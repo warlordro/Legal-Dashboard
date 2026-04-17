@@ -9,6 +9,19 @@ function stripDiacritics(s: string): string {
   return (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+// SECURITY: prevent CSV/formula injection in exported XLSX — prefix leading =,+,-,@,tab,CR
+// with a single quote so Excel/LibreOffice render the value as plain text.
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+function sanitizeFormulaCells(ws: Record<string, unknown>) {
+  for (const key of Object.keys(ws)) {
+    if (key.startsWith("!")) continue;
+    const cell = ws[key] as { t?: string; v?: unknown } | undefined;
+    if (cell && cell.t === "s" && typeof cell.v === "string" && FORMULA_PREFIX.test(cell.v)) {
+      cell.v = `'${cell.v}`;
+    }
+  }
+}
+
 function partyLabel(p: RnpmParty): string {
   if (p.tip_persoana === "PF") return [p.denumire, p.prenume].filter(Boolean).join(" ");
   return p.denumire ?? "";
@@ -373,6 +386,12 @@ export async function exportRnpmExcel(
     [30, 30, 11, 28, 30],
     istoricRows, avizRowOf,
   );
+
+  sanitizeFormulaCells(wsAvize);
+  if (wsCred) sanitizeFormulaCells(wsCred);
+  if (wsDeb) sanitizeFormulaCells(wsDeb);
+  if (wsBun) sanitizeFormulaCells(wsBun);
+  if (wsIst) sanitizeFormulaCells(wsIst);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, wsAvize as import("xlsx").WorkSheet, "Avize");

@@ -49,6 +49,20 @@ function ensureCell(ws: Record<string, unknown>, addr: string, value = "") {
   if (!ws[addr]) ws[addr] = { t: "s", v: value };
 }
 
+// SECURITY: prevent CSV/formula injection — a string cell starting with =, +, -, @ or a
+// leading tab/CR is treated as a formula by Excel/LibreOffice. Prefix with a single quote
+// so the value is rendered as plain text (Excel strips the quote on display).
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+function sanitizeFormulaCells(ws: Record<string, unknown>) {
+  for (const key of Object.keys(ws)) {
+    if (key.startsWith("!")) continue;
+    const cell = ws[key] as { t?: string; v?: unknown } | undefined;
+    if (cell && cell.t === "s" && typeof cell.v === "string" && FORMULA_PREFIX.test(cell.v)) {
+      cell.v = `'${cell.v}`;
+    }
+  }
+}
+
 const BLUE_DARK  = "1E40AF"; // title background
 const BLUE_MAIN  = "2563EB"; // header row (same as PDF)
 const BLUE_LIGHT = "DBEAFE"; // section group header
@@ -265,6 +279,9 @@ export async function exportDosareExcel(dosare: Dosar[]) {
     });
   }
 
+  sanitizeFormulaCells(wsDosare);
+  if (wsSedinte) sanitizeFormulaCells(wsSedinte);
+
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, wsDosare as import("xlsx").WorkSheet, "Dosare");
   if (wsSedinte) XLSX.utils.book_append_sheet(wb, wsSedinte as import("xlsx").WorkSheet, "Sedinte");
@@ -312,6 +329,8 @@ export async function exportTermeneExcel(termene: Termen[]) {
       styleCell(ws, r, c, styleDataCell(i, c === 1));
     }
   });
+
+  sanitizeFormulaCells(ws);
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Termene");
