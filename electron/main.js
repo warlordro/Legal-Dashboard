@@ -2,11 +2,19 @@ const { app, BrowserWindow, session, Menu, screen, dialog } = require("electron"
 const path = require("path");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 
+// SECURITY: single-instance lock — prevents concurrent SQLite writers from corrupting the DB
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+  process.exit(0);
+}
+
 let mainWindow;
 let backendStarted = false;
 
+const IS_DEV = process.env.NODE_ENV !== "production";
+
 function buildAppMenu() {
-  const isDev = process.env.NODE_ENV !== "production" || process.argv.includes("--dev-tools");
+  const isDev = IS_DEV;
 
   const template = [
     {
@@ -168,8 +176,9 @@ function createWindow() {
       nodeIntegration: false,
       contextIsolation: true,
       sandbox: true,
+      webSecurity: true,
       enableRemoteModule: false,
-      devTools: process.env.NODE_ENV !== "production" || process.argv.includes("--dev-tools"),
+      devTools: IS_DEV,
     },
   });
 
@@ -265,6 +274,13 @@ app.whenReady().then(async () => {
     buildAppMenu();
   } catch (err) {
     showStartupErrorAndQuit(err);
+  }
+});
+
+app.on("second-instance", () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.focus();
   }
 });
 
