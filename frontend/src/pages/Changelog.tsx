@@ -1,6 +1,6 @@
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ScrollText, Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet } from "lucide-react";
+import { ScrollText, Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock } from "lucide-react";
 
 interface ChangeSection {
   title: string;
@@ -19,6 +19,70 @@ interface VersionEntry {
 }
 
 const versions: VersionEntry[] = [
+  {
+    version: "v2.0.2",
+    date: "17 Aprilie 2026",
+    subtitle: "Audit de securitate — hardening Electron + backend + chei in OS keystore",
+    icon: <Lock className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Cheile API migrate in OS keystore (Electron safeStorage)",
+        content:
+          "Inainte, cheile Anthropic / OpenAI / Google / 2Captcha / CapSolver erau obfuscate cu btoa+reverse in localStorage — reversibil in cateva secunde. Acum, pe desktop, cheile trec prin Electron safeStorage (DPAPI pe Windows, Keychain pe macOS, libsecret pe Linux):",
+        bullets: [
+          "preload.js dedicat expune doar 3 metode via contextBridge: encryptKeys / decryptKeys / isEncryptionAvailable. Renderer-ul nu mai are acces la ipcRenderer direct",
+          "IPC handler in main.js cu limite dure: plaintext max 8 KiB, ciphertext base64 max 16 KiB — previne payload-uri abuzive",
+          "Migrare automata la primul boot dupa upgrade: blob-ul vechi 'portaljust-api-keys' se decripteaza, se re-cripteaza prin OS keystore in 'portaljust-api-keys-enc', iar blob-ul vechi se sterge",
+          "Pe web (fara desktopApi) ramane fallback-ul de obfuscare — e documentat explicit ca NU e control de securitate, e doar anti-screenshot casual",
+        ],
+      },
+      {
+        title: "Hardening Electron",
+        content:
+          "Cresterea defense-in-depth pe procesul principal:",
+        bullets: [
+          "Single-instance lock (app.requestSingleInstanceLock) — previne doua Electron-uri simultane care se bat pe acelasi fisier SQLite si corup baza; a doua lansare focuseaza fereastra existenta",
+          "webSecurity: true, sandbox: true, contextIsolation: true explicite in webPreferences — nu mai depindem de default-urile framework-ului",
+          "DevTools activate doar in dev (IS_DEV = NODE_ENV !== 'production'); meniul 'Instrumente dezvoltator' dispare complet din build-ul de productie",
+          "Verificare identitate /health la boot — daca alt proces asculta pe portul 3002, aplicatia refuza sa se conecteze (nu doar ca primeste 200 OK)",
+        ],
+      },
+      {
+        title: "Hardening backend",
+        content:
+          "Server-ul Hono primeste mai multe controale aliniate la threat-model-ul desktop + potential LAN deploy:",
+        bullets: [
+          "CSP explicit pe toate raspunsurile: default-src 'self', script-src 'self', object-src 'none', frame-ancestors 'none', base-uri 'self' — inclusiv in modul server standalone, nu doar in Electron",
+          "Rate limiter cheie pe IP-ul real al socket-ului (getConnInfo.remote.address), nu pe X-Forwarded-For care era spoofable printr-un simplu header",
+          "Bind pe 127.0.0.1 garantat: HOST=0.0.0.0 (sau orice alt non-loopback) este IGNORAT si se afiseaza warning, decat daca operatorul seteaza explicit LEGAL_DASHBOARD_ALLOW_REMOTE=1 — previne expunere accidentala in LAN",
+          "MAX_SOAP_FANOUT=500 pe /api/dosare/load-more si /api/termene/load-more — previne amplificare unde un POST legitim declanseaza mii de cereri SOAP upstream",
+          "TRUNCATE_SOLUTIE redus de la 10000 la 5000 caractere — bounded token spend + surface mai mic pentru prompt injection",
+          "AI keys env-first: daca ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_KEY sunt setate in env, au precedenta asupra cheilor din body (critic pentru deployment ca serviciu)",
+        ],
+      },
+      {
+        title: "Fix XLSX formula injection la export",
+        content:
+          "Celulele de tip string care incepeau cu = + - @ Tab sau CR erau interpretate de Excel ca formule. Daca un atacator injecta '=HYPERLINK(...)' intr-un camp (ex: nume parte), user-ul deschidea fisierul si formula se executa. Fix:",
+        bullets: [
+          "Helper sanitizeFormulaCells aplicat pe toate sheet-urile generate din frontend/src/lib/export.ts si rnpmExport.ts",
+          "Celulele care incep cu caracter declansator primesc prefix ' (apostrof) — Excel/LibreOffice le afiseaza literal ca text, nu le evalueaza",
+          "Acopera export-urile Dosare, Sedinte, Termene, Avize, Creditori, Debitori, Bunuri, Istoric",
+        ],
+      },
+      {
+        title: "Documentatie",
+        content:
+          "Threat model si configurare documentate la radacina repo-ului pentru operatori si cititori viitori:",
+        bullets: [
+          "SECURITY.md — what's in scope (single-instance, safeStorage, CSP, real-IP rate limit, HOST whitelist, SOAP cap, formula escape), what's out of scope (malware pe acelasi user OS, supply-chain, binar nesemnat Windows, LAN-mode fara auth, SOAP upstream HTTP la portalquery.just.ro)",
+          "backend/.env.example — documenteaza clar env-precedence-over-body pentru cheile AI, opt-in-ul LEGAL_DASHBOARD_ALLOW_REMOTE si nota corecta despre persistenta cheilor (safeStorage pe desktop, obfuscare pe web — NU in SQLite cum scria inainte eronat)",
+        ],
+      },
+    ],
+  },
   {
     version: "v2.0.1",
     date: "17 Aprilie 2026",

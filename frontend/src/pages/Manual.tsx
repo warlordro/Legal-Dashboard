@@ -1,4 +1,4 @@
-import { BookOpen, Download, Search, CalendarDays, BarChart3, FileSpreadsheet, FileText, Brain, Shield, Settings, Monitor, MousePointerClick, ArrowUpDown, Filter, CheckSquare, Loader2 } from "lucide-react";
+import { BookOpen, Download, Search, CalendarDays, BarChart3, FileSpreadsheet, FileText, Brain, Shield, Settings, Monitor, MousePointerClick, ArrowUpDown, Filter, CheckSquare, Loader2, Database } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -103,14 +103,15 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
               { label: "2. Pagina Dashboard", id: "dashboard" },
               { label: "3. Cautare Dosare", id: "dosare" },
               { label: "4. Termene & Calendar", id: "termene" },
-              { label: "5. Incarca Mai Multe (Load More)", id: "loadmore" },
-              { label: "6. Export Excel si PDF", id: "export" },
-              { label: "7. Analiza AI", id: "ai" },
-              { label: "8. Analiza AI Avansata (Multi-Agent)", id: "ai-multi" },
-              { label: "9. Configurare Chei API", id: "chei-api" },
-              { label: "10. Sidebar si Navigare", id: "sidebar" },
-              { label: "11. Personalizare (Tema & Font)", id: "personalizare" },
-              { label: "12. Securitate si Confidentialitate", id: "securitate" },
+              { label: "5. Modul RNPM (Publicitate Mobiliara)", id: "rnpm" },
+              { label: "6. Incarca Mai Multe (Load More)", id: "loadmore" },
+              { label: "7. Export Excel si PDF", id: "export" },
+              { label: "8. Analiza AI", id: "ai" },
+              { label: "9. Analiza AI Avansata (Multi-Agent)", id: "ai-multi" },
+              { label: "10. Configurare Chei API", id: "chei-api" },
+              { label: "11. Sidebar si Navigare", id: "sidebar" },
+              { label: "12. Personalizare (Tema & Font)", id: "personalizare" },
+              { label: "13. Securitate si Confidentialitate", id: "securitate" },
             ].map((item) => (
               <button
                 key={item.id}
@@ -305,8 +306,122 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
         </SubSection>
       </Section>
 
-      {/* 5. Load More */}
-      <Section id="loadmore" icon={<Loader2 className="h-5 w-5 text-emerald-500" />} title="5. Incarca Mai Multe (Load More)">
+      {/* 5. RNPM */}
+      <Section id="rnpm" icon={<Database className="h-5 w-5 text-rose-500" />} title="5. Modul RNPM (Publicitate Mobiliara)">
+        <p>
+          Modulul <strong className="text-foreground">RNPM</strong> (Registrul National de Publicitate Mobiliara) permite cautarea,
+          vizualizarea si arhivarea avizelor de ipoteca mobiliara, fiducie si avizelor specifice direct din registrul oficial
+          <code className="text-foreground"> mj.rnpm.ro</code>. Se acceseaza din sidebar cu tab-ul <strong className="text-foreground">Cautare RNPM</strong>.
+        </p>
+
+        <SubSection title="Sub-taburi disponibile:">
+          <BulletList items={[
+            "Cautare — formularul principal pentru o singura cautare (sync, rezultate afisate imediat in tabel)",
+            "Bulk — incarca un fisier cu mai multe identificatori (pana la 100) si executa toate cautarile la rand cu progres live",
+            "Baza locala — browse peste toate avizele deja salvate local in SQLite (filtrare, cautare, export, sters)",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Categorii de cautare (aliniate la site-ul oficial):">
+          <BulletList items={[
+            "Aviz de ipoteca mobiliara — tipul cel mai comun; 18 tipuri specifice (initial, modificator, de prelungire, etc.)",
+            "Fiducie — 7 tipuri specifice (constituitor, fiduciar, beneficiar)",
+            "Aviz specific — 7 tipuri (ex: aviz de sechestru, aviz de executare)",
+            "Aviz de ipoteca — creante securitizate",
+            "Aviz de ipoteca — obligatiuni ipotecare (cu formular Agent PJ/PF + Emitent PJ + descriere bun garantie)",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Campurile formularului:">
+          <BulletList items={[
+            "Tipul avizului — dropdown cu valorile aplicabile categoriei selectate",
+            "Destinatia inscrierii — dropdown (14 valori pentru ipoteca, 10 pentru specific)",
+            "Operator SI / SAU per camp — combinarea criteriilor in logica AND sau OR",
+            "Toggle PJ / PF — unic per rol (Constituitor, Fiduciar, Beneficiar, Parte, Debitor, Creditor); formularul se adapteaza (CUI pentru PJ, CNP pentru PF)",
+            "Checkbox-uri default active: 'Numai active', 'Nemodificate de alte inscrieri' (aliniate cu default-urile site-ului oficial)",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Captcha (obligatoriu pe site-ul RNPM):">
+          <p>
+            RNPM foloseste reCAPTCHA v2 pe toate cautarile. Aplicatia rezolva captcha-ul automat prin doi furnizori externi platiti
+            (aproximativ $0.003 per captcha):
+          </p>
+          <BulletList items={[
+            "2Captcha — furnizor default; cheie obtinuta de la 2captcha.com",
+            "CapSolver — alternativa; cheie obtinuta de la capsolver.com",
+            "Mod sequential (default) — aplicatia foloseste doar furnizorul selectat",
+            "Mod race — daca ai ambele chei, aplicatia trimite captcha-ul la ambii furnizori simultan si il accepta pe primul care raspunde (latenta minima, cost dublu)",
+            "Cheia se configureaza in dialogul Setari AI, alaturi de cheile Anthropic / OpenAI / Google",
+            "Pe desktop, cheia este criptata cu OS keystore (DPAPI / Keychain / libsecret) prin Electron safeStorage",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Modal detaliu aviz (5 tab-uri):">
+          <p>Click pe un rand din tabelul de rezultate deschide un modal cu toate datele avizului:</p>
+          <BulletList items={[
+            "General — numar inregistrare, data, categorie, tip, destinatie, descriere publica",
+            "Creditori — lista beneficiarilor cu CUI/CNP si denumire",
+            "Debitori — lista constituitorilor / debitorilor cu CUI/CNP si denumire",
+            "Bunuri — bunurile inregistrate ca garantie; pentru fiecare bun, badge-uri colorate pentru referinte (sky = constituitor, amber = tert)",
+            "Istoric — modificari succesive asupra avizului (prelungiri, cesiuni, radieri)",
+            "Badge cu count per tab pentru identificare rapida a datelor disponibile",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Bulk search — cautare in serie:">
+          <BulletList items={[
+            "Incarca un fisier cu lista de identificatori (CUI, CNP, nume) — pana la 100 per batch",
+            "Estimare timp si cost afisata inainte de start (aprox 15-25s per item in functie de reCAPTCHA)",
+            "Progres live via SSE: contor rezolvat / total, status per item (Loader2 → CheckCircle2 pentru succes, XCircle pentru eroare)",
+            "Buton Abort cu cleanup complet — intrerupe captcha solver, fetch-urile RNPM in curs si persist-ul SQLite in acelasi moment",
+            "Timeout hard pe sesiune: 10 minute per batch",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Baza locala (SQLite):">
+          <p>
+            Toate avizele cautate sunt persistate local in 6 tabele (rnpm_avize, rnpm_creditori, rnpm_debitori, rnpm_bunuri,
+            rnpm_istoric, rnpm_searches) cu coloana owner_id pentru izolare multi-user viitor. Motivatie: UUID-urile RNPM sunt
+            efemere (expira in cateva minute), asa ca detaliile se preiau <strong className="text-foreground">in timpul</strong> cautarii si se salveaza imediat.
+          </p>
+          <BulletList items={[
+            "Filtrare full-text insensibila la diacritice — cautand 'stefan' gasesti 'Ștefan' / 'ȘTEFAN' / 'STEFAN'",
+            "Filtru interval de date (data inscrierii) — doua campuri 'de la' / 'pana la'",
+            "Badge verde (Activ) / gri (Inactiv) per aviz",
+            "Cursor 'Incarca mai multe' — paginare progresiva, fara sa incarci mii de randuri deodata",
+            "Sterge tot — buton cu dubla confirmare (operatie ireversibila care sterge si toate tabelele related prin CASCADE)",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Export RNPM:">
+          <BulletList items={[
+            "Excel (.xlsx) cu 5 sheet-uri separate: Avize, Creditori, Debitori, Bunuri, Istoric",
+            "Toate celulele text care incep cu = + - @ Tab sau CR sunt prefixate cu apostrof (protectie formula injection)",
+            "Coloanele auto-dimensionate pentru lizibilitate",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Butonul Stop:">
+          <p>
+            Butonul <strong className="text-foreground">Stop</strong> intrerupe efectiv intregul lant: captcha solver, fetch-urile catre RNPM (search si detalii)
+            si persist-ul SQLite. Abort-ul este instant (sub 2s latenta) si fetch-urile deja in curs <strong className="text-foreground">nu mai scriu in baza</strong> dupa
+            apasarea Stop — baza ramane neatinsa daca opresti o cautare.
+          </p>
+        </SubSection>
+
+        <SubSection title="Limite si costuri:">
+          <BulletList items={[
+            "Maxim 1500 rezultate per cautare (limita oficiala RNPM) — la depasire, aplicatia afiseaza eroare clara",
+            "Bulk: max 100 items per batch",
+            "Captcha cost: ~$0.003 per rezolvare (2Captcha sau CapSolver)",
+            "Aplicatia nu stocheaza niciodata cheia captcha pe server — e pastrata exclusiv local, in OS keystore (desktop) sau localStorage (web)",
+          ]} />
+        </SubSection>
+      </Section>
+
+      {/* 6. Load More */}
+      <Section id="loadmore" icon={<Loader2 className="h-5 w-5 text-emerald-500" />} title="6. Incarca Mai Multe (Load More)">
         <p>
           API-ul Ministerului Justitiei returneaza maxim <strong className="text-foreground">1000 de rezultate</strong> per cerere. Daca cautarea
           ta are mai multe rezultate, butonul <strong className="text-foreground">\"Incarca mai multe\"</strong> iti permite sa le obtii pe toate.
@@ -348,7 +463,7 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       </Section>
 
       {/* 6. Export */}
-      <Section id="export" icon={<FileSpreadsheet className="h-5 w-5 text-green-500" />} title="6. Export Excel si PDF">
+      <Section id="export" icon={<FileSpreadsheet className="h-5 w-5 text-green-500" />} title="7. Export Excel si PDF">
         <SubSection title="Export Excel (.xlsx):">
           <BulletList items={[
             "Dosare: genereaza 2 foi (sheet-uri) — \"Dosare\" cu informatiile de baza si \"Sedinte\" cu toate sedintele",
@@ -373,7 +488,7 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       </Section>
 
       {/* 7. AI Simpla */}
-      <Section id="ai" icon={<Brain className="h-5 w-5 text-violet-500" />} title="7. Analiza AI">
+      <Section id="ai" icon={<Brain className="h-5 w-5 text-violet-500" />} title="8. Analiza AI">
         <p>
           Aplicatia ofera analiza inteligenta a dosarelor folosind modele AI de ultima generatie. Pentru a folosi
           aceasta functie, trebuie sa configurezi cel putin o cheie API (vezi sectiunea 9).
@@ -433,7 +548,7 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       </Section>
 
       {/* 8. AI Multi-Agent */}
-      <Section id="ai-multi" icon={<Brain className="h-5 w-5 text-amber-500" />} title="8. Analiza AI Avansata (Multi-Agent)">
+      <Section id="ai-multi" icon={<Brain className="h-5 w-5 text-amber-500" />} title="9. Analiza AI Avansata (Multi-Agent)">
         <p>
           Analiza avansata foloseste <strong className="text-foreground">3 modele AI simultan</strong> pentru o analiza mai completa si verificata.
         </p>
@@ -468,7 +583,7 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       </Section>
 
       {/* 9. Chei API */}
-      <Section id="chei-api" icon={<Settings className="h-5 w-5 text-gray-500" />} title="9. Configurare Chei API">
+      <Section id="chei-api" icon={<Settings className="h-5 w-5 text-gray-500" />} title="10. Configurare Chei API">
         <p>
           Pentru a folosi analiza AI, trebuie sa configurezi cel putin o cheie API de la un furnizor AI.
           Cheile sunt <strong className="text-foreground">gratuite la inregistrare</strong> pentru un volum limitat de cereri.
@@ -504,7 +619,7 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       </Section>
 
       {/* 10. Sidebar */}
-      <Section id="sidebar" icon={<MousePointerClick className="h-5 w-5 text-indigo-500" />} title="10. Sidebar si Navigare">
+      <Section id="sidebar" icon={<MousePointerClick className="h-5 w-5 text-indigo-500" />} title="11. Sidebar si Navigare">
         <SubSection title="Meniu de navigare:">
           <BulletList items={[
             "Dashboard — pagina principala cu rezumat si navigare rapida",
@@ -544,7 +659,7 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       </Section>
 
       {/* 11. Personalizare */}
-      <Section id="personalizare" icon={<ArrowUpDown className="h-5 w-5 text-orange-500" />} title="11. Personalizare (Tema & Font)">
+      <Section id="personalizare" icon={<ArrowUpDown className="h-5 w-5 text-orange-500" />} title="12. Personalizare (Tema & Font)">
         <SubSection title="Tema vizuala:">
           <BulletList items={[
             "Mod Luminos (Light) si Mod Inchis (Dark) — toggle din sidebar",
@@ -573,27 +688,51 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       </Section>
 
       {/* 12. Securitate */}
-      <Section id="securitate" icon={<Shield className="h-5 w-5 text-red-500" />} title="12. Securitate si Confidentialitate">
+      <Section id="securitate" icon={<Shield className="h-5 w-5 text-red-500" />} title="13. Securitate si Confidentialitate">
         <SubSection title="Unde sunt datele tale:">
           <BulletList items={[
-            "Cheile API sunt stocate doar local pe calculatorul tau (in localStorage, obfuscate)",
-            "Istoricul cautarilor este salvat doar local",
-            "Preferintele (tema, font) sunt salvate doar local",
-            "Nu exista niciun server intermediar — datele merg direct de la calculatorul tau catre API-urile oficiale",
-            "Dosarele si termenele sunt date publice obtinute din API-ul Ministerului Justitiei",
+            "Cheile API (Anthropic / OpenAI / Google / 2Captcha / CapSolver) sunt stocate in OS keystore pe desktop — DPAPI pe Windows, Keychain pe macOS, libsecret pe Linux — prin Electron safeStorage. Ciphertext-ul ajunge in localStorage; plaintext-ul nu atinge niciodata disk-ul",
+            "Pe web (fara desktop keystore) cheile sunt obfuscate reversibil in localStorage — nu e control real de securitate, e doar anti-screenshot casual",
+            "Istoricul cautarilor si preferintele (tema, font) — doar in localStorage local",
+            "Avizele RNPM si dosarele cautate sunt salvate in SQLite local (%APPDATA%/legal-dashboard/legal-dashboard.db)",
+            "Nu exista niciun server intermediar — datele merg direct de la calculatorul tau catre API-urile oficiale (just.ro, mj.rnpm.ro, furnizorii AI, 2Captcha / CapSolver)",
           ]} />
         </SubSection>
 
-        <SubSection title="Protectii implementate:">
+        <SubSection title="Protectii implementate (desktop):">
           <BulletList items={[
-            "Validare completa a tuturor datelor de intrare (lungime, format, caractere speciale)",
-            "Protectie XSS (Cross-Site Scripting) pe toate continuturile afisate, inclusiv raspunsurile AI",
-            "Protectie impotriva Prompt Injection — datele dosarelor sunt izolate in prompt-ul AI",
-            "Rate limiting — maxim 30 cereri pe minut pentru prevenirea abuzurilor",
-            "Serverul backend este accesibil doar local (localhost), nu din retea",
-            "Linkurile externe se deschid doar catre domenii portal.just.ro verificate",
-            "Content Security Policy strict in aplicatia desktop",
+            "Single-instance lock — doua Electron-uri simultane nu se pot lansa si corupe baza SQLite; a doua lansare focuseaza fereastra existenta",
+            "sandbox + contextIsolation + preload.js cu suprafata minima expusa (doar encryptKeys / decryptKeys / isEncryptionAvailable)",
+            "DevTools dezactivate in productie; activabile doar cu NODE_ENV=development",
+            "Verificare identitate backend la boot — daca alt proces asculta pe port, aplicatia refuza conexiunea",
+            "CSP strict in Electron (default-src 'self', object-src 'none', frame-ancestors 'none')",
+            "Navigare si popup-uri blocate; shell.openExternal doar catre whitelist exact (portal.just.ro, www.just.ro, portalquery.just.ro, mj.rnpm.ro, www.rnpm.ro) peste HTTPS",
           ]} />
+        </SubSection>
+
+        <SubSection title="Protectii implementate (backend):">
+          <BulletList items={[
+            "Bind pe 127.0.0.1 garantat — HOST=0.0.0.0 este ignorat decat daca setezi explicit LEGAL_DASHBOARD_ALLOW_REMOTE=1 (opt-in pentru deployment LAN)",
+            "Rate limiter pe IP-ul real al socket-ului (nu pe X-Forwarded-For spoofable)",
+            "CSP explicit pe toate raspunsurile server-ului, nu doar in Electron",
+            "MAX_SOAP_FANOUT=500 pe load-more — previne amplificare cerere unica in mii de cereri SOAP",
+            "Validare completa a datelor de intrare (lungime, format, caractere de control / null bytes respinse)",
+            "Protectie XSS cu DOMPurify pe toate raspunsurile AI afisate",
+            "Protectie prompt injection — datele dosarelor in delimitatori XML, campuri truncate (obiect 500, nume parte 100, solutie 5000)",
+            "Protectie formula injection la export Excel — celulele text care incep cu = + - @ Tab sau CR primesc prefix apostrof (tratate ca text, nu formula)",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Ce NU protejam explicit:">
+          <BulletList items={[
+            "Malware care ruleaza sub acelasi user OS — safeStorage decripteaza transparent pentru user-ul curent; aparare e la nivel de OS (antivirus, cont cu drepturi limitate)",
+            "Supply-chain (npm packages compromise) — dependintele sunt trust-uite la install time",
+            "Binar Windows nesemnat — SmartScreen va avertiza la prima lansare pentru fisiere descarcate; intern / pe USB nu e afectat",
+            "LAN-mode fara autentificare — daca rulezi cu LEGAL_DASHBOARD_ALLOW_REMOTE=1 fara reverse-proxy + TLS + auth, oricine din retea poate accesa backend-ul",
+          ]} />
+          <p className="text-xs text-muted-foreground">
+            Detalii complete in fisierul <code className="text-foreground">SECURITY.md</code> de la radacina proiectului.
+          </p>
         </SubSection>
 
         <SubSection title="Analiza AI si confidentialitatea:">
@@ -620,8 +759,8 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
             {isDownloading ? "Se genereaza..." : "Descarca Manual PDF"}
           </Button>
         )}
-        <p>Legal Dashboard — Manual de Utilizare v1.0.0</p>
-        <p>Datele sunt furnizate de API-ul public al Ministerului Justitiei (portalquery.just.ro)</p>
+        <p>Legal Dashboard — Manual de Utilizare v{__APP_VERSION__}</p>
+        <p>Datele sunt furnizate de API-ul public al Ministerului Justitiei (portalquery.just.ro) si Registrul National de Publicitate Mobiliara (mj.rnpm.ro)</p>
       </div>
     </div>
   );
