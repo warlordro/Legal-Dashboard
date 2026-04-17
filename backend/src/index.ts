@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
@@ -24,8 +25,24 @@ const app = new Hono();
 
 app.use("*", logger());
 
-// Security headers (X-Content-Type-Options, X-Frame-Options, etc.)
-app.use("*", secureHeaders());
+// Security headers + CSP (applied to both Electron-served HTML and future web build)
+app.use(
+  "*",
+  secureHeaders({
+    contentSecurityPolicy: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"], // Tailwind emits inline styles
+      imgSrc: ["'self'", "data:"],
+      fontSrc: ["'self'", "data:"],
+      connectSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"],
+      baseUri: ["'self'"],
+      formAction: ["'self'"],
+    },
+  })
+);
 
 // CORS - only needed in development
 app.use(
@@ -42,6 +59,7 @@ const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const RATE_LIMIT = 30; // requests per window
 const RATE_WINDOW = 60000; // 1 minute
 const MAX_INSTITUTII = 50; // max institutii per request
+const MAX_SOAP_FANOUT = 500; // (institutii * intervals) hard cap — bounds upstream load per request
 const MAX_EXISTING_ITEMS = 10000; // max dosare numbers in load-more existing array
 const MAX_EXISTING_ITEM_LEN = 100; // max chars per dosare number
 const MAX_LOADMORE_BODY = 512000; // 500KB max body for load-more POST
@@ -49,8 +67,9 @@ const MAX_SSE_INTERVALS = 120; // max monthly intervals (~10 years)
 const SSE_TIMEOUT_MS = 900000; // 15 minutes max per SSE stream (paralelism N=3 + 7-year default fallback)
 
 app.use("/api/*", async (c, next) => {
-  // SECURITY: Don't trust X-Forwarded-For (spoofable). Use fixed key for localhost-only server.
-  const ip = "127.0.0.1";
+  // SECURITY: rate-limit by real socket address (falls back to a shared bucket if unknown).
+  // X-Forwarded-For is spoofable and deliberately ignored.
+  const ip = getConnInfo(c).remote.address || "unknown";
   const now = Date.now();
   // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit
   if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved")) {
@@ -468,6 +487,10 @@ app.post("/api/dosare/load-more", async (c) => {
   // Single sweep when no institutie filter (institutionList = [undefined]).
   const institutionList: (string | undefined)[] = institutii.length > 0 ? institutii : [undefined];
   const totalUnits = institutionList.length * intervals.length;
+  // SECURITY: bound upstream SOAP load per request so a single client cannot flood portal.just.ro
+  if (totalUnits > MAX_SOAP_FANOUT) {
+    return c.json({ error: `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.` }, 400);
+  }
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -597,6 +620,10 @@ app.post("/api/termene/load-more", async (c) => {
 
   const institutionList: (string | undefined)[] = institutii.length > 0 ? institutii : [undefined];
   const totalUnits = institutionList.length * intervals.length;
+  // SECURITY: bound upstream SOAP load per request so a single client cannot flood portal.just.ro
+  if (totalUnits > MAX_SOAP_FANOUT) {
+    return c.json({ error: `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.` }, 400);
+  }
 
   const stream = new ReadableStream({
     async start(controller) {
@@ -718,7 +745,7 @@ const AI_MODELS: Record<string, { provider: string; modelId: string }> = {
 // SECURITY: Truncation limits for user-supplied dosar fields (prompt injection mitigation)
 const TRUNCATE_OBIECT = 500;
 const TRUNCATE_PARTY_NAME = 200;
-const TRUNCATE_SOLUTIE = 10000;
+const TRUNCATE_SOLUTIE = 5000;
 
 function truncate(value: unknown, maxLen: number): string {
   const s = typeof value === "string" ? value : "";
@@ -896,10 +923,13 @@ function validateAiBody(body: unknown): string | null {
   return null;
 }
 
+// SECURITY: env keys take precedence over body-supplied keys. In hosted deployments
+// operators can lock the provider credentials via env; desktop users without env fall
+// back to keys saved in the UI (passed through the request body).
 function getApiKey(provider: string, keys: Record<string, string>): string {
-  if (provider === "anthropic") return keys.anthropic || process.env.ANTHROPIC_API_KEY || "";
-  if (provider === "openai") return keys.openai || process.env.OPENAI_API_KEY || "";
-  if (provider === "google") return keys.google || process.env.GOOGLE_AI_KEY || "";
+  if (provider === "anthropic") return process.env.ANTHROPIC_API_KEY || keys.anthropic || "";
+  if (provider === "openai") return process.env.OPENAI_API_KEY || keys.openai || "";
+  if (provider === "google") return process.env.GOOGLE_AI_KEY || keys.google || "";
   return "";
 }
 
@@ -947,16 +977,9 @@ app.post("/api/ai/analyze", async (c) => {
       return c.json({ error: "Model necunoscut." }, 400);
     }
 
-    // Get API key for the provider
+    // Get API key for the provider (env preferred, body fallback — see getApiKey)
     const keys = apiKeys || {};
-    let apiKey = "";
-    if (selectedModel.provider === "anthropic") {
-      apiKey = keys.anthropic || process.env.ANTHROPIC_API_KEY || "";
-    } else if (selectedModel.provider === "openai") {
-      apiKey = keys.openai || process.env.OPENAI_API_KEY || "";
-    } else if (selectedModel.provider === "google") {
-      apiKey = keys.google || process.env.GOOGLE_AI_KEY || "";
-    }
+    const apiKey = getApiKey(selectedModel.provider, keys);
 
     if (!apiKey) {
       return c.json({ error: "NO_API_KEY" }, 400);
@@ -1116,7 +1139,16 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const port = Number(process.env.LEGAL_DASHBOARD_PORT) || 3002;
-const hostname = process.env.HOST || "127.0.0.1";
+// SECURITY: bind to loopback unless LEGAL_DASHBOARD_ALLOW_REMOTE=1 is set explicitly.
+// Without that opt-in, any HOST value other than loopback is rejected — prevents
+// accidental LAN exposure via a stray `HOST=0.0.0.0` in a shell session.
+const rawHost = process.env.HOST || "127.0.0.1";
+const loopback = new Set(["127.0.0.1", "localhost", "::1"]);
+let hostname = rawHost;
+if (!loopback.has(rawHost) && process.env.LEGAL_DASHBOARD_ALLOW_REMOTE !== "1") {
+  console.warn(`[security] HOST=${rawHost} ignored; set LEGAL_DASHBOARD_ALLOW_REMOTE=1 to opt in.`);
+  hostname = "127.0.0.1";
+}
 
 serve({ fetch: app.fetch, port, hostname });
 
