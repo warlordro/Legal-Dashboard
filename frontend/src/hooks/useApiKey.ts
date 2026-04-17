@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 export type CaptchaProvider = "2captcha" | "capsolver";
 export type CaptchaMode = "sequential" | "race";
@@ -11,33 +11,27 @@ export interface ApiKeys {
   capsolver: string;
 }
 
-const STORAGE_KEY = "portaljust-api-keys";
+const LEGACY_KEY = "portaljust-api-keys";
+const ENC_KEY = "portaljust-api-keys-enc";
 const PROVIDER_KEY = "portaljust-captcha-provider";
 const MODE_KEY = "portaljust-captcha-mode";
 
-// SECURITY: Simple obfuscation to prevent casual plaintext reading of API keys in localStorage.
-// This is NOT encryption — it deters casual browsing but not determined attackers.
+const EMPTY: ApiKeys = { anthropic: "", openai: "", google: "", twocaptcha: "", capsolver: "" };
+
+// SECURITY: weak obfuscation — used only on web where no OS keystore is available.
+// Desktop builds go through Electron safeStorage (DPAPI / Keychain / libsecret).
 function obfuscate(text: string): string {
   if (!text) return "";
-  try {
-    return btoa(text.split("").reverse().join(""));
-  } catch {
-    return text;
-  }
+  try { return btoa(text.split("").reverse().join("")); } catch { return text; }
 }
-
 function deobfuscate(text: string): string {
   if (!text) return "";
-  try {
-    return atob(text).split("").reverse().join("");
-  } catch {
-    return text;
-  }
+  try { return atob(text).split("").reverse().join(""); } catch { return text; }
 }
 
-function loadKeys(): ApiKeys {
+function loadLegacy(): ApiKeys {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY);
+    const saved = localStorage.getItem(LEGACY_KEY);
     if (saved) {
       const parsed = JSON.parse(saved);
       return {
@@ -48,23 +42,22 @@ function loadKeys(): ApiKeys {
         capsolver: deobfuscate(parsed.capsolver || ""),
       };
     }
+    const oldSingle = localStorage.getItem("portaljust-anthropic-key");
+    if (oldSingle) return { ...EMPTY, anthropic: oldSingle };
   } catch {}
+  return EMPTY;
+}
+
+function saveLegacy(keys: ApiKeys) {
   try {
-    const oldKey = localStorage.getItem("portaljust-anthropic-key");
-    if (oldKey) {
-      const keys = { anthropic: oldKey, openai: "", google: "", twocaptcha: "", capsolver: "" };
-      localStorage.setItem(STORAGE_KEY, JSON.stringify({
-        anthropic: obfuscate(oldKey),
-        openai: "",
-        google: "",
-        twocaptcha: "",
-        capsolver: "",
-      }));
-      localStorage.removeItem("portaljust-anthropic-key");
-      return keys;
-    }
+    localStorage.setItem(LEGACY_KEY, JSON.stringify({
+      anthropic: obfuscate(keys.anthropic),
+      openai: obfuscate(keys.openai),
+      google: obfuscate(keys.google),
+      twocaptcha: obfuscate(keys.twocaptcha),
+      capsolver: obfuscate(keys.capsolver),
+    }));
   } catch {}
-  return { anthropic: "", openai: "", google: "", twocaptcha: "", capsolver: "" };
 }
 
 function loadProvider(): CaptchaProvider {
@@ -84,19 +77,76 @@ function loadMode(): CaptchaMode {
 }
 
 export function useApiKey() {
-  const [keys, setKeysState] = useState<ApiKeys>(loadKeys);
+  // Boot with empty state; async load runs once on mount. One-frame flash is acceptable
+  // because sensitive screens (Setari AI) read keys on user navigation, not on boot.
+  const [keys, setKeysState] = useState<ApiKeys>(EMPTY);
   const [captchaProvider, setCaptchaProviderState] = useState<CaptchaProvider>(loadProvider);
   const [captchaMode, setCaptchaModeState] = useState<CaptchaMode>(loadMode);
+  const safeStorageReady = useRef(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const api = window.desktopApi;
+      const available = api ? await api.isEncryptionAvailable().catch(() => false) : false;
+      safeStorageReady.current = available;
+
+      if (available && api) {
+        // Desktop path: prefer encrypted blob; fall back to legacy (migrating it on the fly).
+        let loaded: ApiKeys | null = null;
+        try {
+          const enc = localStorage.getItem(ENC_KEY);
+          if (enc) {
+            const plain = await api.decryptKeys(enc);
+            if (plain) loaded = JSON.parse(plain) as ApiKeys;
+          }
+        } catch {}
+
+        if (!loaded) {
+          const legacy = loadLegacy();
+          if (legacy.anthropic || legacy.openai || legacy.google || legacy.twocaptcha || legacy.capsolver) {
+            loaded = legacy;
+            try {
+              const cipher = await api.encryptKeys(JSON.stringify(legacy));
+              if (cipher) {
+                localStorage.setItem(ENC_KEY, cipher);
+                localStorage.removeItem(LEGACY_KEY);
+                localStorage.removeItem("portaljust-anthropic-key");
+              }
+            } catch {}
+          }
+        }
+
+        if (!cancelled && loaded) setKeysState(loaded);
+      } else {
+        // Web fallback: legacy obfuscation only.
+        const legacy = loadLegacy();
+        if (!cancelled) setKeysState(legacy);
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+  const persist = (newKeys: ApiKeys) => {
+    const api = window.desktopApi;
+    if (safeStorageReady.current && api) {
+      api.encryptKeys(JSON.stringify(newKeys)).then((cipher) => {
+        if (cipher) {
+          try { localStorage.setItem(ENC_KEY, cipher); } catch {}
+        } else {
+          saveLegacy(newKeys);
+        }
+      }).catch(() => saveLegacy(newKeys));
+    } else {
+      saveLegacy(newKeys);
+    }
+  };
 
   const setKeys = (newKeys: ApiKeys) => {
     setKeysState(newKeys);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify({
-      anthropic: obfuscate(newKeys.anthropic),
-      openai: obfuscate(newKeys.openai),
-      google: obfuscate(newKeys.google),
-      twocaptcha: obfuscate(newKeys.twocaptcha),
-      capsolver: obfuscate(newKeys.capsolver),
-    }));
+    persist(newKeys);
   };
 
   const setKey = (provider: keyof ApiKeys, value: string) => {

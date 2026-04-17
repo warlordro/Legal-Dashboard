@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, screen, dialog } = require("electron");
+const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage } = require("electron");
 const path = require("path");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 
@@ -153,6 +153,36 @@ function startBackend() {
   });
 }
 
+// SECURITY: IPC bridge for OS-keystore-backed API key storage. Renderer keeps the
+// ciphertext in localStorage; the plaintext never touches disk and only lives in
+// memory during encrypt/decrypt calls. Input sizes are capped to prevent abuse.
+const MAX_PLAINTEXT = 8 * 1024;
+const MAX_CIPHERTEXT_B64 = 16 * 1024;
+
+function registerSafeStorageIpc() {
+  ipcMain.handle("safeStorage:available", () => safeStorage.isEncryptionAvailable());
+
+  ipcMain.handle("safeStorage:encrypt", (_event, plaintext) => {
+    if (typeof plaintext !== "string" || plaintext.length > MAX_PLAINTEXT) return null;
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    try {
+      return safeStorage.encryptString(plaintext).toString("base64");
+    } catch {
+      return null;
+    }
+  });
+
+  ipcMain.handle("safeStorage:decrypt", (_event, ciphertextB64) => {
+    if (typeof ciphertextB64 !== "string" || ciphertextB64.length > MAX_CIPHERTEXT_B64) return null;
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    try {
+      return safeStorage.decryptString(Buffer.from(ciphertextB64, "base64"));
+    } catch {
+      return null;
+    }
+  });
+}
+
 function showStartupErrorAndQuit(err) {
   const message = err && err.message ? err.message : String(err);
   dialog.showErrorBox(
@@ -178,6 +208,7 @@ function createWindow() {
       sandbox: true,
       webSecurity: true,
       enableRemoteModule: false,
+      preload: path.join(__dirname, "preload.js"),
       devTools: IS_DEV,
     },
   });
@@ -267,6 +298,8 @@ app.whenReady().then(async () => {
       },
     });
   });
+
+  registerSafeStorageIpc();
 
   try {
     await startBackend();
