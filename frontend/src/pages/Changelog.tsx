@@ -20,6 +20,103 @@ interface VersionEntry {
 
 const versions: VersionEntry[] = [
   {
+    version: "v2.0.3",
+    date: "18 Aprilie 2026",
+    subtitle: "Performanta RNPM + backup zilnic + restore + dashboard persistent + rafinari UI",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Mini-lag eliminat la intrarea pe tab + deschiderea avizelor",
+        content:
+          "Sesiune dedicata fluiditatii UI. Diagnosticul a aratat ca problema nu era viteza query-urilor, ci (a) componenta se demonta la tab switch si (b) fiecare click pe aviz facea round-trip + 5 query-uri repository. Trei interventii complementare:",
+        bullets: [
+          "RnpmSavedData ramane montata la tab switch (conditional render inlocuit cu class='hidden') — tab-ul Baza locala redevine instant, fara re-fetch, cu filtrele + pagina + scroll-ul pastrate",
+          "Cache in-memory pentru detaliul avizului (avizDetailCache, TTL 60s) — re-deschiderea aceluiasi aviz e instant; cache invalidat automat la delete (single / batch / all)",
+          "Prewarm SQLite page cache la bootstrap backend (getAvize({limit:1}) + getAvizStats() dupa serve) — prima interactiune nu mai plateste cold-start pe disc",
+        ],
+      },
+      {
+        title: "Backup zilnic automat al bazei locale",
+        content:
+          "Cu mii de avize persistate, pierderea fisierului .db e costisitoare. Aplicatia genereaza acum backup automat la pornire, cu rotatie:",
+        bullets: [
+          "Foloseste better-sqlite3 online backup API (db.backup) — sigur cu WAL, fara checkpoint sau exclusive lock",
+          "Nume standard: legal-dashboard.YYYY-MM-DD.db in <userData>/backups/",
+          "Skip daca ultimul backup e sub 24h vechime; rotatie automata la 7 fisiere (sortare lexicografica = cronologica)",
+          "Best-effort — orice esec logheaza warning si lasa app-ul sa porneasca normal",
+        ],
+      },
+      {
+        title: "Dialog de confirmare stilizat (inlocuieste pop-up-urile native Chromium)",
+        content:
+          "Ferestrele window.confirm() native aratau strain fata de restul UI-ului. Aplicatia are acum un dialog unificat, consistent cu celelalte modale:",
+        bullets: [
+          "Componenta ConfirmProvider + hook useConfirm() (Promise-based) in frontend/src/components/ui/confirm-dialog.tsx",
+          "Icon AlertTriangle + buton rosu pentru actiuni destructive; keyboard Escape=cancel, Enter=confirm; click-outside cancel; auto-focus pe confirm",
+          "4 call-site-uri migrate: sterge aviz individual, batch delete, sterge toate avizele, warning CUI invalid",
+        ],
+      },
+      {
+        title: "Info baza locala — management backups si relabel butoane",
+        content:
+          "Zona de actiuni din modalul 'Info baza locala' reorganizata:",
+        bullets: [
+          "Buton nou Backups (icon Archive) — deschide <userData>/backups/ in File Explorer",
+          "Buton nou Sterge back-up (rosu) — sterge toate fisierele de backup; urmatorul se genereaza la urmatoarea pornire a app-ului",
+          "Relabel: 'Deschide folder' → 'Folder baza', 'Sterge tot' → 'Sterge baza' (pentru claritate)",
+          "Sterge back-up + Sterge baza grupate impreuna spre dreapta; toate confirmarile trec prin noul dialog stilizat",
+        ],
+      },
+      {
+        title: "Fix UI conex — DosareTable timeline sedinte",
+        content:
+          "Efect secundar al font-scale bump din sesiunea anterioara: data '19.01.2026' era taiata, iar cercul-marker nu se alinia vertical cu linia. Ajustata latimea coloanei, pozitia marker-ului si spacing-ul vertical pentru noua scara.",
+      },
+      {
+        title: "Bugfix — paginare goala dupa aplicare filtre",
+        content:
+          "La aplicarea unui filtru care reducea numarul de pagini, tabela ramanea goala pentru ca page depasea noul totalPages. DosareTable + TermeneTable primesc un useEffect care clampeaza page la max(1, totalPages) cand datele filtrate se schimba.",
+      },
+      {
+        title: "TermeneTable — chei stabile pentru selectie",
+        content:
+          "Inainte, state-ul de selectie folosea index-ul rand-ului drept cheie, asa ca la sortare/filtrare selectiile 'sareau' pe alte randuri. Acum cheia e compusa din identificatori reali (institutie + departament + numar + ora + complet), stabila prin orice reordonare.",
+      },
+      {
+        title: "RnpmDetailModal — identificator aviz in header",
+        content:
+          "Identificatorul avizului apare acum in header-ul modalului 'Detalii Aviz', fara font-mono si aliniat baseline — userul il vede fara sa scrolleze pana la randul de detalii.",
+      },
+      {
+        title: "Dashboard — persistenta 'Ultima Cautare' pentru dosare",
+        content:
+          "Dupa restart, cardul 'Dosare' nu mai dispare din dashboard. Persistam doar meta (numar dosare + categorii + institutii) + params-ul ultimei cautari (nu intregul dataset). Click pe card → navigheaza la pagina dosare si re-triggereaza cautarea automat cu params-ul stocat.",
+      },
+      {
+        title: "Restore baza locala din backup",
+        content:
+          "In modalul 'Info baza locala' — buton nou 'Restaurare' intre 'Backups' si 'Sterge back-up'. Deschide un dialog cu lista de backups (nume + marime + data), cu confirm destructiv inainte de aplicare:",
+        bullets: [
+          "Snapshot preventiv automat al DB-ului curent in legal-dashboard.pre-restore-<ISO>.db — userul poate rolla back manual daca restore-ul nu e ce se astepta",
+          "Close DB handle inainte de overwrite (Windows blocheaza fisierele deschise); unlink al sidecar-urilor WAL/SHM dupa overwrite (ar corupe deschiderea noii DB)",
+          "Validare stricta a numelui fisierului cu regex + check path traversal — niciun fisier din afara folder-ului backups/ nu poate fi selectat",
+        ],
+      },
+      {
+        title: "Info baza locala — aliniere 'Cale:' + modal largit",
+        content:
+          "Modalul 'Info baza locala' lat cu un pas (max-w-xl → max-w-2xl) ca sa incapa cai lungi fara break. 'Cale:' + calea + butonul copy inlinate intr-un singur rand cu aliniere fixata (font-mono are metrici diferite de sans — translate-y-[2px] corecteaza restul).",
+      },
+      {
+        title: "Dependency hygiene",
+        content:
+          "Bump dompurify (patch securitate XSS sanitizer) + bump @anthropic-ai/sdk pentru sync cu release-urile upstream. npm audit — 0 vulnerabilitati la nivel repo.",
+      },
+    ],
+  },
+  {
     version: "v2.0.2",
     date: "17 Aprilie 2026",
     subtitle: "Audit de securitate — hardening Electron + backend + chei in OS keystore",

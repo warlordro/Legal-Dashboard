@@ -5,24 +5,25 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { rnpmGetSaved, rnpmDeleteAviz, rnpmDeleteAvizeBatch } from "@/lib/rnpmApi";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { exportRnpmExcel, exportRnpmPDF } from "@/lib/rnpmExport";
-import type { RnpmAvizRecord, RnpmSearchType, RnpmDocument } from "@/types/rnpm";
+import type { RnpmAvizRecord, RnpmSearchType, RnpmDocument, RnpmSavedSortKey, RnpmSavedSortDir } from "@/types/rnpm";
 
-type SortKey = "identificator" | "search_type" | "data" | "tip" | "activ";
-type SortDir = "asc" | "desc";
-
-function parseRoDate(s: string): number {
-  if (!s) return 0;
-  const m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
-  if (m) {
-    const d = parseInt(m[1], 10);
-    const mo = parseInt(m[2], 10);
-    let y = parseInt(m[3], 10);
-    if (y < 100) y += 2000;
-    return new Date(y, mo - 1, d).getTime();
+function getPageNumbers(currentPage: number, totalPages: number): (number | "...")[] {
+  const pages: (number | "...")[] = [];
+  if (totalPages <= 7) {
+    for (let i = 1; i <= totalPages; i++) pages.push(i);
+    return pages;
   }
-  const t = Date.parse(s);
-  return isNaN(t) ? 0 : t;
+  const current = currentPage + 1;
+  pages.push(1);
+  if (current > 3) pages.push("...");
+  for (let i = Math.max(2, current - 1); i <= Math.min(totalPages - 1, current + 1); i++) {
+    pages.push(i);
+  }
+  if (current < totalPages - 2) pages.push("...");
+  pages.push(totalPages);
+  return pages;
 }
 
 function toDocs(records: RnpmAvizRecord[]): { docs: RnpmDocument[]; avizIds: (number | null)[] } {
@@ -55,8 +56,11 @@ export interface RnpmSavedDataProps {
 }
 
 export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSavedDataProps) {
+  const confirm = useConfirm();
   const [items, setItems] = useState<RnpmAvizRecord[]>([]);
-  const [nextCursor, setNextCursor] = useState<number | null>(null);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
   const [q, setQ] = useState("");
   const [searchType, setSearchType] = useState<"" | RnpmSearchType>("");
@@ -64,72 +68,99 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
   const [dataStart, setDataStart] = useState("");
   const [dataStop, setDataStop] = useState("");
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
-  const [sortKey, setSortKey] = useState<SortKey>("data");
-  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [sortKey, setSortKey] = useState<RnpmSavedSortKey>("data");
+  const [sortDir, setSortDir] = useState<RnpmSavedSortDir>("desc");
 
-  const toggleSort = (key: SortKey) => {
+  const toggleSort = (key: RnpmSavedSortKey) => {
+    setPage(0);
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
     else { setSortKey(key); setSortDir("asc"); }
   };
 
-  const SortIcon = ({ k }: { k: SortKey }) => {
+  const SortIcon = ({ k }: { k: RnpmSavedSortKey }) => {
     if (sortKey !== k) return <ArrowUpDown className="h-3 w-3 opacity-40" />;
     return sortDir === "asc" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />;
   };
 
-  const load = useCallback(async (reset: boolean) => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const page = await rnpmGetSaved({
-        limit: 50,
-        cursor: reset ? null : nextCursor,
+      const result = await rnpmGetSaved({
+        page,
+        pageSize,
         searchType: searchType || undefined,
         activ: activOnly ? true : undefined,
         q: q.trim() || undefined,
         dataStart: dataStart || undefined,
         dataStop: dataStop || undefined,
+        sortKey,
+        sortDir,
       });
-      setItems((prev) => reset ? page.items : [...prev, ...page.items]);
-      setNextCursor(page.nextCursor);
+      setItems(result.items);
+      setTotal(result.total);
     } finally {
       setLoading(false);
     }
-  }, [nextCursor, q, searchType, activOnly, dataStart, dataStop]);
+  }, [page, pageSize, q, searchType, activOnly, dataStart, dataStop, sortKey, sortDir]);
 
   useEffect(() => {
-    // Reset selection when filters change or parent forces refresh.
+    load();
+  }, [load, refreshKey]);
+
+  // Reset selection when filters/sort/page change, since the visible set changes too.
+  useEffect(() => {
     setSelectedIds(new Set());
-    load(true);
-    /* eslint-disable-next-line react-hooks/exhaustive-deps */
-  }, [searchType, activOnly, dataStart, dataStop, refreshKey]);
+  }, [searchType, activOnly, dataStart, dataStop, sortKey, sortDir, page, pageSize, refreshKey]);
 
   const handleSearch = (e: React.FormEvent) => {
     e.preventDefault();
     setSelectedIds(new Set());
-    load(true);
+    setPage(0);
+    load();
+  };
+
+  // Dupa stergere: refetch pagina curenta (nu doar filtrez local) ca sa urce randurile
+  // din paginile urmatoare. Daca pagina curenta ar deveni goala (toate randurile erau
+  // pe ultima pagina), saltam la ultima pagina valida — altfel userul ramane pe o pagina
+  // goala cu "Inainte" dezactivat.
+  const refreshAfterDelete = async (removedCount: number) => {
+    const newTotal = Math.max(0, total - removedCount);
+    const lastPage = newTotal === 0 ? 0 : Math.ceil(newTotal / pageSize) - 1;
+    if (page > lastPage) {
+      setPage(lastPage); // declanseaza load via useEffect
+    } else {
+      await load();
+    }
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm("Sterge acest aviz din baza locala?")) return;
+    if (!(await confirm({
+      message: "Sterge acest aviz din baza locala?",
+      confirmLabel: "Sterge",
+      destructive: true,
+    }))) return;
     await rnpmDeleteAviz(id);
-    setItems((prev) => prev.filter((i) => i.id !== id));
     setSelectedIds((prev) => {
       if (!prev.has(id)) return prev;
       const next = new Set(prev); next.delete(id); return next;
     });
+    await refreshAfterDelete(1);
     onChanged?.();
   };
 
   const handleDeleteSelected = async () => {
     const ids = Array.from(selectedIds);
     if (ids.length === 0) return;
-    if (!confirm(`Stergi ${ids.length} aviz${ids.length === 1 ? "" : "e"} selectat${ids.length === 1 ? "" : "e"}?\n\nActiunea nu poate fi anulata.`)) return;
+    if (!(await confirm({
+      message: `Stergi ${ids.length} aviz${ids.length === 1 ? "" : "e"} selectat${ids.length === 1 ? "" : "e"}?\n\nActiunea nu poate fi anulata.`,
+      confirmLabel: "Sterge",
+      destructive: true,
+    }))) return;
     setLoading(true);
     try {
       await rnpmDeleteAvizeBatch(ids);
-      const removed = new Set(ids);
-      setItems((prev) => prev.filter((i) => !removed.has(i.id)));
       setSelectedIds(new Set());
+      await refreshAfterDelete(ids.length);
       onChanged?.();
     } finally {
       setLoading(false);
@@ -161,20 +192,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
     });
   };
 
-  const sortedItems = useMemo(() => {
-    const dir = sortDir === "asc" ? 1 : -1;
-    const cmp = (a: RnpmAvizRecord, b: RnpmAvizRecord): number => {
-      switch (sortKey) {
-        case "identificator": return a.identificator.localeCompare(b.identificator, "ro") * dir;
-        case "search_type": return a.search_type.localeCompare(b.search_type, "ro") * dir;
-        case "data": return (parseRoDate(a.data) - parseRoDate(b.data)) * dir;
-        case "tip": return (a.tip ?? "").localeCompare(b.tip ?? "", "ro") * dir;
-        case "activ": return (a.activ - b.activ) * dir;
-      }
-    };
-    return [...items].sort(cmp);
-  }, [items, sortKey, sortDir]);
-
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const visibleIds = useMemo(() => items.map((i) => i.id), [items]);
   const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
   const someVisibleSelected = !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
@@ -252,10 +270,10 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 text-xs text-foreground">
             <span>
-              {items.length} aviz{items.length === 1 ? "" : "e"}
+              {total} aviz{total === 1 ? "" : "e"}
             </span>
             {selectedIds.size > 0 && (
-              <span className="font-medium text-violet-600">({selectedIds.size} selectate)</span>
+              <span className="font-medium text-violet-600">({selectedIds.size} selectate pe aceasta pagina)</span>
             )}
           </div>
           <div className="flex items-center gap-2">
@@ -324,7 +342,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
               </tr>
             </thead>
             <tbody>
-              {sortedItems.map((a) => (
+              {items.map((a) => (
                 <tr key={a.id} className={cn(
                   "border-t border-border cursor-pointer transition-colors",
                   selectedIds.has(a.id) ? "bg-accent/20" : "hover:bg-accent/30"
@@ -366,12 +384,64 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
         </div>
       )}
 
-      {nextCursor != null && (
-        <div className="flex justify-center">
-          <Button variant="outline" size="sm" onClick={() => load(false)} disabled={loading}>
-            {loading && <Loader2 className="h-4 w-4 animate-spin" />}
-            Incarca mai multe
-          </Button>
+      {total > 0 && totalPages > 1 && (
+        <div className="flex flex-col items-center gap-2 border-t border-border px-4 py-3">
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => setPage(0)} disabled={page === 0 || loading}>«</Button>
+            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0 || loading}>‹ Inapoi</Button>
+            <div className="flex items-center gap-1">
+              {getPageNumbers(page, totalPages).map((p, i) =>
+                p === "..." ? (
+                  <span key={`dots-${i}`} className="px-1 text-sm text-muted-foreground">...</span>
+                ) : (
+                  <Button
+                    key={p}
+                    variant={p === page + 1 ? "default" : "outline"}
+                    size="sm"
+                    className="min-w-[32px]"
+                    onClick={() => setPage((p as number) - 1)}
+                    disabled={loading}
+                  >
+                    {p}
+                  </Button>
+                )
+              )}
+            </div>
+            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1 || loading}>Inainte ›</Button>
+            <Button variant="outline" size="sm" onClick={() => setPage(totalPages - 1)} disabled={page === totalPages - 1 || loading}>»</Button>
+            <div className="flex items-center gap-1 ml-2">
+              <span className="text-xs text-muted-foreground">Pagina</span>
+              <input
+                type="number"
+                min={1}
+                max={totalPages}
+                value={page + 1}
+                onChange={(e) => {
+                  const val = parseInt(e.target.value, 10);
+                  if (val >= 1 && val <= totalPages) setPage(val - 1);
+                }}
+                className="w-14 rounded border border-border bg-background px-2 py-1 text-center text-sm"
+              />
+            </div>
+            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground ml-1" />}
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-muted-foreground">Pagina {page + 1} din {totalPages}</span>
+            <span className="text-xs text-muted-foreground">|</span>
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs text-muted-foreground">Rezultate pe pagina:</span>
+              {[10, 15, 25, 50, 100].map((size) => (
+                <button
+                  key={size}
+                  onClick={() => { setPageSize(size); setPage(0); }}
+                  disabled={loading}
+                  className={`min-w-[32px] rounded px-2 py-0.5 text-xs border ${pageSize === size ? "bg-primary text-primary-foreground border-primary" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
+                >
+                  {size}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       )}
     </div>

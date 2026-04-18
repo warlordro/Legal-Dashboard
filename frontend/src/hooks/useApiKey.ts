@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 
+// NOTE (CP-12): empty `catch {}` blocks below intentionally swallow errors from
+// localStorage / safeStorage IPC. Reads fall back to EMPTY; writes are best-effort.
+// Causes we accept: quota exceeded, private-mode blocked, keystore unavailable.
+// A noisy failure here would break app boot for users with any of the above.
+
 export type CaptchaProvider = "2captcha" | "capsolver";
 export type CaptchaMode = "sequential" | "race";
 

@@ -92,6 +92,8 @@ export interface RnpmDetailPartyPJ {
   alteDate?: string;
   subscriptor?: boolean;
   no?: number;
+  calitate?: string;
+  altaCalitate?: string;
   [key: string]: unknown;
 }
 
@@ -107,6 +109,8 @@ export interface RnpmDetailPartyPF {
   alteDate?: string;
   subscriptor?: boolean;
   no?: number;
+  calitate?: string;
+  altaCalitate?: string;
   [key: string]: unknown;
 }
 
@@ -116,12 +120,17 @@ export interface RnpmDetailPartyPJDebitor extends RnpmDetailPartyPJ { calitate?:
 export interface RnpmDetailPart2 {
   creditoriF?: RnpmDetailPartyPF[];
   creditoriJ?: RnpmDetailPartyPJ[];
+  // Specifice: parti (single bucket, calitate + altaCalitate) in loc de creditori/debitori.
+  partiF?: RnpmDetailPartyPF[];
+  partiJ?: RnpmDetailPartyPJ[];
   [key: string]: unknown;
 }
 
 export interface RnpmDetailPart3 {
   debitoriF?: RnpmDetailPartyPFDebitor[];
   debitoriJ?: RnpmDetailPartyPJDebitor[];
+  // Specifice: bunuri simple (doar descriere) direct in part3.
+  bunuri?: RnpmDetailBun[];
   [key: string]: unknown;
 }
 
@@ -229,13 +238,28 @@ export class RnpmClient {
 
   async fetchIstoric(uuid: string, signal?: AbortSignal): Promise<RnpmIstoricEntry[]> {
     const url = `${RNPM_BASE_URL}/api/view/istoric/${uuid}`;
-    const res = await this.fetchImpl(url, { headers: DEFAULT_HEADERS, signal });
+    // The istoric endpoint is flaky — same URL occasionally returns 400 "command
+    // execution error" then 200 with data a few seconds later. Retry once with a
+    // short backoff before giving up.
+    const doFetch = () => this.fetchImpl(url, { headers: DEFAULT_HEADERS, signal });
+    let res = await doFetch();
+    if (res.status === 400) {
+      await new Promise((r) => setTimeout(r, 1500));
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      res = await doFetch();
+    }
+    // 404/410 = aviz not found / gone; 400 after retry = treat as no history.
     if (res.status === 400 || res.status === 404 || res.status === 410) return [];
     if (!res.ok) {
       const body = await res.text().catch(() => "");
       throw new RnpmError(`Eroare RNPM istoric (${res.status}): ${body.slice(0, 200)}`, res.status);
     }
     const data = await res.json();
+    // Real response shape is { inscriere: string, istoric: Entry[] }.
+    // Keep array + { entries } paths as tolerant fallbacks.
+    if (data && Array.isArray((data as { istoric?: unknown }).istoric)) {
+      return (data as { istoric: RnpmIstoricEntry[] }).istoric;
+    }
     if (Array.isArray(data)) return data as RnpmIstoricEntry[];
     if (data && Array.isArray((data as { entries?: unknown }).entries)) {
       return (data as { entries: RnpmIstoricEntry[] }).entries;

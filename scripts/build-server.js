@@ -1,6 +1,6 @@
 import { execSync } from "child_process";
-import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, createWriteStream, readdirSync, statSync } from "fs";
-import { resolve, dirname, join, relative } from "path";
+import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
+import { resolve, dirname, join } from "path";
 import { fileURLToPath } from "url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -30,7 +30,6 @@ cpSync(resolve(root, "docker-compose.yml"), join(outDir, "docker-compose.yml"));
 cpSync(resolve(root, ".env.example"), join(outDir, ".env.example"));
 
 // Write a minimal start script
-import { writeFileSync } from "fs";
 writeFileSync(join(outDir, "start.sh"), `#!/bin/sh
 NODE_ENV=production node dist-backend/index.cjs
 `);

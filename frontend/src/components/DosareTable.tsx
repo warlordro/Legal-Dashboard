@@ -164,7 +164,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
       if (prev.has(numar)) return prev;
       const next = new Set(prev);
       next.add(numar);
-      try { sessionStorage.setItem("viewedDosare", JSON.stringify([...next])); } catch {}
+      try { sessionStorage.setItem("viewedDosare", JSON.stringify([...next])); } catch { /* sessionStorage unavailable; visited-markers are best-effort */ }
       return next;
     });
   }, []);
@@ -349,8 +349,15 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
     return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
   });
 
-  const paged = sorted.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(dosare.length / pageSize);
+
+  // Clamp page when list shrinks (filters reduce count below current page bounds).
+  // Without this, the table renders empty — results exist but on a page that no longer exists.
+  useEffect(() => {
+    if (totalPages > 0 && page >= totalPages) setPage(0);
+  }, [totalPages, page]);
+
+  const paged = sorted.slice(page * pageSize, (page + 1) * pageSize);
 
   const SortIcon = ({ k }: { k: SortKey }) =>
     sortKey === k ? (
@@ -595,11 +602,11 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                               </h4>
                               <div className="relative space-y-0">
                                 {/* Timeline line */}
-                                <div className="absolute left-[72px] top-0 bottom-0 w-px bg-border" />
+                                <div className="absolute left-[92px] top-0 bottom-0 w-px bg-border" />
                                 {dosar.sedinte.map((s, j) => (
                                   <div key={j} className="relative flex gap-4 py-3 first:pt-0 last:pb-0">
                                     {/* Date + Time column */}
-                                    <div className="w-[60px] shrink-0 text-right">
+                                    <div className="w-[80px] shrink-0 text-right">
                                       <span className="font-mono text-xs font-bold text-primary">
                                         {formatDate(s.data)}
                                       </span>
@@ -608,7 +615,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                                       )}
                                     </div>
                                     {/* Timeline dot */}
-                                    <div className="relative z-10 mt-1 h-2.5 w-2.5 shrink-0 rounded-full border-2 border-primary bg-background" />
+                                    <div className="relative z-10 mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full border-2 border-primary bg-background" />
                                     {/* Content */}
                                     <div className="flex-1 min-w-0 rounded-lg border border-border bg-background p-3">
                                       <div className="flex items-center gap-2 flex-wrap">

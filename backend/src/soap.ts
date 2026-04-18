@@ -104,6 +104,7 @@ export function extractAll(xml: string, tag: string): string[] {
   return results;
 }
 
+export type Dosar = ReturnType<typeof parseDosar>;
 export function parseDosar(xml: string) {
   // Extract nested sections first
   const partiXml = extractFirst(xml, "parti");

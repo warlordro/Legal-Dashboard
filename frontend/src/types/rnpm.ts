@@ -162,10 +162,15 @@ export interface RnpmAvizFull {
   istoric: RnpmIstoricEntry[];
 }
 
-export interface RnpmCursorPage<T> {
+export interface RnpmOffsetPage<T> {
   items: T[];
-  nextCursor: number | null;
+  total: number;
+  page: number;
+  pageSize: number;
 }
+
+export type RnpmSavedSortKey = "id" | "identificator" | "search_type" | "data" | "tip" | "activ";
+export type RnpmSavedSortDir = "asc" | "desc";
 
 export interface RnpmStats {
   total: number;

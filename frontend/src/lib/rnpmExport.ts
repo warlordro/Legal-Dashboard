@@ -159,6 +159,11 @@ export async function exportRnpmExcel(
   const XLSX = await import("xlsx-js-style");
   const details = await fetchDetails(docs, avizIds);
 
+  // Avizele specifice nu au creditori/debitori separati — ci un singur bucket "Parti"
+  // (mapat pe coloana debitori in DB). Ajustam label-urile si schema sheet-urilor corespunzator.
+  const isSpecifice = searchType === "specifice";
+  const partyLabel2 = isSpecifice ? "Parti" : "Debitori";
+
   const dateStr = todayRo();
 
   // Pre-compute counts + first-row offsets in each child tab.
@@ -189,15 +194,22 @@ export async function exportRnpmExcel(
     "#", "Identificator", "Data", "Tip", "Utilizator autorizat", "Necesita act.", "Activ",
     "Destinatie", "Tip act", "Numar act", "Data inregistrare", "Data expirare",
     "Inscriere initiala", "Inscriere modificata",
-    "Creditori", "Debitori", "Bunuri", "Istoric",
+    ...(isSpecifice ? [partyLabel2] : ["Creditori", partyLabel2]),
+    "Bunuri", "Istoric",
     "Alte mentiuni", "Detalii comune",
   ];
-  const A_WIDTHS = [5, 30, 11, 30, 32, 10, 6, 22, 14, 16, 14, 14, 26, 26, 10, 9, 8, 8, 40, 60];
+  const A_WIDTHS = [5, 30, 11, 30, 32, 10, 6, 22, 14, 16, 14, 14, 26, 26,
+    ...(isSpecifice ? [9] : [10, 9]),
+    8, 8, 40, 60];
   const A_COLS = A_HEADERS.length;
+
+  const statsLine = isSpecifice
+    ? `Generat: ${dateStr}  |  ${docs.length} avize  |  ${totalDeb} parti  |  ${totalBun} bunuri`
+    : `Generat: ${dateStr}  |  ${docs.length} avize  |  ${totalCred} creditori  |  ${totalDeb} debitori  |  ${totalBun} bunuri`;
 
   const avizeAoA: (string | number | null)[][] = [
     [`LEGAL DASHBOARD - RNPM${searchType ? ` / ${searchType.toUpperCase()}` : ""}`, ...Array(A_COLS - 1).fill(null)],
-    [`Generat: ${dateStr}  |  ${docs.length} avize  |  ${totalCred} creditori  |  ${totalDeb} debitori  |  ${totalBun} bunuri`, ...Array(A_COLS - 1).fill(null)],
+    [statsLine, ...Array(A_COLS - 1).fill(null)],
     Array(A_COLS).fill(null),
     A_HEADERS,
     ...docs.map((d, i) => {
@@ -219,7 +231,7 @@ export async function exportRnpmExcel(
         a?.data_expirare ?? "",
         a?.inscriere_initiala_id ?? "",
         a?.inscriere_modificata_id ?? "",
-        cnt.creditori || "",
+        ...(isSpecifice ? [] : [cnt.creditori || ""]),
         cnt.debitori || "",
         cnt.bunuri || "",
         cnt.istoric || "",
@@ -239,16 +251,20 @@ export async function exportRnpmExcel(
   styleRow(wsAvize, 1, A_COLS, styleStats);
   styleRow(wsAvize, 3, A_COLS, styleHeader);
 
-  const NAV_COLS = { creditori: 14, debitori: 15, bunuri: 16, istoric: 17 };
+  // NAV_COLS.creditori lipseste cand isSpecifice (coloana nu mai exista in layout).
+  const NAV_COLS: { creditori?: number; debitori: number; bunuri: number; istoric: number } = isSpecifice
+    ? { debitori: 14, bunuri: 15, istoric: 16 }
+    : { creditori: 14, debitori: 15, bunuri: 16, istoric: 17 };
+  const navStart = NAV_COLS.creditori ?? NAV_COLS.debitori;
   docs.forEach((d, i) => {
     const r = 4 + i;
     const fr = firstRow.get(d.identificator.v);
     const hasChildren = fr && (fr.bunuri || fr.debitori || fr.creditori || fr.istoric);
     for (let c = 0; c < A_COLS; c++) {
       const isIdent = c === 1;
-      const isNav = c >= NAV_COLS.creditori && c <= NAV_COLS.istoric;
+      const isNav = c >= navStart && c <= NAV_COLS.istoric;
       const isLink = (isIdent && hasChildren) ||
-        (c === NAV_COLS.creditori && fr?.creditori) ||
+        (NAV_COLS.creditori != null && c === NAV_COLS.creditori && fr?.creditori) ||
         (c === NAV_COLS.debitori && fr?.debitori) ||
         (c === NAV_COLS.bunuri && fr?.bunuri) ||
         (c === NAV_COLS.istoric && fr?.istoric);
@@ -262,11 +278,17 @@ export async function exportRnpmExcel(
     if (isNullish(fr)) return;
     const primary = fr.bunuri ?? fr.debitori ?? fr.creditori ?? fr.istoric;
     if (primary != null) {
-      const sheet = fr.bunuri ? "Bunuri" : fr.debitori ? "Debitori" : fr.creditori ? "Creditori" : "Istoric";
+      const sheet = fr.bunuri
+        ? "Bunuri"
+        : fr.debitori
+        ? partyLabel2
+        : fr.creditori
+        ? "Creditori"
+        : "Istoric";
       setLink(wsAvize, r, 1, `#${sheet}!A${primary + 1}`, "Deschide detaliile avizului");
     }
-    if (fr.creditori != null) setLink(wsAvize, r, NAV_COLS.creditori, `#Creditori!A${fr.creditori + 1}`, "Vezi creditori");
-    if (fr.debitori != null) setLink(wsAvize, r, NAV_COLS.debitori, `#Debitori!A${fr.debitori + 1}`, "Vezi debitori");
+    if (NAV_COLS.creditori != null && fr.creditori != null) setLink(wsAvize, r, NAV_COLS.creditori, `#Creditori!A${fr.creditori + 1}`, "Vezi creditori");
+    if (fr.debitori != null) setLink(wsAvize, r, NAV_COLS.debitori, `#${partyLabel2}!A${fr.debitori + 1}`, `Vezi ${partyLabel2.toLowerCase()}`);
     if (fr.bunuri != null) setLink(wsAvize, r, NAV_COLS.bunuri, `#Bunuri!A${fr.bunuri + 1}`, "Vezi bunuri");
     if (fr.istoric != null) setLink(wsAvize, r, NAV_COLS.istoric, `#Istoric!A${fr.istoric + 1}`, "Vezi istoric");
   });
@@ -359,7 +381,8 @@ export async function exportRnpmExcel(
     }
   }
 
-  const wsCred = buildChildSheet(
+  // Specifice n-are creditori separati — sarim peste sheet-ul Creditori complet.
+  const wsCred = isSpecifice ? null : buildChildSheet(
     "Creditori",
     ["Aviz", "Tip", "Nr ordine", "Subscriptor", "Denumire", "Prenume", "Tip entitate",
       "CNP", "Cod fiscal", "Nr identificare", "Sediu", "Localitate", "Judet", "Cod postal", "Tara", "Alte date"],
@@ -367,7 +390,7 @@ export async function exportRnpmExcel(
     creditoriRows, avizRowOf,
   );
   const wsDeb = buildChildSheet(
-    "Debitori",
+    partyLabel2,
     ["Aviz", "Calitate", "Tip", "Nr ordine", "Subscriptor", "Denumire", "Prenume", "Tip entitate",
       "CNP", "Cod fiscal", "Nr identificare", "Sediu", "Localitate", "Judet", "Cod postal", "Tara", "Alte date"],
     [30, 16, 5, 9, 11, 34, 18, 16, 16, 16, 18, 36, 18, 14, 10, 10, 30],
@@ -396,12 +419,22 @@ export async function exportRnpmExcel(
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, wsAvize as import("xlsx").WorkSheet, "Avize");
   if (wsCred) XLSX.utils.book_append_sheet(wb, wsCred as import("xlsx").WorkSheet, "Creditori");
-  if (wsDeb) XLSX.utils.book_append_sheet(wb, wsDeb as import("xlsx").WorkSheet, "Debitori");
+  if (wsDeb) XLSX.utils.book_append_sheet(wb, wsDeb as import("xlsx").WorkSheet, partyLabel2);
   if (wsBun) XLSX.utils.book_append_sheet(wb, wsBun as import("xlsx").WorkSheet, "Bunuri");
   if (wsIst) XLSX.utils.book_append_sheet(wb, wsIst as import("xlsx").WorkSheet, "Istoric");
 
-  const suffix = searchType ? `_${searchType}` : "";
-  XLSX.writeFile(wb, `rnpm${suffix}_${dateStr}.xlsx`);
+  // Single-item export → foloseste identificatorul avizului ca nume de fisier.
+  // Multi-item → pattern clasic cu tip + data.
+  const fileBase = docs.length === 1
+    ? sanitizeFilename(docs[0].identificator.v)
+    : `rnpm${searchType ? `_${searchType}` : ""}_${dateStr}`;
+  XLSX.writeFile(wb, `${fileBase}.xlsx`);
+}
+
+// Pastram doar caractere sigure pentru nume de fisier (identificatorii RNPM
+// contin doar litere/cifre/cratima, dar suntem defensivi pentru cazuri viitoare).
+function sanitizeFilename(s: string): string {
+  return s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "export";
 }
 
 function isNullish<T>(v: T | undefined | null): v is undefined | null {
@@ -418,6 +451,8 @@ export async function exportRnpmPDF(
   const { default: jsPDF } = await import("jspdf");
   const autoTable = (await import("jspdf-autotable")).default;
   const details = await fetchDetails(docs, avizIds);
+  const isSpecifice = searchType === "specifice";
+  const partyLabel2 = isSpecifice ? "Parti" : "Debitori";
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   doc.setFontSize(14);
@@ -479,22 +514,24 @@ export async function exportRnpmPDF(
       });
     };
 
+    if (!isSpecifice) {
+      section(
+        "Creditori",
+        ["Nr", "Tip", "Subscr.", "Denumire", "Tip ent.", "Identificator", "Sediu", "Cod postal"],
+        full.creditori.map((p) => [
+          p.nr_ordine != null ? String(p.nr_ordine) : "",
+          p.tip_persoana,
+          subscriptorLabel(p.subscriptor),
+          stripDiacritics(partyLabel(p)),
+          stripDiacritics(p.tip_entitate ?? ""),
+          partyId(p),
+          stripDiacritics(p.sediu ?? ""),
+          p.cod_postal ?? "",
+        ])
+      );
+    }
     section(
-      "Creditori",
-      ["Nr", "Tip", "Subscr.", "Denumire", "Tip ent.", "Identificator", "Sediu", "Cod postal"],
-      full.creditori.map((p) => [
-        p.nr_ordine != null ? String(p.nr_ordine) : "",
-        p.tip_persoana,
-        subscriptorLabel(p.subscriptor),
-        stripDiacritics(partyLabel(p)),
-        stripDiacritics(p.tip_entitate ?? ""),
-        partyId(p),
-        stripDiacritics(p.sediu ?? ""),
-        p.cod_postal ?? "",
-      ])
-    );
-    section(
-      "Debitori",
+      partyLabel2,
       ["Nr", "Tip", "Calitate", "Subscr.", "Denumire", "Tip ent.", "Identificator", "Sediu", "Cod postal"],
       full.debitori.map((p) => [
         p.nr_ordine != null ? String(p.nr_ordine) : "",
@@ -538,6 +575,8 @@ export async function exportRnpmPDF(
     );
   }
 
-  const suffix = searchType ? `_${searchType}` : "";
-  doc.save(`rnpm${suffix}_${todayRo()}.pdf`);
+  const fileBase = docs.length === 1
+    ? sanitizeFilename(docs[0].identificator.v)
+    : `rnpm${searchType ? `_${searchType}` : ""}_${todayRo()}`;
+  doc.save(`${fileBase}.pdf`);
 }

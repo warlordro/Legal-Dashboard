@@ -1,8 +1,10 @@
 # Legal Dashboard — Status Implementare
 
-**Data:** 2026-04-15
+**Data:** 2026-04-18 (sesiune 2)
 **Versiune tinta:** v1.0.0
 **Status global:** 10/10 pasi completi. Installer generat: `release/Legal Dashboard Setup 1.0.0.exe` (98 MB).
+
+**De continuat:** parser-ul RNPM trateaza acum `ipoteci` (default) + `specifice` (shape partiF/partiJ + part3.bunuri). Ramane de extins pentru **fiducii / creante / obligatiuni ipotecare** — dupa captura unor raspunsuri reale (parts 1-4 + istoric). Vezi CHANGELOG.md → "18 Aprilie 2026 (sesiune 2)" pentru pattern-ul de branching.
 
 ---
 
@@ -303,3 +305,34 @@ PLAN.md mentioneaza categoria la endpoint + schema, dar stub-ul `RnpmSearchParam
 
 ### Ramas pentru urmatoarea sesiune
 - **Verificat comportamentul cautare dupa aviz**: user a semnalat ca trebuie confirmat daca la cautarea dupa **identificatorul unui aviz** rezultatele includ si **avizele de modificare** corespunzatoare (identificator nou, referinta catre cel initial). Comportament potential de completat dupa verificare manuala + captura Network pe site-ul oficial RNPM.
+
+---
+
+## Update 2026-04-18 — Performanta RNPM + backup zilnic + dialog confirmare stilizat
+
+Detalii complete in `CHANGELOG.md` sectiunea "18 Aprilie 2026 — Mini-lag RNPM rezolvat + backup zilnic + dialog confirmare stilizat". Sinteza:
+
+### Performanta — tab-enter instant + click pe aviz instant
+- **A. Keep-mounted RnpmSavedData**: conditional render → `hidden` class, elimina unmount/remount la tab switch (state + scroll persist).
+- **D. Cache in-memory aviz detail** (`avizDetailCache`, TTL 60s): elimina round-trip + 5 query-uri repository la re-deschidere. Invalidat la delete (single / batch / all).
+- **E. Prewarm SQLite page cache la bootstrap**: `getAvize({limit:1}) + getAvizStats()` dupa `serve(...)` — prima interactiune nu mai plateste cold-start.
+
+### Backup zilnic automat (reziliente date cu mii de avize)
+- `backend/src/db/backup.ts` — `runDailyBackup()` via `better-sqlite3` online backup API, WAL-safe, fara checkpoint.
+- `<userData>/backups/legal-dashboard.YYYY-MM-DD.db` — skip `<24h`, rotatie la 7 fisiere (lexicografic = cronologic gratie ISO in nume).
+- Endpoints noi: `POST /api/rnpm/open-backups-folder`, `DELETE /api/rnpm/backups` (returneaza `{deleted}`).
+
+### Dialog de confirmare stilizat (inlocuieste `window.confirm()`)
+- `frontend/src/components/ui/confirm-dialog.tsx` — `ConfirmProvider` + `useConfirm()` hook Promise-based; `AlertTriangle` pentru destructive; Esc/Enter; click-outside.
+- 4 call-site-uri migrate: sterge aviz / batch / all + warning CUI invalid.
+
+### "Info baza locala" — management backups + relabel
+- Butoane noi: **Folder baza** (relabel din "Deschide folder"), **Backups** (open folder), **Sterge back-up** (delete all backups), **Sterge baza** (relabel din "Sterge tot", delete toate avizele). Ultimele doua grupate impreuna spre dreapta.
+
+### Fix UI conex — DosareTable timeline sedinte
+Efect secundar al font-scale bump din commit `dd05b05`: data taiata + cerc-marker nealiniat. Ajustat `w-[60px]→w-[80px]`, `left-[72px]→left-[92px]`, `mt-1→mt-1.5`.
+
+### Verificare
+- `npx tsc --noEmit` (frontend + backend) — clean.
+- Build reproductibil (`node scripts/build.js`), backend bundle 1.7mb.
+- Manual in Electron: log `[backup] saved legal-dashboard.2026-04-18.db` prezent la bootstrap; fisierul exista in `%APPDATA%/legal-dashboard/backups/`; tab-switch si click aviz instant; confirmarile folosesc dialog stilizat.

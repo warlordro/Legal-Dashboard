@@ -8,6 +8,38 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
+// CP-E1: main process crash handlers. Log the failure; show a dialog + quit only for
+// truly unrecoverable errors. Benign IO errors (broken stdout pipe, closed stream) are
+// logged and ignored — showing a dialog + quitting on those would be a regression.
+const NON_FATAL_CODES = new Set(["EPIPE", "EIO", "ECONNRESET", "ECONNABORTED"]);
+process.on("uncaughtException", (err) => {
+  const code = err && err.code;
+  if (code && NON_FATAL_CODES.has(code)) {
+    console.warn(`[main] non-fatal ${code}:`, err.message || err);
+    return;
+  }
+  console.error("[main] uncaughtException:", err);
+  try {
+    dialog.showErrorBox(
+      "Eroare neasteptata Legal Dashboard",
+      `Aplicatia a intampinat o eroare si se va inchide:\n\n${err && err.message ? err.message : err}`
+    );
+  } catch { /* dialog may not be ready; log only */ }
+  app.exit(1);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.error("[main] unhandledRejection:", reason);
+});
+
+app.on("before-quit", () => {
+  // Backend bundle registered a global shutdown hook that flushes the SQLite WAL.
+  const shutdown = globalThis.__legalDashboardShutdown;
+  if (typeof shutdown === "function") {
+    try { shutdown(); } catch (e) { console.error("[main] backend shutdown failed:", e); }
+  }
+});
+
 let mainWindow;
 let backendStarted = false;
 

@@ -137,7 +137,7 @@ export function RnpmResultsTable({ result, loading, onNeedMore, onOpenDetail, se
       if (prev.has(identificator)) return prev;
       const next = new Set(prev);
       next.add(identificator);
-      try { sessionStorage.setItem("viewedRnpm", JSON.stringify([...next])); } catch {}
+      try { sessionStorage.setItem("viewedRnpm", JSON.stringify([...next])); } catch { /* sessionStorage unavailable; visited-markers are best-effort */ }
       return next;
     });
   }, []);

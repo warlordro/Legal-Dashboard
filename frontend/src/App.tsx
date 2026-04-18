@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { BrowserRouter, useLocation } from "react-router-dom";
 import { Key, X, Bot, ArrowUp, ArrowDown } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { Sidebar } from "@/components/Sidebar";
 import { useDialog } from "@/hooks/useDialog";
 import Dashboard from "@/pages/Dashboard";
@@ -115,14 +116,21 @@ function AppShell({
       />
       <main ref={mainRef} className="flex-1 overflow-y-auto scrollbar-thin relative">
         {/* Dashboard only renders on "/" — no long-running ops */}
-        {pathname === "/" && <Dashboard dosareState={dosareState} />}
+        {pathname === "/" && (
+          <Dashboard
+            dosareState={dosareState}
+            rnpmHistory={rnpmHistory}
+            history={history}
+            onHistoryClick={handleHistoryClick}
+          />
+        )}
 
         {/* Dosare & Termene stay mounted so async operations survive tab switches */}
         <div style={{ display: pathname === "/dosare" ? undefined : "none" }}>
           <Dosare
             state={dosareState}
             onStateChange={setDosareState}
-            onSearchComplete={(params, count) => addEntry("dosare", params, count)}
+            onSearchComplete={(params, count, meta) => addEntry("dosare", params, count, meta)}
             pendingSearch={pendingSearch?.type === "dosare" ? pendingSearch.params : null}
             consumePendingSearch={consumePendingSearch}
             apiKeys={keys}
@@ -244,6 +252,7 @@ export default function App() {
 
   return (
     <BrowserRouter>
+      <ConfirmProvider>
       <AppShell
         dosareState={dosareState}
         setDosareState={setDosareState}
@@ -487,6 +496,7 @@ export default function App() {
           </div>
         </div>
       )}
+      </ConfirmProvider>
     </BrowserRouter>
   );
 }

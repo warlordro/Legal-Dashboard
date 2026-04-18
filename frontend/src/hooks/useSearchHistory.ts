@@ -29,7 +29,12 @@ export function useSearchHistory() {
   const [history, setHistory] = useState<SearchHistoryEntry[]>(loadHistory);
 
   const addEntry = useCallback(
-    (type: "dosare" | "termene", params: SearchParams, resultCount: number) => {
+    (
+      type: "dosare" | "termene",
+      params: SearchParams,
+      resultCount: number,
+      meta?: { categoriesCount: number; institutiiCount: number },
+    ) => {
       const entry: SearchHistoryEntry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
         type,
@@ -37,6 +42,7 @@ export function useSearchHistory() {
         label: buildLabel(params),
         resultCount,
         timestamp: Date.now(),
+        ...(meta ? { meta } : {}),
       };
 
       setHistory((prev) => {

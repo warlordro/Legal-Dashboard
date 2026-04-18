@@ -4,7 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { rnpmBulkSearch, type CaptchaProvider, type CaptchaMode } from "@/lib/rnpmApi";
-import type { RnpmBulkItem, RnpmBulkProgress, RnpmSearchType } from "@/types/rnpm";
+import type { RnpmBulkItem, RnpmBulkProgress, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
 
 const CATEGORIES: { type: RnpmSearchType; label: string }[] = [
   { type: "ipoteci", label: "Aviz de ipoteca mobiliara" },
@@ -14,14 +14,53 @@ const CATEGORIES: { type: RnpmSearchType; label: string }[] = [
   { type: "obligatiuni", label: "Aviz de ipoteca - obligatiuni ipotecare" },
 ];
 
-type FieldKey = "debitorPJ.CUI" | "debitorPF.CNP" | "debitorPJ.denumire" | "creditorPJ.CUI" | "creditorPJ.denumire";
-const FIELDS: { key: FieldKey; label: string }[] = [
-  { key: "debitorPJ.CUI", label: "CUI Debitor PJ" },
-  { key: "debitorPF.CNP", label: "CNP Debitor PF" },
-  { key: "debitorPJ.denumire", label: "Denumire Debitor PJ" },
-  { key: "creditorPJ.CUI", label: "CUI Creditor PJ" },
-  { key: "creditorPJ.denumire", label: "Denumire Creditor PJ" },
-];
+// RNPM foloseste chei diferite pentru parti in functie de categorie:
+// ipoteci: debitorPJ/debitorPF/creditorPJ; specifice: parteJ/parteF; creante: debitorJ/debitorF/reprezentantCreditor;
+// fiducii: constituitorPJ/constituitorPF/fiduciar/beneficiarPJ/beneficiarPF; obligatiuni: agentPJ/agentPF/emitent.
+// Trimiterea unui `debitorPJ.CUI` catre /api/search/specifice = 0 rezultate (RNPM nu recunoaste cheia).
+type FieldSpec = {
+  key: string;
+  label: string;
+  build: (params: RnpmSearchParams, value: string) => void;
+};
+const FIELDS_BY_CATEGORY: Record<RnpmSearchType, FieldSpec[]> = {
+  ipoteci: [
+    { key: "debitorPJ.CUI", label: "CUI Debitor PJ", build: (p, v) => { p.debitorPJ = { CUI: { type: "1", value: v } }; } },
+    { key: "debitorPF.CNP", label: "CNP Debitor PF", build: (p, v) => { p.debitorPF = { CNP: { type: "1", value: v } }; } },
+    { key: "debitorPJ.denumire", label: "Denumire Debitor PJ", build: (p, v) => { p.debitorPJ = { denumire: v }; } },
+    { key: "creditorPJ.CUI", label: "CUI Creditor PJ", build: (p, v) => { p.creditorPJ = { CUI: { type: "1", value: v } }; } },
+    { key: "creditorPJ.denumire", label: "Denumire Creditor PJ", build: (p, v) => { p.creditorPJ = { denumire: v }; } },
+  ],
+  specifice: [
+    { key: "parteJ.CUI", label: "CUI Parte PJ", build: (p, v) => { p.parteJ = { CUI: { type: "1", value: v } }; } },
+    { key: "parteF.CNP", label: "CNP Parte PF", build: (p, v) => { p.parteF = { CNP: { type: "1", value: v } }; } },
+    { key: "parteJ.denumire", label: "Denumire Parte PJ", build: (p, v) => { p.parteJ = { denumire: v }; } },
+  ],
+  fiducii: [
+    { key: "constituitorPJ.CUI", label: "CUI Constituitor PJ", build: (p, v) => { p.constituitorPJ = { CUI: { type: "1", value: v } }; } },
+    { key: "constituitorPF.CNP", label: "CNP Constituitor PF", build: (p, v) => { p.constituitorPF = { CNP: { type: "1", value: v } }; } },
+    { key: "constituitorPJ.denumire", label: "Denumire Constituitor PJ", build: (p, v) => { p.constituitorPJ = { denumire: v }; } },
+    { key: "fiduciar.CUI", label: "CUI Fiduciar", build: (p, v) => { p.fiduciar = { CUI: { type: "1", value: v } }; } },
+    { key: "fiduciar.denumire", label: "Denumire Fiduciar", build: (p, v) => { p.fiduciar = { denumire: v }; } },
+    { key: "beneficiarPJ.CUI", label: "CUI Beneficiar PJ", build: (p, v) => { p.beneficiarPJ = { CUI: { type: "1", value: v } }; } },
+    { key: "beneficiarPF.CNP", label: "CNP Beneficiar PF", build: (p, v) => { p.beneficiarPF = { CNP: { type: "1", value: v } }; } },
+    { key: "beneficiarPJ.denumire", label: "Denumire Beneficiar PJ", build: (p, v) => { p.beneficiarPJ = { denumire: v }; } },
+  ],
+  creante: [
+    { key: "debitorJ.CUI", label: "CUI Debitor PJ", build: (p, v) => { p.debitorJ = { CUI: { type: "1", value: v } }; } },
+    { key: "debitorF.CNP", label: "CNP Debitor PF", build: (p, v) => { p.debitorF = { CNP: { type: "1", value: v } }; } },
+    { key: "debitorJ.denumire", label: "Denumire Debitor PJ", build: (p, v) => { p.debitorJ = { denumire: v }; } },
+    { key: "reprezentantCreditor.CUI", label: "CUI Reprezentant Creditor", build: (p, v) => { p.reprezentantCreditor = { CUI: { type: "1", value: v } }; } },
+    { key: "reprezentantCreditor.denumire", label: "Denumire Reprezentant Creditor", build: (p, v) => { p.reprezentantCreditor = { denumire: v }; } },
+  ],
+  obligatiuni: [
+    { key: "agentPJ.CUI", label: "CUI Agent PJ", build: (p, v) => { p.agentPJ = { CUI: { type: "1", value: v } }; } },
+    { key: "agentPF.CNP", label: "CNP Agent PF", build: (p, v) => { p.agentPF = { CNP: { type: "1", value: v } }; } },
+    { key: "agentPJ.denumire", label: "Denumire Agent PJ", build: (p, v) => { p.agentPJ = { denumire: v }; } },
+    { key: "emitent.CUI", label: "CUI Emitent", build: (p, v) => { p.emitent = { CUI: { type: "1", value: v } }; } },
+    { key: "emitent.denumire", label: "Denumire Emitent", build: (p, v) => { p.emitent = { denumire: v }; } },
+  ],
+};
 
 export interface RnpmBulkSearchProps {
   captchaKey: string;
@@ -33,11 +72,16 @@ export interface RnpmBulkSearchProps {
 
 export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, onConfigureKey }: RnpmBulkSearchProps) {
   const [type, setType] = useState<RnpmSearchType>("ipoteci");
-  const [field, setField] = useState<FieldKey>("debitorPJ.CUI");
+  const [field, setField] = useState<string>(FIELDS_BY_CATEGORY.ipoteci[0].key);
   const [valuesText, setValuesText] = useState("");
+  const [activ, setActiv] = useState<boolean>(true);
+  const [nemodificat, setNemodificat] = useState<boolean>(true);
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState<RnpmBulkProgress[]>([]);
   const [abortCtl, setAbortCtl] = useState<AbortController | null>(null);
+
+  const fieldsForType = FIELDS_BY_CATEGORY[type];
+  const activeField = fieldsForType.find((f) => f.key === field) ?? fieldsForType[0];
 
   const MAX_BATCH = 100;
   const allValues = valuesText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
@@ -45,17 +89,19 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
   const overLimit = allValues.length > MAX_BATCH;
 
   const buildItems = (): RnpmBulkItem[] => values.map((value) => {
-    const item: RnpmBulkItem = { type, params: {}, label: `${field} = ${value}` };
-    const p = item.params;
-    switch (field) {
-      case "debitorPJ.CUI": p.debitorPJ = { CUI: { type: "1", value } }; break;
-      case "debitorPF.CNP": p.debitorPF = { CNP: { type: "1", value } }; break;
-      case "debitorPJ.denumire": p.debitorPJ = { denumire: value }; break;
-      case "creditorPJ.CUI": p.creditorPJ = { CUI: { type: "1", value } }; break;
-      case "creditorPJ.denumire": p.creditorPJ = { denumire: value }; break;
-    }
+    const item: RnpmBulkItem = { type, params: {}, label: `${activeField.key} = ${value}` };
+    activeField.build(item.params, value);
+    // RNPM /api/search trateaza activ:false identic cu activ:true (ambele filtreaza la active-only).
+    // Doar absenta cheii aduce active + inactive. De-aceea includem in params NUMAI daca e true.
+    if (activ) item.params.activ = true;
+    if (nemodificat) item.params.nemodificat = true;
     return item;
   });
+
+  const handleTypeChange = (nextType: RnpmSearchType) => {
+    setType(nextType);
+    setField(FIELDS_BY_CATEGORY[nextType][0].key);
+  };
 
   const handleStart = async () => {
     if (!captchaKey) { onConfigureKey(); return; }
@@ -101,16 +147,16 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">Categorie</label>
-          <select value={type} onChange={(e) => setType(e.target.value as RnpmSearchType)} disabled={running}
+          <select value={type} onChange={(e) => handleTypeChange(e.target.value as RnpmSearchType)} disabled={running}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm">
             {CATEGORIES.map((c) => <option key={c.type} value={c.type}>{c.label}</option>)}
           </select>
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">Camp cautare</label>
-          <select value={field} onChange={(e) => setField(e.target.value as FieldKey)} disabled={running}
+          <select value={activeField.key} onChange={(e) => setField(e.target.value)} disabled={running}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm">
-            {FIELDS.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+            {fieldsForType.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
           </select>
         </div>
       </div>
@@ -128,6 +174,17 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
           placeholder={"14399840\n123456789\n..."}
           className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
         />
+      </div>
+
+      <div className="flex items-center gap-4 text-sm">
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={activ} onChange={(e) => setActiv(e.target.checked)} disabled={running} />
+          Numai active
+        </label>
+        <label className="flex items-center gap-2">
+          <input type="checkbox" checked={nemodificat} onChange={(e) => setNemodificat(e.target.checked)} disabled={running} />
+          Nemodificate de alte inscrieri
+        </label>
       </div>
 
       <div className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2 text-xs">

@@ -221,7 +221,12 @@ export default function RnpmSearchPage({
           <div className="pb-1">
             <RnpmSavedStats
               refreshKey={savedRefreshKey + savedStatsKey}
-              onAfterDeleteAll={() => setSavedRefreshKey((k) => k + 1)}
+              onAfterDeleteAll={() => {
+                setSavedRefreshKey((k) => k + 1);
+                setResult(null);
+                setError(null);
+                setElapsedMs(null);
+              }}
             />
           </div>
         )}
@@ -266,13 +271,14 @@ export default function RnpmSearchPage({
         <RnpmBulkSearch captchaKey={captchaKey} captchaProvider={captchaProvider} fallback2CaptchaKey={fallback2CaptchaKey} captchaMode={captchaMode} onConfigureKey={onConfigureKey} />
       )}
 
-      {tab === "saved" && (
+      {/* A: keep RnpmSavedData mounted across tab switches so re-entering "saved" is instant */}
+      <div className={tab === "saved" ? "" : "hidden"}>
         <RnpmSavedData
           onOpenDetail={setDetailAvizId}
           refreshKey={savedRefreshKey}
           onChanged={() => setSavedStatsKey((k) => k + 1)}
         />
-      )}
+      </div>
 
       <RnpmDetailModal avizId={detailAvizId} onClose={() => setDetailAvizId(null)} />
     </div>

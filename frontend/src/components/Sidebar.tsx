@@ -43,7 +43,13 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
   const { theme, toggle } = useTheme();
   const fontSize = useFontSize();
   const [collapsed, setCollapsed] = useState(false);
-  const [openHistory, setOpenHistory] = useState<"cautari" | "rnpm" | null>("cautari");
+  // Open the section whose most recent entry is newest — so reopening the app
+  // lands on whichever category the user was last active in.
+  const [openHistory, setOpenHistory] = useState<"cautari" | "rnpm" | null>(() => {
+    const latestCautari = history[0]?.timestamp ?? 0;
+    const latestRnpm = rnpmHistory[0]?.timestamp ?? 0;
+    return latestRnpm > latestCautari ? "rnpm" : "cautari";
+  });
   const [popoverSection, setPopoverSection] = useState<"cautari" | "rnpm" | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const popoverBtnRef = useRef<HTMLButtonElement>(null);

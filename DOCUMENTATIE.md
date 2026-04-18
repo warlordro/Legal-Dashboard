@@ -187,15 +187,15 @@ Trei tab-uri (`Cautare` / `Bulk` / `Baza locala`) + modal detaliu partajat (`Rnp
 
 | Provider | Model | Key | Identificator API |
 |----------|-------|-----|-------------------|
-| **Anthropic** | Claude Haiku 4.5 | `claude-haiku` | `claude-haiku-4-5-20251001` |
-| | Claude Sonnet 4 | `claude-sonnet` | `claude-sonnet-4-20250514` |
-| | Claude Opus 4 | `claude-opus` | `claude-opus-4-20250514` |
+| **Anthropic** | Claude Haiku 4.5 (Rapid) | `claude-haiku` | `claude-haiku-4-5-20251001` |
+| | Claude Sonnet 4.6 (Echilibrat) | `claude-sonnet` | `claude-sonnet-4-6` |
+| | Claude Opus 4.6 (Premium) | `claude-opus` | `claude-opus-4-6` |
 | **OpenAI** | GPT-5.4 nano (Rapid) | `gpt-5.4-nano` | `gpt-5.4-nano` |
 | | GPT-5.4 mini (Echilibrat) | `gpt-5.4-mini` | `gpt-5.4-mini` |
 | | GPT-5.4 (Premium) | `gpt-5.4` | `gpt-5.4` |
-| **Google** | Gemini Flash 2.0 (Rapid) | `gemini-flash` | `gemini-2.0-flash` |
-| | Gemini Flash 2.5 (Echilibrat) | `gemini-flash-25` | `gemini-2.5-flash-preview-05-20` |
-| | Gemini Pro 2.5 (Premium) | `gemini-pro` | `gemini-2.5-pro-preview-05-06` |
+| **Google** | Gemini 3.1 Flash Lite (Rapid) | `gemini-flash-lite-3` | `gemini-3.1-flash-lite-preview` |
+| | Gemini 3 Flash (Echilibrat) | `gemini-flash-3` | `gemini-3-flash-preview` |
+| | Gemini 3.1 Pro (Premium) | `gemini-pro-3` | `gemini-3.1-pro-preview` |
 
 ### Autentificare AI
 - Cheile API se introduc din interfata (Sidebar > AI Settings)

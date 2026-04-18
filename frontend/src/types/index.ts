@@ -58,4 +58,5 @@ export interface SearchHistoryEntry {
   label: string;
   resultCount: number;
   timestamp: number;
+  meta?: { categoriesCount: number; institutiiCount: number };
 }

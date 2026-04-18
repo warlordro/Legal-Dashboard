@@ -113,6 +113,22 @@ and persisted via `safeStorage` on desktop (or obfuscated localStorage on web).
   allowlisting. If `xlsx-js-style`, `better-sqlite3`, or `@hono/node-server`
   ships a malicious update, the app is compromised. Mitigation: review
   lockfile diffs, use `npm ci` in CI, run `npm audit` regularly.
+- **`xlsx` / `xlsx-js-style` parser CVEs (accepted risk).** `npm audit`
+  currently flags:
+  - `CVE-2023-30533` — Prototype Pollution in SheetJS parser (high)
+  - `CVE-2024-22363` — ReDoS in SheetJS (high)
+
+  Both affect the `xlsx.read()` / parsing path when the library is fed an
+  attacker-controlled spreadsheet. Legal Dashboard uses `xlsx-js-style`
+  **exclusively for `writeFile()`** — generating .xlsx output from data
+  already validated inside the app (dosare / termene / avize). There is no
+  code path that calls `XLSX.read()` or accepts user-uploaded spreadsheets.
+  The CVEs therefore have no reachable attack surface in this deployment.
+
+  Follow-up: when `xlsx-js-style` catches up with upstream (no patch released
+  at time of writing) or when we have bandwidth to migrate the 3 export
+  pipelines to `exceljs` (~4–6h), the risk is re-evaluated and this
+  acceptance is removed. Tracked in `AUDIT_DEFERRED_2026-04-18.md`.
 - **Unsigned Windows binaries.** We do not currently code-sign Windows
   installers. SmartScreen will warn on first launch. Obtaining and wiring an
   EV / OV certificate is tracked separately.
@@ -143,3 +159,4 @@ the report should be private. Please include:
 | Date | Change |
 |---|---|
 | 2026-04-17 | Initial security model: Electron hardening, safeStorage-backed keys, loopback bind, CSP, real-IP rate limit, SOAP fan-out cap, XLSX formula escape. |
+| 2026-04-18 | Documented accept of `xlsx` / `xlsx-js-style` parser CVEs (write-only usage, no reachable surface). Deferred items tracked in `AUDIT_DEFERRED_2026-04-18.md`. |

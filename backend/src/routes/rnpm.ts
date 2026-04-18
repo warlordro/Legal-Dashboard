@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
-import fs from "fs";
+import { stat } from "node:fs/promises";
 import {
   executeSearch,
   executeBulkSearch,
@@ -10,7 +10,9 @@ import {
 } from "../services/rnpmSearchService.ts";
 import { defaultRnpmClient, type RnpmSearchType } from "../services/rnpmClient.ts";
 import { getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
-import { getDbPath } from "../db/schema.ts";
+import { getDbPath, compactDb } from "../db/schema.ts";
+import { getBackupDir, deleteAllBackups, listBackupsWithMeta, restoreFromBackup } from "../db/backup.ts";
+import { mkdir } from "node:fs/promises";
 
 function parseProvider(v: unknown): CaptchaProvider | undefined {
   return v === "capsolver" || v === "2captcha" ? v : undefined;
@@ -64,6 +66,21 @@ function isValidType(t: unknown): t is RnpmSearchType {
 
 export const rnpmRouter = new Hono();
 
+// CP-B8: opt-in idempotency. Clients may include `clientRequestId` (uuid) in the body;
+// a second request with the same (ownerId, clientRequestId) while the first is still
+// in-flight returns 409. Missing `clientRequestId` = legacy behavior (no dedup).
+// Swap ownerId source when multi-user ships; current single-user build always uses "local".
+const inflightRequests = new Map<string, Promise<unknown>>();
+function inflightKey(ownerId: string, clientRequestId: string): string {
+  return `${ownerId}:${clientRequestId}`;
+}
+function parseClientRequestId(body: Record<string, unknown> | null): string | null {
+  const v = body?.clientRequestId;
+  if (typeof v !== "string") return null;
+  if (v.length === 0 || v.length > 128) return null;
+  return v;
+}
+
 rnpmRouter.post("/search", limitSearch, async (c) => {
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
@@ -86,20 +103,29 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const existingGcode = typeof gcode === "string" && gcode.length > 0 ? gcode : undefined;
   const existingSearchId = typeof searchId === "number" && Number.isFinite(searchId) ? searchId : undefined;
 
+  const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
+  const dedupKey = clientRequestId ? inflightKey("local", clientRequestId) : null;
+  if (dedupKey && inflightRequests.has(dedupKey)) {
+    return c.json({ error: "Cerere deja in curs (dedup clientRequestId)" }, 409);
+  }
+
+  const run = executeSearch({
+    type,
+    params: params as Parameters<typeof executeSearch>[0]["params"],
+    captchaKey,
+    captchaProvider: provider,
+    fallback2CaptchaKey: typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
+    captchaMode: captchaMode === "race" ? "race" : "sequential",
+    startRnpmPage: startPage,
+    batchSize: batch,
+    existingGcode,
+    existingSearchId,
+    signal: c.req.raw.signal,
+  });
+  if (dedupKey) inflightRequests.set(dedupKey, run);
+
   try {
-    const result = await executeSearch({
-      type,
-      params: params as Parameters<typeof executeSearch>[0]["params"],
-      captchaKey,
-      captchaProvider: provider,
-      fallback2CaptchaKey: typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
-      captchaMode: captchaMode === "race" ? "race" : "sequential",
-      startRnpmPage: startPage,
-      batchSize: batch,
-      existingGcode,
-      existingSearchId,
-      signal: c.req.raw.signal,
-    });
+    const result = await run;
     return c.json({
       searchId: result.searchId,
       total: result.total,
@@ -121,6 +147,8 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
     console.error("[rnpm/search]", msg);
     return c.json({ error: msg }, 500);
+  } finally {
+    if (dedupKey) inflightRequests.delete(dedupKey);
   }
 });
 
@@ -135,6 +163,12 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     return c.json({ error: "Cheie captcha lipsa sau invalida" }, 400);
   }
   const provider = parseProvider(captchaProvider);
+
+  const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
+  const dedupKey = clientRequestId ? inflightKey("local", clientRequestId) : null;
+  if (dedupKey && inflightRequests.has(dedupKey)) {
+    return c.json({ error: "Bulk deja in curs (dedup clientRequestId)" }, 409);
+  }
 
   const validItems: BulkSearchItem[] = [];
   for (const it of items) {
@@ -163,8 +197,21 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
       data: JSON.stringify(p),
     });
 
+    const bulkRun = executeBulkSearch(
+      validItems,
+      captchaKey,
+      "local",
+      (p) => { void send(p); },
+      defaultRnpmClient,
+      controller.signal,
+      provider,
+      typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
+      captchaMode === "race" ? "race" : "sequential"
+    );
+    if (dedupKey) inflightRequests.set(dedupKey, bulkRun);
+
     try {
-      await executeBulkSearch(validItems, captchaKey, "local", (p) => { void send(p); }, defaultRnpmClient, controller.signal, provider, typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined, captchaMode === "race" ? "race" : "sequential");
+      await bulkRun;
       await stream.writeSSE({ event: "complete", data: "{}" });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
@@ -172,29 +219,35 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     } finally {
       clearTimeout(timeoutHandle);
       c.req.raw.signal?.removeEventListener?.("abort", onAbort);
+      if (dedupKey) inflightRequests.delete(dedupKey);
     }
   });
 });
 
+const SORT_KEYS = new Set(["id", "identificator", "search_type", "data", "tip", "activ"]);
+
 rnpmRouter.get("/saved", (c) => {
-  const limit = Number(c.req.query("limit") ?? 50);
-  const cursorStr = c.req.query("cursor");
-  const cursor = cursorStr ? Number(cursorStr) : null;
+  const pageRaw = Number(c.req.query("page") ?? 0);
+  const pageSizeRaw = Number(c.req.query("pageSize") ?? 25);
   const searchType = c.req.query("searchType") ?? undefined;
   const activStr = c.req.query("activ");
   const activ = activStr == null ? undefined : activStr === "true";
   const searchText = c.req.query("q") ?? undefined;
+  const sortKeyRaw = c.req.query("sortKey");
+  const sortDirRaw = c.req.query("sortDir");
 
-  const page = getAvize({
-    limit: Number.isFinite(limit) ? limit : 50,
-    cursor: Number.isFinite(cursor as number) ? (cursor as number) : null,
+  const result = getAvize({
+    page: Number.isFinite(pageRaw) ? pageRaw : 0,
+    pageSize: Number.isFinite(pageSizeRaw) ? pageSizeRaw : 25,
     searchType,
     activ,
     searchText,
     dataStart: c.req.query("dataStart") ?? undefined,
     dataStop: c.req.query("dataStop") ?? undefined,
+    sortKey: sortKeyRaw && SORT_KEYS.has(sortKeyRaw) ? (sortKeyRaw as "id" | "identificator" | "search_type" | "data" | "tip" | "activ") : undefined,
+    sortDir: sortDirRaw === "asc" || sortDirRaw === "desc" ? sortDirRaw : undefined,
   });
-  return c.json(page);
+  return c.json(result);
 });
 
 rnpmRouter.get("/saved/:id", (c) => {
@@ -221,14 +274,19 @@ rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
   return c.json({ deleted: deleteAvizeByIds(numIds) });
 });
 
-rnpmRouter.get("/stats", (c) => {
+rnpmRouter.get("/stats", async (c) => {
   const stats = getAvizStats();
   const dbPath = getDbPath();
-  const sizeOf = (p: string): number => {
-    try { return fs.statSync(p).size; } catch { return 0; }
+  // CP-B4: async fs so handler does not block the event loop under concurrency (web mode).
+  const sizeOf = async (p: string): Promise<number> => {
+    try { return (await stat(p)).size; } catch { return 0; }
   };
-  const bytes = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
-  return c.json({ ...stats, db: { path: dbPath, sizeBytes: bytes } });
+  const [main, wal, shm] = await Promise.all([
+    sizeOf(dbPath),
+    sizeOf(`${dbPath}-wal`),
+    sizeOf(`${dbPath}-shm`),
+  ]);
+  return c.json({ ...stats, db: { path: dbPath, sizeBytes: main + wal + shm } });
 });
 
 // Desktop-only: reveal the DB file in the system file manager via Electron shell.
@@ -241,7 +299,6 @@ rnpmRouter.post("/open-db-folder", (c) => {
     // esbuild emits `require("electron")` verbatim in the CJS bundle because
     // electron is marked external (scripts/build.js). At runtime inside Electron's
     // main process the CJS loader resolves it; outside Electron it throws.
-    // @ts-expect-error `require` is available at runtime in the bundled CJS output.
     const electron = require("electron") as { shell?: { showItemInFolder?: (p: string) => void } };
     if (!electron?.shell?.showItemInFolder) {
       return c.json({ error: "Functie disponibila doar in Electron" }, 501);
@@ -250,6 +307,69 @@ rnpmRouter.post("/open-db-folder", (c) => {
     return c.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare deschidere folder";
+    return c.json({ error: msg }, 500);
+  }
+});
+
+rnpmRouter.post("/compact", (c) => {
+  try {
+    const result = compactDb();
+    return c.json({ ok: true, ...result });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare compactare baza";
+    return c.json({ error: msg }, 500);
+  }
+});
+
+rnpmRouter.delete("/backups", async (c) => {
+  try {
+    const deleted = await deleteAllBackups();
+    return c.json({ deleted });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare stergere backups";
+    return c.json({ error: msg }, 500);
+  }
+});
+
+rnpmRouter.get("/backups", async (c) => {
+  try {
+    const backups = await listBackupsWithMeta();
+    return c.json({ backups });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare listare backups";
+    return c.json({ error: msg }, 500);
+  }
+});
+
+rnpmRouter.post("/backups/restore", limitSmall, async (c) => {
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
+  const name = (body as { name?: unknown })?.name;
+  if (typeof name !== "string" || name.length === 0) {
+    return c.json({ error: "Nume backup lipsa" }, 400);
+  }
+  try {
+    const { preRestoreName } = await restoreFromBackup(name);
+    return c.json({ ok: true, preRestoreName });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare restore";
+    return c.json({ error: msg }, 500);
+  }
+});
+
+rnpmRouter.post("/open-backups-folder", async (c) => {
+  const dir = getBackupDir();
+  try {
+    await mkdir(dir, { recursive: true });
+    const electron = require("electron") as { shell?: { openPath?: (p: string) => Promise<string> } };
+    if (!electron?.shell?.openPath) {
+      return c.json({ error: "Functie disponibila doar in Electron" }, 501);
+    }
+    const err = await electron.shell.openPath(dir);
+    if (err) return c.json({ error: err }, 500);
+    return c.json({ ok: true });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare deschidere folder backups";
     return c.json({ error: msg }, 500);
   }
 });

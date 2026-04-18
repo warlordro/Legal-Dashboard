@@ -3,6 +3,20 @@ import path from "path";
 import fs from "fs";
 import { stripDiacritics } from "../util/textNormalize.ts";
 
+function preMigrationBackup(src: string, label: string): void {
+  try {
+    const dir = path.join(path.dirname(src), "backups");
+    fs.mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    const dest = path.join(dir, `legal-dashboard.pre-${label}-${stamp}.db`);
+    // Plain file copy — DB is not yet opened when this runs (called from getDb before new Database(...)).
+    fs.copyFileSync(src, dest);
+    console.log(`[schema] pre-migration backup -> ${dest}`);
+  } catch (e) {
+    console.warn(`[schema] pre-migration backup failed (continuing):`, e instanceof Error ? e.message : e);
+  }
+}
+
 let db: Database.Database | null = null;
 
 export function getDbPath(): string {
@@ -17,9 +31,29 @@ export function getDb(): Database.Database {
 
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
+  // One-shot pre-migration backup: only when the old `descriere` column still exists
+  // and a migration is about to run. Copy is cheap, DB is closed, and we want a
+  // checkpointed file on disk before ALTER TABLE / DROP COLUMN touch user data.
+  if (fs.existsSync(dbPath) && needsDescriereMigration(dbPath)) {
+    preMigrationBackup(dbPath, "descriere-dedup");
+  }
+
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+
+  // Truncate oversized WAL on boot. VACUUM + massive UPDATE sequences leave the -wal file
+  // bloated (SQLite only auto-checkpoints, doesn't truncate). One-shot check: if WAL >
+  // 32 MB at boot, force a TRUNCATE so disk usage settles quickly without waiting for the
+  // next natural checkpoint.
+  try {
+    const walSize = fs.statSync(dbPath + "-wal").size;
+    if (walSize > 32 * 1024 * 1024) {
+      const t0 = Date.now();
+      db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+      console.log(`[schema] WAL was ${(walSize / 1024 / 1024).toFixed(1)}MB; truncated in ${Date.now() - t0}ms`);
+    }
+  } catch { /* -wal absent is fine */ }
 
   // Custom scalar used by the "Baza locala" filter so "Stefan" matches "Ștefan".
   // Registered per-connection; SQLite has no built-in diacritic folding.
@@ -29,6 +63,29 @@ export function getDb(): Database.Database {
 
   initSchema(db);
   return db;
+}
+
+// Fast pre-open check: opens a temporary read-only connection to inspect columns.
+// Needed because the backup copy must happen BEFORE the main connection opens in WAL mode.
+function needsDescriereMigration(dbPath: string): boolean {
+  try {
+    const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const bunuriExists = probe.prepare(
+        `SELECT name FROM sqlite_master WHERE type='table' AND name='rnpm_bunuri'`
+      ).get();
+      if (!bunuriExists) return false;
+      const cols = probe.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
+      const hasOld = cols.some((c) => c.name === "descriere");
+      const hasNew = cols.some((c) => c.name === "descriere_id");
+      // Migration runs only when old column still exists AND new one is missing.
+      return hasOld && !hasNew;
+    } finally {
+      probe.close();
+    }
+  } catch {
+    return false;
+  }
 }
 
 function initSchema(d: Database.Database): void {
@@ -155,40 +212,120 @@ function initSchema(d: Database.Database): void {
   `);
 
   // Migration: add referinte_json column to rnpm_bunuri (idempotent)
-  const cols = db.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
+  const cols = d.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
   if (!cols.some((c) => c.name === "referinte_json")) {
-    db.exec(`ALTER TABLE rnpm_bunuri ADD COLUMN referinte_json TEXT`);
+    d.exec(`ALTER TABLE rnpm_bunuri ADD COLUMN referinte_json TEXT`);
   }
 
   // Migration: add inscriere_initiala_id + inscriere_initiala_uuid to rnpm_avize (idempotent).
   // Populated on avize modificatoare to preserve the link back to the parent aviz.
-  const avizeCols = db.prepare(`PRAGMA table_info(rnpm_avize)`).all() as { name: string }[];
+  const avizeCols = d.prepare(`PRAGMA table_info(rnpm_avize)`).all() as { name: string }[];
   if (!avizeCols.some((c) => c.name === "inscriere_initiala_id")) {
-    db.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_id TEXT`);
+    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_id TEXT`);
   }
   if (!avizeCols.some((c) => c.name === "inscriere_initiala_uuid")) {
-    db.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_uuid TEXT`);
+    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_uuid TEXT`);
   }
   if (!avizeCols.some((c) => c.name === "inscriere_modificata_id")) {
-    db.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_id TEXT`);
+    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_id TEXT`);
   }
   if (!avizeCols.some((c) => c.name === "inscriere_modificata_uuid")) {
-    db.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_uuid TEXT`);
+    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_uuid TEXT`);
   }
 
   // Migration: add subscriptor + nr_ordine to rnpm_creditori / rnpm_debitori (idempotent).
   // subscriptor = boolean flag (whether this party signed the aviz). nr_ordine = RNPM's display order.
   for (const t of ["rnpm_creditori", "rnpm_debitori"] as const) {
-    const partyCols = db.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[];
+    const partyCols = d.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[];
     if (!partyCols.some((c) => c.name === "subscriptor")) {
-      db.exec(`ALTER TABLE ${t} ADD COLUMN subscriptor INTEGER`);
+      d.exec(`ALTER TABLE ${t} ADD COLUMN subscriptor INTEGER`);
     }
     if (!partyCols.some((c) => c.name === "nr_ordine")) {
-      db.exec(`ALTER TABLE ${t} ADD COLUMN nr_ordine INTEGER`);
+      d.exec(`ALTER TABLE ${t} ADD COLUMN nr_ordine INTEGER`);
     }
+  }
+
+  // Descriere dedup (lookup table) — idempotent.
+  // Why: rnpm_bunuri.descriere was ~2KB × thousands of near-identical rows per aviz
+  // (the same legal clause copied on every bun). Size grew to ~160MB on 500 avize.
+  // Moving unique texts to rnpm_bunuri_descrieri keyed by id reduces duplication ~99%
+  // while keeping the API shape unchanged (loadAvizChildren joins and aliases bd.text AS descriere).
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS rnpm_bunuri_descrieri (
+      id    INTEGER PRIMARY KEY AUTOINCREMENT,
+      text  TEXT NOT NULL UNIQUE
+    );
+  `);
+  const bunuriCols = d.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
+  const hasDescrId = bunuriCols.some((c) => c.name === "descriere_id");
+  const hasDescrText = bunuriCols.some((c) => c.name === "descriere");
+  if (!hasDescrId) {
+    d.exec(`ALTER TABLE rnpm_bunuri ADD COLUMN descriere_id INTEGER REFERENCES rnpm_bunuri_descrieri(id)`);
+  }
+  // Index on descriere_id speeds up orphan-descriere GC after aviz deletes.
+  d.exec(`CREATE INDEX IF NOT EXISTS idx_bunuri_descriere_id ON rnpm_bunuri(descriere_id)`);
+  if (hasDescrText) {
+    console.log(`[schema] migrating rnpm_bunuri.descriere -> rnpm_bunuri_descrieri (may take 30-90s)`);
+    const t0 = Date.now();
+    const migrate = d.transaction(() => {
+      // Populate lookup with distinct non-empty texts. NULL stays NULL (no row inserted).
+      d.exec(`
+        INSERT OR IGNORE INTO rnpm_bunuri_descrieri (text)
+        SELECT DISTINCT descriere FROM rnpm_bunuri WHERE descriere IS NOT NULL AND descriere <> ''
+      `);
+      // Fill descriere_id for rows that have text.
+      d.exec(`
+        UPDATE rnpm_bunuri
+        SET descriere_id = (
+          SELECT id FROM rnpm_bunuri_descrieri WHERE text = rnpm_bunuri.descriere
+        )
+        WHERE descriere IS NOT NULL AND descriere <> ''
+      `);
+      // Drop the now-redundant column. SQLite >= 3.35 supports DROP COLUMN inline.
+      d.exec(`ALTER TABLE rnpm_bunuri DROP COLUMN descriere`);
+    });
+    migrate();
+    console.log(`[schema] migration done in ${Date.now() - t0}ms; running VACUUM to reclaim disk space`);
+    // VACUUM cannot run inside a transaction — do it after commit.
+    const t1 = Date.now();
+    d.exec("VACUUM");
+    console.log(`[schema] VACUUM done in ${Date.now() - t1}ms`);
+    // WAL keeps pages from before VACUUM — a checkpoint+truncate frees the -wal file too.
+    // Without this, legal-dashboard.db-wal stays ~= pre-VACUUM size on disk and the UI's
+    // "Dimensiune" (data+jurnal) still reports the old total.
+    const t2 = Date.now();
+    d.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    console.log(`[schema] WAL truncate done in ${Date.now() - t2}ms`);
   }
 }
 
 export function closeDb(): void {
   if (db) { db.close(); db = null; }
+}
+
+// SQLite DELETE-urile acumuleaza in WAL pana la checkpoint automat, iar modalul "Info baza locala"
+// raporteaza "date + jurnal" (main.db + main.db-wal). Fara TRUNCATE dupa bulk delete, fisierul WAL
+// continua sa creasca si da impresia ca baza "se mareste pe masura ce sterg".
+export function checkpointWal(): void {
+  const d = getDb();
+  d.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+}
+
+// VACUUM rescrie intregul fisier eliminand paginile libere ramase dupa DELETE.
+// Nu poate rula in tranzactie si ia un lock exclusiv → blocheaza alte operatii pentru cateva secunde la 100MB.
+// Apelam TRUNCATE pe WAL inainte si dupa, ca statisticile post-compact sa reflecte imediat noua dimensiune.
+export function compactDb(): { beforeBytes: number; afterBytes: number; durationMs: number } {
+  const d = getDb();
+  const dbPath = getDbPath();
+  const sizeOf = (p: string): number => {
+    try { return fs.statSync(p).size; } catch { return 0; }
+  };
+  const before = sizeOf(dbPath) + sizeOf(dbPath + "-wal") + sizeOf(dbPath + "-shm");
+  const t0 = Date.now();
+  d.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+  d.exec("VACUUM");
+  d.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+  const durationMs = Date.now() - t0;
+  const after = sizeOf(dbPath) + sizeOf(dbPath + "-wal") + sizeOf(dbPath + "-shm");
+  return { beforeBytes: before, afterBytes: after, durationMs };
 }

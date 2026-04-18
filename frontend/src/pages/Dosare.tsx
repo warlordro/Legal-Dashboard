@@ -87,7 +87,11 @@ interface DosareState {
 interface DosareProps {
   state: DosareState;
   onStateChange: React.Dispatch<React.SetStateAction<DosareState>>;
-  onSearchComplete?: (params: SearchParams, resultCount: number) => void;
+  onSearchComplete?: (
+    params: SearchParams,
+    resultCount: number,
+    meta?: { categoriesCount: number; institutiiCount: number },
+  ) => void;
   pendingSearch?: SearchParams | null;
   consumePendingSearch?: () => void;
   apiKeys?: ApiKeys;
@@ -132,7 +136,16 @@ export default function Dosare({ state, onStateChange, onSearchComplete, pending
         searchedName: searchParams.numeParte || undefined,
         lastSearchParams: params,
       });
-      onSearchComplete?.(params, res.data.length);
+      const catSet = new Set<string>();
+      const instSet = new Set<string>();
+      for (const d of res.data) {
+        if (d.categorieCaz) catSet.add(d.categorieCaz);
+        if (d.institutie) instSet.add(d.institutie);
+      }
+      onSearchComplete?.(params, res.data.length, {
+        categoriesCount: catSet.size,
+        institutiiCount: instSet.size,
+      });
     } catch (e) {
       onStateChange({
         allDosare: [],

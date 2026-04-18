@@ -1,107 +1,96 @@
 # Legal Dashboard — Context Proiect
 
 ## Descriere
-Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ tab Cautare RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha). Fork / extindere a PortalJust Dashboard v1.4.4-ai — PortalJust ramane aplicatie separata.
+Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web — fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v1.0.0** — 15 Aprilie 2026
+**v2.0.2** — 17 Aprilie 2026
 
-## Status implementare
-Vezi `STATUS.md` pentru progres detaliat. 9/10 pasi completi — ramas doar `npm run dist` pentru installer.
+Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
 ## Structura Proiect
 ```
-portaljust-dashboard/
-├── frontend/          # React + TypeScript + Vite + Tailwind + shadcn/ui
+legal-dashboard/
+├── frontend/          # React 19 + TypeScript + Vite + custom CSS
 │   └── src/
-│       ├── pages/     # Dashboard, Dosare, Termene, Changelog
-│       ├── components/# DosareTable, TermeneTable, Sidebar, CalendarView, SearchForm, ui/
-│       ├── hooks/     # useTheme, useFontSize, useApiKey, useSearchHistory
-│       ├── lib/       # api.ts, export.ts (Excel/PDF), utils.ts
-│       └── types/     # TypeScript interfaces (Dosar, Termen, etc.)
-├── backend/           # Node.js + Hono (port 3001)
+│       ├── pages/     # Dashboard, Dosare, Termene, RNPM, Changelog, Manual, Setari
+│       ├── components/# DosareTable, TermeneTable, rnpm/*, chair-report, ui/
+│       ├── hooks/     # useApiKey (safeStorage IPC), useFontSize, useTheme
+│       └── lib/       # api.ts, export.ts (XLSX + PDF), utils.ts
+├── backend/           # Node.js 22+ + Hono (port 3002)
+│   ├── tsconfig.json  # strict: true, noEmit (type-check only)
 │   └── src/
 │       ├── index.ts   # API routes, AI endpoint, SSE load-more, rate limiter, static serving
-│       ├── soap.ts    # SOAP client for PortalJust (CautareDosare, CautareTermene)
-│       └── intervals.ts # Date interval utilities for monthly batch pagination
+│       ├── routes/    # rnpm.ts (search + bulk + baza locala + export)
+│       ├── services/  # rnpmSearchService, captchaSolver, rnpmClient
+│       ├── db/        # schema.ts, avizRepository.ts, searchRepository.ts (owner_id everywhere)
+│       ├── soap.ts    # SOAP client pentru PortalJust
+│       └── intervals.ts
 ├── electron/          # Electron shell
-│   └── main.js        # BrowserWindow, context menu, CSP, security
-├── scripts/           # build.js (frontend + backend + copy)
-├── build/             # Icons (icon.ico, icon-1024.png)
-├── CHANGELOG.md       # Changelog complet per versiune
-└── release/           # Output installer (.exe)
+│   ├── main.js        # Single-instance lock, CSP, safeStorage IPC, crash handlers
+│   └── preload.js     # Context bridge (doar safeStorage, IPC timeout 10s)
+├── scripts/build.js   # esbuild backend -> CJS, copy frontend dist
+├── biome.json         # Lint + format config
+├── README.md          # Setup pentru developeri noi
+└── SECURITY.md        # Threat model + protectii
 ```
 
 ## Comenzi
-- `npm run dev` — porneste frontend (5173) + backend (3001) in paralel
-- `npm run build` — build frontend + backend
-- `npm run dist` — build + electron-builder (NSIS installer Windows)
-- Frontend dev: `cd frontend && npm run dev`
-- Backend dev: `cd backend && npm run dev`
+- `npm run electron:dev` — porneste Electron (backend in-process pe 3002)
+- `npm run dev:backend` — backend standalone (pentru dev web)
+- `npm run dev:frontend` — Vite dev server pe 5173
+- `npm run build` — build productie (frontend + backend CJS)
+- `npm run dist` — electron-builder pentru Windows NSIS
+- `npm test --workspace=backend` — vitest (24 teste)
+- `npx tsc --noEmit -p backend/tsconfig.json` — type-check backend
+- `cd frontend && npx tsc --noEmit` — type-check frontend
+- `npx biome check` — lint + format check
 
 ## Arhitectura
-- **Frontend**: React 19, Vite 5, Tailwind CSS, shadcn/ui, Recharts
-- **Backend**: Hono framework, SOAP XML parsing manual (fara dependenta soap)
+- **Frontend**: React 19, Vite 5, custom CSS (fara Tailwind), Recharts, DOMPurify
+- **Backend**: Hono + `@hono/node-server`, SOAP XML parsing manual
+- **DB**: SQLite via `better-sqlite3`, repositories + schema cu `owner_id DEFAULT 'local'` pe toate tabelele
 - **AI**: Anthropic SDK, OpenAI SDK, Google Generative AI SDK
-- **Export**: xlsx-js-style (drop-in xlsx cu styling celule), jspdf + jspdf-autotable (dynamic import)
-- **Desktop**: Electron 41 + electron-builder (NSIS, per-user install, fara admin)
-- **Build**: esbuild (backend -> CJS), Vite (frontend)
-- **Routing**: Dosare si Termene sunt mereu montate (display:none cand inactive) — operatiile async supravietuiesc navigarii
-- **Filtrare date client-side**: Data Start/Data Stop filtreaza instant rezultatele deja incarcate (fara re-cautare SOAP) pe ambele pagini
+- **Captcha**: 2Captcha + CapSolver (mod sequential sau race)
+- **Export**: `xlsx-js-style` cu formula-injection escape (`=+-@\t\r` prefix)
+- **Desktop**: Electron 41, single-instance lock, safeStorage (DPAPI / Keychain / libsecret)
+- **Build**: esbuild (backend → CJS, `--external:better-sqlite3 --external:electron`), Vite (frontend)
 
-## Load More — Paginare Extinsa
-SOAP API returneaza max 1000 rezultate per request. "Incarca mai multe" scaneaza luna cu luna prin SSE:
-- **Backend**: `POST /api/dosare/load-more` si `POST /api/termene/load-more` (SSE stream)
-- **Batch pagination**: `intervals.ts` genereaza intervale lunare, cu subdivizare recursiva daca o luna depaseste 1000
-- **Deduplicare**: Backend primeste numerele dosarelor existente via POST body, trimite doar dosare NOI
-- **Frontend**: Merge incremental pe fiecare batch event, progress arata totalul unic real
-- **Stop**: Pastreaza rezultatele partiale deja primite (merge incremental = nimic pierdut)
-- **Vite proxy**: Timeout 600s pentru SSE endpoints
-- **Limite securitate**: Max 120 intervale (~10 ani), timeout 10 minute pe stream, body 500KB max
-
-## AI Multi-Provider
-- Endpoint unic: `POST /api/ai/analyze`
-- Provideri: Anthropic (Claude), OpenAI (GPT-4), Google (Gemini)
-- Cheile API se salveaza obfuscate in localStorage (btoa+reverse), trimise per-request
-- Backend accepta si chei din .env (ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_AI_KEY)
-- **max_tokens/max_output_tokens: 8000** pe toti providerii (explicit setat)
-- **Timeout backend**: 120s per apel AI
-- **Timeout frontend**: 180s (single), 300s (multi-agent)
-- Truncation prompt: obiect 500 chars, nume parte 200 chars, solutie sedinta 10000 chars
-- Toate sedintele sunt incluse in prompt (fara limita de numar)
-
-## Securitate (Audit Complet — 29 Martie 2026)
+## Securitate (audit 17 Aprilie 2026 — v2.0.2)
 ### Protectii active
-- DOMPurify pe toate dangerouslySetInnerHTML (protectie XSS din raspunsuri AI)
-- Sanitizare erori API (fara leak chei/stack traces catre client)
-- Body size limit 100KB pe AI, 500KB pe load-more POST
-- Schema validation pe AI request body si load-more existing array (max 10000 elem, max 100 chars/elem)
-- JSON.parse wrapped in try-catch dedicat pe toate endpoint-urile
-- SSE timeout 10 minute + max 120 intervale lunare
-- API keys obfuscate in localStorage (nu plaintext)
-- Rate limiter fix (nu foloseste X-Forwarded-For)
-- Validare date reale (30 feb respins)
-- SOAP fault sanitizat (detalii doar in log)
-- Bind localhost only (127.0.0.1)
-- Path traversal protection
-- CSP headers in Electron (fara data: URI)
-- CORS restrictiv (doar localhost:5173/4173)
-- XML escape complet in SOAP
-- Sandbox + contextIsolation + enableRemoteModule:false in Electron
-- DevTools dezactivate in productie (activabile cu --dev-tools flag)
-- External URL whitelist exact (portal.just.ro, www.just.ro, portalquery.just.ro)
+- **safeStorage IPC** pentru cheile API (DPAPI / Keychain / libsecret), ciphertext in localStorage doar
+- **CSP strict** (`script-src 'self'`, fara `unsafe-inline`), `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`
+- **IPC timeout 10s** in preload.js (previne renderer freeze)
+- **Single-instance lock** (previne corupere SQLite din writers concurrenti)
+- **Crash handlers** (`uncaughtException`, `unhandledRejection`, `before-quit` → cleanup SQLite WAL)
+- **DOMPurify** pe toate outputurile AI (HTML render)
+- **Rate limiter** per IP via `getConnInfo` (nu trusted proxy headers)
+- **Hono `secureHeaders`** + CSP per-response
+- **LAN bind opt-in**: `LEGAL_DASHBOARD_ALLOW_REMOTE=1` required altfel `127.0.0.1` hard-forced
+- **XLSX formula-injection escape** (`=+-@\t\r` → prefix `'`)
+- **Body size limits** (64KB search, 512KB bulk, 4KB small, 100KB AI)
+- **Rate limits** dedicated (search, bulk, export, small)
+- **External URL whitelist** exact: portal.just.ro, www.just.ro, portalquery.just.ro, mj.rnpm.ro, www.rnpm.ro
 
 ### Riscuri acceptate
-- SOAP HTTP (portalquery.just.ro nu ofera HTTPS) — date publice, fara autentificare
-- XML regex parsing (nu parser dedicat) — functioneaza corect cu formatul fix MJ
+- SOAP HTTP upstream (portalquery.just.ro nu ofera HTTPS) — date publice, fara autentificare
+- Unsigned Windows binary — SmartScreen warning la prima instalare (fara cert commercial)
+- LAN mode fara auth — user doar dupa opt-in explicit
+
+## Web-readiness bridge (prep pentru deploy server)
+- Repository-only DB access — raw SQL doar in `backend/src/db/**`
+- `owner_id` column pe toate tabelele (DEFAULT `'local'`)
+- Pagination cursor-based pe listari
+- Zero sync fs in handlers (async `fs/promises` everywhere)
+- Opt-in `clientRequestId` dedup pe mutations (idempotency)
+- No singleton stat tied to user activity
 
 ## Nota Importanta Build
 - Backend-ul e compilat ca CJS de esbuild. `import.meta.url` nu functioneaza in CJS.
   Se foloseste `typeof __dirname !== "undefined" ? __dirname : ...` pentru compatibilitate.
-- `optimizeDeps.include` in vite.config.ts e necesar pentru xlsx-js-style, jspdf, jspdf-autotable
-  (altfel dynamic import esueaza silentios in browser)
+- `require("electron")` in `rnpm.ts` e marked external la bundle, rezolvat la runtime in main process.
 - `npm run dist:server` — genereaza pachet ZIP deployabil pe server (dist-backend + dist-frontend + Dockerfile)
 
 ## Limba
-- Interfata si mesajele sunt in **romana**
+- Interfata si mesajele sunt in **romana** (fara diacritice in cod sursa — legacy constraint PortalJust)
 - Comentariile din cod pot fi in engleza sau romana

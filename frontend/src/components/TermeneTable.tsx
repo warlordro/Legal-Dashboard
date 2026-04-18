@@ -92,7 +92,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
       if (prev.has(numarDosar)) return prev;
       const next = new Set(prev);
       next.add(numarDosar);
-      try { sessionStorage.setItem("viewedTermene", JSON.stringify([...next])); } catch {}
+      try { sessionStorage.setItem("viewedTermene", JSON.stringify([...next])); } catch { /* sessionStorage unavailable; visited-markers are best-effort */ }
       return next;
     });
   }, []);
@@ -149,8 +149,12 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
     });
   };
 
+  // Stable compound key — survives filter/sort/reorder. Positional keys (page*pageSize+i)
+  // silently select the wrong row when the underlying list changes.
+  const getTermenKey = (t: Termen) => `${t.numarDosar}|${t.data}|${t.ora}|${t.complet}`;
+
   const toggleSelectAll = () => {
-    const pageKeys = paged.map((_, i) => `${page * pageSize + i}`);
+    const pageKeys = paged.map(getTermenKey);
     const allSelected = pageKeys.every((k) => selected.has(k));
     setSelected((prev) => {
       const next = new Set(prev);
@@ -165,9 +169,10 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
 
   const getExportTermene = (): Termen[] | undefined => {
     if (selected.size === 0) return undefined;
+    const byKey = new Map(termene.map((t) => [getTermenKey(t), t]));
     return Array.from(selected)
-      .map((k) => termene[parseInt(k, 10)])
-      .filter(Boolean);
+      .map((k) => byKey.get(k))
+      .filter((t): t is Termen => Boolean(t));
   };
 
   const today = new Date();
@@ -179,8 +184,15 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
     return !isNaN(d.getTime()) && d >= today;
   };
 
-  const paged = termene.slice(page * pageSize, (page + 1) * pageSize);
   const totalPages = Math.ceil(termene.length / pageSize);
+
+  // Clamp page when list shrinks (filters reduce count below current page bounds).
+  // Without this, the table renders empty — results exist but on a page that no longer exists.
+  useEffect(() => {
+    if (totalPages > 0 && page >= totalPages) setPage(0);
+  }, [totalPages, page]);
+
+  const paged = termene.slice(page * pageSize, (page + 1) * pageSize);
 
   return (
     <Card>
@@ -212,7 +224,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                 <input
                   type="checkbox"
                   className="h-4 w-4 rounded border-gray-300 accent-violet-600"
-                  checked={paged.length > 0 && paged.every((_, i) => selected.has(`${page * pageSize + i}`))}
+                  checked={paged.length > 0 && paged.every((t) => selected.has(getTermenKey(t)))}
                   onChange={toggleSelectAll}
                 />
               </th>
@@ -226,7 +238,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
           <tbody className="divide-y divide-border">
             {paged.map((t, i) => {
               const rowKey = `${t.numarDosar}-${t.data}-${i}`;
-              const selectKey = `${page * pageSize + i}`;
+              const selectKey = getTermenKey(t);
               const isExpanded = expandedRows.has(rowKey);
               const isSelected = selected.has(selectKey);
               const hasParts = t.parti && t.parti.length > 0;

@@ -4,8 +4,11 @@ import { Hono } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
-import { cautareDosare } from "./soap.ts";
+import { cautareDosare, type Dosar } from "./soap.ts";
 import { rnpmRouter } from "./routes/rnpm.ts";
+import { closeDb } from "./db/schema.ts";
+import { getAvize, getAvizStats } from "./db/avizRepository.ts";
+import { runDailyBackup } from "./db/backup.ts";
 import { generateMonthlyIntervals, splitInterval, defaultDateRange } from "./intervals.ts";
 import Anthropic from "@anthropic-ai/sdk";
 import { fileURLToPath } from "url";
@@ -14,8 +17,13 @@ import fs from "fs";
 import fsPromises from "fs/promises";
 import dotenv from "dotenv";
 
-// Load .env from backend directory
-// Use __dirname in CJS (esbuild output) or import.meta.url in ESM
+// __dirname is provided by:
+//   - CJS bundle (esbuild output in production)
+//   - Node --experimental-strip-types running .ts directly under CommonJS
+// In ESM dev we fall back to import.meta.url. For the CJS bundle, scripts/build.js
+// passes --define:import.meta.url="\"\"" so esbuild replaces the token at compile
+// time — no empty-import-meta warning, and the branch is dead anyway (__dirname is
+// defined) so the empty string is never used.
 const __curdir = typeof __dirname !== "undefined"
   ? __dirname
   : path.dirname(fileURLToPath(import.meta.url));
@@ -283,12 +291,12 @@ async function batchFetchDosare(
   params: { numarDosar?: string; obiectDosar?: string; numeParte?: string; institutie?: string },
   dateRange: { dataStart: string; dataStop: string },
   onProgress?: (processed: number, total: number, found: number, currentInterval: string) => void,
-  onBatch?: (newItems: any[]) => void,
+  onBatch?: (newItems: Dosar[]) => void,
   existingNumere?: Set<string>,
   signal?: AbortSignal,
-): Promise<BatchResult<ReturnType<Awaited<ReturnType<typeof cautareDosare>>[number] & {}>>> {
+): Promise<BatchResult<Dosar>> {
   const intervals = generateMonthlyIntervals(dateRange.dataStart, dateRange.dataStop);
-  const allDosare = new Map<string, any>(); // deduplicate by numar — only NEW dosare
+  const allDosare = new Map<string, Dosar>(); // deduplicate by numar — only NEW dosare
   const known = existingNumere ?? new Set<string>();
   const warnings: string[] = [];
 
@@ -315,7 +323,7 @@ async function batchFetchDosare(
           return { label, items: results, warnings: [] as string[] };
         } catch (err) {
           console.error(`Eroare batch ${label}:`, err);
-          return { label, items: [] as any[], warnings: [`Eroare la intervalul ${label}`] };
+          return { label, items: [] as Dosar[], warnings: [`Eroare la intervalul ${label}`] };
         }
       })
     );
@@ -323,7 +331,7 @@ async function batchFetchDosare(
     // Apply chunk results in order (preserves dedup + progress determinism)
     for (let j = 0; j < chunkResults.length; j++) {
       const { label, items, warnings: w } = chunkResults[j];
-      const newInBatch: any[] = [];
+      const newInBatch: Dosar[] = [];
       for (const d of items) {
         if (!known.has(d.numar) && !allDosare.has(d.numar)) newInBatch.push(d);
         if (!known.has(d.numar)) allDosare.set(d.numar, d);
@@ -348,7 +356,7 @@ async function subdivideInterval(
   interval: { dataStart: string; dataStop: string },
   depth: number,
   signal?: AbortSignal,
-): Promise<BatchResult<any>> {
+): Promise<BatchResult<Dosar>> {
   if (depth > MAX_SPLIT_DEPTH) {
     // Max depth reached — fetch what we can and warn
     const results = await cautareDosare({ ...params, dataStart: interval.dataStart, dataStop: interval.dataStop });
@@ -359,7 +367,7 @@ async function subdivideInterval(
   }
 
   const [first, second] = splitInterval(interval);
-  const allItems: any[] = [];
+  const allItems: Dosar[] = [];
   const warnings: string[] = [];
 
   for (const sub of [first, second]) {
@@ -664,8 +672,8 @@ app.post("/api/termene/load-more", async (c) => {
             },
             (newItems) => {
               // Convert dosare batch → termene batch
-              const termeneBatch = newItems.flatMap((d: any) =>
-                d.sedinte.map((s: any) => ({
+              const termeneBatch = newItems.flatMap((d) =>
+                d.sedinte.map((s) => ({
                   numarDosar: d.numar,
                   institutie: d.institutie,
                   data: s.data,
@@ -861,8 +869,7 @@ async function callAnthropic(apiKey: string, modelId: string, prompt: string, ti
     messages: [{ role: "user", content: prompt }],
   }, { signal: AbortSignal.timeout(timeout) });
   return message.content
-    .filter((block: { type: string }) => block.type === "text")
-    .map((block: { type: string; text: string }) => block.text)
+    .flatMap((block) => (block.type === "text" ? [block.text] : []))
     .join("");
 }
 
@@ -957,6 +964,7 @@ app.post("/api/ai/analyze", async (c) => {
       return c.json({ error: "Cererea depaseste dimensiunea maxima permisa." }, 413);
     }
 
+    // NOTE: typed `any` here is validated below by validateAiBody before any field access.
     let body: any;
     try {
       body = JSON.parse(rawBody);
@@ -1016,6 +1024,7 @@ app.post("/api/ai/analyze-multi", async (c) => {
       return c.json({ error: "Cererea depaseste dimensiunea maxima permisa." }, 413);
     }
 
+    // NOTE: typed `any` here is validated below by validateAiBody before any field access.
     let body: any;
     try {
       body = JSON.parse(rawBody);
@@ -1117,11 +1126,20 @@ if (process.env.NODE_ENV === "production") {
     if (urlPath.startsWith("/api/") || urlPath === "/health") return;
 
     // Decode and resolve the requested file path
-    const decodedPath = decodeURIComponent(urlPath);
+    let decodedPath: string;
+    try {
+      decodedPath = decodeURIComponent(urlPath);
+    } catch {
+      return c.text("Bad Request", 400);
+    }
     const filePath = path.resolve(resolvedFrontend, decodedPath === "/" ? "index.html" : "." + decodedPath);
 
-    // SECURITY: Prevent path traversal - ensure resolved path stays within frontend dir
-    if (!filePath.startsWith(resolvedFrontend)) {
+    // SECURITY: Prevent path traversal. startsWith() is a textual prefix check —
+    // a sibling dir like `frontend-evil/` shares the prefix and passes incorrectly.
+    // path.relative() handles separators, case (Windows), and returns "../…" when
+    // the target escapes the base dir.
+    const rel = path.relative(resolvedFrontend, filePath);
+    if (rel.startsWith("..") || path.isAbsolute(rel)) {
       return c.text("Forbidden", 403);
     }
 
@@ -1151,6 +1169,41 @@ if (!loopback.has(rawHost) && process.env.LEGAL_DASHBOARD_ALLOW_REMOTE !== "1") 
 }
 
 serve({ fetch: app.fetch, port, hostname });
+
+// E: prewarm SQLite page cache so the first /rnpm/saved + /rnpm/stats after launch
+// don't pay the cold-disk cost (hot index pages loaded once, reused for every request).
+try {
+  getAvize({ pageSize: 1 });
+  getAvizStats();
+} catch (e) {
+  console.warn("[prewarm] failed:", e instanceof Error ? e.message : e);
+}
+
+// Daily snapshot — skipped if the most recent backup is <24h old, so extra launches
+// in the same day don't duplicate work. Keeps the last 7 files.
+runDailyBackup().catch((e) => console.warn("[backup] top-level:", e));
+
+// CP-E1: clean DB shutdown on signal or unexpected exit.
+// - Server mode: SIGTERM/SIGINT from process manager or Ctrl+C.
+// - Electron mode: main.js calls the exported closer on `before-quit` (in-process bundle).
+// closeDb() is idempotent (null-guarded in schema.ts).
+let shuttingDown = false;
+function gracefulShutdown(reason: string): void {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.log(`[shutdown] ${reason} — closing SQLite`);
+  try { closeDb(); } catch (e) {
+    console.error("[shutdown] closeDb failed:", e);
+  }
+}
+process.on("SIGTERM", () => { gracefulShutdown("SIGTERM"); process.exit(0); });
+process.on("SIGINT", () => { gracefulShutdown("SIGINT"); process.exit(0); });
+process.on("beforeExit", () => gracefulShutdown("beforeExit"));
+
+// Expose shutdown hook so Electron's `before-quit` can flush WAL without killing the process.
+// Uses a globalThis key to survive esbuild's CJS bundle boundary.
+(globalThis as unknown as { __legalDashboardShutdown?: () => void }).__legalDashboardShutdown =
+  () => gracefulShutdown("before-quit");
 
 console.log("");
 console.log("  Legal Dashboard v1.0.0");

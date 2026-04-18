@@ -13,23 +13,30 @@ export interface RnpmDetailModalProps {
 }
 
 export function RnpmDetailModal({ avizId, onClose }: RnpmDetailModalProps) {
+  const [identificator, setIdentificator] = useState<string | null>(null);
+  useEffect(() => { setIdentificator(null); }, [avizId]);
   if (avizId == null) return null;
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="flex w-full max-w-4xl max-h-[90vh] flex-col rounded-xl border border-border bg-card shadow-2xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
-          <h3 className="text-sm font-semibold">Detalii Aviz</h3>
+          <h3 className="flex items-baseline gap-2 text-sm font-semibold text-foreground">
+            Detalii Aviz
+            {identificator && (
+              <span className="text-xs font-semibold text-foreground">{identificator}</span>
+            )}
+          </h3>
           <button onClick={onClose} className="rounded-lg p-1 hover:bg-muted"><X className="h-4 w-4" /></button>
         </div>
         <div className="flex-1 overflow-y-auto">
-          <RnpmAvizDetailContent avizId={avizId} />
+          <RnpmAvizDetailContent avizId={avizId} onIdentificatorLoaded={setIdentificator} />
         </div>
       </div>
     </div>
   );
 }
 
-export function RnpmAvizDetailContent({ avizId }: { avizId: number }) {
+export function RnpmAvizDetailContent({ avizId, onIdentificatorLoaded }: { avizId: number; onIdentificatorLoaded?: (id: string) => void }) {
   const [data, setData] = useState<RnpmAvizFull | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,18 +47,28 @@ export function RnpmAvizDetailContent({ avizId }: { avizId: number }) {
   useEffect(() => {
     setLoading(true); setError(null); setData(null); setTab("general");
     rnpmGetAvizDetail(avizId)
-      .then(setData)
+      .then((d) => { setData(d); onIdentificatorLoaded?.(d.aviz.identificator); })
       .catch((e) => setError(e instanceof Error ? e.message : "Eroare"))
       .finally(() => setLoading(false));
-  }, [avizId]);
+  }, [avizId, onIdentificatorLoaded]);
 
-  const tabs: { id: Tab; label: string; icon: typeof Users; count?: number }[] = [
-    { id: "general", label: "General", icon: FileText },
-    { id: "creditori", label: "Creditori", icon: Users, count: data?.creditori.length },
-    { id: "debitori", label: "Debitori", icon: User, count: data?.debitori.length },
-    { id: "bunuri", label: "Bunuri", icon: Package, count: data?.bunuri.length },
-    { id: "istoric", label: "Istoric", icon: HistoryIcon, count: data?.istoric.length },
-  ];
+  // Avizele specifice au "parti" (bucket unic cu calitate+altaCalitate), nu creditori/debitori —
+  // le mapam pe campul debitori in DB si afisam un singur tab "Parti".
+  const isSpecifice = data?.aviz.search_type === "specifice";
+  const tabs: { id: Tab; label: string; icon: typeof Users; count?: number }[] = isSpecifice
+    ? [
+        { id: "general", label: "General", icon: FileText },
+        { id: "debitori", label: "Parti", icon: Users, count: data?.debitori.length },
+        { id: "bunuri", label: "Bunuri", icon: Package, count: data?.bunuri.length },
+        { id: "istoric", label: "Istoric", icon: HistoryIcon, count: data?.istoric.length },
+      ]
+    : [
+        { id: "general", label: "General", icon: FileText },
+        { id: "creditori", label: "Creditori", icon: Users, count: data?.creditori.length },
+        { id: "debitori", label: "Debitori", icon: User, count: data?.debitori.length },
+        { id: "bunuri", label: "Bunuri", icon: Package, count: data?.bunuri.length },
+        { id: "istoric", label: "Istoric", icon: HistoryIcon, count: data?.istoric.length },
+      ];
 
   if (loading) {
     return <div className="flex items-center justify-center p-6"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>;
@@ -88,7 +105,7 @@ export function RnpmAvizDetailContent({ avizId }: { avizId: number }) {
       <div ref={contentRef} className="p-4">
         {tab === "general" && <GeneralTab data={data} />}
         {tab === "creditori" && <PartyList parties={data.creditori} emptyMsg="Fara creditori" />}
-        {tab === "debitori" && <PartyList parties={data.debitori} emptyMsg="Fara debitori" showCalitate />}
+        {tab === "debitori" && <PartyList parties={data.debitori} emptyMsg={isSpecifice ? "Fara parti" : "Fara debitori"} showCalitate />}
         {tab === "bunuri" && <BunuriList bunuri={data.bunuri} detaliiComune={data.aviz.detalii_comune} />}
         {tab === "istoric" && <IstoricList istoric={data.istoric} />}
       </div>
@@ -132,8 +149,8 @@ function PartyList({ parties, emptyMsg, showCalitate }: { parties: RnpmParty[]; 
           <div className="mb-1 flex items-center gap-2">
             {p.nr_ordine != null && <span className="text-[11px] text-muted-foreground font-mono">#{p.nr_ordine}</span>}
             <Badge variant="outline" className="text-[10px]">{p.tip_persoana}</Badge>
-            {showCalitate && p.calitate && <Badge className="text-[10px]">{p.calitate}</Badge>}
-            {p.subscriptor === 1 && <Badge variant="secondary" className="text-[10px]">Subscriptor</Badge>}
+            {showCalitate && p.calitate && <Badge className="text-xs">{p.calitate}</Badge>}
+            {p.subscriptor === 1 && <Badge variant="secondary" className="text-xs">Subscriptor</Badge>}
             <span className="text-sm font-medium">
               {p.tip_persoana === "PF" ? `${p.denumire ?? ""} ${p.prenume ?? ""}`.trim() : p.denumire}
             </span>
@@ -197,7 +214,7 @@ function BunRefRow({ r }: { r: RnpmBunPartyRef }) {
   return (
     <div className="rounded border border-border/60 bg-muted/20 p-2">
       <div className="mb-0.5 flex flex-wrap items-center gap-1.5">
-        <Badge className={cn("text-[10px] text-white", r.rol === "tert" ? "bg-amber-600 hover:bg-amber-600" : "bg-sky-600 hover:bg-sky-600")}>
+        <Badge className={cn("text-xs text-white", r.rol === "tert" ? "bg-amber-600 hover:bg-amber-600" : "bg-sky-600 hover:bg-sky-600")}>
           {r.rol === "tert" ? "Tert" : "Constituitor"}
         </Badge>
         <Badge variant="outline" className="text-[10px]">{r.tip_persoana}</Badge>
@@ -223,17 +240,26 @@ function BunRefRow({ r }: { r: RnpmBunPartyRef }) {
   );
 }
 
+function istoricBadgeClass(tip: string): string {
+  const t = tip.toLowerCase();
+  if (t.includes("initial")) return "border-emerald-500/60 text-emerald-700 dark:text-emerald-400";
+  if (t.includes("reducere") || t.includes("radiere") || t.includes("stingere")) return "border-rose-500/60 text-rose-700 dark:text-rose-400";
+  if (t.includes("prelungire") || t.includes("extindere") || t.includes("cesiune")) return "border-sky-500/60 text-sky-700 dark:text-sky-400";
+  if (t.includes("modificare") || t.includes("rectificare") || t.includes("completare")) return "border-amber-500/60 text-amber-700 dark:text-amber-400";
+  return "";
+}
+
 function IstoricList({ istoric }: { istoric: RnpmAvizFull["istoric"] }) {
   if (istoric.length === 0) return <p className="text-sm text-muted-foreground">Fara modificari inregistrate.</p>;
   return (
     <ol className="space-y-2">
       {istoric.map((h) => (
-        <li key={h.id} className="rounded-lg border border-border p-2 text-xs">
+        <li key={h.id} className="rounded-lg border border-border p-3">
           <div className="flex items-center gap-2">
-            <span className="font-mono text-muted-foreground">{h.data}</span>
-            <Badge variant="outline" className="text-[10px]">{h.tip}</Badge>
+            <span className="font-mono text-sm text-foreground">{h.data}</span>
+            <Badge variant="outline" className={cn("text-xs", istoricBadgeClass(h.tip))}>{h.tip}</Badge>
           </div>
-          <div className="mt-1 font-mono text-[11px] text-muted-foreground">{h.identificator}</div>
+          <div className="mt-1 font-mono text-[13.5px] text-foreground">{h.identificator}</div>
         </li>
       ))}
     </ol>
