@@ -2,6 +2,7 @@ import { useState } from "react";
 import { Search, Loader2, RotateCcw, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import type { RnpmSearchParams, RnpmSearchType, RnpmSiSau } from "@/types/rnpm";
 
@@ -267,6 +268,7 @@ export interface RnpmSearchFormProps {
 }
 
 export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onReset, initialType, initialParams, extraActions }: RnpmSearchFormProps) {
+  const confirm = useConfirm();
   const [activeType, setActiveType] = useState<RnpmSearchType>(initialType ?? "ipoteci");
   const identificator = useText(initialParams?.identificatorInscriere);
   const [perioadaStart, setPerioadaStart] = useState(initialParams?.perioadaStart ?? "");
@@ -325,7 +327,7 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
   const bunVSasiu = useSiSauField(initialParams?.bunV?.serieSasiu);
   const bunVImatr = useSiSauField(initialParams?.bunV?.nrImatriculare);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const params: RnpmSearchParams = {};
 
@@ -336,7 +338,17 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
     if (activ != null) params.activ = activ;
     if (nemodificat != null) params.nemodificat = nemodificat;
     const tipInsc = tipInscriere.toParam();
-    if (tipInsc) params.tipInscriere = tipInsc;
+    if (tipInsc) {
+      // RNPM asteapta tipInscriere.value ca index 1-based in lista TIP_AVIZ_BY_CATEGORY
+      // a tipului curent (confirmat prin Network capture pe /api/search/specifice).
+      // Labelul "stingere" era echoat ca '' de RNPM -> 0 rezultate.
+      const list = TIP_AVIZ_BY_CATEGORY[activeType];
+      const idx = list.indexOf(tipInsc.value);
+      params.tipInscriere = {
+        type: tipInsc.type,
+        value: idx >= 0 ? String(idx + 1) : tipInsc.value,
+      };
+    }
 
     if (activeType === "specifice") {
       const dest = destinatie.toParam();
@@ -572,7 +584,11 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
     // CUI trebuie sa contina doar cifre (cf. spec RNPM). Warn non-blocking peste params-ul
     // construit deja — astfel nu validam CUI-uri din tab-uri inactive (state persista dupa switch).
     const badCui = findNonNumericCui(params);
-    if (badCui && !window.confirm(`Atentie: CUI "${badCui}" contine caractere non-numerice. Continui cautarea?`)) {
+    if (badCui && !(await confirm({
+      title: "Atentie",
+      message: `CUI "${badCui}" contine caractere non-numerice. Continui cautarea?`,
+      confirmLabel: "Continua",
+    }))) {
       return;
     }
 

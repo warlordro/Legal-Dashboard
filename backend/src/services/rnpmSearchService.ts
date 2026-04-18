@@ -87,11 +87,18 @@ export async function executeSearch(
   void _ps; void _pf;
 
   let firstResult;
+  // PRIVACY: do NOT log parameter values (CUI, CNP, nume, sedii). Log only
+  // the shape of the request so we can correlate issues without leaking PII.
   const { gcode: _g, ...logParams } = searchParams;
-  console.log(`[rnpm] search type=${input.type} page=${rnpmPage} params=${JSON.stringify(logParams)}`);
+  const fieldsPresent = Object.entries(logParams)
+    .filter(([, v]) => v !== undefined && v !== null && v !== "")
+    .map(([k]) => k)
+    .join(",");
+  console.log(`[rnpm] search type=${input.type} page=${rnpmPage} fields=[${fieldsPresent}]`);
   try {
     firstResult = await client.search(input.type, searchParams, rnpmPage, signal);
-    console.log(`[rnpm] result total=${firstResult.total} criteriu="${firstResult.criteriu}"`);
+    // criteriu is the site's echo of the user's inputs — also PII. Log only total + pages.
+    console.log(`[rnpm] result total=${firstResult.total} pages=${firstResult.pagesTotal}`);
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     const isExpired = e instanceof RnpmError && (e.status === 410 || e.status === 401 || e.status === 403);
@@ -143,7 +150,7 @@ export async function executeSearch(
           // Fetch-ul poate sa se fi intors inainte ca abort-ul sa-l ajunga.
           // Verificam explicit ca sa nu scriem in SQLite dupa ce user-ul a oprit cautarea.
           if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-          doc.activ = detail.part1?.activ !== false;
+          if (typeof detail.part1?.activ === "boolean") doc.activ = detail.part1.activ;
           const avizId = persistAvizWithDetail(doc, detail, input.type, ownerId, searchId);
           return { localIdx, doc, ok: true as const, avizId };
         } catch (e) {
@@ -213,28 +220,53 @@ function persistAvizWithDetail(
 
   const arr = <T,>(v: unknown): T[] => Array.isArray(v) ? (v as T[]) : [];
 
-  const creditori: PartyInput[] = [
-    ...arr<RnpmDetailPartyPF>(part2.creditoriF).map((p) => mapPartyPF(p)),
-    ...arr<RnpmDetailPartyPJ>(part2.creditoriJ).map((p) => mapPartyPJ(p)),
-  ];
+  let creditori: PartyInput[] = [];
+  let debitori: PartyInput[] = [];
+  let bunuri: BunInput[] = [];
 
-  const debitori: PartyInput[] = [
-    ...arr<RnpmDetailPartyPF & { calitate?: string }>(part3.debitoriF).map((p) => ({ ...mapPartyPF(p), calitate: p.calitate ?? null })),
-    ...arr<RnpmDetailPartyPJ & { calitate?: string }>(part3.debitoriJ).map((p) => ({ ...mapPartyPJ(p), calitate: p.calitate ?? null })),
-  ];
+  if (searchType === "specifice") {
+    // Specifice: part2 contine partiF/partiJ (bucket unic cu calitate+altaCalitate),
+    // part3 contine { bunuri: [{ no, descriere }] }, part4 = null.
+    // Mapam toate partile in "debitori" (schema are coloana calitate) — creditori raman goale.
+    debitori = [
+      ...arr<RnpmDetailPartyPF>(part2.partiF).map((p) => ({ ...mapPartyPF(p), calitate: formatCalitate(p.calitate, p.altaCalitate) })),
+      ...arr<RnpmDetailPartyPJ>(part2.partiJ).map((p) => ({ ...mapPartyPJ(p), calitate: formatCalitate(p.calitate, p.altaCalitate) })),
+    ];
+    bunuri = arr<RnpmDetailBun & { descriere?: string }>(part3.bunuri).map((b) => ({
+      tip_bun: "alt",
+      categorie: null,
+      identificare: null,
+      descriere: b.descriere ?? null,
+      model: null,
+      serie_sasiu: null,
+      serie_motor: null,
+      nr_inmatriculare: null,
+      referinte: [],
+    }));
+  } else {
+    creditori = [
+      ...arr<RnpmDetailPartyPF>(part2.creditoriF).map((p) => mapPartyPF(p)),
+      ...arr<RnpmDetailPartyPJ>(part2.creditoriJ).map((p) => mapPartyPJ(p)),
+    ];
 
-  const flattenBucket = (bucket: RnpmDetailBunBucket | undefined): RnpmDetailBun[] => {
-    if (!bucket) return [];
-    if (Array.isArray(bucket)) return bucket;
-    return Object.values(bucket).flatMap((g) => Array.isArray(g?.bunuri) ? g.bunuri : []);
-  };
-  const debitoriF = arr<RnpmDetailPartyPF & { calitate?: string }>(part3.debitoriF);
-  const debitoriJ = arr<RnpmDetailPartyPJ & { calitate?: string }>(part3.debitoriJ);
-  const bunuri: BunInput[] = [
-    ...flattenBucket(part4.vehicule).map((b) => mapBun(b, "vehicul", debitoriF, debitoriJ)),
-    ...flattenBucket(part4.mobile).map((b) => mapBun(b, "mobil", debitoriF, debitoriJ)),
-    ...flattenBucket(part4.alte).map((b) => mapBun(b, "alt", debitoriF, debitoriJ)),
-  ];
+    debitori = [
+      ...arr<RnpmDetailPartyPF & { calitate?: string }>(part3.debitoriF).map((p) => ({ ...mapPartyPF(p), calitate: p.calitate ?? null })),
+      ...arr<RnpmDetailPartyPJ & { calitate?: string }>(part3.debitoriJ).map((p) => ({ ...mapPartyPJ(p), calitate: p.calitate ?? null })),
+    ];
+
+    const flattenBucket = (bucket: RnpmDetailBunBucket | undefined): RnpmDetailBun[] => {
+      if (!bucket) return [];
+      if (Array.isArray(bucket)) return bucket;
+      return Object.values(bucket).flatMap((g) => Array.isArray(g?.bunuri) ? g.bunuri : []);
+    };
+    const debitoriF = arr<RnpmDetailPartyPF & { calitate?: string }>(part3.debitoriF);
+    const debitoriJ = arr<RnpmDetailPartyPJ & { calitate?: string }>(part3.debitoriJ);
+    bunuri = [
+      ...flattenBucket(part4.vehicule).map((b) => mapBun(b, "vehicul", debitoriF, debitoriJ)),
+      ...flattenBucket(part4.mobile).map((b) => mapBun(b, "mobil", debitoriF, debitoriJ)),
+      ...flattenBucket(part4.alte).map((b) => mapBun(b, "alt", debitoriF, debitoriJ)),
+    ];
+  }
 
   const istoric: IstoricInput[] = arr<{ identificator?: { v?: string; k?: string }; data?: string; tip?: string; inscriereM?: { v?: string; k?: string } }>(detail.istoric).map((h) => ({
     identificator: h.identificator?.v ?? "",
@@ -254,7 +286,7 @@ function persistAvizWithDetail(
     tip: doc.tip,
     data: doc.data,
     utilizatorAutorizat: doc.utilizatorAutorizat ?? null,
-    activ: part1.activ !== false,
+    activ: typeof part1.activ === "boolean" ? part1.activ : (doc.activ ?? true),
     needsActualizare: doc.needsActualizare === true,
     destinatie: part1.destinatie ?? null,
     tipAct: part1.tipAct ?? null,
@@ -273,6 +305,13 @@ function persistAvizWithDetail(
     bunuri,
     istoric,
   });
+}
+
+// Specifice: calitate generica ("Alta calitate") + altaCalitate (textul specific).
+// Le combinam intr-un singur string pentru afisarea in tab-ul Debitori, unde specifice-ul isi mapeaza partile.
+function formatCalitate(calitate: string | null | undefined, altaCalitate: string | null | undefined): string | null {
+  if (altaCalitate) return calitate ? `${calitate}: ${altaCalitate}` : altaCalitate;
+  return calitate ?? null;
 }
 
 function mapPartyPF(p: RnpmDetailPartyPF): PartyInput {

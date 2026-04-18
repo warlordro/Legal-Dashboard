@@ -4,6 +4,261 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 18 Aprilie 2026 (sesiune 3) — Fix filtre RNPM: `activ` semantic + `tipInscriere` index
+
+Doua bug-uri la cautarile RNPM descoperite azi:
+
+### 1. Checkbox "Numai active" nu facea nimic — toate avizele veneau marcate active
+
+**Simptom:** User a rulat cautare CUI 37700569 cu "Numai active" debifat si a primit 42 rezultate **toate marcate active**, desi pe site-ul RNPM aceeasi cautare intoarce ~180 rezultate (active + inactive).
+
+**Cauza dubla:**
+1. **Endpoint-ul `/api/search/ipoteci` trateaza `{"activ": false}` identic cu `{"activ": true}`** — ambele filtreaza la active-only (criteriu echoat contine "este activ" in ambele cazuri). Singurul mod de a primi active + inactive este sa **omiti cheia `activ` complet** din payload.
+2. Parser-ul backend la [backend/src/services/rnpmSearchService.ts:153](backend/src/services/rnpmSearchService.ts#L153) avea `doc.activ = detail.part1?.activ !== false` — cand `part1.activ` era `undefined`/absent, comparatia `undefined !== false` = `true`, deci toate avizele ajungeau marcate active indiferent de realitate.
+
+**Fix:**
+- Frontend ([RnpmSearchForm.tsx:749-756](frontend/src/components/rnpm/RnpmSearchForm.tsx#L749-L756)): `onChange` era deja corect (`checked ? true : undefined` → cand debifat, `activ` nu e trimis). Comportamentul asteptat confirmat prin Network capture.
+- Backend ([rnpmSearchService.ts:153](backend/src/services/rnpmSearchService.ts#L153)): `if (typeof detail.part1?.activ === "boolean") doc.activ = detail.part1.activ;` — preserva `part1.activ` doar cand e boolean explicit.
+- Backend ([rnpmSearchService.ts:289](backend/src/services/rnpmSearchService.ts#L289)): la persist, `activ: typeof part1.activ === "boolean" ? part1.activ : (doc.activ ?? true)`.
+
+**Verificat empiric:** CUI 39029401 fara `activ` → 190 rezultate (mix active + inactive); cu `activ: true` → 146 (doar active). Avizul `2020-05051707599224-CAY` aparut in DB cu `activ=0`.
+
+**Semantica RNPM (documentata acum):**
+- `activ` = STAREA avizului (in vigoare vs. expirat/stins).
+- `nemodificat` = ISTORIA avizului (atins de acte ulterioare sau nu) — dimensiune ortogonala fata de `activ`.
+- Combinatii testate pe CUI 39029401: ambele unset → 190; `nemodificat:true` only → 170; `activ:true` only → 166; ambele true → 146.
+
+### 2. Dropdown "Tipul avizului" pe `specifice` (si celelalte non-ipoteci) — 0 rezultate chiar cu criterii identice cu site-ul
+
+**Simptom:** Cautare specifice + tip "stingere" + CUI 39029401 + nemodificat → 0 in app, 73 pe site.
+
+**Cauza:** RNPM asteapta `tipInscriere.value` ca **index 1-based** in lista tipurilor de aviz din categoria curenta, NU ca label. Request-ul site-ului pentru "stingere" pe specifice: `{"tipInscriere":{"type":"1","value":"3"}}` (pozitia 3 in lista `["aviz initial","modificare","stingere",...]`). Aplicatia trimitea `value: "stingere"` → RNPM il ignora si echoia `Tipul inscrierii este ''` → 0 rezultate.
+
+**Fix** ([RnpmSearchForm.tsx handleSubmit](frontend/src/components/rnpm/RnpmSearchForm.tsx)): la submit, `tipInscriere.value` se converteste din label → index 1-based folosind `TIP_AVIZ_BY_CATEGORY[activeType].indexOf(label) + 1`. Uniform pentru toate cele 5 tipuri (convenția site-ului e identica). State-ul dropdown-ului ramane label pentru UX — conversia e punctuala la submit.
+
+**Verificat empiric:** specifice + tip stingere + CUI 39029401 → 73 rezultate (identic cu site-ul).
+
+### Verificare
+
+- Rebuild frontend + recopiere `dist-frontend` + restart Electron efectuate dupa fiecare fix (fara HMR in Electron).
+- Testat manual: ipoteci (CUI 39029401, 37700569) + specifice (CUI 39029401). Celelalte tipuri (fiducii/creante/obligatiuni) — fix-ul tipInscriere e uniform, dar fara CUI-uri de test nu am putut confirma direct.
+- Diagnostic console.log-uri adaugate temporar au fost eliminate.
+
+---
+
+## 18 Aprilie 2026 (sesiune 2) — Parser avize specifice + UI/export per-tip + cascade delete + backup button disable
+
+Context: aviz `2021-07221630009133-WUW` (specific, initial) aparea cu tab-uri goale — Creditori/Debitori/Bunuri fara date — desi pe site-ul RNPM avea PJ (`IFN IMPRUMUT EXPRES`), PF (`BUDAN NICU ILIE`) si bun descris ca "fideiusiune". Diagnosticul a aratat ca RNPM returneaza pentru tipul `specifice` un shape diferit fata de `ipoteci`:
+
+- `part2.partiF / part2.partiJ` (in loc de `creditoriF/creditoriJ` + `debitoriF/debitoriJ`); partile au `calitate` + `altaCalitate` (ex: "Altele: Fideiusiune").
+- `part3.bunuri` (in loc de `part4.vehicule/mobile/alte`); bunurile au doar `no` + `descriere`.
+- `part4 = null` pentru specifice.
+
+### 1. Parser backend — branch pe `searchType === "specifice"`
+
+**Types** ([backend/src/services/rnpmClient.ts](backend/src/services/rnpmClient.ts)):
+- `RnpmDetailPartyPF/PJ` — adaugat `calitate` + `altaCalitate`.
+- `RnpmDetailPart2` — adaugat `partiF?: RnpmDetailPartyPF[]` + `partiJ?: RnpmDetailPartyPJ[]`.
+- `RnpmDetailPart3` — adaugat `bunuri?: RnpmDetailBun[]`.
+
+**Persist** ([backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts)):
+- Helper `formatCalitate(calitate, altaCalitate)` — combina `"Altele: Fideiusiune"` cand `altaCalitate` e prezent; altfel returneaza `calitate` brut.
+- Pentru `specifice`: `creditori = []`; `debitori` = `partiF + partiJ` cu `calitate` formatata; `bunuri` = `part3.bunuri` cu `tip_bun: "alt"` si doar `descriere` populat (restul campurilor null). Pentru celelalte tipuri, ramane codul vechi (creditori/debitori/bunuri din buckets-urile originale).
+
+### 2. UI tabs — "Parti" in loc de Creditori/Debitori pentru specifice
+
+**Frontend** ([frontend/src/components/rnpm/RnpmDetailModal.tsx](frontend/src/components/rnpm/RnpmDetailModal.tsx)):
+- `isSpecifice = data?.aviz.search_type === "specifice"`.
+- Pentru specifice: 4 tab-uri (`General`, `Parti`, `Bunuri`, `Istoric`) — se dropeaza tab-ul "Creditori". Tab-ul "Parti" foloseste bucket-ul `debitori` (unde parser-ul pune partile) cu label schimbat.
+- `emptyMsg={isSpecifice ? "Fara parti" : "Fara debitori"}`.
+
+### 3. Export Excel + PDF — etichete per-tip + filename identificator
+
+**Frontend** ([frontend/src/lib/rnpmExport.ts](frontend/src/lib/rnpmExport.ts)):
+- `isSpecifice` + `partyLabel2 = isSpecifice ? "Parti" : "Debitori"` calculate o data la export.
+- Sheet "Avize" (overview) dropeaza coloana "Creditori" pentru specifice; numerotarea coloanelor pentru link-urile interne (Creditori/Debitori/Bunuri/Istoric) ajustata corespunzator.
+- Linia de stats afiseaza `"{N} parti"` in loc de `"{N} creditori + {N} debitori"` pentru specifice.
+- Sheet "Creditori" **nu** se mai creeaza pentru specifice (`wsCred = null`); sheet "Debitori" se redenumeste "Parti" via `book_append_sheet(wb, wsDeb, partyLabel2)`.
+- PDF: sectiunea "Creditori" se omite pentru specifice; sectiunea "Debitori" apare sub titlul "Parti".
+- **Filename identificator:** cand exportul e pentru un singur aviz (`docs.length === 1`), filename-ul devine `<identificator>.xlsx/.pdf` (sanitizat cu `[^A-Za-z0-9._-]+ → _`) in loc de `rnpm_<tip>_<timestamp>`. Valabil pentru toate cele 5 tipuri RNPM, nu doar specifice.
+
+### 4. "Sterge back-up" — disable cand nu exista backup-uri
+
+**Frontend** ([frontend/src/components/rnpm/RnpmSavedStats.tsx](frontend/src/components/rnpm/RnpmSavedStats.tsx)):
+- State nou `backupCount: number | null` (null = neincarcat / eroare la listare → buton activ ca retry affordance).
+- `loadBackups()` — apeleaza `rnpmListBackups()` la mount + dupa orice delete; seteaza `backupCount = list.length`.
+- Butonul "Sterge back-up" are `disabled={backupCount === 0}` + `title` explicativ + `disabled:opacity-50`. Clasa `ml-auto` pastrata pentru spacing.
+
+### 5. "Sterge baza" cascadeaza la rezultatele din tab "Cautare"
+
+Inainte: `onAfterDeleteAll` bumpa doar `savedRefreshKey` (re-fetch baza locala). Tab-ul "Cautare" pastra in-memory rezultatele vechi care pointau la ID-uri sterse → click pe aviz = 404 pe `rnpmGetAvizDetail`.
+
+**Frontend** ([frontend/src/pages/RnpmSearch.tsx](frontend/src/pages/RnpmSearch.tsx)):
+- Callback-ul pasat la `<RnpmSavedStats onAfterDeleteAll={...}>` reseteaza acum `result`, `error`, `elapsedMs` in plus de refreshKey. Actiunea "Sterge back-up" ramane separata — nu curata rezultatele (backup-urile nu invalideaza DB-ul curent).
+
+### Pending / de continuat
+
+- **fiducii / creante / obligatiuni ipotecare** — parser-ul folosit azi acopera doar ipoteci (default) + specifice. User a ales **Optiunea 1** (astepta sample-uri reale inainte de extindere — fara cod speculativ). La urmatoarea sesiune: rula una-doua cautari reale pentru fiecare tip, captura raspunsul RNPM (parts 1-4 + istoric) si extinde `rnpmSearchService.ts` cu ramuri noi unde shape-ul difera.
+
+### Verificare
+
+- `npx tsc --noEmit` frontend + backend — clean.
+- `npm run build` frontend (Vite) — OK; `dist-frontend/` copiat peste.
+- Rebuild backend (esbuild via `scripts/build.js`) necesar cand se modifica `backend/src/**` pentru ca `electron:dev` incarca bundle-ul `dist-backend/index.cjs`, nu sursa `.ts`.
+- Manual in Electron:
+  - Re-cautare aviz specific cu CUI-ul reclamat → tab "Parti" populat cu PJ + PF, tab "Bunuri" cu descrierea "fideiusiune".
+  - Export individual aviz specific → xlsx/pdf denumit `<identificator>`; sheet Creditori absent, sheet Parti prezent.
+  - "Sterge baza" → tab "Cautare" curatat automat, buton "Sterge back-up" ramane activ (exista backup-uri).
+  - "Sterge back-up" → butonul se dezactiveaza dupa delete cand count-ul ajunge la 0.
+
+---
+
+## 18 Aprilie 2026 — Mini-lag RNPM rezolvat + backup zilnic + dialog confirmare stilizat + restore flow + dashboard persistent
+
+Sesiune dedicata **fluiditatii UI** (tab-enter + deschidere aviz), **rezilientei datelor** (backup automat) si **coerentei vizuale** (confirmari native Chromium → dialog stilizat in app).
+
+### 1. Performanta — mini-lag la intrarea pe tab si deschiderea avizelor
+
+Diagnostic: nu era viteza query-urilor, ci (a) unmount/remount al componentei la tab switch si (b) round-trip + 5 query-uri pentru fiecare click pe aviz. Aplicate trei interventii complementare:
+
+**A. Keep-mounted pe RnpmSavedData** ([frontend/src/pages/RnpmSearch.tsx](frontend/src/pages/RnpmSearch.tsx)):
+- Inainte: `{tab === "saved" && <RnpmSavedData .../>}` — conditional render = unmount total la fiecare tab-switch, cu re-fetch + re-hidratare state.
+- Dupa: `<div className={tab === "saved" ? "" : "hidden"}><RnpmSavedData .../></div>` — componenta ramane montata, state (filtre, pagina, selectie) persistat, re-intrarea pe tab este instant.
+
+**D. Cache in-memory pentru detaliul avizului** ([frontend/src/lib/rnpmApi.ts](frontend/src/lib/rnpmApi.ts)):
+- `avizDetailCache: Map<number, { data, expiresAt }>` + `AVIZ_DETAIL_TTL_MS = 60_000`.
+- `rnpmGetAvizDetail(id)` verifica cache-ul inainte de fetch; hit-ul evita round-trip-ul + cele 5 query-uri repository-side.
+- Invalidare explicita in `rnpmDeleteAviz`, `rnpmDeleteAllSaved`, `rnpmDeleteAvizeBatch` — coherenta garantata cu stergeri.
+
+**E. Prewarm SQLite page cache la bootstrap** ([backend/src/index.ts](backend/src/index.ts)):
+- Dupa `serve(...)`: `getAvize({ limit: 1 })` + `getAvizStats()` — fortam o prima atingere a paginilor SQLite care altfel s-ar citi de pe disc la primul request al userului.
+- Cold-start dispare din prima interactiune — cache-ul paginilor e deja cald cand userul apasa pe tab.
+
+### 2. Backup zilnic automat al bazei locale
+
+Motivatie: cu mii de avize salvate, pierderea `.db`-ului ar fi costisitoare. Solutie — backup automat la fiecare pornire, cu rotatie.
+
+**Backend** ([backend/src/db/backup.ts](backend/src/db/backup.ts)):
+- `runDailyBackup()` — foloseste `better-sqlite3` online backup API (`db.backup(dest)`), sigur cu WAL fara checkpoint sau exclusive lock.
+- Nume: `legal-dashboard.YYYY-MM-DD.db` in `<userData>/backups/`.
+- Skip daca ultimul backup `<24h` (check pe `mtimeMs` din `fs.stat`).
+- Rotatie: sortare lexicografica (= cronologica gratie formatului ISO in nume), pastreaza ultimele 7, sterge restul.
+- Best-effort — orice esec logheaza `[backup] failed: ...` si lasa app-ul sa porneasca normal.
+- `runDailyBackup()` apelat in [backend/src/index.ts](backend/src/index.ts) dupa prewarm, cu `.catch(...)` ca nu blocheaza bootstrap-ul.
+
+**Endpoints noi** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)):
+- `POST /api/rnpm/open-backups-folder` — `shell.openPath(backupsDir)` + `mkdir -p` defensiv (501 daca nu e Electron).
+- `DELETE /api/rnpm/backups` — `deleteAllBackups()` (unlink pe toate fisierele care respecta prefix/sufix), returneaza `{ deleted: n }`.
+
+### 3. Dialog de confirmare stilizat (inlocuieste `window.confirm()` nativ)
+
+Motivatie: user a observat ca pop-up-urile native Chromium arata strain fata de restul UI-ului. Creat un dialog unified stilizat cu app-ul.
+
+**Componenta noua** ([frontend/src/components/ui/confirm-dialog.tsx](frontend/src/components/ui/confirm-dialog.tsx)):
+- `ConfirmProvider` + `useConfirm()` hook (Promise-based: `await confirm({ message, confirmLabel, cancelLabel, destructive, title })`).
+- Icon `AlertTriangle` pentru variantele destructive; buton confirm rosu cand `destructive: true`.
+- Keyboard: `Escape` = cancel, `Enter` = confirm. Click-outside = cancel. Auto-focus pe butonul de confirmare.
+- `z-[100]`, backdrop-blur, consistent cu restul modalelor din app.
+- Wrapper instalat in [frontend/src/App.tsx](frontend/src/App.tsx) sub `BrowserRouter`.
+
+**Call-site-uri migrate** (4):
+- [RnpmSavedData.tsx](frontend/src/components/rnpm/RnpmSavedData.tsx) — sterge aviz individual + batch delete.
+- [RnpmSavedStats.tsx](frontend/src/components/rnpm/RnpmSavedStats.tsx) — sterge toate avizele din baza locala.
+- [RnpmSearchForm.tsx](frontend/src/components/rnpm/RnpmSearchForm.tsx) — warning CUI invalid (non-destructive, confirmLabel="Continua").
+
+### 4. "Info baza locala" — management backups + relabel butoane
+
+[frontend/src/components/rnpm/RnpmSavedStats.tsx](frontend/src/components/rnpm/RnpmSavedStats.tsx) — reorganizare zona de actiuni:
+- `[Folder baza]` `[Backups]` ... `[Sterge back-up]` `[Sterge baza]`
+- Butonul `Backups` (icon `Archive`) → deschide `<userData>/backups/` in File Explorer.
+- Butonul `Sterge back-up` (rosu, outline) → sterge toate fisierele de backup (confirm destructiv); urmatorul backup se genereaza la urmatoarea pornire a app-ului.
+- Butonul `Sterge baza` pastreaza comportamentul anterior (fost "Sterge tot"), cu confirm destructiv; confirmarile folosesc toate noul `useConfirm()`.
+- Relabel: "Deschide folder" → "Folder baza".
+
+### 5. Fix UI — DosareTable timeline sedinte
+
+Efect secundar al `dd05b05` (font-scale bump): data "19.01.2026" era taiata, iar cercul-marker nu se alinia vertical cu linia.
+**Frontend** ([frontend/src/components/DosareTable.tsx](frontend/src/components/DosareTable.tsx)): coloana data `w-[60px]`→`w-[80px]`, marker-ul `left-[72px]`→`left-[92px]`, spacing `mt-1`→`mt-1.5`.
+
+### 6. Bugfix — paginare goala dupa aplicare filtre
+
+Simptom: la aplicarea unui filtru care reducea numarul de pagini, tabela ramanea goala pentru ca `page` depasea noul `totalPages` si slice-ul `filtered.slice((page-1)*pageSize, page*pageSize)` returna `[]`.
+
+**Frontend** ([frontend/src/components/DosareTable.tsx](frontend/src/components/DosareTable.tsx), [frontend/src/components/TermeneTable.tsx](frontend/src/components/TermeneTable.tsx)): `useEffect` care clampeaza `page` la `Math.max(1, totalPages)` cand filtered data se schimba. Dependency array include lungimea datelor filtrate + pageSize.
+
+### 7. TermeneTable — chei stabile pentru selectie (CP-B P2.3)
+
+Inainte: selection state folosea index-ul rand-ului (`${page}-${idx}`) drept cheie. La sortare/filtrare, Set-ul de selectii "se agata" de indici care indicau alte randuri — selectie care pare sa sara.
+
+**Frontend** ([frontend/src/components/TermeneTable.tsx](frontend/src/components/TermeneTable.tsx)): cheie compusa stabila `${institutie}|${departament}|${numar}|${ora}|${complet}` in locul index-ului; helper `rowKey(t)` aplicat peste tot in checkbox handlers, `selectAllFiltered`, export CSV.
+
+### 8. RnpmDetailModal — identificator aviz in header
+
+User vrea sa vada identificatorul avizului fara sa scrolleze pana la randul de detalii.
+
+**Frontend** ([frontend/src/components/rnpm/RnpmDetailModal.tsx](frontend/src/components/rnpm/RnpmDetailModal.tsx)): `<h3>` cu `flex items-baseline gap-2`, "Detalii Aviz" `text-sm font-semibold` + identificator `text-xs font-semibold text-foreground` (fara font-mono — metricile diferite intre sans/mono cauzeaza offset vizual la `items-center`; baseline + acelasi font family rezolva alinierea).
+
+### 9. Dashboard — persistenta "Ultima Cautare" pentru dosare (Optiunea 1)
+
+Inainte: dupa restart, cardul "Dosare" disparea din dashboard chiar daca userul facuse zeci de cautari. RNPM avea deja persistenta; dosare nu.
+
+Decisie: **nu** persistam intregul dataset (prea mare, deja avem istoric local), ci doar meta-count-urile + params-ul ultimei cautari. Click pe card → navigare la pagina dosare + re-trigger search cu params stored (prin pending-search pattern existent).
+
+- **Types** ([frontend/src/types/index.ts](frontend/src/types/index.ts)): `SearchHistoryEntry.meta?: { categoriesCount; institutiiCount }`.
+- **Hook** ([frontend/src/hooks/useSearchHistory.ts](frontend/src/hooks/useSearchHistory.ts)): `addEntry(type, params, resultCount, meta?)`.
+- **Dosare** ([frontend/src/pages/Dosare.tsx](frontend/src/pages/Dosare.tsx)): `handleSearch` construieste Set-urile pentru categorie + institutie, pasa meta prin `onSearchComplete`.
+- **Dashboard** ([frontend/src/pages/Dashboard.tsx](frontend/src/pages/Dashboard.tsx)): daca nu sunt date live, fallback pe `history.find(e => e.type === "dosare")`. Click pe card → `navigate("/dosare")` + (daca e fallback) `onHistoryClick("dosare", params)` pentru refresh.
+- **App** ([frontend/src/App.tsx](frontend/src/App.tsx)): passing `history` + `onHistoryClick` la Dashboard.
+
+### 10. Restore baza locala din backup
+
+User: "Cum putem face restore la un backup daca stergem baza principala?". Motivatie — azi un backup corupt sau o stergere accidentala ar fi fatala fara o cale de recuperare in-app.
+
+**Backend** ([backend/src/db/backup.ts](backend/src/db/backup.ts)):
+- `listBackupsWithMeta()` — enumera fisierele care respecta prefix/sufix, returneaza `{ name, sizeBytes, mtime }[]`, sortat desc pe mtime.
+- `restoreFromBackup(name)` — validare stricta: regex `/^legal-dashboard\.[A-Za-z0-9._-]+\.db$/` + check `/` si `\` (block path traversal).
+  - `closeDb()` — necesar pe Windows unde fisierul deschis e blocat.
+  - Snapshot preventiv al DB-ului curent in `legal-dashboard.pre-restore-<ISO>.db` (user poate rolla back manual).
+  - `copyFile(src, dbPath)`.
+  - Unlink `-wal` + `-shm` (sidecar-urile apartin vechii DB; ar corupe deschiderea noii DB).
+  - Returneaza `preRestoreName` catre UI.
+
+**API** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)): `GET /api/rnpm/backups` + `POST /api/rnpm/backups/restore` (cu `limitSmall`).
+
+**Frontend** ([frontend/src/lib/rnpmApi.ts](frontend/src/lib/rnpmApi.ts)): `rnpmListBackups()` + `rnpmRestoreBackup(name)`.
+
+**UI** ([frontend/src/components/rnpm/RnpmSavedStats.tsx](frontend/src/components/rnpm/RnpmSavedStats.tsx)): buton "Restaurare" (icon `History`) intre "Backups" si "Sterge back-up". Deschide `RestoreModal` — lista backups (name + size + data), confirm destructiv cu `useConfirm`, afisare success cu `preRestoreName`, reincarca stats + trigger `onRestored` dupa 2.5s pentru re-hidratare.
+
+### 11. Info baza locala — aliniere "Cale:" + modal largit
+
+User: "alinieaza vizual 'Cale' cu scrisul caii efective" + "poti lungi si fereastra putin".
+
+**Frontend** ([frontend/src/components/rnpm/RnpmSavedStats.tsx](frontend/src/components/rnpm/RnpmSavedStats.tsx)):
+- Modal `max-w-xl` → `max-w-2xl`.
+- "Cale:" row — inlinat intr-un singur `<div className="leading-5">` cu `<span>Cale: </span><span className="font-mono ...">{path}</span><button ...><Copy/></button>`. Butonul de copiere `h-4 w-4 translate-y-[2px]` aliniat vizual cu linia de text (font-mono are metrici diferite de sans — baseline pur nu ajunge, translate-y fixeaza restul).
+
+### 12. Dependency hygiene
+
+- Bump `dompurify` — patch minor de securitate (XSS sanitizer).
+- Bump `@anthropic-ai/sdk` — pastram in sync cu release-urile upstream.
+- `npm audit` — 0 vulnerabilitati la nivel repo.
+
+### Verificare
+
+- `npx tsc --noEmit` (frontend + backend) — clean.
+- `node scripts/build.js` — build complet reproducibil, backend bundle `1.7mb`.
+- Reproducere manuala in Electron:
+  - Tab-switch intre RNPM → Cautare ↔ Baza locala — instant, fara re-fetch vizibil.
+  - Click pe aviz recent → modal apare instant (cache hit).
+  - Log backend la pornire: `[backup] saved legal-dashboard.2026-04-18.db`.
+  - Fisier prezent in `%APPDATA%/legal-dashboard/backups/`.
+  - Delete aviz / Delete all / Sterge back-up / CUI warning — toate afiseaza dialog stilizat, nu pop-up nativ.
+  - RNPM → Info baza locala → "Restaurare" → selecteaza backup → confirm → app reincarca cu datele din backup; fisier `legal-dashboard.pre-restore-*.db` aparut in `backups/`.
+  - Dashboard dupa restart (fara cautare in sesiunea curenta) — cardul "Dosare" afiseaza ultima cautare persistata; click → navigheaza + re-triggereaza search-ul automat.
+  - Aplicare filtru pe pagina 5 dintr-o tabela cu 50 rezultate → `page` clampat la ultima pagina valida, tabela afiseaza randuri.
+
+---
+
 ## 17 Aprilie 2026 — Butonul Stop RNPM functioneaza cap-coada (abort chain complet)
 
 Bug raportat: la tab-ul **Cautare RNPM → Cautare**, click pe butonul **Stop** nu oprea efectiv cautarea. UI parea "blocat" (Stop + "Interogare RNPM..." persistau), iar dupa cateva incercari aparea un val de ~25 avize persistate in baza locala fara ca userul sa fi cerut. Investigatia a scos la iveala mai multe probleme in lantul de anulare — rezolvate toate in aceasta sesiune.
