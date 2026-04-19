@@ -1,17 +1,14 @@
-import { lazy, Suspense, useCallback, useState } from "react";
-import { Scale, FileSearch, CalendarDays, ArrowRight, FolderOpen, BarChart3, ScrollText, X, BookOpen, Loader2, FileLock2, Clock } from "lucide-react";
+import { useCallback, useState } from "react";
+import { Scale, FileSearch, CalendarDays, ArrowRight, ScrollText, BookOpen } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
 import type { Dosar, SearchHistoryEntry, SearchParams } from "@/types";
-import type { RnpmSearchHistoryEntry, RnpmSearchType } from "@/types/rnpm";
-
-// Lazy: both modals are only mounted after user clicks "Noutati" / "Manual",
-// and the Manual pulls in the PDF export pipeline (jspdf + xlsx).
-const Changelog = lazy(() => import("@/pages/Changelog"));
-const Manual = lazy(() => import("@/pages/Manual"));
+import type { RnpmSearchHistoryEntry } from "@/types/rnpm";
+import { LastDosareCard, LastRnpmCard } from "./dashboard-summary-cards";
+import { ChangelogDialog, ManualDialog } from "./dashboard-modals";
 
 const APP_VERSION = `v${__APP_VERSION__}`;
 
@@ -30,25 +27,6 @@ interface DashboardProps {
   rnpmHistory: RnpmSearchHistoryEntry[];
   history: SearchHistoryEntry[];
   onHistoryClick: (type: "dosare" | "termene", params: SearchParams) => void;
-}
-
-const RNPM_TYPE_LABEL: Record<RnpmSearchType, string> = {
-  ipoteci: "Ipoteci",
-  fiducii: "Fiducii",
-  specifice: "Operatiuni specifice",
-  creante: "Creante",
-  obligatiuni: "Obligatiuni",
-};
-
-function stripRnpmLabelType(label: string, type: RnpmSearchType): string {
-  const prefix = `${type} · `;
-  return label.startsWith(prefix) ? label.slice(prefix.length) : label;
-}
-
-function formatRnpmTimestamp(ts: number): string {
-  const d = new Date(ts);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${pad(d.getDate())}.${pad(d.getMonth() + 1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 const features = [
@@ -149,13 +127,6 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
     }
   };
 
-  const modalFallback = (
-    <div className="flex items-center justify-center py-12 text-sm text-muted-foreground">
-      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-      Se incarca...
-    </div>
-  );
-
   return (
     <div className="space-y-8 p-6">
       {/* Hero */}
@@ -171,134 +142,17 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
         </div>
       </div>
 
-      {/* Last search summary */}
       {dosareCard && (
-        <div>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Ultima Cautare
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10">
-                  <FolderOpen className="h-4 w-4 text-primary" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Dosare Gasite</p>
-                  <p className="text-lg font-bold">{dosareCard.count}</p>
-                </div>
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-                  <BarChart3 className="h-4 w-4 text-blue-500" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Categorii</p>
-                  <p className="text-lg font-bold">{dosareCard.categoriesCount}</p>
-                </div>
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-500/10">
-                  <Scale className="h-4 w-4 text-teal-500" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Institutii</p>
-                  <p className="text-lg font-bold">{dosareCard.institutiiCount}</p>
-                </div>
-              </div>
-            </Card>
-            {dosareCard.searchedName && (
-              <Card className="p-4">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10">
-                    <FileSearch className="h-4 w-4 text-purple-500" />
-                  </div>
-                  <div className="min-w-0">
-                    <p className="text-xs text-muted-foreground">Parte Cautata</p>
-                    <p className="truncate text-sm font-bold">{dosareCard.searchedName}</p>
-                  </div>
-                </div>
-              </Card>
-            )}
-          </div>
-          <div className="mt-3">
-            <button
-              type="button"
-              onClick={handleOpenDosare}
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80"
-            >
-              Vezi dosarele <ArrowRight className="h-3 w-3" />
-            </button>
-          </div>
-        </div>
+        <LastDosareCard
+          count={dosareCard.count}
+          categoriesCount={dosareCard.categoriesCount}
+          institutiiCount={dosareCard.institutiiCount}
+          searchedName={dosareCard.searchedName}
+          onOpen={handleOpenDosare}
+        />
       )}
 
-      {/* Last RNPM search summary */}
-      {lastRnpm && (
-        <div>
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-            Ultima Cautare RNPM
-          </h2>
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-amber-500/10">
-                  <FileLock2 className="h-4 w-4 text-amber-500" />
-                </div>
-                <div>
-                  <p className="text-xs text-muted-foreground">Avize Gasite</p>
-                  <p className="text-lg font-bold">{lastRnpm.resultCount}</p>
-                </div>
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-blue-500/10">
-                  <BarChart3 className="h-4 w-4 text-blue-500" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Tip</p>
-                  <p className="truncate text-sm font-bold">{RNPM_TYPE_LABEL[lastRnpm.type]}</p>
-                </div>
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-purple-500/10">
-                  <FileSearch className="h-4 w-4 text-purple-500" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Cautat dupa</p>
-                  <p className="truncate text-sm font-bold">{stripRnpmLabelType(lastRnpm.label, lastRnpm.type) || "—"}</p>
-                </div>
-              </div>
-            </Card>
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-teal-500/10">
-                  <Clock className="h-4 w-4 text-teal-500" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-xs text-muted-foreground">Data</p>
-                  <p className="truncate text-sm font-bold">{formatRnpmTimestamp(lastRnpm.timestamp)}</p>
-                </div>
-              </div>
-            </Card>
-          </div>
-          <div className="mt-3">
-            <Link
-              to="/rnpm"
-              className="inline-flex items-center gap-1.5 text-xs font-medium text-primary hover:text-primary/80"
-            >
-              Vezi avizele <ArrowRight className="h-3 w-3" />
-            </Link>
-          </div>
-        </div>
-      )}
+      {lastRnpm && <LastRnpmCard entry={lastRnpm} />}
 
       {/* Feature cards */}
       <div className="grid gap-4 sm:grid-cols-2">
@@ -409,73 +263,17 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
         </Card>
       </div>
 
-      {/* Changelog Modal */}
       {showChangelog && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeChangelog}>
-          <div
-            ref={changelogRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="changelog-title"
-            tabIndex={-1}
-            className="relative mx-4 flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-border bg-background shadow-2xl focus:outline-none"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <div className="flex items-center gap-3">
-                <ScrollText className="h-5 w-5 text-violet-500" />
-                <h2 id="changelog-title" className="text-lg font-bold">Noutati</h2>
-                <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400 text-xs font-bold">
-                  {APP_VERSION}
-                </Badge>
-              </div>
-              <Button variant="ghost" size="sm" onClick={closeChangelog} aria-label="Inchide noutati">
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            {/* Scrollable content */}
-            <div className="overflow-y-auto scrollbar-thin px-2 py-4">
-              <Suspense fallback={modalFallback}>
-                <Changelog />
-              </Suspense>
-            </div>
-          </div>
-        </div>
+        <ChangelogDialog dialogRef={changelogRef} appVersion={APP_VERSION} onClose={closeChangelog} />
       )}
-      {/* Manual Modal */}
       {showManual && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={closeManual}>
-          <div
-            ref={manualRef}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="manual-title"
-            tabIndex={-1}
-            className="relative mx-4 flex max-h-[85vh] w-full max-w-4xl flex-col rounded-xl border border-border bg-background shadow-2xl focus:outline-none"
-            onClick={(e) => e.stopPropagation()}
-          >
-            {/* Header */}
-            <div className="flex items-center justify-between border-b border-border px-6 py-4">
-              <div className="flex items-center gap-3">
-                <BookOpen className="h-5 w-5 text-primary" />
-                <h2 id="manual-title" className="text-lg font-bold">Manual de Utilizare</h2>
-                <Badge className="bg-primary/10 text-primary text-xs font-bold">
-                  {APP_VERSION}
-                </Badge>
-              </div>
-              <Button variant="ghost" size="sm" onClick={closeManual} aria-label="Inchide manual">
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            {/* Scrollable content */}
-            <div className="overflow-y-auto scrollbar-thin px-2 py-4">
-              <Suspense fallback={modalFallback}>
-                <Manual onDownloadPdf={handleDownloadManualPdf} isDownloading={isDownloadingManual} />
-              </Suspense>
-            </div>
-          </div>
-        </div>
+        <ManualDialog
+          dialogRef={manualRef}
+          appVersion={APP_VERSION}
+          onClose={closeManual}
+          onDownloadPdf={handleDownloadManualPdf}
+          isDownloading={isDownloadingManual}
+        />
       )}
     </div>
   );

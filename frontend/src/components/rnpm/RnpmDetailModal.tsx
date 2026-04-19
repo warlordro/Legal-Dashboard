@@ -186,7 +186,11 @@ function BunuriList({ bunuri, detaliiComune }: { bunuri: RnpmBun[]; detaliiComun
       {bunuri.length === 0 ? (
         <p className="text-sm text-muted-foreground">Fara bunuri listate.</p>
       ) : bunuri.map((b) => (
-        <div key={b.id} className="rounded-lg border border-border p-3">
+        <div
+          key={b.id}
+          className="rounded-lg border border-border p-3"
+          style={{ contentVisibility: "auto", containIntrinsicSize: "auto 150px" }}
+        >
           <Badge variant="outline" className="mb-1 text-[10px]">{b.tip_bun}</Badge>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
             {b.categorie && <span><span className="text-muted-foreground">Categorie:</span> {b.categorie}</span>}

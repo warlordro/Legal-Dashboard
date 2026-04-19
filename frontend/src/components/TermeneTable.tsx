@@ -1,40 +1,19 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Download, CalendarDays, ExternalLink, ChevronDown, ChevronUp, Users, Scale, FileText, Building2, Eye } from "lucide-react";
+import { Download, CalendarDays, ExternalLink, ChevronDown, ChevronUp, Eye } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { formatDate, formatDocumentSedinta } from "@/lib/utils";
 import type { Termen } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
+import { TablePagination } from "@/components/table-pagination";
+import { TermeneExpandedDetail } from "./termene-table-detail-row";
 
 interface TermeneTableProps {
   termene: Termen[];
   onExportExcel: (selected?: Termen[]) => void;
   onExportPDF: (selected?: Termen[]) => void;
   searchedName?: string;
-}
-
-function HighlightName({ text, search }: { text: string; search?: string }) {
-  if (!search || !text) return <>{text}</>;
-  const searchWords = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
-  if (searchWords.length === 0) return <>{text}</>;
-  const escaped = searchWords.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
-  const parts = text.split(regex);
-  return (
-    <>
-      {parts.map((part, i) => {
-        const isMatch = searchWords.some((w) => part.toLowerCase() === w);
-        return isMatch ? (
-          <span key={i} className="rounded bg-yellow-200 px-0.5 font-semibold text-yellow-900 dark:bg-yellow-500/30 dark:text-yellow-200">
-            {part}
-          </span>
-        ) : (
-          <span key={i}>{part}</span>
-        );
-      })}
-    </>
-  );
 }
 
 function getSolutieBadgeVariant(solutie: string): "default" | "secondary" | "outline" | "success" | "warning" {
@@ -52,23 +31,6 @@ function getPortalJustUrl(numar: string): string {
 function formatInstitutie(raw: string): string {
   if (!raw) return "-";
   return normalizeInstitutie(raw);
-}
-
-function getPageNumbers(currentPage: number, totalPages: number): (number | "...")[] {
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-    return pages;
-  }
-  const current = currentPage + 1;
-  pages.push(1);
-  if (current > 3) pages.push("...");
-  for (let i = Math.max(2, current - 1); i <= Math.min(totalPages - 1, current + 1); i++) {
-    pages.push(i);
-  }
-  if (current < totalPages - 2) pages.push("...");
-  pages.push(totalPages);
-  return pages;
 }
 
 export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName }: TermeneTableProps) {
@@ -311,72 +273,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                   {isExpanded && hasDetails && (
                     <tr key={`${rowKey}-detail`} ref={lastExpandedKey === rowKey ? expandedDetailRef : undefined} className="bg-muted/20">
                       <td colSpan={7} className="px-4 py-4">
-                        <div className="space-y-3 pl-6">
-                          {/* Info badges */}
-                          <div className="flex flex-wrap gap-3">
-                            {t.categorieCaz && (
-                              <div className="flex items-center gap-1.5 text-xs">
-                                <Scale className="h-3.5 w-3.5 text-muted-foreground" />
-                                <span className="text-muted-foreground">Categorie:</span>
-                                <Badge variant="outline" className="text-[11px]">{t.categorieCaz}</Badge>
-                              </div>
-                            )}
-                            {t.stadiuProcesual && (
-                              <div className="flex items-center gap-1.5 text-xs">
-                                <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                                <span className="text-muted-foreground">Stadiu:</span>
-                                <Badge variant="outline" className="text-[11px]">{t.stadiuProcesual}</Badge>
-                              </div>
-                            )}
-                            {t.obiect && (
-                              <div className="flex items-center gap-1.5 text-xs">
-                                <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                                <span className="text-muted-foreground">Obiect:</span>
-                                <span className="text-xs font-medium">{t.obiect}</span>
-                              </div>
-                            )}
-                          </div>
-
-                          {/* Solutie completa */}
-                          {(t.solutie || t.solutieSumar) && (
-                            <div>
-                              <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                <Scale className="h-3.5 w-3.5" /> Solutie
-                              </h4>
-                              <div className="rounded-lg border border-border bg-background p-3">
-                                {t.solutie && (
-                                  <p className="mb-2 text-sm font-medium text-foreground">{formatDocumentSedinta(t.solutie!)}</p>
-                                )}
-                                {t.solutieSumar && (
-                                  <div className="rounded bg-muted/30 p-2">
-                                    <p className="leading-relaxed text-foreground" style={{ fontSize: "14.5px" }}>{t.solutieSumar}</p>
-                                  </div>
-                                )}
-                              </div>
-                            </div>
-                          )}
-
-                          {/* Parti */}
-                          {hasParts && (
-                            <div>
-                              <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                <Users className="h-3.5 w-3.5" /> Parti ({t.parti!.length})
-                              </h4>
-                              <div className="grid gap-1 rounded-lg border border-border bg-background p-3 sm:grid-cols-2">
-                                {t.parti!.map((p, j) => (
-                                  <div key={j} className="flex items-center gap-1.5 text-xs">
-                                    <Badge variant="outline" className="shrink-0 text-xs">
-                                      {p.calitateParte}
-                                    </Badge>
-                                    <span className="truncate" title={p.nume}>
-                                      <HighlightName text={p.nume} search={searchedName} />
-                                    </span>
-                                  </div>
-                                ))}
-                              </div>
-                            </div>
-                          )}
-                        </div>
+                        <TermeneExpandedDetail termen={t} searchedName={searchedName} />
                       </td>
                     </tr>
                   )}
@@ -388,69 +285,14 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
       </div>
 
       {totalPages > 1 && (
-        <div className="flex flex-col items-center gap-2 border-t border-border px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setPage(0)} disabled={page === 0}>
-              «
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0}>
-              ‹ Inapoi
-            </Button>
-            <div className="flex items-center gap-1">
-              {getPageNumbers(page, totalPages).map((p, i) =>
-                p === "..." ? (
-                  <span key={`dots-${i}`} className="px-1 text-sm text-muted-foreground">...</span>
-                ) : (
-                  <Button
-                    key={p}
-                    variant={p === page + 1 ? "default" : "outline"}
-                    size="sm"
-                    className="min-w-[32px]"
-                    onClick={() => setPage((p as number) - 1)}
-                  >
-                    {p}
-                  </Button>
-                )
-              )}
-            </div>
-            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1}>
-              Inainte ›
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setPage(totalPages - 1)} disabled={page === totalPages - 1}>
-              »
-            </Button>
-            <div className="flex items-center gap-1 ml-2">
-              <span className="text-xs text-muted-foreground">Pagina</span>
-              <input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={page + 1}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (val >= 1 && val <= totalPages) setPage(val - 1);
-                }}
-                className="w-14 rounded border border-border bg-background px-2 py-1 text-center text-sm"
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">Pagina {page + 1} din {totalPages}</span>
-            <span className="text-xs text-muted-foreground">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">Rezultate pe pagina:</span>
-              {[10, 20, 50, 100].map((size) => (
-                <button
-                  key={size}
-                  onClick={() => { setPageSize(size); setPage(0); }}
-                  className={`min-w-[32px] rounded px-2 py-0.5 text-xs border ${pageSize === size ? "bg-primary text-primary-foreground border-primary" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
-                >
-                  {size}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(0); }}
+          pageSizes={[10, 20, 50, 100]}
+        />
       )}
     </Card>
   );

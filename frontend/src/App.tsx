@@ -101,7 +101,14 @@ function AppShell({
   }, []);
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-screen overflow-hidden bg-background pt-8">
+      {/* Top 32px drag strip — matches Electron titleBarOverlay height. Windows buttons
+          are drawn by the OS on top of this with higher priority, so clicks on them
+          still work while the rest of the strip drags the window. */}
+      <div
+        className="fixed top-0 left-0 right-0 h-8 bg-background z-[60]"
+        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+      />
       <Sidebar
         history={history}
         onHistoryClick={handleHistoryClick}

@@ -63,6 +63,7 @@ export default function RnpmSearchPage({
   const [savedStatsKey, setSavedStatsKey] = useState(0);
   const [formResetKey, setFormResetKey] = useState(0);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
+  const [autoLoading, setAutoLoading] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
 
   const isAbort = (e: unknown): boolean => e instanceof DOMException && e.name === "AbortError";
@@ -144,7 +145,10 @@ export default function RnpmSearchPage({
       } : null);
       setSavedRefreshKey((k) => k + 1);
     } catch (e) {
-      if (!isAbort(e) && !ctl.signal.aborted) setError(e instanceof Error ? e.message : "Eroare necunoscuta");
+      if (!isAbort(e) && !ctl.signal.aborted) {
+        setError(e instanceof Error ? e.message : "Eroare necunoscuta");
+        setAutoLoading(false);
+      }
     } finally {
       if (abortRef.current === ctl) abortRef.current = null;
       setLoading(false);
@@ -152,9 +156,22 @@ export default function RnpmSearchPage({
     }
   };
 
+  // Auto-loop: after a batch completes, trigger the next one while autoLoading is on.
+  // Stops naturally when nextRnpmPage becomes null; user can cancel via handleStop.
+  useEffect(() => {
+    if (!autoLoading || loading) return;
+    if (!result || result.nextRnpmPage == null) {
+      setAutoLoading(false);
+      return;
+    }
+    void loadNextBatch();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoLoading, loading, result?.nextRnpmPage]);
+
   const handleStop = () => {
     stoppedRef.current = true;
     abortRef.current?.abort();
+    setAutoLoading(false);
     setLoading(false);
     setPhase("");
   };
@@ -243,10 +260,27 @@ export default function RnpmSearchPage({
             onReset={() => { setResult(null); setError(null); setLastParams({}); }}
             initialType={lastType}
             initialParams={lastParams}
+            suppressStop={result != null && result.nextRnpmPage != null}
             extraActions={result && result.nextRnpmPage != null ? (
-              <Button type="button" disabled={loading} onClick={loadNextBatch} className="font-normal h-8 px-3 text-xs">
-                Incarca mai multe ({result.documents.length} din {result.total})
-              </Button>
+              <div className="flex items-center gap-2">
+                {autoLoading ? (
+                  <Button type="button" variant="destructive" onClick={handleStop} className="font-normal h-8 px-3 text-xs">
+                    Opreste incarcarea ({result.documents.length} din {result.total})
+                  </Button>
+                ) : (
+                  <Button type="button" disabled={loading} onClick={() => setAutoLoading(true)} className="font-normal h-8 px-3 text-xs">
+                    Incarca tot ({result.documents.length} din {result.total})
+                  </Button>
+                )}
+                {result.total > 0 && (
+                  <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full bg-primary transition-all duration-300"
+                      style={{ width: `${Math.round((result.documents.length / result.total) * 100)}%` }}
+                    />
+                  </div>
+                )}
+              </div>
             ) : null}
           />
           {error && (
@@ -268,7 +302,14 @@ export default function RnpmSearchPage({
       )}
 
       {tab === "bulk" && (
-        <RnpmBulkSearch captchaKey={captchaKey} captchaProvider={captchaProvider} fallback2CaptchaKey={fallback2CaptchaKey} captchaMode={captchaMode} onConfigureKey={onConfigureKey} />
+        <RnpmBulkSearch
+          captchaKey={captchaKey}
+          captchaProvider={captchaProvider}
+          fallback2CaptchaKey={fallback2CaptchaKey}
+          captchaMode={captchaMode}
+          onConfigureKey={onConfigureKey}
+          onItemSaved={() => setSavedRefreshKey((k) => k + 1)}
+        />
       )}
 
       {/* A: keep RnpmSavedData mounted across tab switches so re-entering "saved" is instant */}

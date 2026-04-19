@@ -4,95 +4,25 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
-import type { RnpmSearchParams, RnpmSearchType, RnpmSiSau } from "@/types/rnpm";
-
-// Bun "Alt tip" la ipoteci — RNPM trimite `bunA.categorie` ca index string (1..11)
-// in ordinea din dropdown-ul oficial. Confirmat prin captura Network: "recolte" = "6".
-const BUN_ALT_TIP_CATEGORII = [
-  "creante conf. art. 2389 lit. a) si b) din Codul civil",
-  "cont bancar",
-  "actiuni/parti sociale/valori mobiliare/alte instrumente financiare",
-  "echipamente/instalatii/alte bunuri destinate sa serveasca exploatarii unei intreprinderi",
-  "polite de asigurare",
-  "recolte",
-  "utilaje agricole, altele decat autovehicule",
-  "efective de animale",
-  "universalitati",
-  "inscriere veche",
-  "alte bunuri",
-];
-
-const DESTINATIE_IPOTECI = [
-  "creditor garantat/debitor",
-  "locatar/locator",
-  "consignatar/consignant",
-  "vanzator/cumparator",
-  "obligatii agricole",
-  "inscrieri in legatura cu finantele publice",
-  "preluat de datoria publica",
-  "alte inscrieri",
-  "sechestru",
-  "sechestru scutit de taxa",
-];
-
-const DESTINATIE_INSCRIERII = [
-  "publicitatea clauzei de insesizabilitate",
-  "publicitatea clauzei de inalienabilitate",
-  "publicitatea clauzei de rezerva a proprietatii",
-  "publicitatea pactului de rascumparare",
-  "publicitatea cesiunii de creanta",
-  "publicitatea declaratiei de rezolutiune",
-  "publicitatea declaratiei de reziliere",
-  "publicitatea hotararii judecatoresti privind actele de dispozitie care pun in pericol grav interesele familiei",
-  "publicitatea regimului matrimonial",
-  "publicitatea uzufructului asupra creantelor",
-  "publicitatea platii anticipate a chiriei",
-  "publicitatea cesiunii creantei privind chiria",
-  "publicitatea titlurilor executorii constatate prin inscrisuri sub semnatura privata",
-  "alte acte/fapte juridice supuse publicitatii conform legii",
-];
-
-const TIP_AVIZ_BY_CATEGORY: Record<RnpmSearchType, string[]> = {
-  ipoteci: [
-    "aviz initial", "cesiune a creantei", "extindere", "intentie", "modificator",
-    "nulitate", "prelungire", "reducere", "stingere", "transformare", "executare",
-    "preluare", "schimbarea rangului", "mentinere", "cesiunea rangului ipotecii",
-    "reactivare", "actualizare", "indreptare a erorii materiale",
-  ],
-  specifice: [
-    "aviz initial", "modificare", "stingere", "nulitate", "prelungire",
-    "reactivare", "indreptare a erorii materiale",
-  ],
-  fiducii: [
-    "aviz initial", "acceptare", "modificare", "nulitate", "stingere",
-    "reactivare", "indreptare a erorii materiale",
-  ],
-  creante: [
-    "aviz initial", "modificare", "extindere", "reducere", "stingere",
-    "nulitate", "prelungire", "reactivare", "indreptare a erorii materiale",
-  ],
-  obligatiuni: [
-    "aviz initial", "modificare", "extindere", "reducere", "stingere",
-    "nulitate", "prelungire", "reactivare", "indreptare a erorii materiale",
-  ],
-};
-
-// Label-ul dropdown-ului de tip difera per categorie pe site-ul RNPM oficial.
-const TIP_LABEL_BY_CATEGORY: Record<RnpmSearchType, string> = {
-  ipoteci: "Tipul inregistrarii",
-  creante: "Tipul inregistrarii",
-  fiducii: "Tipul fiduciei",
-  specifice: "Tipul avizului",
-  obligatiuni: "Tipul avizului",
-};
-
-const CATEGORIES: { type: RnpmSearchType; label: string }[] = [
-  { type: "ipoteci", label: "Aviz de ipoteca mobiliara" },
-  { type: "fiducii", label: "Fiducie" },
-  { type: "specifice", label: "Aviz specific" },
-  { type: "creante", label: "Aviz de ipoteca - creante securitizate" },
-  { type: "obligatiuni", label: "Aviz de ipoteca - obligatiuni ipotecare" },
-];
+import type { RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
+import {
+  BUN_ALT_TIP_CATEGORII,
+  DESTINATIE_IPOTECI,
+  DESTINATIE_INSCRIERII,
+  TIP_AVIZ_BY_CATEGORY,
+  TIP_LABEL_BY_CATEGORY,
+  CATEGORIES,
+} from "./rnpm-form-constants";
+import { useText, useSiSauField, usePJField, usePFField } from "./rnpm-form-hooks";
+import {
+  CollapsibleFieldset,
+  SiSauInput,
+  SiSauToggle,
+  PJBlock,
+  PartyFieldset,
+  VehiculFieldset,
+  DestinatieSelect,
+} from "./rnpm-form-fields";
 
 // Walk the built params object for any `CUI` field with a non-digit value.
 // Returns the first offending value (for the warning message) or null if clean.
@@ -111,151 +41,6 @@ function findNonNumericCui(obj: unknown): string | null {
   return null;
 }
 
-// ---- Custom hooks: collapse per-field state boilerplate ----
-
-function useText(init = "") {
-  const [value, setValue] = useState(init);
-  return {
-    value,
-    setValue,
-    reset: () => setValue(""),
-    trimmed: (): string | undefined => {
-      const v = value.trim();
-      return v ? v : undefined;
-    },
-  };
-}
-type TextField = ReturnType<typeof useText>;
-
-function useSiSauField(init?: RnpmSiSau) {
-  const [value, setValue] = useState(init?.value ?? "");
-  const [op, setOp] = useState<"1" | "2">(init?.type ?? "1");
-  return {
-    value,
-    setValue,
-    op,
-    setOp,
-    reset: () => { setValue(""); setOp("1"); },
-    toParam: (): RnpmSiSau | undefined => {
-      const v = value.trim();
-      return v ? { type: op, value: v } : undefined;
-    },
-  };
-}
-type SiSauField = ReturnType<typeof useSiSauField>;
-
-function usePJField(init?: { denumire?: string; CUI?: RnpmSiSau; RegCom?: RnpmSiSau; regCom?: RnpmSiSau }) {
-  const denumire = useText(init?.denumire);
-  const cui = useSiSauField(init?.CUI);
-  const reg = useSiSauField(init?.RegCom ?? init?.regCom);
-  return {
-    denumire, cui, reg,
-    reset: () => { denumire.reset(); cui.reset(); reg.reset(); },
-  };
-}
-type PJField = ReturnType<typeof usePJField>;
-
-function usePFField(init?: { nume?: string; prenume?: RnpmSiSau; CNP?: RnpmSiSau }) {
-  const nume = useText(init?.nume);
-  const prenume = useSiSauField(init?.prenume);
-  const cnp = useSiSauField(init?.CNP);
-  return {
-    nume, prenume, cnp,
-    reset: () => { nume.reset(); prenume.reset(); cnp.reset(); },
-  };
-}
-type PFField = ReturnType<typeof usePFField>;
-
-// ---- Section sub-components ----
-
-function PJBlock({ field, showReg = false, compact = false }: { field: PJField; showReg?: boolean; compact?: boolean }) {
-  // Compact: layout orizontal (2 sau 3 coloane in functie de showReg) pe ecrane >=md.
-  const wrapCls = compact
-    ? cn("grid gap-1.5", showReg ? "md:grid-cols-3" : "md:grid-cols-2")
-    : "space-y-2";
-  return (
-    <div className={wrapCls}>
-      <Input placeholder="Denumire" value={field.denumire.value} onChange={(e) => field.denumire.setValue(e.target.value)} />
-      {showReg && (
-        <SiSauInput placeholder="Nr. Reg. Comertului" value={field.reg.value} onChange={field.reg.setValue} op={field.reg.op} onOpChange={field.reg.setOp} />
-      )}
-      <SiSauInput placeholder="CUI" value={field.cui.value} onChange={field.cui.setValue} op={field.cui.op} onOpChange={field.cui.setOp} />
-    </div>
-  );
-}
-
-function PFBlock({ field, showPrenume = false, numePlaceholder = "Nume", compact = false }: { field: PFField; showPrenume?: boolean; numePlaceholder?: string; compact?: boolean }) {
-  const wrapCls = compact
-    ? cn("grid gap-1.5", showPrenume ? "md:grid-cols-3" : "md:grid-cols-2")
-    : "space-y-2";
-  return (
-    <div className={wrapCls}>
-      <Input placeholder={numePlaceholder} value={field.nume.value} onChange={(e) => field.nume.setValue(e.target.value)} />
-      {showPrenume && (
-        <SiSauInput placeholder="Prenume" value={field.prenume.value} onChange={field.prenume.setValue} op={field.prenume.op} onOpChange={field.prenume.setOp} />
-      )}
-      <SiSauInput placeholder="CNP" value={field.cnp.value} onChange={field.cnp.setValue} op={field.cnp.op} onOpChange={field.cnp.setOp} />
-    </div>
-  );
-}
-
-function PartyFieldset({
-  legend, tip, onTipChange, pj, pf,
-  pjShowReg = false, pfShowPrenume = false, pfNumePlaceholder = "Nume", compact = false,
-}: {
-  legend: string;
-  tip: "PJ" | "PF";
-  onTipChange: (v: "PJ" | "PF") => void;
-  pj: PJField;
-  pf: PFField;
-  pjShowReg?: boolean;
-  pfShowPrenume?: boolean;
-  pfNumePlaceholder?: string;
-  compact?: boolean;
-}) {
-  return (
-    <fieldset className={cn("rounded-lg border border-border", compact ? "p-2" : "p-3")}>
-      <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{legend}</legend>
-      <PJPFToggle value={tip} onChange={onTipChange} />
-      {tip === "PJ"
-        ? <PJBlock field={pj} showReg={pjShowReg} compact={compact} />
-        : <PFBlock field={pf} showPrenume={pfShowPrenume} numePlaceholder={pfNumePlaceholder} compact={compact} />}
-    </fieldset>
-  );
-}
-
-function VehiculFieldset({ model, sasiu, imatr, cols = 1, compact = false }: { model: TextField; sasiu: SiSauField; imatr: SiSauField; cols?: 1 | 3; compact?: boolean }) {
-  const gridCls = cols === 3 ? "grid gap-2 md:grid-cols-3" : "space-y-2";
-  return (
-    <fieldset className={cn("rounded-lg border border-border", compact ? "p-2" : "p-3", cols === 3 && "md:col-span-2")}>
-      <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vehicul (bun garantat)</legend>
-      <div className={gridCls}>
-        <Input placeholder="Model" value={model.value} onChange={(e) => model.setValue(e.target.value)} />
-        <SiSauInput placeholder="Serie sasiu" value={sasiu.value} onChange={sasiu.setValue} op={sasiu.op} onOpChange={sasiu.setOp} />
-        <SiSauInput placeholder="Nr. inmatriculare" value={imatr.value} onChange={imatr.setValue} op={imatr.op} onOpChange={imatr.setOp} />
-      </div>
-    </fieldset>
-  );
-}
-
-function DestinatieSelect({ field, values }: { field: SiSauField; values: string[] }) {
-  return (
-    <div className="flex gap-2">
-      <select
-        value={field.value}
-        onChange={(e) => field.setValue(e.target.value)}
-        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      >
-        <option value="">-- selecteaza --</option>
-        {values.map((d) => <option key={d} value={d}>{d}</option>)}
-      </select>
-      <SiSauToggle value={field.op} onChange={field.setOp} />
-    </div>
-  );
-}
-
-// ---- Main form ----
-
 export interface RnpmSearchFormProps {
   loading: boolean;
   loadingPhase?: string;
@@ -265,9 +50,10 @@ export interface RnpmSearchFormProps {
   initialType?: RnpmSearchType;
   initialParams?: RnpmSearchParams;
   extraActions?: React.ReactNode;
+  suppressStop?: boolean;
 }
 
-export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onReset, initialType, initialParams, extraActions }: RnpmSearchFormProps) {
+export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onReset, initialType, initialParams, extraActions, suppressStop }: RnpmSearchFormProps) {
   const confirm = useConfirm();
   const [activeType, setActiveType] = useState<RnpmSearchType>(initialType ?? "ipoteci");
   const identificator = useText(initialParams?.identificatorInscriere);
@@ -527,12 +313,14 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
           if (cui) params.creditorPJ.CUI = cui;
         }
       } else {
-        // CreditorPF: fara prenume (parity cu original)
+        // CreditorPF: Nume + Prenume + CNP (paritate cu formularul RNPM).
         const nume = credPF.nume.trimmed();
+        const pren = credPF.prenume.toParam();
         const cnp = credPF.cnp.toParam();
         if (nume || cnp) {
           params.CreditorPF = {};
           if (nume) params.CreditorPF.nume = nume;
+          if (pren) params.CreditorPF.prenume = pren;
           if (cnp) params.CreditorPF.CNP = cnp;
         }
       }
@@ -724,34 +512,36 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
           <PartyFieldset compact legend="Debitor" tip={debTip} onTipChange={setDebTip} pj={debPJ} pf={debPF} pfShowPrenume />
-          <PartyFieldset compact legend="Creditor" tip={credTip} onTipChange={setCredTip} pj={credPJ} pf={credPF} pfNumePlaceholder="Nume complet" />
+          <PartyFieldset compact legend="Creditor" tip={credTip} onTipChange={setCredTip} pj={credPJ} pf={credPF} pfShowPrenume />
           {activeType === "ipoteci" && (
             <fieldset className="rounded-lg border border-border p-2 md:col-span-2">
               <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Destinatia inscrierii</legend>
               <DestinatieSelect field={destinatie} values={DESTINATIE_IPOTECI} />
             </fieldset>
           )}
-          <VehiculFieldset compact model={bunVModel} sasiu={bunVSasiu} imatr={bunVImatr} cols={3} />
+          <VehiculFieldset compact collapsible model={bunVModel} sasiu={bunVSasiu} imatr={bunVImatr} cols={3} />
           {activeType === "ipoteci" && (
-            <>
-              <fieldset className="rounded-lg border border-border p-2">
-                <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bun (alt tip)</legend>
-                <div className="grid gap-1.5">
-                  <select
-                    value={bunACategorie.value}
-                    onChange={(e) => bunACategorie.setValue(e.target.value)}
-                    className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                  >
-                    <option value="">-- selecteaza categorie --</option>
-                    {BUN_ALT_TIP_CATEGORII.map((label, i) => (
-                      <option key={label} value={String(i + 1)}>{label}</option>
-                    ))}
-                  </select>
-                  <SiSauInput placeholder="Identificare bun" value={bunAIdentificare.value} onChange={bunAIdentificare.setValue} op={bunAIdentificare.op} onOpChange={bunAIdentificare.setOp} />
-                </div>
-              </fieldset>
-              <PartyFieldset compact legend="Tert cedat" tip={tertTip} onTipChange={setTertTip} pj={tertJ} pf={tertF} pjShowReg pfShowPrenume />
-            </>
+            <CollapsibleFieldset legend="Bun (alt tip) & Tert cedat" compact colSpan2>
+              <div className="grid gap-3 md:grid-cols-2">
+                <fieldset className="rounded-lg border border-border p-2">
+                  <legend className="ml-[1.125rem] text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bun (alt tip)</legend>
+                  <div className="grid gap-1.5">
+                    <select
+                      value={bunACategorie.value}
+                      onChange={(e) => bunACategorie.setValue(e.target.value)}
+                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                    >
+                      <option value="">-- selecteaza categorie --</option>
+                      {BUN_ALT_TIP_CATEGORII.map((label, i) => (
+                        <option key={label} value={String(i + 1)}>{label}</option>
+                      ))}
+                    </select>
+                    <SiSauInput placeholder="Identificare bun" value={bunAIdentificare.value} onChange={bunAIdentificare.setValue} op={bunAIdentificare.op} onOpChange={bunAIdentificare.setOp} />
+                  </div>
+                </fieldset>
+                <PartyFieldset compact legend="Tert cedat" tip={tertTip} onTipChange={setTertTip} pj={tertJ} pf={tertF} pjShowReg pfShowPrenume />
+              </div>
+            </CollapsibleFieldset>
           )}
         </div>
       )}
@@ -780,7 +570,7 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
               {loadingPhase}
             </span>
           )}
-          {loading && onStop ? (
+          {loading && onStop && !suppressStop ? (
             <Button
               key="rnpm-stop-btn"
               type="button"
@@ -802,62 +592,5 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
         </div>
       </div>
     </form>
-  );
-}
-
-// ---- Low-level helper components ----
-
-function SiSauInput({ placeholder, value, onChange, op, onOpChange }: {
-  placeholder: string;
-  value: string;
-  onChange: (v: string) => void;
-  op: "1" | "2";
-  onOpChange: (v: "1" | "2") => void;
-}) {
-  return (
-    <div className="flex gap-2">
-      <Input placeholder={placeholder} value={value} onChange={(e) => onChange(e.target.value)} />
-      <SiSauToggle value={op} onChange={onOpChange} />
-    </div>
-  );
-}
-
-function SiSauToggle({ value, onChange }: { value: "1" | "2"; onChange: (v: "1" | "2") => void }) {
-  return (
-    <div className="flex shrink-0 items-center gap-1 rounded-md border border-input px-1">
-      {(["1", "2"] as const).map((v) => (
-        <button
-          key={v}
-          type="button"
-          onClick={() => onChange(v)}
-          className={cn(
-            "rounded px-2 py-0.5 text-[11px] font-medium transition-colors",
-            value === v ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent"
-          )}
-        >
-          {v === "1" ? "SI" : "SAU"}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function PJPFToggle({ value, onChange }: { value: "PJ" | "PF"; onChange: (v: "PJ" | "PF") => void }) {
-  return (
-    <div className="mb-2 flex gap-1">
-      {(["PJ", "PF"] as const).map((t) => (
-        <button
-          key={t}
-          type="button"
-          onClick={() => onChange(t)}
-          className={cn(
-            "rounded-md px-3 py-1 text-xs font-medium transition-colors",
-            value === t ? "bg-primary text-primary-foreground" : "bg-muted text-muted-foreground hover:bg-accent"
-          )}
-        >
-          {t === "PJ" ? "Persoana Juridica" : "Persoana Fizica"}
-        </button>
-      ))}
-    </div>
   );
 }

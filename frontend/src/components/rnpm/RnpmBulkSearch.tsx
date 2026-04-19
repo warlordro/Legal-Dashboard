@@ -68,9 +68,10 @@ export interface RnpmBulkSearchProps {
   fallback2CaptchaKey?: string;
   captchaMode?: CaptchaMode;
   onConfigureKey: () => void;
+  onItemSaved?: () => void;
 }
 
-export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, onConfigureKey }: RnpmBulkSearchProps) {
+export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, onConfigureKey, onItemSaved }: RnpmBulkSearchProps) {
   const [type, setType] = useState<RnpmSearchType>("ipoteci");
   const [field, setField] = useState<string>(FIELDS_BY_CATEGORY.ipoteci[0].key);
   const [valuesText, setValuesText] = useState("");
@@ -118,6 +119,9 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
           next[p.index] = p;
           return next;
         });
+        // Un item persistat → avizele sunt deja scrise in SQLite. Notificam parintele
+        // sa refaca fetch-ul in "Baza locala" ca totalul sa urmeze progresul live.
+        if (p.phase === "done" && (p.resultCount ?? 0) > 0) onItemSaved?.();
       }, ctl.signal, captchaProvider, fallback2CaptchaKey, captchaMode);
     } catch (e) {
       if (!(e instanceof Error) || e.name !== "AbortError") {

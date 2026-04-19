@@ -17,6 +17,8 @@ export function useTheme() {
       root.classList.remove("dark");
     }
     localStorage.setItem("theme", theme);
+    // Sync Electron's native title/menu bar. Fire-and-forget — unavailable in web build.
+    window.desktopApi?.setWindowTheme?.(theme).catch(() => {});
   }, [theme]);
 
   const toggle = () => setTheme((t) => (t === "dark" ? "light" : "dark"));

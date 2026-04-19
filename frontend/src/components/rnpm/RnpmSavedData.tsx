@@ -7,24 +7,8 @@ import { cn } from "@/lib/utils";
 import { rnpmGetSaved, rnpmDeleteAviz, rnpmDeleteAvizeBatch } from "@/lib/rnpmApi";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { exportRnpmExcel, exportRnpmPDF } from "@/lib/rnpmExport";
+import { TablePagination } from "@/components/table-pagination";
 import type { RnpmAvizRecord, RnpmSearchType, RnpmDocument, RnpmSavedSortKey, RnpmSavedSortDir } from "@/types/rnpm";
-
-function getPageNumbers(currentPage: number, totalPages: number): (number | "...")[] {
-  const pages: (number | "...")[] = [];
-  if (totalPages <= 7) {
-    for (let i = 1; i <= totalPages; i++) pages.push(i);
-    return pages;
-  }
-  const current = currentPage + 1;
-  pages.push(1);
-  if (current > 3) pages.push("...");
-  for (let i = Math.max(2, current - 1); i <= Math.min(totalPages - 1, current + 1); i++) {
-    pages.push(i);
-  }
-  if (current < totalPages - 2) pages.push("...");
-  pages.push(totalPages);
-  return pages;
-}
 
 function toDocs(records: RnpmAvizRecord[]): { docs: RnpmDocument[]; avizIds: (number | null)[] } {
   const docs: RnpmDocument[] = records.map((a, i) => ({
@@ -385,64 +369,14 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
       )}
 
       {total > 0 && totalPages > 1 && (
-        <div className="flex flex-col items-center gap-2 border-t border-border px-4 py-3">
-          <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={() => setPage(0)} disabled={page === 0 || loading}>«</Button>
-            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.max(0, p - 1))} disabled={page === 0 || loading}>‹ Inapoi</Button>
-            <div className="flex items-center gap-1">
-              {getPageNumbers(page, totalPages).map((p, i) =>
-                p === "..." ? (
-                  <span key={`dots-${i}`} className="px-1 text-sm text-muted-foreground">...</span>
-                ) : (
-                  <Button
-                    key={p}
-                    variant={p === page + 1 ? "default" : "outline"}
-                    size="sm"
-                    className="min-w-[32px]"
-                    onClick={() => setPage((p as number) - 1)}
-                    disabled={loading}
-                  >
-                    {p}
-                  </Button>
-                )
-              )}
-            </div>
-            <Button variant="outline" size="sm" onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))} disabled={page === totalPages - 1 || loading}>Inainte ›</Button>
-            <Button variant="outline" size="sm" onClick={() => setPage(totalPages - 1)} disabled={page === totalPages - 1 || loading}>»</Button>
-            <div className="flex items-center gap-1 ml-2">
-              <span className="text-xs text-muted-foreground">Pagina</span>
-              <input
-                type="number"
-                min={1}
-                max={totalPages}
-                value={page + 1}
-                onChange={(e) => {
-                  const val = parseInt(e.target.value, 10);
-                  if (val >= 1 && val <= totalPages) setPage(val - 1);
-                }}
-                className="w-14 rounded border border-border bg-background px-2 py-1 text-center text-sm"
-              />
-            </div>
-            {loading && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground ml-1" />}
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted-foreground">Pagina {page + 1} din {totalPages}</span>
-            <span className="text-xs text-muted-foreground">|</span>
-            <div className="flex items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">Rezultate pe pagina:</span>
-              {[10, 15, 25, 50, 100].map((size) => (
-                <button
-                  key={size}
-                  onClick={() => { setPageSize(size); setPage(0); }}
-                  disabled={loading}
-                  className={`min-w-[32px] rounded px-2 py-0.5 text-xs border ${pageSize === size ? "bg-primary text-primary-foreground border-primary" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
-                >
-                  {size}
-                </button>
-              ))}
-            </div>
-          </div>
-        </div>
+        <TablePagination
+          page={page}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={setPage}
+          onPageSizeChange={(size) => { setPageSize(size); setPage(0); }}
+          disabled={loading}
+        />
       )}
     </div>
   );
