@@ -1,8 +1,12 @@
 # Legal Dashboard — Status Implementare
 
-**Data:** 2026-04-18 (sesiune 2)
-**Versiune tinta:** v1.0.0
-**Status global:** 10/10 pasi completi. Installer generat: `release/Legal Dashboard Setup 1.0.0.exe` (98 MB).
+**Data:** 2026-04-19 (sesiune 2)
+**Versiune curenta:** v2.0.5
+**Status global:** 10/10 pasi completi. Installer: `release/Legal Dashboard Setup 1.0.0.exe` (98 MB).
+
+**Livrat recent (v2.0.5):** RNPM auto-load pe batch de 25 cu bara de progres; `Sterge baza` elibereaza efectiv spatiul pe disc (VACUUM + WAL checkpoint); user-abort loghea 499 pe backend (separat de erorile 500 reale); tab Bunuri nu mai intepeneste pe avize 1000+ bunuri (content-visibility).
+
+**Livrat anterior (v2.0.4):** split-uri componente (DosareTable, RnpmSearchForm, Sidebar, MetricsPanel, Dashboard, Manual, Changelog, TermeneTable) + polish formular RNPM (Prenume creditor PF, PFBlock grid, zone colapsabile, legend alignment) + bulk stats refresh + RnpmRestoreModal.
 
 **De continuat:** parser-ul RNPM trateaza acum `ipoteci` (default) + `specifice` (shape partiF/partiJ + part3.bunuri). Ramane de extins pentru **fiducii / creante / obligatiuni ipotecare** — dupa captura unor raspunsuri reale (parts 1-4 + istoric). Vezi CHANGELOG.md → "18 Aprilie 2026 (sesiune 2)" pentru pattern-ul de branching.
 

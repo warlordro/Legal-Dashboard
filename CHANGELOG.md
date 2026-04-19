@@ -4,6 +4,169 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 19 Aprilie 2026 (sesiune 2) — Backend god-file split + audit remediation + RNPM UX + dark bar nativ
+
+Sesiune larga: ultimul god-file (backend/src/index.ts) spart in module dedicate; review tehnic intern cu findings inchise si ramase; UX pe paginarea RNPM; sincronizare tema nativa Windows; export PDF pentru changelog.
+
+### Backend — index.ts 1214 → 133 linii
+
+Audit-ul a identificat [backend/src/index.ts](backend/src/index.ts) ca ultimul fisier monolitic mare din proiect: bootstrap + middleware + rate limiting + SOAP + AI + static serving + lifecycle erau toate inghesuite intr-un singur fisier. Splitat in module cu responsabilitate unica; comportamentul observabil este neschimbat (type-check + smoke tests RNPM).
+
+- [backend/src/routes/dosare.ts](backend/src/routes/dosare.ts) (204 linii) — SOAP PortalJust search endpoints.
+- [backend/src/routes/termene.ts](backend/src/routes/termene.ts) (236 linii) — termene by instanta + istoric.
+- [backend/src/routes/ai.ts](backend/src/routes/ai.ts) (182 linii) — multi-provider AI proxy (Claude / OpenAI / Gemini).
+- [backend/src/services/ai.ts](backend/src/services/ai.ts) (219 linii) — provider clients + cost calculators.
+- [backend/src/services/batch-dosare.ts](backend/src/services/batch-dosare.ts) (186 linii) — batch analysis orchestration cu AbortSignal.
+- [backend/src/middleware/rate-limit.ts](backend/src/middleware/rate-limit.ts) (40 linii) — real-IP rate limiter.
+- [backend/src/middleware/static-frontend.ts](backend/src/middleware/static-frontend.ts) (64 linii) — static serving cu path-traversal guard intact (`path.relative` + `decodeURIComponent` defensiv).
+- [backend/src/util/validation.ts](backend/src/util/validation.ts) — validare shared request payloads.
+- `index.ts` ramane doar bootstrap: CSP, CORS, mount routers, loopback-guard, prewarm page cache, daily backup, graceful shutdown.
+
+### Audit remediation (legal-dashboard-review-report.md)
+
+Review tehnic complet orientat spre code quality + security posture + component architecture. Inchise in aceasta iteratie sau confirmate ca deja rezolvate:
+
+- **[INCHIS]** Static path traversal — middleware dedicat cu `path.relative` + `decodeURIComponent` defensiv.
+- **[INCHIS]** Logging RNPM sensibil — [rnpmSearchService.ts:90-101](backend/src/services/rnpmSearchService.ts#L90-L101) logheaza doar type/page/field-names, nu valori PII.
+- **[INCHIS]** TermeneTable selection drift — chei stabile + dedup in `loadMore` cu aceeasi semantica.
+- **[INCHIS]** God-files `DosareTable` + `RnpmSearchForm` + `backend/src/index.ts` — toate splitate (frontend in v2.0.4, backend in v2.0.5).
+
+Ramase active pentru faze ulterioare (documentate in `legal-dashboard-review-report.md`):
+
+- **[P1]** `useApiKey` fallback `localStorage` pentru web mode — de eliminat inainte de tranzitia la web; AI doar cu chei server-side.
+- **[P1]** Dependente vulnerabile — `dompurify` / `jspdf` / `jspdf-autotable` / `xlsx` (faza de dependency hardening separata).
+- **[P2]** Modal standardization — `useDialog` nu e folosit uniform; plan: `DialogShell` comun + `role="dialog"` + `aria-modal`.
+- **[P3]** Hono stack — `hono` + `@hono/node-server` raman in urma fata de advisories curente.
+
+### Electron — title bar + menu bar nativ urmeaza tema app-ului
+
+In dark mode, bara nativa Windows (title bar + meniul Fisier/Editare/Vizualizare/Fereastra/Ajutor) ramanea light chiar si cand app-ul era dark. Fix prin sync explicit catre `nativeTheme` pe fiecare toggle.
+
+- [electron/main.js](electron/main.js) — import `nativeTheme` + `ipcMain.handle("window:setTheme")` care seteaza `nativeTheme.themeSource` in `"dark" | "light" | "system"`.
+- [electron/preload.js](electron/preload.js) — expune `window.desktopApi.setWindowTheme(theme)` via contextBridge; suprafata IPC ramane minima + tipata in [desktop-api.d.ts](frontend/src/types/desktop-api.d.ts).
+- [useTheme hook](frontend/src/hooks/useTheme.ts) — apeleaza `setWindowTheme` in `useEffect`-ul existent, fire-and-forget; pe web (fara `desktopApi`) ramane no-op via `?.`.
+- Windows 11 aplica tema dark pe title bar + meniul nativ dupa prima IPC din renderer (flicker minim la boot).
+
+### Changelog — export PDF
+
+Buton nou „Export PDF" in pagina Changelog genereaza un document portrait A4 cu tot istoricul (versiune + data + subtitlu + sectiuni + bulleturi) pentru lectura in afara aplicatiei.
+
+- [frontend/src/lib/changelog-pdf.ts](frontend/src/lib/changelog-pdf.ts) — jsPDF dynamic import, auto page-break, page numbering, strip diacritics pentru compatibilitate Helvetica.
+- Fisier salvat ca `legal-dashboard-changelog-v<VERSION>.pdf` — `VERSION` din `__APP_VERSION__` (root package.json, single source of truth).
+
+### RNPM — auto-loop „Incarca tot" (pe modelul cautarii de dosare)
+
+Butonul `Incarca mai multe` obliga click per batch pe cautari cu sute/mii de rezultate. Flow inlocuit cu **auto-loop**:
+
+- [RnpmSearch.tsx](frontend/src/pages/RnpmSearch.tsx): state nou `autoLoading: boolean` + `useEffect` care re-declanseaza `loadNextBatch()` dupa fiecare batch completat, pana cand `result.nextRnpmPage === null` sau user apasa stop.
+- Buton single cu contor in text: `Incarca tot (X din TOTAL)` → `Opreste incarcarea (X din TOTAL)` (variant `destructive` in timpul auto-load-ului).
+- **Bara de progres albastra** (h-1.5 w-32) langa buton — `style.width = Math.round((documents.length / total) * 100)%`; animata cu `transition-all duration-300`.
+- **Stop duplicat suprimat** in timpul auto-load-ului — prop nou `suppressStop?: boolean` pe `RnpmSearchForm`, setat de parent la `result != null && result.nextRnpmPage != null`. Stop-ul formularului ramane activ doar in prima faza (inainte ca primele rezultate sa apara).
+- Datele deja aduse raman accesibile in tabel in timpul auto-load-ului (scroll, filtru, click detaliu functioneaza neintrerupt). Abort middle-batch pastreaza documentele deja incarcate.
+
+### RNPM Detalii — tab Bunuri: lag eliminat pentru avize cu 1000+ items
+
+Pe avize mari (test real: 1730 bunuri pe un singur aviz), primul click pe tabul Bunuri bloca rendererul ~800ms. Fix cu 3 linii CSS, fara `@tanstack/react-virtual` sau alta dependenta.
+
+- [RnpmDetailModal.tsx](frontend/src/components/rnpm/RnpmDetailModal.tsx) — pe fiecare card bun: `style={{ contentVisibility: "auto", containIntrinsicSize: "auto 150px" }}`.
+- Chromium decide singur ce iese din viewport si **skip-uieste rendering-ul**; click-to-render din ~800ms → imperceptibil. Singurul cost: un pop-in scurt la flick-scroll foarte rapid prin mii de iteme — nu e flow real.
+- Memoria proiectului actualizata (`project_legal_dashboard_large_list_render.md`) sa indice **content-visibility** ca default pentru liste mari viitoare in renderer.
+
+### Sterge baza — acum elibereaza efectiv spatiul pe disc
+
+**Simptom:** dupa `Sterge baza` contoarele aratau 0 avize, dar fisierul `.db` ramanea la ~112 MB.
+
+**Cauza:** SQLite `DELETE` marcheaza doar pagini libere intern — nu returneaza spatiul pe disc fara `VACUUM`. `PRAGMA wal_checkpoint(TRUNCATE)` e necesar pentru a trunchia si fisierul `-wal`.
+
+**Fix** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)):
+
+```ts
+rnpmRouter.delete("/saved/all", (c) => {
+  const count = deleteAllAvize();
+  try { compactDb(); } catch (e) { console.warn("[rnpm] compact after delete-all failed:", e); }
+  return c.json({ deleted: count });
+});
+```
+
+- `compactDb()` e implementat in repositories ca `db.exec("VACUUM"); db.pragma("wal_checkpoint(TRUNCATE)")`.
+- Best-effort: esecul `VACUUM` logheaza warning (ex. daca rulează alta tranzactie), dar stergerea randurilor nu e blocata.
+- Panoul `Info baza locala` reflecta corect eliberarea imediat dupa stergere.
+
+### Observabilitate — HTTP 499 pentru user-abort pe RNPM search
+
+Anterior, abortul clientului (buton Stop / Opreste incarcarea) rezulta in log 500 pe backend — indistinct de erorile reale (captcha fail, upstream down, parse fail). Schimbat la **499 Client Closed Request** (convenția nginx, non-standard).
+
+**Fix** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)):
+
+```ts
+} catch (e) {
+  if (e instanceof DOMException && e.name === "AbortError") {
+    console.log("[rnpm/search] aborted by client");
+    // 499 = Client Closed Request. Hono's ContentfulStatusCode exclude 499,
+    // deci emit direct prin Response pentru a pastra status-ul.
+    return new Response(JSON.stringify({ error: "Cautare oprita" }), {
+      status: 499,
+      headers: { "Content-Type": "application/json" },
+    });
+  }
+  ...
+}
+```
+
+- `console.log` ramane pentru observabilitate backend.
+- UI-ul nu vede `499`: fetch-ul client se arunca deja cu `AbortError` inainte de primirea raspunsului, iar `isAbort(e) || ctl.signal.aborted` suprima orice UI de eroare.
+- Metricile 500 devin curate — reflecta doar esec real.
+
+### Verificare
+
+- `npx tsc --noEmit` — clean pe ambele workspace-uri.
+- Manual in Electron: cautari 200+ rezultate cu auto-load, Stop la mijloc + reluare, `Sterge baza` cu observare dimensiune fisier `.db` inainte/dupa, abort middle-batch (backend scrie 499 in logs, UI ramane curat).
+
+---
+
+## 19 Aprilie 2026 — Refactor structural major + polish formular RNPM
+
+Sesiune dedicata reducerii complexitatii componentelor mari (pre-conditie pentru web transition + testabilitate) si rafinarii formularului de cautare RNPM.
+
+### Splituri de componente
+
+Componentele care crescusera peste 500-800 linii prin acumulare au fost sparte in parti dedicate cu responsabilitate unica:
+
+- **DosareTable** (1063 → ~450 linii): extrase `dosare-ai-config.ts` (AI_MODELS, JUDGE_MODELS_LIST, PROVIDER_LABELS, model cost), `dosare-table-highlight.tsx` (highlight helpers pentru AI output), `dosare-table-helpers.ts` (utilitare generice), `dosare-ai-analysis-panel.tsx` (panoul single + multi-agent cu sanitizare DOMPurify). Paginarea reutilizeaza `table-pagination.tsx`.
+- **RnpmSearchForm** (863 → ~590 linii): extrase `rnpm-form-constants.ts` (CATEGORIES, TIP_AVIZ_BY_CATEGORY, DESTINATIE_IPOTECI/INSCRIERII, BUN_ALT_TIP_CATEGORII), `rnpm-form-hooks.ts` (useText, useSiSauField, usePJField, usePFField), `rnpm-form-fields.tsx` (SiSauToggle, PJPFToggle, PJBlock, PFBlock, PartyFieldset, VehiculFieldset, DestinatieSelect, CollapsibleFieldset).
+- **Sidebar**: extrase `sidebar-footer.tsx` si `sidebar-history-entry.tsx`.
+- **MetricsPanel**: extrase `metrics-panel-parts.tsx` cu sub-componentele de rendering.
+- **Dashboard**: extrase `dashboard-modals.tsx` si `dashboard-summary-cards.tsx`.
+- **Manual**: continutul (mii de linii de text) extras in `manual-content.tsx`.
+- **Changelog**: datele (toate version entries) extrase in `data/changelog-entries.tsx`; pagina `Changelog.tsx` pastreaza doar render layer.
+- **TermeneTable**: row-ul extins extras in `termene-table-detail-row.tsx`.
+
+**Motivatie:** testabilitate scazuta, review greu, risc mare de regresii pe fisiere peste 1000 linii. Extractia pastreaza acelasi comportament observabil (verificat in browser) si deblocheaza rescrieri incrementale viitoare.
+
+### RNPM — formular search polish
+
+Formularul de cautare RNPM a fost ajustat pentru paritate cu site-ul oficial si pentru a reduce clutter-ul vizual:
+
+- **Creditor PF** primeste camp **Prenume** (exista deja la Debitor PF; paritate completa cu formularul RNPM).
+- **PFBlock** rearanjat cu grid `1fr_1fr_auto`: rand 1 = Nume + Prenume + toggle SI/SAU, rand 2 = CNP (full width col 1) + toggle SI/SAU sub primul. Toggle-urile SI/SAU stivuite vertical la dreapta (aestetica + CNP vizibil pe toate 13 cifre).
+- **Vehicul (bun garantat)** si **Bun (alt tip) & Tert cedat** devin zone colapsabile (nou `CollapsibleFieldset` cu chevron + `defaultOpen=false`) — reduc inaltimea formularului la scroll initial, fara a pierde campurile.
+- **Legend alignment fix**: in fieldset-uri imbricate in `CollapsibleFieldset`, folosim `ml-*` (margin-left) pe `<legend>` in loc de `pl-*` (padding-left) — `pl-*` lasa un stub de border vizibil la stanga (aparent "discontinuu"), `ml-*` muta legend-ul intreg si border-ul ramane continuu pana la text.
+
+### RNPM — bulk stats refresh
+
+`RnpmBulkSearch` primeste prop `onItemSaved?: () => void` (invocat la fiecare item cu `phase === "done" && resultCount > 0`). Parent-ul `RnpmSearch.tsx` incrementeaza `savedRefreshKey` → `RnpmSavedStats` re-fetch-uieste contoarele. Inainte, contoarele nu se actualizau decat dupa delete manual.
+
+### Adaugiri
+
+- `RnpmRestoreModal.tsx` — modal dedicat pentru restore backup DB (listing + confirm destructiv); a absorbit logica care era inlinata in `RnpmSavedStats`.
+
+### Verificare
+
+- `npx tsc --noEmit` — clean pe ambele workspace-uri.
+- Verificare manuala in Electron: toate categoriile RNPM (ipoteci/fiducii/specifice/creante/obligatiuni), toggle PJ/PF, toggle SI/SAU, submit + stop + reset, alignment zone colapsabile.
+
+---
+
 ## 18 Aprilie 2026 (sesiune 3) — Fix filtre RNPM: `activ` semantic + `tipInscriere` index
 
 Doua bug-uri la cautarile RNPM descoperite azi:

@@ -13,23 +13,30 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 legal-dashboard/
 ├── frontend/          # React 19 + TypeScript + Vite + custom CSS
 │   └── src/
-│       ├── pages/     # Dashboard, Dosare, Termene, RNPM, Changelog, Manual, Setari
-│       ├── components/# DosareTable, TermeneTable, rnpm/*, chair-report, ui/
-│       ├── hooks/     # useApiKey (safeStorage IPC), useFontSize, useTheme
-│       └── lib/       # api.ts, export.ts (XLSX + PDF), utils.ts
+│       ├── pages/     # Dashboard, Dosare, Termene, RnpmSearch, Changelog, Manual
+│       ├── components/# DosareTable, TermeneTable, Sidebar, MetricsPanel, CalendarView,
+│       │              # DosarModal, InstitutieSelect, SearchForm, TermeneMetrics, rnpm/*, ui/
+│       ├── hooks/     # useApiKey (safeStorage IPC), useDialog, useFontSize,
+│       │              # useRnpmHistory, useSearchHistory, useTheme
+│       ├── lib/       # api.ts, rnpmApi.ts, export.ts, rnpmExport.ts,
+│       │              # chart-colors.ts, institutii.ts, utils.ts
+│       └── types/     # desktop-api.d.ts, index.ts, rnpm.ts
 ├── backend/           # Node.js 22+ + Hono (port 3002)
 │   ├── tsconfig.json  # strict: true, noEmit (type-check only)
 │   └── src/
 │       ├── index.ts   # API routes, AI endpoint, SSE load-more, rate limiter, static serving
-│       ├── routes/    # rnpm.ts (search + bulk + baza locala + export)
+│       ├── routes/    # rnpm.ts (search + bulk + baza locala + export + compact)
 │       ├── services/  # rnpmSearchService, captchaSolver, rnpmClient
-│       ├── db/        # schema.ts, avizRepository.ts, searchRepository.ts (owner_id everywhere)
+│       ├── db/        # schema.ts, avizRepository.ts, searchRepository.ts,
+│       │              # backup.ts (owner_id everywhere)
+│       ├── util/      # textNormalize (SQLite rnpm_norm diacritic fold)
 │       ├── soap.ts    # SOAP client pentru PortalJust
 │       └── intervals.ts
 ├── electron/          # Electron shell
 │   ├── main.js        # Single-instance lock, CSP, safeStorage IPC, crash handlers
 │   └── preload.js     # Context bridge (doar safeStorage, IPC timeout 10s)
-├── scripts/build.js   # esbuild backend -> CJS, copy frontend dist
+├── scripts/           # build.js (esbuild backend → CJS + copy frontend),
+│                      # build-server.js (ZIP deploy), generate-icon.mjs
 ├── biome.json         # Lint + format config
 ├── README.md          # Setup pentru developeri noi
 └── SECURITY.md        # Threat model + protectii
@@ -80,10 +87,13 @@ legal-dashboard/
 ## Web-readiness bridge (prep pentru deploy server)
 - Repository-only DB access — raw SQL doar in `backend/src/db/**`
 - `owner_id` column pe toate tabelele (DEFAULT `'local'`)
-- Pagination cursor-based pe listari
+- Pagination offset-based (`{ page, pageSize, total }`) pe listari principale
 - Zero sync fs in handlers (async `fs/promises` everywhere)
 - Opt-in `clientRequestId` dedup pe mutations (idempotency)
-- No singleton stat tied to user activity
+- No singleton state tied to user activity
+
+## Roadmap
+Roadmap de hardening in [HARDENING.md](HARDENING.md) — fazele 1-6 prioritizate (CI foundation → security → crash visibility → data integrity → compliance → release engineering). Items filtrate ca overkill / deferred sunt documentate la final; nu le re-adauga fara reevaluare.
 
 ## Nota Importanta Build
 - Backend-ul e compilat ca CJS de esbuild. `import.meta.url` nu functioneaza in CJS.
