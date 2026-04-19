@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.0.5** (19 Aprilie 2026)
+- **Versiune curenta**: **v2.0.6** (19 Aprilie 2026)
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
@@ -573,6 +573,7 @@ Right-click contextual: Copiaza (daca exista selectie), Lipeste (daca e editabil
 - **v2.0.2**: safeStorage OS keystore, single-instance lock, `shell.openExternal` whitelist strict, nativeTheme sync title bar.
 - **v2.0.3**: daily backup SQLite, HTTP 499 abort, formula injection fix, WAL truncate boot, log sanitization RNPM.
 - **v2.0.5**: backend god-file split, audit remediation internal (static traversal / TermeneTable selection drift / DosareTable + RnpmSearchForm splits — toate inchise).
+- **v2.0.6**: SOAP parser decodeaza entitati XML in `parseDosar` (corectitudine user-facing); CodeRabbit findings 19.04.2026 consolidate in HARDENING Faza 7 (4 Critical blockers pre-web-deploy + 6 Important + 6 suggestions).
 
 ### Consideratii Deploy Server-Based (backlog)
 
@@ -755,8 +756,9 @@ Parsate din enumerarea WSDL a Ministerului Justitiei, grupate in 7 categorii:
 | v2.0.2 | 17.04.2026 | Audit securitate: safeStorage OS keystore, single-instance lock, shell.openExternal whitelist strict, nativeTheme sync title bar, CSP updates |
 | v2.0.3 | 18.04.2026 | Performanta RNPM + backup zilnic online (retain 7) + restore UI + dashboard persistent + HTTP 499 abort + formula injection fix + WAL truncate boot |
 | v2.0.4 | 19.04.2026 | Refactor structural major (DosareTable + RnpmSearchForm splits) + polish formular RNPM |
-| **v2.0.5** | **19.04.2026** | **Backend god-file split (index.ts 1214 → 133 linii, routes/services/middleware/util) + audit remediation intern + RNPM UX rafinari + export PDF changelog cu design colorat + title bar nativ dark sync** |
+| v2.0.5 | 19.04.2026 | Backend god-file split (index.ts 1214 → 133 linii, routes/services/middleware/util) + audit remediation intern + RNPM UX rafinari + export PDF changelog cu design colorat + title bar nativ dark sync |
+| **v2.0.6** | **19.04.2026** | **SOAP XML entity decoding in parseDosar (correctness user-facing: nume parti / obiect / solutie) + consolidare CodeRabbit findings 19.04.2026 in HARDENING Faza 7 (blockers web-deploy + pre-monitorizare auto-sync)** |
 
 ---
 
-*Ultima actualizare: 19 Aprilie 2026 — v2.0.5*
+*Ultima actualizare: 19 Aprilie 2026 — v2.0.6*

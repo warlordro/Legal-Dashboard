@@ -4,6 +4,60 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 19 Aprilie 2026 (sesiune 3) — v2.0.6 — SOAP XML entity decoding + consolidare CodeRabbit findings
+
+Fix de corectitudine pe parser-ul SOAP PortalJust + consolidarea auditului CodeRabbit 19.04.2026 in roadmap-ul de hardening. Nimic nou in feature set — doar bani ficti mai curati pe display + un punch-list explicit pentru tranzitia web si modulul de monitorizare.
+
+### SOAP parser — decodare entitati XML (I3 din audit CodeRabbit)
+
+**Simptom:** nume parti cu `&` / `'` / `"` (ex. `S.C. X &amp; Co. SRL`, `John&apos;s Pub`) apareau cu literal `&amp;` / `&apos;` in tabele, modal detalii, export XLSX si promptul AI. `DOMPurify` neutraliza orice risc de injectie, deci nu e vulnerabilitate — dar output-ul e vizibil gresit.
+
+**Cauza:** [backend/src/soap.ts](backend/src/soap.ts) foloseste regex simplu pentru `extractFirst` / `extractAll`, fara decoder pentru entitati XML. PortalJust (corect) escape-eaza `&`, `<`, `>`, `"`, `'` in text nodes — aplicatia le returna raw.
+
+**Fix:**
+
+- Helper nou `decodeXmlEntities(s)` exportat din `soap.ts` — decodeaza in ordine: numeric hex (`&#x41;`), numeric zecimal (`&#65;`), named (`&lt;`, `&gt;`, `&quot;`, `&apos;`) si **`&amp;` ultimul** ca sa nu dublu-decodeze secvente de forma `&amp;lt;` in `<`.
+- **Aplicat la leaf fields** in `parseDosar`, nu la nivelul `extractFirst` / `extractAll`. Motiv: extractoarele pot returna XML inner cu tag-uri nested (`<DosarParte>` in `<parti>`); decoderea prematura ar risca sa transforme text legal cu `&lt;` in tag-uri fantoma. Campuri decodate: `obiect`, `institutie`, `departament`, `categorieCaz`, `stadiuProcesual`, `parti[].nume`, `parti[].calitateParte`, `sedinte[].solutie`, `sedinte[].solutieSumar`, `sedinte[].complet`, `sedinte[].documentSedinta`.
+- Campuri cu format strict (`numar`, `data`, `ora`, `numarDocument`, `dataPronuntare`) raman ne-decodate — nu contin entitati prin natura datelor.
+- **Teste noi** ([backend/src/soap.test.ts](backend/src/soap.test.ts)): 4 unit tests pentru `decodeXmlEntities` (named / numeric / invariant „`&amp;` nu dublu-decodeaza" / passthrough pe text fara entitati) + 1 integration test pe `parseDosar` cu payload mixt (entitati in nume, obiect si solutie). Total: **24 → 29 teste verde**.
+
+### HARDENING — Faza 7: consolidare CodeRabbit findings 19.04.2026
+
+Auditul CodeRabbit a scos 4 Critical + 7 Important. Fiecare verificat manual vs codul sursa (fisier:linie concrete), apoi sintetizat in [HARDENING.md](HARDENING.md) Faza 7 ca punch-list actionabil. Fisierul intermediar `CODERABBIT-FINDINGS-2026-04-19.md` a fost eliminat — context-ul necesar e self-contained in fiecare bullet din Faza 7.
+
+**Blockers pentru web deploy** (~3h total, fix inainte de orice `LEGAL_DASHBOARD_ALLOW_REMOTE=1` sau Docker push):
+
+- **C1** — `GET /api/dosare` + `/api/termene` ruleaza `Promise.all` peste `institutii[]` fara cap `MAX_SOAP_FANOUT`. Doar `MAX_INSTITUTII=50` e aplicat; guard-ul exista deja in SSE `/load-more`, trebuie oglindit pe GET. Amplificator SOAP outbound + memory pressure in web mode.
+- **C2** — rate limiter foloseste string `"unknown"` ca bucket cand `getConnInfo(c).remote.address` e falsy. In web mode orice client fara IP resolvable consuma quota partajata. Fix: HTTP 503 fail-closed.
+- **C3** — Dockerfile ruleaza ca root + `COPY .env* ./` baked in layers (secrete persistente in imagine). Fix: `USER app` non-root + `.dockerignore` cu `.env*` + inject env la runtime.
+- **C4** — docker-compose bind-uieste `3001:3001` pe toate interfete-le dar backend-ul forteaza `127.0.0.1` fara `LEGAL_DASHBOARD_ALLOW_REMOTE=1` → port forward se termina in container loopback, service invizibil silent. In plus port-mismatch cu backend default `LEGAL_DASHBOARD_PORT=3002`.
+- **I2** — CORS allow-list are `localhost:5173/4173` fara gate pe `NODE_ENV`. In build productie un atacator local pe host-ul deploy poate emite request-uri cross-origin cu credentials.
+
+**Pre-monitorizare Watched Dosare** (~4h, inainte de auto-sync multi-dosar):
+
+- **I4** — splash „Optimizare baza de date..." inainte de VACUUM sincron pe migration path `descriere-dedup` (azi blocheaza Electron UI 30-90s fara feedback la primul boot post-upgrade).
+- **I5** — `searchRepository.saveSearch` accepta orice string pentru `searchType`. Validare enum la repository boundary.
+- **I6** — `rateLimitMap` cleanup doar la size>1000. Trebuie mutat pe `setInterval(60_000).unref()`.
+- **I7** — `let body: any` in ai.ts handlers (singurul `any` ramas in backend) → `unknown` + narrowing via `validateAiBody` tipat.
+
+**Suggestions opportunistic** (~2h): `json: any` in api.ts, README GPU flag, log orphan solve-id captcha, comentariu User-Agent RNPM, pinning test validateParamsDepth, debounce `cleanupOrphanDescrieri`.
+
+**Rejected ca false positive** (verificat vs cod):
+
+- **I1** — CodeRabbit a raportat dublu-apel `validateAiBody` in `/analyze-multi`. Citit direct [backend/src/routes/ai.ts:102-109](backend/src/routes/ai.ts): un singur apel la L106; L102-103 sunt guard-uri existence (`!body || typeof body !== "object"` si `!body.dosar`), nu re-validari. Not actionable.
+
+### De ce aceasta versiune
+
+Doua borne apropiate: **tranzitia web** (cand ridicam `LEGAL_DASHBOARD_ALLOW_REMOTE` sau distribuim Docker image) si **modulul Watched Dosare cu auto-sync** (Pilon B din roadmap). Ambele reuseaza codul atacat de findings — e mai ieftin sa ai punch-list-ul scris inainte de implementare decat sa-l inventezi la momentul critic. I3 s-a facut azi pentru ca e corectitudine vizibila la user (~30 min), restul raman in `[ ]` pentru sprint dedicat.
+
+### Verificare
+
+- `npx tsc --noEmit -p backend/tsconfig.json` — 0 erori.
+- `npm test --workspace=backend` — **29/29 verde** (24 existente + 5 noi pentru XML entities).
+- Manual pe payload SOAP real cu `&amp;` in denumire parte: render corect in `DosareTable`, modal detalii, export XLSX, prompt AI.
+
+---
+
 ## 19 Aprilie 2026 (sesiune 2) — Backend god-file split + audit remediation + RNPM UX + dark bar nativ
 
 Sesiune larga: ultimul god-file (backend/src/index.ts) spart in module dedicate; review tehnic intern cu findings inchise si ramase; UX pe paginarea RNPM; sincronizare tema nativa Windows; export PDF pentru changelog.

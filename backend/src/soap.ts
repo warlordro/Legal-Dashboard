@@ -80,6 +80,22 @@ async function callSoap(action: string, body: string): Promise<string> {
   return text;
 }
 
+// Decode XML entities in text content (leaf fields only — not applied inside
+// extractFirst/extractAll, which may return inner XML that downstream callers
+// re-parse for nested tags).
+// Order matters: numeric refs first, then named refs, &amp; LAST so we don't
+// double-decode sequences like "&amp;lt;" → "<".
+export function decodeXmlEntities(s: string): string {
+  return s
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'")
+    .replace(/&amp;/g, "&");
+}
+
 // XML parsing helpers
 // Match exact tag names: require \s or > after tag name, exclude self-closing tags
 // Exported for unit tests; not part of the route-level public API.
@@ -109,18 +125,18 @@ export function parseDosar(xml: string) {
   // Extract nested sections first
   const partiXml = extractFirst(xml, "parti");
   const parti = extractAll(partiXml, "DosarParte").map((p) => ({
-    nume: extractFirst(p, "nume"),
-    calitateParte: extractFirst(p, "calitateParte"),
+    nume: decodeXmlEntities(extractFirst(p, "nume")),
+    calitateParte: decodeXmlEntities(extractFirst(p, "calitateParte")),
   }));
 
   const sedinteXml = extractFirst(xml, "sedinte");
   const sedinte = extractAll(sedinteXml, "DosarSedinta").map((s) => ({
-    complet: extractFirst(s, "complet"),
+    complet: decodeXmlEntities(extractFirst(s, "complet")),
     data: extractFirst(s, "data"),
     ora: extractFirst(s, "ora"),
-    solutie: extractFirst(s, "solutie"),
-    solutieSumar: extractFirst(s, "solutieSumar"),
-    documentSedinta: extractFirst(s, "documentSedinta"),
+    solutie: decodeXmlEntities(extractFirst(s, "solutie")),
+    solutieSumar: decodeXmlEntities(extractFirst(s, "solutieSumar")),
+    documentSedinta: decodeXmlEntities(extractFirst(s, "documentSedinta")),
     numarDocument: extractFirst(s, "numarDocument"),
     dataPronuntare: extractFirst(s, "dataPronuntare"),
   }));
@@ -134,11 +150,11 @@ export function parseDosar(xml: string) {
   return {
     numar: extractFirst(flat, "numar"),
     data: extractFirst(flat, "data"),
-    institutie: extractFirst(flat, "institutie"),
-    departament: extractFirst(flat, "departament"),
-    categorieCaz: extractFirst(flat, "categorieCazNume") || extractFirst(flat, "categorieCaz"),
-    stadiuProcesual: extractFirst(flat, "stadiuProcesualNume") || extractFirst(flat, "stadiuProcesual"),
-    obiect: extractFirst(flat, "obiect"),
+    institutie: decodeXmlEntities(extractFirst(flat, "institutie")),
+    departament: decodeXmlEntities(extractFirst(flat, "departament")),
+    categorieCaz: decodeXmlEntities(extractFirst(flat, "categorieCazNume") || extractFirst(flat, "categorieCaz")),
+    stadiuProcesual: decodeXmlEntities(extractFirst(flat, "stadiuProcesualNume") || extractFirst(flat, "stadiuProcesual")),
+    obiect: decodeXmlEntities(extractFirst(flat, "obiect")),
     parti,
     sedinte,
   };

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { extractFirst, extractAll, parseDosar, toLegacyDiacritics } from "./soap.ts";
+import { decodeXmlEntities, extractFirst, extractAll, parseDosar, toLegacyDiacritics } from "./soap.ts";
 
 describe("toLegacyDiacritics", () => {
   it("converts modern Romanian comma-below to cedilla", () => {
@@ -116,5 +116,54 @@ describe("parseDosar", () => {
     const d = parseDosar(minimal);
     expect(d.parti).toEqual([]);
     expect(d.sedinte).toEqual([]);
+  });
+
+  it("decodes XML entities in party names and text fields", () => {
+    const withEntities = `
+      <Dosar>
+        <obiect>Litigiu &quot;comercial&quot; &amp; fiscal</obiect>
+        <parti>
+          <DosarParte>
+            <nume>S.C. X &amp; Co. SRL</nume>
+            <calitateParte>Reclamant</calitateParte>
+          </DosarParte>
+        </parti>
+        <sedinte>
+          <DosarSedinta>
+            <solutie>John&apos;s Pub admis</solutie>
+          </DosarSedinta>
+        </sedinte>
+      </Dosar>`;
+    const d = parseDosar(withEntities);
+    expect(d.obiect).toBe('Litigiu "comercial" & fiscal');
+    expect(d.parti[0].nume).toBe("S.C. X & Co. SRL");
+    expect(d.sedinte[0].solutie).toBe("John's Pub admis");
+  });
+});
+
+describe("decodeXmlEntities", () => {
+  it("decodes the five standard named entities", () => {
+    expect(decodeXmlEntities("a &amp; b")).toBe("a & b");
+    expect(decodeXmlEntities("&lt;x&gt;")).toBe("<x>");
+    expect(decodeXmlEntities("&quot;q&quot;")).toBe('"q"');
+    expect(decodeXmlEntities("John&apos;s")).toBe("John's");
+  });
+
+  it("decodes decimal and hex numeric references", () => {
+    expect(decodeXmlEntities("&#65;&#66;")).toBe("AB");
+    expect(decodeXmlEntities("&#x41;&#x42;")).toBe("AB");
+    // Romanian cedilla Ș (U+015E)
+    expect(decodeXmlEntities("&#350;")).toBe("\u015E");
+  });
+
+  it("does not double-decode &amp;lt; → '<'", () => {
+    // &amp; decodes last, so "&amp;lt;" must remain "&lt;" (literal text
+    // "less-than entity"), not become "<"
+    expect(decodeXmlEntities("&amp;lt;")).toBe("&lt;");
+  });
+
+  it("leaves text without entities untouched", () => {
+    expect(decodeXmlEntities("Popescu Ionescu 2024")).toBe("Popescu Ionescu 2024");
+    expect(decodeXmlEntities("")).toBe("");
   });
 });

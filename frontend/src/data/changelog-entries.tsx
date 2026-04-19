@@ -18,6 +18,43 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.0.6",
+    date: "19 Aprilie 2026",
+    subtitle: "SOAP XML entity decoding + consolidare CodeRabbit findings in HARDENING Faza 7",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "SOAP parser — decodare entitati XML (correctness user-facing)",
+        content:
+          "Numele partilor si campurile text venite de la PortalJust (ex. 'S.C. X & Co. SRL' sau nume cu apostrof) aparea cu literal &amp; / &apos; in tabele, modal detalii, export XLSX si promptul AI. Cauza: parser-ul regex din backend/src/soap.ts nu decoda entitatile XML. DOMPurify neutraliza orice risc de injectie, deci nu a fost vulnerabilitate — doar output vizibil gresit. Fix aplicat la leaf fields in parseDosar (nu la extractFirst/extractAll — evita tag-uri fantoma in XML nested).",
+        bullets: [
+          "Helper nou decodeXmlEntities(s) — ordine: numeric hex → numeric zecimal → named (lt/gt/quot/apos) → amp LAST (sa nu dublu-decodeze &amp;lt;)",
+          "Campuri decodate: obiect, institutie, departament, categorieCaz, stadiuProcesual, parti[].nume, parti[].calitateParte, sedinte[].solutie/solutieSumar/complet/documentSedinta",
+          "Campuri ne-atinse (format strict): numar, data, ora, numarDocument, dataPronuntare — nu contin entitati prin natura datelor",
+          "5 teste noi (4 unit + 1 integration parseDosar): total 24 → 29 verde",
+        ],
+      },
+      {
+        title: "HARDENING — Faza 7: consolidare CodeRabbit findings 19.04.2026",
+        content:
+          "Auditul CodeRabbit a scos 4 Critical + 7 Important. Fiecare verificat manual vs cod (fisier:linie concrete), sintetizat in HARDENING.md Faza 7 ca punch-list actionabil. Un finding (I1, dublu validateAiBody in ai.ts) verificat direct si respins ca false positive — un singur apel exista la L106, liniile precedente sunt existence guards. Fisierul intermediar CODERABBIT-FINDINGS-2026-04-19.md eliminat; context-ul ramane self-contained in Faza 7.",
+        bullets: [
+          "Blockers web-deploy (~3h, inainte de ALLOW_REMOTE sau Docker push): C1 SOAP fanout cap pe GET /api/dosare+termene · C2 rate-limit fail-closed pe IP irezolvabil · C3 Dockerfile non-root + no .env baked · C4 docker-compose loopback bind + port-fix · I2 CORS gate pe NODE_ENV",
+          "Pre-monitorizare Watched Dosare (~4h): I4 splash pre-VACUUM · I5 enum validation pe searchType · I6 rateLimitMap cleanup pe interval unref · I7 any → unknown + narrowing in ai.ts",
+          "Suggestions opportunistic (~2h): json:any in api.ts, README GPU flag, log orphan solve-id captcha, comentariu User-Agent RNPM, pinning test validateParamsDepth, debounce cleanupOrphanDescrieri",
+          "Done azi (I3): decodeXmlEntities — detaliat in sectiunea de mai sus",
+        ],
+      },
+      {
+        title: "De ce aceasta versiune acum",
+        content:
+          "Doua borne apropiate: tranzitia web (cand ridicam LEGAL_DASHBOARD_ALLOW_REMOTE sau distribuim Docker image) si modulul Watched Dosare cu auto-sync (Pilon B din roadmap). Ambele reuseaza exact codul atins de findings — e mai ieftin sa ai punch-list-ul scris inainte de implementare decat sa-l inventezi la momentul critic.",
+      },
+    ],
+  },
+  {
     version: "v2.0.5",
     date: "19 Aprilie 2026",
     subtitle: "Backend god-file split + audit remediation + RNPM UX + dark bar nativ",
