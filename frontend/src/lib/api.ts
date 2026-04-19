@@ -180,7 +180,8 @@ export const api = {
       dosar: Dosar,
       analysts: [string, string],
       judge: string,
-      apiKeys?: { anthropic?: string; openai?: string; google?: string }
+      apiKeys?: { anthropic?: string; openai?: string; google?: string },
+      onPhase?: (phase: "analyst1_done" | "analyst2_done" | "judge_started") => void,
     ): Promise<{
       analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
       judge: { model: string; text: string };
@@ -188,13 +189,50 @@ export const api = {
     }> => {
       const res = await fetch(`${BASE}/ai/analyze-multi`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({ dosar, analysts, judge, apiKeys }),
         signal: AbortSignal.timeout(300000), // 5 min — multi-agent has 3 sequential AI calls
       });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Eroare AI Multi");
-      return json;
+      if (!res.ok) {
+        // Validation/size/rate-limit errors still come back as JSON with a non-2xx status.
+        const errJson = await res.json().catch(() => ({ error: "Eroare AI Multi" }));
+        throw new Error(errJson.error ?? "Eroare AI Multi");
+      }
+      if (!res.body) throw new Error("Raspuns streaming indisponibil");
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let final: {
+        analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
+        judge: { model: string; text: string };
+        final: string;
+      } | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          if (!chunk.trim()) continue;
+          let eventName = "";
+          let dataStr = "";
+          for (const line of chunk.split("\n")) {
+            if (line.startsWith("event:")) eventName = line.slice(6).trim();
+            else if (line.startsWith("data:")) dataStr += line.slice(5).trim();
+          }
+          if (!eventName || !dataStr) continue;
+          const data = JSON.parse(dataStr);
+          if (eventName === "done") final = data.result;
+          else if (eventName === "error") throw new Error(data.error ?? "Eroare AI Multi");
+          else if (eventName === "analyst_done") onPhase?.(data.which === 1 ? "analyst1_done" : "analyst2_done");
+          else if (eventName === "judge_started") onPhase?.("judge_started");
+        }
+      }
+      if (!final) throw new Error("Analiza nu s-a incheiat");
+      return final;
     },
   },
 };

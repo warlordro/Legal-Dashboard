@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage } = require("electron");
+const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage, nativeTheme } = require("electron");
 const path = require("path");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 
@@ -213,6 +213,23 @@ function registerSafeStorageIpc() {
       return null;
     }
   });
+
+  // Sync renderer theme toggle with the native Windows title bar overlay.
+  // Without this, the custom title bar overlay stays frozen at its creation-time color.
+  ipcMain.handle("window:setTheme", (_event, theme) => {
+    if (theme !== "dark" && theme !== "light" && theme !== "system") return;
+    nativeTheme.themeSource = theme;
+    const effective = theme === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : theme;
+    // Match Tailwind `bg-background` tokens: hsl(222 47% 7%) dark / hsl(210 20% 98%) light.
+    const overlay = effective === "dark"
+      ? { color: "#090E1A", symbolColor: "#E5E7EB", height: 32 }
+      : { color: "#F8FAFC", symbolColor: "#1E293B", height: 32 };
+    try {
+      mainWindow?.setTitleBarOverlay?.(overlay);
+    } catch (e) {
+      console.warn("[theme] setTitleBarOverlay failed:", e?.message || e);
+    }
+  });
 }
 
 function showStartupErrorAndQuit(err) {
@@ -234,6 +251,19 @@ function createWindow() {
     minHeight: 600,
     title: "Legal Dashboard",
     icon: path.join(__dirname, "..", "build", process.platform === "darwin" ? "icon-1024.png" : "icon.ico"),
+    // Background matches Tailwind `bg-background` in dark mode (hsl(222 47% 7%) ~ #090E1A)
+    // — removes the white flash before the renderer is ready.
+    backgroundColor: "#090E1A",
+    // Custom title bar overlay on Windows so the bar matches the navy content instead of
+    // Win11's pure-black native dark title bar. Height tuned to standard 32px.
+    titleBarStyle: "hidden",
+    titleBarOverlay: {
+      color: "#090E1A",
+      symbolColor: "#E5E7EB",
+      height: 32,
+    },
+    // Hide the native menu bar entirely (Alt still toggles it on demand).
+    autoHideMenuBar: true,
     webPreferences: {
       nodeIntegration: false,
       contextIsolation: true,
@@ -244,6 +274,7 @@ function createWindow() {
       devTools: IS_DEV,
     },
   });
+  mainWindow.setMenuBarVisibility(false);
 
   mainWindow.loadURL(`http://localhost:${BACKEND_PORT}`);
 

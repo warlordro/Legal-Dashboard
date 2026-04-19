@@ -17,24 +17,22 @@ export interface ApiKeys {
 }
 
 const LEGACY_KEY = "portaljust-api-keys";
+const SINGLE_LEGACY_KEY = "portaljust-anthropic-key";
 const ENC_KEY = "portaljust-api-keys-enc";
 const PROVIDER_KEY = "portaljust-captcha-provider";
 const MODE_KEY = "portaljust-captcha-mode";
 
 const EMPTY: ApiKeys = { anthropic: "", openai: "", google: "", twocaptcha: "", capsolver: "" };
 
-// SECURITY: weak obfuscation — used only on web where no OS keystore is available.
-// Desktop builds go through Electron safeStorage (DPAPI / Keychain / libsecret).
-function obfuscate(text: string): string {
-  if (!text) return "";
-  try { return btoa(text.split("").reverse().join("")); } catch { return text; }
-}
+// One-shot migration reader: legacy localStorage entries were XOR-obfuscated.
+// Used ONLY to re-save them through safeStorage at first boot after upgrade,
+// then the legacy entries are removed. No new writes ever use this path.
 function deobfuscate(text: string): string {
   if (!text) return "";
   try { return atob(text).split("").reverse().join(""); } catch { return text; }
 }
 
-function loadLegacy(): ApiKeys {
+function readLegacyForMigration(): ApiKeys | null {
   try {
     const saved = localStorage.getItem(LEGACY_KEY);
     if (saved) {
@@ -47,22 +45,19 @@ function loadLegacy(): ApiKeys {
         capsolver: deobfuscate(parsed.capsolver || ""),
       };
     }
-    const oldSingle = localStorage.getItem("portaljust-anthropic-key");
+    const oldSingle = localStorage.getItem(SINGLE_LEGACY_KEY);
     if (oldSingle) return { ...EMPTY, anthropic: oldSingle };
   } catch {}
-  return EMPTY;
+  return null;
 }
 
-function saveLegacy(keys: ApiKeys) {
-  try {
-    localStorage.setItem(LEGACY_KEY, JSON.stringify({
-      anthropic: obfuscate(keys.anthropic),
-      openai: obfuscate(keys.openai),
-      google: obfuscate(keys.google),
-      twocaptcha: obfuscate(keys.twocaptcha),
-      capsolver: obfuscate(keys.capsolver),
-    }));
-  } catch {}
+function clearLegacyStorage() {
+  try { localStorage.removeItem(LEGACY_KEY); } catch {}
+  try { localStorage.removeItem(SINGLE_LEGACY_KEY); } catch {}
+}
+
+function hasAnyKey(k: ApiKeys): boolean {
+  return !!(k.anthropic || k.openai || k.google || k.twocaptcha || k.capsolver);
 }
 
 function loadProvider(): CaptchaProvider {
@@ -87,6 +82,9 @@ export function useApiKey() {
   const [keys, setKeysState] = useState<ApiKeys>(EMPTY);
   const [captchaProvider, setCaptchaProviderState] = useState<CaptchaProvider>(loadProvider);
   const [captchaMode, setCaptchaModeState] = useState<CaptchaMode>(loadMode);
+  // When true, OS keystore (DPAPI/Keychain/libsecret) is unavailable. We refuse
+  // to persist keys in plaintext; the UI should show a "cannot save" state.
+  const [encryptionUnavailable, setEncryptionUnavailable] = useState(false);
   const safeStorageReady = useRef(false);
 
   useEffect(() => {
@@ -97,38 +95,38 @@ export function useApiKey() {
       const available = api ? await api.isEncryptionAvailable().catch(() => false) : false;
       safeStorageReady.current = available;
 
-      if (available && api) {
-        // Desktop path: prefer encrypted blob; fall back to legacy (migrating it on the fly).
-        let loaded: ApiKeys | null = null;
-        try {
-          const enc = localStorage.getItem(ENC_KEY);
-          if (enc) {
-            const plain = await api.decryptKeys(enc);
-            if (plain) loaded = JSON.parse(plain) as ApiKeys;
-          }
-        } catch {}
-
-        if (!loaded) {
-          const legacy = loadLegacy();
-          if (legacy.anthropic || legacy.openai || legacy.google || legacy.twocaptcha || legacy.capsolver) {
-            loaded = legacy;
-            try {
-              const cipher = await api.encryptKeys(JSON.stringify(legacy));
-              if (cipher) {
-                localStorage.setItem(ENC_KEY, cipher);
-                localStorage.removeItem(LEGACY_KEY);
-                localStorage.removeItem("portaljust-anthropic-key");
-              }
-            } catch {}
-          }
-        }
-
-        if (!cancelled && loaded) setKeysState(loaded);
-      } else {
-        // Web fallback: legacy obfuscation only.
-        const legacy = loadLegacy();
-        if (!cancelled) setKeysState(legacy);
+      if (!available || !api) {
+        // No OS keystore. Wipe any obfuscated legacy entries that may linger and
+        // surface the state so the UI can explain why nothing persists.
+        clearLegacyStorage();
+        if (!cancelled) setEncryptionUnavailable(true);
+        return;
       }
+
+      let loaded: ApiKeys | null = null;
+      try {
+        const enc = localStorage.getItem(ENC_KEY);
+        if (enc) {
+          const plain = await api.decryptKeys(enc);
+          if (plain) loaded = JSON.parse(plain) as ApiKeys;
+        }
+      } catch {}
+
+      if (!loaded) {
+        const legacy = readLegacyForMigration();
+        if (legacy && hasAnyKey(legacy)) {
+          try {
+            const cipher = await api.encryptKeys(JSON.stringify(legacy));
+            if (cipher) {
+              localStorage.setItem(ENC_KEY, cipher);
+              clearLegacyStorage();
+              loaded = legacy;
+            }
+          } catch {}
+        }
+      }
+
+      if (!cancelled && loaded) setKeysState(loaded);
     })();
 
     return () => { cancelled = true; };
@@ -136,17 +134,19 @@ export function useApiKey() {
 
   const persist = (newKeys: ApiKeys) => {
     const api = window.desktopApi;
-    if (safeStorageReady.current && api) {
-      api.encryptKeys(JSON.stringify(newKeys)).then((cipher) => {
-        if (cipher) {
-          try { localStorage.setItem(ENC_KEY, cipher); } catch {}
-        } else {
-          saveLegacy(newKeys);
-        }
-      }).catch(() => saveLegacy(newKeys));
-    } else {
-      saveLegacy(newKeys);
+    if (!safeStorageReady.current || !api) {
+      setEncryptionUnavailable(true);
+      return;
     }
+    api.encryptKeys(JSON.stringify(newKeys)).then((cipher) => {
+      if (!cipher) {
+        setEncryptionUnavailable(true);
+        return;
+      }
+      try { localStorage.setItem(ENC_KEY, cipher); } catch {}
+    }).catch(() => {
+      setEncryptionUnavailable(true);
+    });
   };
 
   const setKeys = (newKeys: ApiKeys) => {
@@ -195,5 +195,6 @@ export function useApiKey() {
     setCaptchaMode,
     activeCaptchaKey,
     setApiKey: (key: string) => setKey("anthropic", key),
+    encryptionUnavailable,
   };
 }

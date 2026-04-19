@@ -13,9 +13,10 @@ function invokeWithTimeout(channel, payload) {
   ]);
 }
 
-// Exposed surface — keep narrow. Renderer sees only these three methods.
+// Exposed surface — keep narrow.
 contextBridge.exposeInMainWorld("desktopApi", {
   encryptKeys: (plaintext) => invokeWithTimeout("safeStorage:encrypt", plaintext),
   decryptKeys: (ciphertextB64) => invokeWithTimeout("safeStorage:decrypt", ciphertextB64),
   isEncryptionAvailable: () => invokeWithTimeout("safeStorage:available"),
+  setWindowTheme: (theme) => invokeWithTimeout("window:setTheme", theme),
 });

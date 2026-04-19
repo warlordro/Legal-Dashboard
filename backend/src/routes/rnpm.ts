@@ -142,7 +142,12 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") {
       console.log("[rnpm/search] aborted by client");
-      return c.json({ error: "Cautare oprita" }, 500);
+      // 499 = Client Closed Request (non-standard but widely used by nginx/others).
+      // Hono's typed status codes exclude it, so emit via a plain Response.
+      return new Response(JSON.stringify({ error: "Cautare oprita" }), {
+        status: 499,
+        headers: { "Content-Type": "application/json" },
+      });
     }
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
     console.error("[rnpm/search]", msg);
@@ -260,6 +265,9 @@ rnpmRouter.get("/saved/:id", (c) => {
 
 rnpmRouter.delete("/saved/all", (c) => {
   const count = deleteAllAvize();
+  // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
+  // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
+  try { compactDb(); } catch (e) { console.warn("[rnpm] compact after delete-all failed:", e); }
   return c.json({ deleted: count });
 });
 
