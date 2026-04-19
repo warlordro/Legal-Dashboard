@@ -4,7 +4,7 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web — fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.0.2** — 17 Aprilie 2026
+**v2.0.5** — 19 Aprilie 2026
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
@@ -24,12 +24,14 @@ legal-dashboard/
 ├── backend/           # Node.js 22+ + Hono (port 3002)
 │   ├── tsconfig.json  # strict: true, noEmit (type-check only)
 │   └── src/
-│       ├── index.ts   # API routes, AI endpoint, SSE load-more, rate limiter, static serving
-│       ├── routes/    # rnpm.ts (search + bulk + baza locala + export + compact)
-│       ├── services/  # rnpmSearchService, captchaSolver, rnpmClient
+│       ├── index.ts   # Bootstrap: CSP, CORS, mount routers, prewarm, backup, shutdown
+│       ├── routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts (multi-provider)
+│       ├── services/  # rnpmSearchService, captchaSolver, rnpmClient,
+│       │              # ai.ts (Claude/OpenAI/Gemini), batch-dosare.ts (AbortSignal)
+│       ├── middleware/# rate-limit.ts (real-IP), static-frontend.ts (path-traversal guard)
 │       ├── db/        # schema.ts, avizRepository.ts, searchRepository.ts,
 │       │              # backup.ts (owner_id everywhere)
-│       ├── util/      # textNormalize (SQLite rnpm_norm diacritic fold)
+│       ├── util/      # textNormalize (SQLite rnpm_norm diacritic fold), validation.ts
 │       ├── soap.ts    # SOAP client pentru PortalJust
 │       └── intervals.ts
 ├── electron/          # Electron shell
@@ -63,7 +65,7 @@ legal-dashboard/
 - **Desktop**: Electron 41, single-instance lock, safeStorage (DPAPI / Keychain / libsecret)
 - **Build**: esbuild (backend → CJS, `--external:better-sqlite3 --external:electron`), Vite (frontend)
 
-## Securitate (audit 17 Aprilie 2026 — v2.0.2)
+## Securitate (audit intern 19 Aprilie 2026 — v2.0.5; predecesor 17 Aprilie — v2.0.2)
 ### Protectii active
 - **safeStorage IPC** pentru cheile API (DPAPI / Keychain / libsecret), ciphertext in localStorage doar
 - **CSP strict** (`script-src 'self'`, fara `unsafe-inline`), `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`
