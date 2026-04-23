@@ -1,10 +1,12 @@
 # Legal Dashboard — Status Implementare
 
-**Data:** 2026-04-19 (sesiune 3)
-**Versiune curenta:** v2.0.6
-**Status global:** 10/10 pasi completi. Installer: `release/Legal Dashboard Setup 1.0.0.exe` (98 MB).
+**Data:** 2026-04-23
+**Versiune curenta:** v2.0.7
+**Status global:** 10/10 pasi completi. Installer: `release/Legal Dashboard Setup 2.0.7.exe`.
 
-**Livrat recent (v2.0.6):** SOAP parser decodeaza entitati XML (`&amp;`, `&quot;`, `&apos;`, `&lt;`, `&gt;` + numeric refs) la leaf fields in `parseDosar` — nume parti si obiect render corect in tabele / modal / export XLSX / prompt AI (ex: `S.C. X &amp; Co.` → `S.C. X & Co.`); consolidare CodeRabbit findings 19.04.2026 in HARDENING Faza 7 (4 Critical + 6 Important + 6 suggestions, blockers pentru web-deploy + auto-sync monitorizare); 5 teste noi pe `decodeXmlEntities` (29/29 verde).
+**Livrat recent (v2.0.7):** RNPM rate limit hardening — concurenta de detalii redusa 7→3, pauza 400ms intre batch-uri, `fetchFullDetail` splitat in 2 valuri (part1+part2+part3, apoi part4+istoric). In-flight simultan catre `mj.rnpm.ro` scade 35→9, eliminand riscul de blacklist IP pe batch-uri mari. Banner-ul de versiune citeste acum `package.json` runtime (fix hardcode v1.0.0) — `/health` returneaza si field-ul `version`.
+
+**Livrat anterior (v2.0.6):** SOAP parser decodeaza entitati XML (`&amp;`, `&quot;`, `&apos;`, `&lt;`, `&gt;` + numeric refs) la leaf fields in `parseDosar` — nume parti si obiect render corect in tabele / modal / export XLSX / prompt AI (ex: `S.C. X &amp; Co.` → `S.C. X & Co.`); consolidare CodeRabbit findings 19.04.2026 in HARDENING Faza 7 (4 Critical + 6 Important + 6 suggestions, blockers pentru web-deploy + auto-sync monitorizare); 5 teste noi pe `decodeXmlEntities` (29/29 verde).
 
 **Livrat anterior (v2.0.5):** RNPM auto-load pe batch de 25 cu bara de progres; `Sterge baza` elibereaza efectiv spatiul pe disc (VACUUM + WAL checkpoint); user-abort loghea 499 pe backend (separat de erorile 500 reale); tab Bunuri nu mai intepeneste pe avize 1000+ bunuri (content-visibility).
 
@@ -18,7 +20,7 @@
 
 Aplicatie Electron desktop = **copie completa PortalJust Dashboard v1.4.4-ai + tab nou "Cautare RNPM"** (Registrul National de Publicitate Mobiliara). PortalJust ramane aplicatie separata, neatinsa.
 
-- **Versiune:** v1.0.0
+- **Versiune:** v2.0.7
 - **AppId:** `ro.legaldashboard.app`
 - **ProductName:** Legal Dashboard
 - **DB path:** `userData/legal-dashboard.db` (via env `LEGAL_DASHBOARD_DB_PATH`)
@@ -109,7 +111,7 @@ cd "C:\Users\Cezar\Desktop\Claude Code\Legal Dashboard"
 npm run dist
 ```
 
-Output asteptat: `release/Legal Dashboard Setup 1.0.0.exe` (NSIS) + portabil.
+Output asteptat: `release/Legal Dashboard Setup 2.0.7.exe` (NSIS) + portabil.
 
 **Verificari dupa build:**
 1. Installer se deschide, se instaleaza in `%LOCALAPPDATA%\Programs\legal-dashboard`
@@ -134,7 +136,7 @@ Output asteptat: `release/Legal Dashboard Setup 1.0.0.exe` (NSIS) + portabil.
 1. Deschide acest fisier (`STATUS.md`) — contine tot contextul.
 2. Ruleaza pasul 10 de mai sus (`npm run dist`).
 3. Dupa build, testeaza fluxul complet pe installer-ul generat.
-4. Daca totul OK: commit + tag `v1.0.0`.
+4. Daca totul OK: commit + tag `v2.0.7`.
 
 ---
 

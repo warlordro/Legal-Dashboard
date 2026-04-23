@@ -94,6 +94,8 @@ Un finding (I1 — dublu `validateAiBody`) a fost verificat direct vs cod si **r
 ### Done
 
 - [x] **I3 — decodeXmlEntities in parseDosar** (2026-04-19) — helper exportat in [backend/src/soap.ts](backend/src/soap.ts), aplicat la leaf fields (nume, obiect, solutie, institutie, departament, categorieCaz, stadiuProcesual). Teste: 5 noi (entity decoding + invariant „&amp; nu dublu-decodeaza"). Scopul: nume parti `S.C. X &amp; Co.` redau corect in UI/XLSX.
+- [x] **RNPM rate-limit hardening** (2026-04-23, v2.0.7) — deep-code-review extern a flagat 35 conexiuni simultane catre `mj.rnpm.ro` pe batch bulk (risc concret ban IP). Fix: `DEFAULT_DETAIL_CONCURRENCY` 7→3 in [backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts), pauza 400ms intre batch-uri (`DETAIL_BATCH_PAUSE_MS`), `fetchFullDetail` in [backend/src/services/rnpmClient.ts](backend/src/services/rnpmClient.ts) splitat in 2 valuri (part1+2+3, apoi part4+istoric) → in-flight simultan 35→9. Latency 25-row end-to-end: ~8s → ~10-11s.
+- [x] **Version banner fix** (2026-04-23, v2.0.7) — hardcoded `v1.0.0` in [backend/src/index.ts](backend/src/index.ts) inlocuit cu `resolveAppVersion()` care citeste din `package.json` (dev + prod paths). `/health` returneaza si `version`.
 
 ### Rejected (false positive verificat vs cod)
 

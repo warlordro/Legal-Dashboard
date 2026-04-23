@@ -5,7 +5,7 @@ portalul instantelor si interogarea Registrului National de Publicitate Mobiliar
 (RNPM). Include un modul de analiza AI multi-agent (Claude, OpenAI, Gemini) cu
 stocarea cheilor in keystore-ul sistemului de operare prin Electron `safeStorage`.
 
-Versiune curenta: **2.0.6**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
+Versiune curenta: **2.0.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
 [SECURITY.md](SECURITY.md) pentru threat model.
 
 ## Prerequisite

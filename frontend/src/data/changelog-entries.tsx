@@ -18,6 +18,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.0.7",
+    date: "23 Aprilie 2026",
+    subtitle: "RNPM rate limit hardening + version banner corect",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "RNPM — paralelism redus pe path-ul de detalii (fix risc ban IP)",
+        content:
+          "Review-ul tehnic extern a semnalat ca o cautare bulk de 25+ avize trimitea in pic 35 de conexiuni simultane catre mj.rnpm.ro (7 documente paralele × 5 fetch-uri/document, fara pauza intre batch-uri). Server-ele guvernamentale aplica uzual rate-limit la reverse-proxy → risc concret de 429/403 mid-stream si blacklist pe IP-ul din spatele NAT-ului (afecteaza toti utilizatorii). Metoda sleep() exista in cod dar nu era apelata nicaieri. Fix: concurenta redusa + pauza explicita intre batch-uri + valuri pe fetch-ul per-aviz.",
+        bullets: [
+          "DEFAULT_DETAIL_CONCURRENCY: 7 → 3 (in services/rnpmSearchService.ts)",
+          "Pauza 400ms intre batch-uri (constant DETAIL_BATCH_PAUSE_MS), cu abort-check reinnoit dupa pauza",
+          "fetchFullDetail splitat in 2 valuri: (part1+part2+part3) apoi (part4+istoric); in-flight simultan 35 → 9",
+          "Latency end-to-end pe 25 avize: ~8s → ~10-11s (acceptabil pentru a nu expune IP-ul)",
+        ],
+      },
+      {
+        title: "Version banner — sincronizare cu package.json",
+        content:
+          "La pornire backend afisa hardcodat v1.0.0 desi versiunea reala era v2.0.6. Problema de ops (log-based version check raporta gresit), nu bug functional. Fix: helper resolveAppVersion() care citeste versiunea din package.json atat pe path-ul dev (backend/src/../../) cat si pe cel bundled (dist-backend/../). Valideaza name === 'legal-dashboard' si fallback 'unknown' daca nu gaseste.",
+        bullets: [
+          "Banner console la startup reflecta versiunea reala din package.json",
+          "Endpoint /health returneaza acum si field-ul version (util pentru smoke tests externe)",
+          "Valori 'unknown' la edge cases — nu crapa niciodata din cauza version resolution",
+        ],
+      },
+      {
+        title: "De ce acum",
+        content:
+          "Modificarile de batch-size din v2.0.6 (pregatire Watched Dosare + bulk auto-sync) cresc probabilitatea sa atingem pragul upstream. Dupa primul episod de rate-limit, orice fix trebuie deploy-at pe masini unde userul deja e blocat — mult mai scump. Aceste fix-uri sunt cheap insurance pre-rollout, semnalate de review-ul extern.",
+      },
+    ],
+  },
+  {
     version: "v2.0.6",
     date: "19 Aprilie 2026",
     subtitle: "SOAP XML entity decoding + consolidare CodeRabbit findings in HARDENING Faza 7",

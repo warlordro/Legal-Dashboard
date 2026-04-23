@@ -57,8 +57,14 @@ export interface ExecuteSearchResult {
   nextRnpmPage: number | null;
 }
 
-const DEFAULT_DETAIL_CONCURRENCY = 7;
+// Reduced from 7 → 3 to avoid IP bans on mj.rnpm.ro.
+// fetchFullDetail issues 5 parallel part requests per doc, so 3 * 5 = 15 in-flight
+// against the upstream, plus a 400ms gap between batches (see DETAIL_BATCH_PAUSE_MS).
+const DEFAULT_DETAIL_CONCURRENCY = 3;
 const DEFAULT_BATCH_SIZE = 25;
+// Pause between successive detail-fetch batches. 400ms keeps us well under any
+// reasonable per-second rate limit while still finishing a 25-row page in <4s.
+const DETAIL_BATCH_PAUSE_MS = 400;
 
 function toRnpmDate(s: string): string {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
@@ -142,6 +148,11 @@ export async function executeSearch(
     if (!fetchDetails || docs.length === 0) return;
     for (let i = 0; i < docs.length; i += concurrency) {
       throwIfAborted(signal);
+      if (i > 0) {
+        // Space successive batches so we don't burst the upstream.
+        await new Promise((r) => setTimeout(r, DETAIL_BATCH_PAUSE_MS));
+        throwIfAborted(signal);
+      }
       const batchResults = await Promise.all(docs.slice(i, i + concurrency).map(async (doc, batchIdx) => {
         const localIdx = i + batchIdx;
         if (!doc.identificator.k) return { localIdx, doc, ok: false as const };

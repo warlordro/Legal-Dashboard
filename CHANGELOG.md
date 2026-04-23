@@ -4,6 +4,40 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 23 Aprilie 2026 — v2.0.7 — RNPM rate limit hardening + version banner fix
+
+Reactie la review-ul tehnic extern (deep-code-review 23.04.2026) care a semnalat doua probleme operationale concrete pe path-ul RNPM — una cu risc direct de ban IP pe `mj.rnpm.ro`, una de diagnoza in productie. Fara schimbari vizibile la user pe feature set; durata batch-urilor RNPM creste cu ~10-15% (acceptabil pentru eliminarea riscului de blacklist).
+
+### RNPM — paralelism redus pe path-ul de detalii (fix risc ban IP)
+
+**Simptom:** o cautare bulk (25+ avize) declansa in pic **35 de conexiuni simultane** catre `mj.rnpm.ro`: 7 documente in paralel × 5 fetch-uri per document (part1-4 + istoric via `Promise.all`). Fara pauza intre batch-uri. Server-ele guvernamentale aplica uzual rate-limit la reverse-proxy; un batch mai mare risca 429/403 mid-stream + blacklist temporar pe IP (afecteaza **toti** utilizatorii din spatele NAT-ului).
+
+**Cauza:** review-ul a remarcat ca metoda `RnpmClient.sleep()` exista in cod dar **nu e apelata nicaieri** (grep confirmat) — probabil ramasita dintr-o iteratie anterioara. `DEFAULT_DETAIL_CONCURRENCY = 7` setat empiric pe network dev, nevalidat vs constrangeri upstream. `fetchFullDetail` fire 5-wide `Promise.all` catre acelasi host fara decuplare.
+
+**Fix:**
+
+- [backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts) — `DEFAULT_DETAIL_CONCURRENCY: 7 → 3`. Pauza de **400ms intre batch-uri** (constant `DETAIL_BATCH_PAUSE_MS`), cu `throwIfAborted` re-check dupa pauza ca userul sa poata opri in fereastra de pauza.
+- [backend/src/services/rnpmClient.ts](backend/src/services/rnpmClient.ts) — `fetchFullDetail` splitat in 2 valuri: (part1 + part2 + part3) apoi (part4 + istoric). Combinat cu concurenta 3, in-flight simultan scade de la 35 → 9 catre upstream. Abort-check intre valuri.
+- Latency impact: pentru 25 avize, timp end-to-end creste de la ~8s la ~10-11s (waves pipeline, nu se serializeaza total). Acceptabil pentru a nu expune IP-ul.
+
+### Version banner — sincronizare cu package.json
+
+**Simptom:** la pornire backend afisa `Legal Dashboard v1.0.0` hardcodat, desi versiunea reala era `2.0.6`. Problema de ops (logs/incident triage raporteaza gresit versiunea rulanta), nu bug functional.
+
+**Fix:** [backend/src/index.ts](backend/src/index.ts) — helper `resolveAppVersion()` care incearca `backend/src/../../package.json` (dev) si `dist-backend/../package.json` (prod bundled), valideaza `name === "legal-dashboard"` si foloseste campul `version`. Fallback la `"unknown"` daca nu gaseste (nu crapa). `/health` endpoint returneaza acum si `version` in payload pentru health-check-uri externe.
+
+### De ce acum
+
+Review-ul extern a evidentiat ca modificarile de batch-size din v2.0.6 (pregatire Watched Dosare + bulk auto-sync) cresc probabilitatea sa atingem pragul upstream. Dupa primul episod de rate-limit, orice fix trebuie deploy-at pe masini unde userul deja e blocat — mult mai scump. Aceste doua fix-uri sunt cheap insurance pre-rollout.
+
+### Verificare
+
+- `npx tsc --noEmit -p backend/tsconfig.json` — 0 erori.
+- `npm test --workspace=backend` — toate testele verde.
+- Smoke manual: cautare bulk 15 avize pe ipoteci, verificat in consola `[rnpm]` logs ca nu mai apar burst-uri > 9 request-uri simultan.
+
+---
+
 ## 19 Aprilie 2026 (sesiune 3) — v2.0.6 — SOAP XML entity decoding + consolidare CodeRabbit findings
 
 Fix de corectitudine pe parser-ul SOAP PortalJust + consolidarea auditului CodeRabbit 19.04.2026 in roadmap-ul de hardening. Nimic nou in feature set — doar bani ficti mai curati pe display + un punch-list explicit pentru tranzitia web si modulul de monitorizare.

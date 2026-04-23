@@ -14,6 +14,7 @@ import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { fileURLToPath } from "url";
 import path from "path";
+import { readFileSync } from "fs";
 import dotenv from "dotenv";
 
 // __dirname is provided by:
@@ -27,6 +28,24 @@ const __curdir = typeof __dirname !== "undefined"
   ? __dirname
   : path.dirname(fileURLToPath(import.meta.url));
 dotenv.config({ path: path.join(__curdir, "..", ".env"), override: true });
+
+// Resolve app version from root package.json so the startup banner can't drift
+// from the real shipped version. Tries dev (backend/src/../../) and prod
+// (dist-backend/../) layouts; falls back to "unknown" rather than crashing.
+function resolveAppVersion(): string {
+  const candidates = [
+    path.resolve(__curdir, "..", "..", "package.json"),
+    path.resolve(__curdir, "..", "package.json"),
+  ];
+  for (const p of candidates) {
+    try {
+      const pkg = JSON.parse(readFileSync(p, "utf-8")) as { name?: string; version?: string };
+      if (pkg.name === "legal-dashboard" && typeof pkg.version === "string") return pkg.version;
+    } catch { /* try next candidate */ }
+  }
+  return "unknown";
+}
+const APP_VERSION = resolveAppVersion();
 
 const app = new Hono();
 
@@ -63,7 +82,7 @@ app.use(
 
 app.use("/api/*", rateLimit);
 
-app.get("/health", (c) => c.json({ status: "ok", service: "Legal Dashboard API" }));
+app.get("/health", (c) => c.json({ status: "ok", service: "Legal Dashboard API", version: APP_VERSION }));
 
 app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
@@ -125,7 +144,7 @@ process.on("beforeExit", () => gracefulShutdown("beforeExit"));
   () => gracefulShutdown("before-quit");
 
 console.log("");
-console.log("  Legal Dashboard v1.0.0");
+console.log(`  Legal Dashboard v${APP_VERSION}`);
 console.log(`  Deschide in browser: http://localhost:${port}`);
 console.log("");
 console.log(`  Server: http://${hostname}:${port}`);

@@ -1168,10 +1168,10 @@ export async function exportManualPDF() {
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(...textMuted);
-    doc.text("Legal Dashboard — Manual de Utilizare v1.0.0", margin, pageHeight - 8);
+    doc.text("Legal Dashboard — Manual de Utilizare v2.0.7", margin, pageHeight - 8);
     doc.text(`Pagina ${i} din ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
     doc.text(`${new Date().toLocaleDateString("ro-RO")}`, pageWidth - margin, pageHeight - 8, { align: "right" });
   }
 
-  doc.save("Legal-Dashboard-Manual-v1.0.0.pdf");
+  doc.save("Legal-Dashboard-Manual-v2.0.7.pdf");
 }

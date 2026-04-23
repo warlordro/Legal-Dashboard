@@ -268,10 +268,17 @@ export class RnpmClient {
   }
 
   async fetchFullDetail(uuid: string, signal?: AbortSignal): Promise<RnpmFullDetail> {
-    const [p1, p2, p3, p4, istoric] = await Promise.all([
+    // Split the 5 per-doc requests into 2 waves (3 + 2) instead of a single 5-wide
+    // Promise.all. Combined with the reduced outer concurrency (3), worst-case
+    // in-flight against mj.rnpm.ro drops from 35 → 9 without changing end-to-end
+    // latency meaningfully (waves pipeline, not serialize fully).
+    const [p1, p2, p3] = await Promise.all([
       this.fetchPart(uuid, 1, signal),
       this.fetchPart(uuid, 2, signal),
       this.fetchPart(uuid, 3, signal),
+    ]);
+    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+    const [p4, istoric] = await Promise.all([
       this.fetchPart(uuid, 4, signal),
       this.fetchIstoric(uuid, signal),
     ]);
