@@ -51,19 +51,33 @@ app.use(
   })
 );
 
-// CORS - only needed in development
-app.use(
-  "*",
-  cors({
-    origin: ["http://localhost:5173", "http://localhost:4173"],
-    allowMethods: ["GET", "POST", "OPTIONS"],
-    allowHeaders: ["Content-Type"],
-  })
-);
+// CORS - only enabled outside production. In production the frontend is served
+// from the same origin (Electron / mounted static), so the dev origins must NOT
+// be on the allow-list — would let any local app call the API in web mode with
+// LEGAL_DASHBOARD_ALLOW_REMOTE=1.
+if (process.env.NODE_ENV !== "production") {
+  app.use(
+    "*",
+    cors({
+      origin: ["http://localhost:5173", "http://localhost:4173"],
+      allowMethods: ["GET", "POST", "OPTIONS"],
+      allowHeaders: ["Content-Type"],
+    })
+  );
+}
 
 app.use("/api/*", rateLimit);
 
-app.get("/health", (c) => c.json({ status: "ok", service: "Legal Dashboard API" }));
+// Readiness flag: schema migrations + prewarm run before serve(), but if the DB
+// is locked by another tool or temporarily inaccessible we keep /health serving
+// 503 until ready=true. Container orchestrators / Electron splash poll this.
+let ready = false;
+app.get("/health", (c) => {
+  if (!ready) {
+    return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
+  }
+  return c.json({ status: "ok", service: "Legal Dashboard API" });
+});
 
 app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
@@ -87,20 +101,38 @@ if (!loopback.has(rawHost) && process.env.LEGAL_DASHBOARD_ALLOW_REMOTE !== "1") 
   hostname = "127.0.0.1";
 }
 
-serve({ fetch: app.fetch, port, hostname });
-
-// E: prewarm SQLite page cache so the first /rnpm/saved + /rnpm/stats after launch
-// don't pay the cold-disk cost (hot index pages loaded once, reused for every request).
+// Run schema init + descriere migration + prewarm BEFORE binding the port. On
+// large DBs, VACUUM/ALTER blocks the event loop for tens of seconds; if serve()
+// were already listening we'd serve "ok" /health while real requests starve
+// behind the migration. Better: bind only when ready. Electron splash and any
+// orchestrator see connection-refused → polled retry, not a misleading 200.
 try {
   getAvize({ pageSize: 1 });
   getAvizStats();
 } catch (e) {
-  console.warn("[prewarm] failed:", e instanceof Error ? e.message : e);
+  console.error("[boot] schema/prewarm failed:", e instanceof Error ? e.message : e);
+  // Boot-time DB failure means subsequent requests will fail too; exit so the
+  // process manager (PM2, systemd, Electron child) restarts cleanly with the
+  // error surfaced in logs instead of silently degrading.
+  process.exit(1);
 }
 
-// Daily snapshot — skipped if the most recent backup is <24h old, so extra launches
-// in the same day don't duplicate work. Keeps the last 7 files.
-runDailyBackup().catch((e) => console.warn("[backup] top-level:", e));
+// Flip `ready` ONLY when the underlying socket fires `listening`, not on the next
+// tick after serve() returns. serve() is sync-returning but listen() is async, so
+// without the callback /health would advertise 200 in the gap between return and
+// actual port-bind. Worse, EADDRINUSE etc. surface on the server's `error` event
+// — without an explicit handler the bind failure becomes an unhandledRejection and
+// `ready` would still flip to true.
+const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
+  ready = true;
+  // Defer the daily snapshot until the listener is verified up. Same fire-and-forget
+  // semantics as before; keeps it off the boot critical path.
+  runDailyBackup().catch((e) => console.warn("[backup] top-level:", e));
+});
+httpServer.on("error", (err: Error) => {
+  console.error("[boot] HTTP server error:", err.message);
+  process.exit(1);
+});
 
 // CP-E1: clean DB shutdown on signal or unexpected exit.
 // - Server mode: SIGTERM/SIGINT from process manager or Ctrl+C.

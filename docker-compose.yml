@@ -1,13 +1,17 @@
 services:
   portaljust:
     build: .
+    # SECURITY: bind only to loopback by default. Exposing 0.0.0.0:3002 puts an
+    # auth-less SOAP/AI gateway on the LAN. To expose the service publicly,
+    # terminate TLS + auth at a reverse proxy (nginx, Caddy, Traefik) and have
+    # it forward to this container; do not flip the bind to 0.0.0.0 in place.
     ports:
-      - "3001:3001"
+      - "127.0.0.1:3002:3002"
     env_file:
       - .env
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3001/health"]
+      test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
       interval: 30s
       timeout: 10s
       retries: 3

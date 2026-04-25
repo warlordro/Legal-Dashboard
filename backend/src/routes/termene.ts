@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cautareDosare } from "../soap.ts";
 import { defaultDateRange, generateMonthlyIntervals } from "../intervals.ts";
 import {
+  MAX_DOSARE_RESPONSE,
   MAX_INSTITUTII,
   MAX_SOAP_FANOUT,
   MAX_SSE_INTERVALS,
@@ -33,6 +34,12 @@ termeneRouter.get("/", async (c) => {
     return c.json({ error: `Maxim ${MAX_INSTITUTII} institutii permise per cerere.` }, 400);
   }
 
+  // SECURITY: defensive fanout cap mirrors the SSE /load-more guard.
+  const fanout = Math.max(institutii.length, 1);
+  if (fanout > MAX_SOAP_FANOUT) {
+    return c.json({ error: `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.` }, 400);
+  }
+
   for (const inst of institutii) {
     const instError = validateParams({ institutie: inst });
     if (instError) {
@@ -57,6 +64,13 @@ termeneRouter.get("/", async (c) => {
         )
       );
       dosare = results.flat();
+    }
+
+    // SECURITY: cap dosare set before fanning out into termene (each dosar can
+    // contain dozens of sedinte, so the termene array is even larger). Reject
+    // before flatMap to avoid serializing tens of MB.
+    if (dosare.length > MAX_DOSARE_RESPONSE) {
+      return c.json({ error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).` }, 413);
     }
 
     // Extrage toate sedintele din toate dosarele (inclusiv parti si categorii)

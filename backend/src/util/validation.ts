@@ -4,6 +4,7 @@
 export const MAX_PARAM_LENGTH = 200;
 export const MAX_INSTITUTII = 50;
 export const MAX_SOAP_FANOUT = 500;
+export const MAX_DOSARE_RESPONSE = 5000;
 export const MAX_EXISTING_ITEMS = 10000;
 export const MAX_EXISTING_ITEM_LEN = 100;
 export const MAX_LOADMORE_BODY = 512000;

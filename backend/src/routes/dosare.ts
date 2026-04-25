@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { cautareDosare } from "../soap.ts";
 import { defaultDateRange, generateMonthlyIntervals } from "../intervals.ts";
 import {
+  MAX_DOSARE_RESPONSE,
   MAX_INSTITUTII,
   MAX_SOAP_FANOUT,
   MAX_SSE_INTERVALS,
@@ -33,6 +34,14 @@ dosareRouter.get("/", async (c) => {
     return c.json({ error: `Maxim ${MAX_INSTITUTII} institutii permise per cerere.` }, 400);
   }
 
+  // SECURITY: defensive fanout cap mirrors the SSE /load-more guard. Today
+  // institutii.length is already capped by MAX_INSTITUTII, but if either limit
+  // shifts in the future this keeps a hard upper bound on upstream SOAP calls.
+  const fanout = Math.max(institutii.length, 1);
+  if (fanout > MAX_SOAP_FANOUT) {
+    return c.json({ error: `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.` }, 400);
+  }
+
   // Validate all institutie values (not just the first)
   for (const inst of institutii) {
     const instError = validateParams({ institutie: inst });
@@ -59,6 +68,13 @@ dosareRouter.get("/", async (c) => {
         )
       );
       dosare = results.flat();
+    }
+    // SECURITY: cap response size before JSON.stringify. Each dosar carries
+    // parti + sedinte arrays; an aggregate of >MAX_DOSARE_RESPONSE explodes
+    // memory and stalls the event loop on serialization. Reject loudly with
+    // 413 so the client narrows filters rather than silently truncating.
+    if (dosare.length > MAX_DOSARE_RESPONSE) {
+      return c.json({ error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).` }, 413);
     }
     return c.json({ data: dosare, total: dosare.length });
   } catch (err) {

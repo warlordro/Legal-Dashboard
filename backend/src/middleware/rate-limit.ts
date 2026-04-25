@@ -7,9 +7,14 @@ const RATE_WINDOW = 60000;
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 export async function rateLimit(c: Context, next: Next): Promise<Response | void> {
-  // SECURITY: rate-limit by real socket address (falls back to a shared bucket if unknown).
-  // X-Forwarded-For is spoofable and deliberately ignored.
-  const ip = getConnInfo(c).remote.address || "unknown";
+  // SECURITY: rate-limit by real socket address. X-Forwarded-For is spoofable and
+  // deliberately ignored. If the runtime cannot surface a remote address (proxy
+  // misconfiguration, raw stream, etc.), fail closed — a shared "unknown" bucket
+  // would let a single misbehaving caller starve every other client.
+  const ip = getConnInfo(c).remote.address;
+  if (!ip) {
+    return c.json({ error: "Origine indisponibila." }, 503);
+  }
   const now = Date.now();
   // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit
   if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved")) {

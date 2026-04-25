@@ -50,7 +50,7 @@ Pornire cu Docker:
   1. Copiaza .env.example in .env si completeaza cheile API (optional)
   2. docker-compose up -d
 
-Aplicatia va fi disponibila la: http://localhost:3001
+Aplicatia va fi disponibila la: http://localhost:3002
 
 Cheile API (Claude/GPT/Gemini) pot fi configurate si din interfata aplicatiei.
 `);
