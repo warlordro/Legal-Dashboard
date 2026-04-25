@@ -43,8 +43,8 @@ export default function Changelog() {
 
       {/* Version Cards */}
       <div className="space-y-6">
-        {versions.map((v) => (
-          <Card key={v.version} className={`border-l-4 ${v.borderColor}`}>
+        {versions.map((v, idx) => (
+          <Card key={`${v.version}-${v.date}-${idx}`} className={`border-l-4 ${v.borderColor}`}>
             <CardHeader className="pb-4">
               <div className="flex flex-wrap items-center gap-3">
                 <Badge className={v.badgeClass}>

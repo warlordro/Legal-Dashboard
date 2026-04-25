@@ -66,6 +66,22 @@ if (process.env.NODE_ENV !== "production") {
   );
 }
 
+// Electron in-process bundle: backend is `require()`'d by main.js. A bare
+// `process.exit(1)` here kills Electron silently (window vanishes, no dialog).
+// Throw instead — synchronous throws propagate through `require()` → main.js
+// catch + showErrorDialog; async throws hit main.js's `uncaughtException`
+// handler which also shows a dialog before quitting. Server mode keeps the
+// hard exit so the process manager (PM2/systemd/Docker) can restart cleanly.
+const IS_ELECTRON_INPROC = typeof process.versions.electron === "string";
+function fatalBoot(reason: string, err: unknown): never {
+  const msg = err instanceof Error ? err.message : String(err);
+  console.error(`[boot] ${reason}:`, msg);
+  if (IS_ELECTRON_INPROC) {
+    throw err instanceof Error ? err : new Error(`${reason}: ${msg}`);
+  }
+  process.exit(1);
+}
+
 app.use("/api/*", rateLimit);
 
 // Readiness flag: schema migrations + prewarm run before serve(), but if the DB
@@ -110,11 +126,11 @@ try {
   getAvize({ pageSize: 1 });
   getAvizStats();
 } catch (e) {
-  console.error("[boot] schema/prewarm failed:", e instanceof Error ? e.message : e);
-  // Boot-time DB failure means subsequent requests will fail too; exit so the
-  // process manager (PM2, systemd, Electron child) restarts cleanly with the
-  // error surfaced in logs instead of silently degrading.
-  process.exit(1);
+  // Boot-time DB failure means subsequent requests will fail too. Server mode:
+  // exit so the process manager restarts cleanly. Electron in-proc: throw so
+  // main.js's `require()` catch path shows a user-visible dialog instead of
+  // killing the window silently.
+  fatalBoot("schema/prewarm failed", e);
 }
 
 // Flip `ready` ONLY when the underlying socket fires `listening`, not on the next
@@ -130,8 +146,9 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   runDailyBackup().catch((e) => console.warn("[backup] top-level:", e));
 });
 httpServer.on("error", (err: Error) => {
-  console.error("[boot] HTTP server error:", err.message);
-  process.exit(1);
+  // Async event: under Electron this becomes uncaughtException → main.js
+  // dialog + app.exit(1). Server mode keeps the explicit process exit.
+  fatalBoot("HTTP server error", err);
 });
 
 // CP-E1: clean DB shutdown on signal or unexpected exit.

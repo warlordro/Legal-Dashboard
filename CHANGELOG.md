@@ -4,6 +4,38 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 26 Aprilie 2026 - v2.0.7 - RNPM tab-state UX fix
+
+Sesiune de corectie UI pentru tab-ul **Cautare RNPM**. Bump de versiune din `2.0.6` la `2.0.7`, ca fixul sa fie vizibil in aplicatie, documentatie si artefactele de release.
+
+### RNPM - rezultatele nu mai "curg" intre cele 5 categorii
+
+**Simptom:** dupa o cautare in `Aviz de ipoteca mobiliara`, rezultatele ramaneau vizibile si dupa schimbarea categoriei interne catre `Fiducie`, `Aviz specific`, `Creante securitizate` sau `Obligatiuni ipotecare`.
+
+**Fix:**
+
+- [frontend/src/components/rnpm/RnpmSearchForm.tsx](frontend/src/components/rnpm/RnpmSearchForm.tsx) expune `onTypeChange`, apelat cand utilizatorul schimba categoria RNPM.
+- [frontend/src/pages/RnpmSearch.tsx](frontend/src/pages/RnpmSearch.tsx) tine `activeSearchType` separat de `lastType`.
+- Tabelul, mesajele de eroare si actiunile `Incarca tot` / `Opreste incarcarea` folosesc `visibleResult` / `visibleError`, afisate doar cand `activeSearchType === lastType`.
+
+### RNPM - revenire corecta din Cautare / Bulk / Baza locala
+
+**Simptom:** cand utilizatorul pleca din tab-ul principal `Cautare` catre `Bulk` sau `Baza locala`, apoi revenea, formularul se remonta pe prima categorie (`Aviz de ipoteca mobiliara`). Daca rezultatul anterior apartinea acelei categorii, uneori ramanea ascuns pana cand utilizatorul se plimba manual intre cele 5 categorii.
+
+**Fix:**
+
+- Sectiunea `Cautare` ramane montata permanent si este doar ascunsa cu `hidden`, la fel ca `RnpmSavedData`.
+- State-ul intern al formularului ramane viu intre cele 3 taburi principale: categoria activa, campurile completate si rezultatul vizibil.
+- `RnpmSearchForm` sincronizeaza categoria activa cu parent-ul la mount si la schimbarea categoriei, ca UI-ul vizibil si `activeSearchType` sa nu mai intre in drift.
+
+### Verificare
+
+- `npm run build --workspace=frontend` - clean.
+- `npm run build` - clean; `dist-frontend` si `dist-backend` regenerate.
+- Electron repornit manual; `/health` raspunde `ok`, `/api/rnpm/saved` raspunde cu date.
+
+---
+
 ## 19 Aprilie 2026 (sesiune 3) — v2.0.6 — SOAP XML entity decoding + consolidare CodeRabbit findings
 
 Fix de corectitudine pe parser-ul SOAP PortalJust + consolidarea auditului CodeRabbit 19.04.2026 in roadmap-ul de hardening. Nimic nou in feature set — doar bani ficti mai curati pe display + un punch-list explicit pentru tranzitia web si modulul de monitorizare.

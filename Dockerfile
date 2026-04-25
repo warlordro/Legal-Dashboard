@@ -20,12 +20,15 @@ COPY backend/package.json ./
 RUN npm install --omit=dev --build-from-source
 
 FROM node:22-alpine
-WORKDIR /app
-
 # SECURITY: drop root before copying anything. The app does not need privileged
 # operations at runtime; running as a non-root user limits container-escape blast
 # radius and is required by most compliant container platforms.
+# Create the user FIRST, then chown WORKDIR so the app process can write to
+# /app at runtime (otherwise WORKDIR stays root-owned and any runtime fs.write
+# under /app — tmp restore staging, db sidecars, log files — fails with EACCES).
 RUN addgroup -S app && adduser -S -G app app
+WORKDIR /app
+RUN chown app:app /app
 
 # Native bindings + bundled JS deps. dist-backend/index.cjs requires
 # `better-sqlite3` from /app/node_modules at runtime.

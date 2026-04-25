@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.0.6** (19 Aprilie 2026)
+- **Versiune curenta**: **v2.0.7** (26 Aprilie 2026, UI hotfix RNPM)
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
@@ -154,6 +154,8 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db` (Windo
 ### 1c. Cautare RNPM (`/rnpm`)
 
 Trei tab-uri (`Cautare` / `Bulk` / `Baza locala`) + modal detaliu partajat (`RnpmDetailModal`).
+
+**Persistenta taburi UI**: cand utilizatorul schimba intre `Cautare` / `Bulk` / `Baza locala`, tab-ul `Cautare` ramane montat si isi pastreaza categoria RNPM activa din cele 5, campurile completate si rezultatul vizibil. Rezultatele live sunt scoped pe categoria in care au fost obtinute: o cautare din `ipoteci` nu ramane vizibila cand utilizatorul trece pe `fiducii`, `specifice`, `creante` sau `obligatiuni`.
 
 **5 categorii (tab-uri in formular)**:
 - `ipoteci` — Aviz de ipoteca mobiliara (debitor / creditor / destinatie / vehicul / bun alt tip / tert cedat)
@@ -575,6 +577,8 @@ Right-click contextual: Copiaza (daca exista selectie), Lipeste (daca e editabil
 - **v2.0.5**: backend god-file split, audit remediation internal (static traversal / TermeneTable selection drift / DosareTable + RnpmSearchForm splits — toate inchise).
 - **v2.0.6**: SOAP parser decodeaza entitati XML in `parseDosar` (corectitudine user-facing); CodeRabbit findings 19.04.2026 consolidate in HARDENING Faza 7 (4 Critical blockers pre-web-deploy + 6 Important + 6 suggestions).
 
+- **v2.0.7**: RNPM tab-state fix — rezultatele live sunt scoped pe categoria de cautare; revenirea din `Bulk` / `Baza locala` pe `Cautare` pastreaza categoria RNPM activa anterior.
+
 ### Consideratii Deploy Server-Based (backlog)
 
 - [ ] Autentificare / autorizare (JWT / sessions, roluri).
@@ -758,7 +762,8 @@ Parsate din enumerarea WSDL a Ministerului Justitiei, grupate in 7 categorii:
 | v2.0.4 | 19.04.2026 | Refactor structural major (DosareTable + RnpmSearchForm splits) + polish formular RNPM |
 | v2.0.5 | 19.04.2026 | Backend god-file split (index.ts 1214 → 133 linii, routes/services/middleware/util) + audit remediation intern + RNPM UX rafinari + export PDF changelog cu design colorat + title bar nativ dark sync |
 | **v2.0.6** | **19.04.2026** | **SOAP XML entity decoding in parseDosar (correctness user-facing: nume parti / obiect / solutie) + consolidare CodeRabbit findings 19.04.2026 in HARDENING Faza 7 (blockers web-deploy + pre-monitorizare auto-sync)** |
+| **v2.0.7** | **26.04.2026** | **UI hotfix RNPM: rezultate scoped pe categoria de cautare + revenire pe categoria activa dupa navigare intre Cautare / Bulk / Baza locala** |
 
 ---
 
-*Ultima actualizare: 19 Aprilie 2026 — v2.0.6*
+*Ultima actualizare: 26 Aprilie 2026 - v2.0.7 UI hotfix RNPM*

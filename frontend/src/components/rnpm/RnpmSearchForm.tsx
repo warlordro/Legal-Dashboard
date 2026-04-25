@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Search, Loader2, RotateCcw, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -45,6 +45,7 @@ export interface RnpmSearchFormProps {
   loading: boolean;
   loadingPhase?: string;
   onSubmit: (type: RnpmSearchType, params: RnpmSearchParams) => void;
+  onTypeChange?: (type: RnpmSearchType) => void;
   onStop?: () => void;
   onReset?: () => void;
   initialType?: RnpmSearchType;
@@ -53,7 +54,7 @@ export interface RnpmSearchFormProps {
   suppressStop?: boolean;
 }
 
-export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onReset, initialType, initialParams, extraActions, suppressStop }: RnpmSearchFormProps) {
+export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, onStop, onReset, initialType, initialParams, extraActions, suppressStop }: RnpmSearchFormProps) {
   const confirm = useConfirm();
   const [activeType, setActiveType] = useState<RnpmSearchType>(initialType ?? "ipoteci");
   const identificator = useText(initialParams?.identificatorInscriere);
@@ -112,6 +113,10 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
   const bunVModel = useText(initialParams?.bunV?.model);
   const bunVSasiu = useSiSauField(initialParams?.bunV?.serieSasiu);
   const bunVImatr = useSiSauField(initialParams?.bunV?.nrImatriculare);
+
+  useEffect(() => {
+    onTypeChange?.(activeType);
+  }, [activeType, onTypeChange]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -417,7 +422,11 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onStop, onRese
           <button
             key={cat.type}
             type="button"
-            onClick={() => { setActiveType(cat.type); tipInscriere.reset(); }}
+            onClick={() => {
+              setActiveType(cat.type);
+              tipInscriere.reset();
+              onTypeChange?.(cat.type);
+            }}
             className={cn(
               "rounded-t-lg px-4 py-2 text-sm font-medium transition-colors",
               activeType === cat.type

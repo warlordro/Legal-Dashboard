@@ -1,10 +1,12 @@
 # Legal Dashboard — Status Implementare
 
-**Data:** 2026-04-19 (sesiune 3)
-**Versiune curenta:** v2.0.6
+**Data:** 2026-04-26 (sesiune UI RNPM)
+**Versiune curenta:** v2.0.7
 **Status global:** 10/10 pasi completi. Installer: `release/Legal Dashboard Setup 1.0.0.exe` (98 MB).
 
-**Livrat recent (v2.0.6):** SOAP parser decodeaza entitati XML (`&amp;`, `&quot;`, `&apos;`, `&lt;`, `&gt;` + numeric refs) la leaf fields in `parseDosar` — nume parti si obiect render corect in tabele / modal / export XLSX / prompt AI (ex: `S.C. X &amp; Co.` → `S.C. X & Co.`); consolidare CodeRabbit findings 19.04.2026 in HARDENING Faza 7 (4 Critical + 6 Important + 6 suggestions, blockers pentru web-deploy + auto-sync monitorizare); 5 teste noi pe `decodeXmlEntities` (29/29 verde).
+**Livrat recent (v2.0.7):** RNPM pastreaza corect state-ul intre taburile principale `Cautare` / `Bulk` / `Baza locala`; revenirea pe `Cautare` intoarce utilizatorul la categoria RNPM activa anterior (din cele 5), nu default pe prima. Rezultatele unei cautari sunt vizibile doar pe categoria in care au fost obtinute, deci nu mai apar in alte categorii.
+
+**Livrat anterior (v2.0.6):** SOAP parser decodeaza entitati XML (`&amp;`, `&quot;`, `&apos;`, `&lt;`, `&gt;` + numeric refs) la leaf fields in `parseDosar` — nume parti si obiect render corect in tabele / modal / export XLSX / prompt AI (ex: `S.C. X &amp; Co.` → `S.C. X & Co.`); consolidare CodeRabbit findings 19.04.2026 in HARDENING Faza 7 (4 Critical + 6 Important + 6 suggestions, blockers pentru web-deploy + auto-sync monitorizare); 5 teste noi pe `decodeXmlEntities` (29/29 verde).
 
 **Livrat anterior (v2.0.5):** RNPM auto-load pe batch de 25 cu bara de progres; `Sterge baza` elibereaza efectiv spatiul pe disc (VACUUM + WAL checkpoint); user-abort loghea 499 pe backend (separat de erorile 500 reale); tab Bunuri nu mai intepeneste pe avize 1000+ bunuri (content-visibility).
 

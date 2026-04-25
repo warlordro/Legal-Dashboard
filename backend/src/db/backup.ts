@@ -11,6 +11,11 @@ const BACKUP_RETAIN_COUNT = 7;
 // a separate retention bucket so a burst of restores can't evict all the dated
 // daily backups (or vice versa). Lex sort on ISO timestamps = chronological.
 const PRE_RESTORE_RETAIN = 5;
+// Pre-migration snapshots (e.g. `legal-dashboard.pre-descriere-dedup-<stamp>.db`,
+// produced from `backend/src/db/schema.ts` before destructive ALTERs). Kept in a
+// third pool so retention of one pool never starves another. Conservative cap —
+// these only fire on schema upgrades, so 5 covers multiple major versions.
+const PRE_MIGRATION_RETAIN = 5;
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 const BACKUP_PREFIX = "legal-dashboard.";
 const BACKUP_SUFFIX = ".db";
@@ -18,6 +23,10 @@ const BACKUP_SUFFIX = ".db";
 const DATED_BACKUP_RE = /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/;
 // Pre-restore snapshot: `legal-dashboard.pre-restore-<ISO-with-dashes>.db`
 const PRE_RESTORE_RE = /^legal-dashboard\.pre-restore-/;
+// Pre-migration snapshot: `legal-dashboard.pre-<label>-<stamp>.db` for any
+// label except `restore`. Negative lookahead keeps the two `pre-*` buckets
+// disjoint so pruning logic is unambiguous.
+const PRE_MIGRATION_RE = /^legal-dashboard\.pre-(?!restore-)[^.]+\.db$/;
 
 export function getBackupDir(): string {
   return path.join(path.dirname(getDbPath()), "backups");
@@ -57,13 +66,15 @@ async function latestBackupMtime(dir: string): Promise<number | null> {
 
 async function pruneOld(dir: string): Promise<number> {
   const all = await listBackups(dir);
-  // Two separate pools so the retention cap of one cannot starve the other.
-  // Pre-restore filenames embed an ISO timestamp; lex sort = chronological.
+  // Three disjoint pools so the retention cap of one cannot starve the others.
+  // Pre-* filenames embed an ISO timestamp; lex sort = chronological.
   const dated = all.filter((f) => DATED_BACKUP_RE.test(f)).sort().reverse();
   const preRestore = all.filter((f) => PRE_RESTORE_RE.test(f)).sort().reverse();
+  const preMigration = all.filter((f) => PRE_MIGRATION_RE.test(f)).sort().reverse();
   const toDelete = [
     ...dated.slice(BACKUP_RETAIN_COUNT),
     ...preRestore.slice(PRE_RESTORE_RETAIN),
+    ...preMigration.slice(PRE_MIGRATION_RETAIN),
   ];
   for (const f of toDelete) {
     await fsPromises.unlink(path.join(dir, f)).catch(() => { /* best-effort */ });

@@ -18,6 +18,41 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.0.7",
+    date: "26 Aprilie 2026",
+    subtitle: "RNPM tab-state UX fix — rezultate si categorie pastrate corect",
+    icon: <MousePointerClick className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "RNPM — rezultate scoped pe categoria de cautare",
+        content:
+          "Rezultatele unei cautari RNPM nu mai raman vizibile cand utilizatorul schimba categoria interna a formularului (ex. din Aviz de ipoteca mobiliara in Fiducie / Aviz specific). Tabelul, erorile si actiunile de incarcare sunt afisate doar pentru categoria in care rezultatul a fost obtinut.",
+        bullets: [
+          "RnpmSearchForm notifica pagina parinte cand categoria activa se schimba.",
+          "RnpmSearch.tsx calculeaza visibleResult / visibleError pe baza perechii activeSearchType === lastType.",
+          "Butoanele Incarca tot / Opreste incarcarea si progress bar-ul folosesc rezultatul vizibil, nu state-ul global vechi.",
+        ],
+      },
+      {
+        title: "RNPM — revenire corecta intre Cautare / Bulk / Baza locala",
+        content:
+          "Cand utilizatorul pleaca din tabul principal Cautare catre Bulk sau Baza locala si revine, formularul RNPM ramane pe categoria dintre cele 5 unde era inainte. Nu mai revine implicit pe primul tab si nu mai ascunde rezultatul cautarii anterioare.",
+        bullets: [
+          "Sectiunea Cautare ramane montata si este doar ascunsa prin clasa hidden, la fel ca Baza locala.",
+          "State-ul intern al formularului (categoria activa, campurile completate, rezultat vizibil) supravietuieste navigarii intre cele 3 taburi principale.",
+          "RnpmSearchForm sincronizeaza categoria activa cu pagina parinte la mount si la fiecare schimbare de categorie.",
+        ],
+      },
+      {
+        title: "Verificare",
+        content:
+          "Build complet rulat dupa schimbare: frontend TypeScript + Vite si bundle-ul Electron/backend au trecut. Aplicatia Electron a fost repornita, /health raspunde ok, iar endpoint-ul /api/rnpm/saved raspunde cu date.",
+      },
+    ],
+  },
+  {
     version: "v2.0.6",
     date: "19 Aprilie 2026",
     subtitle: "SOAP XML entity decoding + consolidare CodeRabbit findings in HARDENING Faza 7",

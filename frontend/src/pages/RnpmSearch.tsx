@@ -52,6 +52,7 @@ export default function RnpmSearchPage({
   consumePendingSearch,
 }: RnpmSearchPageProps) {
   const [tab, setTab] = useState<Tab>("search");
+  const [activeSearchType, setActiveSearchType] = useState<RnpmSearchType>("ipoteci");
   const [lastType, setLastType] = useState<RnpmSearchType>("ipoteci");
   const [lastParams, setLastParams] = useState<RnpmSearchParams>({});
   const [result, setResult] = useState<ResultState | null>(null);
@@ -81,6 +82,7 @@ export default function RnpmSearchPage({
     setResult(null);
     setElapsedMs(null);
     setPhase("Rezolvare captcha...");
+    setActiveSearchType(type);
     setLastType(type);
     setLastParams(params);
     const startTs = performance.now();
@@ -181,6 +183,7 @@ export default function RnpmSearchPage({
     const { type, params } = pendingSearch;
     consumePendingSearch();
     setTab("search");
+    setActiveSearchType(type);
     setLastType(type);
     setLastParams(params);
     setFormResetKey((k) => k + 1);
@@ -198,6 +201,8 @@ export default function RnpmSearchPage({
     { id: "bulk", label: "Bulk", icon: ListChecks },
     { id: "saved", label: "Baza locala", icon: Database },
   ];
+  const visibleResult = activeSearchType === lastType ? result : null;
+  const visibleError = activeSearchType === lastType ? error : null;
 
   return (
     <div className="mx-auto max-w-6xl p-6 space-y-4">
@@ -249,47 +254,47 @@ export default function RnpmSearchPage({
         )}
       </div>
 
-      {tab === "search" && (
-        <div className="space-y-4">
+      <div className={tab === "search" ? "space-y-4" : "hidden"}>
           <RnpmSearchForm
             key={formResetKey}
             loading={loading}
             loadingPhase={phase}
             onSubmit={(type, params) => runSearch(type, params)}
+            onTypeChange={setActiveSearchType}
             onStop={handleStop}
             onReset={() => { setResult(null); setError(null); setLastParams({}); }}
             initialType={lastType}
             initialParams={lastParams}
-            suppressStop={result != null && result.nextRnpmPage != null}
-            extraActions={result && result.nextRnpmPage != null ? (
+            suppressStop={visibleResult != null && visibleResult.nextRnpmPage != null}
+            extraActions={visibleResult && visibleResult.nextRnpmPage != null ? (
               <div className="flex items-center gap-2">
                 {autoLoading ? (
                   <Button type="button" variant="destructive" onClick={handleStop} className="font-normal h-8 px-3 text-xs">
-                    Opreste incarcarea ({result.documents.length} din {result.total})
+                    Opreste incarcarea ({visibleResult.documents.length} din {visibleResult.total})
                   </Button>
                 ) : (
                   <Button type="button" disabled={loading} onClick={() => setAutoLoading(true)} className="font-normal h-8 px-3 text-xs">
-                    Incarca tot ({result.documents.length} din {result.total})
+                    Incarca tot ({visibleResult.documents.length} din {visibleResult.total})
                   </Button>
                 )}
-                {result.total > 0 && (
+                {visibleResult.total > 0 && (
                   <div className="h-1.5 w-32 overflow-hidden rounded-full bg-muted">
                     <div
                       className="h-full rounded-full bg-primary transition-all duration-300"
-                      style={{ width: `${Math.round((result.documents.length / result.total) * 100)}%` }}
+                      style={{ width: `${Math.round((visibleResult.documents.length / visibleResult.total) * 100)}%` }}
                     />
                   </div>
                 )}
               </div>
             ) : null}
           />
-          {error && (
+          {visibleError && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
-              {error}
+              {visibleError}
             </div>
           )}
           <RnpmResultsTable
-            result={result}
+            result={visibleResult}
             loading={loading}
             onNeedMore={loadNextBatch}
             onOpenDetail={(_doc, avizId) => openDetailByAvizId(avizId)}
@@ -299,7 +304,6 @@ export default function RnpmSearchPage({
             elapsedMs={elapsedMs}
           />
         </div>
-      )}
 
       {tab === "bulk" && (
         <RnpmBulkSearch
