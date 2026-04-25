@@ -11,6 +11,7 @@
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
     "install:all": "npm install",
+    "rebuild:electron": "npx --yes @electron/rebuild -f -w better-sqlite3",
     "build": "node --experimental-strip-types scripts/build.js",
     "electron:dev": "electron .",
     "clean:release": "node -e \"require('fs').rmSync('release', {recursive:true, force:true})\"",
