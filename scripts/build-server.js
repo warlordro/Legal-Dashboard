@@ -27,7 +27,7 @@ cpSync(resolve(root, "dist-backend"), join(outDir, "dist-backend"), { recursive:
 cpSync(resolve(root, "dist-frontend"), join(outDir, "dist-frontend"), { recursive: true });
 cpSync(resolve(root, "Dockerfile"), join(outDir, "Dockerfile"));
 cpSync(resolve(root, "docker-compose.yml"), join(outDir, "docker-compose.yml"));
-cpSync(resolve(root, ".env.example"), join(outDir, ".env.example"));
+cpSync(resolve(root, "backend", ".env.example"), join(outDir, ".env.example"));
 
 // Write a minimal start script
 writeFileSync(join(outDir, "start.sh"), `#!/bin/sh

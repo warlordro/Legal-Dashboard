@@ -105,9 +105,9 @@ Un finding (I1 — dublu `validateAiBody`) a fost verificat direct vs cod si **r
 
 ### Release blockers (fix inainte de urmatorul tag `v2.0.7`)
 
-- [ ] **B1 — `scripts/build-server.js:30` cu path rupt** — copiaza `.env.example` din repo root, fisier care nu exista (doar `backend/.env.example`). `npm run dist:server` arunca inainte sa produca ZIP-ul. Fix: schimba path la `backend/.env.example` sau commit un root `.env.example`. **Effort:** ~15 min.
-- [ ] **B2 — `release/Legal Dashboard Setup 1.0.0.exe` + `.blockmap` inca prezente** — daca folder-ul e zipat/distribuit, installer-ul vechi pleaca odata cu cel nou. Rollback la versiune veche peste DB noua = cascada de probleme (vezi Faza 4 schema version table). Fix: sterge artefactele 1.0.0 din `release/`, adauga step `rm release/*<OLD_VERSION>*` in `dist` pre-publish. **Effort:** ~5 min.
-- [ ] **B3 — banner stale `v1.0.0` in backend** — [backend/src/index.ts:128](backend/src/index.ts) hardcoded la `Legal Dashboard v1.0.0` cand `package.json` zice 2.0.6. User-vizibil in Electron console + Docker logs + undermineaza bug reports. Fix: injecteaza via esbuild `--define` sau `require("../package.json").version` la bootstrap (backend-ul e CJS deja). **Effort:** ~15 min.
+- [x] **B1 — `scripts/build-server.js:30` cu path rupt** — copiaza `.env.example` din repo root, fisier care nu exista (doar `backend/.env.example`). `npm run dist:server` arunca inainte sa produca ZIP-ul. ✅ Rezolvat in [build-server.js:30](scripts/build-server.js#L30) (path schimbat la `backend/.env.example`).
+- [x] **B2 — `release/Legal Dashboard Setup 1.0.0.exe` + `.blockmap` inca prezente** — daca folder-ul e zipat/distribuit, installer-ul vechi pleaca odata cu cel nou. Rollback la versiune veche peste DB noua = cascada de probleme (vezi Faza 4 schema version table). ✅ Rezolvat: artefactele 1.0.0 sterse + adaugat `clean:release` + `predist*` hooks in [package.json](package.json) (electron-builder porneste de pe `release/` curat la fiecare build).
+- [x] **B3 — banner stale `v1.0.0` in backend** — [backend/src/index.ts:128](backend/src/index.ts) hardcoded la `Legal Dashboard v1.0.0` cand `package.json` zice 2.0.6. User-vizibil in Electron console + Docker logs + undermineaza bug reports. ✅ Rezolvat: `APP_VERSION` citita la runtime via `require("../../package.json")` cu fallback `"unknown"` (esbuild bundle-uieste JSON-ul in CJS).
 
 ### Data integrity + reliability (desktop-critical)
 

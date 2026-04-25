@@ -124,8 +124,16 @@ process.on("beforeExit", () => gracefulShutdown("beforeExit"));
 (globalThis as unknown as { __legalDashboardShutdown?: () => void }).__legalDashboardShutdown =
   () => gracefulShutdown("before-quit");
 
+const APP_VERSION: string = (() => {
+  try {
+    return (require("../../package.json") as { version: string }).version;
+  } catch {
+    return "unknown";
+  }
+})();
+
 console.log("");
-console.log("  Legal Dashboard v1.0.0");
+console.log(`  Legal Dashboard v${APP_VERSION}`);
 console.log(`  Deschide in browser: http://localhost:${port}`);
 console.log("");
 console.log(`  Server: http://${hostname}:${port}`);
