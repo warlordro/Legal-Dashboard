@@ -4,7 +4,7 @@ import os from "os";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import Database from "better-sqlite3";
-import { restoreFromBackup, getBackupDir } from "./backup.ts";
+import { getBackupDir, listBackupsWithMeta, restoreFromBackup, runDailyBackup } from "./backup.ts";
 import { closeDb } from "./schema.ts";
 
 let tmpRoot: string;
@@ -34,6 +34,12 @@ async function seedBackup(name: string, label: string): Promise<void> {
   db.exec("CREATE TABLE marker (label TEXT)");
   db.prepare("INSERT INTO marker(label) VALUES (?)").run(label);
   db.close();
+}
+
+async function seedOldBackup(name: string, label: string): Promise<void> {
+  await seedBackup(name, label);
+  const old = new Date("2020-01-01T00:00:00.000Z");
+  await fsPromises.utimes(path.join(getBackupDir(), name), old, old);
 }
 
 function readMarker(p: string): string {
@@ -105,5 +111,49 @@ describe("restoreFromBackup — atomicity + safety", () => {
     await expect(restoreFromBackup("legal-dashboard.does-not-exist.db")).rejects.toThrow(
       /inexistent/i,
     );
+  });
+});
+
+describe("runDailyBackup — atomicity + retention", () => {
+  it("removes orphan .db.tmp files before writing the daily backup", async () => {
+    const dir = getBackupDir();
+    await fsPromises.mkdir(dir, { recursive: true });
+    const orphanTmp = path.join(dir, "legal-dashboard.2026-04-15.db.tmp");
+    const unrelatedTmp = path.join(dir, "notes.db.tmp");
+    await fsPromises.writeFile(orphanTmp, "partial backup");
+    await fsPromises.writeFile(unrelatedTmp, "not ours");
+
+    await runDailyBackup();
+
+    expect(fs.existsSync(orphanTmp)).toBe(false);
+    expect(fs.existsSync(unrelatedTmp)).toBe(true);
+    const names = (await listBackupsWithMeta()).map((b) => b.name);
+    expect(names.some((name) => /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/.test(name))).toBe(true);
+    expect(names.some((name) => name.endsWith(".db.tmp"))).toBe(false);
+  });
+
+  it("prunes dated, pre-restore, and pre-migration backups in separate pools", async () => {
+    for (let i = 1; i <= 8; i++) {
+      await seedOldBackup(`legal-dashboard.2020-01-${String(i).padStart(2, "0")}.db`, `DAILY-${i}`);
+    }
+    for (let i = 1; i <= 7; i++) {
+      await seedOldBackup(`legal-dashboard.pre-restore-2020-01-${String(i).padStart(2, "0")}.db`, `RESTORE-${i}`);
+    }
+    for (let i = 1; i <= 7; i++) {
+      await seedOldBackup(`legal-dashboard.pre-schema-2020010${i}.db`, `MIGRATION-${i}`);
+    }
+
+    await runDailyBackup();
+
+    const names = (await listBackupsWithMeta()).map((b) => b.name);
+    const dated = names.filter((name) => /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/.test(name));
+    const preRestore = names.filter((name) => /^legal-dashboard\.pre-restore-/.test(name));
+    const preMigration = names.filter((name) => /^legal-dashboard\.pre-(?!restore-)[^.]+\.db$/.test(name));
+
+    expect(dated).toHaveLength(7);
+    expect(preRestore).toHaveLength(5);
+    expect(preMigration).toHaveLength(5);
+    expect(preMigration).toContain("legal-dashboard.pre-schema-20200107.db");
+    expect(preMigration).not.toContain("legal-dashboard.pre-schema-20200101.db");
   });
 });
