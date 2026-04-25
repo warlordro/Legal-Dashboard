@@ -28,12 +28,34 @@ cpSync(resolve(root, "dist-frontend"), join(outDir, "dist-frontend"), { recursiv
 cpSync(resolve(root, "Dockerfile"), join(outDir, "Dockerfile"));
 cpSync(resolve(root, "docker-compose.yml"), join(outDir, "docker-compose.yml"));
 cpSync(resolve(root, "backend", ".env.example"), join(outDir, ".env.example"));
+// Bare-metal ZIP runtime dependencies are intentionally installed on the target
+// machine, not copied from the build machine: better-sqlite3 is a native module
+// and a Windows-built node_modules would not run on Linux/Mac. Ship the exact
+// lockfile + workspace manifests, then start.sh/start.bat run `npm ci` once if
+// the native binding is missing.
+cpSync(resolve(root, "package.json"), join(outDir, "package.json"));
+cpSync(resolve(root, "package-lock.json"), join(outDir, "package-lock.json"));
+mkdirSync(join(outDir, "backend"), { recursive: true });
+mkdirSync(join(outDir, "frontend"), { recursive: true });
+cpSync(resolve(root, "backend", "package.json"), join(outDir, "backend", "package.json"));
+cpSync(resolve(root, "frontend", "package.json"), join(outDir, "frontend", "package.json"));
 
 // Write a minimal start script
 writeFileSync(join(outDir, "start.sh"), `#!/bin/sh
+set -eu
+if [ ! -d node_modules/better-sqlite3 ]; then
+  echo "Installing runtime dependencies from package-lock.json..."
+  npm ci --omit=dev --workspace=backend --include-workspace-root=false
+fi
 NODE_ENV=production node dist-backend/index.cjs
 `);
 writeFileSync(join(outDir, "start.bat"), `@echo off
+setlocal
+if not exist node_modules\\better-sqlite3 (
+  echo Installing runtime dependencies from package-lock.json...
+  call npm ci --omit=dev --workspace=backend --include-workspace-root=false
+  if errorlevel 1 exit /b %errorlevel%
+)
 set NODE_ENV=production
 node dist-backend\\index.cjs
 `);
@@ -45,6 +67,10 @@ Cerinte: Node.js v22+
 Pornire directa:
   Linux/Mac:  sh start.sh
   Windows:    start.bat
+
+La prima pornire, scriptul instaleaza dependintele runtime din package-lock.json
+cu npm ci daca lipseste node_modules/better-sqlite3. Este intentionat: better-sqlite3
+este modul nativ si trebuie instalat pe platforma unde ruleaza serverul.
 
 Pornire cu Docker:
   1. Copiaza .env.example in .env si completeaza cheile API (optional)

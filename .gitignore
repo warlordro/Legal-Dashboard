@@ -8,6 +8,7 @@ dist-backend/
 frontend/dist/
 backend/dist/
 release/
+server-release/
 out/
 
 # Databases (local dev data, user-specific)

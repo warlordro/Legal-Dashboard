@@ -26,11 +26,14 @@ node_modules
 .npm
 .pnpm-store
 
-# Build artifacts not needed inside the image (we COPY dist-* explicitly)
+# Build artifacts not needed inside the image (we COPY dist-* explicitly).
+# Keep package manifests available for the deps stage so Docker can use the
+# workspace lockfile with `npm ci --workspace=backend`.
 release
 server-release
 build
-frontend
+frontend/*
+!frontend/package.json
 backend/src
 electron
 scripts

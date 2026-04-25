@@ -13,11 +13,14 @@ FROM node:22-alpine AS deps
 # binaries are glibc-only, so we compile from source against musl.
 RUN apk add --no-cache python3 make g++
 WORKDIR /app
-# Use the backend manifest so versions stay in sync with what the bundle was tested
-# against. Copying just package.json (no lockfile from the workspace root) keeps the
-# build context small; npm resolves to compatible patch versions.
-COPY backend/package.json ./
-RUN npm install --omit=dev --build-from-source
+# Reproducible runtime dependency install. The root lockfile contains workspace
+# deps, while `--workspace=backend --include-workspace-root=false` installs only
+# backend production dependencies into /app/node_modules. `better-sqlite3` is
+# built from source for Alpine/musl instead of relying on glibc prebuilds.
+COPY package.json package-lock.json ./
+COPY backend/package.json ./backend/package.json
+COPY frontend/package.json ./frontend/package.json
+RUN npm ci --omit=dev --workspace=backend --include-workspace-root=false --build-from-source
 
 FROM node:22-alpine
 # SECURITY: drop root before copying anything. The app does not need privileged
@@ -50,7 +53,7 @@ EXPOSE 3002
 # Healthcheck inside the image so `docker run` (no compose) also benefits.
 # Aligns with the docker-compose.yml healthcheck and DR3 readiness gating: the
 # `/health` endpoint returns 503 until backend boot/prewarm completes.
-HEALTHCHECK --interval=30s --timeout=10s --retries=3 \
+HEALTHCHECK --interval=30s --timeout=10s --start-period=120s --retries=3 \
   CMD wget -qO- http://localhost:3002/health || exit 1
 
 CMD ["node", "dist-backend/index.cjs"]
