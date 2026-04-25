@@ -48,6 +48,21 @@ async function listBackups(dir: string): Promise<string[]> {
   }
 }
 
+// Half-written backups left by a prior crash / SIGTERM / power loss between
+// `db.backup(tmp)` and the atomic rename below. Filter is strict (`.db.tmp`
+// suffix on a backup-prefixed name) so we never touch unrelated files even if
+// the user drops them into the backups folder.
+async function cleanupOrphanTmp(dir: string): Promise<void> {
+  try {
+    const entries = await fsPromises.readdir(dir);
+    for (const f of entries) {
+      if (f.startsWith(BACKUP_PREFIX) && f.endsWith(`${BACKUP_SUFFIX}.tmp`)) {
+        await fsPromises.unlink(path.join(dir, f)).catch(() => { /* best-effort */ });
+      }
+    }
+  } catch { /* dir missing — runDailyBackup will mkdir before us */ }
+}
+
 async function latestBackupMtime(dir: string): Promise<number | null> {
   // Only count dated daily backups for "should I skip today's snapshot" — a recent
   // pre-restore snapshot was triggered by a user-initiated restore and does not
@@ -160,6 +175,20 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
     try { await fsPromises.unlink(dbPath + suffix); } catch { /* missing is fine */ }
   }
 
+  // Structured audit line. Persistent `audit_log` table is deferred to Faza 5
+  // (compliance), but emitting JSON to stdout already lets ops grep
+  // `"action":"restore"` after-the-fact in shipped log files (DR6) or in
+  // Electron's stdout pipe. Single line so log scrapers don't have to handle
+  // multi-line records.
+  console.log(
+    JSON.stringify({
+      action: "restore",
+      source: name,
+      preRestore: preRestoreName,
+      ts: new Date().toISOString(),
+    }),
+  );
+
   return { preRestoreName };
 }
 
@@ -185,15 +214,31 @@ export async function runDailyBackup(): Promise<void> {
     return;
   }
 
+  // SQLite's online backup writes incrementally to its destination file. A
+  // SIGTERM / power loss / crash mid-`db.backup()` would leave a partial file
+  // at today's filename, which `latestBackupMtime` would then accept as
+  // "fresh enough" and `restoreFromBackup` would silently corrupt the live
+  // DB from on the next manual restore. Stage to a sibling `.tmp` and rename
+  // atomically — incomplete writes leave only the `.tmp`, cleaned at the
+  // next boot and skipped by the freshness check (different suffix).
+  await cleanupOrphanTmp(dir);
+
   const lastMtime = await latestBackupMtime(dir);
   if (lastMtime && Date.now() - lastMtime < BACKUP_INTERVAL_MS) return;
 
   const dest = path.join(dir, todayBackupName());
+  const tmp = `${dest}.tmp`;
   try {
-    await getDb().backup(dest);
+    // Defensive: an extra orphan can survive cleanupOrphanTmp if mkdirSync above
+    // raced with another writer; ensure tmp slot is empty before db.backup.
+    await fsPromises.unlink(tmp).catch(() => { /* missing is fine */ });
+    await getDb().backup(tmp);
+    await fsPromises.rename(tmp, dest);
     const pruned = await pruneOld(dir);
     console.log(`[backup] saved ${path.basename(dest)}${pruned > 0 ? ` (pruned ${pruned} old)` : ""}`);
   } catch (e) {
+    // Best-effort cleanup so the next attempt does not race a half-written sibling.
+    await fsPromises.unlink(tmp).catch(() => { /* missing is fine */ });
     console.warn("[backup] failed:", e instanceof Error ? e.message : e);
   }
 }

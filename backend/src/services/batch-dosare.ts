@@ -47,11 +47,14 @@ export async function batchFetchDosare(
       chunk.map(async (interval) => {
         const label = `${interval.dataStart} → ${interval.dataStop}`;
         try {
-          const results = await cautareDosare({
-            ...params,
-            dataStart: interval.dataStart,
-            dataStop: interval.dataStop,
-          });
+          const results = await cautareDosare(
+            {
+              ...params,
+              dataStart: interval.dataStart,
+              dataStop: interval.dataStop,
+            },
+            { signal },
+          );
           if (results.length >= SOAP_RESULT_LIMIT) {
             const subResults = await subdivideInterval(params, interval, 1, signal);
             return { label, items: subResults.items, warnings: subResults.warnings };
@@ -95,7 +98,10 @@ async function subdivideInterval(
 ): Promise<BatchResult<Dosar>> {
   if (depth > MAX_SPLIT_DEPTH) {
     // Max depth reached — fetch what we can and warn
-    const results = await cautareDosare({ ...params, dataStart: interval.dataStart, dataStop: interval.dataStop });
+    const results = await cautareDosare(
+      { ...params, dataStart: interval.dataStart, dataStop: interval.dataStop },
+      { signal },
+    );
     const warning = results.length >= SOAP_RESULT_LIMIT
       ? `Intervalul ${interval.dataStart} → ${interval.dataStop} depaseste limita chiar si dupa subdivizare (${results.length} rezultate)`
       : undefined;
@@ -110,7 +116,10 @@ async function subdivideInterval(
     if (signal?.aborted) break;
     await delay(BATCH_DELAY_MS);
     try {
-      const results = await cautareDosare({ ...params, dataStart: sub.dataStart, dataStop: sub.dataStop });
+      const results = await cautareDosare(
+        { ...params, dataStart: sub.dataStart, dataStop: sub.dataStop },
+        { signal },
+      );
       if (results.length >= SOAP_RESULT_LIMIT) {
         const deeper = await subdivideInterval(params, sub, depth + 1, signal);
         allItems.push(...deeper.items);

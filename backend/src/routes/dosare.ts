@@ -55,15 +55,20 @@ dosareRouter.get("/", async (c) => {
     return c.json({ error: validationError }, 400);
   }
 
+  // Client disconnect cancels in-flight SOAP — without this the request looks
+  // cancelled at the client but the upstream call still consumes its 45s
+  // timeout server-side.
+  const signal = c.req.raw.signal;
+
   try {
     let dosare;
     if (institutii.length <= 1) {
-      dosare = await cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop });
+      dosare = await cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop }, { signal });
     } else {
       // Parallel SOAP calls for multiple institutions
       const results = await Promise.all(
         institutii.map((inst) =>
-          cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop })
+          cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop }, { signal })
             .catch((err) => { console.error(`Eroare cautare ${inst}:`, err); return []; })
         )
       );

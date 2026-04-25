@@ -52,14 +52,17 @@ termeneRouter.get("/", async (c) => {
     return c.json({ error: validationError }, 400);
   }
 
+  // Client disconnect cancels in-flight SOAP — see routes/dosare.ts for rationale.
+  const signal = c.req.raw.signal;
+
   try {
     let dosare;
     if (institutii.length <= 1) {
-      dosare = await cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop });
+      dosare = await cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop }, { signal });
     } else {
       const results = await Promise.all(
         institutii.map((inst) =>
-          cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop })
+          cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop }, { signal })
             .catch((err) => { console.error(`Eroare cautare termene ${inst}:`, err); return []; })
         )
       );

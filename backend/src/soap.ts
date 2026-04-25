@@ -57,7 +57,18 @@ function buildEnvelope(action: string, body: string): string {
 </soap:Envelope>`;
 }
 
-async function callSoap(action: string, body: string): Promise<string> {
+// Internal hard cap: PortalJust SOAP can hang on bad payloads. Always pair a
+// caller-supplied signal with this timeout via `AbortSignal.any` so neither
+// side starves — caller abort cancels the in-flight fetch immediately, and
+// the timeout still fires if the caller is unbounded.
+const SOAP_TIMEOUT_MS = 45000;
+
+function combineSignals(external?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(SOAP_TIMEOUT_MS);
+  return external ? AbortSignal.any([external, timeout]) : timeout;
+}
+
+async function callSoap(action: string, body: string, signal?: AbortSignal): Promise<string> {
   const envelope = buildEnvelope(action, body);
 
   const response = await fetch(SOAP_ENDPOINT, {
@@ -67,7 +78,7 @@ async function callSoap(action: string, body: string): Promise<string> {
       SOAPAction: `"${NS}/${action}"`,
     },
     body: envelope,
-    signal: AbortSignal.timeout(45000),
+    signal: combineSignals(signal),
   });
 
   const text = await response.text();
@@ -160,7 +171,15 @@ export function parseDosar(xml: string) {
   };
 }
 
-export async function cautareDosare(params: SearchParams) {
+export interface CautareDosareOptions {
+  // External AbortSignal — typically the SSE controller's signal in
+  // /load-more, or `c.req.raw.signal` for plain GET handlers. Combined with
+  // the internal 45s SOAP timeout so caller cancellation propagates the
+  // moment a client disconnects, not 45s later.
+  signal?: AbortSignal;
+}
+
+export async function cautareDosare(params: SearchParams, options?: CautareDosareOptions) {
   const body = `
     <numarDosar>${esc(toLegacyDiacritics(params.numarDosar ?? ""))}</numarDosar>
     <obiectDosar>${esc(toLegacyDiacritics(params.obiectDosar ?? ""))}</obiectDosar>
@@ -170,7 +189,7 @@ export async function cautareDosare(params: SearchParams) {
     ${nilOrValue("dataStop", params.dataStop)}
   `;
 
-  const xml = await callSoap("CautareDosare", body);
+  const xml = await callSoap("CautareDosare", body, options?.signal);
   const resultXml = extractFirst(xml, "CautareDosareResult");
   if (!resultXml) return [];
 
