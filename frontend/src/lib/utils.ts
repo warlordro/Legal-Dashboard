@@ -80,29 +80,44 @@ const LEGAL_WORDS = [
   "DIN", "NR", "ART",
 ].sort((a, b) => b.length - a.length);
 
+// 1-2 char connectors deliberately excluded from LEGAL_WORDS (would cause false
+// splits inside longer words). Recognized in the unmatched-run fallback so they
+// emit as standalone tokens instead of gluing to the previous word — fixes
+// "INCHEIEREDE", "INITIALAA", "ULTERIOARAA" coming from PortalJust SOAP.
+const SHORT_CONNECTORS = new Set(["DE", "A", "LA", "PE", "CU", "IN", "SI"]);
+
 export function splitConcatenatedWords(text: string): string {
   if (text.includes(" ")) return text;
   const upper = text.toUpperCase();
   const result: string[] = [];
   let pos = 0;
   while (pos < upper.length) {
-    let matched = false;
+    let matched: string | null = null;
     for (const word of LEGAL_WORDS) {
-      if (upper.startsWith(word, pos)) {
-        result.push(word);
-        pos += word.length;
-        matched = true;
-        break;
-      }
+      if (upper.startsWith(word, pos)) { matched = word; break; }
     }
-    if (!matched) {
-      if (result.length > 0) {
-        result[result.length - 1] += upper[pos];
-      } else {
-        result.push(upper[pos]);
-      }
-      pos++;
+    if (matched) {
+      result.push(matched);
+      pos += matched.length;
+      continue;
     }
+    // Unmatched run — scan to next known-word boundary (or end).
+    let nextWordPos = pos + 1;
+    while (nextWordPos < upper.length) {
+      if (LEGAL_WORDS.some((w) => upper.startsWith(w, nextWordPos))) break;
+      nextWordPos++;
+    }
+    const run = upper.slice(pos, nextWordPos);
+    if (SHORT_CONNECTORS.has(run) || nextWordPos < upper.length) {
+      // Known connector OR a gap before a future word — emit as its own token.
+      result.push(run);
+    } else if (result.length > 0) {
+      // Trailing junk (punctuation, digits) — keep glued to previous word.
+      result[result.length - 1] += run;
+    } else {
+      result.push(run);
+    }
+    pos = nextWordPos;
   }
   return result.join(" ");
 }
