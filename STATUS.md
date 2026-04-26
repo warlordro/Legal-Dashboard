@@ -1,10 +1,12 @@
 # Legal Dashboard — Status Implementare
 
-**Data:** 2026-04-26 (sesiune hardening + release packaging)
-**Versiune curenta:** v2.0.8
+**Data:** 2026-04-26 (sesiune Faza 10 medium close-out + Docker CI)
+**Versiune curenta:** v2.0.9
 **Status global:** 10/10 pasi completi. Installer: `release/Legal Dashboard Setup 1.0.0.exe` (98 MB).
 
-**Livrat recent (v2.0.8):** hardening post-release: `NODE_ENV=development` eliminat din `.env.example`; `AbortSignal` propagat pana in SOAP fetch; daily backup atomic cu `.db.tmp` + rename si cleanup orphan; restore log JSON structurat; teste backup atomicity/retention (55/55 backend tests); Docker reproductibil cu `package-lock.json` + `npm ci`; healthcheck cu `start-period=120s`; ZIP server instaleaza runtime deps pe platforma tinta; script `npm run rebuild:electron` pentru alternanta Node/Electron ABI la `better-sqlite3`.
+**Livrat recent (v2.0.9):** F10-M4 — `restoreFromBackup` foloseste `fsPromises.access` in loc de `fs.existsSync` (path async-only, event loop nu mai blocheaza pe stat-uri lente); F10-M5 — `unlink(-wal)` / `unlink(-shm)` mutate inainte de `rename(tmpPath, dbPath)` ca DB-ul nou sa nu coexiste cu sidecar-uri stale (silent corruption la lazy open eliminat); F10-M6 — helper `withAiLogging(provider, model, fn)` in `services/ai.ts` care wraps `callAnthropic`/`callOpenAI`/`callGoogle` si emite single-line JSON `{action:"ai_call", provider, model, latencyMs, status, errorType?, ts}`; F10-M7 — `.github/workflows/docker-build.yml` cu `docker build` + smoke test `node -e` + smoke test `/health` (60s poll, container primeste `HOST=0.0.0.0` + `LEGAL_DASHBOARD_ALLOW_REMOTE=1` ca portul 3002 sa fie reachable din host). Run CI verde in 2m20s.
+
+**Livrat anterior (v2.0.8):** hardening post-release: `NODE_ENV=development` eliminat din `.env.example`; `AbortSignal` propagat pana in SOAP fetch; daily backup atomic cu `.db.tmp` + rename si cleanup orphan; restore log JSON structurat; teste backup atomicity/retention (55/55 backend tests); Docker reproductibil cu `package-lock.json` + `npm ci`; healthcheck cu `start-period=120s`; ZIP server instaleaza runtime deps pe platforma tinta; script `npm run rebuild:electron` pentru alternanta Node/Electron ABI la `better-sqlite3`.
 
 **Livrat anterior (v2.0.7):** RNPM pastreaza corect state-ul intre taburile principale `Cautare` / `Bulk` / `Baza locala`; revenirea pe `Cautare` intoarce utilizatorul la categoria RNPM activa anterior (din cele 5), nu default pe prima. Rezultatele unei cautari sunt vizibile doar pe categoria in care au fost obtinute, deci nu mai apar in alte categorii.
 

@@ -18,6 +18,50 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.0.9",
+    date: "26 Aprilie 2026",
+    subtitle: "Faza 10 medium close-out — restore correctness, AI logging, Docker CI",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Restore correctness — async path + WAL/SHM ordering",
+        content:
+          "Inchidere finala a Faza 10 medium-priority pe restoreFromBackup. Functia ramane integral asincrona si elimina o fereastra de race in care DB-ul nou putea fi pereche cu sidecar-uri stale.",
+        bullets: [
+          "fs.existsSync inlocuit cu await fsPromises.access(dbPath) + flag dbExists. Event loop-ul nu mai blocheaza pe stat-uri lente (de ex. fisier scanat de antivirus).",
+          "unlink(-wal) si unlink(-shm) ruleaza inainte de rename(tmpPath, dbPath). Inainte exista o fereastra in care better-sqlite3 putea face lazy open peste combinatia DB nou + sidecar-uri vechi (silent corruption la primul query).",
+        ],
+      },
+      {
+        title: "Observability — log structurat pentru apelurile AI",
+        content:
+          "Apelurile catre Claude / GPT / Gemini emit acum un singur rand JSON cu provider, model, latenta si status. Util pentru ops, cost tracking grosier si debugging la spike-uri sau timeout-uri.",
+        bullets: [
+          "Helper withAiLogging imbraca callAnthropic / callOpenAI / callGoogle si emite { action: \"ai_call\", provider, model, latencyMs, status, errorType?, ts }.",
+          "TimeoutError si AbortError sunt normalizate la errorType: \"timeout\" ca log scrapers sa nu trebuiasca sa special-case-uieze ambele.",
+          "Tabela audit_log persistenta ramane scope Faza 5 (compliance).",
+        ],
+      },
+      {
+        title: "Docker CI smoke test",
+        content:
+          "Imaginea Docker e validata acum la fiecare push pe main si la fiecare PR care atinge Dockerfile / lockfile / backend / frontend. Regresiile in build-ul Alpine/musl al modulului nativ sunt prinse inainte de release.",
+        bullets: [
+          ".github/workflows/docker-build.yml ruleaza docker build + smoke test node + smoke test /health (poll 60s).",
+          "Containerul primeste HOST=0.0.0.0 + LEGAL_DASHBOARD_ALLOW_REMOTE=1 ca portul 3002 sa fie reachable din host (loopback-ul containerului e izolat).",
+          "Esuarea oricarui pas dump-eaza docker logs pentru triage direct din run-ul GitHub Actions.",
+        ],
+      },
+      {
+        title: "Verificare",
+        content:
+          "Backend typecheck curat, 55/55 teste backend verde, frontend typecheck curat, GitHub Actions Docker Build run 24955410182 verde in 2m20s cu /health 200 OK in containerul produs.",
+      },
+    ],
+  },
+  {
     version: "v2.0.8",
     date: "26 Aprilie 2026",
     subtitle: "Hardening + release packaging — Docker, ZIP server, backup atomicity",

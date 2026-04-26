@@ -4,6 +4,36 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 26 Aprilie 2026 - v2.0.9 - Faza 10 medium close-out + Docker CI
+
+Continuare directa a hardening-ului `v2.0.8`: inchide ultimele patru medium-priority din review-ul Faza 10 (M4-M7) si adauga un workflow GitHub Actions care valideaza imaginea Docker la fiecare push pe `main` sau pull request.
+
+### Restore correctness (F10-M4 + F10-M5)
+
+- `restoreFromBackup` foloseste acum `await fsPromises.access(dbPath)` + flag `dbExists` in loc de `fs.existsSync`. Path-ul ramane integral asincron, iar event loop-ul nu mai blocheaza pe stat-uri lente (de ex. fisier scanat de antivirus).
+- `unlink(-wal)` / `unlink(-shm)` se executa **inainte** de `rename(tmpPath, dbPath)`. Inainte exista o fereastra in care DB-ul nou era pereche cu sidecar-uri WAL/SHM stale, iar `better-sqlite3` putea face lazy open peste combinatia gresita (silent corruption la primul query post-restore).
+
+### Observability (F10-M6)
+
+- `services/ai.ts` introduce helper-ul `withAiLogging(provider, model, fn)` care imbraca `callAnthropic` / `callOpenAI` / `callGoogle`. Fiecare apel emite un singur rand JSON: `{ action: "ai_call", provider, model, latencyMs, status, errorType?, ts }`. `TimeoutError` / `AbortError` sunt normalizate la `errorType: "timeout"` ca agregatoarele sa nu trebuiasca sa special-case-uieze ambele.
+- Util pentru ops: cost tracking grosier per provider, rata de timeout-uri, latente la nivel de model. `audit_log` persistent ramane scope Faza 5 (compliance).
+
+### Docker CI smoke test (F10-M7)
+
+- `.github/workflows/docker-build.yml` ruleaza la push pe `main` si la PR atunci cand `Dockerfile`, `.dockerignore`, `docker-compose.yml`, `package-lock.json`, `backend/**`, `frontend/**` sau `scripts/build.js` se schimba.
+- Pasi: `npm ci` + `npm run build` (genereaza `dist-backend/` + `dist-frontend/` cerute de Dockerfile) -> `docker build -t legal-dashboard:ci .` -> smoke test `node -e "console.log(process.version)"` in image -> smoke test `/health` (poll 60s, valideaza prewarm + listen flip la 200 OK in container).
+- Containerul primeste `HOST=0.0.0.0` + `LEGAL_DASHBOARD_ALLOW_REMOTE=1` la `docker run` astfel incat portul 3002 sa fie accesibil din afara (loopback-ul containerului e izolat de host - `-p 3002:3002` cere bind non-loopback).
+- Esuarea oricarui pas dump-eaza `docker logs ld-ci` si `exit 1`, ca triage-ul sa fie posibil direct din run-ul GitHub Actions.
+
+### Verificare
+
+- `npx tsc --noEmit -p backend/tsconfig.json` - clean.
+- `npm test --workspace=backend` - 55/55 teste verde.
+- `cd frontend && npx tsc --noEmit` - clean.
+- GitHub Actions Docker Build run `24955410182` - verde in 2m20s, smoke test `/health` confirma 200 OK in containerul produs.
+
+---
+
 ## 26 Aprilie 2026 - v2.0.8 - hardening + release packaging
 
 Sesiune de hardening dupa tag-ul `v2.0.7`. Versiunea `v2.0.8` include fixurile post-tag pentru backup/env/SOAP, teste de regresie pe backup atomic si packaging reproductibil pentru Docker + ZIP server.

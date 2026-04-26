@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.0.8** (26 Aprilie 2026, hardening + release packaging)
+- **Versiune curenta**: **v2.0.9** (26 Aprilie 2026, Faza 10 medium close-out + Docker CI)
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
@@ -579,6 +579,7 @@ Right-click contextual: Copiaza (daca exista selectie), Lipeste (daca e editabil
 
 - **v2.0.7**: RNPM tab-state fix — rezultatele live sunt scoped pe categoria de cautare; revenirea din `Bulk` / `Baza locala` pe `Cautare` pastreaza categoria RNPM activa anterior.
 - **v2.0.8**: hardening post-release — env template sigur, AbortSignal propagat pana in SOAP fetch, daily backup atomic cu `.db.tmp` + rename, restore audit log JSON, teste backup atomicity/retention, Docker lockfile + healthcheck start-period, ZIP server cu runtime deps instalate pe platforma tinta.
+- **v2.0.9**: Faza 10 medium close-out — `restoreFromBackup` integral asincron (fsPromises.access in loc de fs.existsSync), unlink WAL/SHM mutat inainte de rename pentru a inchide fereastra de race, helper `withAiLogging` pentru log JSON `{action:"ai_call", provider, model, latencyMs, status}` pe Claude/GPT/Gemini, workflow `.github/workflows/docker-build.yml` cu smoke test node + `/health` (60s poll, HOST=0.0.0.0 + LEGAL_DASHBOARD_ALLOW_REMOTE=1 in container).
 
 ### Consideratii Deploy Server-Based (backlog)
 
@@ -765,7 +766,8 @@ Parsate din enumerarea WSDL a Ministerului Justitiei, grupate in 7 categorii:
 | **v2.0.6** | **19.04.2026** | **SOAP XML entity decoding in parseDosar (correctness user-facing: nume parti / obiect / solutie) + consolidare CodeRabbit findings 19.04.2026 in HARDENING Faza 7 (blockers web-deploy + pre-monitorizare auto-sync)** |
 | **v2.0.7** | **26.04.2026** | **UI hotfix RNPM: rezultate scoped pe categoria de cautare + revenire pe categoria activa dupa navigare intre Cautare / Bulk / Baza locala** |
 | **v2.0.8** | **26.04.2026** | **Hardening + release packaging: backup atomic, SOAP cancellation, env template sigur, teste backup 55/55, Docker npm ci din lockfile, healthcheck start-period, ZIP server cu runtime deps pe platforma tinta** |
+| **v2.0.9** | **26.04.2026** | **Faza 10 medium close-out: restoreFromBackup integral asincron, WAL/SHM unlink pre-rename, withAiLogging structurat pentru Claude/GPT/Gemini, workflow GitHub Actions docker-build cu smoke test /health** |
 
 ---
 
-*Ultima actualizare: 26 Aprilie 2026 - v2.0.8 hardening + release packaging*
+*Ultima actualizare: 26 Aprilie 2026 - v2.0.9 Faza 10 medium close-out + Docker CI*
