@@ -4,6 +4,46 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 27 Aprilie 2026 - v2.0.13 - PR-2: shadow tables auth + audit_log
+
+Al treilea PR din roadmap (saptamana 1 incheiata). Scop: introducem `users`, `user_sessions`, `audit_log` ca tabele "shadow" — definite de acum dar nepopulate cu utilizatori reali pana la PR-9 (web mode + Google SSO). `audit_log` insa devine imediat scriabil prin helperul `recordAudit()`, pe care PR-3+ il vor consuma pe fiecare mutatie sensibila (monitoring CRUD, name list import, AI request). Pe desktop, comportamentul ramane identic: un singur user sintetic `local` e seed-uit, iar restul tabelei `users` e gol.
+
+### Migrare DDL (`0002_users_sessions_audit.up.sql`)
+
+- `users(id, email UNIQUE, password_hash, display_name, role, status, created_at, last_login_at, meta_json)`. CHECK pe `role IN ('user','admin','support','readonly')` si pe `status IN ('active','suspended','deleted')`.
+- `user_sessions(id, user_id FK→users.id ON DELETE CASCADE, token_hash UNIQUE, user_agent, ip, expires_at, revoked_at, created_at)` cu index `(user_id, revoked_at)`.
+- Seed `INSERT OR IGNORE INTO users(...) VALUES ('local','local@desktop','Local User','user')` — un singur user sintetic care reprezinta sesiunea desktop.
+- `audit_log(id, owner_id, actor_id, ts, action, target_kind, target_id, outcome, ip, user_agent, detail_json)` cu CHECK `outcome IN ('ok','denied','error')` si indexuri `(owner_id, ts DESC)` + `(actor_id, ts DESC)`. `owner_id` nullable pentru evenimente de sistem.
+- Down migration prezenta (manuala, neexecutata automat de runner) — DROP INDEX + DROP TABLE in ordinea inversa, plus `DELETE FROM _schema_versions WHERE version=2`.
+
+### Helper `recordAudit()` (`backend/src/db/auditRepository.ts`)
+
+- API: `recordAudit(c | null, action, options?)`. Cu `c: Hono.Context` extrage automat `owner_id`, `actor_id`, `ip` (via `getConnInfo` — consistenta cu rate-limit-ul, **NU** trusted proxy headers), `user-agent`. Cu `c = null` semneaza evenimente de sistem (boot, scheduler tick, backup).
+- Override-uri explicite in `options` (e.g. admin actionand pentru alt tenant) cad peste valorile derivate din context.
+- `serializeDetail()` JSON-ifica obiectul; pentru circular refs sau BigInt, fallback la `{_audit_serialize_error: true}` ca path-ul de audit sa nu blocheze niciodata request-ul.
+- `getAuditEvents({ownerId, action, limit})` pentru read scope-uit pe owner sau system events (`ownerId: null`). Limit clamped `[1, 1000]`.
+- Sincron pe scop — audit-urile se scriu pe mutatii (rar), nu pe queries (des). Erorile propaga; caller-ul decide daca le inghite.
+
+### Tests (13 noi → total **99** backend, de la 85)
+
+`backend/src/db/auditRepository.test.ts`:
+
+- **Schema (6 teste)**: tabelele exista post-0002, seed `local` user prezent, `_schema_versions(2)` are hash real (nu sentinel-ul), CHECK rejecta role/status/outcome invalid, ON DELETE CASCADE pe user_sessions, idempotency la al 2-lea boot.
+- **Write paths (4 teste)**: system events (`c=null`), context auto-fill (Hono `app.request()` cu `ownerContext` mount-uit end-to-end), explicit overrides, fallback pe detail necirculizabil.
+- **Read paths (3 teste)**: scope per owner, system filter (`ownerId: null`), limit clamp.
+
+Plus 1 fix in `runner.test.ts`: integration test-ul "real baseline" se astepta la `result.applied === [1]` — acum cu 0002 in repo, e `[1, 2]`. Testul foloseste `applied[0] === 1` + `length >= 1` ca sa nu mai fie nevoie de update la fiecare PR viitor.
+
+### Bump
+
+`2.0.12 → 2.0.13` patch. DDL nou pe DB-urile existente (legacy backfilled), zero schimbare user-vizibila, zero rute noi. Modulul `auditRepository` e pregatit dar inca neapelat (consumatori — PR-3+).
+
+### Risk
+
+🟢 **LOW**. 0002 ruleaza o singura data per DB. Pe DB-uri legacy: `_schema_versions(1, sentinel)` exista deja → 0002 vede applied=[1], aplica fresh, recordeaza `(2, sha256)`. Pe DB fresh: `0001_baseline` instaleaza schema rnpm_*, `0002` instaleaza users + audit. Seed-ul `INSERT OR IGNORE` e safe daca cineva pre-seed-uieste manual. Niciun query existent nu e modificat — tabelele noi nu intersecteaza cu rnpm_*.
+
+---
+
 ## 27 Aprilie 2026 - v2.0.12 - PR-1: getOwnerId helper + 5 owner_id leak fixes
 
 Al doilea PR din roadmap (PLAN §3 + EXECUTION-ROADMAP saptamana 1). Scop: stabilim seam-ul prin care toate rutele viitoare vor citi `owner_id`-ul curent din context si inchidem cele 5 cai latente prin care un FK breach ar fi putut leak-ui randuri intre owneri in modul web (PR-9+). Pe desktop, comportamentul ramane identic (singurul `owner_id` activ e in continuare `"local"`).

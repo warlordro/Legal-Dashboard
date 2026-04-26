@@ -18,6 +18,90 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.0.13",
+    date: "27 Aprilie 2026",
+    subtitle: "PR-2 — fundatie auth (shadow) + audit log",
+    icon: <Lock className="h-5 w-5" />,
+    borderColor: "border-l-violet-500",
+    badgeClass: "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400",
+    sections: [
+      {
+        title: "Tabele auth introduse ca \"schela\" (users / user_sessions)",
+        content:
+          "Pregatim infrastructura pentru modul web (login Google Workspace, planificat in PR-9) fara sa schimbam comportamentul desktop. Pe instalare locala ramane un singur user sintetic — \"local\" — la fel ca pana acum.",
+        bullets: [
+          "Migrare 0002_users_sessions_audit.up.sql ruleaza la primul boot si insereaza un singur rand in users (id='local'). Niciun login, niciun ecran nou.",
+          "user_sessions exista pentru viitorul modul web (refresh tokens server-side); pe desktop ramane gol.",
+          "PR-9 va popula real users cand pornim varianta server — atunci toate rutele care folosesc owner_id (introdus in PR-1) trec automat la id-ul user-ului autentificat, fara rescriere.",
+        ],
+      },
+      {
+        title: "Audit log scriabil — recordAudit()",
+        content:
+          "Tabela audit_log accepta evenimente pe orice mutatie sensibila (creare/stergere job monitorizare, import lista, request AI). Helperul scrie owner_id, IP, user-agent automat din contextul Hono. Pe desktop e mostly silent — devine vizibil in PR-3+ cand monitorizarea va incepe sa scrie aici.",
+        bullets: [
+          "Indexuri (owner_id, ts DESC) si (actor_id, ts DESC) pentru read scope-uit per user / per actor (relevant in modul web cand un admin actioneaza pentru alt tenant).",
+          "outcome ∈ {ok, denied, error}; detail_json captureaza payload-ul concret cu fallback safe la BigInt sau circular refs.",
+        ],
+      },
+      {
+        title: "Verificare",
+        content:
+          "99 teste backend verde (de la 85): 13 noi pe schema 0002 + recordAudit + getAuditEvents end-to-end prin Hono. Smoke pe DB-ul live: migration-ul ruleaza o singura data, restul DB-ului intact, frontend si rutele existente functioneaza identic.",
+      },
+    ],
+  },
+  {
+    version: "v2.0.12",
+    date: "27 Aprilie 2026",
+    subtitle: "PR-1 — getOwnerId helper + 5 fixuri scurgere intre owneri",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-rose-500",
+    badgeClass: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400",
+    sections: [
+      {
+        title: "Seam pentru viitoarea autentificare web",
+        content:
+          "Toate rutele citesc acum owner_id-ul curent printr-un singur helper (c.get(\"ownerId\")). Pe desktop e hardcoded \"local\"; in PR-9 va fi inlocuit cu id-ul user-ului din JWT — zero refactor pe rute, doar implementarea helper-ului se schimba.",
+      },
+      {
+        title: "Inchidere a 5 cai latente prin care un user ar fi putut vedea date altui user",
+        content:
+          "loadAvizChildren (creditori / debitori / bunuri / istoric) cerea copiii doar dupa aviz_id, fara constraint pe owner_id. Daca s-ar fi produs vreodata un FK breach (bug de migrare, restore partial), randul user-ului B ar fi ajuns la user-ul A. Toate cele 4 query-uri cer acum AND owner_id = ? si pasa explicit aviz.owner_id. Sub-clauzele EXISTS din getAvize sunt si ele filtrate pe owner_id.",
+      },
+      {
+        title: "Test de regresie pentru izolare",
+        content:
+          "Suite-ul nou repository-isolation.test.ts forjeaza copii cu owner_id mismatch (raw INSERT) si verifica ca nicio metoda din avizRepository nu-i returneaza. 8 teste noi → 85 in total. Pe desktop comportamentul e identic — singurul owner_id activ ramane \"local\".",
+      },
+    ],
+  },
+  {
+    version: "v2.0.11",
+    date: "27 Aprilie 2026",
+    subtitle: "PR-0 — framework de migrari versionate",
+    icon: <Layers className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "_schema_versions + runner ordonat",
+        content:
+          "De acum incolo orice modificare de schema (tabel nou, coloana noua, index nou) e versionata intr-un fisier 0001_*.up.sql, 0002_*.up.sql, ... cu hash sha256 stocat in DB. La boot, runner-ul aplica doar fisierele neinregistrate, ordonat numeric, in tranzactii separate. Drift detection: daca un fisier deja aplicat e modificat dupa, boot-ul se opreste cu eroare clara.",
+      },
+      {
+        title: "Backfill pentru DB-uri legacy (v2.0.10 si mai vechi)",
+        content:
+          "La prima rulare pe o instalare existenta, runner-ul detecteaza ca DB-ul are deja schema rnpm_* si insereaza o intrare sentinel (1, '__backfilled_v1__') in loc sa execute baseline-ul (ar fi crapat pe CREATE TABLE duplicat). Path-ul vechi de ALTER idempotent ramane intact — zero schimbari functionale pentru utilizator.",
+      },
+      {
+        title: "Verificare",
+        content:
+          "77 teste backend verde (de la 62): 15 noi pe runner (fresh DB, idempotency, gap detection, drift, downgrade guard). Smoke pe DB-ul live (~189 avize, 104 MB): boot 1 backfill sentinel + boot 2 silent — zero data loss.",
+      },
+    ],
+  },
+  {
     version: "v2.0.10",
     date: "26 Aprilie 2026",
     subtitle: "Hardening — AI logging extension + backup maintenance lock + safeStorage trim",

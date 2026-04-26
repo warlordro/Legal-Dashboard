@@ -205,15 +205,19 @@ describe("discoverMigrations - file validation", () => {
   });
 });
 
-describe("runMigrations - real 0001_baseline.up.sql integration", () => {
-  it("real baseline applies cleanly on a fresh DB and records correct hash", () => {
+describe("runMigrations - real repo migrations integration", () => {
+  it("baseline + later migrations apply cleanly on a fresh DB and record correct hashes", () => {
     const repoMigrationsDir = __dirname;
     const baselinePath = path.join(repoMigrationsDir, "0001_baseline.up.sql");
     const baselineSql = fs.readFileSync(baselinePath, "utf8");
 
     const result = runMigrations(db, repoMigrationsDir);
 
-    expect(result.applied).toEqual([1]);
+    // Iterating tracks every committed migration in repo order; assert version 1
+    // is among them (and is the first applied) without hardcoding the count, so
+    // adding 0003+ in a later PR doesn't require touching this test.
+    expect(result.applied[0]).toBe(1);
+    expect(result.applied.length).toBeGreaterThanOrEqual(1);
     expect(result.backfilled).toBe(false);
 
     const row = db.prepare("SELECT version, sha256_up FROM _schema_versions WHERE version=1").get() as { version: number; sha256_up: string };
