@@ -150,8 +150,12 @@ export function useApiKey() {
   };
 
   const setKeys = (newKeys: ApiKeys) => {
-    setKeysState(newKeys);
-    persist(newKeys);
+    const trimmed = { ...newKeys };
+    for (const k of Object.keys(trimmed) as (keyof ApiKeys)[]) {
+      trimmed[k] = trimmed[k].trim();
+    }
+    setKeysState(trimmed);
+    persist(trimmed);
   };
 
   const setKey = (provider: keyof ApiKeys, value: string) => {

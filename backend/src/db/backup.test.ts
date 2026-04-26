@@ -4,8 +4,24 @@ import os from "os";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import Database from "better-sqlite3";
-import { getBackupDir, listBackupsWithMeta, restoreFromBackup, runDailyBackup } from "./backup.ts";
+import { deleteAllBackups, getBackupDir, listBackupsWithMeta, restoreFromBackup, runDailyBackup } from "./backup.ts";
 import { closeDb } from "./schema.ts";
+
+// Capture console.log during the body — vi.spyOn does not intercept reliably
+// across the maintenance-lock microtask hop, so override the method directly.
+async function captureConsoleLog<T>(fn: () => Promise<T>): Promise<{ value: T; lines: string[] }> {
+  const lines: string[] = [];
+  const original = console.log;
+  console.log = (...args: unknown[]) => {
+    if (typeof args[0] === "string") lines.push(args[0]);
+  };
+  try {
+    const value = await fn();
+    return { value, lines };
+  } finally {
+    console.log = original;
+  }
+}
 
 let tmpRoot: string;
 let dbPath: string;
@@ -111,6 +127,59 @@ describe("restoreFromBackup — atomicity + safety", () => {
     await expect(restoreFromBackup("legal-dashboard.does-not-exist.db")).rejects.toThrow(
       /inexistent/i,
     );
+  });
+
+  it("skips pre-restore snapshot when live DB does not exist (first-boot restore)", async () => {
+    // Simulate fresh install scenario: the user imports a backup before any
+    // local DB exists. There's nothing to snapshot, so pre-restore must not
+    // try to copy a missing source — that would throw and block restore.
+    closeDb();
+    await fsPromises.unlink(dbPath);
+
+    const backupName = "legal-dashboard.2026-04-15.db";
+    await seedBackup(backupName, "RESTORED");
+
+    const { preRestoreName } = await restoreFromBackup(backupName);
+
+    // No pre-restore file created, but the name is still returned for UX
+    // consistency (UI shows "rollback la <name>" — disabled when missing).
+    expect(fs.existsSync(path.join(getBackupDir(), preRestoreName))).toBe(false);
+    // Restore itself still applies.
+    expect(readMarker(dbPath)).toBe("RESTORED");
+  });
+
+  it("emits a structured audit line on successful restore", async () => {
+    const backupName = "legal-dashboard.2026-04-15.db";
+    await seedBackup(backupName, "RESTORED");
+
+    const { lines } = await captureConsoleLog(() => restoreFromBackup(backupName));
+
+    const restoreLine = lines.find(
+      (s) => s.includes('"action":"restore"') && !s.includes('"restore_failed"'),
+    );
+    expect(restoreLine).toBeDefined();
+    const parsed = JSON.parse(restoreLine!);
+    expect(parsed.action).toBe("restore");
+    expect(parsed.source).toBe(backupName);
+    expect(parsed.preRestoreCreated).toBe(true);
+  });
+});
+
+describe("deleteAllBackups — audit log", () => {
+  it("emits a delete_all_backups audit line with deleted count and total", async () => {
+    await seedBackup("legal-dashboard.2026-04-10.db", "A");
+    await seedBackup("legal-dashboard.2026-04-11.db", "B");
+    await seedBackup("legal-dashboard.2026-04-12.db", "C");
+
+    const { value: deleted, lines } = await captureConsoleLog(() => deleteAllBackups());
+    expect(deleted).toBe(3);
+
+    const auditLine = lines.find((s) => s.includes('"action":"delete_all_backups"'));
+    expect(auditLine).toBeDefined();
+    const parsed = JSON.parse(auditLine!);
+    expect(parsed.deleted).toBe(3);
+    expect(parsed.total).toBe(3);
+    expect(typeof parsed.ts).toBe("string");
   });
 });
 

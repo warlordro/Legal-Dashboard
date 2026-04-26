@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPrompt, buildJudgePrompt, escapeFenceTags } from "./ai.ts";
+import { buildPrompt, buildJudgePrompt, escapeFenceTags, isTimeoutOrAbort } from "./ai.ts";
 
 describe("escapeFenceTags", () => {
   it("neutralizes the dosar_data closing tag", () => {
@@ -102,5 +102,38 @@ describe("buildJudgePrompt — indirect prompt-injection resistance", () => {
     // full 60k payload. 50k is the cap, allow some envelope around it.
     expect(prompt).toContain("…");
     expect(prompt.length).toBeLessThan(huge.length);
+  });
+});
+
+describe("isTimeoutOrAbort — abort/timeout detection across SDKs", () => {
+  it("detects DOMException-style TimeoutError (AbortSignal.timeout)", () => {
+    const err = new Error("timed out");
+    err.name = "TimeoutError";
+    expect(isTimeoutOrAbort(err)).toBe(true);
+  });
+
+  it("detects classic AbortError", () => {
+    const err = new Error("aborted");
+    err.name = "AbortError";
+    expect(isTimeoutOrAbort(err)).toBe(true);
+  });
+
+  it("detects SDK subclasses by constructor name even when e.name === 'Error'", () => {
+    class APIUserAbortError extends Error {}
+    class APIConnectionTimeoutError extends Error {}
+    class GoogleGenerativeAIAbortError extends Error {}
+    // These do not override `name`, so they inherit "Error" — the bug the fix
+    // addresses. Must still be detected as timeout/abort.
+    expect(isTimeoutOrAbort(new APIUserAbortError("user aborted"))).toBe(true);
+    expect(isTimeoutOrAbort(new APIConnectionTimeoutError("conn timeout"))).toBe(true);
+    expect(isTimeoutOrAbort(new GoogleGenerativeAIAbortError("aborted"))).toBe(true);
+  });
+
+  it("returns false for unrelated errors", () => {
+    expect(isTimeoutOrAbort(new TypeError("bad type"))).toBe(false);
+    expect(isTimeoutOrAbort(new Error("network failure"))).toBe(false);
+    expect(isTimeoutOrAbort(null)).toBe(false);
+    expect(isTimeoutOrAbort("string")).toBe(false);
+    expect(isTimeoutOrAbort(undefined)).toBe(false);
   });
 });

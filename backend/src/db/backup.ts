@@ -1,7 +1,35 @@
 import path from "path";
-import fs from "fs";
 import fsPromises from "fs/promises";
 import { getDb, getDbPath, closeDb } from "./schema.ts";
+
+// Single in-process serialization point for DB-mutating maintenance ops
+// (restore + daily backup). On desktop these never run concurrently in normal
+// use, but `runDailyBackup` is scheduled and a user-initiated restore can
+// theoretically interleave — closing the DB mid-`db.backup()` corrupts the
+// destination. Promise chain is enough for single-process scope; web-mode
+// would replace this with a row-lock or advisory lock in the gateway.
+let maintenanceChain: Promise<unknown> = Promise.resolve();
+
+function withMaintenanceLock<T>(fn: () => Promise<T>): Promise<T> {
+  // `.then(fn, fn)` uses the same handler for fulfilled + rejected so a prior
+  // failure does not block the next op (chain self-heals).
+  const next = maintenanceChain.then(fn, fn);
+  // Update the chain head with a settled (never-rejecting) wrapper so a thrown
+  // op here does not poison every future op behind it.
+  maintenanceChain = next.then(() => undefined, () => undefined);
+  return next;
+}
+
+// Single-line JSON audit lines on stdout. Same shape as `restore` /
+// `ai_call` so log scrapers can grep `"action":"daily_backup"` etc.
+function logBackupEvent(entry: Record<string, unknown>): void {
+  console.log(
+    JSON.stringify({
+      ...entry,
+      ts: new Date().toISOString(),
+    }),
+  );
+}
 
 // Daily snapshot of legal-dashboard.db, kept in a sibling "backups/" folder.
 // Uses SQLite's online backup API (better-sqlite3 db.backup) — safe while the
@@ -125,6 +153,10 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
   if (!RESTORE_NAME_RE.test(name) || name.includes("/") || name.includes("\\")) {
     throw new Error("Nume backup invalid");
   }
+  return withMaintenanceLock(() => restoreFromBackupImpl(name));
+}
+
+async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: string }> {
   const dir = getBackupDir();
   const src = path.join(dir, name);
   try {
@@ -135,13 +167,6 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
 
   const dbPath = getDbPath();
 
-  // Close the active handle so we can overwrite the file on Windows (which locks open files).
-  closeDb();
-
-  // Preventive snapshot of the current DB into backups/ so the user can roll the restore back.
-  const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const preRestoreName = `${BACKUP_PREFIX}pre-restore-${ts}${BACKUP_SUFFIX}`;
-  const preRestorePath = path.join(dir, preRestoreName);
   // Async existence probe — sync `fs.existsSync` here would block the event loop
   // for the duration of the stat call (visible on AV-locked DB files), and the
   // rest of this function is async-only.
@@ -151,10 +176,43 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
   } catch {
     dbExists = false;
   }
+
+  // Force WAL frames into the main DB BEFORE closing. better-sqlite3 does not
+  // guarantee a TRUNCATE checkpoint on close, so without this the pre-restore
+  // copyFile below would capture only the .db file and lose any uncommitted
+  // WAL frames — making rollback to "moments before the restore" silently
+  // incomplete. Best-effort: a checkpoint failure means the snapshot is
+  // slightly stale, which is the same failure mode as before this fix.
+  if (dbExists) {
+    try {
+      getDb().prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    } catch (e) {
+      logBackupEvent({
+        action: "restore",
+        stage: "checkpoint_failed",
+        source: name,
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    }
+  }
+
+  // Close the active handle so we can overwrite the file on Windows (which locks open files).
+  closeDb();
+
+  // Preventive snapshot of the current DB into backups/ so the user can roll the restore back.
+  const ts = new Date().toISOString().replace(/[:.]/g, "-");
+  const preRestoreName = `${BACKUP_PREFIX}pre-restore-${ts}${BACKUP_SUFFIX}`;
+  const preRestorePath = path.join(dir, preRestoreName);
   if (dbExists) {
     try {
       await fsPromises.copyFile(dbPath, preRestorePath);
     } catch (e) {
+      logBackupEvent({
+        action: "restore_failed",
+        source: name,
+        stage: "pre_restore_snapshot",
+        reason: e instanceof Error ? e.message : String(e),
+      });
       throw new Error(
         `Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`,
       );
@@ -168,7 +226,27 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
   // matters even on single-instance desktop because better-sqlite3's lazy open
   // can race with any post-rename code path.
   for (const suffix of ["-wal", "-shm"]) {
-    try { await fsPromises.unlink(dbPath + suffix); } catch { /* missing is fine */ }
+    try {
+      await fsPromises.unlink(dbPath + suffix);
+    } catch (e) {
+      // ENOENT is benign — the sidecar legitimately does not exist. Anything
+      // else (EBUSY on Windows from AV / open handle, EACCES, etc.) means the
+      // file survived and will pair with the new DB after rename → silent
+      // corruption risk on next open. Log loudly but do not throw — preserves
+      // current restore-completes-anyway behavior; flip to throw in a future
+      // release if logs show this never fires in practice.
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== "ENOENT") {
+        logBackupEvent({
+          action: "restore",
+          stage: "stale_sidecar_unlink_failed",
+          source: name,
+          sidecar: suffix,
+          errnoCode: code,
+          reason: e instanceof Error ? e.message : String(e),
+        });
+      }
+    }
   }
 
   // Atomic replace: stage to a temp sibling, then rename onto the active DB path.
@@ -184,24 +262,23 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
     // Stale tmp may remain if the copy failed midway — best-effort cleanup so the
     // next restore attempt does not race a half-written sibling.
     await fsPromises.unlink(tmpPath).catch(() => { /* missing is fine */ });
+    logBackupEvent({
+      action: "restore_failed",
+      source: name,
+      stage: "rename",
+      reason: e instanceof Error ? e.message : String(e),
+    });
     throw new Error(
       `Restore esuat: ${e instanceof Error ? e.message : String(e)}`,
     );
   }
 
-  // Structured audit line. Persistent `audit_log` table is deferred to Faza 5
-  // (compliance), but emitting JSON to stdout already lets ops grep
-  // `"action":"restore"` after-the-fact in shipped log files (DR6) or in
-  // Electron's stdout pipe. Single line so log scrapers don't have to handle
-  // multi-line records.
-  console.log(
-    JSON.stringify({
-      action: "restore",
-      source: name,
-      preRestore: preRestoreName,
-      ts: new Date().toISOString(),
-    }),
-  );
+  logBackupEvent({
+    action: "restore",
+    source: name,
+    preRestore: preRestoreName,
+    preRestoreCreated: dbExists,
+  });
 
   return { preRestoreName };
 }
@@ -216,15 +293,35 @@ export async function deleteAllBackups(): Promise<number> {
       deleted++;
     } catch { /* best-effort */ }
   }
+  // Audit line: mass-delete is a destructive op the user can trigger from the
+  // UI. Logging count + total lets ops correlate "all backups gone" reports
+  // with the actual click. No throw — partial failures already swallowed
+  // above by design (one stuck file should not block the rest).
+  logBackupEvent({
+    action: "delete_all_backups",
+    deleted,
+    total: backups.length,
+  });
   return deleted;
 }
 
 export async function runDailyBackup(): Promise<void> {
+  // Serialize with restoreFromBackup so a user-triggered restore that closes
+  // the DB cannot interleave with `db.backup()` running from this scheduler.
+  // Lock is fast-path on desktop (no contention in practice).
+  return withMaintenanceLock(runDailyBackupImpl);
+}
+
+async function runDailyBackupImpl(): Promise<void> {
   const dir = getBackupDir();
   try {
-    fs.mkdirSync(dir, { recursive: true });
+    await fsPromises.mkdir(dir, { recursive: true });
   } catch (e) {
-    console.warn("[backup] cannot create backup dir:", e instanceof Error ? e.message : e);
+    logBackupEvent({
+      action: "daily_backup_failed",
+      stage: "mkdir",
+      reason: e instanceof Error ? e.message : String(e),
+    });
     return;
   }
 
@@ -249,10 +346,19 @@ export async function runDailyBackup(): Promise<void> {
     await getDb().backup(tmp);
     await fsPromises.rename(tmp, dest);
     const pruned = await pruneOld(dir);
-    console.log(`[backup] saved ${path.basename(dest)}${pruned > 0 ? ` (pruned ${pruned} old)` : ""}`);
+    logBackupEvent({
+      action: "daily_backup",
+      file: path.basename(dest),
+      pruned,
+    });
   } catch (e) {
     // Best-effort cleanup so the next attempt does not race a half-written sibling.
     await fsPromises.unlink(tmp).catch(() => { /* missing is fine */ });
-    console.warn("[backup] failed:", e instanceof Error ? e.message : e);
+    logBackupEvent({
+      action: "daily_backup_failed",
+      stage: "backup",
+      file: path.basename(dest),
+      reason: e instanceof Error ? e.message : String(e),
+    });
   }
 }

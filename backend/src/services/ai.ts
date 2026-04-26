@@ -157,13 +157,19 @@ Raspunde in romana, clar si concis. Foloseste un limbaj accesibil dar precis jur
 // Structured AI call log: single-line JSON to stdout. Lets ops grep
 // `"action":"ai_call"` after-the-fact for latency / failure rate per provider.
 // Persistent `audit_log` table is deferred to Faza 5 (compliance).
+type AiCallMeta = {
+  httpStatus?: number;
+  usageInput?: number;
+  usageOutput?: number;
+};
+
 function logAiCall(entry: {
   provider: string;
   model: string;
   latencyMs: number;
   status: "ok" | "error";
   errorType?: string;
-}): void {
+} & AiCallMeta): void {
   console.log(
     JSON.stringify({
       action: "ai_call",
@@ -173,29 +179,51 @@ function logAiCall(entry: {
   );
 }
 
-// Time the underlying provider call and emit a structured log line on both
-// success and failure. AbortSignal.timeout fires `TimeoutError` in modern Node
-// and `AbortError` in older runtimes — normalize to `timeout` so dashboards
-// don't have to special-case both.
+// Detect timeout/abort across raw DOMException (AbortSignal.timeout()), classic
+// AbortError, and SDK wrappers (Anthropic / OpenAI APIUserAbortError /
+// APIConnectionTimeoutError, Google SDK abort errors). Older normalization
+// relied solely on `e.name`, which is "Error" for SDK subclasses that don't
+// override it — so the timeout branch was effectively dead. Match constructor
+// name as a fallback so dashboards see `errorType:"timeout"` for real aborts.
+export function isTimeoutOrAbort(e: unknown): boolean {
+  if (!(e instanceof Error)) return false;
+  if (e.name === "TimeoutError" || e.name === "AbortError") return true;
+  const ctorName = e.constructor?.name ?? "";
+  return /Abort|Timeout/.test(ctorName);
+}
+
 async function withAiLogging<T>(
   provider: string,
   model: string,
-  fn: () => Promise<T>,
+  fn: () => Promise<{ value: T; meta?: AiCallMeta }>,
 ): Promise<T> {
   const start = Date.now();
   try {
-    const result = await fn();
-    logAiCall({ provider, model, latencyMs: Date.now() - start, status: "ok" });
-    return result;
+    const { value, meta } = await fn();
+    logAiCall({
+      provider,
+      model,
+      latencyMs: Date.now() - start,
+      status: "ok",
+      ...meta,
+    });
+    return value;
   } catch (e) {
-    const name = e instanceof Error ? e.name : "Unknown";
-    const errorType = name === "TimeoutError" || name === "AbortError" ? "timeout" : name;
+    const errorType = isTimeoutOrAbort(e)
+      ? "timeout"
+      : e instanceof Error
+        ? e.name === "Error" ? e.constructor.name : e.name
+        : "Unknown";
+    // SDK errors (Anthropic / OpenAI APIError) expose `.status` with the HTTP
+    // status code. Capture it so dashboards can split 4xx/5xx vs network/abort.
+    const httpStatus = (e as { status?: unknown })?.status;
     logAiCall({
       provider,
       model,
       latencyMs: Date.now() - start,
       status: "error",
       errorType,
+      httpStatus: typeof httpStatus === "number" ? httpStatus : undefined,
     });
     throw e;
   }
@@ -209,9 +237,16 @@ async function callAnthropic(apiKey: string, modelId: string, prompt: string, ti
       max_tokens: AI_MAX_TOKENS,
       messages: [{ role: "user", content: prompt }],
     }, { signal: AbortSignal.timeout(timeout) });
-    return message.content
+    const value = message.content
       .flatMap((block) => (block.type === "text" ? [block.text] : []))
       .join("");
+    return {
+      value,
+      meta: {
+        usageInput: message.usage?.input_tokens,
+        usageOutput: message.usage?.output_tokens,
+      },
+    };
   });
 }
 
@@ -224,7 +259,14 @@ async function callOpenAI(apiKey: string, modelId: string, prompt: string, timeo
       input: prompt,
       max_output_tokens: AI_MAX_TOKENS,
     }, { signal: AbortSignal.timeout(timeout) });
-    return response.output_text || "";
+    const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+    return {
+      value: response.output_text || "",
+      meta: {
+        usageInput: usage?.input_tokens,
+        usageOutput: usage?.output_tokens,
+      },
+    };
   });
 }
 
@@ -237,7 +279,14 @@ async function callGoogle(apiKey: string, modelId: string, prompt: string, timeo
     const timer = setTimeout(() => controller.abort(), timeout);
     try {
       const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: prompt }] }] }, { signal: controller.signal as AbortSignal });
-      return result.response.text();
+      const usage = (result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+      return {
+        value: result.response.text(),
+        meta: {
+          usageInput: usage?.promptTokenCount,
+          usageOutput: usage?.candidatesTokenCount,
+        },
+      };
     } finally {
       clearTimeout(timer);
     }
