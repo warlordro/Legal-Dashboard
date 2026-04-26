@@ -18,6 +18,53 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.0.8",
+    date: "26 Aprilie 2026",
+    subtitle: "Hardening + release packaging — Docker, ZIP server, backup atomicity",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Backend hardening — backup, restore, env si SOAP cancel",
+        content:
+          "Dupa tag-ul v2.0.7 am inchis fixurile high-priority din Faza 10 si packaging-ul minim de release. v2.0.8 nu schimba workflow-ul UI al aplicatiei; intareste backup-ul, anularea SOAP si livrarea Docker/ZIP.",
+        bullets: [
+          "backend/.env.example nu mai include NODE_ENV=development; dev mode se activeaza explicit din shell, nu prin template-ul copiat in deploy.",
+          "cautareDosare accepta { signal } si combina signal-ul extern cu timeout-ul SOAP intern, astfel incat disconnect-ul clientului anuleaza fetch-ul in zbor.",
+          "Backup-ul zilnic scrie intai in .db.tmp si face rename atomic; orphan tmp-urile Legal Dashboard sunt curatate la urmatorul run.",
+          "restoreFromBackup emite log JSON structurat cu action/source/preRestore/ts pentru audit operational.",
+        ],
+      },
+      {
+        title: "Teste backup atomicity",
+        content:
+          "Coverage-ul backend pentru backup a fost extins ca protectie de regresie pentru backup atomic si retention pools.",
+        bullets: [
+          "backup.test.ts verifica stergerea orphan legal-dashboard.*.db.tmp si pastreaza tmp-urile care nu apartin aplicatiei.",
+          "listBackupsWithMeta expune doar backup-uri finalizate .db, nu fisiere de staging .db.tmp.",
+          "Retention-ul este verificat separat pentru daily / pre-restore / pre-migration pools (7/5/5), prevenind starvation reciproca.",
+        ],
+      },
+      {
+        title: "Release packaging — Docker si ZIP server",
+        content:
+          "Pachetele de server sunt mai reproductibile si mai sigure pentru deploy: Docker foloseste lockfile, iar ZIP-ul bare-metal instaleaza runtime deps pe platforma tinta.",
+        bullets: [
+          "Dockerfile foloseste package-lock.json + npm ci --workspace=backend --omit=dev --build-from-source, in loc de npm install fara lockfile.",
+          "Dockerfile si docker-compose au start-period/start_period=120s pe healthcheck pentru boot-uri lente cu prewarm/migrari DB.",
+          "dist:server include package-lock.json si manifestele workspace; start.sh/start.bat instaleaza deps la prima pornire daca lipseste better-sqlite3.",
+          "Script nou npm run rebuild:electron pentru alternanta Node ABI ↔ Electron ABI a modulului nativ better-sqlite3.",
+        ],
+      },
+      {
+        title: "Verificare",
+        content:
+          "Backend typecheck curat, 55/55 teste backend verde, build complet si dist:server generate cu succes. Electron a fost reconstruit pentru ABI-ul sau si repornit cu /health 200.",
+      },
+    ],
+  },
+  {
     version: "v2.0.7",
     date: "26 Aprilie 2026",
     subtitle: "RNPM tab-state UX fix — rezultate si categorie pastrate corect",

@@ -5,7 +5,7 @@ portalul instantelor si interogarea Registrului National de Publicitate Mobiliar
 (RNPM). Include un modul de analiza AI multi-agent (Claude, OpenAI, Gemini) cu
 stocarea cheilor in keystore-ul sistemului de operare prin Electron `safeStorage`.
 
-Versiune curenta: **2.0.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
+Versiune curenta: **2.0.8**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
 [SECURITY.md](SECURITY.md) pentru threat model.
 
 ## Prerequisite
@@ -32,14 +32,26 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | Comanda | Ce face |
 |---|---|
 | `npm run electron:dev` | Porneste aplicatia desktop |
+| `npm run rebuild:electron` | Recompileaza `better-sqlite3` pentru ABI-ul Electron dupa teste Node / `npm rebuild` |
 | `npm run dev:backend` | Ruleaza backend-ul separat (Node + TS direct) pe 3002 |
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (24 teste) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (55 teste in v2.0.8) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
+
+## Server / Docker deploy
+
+`npm run dist:server` genereaza `server-release/portaljust-server-<version>.zip`.
+ZIP-ul include `package-lock.json` + manifestele workspace si scripturile `start.sh` /
+`start.bat` instaleaza runtime deps cu `npm ci` la prima pornire daca lipseste
+`node_modules/better-sqlite3`. Motiv: `better-sqlite3` este modul nativ si trebuie
+compilat pe platforma tinta.
+
+Docker foloseste acelasi lockfile prin `npm ci --workspace=backend --omit=dev` si
+are `start-period=120s` pe healthcheck pentru boot-uri lente cu prewarm/migrari DB.
 
 ## Configurare
 

@@ -4,6 +4,48 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 26 Aprilie 2026 - v2.0.8 - hardening + release packaging
+
+Sesiune de hardening dupa tag-ul `v2.0.7`. Versiunea `v2.0.8` include fixurile post-tag pentru backup/env/SOAP, teste de regresie pe backup atomic si packaging reproductibil pentru Docker + ZIP server.
+
+### Backend hardening - backup, restore, env si SOAP cancel
+
+**Fixuri livrate:**
+
+- `backend/.env.example` nu mai contine `NODE_ENV=development`; template-ul explica faptul ca Electron/Docker seteaza production, iar dev mode se activeaza explicit din shell.
+- `cautareDosare(params, { signal })` propaga `AbortSignal` pana in `fetch`-ul SOAP prin `AbortSignal.any([external, timeout])`, deci disconnect-ul clientului sau timeout-ul SSE opresc request-ul in zbor.
+- `runDailyBackup` scrie backup-ul zilnic la `${dest}.tmp`, apoi face `rename` atomic; orphan `.db.tmp` se curata la urmatorul run.
+- `restoreFromBackup` emite log JSON structurat `{ action, source, preRestore, ts }`, util pana la introducerea unui `audit_log` persistent.
+
+### Teste backup atomicity (F10-M8)
+
+- `backup.test.ts` acopera cleanup-ul orphan `legal-dashboard.*.db.tmp`.
+- Verifica faptul ca fisierele `.tmp` care nu apartin aplicatiei nu sunt sterse.
+- Verifica faptul ca `listBackupsWithMeta` expune doar backup-uri finalizate `.db`, nu staging `.db.tmp`.
+- Verifica retention pools separate pentru daily / pre-restore / pre-migration (`7/5/5`), ca un pool sa nu le elimine pe celelalte.
+
+### Release packaging - Docker si ZIP server
+
+- `Dockerfile` foloseste acum `package-lock.json` + `npm ci --omit=dev --workspace=backend --include-workspace-root=false --build-from-source`, nu `npm install` fara lockfile.
+- `Dockerfile` si `docker-compose.yml` au `start-period/start_period=120s` pe healthcheck pentru boot-uri lente cu prewarm/migrari DB.
+- `dist:server` include in ZIP root `package.json`, `package-lock.json`, `backend/package.json`, `frontend/package.json`.
+- `start.sh` / `start.bat` instaleaza runtime deps cu `npm ci` la prima pornire daca lipseste `node_modules/better-sqlite3`, astfel incat modulul nativ sa fie construit pe platforma tinta.
+- `.gitignore` ignora `server-release/`; `.dockerignore` pastreaza manifestele necesare workspace-ului in build context.
+
+### Developer workflow
+
+- Script nou `npm run rebuild:electron` pentru recompilarea `better-sqlite3` pe ABI-ul Electron dupa teste Node / `npm rebuild`.
+
+### Verificare
+
+- `npx tsc --noEmit -p backend/tsconfig.json` - clean.
+- `npm test --workspace=backend` - 55/55 teste verde.
+- `npm run build` - clean.
+- `npm run dist:server` - ZIP generat; arhiva contine lockfile + manifests + start scripts.
+- `npm run rebuild:electron` + `npm run electron:dev` - aplicatia porneste, `/health` raspunde 200.
+
+---
+
 ## 26 Aprilie 2026 - v2.0.7 - RNPM tab-state UX fix
 
 Sesiune de corectie UI pentru tab-ul **Cautare RNPM**. Bump de versiune din `2.0.6` la `2.0.7`, ca fixul sa fie vizibil in aplicatie, documentatie si artefactele de release.

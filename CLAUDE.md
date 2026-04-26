@@ -4,7 +4,7 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web — fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.0.6** — 19 Aprilie 2026
+**v2.0.8** — 26 Aprilie 2026
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
@@ -46,11 +46,12 @@ legal-dashboard/
 
 ## Comenzi
 - `npm run electron:dev` — porneste Electron (backend in-process pe 3002)
+- `npm run rebuild:electron` — recompileaza `better-sqlite3` pentru ABI-ul Electron dupa teste Node / `npm rebuild`
 - `npm run dev:backend` — backend standalone (pentru dev web)
 - `npm run dev:frontend` — Vite dev server pe 5173
 - `npm run build` — build productie (frontend + backend CJS)
 - `npm run dist` — electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` — vitest (24 teste)
+- `npm test --workspace=backend` — vitest (55 teste)
 - `npx tsc --noEmit -p backend/tsconfig.json` — type-check backend
 - `cd frontend && npx tsc --noEmit` — type-check frontend
 - `npx biome check` — lint + format check
@@ -80,6 +81,8 @@ legal-dashboard/
 - **Body size limits** (64KB search, 512KB bulk, 4KB small, 100KB AI)
 - **Rate limits** dedicated (search, bulk, export, small)
 - **External URL whitelist** exact: portal.just.ro, www.just.ro, portalquery.just.ro, mj.rnpm.ro, www.rnpm.ro
+- **Backup atomic**: daily backup scrie la `.db.tmp` + rename atomic, cleanup orphan tmp la urmatorul run
+- **SOAP cancellation**: `AbortSignal` extern propagat pana in fetch-ul PortalJust, combinat cu timeout intern
 
 ### Riscuri acceptate
 - SOAP HTTP upstream (portalquery.just.ro nu ofera HTTPS) — date publice, fara autentificare
@@ -101,7 +104,8 @@ Roadmap de hardening in [HARDENING.md](HARDENING.md) — fazele 1-6 prioritizate
 - Backend-ul e compilat ca CJS de esbuild. `import.meta.url` nu functioneaza in CJS.
   Se foloseste `typeof __dirname !== "undefined" ? __dirname : ...` pentru compatibilitate.
 - `require("electron")` in `rnpm.ts` e marked external la bundle, rezolvat la runtime in main process.
-- `npm run dist:server` — genereaza pachet ZIP deployabil pe server (dist-backend + dist-frontend + Dockerfile)
+- `npm run dist:server` — genereaza pachet ZIP deployabil pe server (dist-backend + dist-frontend + Dockerfile + lockfile/manifests). `start.sh` / `start.bat` instaleaza runtime deps cu `npm ci` daca lipseste `node_modules/better-sqlite3`, pentru ca modulul nativ sa fie construit pe platforma tinta.
+- Dockerfile foloseste root `package-lock.json` + `npm ci --workspace=backend --omit=dev --build-from-source`; healthcheck are `--start-period=120s`.
 
 ## Limba
 - Interfata si mesajele sunt in **romana** (fara diacritice in cod sursa — legacy constraint PortalJust)

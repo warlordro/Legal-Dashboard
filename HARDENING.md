@@ -230,7 +230,7 @@ Un finding (I1 — dublu `validateAiBody`) a fost verificat direct vs cod si **r
 
 **Verdict global:** 🟡 CONDITIONAL — calitatea sprint-ului e mare, dar 3 blockers fac container-ul Docker sa nu booteze, exit-ul Electron sa fie distructiv silentios, si concurency-ul restore-ului inca neaplicat (DR2 din Faza 8 e same risc, ramane open).
 
-**Status post-tag (2026-04-26):** toate cele 3 blockers (C1+C2+C3) si toate 4 high-priority (H1+H2+H3+H4) **landed**. Tag `v2.0.7` push-uit cu fix-urile critice; H1-H4 livrate post-tag pe `main` (single hardening commit). Ramane scope Faza 10 doar medium/low priority (M3 deja absorbit in version bump v2.0.7).
+**Status v2.0.8 (2026-04-26):** toate cele 3 blockers (C1+C2+C3), toate 4 high-priority (H1+H2+H3+H4) si medium-urile M1/M2/M3/M8 sunt **landed**. `v2.0.8` este release-ul curat care include fixurile post-tag `v2.0.7`: backup/env/SOAP hardening, teste backup atomicity, Docker lockfile + healthcheck start-period si ZIP server cu runtime deps instalate pe platforma tinta.
 
 ### Release blockers (fix INAINTE de tag `v2.0.7`)
 
