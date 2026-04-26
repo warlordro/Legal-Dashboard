@@ -36,6 +36,10 @@ yarn-error.log*
 *.swp
 *.swo
 
+# Claude Code local config (per-machine session settings, hooks, lockfiles)
+.claude/
+.mcp.json
+
 # OS
 .DS_Store
 Thumbs.db

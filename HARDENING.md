@@ -273,6 +273,33 @@ Un finding (I1 — dublu `validateAiBody`) a fost verificat direct vs cod si **r
 
 ## Planned feature — Dashboard rework + Watched Dosare (viitor)
 
+> ## ❌ OBSOLETE — 2026-04-27
+>
+> **Acest spec este absorbit in [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md) §5.1 + §11.2bis si NU se mai implementeaza ca atare.**
+>
+> **Motivul absorbtiei**: schema `tracked_dosare` + `termene_cache` documentata aici e single-purpose (doar dosare urmarite explicit). Plan-ul nou foloseste schema generica `monitoring_jobs(kind='dosar_soap'|'name_soap'|'aviz_rnpm')` + `monitoring_runs` + `monitoring_alerts` care:
+> - acopera Watched Dosare ca un caz particular (kind='dosar_soap')
+> - extinde nativ la name_soap (bulk name lists, PR-5) si aviz_rnpm (PR-7)
+> - e web-ready din ziua 1 (`owner_id` + `getOwnerId()` din PR-1, vs adaugat retroactiv aici)
+> - are audit trail separat (`monitoring_runs`) pentru observability + compliance
+>
+> **Features pastrate (absorbite in plan)**:
+> - `notify_days_before_json: [14,7,3,1]` → `monitoring_jobs.alert_config_json.notify_days_before` (multi-threshold proximity alerts)
+> - `is_new` flag → `monitoring_alerts.is_new` (badge "NOU" pana user-ul vede)
+> - `solution_changed_at` trigger → `monitoring_alerts.kind='solutie_aparuta'` (alert separat de `termen_changed`)
+> - `stadiu_procesual` in UNIQUE key → prim segment in `buildSedintaKey()` (un dosar poate avea termene simultan in fond + apel)
+> - Concurrency guard `last_sync_status='in_progress'` → `monitoring_jobs.last_status='running'` + crash recovery la boot (B.18)
+> - Normalizare data/ora (slice 0,10 + padStart 2) → `normalizeData()` / `normalizeOra()` in diff service
+> - Multi-record per dosar (fond + apel coexistente) → `stadiu` in cheia diff
+>
+> **Features deprecated (NU se mai face)**:
+> - Tabel `tracked_dosare` separat — inlocuit cu `monitoring_jobs(kind='dosar_soap')`
+> - Tabel `termene_cache` separat — inlocuit cu `monitoring_snapshots` (1 row per run, payload ca JSON in `snapshot_json`)
+> - Routes `/api/watched/*` → inlocuite cu `/api/v1/monitoring/jobs` (RESTful, web-ready)
+> - Component `WatchStarButton` integrat in 3 locuri (Termene tabel, RnpmDetailModal, cautare) — UX-ul ramane, dar legaturile API se schimba la `POST /api/v1/monitoring/jobs`
+>
+> **Sectiunea de mai jos e pastrata read-only ca referinta istorica + audit trail al deciziei. NU implementati pe baza acestui spec.**
+
 > **Status:** planificat, **nu inceput**. Documentat aici integral ca sa nu se piarda contextul. Se porneste cand avem bandwidth pe feature-uri non-hardening (probabil dupa Faza 3 — fara error boundaries + request IDs, debug-ul sync-urilor esuate e orb).
 >
 > **Scop:** combina 2 directii discutate in debate-ul dashboard:
