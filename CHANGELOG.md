@@ -4,6 +4,42 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 27 Aprilie 2026 - v2.0.12 - PR-1: getOwnerId helper + 5 owner_id leak fixes
+
+Al doilea PR din roadmap (PLAN §3 + EXECUTION-ROADMAP saptamana 1). Scop: stabilim seam-ul prin care toate rutele viitoare vor citi `owner_id`-ul curent din context si inchidem cele 5 cai latente prin care un FK breach ar fi putut leak-ui randuri intre owneri in modul web (PR-9+). Pe desktop, comportamentul ramane identic (singurul `owner_id` activ e in continuare `"local"`).
+
+### Helper + middleware (`backend/src/middleware/owner.ts`)
+
+- `ownerContext`: middleware Hono care seteaza `c.set("ownerId", "local")` pe fiecare request. PR-9 va inlocui valoarea cu user id-ul derivat din JWT (si va respinge requesturi neautentificate).
+- `getOwnerId(c)`: helper consumat de rutele noi (PR-3+). Citeste valoarea seteaza de middleware; fallback `"local"` astfel incat o eventuala lipsa de mount sa pastreze comportamentul desktop.
+- `ContextVariableMap` augmentat o singura data — `c.get("ownerId")` returneaza `string` in tot codebase-ul, fara cast manual.
+- Mount-uit in `index.ts` ca `app.use("*", ownerContext)` inainte de `rateLimit` (deja pregatit pentru rate-limit per owner in PR-12).
+
+### Fix-uri leak `avizRepository.ts` (5 locuri, PLAN §3)
+
+`loadAvizChildren` re-querya copiii (creditori/debitori/bunuri/istoric) doar dupa `aviz_id`, fara `owner_id`. Daca un FK breach apare vreodata (bug de migrare, restore partial), child-ul user-ului B s-ar fi livrat catre user A. Toate cele 4 query-uri primesc acum `AND owner_id = ?` si pasa `aviz.owner_id`.
+
+`getAvize` continea doua sub-clauze `EXISTS` peste `rnpm_creditori` / `rnpm_debitori` care matchau pe `c.aviz_id = a.id` fara constraint pe `owner_id`. Adaugat `AND c.owner_id = a.owner_id` (idem `d`) — un breach child al lui B nu mai poate face ca aviz-ul lui A sa apara in rezultatele unei cautari ale lui A.
+
+### Test de regresie (`backend/src/db/repository-isolation.test.ts`)
+
+Skeleton extensibil pentru toate repo-urile viitoare:
+
+- **Happy path** (3 teste): `getAvize`, `getAvizById`/`getAvizByIdentificator`, `getAvizStats`/`getAvizeByIds`/`deleteAviz*` toate respecta filtrul `owner_id`. Cross-owner reads/writes intoarce `null` / `0`.
+- **FK breach defense** (5 teste, cate unul per fix): inserturi raw care simuleaza un copil cu `owner_id` mismatch fata de aviz-ul parinte, apoi assert ca repo-ul **nu** returneaza randul forjat. Acopera toate cele 5 leak-uri din PLAN §3.
+
+Suite-ul ruleaza in tmp dir cu `LEGAL_DASHBOARD_DB_PATH` setat per-test, deci nu atinge baza locala. 8 teste noi → total **85** in backend (de la 77).
+
+### Bump
+
+`2.0.11 → 2.0.12` patch. Zero schimbari user-vizibile, zero migrare DDL noua (PR-1 nu adauga schema, doar query fixes).
+
+### Risk
+
+🟢 **LOW**. Pe desktop singurul `owner_id` e `"local"` peste tot, deci constraint-urile noi `AND owner_id = ?` sunt no-op functional. Singura schimbare de comportament posibila e cazul (improbabil) de FK breach pre-existent: random copil ortografiat manual ar deveni invizibil — but exact asta e scopul fix-ului.
+
+---
+
 ## 27 Aprilie 2026 - v2.0.11 - PR-0: migration framework + _schema_versions
 
 Primul PR din roadmap-ul de monitoring + web mode (vezi `PLAN-monitoring-webmode.md`, `EXECUTION-ROADMAP.md`). Scopul e infrastructural: introducem un mecanism de migrari versionate inainte sa adaugam orice schema noua in PR-2+.

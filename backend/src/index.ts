@@ -8,6 +8,7 @@ import { dosareRouter } from "./routes/dosare.ts";
 import { termeneRouter } from "./routes/termene.ts";
 import { aiRouter } from "./routes/ai.ts";
 import { rateLimit } from "./middleware/rate-limit.ts";
+import { ownerContext } from "./middleware/owner.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { closeDb } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
@@ -81,6 +82,11 @@ function fatalBoot(reason: string, err: unknown): never {
   }
   process.exit(1);
 }
+
+// PR-1 web-readiness seam: populate c.get("ownerId") for every request.
+// Desktop and Faza 1 = "local"; PR-9 swaps for JWT-derived user id. Mounted
+// before rateLimit so a future per-owner rate-limit can read the variable.
+app.use("*", ownerContext);
 
 app.use("/api/*", rateLimit);
 

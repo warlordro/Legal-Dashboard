@@ -269,18 +269,24 @@ export function getAvizByIdentificator(identificator: string, ownerId = "local")
 
 function loadAvizChildren(aviz: AvizRecord): AvizFull {
   const db = getDb();
-  const creditori = db.prepare(`SELECT * FROM rnpm_creditori WHERE aviz_id = ? ORDER BY id`).all(aviz.id) as PartyRecord[];
-  const debitori = db.prepare(`SELECT * FROM rnpm_debitori WHERE aviz_id = ? ORDER BY id`).all(aviz.id) as PartyRecord[];
+  // Defense in depth: aviz row was already filtered by owner_id at the entry
+  // point, but child queries must repeat the constraint so that a stale FK
+  // (bug-introduced or partial restore) cannot leak rows from a different
+  // owner. Pass aviz.owner_id rather than re-deriving it.
+  const creditori = db.prepare(`SELECT * FROM rnpm_creditori WHERE aviz_id = ? AND owner_id = ? ORDER BY id`).all(aviz.id, aviz.owner_id) as PartyRecord[];
+  const debitori = db.prepare(`SELECT * FROM rnpm_debitori WHERE aviz_id = ? AND owner_id = ? ORDER BY id`).all(aviz.id, aviz.owner_id) as PartyRecord[];
   // JOIN on lookup table so `descriere` arrives populated with the full text,
   // exactly as if it were still a column. API shape is unchanged for callers.
+  // rnpm_bunuri_descrieri is an owner-agnostic dedup pool (no owner_id) — only
+  // reachable via b.descriere_id which is itself owner-scoped here.
   const bunuriRows = db.prepare(`
     SELECT b.id, b.owner_id, b.aviz_id, b.tip_bun, b.categorie, b.identificare,
            bd.text AS descriere,
            b.model, b.serie_sasiu, b.serie_motor, b.nr_inmatriculare, b.referinte_json
     FROM rnpm_bunuri b
     LEFT JOIN rnpm_bunuri_descrieri bd ON bd.id = b.descriere_id
-    WHERE b.aviz_id = ? ORDER BY b.id
-  `).all(aviz.id) as (Omit<BunRecord, "referinte"> & { referinte_json: string | null })[];
+    WHERE b.aviz_id = ? AND b.owner_id = ? ORDER BY b.id
+  `).all(aviz.id, aviz.owner_id) as (Omit<BunRecord, "referinte"> & { referinte_json: string | null })[];
   const bunuri: BunRecord[] = bunuriRows.map((r) => {
     const { referinte_json, ...rest } = r;
     let referinte: BunPartyRef[] = [];
@@ -289,7 +295,7 @@ function loadAvizChildren(aviz: AvizRecord): AvizFull {
     }
     return { ...rest, referinte };
   });
-  const istoric = db.prepare(`SELECT * FROM rnpm_istoric WHERE aviz_id = ? ORDER BY id`).all(aviz.id) as IstoricRecord[];
+  const istoric = db.prepare(`SELECT * FROM rnpm_istoric WHERE aviz_id = ? AND owner_id = ? ORDER BY id`).all(aviz.id, aviz.owner_id) as IstoricRecord[];
   return { aviz, creditori, debitori, bunuri, istoric };
 }
 
@@ -350,8 +356,8 @@ export function getAvize(opts: GetAvizeOptions = {}): OffsetPage<AvizRecord> {
     where.push(`(
       rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\' OR rnpm_norm(a.utilizator_autorizat) LIKE ? ESCAPE '\\' OR rnpm_norm(a.numar_act) LIKE ? ESCAPE '\\'
       OR rnpm_norm(a.inscriere_initiala_id) LIKE ? ESCAPE '\\' OR rnpm_norm(a.inscriere_modificata_id) LIKE ? ESCAPE '\\'
-      OR EXISTS (SELECT 1 FROM rnpm_creditori c WHERE c.aviz_id = a.id AND (rnpm_norm(c.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cnp) LIKE ? ESCAPE '\\'))
-      OR EXISTS (SELECT 1 FROM rnpm_debitori d WHERE d.aviz_id = a.id AND (rnpm_norm(d.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cnp) LIKE ? ESCAPE '\\'))
+      OR EXISTS (SELECT 1 FROM rnpm_creditori c WHERE c.aviz_id = a.id AND c.owner_id = a.owner_id AND (rnpm_norm(c.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cnp) LIKE ? ESCAPE '\\'))
+      OR EXISTS (SELECT 1 FROM rnpm_debitori d WHERE d.aviz_id = a.id AND d.owner_id = a.owner_id AND (rnpm_norm(d.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cnp) LIKE ? ESCAPE '\\'))
     )`);
     const escaped = stripDiacritics(opts.searchText).toLowerCase().replace(/[\\%_]/g, "\\$&");
     const like = `%${escaped}%`;
