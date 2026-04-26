@@ -1,7 +1,17 @@
 import Database from "better-sqlite3";
 import path from "path";
 import fs from "fs";
+import { fileURLToPath } from "url";
 import { stripDiacritics } from "../util/textNormalize.ts";
+import { runMigrations } from "./migrations/runner.ts";
+
+// Resolve migrations dir for both dev (Node --experimental-strip-types, ESM)
+// and prod (esbuild CJS bundle). In CJS __dirname is `dist-backend/`; in dev
+// it's `backend/src/db/`. Either way, sibling `migrations/` is the target.
+const __schemaDir = typeof __dirname !== "undefined"
+  ? __dirname
+  : path.dirname(fileURLToPath(import.meta.url));
+const MIGRATIONS_DIR = path.join(__schemaDir, "migrations");
 
 function preMigrationBackup(src: string, label: string): void {
   try {
@@ -89,6 +99,25 @@ function needsDescriereMigration(dbPath: string): boolean {
 }
 
 function initSchema(d: Database.Database): void {
+  // Phase 1 — versioned migration framework (PR-0).
+  // On a fresh DB: 0001_baseline.up.sql installs the full schema; later migration
+  // files (0002+, added in PR-2 onward) extend it.
+  // On a legacy DB (v2.0.10 and earlier): runMigrations backfills version=1 with
+  // the sentinel hash, the baseline file is SKIPPED, and the idempotent legacy
+  // block below continues to maintain inline ALTER history exactly as before —
+  // zero behavior change for installed users.
+  const migrationResult = runMigrations(d, MIGRATIONS_DIR);
+  if (migrationResult.applied.length > 0) {
+    console.log(`[schema] applied migrations: ${migrationResult.applied.join(", ")}`);
+  }
+  if (migrationResult.backfilled) {
+    console.log(`[schema] legacy DB — backfilled _schema_versions(1, sentinel)`);
+  }
+
+  // Phase 2 — legacy idempotent CREATE/ALTER block. Required for DBs backfilled
+  // with the sentinel: those rows skip 0001_baseline so the historic ALTER chain
+  // is what keeps their schema in lockstep with the code. Once all production
+  // installs are migrated through the runner end-to-end this block can retire.
   d.exec(`
     CREATE TABLE IF NOT EXISTS rnpm_searches (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,

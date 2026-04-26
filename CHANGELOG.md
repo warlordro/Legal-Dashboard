@@ -4,6 +4,47 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 27 Aprilie 2026 - v2.0.11 - PR-0: migration framework + _schema_versions
+
+Primul PR din roadmap-ul de monitoring + web mode (vezi `PLAN-monitoring-webmode.md`, `EXECUTION-ROADMAP.md`). Scopul e infrastructural: introducem un mecanism de migrari versionate inainte sa adaugam orice schema noua in PR-2+.
+
+### Migration framework (`backend/src/db/migrations/`)
+
+- `runner.ts` exporta `runMigrations(db, migrationsDir)`. La boot citeste sincron toate fisierele `0001_*.up.sql`, `0002_*.up.sql`, ... (sortate numeric, contiguu de la 1) si le aplica in tranzactie pe cele neinregistrate inca in tabela `_schema_versions(version INTEGER PRIMARY KEY, applied_at TEXT, sha256_up TEXT)`.
+- **Backfill pentru DB-uri legacy**: la prima rulare, daca `_schema_versions` e gol AND DB-ul are tabele user (instalari v2.0.10 si mai vechi), runner-ul insereaza `(1, '__backfilled_v1__')` si SARE peste executia `0001_baseline.up.sql`. Asta evita `CREATE TABLE` duplicat pe schema deja prezenta.
+- **Drift detection**: la rulari ulterioare, daca hash-ul stocat difera de continutul fisierului → throw + abort boot. Mesajul de eroare include numarul versiunii urmatoare disponibile pentru forward progress (e.g. "create a new 0002_*.up.sql instead").
+- **Downgrade guard**: daca DB-ul are versiune > max(file_version) → throw (preveniti accidentul "checkout commit vechi pe DB nou").
+- **Sanity la discovery**: duplicate de versiune, gap-uri in numerotare, lipsa directorului → throw cu mesaj clar.
+
+### Baseline schema commit-uita (`0001_baseline.up.sql`)
+
+- Reflecta v2.0.10 in forma FINALA post-ALTER: rnpm_avize cu cele 4 coloane `inscriere_initiala/modificata_*`, rnpm_creditori/debitori cu `subscriptor + nr_ordine`, rnpm_bunuri **fara** `descriere` (deduplicat in `rnpm_bunuri_descrieri`) dar cu `referinte_json + descriere_id`.
+- Ordinea CREATE respecta dependintele FK sub `PRAGMA foreign_keys = ON`: searches → avize → bunuri_descrieri → creditori/debitori → bunuri → istoric.
+- Pe DB-uri fresh (CI, instalari noi), runner-ul executa fisierul si stocheaza sha256 real. Pe instalari legacy se sare prin sentinel.
+
+### Wiring in `schema.ts`
+
+- `initSchema()` apeleaza `runMigrations()` ca **Phase 1**, urmat de blocul idempotent legacy CREATE/ALTER existent ca **Phase 2**. Phase 2 ramane intact pentru DB-urile backfilled cu sentinel — pentru ele 0001_baseline e skipped, deci ALTER-urile inline sunt singura sursa de mentinere a coloanelor adaugate intre v2.0.0 → v2.0.10.
+- Zero schimbare de comportament pentru useri instalati: `LEGAL_DASHBOARD_DB_PATH` deschide DB-ul existent → backfill o singura data → ALTER-urile inline ruleaza ca pana acum → totul continua.
+
+### Build pipeline (`scripts/build.js`)
+
+- Pas nou `[4/4] Copying migration files...` care copiaza `backend/src/db/migrations/*.up.sql` + `*.down.sql` la `dist-backend/migrations/`. Esbuild bundleaza CJS dar nu copiaza assets non-JS; runner-ul le citeste cu `fs.readdirSync(migrationsDir)` la boot.
+- Filtru pozitiv (whitelist `*.up.sql|*.down.sql` plus directoare pentru recursie), nu negativ — fisierele sidecar (test, README, viitoare TS helpers) raman in afara bundle-ului productie.
+
+### Tests (`runner.test.ts`)
+
+- 15 teste vitest pe runner: ordering numeric, idempotency, hash mismatch → throw, backfill cu sentinel pe DB legacy, sentinel sare hash check, transaction rollback la SQL invalid, gap detection, duplicate version detection, downgrade guard.
+- Plus un test integration care ruleaza efectiv `0001_baseline.up.sql` pe DB temporar si verifica ca toate cele 7 tabele sunt create.
+
+### Verificare
+
+- `npx tsc --noEmit -p backend/tsconfig.json` — clean.
+- `npm test --workspace=backend` — toate testele verde (62 existente + 15 noi runner = 77 total).
+- Smoke desktop: `npm run electron:dev` cu DB-ul existing v2.0.10 → boot ok, log `[schema] legacy DB — backfilled _schema_versions(1, sentinel)` o singura data, run urmator → silent (deja backfilled).
+
+---
+
 ## 26 Aprilie 2026 - v2.0.10 - hardening: AI logging extension + backup maintenance lock + safeStorage trim
 
 Continuare directa a `v2.0.9`. Trei imbunatatiri de hardening pe linia de observabilitate AI, integritatea operatiilor de backup/restore si robustetea persistentei cheilor API. Plus o investigatie negativa inchisa pe partea de captcha RNPM.
