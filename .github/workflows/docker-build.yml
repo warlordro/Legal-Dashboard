@@ -1,0 +1,82 @@
+name: Docker Build
+
+# Verifies the Dockerfile keeps building after changes to Dockerfile, build
+# scripts, lockfile or backend code. The image is built fresh on every run
+# (no registry push) and smoke-tested by invoking node inside the runtime
+# stage to confirm that the image is at least bootable.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker-compose.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'scripts/build.js'
+      - '.github/workflows/docker-build.yml'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'docker-compose.yml'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'backend/**'
+      - 'frontend/**'
+      - 'scripts/build.js'
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Dockerfile expects dist-backend/ + dist-frontend/ to be present in the
+      # build context (see comments at the top of the Dockerfile). Build them
+      # locally before invoking docker build.
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build (backend CJS + frontend static)
+        run: npm run build
+
+      - name: Build Docker image
+        run: docker build -t legal-dashboard:ci .
+
+      - name: Smoke test — node available in image
+        run: docker run --rm legal-dashboard:ci node -e "console.log('node', process.version)"
+
+      - name: Smoke test — /health responds (max 60s)
+        run: |
+          docker run -d --name ld-ci -p 3002:3002 legal-dashboard:ci
+          # Poll /health every 2s for 60s. start-period=120s keeps healthcheck
+          # green during prewarm, but the endpoint itself flips to 200 as soon
+          # as `serve()` fires `listening` — usually under 10s on a fresh DB.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' http://127.0.0.1:3002/health || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "ready after ${i} polls (~$((i*2))s)"
+              cat /tmp/health.json
+              docker stop ld-ci >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::/health did not return 200 within 60s"
+          docker logs ld-ci || true
+          docker stop ld-ci >/dev/null || true
+          exit 1
