@@ -11,7 +11,7 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 ## Structura Proiect
 ```
 legal-dashboard/
-├── frontend/          # React 19 + TypeScript + Vite + custom CSS
+├── frontend/          # React 18 + TypeScript + Vite + custom CSS
 │   └── src/
 │       ├── pages/     # Dashboard, Dosare, Termene, RnpmSearch, Changelog, Manual
 │       ├── components/# DosareTable, TermeneTable, Sidebar, MetricsPanel, CalendarView,
@@ -30,7 +30,7 @@ legal-dashboard/
 │       │              # ai.ts (Claude/OpenAI/Gemini), batch-dosare.ts (AbortSignal)
 │       ├── middleware/# rate-limit.ts (real-IP), static-frontend.ts (path-traversal guard)
 │       ├── db/        # schema.ts, avizRepository.ts, searchRepository.ts,
-│       │              # backup.ts (owner_id everywhere)
+│       │              # backup.ts (owner_id everywhere), migrations/ (versioned DDL, PR-0+)
 │       ├── util/      # textNormalize (SQLite rnpm_norm diacritic fold), validation.ts
 │       ├── soap.ts    # SOAP client pentru PortalJust
 │       └── intervals.ts
@@ -51,13 +51,13 @@ legal-dashboard/
 - `npm run dev:frontend` — Vite dev server pe 5173
 - `npm run build` — build productie (frontend + backend CJS)
 - `npm run dist` — electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` — vitest (55 teste)
+- `npm test --workspace=backend` — vitest (62 teste in v2.0.10)
 - `npx tsc --noEmit -p backend/tsconfig.json` — type-check backend
 - `cd frontend && npx tsc --noEmit` — type-check frontend
 - `npx biome check` — lint + format check
 
 ## Arhitectura
-- **Frontend**: React 19, Vite 5, custom CSS (fara Tailwind), Recharts, DOMPurify
+- **Frontend**: React 18, Vite 5, custom CSS (Tailwind in deps dar deprecat), Recharts, DOMPurify
 - **Backend**: Hono + `@hono/node-server`, SOAP XML parsing manual
 - **DB**: SQLite via `better-sqlite3`, repositories + schema cu `owner_id DEFAULT 'local'` pe toate tabelele
 - **AI**: Anthropic SDK, OpenAI SDK, Google Generative AI SDK
@@ -97,8 +97,12 @@ legal-dashboard/
 - Opt-in `clientRequestId` dedup pe mutations (idempotency)
 - No singleton state tied to user activity
 
-## Roadmap
-Roadmap de hardening in [HARDENING.md](HARDENING.md) — fazele 1-6 prioritizate (CI foundation → security → crash visibility → data integrity → compliance → release engineering). Items filtrate ca overkill / deferred sunt documentate la final; nu le re-adauga fara reevaluare.
+## Roadmap & Planuri Active
+**Trimestrul curent (sapt 1-13, 2026-04-27 → ~2026-07)**: monitoring desktop + cutover web, livrat in 13 PR-uri secventiale (PR-0 → PR-12).
+- [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) — roadmap saptamanal cu DoD checkboxes per PR. **Citeste sectiunea PR curent inainte de orice cod.**
+- [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md) — master spec tehnic (DDL, API contracts, security model).
+- [SESSION-HANDOFF.md](SESSION-HANDOFF.md) — context transfer intre sesiuni (decizii inchise, status PR curent).
+- [HARDENING.md](HARDENING.md) — **L274-440 SUPERSEDA de PLAN-monitoring-webmode.md** (vezi banner OBSOLETE). Restul fazelor 1-6 inca relevante.
 
 ## Nota Importanta Build
 - Backend-ul e compilat ca CJS de esbuild. `import.meta.url` nu functioneaza in CJS.
