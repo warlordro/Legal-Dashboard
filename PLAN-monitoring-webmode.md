@@ -88,6 +88,17 @@ INSERT INTO users(id,email,display_name,role) VALUES
 
 ### 2.2 Monitoring core (PR-3 / PR-4 / PR-5)
 
+**Validation strategy pentru coloanele `*_json`** (`target_json`, `alert_config_json`, `payload_json`, `detail_json`, ulterior `meta_json`, `params_json`):
+
+- **Decizie**: Zod schemas la **route layer** + repository write helpers, **NU** `CHECK(json_valid(col))` inline in DDL.
+- **De ce nu CHECK**: SQLite `json_valid()` valideaza doar JSON well-formedness, nu structure. Si mai important, daca adaugam in viitor `CHECK(json_valid(...))` pe coloana cu date istorice non-JSON (sau JSON laxat de un bug), migrarea forward esueaza pe DB-uri vechi — costless de evitat.
+- **Implementare**:
+  - `backend/src/schemas/monitoring.ts` exporta `TargetJsonSchema`, `AlertConfigSchema`, `SnapshotPayloadSchema`, `AlertDetailSchema` (Zod).
+  - Route handlers PR-3+ apeleaza `Schema.parse(input)` inainte de write — failure → 422 cu `{error: {code: 'invalid_payload', issues: [...]}}`.
+  - Repository write helpers (`monitoringJobRepo.create`, `snapshot.insert`, `alert.insert`) primesc `Type` (validated), serializeaza cu `JSON.stringify` la final.
+  - Reader-side: `Schema.safeParse(JSON.parse(row.x_json))` cu fallback graceful (logheaza + returneaza valori default) pentru a supravietui drift istoric (ex: o cheie noua adaugata in alert_config_json post-PR-5 trebuie sa decoda OK pe rows din PR-3).
+- **Test**: `schemas/monitoring-validation.test.ts` — happy path + reject (extra keys, wrong types, missing required) + forward-compat (citire row cu schema veche).
+
 ```sql
 -- Job: cerere persistenta de a urmari un dosar SOAP sau o lista de nume
 CREATE TABLE monitoring_jobs (
@@ -591,6 +602,10 @@ Setate in `.env.example` la PR-1 cu defaults clare; documentate in `README.md`.
 
 - **Argon2id** pentru passwords (`argon2` npm). Min cost: `t=3, m=64MB, p=4`.
 - **JWT**: HS256 cu secret rotabil (header `kid` pentru rollover), exp 15 min access, 30d refresh.
+  - **Secret material**: `JWT_SECRETS_JSON` env var = `{ "<kid>": "<base64-256bit>", ... }` cu min 32 bytes (256-bit) per secret. Genereaza via `openssl rand -hex 32`. Boot fail-fast daca secretul activ < 32 bytes (validat la `parseEnv()`).
+  - **Refresh rotation flow**: la `POST /auth/refresh`, mint NEW access + NEW refresh atomic, marcheaza `user_sessions.revoked_at = now()` pe randul vechi, leaga noul session de `parent_session_id`. **Refresh-token reuse detection**: daca un refresh deja revoked este re-prezentat → revoke intregul session family (toate `WHERE parent_session_id = root_id` recursiv) + audit log `auth.refresh_reuse_detected`.
+  - **`kid`-aware decode**: header parses `kid`, lookup in keyring; tokens semnate cu `kid` necunoscut → 401 + audit log. Permite rotation grace period (current + N-1 secret valid simultan).
+  - **Fail-fast secret validation**: la boot, server itera `JWT_SECRETS_JSON`, valideaza fiecare secret >= 32 bytes; la prima incalcare arunca `ConfigError` si abort process.
 - **CSRF** (PR-12): doar pe rute `POST/PATCH/DELETE` din web SPA — token din cookie + header double-submit. Desktop bypassed (acelasi origin, no third-party form).
 - **GDPR**: `DELETE /api/v1/me` → cascade soft-delete: `users.status='deleted'`, anonymize email/displayName la `deleted_<id>@anon`, `monitoring_jobs.active=0`, `audit_log` retained 1 an.
 - **Audit log immutabilitate**: append-only check via trigger `BEFORE UPDATE/DELETE ON audit_log` → `RAISE`. Compactare lunara cu archive separat.
@@ -631,7 +646,7 @@ Setate in `.env.example` la PR-1 cu defaults clare; documentate in `README.md`.
 
 ### 11.2bis ✅ Decizia §11.2-2 RESOLVED (2026-04-27)
 
-**Status**: Folder `C:\Users\Cezar\Desktop\Proiecte\Portal Just Integrat` accesibil. Sister project **`portaljust-dashboard` v1.4.2-ai** are **monitorizare implementata complet in productie** (vezi `PROGRES.md` 2026-04-01). Patterns confirmate empiric, le folosim ca **referinta de design**, NU port 1:1 (arhitecturi divergente — vezi mai jos).
+**Status**: Sister project **`portaljust-dashboard` v1.4.2-ai** disponibil local (path configurat prin env `PJI_REFERENCE_REPO`; vezi setup local in [README.md](README.md)). Are **monitorizare implementata complet in productie** (vezi `PROGRES.md` 2026-04-01). Patterns confirmate empiric, le folosim ca **referinta de design**, NU port 1:1 (arhitecturi divergente — vezi mai jos).
 
 **Patterns reutilizabile (port conceptual, rescrie pentru SQLite + multi-user)**:
 - ✅ **Snapshot-by-keys, nu by-content**: `snapshot[dosarNumar] = { sedintaKeys: string[] }` (Set<string> de keys deterministe). Memorie eficienta, diff O(n). **Adopta**: `snapshot_json` in `monitoring_jobs` stocheaza set de chei, nu payload SOAP complet (rezolva si B.3 diff determinism).

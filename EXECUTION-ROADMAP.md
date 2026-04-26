@@ -60,7 +60,7 @@ Treci prin asta inainte sa scrii prima linie de cod. Daca ceva nu e bifat, opres
 - [ ] CHANGELOG.md sincronizat cu `package.json` (`v2.0.10`).
 
 ### Citire obligatorie inainte de PR-3
-- [ ] **Citeste integral** [Portal Just Integrat `Monitorizare.tsx:1-1724`](C:/Users/Cezar/Desktop/Proiecte/Portal%20Just%20Integrat/frontend/src/pages/Monitorizare.tsx) — pattern-ul de snapshot/diff/scheduler e portat. ~1h.
+- [ ] **Citeste integral** Portal Just Integrat `frontend/src/pages/Monitorizare.tsx:1-1724` (path local — sister project `portaljust-dashboard`, configureaza via env `PJI_REFERENCE_REPO`) — pattern-ul de snapshot/diff/scheduler e portat. ~1h.
 - [ ] **Citeste integral** [HARDENING.md L274-440](HARDENING.md) — chiar daca e OBSOLETE, semantic-ul (notify_days_before, is_new, solution_changed_at) trebuie inteles ca sa-l absoarbi corect in `alert_config_json`.
 - [ ] **Spike empirical OBLIGATORIU**: ruleaza `cautareDosare` 5× same-input → verifica daca PortalJust intoarce payload identic. Daca difera (timestamp, ordering, etc), pivoteaza diff strategy. Documenteaza rezultatul intr-un comment in [batch-dosare.ts](backend/src/services/batch-dosare.ts).
 
@@ -175,6 +175,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
   - [ ] Dezactivezi job in timpul run → status='aborted'.
   - [ ] Backup-ul daily nu se ciocneste cu scheduler-ul (rwlock works).
   - [ ] **`load-test/monitoring-jobs.k6.js` ruleaza local** — simuleaza 1000 jobs scheduled, p95 `POST /api/v1/monitoring/jobs` < 500ms, zero error la tick worker dupa 10 min run continuu (CP-7 conform).
+  - [ ] **Test concurrent-writer SQLite**: `monitoring/concurrent-writes.test.ts` — porneste scheduler tick cu 100 joburi paralele + simuleaza 100 inserturi user-driven (ex: `POST /api/v1/monitoring/jobs`) intr-un thread separat. Asserta (a) `COUNT(*) FROM monitoring_runs == 200`, (b) zero `SQLITE_BUSY` neacomodat (toate retry-uite de better-sqlite3 transactional API), (c) WAL nu creste peste 10MB (checkpoint corect). Validate single-writer serialization a SQLite sub presiune scheduler+interactive concomitent.
 - **Bump**: 2.1.1 minor.
 - **Risk**: 🟡 MEDIUM. Chestia care ne poate strica zilele e: PortalJust returneaza payload non-determinist → false positive alerts spam. **Mitigation**: spike-ul empirical din pre-flight + fallback diff strategy in PLAN §B.3.
 
