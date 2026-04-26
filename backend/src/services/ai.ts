@@ -154,41 +154,94 @@ Dupa analiza finala, adauga o sectiune separata cu titlul exact "## Revizuire si
 Raspunde in romana, clar si concis. Foloseste un limbaj accesibil dar precis juridic. In analiza finala NU mentiona ca ai primit doua analize - prezinta-o ca o analiza unitara. Sectiunea de revizuire este separata si transparenta.`;
 }
 
+// Structured AI call log: single-line JSON to stdout. Lets ops grep
+// `"action":"ai_call"` after-the-fact for latency / failure rate per provider.
+// Persistent `audit_log` table is deferred to Faza 5 (compliance).
+function logAiCall(entry: {
+  provider: string;
+  model: string;
+  latencyMs: number;
+  status: "ok" | "error";
+  errorType?: string;
+}): void {
+  console.log(
+    JSON.stringify({
+      action: "ai_call",
+      ...entry,
+      ts: new Date().toISOString(),
+    }),
+  );
+}
+
+// Time the underlying provider call and emit a structured log line on both
+// success and failure. AbortSignal.timeout fires `TimeoutError` in modern Node
+// and `AbortError` in older runtimes — normalize to `timeout` so dashboards
+// don't have to special-case both.
+async function withAiLogging<T>(
+  provider: string,
+  model: string,
+  fn: () => Promise<T>,
+): Promise<T> {
+  const start = Date.now();
+  try {
+    const result = await fn();
+    logAiCall({ provider, model, latencyMs: Date.now() - start, status: "ok" });
+    return result;
+  } catch (e) {
+    const name = e instanceof Error ? e.name : "Unknown";
+    const errorType = name === "TimeoutError" || name === "AbortError" ? "timeout" : name;
+    logAiCall({
+      provider,
+      model,
+      latencyMs: Date.now() - start,
+      status: "error",
+      errorType,
+    });
+    throw e;
+  }
+}
+
 async function callAnthropic(apiKey: string, modelId: string, prompt: string, timeout = AI_TIMEOUT): Promise<string> {
-  const client = new Anthropic({ apiKey });
-  const message = await client.messages.create({
-    model: modelId,
-    max_tokens: AI_MAX_TOKENS,
-    messages: [{ role: "user", content: prompt }],
-  }, { signal: AbortSignal.timeout(timeout) });
-  return message.content
-    .flatMap((block) => (block.type === "text" ? [block.text] : []))
-    .join("");
+  return withAiLogging("anthropic", modelId, async () => {
+    const client = new Anthropic({ apiKey });
+    const message = await client.messages.create({
+      model: modelId,
+      max_tokens: AI_MAX_TOKENS,
+      messages: [{ role: "user", content: prompt }],
+    }, { signal: AbortSignal.timeout(timeout) });
+    return message.content
+      .flatMap((block) => (block.type === "text" ? [block.text] : []))
+      .join("");
+  });
 }
 
 async function callOpenAI(apiKey: string, modelId: string, prompt: string, timeout = AI_TIMEOUT): Promise<string> {
-  const { default: OpenAI } = await import("openai");
-  const client = new OpenAI({ apiKey });
-  const response = await client.responses.create({
-    model: modelId,
-    input: prompt,
-    max_output_tokens: AI_MAX_TOKENS,
-  }, { signal: AbortSignal.timeout(timeout) });
-  return response.output_text || "";
+  return withAiLogging("openai", modelId, async () => {
+    const { default: OpenAI } = await import("openai");
+    const client = new OpenAI({ apiKey });
+    const response = await client.responses.create({
+      model: modelId,
+      input: prompt,
+      max_output_tokens: AI_MAX_TOKENS,
+    }, { signal: AbortSignal.timeout(timeout) });
+    return response.output_text || "";
+  });
 }
 
 async function callGoogle(apiKey: string, modelId: string, prompt: string, timeout = AI_TIMEOUT): Promise<string> {
-  const { GoogleGenerativeAI } = await import("@google/generative-ai");
-  const genAI = new GoogleGenerativeAI(apiKey);
-  const model = genAI.getGenerativeModel({ model: modelId, generationConfig: { maxOutputTokens: AI_MAX_TOKENS } });
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeout);
-  try {
-    const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: prompt }] }] }, { signal: controller.signal as AbortSignal });
-    return result.response.text();
-  } finally {
-    clearTimeout(timer);
-  }
+  return withAiLogging("google", modelId, async () => {
+    const { GoogleGenerativeAI } = await import("@google/generative-ai");
+    const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ model: modelId, generationConfig: { maxOutputTokens: AI_MAX_TOKENS } });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeout);
+    try {
+      const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: prompt }] }] }, { signal: controller.signal as AbortSignal });
+      return result.response.text();
+    } finally {
+      clearTimeout(timer);
+    }
+  });
 }
 
 export { callAnthropic, callOpenAI, callGoogle };
