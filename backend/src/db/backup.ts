@@ -142,14 +142,33 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
   const ts = new Date().toISOString().replace(/[:.]/g, "-");
   const preRestoreName = `${BACKUP_PREFIX}pre-restore-${ts}${BACKUP_SUFFIX}`;
   const preRestorePath = path.join(dir, preRestoreName);
+  // Async existence probe — sync `fs.existsSync` here would block the event loop
+  // for the duration of the stat call (visible on AV-locked DB files), and the
+  // rest of this function is async-only.
+  let dbExists = true;
   try {
-    if (fs.existsSync(dbPath)) {
+    await fsPromises.access(dbPath);
+  } catch {
+    dbExists = false;
+  }
+  if (dbExists) {
+    try {
       await fsPromises.copyFile(dbPath, preRestorePath);
+    } catch (e) {
+      throw new Error(
+        `Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`,
+      );
     }
-  } catch (e) {
-    throw new Error(
-      `Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`,
-    );
+  }
+
+  // Stale WAL/SHM sidecars belong to the OLD DB. Remove them BEFORE the rename
+  // so there's no window where the new DB at `dbPath` is paired with WAL/SHM
+  // pointing at the previous snapshot — opening that combination merges stale
+  // WAL frames into the restored data and produces silent corruption. Order
+  // matters even on single-instance desktop because better-sqlite3's lazy open
+  // can race with any post-rename code path.
+  for (const suffix of ["-wal", "-shm"]) {
+    try { await fsPromises.unlink(dbPath + suffix); } catch { /* missing is fine */ }
   }
 
   // Atomic replace: stage to a temp sibling, then rename onto the active DB path.
@@ -168,11 +187,6 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
     throw new Error(
       `Restore esuat: ${e instanceof Error ? e.message : String(e)}`,
     );
-  }
-
-  // Stale WAL/SHM sidecars belong to the old DB; removing them forces a clean open.
-  for (const suffix of ["-wal", "-shm"]) {
-    try { await fsPromises.unlink(dbPath + suffix); } catch { /* missing is fine */ }
   }
 
   // Structured audit line. Persistent `audit_log` table is deferred to Faza 5
