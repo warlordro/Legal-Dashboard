@@ -18,6 +18,59 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.0.10",
+    date: "26 Aprilie 2026",
+    subtitle: "Hardening — AI logging extension + backup maintenance lock + safeStorage trim",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Observability AI extinsa — httpStatus + token usage + isTimeoutOrAbort",
+        content:
+          "Log-ul JSON ai_call captureaza acum metadata fina pe fiecare apel catre Claude / GPT / Gemini. Permite cost tracking real (token counts) si rata de erori split pe HTTP status.",
+        bullets: [
+          "Helper isTimeoutOrAbort(e) detecteaza timeout/abort inclusiv pe subclase SDK (Anthropic / OpenAI APIUserAbortError / APIConnectionTimeoutError) care nu seteaza e.name = TimeoutError. Inainte branch-ul errorType: \"timeout\" era practic dead pentru aceste cazuri.",
+          "withAiLogging primeste { value, meta } din provider-ul interior; usageInput / usageOutput populate din message.usage (Anthropic), response.usage (OpenAI), result.response.usageMetadata (Google).",
+          "Pe path-ul de eroare, e.status (cand exista — APIError SDK) e capturat ca httpStatus, ca dashboard-urile sa poata splita 4xx/5xx vs network/abort.",
+        ],
+      },
+      {
+        title: "Backup/restore — maintenance lock + WAL truncate pre-snapshot",
+        content:
+          "Doua hardening-uri pe path-ul de backup/restore: serializarea operatiilor de mentenanta si captura corecta a frame-urilor WAL inainte de close.",
+        bullets: [
+          "withMaintenanceLock (promise chain in-process) serializeaza restoreFromBackup cu runDailyBackup. Pe desktop fara concurenta in practica, dar scheduler-ul putea teoretic interleave-ui cu un restore care inchide DB-ul mid-db.backup() -> destinatie corupta. Web-mode va inlocui cu row-lock.",
+          "Pre-restore snapshot face PRAGMA wal_checkpoint(TRUNCATE) inainte de closeDb(). Fara checkpoint, snapshot-ul prindea doar fisierul .db si pierdea frame-urile WAL necommitate -> rollback silent incomplete.",
+          "logBackupEvent (single-line JSON, ts auto) inlocuieste console.log ad-hoc; daily_backup_failed distinge stage: \"mkdir\" vs \"backup\"; sterge sidecar -wal/-shm cu logging non-ENOENT (EBUSY de la AV pe Windows nu mai e silentios).",
+        ],
+      },
+      {
+        title: "Frontend safeStorage — defensive trim in setKeys",
+        content:
+          "Inchide o gap subtila pe path-ul de migrare legacy: deobfuscate putea propaga whitespace din intrari vechi localStorage in safeStorage encrypted, iar cererile cu whitespace in cheia API esueaza cu 401.",
+        bullets: [
+          "useApiKey.setKeys() aplica acum .trim() pe fiecare cheie inainte de persist; setKey individual deja trima. Fixul aliniaza path-ul bulk cu cel single.",
+        ],
+      },
+      {
+        title: "RNPM gcode caching — investigatie inchisa (negativa)",
+        content:
+          "Test empiric: RNPM respinge reuse-ul gcode-ului intre cautari cu parametri diferiti. Captcha-per-query ramane cost intrinsec la API-level.",
+        bullets: [
+          "Spike in RnpmSearch.tsx care threading existingGcode din runSearch precedent a generat in backend phase: \"search_retry\" (gap 16.4s, captcha re-solve), nu phase: \"search\" direct.",
+          "Pagination intra-search (loadNextBatch) reuseaza gcode-ul corect; path-ul existent ramane valid.",
+          "Mitigari posibile pe viitor: provider mai rapid (CapSolver vs 2Captcha - deja setting), race mode (deja suportat), pre-warm captcha speculativ (necesita API discovery).",
+        ],
+      },
+      {
+        title: "Verificare",
+        content:
+          "Backend typecheck curat, 62/62 teste backend verde (include teste noi pe withMaintenanceLock + WAL checkpoint si pe isTimeoutOrAbort), frontend typecheck curat.",
+      },
+    ],
+  },
+  {
     version: "v2.0.9",
     date: "26 Aprilie 2026",
     subtitle: "Faza 10 medium close-out — restore correctness, AI logging, Docker CI",

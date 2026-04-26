@@ -5,7 +5,7 @@ portalul instantelor si interogarea Registrului National de Publicitate Mobiliar
 (RNPM). Include un modul de analiza AI multi-agent (Claude, OpenAI, Gemini) cu
 stocarea cheilor in keystore-ul sistemului de operare prin Electron `safeStorage`.
 
-Versiune curenta: **2.0.9**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
+Versiune curenta: **2.0.10**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
 [SECURITY.md](SECURITY.md) pentru threat model.
 
 ## Prerequisite
@@ -37,7 +37,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (55 teste in v2.0.9) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (62 teste in v2.0.10) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

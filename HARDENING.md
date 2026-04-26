@@ -230,7 +230,7 @@ Un finding (I1 — dublu `validateAiBody`) a fost verificat direct vs cod si **r
 
 **Verdict global:** 🟡 CONDITIONAL — calitatea sprint-ului e mare, dar 3 blockers fac container-ul Docker sa nu booteze, exit-ul Electron sa fie distructiv silentios, si concurency-ul restore-ului inca neaplicat (DR2 din Faza 8 e same risc, ramane open).
 
-**Status v2.0.9 (2026-04-26):** toate cele 3 blockers (C1+C2+C3), toate 4 high-priority (H1+H2+H3+H4) si **toate** medium-urile (M1+M2+M3+M4+M5+M6+M7+M8) sunt **landed**. `v2.0.8` a fost release-ul de hardening initial; `v2.0.9` inchide ultimele patru medium din Faza 10: `restoreFromBackup` integral asincron, WAL/SHM unlink mutat inainte de rename, helper `withAiLogging` pentru log JSON pe Claude/GPT/Gemini si workflow GitHub Actions `docker-build.yml` cu smoke test `/health` in container. Doar L1-L10 raman in Faza 10 (low priority, deferable la Faza 9 cleanup sau dupa primul deploy real).
+**Status v2.0.10 (2026-04-26):** toate cele 3 blockers (C1+C2+C3), toate 4 high-priority (H1+H2+H3+H4) si **toate** medium-urile (M1+M2+M3+M4+M5+M6+M7+M8) sunt **landed**. `v2.0.8` a fost release-ul de hardening initial; `v2.0.9` a inchis ultimele patru medium din Faza 10. `v2.0.10` adauga peste asta: `withMaintenanceLock` pentru serializarea restore + daily backup, `PRAGMA wal_checkpoint(TRUNCATE)` pre-restore snapshot, `isTimeoutOrAbort` care detecteaza subclase SDK pentru log corect, `httpStatus` + token usage in `ai_call`, `useApiKey.setKeys` defensive trim. Doar L1-L10 raman in Faza 10 (low priority, deferable la Faza 9 cleanup sau dupa primul deploy real).
 
 ### Release blockers (fix INAINTE de tag `v2.0.7`)
 

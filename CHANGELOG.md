@@ -4,6 +4,45 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 26 Aprilie 2026 - v2.0.10 - hardening: AI logging extension + backup maintenance lock + safeStorage trim
+
+Continuare directa a `v2.0.9`. Trei imbunatatiri de hardening pe linia de observabilitate AI, integritatea operatiilor de backup/restore si robustetea persistentei cheilor API. Plus o investigatie negativa inchisa pe partea de captcha RNPM.
+
+### Observabilitate AI extinsa
+
+- `services/ai.ts` exporta acum helper-ul `isTimeoutOrAbort(e)` care detecteaza corect timeout-urile si abort-urile inclusiv pentru subclase SDK (Anthropic / OpenAI `APIUserAbortError` / `APIConnectionTimeoutError`, Google SDK abort errors). Inainte normalizarea se baza doar pe `e.name`, care e `"Error"` pentru subclase ce nu il override-uiesc - branch-ul timeout era practic dead.
+- `withAiLogging` accepta acum `{ value, meta }` din functia interioara, astfel incat fiecare provider sa-si ataseze `usageInput` / `usageOutput` (token counts) la log-ul JSON. Plus capturarea `httpStatus` din erorile SDK (`.status` pe `APIError`) ca dashboard-urile sa poata splita 4xx/5xx vs network/abort.
+- `ai_call` log line acum poate include: `httpStatus`, `usageInput`, `usageOutput`, complementar cu `latencyMs`, `status`, `errorType`. Pasul intermediar pana la `audit_log` persistent (Faza 5).
+
+### Backup/restore: maintenance lock + WAL truncate pre-snapshot
+
+- `withMaintenanceLock` (promise chain in-process) serializeaza `restoreFromBackup` cu `runDailyBackup`. Pe desktop nu sunt concurente in practica, dar scheduler-ul `runDailyBackup` putea teoretic interleave-ui cu un restore initiat de user care inchide DB-ul mid-`db.backup()` -> destinatie corupta. Web mode va inlocui cu row-lock / advisory lock.
+- Pre-restore snapshot face acum `PRAGMA wal_checkpoint(TRUNCATE)` *inainte* de `closeDb()`. Fara checkpoint, pre-restore copy captura doar fisierul `.db` si pierdea frame-urile WAL necommitate -> rollback-ul "moments before restore" era silent incomplete.
+- `logBackupEvent` (single-line JSON, `ts` auto-stamp) inlocuieste `console.log` ad-hoc. `daily_backup_failed` distinge acum `stage: "mkdir"` vs `stage: "backup"`. Sterge orphan sidecar `-wal`/`-shm` cu logging non-ENOENT (EBUSY de la AV pe Windows nu mai e silentios).
+- `runDailyBackup` foloseste `await fsPromises.mkdir` in loc de `fs.mkdirSync` (nu mai blocheaza event loop-ul; cosmetic - dir-ul exista in 99% din cazuri).
+
+### Frontend: safeStorage defensive trim
+
+- `useApiKey.setKeys()` aplica `.trim()` pe fiecare cheie inainte de persistare. Inchide o gap legacy: path-ul de migrare `deobfuscate` propaga whitespace din intrari vechi `localStorage`, iar fara trim-ul defensiv keystore-ul ramanea cu spaces care faceau cererile sa esueze cu 401. `setKey` deja trimea valoarea individuala; `setKeys` (bulk) nu o facea.
+
+### RNPM gcode caching - investigatie inchisa (negativa)
+
+- Test empiric `2026-04-26` confirma ca RNPM **respinge** reuse-ul gcode intre cautari cu parametri diferiti. Spike in `RnpmSearch.tsx` care threading `existingGcode` din `runSearch` precedent a generat in backend `phase: "search_retry"` (gap 16.4s = failed-SOAP + captcha re-solve + retry), nu `phase: "search"` direct.
+- Concluzie: captcha-per-query este cost intrinsec la nivelul API-ului RNPM. Optimizarile client-side nu pot evita. Path-ul existent de pagination intra-search (`loadNextBatch` reuseaza gcode-ul corect) ramane valid.
+- Mitigari posibile pe viitor (neinvestigate): provider mai rapid (CapSolver vs 2Captcha - deja setting), race mode (deja suportat), pre-warm captcha speculativ.
+
+### CodeRabbit follow-up
+
+- Verificate trei claim-uri pe CodeRabbit: `setKeys` nu trim (PARTIAL VALID - fixat), `.mcp.json` shape (FALSE POSITIVE - format-ul actual e valid), `fs.mkdirSync` blocking (VALID cosmetic - fixat). Cele doua valid au fost executate pure-equivalent fara impact functional.
+
+### Verificare
+
+- `npx tsc --noEmit -p backend/tsconfig.json` - clean.
+- `cd frontend && npx tsc --noEmit` - clean.
+- `npm test --workspace=backend` - 62/62 teste verde (include teste noi pe `withMaintenanceLock` + WAL checkpoint si pe `isTimeoutOrAbort`).
+
+---
+
 ## 26 Aprilie 2026 - v2.0.9 - Faza 10 medium close-out + Docker CI
 
 Continuare directa a hardening-ului `v2.0.8`: inchide ultimele patru medium-priority din review-ul Faza 10 (M4-M7) si adauga un workflow GitHub Actions care valideaza imaginea Docker la fiecare push pe `main` sau pull request.
