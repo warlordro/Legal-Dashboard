@@ -1,4 +1,4 @@
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
 import {
   AI_MODELS,
@@ -17,26 +17,37 @@ import {
 
 export const aiRouter = new Hono();
 
+// Shared body parser for AI POST endpoints. Enforces MAX_AI_BODY_SIZE on both
+// the Content-Length header and the actual body, then parses JSON. Returns a
+// discriminated result so the route can map the error to its own response
+// shape without losing the early-return ergonomics.
+type ParsedAiBody =
+  | { kind: "ok"; body: unknown }
+  | { kind: "error"; status: 400 | 413; message: string };
+
+async function parseAiBody(c: Context): Promise<ParsedAiBody> {
+  const contentLength = parseInt(c.req.header("content-length") || "0", 10);
+  if (contentLength > MAX_AI_BODY_SIZE) {
+    return { kind: "error", status: 413, message: "Cererea depaseste dimensiunea maxima permisa." };
+  }
+  const rawBody = await c.req.text();
+  if (rawBody.length > MAX_AI_BODY_SIZE) {
+    return { kind: "error", status: 413, message: "Cererea depaseste dimensiunea maxima permisa." };
+  }
+  try {
+    return { kind: "ok", body: JSON.parse(rawBody) };
+  } catch {
+    return { kind: "error", status: 400, message: "JSON invalid." };
+  }
+}
+
 // AI Analysis endpoint
 aiRouter.post("/analyze", async (c) => {
   try {
-    // SECURITY: Enforce body size limit (Content-Length header + actual body)
-    const contentLength = parseInt(c.req.header("content-length") || "0", 10);
-    if (contentLength > MAX_AI_BODY_SIZE) {
-      return c.json({ error: "Cererea depaseste dimensiunea maxima permisa." }, 413);
-    }
-    const rawBody = await c.req.text();
-    if (rawBody.length > MAX_AI_BODY_SIZE) {
-      return c.json({ error: "Cererea depaseste dimensiunea maxima permisa." }, 413);
-    }
-
+    const parsed = await parseAiBody(c);
+    if (parsed.kind === "error") return c.json({ error: parsed.message }, parsed.status);
     // NOTE: typed `any` here is validated below by validateAiBody before any field access.
-    let body: any;
-    try {
-      body = JSON.parse(rawBody);
-    } catch {
-      return c.json({ error: "JSON invalid." }, 400);
-    }
+    const body: any = parsed.body;
 
     // Schema validation
     const validationError = validateAiBody(body);
@@ -60,15 +71,13 @@ aiRouter.post("/analyze", async (c) => {
     }
 
     const prompt = buildPrompt(dosar);
-    let text = "";
-
-    if (selectedModel.provider === "anthropic") {
-      text = await callAnthropic(apiKey, selectedModel.modelId, prompt);
-    } else if (selectedModel.provider === "openai") {
-      text = await callOpenAI(apiKey, selectedModel.modelId, prompt);
-    } else if (selectedModel.provider === "google") {
-      text = await callGoogle(apiKey, selectedModel.modelId, prompt);
-    }
+    const dispatch: Record<string, (key: string, modelId: string, prompt: string) => Promise<string>> = {
+      anthropic: callAnthropic,
+      openai: callOpenAI,
+      google: callGoogle,
+    };
+    const providerFn = dispatch[selectedModel.provider];
+    const text = providerFn ? await providerFn(apiKey, selectedModel.modelId, prompt) : "";
 
     return c.json({ analysis: text });
   } catch (err: unknown) {
@@ -81,22 +90,10 @@ aiRouter.post("/analyze", async (c) => {
 // Multi-Agent AI Analysis endpoint
 aiRouter.post("/analyze-multi", async (c) => {
   try {
-    const contentLength = parseInt(c.req.header("content-length") || "0", 10);
-    if (contentLength > MAX_AI_BODY_SIZE) {
-      return c.json({ error: "Cererea depaseste dimensiunea maxima permisa." }, 413);
-    }
-    const rawBody = await c.req.text();
-    if (rawBody.length > MAX_AI_BODY_SIZE) {
-      return c.json({ error: "Cererea depaseste dimensiunea maxima permisa." }, 413);
-    }
-
-    // NOTE: typed `any` here is validated below by validateAiBody before any field access.
-    let body: any;
-    try {
-      body = JSON.parse(rawBody);
-    } catch {
-      return c.json({ error: "JSON invalid." }, 400);
-    }
+    const parsed = await parseAiBody(c);
+    if (parsed.kind === "error") return c.json({ error: parsed.message }, parsed.status);
+    // NOTE: typed `any` here is validated below by validateAiBody and per-field checks.
+    const body: any = parsed.body;
 
     // Validate structure (reuse dosar validation from single-agent endpoint)
     if (!body || typeof body !== "object") return c.json({ error: "Body invalid." }, 400);

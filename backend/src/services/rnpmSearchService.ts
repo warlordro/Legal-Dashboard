@@ -7,19 +7,10 @@ import {
   type RnpmSearchParams,
   type RnpmDocument,
   type RnpmFullDetail,
-  type RnpmDetailPartyPF,
-  type RnpmDetailPartyPJ,
-  type RnpmDetailBun,
-  type RnpmDetailBunBucket,
 } from "./rnpmClient.ts";
 import { saveSearch } from "../db/searchRepository.ts";
-import {
-  saveAvizFull,
-  type PartyInput,
-  type BunInput,
-  type IstoricInput,
-  type BunPartyRef,
-} from "../db/avizRepository.ts";
+import { saveAvizFull } from "../db/avizRepository.ts";
+import { buildSaveAvizInput } from "./rnpmAvizMapper.ts";
 import { stripDiacriticsDeep } from "../util/textNormalize.ts";
 
 export interface ExecuteSearchInput {
@@ -60,6 +51,19 @@ export interface ExecuteSearchResult {
 const DEFAULT_DETAIL_CONCURRENCY = 7;
 const DEFAULT_BATCH_SIZE = 25;
 
+// Single-line JSON timing line on stdout. Same shape as other audit events
+// (ai_call, restore). Lets ops grep `"action":"rnpm_phase"` and pivot by
+// phase to see where wall-clock time goes (captcha solver vs RNPM search vs
+// detail fetches). PII-clean: no parameter values, no document identifiers.
+function logRnpmEvent(entry: Record<string, unknown>): void {
+  console.log(
+    JSON.stringify({
+      ...entry,
+      ts: new Date().toISOString(),
+    }),
+  );
+}
+
 function toRnpmDate(s: string): string {
   const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
@@ -76,8 +80,25 @@ export async function executeSearch(
   const signal = input.signal;
   let rnpmPage = input.startRnpmPage ?? 1;
 
+  // Per-phase timing accumulators — emitted at the end as a single
+  // `rnpm_search` summary line so the slow-search complaint can be triaged
+  // ("captcha was 28s" vs "details fetched 14 docs in 22s").
+  const tStart = Date.now();
+  let captchaMs = 0;
+  let searchMs = 0;
+  let detailsMs = 0;
+  let detailsOk = 0;
+  let detailsFailedCount = 0;
+
   throwIfAborted(signal);
-  let gcode = input.existingGcode ?? await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
+  let gcode: string;
+  if (input.existingGcode) {
+    gcode = input.existingGcode;
+  } else {
+    const tCaptcha = Date.now();
+    gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
+    captchaMs = Date.now() - tCaptcha;
+  }
   throwIfAborted(signal);
   // perioadaStart/perioadaFinal sunt filtre client-side (RNPM nu suporta interval pe majoritatea categoriilor)
   const { perioadaStart: _ps, perioadaFinal: _pf, ...restParams } = input.params;
@@ -94,19 +115,50 @@ export async function executeSearch(
     .filter(([, v]) => v !== undefined && v !== null && v !== "")
     .map(([k]) => k)
     .join(",");
-  console.log(`[rnpm] search type=${input.type} page=${rnpmPage} fields=[${fieldsPresent}]`);
+  logRnpmEvent({
+    action: "rnpm_phase",
+    phase: "search_start",
+    searchType: input.type,
+    page: rnpmPage,
+    fields: fieldsPresent,
+    captchaMs: captchaMs || undefined,
+  });
   try {
+    const tSearch = Date.now();
     firstResult = await client.search(input.type, searchParams, rnpmPage, signal);
-    // criteriu is the site's echo of the user's inputs — also PII. Log only total + pages.
-    console.log(`[rnpm] result total=${firstResult.total} pages=${firstResult.pagesTotal}`);
+    const dt = Date.now() - tSearch;
+    searchMs += dt;
+    logRnpmEvent({
+      action: "rnpm_phase",
+      phase: "search",
+      searchType: input.type,
+      page: rnpmPage,
+      latencyMs: dt,
+      total: firstResult.total,
+      pages: firstResult.pagesTotal,
+    });
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     const isExpired = e instanceof RnpmError && (e.status === 410 || e.status === 401 || e.status === 403);
     if ((input.existingGcode && e instanceof RnpmError) || isExpired) {
       throwIfAborted(signal);
+      const tRetry = Date.now();
       gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
+      captchaMs += Date.now() - tRetry;
       searchParams.gcode = gcode;
+      const tSearch2 = Date.now();
       firstResult = await client.search(input.type, searchParams, rnpmPage, signal);
+      const dt = Date.now() - tSearch2;
+      searchMs += dt;
+      logRnpmEvent({
+        action: "rnpm_phase",
+        phase: "search_retry",
+        searchType: input.type,
+        page: rnpmPage,
+        latencyMs: dt,
+        total: firstResult.total,
+        pages: firstResult.pagesTotal,
+      });
     } else {
       throw e;
     }
@@ -142,6 +194,7 @@ export async function executeSearch(
     if (!fetchDetails || docs.length === 0) return;
     for (let i = 0; i < docs.length; i += concurrency) {
       throwIfAborted(signal);
+      const tBatch = Date.now();
       const batchResults = await Promise.all(docs.slice(i, i + concurrency).map(async (doc, batchIdx) => {
         const localIdx = i + batchIdx;
         if (!doc.identificator.k) return { localIdx, doc, ok: false as const };
@@ -159,10 +212,30 @@ export async function executeSearch(
           return { localIdx, doc, ok: false as const };
         }
       }));
+      const dt = Date.now() - tBatch;
+      detailsMs += dt;
+      let okCount = 0;
+      let failCount = 0;
       for (const r of batchResults) {
-        if (r.ok) avizIds[baseIdx + r.localIdx] = r.avizId;
-        else detailsFailed.push(r.doc.identificator.v);
+        if (r.ok) {
+          avizIds[baseIdx + r.localIdx] = r.avizId;
+          okCount++;
+        } else {
+          detailsFailed.push(r.doc.identificator.v);
+          failCount++;
+        }
       }
+      detailsOk += okCount;
+      detailsFailedCount += failCount;
+      logRnpmEvent({
+        action: "rnpm_phase",
+        phase: "details_batch",
+        searchType: input.type,
+        size: batchResults.length,
+        ok: okCount,
+        failed: failCount,
+        latencyMs: dt,
+      });
     }
   };
 
@@ -173,14 +246,36 @@ export async function executeSearch(
     throwIfAborted(signal);
     let r;
     try {
+      const tMore = Date.now();
       r = await client.search(input.type, searchParams, rnpmPage, signal);
+      const dt = Date.now() - tMore;
+      searchMs += dt;
+      logRnpmEvent({
+        action: "rnpm_phase",
+        phase: "search_more",
+        searchType: input.type,
+        page: rnpmPage,
+        latencyMs: dt,
+      });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") throw e;
       if (e instanceof RnpmError && (e.status === 410 || e.status === 401 || e.status === 403)) {
         throwIfAborted(signal);
+        const tRetry = Date.now();
         gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
+        captchaMs += Date.now() - tRetry;
         searchParams.gcode = gcode;
+        const tMore2 = Date.now();
         r = await client.search(input.type, searchParams, rnpmPage, signal);
+        const dt = Date.now() - tMore2;
+        searchMs += dt;
+        logRnpmEvent({
+          action: "rnpm_phase",
+          phase: "search_more_retry",
+          searchType: input.type,
+          page: rnpmPage,
+          latencyMs: dt,
+        });
       } else {
         throw e;
       }
@@ -190,6 +285,20 @@ export async function executeSearch(
   }
 
   const nextRnpmPage = rnpmPage <= pagesTotal ? rnpmPage : null;
+
+  logRnpmEvent({
+    action: "rnpm_search",
+    searchType: input.type,
+    totalLatencyMs: Date.now() - tStart,
+    captchaMs,
+    searchMs,
+    detailsMs,
+    count: allDocs.length,
+    ok: detailsOk,
+    failed: detailsFailedCount,
+    pages: pagesTotal,
+    total,
+  });
 
   return {
     searchId,
@@ -211,208 +320,9 @@ function persistAvizWithDetail(
   detail: RnpmFullDetail,
   searchType: string,
   ownerId: string,
-  searchId: number
+  searchId: number,
 ): number {
-  const part1 = detail.part1 ?? {};
-  const part2 = detail.part2 ?? {};
-  const part3 = detail.part3 ?? {};
-  const part4 = detail.part4 ?? {};
-
-  const arr = <T,>(v: unknown): T[] => Array.isArray(v) ? (v as T[]) : [];
-
-  let creditori: PartyInput[] = [];
-  let debitori: PartyInput[] = [];
-  let bunuri: BunInput[] = [];
-
-  if (searchType === "specifice") {
-    // Specifice: part2 contine partiF/partiJ (bucket unic cu calitate+altaCalitate),
-    // part3 contine { bunuri: [{ no, descriere }] }, part4 = null.
-    // Mapam toate partile in "debitori" (schema are coloana calitate) — creditori raman goale.
-    debitori = [
-      ...arr<RnpmDetailPartyPF>(part2.partiF).map((p) => ({ ...mapPartyPF(p), calitate: formatCalitate(p.calitate, p.altaCalitate) })),
-      ...arr<RnpmDetailPartyPJ>(part2.partiJ).map((p) => ({ ...mapPartyPJ(p), calitate: formatCalitate(p.calitate, p.altaCalitate) })),
-    ];
-    bunuri = arr<RnpmDetailBun & { descriere?: string }>(part3.bunuri).map((b) => ({
-      tip_bun: "alt",
-      categorie: null,
-      identificare: null,
-      descriere: b.descriere ?? null,
-      model: null,
-      serie_sasiu: null,
-      serie_motor: null,
-      nr_inmatriculare: null,
-      referinte: [],
-    }));
-  } else {
-    creditori = [
-      ...arr<RnpmDetailPartyPF>(part2.creditoriF).map((p) => mapPartyPF(p)),
-      ...arr<RnpmDetailPartyPJ>(part2.creditoriJ).map((p) => mapPartyPJ(p)),
-    ];
-
-    debitori = [
-      ...arr<RnpmDetailPartyPF & { calitate?: string }>(part3.debitoriF).map((p) => ({ ...mapPartyPF(p), calitate: p.calitate ?? null })),
-      ...arr<RnpmDetailPartyPJ & { calitate?: string }>(part3.debitoriJ).map((p) => ({ ...mapPartyPJ(p), calitate: p.calitate ?? null })),
-    ];
-
-    const flattenBucket = (bucket: RnpmDetailBunBucket | undefined): RnpmDetailBun[] => {
-      if (!bucket) return [];
-      if (Array.isArray(bucket)) return bucket;
-      return Object.values(bucket).flatMap((g) => Array.isArray(g?.bunuri) ? g.bunuri : []);
-    };
-    const debitoriF = arr<RnpmDetailPartyPF & { calitate?: string }>(part3.debitoriF);
-    const debitoriJ = arr<RnpmDetailPartyPJ & { calitate?: string }>(part3.debitoriJ);
-    bunuri = [
-      ...flattenBucket(part4.vehicule).map((b) => mapBun(b, "vehicul", debitoriF, debitoriJ)),
-      ...flattenBucket(part4.mobile).map((b) => mapBun(b, "mobil", debitoriF, debitoriJ)),
-      ...flattenBucket(part4.alte).map((b) => mapBun(b, "alt", debitoriF, debitoriJ)),
-    ];
-  }
-
-  const istoric: IstoricInput[] = arr<{ identificator?: { v?: string; k?: string }; data?: string; tip?: string; inscriereM?: { v?: string; k?: string } }>(detail.istoric).map((h) => ({
-    identificator: h.identificator?.v ?? "",
-    uuid: h.identificator?.k ?? "",
-    data: h.data ?? "",
-    tip: h.tip ?? "",
-    inscriere_m_v: h.inscriereM?.v ?? null,
-    inscriere_m_k: h.inscriereM?.k ?? null,
-  }));
-
-  return saveAvizFull({
-    ownerId,
-    searchId,
-    uuid: doc.identificator.k ?? "",
-    identificator: doc.identificator.v,
-    searchType,
-    tip: doc.tip,
-    data: doc.data,
-    utilizatorAutorizat: doc.utilizatorAutorizat ?? null,
-    activ: typeof part1.activ === "boolean" ? part1.activ : (doc.activ ?? true),
-    needsActualizare: doc.needsActualizare === true,
-    destinatie: part1.destinatie ?? null,
-    tipAct: part1.tipAct ?? null,
-    numarAct: part1.numar ?? null,
-    dataInreg: part1.dataInreg ?? null,
-    dataExpirare: part1.dataExpirare ?? null,
-    alteMentiuni: typeof part1.alteMentiuni === "string" ? part1.alteMentiuni : null,
-    detaliiComune: part4.detaliiComune ?? null,
-    inscriereInitialaId: part1.inscriereInitiala?.v ?? null,
-    inscriereInitialaUuid: part1.inscriereInitiala?.k ?? null,
-    inscriereModificataId: part1.inscriereModificata?.v ?? null,
-    inscriereModificataUuid: part1.inscriereModificata?.k ?? null,
-    detailFetched: true,
-    creditori,
-    debitori,
-    bunuri,
-    istoric,
-  });
-}
-
-// Specifice: calitate generica ("Alta calitate") + altaCalitate (textul specific).
-// Le combinam intr-un singur string pentru afisarea in tab-ul Debitori, unde specifice-ul isi mapeaza partile.
-function formatCalitate(calitate: string | null | undefined, altaCalitate: string | null | undefined): string | null {
-  if (altaCalitate) return calitate ? `${calitate}: ${altaCalitate}` : altaCalitate;
-  return calitate ?? null;
-}
-
-function mapPartyPF(p: RnpmDetailPartyPF): PartyInput {
-  return {
-    tip_persoana: "PF",
-    denumire: p.nume ?? null,
-    prenume: p.prenume ?? null,
-    tip_entitate: null,
-    sediu: p.sediu ?? null,
-    nr_identificare: null,
-    cod: null,
-    cnp: p.cnp ?? null,
-    tara: p.tara ?? null,
-    localitate: p.localitate ?? null,
-    judet: p.judet ?? null,
-    cod_postal: p.codPostal ?? null,
-    alte_date: p.alteDate ?? null,
-    subscriptor: p.subscriptor == null ? null : (p.subscriptor ? 1 : 0),
-    nr_ordine: p.no ?? null,
-  };
-}
-
-function mapPartyPJ(p: RnpmDetailPartyPJ): PartyInput {
-  return {
-    tip_persoana: "PJ",
-    denumire: p.denumire ?? null,
-    prenume: null,
-    tip_entitate: p.tip ?? null,
-    sediu: p.sediu ?? null,
-    nr_identificare: p.nrIdentificare ?? null,
-    cod: p.cod ?? null,
-    cnp: null,
-    tara: p.tara ?? null,
-    localitate: p.localitate ?? null,
-    judet: p.judet ?? null,
-    cod_postal: p.codPostal ?? null,
-    alte_date: p.alteDate ?? null,
-    subscriptor: p.subscriptor == null ? null : (p.subscriptor ? 1 : 0),
-    nr_ordine: p.no ?? null,
-  };
-}
-
-function mapBun(
-  b: RnpmDetailBun,
-  tip: "vehicul" | "mobil" | "alt",
-  debitoriF: RnpmDetailPartyPF[] = [],
-  debitoriJ: RnpmDetailPartyPJ[] = []
-): BunInput {
-  const refs: BunPartyRef[] = [];
-  for (const idx of b.constituitoriF ?? []) {
-    const p = debitoriF[idx - 1];
-    if (p) refs.push(refFromPF("constituitor", p));
-  }
-  for (const idx of b.constituitoriJ ?? []) {
-    const p = debitoriJ[idx - 1];
-    if (p) refs.push(refFromPJ("constituitor", p));
-  }
-  for (const p of b.tertiF ?? []) refs.push(refFromPF("tert", p));
-  for (const p of b.tertiJ ?? []) refs.push(refFromPJ("tert", p));
-  return {
-    tip_bun: tip,
-    categorie: b.categorie ?? null,
-    identificare: b.identificare ?? null,
-    descriere: b.descriere ?? null,
-    model: b.model ?? null,
-    serie_sasiu: b.serieSasiu ?? null,
-    serie_motor: b.serieMotor ?? null,
-    nr_inmatriculare: b.nrInmatriculare ?? null,
-    referinte: refs,
-  };
-}
-
-function refFromPF(rol: "constituitor" | "tert", p: RnpmDetailPartyPF): BunPartyRef {
-  return {
-    rol, tip_persoana: "PF",
-    denumire: p.nume ?? null,
-    prenume: p.prenume ?? null,
-    sediu: p.sediu ?? null,
-    cnp: p.cnp ?? null,
-    tara: p.tara ?? null,
-    localitate: p.localitate ?? null,
-    judet: p.judet ?? null,
-    cod_postal: p.codPostal ?? null,
-    alte_date: p.alteDate ?? null,
-  };
-}
-
-function refFromPJ(rol: "constituitor" | "tert", p: RnpmDetailPartyPJ): BunPartyRef {
-  return {
-    rol, tip_persoana: "PJ",
-    denumire: p.denumire ?? null,
-    tip_entitate: p.tip ?? null,
-    sediu: p.sediu ?? null,
-    nr_identificare: p.nrIdentificare ?? null,
-    cod: p.cod ?? null,
-    tara: p.tara ?? null,
-    localitate: p.localitate ?? null,
-    judet: p.judet ?? null,
-    cod_postal: p.codPostal ?? null,
-    alte_date: p.alteDate ?? null,
-  };
+  return saveAvizFull(buildSaveAvizInput(doc, detail, searchType, ownerId, searchId));
 }
 
 export interface BulkSearchItem {
