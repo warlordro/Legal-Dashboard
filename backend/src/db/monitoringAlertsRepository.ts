@@ -79,12 +79,24 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
       input.dedupKey,
     );
 
-  return db
+  const row = db
     .prepare(
       `SELECT * FROM monitoring_alerts
        WHERE job_id = ? AND dedup_key = ?`,
     )
-    .get(input.jobId, input.dedupKey) as MonitoringAlertRow;
+    .get(input.jobId, input.dedupKey) as MonitoringAlertRow | undefined;
+
+  // ON CONFLICT DO NOTHING guarantees the row exists post-INSERT — either we
+  // inserted it or the conflicting row is already there. A missing row here
+  // means DB corruption or a concurrent DELETE; surface loudly rather than
+  // letting `undefined` propagate as a "cannot read property X of undefined"
+  // downstream.
+  if (!row) {
+    throw new Error(
+      `insertAlert: row missing after upsert (job_id=${input.jobId}, dedup_key=${input.dedupKey})`,
+    );
+  }
+  return row;
 }
 
 export interface ListAlertsByJobOptions {
