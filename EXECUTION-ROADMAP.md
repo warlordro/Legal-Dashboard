@@ -49,7 +49,7 @@ Treci prin asta inainte sa scrii prima linie de cod. Daca ceva nu e bifat, opres
 ### Local dev (validat post-PR-2 la 2026-04-27)
 - [x] `git status` clean pe `main` (nu sunt modificari uncommitted ramase de la Faza 10).
 - [x] `npm run electron:dev` porneste fara erori (3 smoke-uri consecutive).
-- [x] `npm test --workspace=backend` toate testele green (**99 teste** in v2.0.13).
+- [x] `npm test --workspace=backend` toate testele green (**192 teste** in v2.1.0; 99 in v2.0.13).
 - [x] `npx tsc --noEmit -p backend/tsconfig.json` zero errors.
 - [x] `cd frontend && npx tsc --noEmit` zero errors.
 - [x] `npx biome check` clean.
@@ -126,31 +126,32 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 
 ---
 
-### Saptamana 2-3 — Monitorizare core (PR-3)
+### Saptamana 2-3 — Monitorizare core (PR-3) ✅ LIVRAT 2026-04-27
 
-> **Tema**: toate tabelele si API-urile pentru monitorizare. Scheduler-ul e DEZACTIVAT inca (`MONITORING_ENABLED=false`).
+> **Tema**: toate tabelele si API-urile pentru monitorizare. Scheduler-ul e DEZACTIVAT inca (in PR-3 nu se interogheaza inca PortalJust; flag `MONITORING_ENABLED=1` desktop default activeaza doar API + UI).
 
 #### PR-3 — Monitoring core: schema + repo + UI minimal read-only
 - **Scop**: user deschide o pagina noua "Monitorizare" si vede o lista (goala). Poate adauga manual un dosar dar nu se intampla nimic — pregatim doar infrastructura.
 - **User vede**: tab nou in sidebar "Monitorizare" cu lista vida.
 - **Tasks**:
-  - [ ] Migration `0003_monitoring_core.up.sql`: tabelele `monitoring_jobs`, `monitoring_snapshots`, `monitoring_alerts`, `monitoring_runs` (vezi PLAN §2.2 — INCLUSIV `alert_config_json` + `monitoring_alerts.is_new`).
-  - [ ] Repository: `monitoringJobsRepository.ts`, `monitoringAlertsRepository.ts` cu owner_id scoping.
-  - [ ] Routes:
+  - [x] Migration `0003_monitoring_core.up.sql`: tabelele `monitoring_jobs`, `monitoring_snapshots`, `monitoring_alerts`, `monitoring_runs` (vezi PLAN §2.2 — INCLUSIV `alert_config_json` + `monitoring_alerts.is_new`).
+  - [x] Repository: `monitoringJobsRepository.ts`, `monitoringAlertsRepository.ts` cu owner_id scoping.
+  - [x] Routes:
     - `GET /api/v1/monitoring/jobs` (lista)
     - `POST /api/v1/monitoring/jobs` (create, idempotent prin `client_request_id`)
-    - `PATCH /api/v1/monitoring/jobs/:id` (toggle active, edit cadence)
+    - `PATCH /api/v1/monitoring/jobs/:id` (toggle active, edit cadence — recomputeaza `next_run_at` cand cadenta/active/paused_until se schimba)
     - `DELETE /api/v1/monitoring/jobs/:id`
-  - [ ] Frontend: pagina `Monitorizare.tsx` minimala — tabel + buton "Adauga dosar" + form simple.
-  - [ ] Env flag `MONITORING_ENABLED=false` (default desktop).
-  - [ ] Util: `canonicalJson()` deterministic + `buildSedintaKey()` (port din PJI cu stadiu prefix — vezi PLAN §5.1).
+  - [x] Frontend: pagina `Monitorizare.tsx` minimala — tabel + buton "Adauga dosar" + form simple. Buton "Monitorizeaza schimbari" si in `DosareTable` panou expanded.
+  - [x] Env flag `MONITORING_ENABLED` (desktop default `1` din `electron/main.js`; setare `0` = kill switch — ruta nu e mount-uita).
+  - [x] Util: `canonicalJson()` deterministic + `buildSedintaKey()` (port din PJI cu stadiu prefix — vezi PLAN §5.1).
 - **DoD**:
-  - [ ] User adauga manual un dosar → row in DB cu `next_run_at = now() + jitter`.
-  - [ ] Scheduler-ul NU ruleaza (flag off).
-  - [ ] Teste integration: idempotency `client_request_id`, owner_id isolation.
-  - [ ] Toate rutele noi sub `/api/v1/*` cu envelope `{data, error?: {code, message}, requestId}`. **Rutele legacy `/api/dosare`, `/api/termene`, `/api/rnpm`, `/api/ai` raman intacte cu shape-ul existent** (zero risk regresie desktop).
+  - [x] User adauga manual un dosar → row in DB cu `next_run_at` calculat din cadenta.
+  - [x] Scheduler-ul NU ruleaza (worker-ul care interogheaza PortalJust ramane pentru PR-4).
+  - [x] Teste integration: idempotency `client_request_id`, owner_id isolation, audit writes pe mutatii, request-id propagation (192 teste backend, +93 noi).
+  - [x] Toate rutele noi sub `/api/v1/*` cu envelope `{data, error?: {code, message}, requestId}`. **Rutele legacy `/api/dosare`, `/api/termene`, `/api/rnpm`, `/api/ai` raman intacte cu shape-ul existent** (zero risk regresie desktop).
+  - [x] Live smoke launch (post-rebuild Electron): `[schema] applied migrations: 3`, GET /api/v1/monitoring/jobs 200, GET /api/dosare 200, POST /api/rnpm/search 200 (35s captcha race).
 - **Bump**: 2.1.0 minor.
-- **Risk**: LOW (scheduler off, doar CRUD).
+- **Risk**: 🟢 LOW (scheduler off, doar CRUD). Post-review hardening (4 valuri) absorbit pre-merge — vezi `CHANGELOG.md` v2.1.0 "Post-review hardening" pentru detalii (schema strftime ISO Z, cadence default 14400, atomic audit + recompute next_run_at, parseSqliteUtc).
 
 ---
 

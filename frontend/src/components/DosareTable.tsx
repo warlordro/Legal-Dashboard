@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from "react";
-import { ChevronDown, ChevronUp, FileText, Download, ExternalLink, Users, Calendar, Building2, Scale, FileCheck, Eye } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Download, ExternalLink, Users, Calendar, Building2, Scale, FileCheck, Eye, Activity } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
-import { formatDate, splitConcatenatedWords, formatDocumentSedinta } from "@/lib/utils";
-import { api } from "@/lib/api";
+import { formatDate, parseSqliteUtc, splitConcatenatedWords, formatDocumentSedinta } from "@/lib/utils";
+import { api, monitoring, MonitoringApiError } from "@/lib/api";
 import type { Dosar } from "@/types";
 import { exportAnalysisPDF } from "@/lib/export";
 import { TablePagination } from "@/components/table-pagination";
@@ -57,7 +57,36 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [hiddenAnalysis, setHiddenAnalysis] = useState<Set<string>>(new Set());
   const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
+  // Per-dosar monitor state: pending = request in flight, "added" / "exists" /
+  // error message. Lives in component state so feedback is local to the row;
+  // the global Monitorizare page is the source of truth and is refreshed on visit.
+  const [monitorState, setMonitorState] = useState<Record<string, "pending" | "added" | "exists" | string>>({});
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
+
+  const handleMonitor = useCallback(async (numar: string) => {
+    if (!numar || monitorState[numar] === "pending") return;
+    setMonitorState((prev) => ({ ...prev, [numar]: "pending" }));
+    try {
+      // client_request_id makes a double-click idempotent: backend returns the
+      // existing row instead of erroring or creating a duplicate.
+      const reqId = `dosar-${numar}-${Date.now()}`;
+      const job = await monitoring.createDosar({
+        numar_dosar: numar,
+        client_request_id: reqId,
+      });
+      // The backend returns 201 on fresh insert and 200 on target_hash collision;
+      // both are exposed as the same shape here, so we infer "exists" when the
+      // job's created_at predates the request by more than a few seconds.
+      const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
+      setMonitorState((prev) => ({
+        ...prev,
+        [numar]: wasJustCreated ? "added" : "exists",
+      }));
+    } catch (err) {
+      const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : "Eroare";
+      setMonitorState((prev) => ({ ...prev, [numar]: msg }));
+    }
+  }, [monitorState]);
 
   // Track viewed (expanded) dosare — persist in sessionStorage
   const [viewedDosare, setViewedDosare] = useState<Set<string>>(() => {
@@ -427,6 +456,34 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                     <tr ref={expandedDetailRef}>
                       <td colSpan={colCount} className="bg-muted/20 px-6 py-5">
                         <div className="space-y-4">
+                          {/* Action bar — Monitorizeaza adauga dosarul in /monitorizare */}
+                          {dosar.numar && (() => {
+                            const state = monitorState[dosar.numar];
+                            const isPending = state === "pending";
+                            const isAdded = state === "added";
+                            const isExists = state === "exists";
+                            const errorMsg = state && !["pending", "added", "exists"].includes(state) ? state : null;
+                            return (
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant={isAdded || isExists ? "secondary" : "outline"}
+                                  size="sm"
+                                  disabled={isPending || isAdded || isExists}
+                                  onClick={(e) => { e.stopPropagation(); handleMonitor(dosar.numar); }}
+                                >
+                                  <Activity className="h-4 w-4" />
+                                  {isPending ? "Se adauga..." :
+                                   isAdded ? "Adaugat la monitorizare" :
+                                   isExists ? "Deja monitorizat" :
+                                   "Monitorizeaza schimbari"}
+                                </Button>
+                                {errorMsg && (
+                                  <span className="text-xs text-red-600">{errorMsg}</span>
+                                )}
+                              </div>
+                            );
+                          })()}
+
                           {/* Info grid */}
                           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
                             <InfoItem icon={Calendar} label="Data Dosar" value={formatDate(dosar.data)} />

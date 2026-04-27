@@ -1,3 +1,21 @@
+// PortalJust determinism spike (2026-04-27, pre-PR-3, per PLAN §B.3):
+// Ran `cautareDosare` 5x same-input across 7 distinct inputs (35 SOAP calls):
+// 0-result sentinel; numeParte=POPESCU+1day (2 dosare, 8070B); 4 real numere de
+// dosare (1887/99/2022/a12 -> 2 dosare 25874B; 786/103/2026 -> 1 dosar 1074B;
+// 1134/93/2026 -> 1 dosar 1317B; 531/40/2025 -> 1 dosar 24226B); plus a cross-
+// time rerun of 1887/99/2022/a12 ~30s later. All 35 responses byte-identical
+// per same-input group AND the cross-time rerun produced the same sha256 as
+// the first run -> PortalJust CautareDosare is byte-deterministic, no
+// embedded timestamp/nonce in the payload. Pivot diff strategy from PLAN §B.3
+// NOT required: we can build snapshot diff on top of `buildSedintaKey()` per
+// PJI port without fallback.
+// CAVEAT: spike validates a ~30s window. PR-4 (scheduler activ + diff) must
+// re-validate cross-day stability (24h+ apart) before flipping
+// MONITORING_ENABLED=true. If a payload field drifts day-over-day (e.g. an
+// internal cache TTL or last-indexed timestamp surfaces in the XML), naive
+// snapshot-by-keys still works because `buildSedintaKey()` ignores those
+// fields, but the additional `payload_hash` (sha256 raw) defense layer would
+// false-positive every run. Confirm before flip.
 import { cautareDosare, type Dosar } from "../soap.ts";
 import { splitInterval, generateMonthlyIntervals } from "../intervals.ts";
 import { MAX_EXISTING_ITEMS, MAX_EXISTING_ITEM_LEN, MAX_LOADMORE_BODY } from "../util/validation.ts";

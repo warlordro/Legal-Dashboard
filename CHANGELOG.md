@@ -4,6 +4,89 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 27 Aprilie 2026 - v2.1.0 - PR-3: monitoring core (schema + API + UI minimala)
+
+Al patrulea PR din roadmap (saptamana 2-3, gated de flag-ul `MONITORING_ENABLED`). Scop: livram intreaga schema `monitoring_*`, API-ul versionat `/api/v1/monitoring/jobs` cu envelope standard `{data, error?, requestId}`, helperii partajati (canonical JSON hash, sedinta key) si o pagina minimala in UI care permite adaugarea + pauza + stergerea unui dosar din monitorizare. Pe desktop, flag-ul e setat implicit pe `1` din `electron/main.js` — feature-ul e ON by default; setare `MONITORING_ENABLED=0` in mediu functioneaza ca kill switch. Scheduler-ul (worker care chiar interogheaza PortalJust) ramane pentru PR-4 — schema si feature-flag-ul sunt insa gata.
+
+### Migrare DDL (`0003_monitoring_core.up.sql`)
+
+- `monitoring_jobs(id, owner_id, kind, target_json, target_hash, cadence_sec, active, paused_until, alert_config_json, next_run_at, last_run_at, last_status, fail_streak, notes, client_request_id, created_at, updated_at)`. CHECK pe `kind IN ('dosar_soap','name_soap','aviz_rnpm')` si pe `last_status IN ('ok','error','partial','skipped')`. UNIQUE `(owner_id, target_hash, kind)` previne dubluri logice; index partial UNIQUE `(owner_id, client_request_id) WHERE client_request_id IS NOT NULL` permite idempotenta opt-in pe POST.
+- Index partial pentru scheduler PR-4: `idx_monitoring_due ON monitoring_jobs(next_run_at) WHERE active = 1` — narrow scan pe joburile active. Predicatul `paused_until` ramane filtru la query-time in scheduler (SQLite ingheata `datetime('now')` la creation in indexuri partiale, deci pause/unpause cycles nu s-ar mai re-include altfel).
+- `monitoring_snapshots(id, job_id FK CASCADE, ts, payload_json, payload_hash, http_status)` — schema persistenta pentru rezultatele crawl-ului PR-4.
+- `monitoring_alerts(id, owner_id, job_id FK CASCADE, ts, severity, kind, payload_json, dedup_key, read_at)` cu UNIQUE `(job_id, dedup_key)` — antidup intre runs (un termen schimbat o data nu mai genereaza alerta la urmatoarea verificare). CHECK pe `severity IN ('info','warn','critical')`.
+- `monitoring_runs(id, job_id FK CASCADE, started_at, finished_at, status, error_message, snapshot_id, alert_count)` cu CHECK pe `status` — log de auditare per executie pentru UI-ul de health (PR-12).
+- Down migration prezenta (manuala) — DROP INDEX + DROP TABLE in ordine inversa (children inainte de parent), plus `DELETE FROM _schema_versions WHERE version = 3`.
+
+### Helperi noi (partajat intre route + repo + scheduler PR-4)
+
+- `backend/src/util/canonicalJson.ts` — `canonicalJson(value)` (JSON cu chei sortate, fara whitespace) si `canonicalSha256(value)`. Folosit pentru `target_hash`: doua jobs cu acelasi target produc acelasi hash indiferent de ordinea cheilor in payload-ul clientului.
+- `backend/src/services/monitoring/sedintaKey.ts` — `buildSedintaKey({stadiuProcesual, data, ora, complet, solutie})` returneaza `${stadiu}|${data}|${ora}|${complet}|${solutie}` dupa normalizare (date `YYYY-MM-DD`, ora `HH:MM`, stadiu lowercase fara diacritice). Diferenta critica fata de proiectul-sora PJI: prefix-ul `stadiu` in cheie elimina coliziunile dintre Apel si Fond la aceeasi data — bug-ul pe care PJI il avea silentios. `buildSedintaKeyWithoutSolutie()` separat pentru detectia "solutie nou aparuta".
+- `backend/src/middleware/requestId.ts` — `requestIdContext` mount-uit dupa `ownerContext` in `index.ts`. Accepta inbound `x-request-id` cand matcheaza `/^[A-Za-z0-9_\-]{8,128}$/`, altfel genereaza UUID v4. Surfata pe envelope (`requestId`) si pe response header `x-request-id`.
+- `backend/src/util/envelope.ts` — `ok(data, c)` si `fail(code, message, c, details?)` helperi pentru rutele v1. Legacy non-envelope (`/api/dosare`, `/api/termene`, `/api/rnpm`, `/api/ai`) raman pe formatul vechi pana la PR-6 (`@hono/zod-openapi`).
+
+### Repository + Zod schemas
+
+- `backend/src/db/monitoringJobsRepository.ts` cu `createJob`, `getJobById`, `listJobs`, `updateJob`, `deleteJob` — toate scope-uite pe `owner_id`. `createJob` are doua nivele de idempotenta: (1) `client_request_id` UNIQUE → returneaza randul existent ca `idempotentReplay: true`; (2) `target_hash + kind` collision → returneaza randul existent ca `duplicate: true, idempotentReplay: false`. Audit-ul se scrie doar pe insert real, nu pe replay.
+- `backend/src/db/monitoringAlertsRepository.ts` — stub `insertAlert` (idempotent pe `dedup_key`), `listByJob`, `markRead`. Schema gata; PR-4 ataseaza producerul.
+- `backend/src/schemas/monitoring.ts` — `JobCreateBodySchema = z.discriminatedUnion("kind", [...])`, fiecare branch cu `target` validat per kind (`numar_dosar` regex `^\d{1,7}/\d{1,5}/\d{4}(?:/[A-Za-z0-9]+)?$` pentru `dosar_soap`). `.strict()` peste tot — chei extra → 422. `JobUpdateBodySchema` rejecta `kind`/`target` (immutable) cu `.refine` non-empty.
+
+### API `/api/v1/monitoring/jobs` (gated `MONITORING_ENABLED`, desktop default = `1`)
+
+- `GET /jobs` — pagination + filter `kind=` + `active=true|false`. Envelope `{data: {rows, total, page, pageSize}, requestId}`.
+- `GET /jobs/:id` — owner-scoped. Daca jobul exista dar la alt owner: **404 not_found** (deliberat, nu 403, ca sa nu leak-uiasca existenta).
+- `POST /jobs` — 201 pe insert nou, 200 pe replay/duplicate. Audit doar pe insert.
+- `PATCH /jobs/:id` — partial merge pentru `alert_config`, restul cimpurilor overwrite. 404 cand id-ul nu e al userului.
+- `DELETE /jobs/:id` — CASCADE pe snapshots/alerts/runs prin FK. 404 cand nu e al userului.
+- Toate mutatiile scriu `audit_log` cu `action: monitoring.job.{created,updated,deleted}`, `target_kind: monitoring_job`, `target_id: <id>`.
+
+### Frontend — pagina `Monitorizare` + integrare in Cautare Dosare
+
+- `frontend/src/pages/Monitorizare.tsx` (read + add + delete + pause/resume). Pagina minimala in stilul aplicatiei: un card pentru formularul de adaugare (numar dosar + cadenta + note) si un tabel cu joburile active (target, tip, cadenta, urmatoarea verificare, ultima rulare, status, actiuni). Refresh pe demand.
+- `frontend/src/components/Sidebar.tsx` — link nou `/monitorizare` cu icon `Activity`.
+- `frontend/src/components/DosareTable.tsx` — buton **"Monitorizeaza schimbari"** in panoul expanded al unui dosar. Click → POST cu `client_request_id` deterministic per dosar (idempotent la double-click). Feedback inline: "Adaugat" / "Deja monitorizat" / mesaj eroare. Hub-ul global ramane pagina Monitorizare.
+- `frontend/src/lib/api.ts` — sectiune `monitoring` + `MonitoringApiError` cu envelope unwrap. Trecut prin acelasi modul ca restul API-ului ca sa respecte hook-ul `block-renderer-fetch`.
+
+### Tests (93 noi → total **192** backend, de la 99)
+
+- `canonicalJson.test.ts` (19 teste) — sort-by-key recursiv, `undefined` skip, BigInt fallback, hash determinism cross-order.
+- `monitoring.test.ts` Zod (26 teste) — discriminated union, regex `numar_dosar`, alert config defaults, `.strict()` reject, PATCH refuse `kind`/`target`, plus assertion pentru cadence default = 14400.
+- `sedintaKey.test.ts` (23 teste) — normalizare data/ora/stadiu, determinism cross-cosmetic-drift, segment integrity (stadiu prefix critic), `buildSedintaKeyWithoutSolutie` semantics.
+- `monitoring.test.ts` integration (25 teste) — POST 201/200/duplicate-replay, idempotency `client_request_id`, owner_id isolation 404 (GET/PATCH/DELETE), audit_log writes pe mutatii (verificat ca tx atomic prin `getDb().transaction()`), malformed JSON → 400, unknown kind / numar_dosar invalid → 422, `x-request-id` propagation (inbound valid echo, malformed -> mint UUID, missing -> mint UUID), filter `kind=` + `active=`, pageSize cap, `institutie` array sort+dedup determinism (target_hash stable cross-order), `next_run_at` recompute la PATCH cadence_sec.
+
+### Post-review hardening (deep + reliability + audit-trail review feedback)
+
+Dupa run-ul de `/full-review` peste PR-3 (8 reviewers paraleli), cele 4 valuri de remediere au fost aplicate inainte de commit — toate fixate cu blast-radius LOW si cu mitiganti documentati:
+
+**Wave 1 — schema correctness (`0003_monitoring_core.up.sql`)**:
+- `cadence_sec NOT NULL DEFAULT 14400` (era fara default → INSERT-uri viitoare ar fi fost forced sa-l specifice manual; alinierea cu Zod default elimina drift-ul).
+- Toate cele 4 timestamp-uri (`created_at`, `updated_at`, `observed_at`, `created_at` pe alerts) trec de la `datetime('now')` (format SQLite naive, space-separated) la `strftime('%Y-%m-%dT%H:%M:%fZ','now')` (ISO Z) — V8 `new Date()` parsa formatul vechi ca **local time** in loc de UTC, drift de pana la 12h pe useri din timezone-uri non-UTC.
+- `idx_monitoring_due` simplificat: predicatul `paused_until` scos definitiv (vezi comentariu in fisier — `datetime('now')` se ingheata la index-creation in SQLite, deci pause/unpause cycles ar fi ramas permanent excluse). Filtrarea `paused_until` ramane la query-time in scheduler (PR-4).
+
+**Wave 2 — validation determinism (`backend/src/schemas/monitoring.ts`)**:
+- `institutie: z.array(...).transform(arr => Array.from(new Set(arr)).sort())` — Zod transform ce dedup + sort ordinea de array `name_soap`. Fara asta, doi useri care submit `["X", "Y"]` vs `["Y", "X"]` (acelasi target logic) primeau hash-uri diferite si jobs separate.
+- `cadence_sec` Zod default mutat de la 600 la 14400 (4h), aliniat cu schema SQL si cu `CADENCE_OPTIONS` din UI.
+
+**Wave 3 — atomic audit + recompute next_run_at (`backend/src/db/monitoringJobsRepository.ts` + `backend/src/routes/monitoring.ts`)**:
+- Toate cele 3 mutatii (POST/PATCH/DELETE) wrapped in `getDb().transaction(() => { mutate; recordAudit(...); })()`. better-sqlite3 transactions sunt sincrone si pe connection-level (singleton `getDb()`), deci o exceptie la `recordAudit` rollback-uieste si jobul. Inainte: existau ferestre micro-secunde in care un crash intre INSERT job si INSERT audit putea lasa state-ul inconsistent.
+- `updateJob` recomputeaza `next_run_at` cand userul schimba `cadence_sec`, `active` sau `paused_until` — folosind `strftime('%Y-%m-%dT%H:%M:%fZ', 'now', '+N seconds')`. Inainte: PATCH la cadenta nu avea efect pana la urmatorul tick de scheduler care el insusi astepta vechiul `next_run_at`.
+
+**Wave 4 — frontend correctness (`frontend/src/pages/Monitorizare.tsx` + tabel components + `lib/utils.ts` + `lib/api.ts`)**:
+- `parseSqliteUtc()` helper nou in `frontend/src/lib/utils.ts` — defensive pentru ambele formate (legacy naive space-separated vs noul ISO Z) si folosit in `DosareTable.tsx` + `TermeneTable.tsx` la display-ul `created_at`. Pana cand toate row-urile sunt rescrise de scheduler, vor coexista in DB.
+- Eliminat loop-ul `auto-PATCH off-grid` din `Monitorizare.tsx` (era anti-pattern: refresh-ul list-ului pornea N PATCH-uri secventiale catre joburi cu `cadence_sec` in afara grid-ului UI, generand audit_log spam si race condition la dublu-render).
+- `monitoring.delete` redenumit `monitoring.deleteJob` in `lib/api.ts` (`delete` e keyword JS rezervat, IDE hint-ul devenea inutilizabil in TypeScript strict).
+- Diacriticele in pagina Monitorizare normalizate la varianta fara semne (legacy constraint PortalJust + restul UI).
+- Activity icon adaugat la sidebar item.
+
+### Bump
+
+`2.0.13 → 2.1.0` minor — feature nou (monitoring API + UI), schema noua, gated de `MONITORING_ENABLED` (desktop default `1` din `electron/main.js`). Pe desktop, userul vede tabul Monitorizare in sidebar si poate adauga dosare la prima pornire dupa upgrade — schema 0003 ruleaza automat (idempotent). Setand `MONITORING_ENABLED=0` in mediu, codul devine inert: ruta nu e mount-uita, nimic nu schimba comportamentul existing — kill switch curat in caz de incident. Scheduler-ul (worker-ul care chiar interogheaza PortalJust) ramane off pana la PR-4 — UI-ul afiseaza explicit acest lucru in pagina.
+
+### Risk
+
+🟢 **LOW**. Ruta noua e izolata sub `/api/v1/monitoring/*` si gated explicit; rutele existente raman bit-pentru-bit identice. Migrarea 0003 ataseaza tabele noi, nu modifica nimic existent — rollback clean prin down migration. Idempotenta dubla pe POST elimina riscul de duplicate la retry-uri de retea. Owner isolation acoperita end-to-end (GET/PATCH/DELETE -> 404 cross-owner) si verificata in 4 teste integrate. Singurul risc de comportament neasteptat: scheduler-ul lipsa face ca `next_run_at` sa nu mai conteze pana la PR-4, dar UI-ul afiseaza acest lucru explicit.
+
+---
+
 ## 27 Aprilie 2026 - v2.0.13 - PR-2: shadow tables auth + audit_log
 
 Al treilea PR din roadmap (saptamana 1 incheiata). Scop: introducem `users`, `user_sessions`, `audit_log` ca tabele "shadow" — definite de acum dar nepopulate cu utilizatori reali pana la PR-9 (web mode + Google SSO). `audit_log` insa devine imediat scriabil prin helperul `recordAudit()`, pe care PR-3+ il vor consuma pe fiecare mutatie sensibila (monitoring CRUD, name list import, AI request). Pe desktop, comportamentul ramane identic: un singur user sintetic `local` e seed-uit, iar restul tabelei `users` e gol.

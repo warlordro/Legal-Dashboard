@@ -144,6 +144,11 @@ function startBackend() {
   if (backendStarted) return Promise.resolve();
   process.env.NODE_ENV = "production";
   process.env.LEGAL_DASHBOARD_DB_PATH = path.join(app.getPath("userData"), "legal-dashboard.db");
+  // PR-3 monitoring routes — desktop default ON (PR-4 flips this in upstream too).
+  // Override with MONITORING_ENABLED=0 in env if needed.
+  if (process.env.MONITORING_ENABLED === undefined) {
+    process.env.MONITORING_ENABLED = "1";
+  }
 
   try {
     require(path.join(__dirname, "..", "dist-backend", "index.cjs"));

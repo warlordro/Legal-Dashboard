@@ -3,11 +3,12 @@ import { Download, CalendarDays, ExternalLink, ChevronDown, ChevronUp, Eye } fro
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
-import { formatDate, formatDocumentSedinta } from "@/lib/utils";
+import { formatDate, formatDocumentSedinta, parseSqliteUtc } from "@/lib/utils";
 import type { Termen } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
 import { TablePagination } from "@/components/table-pagination";
 import { TermeneExpandedDetail } from "./termene-table-detail-row";
+import { monitoring, MonitoringApiError } from "@/lib/api";
 
 interface TermeneTableProps {
   termene: Termen[];
@@ -48,6 +49,30 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
       return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch { return new Set(); }
   });
+
+  // Per-numarDosar monitor state. Keyed by numarDosar (not by row) so opening
+  // multiple termene of the same dosar shares the "Deja monitorizat" feedback.
+  const [monitorState, setMonitorState] = useState<Record<string, "pending" | "added" | "exists" | string>>({});
+
+  const handleMonitor = useCallback(async (numar: string) => {
+    if (!numar || monitorState[numar] === "pending") return;
+    setMonitorState((prev) => ({ ...prev, [numar]: "pending" }));
+    try {
+      const reqId = `termen-${numar}-${Date.now()}`;
+      const job = await monitoring.createDosar({
+        numar_dosar: numar,
+        client_request_id: reqId,
+      });
+      const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
+      setMonitorState((prev) => ({
+        ...prev,
+        [numar]: wasJustCreated ? "added" : "exists",
+      }));
+    } catch (err) {
+      const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : "Eroare";
+      setMonitorState((prev) => ({ ...prev, [numar]: msg }));
+    }
+  }, [monitorState]);
 
   const markAsViewed = useCallback((numarDosar: string) => {
     setViewedTermene((prev) => {
@@ -204,7 +229,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
               const isExpanded = expandedRows.has(rowKey);
               const isSelected = selected.has(selectKey);
               const hasParts = t.parti && t.parti.length > 0;
-              const hasDetails = hasParts || t.categorieCaz || t.stadiuProcesual || t.obiect || t.solutie || t.solutieSumar;
+              const hasDetails = hasParts || t.categorieCaz || t.stadiuProcesual || t.obiect || t.solutie || t.solutieSumar || Boolean(t.numarDosar);
 
               return (
                 <>
@@ -273,7 +298,12 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                   {isExpanded && hasDetails && (
                     <tr key={`${rowKey}-detail`} ref={lastExpandedKey === rowKey ? expandedDetailRef : undefined} className="bg-muted/20">
                       <td colSpan={7} className="px-4 py-4">
-                        <TermeneExpandedDetail termen={t} searchedName={searchedName} />
+                        <TermeneExpandedDetail
+                          termen={t}
+                          searchedName={searchedName}
+                          monitorState={t.numarDosar ? monitorState[t.numarDosar] : undefined}
+                          onMonitor={handleMonitor}
+                        />
                       </td>
                     </tr>
                   )}

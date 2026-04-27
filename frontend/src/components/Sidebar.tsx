@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Scale, Search, CalendarDays, BarChart3, History, Trash2, FileSearch, FileLock2, ChevronDown, ChevronRight } from "lucide-react";
+import { Scale, Search, CalendarDays, BarChart3, History, Trash2, FileSearch, FileLock2, ChevronDown, ChevronRight, Activity } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
@@ -12,6 +12,7 @@ const navItems = [
   { to: "/dosare", label: "Cautare Dosare", icon: Search },
   { to: "/termene", label: "Termene & Calendar", icon: CalendarDays },
   { to: "/rnpm", label: "Cautare RNPM", icon: FileLock2 },
+  { to: "/monitorizare", label: "Monitorizare", icon: Activity },
 ];
 
 interface SidebarProps {

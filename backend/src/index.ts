@@ -9,6 +9,8 @@ import { termeneRouter } from "./routes/termene.ts";
 import { aiRouter } from "./routes/ai.ts";
 import { rateLimit } from "./middleware/rate-limit.ts";
 import { ownerContext } from "./middleware/owner.ts";
+import { requestIdContext } from "./middleware/requestId.ts";
+import { monitoringRouter } from "./routes/monitoring.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { closeDb } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
@@ -88,6 +90,12 @@ function fatalBoot(reason: string, err: unknown): never {
 // before rateLimit so a future per-owner rate-limit can read the variable.
 app.use("*", ownerContext);
 
+// PR-3: per-request correlation id, surfaced on /api/v1/* envelope responses
+// and on `x-request-id` response header. Must run after ownerContext but
+// before any handler that uses recordAudit (audit_log can't see requestId yet,
+// but downstream loggers will).
+app.use("*", requestIdContext);
+
 app.use("/api/*", rateLimit);
 
 // Readiness flag: schema migrations + prewarm run before serve(), but if the DB
@@ -105,6 +113,18 @@ app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
 app.route("/api/termene", termeneRouter);
 app.route("/api/ai", aiRouter);
+
+// PR-3: monitoring core. Gated behind MONITORING_ENABLED so production desktop
+// builds ship dark by default. Set MONITORING_ENABLED=1 to expose the routes.
+// PR-4 (scheduler) will be gated by the same flag — flip the flag once and the
+// whole feature comes alive together. Path is `/api/v1/...` to mark the start
+// of the versioned API surface; legacy non-versioned routes above remain
+// stable until PR-6 standardizes everything via @hono/zod-openapi.
+const MONITORING_ENABLED = process.env.MONITORING_ENABLED === "1";
+if (MONITORING_ENABLED) {
+  app.route("/api/v1/monitoring", monitoringRouter);
+  console.log("[monitoring] routes mounted at /api/v1/monitoring (MONITORING_ENABLED=1)");
+}
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === "production") {

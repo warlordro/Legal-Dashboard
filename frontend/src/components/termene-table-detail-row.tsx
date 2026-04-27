@@ -1,5 +1,6 @@
-import { Scale, Building2, FileText, Users } from "lucide-react";
+import { Scale, Building2, FileText, Users, Activity } from "lucide-react";
 import { Badge } from "./ui/badge";
+import { Button } from "./ui/button";
 import { formatDocumentSedinta } from "@/lib/utils";
 import type { Termen } from "@/types";
 
@@ -29,12 +30,39 @@ function HighlightName({ text, search }: { text: string; search?: string }) {
 export interface TermeneExpandedDetailProps {
   termen: Termen;
   searchedName?: string;
+  monitorState?: "pending" | "added" | "exists" | string;
+  onMonitor?: (numar: string) => void;
 }
 
-export function TermeneExpandedDetail({ termen, searchedName }: TermeneExpandedDetailProps) {
+export function TermeneExpandedDetail({ termen, searchedName, monitorState, onMonitor }: TermeneExpandedDetailProps) {
   const hasParts = termen.parti && termen.parti.length > 0;
+  const isPending = monitorState === "pending";
+  const isAdded = monitorState === "added";
+  const isExists = monitorState === "exists";
+  const errorMsg = monitorState && !["pending", "added", "exists"].includes(monitorState) ? monitorState : null;
   return (
     <div className="space-y-3 pl-6">
+      {/* Action bar — Monitorizeaza schimbari pe acest dosar */}
+      {termen.numarDosar && onMonitor && (
+        <div className="flex items-center gap-2">
+          <Button
+            variant={isAdded || isExists ? "secondary" : "outline"}
+            size="sm"
+            disabled={isPending || isAdded || isExists}
+            onClick={(e) => { e.stopPropagation(); onMonitor(termen.numarDosar); }}
+          >
+            <Activity className="h-4 w-4" />
+            {isPending ? "Se adauga..." :
+             isAdded ? "Adaugat la monitorizare" :
+             isExists ? "Deja monitorizat" :
+             "Monitorizeaza schimbari"}
+          </Button>
+          {errorMsg && (
+            <span className="text-xs text-red-600">{errorMsg}</span>
+          )}
+        </div>
+      )}
+
       {/* Info badges */}
       <div className="flex flex-wrap gap-3">
         {termen.categorieCaz && (

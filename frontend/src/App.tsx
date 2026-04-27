@@ -8,6 +8,7 @@ import Dashboard from "@/pages/Dashboard";
 import Dosare from "@/pages/Dosare";
 import Termene from "@/pages/Termene";
 import RnpmSearchPage from "@/pages/RnpmSearch";
+import Monitorizare from "@/pages/Monitorizare";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
@@ -152,6 +153,7 @@ function AppShell({
             consumePendingSearch={consumePendingSearch}
           />
         </div>
+        {pathname === "/monitorizare" && <Monitorizare />}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>
           <RnpmSearchPage
             captchaKey={activeCaptchaKey}
