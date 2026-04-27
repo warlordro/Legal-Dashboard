@@ -4,9 +4,17 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web — fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.0.10** — 26 Aprilie 2026
+**v2.0.13** — 27 Aprilie 2026
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
+
+### Sprint curent: monitoring + web mode (PR-0..PR-12)
+- ✅ **PR-0** v2.0.11 — migration framework + 0001 baseline (commit `9c3a9aa` pe main)
+- ✅ **PR-1** v2.0.12 — `getOwnerId` helper + 5 fix-uri owner_id leak (commit `beca3b6` pe `feat/web-readiness-foundation`)
+- ✅ **PR-2** v2.0.13 — shadow tables users/sessions + audit_log + `recordAudit()` (commit `c09a855` pe `feat/web-readiness-foundation`)
+- 🚧 **PR-3** (next) — monitoring core: schema + repo + UI minimal read-only
+
+Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](SESSION-HANDOFF.md).
 
 ## Structura Proiect
 ```
@@ -28,9 +36,11 @@ legal-dashboard/
 │       ├── routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts (multi-provider)
 │       ├── services/  # rnpmSearchService, captchaSolver, rnpmClient,
 │       │              # ai.ts (Claude/OpenAI/Gemini), batch-dosare.ts (AbortSignal)
-│       ├── middleware/# rate-limit.ts (real-IP), static-frontend.ts (path-traversal guard)
+│       ├── middleware/# rate-limit.ts (real-IP), static-frontend.ts (path-traversal guard),
+│       │              # owner.ts (getOwnerId helper, PR-1)
 │       ├── db/        # schema.ts, avizRepository.ts, searchRepository.ts,
-│       │              # backup.ts (owner_id everywhere), migrations/ (versioned DDL, PR-0+)
+│       │              # backup.ts (owner_id everywhere), auditRepository.ts (recordAudit, PR-2),
+│       │              # migrations/ (versioned DDL: 0001 baseline, 0002 users/sessions/audit)
 │       ├── util/      # textNormalize (SQLite rnpm_norm diacritic fold), validation.ts
 │       ├── soap.ts    # SOAP client pentru PortalJust
 │       └── intervals.ts
@@ -51,7 +61,7 @@ legal-dashboard/
 - `npm run dev:frontend` — Vite dev server pe 5173
 - `npm run build` — build productie (frontend + backend CJS)
 - `npm run dist` — electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` — vitest (62 teste in v2.0.10)
+- `npm test --workspace=backend` — vitest (99 teste in v2.0.13: +15 runner PR-0, +9 owner_id isolation PR-1, +13 audit/users/sessions PR-2)
 - `npx tsc --noEmit -p backend/tsconfig.json` — type-check backend
 - `cd frontend && npx tsc --noEmit` — type-check frontend
 - `npx biome check` — lint + format check

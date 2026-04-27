@@ -46,18 +46,18 @@ Acest document e **roadmap-ul de executie** — saptamanal, cu checkboxes si lim
 
 Treci prin asta inainte sa scrii prima linie de cod. Daca ceva nu e bifat, opreste-te si rezolva.
 
-### Local dev
-- [ ] `git status` clean pe `main` (nu sunt modificari uncommitted ramase de la Faza 10).
-- [ ] `npm run electron:dev` porneste fara erori.
-- [ ] `npm test --workspace=backend` toate testele green (62 teste in v2.0.10).
-- [ ] `npx tsc --noEmit -p backend/tsconfig.json` zero errors.
-- [ ] `cd frontend && npx tsc --noEmit` zero errors.
-- [ ] `npx biome check` warnings doar non-bloquante.
+### Local dev (validat post-PR-2 la 2026-04-27)
+- [x] `git status` clean pe `main` (nu sunt modificari uncommitted ramase de la Faza 10).
+- [x] `npm run electron:dev` porneste fara erori (3 smoke-uri consecutive).
+- [x] `npm test --workspace=backend` toate testele green (**99 teste** in v2.0.13).
+- [x] `npx tsc --noEmit -p backend/tsconfig.json` zero errors.
+- [x] `cd frontend && npx tsc --noEmit` zero errors.
+- [x] `npx biome check` clean.
 
 ### Repo hygiene
 - [ ] Branch protection pe `main` activat in GitHub (require PR review, even if self-merging).
 - [ ] CI (GitHub Actions) verde pe ultimul commit `main`.
-- [ ] CHANGELOG.md sincronizat cu `package.json` (`v2.0.10`).
+- [x] CHANGELOG.md sincronizat cu `package.json` (`v2.0.13`).
 
 ### Citire obligatorie inainte de PR-3
 - [ ] **Citeste integral** Portal Just Integrat `frontend/src/pages/Monitorizare.tsx:1-1724` (path local — sister project `portaljust-dashboard`, configureaza via env `PJI_REFERENCE_REPO`) — pattern-ul de snapshot/diff/scheduler e portat. ~1h.
@@ -74,54 +74,55 @@ Treci prin asta inainte sa scrii prima linie de cod. Daca ceva nu e bifat, opres
 
 Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user), tasks principale, definition of done (DoD), risk + mitigation.
 
-### Saptamana 1 — Fundatie (PR-0 + PR-1 + PR-2)
+### Saptamana 1 — Fundatie (PR-0 + PR-1 + PR-2) ✅ LIVRAT 2026-04-27
 
 > **Tema**: pregatim "schela" pentru web fara sa schimbam nimic vizibil pentru user. Toate cele 3 PR-uri sunt low-risk si pot merge in aceeasi saptamana.
 
-#### PR-0 — Migration framework
+#### PR-0 — Migration framework ✅ DONE (commit `9c3a9aa` pe main, v2.0.11)
 - **Scop**: tabel `_schema_versions` + runner ordonat. Inseamna ca de acum incolo, orice modificare de schema DB (tabel nou, coloana noua) e versionata si reproductibila pe orice DB existent.
 - **User vede**: nimic.
 - **Tasks**:
-  - [ ] Branch: `feat/migrations-framework`
-  - [ ] Tabel `_schema_versions(version INTEGER PRIMARY KEY, applied_at, sha256_up)` cu CREATE IF NOT EXISTS.
-  - [ ] Runner in `backend/src/db/migrations/runner.ts` care citeste `0001_*.up.sql` ... ordonat.
-  - [ ] Backfill: marcheaza schema curenta ca `version=1`.
-  - [ ] Test: deschide DB existing → ruleaza runner → idempotent (no-op la al 2-lea run).
+  - [x] Branch: `feat/migrations-framework`
+  - [x] Tabel `_schema_versions(version INTEGER PRIMARY KEY, applied_at, sha256_up)` cu CREATE IF NOT EXISTS.
+  - [x] Runner in `backend/src/db/migrations/runner.ts` care citeste `0001_*.up.sql` ... ordonat.
+  - [x] Backfill: marcheaza schema curenta ca `version=1` cu sentinel `__backfilled_v1__`.
+  - [x] Test: deschide DB existing → ruleaza runner → idempotent (no-op la al 2-lea run).
 - **DoD**:
-  - [ ] `npm test --workspace=backend` verde + DB existing migrat la `version=1` (sentinel `__backfilled_v1__`) + nu pierde date.
-  - [ ] Migration files citite **doar la boot** (sync `fs.readdirSync` ok, NU in handler) — CQ-6 conform.
-  - [ ] Comiteat `0001_baseline.up.sql` real (extras DDL existing) pentru consistenta CI pe DB-uri proaspete.
-  - [ ] **PR-0 NU blocheaza PR-1** — pot rula in paralel daca timing convenabil.
-- **Bump**: 2.0.11 patch.
+  - [x] `npm test --workspace=backend` verde + DB existing migrat la `version=1` (sentinel `__backfilled_v1__`) + nu pierde date.
+  - [x] Migration files citite **doar la boot** (sync `fs.readdirSync` ok, NU in handler) — CQ-6 conform.
+  - [x] Comiteat `0001_baseline.up.sql` real (extras DDL existing) pentru consistenta CI pe DB-uri proaspete.
+  - [x] **PR-0 NU blocheaza PR-1** — pot rula in paralel daca timing convenabil.
+- **Bump**: 2.0.11 patch. ✅
 - **Risk**: LOW (paralel cu schema existing, nu interfere).
 
-#### PR-1 — `getOwnerId` helper + 5 fix-uri owner_id leak
+#### PR-1 — `getOwnerId` helper + 5 fix-uri owner_id leak ✅ DONE (commit `beca3b6`, v2.0.12)
 - **Scop**: orice endpoint nou va folosi `c.get('ownerId')` (azi returneaza `'local'` hardcoded). Cand vine PR-9, schimbam doar implementarea helper-ului — TOATE endpoint-urile mostenesc auth automat.
 - **User vede**: nimic.
 - **Tasks**:
-  - [ ] Branch: `feat/web-readiness-foundation`
-  - [ ] Middleware Hono: `c.set('ownerId', req.user?.id ?? 'local')`.
-  - [ ] Fix 5 leak-uri din `avizRepository.ts` lines 272, 273, 276-283, 292, 353-354 (vezi PLAN §3).
-  - [ ] Test: `repository-isolation.test.ts` (skeleton extensibil) — verifica ca o operatie cu `ownerId='userA'` nu vede date `ownerId='userB'`.
-- **DoD**: zero teste rosii + `getOwnerId(c)` folosit consistent in toate routes.
-- **Bump**: 2.0.12 patch.
+  - [x] Branch: `feat/web-readiness-foundation`
+  - [x] Middleware Hono `backend/src/middleware/owner.ts`: `c.set('ownerId', ...)` + `ContextVariableMap` augmentation.
+  - [x] Fix 5 leak-uri din `avizRepository.ts` lines 272, 273, 276-283, 292, 353-354 (vezi PLAN §3).
+  - [x] Test: `repository-isolation.test.ts` (skeleton extensibil) — verifica ca o operatie cu `ownerId='userA'` nu vede date `ownerId='userB'`.
+- **DoD**: ✅ zero teste rosii + `getOwnerId(c)` folosit consistent in toate routes.
+- **Bump**: 2.0.12 patch. ✅
 - **Risk**: LOW.
 
-#### PR-2 — DDL users/sessions/audit (shadow tables)
+#### PR-2 — DDL users/sessions/audit (shadow tables) ✅ DONE (commit `c09a855`, v2.0.13)
 - **Scop**: cream tabelele `users`, `sessions`, `audit_log` cu un singur seed `local`. Nu sunt populate cu useri reali pana la PR-9. Insa `audit_log` e folosit imediat in PR-3+.
 - **User vede**: nimic.
 - **Tasks**:
-  - [ ] Migration `0002_users_sessions_audit.up.sql` + down complet.
-  - [ ] Helper `recordAudit(c, action, ...)` exportat din `backend/src/db/auditRepository.ts`.
-  - [ ] Seed: 1 row in `users` cu `id='local', email='local@desktop'`.
-- **DoD**: tables creates + seed inserat + `recordAudit()` se poate apela manual.
-- **Bump**: 2.0.13 patch.
+  - [x] Migration `0002_users_sessions_audit.up.sql` + `.down.sql` complet.
+  - [x] Helper `recordAudit(c, action, options?)` exportat din `backend/src/db/auditRepository.ts` (+ `getAuditEvents` cu owner scope si system filter).
+  - [x] Seed: 1 row in `users` cu `id='local', email='local@desktop', role='user'`.
+- **DoD**: ✅ tables creates + seed inserat + `recordAudit()` se poate apela manual; 13 teste in `auditRepository.test.ts` (schema, write paths, read paths, owner isolation).
+- **Bump**: 2.0.13 patch. ✅
 - **Risk**: LOW.
 
 **Saptamana 1 — verificari finale**:
-- [ ] CHANGELOG.md actualizat (3 entries).
-- [ ] Tag git pe fiecare PR pentru rollback usor.
-- [ ] Smoke test desktop: aplicatia porneste si functioneaza identic ca inainte.
+- [x] CHANGELOG.md actualizat (3 entries — v2.0.11/12/13).
+- [x] In-app changelog (`frontend/src/data/changelog-entries.tsx`) actualizat (3 entries).
+- [ ] Tag git pe fiecare PR pentru rollback usor — **optional, nu blocheaza PR-3**.
+- [x] Smoke test desktop: 3 launch-uri Electron consecutive (02:18 / 02:26 / 02:29 in `logs/electron-20260427-*`), `[schema] applied migrations: 2`, app functional 1:1.
 
 ---
 
@@ -416,4 +417,5 @@ Vezi PLAN-monitoring-webmode.md §0 pentru rationale complet.
 ## Document history
 
 - **v1.0** (2026-04-27): document creat initial dupa rezolvare deciziilor §11.2-1/2/3.
+- **v1.1** (2026-04-27): Saptamana 1 (PR-0 + PR-1 + PR-2) marcata DONE; commits + version bumps inregistrate; smoke launch logs referenced.
 

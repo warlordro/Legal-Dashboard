@@ -1,14 +1,14 @@
-# Session Handoff — PR-0 livrat, gata pentru PR-1
+# Session Handoff — PR-0/1/2 livrate, gata pentru PR-3
 
 **Data**: 2026-04-27
-**Sesiune incheiata**: PR-0 (migration framework) implementat end-to-end + 4 spec gaps adresate post-review.
-**Status**: 🟢 PR-0 cod committed + testat + verificat live; doc fix-uri commit pe main; **nepushat la origin**.
+**Sesiune incheiata**: PR-0 (migration framework) + PR-1 (`getOwnerId` + 5 leak fixes) + PR-2 (shadow tables users/sessions/audit + `recordAudit`).
+**Status**: 🟢 Saptamana 1 din [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) **complet livrata si pushed la origin**.
 
 ---
 
 ## TL;DR pentru sesiunea noua
 
-PR-0 (migration framework) e **complet** pe branch local `feat/migrations-framework`. Toate testele trec (77/77), smoke pe DB-ul live (~189 avize) verifica calea de backfill end-to-end. CodeRabbit a ridicat 4 spec gaps in planning docs — toate adresate pe `main` ca commit separat. Urmatoarele actiuni sunt **decizionale** (push? PR? merge?) si apoi **start PR-1**.
+Saptamana 1 a sprintului monitoring + web mode e **terminata**: PR-0 a aterizat pe `main`, PR-1 si PR-2 sunt pe `feat/web-readiness-foundation` la origin. 99/99 teste verzi. Smoke launch live (Electron) confirma `[schema] applied migrations: 2`. Documentatia user-facing (CHANGELOG.md, in-app changelog v2.0.11/12/13) sincronizata. Urmatorul pas: **PR-3 — Monitoring core: schema + repo + UI minimal read-only** (sapt 2-3 in roadmap).
 
 ---
 
@@ -17,95 +17,88 @@ PR-0 (migration framework) e **complet** pe branch local `feat/migrations-framew
 ### Branch state
 
 ```
-main:                     5cbf331 → 9e142ed  (ahead origin/main by 2 — nepushat)
-feat/migrations-framework: 5cbf331 → 3f967c8  (ahead main by 1 PR-0 commit; nepushat)
-tag pre-pr0-rollback → dc4f7ea (v2.0.10)     (rollback safety net)
+main:                          9c633a3 [origin/main]                                 (PR-0 + docs refresh post-review)
+feat/web-readiness-foundation: c09a855 [origin/feat/web-readiness-foundation]        (PR-2 head, ahead main by 2)
+tag pre-pr0-rollback → dc4f7ea (v2.0.10)                                              (rollback safety net)
 ```
 
-### Commits livrate (in ordine)
+### Commits livrate (in ordine cronologica)
 
-1. **`5cbf331` docs: add monitoring + web mode plan (PR-0..PR-12 spec)** — pe main
-   - PLAN-monitoring-webmode.md, EXECUTION-ROADMAP.md, SESSION-HANDOFF.md (versiunea veche), HARDENING.md OBSOLETE banner.
-2. **`3f967c8` feat(db): PR-0 — versioned migration framework + 0001 baseline** — pe `feat/migrations-framework`
+1. **`5cbf331` docs: add monitoring + web mode plan (PR-0..PR-12 spec)** — main
+2. **`9e142ed` docs: address coderabbit review gaps in monitoring + web mode plan** — main
+3. **`9c3a9aa` feat(db): PR-0 — versioned migration framework + 0001 baseline** — main
    - `backend/src/db/migrations/{runner,runner.test,0001_baseline.up}` (3 fisiere noi)
-   - `backend/src/db/schema.ts` (wiring runMigrations inainte de legacy block)
-   - `scripts/build.js` (copy `*.up.sql`/`*.down.sql` la dist)
-   - `package.json` x3 (root+backend+frontend) + `CHANGELOG.md` → `2.0.11`
-3. **`9e142ed` docs: address coderabbit review gaps in monitoring + web mode plan** — pe main
-   - Spec-only update: paths absolute → placeholder + env, JWT contract, JSON validation strategy, concurrent-writer test bullet.
+   - `backend/src/db/schema.ts` wiring `runMigrations` inainte de legacy block
+   - `scripts/build.js` copy `*.up.sql`/`*.down.sql` la `dist-backend/migrations/`
+   - bump 2.0.10 → 2.0.11 (root + backend + frontend) + CHANGELOG.md
+4. **`9c633a3` docs: refresh CLAUDE.md + handoff post-PR-0** — main
+5. **`beca3b6` feat(web-readiness): PR-1 — getOwnerId helper + 5 owner_id leak fixes** — `feat/web-readiness-foundation`
+   - `backend/src/middleware/owner.ts` (`getOwnerId(c)` + Hono `ContextVariableMap` augmentation)
+   - 5 fix-uri concrete in `backend/src/db/avizRepository.ts` (PLAN §3 lines 272/273/276-283/292/353-354)
+   - `backend/src/db/repository-isolation.test.ts` (skeleton extensibil)
+   - bump 2.0.11 → 2.0.12
+6. **`c09a855` feat(web-readiness): PR-2 — shadow tables (users/sessions) + audit_log + recordAudit** — `feat/web-readiness-foundation`
+   - `backend/src/db/migrations/0002_users_sessions_audit.up.sql` + `.down.sql`
+   - `backend/src/db/auditRepository.ts` (`recordAudit`, `getAuditEvents`, owner scope + system events)
+   - `backend/src/db/auditRepository.test.ts` (13 teste: schema, write paths, read paths)
+   - bump 2.0.12 → 2.0.13 + CHANGELOG.md + in-app changelog (v2.0.11/12/13 in `frontend/src/data/changelog-entries.tsx`)
 
 ### Verificari trecute (toate verde)
 
 - [x] `npx tsc --noEmit -p backend/tsconfig.json` — clean
 - [x] `cd frontend && npx tsc --noEmit` — clean
 - [x] `npx biome check` — clean
-- [x] `npm test --workspace=backend` — **77/77** (62 existente + 15 noi pentru runner)
-- [x] **Live smoke** — copy DB la `~/AppData/Roaming/legal-dashboard/legal-dashboard.db` (104 MB, 189 avize) intr-un temp dir + rulat boot path:
-  - Boot 1: `[schema] legacy DB — backfilled _schema_versions(1, sentinel)` (o singura data)
-  - Boot 2: silent, `skipped: [1]`
-  - 7 user tables intacte, zero data loss
-- [x] `npm run rebuild:electron` rulat post-vitest pentru a restaura ABI 145 (better-sqlite3 fusese rebuilt pentru Node ABI 137 in timpul testelor)
-
-### Verificari NEPRELUATE (decision needed)
-
-- [ ] **Live `npm run electron:dev`** smoke — covered functional de smoke-ul scriptat pe copy live DB; daca vrei vizual GUI confirm, ruleaza-l manual. Nu blocheaza nimic.
-- [ ] Pre-flight checklist din [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md#pre-flight-checklist-saptamana-0--inainte-de-pr-0) §0 — branch protection main, CI status, GCS setup. Niciunul nu blocheaza PR-1 dar sunt prerequisites pentru Faza 2.
+- [x] `npm test --workspace=backend` — **99/99** (62 baseline + 15 PR-0 runner + 9 PR-1 owner_id isolation + 13 PR-2 audit/users/sessions)
+- [x] **Live smoke** Electron — 3 launch-uri consecutive pe DB live (~189 avize):
+  - 02:18:00 (post PR-1) — `[schema] applied migrations: 1`
+  - 02:26:08 (post PR-2 build) — `[schema] applied migrations: 2`
+  - 02:29:11 (post Changelog UI update) — silent, all idempotent
+- [x] In-app Changelog UI updated cu v2.0.11/12/13 (era inghetat la v2.0.10)
+- [x] Push la origin pentru `feat/web-readiness-foundation`
 
 ---
 
 ## Decision points pentru sesiunea noua
 
-### 1. Cum aterizam PR-0 (alege una)
+### 1. Cum aterizam PR-1 + PR-2 inainte de PR-3?
 
-**Optiunea A — Open PR review pe GitHub** (recomandat daca ai self-review discipline / vrei istoric clar)
+PR-3 e `feat/monitoring-core` care porneste din **main**. Daca lasam PR-1 + PR-2 pe `feat/web-readiness-foundation` neintegrat:
+- main divergeaza tot mai mult, conflicte marginale.
+- PR-3 trebuie rebased pe `feat/web-readiness-foundation` ca sa aiba `getOwnerId` + `recordAudit`.
 
-```
-git push -u origin feat/migrations-framework
-gh pr create --title "PR-0: migration framework + 0001 baseline" --body @body.md
-```
-
-Avantaj: snapshot CI verde inainte de merge, traceable pe long-term. Cost: ~5 min overhead.
-
-**Optiunea B — Fast-forward merge in main + push** (mai rapid pentru solo dev)
-
+**Optiunea A — fast-forward merge in main, push** (recomandat solo dev):
 ```
 git checkout main
-git merge --ff-only feat/migrations-framework
+git merge --ff-only feat/web-readiness-foundation
 git push origin main
-git push origin pre-pr0-rollback
+git tag v2.0.13 c09a855 && git push origin v2.0.13
 ```
 
-Avantaj: zero overhead. Dezavantaj: nu ai snapshot CI dedicat pentru PR-0.
-
-**Optiunea C — Rebase peste main first** (dependency = decision A sau B + faptul ca main e divergent prin commit `9e142ed`)
-
+**Optiunea B — open PR pe GitHub pentru snapshot CI dedicat** (overhead ~5 min, dar istoric clar):
 ```
-git rebase main feat/migrations-framework  # va aduce doc fixes pe branch
-# apoi A sau B
+gh pr create --base main --head feat/web-readiness-foundation --title "PR-1 + PR-2: web-readiness foundation"
 ```
 
-Recomandat daca alegi A (face PR-ul mai curat — face match cu doc state din main).
+**Verdict recomandat**: **Optiunea A** + creeaza branch nou `feat/monitoring-core` din `main` post-merge.
 
-**Verdict recomandat**: **Optiunea C → A** daca vrei PR review; **Optiunea B** daca solo si vrei viteza.
+### 2. PR-3 pornire imediata?
 
-### 2. PR-1 pornire imediata sau pause?
+PR-3 = `Monitoring core: schema + repo + UI minimal read-only` — vezi [EXECUTION-ROADMAP.md §Saptamana 2-3](EXECUTION-ROADMAP.md). E **ROSU** pre-flight: cere **spike empirical** in [PLAN §B.3](PLAN-monitoring-webmode.md) (ruleaza `cautareDosare` 5× same-input pentru a verifica daca PortalJust intoarce payload identic). **Nu porni PR-3 fara spike-ul facut.**
 
-PR-1 = `getOwnerId` helper + 5 fix-uri owner_id leak in [avizRepository.ts](backend/src/db/avizRepository.ts) — listate concret in [PLAN §3](PLAN-monitoring-webmode.md#3-latent-leaks-owner_id--fix-list-pr-1) (lines 272, 273, 276-283, 292, 353-354). Risk LOW, ~1-2 zile.
-
-Branch nou `feat/web-readiness-foundation` pornit din `main` (post-merge PR-0).
+Dependinte:
+- Citit integral Portal Just Integrat `frontend/src/pages/Monitorizare.tsx:1-1724` (sister project, ~1h).
+- Citit integral [HARDENING.md L274-440](HARDENING.md) (semantic notify_days_before / is_new / solution_changed_at de absorbit in `alert_config_json`).
 
 ---
 
-## Ce s-a schimbat in spec post-review (4 fix-uri commit `9e142ed`)
+## Ce s-a schimbat in spec (deja absorbit)
 
-**De citit inainte sa pornesti PR-3 / PR-4 / PR-9** — bullet-urile noi specifica concret ce trebuie implementat:
-
-| Fix | Locatie | Cand devine relevant |
+| Fix | Locatie | Status |
 |---|---|---|
-| Path-uri absolute Windows → placeholder + `PJI_REFERENCE_REPO` env | `PLAN:646`, `EXECUTION-ROADMAP:63` | acum (CP-1 portability) |
-| JWT contract concret (4 sub-bullets: secret material, refresh rotation, kid decode, fail-fast validation) | `PLAN §9` | **PR-9** (sapt 10-11) |
-| JSON validation strategy: Zod-at-route-layer, NU `json_valid` CHECK inline | `PLAN §2.2` (header) | **PR-3** (sapt 2-3) |
-| Concurrent-writer SQLite test in PR-4 DoD | `EXECUTION-ROADMAP` PR-4 DoD | **PR-4** (sapt 4-5) |
+| Path-uri absolute Windows → placeholder + `PJI_REFERENCE_REPO` env | `PLAN:646`, `EXECUTION-ROADMAP:63` | ✅ aplicat |
+| JWT contract concret (4 sub-bullets) | `PLAN §9` | 🚧 relevant la PR-9 |
+| JSON validation strategy: Zod-at-route-layer, NU `json_valid` CHECK inline | `PLAN §2.2` (header) | 🚧 relevant la PR-3 |
+| Concurrent-writer SQLite test in PR-4 DoD | `EXECUTION-ROADMAP` PR-4 DoD | 🚧 relevant la PR-4 |
 
 ---
 
@@ -113,7 +106,7 @@ Branch nou `feat/web-readiness-foundation` pornit din `main` (post-merge PR-0).
 
 ### Hooks security_reminder_hook.py false-positive
 
-Hook-ul Claude Code blocheaza Write/Edit pe content care contine substring `exec` urmat de paranteza — match pe API-ul better-sqlite3 idiomatic si benign. Workaround pentru fisiere noi: foloseste Bash heredoc (`cat > file <<'EOF'`); pentru edit pe fisiere existente, ancoreaza `old_string` pe linii fara aceasta paranteza. Daca scrii doc cu citate de cod, evita parantezele literale dupa `exec` in proza.
+Hook-ul Claude Code blocheaza Write/Edit pe content care contine substring `exec` urmat de paranteza — match pe API-ul better-sqlite3 idiomatic si benign. Workaround pentru fisiere noi: foloseste Bash heredoc (`cat > file <<'EOF'`); pentru edit pe fisiere existente, ancoreaza `old_string` pe linii fara aceasta paranteza.
 
 ### NODE_MODULE_VERSION ABI mismatch
 
@@ -121,21 +114,27 @@ Hook-ul Claude Code blocheaza Write/Edit pe content care contine substring `exec
 - Dupa `npm test --workspace=backend` → `npm run rebuild:electron` inainte de `electron:dev`
 - Dupa `npm install` sau dupa Electron upgrade → `npm rebuild better-sqlite3` inainte de teste
 
-Sesiunea curenta a terminat cu Electron ABI restaurat — `electron:dev` ruleaza fresh.
+### ELECTRON_RUN_AS_NODE leak
+
+Daca `electron:dev` face `TypeError: Cannot read properties of undefined (reading 'requestSingleInstanceLock')`, e env var `ELECTRON_RUN_AS_NODE=1` leaked din shell. Scrub: `Remove-Item Env:\ELECTRON_RUN_AS_NODE` (PowerShell) sau `unset ELECTRON_RUN_AS_NODE` (bash). Memorat in `project_electron_run_as_node_leak.md`.
 
 ### Migrations dir resolution in CJS bundle vs ESM dev
 
 `__schemaDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url))`. In dev (`--experimental-strip-types`) → `backend/src/db/`; in CJS bundle → `dist-backend/`. Build script copiaza `*.up.sql`/`*.down.sql` la `dist-backend/migrations/` ca sibling.
+
+### Audit log scope
+
+`recordAudit(c, action, options?)` se cheama **doar pe mutatii** (POST/PATCH/DELETE), nu pe GET. Owner scope: `getAuditEvents({ownerId})` filtreaza per user; `getAuditEvents({ownerId: null})` returneaza system events (login attempts, scheduler ticks). Limit clamped [1, 1000].
 
 ---
 
 ## Reading list pentru sesiunea noua (in ordinea recomandata)
 
 1. **Acest fisier** (5 min)
-2. [EXECUTION-ROADMAP.md §Saptamana 1](EXECUTION-ROADMAP.md) — PR-0 done, PR-1 + PR-2 ramase din sapt 1 (10 min)
-3. [PLAN-monitoring-webmode.md §3](PLAN-monitoring-webmode.md) — 5 fix-uri owner_id concrete cu line numbers (5 min)
-4. [PLAN-monitoring-webmode.md §2.2](PLAN-monitoring-webmode.md) header — Zod validation strategy (3 min, relevant pentru PR-3)
-5. (optional) [PLAN-monitoring-webmode.md §11.2bis](PLAN-monitoring-webmode.md) — sister project Portal Just Integrat patterns
+2. [EXECUTION-ROADMAP.md §Saptamana 2-3](EXECUTION-ROADMAP.md) — PR-3 scope + DoD (10 min)
+3. [PLAN-monitoring-webmode.md §2.2](PLAN-monitoring-webmode.md) — DDL `monitoring_jobs/snapshots/alerts/runs` + Zod strategy (15 min)
+4. [PLAN-monitoring-webmode.md §5.1](PLAN-monitoring-webmode.md) — `buildSedintaKey()` deterministic + `canonicalJson()` util (5 min)
+5. (obligatoriu pre-PR-3) Portal Just Integrat `frontend/src/pages/Monitorizare.tsx:1-1724` — pattern-ul de snapshot/diff/scheduler (~1h)
 
 ---
 
@@ -144,16 +143,18 @@ Sesiunea curenta a terminat cu Electron ABI restaurat — `electron:dev` ruleaza
 ```
 Citeste SESSION-HANDOFF.md.
 
-Pasul 1: confirma state-ul (git log feat/migrations-framework, git log main, git status).
-Pasul 2: pornim Optiunea [A/B/C] pentru landing PR-0.  ← decizie user
-Pasul 3: branch nou feat/web-readiness-foundation pentru PR-1.
+Pasul 1: confirma state-ul (git log feat/web-readiness-foundation, git log main, git status).
+Pasul 2: pornim Optiunea [A/B] pentru landing PR-1 + PR-2 in main.
+Pasul 3: spike empirical PortalJust determinism (5× same-input) inainte de PR-3.
+Pasul 4: branch nou feat/monitoring-core pentru PR-3.
 ```
 
 ---
 
 ## Loose ends
 
-- Memory `project_faza10_sprint.md` ramane la v2.0.10 — actualizeaza la primul tag v2.0.11 dupa landing PR-0.
-- Memory `project_monitoring_webmode_plan.md` mentioneaza "Faza 1 PR-0..PR-7" — la finalul Faza 1 actualizeaza-l cu status real.
+- Memory `project_faza10_sprint.md` — actualizat la 2026-04-27 cu pointer monitoring sprint.
+- Memory `project_monitoring_webmode_plan.md` — actualizat la 2026-04-27 cu status PR-0/1/2 done.
 - `.claude/` + `.mcp.json` sunt in `.gitignore` (per-machine config, nu se commit).
-- Niciun fisier untracked semnificativ ramas la finalul sesiunii.
+- `logs/` adaugat la `.gitignore` (smoke launch outputs).
+- Tag-uri git pentru rollback per PR (v2.0.11/12/13) — **optional, nu blocheaza nimic**, doar safety net.
