@@ -391,31 +391,36 @@ describe("GET /jobs — query handling", () => {
   it("filters by kind and active", async () => {
     const app = buildTestApp();
     await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
-    await postJson(app, "/api/v1/monitoring/jobs", {
+    const secondPost = await postJson(app, "/api/v1/monitoring/jobs", {
       ...validDosarBody,
       target: { numar_dosar: "5555/180/2024" },
     });
+    const secondJson = (await secondPost.json()) as { data: { id: number } };
+    const secondId = secondJson.data.id;
 
     // Set the second one inactive.
-    const list1 = await app.request("/api/v1/monitoring/jobs?kind=dosar_soap");
-    const list1Json = (await list1.json()) as { data: { rows: { id: number }[] } };
-    const secondId = list1Json.data.rows.find(
-      (r) => true,
-    )?.id as number;
-
-    await app.request(`/api/v1/monitoring/jobs/${secondId}`, {
+    const patch = await app.request(`/api/v1/monitoring/jobs/${secondId}`, {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ active: false }),
     });
+    expect(patch.status).toBe(200);
 
     const activeOnly = await app.request("/api/v1/monitoring/jobs?active=true");
-    const activeJson = (await activeOnly.json()) as { data: { total: number } };
+    const activeJson = (await activeOnly.json()) as {
+      data: { total: number; rows: { id: number; active: number }[] };
+    };
     expect(activeJson.data.total).toBe(1);
+    expect(activeJson.data.rows[0].id).not.toBe(secondId);
+    expect(activeJson.data.rows[0].active).toBe(1);
 
     const inactiveOnly = await app.request("/api/v1/monitoring/jobs?active=false");
-    const inactiveJson = (await inactiveOnly.json()) as { data: { total: number } };
+    const inactiveJson = (await inactiveOnly.json()) as {
+      data: { total: number; rows: { id: number; active: number }[] };
+    };
     expect(inactiveJson.data.total).toBe(1);
+    expect(inactiveJson.data.rows[0].id).toBe(secondId);
+    expect(inactiveJson.data.rows[0].active).toBe(0);
   });
 
   it("rejects invalid query (pageSize too large) with 400", async () => {

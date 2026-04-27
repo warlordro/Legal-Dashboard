@@ -50,23 +50,24 @@ export interface InsertAlertInput {
 // inserted OR the existing row when the dedup_key already exists for the job.
 // This is the contract PR-4's diff engine relies on: re-running the same diff
 // twice is a no-op, never a duplicate alert.
+//
+// Race-free via `INSERT ... ON CONFLICT(job_id, dedup_key) DO NOTHING` — a
+// SELECT-then-INSERT pattern would have a TOCTOU window where two concurrent
+// callers (e.g. scheduler tick + manual replay) both see "no row" and race
+// into the INSERT, with the loser hitting the UNIQUE constraint. The atomic
+// upsert collapses that to a single statement: either we win and the inserted
+// row is returned, or someone else won and we return their row. Same logical
+// outcome (single alert), no exceptions.
 export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
   const db = getDb();
   const detailJson = input.detail ? JSON.stringify(input.detail) : "{}";
 
-  const existing = db
-    .prepare(
-      `SELECT * FROM monitoring_alerts
-       WHERE job_id = ? AND dedup_key = ?`,
-    )
-    .get(input.jobId, input.dedupKey) as MonitoringAlertRow | undefined;
-  if (existing) return existing;
-
-  const result = db
+  db
     .prepare(
       `INSERT INTO monitoring_alerts
          (owner_id, job_id, kind, severity, title, detail_json, dedup_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(job_id, dedup_key) DO NOTHING`,
     )
     .run(
       input.ownerId,
@@ -79,8 +80,11 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
     );
 
   return db
-    .prepare(`SELECT * FROM monitoring_alerts WHERE id = ?`)
-    .get(result.lastInsertRowid) as MonitoringAlertRow;
+    .prepare(
+      `SELECT * FROM monitoring_alerts
+       WHERE job_id = ? AND dedup_key = ?`,
+    )
+    .get(input.jobId, input.dedupKey) as MonitoringAlertRow;
 }
 
 export interface ListAlertsByJobOptions {

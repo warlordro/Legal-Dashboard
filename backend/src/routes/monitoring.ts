@@ -10,7 +10,6 @@
 // signal we don't want to give.
 
 import { Hono } from "hono";
-import { ZodError } from "zod";
 
 import { getOwnerId } from "../middleware/owner.ts";
 import { recordAudit } from "../db/auditRepository.ts";
@@ -95,9 +94,8 @@ monitoringRouter.post("/jobs", async (c) => {
       return r;
     })();
   } catch (err) {
-    if (err instanceof ZodError) {
-      return c.json(fail("invalid_payload", "Payload invalid", c, err.issues), 422);
-    }
+    // Body is already Zod-validated above, so any throw from here is an
+    // unexpected DB / runtime fault — treat as 500.
     console.error("[monitoring] createJob failed:", err);
     return c.json(fail("internal_error", "Eroare la salvarea jobului", c), 500);
   }
