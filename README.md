@@ -5,8 +5,10 @@ portalul instantelor si interogarea Registrului National de Publicitate Mobiliar
 (RNPM). Include un modul de analiza AI multi-agent (Claude, OpenAI, Gemini) cu
 stocarea cheilor in keystore-ul sistemului de operare prin Electron `safeStorage`.
 
-Versiune curenta: **2.0.10**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
-[SECURITY.md](SECURITY.md) pentru threat model.
+Versiune curenta: **2.0.13**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
+[SECURITY.md](SECURITY.md) pentru threat model. Ultimul release publicat este PR-2
+din roadmap-ul de web-readiness: migrari versionate, izolarea `owner_id`, tabele
+shadow pentru utilizatori/sesiuni si `audit_log` pregatit pentru mutatiile PR-3+.
 
 ## Prerequisite
 
@@ -37,7 +39,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (62 teste in v2.0.10) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (99 de teste in v2.0.13) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
@@ -68,7 +70,7 @@ LAN exposure blocat by default; opt-in explicit cu `LEGAL_DASHBOARD_ALLOW_REMOTE
 - `electron/preload.js` — context bridge (doar safeStorage)
 - `backend/src/index.ts` — Hono server (port 3002). Rute AI, SOAP PortalJust, RNPM
 - `backend/src/routes/rnpm.ts` — search + bulk + baza locala + export
-- `backend/src/db/**` — SQLite (better-sqlite3), repositories + schema cu `owner_id` pentru multi-user
+- `backend/src/db/**` — SQLite (better-sqlite3), migrari versionate, repositories cu `owner_id` si audit shadow tables
 - `frontend/src/**` — React 19 SPA (Vite), comunica cu backend prin REST/SSE
 - `dist-backend/`, `dist-frontend/` — output de build
 
