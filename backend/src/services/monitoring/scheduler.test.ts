@@ -669,3 +669,71 @@ describe("Scheduler — stop() drain", () => {
     expect(job.last_run_at).toBeNull();
   });
 });
+
+// C4 regression: a transient throw inside tickOnce (e.g. claimDueJobs hits a
+// momentarily-locked DB, clock fault, RWLock corruption) must NOT kill the
+// scheduler loop. Pre-C4 the await rejection silently dropped the chained
+// scheduleNextTick and monitoring went dark until process restart.
+describe("Scheduler — tick error survival (C4)", () => {
+  it("throw inside tickOnce does not kill the loop; next tick still fires", async () => {
+    // Subclass FakeClock so the first now() throws once, then succeeds.
+    // tickOnce calls clock.now() at the very top, so this propagates up
+    // through `await this.tickOnce()` in the timer callback.
+    class ThrowOnceClock extends FakeClock {
+      private armed = true;
+      now(): Date {
+        if (this.armed) {
+          this.armed = false;
+          throw new Error("transient clock fault");
+        }
+        return super.now();
+      }
+    }
+
+    const jobId = seedJob({
+      cadenceSec: 600,
+      // Past — claimDueJobs will pick it up on the SECOND (recovered) tick.
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+
+    const clock = new ThrowOnceClock(T0_DATE);
+    const runner = new NoopOkRunner();
+    const sch = new Scheduler({
+      clock,
+      runner,
+      tickIntervalMs: 1_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    // Suppress the structured error console.error from C4's catch so test
+    // output stays clean; the assertion below is what proves the catch ran.
+    const origError = console.error;
+    const errorCalls: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      errorCalls.push(args);
+    };
+
+    try {
+      await sch.start();
+      // First scheduled tick fires → clock.now() throws → C4 catch logs +
+      // scheduleNextTick fires the NEXT timer despite the rejection.
+      await clock.advance(1_000);
+      // Second scheduled tick fires → clock.now() succeeds → job runs.
+      await clock.advance(1_000);
+      await sch.stop();
+    } finally {
+      console.error = origError;
+    }
+
+    // The throw was logged exactly once (proves C4's catch was reached).
+    expect(errorCalls.length).toBeGreaterThanOrEqual(1);
+    expect(String(errorCalls[0]![0])).toContain("tickOnce threw");
+
+    // The job ran on the recovered tick — proves the loop survived.
+    expect(runner.calls.length).toBe(1);
+    expect(runner.calls[0]!.job.id).toBe(jobId);
+    const job = readJob(jobId);
+    expect(job.last_status).toBe("ok");
+  });
+});

@@ -223,7 +223,22 @@ export class Scheduler {
   private scheduleNextTick(): void {
     if (!this.running) return;
     this.timerHandle = this.opts.clock.setTimeout(async () => {
-      await this.tickOnce();
+      // C4 hardening: an unhandled throw from tickOnce (e.g. transient DB
+      // I/O error from claimDueJobs, RWLock corruption, an exception thrown
+      // synchronously before tickOnce's own finally runs) used to kill the
+      // setTimeout chain — the next scheduleNextTick never registered and
+      // monitoring went silently dark until the next process restart. The
+      // catch keeps the loop alive across transient faults; a chronically
+      // broken DB will surface via the per-job source_error path instead
+      // of as a dead scheduler.
+      try {
+        await this.tickOnce();
+      } catch (err) {
+        console.error("[scheduler] tickOnce threw, continuing loop", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      }
       this.scheduleNextTick();
     }, this.opts.tickIntervalMs);
   }
