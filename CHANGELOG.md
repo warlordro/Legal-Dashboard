@@ -4,6 +4,43 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 28 Aprilie 2026 - v2.1.1 - PR-4: monitoring scheduler + dosar_soap runner
+
+Al cincilea PR (saptamana 4-5). Aduce live executia: scheduler-ul tick-claim-run-finalize cu re-entrancy guard, dosar_soap runner cu compose AbortSignal (drain extern + 10min wallclock budget intern), backoff 0/120/240/.../3600s cu jitter 0-30s, source_error alert la 5 esecuri consecutive, manual-trigger route si feature ON by default (`MONITORING_ENABLED!=0` — kill switch ramane).
+
+### Scheduler
+
+- `backend/src/services/monitoring/scheduler.ts` — orchestration shell: `claimDueJobs` (lease semantics: in-flight `running` row exclude jobul din claim), `runOne` cu per-job AbortController, `finalize` + `applyJobOutcome` (cadence vs backoff vs source_error 1h override). Tick re-entrancy guard prin `tickInProgress` boolean. `start()` ruleaza `recoverOrphanRuns()` PRIMA — orphan `running` rows ar exclude joburile din claim altfel. `stop()` aborteaza fiecare in-flight controller si asteapta finalize-ul.
+- `backend/src/util/rwlock.ts` — writer-preference RWLock; `withMaintenanceRead` (scheduler tick) vs `withMaintenanceWrite` (daily backup, restore). Stream-ul de readers nu poate flama un writer queued. Tick-ul wrap-uit in `withMaintenanceRead` cu re-check post-acquire `if (!this.running) return` pentru a preveni reader-ul parked sa execute claim+run dupa `stop()`.
+- `backend/src/services/monitoring/clock.ts` — `Clock` interface cu `realClock` + `FakeClock` pentru teste deterministe.
+
+### Runner dosar_soap
+
+- `backend/src/services/monitoring/dosarSoapRunner.ts` — `createDosarSoapRunner({ searchDosare, budgetMs? })` factory. Compose-uieste signal extern (drain) cu `AbortSignal.timeout(10min)` via `AbortSignal.any`. Mapeaza `AbortError` cu external aborted → `aborted`, cu budget aborted → `timeout`. Diff pur `diffDosarSoap` returneaza alerts `termen_nou`, `solutie_aparuta`, `termen_modificat`. Snapshot persistat doar daca payload_hash difera de ultimul.
+- `backend/src/services/monitoring/diff.ts` — diff pur intre snapshots. Foloseste `sedintaKey` cu prefix stadiu (Apel vs Fond) — fix pentru bug-ul silentios din PJI.
+
+### Manual trigger
+
+- `POST /api/v1/monitoring/jobs/:id/run` returneaza `202 + {runId}` (PLAN-monitoring-webmode L491). 503 cand scheduler-ul nu e mounted/running, 409 cand jobul are deja un runner in flight, 404 cand jobul lipseste sau apartine altui owner. Audit row `monitoring.job.run_manual` scris doar pe 202.
+- `Scheduler.runJobNow(job)` — wrap intern pe `withMaintenanceRead` + `insertRunning` + fire-and-forget `runOne`. Reuse-uieste `getInflightAbortController` pentru detectia conflictelor.
+
+### Boot wiring
+
+- `index.ts`: scheduler instantiat post-`listen` (dupa `ready=true`, dupa daily backup queued), `setMonitoringScheduler(scheduler)` injecteaza handle-ul in route. `gracefulShutdown` await-uieste `scheduler.stop()` INAINTE de `closeDb()` ca runnerii sa finalize-eze run rows pe DB-ul live.
+- Default flip: `MONITORING_ENABLED !== "0"` — feature-ul porneste implicit, kill switch `MONITORING_ENABLED=0` ramane pentru ops.
+
+### Load harness
+
+- `scripts/loadtest-monitoring.js` — k6 1000-job harness (CP-7 envelope: p95 < 500ms, error < 1%). 80% list / 15% GET / 5% manual-run mix. Manual run only — nu in CI.
+
+### Teste (302+ in v2.1.1)
+
+- `scheduler.test.ts` — crash recovery, success path, error backoff (1/3/5/6 fail streaks cu source_error transition exact la 4→5), `getInflightAbortController` lifecycle, `stop()`-race vs parked tick (regression dupa C4), drain semantics (fail_streak/next_run_at neschimbate pe `aborted`), `runJobNow` cu in_flight si not_running paths.
+- `rwlock.test.ts` — concurrent readers, writer preference, error-self-heal.
+- `monitoring.test.ts` — `POST /jobs/:id/run` cu 202/404/409/503 + audit row.
+
+---
+
 ## 27 Aprilie 2026 - v2.1.0 - PR-3: monitoring core (schema + API + UI minimala)
 
 Al patrulea PR din roadmap (saptamana 2-3, gated de flag-ul `MONITORING_ENABLED`). Scop: livram intreaga schema `monitoring_*`, API-ul versionat `/api/v1/monitoring/jobs` cu envelope standard `{data, error?, requestId}`, helperii partajati (canonical JSON hash, sedinta key) si o pagina minimala in UI care permite adaugarea + pauza + stergerea unui dosar din monitorizare. Pe desktop, flag-ul e setat implicit pe `1` din `electron/main.js` — feature-ul e ON by default; setare `MONITORING_ENABLED=0` in mediu functioneaza ca kill switch. Scheduler-ul (worker care chiar interogheaza PortalJust) ramane pentru PR-4 — schema si feature-flag-ul sunt insa gata.

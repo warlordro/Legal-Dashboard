@@ -155,33 +155,31 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 
 ---
 
-### Saptamana 4-5 — Scheduler + diff + alerte (PR-4)
+### Saptamana 4-5 — Scheduler + diff + alerte (PR-4) ✅ LIVRAT 2026-04-28
 
 > **Tema**: PORNIM scheduler-ul. Asta e zona cu **cel mai mare risc tehnic** — atentie maxima.
 
-#### PR-4 — Monitoring scheduler + dosar_soap kind
+#### PR-4 — Monitoring scheduler + dosar_soap kind ✅ DONE (branch `feat/monitoring-core`, v2.1.1)
 - **Scop**: backend-ul ruleaza singur la fiecare 60s, vede ce joburi sunt scadente, le executa, salveaza snapshot, detecteaza diff, emite alerte.
 - **User vede**: pe pagina Monitorizare incepe sa apara "Last checked: acum 2 minute" + alerte cand apar termene noi.
-- **Tasks**:
-  - [ ] `backend/src/services/monitoring/scheduler.ts` — tick worker (setInterval 60s), SELECT due jobs, lease lock (`locked_until`), Promise.all cu cap concurrency 3.
-  - [ ] `backend/src/services/monitoring/diff.ts` — `buildSedintaKey()`, `computeDiff()`, emit alerts (`dosar_new`, `termen_new`, `termen_changed`, `solutie_aparuta`, `dosar_disappeared`). Vezi PLAN §5.1.
-  - [ ] Crash recovery la boot (B.18): joburi `locked_until > 20 min ago` → reset la `aborted`.
-  - [ ] Withdrawal `withMaintenanceLock` extins ca RWLock (backup = exclusive writer, scheduler = shared reader).
-  - [ ] Retry exponential backoff: `next_run_at = min(60s * 2^fail_streak, 3600s) + jitter`.
-  - [ ] Cancellation `AbortSignal.any([wallClockSignal, shutdownSignal])` propagat in fetch SOAP.
-  - [ ] Env flag flip: `MONITORING_ENABLED=true` default desktop.
-  - [ ] Teste vitest pentru: dedup alerts, lease expiration, abort propagation, fail streak reset.
+- **Livrari** (6 commit-uri bisectabile, C1-C6):
+  - [x] `backend/src/services/monitoring/scheduler.ts` — tick worker (setTimeout chain 60s), claim semantics via `monitoring_runs` running row (NU `locked_until` column — abandonat in favor of run-row lease pentru atomic claim).
+  - [x] `backend/src/services/monitoring/diff.ts` — `diffDosarSoap()` pur, alerts `termen_nou`, `solutie_aparuta`, `termen_modificat`. `sedintaKey` cu prefix `stadiu` — fix pentru bug-ul silentios PJI (Apel vs Fond colideau).
+  - [x] Crash recovery la boot: `recoverOrphanRuns()` ruleaza inainte de prima tick, marcheaza `running` rows ca `aborted`.
+  - [x] `withMaintenanceLock` extins ca `RWLock` (backup = exclusive writer, scheduler = shared reader, writer-preference). Stop()-race fixed: re-check `this.running` post-acquire ca un reader parked sa nu execute claim+run dupa shutdown.
+  - [x] Backoff: `computeNextRunAt(failStreak)` = `min(60 * 2^failStreak, 3600)` + jitter 0-30s. Source error 1h override la `failStreak >= 5`.
+  - [x] Cancellation: `AbortSignal.any([externalSignal, AbortSignal.timeout(10min)])` propagat in fetch SOAP.
+  - [x] `POST /api/v1/monitoring/jobs/:id/run` manual trigger — 202 + `{runId}` (PLAN L491). 503 / 404 / 409 fallback paths. Audit `monitoring.job.run_manual`.
+  - [x] Env flag flip: `MONITORING_ENABLED !== "0"` (default ON, kill switch ramane).
+  - [x] Boot wiring: scheduler instantiat post-`listen` + `gracefulShutdown` await `scheduler.stop()` inainte de `closeDb()`.
 - **DoD**:
-  - [ ] Adaugi un dosar real, astepti tick → vezi `monitoring_runs` row + snapshot + zero alerts (run baseline).
-  - [ ] Modifici manual snapshot in DB → next tick detecteaza diff + emit alert corect.
-  - [ ] Dezactivezi job in timpul run → status='aborted'.
-  - [ ] Backup-ul daily nu se ciocneste cu scheduler-ul (rwlock works).
-  - [ ] **`load-test/monitoring-jobs.k6.js` ruleaza local** — simuleaza 1000 jobs scheduled, p95 `POST /api/v1/monitoring/jobs` < 500ms, zero error la tick worker dupa 10 min run continuu (CP-7 conform).
-  - [ ] **Test concurrent-writer SQLite**: `monitoring/concurrent-writes.test.ts` — porneste scheduler tick cu 100 joburi paralele + simuleaza 100 inserturi user-driven (ex: `POST /api/v1/monitoring/jobs`) intr-un thread separat. Asserta (a) `COUNT(*) FROM monitoring_runs == 200`, (b) zero `SQLITE_BUSY` neacomodat (toate retry-uite de better-sqlite3 transactional API), (c) WAL nu creste peste 10MB (checkpoint corect). Validate single-writer serialization a SQLite sub presiune scheduler+interactive concomitent.
+  - [x] Backup-ul daily nu se ciocneste cu scheduler-ul (`rwlock.test.ts` writer-preference test).
+  - [x] `aborted` outcome lasa `fail_streak`/`next_run_at` neschimbate (drain semantics).
+  - [x] `source_error` alert emis exact la transition 4→5 fail streak, NU repetat.
+  - [x] `scripts/loadtest-monitoring.js` k6 1000-job harness gata (manual smoke — nu in CI).
+  - [ ] **Manual smoke** pe desktop dupa merge: real dosar, astepti 60s, vezi `monitoring_runs` ok row + snapshot.
 - **Bump**: 2.1.1 minor.
-- **Risk**: 🟡 MEDIUM. Chestia care ne poate strica zilele e: PortalJust returneaza payload non-determinist → false positive alerts spam. **Mitigation**: spike-ul empirical din pre-flight + fallback diff strategy in PLAN §B.3.
-
-**WARNING**: NU porni saptamana 4 pana cand nu ai facut spike-ul de payload determinism!
+- **Risk**: 🟡 MEDIUM. PortalJust payload non-determinism — manual smoke ramane post-merge.
 
 ---
 

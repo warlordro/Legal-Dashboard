@@ -10,7 +10,11 @@ import { aiRouter } from "./routes/ai.ts";
 import { rateLimit } from "./middleware/rate-limit.ts";
 import { ownerContext } from "./middleware/owner.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
-import { monitoringRouter } from "./routes/monitoring.ts";
+import { monitoringRouter, setMonitoringScheduler } from "./routes/monitoring.ts";
+import { Scheduler } from "./services/monitoring/scheduler.ts";
+import { realClock } from "./services/monitoring/clock.ts";
+import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
+import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { closeDb } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
@@ -120,10 +124,15 @@ app.route("/api/ai", aiRouter);
 // whole feature comes alive together. Path is `/api/v1/...` to mark the start
 // of the versioned API surface; legacy non-versioned routes above remain
 // stable until PR-6 standardizes everything via @hono/zod-openapi.
-const MONITORING_ENABLED = process.env.MONITORING_ENABLED === "1";
+// PR-4 default-on: monitoring is enabled unless explicitly disabled. The kill
+// switch (MONITORING_ENABLED=0) stays so an ops incident can take the feature
+// dark without a redeploy. Default-on means the scheduler boots with the
+// process — desktop users get monitoring "for free" once they upgrade.
+const MONITORING_ENABLED = process.env.MONITORING_ENABLED !== "0";
+let monitoringScheduler: Scheduler | null = null;
 if (MONITORING_ENABLED) {
   app.route("/api/v1/monitoring", monitoringRouter);
-  console.log("[monitoring] routes mounted at /api/v1/monitoring (MONITORING_ENABLED=1)");
+  console.log("[monitoring] routes mounted at /api/v1/monitoring");
 }
 
 // Serve frontend static files in production
@@ -170,6 +179,26 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   // Defer the daily snapshot until the listener is verified up. Same fire-and-forget
   // semantics as before; keeps it off the boot critical path.
   runDailyBackup().catch((e) => console.warn("[backup] top-level:", e));
+
+  // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
+  // shares the maintenance lock with backup so concurrent ticks pause cleanly
+  // for a writer; starting it any earlier would race the schema/prewarm path
+  // above.
+  if (MONITORING_ENABLED) {
+    const runner = createDosarSoapRunner({ searchDosare: cautareDosare });
+    monitoringScheduler = new Scheduler({
+      clock: realClock,
+      runner,
+      tickIntervalMs: 60_000,
+      claimLimit: 25,
+      jitterSecMax: 30,
+    });
+    setMonitoringScheduler(monitoringScheduler);
+    monitoringScheduler.start().catch((e) => {
+      console.error("[monitoring] scheduler.start failed:", e);
+    });
+    console.log("[monitoring] scheduler started (60s tick, claimLimit=25)");
+  }
 });
 httpServer.on("error", (err: Error) => {
   // Async event: under Electron this becomes uncaughtException → main.js
@@ -182,21 +211,39 @@ httpServer.on("error", (err: Error) => {
 // - Electron mode: main.js calls the exported closer on `before-quit` (in-process bundle).
 // closeDb() is idempotent (null-guarded in schema.ts).
 let shuttingDown = false;
-function gracefulShutdown(reason: string): void {
+async function gracefulShutdown(reason: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[shutdown] ${reason} — closing SQLite`);
+  console.log(`[shutdown] ${reason} — draining scheduler + closing SQLite`);
+  // Order matters: stop the scheduler FIRST so no fresh tick claims a job
+  // after we close the DB handle. stop() aborts in-flight runners and waits
+  // for them to finalize their run rows before resolving.
+  if (monitoringScheduler) {
+    try {
+      await monitoringScheduler.stop();
+    } catch (e) {
+      console.error("[shutdown] scheduler.stop failed:", e);
+    }
+    setMonitoringScheduler(null);
+    monitoringScheduler = null;
+  }
   try { closeDb(); } catch (e) {
     console.error("[shutdown] closeDb failed:", e);
   }
 }
-process.on("SIGTERM", () => { gracefulShutdown("SIGTERM"); process.exit(0); });
-process.on("SIGINT", () => { gracefulShutdown("SIGINT"); process.exit(0); });
-process.on("beforeExit", () => gracefulShutdown("beforeExit"));
+process.on("SIGTERM", () => {
+  void gracefulShutdown("SIGTERM").finally(() => process.exit(0));
+});
+process.on("SIGINT", () => {
+  void gracefulShutdown("SIGINT").finally(() => process.exit(0));
+});
+process.on("beforeExit", () => {
+  void gracefulShutdown("beforeExit");
+});
 
 // Expose shutdown hook so Electron's `before-quit` can flush WAL without killing the process.
 // Uses a globalThis key to survive esbuild's CJS bundle boundary.
-(globalThis as unknown as { __legalDashboardShutdown?: () => void }).__legalDashboardShutdown =
+(globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> }).__legalDashboardShutdown =
   () => gracefulShutdown("before-quit");
 
 const APP_VERSION: string = (() => {
