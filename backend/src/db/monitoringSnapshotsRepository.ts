@@ -17,11 +17,20 @@ export interface MonitoringSnapshotRow {
   observed_at: string;
   payload_hash: string;
   payload_json: string;
+  // Tier 3 #9 — run_id FK populated by the runner. Nullable: rows written
+  // before migration 0004 retain NULL; ON DELETE SET NULL on the FK keeps
+  // the snapshot when a run row is purged by retention.
+  run_id: number | null;
 }
 
 export interface InsertSnapshotInput {
   ownerId: string;
   jobId: number;
+  // The monitoring_runs.id row that produced this snapshot. Required on
+  // every new write — the runner always has it in scope (passed via
+  // JobRunner.run input). Going through `null` is reserved for a future
+  // backfill helper, not a normal code path.
+  runId: number;
   observedAt: string;
   payloadHash: string;
   payloadJson: string;
@@ -31,12 +40,13 @@ export function insertSnapshot(input: InsertSnapshotInput): number {
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_snapshots
-         (owner_id, job_id, observed_at, payload_hash, payload_json)
-       VALUES (?, ?, ?, ?, ?)`,
+         (owner_id, job_id, run_id, observed_at, payload_hash, payload_json)
+       VALUES (?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.ownerId,
       input.jobId,
+      input.runId,
       input.observedAt,
       input.payloadHash,
       input.payloadJson,

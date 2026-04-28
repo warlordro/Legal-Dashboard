@@ -43,7 +43,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
   const budgetMs = deps.budgetMs ?? DEFAULT_BUDGET_MS;
 
   return {
-    async run({ job, nowIso, signal }): Promise<RunOutcome> {
+    async run({ job, runId, nowIso, signal }): Promise<RunOutcome> {
       // Compose external (drain/manual cancel) with internal wallclock budget
       // so neither side starves: drain aborts immediately on stop(), and the
       // budget is a safety belt against runaway SOAP calls.
@@ -110,6 +110,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         insertSnapshot({
           ownerId: job.owner_id,
           jobId: job.id,
+          runId,
           observedAt: nowIso,
           payloadHash: canonicalSha256(newSnapshot),
           payloadJson: canonicalJson(newSnapshot),
@@ -118,6 +119,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
           insertAlert({
             ownerId: job.owner_id,
             jobId: job.id,
+            runId,
             kind: alert.kind,
             severity: alert.severity,
             title: alert.title,

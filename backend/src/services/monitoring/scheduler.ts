@@ -363,6 +363,7 @@ export class Scheduler {
       insertAlert({
         ownerId: job.owner_id,
         jobId: job.id,
+        runId,
         kind: "source_error",
         severity: "warning",
         title: "Sursa indisponibila (5 esecuri consecutive)",
