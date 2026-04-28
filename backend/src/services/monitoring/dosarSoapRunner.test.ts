@@ -124,7 +124,7 @@ describe("dosarSoapRunner — happy path baseline", () => {
     expect(out.status).toBe("ok");
     expect(out.alertsCreated).toBe(0);
 
-    const snap = getLatestSnapshot(job.id);
+    const snap = getLatestSnapshot(job.owner_id, job.id);
     expect(snap).not.toBeNull();
     expect(snap!.observed_at).toBe(NOW_ISO);
     const payload = JSON.parse(snap!.payload_json);
@@ -213,7 +213,7 @@ describe("dosarSoapRunner — SOAP error", () => {
     expect(out.status).toBe("error");
     expect(out.errorCode).toBe("SOAP_FAIL");
     expect(out.errorMessage).toContain("upstream 503");
-    expect(getLatestSnapshot(job.id)).toBeNull();
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
 });
 
@@ -249,7 +249,7 @@ describe("dosarSoapRunner — abort during SOAP", () => {
 
     const out = await promise;
     expect(out.status).toBe("aborted");
-    expect(getLatestSnapshot(job.id)).toBeNull();
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
 });
 
@@ -285,7 +285,7 @@ describe("dosarSoapRunner — wallclock budget", () => {
 
     expect(out.status).toBe("timeout");
     expect(out.errorCode).toBe("WALLCLOCK_BUDGET");
-    expect(getLatestSnapshot(job.id)).toBeNull();
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
 });
 
@@ -306,7 +306,7 @@ describe("dosarSoapRunner — dosar disappeared", () => {
     });
 
     expect(out.status).toBe("ok");
-    const snap = getLatestSnapshot(job.id);
+    const snap = getLatestSnapshot(job.owner_id, job.id);
     expect(snap).not.toBeNull();
     expect(JSON.parse(snap!.payload_json).lastDosarPresent).toBe(false);
   });
@@ -355,7 +355,7 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
 
     // Capture baseline snapshot id so we can prove it stays the latest after
     // the transactional rollback (vs. a new aborted snapshot leaking through).
-    const baselineSnap = getLatestSnapshot(job.id);
+    const baselineSnap = getLatestSnapshot(job.owner_id, job.id);
     expect(baselineSnap).not.toBeNull();
     const baselineId = baselineSnap!.id;
 
@@ -392,7 +392,7 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
 
     // Atomic boundary holds: latest snapshot is still the baseline (no new
     // snapshot row from the failed run), and 0 alerts persisted.
-    const snapAfter = getLatestSnapshot(job.id);
+    const snapAfter = getLatestSnapshot(job.owner_id, job.id);
     expect(snapAfter).not.toBeNull();
     expect(snapAfter!.id).toBe(baselineId);
 

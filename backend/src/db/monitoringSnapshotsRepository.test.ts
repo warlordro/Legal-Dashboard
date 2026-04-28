@@ -141,7 +141,7 @@ describe("insertSnapshot", () => {
 describe("getLatestSnapshot", () => {
   it("returns null when no snapshot exists for the job", () => {
     const jobId = seedJob("h1");
-    expect(getLatestSnapshot(jobId)).toBeNull();
+    expect(getLatestSnapshot(OWNER, jobId)).toBeNull();
   });
 
   it("returns the most recent snapshot (observed_at DESC)", () => {
@@ -164,7 +164,7 @@ describe("getLatestSnapshot", () => {
       payloadJson: '{"v":"new"}',
     });
 
-    const latest = getLatestSnapshot(jobId);
+    const latest = getLatestSnapshot(OWNER, jobId);
     expect(latest).not.toBeNull();
     expect(latest!.payload_hash).toBe("newer");
     expect(latest!.payload_json).toBe('{"v":"new"}');
@@ -193,8 +193,8 @@ describe("getLatestSnapshot", () => {
       payloadJson: '{"job":"B"}',
     });
 
-    const a = getLatestSnapshot(jobA);
-    const b = getLatestSnapshot(jobB);
+    const a = getLatestSnapshot(OWNER, jobA);
+    const b = getLatestSnapshot(OWNER, jobB);
     expect(a!.payload_hash).toBe("for-A");
     expect(b!.payload_hash).toBe("for-B");
   });
@@ -220,6 +220,35 @@ describe("getLatestSnapshot", () => {
       payloadJson: "{}",
     });
 
-    expect(getLatestSnapshot(jobId)!.payload_hash).toBe("second");
+    expect(getLatestSnapshot(OWNER, jobId)!.payload_hash).toBe("second");
+  });
+
+  it("ignores snapshots whose owner_id does not match the requested owner", () => {
+    const jobId = seedJob("h1");
+    const runId = seedRun(jobId);
+    insertSnapshot({
+      ownerId: OWNER,
+      jobId,
+      runId,
+      observedAt: "2026-04-28T10:00:00.000Z",
+      payloadHash: "owned",
+      payloadJson: "{}",
+    });
+    getDb()
+      .prepare(
+        `INSERT INTO monitoring_snapshots
+           (owner_id, job_id, run_id, observed_at, payload_hash, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "other-owner",
+        jobId,
+        runId,
+        "2026-04-28T11:00:00.000Z",
+        "foreign-owner-newer",
+        "{}",
+      );
+
+    expect(getLatestSnapshot(OWNER, jobId)!.payload_hash).toBe("owned");
   });
 });

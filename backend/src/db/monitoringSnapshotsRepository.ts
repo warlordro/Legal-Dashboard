@@ -59,15 +59,16 @@ export function insertSnapshot(input: InsertSnapshotInput): number {
 // distinguish (PR-4 cadence is hours, but C5 manual-trigger lets a user fire
 // a second run in the same millisecond, so we need a deterministic order).
 export function getLatestSnapshot(
+  ownerId: string,
   jobId: number,
 ): MonitoringSnapshotRow | null {
   const row = getDb()
     .prepare(
       `SELECT * FROM monitoring_snapshots
-       WHERE job_id = ?
+       WHERE owner_id = ? AND job_id = ?
        ORDER BY observed_at DESC, id DESC
        LIMIT 1`,
     )
-    .get(jobId) as MonitoringSnapshotRow | undefined;
+    .get(ownerId, jobId) as MonitoringSnapshotRow | undefined;
   return row ?? null;
 }

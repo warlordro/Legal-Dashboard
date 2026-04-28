@@ -333,8 +333,8 @@ export const monitoring = {
     active?: boolean;
   } = {}): Promise<MonitoringListResult> => {
     const search = new URLSearchParams();
-    if (params.page) search.set("page", String(params.page));
-    if (params.pageSize) search.set("pageSize", String(params.pageSize));
+    if (params.page !== undefined) search.set("page", String(params.page));
+    if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
     if (params.kind) search.set("kind", params.kind);
     if (params.active !== undefined) search.set("active", String(params.active));
     const qs = search.toString();

@@ -246,6 +246,19 @@ describe("POST /api/v1/monitoring/jobs", () => {
     const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("invalid_json");
   });
+
+  it("rejects oversized create payloads before JSON parsing", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", null, {
+      rawBody: JSON.stringify({
+        ...validDosarBody,
+        notes: "x".repeat(20 * 1024),
+      }),
+    });
+    expect(res.status).toBe(413);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("payload_too_large");
+  });
 });
 
 describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
@@ -425,6 +438,21 @@ describe("PATCH /jobs/:id — write paths", () => {
       body: JSON.stringify({ kind: "name_soap" }),
     });
     expect(patch.status).toBe(422);
+  });
+
+  it("rejects oversized PATCH payloads before JSON parsing", async () => {
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
+    const created = (await create.json()) as { data: { id: number } };
+
+    const patch = await app.request(`/api/v1/monitoring/jobs/${created.data.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ notes: "x".repeat(20 * 1024) }),
+    });
+    expect(patch.status).toBe(413);
+    const json = (await patch.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("payload_too_large");
   });
 });
 

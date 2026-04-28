@@ -10,6 +10,8 @@
 // signal we don't want to give.
 
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import type { Context } from "hono";
 
 import { getOwnerId } from "../middleware/owner.ts";
 import { recordAudit } from "../db/auditRepository.ts";
@@ -28,6 +30,52 @@ import {
   JobUpdateBodySchema,
 } from "../schemas/monitoring.ts";
 import { fail, ok } from "../util/envelope.ts";
+
+const MONITORING_BODY_LIMIT = 16 * 1024;
+
+const bodyTooLarge = (c: Context) =>
+  c.json(fail("payload_too_large", "Payload prea mare", c), 413);
+const limitMonitoringBody = bodyLimit({
+  maxSize: MONITORING_BODY_LIMIT,
+  onError: bodyTooLarge,
+});
+
+async function readLimitedJsonBody(
+  c: Context,
+): Promise<{ ok: true; body: unknown } | { ok: false; response: Response }> {
+  const contentLength = Number(c.req.header("content-length") ?? 0);
+  if (Number.isFinite(contentLength) && contentLength > MONITORING_BODY_LIMIT) {
+    return { ok: false, response: bodyTooLarge(c) };
+  }
+
+  let raw: string;
+  try {
+    raw = await c.req.text();
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "";
+    const message = err instanceof Error ? err.message : String(err);
+    if (name === "BodyLimitError" || message.includes("Payload Too Large")) {
+      return { ok: false, response: bodyTooLarge(c) };
+    }
+    return {
+      ok: false,
+      response: c.json(fail("invalid_json", "Body JSON invalid", c), 400),
+    };
+  }
+
+  if (new TextEncoder().encode(raw).length > MONITORING_BODY_LIMIT) {
+    return { ok: false, response: bodyTooLarge(c) };
+  }
+
+  try {
+    return { ok: true, body: JSON.parse(raw) as unknown };
+  } catch {
+    return {
+      ok: false,
+      response: c.json(fail("invalid_json", "Body JSON invalid", c), 400),
+    };
+  }
+}
 
 // PR-4 C5: manual-trigger route hands a claimed job to the scheduler. We
 // don't import Scheduler directly (cycle: scheduler.ts wires runs through the
@@ -90,14 +138,11 @@ monitoringRouter.get("/jobs/:id", (c) => {
 });
 
 // POST /jobs
-monitoringRouter.post("/jobs", async (c) => {
+monitoringRouter.post("/jobs", limitMonitoringBody, async (c) => {
   const ownerId = getOwnerId(c);
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json(fail("invalid_json", "Body JSON invalid", c), 400);
-  }
+  const bodyResult = await readLimitedJsonBody(c);
+  if (!bodyResult.ok) return bodyResult.response;
+  const body = bodyResult.body;
 
   const parsed = JobCreateBodySchema.safeParse(body);
   if (!parsed.success) {
@@ -178,19 +223,16 @@ function safeJsonParse(s: string): unknown {
 }
 
 // PATCH /jobs/:id
-monitoringRouter.patch("/jobs/:id", async (c) => {
+monitoringRouter.patch("/jobs/:id", limitMonitoringBody, async (c) => {
   const ownerId = getOwnerId(c);
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id) || id <= 0) {
     return c.json(fail("invalid_id", "ID invalid", c), 400);
   }
 
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return c.json(fail("invalid_json", "Body JSON invalid", c), 400);
-  }
+  const bodyResult = await readLimitedJsonBody(c);
+  if (!bodyResult.ok) return bodyResult.response;
+  const body = bodyResult.body;
 
   const parsed = JobUpdateBodySchema.safeParse(body);
   if (!parsed.success) {
@@ -314,7 +356,7 @@ monitoringRouter.delete("/jobs/:id", (c) => {
 //   - "in_flight"     → 409 (a previous run is still executing)
 //   - "not_running"   → 503 (scheduler stopped mid-flight)
 // 503 also covers the "no scheduler registered" pre-check above.
-monitoringRouter.post("/jobs/:id/run", async (c) => {
+monitoringRouter.post("/jobs/:id/run", limitMonitoringBody, async (c) => {
   const ownerId = getOwnerId(c);
   const id = Number(c.req.param("id"));
   if (!Number.isInteger(id) || id <= 0) {

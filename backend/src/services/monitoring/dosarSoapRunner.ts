@@ -97,7 +97,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
       // transaction (C2 hardening) is preserved verbatim inside.
       let alertsCreated = 0;
       await withMaintenanceRead(async () => {
-        const prevRow = getLatestSnapshot(job.id);
+        const prevRow = getLatestSnapshot(job.owner_id, job.id);
         const prevSnapshot = prevRow
           ? (JSON.parse(prevRow.payload_json) as DiffSnapshotPayload)
           : null;
