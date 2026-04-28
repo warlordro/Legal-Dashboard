@@ -103,30 +103,36 @@ export class Scheduler {
   // Single tick — claim, run, finalize. Public for test ergonomics; production
   // path goes through scheduleNextTick → setTimeout → tick().
   //
-  // Wrapped in withMaintenanceRead so daily backup (writer-exclusive) cannot
-  // interleave mid-tick. Concurrent ticks remain parallel; writer-preference
-  // means a queued backup blocks the NEXT tick from claiming, in-flight ticks
-  // drain first, then backup runs.
+  // The lock split (C1 hardening): the brief outer read lock covers only the
+  // claim step (sub-millisecond DB write that flips next_run_at); each runOne
+  // then acquires its OWN read lock for its run body. This means a queued
+  // backup waits at most for the *longest in-flight run*, not the entire
+  // cohort (Top-8 #7). It also closes the runJobNow void-runOne lock leak —
+  // every run, manual or scheduled, executes inside a maintenance read.
   async tickOnce(): Promise<void> {
     if (!this.running) return;
     if (this.tickInProgress) return;
     this.tickInProgress = true;
     try {
+      const now = this.opts.clock.now().toISOString();
+      let claimed: ReturnType<typeof claimDueJobs> = [];
       await withMaintenanceRead(async () => {
         // Re-check after the lock acquires. If a writer was holding the lock
         // when this tick was queued and stop() ran in the meantime, we'd
         // otherwise wake up here and proceed to claim/run AFTER shutdown.
         if (!this.running) return;
-        const now = this.opts.clock.now().toISOString();
-        const claimed = claimDueJobs({ now, limit: this.opts.claimLimit });
-
-        // Each claimed job runs concurrently; the SOAP runner in C3 adds
-        // its own PARALLEL_BATCH_SIZE=3 cap.
-        const promises = claimed.map(({ job, runId }) =>
-          this.runOne(job, runId, now),
-        );
-        await Promise.all(promises);
+        claimed = claimDueJobs({ now, limit: this.opts.claimLimit });
       });
+
+      if (claimed.length === 0) return;
+
+      // Each claimed job runs concurrently; the SOAP runner in C3 adds
+      // its own PARALLEL_BATCH_SIZE=3 cap. runOne is responsible for taking
+      // its own withMaintenanceRead for the run duration.
+      const promises = claimed.map(({ job, runId }) =>
+        this.runOne(job, runId, now),
+      );
+      await Promise.all(promises);
     } finally {
       this.tickInProgress = false;
     }
@@ -162,8 +168,11 @@ export class Scheduler {
   // the scheduler isn't running or if a runner is already in flight for the
   // same job (we don't want concurrent runs writing the same dedup_keys).
   //
-  // Wrapped in withMaintenanceRead so a daily backup or restore racing the
-  // manual trigger blocks here, same contract as the regular tick.
+  // Lock split (C1 hardening): only the insertRunning step is wrapped in
+  // withMaintenanceRead at this layer. runOne then acquires its OWN read
+  // lock around the actual SOAP + diff + finalize body. This closes the
+  // previous bug where `void runOne(...)` ran outside any lock, letting a
+  // backup writer race against in-flight snapshot/alert/finalize writes.
   async runJobNow(job: ScheduledJob): Promise<{ runId: number }> {
     if (!this.running) {
       const err = new Error("scheduler not running") as Error & {
@@ -178,7 +187,9 @@ export class Scheduler {
       throw err;
     }
 
-    return withMaintenanceRead(async () => {
+    const nowIso = this.opts.clock.now().toISOString();
+    let runId = 0;
+    await withMaintenanceRead(async () => {
       // Re-check after lock acquires (same reason as tickOnce).
       if (!this.running) {
         const err = new Error("scheduler not running") as Error & {
@@ -192,18 +203,20 @@ export class Scheduler {
         err.code = "in_flight";
         throw err;
       }
-      const nowIso = this.opts.clock.now().toISOString();
-      const runId = insertRunning({
+      runId = insertRunning({
         ownerId: job.owner_id,
         jobId: job.id,
         startedAt: nowIso,
       });
-      // Fire and forget: the run completes asynchronously and finalizes its
-      // own row + job state. The route returns 202 with this runId so the
-      // caller can poll.
-      void this.runOne(job, runId, nowIso);
-      return { runId };
     });
+
+    // Fire and forget: runOne acquires its OWN withMaintenanceRead and runs
+    // asynchronously to completion. The route returns 202 + runId so the
+    // caller can poll. Synchronous portion of runOne (inflight.set) executes
+    // before this function returns, so a duplicate runJobNow on the same job
+    // sees the in_flight entry and 409s.
+    void this.runOne(job, runId, nowIso);
+    return { runId };
   }
 
   private scheduleNextTick(): void {
@@ -222,7 +235,12 @@ export class Scheduler {
     const controller = new AbortController();
     const startMs = Date.now();
 
-    const work = (async () => {
+    // Each runOne acquires its own withMaintenanceRead for the duration of
+    // its body (runner SOAP + DB writes + finalize). Lock is held alongside
+    // any sibling concurrent runs (read lock = shared) but a queued backup
+    // writer waits for this run to drain. See C1 commit message for the
+    // full rationale and the bug it fixes.
+    const work = withMaintenanceRead(async () => {
       let outcome: RunOutcome;
       try {
         outcome = await this.opts.runner.run({
@@ -260,7 +278,7 @@ export class Scheduler {
       if (outcome.status !== "aborted") {
         this.applyJobOutcome(job, runId, outcome, nowIso);
       }
-    })().finally(() => {
+    }).finally(() => {
       this.inflight.delete(job.id);
     });
 

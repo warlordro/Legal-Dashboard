@@ -503,6 +503,67 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     await tickPromise;
     await sch.stop();
   });
+
+  // C1 regression: prior to the lock split, runJobNow wrapped insertRunning
+  // in withMaintenanceRead and then `void runOne(...)`'d outside the lock,
+  // so a backup writer could race the runner's snapshot/alert/finalize
+  // writes. After C1, runOne acquires its own withMaintenanceRead — a
+  // queued backup must wait for the manual run to drain before proceeding.
+  it("manual runJobNow holds maintenance read for the run duration (C1)", async () => {
+    seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-29T00:00:00.000Z",
+    });
+
+    let resolveRun: (() => void) | undefined;
+    const slowRunner: JobRunner = {
+      run: async () => {
+        await new Promise<void>((r) => {
+          resolveRun = r;
+        });
+        return { status: "ok", alertsCreated: 0 };
+      },
+    };
+
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: slowRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    const job = getDb()
+      .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
+      .get(1) as ScheduledJob;
+
+    // Kick off the manual run; it returns 202-style with the runId once
+    // insertRunning has happened, but the runner is still parked.
+    await sch.runJobNow(job);
+    // Yield so runOne's withMaintenanceRead is acquired (read lock = active).
+    await new Promise((r) => setImmediate(r));
+
+    // Queue a writer behind the live reader. Writer-preference RWLock keeps
+    // it parked until the in-flight runOne releases.
+    let writerEntered = false;
+    const writerPromise = _withMaintenanceWriteForTest(async () => {
+      writerEntered = true;
+    });
+
+    // Yield several times — the writer must NOT enter while the runner is
+    // still parked (runner held → reader held → writer queued).
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    expect(writerEntered).toBe(false);
+
+    // Release the runner. After it finalizes, the read lock drops and the
+    // writer wakes up.
+    resolveRun!();
+    await writerPromise;
+    expect(writerEntered).toBe(true);
+
+    await sch.stop();
+  });
 });
 
 describe("Scheduler — stop() drain", () => {
