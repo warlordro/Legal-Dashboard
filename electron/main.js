@@ -32,12 +32,53 @@ process.on("unhandledRejection", (reason) => {
   console.error("[main] unhandledRejection:", reason);
 });
 
-app.on("before-quit", () => {
-  // Backend bundle registered a global shutdown hook that flushes the SQLite WAL.
+// CP-E1: drain the backend (scheduler + SQLite WAL) before Electron tears the
+// process down. The shutdown hook is async (it `await`s scheduler.stop()
+// which in turn aborts in-flight SOAP runners and waits for them to finalize
+// their run rows), so we preventDefault the first quit, run the drain, then
+// re-issue app.quit(). The `backendShutdownStarted` flag short-circuits the
+// recursive before-quit fired by the second app.quit().
+//
+// 5s hard cap so a wedged socket can never hang the user's quit indefinitely;
+// scheduler.stop() already propagates AbortSignal into fetch, so reaching the
+// timeout would indicate a runner that swallowed cancellation — log and force.
+let backendShutdownStarted = false;
+const BACKEND_SHUTDOWN_TIMEOUT_MS = 5000;
+app.on("before-quit", (event) => {
   const shutdown = globalThis.__legalDashboardShutdown;
-  if (typeof shutdown === "function") {
-    try { shutdown(); } catch (e) { console.error("[main] backend shutdown failed:", e); }
-  }
+  if (typeof shutdown !== "function") return;
+  if (backendShutdownStarted) return;
+
+  backendShutdownStarted = true;
+  event.preventDefault();
+  console.log("[main] before-quit: draining backend (scheduler + DB)...");
+
+  let timedOut = false;
+  const timeout = new Promise((resolve) =>
+    setTimeout(() => {
+      timedOut = true;
+      resolve("timeout");
+    }, BACKEND_SHUTDOWN_TIMEOUT_MS),
+  );
+
+  const drain = Promise.resolve()
+    .then(() => shutdown())
+    .then(() => "ok")
+    .catch((e) => {
+      console.error("[main] backend shutdown failed:", e);
+      return "error";
+    });
+
+  Promise.race([drain, timeout]).finally(() => {
+    if (timedOut) {
+      console.warn(
+        `[main] backend shutdown exceeded ${BACKEND_SHUTDOWN_TIMEOUT_MS}ms — forcing quit`,
+      );
+    } else {
+      console.log("[main] before-quit: backend drained, continuing quit");
+    }
+    app.quit();
+  });
 });
 
 let mainWindow;
