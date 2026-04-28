@@ -402,6 +402,109 @@ describe("Scheduler — stop() race against parked tick", () => {
   });
 });
 
+// C5: manual trigger. runJobNow is what the POST /jobs/:id/run route calls
+// once it has resolved the job by id. Contract:
+//   - if scheduler is not running → throw { code: "not_running" }
+//   - if a runner is already in flight for this job → throw { code: "in_flight" }
+//   - otherwise allocate a run row, kick off the runner, return { runId }
+//     synchronously once insertRunning has happened (route returns 202).
+describe("Scheduler — runJobNow (manual trigger)", () => {
+  it("kicks off a run and returns the runId, finalizing on completion", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      // Make next_run_at in the future so the regular tick loop wouldn't
+      // pick this up — we want to prove runJobNow runs it anyway.
+      nextRunAt: "2026-04-29T00:00:00.000Z",
+    });
+    const runner = new NoopOkRunner();
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    const job = getDb()
+      .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
+      .get(jobId) as ScheduledJob;
+    const { runId } = await sch.runJobNow(job);
+    await sch.stop();
+
+    expect(runId).toBeGreaterThan(0);
+    expect(runner.calls.length).toBe(1);
+    expect(runner.calls[0]!.job.id).toBe(jobId);
+
+    const run = getDb()
+      .prepare(`SELECT id, status FROM monitoring_runs WHERE id = ?`)
+      .get(runId) as { id: number; status: string };
+    expect(run.status).toBe("ok");
+  });
+
+  it("throws { code: 'not_running' } if scheduler hasn't started", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: new NoopOkRunner(),
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+    const job = getDb()
+      .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
+      .get(jobId) as ScheduledJob;
+
+    await expect(sch.runJobNow(job)).rejects.toMatchObject({
+      code: "not_running",
+    });
+  });
+
+  it("throws { code: 'in_flight' } if a runner is already running for the job", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+
+    let resolveRun: (() => void) | undefined;
+    const slowRunner: JobRunner = {
+      run: async () => {
+        await new Promise<void>((r) => {
+          resolveRun = r;
+        });
+        return { status: "ok", alertsCreated: 0 };
+      },
+    };
+
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: slowRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    // Prime the inflight Map via the regular tick path.
+    const tickPromise = sch.tickOnce();
+    await new Promise((r) => setImmediate(r));
+
+    const job = getDb()
+      .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
+      .get(jobId) as ScheduledJob;
+    await expect(sch.runJobNow(job)).rejects.toMatchObject({
+      code: "in_flight",
+    });
+
+    resolveRun!();
+    await tickPromise;
+    await sch.stop();
+  });
+});
+
 describe("Scheduler — stop() drain", () => {
   it("aborts in-flight runners and waits for them to finalize", async () => {
     const jobId = seedJob({

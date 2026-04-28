@@ -21,8 +21,13 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../db/schema.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
+import type { MonitoringJobRow } from "../db/monitoringJobsRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
-import { monitoringRouter } from "./monitoring.ts";
+import {
+  monitoringRouter,
+  setMonitoringScheduler,
+  type MonitoringSchedulerHandle,
+} from "./monitoring.ts";
 
 let tmpRoot: string;
 let dbPath: string;
@@ -74,6 +79,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  setMonitoringScheduler(null);
   closeDb();
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
@@ -429,5 +435,147 @@ describe("GET /jobs — query handling", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("invalid_query");
+  });
+});
+
+// PR-4 C5: manual trigger route. Uses a controllable stub scheduler so the
+// route's behavior can be exercised without spinning up the real tick loop.
+class StubScheduler implements MonitoringSchedulerHandle {
+  callCount = 0;
+  lastJob: MonitoringJobRow | null = null;
+  mode: "ok" | "in_flight" | "not_running" = "ok";
+  nextRunId = 4242;
+
+  async runJobNow(job: MonitoringJobRow): Promise<{ runId: number }> {
+    this.callCount++;
+    this.lastJob = job;
+    if (this.mode === "in_flight") {
+      const err = new Error("already in flight") as Error & { code?: string };
+      err.code = "in_flight";
+      throw err;
+    }
+    if (this.mode === "not_running") {
+      const err = new Error("scheduler stopped") as Error & { code?: string };
+      err.code = "not_running";
+      throw err;
+    }
+    return { runId: this.nextRunId };
+  }
+}
+
+describe("POST /api/v1/monitoring/jobs/:id/run", () => {
+  it("returns 503 when no scheduler is registered", async () => {
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await app.request(
+      `/api/v1/monitoring/jobs/${created.data.id}/run`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(503);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("scheduler_unavailable");
+  });
+
+  it("returns 404 on missing job", async () => {
+    setMonitoringScheduler(new StubScheduler());
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/monitoring/jobs/999999/run", {
+      method: "POST",
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 404 when job belongs to another owner (no leak)", async () => {
+    setMonitoringScheduler(new StubScheduler());
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody, {
+      owner: "alice",
+    });
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await app.request(
+      `/api/v1/monitoring/jobs/${created.data.id}/run`,
+      { method: "POST", headers: { "x-test-owner": "bob" } },
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it("returns 202 + {runId} and writes monitoring.job.run_manual audit row", async () => {
+    const stub = new StubScheduler();
+    stub.nextRunId = 777;
+    setMonitoringScheduler(stub);
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await app.request(
+      `/api/v1/monitoring/jobs/${created.data.id}/run`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(202);
+    const json = (await res.json()) as { data: { runId: number } };
+    expect(json.data.runId).toBe(777);
+    expect(stub.callCount).toBe(1);
+    expect(stub.lastJob?.id).toBe(created.data.id);
+
+    const events = getAuditEvents({
+      ownerId: "local",
+      action: "monitoring.job.run_manual",
+    });
+    expect(events).toHaveLength(1);
+    expect(events[0].target_id).toBe(String(created.data.id));
+    expect(JSON.parse(events[0].detail_json)).toEqual({ runId: 777 });
+  });
+
+  it("returns 409 when scheduler reports the job is already in flight", async () => {
+    const stub = new StubScheduler();
+    stub.mode = "in_flight";
+    setMonitoringScheduler(stub);
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await app.request(
+      `/api/v1/monitoring/jobs/${created.data.id}/run`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(409);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("in_flight");
+
+    // No audit row when the run did not actually start.
+    const events = getAuditEvents({
+      ownerId: "local",
+      action: "monitoring.job.run_manual",
+    });
+    expect(events).toHaveLength(0);
+  });
+
+  it("returns 503 when scheduler reports it is not running", async () => {
+    const stub = new StubScheduler();
+    stub.mode = "not_running";
+    setMonitoringScheduler(stub);
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await app.request(
+      `/api/v1/monitoring/jobs/${created.data.id}/run`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(503);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("scheduler_unavailable");
+  });
+
+  it("returns 400 on non-numeric id", async () => {
+    setMonitoringScheduler(new StubScheduler());
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/monitoring/jobs/abc/run", {
+      method: "POST",
+    });
+    expect(res.status).toBe(400);
   });
 });

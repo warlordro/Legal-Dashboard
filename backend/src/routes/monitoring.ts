@@ -19,6 +19,7 @@ import {
   getJobById,
   listJobs,
   updateJob,
+  type MonitoringJobRow,
 } from "../db/monitoringJobsRepository.ts";
 import { getDb } from "../db/schema.ts";
 import {
@@ -27,6 +28,23 @@ import {
   JobUpdateBodySchema,
 } from "../schemas/monitoring.ts";
 import { fail, ok } from "../util/envelope.ts";
+
+// PR-4 C5: manual-trigger route hands a claimed job to the scheduler. We
+// don't import Scheduler directly (cycle: scheduler.ts wires runs through the
+// repos this router already touches). Instead the bootstrap calls
+// setMonitoringScheduler(scheduler) after constructing it; the route
+// null-checks and falls back to 503 when not yet wired.
+export interface MonitoringSchedulerHandle {
+  runJobNow(job: MonitoringJobRow): Promise<{ runId: number }>;
+}
+
+let scheduler: MonitoringSchedulerHandle | null = null;
+
+export function setMonitoringScheduler(
+  s: MonitoringSchedulerHandle | null,
+): void {
+  scheduler = s;
+}
 
 export const monitoringRouter = new Hono();
 
@@ -167,4 +185,58 @@ monitoringRouter.delete("/jobs/:id", (c) => {
     return c.json(fail("not_found", "Job inexistent", c), 404);
   }
   return c.json(ok({ deleted: true }, c));
+});
+
+// POST /jobs/:id/run — manual trigger. Per PLAN-monitoring-webmode.md L491:
+// returns 202 + { runId }. We always wait for the run to start (insertRunning
+// has happened) so the caller has a runId to poll, but the runner itself runs
+// async — the response returns before the run finalizes.
+//
+// Errors mapped from runJobNow:
+//   - "in_flight"     → 409 (a previous run is still executing)
+//   - "not_running"   → 503 (scheduler stopped mid-flight)
+// 503 also covers the "no scheduler registered" pre-check above.
+monitoringRouter.post("/jobs/:id/run", async (c) => {
+  const ownerId = getOwnerId(c);
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id) || id <= 0) {
+    return c.json(fail("invalid_id", "ID invalid", c), 400);
+  }
+  if (!scheduler) {
+    return c.json(
+      fail("scheduler_unavailable", "Scheduler indisponibil", c),
+      503,
+    );
+  }
+  const job = getJobById(ownerId, id);
+  if (!job) {
+    return c.json(fail("not_found", "Job inexistent", c), 404);
+  }
+
+  let runId: number;
+  try {
+    const result = await scheduler.runJobNow(job);
+    runId = result.runId;
+  } catch (err) {
+    const code = (err as { code?: string }).code;
+    if (code === "in_flight") {
+      return c.json(fail("in_flight", "Job deja in executie", c), 409);
+    }
+    if (code === "not_running") {
+      return c.json(
+        fail("scheduler_unavailable", "Scheduler indisponibil", c),
+        503,
+      );
+    }
+    console.error("[monitoring] runJobNow failed:", err);
+    return c.json(fail("internal_error", "Eroare la rularea jobului", c), 500);
+  }
+
+  recordAudit(c, "monitoring.job.run_manual", {
+    targetKind: "monitoring_job",
+    targetId: String(id),
+    detail: { runId },
+  });
+
+  return c.json(ok({ runId }, c), 202);
 });

@@ -24,6 +24,7 @@ import {
 } from "../../db/monitoringJobsRepository.ts";
 import {
   finalize,
+  insertRunning,
   recoverOrphanRuns,
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
@@ -154,6 +155,55 @@ export class Scheduler {
   // job without reaching into scheduler internals.
   getInflightAbortController(jobId: number): AbortController | undefined {
     return this.inflight.get(jobId)?.controller;
+  }
+
+  // Manual trigger from POST /jobs/:id/run (C5). Allocates a fresh run row
+  // and runs the job immediately, bypassing the next_run_at gate. Refuses if
+  // the scheduler isn't running or if a runner is already in flight for the
+  // same job (we don't want concurrent runs writing the same dedup_keys).
+  //
+  // Wrapped in withMaintenanceRead so a daily backup or restore racing the
+  // manual trigger blocks here, same contract as the regular tick.
+  async runJobNow(job: ScheduledJob): Promise<{ runId: number }> {
+    if (!this.running) {
+      const err = new Error("scheduler not running") as Error & {
+        code?: string;
+      };
+      err.code = "not_running";
+      throw err;
+    }
+    if (this.inflight.has(job.id)) {
+      const err = new Error("already in flight") as Error & { code?: string };
+      err.code = "in_flight";
+      throw err;
+    }
+
+    return withMaintenanceRead(async () => {
+      // Re-check after lock acquires (same reason as tickOnce).
+      if (!this.running) {
+        const err = new Error("scheduler not running") as Error & {
+          code?: string;
+        };
+        err.code = "not_running";
+        throw err;
+      }
+      if (this.inflight.has(job.id)) {
+        const err = new Error("already in flight") as Error & { code?: string };
+        err.code = "in_flight";
+        throw err;
+      }
+      const nowIso = this.opts.clock.now().toISOString();
+      const runId = insertRunning({
+        ownerId: job.owner_id,
+        jobId: job.id,
+        startedAt: nowIso,
+      });
+      // Fire and forget: the run completes asynchronously and finalizes its
+      // own row + job state. The route returns 202 with this runId so the
+      // caller can poll.
+      void this.runOne(job, runId, nowIso);
+      return { runId };
+    });
   }
 
   private scheduleNextTick(): void {
