@@ -269,3 +269,101 @@ export function deleteJob(ownerId: string, id: number): boolean {
     .run(id, ownerId);
   return info.changes > 0;
 }
+
+// --- scheduler glue: atomic claim of due jobs ----------------------------
+//
+// The scheduler tick calls this to pull a batch of due jobs and lease them
+// atomically. "Lease" = a `monitoring_runs` row with status='running' is
+// inserted in the same transaction as the SELECT, so the next tick (or a
+// concurrent manual trigger) sees the job already in flight and skips it.
+//
+// Why BEGIN IMMEDIATE: better-sqlite3's default transaction mode is DEFERRED,
+// which acquires the write lock only at first write. With DEFERRED, two
+// callers can both read the same "due" rows before either INSERTs into runs,
+// then both INSERT and double-claim. IMMEDIATE acquires the reserved lock at
+// BEGIN — the second caller waits until the first commits, then sees the
+// just-inserted running rows in its SELECT and skips them.
+//
+// Eligibility predicate (kept in lock-step with idx_monitoring_due):
+//   active = 1
+//   AND (paused_until IS NULL OR paused_until <= now)
+//   AND next_run_at <= now
+//   AND no monitoring_runs row exists with status='running' for this job_id
+
+export interface ClaimDueJobsInput {
+  now: string;
+  limit: number;
+}
+
+export interface ClaimedJob {
+  job: MonitoringJobRow;
+  runId: number;
+}
+
+// Scheduler-private outcome write. updateJob() deliberately rejects these
+// fields (last_run_at/last_status/fail_streak/next_run_at) so user PATCH can't
+// mutate the scheduler's internal state. The scheduler uses this write
+// instead — single UPDATE, no transaction needed (sole writer for these
+// columns is the scheduler itself, ordered by ticks).
+export interface MarkJobOutcomeInput {
+  jobId: number;
+  lastRunAt: string;
+  lastStatus: "ok" | "error";
+  failStreak: number;
+  nextRunAt: string;
+}
+
+export function markJobOutcome(input: MarkJobOutcomeInput): void {
+  getDb()
+    .prepare(
+      `UPDATE monitoring_jobs
+         SET last_run_at = ?,
+             last_status = ?,
+             fail_streak = ?,
+             next_run_at = ?,
+             updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       WHERE id = ?`,
+    )
+    .run(
+      input.lastRunAt,
+      input.lastStatus,
+      input.failStreak,
+      input.nextRunAt,
+      input.jobId,
+    );
+}
+
+export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
+  const db = getDb();
+  const tx = db.transaction((now: string, limit: number): ClaimedJob[] => {
+    const due = db
+      .prepare(
+        `SELECT * FROM monitoring_jobs
+         WHERE active = 1
+           AND (paused_until IS NULL OR paused_until <= ?)
+           AND next_run_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM monitoring_runs
+             WHERE monitoring_runs.job_id = monitoring_jobs.id
+               AND monitoring_runs.status = 'running'
+           )
+         ORDER BY next_run_at ASC, id ASC
+         LIMIT ?`,
+      )
+      .all(now, now, limit) as MonitoringJobRow[];
+
+    const insertRun = db.prepare(
+      `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
+       VALUES (?, ?, ?, 'running')`,
+    );
+
+    const claimed: ClaimedJob[] = [];
+    for (const job of due) {
+      const info = insertRun.run(job.owner_id, job.id, now);
+      claimed.push({ job, runId: info.lastInsertRowid as number });
+    }
+    return claimed;
+  });
+  // .immediate() runs the transaction with BEGIN IMMEDIATE. See block comment.
+  return tx.immediate(input.now, input.limit);
+}
