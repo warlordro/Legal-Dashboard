@@ -30,6 +30,7 @@ import {
 } from "../../db/monitoringRunsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
+import { getDb } from "../../db/schema.ts";
 
 // 5 consecutive failures = the source is broken, not flaky. Spec
 // PLAN-monitoring-webmode.md L390: emit one source_error alert and slow the
@@ -260,24 +261,33 @@ export class Scheduler {
       const endIso = this.opts.clock.now().toISOString();
       const durationMs = Date.now() - startMs;
 
-      finalize(runId, {
-        status: outcome.status,
-        endedAt: endIso,
-        durationMs,
-        httpStatus: outcome.httpStatus,
-        errorCode: outcome.errorCode,
-        errorMessage: outcome.errorMessage,
-        alertsCreated: outcome.alertsCreated ?? 0,
-      });
+      // C3 hardening: finalize (run row terminal) + markJobOutcome (advances
+      // next_run_at + fail_streak) MUST commit together. Without this, a
+      // crash between the two leaves monitoring_runs marked terminal while
+      // monitoring_jobs.next_run_at stays at its pre-run value — the next
+      // tick re-claims the same job and produces duplicate snapshots/alerts.
+      // The source_error insertAlert inside applyJobOutcome is part of the
+      // same atomic boundary so a half-applied recovery never persists.
+      getDb().transaction(() => {
+        finalize(runId, {
+          status: outcome.status,
+          endedAt: endIso,
+          durationMs,
+          httpStatus: outcome.httpStatus,
+          errorCode: outcome.errorCode,
+          errorMessage: outcome.errorMessage,
+          alertsCreated: outcome.alertsCreated ?? 0,
+        });
 
-      // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
-      // state (fail_streak, next_run_at, last_*) untouched so the next boot
-      // resumes the job at its existing schedule. Counting it would inflate
-      // fail_streak on every clean shutdown and trip spurious source_error
-      // alerts on healthy jobs.
-      if (outcome.status !== "aborted") {
-        this.applyJobOutcome(job, runId, outcome, nowIso);
-      }
+        // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
+        // state (fail_streak, next_run_at, last_*) untouched so the next boot
+        // resumes the job at its existing schedule. Counting it would inflate
+        // fail_streak on every clean shutdown and trip spurious source_error
+        // alerts on healthy jobs.
+        if (outcome.status !== "aborted") {
+          this.applyJobOutcome(job, runId, outcome, nowIso);
+        }
+      })();
     }).finally(() => {
       this.inflight.delete(job.id);
     });
