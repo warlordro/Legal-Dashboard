@@ -307,6 +307,17 @@ export interface ClaimedJob {
   runId: number;
 }
 
+function getDisabledMonitoringKinds(): string[] {
+  return Array.from(
+    new Set(
+      (process.env.MONITORING_DISABLED_KINDS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 // Scheduler-private outcome write. updateJob() deliberately rejects these
 // fields (last_run_at/last_status/fail_streak/next_run_at) so user PATCH can't
 // mutate the scheduler's internal state. The scheduler uses this write
@@ -354,12 +365,19 @@ export function markJobOutcome(input: MarkJobOutcomeInput): boolean {
 export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
   const db = getDb();
   const tx = db.transaction((now: string, limit: number): ClaimedJob[] => {
+    const disabledKinds = getDisabledMonitoringKinds();
+    const disabledKindSql =
+      disabledKinds.length > 0
+        ? `AND kind NOT IN (${disabledKinds.map(() => "?").join(", ")})`
+        : "";
+    const selectParams: (string | number)[] = [now, now, ...disabledKinds, limit];
     const due = db
       .prepare(
         `SELECT * FROM monitoring_jobs
          WHERE active = 1
            AND (paused_until IS NULL OR paused_until <= ?)
            AND next_run_at <= ?
+           ${disabledKindSql}
            AND NOT EXISTS (
              SELECT 1 FROM monitoring_runs
              WHERE monitoring_runs.job_id = monitoring_jobs.id
@@ -368,7 +386,7 @@ export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
          ORDER BY next_run_at ASC, id ASC
          LIMIT ?`,
       )
-      .all(now, now, limit) as MonitoringJobRow[];
+      .all(...selectParams) as MonitoringJobRow[];
 
     const insertRun = db.prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)

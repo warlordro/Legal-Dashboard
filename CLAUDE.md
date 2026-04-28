@@ -66,6 +66,7 @@ legal-dashboard/
 - `npx tsc --noEmit -p backend/tsconfig.json` — type-check backend
 - `cd frontend && npx tsc --noEmit` — type-check frontend
 - `npx biome check` — lint + format check
+- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` — kill switch operational pentru a opri temporar claim-ul pe anumite tipuri de joburi de monitoring
 
 ## Arhitectura
 - **Frontend**: React 18, Vite 5, custom CSS (Tailwind in deps dar deprecat), Recharts, DOMPurify
@@ -94,6 +95,8 @@ legal-dashboard/
 - **External URL whitelist** exact: portal.just.ro, www.just.ro, portalquery.just.ro, mj.rnpm.ro, www.rnpm.ro
 - **Backup atomic**: daily backup scrie la `.db.tmp` + rename atomic, cleanup orphan tmp la urmatorul run
 - **SOAP cancellation**: `AbortSignal` extern propagat pana in fetch-ul PortalJust, combinat cu timeout intern
+- **Monitoring operational kill switch**: `MONITORING_DISABLED_KINDS` exclude tipurile listate din scheduler claim fara modificari in DB
+- **Monitoring run retention**: `monitoring_runs` este purjat zilnic la 90 zile pentru a limita cresterea istoricului operational
 
 ### Riscuri acceptate
 - SOAP HTTP upstream (portalquery.just.ro nu ofera HTTPS) — date publice, fara autentificare

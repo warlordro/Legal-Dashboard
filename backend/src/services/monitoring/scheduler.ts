@@ -25,6 +25,7 @@ import {
 import {
   finalize,
   insertRunning,
+  purgeOldRuns,
   recoverOrphanRuns,
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
@@ -37,6 +38,8 @@ import { getDb } from "../../db/schema.ts";
 // job to once-per-hour to spare upstream and ourselves.
 const SOURCE_ERROR_THRESHOLD = 5;
 const SOURCE_ERROR_BACKOFF_SEC = 3600;
+const RUN_RETENTION_DAYS = 90;
+const RUN_PURGE_INTERVAL_MS = 86_400_000;
 
 export type ScheduledJob = MonitoringJobRow;
 
@@ -80,6 +83,7 @@ export class Scheduler {
   private running = false;
   private tickInProgress = false;
   private timerHandle: TimerHandle | undefined;
+  private purgeTimerHandle: TimerHandle | undefined;
   private readonly inflight = new Map<number, InflightEntry>();
 
   constructor(opts: SchedulerOptions) {
@@ -94,8 +98,22 @@ export class Scheduler {
     // boot, before the listen handler that ever fires the daily backup; a
     // restore at this exact instant is also implausible (UI route is mounted
     // later). If web-mode reorders boot so this becomes possible, wrap it.
-    recoverOrphanRuns();
+    //
+    // Tier 4 #20: log the recovered count so a crash-then-restart is visible
+    // in the boot log. error_code='CRASH_RECOVERY' is stamped per-row inside
+    // recoverOrphanRuns; this log line is the operator-visible signal.
+    const recovered = recoverOrphanRuns();
+    if (recovered > 0) {
+      console.log(
+        JSON.stringify({
+          action: "monitoring.crash_recovery",
+          recovered_count: recovered,
+          ts: new Date().toISOString(),
+        }),
+      );
+    }
     this.running = true;
+    this.scheduleRunPurge();
     // First tick fires after one interval; callers can also invoke tickOnce()
     // explicitly (tests do).
     this.scheduleNextTick();
@@ -146,6 +164,10 @@ export class Scheduler {
     if (this.timerHandle !== undefined) {
       this.opts.clock.clearTimeout(this.timerHandle);
       this.timerHandle = undefined;
+    }
+    if (this.purgeTimerHandle !== undefined) {
+      this.opts.clock.clearTimeout(this.purgeTimerHandle);
+      this.purgeTimerHandle = undefined;
     }
 
     // Signal cancellation to every in-flight runner, then wait for them all
@@ -248,13 +270,43 @@ export class Scheduler {
     }, this.opts.tickIntervalMs);
   }
 
+  private scheduleRunPurge(): void {
+    if (!this.running) return;
+    this.purgeTimerHandle = this.opts.clock.setTimeout(() => {
+      if (!this.running) return;
+      try {
+        const deleted = purgeOldRuns(RUN_RETENTION_DAYS);
+        if (deleted > 0) {
+          console.log(JSON.stringify({
+            action: "monitoring.runs_purged",
+            deleted_count: deleted,
+            retention_days: RUN_RETENTION_DAYS,
+            ts: this.opts.clock.now().toISOString(),
+          }));
+        }
+      } catch (err) {
+        console.error("[scheduler] purgeOldRuns threw, continuing loop", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      } finally {
+        this.purgeTimerHandle = undefined;
+        this.scheduleRunPurge();
+      }
+    }, RUN_PURGE_INTERVAL_MS);
+  }
+
   private async runOne(
     job: ScheduledJob,
     runId: number,
     nowIso: string,
   ): Promise<void> {
     const controller = new AbortController();
-    const startMs = Date.now();
+    // Tier 4 #18: anchor startMs to clock.now() so duration math is
+    // deterministic against the same time source as endIso below. Mixing
+    // raw Date.now() with the injected clock produced drift-bounded but
+    // non-zero noise in fake-clock tests (durationMs ≠ FakeClock advance).
+    const startMs = this.opts.clock.now().getTime();
 
     // Tier 3 #11: the runner.run() call is INTENTIONALLY outside any
     // maintenance lock at this layer. SOAP I/O can take up to 10min on the
@@ -285,7 +337,7 @@ export class Scheduler {
       }
 
       const endIso = this.opts.clock.now().toISOString();
-      const durationMs = Date.now() - startMs;
+      const durationMs = this.opts.clock.now().getTime() - startMs;
 
       // C3 hardening: finalize (run row terminal) + markJobOutcome (advances
       // next_run_at + fail_streak) MUST commit together. Without this, a
@@ -385,6 +437,21 @@ export class Scheduler {
         },
         dedupKey: `source_error|${runId}`,
       });
+    } else if (failStreak > SOURCE_ERROR_THRESHOLD) {
+      // Tier 4 #22: when a chronically broken job keeps failing past the
+      // threshold, the alert is intentionally suppressed (one alert per
+      // streak, not per tick). Without a log line, ops have no way to tell
+      // "no alert because nothing's wrong" from "no alert because we
+      // already alerted once". This log gives that visibility without
+      // re-tripping the alert dedup.
+      console.log(JSON.stringify({
+        action: "monitoring.source_error_suppressed",
+        job_id: job.id,
+        run_id: runId,
+        fail_streak: failStreak,
+        last_error_code: outcome.errorCode ?? null,
+        ts: nowIso,
+      }));
     }
   }
 }

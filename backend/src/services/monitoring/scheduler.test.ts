@@ -821,3 +821,419 @@ describe("Scheduler — tick error survival (C4)", () => {
     expect(job.last_status).toBe("ok");
   });
 });
+
+// Tier 5 #T3 — runner.run() rejecting must surface as RUNNER_THREW (not crash
+// the scheduler). Regression for the try/catch in runOne: a runner that throws
+// a non-Error value (or a synchronous throw mid-Promise) still has to produce
+// a terminal run row + advance fail_streak so the loop stays self-healing.
+describe("Scheduler — runner reject becomes RUNNER_THREW (#T3)", () => {
+  it("runner throws synchronously → finalize as error/RUNNER_THREW + fail_streak++", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+    const throwingRunner: JobRunner = {
+      run: async () => {
+        throw new Error("runner kaboom");
+      },
+    };
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: throwingRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    const job = readJob(jobId);
+    expect(job.last_status).toBe("error");
+    expect(job.fail_streak).toBe(1);
+
+    const run = getDb()
+      .prepare(
+        `SELECT status, error_code, error_message
+           FROM monitoring_runs WHERE job_id = ?`,
+      )
+      .get(jobId) as {
+        status: string;
+        error_code: string;
+        error_message: string;
+      };
+    expect(run.status).toBe("error");
+    expect(run.error_code).toBe("RUNNER_THREW");
+    expect(run.error_message).toContain("runner kaboom");
+  });
+
+  it("runner throws non-Error value → error_message stringified", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+    const oddRunner: JobRunner = {
+      // Reject with a non-Error so the `instanceof Error` branch falls through
+      // to String(err). Real-world: a third-party SDK rejecting with a plain
+      // object {code, message} or a number.
+      run: async () => {
+        throw { weird: true, code: 42 };
+      },
+    };
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: oddRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    const run = getDb()
+      .prepare(
+        `SELECT status, error_code, error_message
+           FROM monitoring_runs WHERE job_id = ?`,
+      )
+      .get(jobId) as {
+        status: string;
+        error_code: string;
+        error_message: string;
+      };
+    expect(run.status).toBe("error");
+    expect(run.error_code).toBe("RUNNER_THREW");
+    expect(typeof run.error_message).toBe("string");
+    expect(run.error_message.length).toBeGreaterThan(0);
+  });
+});
+
+// Tier 5 #T4 — lease semantics: claimDueJobs is the only thing keeping two
+// concurrent ticks from running the same job twice. The lease is the row in
+// monitoring_runs with status='running'; tick #2 must NOT pick the job up
+// while tick #1 is still inflight, even if next_run_at is past.
+describe("Scheduler — concurrent tick lease semantics (#T4)", () => {
+  it("two overlapping ticks don't double-run the same job", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+
+    // Park the runner so tick #1 stays in-flight while tick #2 runs.
+    let resolveRun: (() => void) | undefined;
+    const calls: number[] = [];
+    const slowRunner: JobRunner = {
+      run: async (input) => {
+        calls.push(input.job.id);
+        await new Promise<void>((r) => {
+          resolveRun = r;
+        });
+        return { status: "ok", alertsCreated: 0 };
+      },
+    };
+
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: slowRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    const tick1 = sch.tickOnce();
+    // Yield so tick1 has time to claim + enter runner.run before tick2 starts.
+    await new Promise((r) => setImmediate(r));
+
+    // tick #2 starts while tick #1's runner is parked. claimDueJobs must
+    // exclude this job because its monitoring_runs row is still 'running'.
+    await sch.tickOnce();
+
+    expect(calls.length).toBe(1);
+    expect(calls[0]).toBe(jobId);
+
+    resolveRun!();
+    await tick1;
+    await sch.stop();
+
+    // After both ticks complete, exactly one terminal run + the job advanced
+    // its schedule once.
+    const runs = getDb()
+      .prepare(
+        `SELECT status FROM monitoring_runs WHERE job_id = ? ORDER BY id`,
+      )
+      .all(jobId) as { status: string }[];
+    expect(runs.length).toBe(1);
+    expect(runs[0]!.status).toBe("ok");
+
+    const job = readJob(jobId);
+    expect(job.last_status).toBe("ok");
+  });
+});
+
+// Tier 5 #T5 — source_error recovery cycle: after the 5-fail trip + alert,
+// a single success must reset fail_streak to 0. The next failing streak
+// should be free to re-trip and emit a fresh source_error alert (anchored
+// to the new runId, so dedup_key doesn't suppress it).
+describe("Scheduler — source_error recovery cycle (#T5)", () => {
+  it("ok run resets fail_streak; next 5-fail streak emits a fresh alert", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      failStreak: 4,
+    });
+
+    // First scheduler instance: fail #5 trips the alert, +1h backoff applied.
+    {
+      const sch = new Scheduler({
+        clock: new FakeClock(T0_DATE),
+        runner: new NoopErrorRunner(),
+        tickIntervalMs: 60_000,
+        claimLimit: 10,
+        jitterSecMax: 0,
+      });
+      await sch.start();
+      await sch.tickOnce();
+      await sch.stop();
+    }
+
+    let job = readJob(jobId);
+    expect(job.fail_streak).toBe(5);
+    let alerts = getDb()
+      .prepare(`SELECT id FROM monitoring_alerts WHERE job_id = ?`)
+      .all(jobId) as { id: number }[];
+    expect(alerts.length).toBe(1);
+
+    // Move the clock past +1h and align next_run_at so the second scheduler
+    // can reclaim. Then run a successful tick to reset the streak.
+    const T_RECOVERY = "2026-04-28T11:30:00.000Z";
+    getDb()
+      .prepare(`UPDATE monitoring_jobs SET next_run_at = ? WHERE id = ?`)
+      .run(T_RECOVERY, jobId);
+
+    {
+      const sch = new Scheduler({
+        clock: new FakeClock(new Date(T_RECOVERY)),
+        runner: new NoopOkRunner(),
+        tickIntervalMs: 60_000,
+        claimLimit: 10,
+        jitterSecMax: 0,
+      });
+      await sch.start();
+      await sch.tickOnce();
+      await sch.stop();
+    }
+
+    job = readJob(jobId);
+    expect(job.fail_streak).toBe(0);
+    expect(job.last_status).toBe("ok");
+
+    // Now drive the job into a fresh failing streak: 4 errors, then on the
+    // 5th the alert must fire AGAIN (different runId → different dedup_key).
+    let nextDue = job.next_run_at;
+    for (let i = 0; i < 4; i++) {
+      const t = new Date(new Date(nextDue).getTime() + 60_000).toISOString();
+      const sch = new Scheduler({
+        clock: new FakeClock(new Date(t)),
+        runner: new NoopErrorRunner(),
+        tickIntervalMs: 60_000,
+        claimLimit: 10,
+        jitterSecMax: 0,
+      });
+      await sch.start();
+      await sch.tickOnce();
+      await sch.stop();
+      nextDue = readJob(jobId).next_run_at;
+    }
+    expect(readJob(jobId).fail_streak).toBe(4);
+
+    // 5th fresh failure → second source_error alert.
+    const t5 = new Date(new Date(nextDue).getTime() + 60_000).toISOString();
+    const sch = new Scheduler({
+      clock: new FakeClock(new Date(t5)),
+      runner: new NoopErrorRunner(),
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    alerts = getDb()
+      .prepare(`SELECT id FROM monitoring_alerts WHERE job_id = ?`)
+      .all(jobId) as { id: number }[];
+    expect(alerts.length).toBe(2);
+  });
+});
+
+// Tier 5 #T7 — boot ordering: recoverOrphanRuns MUST run before the first
+// tick. If tick #1 sees a stale `running` row from a prior crash, claimDueJobs
+// excludes the legitimately-due job from the cohort and the job stays dark
+// until the row times out (which never happens — there's no timeout). Recover
+// flips orphan rows to 'aborted' so the cohort is clean for tick #1.
+describe("Scheduler — recoverOrphanRuns runs before tick #1 (#T7)", () => {
+  it("orphan running row from prior crash → first tick still claims the job", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+    // Simulate prior-process crash: a `running` row with no terminal status.
+    getDb()
+      .prepare(
+        `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
+         VALUES (?, ?, '2026-04-28T08:30:00.000Z', 'running')`,
+      )
+      .run(OWNER, jobId);
+
+    const runner = new NoopOkRunner();
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    // Orphan row is now aborted with CRASH_RECOVERY signal (Tier 4 #20).
+    const allRuns = getDb()
+      .prepare(
+        `SELECT status, error_code FROM monitoring_runs
+           WHERE job_id = ? ORDER BY id`,
+      )
+      .all(jobId) as { status: string; error_code: string | null }[];
+    expect(allRuns.length).toBe(2);
+    expect(allRuns[0]!.status).toBe("aborted");
+    expect(allRuns[0]!.error_code).toBe("CRASH_RECOVERY");
+    // Tick #1 produced a fresh ok run — proves recover ran first AND the
+    // claim wasn't blocked by the leftover lease.
+    expect(allRuns[1]!.status).toBe("ok");
+    expect(runner.calls.length).toBe(1);
+  });
+});
+
+// Tier 6 #34 — monitoring_runs is diagnostic history, not permanent business
+// data. The scheduler owns the daily retention timer and must clear it on
+// stop() so shutdown does not leave background work queued.
+describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
+  function seedTerminalRun(startedAt: string): number {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2099-01-01T00:00:00.000Z",
+      hashSeed: `purge-${startedAt}`,
+    });
+    const info = getDb()
+      .prepare(
+        `INSERT INTO monitoring_runs
+           (owner_id, job_id, started_at, ended_at, status, duration_ms)
+         VALUES (?, ?, ?, ?, 'ok', 100)`,
+      )
+      .run(OWNER, jobId, startedAt, startedAt);
+    return info.lastInsertRowid as number;
+  }
+
+  it("purges runs older than 90 days when the daily timer fires", async () => {
+    const oldRun = seedTerminalRun(new Date(Date.now() - 91 * 86_400_000).toISOString());
+    const freshRun = seedTerminalRun(new Date(Date.now() - 89 * 86_400_000).toISOString());
+    const clock = new FakeClock(T0_DATE);
+    const sch = new Scheduler({
+      clock,
+      runner: new NoopOkRunner(),
+      tickIntervalMs: 2 * 86_400_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await clock.advance(86_400_000);
+    await sch.stop();
+
+    const rows = getDb()
+      .prepare(`SELECT id FROM monitoring_runs ORDER BY id`)
+      .all() as { id: number }[];
+    expect(rows.map((r) => r.id)).toEqual([freshRun]);
+    expect(rows.find((r) => r.id === oldRun)).toBeUndefined();
+  });
+
+  it("cancels the daily purge timer on stop()", async () => {
+    const oldRun = seedTerminalRun(new Date(Date.now() - 91 * 86_400_000).toISOString());
+    const clock = new FakeClock(T0_DATE);
+    const sch = new Scheduler({
+      clock,
+      runner: new NoopOkRunner(),
+      tickIntervalMs: 2 * 86_400_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.stop();
+    await clock.advance(86_400_000);
+
+    const rows = getDb()
+      .prepare(`SELECT id FROM monitoring_runs ORDER BY id`)
+      .all() as { id: number }[];
+    expect(rows.map((r) => r.id)).toEqual([oldRun]);
+  });
+});
+
+// Tier 5 #T2 — lock-hold-duration: the per-run maintenance read lock is now
+// scoped to the finalize transaction only (Tier 3 #11). A queued backup
+// writer must NOT wait on the runner's wallclock — only on the brief DB
+// commit. We assert the lock is RELEASED while runner.run is parked.
+describe("Scheduler — finalize lock window only (#T2)", () => {
+  it("runner.run() does NOT hold the maintenance read lock", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+
+    let resolveRun: (() => void) | undefined;
+    const slowRunner: JobRunner = {
+      run: async () => {
+        await new Promise<void>((r) => {
+          resolveRun = r;
+        });
+        return { status: "ok", alertsCreated: 0 };
+      },
+    };
+
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: slowRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    const tickPromise = sch.tickOnce();
+
+    // Yield once so tick claims the job and enters runner.run (which parks).
+    await new Promise((r) => setImmediate(r));
+
+    // While the runner is parked, a writer should be able to acquire the
+    // maintenance lock without waiting. Pre-#11 this would deadlock until
+    // resolveRun() fired. Use a short timeout race to prove fast acquisition.
+    let writerEntered = false;
+    const writerPromise = withMaintenanceWrite(async () => {
+      writerEntered = true;
+    });
+    // Give the writer a few microtask hops; if the lock were held it would
+    // not enter at all.
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+    await writerPromise;
+    expect(writerEntered).toBe(true);
+
+    resolveRun!();
+    await tickPromise;
+    await sch.stop();
+  });
+});

@@ -17,6 +17,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   insertRunning,
   finalize,
+  purgeOldRuns,
   recoverOrphanRuns,
   type MonitoringRunRow,
 } from "./monitoringRunsRepository.ts";
@@ -188,5 +189,26 @@ describe("recoverOrphanRuns", () => {
 
   it("returns 0 when no running rows exist", () => {
     expect(recoverOrphanRuns()).toBe(0);
+  });
+});
+
+describe("purgeOldRuns", () => {
+  it("deletes only runs older than the retention window", () => {
+    const jobId = seedJob();
+    const oldStartedAt = new Date(Date.now() - 91 * 86_400_000).toISOString();
+    const freshStartedAt = new Date(Date.now() - 89 * 86_400_000).toISOString();
+
+    const oldRun = insertRunning({ ownerId: OWNER, jobId, startedAt: oldStartedAt });
+    const freshRun = insertRunning({ ownerId: OWNER, jobId, startedAt: freshStartedAt });
+    finalize(oldRun, { status: "ok", endedAt: oldStartedAt, durationMs: 100 });
+    finalize(freshRun, { status: "ok", endedAt: freshStartedAt, durationMs: 100 });
+
+    const deleted = purgeOldRuns(90);
+    expect(deleted).toBe(1);
+
+    const rows = getDb()
+      .prepare(`SELECT id FROM monitoring_runs ORDER BY id`)
+      .all() as { id: number }[];
+    expect(rows.map((r) => r.id)).toEqual([freshRun]);
   });
 });

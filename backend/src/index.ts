@@ -140,16 +140,12 @@ app.route("/api/dosare", dosareRouter);
 app.route("/api/termene", termeneRouter);
 app.route("/api/ai", aiRouter);
 
-// PR-3: monitoring core. Gated behind MONITORING_ENABLED so production desktop
-// builds ship dark by default. Set MONITORING_ENABLED=1 to expose the routes.
-// PR-4 (scheduler) will be gated by the same flag — flip the flag once and the
-// whole feature comes alive together. Path is `/api/v1/...` to mark the start
+// Monitoring (routes + scheduler) is default-ON since PR-4 C6: desktop users
+// get the feature "for free" on upgrade. The kill switch MONITORING_ENABLED=0
+// stays as the ops escape hatch — flip it to take the feature dark without a
+// redeploy if an incident requires it. Path is `/api/v1/...` to mark the start
 // of the versioned API surface; legacy non-versioned routes above remain
 // stable until PR-6 standardizes everything via @hono/zod-openapi.
-// PR-4 default-on: monitoring is enabled unless explicitly disabled. The kill
-// switch (MONITORING_ENABLED=0) stays so an ops incident can take the feature
-// dark without a redeploy. Default-on means the scheduler boots with the
-// process — desktop users get monitoring "for free" once they upgrade.
 const MONITORING_ENABLED = process.env.MONITORING_ENABLED !== "0";
 let monitoringScheduler: Scheduler | null = null;
 if (MONITORING_ENABLED) {

@@ -726,3 +726,81 @@ describe("getMonitoringSchedulerStatus (Tier 3 #12 — /health hook)", () => {
     });
   });
 });
+
+// Tier 5 #T6 — POST /jobs/:id/run wired to a REAL Scheduler instance.
+// All other route tests use a stub; this proves the contract end-to-end:
+//   - route resolves the job, hands it to scheduler.runJobNow
+//   - scheduler claims a runId via insertRunning, fires runOne (background)
+//   - the background run finalizes the row to a terminal status
+//   - audit_log records monitoring.job.run_manual with the real runId
+describe("POST /jobs/:id/run + real Scheduler (#T6)", () => {
+  it("manual trigger drives a real Scheduler to a terminal run row", async () => {
+    // Lazy import inside the test so the scheduler module isn't loaded for
+    // every other route test (some setup/teardown ordering matters less, but
+    // this also keeps the heavy dep out of the cold-start path of the file).
+    const { Scheduler } = await import("../services/monitoring/scheduler.ts");
+    const { FakeClock } = await import("../services/monitoring/clock.ts");
+    type RealRunOutcome = { status: "ok"; alertsCreated: number };
+    const noopOk = {
+      run: async (): Promise<RealRunOutcome> => ({
+        status: "ok",
+        alertsCreated: 0,
+      }),
+    };
+
+    const T = new Date("2026-04-28T10:00:00.000Z");
+    const realScheduler = new Scheduler({
+      clock: new FakeClock(T),
+      runner: noopOk,
+      // Long tickIntervalMs so the scheduler doesn't auto-tick during the
+      // test; we drive runJobNow directly via the route.
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+    await realScheduler.start();
+    setMonitoringScheduler(realScheduler);
+
+    const app = buildTestApp();
+    const create = await postJson(
+      app,
+      "/api/v1/monitoring/jobs",
+      validDosarBody,
+    );
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await app.request(
+      `/api/v1/monitoring/jobs/${created.data.id}/run`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(202);
+    const json = (await res.json()) as { data: { runId: number } };
+    expect(json.data.runId).toBeGreaterThan(0);
+
+    // Scheduler runOne is fire-and-forget; wait for the inflight set to drain
+    // by polling the public status. With a noop runner this resolves on the
+    // next microtask cluster.
+    for (let i = 0; i < 50; i++) {
+      const status = realScheduler.getStatus();
+      if (status.inflight === 0) break;
+      await new Promise((r) => setImmediate(r));
+    }
+
+    await realScheduler.stop();
+
+    const run = getDb()
+      .prepare(`SELECT id, status FROM monitoring_runs WHERE id = ?`)
+      .get(json.data.runId) as { id: number; status: string };
+    expect(run).toBeTruthy();
+    expect(run.status).toBe("ok");
+
+    const events = getAuditEvents({
+      ownerId: "local",
+      action: "monitoring.job.run_manual",
+    });
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0].detail_json)).toEqual({
+      runId: json.data.runId,
+    });
+  });
+});

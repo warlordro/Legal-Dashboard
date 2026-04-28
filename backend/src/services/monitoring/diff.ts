@@ -62,9 +62,15 @@ export interface DiffInput {
   prevSnapshot: DiffSnapshotPayload | null;
   currentDosar: Dosar | null;
   alertConfig: AlertConfig;
-  // ISO timestamp used to dedup transition alerts (dosar_new / dosar_disappeared)
-  // across episodes. Each new tick gets a fresh now → fresh dedup_key.
+  // ISO timestamp; embedded in alert detail so the UI can render "observed at".
+  // No longer used for dedup keys (#19 — runId replaced it for compactness +
+  // direct lineage to the run row + guaranteed uniqueness regardless of clock).
   now: string;
+  // Tier 4 #19: stable id of the run that produced this diff. Used as the
+  // time-anchor in transition dedup keys (dosar_new / dosar_disappeared) so
+  // each fresh appearance/disappearance episode gets a distinct key without
+  // depending on monotonic ISO timestamps.
+  runId: number;
 }
 
 export interface DiffOutput {
@@ -164,7 +170,7 @@ function parseSedintaKey(key: string): {
 // --- main -----------------------------------------------------------------
 
 export function diffDosarSoap(input: DiffInput): DiffOutput {
-  const { prevSnapshot, currentDosar, alertConfig, now } = input;
+  const { prevSnapshot, currentDosar, alertConfig, now, runId } = input;
   const filterFingerprint = computeFilterFingerprint(alertConfig);
 
   // Pre-diff filter: dosar that doesn't pass stadii/categorii is treated as
@@ -195,7 +201,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
         severity: "warning",
         title: "Dosarul nu mai apare la PortalJust",
         detail: { observedAt: now },
-        dedupKey: `dosar_disappeared|${now}`,
+        dedupKey: `dosar_disappeared|${runId}`,
       });
     }
     return { newSnapshot, alerts, resetReason: null };
@@ -210,7 +216,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
       severity: "info",
       title: "Dosarul a aparut la PortalJust",
       detail: { observedAt: now, sedinteCount: filteredDosar.sedinte.length },
-      dedupKey: `dosar_new|${now}`,
+      dedupKey: `dosar_new|${runId}`,
     });
     return { newSnapshot, alerts, resetReason: null };
   }

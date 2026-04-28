@@ -91,15 +91,34 @@ export function finalize(runId: number, input: FinalizeInput): boolean {
 // Called once at scheduler boot, BEFORE the first tick — otherwise tick #1
 // would see stale rows and exclude legitimately-due jobs from claim.
 //
+// Tier 4 #20: stamp `error_code='CRASH_RECOVERY'` on every recovered row so
+// audit consumers can distinguish a graceful drain ('aborted' from stop()
+// with no error_code) from a crash ('aborted' with CRASH_RECOVERY). Without
+// this column, the two collapse into the same `last_status='error'` after
+// applyJobOutcome runs and we lose the diagnostic. We DON'T overwrite an
+// existing error_code (defense in depth — recovery should never run while
+// finalize is happening, but if it did we wouldn't want to clobber the
+// failure reason).
+//
 // Returns the number of rows recovered (useful for boot logs / metrics).
 export function recoverOrphanRuns(): number {
   const info = getDb()
     .prepare(
       `UPDATE monitoring_runs
          SET status = 'aborted',
-             ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+             ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+             error_code = COALESCE(error_code, 'CRASH_RECOVERY'),
+             error_message = COALESCE(error_message, 'Recovered orphan running row at boot')
        WHERE status = 'running'`,
     )
     .run();
+  return info.changes;
+}
+
+export function purgeOldRuns(retentionDays = 90): number {
+  const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+  const info = getDb()
+    .prepare(`DELETE FROM monitoring_runs WHERE started_at < ?`)
+    .run(cutoff);
   return info.changes;
 }

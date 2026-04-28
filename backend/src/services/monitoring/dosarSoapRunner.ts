@@ -107,6 +107,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
           currentDosar,
           alertConfig,
           now: nowIso,
+          runId,
         });
 
         // C2 hardening: snapshot + alerts must commit together. Without this,

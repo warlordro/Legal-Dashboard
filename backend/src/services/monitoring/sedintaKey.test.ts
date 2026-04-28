@@ -192,3 +192,57 @@ describe("buildSedintaKeyWithoutSolutie", () => {
     expect(a).not.toBe(b);
   });
 });
+
+// Tier 6 H4: parseSedintaKey (in diff.ts) splits on `|` and assumes only the
+// trailing `solutie` segment can legitimately contain that character. If a
+// non-trailing segment ever contained `|`, parsing would silently misalign
+// boundaries → wrong bucket → false termen_changed/solutie_aparuta alerts.
+// Lock that contract via assertion + tests.
+describe("buildSedintaKey — pipe-character defense (H4)", () => {
+  it("throws when complet contains '|'", () => {
+    expect(() =>
+      buildSedintaKey({
+        stadiuProcesual: "Apel",
+        data: "2026-04-19",
+        ora: "10:00",
+        complet: "Judecator A | B",
+        solutie: "",
+      }),
+    ).toThrow(/'complet' segment contains '\|'/);
+  });
+
+  it("throws when stadiu contains '|' after normalization", () => {
+    expect(() =>
+      buildSedintaKey({
+        stadiuProcesual: "Fond | Apel",
+        data: "2026-04-19",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "",
+      }),
+    ).toThrow(/'stadiu' segment contains '\|'/);
+  });
+
+  it("solutie containing '|' is allowed (round-trips as last segment)", () => {
+    const k = buildSedintaKey({
+      stadiuProcesual: "Fond",
+      data: "2026-04-19",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "amana | suspenda",
+    });
+    expect(k).toBe("fond|2026-04-19|10:00|C1|amana | suspenda");
+  });
+
+  it("buildSedintaKeyWithoutSolutie also asserts on leading segments", () => {
+    expect(() =>
+      buildSedintaKeyWithoutSolutie({
+        stadiuProcesual: "Apel",
+        data: "2026-04-19",
+        ora: "10:00",
+        complet: "Judecator | Other",
+        solutie: "",
+      }),
+    ).toThrow(/'complet' segment contains '\|'/);
+  });
+});
