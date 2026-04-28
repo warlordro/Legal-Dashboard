@@ -236,3 +236,175 @@ export const api = {
     },
   },
 };
+
+// ===== Monitoring (PR-3) ====================================================
+// /api/v1/monitoring uses the v1 envelope shape `{data, error?, requestId}`.
+// Different from the legacy endpoints above, so it has its own helper. All
+// fetches live here so the renderer-fetch lint hook stays satisfied.
+
+export type MonitoringJobKind = "dosar_soap" | "name_soap" | "aviz_rnpm";
+export type MonitoringJobStatus = "ok" | "error" | "partial" | "skipped";
+
+export interface MonitoringJob {
+  id: number;
+  owner_id: string;
+  kind: MonitoringJobKind;
+  target_json: string;
+  target_hash: string;
+  cadence_sec: number;
+  active: number;
+  paused_until: string | null;
+  alert_config_json: string;
+  next_run_at: string;
+  last_run_at: string | null;
+  last_status: MonitoringJobStatus | null;
+  fail_streak: number;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface MonitoringListResult {
+  rows: MonitoringJob[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+interface MonitoringEnvelopeOk<T> { data: T; requestId: string; error?: undefined }
+interface MonitoringEnvelopeError {
+  data: null;
+  error: { code: string; message: string; details?: unknown };
+  requestId: string;
+}
+
+export class MonitoringApiError extends Error {
+  code: string;
+  status: number;
+  details?: unknown;
+  constructor(code: string, message: string, status: number, details?: unknown) {
+    super(message);
+    this.code = code;
+    this.status = status;
+    this.details = details;
+  }
+}
+
+async function unwrapMonitoring<T>(res: Response): Promise<T> {
+  let body: MonitoringEnvelopeOk<T> | MonitoringEnvelopeError;
+  try {
+    body = (await res.json()) as MonitoringEnvelopeOk<T> | MonitoringEnvelopeError;
+  } catch {
+    throw new MonitoringApiError("invalid_response", "Raspuns invalid de la server.", res.status);
+  }
+  if (!res.ok || (body as MonitoringEnvelopeError).error) {
+    const e = (body as MonitoringEnvelopeError).error;
+    throw new MonitoringApiError(
+      e?.code ?? "unknown_error",
+      e?.message ?? "Eroare necunoscuta",
+      res.status,
+      e?.details,
+    );
+  }
+  return (body as MonitoringEnvelopeOk<T>).data;
+}
+
+export interface CreateDosarMonitoringInput {
+  numar_dosar: string;
+  cadence_sec?: number;
+  notes?: string;
+  client_request_id?: string;
+}
+
+export interface CreateNameMonitoringInput {
+  name_normalized: string;
+  name_kind: "fizic" | "juridic";
+  institutie?: string[];
+  cadence_sec?: number;
+  notes?: string;
+  client_request_id?: string;
+}
+
+export const monitoring = {
+  list: async (params: {
+    page?: number;
+    pageSize?: number;
+    kind?: MonitoringJobKind;
+    active?: boolean;
+  } = {}): Promise<MonitoringListResult> => {
+    const search = new URLSearchParams();
+    if (params.page) search.set("page", String(params.page));
+    if (params.pageSize) search.set("pageSize", String(params.pageSize));
+    if (params.kind) search.set("kind", params.kind);
+    if (params.active !== undefined) search.set("active", String(params.active));
+    const qs = search.toString();
+    const res = await fetch(`/api/v1/monitoring/jobs${qs ? "?" + qs : ""}`);
+    return unwrapMonitoring<MonitoringListResult>(res);
+  },
+
+  createDosar: async (input: CreateDosarMonitoringInput): Promise<MonitoringJob> => {
+    const res = await fetch(`/api/v1/monitoring/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "dosar_soap",
+        target: { numar_dosar: input.numar_dosar },
+        cadence_sec: input.cadence_sec ?? 14400,
+        notes: input.notes,
+        client_request_id: input.client_request_id,
+      }),
+    });
+    return unwrapMonitoring<MonitoringJob>(res);
+  },
+
+  createName: async (input: CreateNameMonitoringInput): Promise<MonitoringJob> => {
+    const target: Record<string, string | string[]> = {
+      name_normalized: input.name_normalized,
+      name_kind: input.name_kind,
+    };
+    if (input.institutie && input.institutie.length > 0) {
+      target.institutie = input.institutie;
+    }
+    const res = await fetch(`/api/v1/monitoring/jobs`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "name_soap",
+        target,
+        cadence_sec: input.cadence_sec ?? 86400,
+        notes: input.notes,
+        client_request_id: input.client_request_id,
+      }),
+    });
+    return unwrapMonitoring<MonitoringJob>(res);
+  },
+
+  patch: async (
+    id: number,
+    patch: { active?: boolean; cadence_sec?: number; notes?: string | null },
+  ): Promise<MonitoringJob> => {
+    const res = await fetch(`/api/v1/monitoring/jobs/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    });
+    return unwrapMonitoring<MonitoringJob>(res);
+  },
+
+  deleteJob: async (id: number): Promise<void> => {
+    const res = await fetch(`/api/v1/monitoring/jobs/${id}`, { method: "DELETE" });
+    await unwrapMonitoring<{ deleted: boolean }>(res);
+  },
+};
+
+export function formatMonitoringTarget(job: MonitoringJob): string {
+  try {
+    const t = JSON.parse(job.target_json) as Record<string, unknown>;
+    if (job.kind === "dosar_soap" && typeof t.numar_dosar === "string") return t.numar_dosar;
+    if (job.kind === "name_soap" && typeof t.name_normalized === "string") return t.name_normalized;
+    if (job.kind === "aviz_rnpm" && typeof t.identificator === "string") return t.identificator;
+    return job.target_json;
+  } catch {
+    return job.target_json;
+  }
+}

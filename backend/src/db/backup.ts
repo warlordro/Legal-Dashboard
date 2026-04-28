@@ -1,23 +1,38 @@
 import path from "path";
 import fsPromises from "fs/promises";
 import { getDb, getDbPath, closeDb } from "./schema.ts";
+import { RWLock } from "../util/rwlock.ts";
 
-// Single in-process serialization point for DB-mutating maintenance ops
-// (restore + daily backup). On desktop these never run concurrently in normal
-// use, but `runDailyBackup` is scheduled and a user-initiated restore can
-// theoretically interleave — closing the DB mid-`db.backup()` corrupts the
-// destination. Promise chain is enough for single-process scope; web-mode
-// would replace this with a row-lock or advisory lock in the gateway.
-let maintenanceChain: Promise<unknown> = Promise.resolve();
+// Single in-process maintenance gate. Restore + daily backup acquire WRITE
+// (exclusive — restore closes the DB handle and atomically renames the file;
+// daily backup snapshots the live DB). The monitoring scheduler acquires
+// READ (shared) around each tick so concurrent ticks interleave but cannot
+// straddle a restore that would invalidate their handle. Writer preference
+// prevents a steady reader stream from starving the daily backup. Promise
+// chain is enough for single-process scope; web-mode would replace this
+// with a row-lock or advisory lock in the gateway.
+const maintenanceLock = new RWLock();
 
+// Exclusive writer (restore + backup). Renamed conceptually from
+// `withMaintenanceLock` — left as the public name so existing call sites
+// here keep working, but readers should now go through `withMaintenanceRead`.
 function withMaintenanceLock<T>(fn: () => Promise<T>): Promise<T> {
-  // `.then(fn, fn)` uses the same handler for fulfilled + rejected so a prior
-  // failure does not block the next op (chain self-heals).
-  const next = maintenanceChain.then(fn, fn);
-  // Update the chain head with a settled (never-rejecting) wrapper so a thrown
-  // op here does not poison every future op behind it.
-  maintenanceChain = next.then(() => undefined, () => undefined);
-  return next;
+  return maintenanceLock.withWrite(fn);
+}
+
+// Test-only export of the writer side, so the scheduler's stop()-race
+// regression can hold the write lock open without spinning a real backup
+// (runDailyBackup does I/O and can't be paused mid-flight). Production code
+// goes through restoreFromBackup / runDailyBackup.
+export function _withMaintenanceWriteForTest<T>(fn: () => Promise<T>): Promise<T> {
+  return maintenanceLock.withWrite(fn);
+}
+
+// Shared reader. Used by the monitoring scheduler to coordinate with the
+// maintenance gate — multiple ticks may run in parallel, but a queued
+// writer (backup/restore) blocks new readers from cutting in.
+export function withMaintenanceRead<T>(fn: () => Promise<T>): Promise<T> {
+  return maintenanceLock.withRead(fn);
 }
 
 // Single-line JSON audit lines on stdout. Same shape as `restore` /

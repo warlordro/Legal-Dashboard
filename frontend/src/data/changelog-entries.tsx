@@ -1,4 +1,4 @@
-import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench } from "lucide-react";
+import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity } from "lucide-react";
 
 export interface ChangeSection {
   title: string;
@@ -17,6 +17,56 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.1.0",
+    date: "27 Aprilie 2026",
+    subtitle: "PR-3 — monitorizare automata: schema + API + UI",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Tab nou \"Monitorizare\" — adauga dosare urmarite automat",
+        content:
+          "Noua sectiune din sidebar permite adaugarea unui dosar pentru verificare recurenta. Selectezi cadenta (10 minute, 1 ora, 6 ore sau 24 ore) si dosarul intra in coada. La fel, in pagina Cautare Dosare, in panoul detaliat al fiecarui dosar gasesti acum butonul \"Monitorizeaza schimbari\" — un click si dosarul e in lista de monitorizare, fara sa duplici cautari.",
+        bullets: [
+          "Idempotent la double-click: doua click-uri rapide pe acelasi dosar nu creeaza doua joburi — feedback inline iti spune \"Adaugat\" sau \"Deja monitorizat\".",
+          "Pauza / reia / sterge — fiecare job poate fi pus in pauza temporar fara a-l pierde, sau sters cu confirmare.",
+          "Toate joburile sunt scope-uite per user — pregatit pentru modul web (PR-9) cand mai multi utilizatori vor folosi aceeasi instanta.",
+        ],
+      },
+      {
+        title: "Schema robusta cu hash determinist + dedup pe alerte",
+        content:
+          "Migrarea 0003 introduce 4 tabele noi: monitoring_jobs (joburi), monitoring_snapshots (rezultate brute), monitoring_alerts (alerte deduped) si monitoring_runs (audit per executie). Hashing-ul tintei foloseste JSON canonic (chei sortate, fara whitespace) astfel incat acelasi dosar sa produca acelasi hash indiferent de ordinea cimpurilor in payload — previne duplicate logice silentioase.",
+        bullets: [
+          "Index partial pe (next_run_at) WHERE active=1 — scheduler-ul (PR-4) selecteaza joburile due fara full scan, ramane rapid si la mii de joburi.",
+          "Cheia de sedinta include stadiul (Apel/Fond/etc.) — fix critic fata de proiectele noastre anterioare unde aceeasi data + ora pe doua stadii diferite cauzau coliziuni de identificare.",
+          "monitoring_alerts are UNIQUE pe (job_id, dedup_key) — un termen schimbat nu te bombardeaza cu alerte la fiecare verificare.",
+        ],
+      },
+      {
+        title: "API versionat + audit complet pe mutatii",
+        content:
+          "Noua suprafata /api/v1/monitoring/jobs are envelope standard {data, error?, requestId}. Fiecare request primeste un request-id (echo-uit pe header si in body) — daca o operatie esueaza, copiezi un singur id si serverul iti arata exact ce s-a intimplat. Toate adaugarile / modificarile / stergerile se inregistreaza in audit_log (introdus in PR-2) — pe desktop e mostly invisible, dar in modul web devine baza pentru un panel admin.",
+        bullets: [
+          "Cross-user isolation verificata in tests: GET/PATCH/DELETE pe un job al altui user returneaza 404 (nu 403, ca sa nu deconspire existenta).",
+          "POST cu client_request_id duplicat → 200 si jobul existent (idempotenta opt-in pentru retry-uri de retea).",
+          "Validare Zod stricta pe payload: chei in plus, kind necunoscut, numar de dosar prost formatat → 422 cu detalii care ajung in UI.",
+        ],
+      },
+      {
+        title: "Stadiu si ce urmeaza",
+        content:
+          "Scheduler-ul automat (workerul care chiar interogheaza PortalJust) ramane planificat pentru PR-4. In aceasta versiune poti adauga / sterge / pune in pauza joburi — verificarile efective se vor relua automat cu urmatoarea actualizare. Tot UI-ul si API-ul sunt insa gata. Pe desktop, modulul e activ implicit (MONITORING_ENABLED=1 din electron/main.js); setand MONITORING_ENABLED=0 in mediu, ruta devine inerta — kill switch in caz de problema.",
+      },
+      {
+        title: "Verificare",
+        content:
+          "192 teste backend verde (de la 99): 93 noi acopera canonical JSON hash, sedinta key cross-cosmetic-drift, Zod schemas (discriminated union, .strict() reject, refine non-empty, institutie sort+dedup), repository idempotency, owner isolation end-to-end, audit writes pe mutatii (verificat tx atomic), request-id propagation, malformed JSON / unknown kind / numar invalid -> 4xx-uri corecte. Type-check + biome + smoke launch trecute. Bonus: post-review hardening (4 valuri remediere) absorbit pre-merge — schema fix strftime ISO Z, cadence default 14400, atomic audit + recompute next_run_at la PATCH, parseSqliteUtc defensive helper.",
+      },
+    ],
+  },
   {
     version: "v2.0.13",
     date: "27 Aprilie 2026",

@@ -5,6 +5,26 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
+// Parse a timestamp emitted by the backend into a Date. Two formats may
+// appear:
+//   - ISO with explicit `Z`: "2026-04-27T12:34:56.789Z" (PR-3+ migrations use
+//     strftime('%Y-%m-%dT%H:%M:%fZ','now')) — V8 parses as UTC, correct.
+//   - SQLite naive datetime: "2026-04-27 12:34:56" (legacy rows from older
+//     migrations using datetime('now')) — V8 parses as LOCAL time, which
+//     drifts by the user's UTC offset. We append `Z` so it's read as UTC.
+//
+// Returns NaN-Date for unparseable input — callers can guard with isNaN.
+export function parseSqliteUtc(ts: string | null | undefined): Date {
+  if (!ts) return new Date(NaN);
+  // Already ISO with timezone (Z or +HH:MM)? Pass through.
+  if (/T.*(Z|[+-]\d{2}:?\d{2})$/.test(ts)) return new Date(ts);
+  // Naive "YYYY-MM-DD HH:MM:SS[.fff]" — coerce to UTC.
+  const naive = ts.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}:\d{2}(?:\.\d+)?)$/);
+  if (naive) return new Date(`${naive[1]}T${naive[2]}Z`);
+  // Anything else — best-effort, may still drift.
+  return new Date(ts);
+}
+
 export function formatDate(dateStr: string): string {
   if (!dateStr) return "-";
   try {

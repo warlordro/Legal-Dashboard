@@ -30,7 +30,14 @@ export function mountStaticFrontend(app: Hono, baseDir: string): void {
 
   app.get("/*", async (c) => {
     const urlPath = c.req.path;
-    if (urlPath.startsWith("/api/") || urlPath === "/health") return;
+    // API / health paths must never fall through to the SPA fallback. If we
+    // reached this handler it means no /api router matched — surface a proper
+    // 404 with JSON so the client doesn't try to JSON.parse an HTML index page
+    // (which manifested as "Raspuns invalid de la server" + a Hono "Context
+    // is not finalized" error in the log).
+    if (urlPath.startsWith("/api/") || urlPath === "/health") {
+      return c.json({ error: { code: "not_found", message: "Route not found" } }, 404);
+    }
 
     // Decode and resolve the requested file path
     let decodedPath: string;
