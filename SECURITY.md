@@ -74,6 +74,20 @@ and treat the current defaults as insufficient.
   and `/api/termene/load-more` to prevent an attacker (or a buggy client) from
   amplifying one request into thousands of upstream SOAP calls.
 
+### Background monitoring activity
+
+The monitoring scheduler (introduced in v2.1.0/v2.1.1, `backend/src/services/monitoring/scheduler.ts`) runs background jobs that periodically refresh dosar / termene state from PortalJust SOAP. It inherits the desktop trust model — same OS user, same SQLite, no extra network surface — and adds the following controls:
+
+- **Single-instance enforcement.** The scheduler runs only inside the Electron main process, which is itself gated by `app.requestSingleInstanceLock()`. There is no second writer racing the scheduler against the same SQLite file.
+- **Cooperative cancellation.** Every outbound SOAP request is wired through an `AbortSignal` chained to: (a) per-request timeout (`SOAP_REQUEST_TIMEOUT_MS`), and (b) the scheduler's shutdown signal. App-quit flushes in-flight runs instead of leaking sockets or holding SQLite WAL locks past process exit.
+- **Maintenance lock (RWLock).** Backup / restore acquire `withMaintenanceWrite` (writer-exclusive); scheduler ticks acquire `withMaintenanceRead`. Backups cannot observe a half-applied job outcome, and the scheduler cannot start a new tick while a backup is running. The lock is writer-preference, so a maintenance request cannot be starved by a busy tick loop.
+- **Outcome atomicity.** `finalizeRun` + `markJobOutcome` are wrapped in a single `db.transaction`, so a job's `runs` row, `next_run_at`, and `last_status` move together. A crash mid-tick cannot leave a "succeeded but never advanced" job. Orphaned `running` runs from a previous process are recovered on boot (`recoverOrphanRuns`).
+- **Source-error suppression.** A job that fails 5 times consecutively against the upstream source is marked `source_error` and stops scheduling until manual intervention. This bounds noise (audit log, console, retries) when PortalJust is degraded — a single outage cannot generate unbounded retries or fill the audit log.
+- **Owner scoping.** Every scheduler-driven mutation carries the owning `owner_id` into `recordAudit`. Cross-owner mutations from the API surface are rejected as `404` (not `403`) so status codes do not disclose the existence of other owners' jobs; the differentiation is preserved only in the audit log (`*_denied` actions).
+- **No external network beyond the existing allowlist.** The scheduler only calls the same PortalJust SOAP endpoints already used by foreground search. It does not introduce new outbound hosts and is bound by the same external-URL allowlist.
+
+The scheduler does **not** add authentication, encryption, or rate-limiting to its own outbound calls — those are inherited from the foreground SOAP path. It also does **not** run on the web (server-mode) deployment until per-owner rate-limiting and per-tenant isolation land; see "Out of scope".
+
 ### Data-at-rest / data-exported
 
 - **XLSX formula-injection escape**. On export, any string cell whose value
@@ -160,3 +174,4 @@ the report should be private. Please include:
 |---|---|
 | 2026-04-17 | Initial security model: Electron hardening, safeStorage-backed keys, loopback bind, CSP, real-IP rate limit, SOAP fan-out cap, XLSX formula escape. |
 | 2026-04-18 | Documented accept of `xlsx` / `xlsx-js-style` parser CVEs (write-only usage, no reachable surface). Deferred items tracked in `AUDIT_DEFERRED_2026-04-18.md`. |
+| 2026-04-28 | Added "Background monitoring activity" section: scheduler trust model, AbortSignal cancellation, RWLock maintenance gate, outcome atomicity, source_error suppression, owner-scoped audit. |
