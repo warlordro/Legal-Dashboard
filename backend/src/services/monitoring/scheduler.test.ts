@@ -19,7 +19,7 @@ import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
-import { _withMaintenanceWriteForTest } from "../../db/backup.ts";
+import { withMaintenanceWrite } from "../../db/backup.ts";
 import { FakeClock } from "./clock.ts";
 import {
   Scheduler,
@@ -372,7 +372,7 @@ describe("Scheduler — stop() race against parked tick", () => {
     // Hold the writer lock open. Tick that we fire next will park inside
     // withMaintenanceRead until releaseWriter() is called.
     let releaseWriter: (() => void) | undefined;
-    const writerHeld = _withMaintenanceWriteForTest(
+    const writerHeld = withMaintenanceWrite(
       () =>
         new Promise<void>((r) => {
           releaseWriter = r;
@@ -547,7 +547,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     // Queue a writer behind the live reader. Writer-preference RWLock keeps
     // it parked until the in-flight runOne releases.
     let writerEntered = false;
-    const writerPromise = _withMaintenanceWriteForTest(async () => {
+    const writerPromise = withMaintenanceWrite(async () => {
       writerEntered = true;
     });
 

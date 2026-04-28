@@ -13,18 +13,16 @@ import { RWLock } from "../util/rwlock.ts";
 // with a row-lock or advisory lock in the gateway.
 const maintenanceLock = new RWLock();
 
-// Exclusive writer (restore + backup). Renamed conceptually from
-// `withMaintenanceLock` — left as the public name so existing call sites
-// here keep working, but readers should now go through `withMaintenanceRead`.
-function withMaintenanceLock<T>(fn: () => Promise<T>): Promise<T> {
-  return maintenanceLock.withWrite(fn);
-}
-
-// Test-only export of the writer side, so the scheduler's stop()-race
-// regression can hold the write lock open without spinning a real backup
-// (runDailyBackup does I/O and can't be paused mid-flight). Production code
-// goes through restoreFromBackup / runDailyBackup.
-export function _withMaintenanceWriteForTest<T>(fn: () => Promise<T>): Promise<T> {
+// Exclusive writer for restore + daily backup. Public: tests need to hold
+// the writer side to assert reader/writer interleaving (without spinning the
+// real runDailyBackup, which does I/O and can't be paused mid-flight).
+// Production callers are restoreFromBackup() and runDailyBackup() below.
+//
+// Tier 3 #17: previously exported as the test-only `_withMaintenanceWriteForTest`
+// alongside a private `withMaintenanceWrite`. The two were the same primitive —
+// only naming made one "test-only". Promoted to a single public symbol so the
+// production module no longer carries test-marked API.
+export function withMaintenanceWrite<T>(fn: () => Promise<T>): Promise<T> {
   return maintenanceLock.withWrite(fn);
 }
 
@@ -168,7 +166,7 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
   if (!RESTORE_NAME_RE.test(name) || name.includes("/") || name.includes("\\")) {
     throw new Error("Nume backup invalid");
   }
-  return withMaintenanceLock(() => restoreFromBackupImpl(name));
+  return withMaintenanceWrite(() => restoreFromBackupImpl(name));
 }
 
 async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: string }> {
@@ -324,7 +322,7 @@ export async function runDailyBackup(): Promise<void> {
   // Serialize with restoreFromBackup so a user-triggered restore that closes
   // the DB cannot interleave with `db.backup()` running from this scheduler.
   // Lock is fast-path on desktop (no contention in practice).
-  return withMaintenanceLock(runDailyBackupImpl);
+  return withMaintenanceWrite(runDailyBackupImpl);
 }
 
 async function runDailyBackupImpl(): Promise<void> {
