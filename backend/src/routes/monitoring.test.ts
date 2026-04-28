@@ -248,7 +248,7 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
     expect(json.error.code).toBe("not_found");
   });
 
-  it("PATCH on another owner's job returns 404", async () => {
+  it("PATCH on another owner's job returns 404 + audits update_denied", async () => {
     const app = buildTestApp();
     const aliceJobId = await createJobAs(app, "alice");
 
@@ -258,9 +258,24 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
       body: JSON.stringify({ active: false }),
     });
     expect(res.status).toBe(404);
+
+    // C5 hardening: cross-owner attempt is recorded as denied so the
+    // antifraud trail captures it. Both 404 paths (denied vs not_found)
+    // return identical bodies — only the audit log differentiates.
+    const denied = getAuditEvents({
+      ownerId: "bob",
+      action: "monitoring.job.update_denied",
+    });
+    expect(denied).toHaveLength(1);
+    expect(denied[0].target_id).toBe(String(aliceJobId));
+    expect(denied[0].outcome).toBe("denied");
+
+    // No "updated" audit was emitted (Alice's row is untouched).
+    const ok = getAuditEvents({ action: "monitoring.job.updated" });
+    expect(ok).toHaveLength(0);
   });
 
-  it("DELETE on another owner's job returns 404 and leaves the row intact", async () => {
+  it("DELETE on another owner's job returns 404 + audits delete_denied + leaves row intact", async () => {
     const app = buildTestApp();
     const aliceJobId = await createJobAs(app, "alice");
 
@@ -270,11 +285,39 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
     });
     expect(res.status).toBe(404);
 
+    const denied = getAuditEvents({
+      ownerId: "bob",
+      action: "monitoring.job.delete_denied",
+    });
+    expect(denied).toHaveLength(1);
+    expect(denied[0].target_id).toBe(String(aliceJobId));
+    expect(denied[0].outcome).toBe("denied");
+
+    // No "deleted" audit (the row survives Bob's denied attempt).
+    const ok = getAuditEvents({ action: "monitoring.job.deleted" });
+    expect(ok).toHaveLength(0);
+
     // Alice can still read her own job.
     const aliceRead = await app.request(`/api/v1/monitoring/jobs/${aliceJobId}`, {
       headers: { "x-test-owner": "alice" },
     });
     expect(aliceRead.status).toBe(200);
+  });
+
+  it("PATCH on a non-existent id does NOT emit a denied audit row", async () => {
+    // Distinguishes denied (cross-owner row exists) from not_found
+    // (id doesn't exist anywhere) — only the former is audit-worthy noise.
+    // A regression that audits all 404s would flood the log on a fuzzer.
+    const app = buildTestApp();
+    const res = await app.request(`/api/v1/monitoring/jobs/999999`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ active: false }),
+    });
+    expect(res.status).toBe(404);
+
+    const denied = getAuditEvents({ action: "monitoring.job.update_denied" });
+    expect(denied).toHaveLength(0);
   });
 
   it("each owner sees only their own jobs in list", async () => {
@@ -326,7 +369,13 @@ describe("PATCH /jobs/:id — write paths", () => {
     const events = getAuditEvents({ ownerId: "local", action: "monitoring.job.updated" });
     expect(events).toHaveLength(1);
     expect(events[0].target_id).toBe(String(created.data.id));
-    expect(JSON.parse(events[0].detail_json)).toEqual({ fields: ["active"] });
+    // C5 hardening: detail captures before/after for each changed field, not
+    // just which keys moved. The audit log now lets you reconstruct the value
+    // change without joining against monitoring_jobs (which may be deleted).
+    expect(JSON.parse(events[0].detail_json)).toEqual({
+      fields: ["active"],
+      changed: { active: { before: 1, after: 0 } },
+    });
   });
 
   it("rejects empty PATCH body via Zod refine", async () => {
@@ -372,6 +421,15 @@ describe("DELETE /jobs/:id — write path", () => {
     const events = getAuditEvents({ ownerId: "local", action: "monitoring.job.deleted" });
     expect(events).toHaveLength(1);
     expect(events[0].target_id).toBe(String(created.data.id));
+
+    // C5 hardening: pre-state captured so the audit log preserves the full
+    // evidence of what was deleted (kind, target, cadence, alert config).
+    // Without this the row vanishes and only the id remains in the log.
+    const detail = JSON.parse(events[0].detail_json) as Record<string, unknown>;
+    expect(detail.kind).toBe("dosar_soap");
+    expect(detail.cadence_sec).toBe(3600);
+    expect(detail.target).toEqual({ numar_dosar: "1234/180/2024" });
+    expect(detail.alert_config).toBeDefined();
 
     const after = await app.request(`/api/v1/monitoring/jobs/${created.data.id}`);
     expect(after.status).toBe(404);
