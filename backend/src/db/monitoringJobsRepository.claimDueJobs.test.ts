@@ -26,7 +26,7 @@ import os from "os";
 import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { claimDueJobs } from "./monitoringJobsRepository.ts";
+import { claimDueJobs, markJobOutcome } from "./monitoringJobsRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 let tmpRoot: string;
@@ -171,5 +171,55 @@ describe("claimDueJobs — atomic side effect", () => {
     const second = claimDueJobs({ now: NOW, limit: 10 });
     expect(first.length).toBe(1);
     expect(second.length).toBe(0);
+  });
+});
+
+// Tier 3 #10 — owner_id end-to-end enforcement on the scheduler outcome write.
+// markJobOutcome USED to UPDATE WHERE id = ? without an owner_id constraint.
+// In a single-owner desktop world the bug was dormant, but the moment a web
+// deploy lands with multiple owners, a stale or spoofed jobId would let the
+// scheduler clobber a different owner's row. The fix: ownerId is REQUIRED on
+// MarkJobOutcomeInput AND added to the WHERE clause; the function returns a
+// boolean so callers can distinguish "no row matched" from a normal write.
+describe("markJobOutcome — owner_id scoping", () => {
+  it("updates the row when ownerId matches", () => {
+    const id = seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z" });
+    const updated = markJobOutcome({
+      ownerId: OWNER,
+      jobId: id,
+      lastRunAt: NOW,
+      lastStatus: "ok",
+      failStreak: 0,
+      nextRunAt: "2026-04-28T11:00:00.000Z",
+    });
+    expect(updated).toBe(true);
+
+    const row = getDb()
+      .prepare("SELECT last_status, fail_streak FROM monitoring_jobs WHERE id = ?")
+      .get(id) as { last_status: string; fail_streak: number };
+    expect(row.last_status).toBe("ok");
+    expect(row.fail_streak).toBe(0);
+  });
+
+  it("does NOT mutate the row when ownerId differs (cross-owner guard)", () => {
+    const id = seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z" });
+    const before = getDb()
+      .prepare("SELECT last_status, fail_streak, next_run_at FROM monitoring_jobs WHERE id = ?")
+      .get(id) as { last_status: string | null; fail_streak: number; next_run_at: string };
+
+    const updated = markJobOutcome({
+      ownerId: "someone-else",
+      jobId: id,
+      lastRunAt: NOW,
+      lastStatus: "error",
+      failStreak: 99,
+      nextRunAt: "2099-01-01T00:00:00.000Z",
+    });
+    expect(updated).toBe(false);
+
+    const after = getDb()
+      .prepare("SELECT last_status, fail_streak, next_run_at FROM monitoring_jobs WHERE id = ?")
+      .get(id) as { last_status: string | null; fail_streak: number; next_run_at: string };
+    expect(after).toEqual(before);
   });
 });

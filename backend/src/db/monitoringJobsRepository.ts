@@ -312,7 +312,16 @@ export interface ClaimedJob {
 // mutate the scheduler's internal state. The scheduler uses this write
 // instead — single UPDATE, no transaction needed (sole writer for these
 // columns is the scheduler itself, ordered by ticks).
+//
+// Tier 3 #10: ownerId is REQUIRED and added to the WHERE clause as a
+// belt-and-braces guard. The scheduler always knows the owner (claim returns
+// it on the row), so a defense-in-depth `AND owner_id = ?` ensures that even
+// if a future caller passes a jobId from a different owner — or owner_id
+// gets corrupted in flight — the UPDATE silently no-ops instead of clobbering
+// another owner's row. Returns true when a row was actually updated so callers
+// can detect cross-owner attempts at the boundary.
 export interface MarkJobOutcomeInput {
+  ownerId: string;
   jobId: number;
   lastRunAt: string;
   lastStatus: "ok" | "error";
@@ -320,8 +329,8 @@ export interface MarkJobOutcomeInput {
   nextRunAt: string;
 }
 
-export function markJobOutcome(input: MarkJobOutcomeInput): void {
-  getDb()
+export function markJobOutcome(input: MarkJobOutcomeInput): boolean {
+  const info = getDb()
     .prepare(
       `UPDATE monitoring_jobs
          SET last_run_at = ?,
@@ -329,7 +338,7 @@ export function markJobOutcome(input: MarkJobOutcomeInput): void {
              fail_streak = ?,
              next_run_at = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-       WHERE id = ?`,
+       WHERE id = ? AND owner_id = ?`,
     )
     .run(
       input.lastRunAt,
@@ -337,7 +346,9 @@ export function markJobOutcome(input: MarkJobOutcomeInput): void {
       input.failStreak,
       input.nextRunAt,
       input.jobId,
+      input.ownerId,
     );
+  return info.changes > 0;
 }
 
 export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {

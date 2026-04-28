@@ -347,6 +347,7 @@ export class Scheduler {
     }
 
     markJobOutcome({
+      ownerId: job.owner_id,
       jobId: job.id,
       lastRunAt: nowIso,
       lastStatus,
