@@ -91,6 +91,22 @@ monitoringRouter.post("/jobs", async (c) => {
     return c.json(fail("invalid_payload", "Payload invalid", c, parsed.error.issues), 422);
   }
 
+  // PR-4 ships only the dosar_soap runner. Schema accepts name_soap and
+  // aviz_rnpm so PR-5/PR-6 can light them up without a schema bump, but
+  // accepting them at POST today produces a job the scheduler can't dispatch
+  // (silent next_run_at advance, never an alert). Reject with a stable code
+  // so the UI can surface "coming soon" copy.
+  if (parsed.data.kind !== "dosar_soap") {
+    return c.json(
+      fail(
+        "kind_not_implemented",
+        "Monitorizarea dupa nume soseste in v2.2.0 (PR-5). Momentan doar dosar dupa numar e implementat.",
+        c,
+      ),
+      422,
+    );
+  }
+
   // Wrap the insert + audit write in a single transaction so a partial
   // failure can't produce a job without a corresponding audit row (or vice
   // versa). better-sqlite3 transactions are synchronous; the route handler is

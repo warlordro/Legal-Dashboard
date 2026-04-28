@@ -188,6 +188,32 @@ describe("POST /api/v1/monitoring/jobs", () => {
     expect(res.status).toBe(422);
   });
 
+  // C0: schema accepts name_soap/aviz_rnpm so PR-5/PR-6 can light them up
+  // without a schema bump, but the route must reject them today — accepting
+  // a kind the runner can't dispatch produces a "ghost job" that silently
+  // advances next_run_at and never alerts.
+  it("rejects name_soap with kind_not_implemented (no runner yet)", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "name_soap",
+      target: { name_normalized: "POPESCU ION", name_kind: "fizic" },
+    });
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as { error: { code: string; message: string } };
+    expect(json.error.code).toBe("kind_not_implemented");
+  });
+
+  it("rejects aviz_rnpm with kind_not_implemented (no runner yet)", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "aviz_rnpm",
+      target: { identificator: "12345" },
+    });
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("kind_not_implemented");
+  });
+
   it("rejects malformed JSON body with 400 invalid_json", async () => {
     const app = buildTestApp();
     const res = await postJson(app, "/api/v1/monitoring/jobs", null, {
