@@ -24,6 +24,7 @@ import { getAuditEvents } from "../db/auditRepository.ts";
 import type { MonitoringJobRow } from "../db/monitoringJobsRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import {
+  getMonitoringSchedulerStatus,
   monitoringRouter,
   setMonitoringScheduler,
   type MonitoringSchedulerHandle,
@@ -683,5 +684,45 @@ describe("POST /api/v1/monitoring/jobs/:id/run", () => {
       method: "POST",
     });
     expect(res.status).toBe(400);
+  });
+});
+
+// Tier 3 #12: /health surfaces scheduler liveness via getMonitoringSchedulerStatus.
+// We test the helper directly rather than booting index.ts.
+describe("getMonitoringSchedulerStatus (Tier 3 #12 — /health hook)", () => {
+  class StatusScheduler implements MonitoringSchedulerHandle {
+    constructor(private snapshot: { running: boolean; inflight: number }) {}
+    async runJobNow(): Promise<{ runId: number }> {
+      throw new Error("not used in these tests");
+    }
+    getStatus() {
+      return this.snapshot;
+    }
+  }
+
+  it("returns null when no scheduler is wired", () => {
+    setMonitoringScheduler(null);
+    expect(getMonitoringSchedulerStatus()).toBeNull();
+  });
+
+  it("returns null when scheduler does not implement getStatus (test stub)", () => {
+    setMonitoringScheduler(new StubScheduler());
+    expect(getMonitoringSchedulerStatus()).toBeNull();
+  });
+
+  it("returns the running snapshot when scheduler implements getStatus", () => {
+    setMonitoringScheduler(new StatusScheduler({ running: true, inflight: 3 }));
+    expect(getMonitoringSchedulerStatus()).toEqual({
+      running: true,
+      inflight: 3,
+    });
+  });
+
+  it("reflects the stopped state once scheduler reports running=false", () => {
+    setMonitoringScheduler(new StatusScheduler({ running: false, inflight: 0 }));
+    expect(getMonitoringSchedulerStatus()).toEqual({
+      running: false,
+      inflight: 0,
+    });
   });
 });

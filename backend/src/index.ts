@@ -10,7 +10,11 @@ import { aiRouter } from "./routes/ai.ts";
 import { rateLimit } from "./middleware/rate-limit.ts";
 import { ownerContext } from "./middleware/owner.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
-import { monitoringRouter, setMonitoringScheduler } from "./routes/monitoring.ts";
+import {
+  monitoringRouter,
+  setMonitoringScheduler,
+  getMonitoringSchedulerStatus,
+} from "./routes/monitoring.ts";
 import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
@@ -110,7 +114,25 @@ app.get("/health", (c) => {
   if (!ready) {
     return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
   }
-  return c.json({ status: "ok", service: "Legal Dashboard API" });
+  // Tier 3 #12: surface monitoring scheduler liveness so ops can detect
+  // "scheduler died but HTTP still up" without scraping logs. Shape:
+  //   monitoring: { enabled: bool, running: bool, inflight: number }
+  // - enabled=false when MONITORING_ENABLED=0 (kill switch tripped)
+  // - running=false but enabled=true is the alert condition: feature is on
+  //   but the scheduler crashed or never started.
+  const status = getMonitoringSchedulerStatus();
+  const monitoring = MONITORING_ENABLED
+    ? {
+        enabled: true,
+        running: status?.running ?? false,
+        inflight: status?.inflight ?? 0,
+      }
+    : { enabled: false, running: false, inflight: 0 };
+  return c.json({
+    status: "ok",
+    service: "Legal Dashboard API",
+    monitoring,
+  });
 });
 
 app.route("/api/rnpm", rnpmRouter);

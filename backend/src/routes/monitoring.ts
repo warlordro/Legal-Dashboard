@@ -36,6 +36,10 @@ import { fail, ok } from "../util/envelope.ts";
 // null-checks and falls back to 503 when not yet wired.
 export interface MonitoringSchedulerHandle {
   runJobNow(job: MonitoringJobRow): Promise<{ runId: number }>;
+  // Tier 3 #12: exposed via /health to surface scheduler liveness without
+  // requiring monitoring-aware orchestration. Optional so test stubs that
+  // only exercise runJobNow don't need to implement it.
+  getStatus?(): { running: boolean; inflight: number };
 }
 
 let scheduler: MonitoringSchedulerHandle | null = null;
@@ -44,6 +48,15 @@ export function setMonitoringScheduler(
   s: MonitoringSchedulerHandle | null,
 ): void {
   scheduler = s;
+}
+
+// Tier 3 #12: read-only handle for the /health endpoint. Returns null when
+// monitoring is disabled or scheduler not yet wired (boot race window).
+export function getMonitoringSchedulerStatus():
+  | { running: boolean; inflight: number }
+  | null {
+  if (!scheduler || typeof scheduler.getStatus !== "function") return null;
+  return scheduler.getStatus();
 }
 
 export const monitoringRouter = new Hono();

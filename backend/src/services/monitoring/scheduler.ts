@@ -164,6 +164,11 @@ export class Scheduler {
     return this.inflight.get(jobId)?.controller;
   }
 
+  // /health snapshot. Cheap and side-effect free — read of two fields.
+  getStatus(): { running: boolean; inflight: number } {
+    return { running: this.running, inflight: this.inflight.size };
+  }
+
   // Manual trigger from POST /jobs/:id/run (C5). Allocates a fresh run row
   // and runs the job immediately, bypassing the next_run_at gate. Refuses if
   // the scheduler isn't running or if a runner is already in flight for the
