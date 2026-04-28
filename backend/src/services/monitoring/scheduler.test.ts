@@ -19,6 +19,7 @@ import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
+import { _withMaintenanceWriteForTest } from "../../db/backup.ts";
 import { FakeClock } from "./clock.ts";
 import {
   Scheduler,
@@ -343,6 +344,61 @@ describe("Scheduler — getInflightAbortController", () => {
 
     // After completion, controller is cleared.
     expect(sch.getInflightAbortController(jobId)).toBeUndefined();
+  });
+});
+
+// stop()-race: a tick can park inside withMaintenanceRead while a writer
+// (daily backup / restore) holds the lock. If stop() runs while parked, the
+// reader still wakes up after the writer drains. Without a re-check, that
+// reader would proceed to claimDueJobs + runOne AFTER stop() returned —
+// leaking work past shutdown and racing the next process boot.
+describe("Scheduler — stop() race against parked tick", () => {
+  it("a tick parked behind a writer must NOT run after stop() returns", async () => {
+    seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+    });
+    const runner = new NoopOkRunner();
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+
+    // Hold the writer lock open. Tick that we fire next will park inside
+    // withMaintenanceRead until releaseWriter() is called.
+    let releaseWriter: (() => void) | undefined;
+    const writerHeld = _withMaintenanceWriteForTest(
+      () =>
+        new Promise<void>((r) => {
+          releaseWriter = r;
+        }),
+    );
+    // Yield once so the writer is actually active before we queue the tick.
+    await new Promise((r) => setImmediate(r));
+
+    const tickPromise = sch.tickOnce();
+    // Yield so the tick's withMaintenanceRead enqueues (writer is active).
+    await new Promise((r) => setImmediate(r));
+
+    // stop() should return promptly even with a parked tick.
+    await sch.stop();
+
+    // Now release the writer. The previously-parked reader will wake up.
+    releaseWriter!();
+    await writerHeld;
+    await tickPromise;
+    // Drain microtasks so the (now-awake) reader has every chance to
+    // claim+run before we assert.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+
+    // The runner must NOT have been called — stop() returning is the
+    // contract that no further runner work executes.
+    expect(runner.calls.length).toBe(0);
   });
 });
 

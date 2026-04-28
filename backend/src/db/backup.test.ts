@@ -4,7 +4,14 @@ import os from "os";
 import fs from "fs";
 import fsPromises from "fs/promises";
 import Database from "better-sqlite3";
-import { deleteAllBackups, getBackupDir, listBackupsWithMeta, restoreFromBackup, runDailyBackup } from "./backup.ts";
+import {
+  deleteAllBackups,
+  getBackupDir,
+  listBackupsWithMeta,
+  restoreFromBackup,
+  runDailyBackup,
+  withMaintenanceRead,
+} from "./backup.ts";
 import { closeDb } from "./schema.ts";
 
 // Capture console.log during the body — vi.spyOn does not intercept reliably
@@ -224,5 +231,81 @@ describe("runDailyBackup — atomicity + retention", () => {
     expect(preMigration).toHaveLength(5);
     expect(preMigration).toContain("legal-dashboard.pre-schema-20200107.db");
     expect(preMigration).not.toContain("legal-dashboard.pre-schema-20200101.db");
+  });
+});
+
+// Regression for the maintenance RWLock: writer (backup/restore) acquired
+// exclusive access blocks new readers (scheduler ticks); concurrent readers
+// run in parallel; writer-preference prevents reader starvation. The lock
+// primitive itself has its own unit tests (util/rwlock.test.ts) covering
+// the abort/throw and ordering edge cases — these tests assert the wiring
+// (same lock instance shared by withMaintenanceLock + withMaintenanceRead).
+describe("maintenance RWLock — backup vs scheduler integration", () => {
+  it("multiple withMaintenanceRead bodies run in parallel", async () => {
+    let inFlight = 0;
+    let peakInFlight = 0;
+    const enter = async () => {
+      inFlight++;
+      if (inFlight > peakInFlight) peakInFlight = inFlight;
+      // Hold the lock long enough for the other readers to acquire too.
+      await new Promise((r) => setImmediate(r));
+      await new Promise((r) => setImmediate(r));
+      inFlight--;
+    };
+
+    await Promise.all([
+      withMaintenanceRead(enter),
+      withMaintenanceRead(enter),
+      withMaintenanceRead(enter),
+    ]);
+
+    expect(peakInFlight).toBe(3);
+  });
+
+  it("queued writer (backup) blocks new readers — writer preference", async () => {
+    // Reader 1 holds the lock; backup queues behind it; reader 2 arrives
+    // AFTER backup. Writer-preference means r2 queues BEHIND backup, NOT
+    // alongside r1 — proven by r2 staying blocked while r1 still holds.
+    // (We deliberately do not assert ordering between events emitted by
+    // different async chains after r1 releases — microtask scheduling can
+    // reorder the IIFE's "backup-end" with r2's body even though the lock
+    // is held correctly. The unit tests in util/rwlock.test.ts cover
+    // post-release ordering on a single chain.)
+    const events: string[] = [];
+
+    let releaseR1: () => void = () => undefined;
+    const r1 = withMaintenanceRead(async () => {
+      events.push("r1-start");
+      await new Promise<void>((resolve) => {
+        releaseR1 = resolve;
+      });
+      events.push("r1-end");
+    });
+    await new Promise((r) => setImmediate(r));
+
+    // Backup queues behind r1 (writer waits for in-flight readers to drain).
+    const backupPromise = captureConsoleLog(() => runDailyBackup());
+    await new Promise((r) => setImmediate(r));
+
+    // r2 arrives AFTER backup is queued. Reader-preference would let r2
+    // join r1 as a parallel reader — writer-preference forces r2 to wait.
+    const r2 = withMaintenanceRead(async () => {
+      events.push("r2-start");
+    });
+
+    // Yield several times — if writer-preference is broken, r2 would run
+    // here while r1 still holds. With writer-preference, r2 stays queued
+    // until r1 releases AND backup completes.
+    for (let i = 0; i < 5; i++) {
+      await new Promise((r) => setImmediate(r));
+    }
+    expect(events).toEqual(["r1-start"]);
+
+    releaseR1();
+    await Promise.all([r1, backupPromise, r2]);
+
+    // Both reader bodies eventually ran — proves the lock did not deadlock.
+    expect(events).toContain("r1-end");
+    expect(events).toContain("r2-start");
   });
 });

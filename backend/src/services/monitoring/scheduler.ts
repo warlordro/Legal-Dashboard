@@ -28,6 +28,7 @@ import {
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { withMaintenanceRead } from "../../db/backup.ts";
 
 // 5 consecutive failures = the source is broken, not flaky. Spec
 // PLAN-monitoring-webmode.md L390: emit one source_error alert and slow the
@@ -87,6 +88,10 @@ export class Scheduler {
     if (this.running) return;
     // Crash recovery FIRST — orphan running rows would otherwise be excluded
     // from claimDueJobs forever. See monitoringRunsRepository.recoverOrphanRuns.
+    // NOTE: not wrapped in withMaintenanceRead because start() runs once at
+    // boot, before the listen handler that ever fires the daily backup; a
+    // restore at this exact instant is also implausible (UI route is mounted
+    // later). If web-mode reorders boot so this becomes possible, wrap it.
     recoverOrphanRuns();
     this.running = true;
     // First tick fires after one interval; callers can also invoke tickOnce()
@@ -96,20 +101,31 @@ export class Scheduler {
 
   // Single tick — claim, run, finalize. Public for test ergonomics; production
   // path goes through scheduleNextTick → setTimeout → tick().
+  //
+  // Wrapped in withMaintenanceRead so daily backup (writer-exclusive) cannot
+  // interleave mid-tick. Concurrent ticks remain parallel; writer-preference
+  // means a queued backup blocks the NEXT tick from claiming, in-flight ticks
+  // drain first, then backup runs.
   async tickOnce(): Promise<void> {
     if (!this.running) return;
     if (this.tickInProgress) return;
     this.tickInProgress = true;
     try {
-      const now = this.opts.clock.now().toISOString();
-      const claimed = claimDueJobs({ now, limit: this.opts.claimLimit });
+      await withMaintenanceRead(async () => {
+        // Re-check after the lock acquires. If a writer was holding the lock
+        // when this tick was queued and stop() ran in the meantime, we'd
+        // otherwise wake up here and proceed to claim/run AFTER shutdown.
+        if (!this.running) return;
+        const now = this.opts.clock.now().toISOString();
+        const claimed = claimDueJobs({ now, limit: this.opts.claimLimit });
 
-      // Each claimed job runs concurrently; the SOAP runner in C3 will add
-      // its own PARALLEL_BATCH_SIZE=3 cap. For C2's NoopRunner this is fine.
-      const promises = claimed.map(({ job, runId }) =>
-        this.runOne(job, runId, now),
-      );
-      await Promise.all(promises);
+        // Each claimed job runs concurrently; the SOAP runner in C3 adds
+        // its own PARALLEL_BATCH_SIZE=3 cap.
+        const promises = claimed.map(({ job, runId }) =>
+          this.runOne(job, runId, now),
+        );
+        await Promise.all(promises);
+      });
     } finally {
       this.tickInProgress = false;
     }
