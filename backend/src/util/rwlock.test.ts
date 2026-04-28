@@ -174,6 +174,117 @@ describe("RWLock — multiple readers after writer drains", () => {
   });
 });
 
+// Tier 3 #14 — close the TOCTOU window between drain.resolve() and the
+// woken waiter's continuation. The audit (rwlock.ts:49,63,83-98) called
+// out that drain mutates state lazily — the writer's `writerActive=true`
+// runs in the writer's microtask continuation, not in drain itself. That
+// leaves a one-microtask window where state introspection sees:
+//   writerActive=false, queue empty, activeReaders=0  → "lock is free!"
+// even though a writer has just been picked. Currently dormant because
+// better-sqlite3 ops are synchronous and no user code interposes between
+// drain and the continuation, but the gap will surface the moment a
+// future caller starts awaiting inside the maintenance critical section.
+//
+// We expose the bug deterministically by wrapping each queued waiter's
+// resolve() callback with a probe — drain calls .resolve() synchronously,
+// so the probe runs at exactly the moment drain hands off, observing
+// whatever state drain has (or has not) set. After the fix, drain mutates
+// the counters BEFORE resolving; before the fix, the counters are
+// untouched and the probe records the broken state.
+describe("RWLock — drain mutates state before resolve (TOCTOU)", () => {
+  it("writerActive is set synchronously inside drain when a writer is woken", async () => {
+    const lock = new RWLock();
+    const internals = lock as unknown as {
+      writerActive: boolean;
+      activeReaders: number;
+      queue: { kind: "read" | "write"; resolve: () => void }[];
+    };
+
+    let releaseR0!: () => void;
+    const r0 = lock.withRead(
+      () => new Promise<void>((res) => { releaseR0 = res; }),
+    );
+    await tick();
+
+    let releaseW1!: () => void;
+    const w1 = lock.withWrite(
+      () => new Promise<void>((res) => { releaseW1 = res; }),
+    );
+    await tick();
+    expect(internals.queue.length).toBe(1);
+
+    let stateAtResolve: { writerActive: boolean; activeReaders: number } | null =
+      null;
+    const writerWaiter = internals.queue[0]!;
+    const original = writerWaiter.resolve;
+    writerWaiter.resolve = () => {
+      stateAtResolve = {
+        writerActive: internals.writerActive,
+        activeReaders: internals.activeReaders,
+      };
+      original();
+    };
+
+    releaseR0();
+    await tick();
+
+    expect(stateAtResolve).not.toBeNull();
+    // Post-fix: drain set writerActive=true BEFORE calling resolve, so a
+    // synchronous acquireRead in the same microtask cycle would correctly
+    // see the lock as held and queue.
+    expect(stateAtResolve!.writerActive).toBe(true);
+    expect(stateAtResolve!.activeReaders).toBe(0);
+
+    releaseW1();
+    await Promise.all([r0, w1]);
+  });
+
+  it("activeReaders is set synchronously inside drain when a reader prefix is woken", async () => {
+    const lock = new RWLock();
+    const internals = lock as unknown as {
+      writerActive: boolean;
+      activeReaders: number;
+      queue: { kind: "read" | "write"; resolve: () => void }[];
+    };
+
+    let releaseW1!: () => void;
+    const w1 = lock.withWrite(
+      () => new Promise<void>((res) => { releaseW1 = res; }),
+    );
+    await tick();
+
+    // Two readers behind the writer — drain wakes them as a single batch.
+    const r1 = lock.withRead(async () => {});
+    const r2 = lock.withRead(async () => {});
+    await tick();
+    expect(internals.queue.length).toBe(2);
+
+    const captured: { activeReaders: number; writerActive: boolean }[] = [];
+    for (const waiter of internals.queue) {
+      const original = waiter.resolve;
+      waiter.resolve = () => {
+        captured.push({
+          activeReaders: internals.activeReaders,
+          writerActive: internals.writerActive,
+        });
+        original();
+      };
+    }
+
+    releaseW1();
+    await tick();
+
+    // Post-fix: drain incremented activeReaders by 2 BEFORE resolving any
+    // waiter, so both probes observe the final count, not the lazy one.
+    expect(captured).toEqual([
+      { activeReaders: 2, writerActive: false },
+      { activeReaders: 2, writerActive: false },
+    ]);
+
+    await Promise.all([w1, r1, r2]);
+  });
+});
+
 describe("RWLock — error in body does not poison the lock", () => {
   it("a thrown reader still releases its slot so the next op can run", async () => {
     const lock = new RWLock();

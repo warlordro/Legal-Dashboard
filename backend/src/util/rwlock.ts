@@ -50,6 +50,11 @@ export class RWLock {
       await new Promise<void>((resolve) => {
         this.queue.push({ kind: "read", resolve });
       });
+      // Tier 3 #14: drain() bumped activeReaders synchronously BEFORE it
+      // resolved us, so we must not double-count here. The fast path below
+      // is the only spot that increments — preserving the invariant that
+      // counter mutations are atomic with the lock-state check.
+      return;
     }
     this.activeReaders++;
   }
@@ -59,6 +64,10 @@ export class RWLock {
       await new Promise<void>((resolve) => {
         this.queue.push({ kind: "write", resolve });
       });
+      // Tier 3 #14: drain() set writerActive=true synchronously BEFORE it
+      // resolved us — see acquireRead for the rationale. Setting it again
+      // here would still be correct but obscures the invariant.
+      return;
     }
     this.writerActive = true;
   }
@@ -88,12 +97,26 @@ export class RWLock {
     //   - writer at head → wake exactly that one writer (then it acquires)
     //   - reader at head → wake every consecutive reader prefix; stop at
     //     the first writer so writer preference holds for whatever queues next
+    //
+    // Tier 3 #14: state mutation is performed synchronously HERE, before
+    // any resolve() fires. A woken waiter's continuation runs in a later
+    // microtask; if we left the counters/flags untouched, that microtask
+    // window would expose `writerActive=false, queue empty, activeReaders=0`
+    // to any synchronous observer — i.e. a freshly-arriving acquireRead
+    // would slip past mutual exclusion. Setting state first closes the gap.
     if (this.queue[0]!.kind === "write") {
+      this.writerActive = true;
       this.queue.shift()!.resolve();
       return;
     }
+    // Reader prefix: collect everyone first, bump the counter once, then
+    // resolve. Doing it in two passes keeps the counter consistent for any
+    // probe that runs between consecutive resolves.
+    const woken: Waiter[] = [];
     while (this.queue.length > 0 && this.queue[0]!.kind === "read") {
-      this.queue.shift()!.resolve();
+      woken.push(this.queue.shift()!);
     }
+    this.activeReaders += woken.length;
+    for (const w of woken) w.resolve();
   }
 }
