@@ -24,6 +24,7 @@ import { getAuditEvents } from "../db/auditRepository.ts";
 import type { MonitoringJobRow } from "../db/monitoringJobsRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import {
+  getMonitoringSchedulerStatus,
   monitoringRouter,
   setMonitoringScheduler,
   type MonitoringSchedulerHandle,
@@ -101,6 +102,28 @@ describe("POST /api/v1/monitoring/jobs", () => {
     expect(json.data.target_hash).toMatch(/^[0-9a-f]{64}$/);
     expect(json.data.id).toBeGreaterThan(0);
     expect(json.requestId).toBeTruthy();
+  });
+
+  it("freshly-created job is claim-eligible immediately (C6)", async () => {
+    // Smoke finding: pre-C6 a new job had next_run_at = now + cadence, so a
+    // user creating a daily monitor saw "Niciodata" in the UI for 24h with no
+    // baseline snapshot. The first tick must run on the very next scheduler
+    // wake-up, not after a full cadence delay.
+    const app = buildTestApp();
+    const before = Date.now();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", {
+      ...validDosarBody,
+      cadence_sec: 86400, // daily
+    });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as {
+      data: { id: number; next_run_at: string };
+    };
+    const nextRunMs = new Date(json.data.next_run_at).getTime();
+    // next_run_at must be at-or-before now (within a small tolerance for the
+    // post-insert SELECT round trip), NOT now + 86400_000.
+    expect(nextRunMs).toBeLessThanOrEqual(Date.now());
+    expect(nextRunMs).toBeGreaterThanOrEqual(before - 1000);
   });
 
   it("writes an audit_log entry on fresh insert", async () => {
@@ -188,6 +211,32 @@ describe("POST /api/v1/monitoring/jobs", () => {
     expect(res.status).toBe(422);
   });
 
+  // C0: schema accepts name_soap/aviz_rnpm so PR-5/PR-6 can light them up
+  // without a schema bump, but the route must reject them today — accepting
+  // a kind the runner can't dispatch produces a "ghost job" that silently
+  // advances next_run_at and never alerts.
+  it("rejects name_soap with kind_not_implemented (no runner yet)", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "name_soap",
+      target: { name_normalized: "POPESCU ION", name_kind: "fizic" },
+    });
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as { error: { code: string; message: string } };
+    expect(json.error.code).toBe("kind_not_implemented");
+  });
+
+  it("rejects aviz_rnpm with kind_not_implemented (no runner yet)", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "aviz_rnpm",
+      target: { identificator: "12345" },
+    });
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("kind_not_implemented");
+  });
+
   it("rejects malformed JSON body with 400 invalid_json", async () => {
     const app = buildTestApp();
     const res = await postJson(app, "/api/v1/monitoring/jobs", null, {
@@ -196,6 +245,19 @@ describe("POST /api/v1/monitoring/jobs", () => {
     expect(res.status).toBe(400);
     const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("invalid_json");
+  });
+
+  it("rejects oversized create payloads before JSON parsing", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", null, {
+      rawBody: JSON.stringify({
+        ...validDosarBody,
+        notes: "x".repeat(20 * 1024),
+      }),
+    });
+    expect(res.status).toBe(413);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("payload_too_large");
   });
 });
 
@@ -222,7 +284,7 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
     expect(json.error.code).toBe("not_found");
   });
 
-  it("PATCH on another owner's job returns 404", async () => {
+  it("PATCH on another owner's job returns 404 + audits update_denied", async () => {
     const app = buildTestApp();
     const aliceJobId = await createJobAs(app, "alice");
 
@@ -232,9 +294,24 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
       body: JSON.stringify({ active: false }),
     });
     expect(res.status).toBe(404);
+
+    // C5 hardening: cross-owner attempt is recorded as denied so the
+    // antifraud trail captures it. Both 404 paths (denied vs not_found)
+    // return identical bodies — only the audit log differentiates.
+    const denied = getAuditEvents({
+      ownerId: "bob",
+      action: "monitoring.job.update_denied",
+    });
+    expect(denied).toHaveLength(1);
+    expect(denied[0].target_id).toBe(String(aliceJobId));
+    expect(denied[0].outcome).toBe("denied");
+
+    // No "updated" audit was emitted (Alice's row is untouched).
+    const ok = getAuditEvents({ action: "monitoring.job.updated" });
+    expect(ok).toHaveLength(0);
   });
 
-  it("DELETE on another owner's job returns 404 and leaves the row intact", async () => {
+  it("DELETE on another owner's job returns 404 + audits delete_denied + leaves row intact", async () => {
     const app = buildTestApp();
     const aliceJobId = await createJobAs(app, "alice");
 
@@ -244,11 +321,39 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
     });
     expect(res.status).toBe(404);
 
+    const denied = getAuditEvents({
+      ownerId: "bob",
+      action: "monitoring.job.delete_denied",
+    });
+    expect(denied).toHaveLength(1);
+    expect(denied[0].target_id).toBe(String(aliceJobId));
+    expect(denied[0].outcome).toBe("denied");
+
+    // No "deleted" audit (the row survives Bob's denied attempt).
+    const ok = getAuditEvents({ action: "monitoring.job.deleted" });
+    expect(ok).toHaveLength(0);
+
     // Alice can still read her own job.
     const aliceRead = await app.request(`/api/v1/monitoring/jobs/${aliceJobId}`, {
       headers: { "x-test-owner": "alice" },
     });
     expect(aliceRead.status).toBe(200);
+  });
+
+  it("PATCH on a non-existent id does NOT emit a denied audit row", async () => {
+    // Distinguishes denied (cross-owner row exists) from not_found
+    // (id doesn't exist anywhere) — only the former is audit-worthy noise.
+    // A regression that audits all 404s would flood the log on a fuzzer.
+    const app = buildTestApp();
+    const res = await app.request(`/api/v1/monitoring/jobs/999999`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ active: false }),
+    });
+    expect(res.status).toBe(404);
+
+    const denied = getAuditEvents({ action: "monitoring.job.update_denied" });
+    expect(denied).toHaveLength(0);
   });
 
   it("each owner sees only their own jobs in list", async () => {
@@ -300,7 +405,13 @@ describe("PATCH /jobs/:id — write paths", () => {
     const events = getAuditEvents({ ownerId: "local", action: "monitoring.job.updated" });
     expect(events).toHaveLength(1);
     expect(events[0].target_id).toBe(String(created.data.id));
-    expect(JSON.parse(events[0].detail_json)).toEqual({ fields: ["active"] });
+    // C5 hardening: detail captures before/after for each changed field, not
+    // just which keys moved. The audit log now lets you reconstruct the value
+    // change without joining against monitoring_jobs (which may be deleted).
+    expect(JSON.parse(events[0].detail_json)).toEqual({
+      fields: ["active"],
+      changed: { active: { before: 1, after: 0 } },
+    });
   });
 
   it("rejects empty PATCH body via Zod refine", async () => {
@@ -328,6 +439,21 @@ describe("PATCH /jobs/:id — write paths", () => {
     });
     expect(patch.status).toBe(422);
   });
+
+  it("rejects oversized PATCH payloads before JSON parsing", async () => {
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
+    const created = (await create.json()) as { data: { id: number } };
+
+    const patch = await app.request(`/api/v1/monitoring/jobs/${created.data.id}`, {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ notes: "x".repeat(20 * 1024) }),
+    });
+    expect(patch.status).toBe(413);
+    const json = (await patch.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("payload_too_large");
+  });
 });
 
 describe("DELETE /jobs/:id — write path", () => {
@@ -346,6 +472,15 @@ describe("DELETE /jobs/:id — write path", () => {
     const events = getAuditEvents({ ownerId: "local", action: "monitoring.job.deleted" });
     expect(events).toHaveLength(1);
     expect(events[0].target_id).toBe(String(created.data.id));
+
+    // C5 hardening: pre-state captured so the audit log preserves the full
+    // evidence of what was deleted (kind, target, cadence, alert config).
+    // Without this the row vanishes and only the id remains in the log.
+    const detail = JSON.parse(events[0].detail_json) as Record<string, unknown>;
+    expect(detail.kind).toBe("dosar_soap");
+    expect(detail.cadence_sec).toBe(3600);
+    expect(detail.target).toEqual({ numar_dosar: "1234/180/2024" });
+    expect(detail.alert_config).toBeDefined();
 
     const after = await app.request(`/api/v1/monitoring/jobs/${created.data.id}`);
     expect(after.status).toBe(404);
@@ -577,5 +712,123 @@ describe("POST /api/v1/monitoring/jobs/:id/run", () => {
       method: "POST",
     });
     expect(res.status).toBe(400);
+  });
+});
+
+// Tier 3 #12: /health surfaces scheduler liveness via getMonitoringSchedulerStatus.
+// We test the helper directly rather than booting index.ts.
+describe("getMonitoringSchedulerStatus (Tier 3 #12 — /health hook)", () => {
+  class StatusScheduler implements MonitoringSchedulerHandle {
+    constructor(private snapshot: { running: boolean; inflight: number }) {}
+    async runJobNow(): Promise<{ runId: number }> {
+      throw new Error("not used in these tests");
+    }
+    getStatus() {
+      return this.snapshot;
+    }
+  }
+
+  it("returns null when no scheduler is wired", () => {
+    setMonitoringScheduler(null);
+    expect(getMonitoringSchedulerStatus()).toBeNull();
+  });
+
+  it("returns null when scheduler does not implement getStatus (test stub)", () => {
+    setMonitoringScheduler(new StubScheduler());
+    expect(getMonitoringSchedulerStatus()).toBeNull();
+  });
+
+  it("returns the running snapshot when scheduler implements getStatus", () => {
+    setMonitoringScheduler(new StatusScheduler({ running: true, inflight: 3 }));
+    expect(getMonitoringSchedulerStatus()).toEqual({
+      running: true,
+      inflight: 3,
+    });
+  });
+
+  it("reflects the stopped state once scheduler reports running=false", () => {
+    setMonitoringScheduler(new StatusScheduler({ running: false, inflight: 0 }));
+    expect(getMonitoringSchedulerStatus()).toEqual({
+      running: false,
+      inflight: 0,
+    });
+  });
+});
+
+// Tier 5 #T6 — POST /jobs/:id/run wired to a REAL Scheduler instance.
+// All other route tests use a stub; this proves the contract end-to-end:
+//   - route resolves the job, hands it to scheduler.runJobNow
+//   - scheduler claims a runId via insertRunning, fires runOne (background)
+//   - the background run finalizes the row to a terminal status
+//   - audit_log records monitoring.job.run_manual with the real runId
+describe("POST /jobs/:id/run + real Scheduler (#T6)", () => {
+  it("manual trigger drives a real Scheduler to a terminal run row", async () => {
+    // Lazy import inside the test so the scheduler module isn't loaded for
+    // every other route test (some setup/teardown ordering matters less, but
+    // this also keeps the heavy dep out of the cold-start path of the file).
+    const { Scheduler } = await import("../services/monitoring/scheduler.ts");
+    const { FakeClock } = await import("../services/monitoring/clock.ts");
+    type RealRunOutcome = { status: "ok"; alertsCreated: number };
+    const noopOk = {
+      run: async (): Promise<RealRunOutcome> => ({
+        status: "ok",
+        alertsCreated: 0,
+      }),
+    };
+
+    const T = new Date("2026-04-28T10:00:00.000Z");
+    const realScheduler = new Scheduler({
+      clock: new FakeClock(T),
+      runner: noopOk,
+      // Long tickIntervalMs so the scheduler doesn't auto-tick during the
+      // test; we drive runJobNow directly via the route.
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+    await realScheduler.start();
+    setMonitoringScheduler(realScheduler);
+
+    const app = buildTestApp();
+    const create = await postJson(
+      app,
+      "/api/v1/monitoring/jobs",
+      validDosarBody,
+    );
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await app.request(
+      `/api/v1/monitoring/jobs/${created.data.id}/run`,
+      { method: "POST" },
+    );
+    expect(res.status).toBe(202);
+    const json = (await res.json()) as { data: { runId: number } };
+    expect(json.data.runId).toBeGreaterThan(0);
+
+    // Scheduler runOne is fire-and-forget; wait for the inflight set to drain
+    // by polling the public status. With a noop runner this resolves on the
+    // next microtask cluster.
+    for (let i = 0; i < 50; i++) {
+      const status = realScheduler.getStatus();
+      if (status.inflight === 0) break;
+      await new Promise((r) => setImmediate(r));
+    }
+
+    await realScheduler.stop();
+
+    const run = getDb()
+      .prepare(`SELECT id, status FROM monitoring_runs WHERE id = ?`)
+      .get(json.data.runId) as { id: number; status: string };
+    expect(run).toBeTruthy();
+    expect(run.status).toBe("ok");
+
+    const events = getAuditEvents({
+      ownerId: "local",
+      action: "monitoring.job.run_manual",
+    });
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0].detail_json)).toEqual({
+      runId: json.data.runId,
+    });
   });
 });

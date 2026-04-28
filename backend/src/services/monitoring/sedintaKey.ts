@@ -62,15 +62,40 @@ export function normalizeStadiu(input: string | null | undefined): string {
   return stripDiacritics(String(input)).toLowerCase().trim();
 }
 
+// Tier 6 H4: parseSedintaKey (in diff.ts) assumes ONLY the trailing `solutie`
+// segment may contain `|`. If PortalJust ever started returning `stadiu`,
+// `data`, `ora`, or `complet` with a `|` inside (e.g., a complet labeled
+// "Judecator A | B"), parseSedintaKey would silently misalign segment
+// boundaries and the diff would emit false `termen_changed` / `solutie_aparuta`
+// alerts. Assert input never contains `|` in those leading segments — fail
+// loud (with the offending field name) rather than produce wrong alerts.
+//
+// `solutie` is intentionally exempt: parseSedintaKey re-joins everything
+// after the 4th separator, so a `|` in solutie round-trips correctly.
+function assertNoPipe(field: string, value: string): void {
+  if (value.includes("|")) {
+    throw new Error(
+      `buildSedintaKey: '${field}' segment contains '|' (value=${JSON.stringify(value)}). ` +
+        `This would corrupt parseSedintaKey boundaries and trigger false alerts. ` +
+        `Either escape '|' in the upstream payload or extend the key separator.`,
+    );
+  }
+}
+
 // Stable, pipe-delimited key. We pick `|` as a separator because PortalJust
-// sedinta fields never legitimately contain it; if that ever changes the test
-// suite would catch the collision (each segment is round-tripped).
+// sedinta fields never legitimately contain it; assertNoPipe() locks that in.
 export function buildSedintaKey(s: SedintaInput): string {
   const stadiu = normalizeStadiu(s.stadiuProcesual);
   const data = normalizeData(s.data);
   const ora = normalizeOra(s.ora);
   const complet = (s.complet ?? "").trim();
   const solutie = (s.solutie ?? "").trim();
+  assertNoPipe("stadiu", stadiu);
+  assertNoPipe("data", data);
+  assertNoPipe("ora", ora);
+  assertNoPipe("complet", complet);
+  // `solutie` may contain `|` — it is the trailing segment and parseSedintaKey
+  // re-joins everything past the 4th separator.
   return `${stadiu}|${data}|${ora}|${complet}|${solutie}`;
 }
 
@@ -82,5 +107,9 @@ export function buildSedintaKeyWithoutSolutie(s: SedintaInput): string {
   const data = normalizeData(s.data);
   const ora = normalizeOra(s.ora);
   const complet = (s.complet ?? "").trim();
+  assertNoPipe("stadiu", stadiu);
+  assertNoPipe("data", data);
+  assertNoPipe("ora", ora);
+  assertNoPipe("complet", complet);
   return `${stadiu}|${data}|${ora}|${complet}`;
 }

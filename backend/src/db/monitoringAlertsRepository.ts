@@ -34,11 +34,20 @@ export interface MonitoringAlertRow {
   created_at: string;
   read_at: string | null;
   dismissed_at: string | null;
+  // Tier 3 #9 — run_id FK populated by the runner / scheduler. Nullable:
+  // rows written before migration 0004 retain NULL; ON DELETE SET NULL on
+  // the FK keeps the alert when a run row is purged by retention.
+  run_id: number | null;
 }
 
 export interface InsertAlertInput {
   ownerId: string;
   jobId: number;
+  // The monitoring_runs.id row that produced this alert. Required on every
+  // new write — runner-emitted alerts and source_error alerts both have a
+  // runId in scope (runner via JobRunner.run input, scheduler via
+  // applyJobOutcome's runId param). NULL is reserved for backfill paths.
+  runId: number;
   kind: AlertKind;
   severity?: AlertSeverity;
   title: string;
@@ -65,13 +74,14 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
   db
     .prepare(
       `INSERT INTO monitoring_alerts
-         (owner_id, job_id, kind, severity, title, detail_json, dedup_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
+         (owner_id, job_id, run_id, kind, severity, title, detail_json, dedup_key)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(job_id, dedup_key) DO NOTHING`,
     )
     .run(
       input.ownerId,
       input.jobId,
+      input.runId,
       input.kind,
       input.severity ?? "info",
       input.title,

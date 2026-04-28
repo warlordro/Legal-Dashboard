@@ -124,7 +124,7 @@ describe("dosarSoapRunner — happy path baseline", () => {
     expect(out.status).toBe("ok");
     expect(out.alertsCreated).toBe(0);
 
-    const snap = getLatestSnapshot(job.id);
+    const snap = getLatestSnapshot(job.owner_id, job.id);
     expect(snap).not.toBeNull();
     expect(snap!.observed_at).toBe(NOW_ISO);
     const payload = JSON.parse(snap!.payload_json);
@@ -213,7 +213,7 @@ describe("dosarSoapRunner — SOAP error", () => {
     expect(out.status).toBe("error");
     expect(out.errorCode).toBe("SOAP_FAIL");
     expect(out.errorMessage).toContain("upstream 503");
-    expect(getLatestSnapshot(job.id)).toBeNull();
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
 });
 
@@ -249,7 +249,7 @@ describe("dosarSoapRunner — abort during SOAP", () => {
 
     const out = await promise;
     expect(out.status).toBe("aborted");
-    expect(getLatestSnapshot(job.id)).toBeNull();
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
 });
 
@@ -285,9 +285,10 @@ describe("dosarSoapRunner — wallclock budget", () => {
 
     expect(out.status).toBe("timeout");
     expect(out.errorCode).toBe("WALLCLOCK_BUDGET");
-    expect(getLatestSnapshot(job.id)).toBeNull();
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
 });
+
 
 describe("dosarSoapRunner — dosar disappeared", () => {
   it("empty SOAP result → snapshot lastDosarPresent=false", async () => {
@@ -305,8 +306,101 @@ describe("dosarSoapRunner — dosar disappeared", () => {
     });
 
     expect(out.status).toBe("ok");
-    const snap = getLatestSnapshot(job.id);
+    const snap = getLatestSnapshot(job.owner_id, job.id);
     expect(snap).not.toBeNull();
     expect(JSON.parse(snap!.payload_json).lastDosarPresent).toBe(false);
+  });
+});
+
+// Tier 5 #T1 (PR-4 hardening): atomic snapshot+alert boundary.
+// Regression guard for C2: the runner persists the new snapshot AND emits
+// alerts inside a single db.transaction(). If alert inserts fail mid-loop
+// (disk-full, OS kill, FK violation), the snapshot must roll back too —
+// otherwise the next tick diffs against the new snapshot and the missed
+// alerts are silently dropped.
+//
+// Force-failure mechanism: a SQL trigger on monitoring_alerts that RAISE(FAIL)
+// after the first insert for this job. Cleaner than module-mocking because it
+// exercises the *real* transaction unwind path SQLite would use in prod.
+describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", () => {
+  it("alert insert fails mid-loop → snapshot rolled back, 0 alerts persisted", async () => {
+    const sedintaA = {
+      complet: "C1",
+      data: "2026-05-01",
+      ora: "10:00",
+      solutie: "",
+      solutieSumar: "",
+      documentSedinta: "",
+      numarDocument: "",
+      dataPronuntare: "",
+    };
+    const sedintaB = { ...sedintaA, complet: "C2", data: "2026-05-02" };
+
+    let secondTick = false;
+    const runner = createDosarSoapRunner({
+      searchDosare: async () =>
+        secondTick
+          ? [makeDosar("1234/180/2024", [sedintaA, sedintaB])]
+          : [makeDosar("1234/180/2024")],
+    });
+
+    const job = seedJob();
+    const r1 = seedRunningRow(job.id);
+    await runner.run({
+      job,
+      runId: r1,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    // Capture baseline snapshot id so we can prove it stays the latest after
+    // the transactional rollback (vs. a new aborted snapshot leaking through).
+    const baselineSnap = getLatestSnapshot(job.owner_id, job.id);
+    expect(baselineSnap).not.toBeNull();
+    const baselineId = baselineSnap!.id;
+
+    // Trigger fires AFTER the first INSERT for this job, so the *second*
+    // alert insert raises. The transaction must unwind everything emitted
+    // by this run — both the new snapshot AND the first alert.
+    const triggerSql = [
+      "CREATE TRIGGER fail_second_alert",
+      "BEFORE INSERT ON monitoring_alerts",
+      "FOR EACH ROW",
+      "WHEN (SELECT COUNT(*) FROM monitoring_alerts WHERE job_id = NEW.job_id) >= 1",
+      "BEGIN SELECT RAISE(FAIL, 'forced regression test failure'); END",
+    ].join(" ");
+    getDb().prepare(triggerSql).run();
+
+    secondTick = true;
+    const r2 = seedRunningRow(job.id);
+    let threw = false;
+    try {
+      await runner.run({
+        job,
+        runId: r2,
+        nowIso: "2026-04-28T10:05:00.000Z",
+        signal: new AbortController().signal,
+      });
+    } catch {
+      threw = true;
+    }
+
+    // Drop the trigger so cleanup has no side effects on later tests.
+    getDb().prepare("DROP TRIGGER fail_second_alert").run();
+
+    expect(threw).toBe(true);
+
+    // Atomic boundary holds: latest snapshot is still the baseline (no new
+    // snapshot row from the failed run), and 0 alerts persisted.
+    const snapAfter = getLatestSnapshot(job.owner_id, job.id);
+    expect(snapAfter).not.toBeNull();
+    expect(snapAfter!.id).toBe(baselineId);
+
+    const alertCount = (
+      getDb()
+        .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`)
+        .get(job.id) as { n: number }
+    ).n;
+    expect(alertCount).toBe(0);
   });
 });

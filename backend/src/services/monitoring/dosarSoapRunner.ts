@@ -26,6 +26,8 @@ import {
   insertSnapshot,
 } from "../../db/monitoringSnapshotsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { withMaintenanceRead } from "../../db/backup.ts";
+import { getDb } from "../../db/schema.ts";
 
 const DEFAULT_BUDGET_MS = 10 * 60 * 1000; // 10 min
 
@@ -42,7 +44,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
   const budgetMs = deps.budgetMs ?? DEFAULT_BUDGET_MS;
 
   return {
-    async run({ job, nowIso, signal }): Promise<RunOutcome> {
+    async run({ job, runId, nowIso, signal }): Promise<RunOutcome> {
       // Compose external (drain/manual cancel) with internal wallclock budget
       // so neither side starves: drain aborts immediately on stop(), and the
       // budget is a safety belt against runaway SOAP calls.
@@ -86,39 +88,61 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
 
       const currentDosar = dosare[0] ?? null;
 
-      const prevRow = getLatestSnapshot(job.id);
-      const prevSnapshot = prevRow
-        ? (JSON.parse(prevRow.payload_json) as DiffSnapshotPayload)
-        : null;
+      // Tier 3 #11: the maintenance read lock now wraps ONLY the DB-touching
+      // section, not the SOAP call above. This shrinks the per-run lock
+      // window from "full SOAP wallclock + DB write" (up to 10min worst case
+      // per the budget) down to "DB write" (sub-millisecond). A queued
+      // backup writer no longer waits for upstream PortalJust latency before
+      // it can acquire the exclusive lock. The atomic snapshot+alerts
+      // transaction (C2 hardening) is preserved verbatim inside.
+      let alertsCreated = 0;
+      await withMaintenanceRead(async () => {
+        const prevRow = getLatestSnapshot(job.owner_id, job.id);
+        const prevSnapshot = prevRow
+          ? (JSON.parse(prevRow.payload_json) as DiffSnapshotPayload)
+          : null;
 
-      const { newSnapshot, alerts } = diffDosarSoap({
-        prevSnapshot,
-        currentDosar,
-        alertConfig,
-        now: nowIso,
-      });
-
-      insertSnapshot({
-        ownerId: job.owner_id,
-        jobId: job.id,
-        observedAt: nowIso,
-        payloadHash: canonicalSha256(newSnapshot),
-        payloadJson: canonicalJson(newSnapshot),
-      });
-
-      for (const alert of alerts) {
-        insertAlert({
-          ownerId: job.owner_id,
-          jobId: job.id,
-          kind: alert.kind,
-          severity: alert.severity,
-          title: alert.title,
-          detail: alert.detail,
-          dedupKey: alert.dedupKey,
+        const { newSnapshot, alerts } = diffDosarSoap({
+          prevSnapshot,
+          currentDosar,
+          alertConfig,
+          now: nowIso,
+          runId,
         });
-      }
 
-      return { status: "ok", alertsCreated: alerts.length };
+        // C2 hardening: snapshot + alerts must commit together. Without this,
+        // a crash / SIGTERM / disk-full between insertSnapshot and the first
+        // insertAlert (or between two alert inserts) leaves the job in a
+        // "snapshot persisted, alerts dropped" state — the next tick diffs
+        // against the new snapshot and never re-emits the missed alerts.
+        // better-sqlite3 transactions are synchronous; the runner is async
+        // only on the SOAP call above, which has already resolved here.
+        getDb().transaction(() => {
+          insertSnapshot({
+            ownerId: job.owner_id,
+            jobId: job.id,
+            runId,
+            observedAt: nowIso,
+            payloadHash: canonicalSha256(newSnapshot),
+            payloadJson: canonicalJson(newSnapshot),
+          });
+          for (const alert of alerts) {
+            insertAlert({
+              ownerId: job.owner_id,
+              jobId: job.id,
+              runId,
+              kind: alert.kind,
+              severity: alert.severity,
+              title: alert.title,
+              detail: alert.detail,
+              dedupKey: alert.dedupKey,
+            });
+          }
+        })();
+        alertsCreated = alerts.length;
+      });
+
+      return { status: "ok", alertsCreated };
     },
   };
 }

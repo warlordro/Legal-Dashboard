@@ -40,6 +40,18 @@ function seedJob(hashSeed: string): number {
   return info.lastInsertRowid as number;
 }
 
+// Tier 3 #9: every snapshot now carries a run_id FK. Tests seed a running
+// row per job so the FK resolves and the constraint can be exercised.
+function seedRun(jobId: number): number {
+  const info = getDb()
+    .prepare(
+      `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
+       VALUES (?, ?, ?, 'running')`,
+    )
+    .run(OWNER, jobId, "2026-04-28T10:00:00.000Z");
+  return info.lastInsertRowid as number;
+}
+
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-snap-"));
   process.env.LEGAL_DASHBOARD_DB_PATH = path.join(
@@ -60,9 +72,11 @@ afterEach(async () => {
 describe("insertSnapshot", () => {
   it("writes a row and returns its id", () => {
     const jobId = seedJob("h1");
+    const runId = seedRun(jobId);
     const id = insertSnapshot({
       ownerId: OWNER,
       jobId,
+      runId,
       observedAt: "2026-04-28T10:00:00.000Z",
       payloadHash: "deadbeef",
       payloadJson: '{"sedintaKeys":[]}',
@@ -74,29 +88,69 @@ describe("insertSnapshot", () => {
       .get(id) as {
         owner_id: string;
         job_id: number;
+        run_id: number;
         observed_at: string;
         payload_hash: string;
         payload_json: string;
       };
     expect(row.owner_id).toBe(OWNER);
     expect(row.job_id).toBe(jobId);
+    expect(row.run_id).toBe(runId);
     expect(row.observed_at).toBe("2026-04-28T10:00:00.000Z");
     expect(row.payload_hash).toBe("deadbeef");
     expect(row.payload_json).toBe('{"sedintaKeys":[]}');
+  });
+
+  // Tier 3 #9: PRAGMA foreign_keys=ON is set in schema.ts; an INSERT with a
+  // run_id pointing at a non-existent monitoring_runs row must be rejected.
+  // This is the regression-guard against accidentally adding an unenforced
+  // column (which would defeat the whole point of #9).
+  it("rejects inserts with a run_id that doesn't point to an existing run", () => {
+    const jobId = seedJob("h1");
+    expect(() =>
+      insertSnapshot({
+        ownerId: OWNER,
+        jobId,
+        runId: 99999, // no row with this id
+        observedAt: "2026-04-28T10:00:00.000Z",
+        payloadHash: "x",
+        payloadJson: "{}",
+      }),
+    ).toThrow(/FOREIGN KEY/i);
+  });
+
+  it("preserves the snapshot when its run row is deleted (ON DELETE SET NULL)", () => {
+    const jobId = seedJob("h1");
+    const runId = seedRun(jobId);
+    const id = insertSnapshot({
+      ownerId: OWNER,
+      jobId,
+      runId,
+      observedAt: "2026-04-28T10:00:00.000Z",
+      payloadHash: "x",
+      payloadJson: "{}",
+    });
+    getDb().prepare("DELETE FROM monitoring_runs WHERE id = ?").run(runId);
+    const row = getDb()
+      .prepare("SELECT run_id FROM monitoring_snapshots WHERE id = ?")
+      .get(id) as { run_id: number | null };
+    expect(row.run_id).toBeNull();
   });
 });
 
 describe("getLatestSnapshot", () => {
   it("returns null when no snapshot exists for the job", () => {
     const jobId = seedJob("h1");
-    expect(getLatestSnapshot(jobId)).toBeNull();
+    expect(getLatestSnapshot(OWNER, jobId)).toBeNull();
   });
 
   it("returns the most recent snapshot (observed_at DESC)", () => {
     const jobId = seedJob("h1");
+    const runId = seedRun(jobId);
     insertSnapshot({
       ownerId: OWNER,
       jobId,
+      runId,
       observedAt: "2026-04-28T10:00:00.000Z",
       payloadHash: "older",
       payloadJson: '{"v":"old"}',
@@ -104,12 +158,13 @@ describe("getLatestSnapshot", () => {
     insertSnapshot({
       ownerId: OWNER,
       jobId,
+      runId,
       observedAt: "2026-04-28T11:00:00.000Z",
       payloadHash: "newer",
       payloadJson: '{"v":"new"}',
     });
 
-    const latest = getLatestSnapshot(jobId);
+    const latest = getLatestSnapshot(OWNER, jobId);
     expect(latest).not.toBeNull();
     expect(latest!.payload_hash).toBe("newer");
     expect(latest!.payload_json).toBe('{"v":"new"}');
@@ -119,9 +174,12 @@ describe("getLatestSnapshot", () => {
   it("scopes snapshots per job_id (no cross-job leak)", () => {
     const jobA = seedJob("hA");
     const jobB = seedJob("hB");
+    const runA = seedRun(jobA);
+    const runB = seedRun(jobB);
     insertSnapshot({
       ownerId: OWNER,
       jobId: jobA,
+      runId: runA,
       observedAt: "2026-04-28T10:00:00.000Z",
       payloadHash: "for-A",
       payloadJson: '{"job":"A"}',
@@ -129,23 +187,26 @@ describe("getLatestSnapshot", () => {
     insertSnapshot({
       ownerId: OWNER,
       jobId: jobB,
+      runId: runB,
       observedAt: "2026-04-28T11:00:00.000Z",
       payloadHash: "for-B",
       payloadJson: '{"job":"B"}',
     });
 
-    const a = getLatestSnapshot(jobA);
-    const b = getLatestSnapshot(jobB);
+    const a = getLatestSnapshot(OWNER, jobA);
+    const b = getLatestSnapshot(OWNER, jobB);
     expect(a!.payload_hash).toBe("for-A");
     expect(b!.payload_hash).toBe("for-B");
   });
 
   it("breaks observed_at ties by id DESC (newest insert wins)", () => {
     const jobId = seedJob("h1");
+    const runId = seedRun(jobId);
     const sameTs = "2026-04-28T10:00:00.000Z";
     insertSnapshot({
       ownerId: OWNER,
       jobId,
+      runId,
       observedAt: sameTs,
       payloadHash: "first",
       payloadJson: "{}",
@@ -153,11 +214,41 @@ describe("getLatestSnapshot", () => {
     insertSnapshot({
       ownerId: OWNER,
       jobId,
+      runId,
       observedAt: sameTs,
       payloadHash: "second",
       payloadJson: "{}",
     });
 
-    expect(getLatestSnapshot(jobId)!.payload_hash).toBe("second");
+    expect(getLatestSnapshot(OWNER, jobId)!.payload_hash).toBe("second");
+  });
+
+  it("ignores snapshots whose owner_id does not match the requested owner", () => {
+    const jobId = seedJob("h1");
+    const runId = seedRun(jobId);
+    insertSnapshot({
+      ownerId: OWNER,
+      jobId,
+      runId,
+      observedAt: "2026-04-28T10:00:00.000Z",
+      payloadHash: "owned",
+      payloadJson: "{}",
+    });
+    getDb()
+      .prepare(
+        `INSERT INTO monitoring_snapshots
+           (owner_id, job_id, run_id, observed_at, payload_hash, payload_json)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        "other-owner",
+        jobId,
+        runId,
+        "2026-04-28T11:00:00.000Z",
+        "foreign-owner-newer",
+        "{}",
+      );
+
+    expect(getLatestSnapshot(OWNER, jobId)!.payload_hash).toBe("owned");
   });
 });

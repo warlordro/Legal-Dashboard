@@ -59,7 +59,14 @@ export function createJob(input: CreateJobInput): CreateJobResult {
   const targetJson = JSON.stringify(body.target);
   const targetHash = canonicalSha256(body.target);
   const alertConfigJson = JSON.stringify(body.alert_config);
-  const nextRunAt = new Date(Date.now() + body.cadence_sec * 1000).toISOString();
+  // C6 hardening (smoke finding): freshly-created job runs on the NEXT
+  // scheduler tick, not after a full cadence. The previous now+cadence math
+  // meant a user creating a daily monitor saw "Niciodata" for 24h with no
+  // baseline snapshot, no UI feedback that the job was wired correctly.
+  // After the first run finalizes, markJobOutcome → computeNextRunAt aligns
+  // future ticks to the requested cadence, so the cadence contract still
+  // holds — only the FIRST tick is accelerated.
+  const nextRunAt = new Date().toISOString();
 
   // 1) client_request_id replay path — return existing row unchanged.
   if (body.client_request_id) {
@@ -300,12 +307,32 @@ export interface ClaimedJob {
   runId: number;
 }
 
+function getDisabledMonitoringKinds(): string[] {
+  return Array.from(
+    new Set(
+      (process.env.MONITORING_DISABLED_KINDS ?? "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    ),
+  );
+}
+
 // Scheduler-private outcome write. updateJob() deliberately rejects these
 // fields (last_run_at/last_status/fail_streak/next_run_at) so user PATCH can't
 // mutate the scheduler's internal state. The scheduler uses this write
 // instead — single UPDATE, no transaction needed (sole writer for these
 // columns is the scheduler itself, ordered by ticks).
+//
+// Tier 3 #10: ownerId is REQUIRED and added to the WHERE clause as a
+// belt-and-braces guard. The scheduler always knows the owner (claim returns
+// it on the row), so a defense-in-depth `AND owner_id = ?` ensures that even
+// if a future caller passes a jobId from a different owner — or owner_id
+// gets corrupted in flight — the UPDATE silently no-ops instead of clobbering
+// another owner's row. Returns true when a row was actually updated so callers
+// can detect cross-owner attempts at the boundary.
 export interface MarkJobOutcomeInput {
+  ownerId: string;
   jobId: number;
   lastRunAt: string;
   lastStatus: "ok" | "error";
@@ -313,8 +340,8 @@ export interface MarkJobOutcomeInput {
   nextRunAt: string;
 }
 
-export function markJobOutcome(input: MarkJobOutcomeInput): void {
-  getDb()
+export function markJobOutcome(input: MarkJobOutcomeInput): boolean {
+  const info = getDb()
     .prepare(
       `UPDATE monitoring_jobs
          SET last_run_at = ?,
@@ -322,7 +349,7 @@ export function markJobOutcome(input: MarkJobOutcomeInput): void {
              fail_streak = ?,
              next_run_at = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-       WHERE id = ?`,
+       WHERE id = ? AND owner_id = ?`,
     )
     .run(
       input.lastRunAt,
@@ -330,18 +357,27 @@ export function markJobOutcome(input: MarkJobOutcomeInput): void {
       input.failStreak,
       input.nextRunAt,
       input.jobId,
+      input.ownerId,
     );
+  return info.changes > 0;
 }
 
 export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
   const db = getDb();
   const tx = db.transaction((now: string, limit: number): ClaimedJob[] => {
+    const disabledKinds = getDisabledMonitoringKinds();
+    const disabledKindSql =
+      disabledKinds.length > 0
+        ? `AND kind NOT IN (${disabledKinds.map(() => "?").join(", ")})`
+        : "";
+    const selectParams: (string | number)[] = [now, now, ...disabledKinds, limit];
     const due = db
       .prepare(
         `SELECT * FROM monitoring_jobs
          WHERE active = 1
            AND (paused_until IS NULL OR paused_until <= ?)
            AND next_run_at <= ?
+           ${disabledKindSql}
            AND NOT EXISTS (
              SELECT 1 FROM monitoring_runs
              WHERE monitoring_runs.job_id = monitoring_jobs.id
@@ -350,7 +386,7 @@ export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
          ORDER BY next_run_at ASC, id ASC
          LIMIT ?`,
       )
-      .all(now, now, limit) as MonitoringJobRow[];
+      .all(...selectParams) as MonitoringJobRow[];
 
     const insertRun = db.prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)

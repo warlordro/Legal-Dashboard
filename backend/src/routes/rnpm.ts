@@ -12,6 +12,7 @@ import { defaultRnpmClient, type RnpmSearchType } from "../services/rnpmClient.t
 import { getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
 import { getDbPath, compactDb } from "../db/schema.ts";
 import { getBackupDir, deleteAllBackups, listBackupsWithMeta, restoreFromBackup } from "../db/backup.ts";
+import { recordAudit } from "../db/auditRepository.ts";
 import { mkdir } from "node:fs/promises";
 
 function parseProvider(v: unknown): CaptchaProvider | undefined {
@@ -329,12 +330,25 @@ rnpmRouter.post("/compact", (c) => {
   }
 });
 
+// Tier 4 #21: destructive backup ops are audit-logged so a web/admin mode
+// later can reconstruct who wiped/rolled back the database. Audit on both
+// success and failure paths — a failed restore that left a pre-restore
+// snapshot behind still matters for reconstruction.
 rnpmRouter.delete("/backups", async (c) => {
   try {
     const deleted = await deleteAllBackups();
+    recordAudit(c, "backup.delete_all", {
+      targetKind: "backup",
+      detail: { deleted },
+    });
     return c.json({ deleted });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare stergere backups";
+    recordAudit(c, "backup.delete_all", {
+      targetKind: "backup",
+      outcome: "error",
+      detail: { error: msg },
+    });
     return c.json({ error: msg }, 500);
   }
 });
@@ -358,9 +372,20 @@ rnpmRouter.post("/backups/restore", limitSmall, async (c) => {
   }
   try {
     const { preRestoreName } = await restoreFromBackup(name);
+    recordAudit(c, "backup.restore", {
+      targetKind: "backup",
+      targetId: name,
+      detail: { preRestoreName },
+    });
     return c.json({ ok: true, preRestoreName });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare restore";
+    recordAudit(c, "backup.restore", {
+      targetKind: "backup",
+      targetId: name,
+      outcome: "error",
+      detail: { error: msg },
+    });
     return c.json({ error: msg }, 500);
   }
 });

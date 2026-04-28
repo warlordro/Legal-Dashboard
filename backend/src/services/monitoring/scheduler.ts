@@ -25,17 +25,21 @@ import {
 import {
   finalize,
   insertRunning,
+  purgeOldRuns,
   recoverOrphanRuns,
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
+import { getDb } from "../../db/schema.ts";
 
 // 5 consecutive failures = the source is broken, not flaky. Spec
 // PLAN-monitoring-webmode.md L390: emit one source_error alert and slow the
 // job to once-per-hour to spare upstream and ourselves.
 const SOURCE_ERROR_THRESHOLD = 5;
 const SOURCE_ERROR_BACKOFF_SEC = 3600;
+const RUN_RETENTION_DAYS = 90;
+const RUN_PURGE_INTERVAL_MS = 86_400_000;
 
 export type ScheduledJob = MonitoringJobRow;
 
@@ -79,6 +83,7 @@ export class Scheduler {
   private running = false;
   private tickInProgress = false;
   private timerHandle: TimerHandle | undefined;
+  private purgeTimerHandle: TimerHandle | undefined;
   private readonly inflight = new Map<number, InflightEntry>();
 
   constructor(opts: SchedulerOptions) {
@@ -93,8 +98,22 @@ export class Scheduler {
     // boot, before the listen handler that ever fires the daily backup; a
     // restore at this exact instant is also implausible (UI route is mounted
     // later). If web-mode reorders boot so this becomes possible, wrap it.
-    recoverOrphanRuns();
+    //
+    // Tier 4 #20: log the recovered count so a crash-then-restart is visible
+    // in the boot log. error_code='CRASH_RECOVERY' is stamped per-row inside
+    // recoverOrphanRuns; this log line is the operator-visible signal.
+    const recovered = recoverOrphanRuns();
+    if (recovered > 0) {
+      console.log(
+        JSON.stringify({
+          action: "monitoring.crash_recovery",
+          recovered_count: recovered,
+          ts: new Date().toISOString(),
+        }),
+      );
+    }
     this.running = true;
+    this.scheduleRunPurge();
     // First tick fires after one interval; callers can also invoke tickOnce()
     // explicitly (tests do).
     this.scheduleNextTick();
@@ -103,30 +122,36 @@ export class Scheduler {
   // Single tick — claim, run, finalize. Public for test ergonomics; production
   // path goes through scheduleNextTick → setTimeout → tick().
   //
-  // Wrapped in withMaintenanceRead so daily backup (writer-exclusive) cannot
-  // interleave mid-tick. Concurrent ticks remain parallel; writer-preference
-  // means a queued backup blocks the NEXT tick from claiming, in-flight ticks
-  // drain first, then backup runs.
+  // The lock split (C1 hardening): the brief outer read lock covers only the
+  // claim step (sub-millisecond DB write that flips next_run_at); each runOne
+  // then acquires its OWN read lock for its run body. This means a queued
+  // backup waits at most for the *longest in-flight run*, not the entire
+  // cohort (Top-8 #7). It also closes the runJobNow void-runOne lock leak —
+  // every run, manual or scheduled, executes inside a maintenance read.
   async tickOnce(): Promise<void> {
     if (!this.running) return;
     if (this.tickInProgress) return;
     this.tickInProgress = true;
     try {
+      const now = this.opts.clock.now().toISOString();
+      let claimed: ReturnType<typeof claimDueJobs> = [];
       await withMaintenanceRead(async () => {
         // Re-check after the lock acquires. If a writer was holding the lock
         // when this tick was queued and stop() ran in the meantime, we'd
         // otherwise wake up here and proceed to claim/run AFTER shutdown.
         if (!this.running) return;
-        const now = this.opts.clock.now().toISOString();
-        const claimed = claimDueJobs({ now, limit: this.opts.claimLimit });
-
-        // Each claimed job runs concurrently; the SOAP runner in C3 adds
-        // its own PARALLEL_BATCH_SIZE=3 cap.
-        const promises = claimed.map(({ job, runId }) =>
-          this.runOne(job, runId, now),
-        );
-        await Promise.all(promises);
+        claimed = claimDueJobs({ now, limit: this.opts.claimLimit });
       });
+
+      if (claimed.length === 0) return;
+
+      // Each claimed job runs concurrently; the SOAP runner in C3 adds
+      // its own PARALLEL_BATCH_SIZE=3 cap. runOne is responsible for taking
+      // its own withMaintenanceRead for the run duration.
+      const promises = claimed.map(({ job, runId }) =>
+        this.runOne(job, runId, now),
+      );
+      await Promise.all(promises);
     } finally {
       this.tickInProgress = false;
     }
@@ -139,6 +164,10 @@ export class Scheduler {
     if (this.timerHandle !== undefined) {
       this.opts.clock.clearTimeout(this.timerHandle);
       this.timerHandle = undefined;
+    }
+    if (this.purgeTimerHandle !== undefined) {
+      this.opts.clock.clearTimeout(this.purgeTimerHandle);
+      this.purgeTimerHandle = undefined;
     }
 
     // Signal cancellation to every in-flight runner, then wait for them all
@@ -157,13 +186,21 @@ export class Scheduler {
     return this.inflight.get(jobId)?.controller;
   }
 
+  // /health snapshot. Cheap and side-effect free — read of two fields.
+  getStatus(): { running: boolean; inflight: number } {
+    return { running: this.running, inflight: this.inflight.size };
+  }
+
   // Manual trigger from POST /jobs/:id/run (C5). Allocates a fresh run row
   // and runs the job immediately, bypassing the next_run_at gate. Refuses if
   // the scheduler isn't running or if a runner is already in flight for the
   // same job (we don't want concurrent runs writing the same dedup_keys).
   //
-  // Wrapped in withMaintenanceRead so a daily backup or restore racing the
-  // manual trigger blocks here, same contract as the regular tick.
+  // Lock split (C1 hardening): only the insertRunning step is wrapped in
+  // withMaintenanceRead at this layer. runOne then acquires its OWN read
+  // lock around the actual SOAP + diff + finalize body. This closes the
+  // previous bug where `void runOne(...)` ran outside any lock, letting a
+  // backup writer race against in-flight snapshot/alert/finalize writes.
   async runJobNow(job: ScheduledJob): Promise<{ runId: number }> {
     if (!this.running) {
       const err = new Error("scheduler not running") as Error & {
@@ -178,7 +215,9 @@ export class Scheduler {
       throw err;
     }
 
-    return withMaintenanceRead(async () => {
+    const nowIso = this.opts.clock.now().toISOString();
+    let runId = 0;
+    await withMaintenanceRead(async () => {
       // Re-check after lock acquires (same reason as tickOnce).
       if (!this.running) {
         const err = new Error("scheduler not running") as Error & {
@@ -192,26 +231,69 @@ export class Scheduler {
         err.code = "in_flight";
         throw err;
       }
-      const nowIso = this.opts.clock.now().toISOString();
-      const runId = insertRunning({
+      runId = insertRunning({
         ownerId: job.owner_id,
         jobId: job.id,
         startedAt: nowIso,
       });
-      // Fire and forget: the run completes asynchronously and finalizes its
-      // own row + job state. The route returns 202 with this runId so the
-      // caller can poll.
-      void this.runOne(job, runId, nowIso);
-      return { runId };
     });
+
+    // Fire and forget: runOne acquires its OWN withMaintenanceRead and runs
+    // asynchronously to completion. The route returns 202 + runId so the
+    // caller can poll. Synchronous portion of runOne (inflight.set) executes
+    // before this function returns, so a duplicate runJobNow on the same job
+    // sees the in_flight entry and 409s.
+    void this.runOne(job, runId, nowIso);
+    return { runId };
   }
 
   private scheduleNextTick(): void {
     if (!this.running) return;
     this.timerHandle = this.opts.clock.setTimeout(async () => {
-      await this.tickOnce();
+      // C4 hardening: an unhandled throw from tickOnce (e.g. transient DB
+      // I/O error from claimDueJobs, RWLock corruption, an exception thrown
+      // synchronously before tickOnce's own finally runs) used to kill the
+      // setTimeout chain — the next scheduleNextTick never registered and
+      // monitoring went silently dark until the next process restart. The
+      // catch keeps the loop alive across transient faults; a chronically
+      // broken DB will surface via the per-job source_error path instead
+      // of as a dead scheduler.
+      try {
+        await this.tickOnce();
+      } catch (err) {
+        console.error("[scheduler] tickOnce threw, continuing loop", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      }
       this.scheduleNextTick();
     }, this.opts.tickIntervalMs);
+  }
+
+  private scheduleRunPurge(): void {
+    if (!this.running) return;
+    this.purgeTimerHandle = this.opts.clock.setTimeout(() => {
+      if (!this.running) return;
+      try {
+        const deleted = purgeOldRuns(RUN_RETENTION_DAYS);
+        if (deleted > 0) {
+          console.log(JSON.stringify({
+            action: "monitoring.runs_purged",
+            deleted_count: deleted,
+            retention_days: RUN_RETENTION_DAYS,
+            ts: this.opts.clock.now().toISOString(),
+          }));
+        }
+      } catch (err) {
+        console.error("[scheduler] purgeOldRuns threw, continuing loop", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      } finally {
+        this.purgeTimerHandle = undefined;
+        this.scheduleRunPurge();
+      }
+    }, RUN_PURGE_INTERVAL_MS);
   }
 
   private async runOne(
@@ -220,8 +302,23 @@ export class Scheduler {
     nowIso: string,
   ): Promise<void> {
     const controller = new AbortController();
-    const startMs = Date.now();
+    // Tier 4 #18: anchor startMs to clock.now() so duration math is
+    // deterministic against the same time source as endIso below. Mixing
+    // raw Date.now() with the injected clock produced drift-bounded but
+    // non-zero noise in fake-clock tests (durationMs ≠ FakeClock advance).
+    const startMs = this.opts.clock.now().getTime();
 
+    // Tier 3 #11: the runner.run() call is INTENTIONALLY outside any
+    // maintenance lock at this layer. SOAP I/O can take up to 10min on the
+    // wallclock budget, and pinning the read lock that long blocks the daily
+    // backup writer behind upstream PortalJust latency. Each runner is
+    // responsible for acquiring withMaintenanceRead around its own DB
+    // persistence (dosarSoapRunner does — see C2 atomicity comment there).
+    // The scheduler then takes a SECOND brief read lock around finalize +
+    // applyJobOutcome (sub-millisecond UPDATE/INSERT chain wrapped in
+    // db.transaction) — so the per-run lock-hold time collapses from
+    // "SOAP+DB" to "DB only" (worst-case ~ms, typical microseconds). Two
+    // brief acquisitions are cheaper for the queued backup than one long one.
     const work = (async () => {
       let outcome: RunOutcome;
       try {
@@ -240,26 +337,38 @@ export class Scheduler {
       }
 
       const endIso = this.opts.clock.now().toISOString();
-      const durationMs = Date.now() - startMs;
+      const durationMs = this.opts.clock.now().getTime() - startMs;
 
-      finalize(runId, {
-        status: outcome.status,
-        endedAt: endIso,
-        durationMs,
-        httpStatus: outcome.httpStatus,
-        errorCode: outcome.errorCode,
-        errorMessage: outcome.errorMessage,
-        alertsCreated: outcome.alertsCreated ?? 0,
+      // C3 hardening: finalize (run row terminal) + markJobOutcome (advances
+      // next_run_at + fail_streak) MUST commit together. Without this, a
+      // crash between the two leaves monitoring_runs marked terminal while
+      // monitoring_jobs.next_run_at stays at its pre-run value — the next
+      // tick re-claims the same job and produces duplicate snapshots/alerts.
+      // The source_error insertAlert inside applyJobOutcome is part of the
+      // same atomic boundary so a half-applied recovery never persists.
+      // Tier 3 #11: the lock now only wraps this terminal-commit transaction.
+      await withMaintenanceRead(async () => {
+        getDb().transaction(() => {
+          finalize(runId, {
+            status: outcome.status,
+            endedAt: endIso,
+            durationMs,
+            httpStatus: outcome.httpStatus,
+            errorCode: outcome.errorCode,
+            errorMessage: outcome.errorMessage,
+            alertsCreated: outcome.alertsCreated ?? 0,
+          });
+
+          // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
+          // state (fail_streak, next_run_at, last_*) untouched so the next boot
+          // resumes the job at its existing schedule. Counting it would inflate
+          // fail_streak on every clean shutdown and trip spurious source_error
+          // alerts on healthy jobs.
+          if (outcome.status !== "aborted") {
+            this.applyJobOutcome(job, runId, outcome, nowIso);
+          }
+        })();
       });
-
-      // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
-      // state (fail_streak, next_run_at, last_*) untouched so the next boot
-      // resumes the job at its existing schedule. Counting it would inflate
-      // fail_streak on every clean shutdown and trip spurious source_error
-      // alerts on healthy jobs.
-      if (outcome.status !== "aborted") {
-        this.applyJobOutcome(job, runId, outcome, nowIso);
-      }
     })().finally(() => {
       this.inflight.delete(job.id);
     });
@@ -299,6 +408,7 @@ export class Scheduler {
     }
 
     markJobOutcome({
+      ownerId: job.owner_id,
       jobId: job.id,
       lastRunAt: nowIso,
       lastStatus,
@@ -315,6 +425,7 @@ export class Scheduler {
       insertAlert({
         ownerId: job.owner_id,
         jobId: job.id,
+        runId,
         kind: "source_error",
         severity: "warning",
         title: "Sursa indisponibila (5 esecuri consecutive)",
@@ -326,6 +437,21 @@ export class Scheduler {
         },
         dedupKey: `source_error|${runId}`,
       });
+    } else if (failStreak > SOURCE_ERROR_THRESHOLD) {
+      // Tier 4 #22: when a chronically broken job keeps failing past the
+      // threshold, the alert is intentionally suppressed (one alert per
+      // streak, not per tick). Without a log line, ops have no way to tell
+      // "no alert because nothing's wrong" from "no alert because we
+      // already alerted once". This log gives that visibility without
+      // re-tripping the alert dedup.
+      console.log(JSON.stringify({
+        action: "monitoring.source_error_suppressed",
+        job_id: job.id,
+        run_id: runId,
+        fail_streak: failStreak,
+        last_error_code: outcome.errorCode ?? null,
+        ts: nowIso,
+      }));
     }
   }
 }

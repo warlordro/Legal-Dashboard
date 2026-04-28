@@ -20,13 +20,23 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
   if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved")) {
     return next();
   }
-  const entry = rateLimitMap.get(ip);
+
+  // Tier 3 #15: bucket per (ip, ownerId). On desktop ownerId is always
+  // "local" so behavior is unchanged (one bucket per IP, just like before).
+  // In LAN / web mode, two owners behind the same NAT or egress proxy now
+  // get independent buckets — owner A exhausting their ceiling cannot DOS
+  // owner B. ownerContext runs before this middleware in the global mount
+  // order; if a route ever runs without it, fall back to "local" so the
+  // key is still well-formed (no map pollution from undefined values).
+  const ownerId = c.get("ownerId") ?? "local";
+  const key = `${ip}|${ownerId}`;
+  const entry = rateLimitMap.get(key);
 
   // SECURITY: Multi-agent endpoint consumes 3 rate limit units (3 AI calls)
   const weight = c.req.path === "/api/ai/analyze-multi" ? 3 : 1;
 
   if (!entry || now > entry.resetTime) {
-    rateLimitMap.set(ip, { count: weight, resetTime: now + RATE_WINDOW });
+    rateLimitMap.set(key, { count: weight, resetTime: now + RATE_WINDOW });
   } else {
     entry.count += weight;
     if (entry.count > RATE_LIMIT) {
@@ -42,4 +52,11 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
   }
 
   await next();
+}
+
+// Test-only: clear the singleton map between tests so per-test budgets are
+// independent. Not exported through any public surface; underscore prefix
+// flags it as "do not call from production code".
+export function _resetRateLimitForTest(): void {
+  rateLimitMap.clear();
 }

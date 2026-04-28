@@ -4,6 +4,33 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 29 Aprilie 2026 - v2.2.0 - PR-4 full-review hardening Tier 2-6
+
+Release de hardening peste monitoring scheduler + dosar_soap runner, rezultat din full-review. Include fix-uri critical/high deja commit-uite pe branch si inchide remaining Tier 4, Tier 5 si Tier 6.
+
+### Reliability + operational hardening
+
+- `monitoring_jobs.claimDueJobs` respecta `MONITORING_DISABLED_KINDS` pentru kill switch operational per kind (`dosar_soap`, `name_soap`, `aviz_rnpm`).
+- `monitoring_runs` primeste retention purge zilnic la 90 zile, cu timer curatat pe `Scheduler.stop()`.
+- `recoverOrphanRuns()` marcheaza crash recovery cu `error_code='CRASH_RECOVERY'`, iar boot-ul logheaza numarul de randuri recuperate.
+- Scheduler-ul logheaza `monitoring.source_error_suppressed` pentru esecurile consecutive peste pragul de alertare.
+- Operatiile destructive RNPM backup delete/restore scriu audit log.
+
+### Correctness + defense in depth
+
+- Snapshot + alert persistence este testata atomic pe partial failure.
+- `sedintaKey` refuza separatorul `|` in segmentele structurale si permite separatorul doar in solutie, unde parserul re-imbina restul segmentelor.
+- `zod` este pin-uit exact la `4.3.6` in manifest si lockfile.
+
+### Teste + smoke
+
+- Backend: 330 teste trecute la `npm test` in `backend/`.
+- Type-check backend curat la `npx tsc --noEmit -p tsconfig.json`.
+- Build productie trecut la `npm run build`.
+- Smoke Electron pe port `3021`: scheduler running, job nou `dosar_soap` creat, tick real produs `monitoring_runs.status='ok'`, audit `monitoring.job.created` prezent.
+
+---
+
 ## 28 Aprilie 2026 - v2.1.1 - PR-4: monitoring scheduler + dosar_soap runner
 
 Al cincilea PR (saptamana 4-5). Aduce live executia: scheduler-ul tick-claim-run-finalize cu re-entrancy guard, dosar_soap runner cu compose AbortSignal (drain extern + 10min wallclock budget intern), backoff 0/120/240/.../3600s cu jitter 0-30s, source_error alert la 5 esecuri consecutive, manual-trigger route si feature ON by default (`MONITORING_ENABLED!=0` — kill switch ramane).

@@ -818,11 +818,6 @@ export default function Monitorizare() {
           )}
         </CardContent>
       </Card>
-
-      <p className="text-xs text-muted-foreground">
-        Scheduler-ul automat soseste in PR-4. In acest moment poti adauga / sterge / pune in pauza
-        joburi; verificarile se vor relua automat odata cu urmatorul release.
-      </p>
     </div>
   );
 }
