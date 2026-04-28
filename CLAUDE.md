@@ -4,7 +4,7 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web — fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.1.0** — 27 Aprilie 2026
+**v2.2.0** — 29 Aprilie 2026
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
@@ -13,7 +13,7 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 - ✅ **PR-1** v2.0.12 — `getOwnerId` helper + 5 fix-uri owner_id leak (commit `beca3b6` pe main)
 - ✅ **PR-2** v2.0.13 — shadow tables users/sessions + audit_log + `recordAudit()` (commit `c09a855` pe main)
 - ✅ **PR-3** v2.1.0 — monitoring core: schema 0003 + helperi (canonicalJson/sedintaKey/envelope/requestId) + repo + rute `/api/v1/monitoring/jobs` + UI minimal (branch `feat/monitoring-core`, post-review hardening absorbit)
-- 🚧 **PR-4** (next) — monitoring scheduler + dosar_soap kind (sapt 4-5; precedat de spike empirical PortalJust determinism)
+- ✅ **PR-4** v2.2.0 — monitoring scheduler + dosar_soap runner + full-review hardening Tier 2-6
 
 Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](SESSION-HANDOFF.md).
 
@@ -62,7 +62,7 @@ legal-dashboard/
 - `npm run dev:frontend` — Vite dev server pe 5173
 - `npm run build` — build productie (frontend + backend CJS)
 - `npm run dist` — electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` — vitest (192 teste in v2.1.0: 99 baseline + 19 canonicalJson + 26 schemas/monitoring + 23 sedintaKey + 25 routes/monitoring integration PR-3)
+- `npm test --workspace=backend` — vitest backend (330 teste in v2.2.0 dupa hardening PR-4)
 - `npx tsc --noEmit -p backend/tsconfig.json` — type-check backend
 - `cd frontend && npx tsc --noEmit` — type-check frontend
 - `npx biome check` — lint + format check
