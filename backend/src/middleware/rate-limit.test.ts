@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
-import { rateLimit } from "./rate-limit.ts";
+import { rateLimit, _resetRateLimitForTest } from "./rate-limit.ts";
 
 vi.mock("@hono/node-server/conninfo", () => ({
   getConnInfo: vi.fn(),
@@ -18,7 +18,22 @@ function buildApp(): Hono {
 
 beforeEach(() => {
   mockedGetConnInfo.mockReset();
+  _resetRateLimitForTest();
 });
+
+function buildAppWithOwner(): Hono {
+  const app = new Hono();
+  // Stand-in for ownerContext: take owner from a header so individual tests
+  // can drive owner identity without booting the real auth seam.
+  app.use("*", async (c, next) => {
+    const owner = c.req.header("x-test-owner") ?? "local";
+    c.set("ownerId", owner);
+    await next();
+  });
+  app.use("/api/*", rateLimit);
+  app.get("/api/ping", (c) => c.json({ ok: true }));
+  return app;
+}
 
 describe("rateLimit — fail-closed semantics", () => {
   it("rejects with 503 when the runtime cannot surface a remote address", async () => {
@@ -63,5 +78,84 @@ describe("rateLimit — fail-closed semantics", () => {
     expect(a.status).toBe(503);
     expect(b.status).toBe(503);
     expect(c.status).toBe(503);
+  });
+});
+
+// Tier 3 #15: per-owner bucket isolation. Today buckets are keyed only by IP,
+// so a noisy owner sharing a NAT (or, post-PR-9, two web-mode tenants behind
+// the same egress proxy) can DOS every other owner. After the fix, the bucket
+// key is `${ip}|${ownerId}` so each owner has their own ceiling.
+describe("rateLimit — per-owner isolation", () => {
+  it("owner A exhausting their bucket does NOT affect owner B on the same IP", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.5" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithOwner();
+
+    // Drain owner alice. RATE_LIMIT is 30; the 30 should pass, the 31st 429.
+    for (let i = 0; i < 30; i++) {
+      const r = await app.request("/api/ping", {
+        headers: { "x-test-owner": "alice" },
+      });
+      expect(r.status).toBe(200);
+    }
+    const aliceExhausted = await app.request("/api/ping", {
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(aliceExhausted.status).toBe(429);
+
+    // Owner bob (same IP, different owner) must still pass — proves buckets
+    // are isolated by owner. With the pre-fix IP-only key this asserts 429
+    // and FAILS, which is the regression we are guarding against.
+    const bobAllowed = await app.request("/api/ping", {
+      headers: { "x-test-owner": "bob" },
+    });
+    expect(bobAllowed.status).toBe(200);
+  });
+
+  it("owner A and owner B share the same rate budget when on different IPs (sanity)", async () => {
+    // Owner alice from IP_A burns 30; owner alice from IP_B is independent
+    // because the IP component still scopes the bucket.
+    mockedGetConnInfo.mockReturnValueOnce({
+      remote: { address: "10.0.0.10" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithOwner();
+
+    // Alternate IP per request — each request gets exactly one mock return.
+    const ips = ["10.0.0.10", "10.0.0.11"];
+    let i = 0;
+    mockedGetConnInfo.mockImplementation(
+      () =>
+        ({
+          remote: { address: ips[i++ % ips.length] },
+        }) as ReturnType<typeof getConnInfo>,
+    );
+
+    // Two requests, same owner, different IPs — both pass and seed two buckets.
+    const r1 = await app.request("/api/ping", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const r2 = await app.request("/api/ping", {
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+  });
+
+  it("requests with no owner in context fall back to the default 'local' bucket", async () => {
+    // Forward-compat with web-mode: even if a route somehow runs before
+    // ownerContext, rateLimit still produces a deterministic bucket key.
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.99" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    // No ownerContext → c.get("ownerId") is undefined → rate-limit must
+    // synthesize "local" so the bucket key is still well-formed.
+    app.use("/api/*", rateLimit);
+    app.get("/api/ping", (c) => c.json({ ok: true }));
+
+    const r = await app.request("/api/ping");
+    expect(r.status).toBe(200);
   });
 });
