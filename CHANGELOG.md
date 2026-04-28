@@ -21,10 +21,13 @@ Release de hardening peste monitoring scheduler + dosar_soap runner, rezultat di
 - Snapshot + alert persistence este testata atomic pe partial failure.
 - `sedintaKey` refuza separatorul `|` in segmentele structurale si permite separatorul doar in solutie, unde parserul re-imbina restul segmentelor.
 - `zod` este pin-uit exact la `4.3.6` in manifest si lockfile.
+- Rutele monitoring POST/PATCH/manual-run au body-size limit dedicat inainte de parse.
+- `getLatestSnapshot(ownerId, jobId)` filtreaza explicit dupa `owner_id`, pentru aparare in profunzime pe izolarea multi-user.
+- Clientul API include explicit `page=0` si `pageSize=0` cand aceste valori sunt setate intentionat, in loc sa le trateze ca falsy.
 
 ### Teste + smoke
 
-- Backend: 330 teste trecute la `npm test` in `backend/`.
+- Backend: 333 teste trecute la `npm test` in `backend/`.
 - Type-check backend curat la `npx tsc --noEmit -p tsconfig.json`.
 - Build productie trecut la `npm run build`.
 - Smoke Electron pe port `3021`: scheduler running, job nou `dosar_soap` creat, tick real produs `monitoring_runs.status='ok'`, audit `monitoring.job.created` prezent.

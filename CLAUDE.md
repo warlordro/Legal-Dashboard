@@ -12,7 +12,7 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 - ✅ **PR-0** v2.0.11 — migration framework + 0001 baseline (commit `9c3a9aa` pe main)
 - ✅ **PR-1** v2.0.12 — `getOwnerId` helper + 5 fix-uri owner_id leak (commit `beca3b6` pe main)
 - ✅ **PR-2** v2.0.13 — shadow tables users/sessions + audit_log + `recordAudit()` (commit `c09a855` pe main)
-- ✅ **PR-3** v2.1.0 — monitoring core: schema 0003 + helperi (canonicalJson/sedintaKey/envelope/requestId) + repo + rute `/api/v1/monitoring/jobs` + UI minimal (branch `feat/monitoring-core`, post-review hardening absorbit)
+- ✅ **PR-3** v2.1.0 — monitoring core: schema 0003 + helperi (canonicalJson/sedintaKey/envelope/requestId) + repo + rute `/api/v1/monitoring/jobs` + UI minimal (post-review hardening absorbit)
 - ✅ **PR-4** v2.2.0 — monitoring scheduler + dosar_soap runner + full-review hardening Tier 2-6
 
 Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](SESSION-HANDOFF.md).
@@ -34,14 +34,14 @@ legal-dashboard/
 │   ├── tsconfig.json  # strict: true, noEmit (type-check only)
 │   └── src/
 │       ├── index.ts   # Bootstrap: CSP, CORS, mount routers, prewarm, backup, shutdown
-│       ├── routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts (multi-provider)
+│       ├── routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts, monitoring.ts
 │       ├── services/  # rnpmSearchService, captchaSolver, rnpmClient,
-│       │              # ai.ts (Claude/OpenAI/Gemini), batch-dosare.ts (AbortSignal)
+│       │              # ai.ts (Claude/OpenAI/Gemini), batch-dosare.ts, monitoring/*
 │       ├── middleware/# rate-limit.ts (real-IP), static-frontend.ts (path-traversal guard),
 │       │              # owner.ts (getOwnerId helper, PR-1)
 │       ├── db/        # schema.ts, avizRepository.ts, searchRepository.ts,
 │       │              # backup.ts (owner_id everywhere), auditRepository.ts (recordAudit, PR-2),
-│       │              # migrations/ (versioned DDL: 0001 baseline, 0002 users/sessions/audit)
+│       │              # migrations/ (versioned DDL: 0001 baseline, 0002 users/sessions/audit, 0003 monitoring)
 │       ├── util/      # textNormalize (SQLite rnpm_norm diacritic fold), validation.ts
 │       ├── soap.ts    # SOAP client pentru PortalJust
 │       └── intervals.ts
@@ -62,7 +62,7 @@ legal-dashboard/
 - `npm run dev:frontend` — Vite dev server pe 5173
 - `npm run build` — build productie (frontend + backend CJS)
 - `npm run dist` — electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` — vitest backend (330 teste in v2.2.0 dupa hardening PR-4)
+- `npm test --workspace=backend` — vitest backend (333 teste in v2.2.0 dupa hardening PR-4)
 - `npx tsc --noEmit -p backend/tsconfig.json` — type-check backend
 - `cd frontend && npx tsc --noEmit` — type-check frontend
 - `npx biome check` — lint + format check

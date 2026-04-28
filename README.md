@@ -1,18 +1,21 @@
 # Legal Dashboard
 
-Desktop app (Electron) + future web build pentru cautarea rapida a dosarelor in
-portalul instantelor si interogarea Registrului National de Publicitate Mobiliara
-(RNPM). Include un modul de analiza AI multi-agent (Claude, OpenAI, Gemini) cu
-stocarea cheilor in keystore-ul sistemului de operare prin Electron `safeStorage`.
+Desktop app (Electron) cu arhitectura web-ready pentru cautarea rapida a
+dosarelor in portalul instantelor, interogarea Registrului National de
+Publicitate Mobiliara (RNPM) si monitorizarea automata a dosarelor prin
+PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
+Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
+`safeStorage`.
 
-Versiune curenta: **2.0.13**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric si
-[SECURITY.md](SECURITY.md) pentru threat model. Ultimul release publicat este PR-2
-din roadmap-ul de web-readiness: migrari versionate, izolarea `owner_id`, tabele
-shadow pentru utilizatori/sesiuni si `audit_log` pregatit pentru mutatiile PR-3+.
+Versiune curenta: **2.2.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release publicat este
+PR-4 din roadmap-ul monitoring + web-readiness: scheduler-ul de monitorizare
+`dosar_soap` este activ pe desktop, iar hardening-ul full-review Tier 2-6 este
+inclus.
 
 ## Prerequisite
 
-- **Node.js ≥ 22** (backend foloseste `--experimental-strip-types`)
+- **Node.js >= 22** (backend foloseste `--experimental-strip-types`)
 - **Git**
 - Optional, doar pentru reCAPTCHA RNPM: cont 2Captcha sau CapSolver (cu credit)
 - Optional, doar pentru modulul AI: cheie API Anthropic / OpenAI / Google
@@ -39,42 +42,65 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (99 de teste in v2.0.13) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (333 teste in v2.2.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
 
+## Monitoring
+
+Feature-ul de monitorizare este pornit implicit pe desktop in v2.2.0. Scheduler-ul
+ruleaza joburi `dosar_soap`, salveaza snapshot-uri, detecteaza diferente intre
+sedinte/solutii si scrie audit log pentru mutatiile relevante.
+
+Kill switch-uri operationale:
+
+- `MONITORING_ENABLED=0` opreste mount-ul rutelor si scheduler-ul.
+- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` exclude tipurile listate din
+  claim-ul scheduler-ului fara modificari in DB.
+
+Tipurile `name_soap` si `aviz_rnpm` raman rezervate pentru PR-5+.
+
 ## Server / Docker deploy
 
 `npm run dist:server` genereaza `server-release/portaljust-server-<version>.zip`.
-ZIP-ul include `package-lock.json` + manifestele workspace si scripturile `start.sh` /
-`start.bat` instaleaza runtime deps cu `npm ci` la prima pornire daca lipseste
-`node_modules/better-sqlite3`. Motiv: `better-sqlite3` este modul nativ si trebuie
-compilat pe platforma tinta.
+ZIP-ul include `package-lock.json` + manifestele workspace si scripturile
+`start.sh` / `start.bat` instaleaza runtime deps cu `npm ci` la prima pornire
+daca lipseste `node_modules/better-sqlite3`. Motiv: `better-sqlite3` este modul
+nativ si trebuie compilat pe platforma tinta.
 
-Docker foloseste acelasi lockfile prin `npm ci --workspace=backend --omit=dev` si
-are `start-period=120s` pe healthcheck pentru boot-uri lente cu prewarm/migrari DB.
+Docker foloseste acelasi lockfile prin `npm ci --workspace=backend --omit=dev`
+si are `start-period=120s` pe healthcheck pentru boot-uri lente cu prewarm /
+migrari DB.
 
 ## Configurare
 
 Toate variabilele de environment sunt in [backend/.env.example](backend/.env.example).
-Cheile API pentru AI pot fi setate fie in `.env` (precedence), fie din UI (salvate
-local prin safeStorage). Vezi `SECURITY.md` pentru detalii.
+Cheile API pentru AI pot fi setate fie in `.env` (precedence), fie din UI
+(salvate local prin safeStorage). Vezi `SECURITY.md` pentru detalii.
 
 Port backend default: `3002`. Suprascrie cu `LEGAL_DASHBOARD_PORT`.
 LAN exposure blocat by default; opt-in explicit cu `LEGAL_DASHBOARD_ALLOW_REMOTE=1`.
 
 ## Arhitectura (scurt)
 
-- `electron/main.js` — main process: single-instance lock, CSP, safeStorage IPC, backend bundle load
-- `electron/preload.js` — context bridge (doar safeStorage)
-- `backend/src/index.ts` — Hono server (port 3002). Rute AI, SOAP PortalJust, RNPM
-- `backend/src/routes/rnpm.ts` — search + bulk + baza locala + export
-- `backend/src/db/**` — SQLite (better-sqlite3), migrari versionate, repositories cu `owner_id` si audit shadow tables
-- `frontend/src/**` — React 19 SPA (Vite), comunica cu backend prin REST/SSE
-- `dist-backend/`, `dist-frontend/` — output de build
+- `electron/main.js` - main process: single-instance lock, CSP, safeStorage IPC,
+  backend bundle load
+- `electron/preload.js` - context bridge (doar safeStorage)
+- `backend/src/index.ts` - Hono server (port 3002), bootstrap scheduler, rute AI,
+  SOAP PortalJust, RNPM
+- `backend/src/routes/monitoring.ts` - API v1 pentru joburi de monitorizare,
+  manual run si body-size limits dedicate
+- `backend/src/services/monitoring/**` - scheduler, diff, runner `dosar_soap`,
+  clock/test seams
+- `backend/src/routes/rnpm.ts` - search + bulk + baza locala + export
+- `backend/src/db/**` - SQLite (better-sqlite3), migrari versionate,
+  repositories cu `owner_id`, audit si monitoring tables
+- `frontend/src/**` - React 18 SPA (Vite), comunica cu backend prin REST/SSE
+- `dist-backend/`, `dist-frontend/` - output de build
 
 ## Securitate
 
-Vezi [SECURITY.md](SECURITY.md) pentru threat model complet, protectii desktop/backend
-si scope out-of-scope (cod fara semnatura Windows, LAN mode fara auth, etc.).
+Vezi [SECURITY.md](SECURITY.md) pentru threat model complet, protectii
+desktop/backend si scope out-of-scope (cod fara semnatura Windows, LAN mode
+fara auth, etc.).

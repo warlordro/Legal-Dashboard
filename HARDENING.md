@@ -1,5 +1,7 @@
 # Legal Dashboard — Roadmap de Hardening
 
+> Status update 2026-04-29: hardening-ul full-review pentru monitoring Tier 2-6 este complet si publicat in `v2.2.0`. Itemele ramase in acest fisier sunt backlog general / web-mode, nu blocante pentru release-ul curent.
+
 > **Scop:** lista de items care muta aplicatia din „production-ready pentru use intern" → „production-ready pentru deployment multi-user la firme externe".
 >
 > **Nu este** tech debt (codul nu e stricat). **Este** maturizare pentru adoption non-tech + compliance.

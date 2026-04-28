@@ -1,7 +1,7 @@
 # Execution Roadmap — Monitorizare + Web Mode
 
-> **Status**: 🟢 READY TO START — toate deciziile blocante rezolvate (2026-04-27).
-> **Versiune document**: 1.0 (2026-04-27)
+> **Status**: PR-0..PR-4 livrate si publicate pe `main` (tag `v2.2.0`, 2026-04-29). Urmatorul PR: PR-5 bulk name lists / `name_soap`.
+> **Versiune document**: 1.2 (2026-04-29)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
@@ -46,10 +46,10 @@ Acest document e **roadmap-ul de executie** — saptamanal, cu checkboxes si lim
 
 Treci prin asta inainte sa scrii prima linie de cod. Daca ceva nu e bifat, opreste-te si rezolva.
 
-### Local dev (validat post-PR-2 la 2026-04-27)
+### Local dev (validat post-v2.2.0 la 2026-04-29)
 - [x] `git status` clean pe `main` (nu sunt modificari uncommitted ramase de la Faza 10).
 - [x] `npm run electron:dev` porneste fara erori (3 smoke-uri consecutive).
-- [x] `npm test --workspace=backend` toate testele green (**192 teste** in v2.1.0; 99 in v2.0.13).
+- [x] `npm test --workspace=backend` toate testele green (**333 teste** in v2.2.0).
 - [x] `npx tsc --noEmit -p backend/tsconfig.json` zero errors.
 - [x] `cd frontend && npx tsc --noEmit` zero errors.
 - [x] `npx biome check` clean.
@@ -57,7 +57,7 @@ Treci prin asta inainte sa scrii prima linie de cod. Daca ceva nu e bifat, opres
 ### Repo hygiene
 - [ ] Branch protection pe `main` activat in GitHub (require PR review, even if self-merging).
 - [ ] CI (GitHub Actions) verde pe ultimul commit `main`.
-- [x] CHANGELOG.md sincronizat cu `package.json` (`v2.0.13`).
+- [x] CHANGELOG.md sincronizat cu `package.json` (`v2.2.0`).
 
 ### Citire obligatorie inainte de PR-3
 - [ ] **Citeste integral** Portal Just Integrat `frontend/src/pages/Monitorizare.tsx:1-1724` (path local — sister project `portaljust-dashboard`, configureaza via env `PJI_REFERENCE_REPO`) — pattern-ul de snapshot/diff/scheduler e portat. ~1h.
@@ -159,7 +159,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 
 > **Tema**: PORNIM scheduler-ul. Asta e zona cu **cel mai mare risc tehnic** — atentie maxima.
 
-#### PR-4 — Monitoring scheduler + dosar_soap kind ✅ DONE (branch `feat/monitoring-core`, v2.1.1)
+#### PR-4 - Monitoring scheduler + dosar_soap kind DONE (main merge `1907373`, v2.2.0)
 - **Scop**: backend-ul ruleaza singur la fiecare 60s, vede ce joburi sunt scadente, le executa, salveaza snapshot, detecteaza diff, emite alerte.
 - **User vede**: pe pagina Monitorizare incepe sa apara "Last checked: acum 2 minute" + alerte cand apar termene noi.
 - **Livrari** (6 commit-uri bisectabile, C1-C6):
@@ -177,9 +177,10 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
   - [x] `aborted` outcome lasa `fail_streak`/`next_run_at` neschimbate (drain semantics).
   - [x] `source_error` alert emis exact la transition 4→5 fail streak, NU repetat.
   - [x] `scripts/loadtest-monitoring.js` k6 1000-job harness gata (manual smoke — nu in CI).
-  - [ ] **Manual smoke** pe desktop dupa merge: real dosar, astepti 60s, vezi `monitoring_runs` ok row + snapshot.
-- **Bump**: 2.1.1 minor.
-- **Risk**: 🟡 MEDIUM. PortalJust payload non-determinism — manual smoke ramane post-merge.
+  - [x] **Manual smoke** pe desktop dupa merge: real dosar, astepti 60s, vezi `monitoring_runs` ok row + snapshot.
+  - [x] Full-review hardening Tier 2-6 absorbit in release: body caps monitoring, per-kind kill switch, retention purge, owner-scoped latest snapshot, crash recovery marker/logging.
+- **Bump**: 2.2.0 minor (PR-4 + hardening full-review).
+- **Risk**: MEDIUM initial, redus dupa smoke desktop si hardening Tier 2-6.
 
 ---
 
@@ -199,7 +200,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
   - [ ] Upload 100 nume → 100 joburi create + scheduler le proceseaza in batches.
   - [ ] Snapshot per nume comparat cu setul de `numarDosar` returnat → emit `dosar_new` la cei nou aparuti.
   - [ ] Filtru `categorii`/`stadii` din `alert_config_json` aplicat post-fetch.
-- **Bump**: 2.2.0 minor.
+- **Bump**: 2.3.0 minor.
 - **Risk**: 🟡 MEDIUM. Nume populare (ex: "POPESCU ION") pot returna >1000 dosare → trebuie sa documentam si capam in UI.
 
 ---
@@ -219,7 +220,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
   - [ ] Marchezi citit → badge scade.
   - [ ] Notificare Windows cand app e in background.
   - [ ] **EventSource cleanup verificat**: `useEffect(() => { const es = new EventSource('/api/v1/alerts/stream'); ...; return () => es.close(); }, [])`. Reconnect-with-backoff la disconnect (CQ-5 + CQ-8 conform). Test: navighezi de pe pagina Alerte → connection-uri active in `netstat` scad la 0.
-- **Bump**: 2.2.1 minor.
+- **Bump**: 2.3.1 minor.
 - **Risk**: LOW.
 
 ---
@@ -237,7 +238,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 - **DoD**:
   - [ ] Faci 3 analize AI → 3 rows in `ai_usage` cu cost calculat.
   - [ ] Panel afiseaza cost ultimele 24h + 30 zile.
-- **Bump**: 2.3.0 minor.
+- **Bump**: 2.4.0 minor.
 - **Risk**: LOW.
 
 **End of Faza 1**: 🎉 Aplicatia are monitorizare auto + alerte + AI quota visibility. Inca strict desktop. Toate scheme-urile au `owner_id` din zi 1 — Faza 2 ataseaza doar auth real fara sa rescrie nimic.
@@ -255,7 +256,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
   - [ ] UI: lista users cu role + status, audit log search, quota override per user.
   - [ ] Pe desktop: pagina exista dar `rol='local'` ≠ `admin`, deci 403. UI ascunde linkul.
 - **DoD**: ruta `/admin/users` accesibila doar daca `currentUser.role='admin'`.
-- **Bump**: 2.3.1 minor.
+- **Bump**: 2.4.1 minor.
 - **Risk**: LOW.
 
 ---
@@ -418,3 +419,4 @@ Vezi PLAN-monitoring-webmode.md §0 pentru rationale complet.
 - **v1.0** (2026-04-27): document creat initial dupa rezolvare deciziilor §11.2-1/2/3.
 - **v1.1** (2026-04-27): Saptamana 1 (PR-0 + PR-1 + PR-2) marcata DONE; commits + version bumps inregistrate; smoke launch logs referenced.
 
+- **v1.2** (2026-04-29): PR-4 + full-review hardening marcat DONE, tag `v2.2.0` publicat, PR-5 retargetat la `v2.3.0`.
