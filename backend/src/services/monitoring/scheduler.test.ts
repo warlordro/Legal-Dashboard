@@ -82,9 +82,14 @@ afterEach(async () => {
 });
 
 class NoopOkRunner implements JobRunner {
-  calls: ScheduledJob[] = [];
-  async run(input: { job: ScheduledJob; runId: number; signal: AbortSignal }): Promise<RunOutcome> {
-    this.calls.push(input.job);
+  calls: { job: ScheduledJob; nowIso: string }[] = [];
+  async run(input: {
+    job: ScheduledJob;
+    runId: number;
+    nowIso: string;
+    signal: AbortSignal;
+  }): Promise<RunOutcome> {
+    this.calls.push({ job: input.job, nowIso: input.nowIso });
     return { status: "ok", alertsCreated: 0 };
   }
 }
@@ -151,7 +156,11 @@ describe("Scheduler — tick success path", () => {
     await sch.stop();
 
     expect(runner.calls.length).toBe(1);
-    expect(runner.calls[0]!.id).toBe(jobId);
+    expect(runner.calls[0]!.job.id).toBe(jobId);
+    // Runner receives the tick's nowIso (rather than calling clock.now itself)
+    // so the diff/snapshot timestamps line up with the run row's started_at
+    // and the next_run_at math is anchored to the same instant.
+    expect(runner.calls[0]!.nowIso).toBe(T0);
 
     const job = readJob(jobId);
     expect(job.last_status).toBe("ok");
@@ -215,6 +224,82 @@ describe("Scheduler — tick error path", () => {
     const job = readJob(jobId);
     expect(job.fail_streak).toBe(3);
     expect(job.next_run_at).toBe("2026-04-28T10:08:00.000Z"); // T0 + 480s
+  });
+
+  // 5 consecutive failures = "the source is broken, not transient flake".
+  // Spec PLAN-monitoring-webmode.md L390:
+  //   - emit source_error alert (severity=warning, NOT critical)
+  //   - override next_run_at = now + 1h regardless of standard backoff
+  //
+  // We emit ONLY at the transition 4 → 5 (not on every subsequent fail) so
+  // a chronically-broken source doesn't spam one alert per tick. The job's
+  // fail_streak keeps growing on later fails but the alert is dedup'd.
+  it("on fifth consecutive failure: emits source_error alert + 1h backoff", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      failStreak: 4,
+    });
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: new NoopErrorRunner(),
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    const job = readJob(jobId);
+    expect(job.fail_streak).toBe(5);
+    // T0 + 3600s, NOT computeNextRunAt(failStreak=5)=min(60*32,3600)=1920s.
+    expect(job.next_run_at).toBe("2026-04-28T11:00:00.000Z");
+
+    const alerts = getDb()
+      .prepare(
+        `SELECT kind, severity FROM monitoring_alerts WHERE job_id = ?`,
+      )
+      .all(jobId) as { kind: string; severity: string }[];
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.kind).toBe("source_error");
+    expect(alerts[0]!.severity).toBe("warning");
+  });
+
+  // Once the streak is past 5, no further source_error alerts should fire.
+  // The job stays on the +1h cadence (3600s == standard cap) until recovery.
+  it("on sixth consecutive failure: no new source_error alert", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      failStreak: 5, // already past the threshold
+    });
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: new NoopErrorRunner(),
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    const job = readJob(jobId);
+    expect(job.fail_streak).toBe(6);
+    // Standard backoff would also be 3600s here (capped) but the override is
+    // the protected contract — lock it so a regression that drops the cap on
+    // failStreak>=6 would still be caught.
+    expect(job.next_run_at).toBe("2026-04-28T11:00:00.000Z");
+
+    const alertCount = (
+      getDb()
+        .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`)
+        .get(jobId) as { n: number }
+    ).n;
+    expect(alertCount).toBe(0);
   });
 });
 
@@ -309,5 +394,58 @@ describe("Scheduler — stop() drain", () => {
       )
       .get(jobId) as { status: string };
     expect(run.status).toBe("aborted");
+  });
+
+  // 'aborted' is a graceful-shutdown outcome, NOT a retry-able failure. If we
+  // counted it toward fail_streak, every clean stop() would inflate the streak
+  // and eventually trip the 5-fail source_error alert on perfectly healthy
+  // jobs. Drain must leave job state (fail_streak, next_run_at, last_status,
+  // last_run_at) untouched so the next boot picks the job up where it was.
+  it("stop() drain leaves fail_streak and next_run_at unchanged", async () => {
+    const ORIGINAL_NEXT_RUN = "2026-04-28T09:00:00.000Z";
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: ORIGINAL_NEXT_RUN,
+      failStreak: 2,
+    });
+
+    let resolveRun: (() => void) | undefined;
+    const slowRunner: JobRunner = {
+      run: async (input) => {
+        await new Promise<void>((r) => {
+          resolveRun = r;
+        });
+        // Simulate the runner observing the abort and reporting 'aborted'.
+        if (input.signal.aborted) {
+          return { status: "aborted", errorCode: "DRAINED" };
+        }
+        return { status: "ok", alertsCreated: 0 };
+      },
+    };
+
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: slowRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    const tickPromise = sch.tickOnce();
+    await new Promise((r) => setImmediate(r));
+
+    const stopPromise = sch.stop();
+    await new Promise((r) => setImmediate(r));
+
+    resolveRun!();
+    await tickPromise;
+    await stopPromise;
+
+    const job = readJob(jobId);
+    expect(job.fail_streak).toBe(2);
+    expect(job.next_run_at).toBe(ORIGINAL_NEXT_RUN);
+    expect(job.last_status).toBeNull();
+    expect(job.last_run_at).toBeNull();
   });
 });

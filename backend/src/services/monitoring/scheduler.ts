@@ -27,6 +27,13 @@ import {
   recoverOrphanRuns,
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
+import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+
+// 5 consecutive failures = the source is broken, not flaky. Spec
+// PLAN-monitoring-webmode.md L390: emit one source_error alert and slow the
+// job to once-per-hour to spare upstream and ourselves.
+const SOURCE_ERROR_THRESHOLD = 5;
+const SOURCE_ERROR_BACKOFF_SEC = 3600;
 
 export type ScheduledJob = MonitoringJobRow;
 
@@ -42,6 +49,11 @@ export interface JobRunner {
   run(input: {
     job: ScheduledJob;
     runId: number;
+    // ISO timestamp captured by the scheduler at claim time. Runners must
+    // use this (not their own Date.now()) when persisting snapshots / dedup
+    // keys / alert payload timestamps so the diff math, run row timestamps,
+    // and next_run_at recompute all anchor to the same instant.
+    nowIso: string;
     signal: AbortSignal;
   }): Promise<RunOutcome>;
 }
@@ -150,6 +162,7 @@ export class Scheduler {
         outcome = await this.opts.runner.run({
           job,
           runId,
+          nowIso,
           signal: controller.signal,
         });
       } catch (err) {
@@ -173,7 +186,14 @@ export class Scheduler {
         alertsCreated: outcome.alertsCreated ?? 0,
       });
 
-      this.applyJobOutcome(job, outcome, nowIso);
+      // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
+      // state (fail_streak, next_run_at, last_*) untouched so the next boot
+      // resumes the job at its existing schedule. Counting it would inflate
+      // fail_streak on every clean shutdown and trip spurious source_error
+      // alerts on healthy jobs.
+      if (outcome.status !== "aborted") {
+        this.applyJobOutcome(job, runId, outcome, nowIso);
+      }
     })().finally(() => {
       this.inflight.delete(job.id);
     });
@@ -184,6 +204,7 @@ export class Scheduler {
 
   private applyJobOutcome(
     job: ScheduledJob,
+    runId: number,
     outcome: RunOutcome,
     nowIso: string,
   ): void {
@@ -191,16 +212,25 @@ export class Scheduler {
     const failStreak = success ? 0 : job.fail_streak + 1;
     const lastStatus: "ok" | "error" = success ? "ok" : "error";
 
-    const jitterSec = this.opts.jitterSecMax === 0
-      ? 0
-      : Math.floor(Math.random() * (this.opts.jitterSecMax + 1));
-
-    const nextRunAt = computeNextRunAt({
-      now: new Date(nowIso),
-      cadenceSec: job.cadence_sec,
-      failStreak,
-      jitterSec,
-    });
+    let nextRunAt: Date;
+    if (failStreak >= SOURCE_ERROR_THRESHOLD) {
+      // Force +1h regardless of standard backoff. At failStreak=5 this is
+      // a meaningful override (standard would be 1920s); at failStreak>=6
+      // standard backoff caps at 3600s so the values converge.
+      nextRunAt = new Date(
+        new Date(nowIso).getTime() + SOURCE_ERROR_BACKOFF_SEC * 1000,
+      );
+    } else {
+      const jitterSec = this.opts.jitterSecMax === 0
+        ? 0
+        : Math.floor(Math.random() * (this.opts.jitterSecMax + 1));
+      nextRunAt = computeNextRunAt({
+        now: new Date(nowIso),
+        cadenceSec: job.cadence_sec,
+        failStreak,
+        jitterSec,
+      });
+    }
 
     markJobOutcome({
       jobId: job.id,
@@ -209,5 +239,27 @@ export class Scheduler {
       failStreak,
       nextRunAt: nextRunAt.toISOString(),
     });
+
+    // Emit source_error EXACTLY at the 4 → 5 transition. Higher streaks
+    // still back off to 1h but stay quiet — otherwise a chronically broken
+    // upstream produces one alert per tick. dedup_key is anchored to the
+    // run id that exposed the trip, so each fresh streak (after a recovery)
+    // can re-emit on its next 5th fail with a different runId.
+    if (failStreak === SOURCE_ERROR_THRESHOLD) {
+      insertAlert({
+        ownerId: job.owner_id,
+        jobId: job.id,
+        kind: "source_error",
+        severity: "warning",
+        title: "Sursa indisponibila (5 esecuri consecutive)",
+        detail: {
+          fail_streak: failStreak,
+          last_error_code: outcome.errorCode ?? null,
+          last_error_message: outcome.errorMessage ?? null,
+          next_run_at: nextRunAt.toISOString(),
+        },
+        dedupKey: `source_error|${runId}`,
+      });
+    }
   }
 }
