@@ -289,6 +289,7 @@ describe("dosarSoapRunner — wallclock budget", () => {
   });
 });
 
+
 describe("dosarSoapRunner — dosar disappeared", () => {
   it("empty SOAP result → snapshot lastDosarPresent=false", async () => {
     const job = seedJob();

@@ -26,6 +26,7 @@ import {
   insertSnapshot,
 } from "../../db/monitoringSnapshotsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { getDb } from "../../db/schema.ts";
 
 const DEFAULT_BUDGET_MS = 10 * 60 * 1000; // 10 min
 
@@ -98,25 +99,33 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         now: nowIso,
       });
 
-      insertSnapshot({
-        ownerId: job.owner_id,
-        jobId: job.id,
-        observedAt: nowIso,
-        payloadHash: canonicalSha256(newSnapshot),
-        payloadJson: canonicalJson(newSnapshot),
-      });
-
-      for (const alert of alerts) {
-        insertAlert({
+      // C2 hardening: snapshot + alerts must commit together. Without this,
+      // a crash / SIGTERM / disk-full between insertSnapshot and the first
+      // insertAlert (or between two alert inserts) leaves the job in a
+      // "snapshot persisted, alerts dropped" state — the next tick diffs
+      // against the new snapshot and never re-emits the missed alerts.
+      // better-sqlite3 transactions are synchronous; the runner is async
+      // only on the SOAP call above, which has already resolved here.
+      getDb().transaction(() => {
+        insertSnapshot({
           ownerId: job.owner_id,
           jobId: job.id,
-          kind: alert.kind,
-          severity: alert.severity,
-          title: alert.title,
-          detail: alert.detail,
-          dedupKey: alert.dedupKey,
+          observedAt: nowIso,
+          payloadHash: canonicalSha256(newSnapshot),
+          payloadJson: canonicalJson(newSnapshot),
         });
-      }
+        for (const alert of alerts) {
+          insertAlert({
+            ownerId: job.owner_id,
+            jobId: job.id,
+            kind: alert.kind,
+            severity: alert.severity,
+            title: alert.title,
+            detail: alert.detail,
+            dedupKey: alert.dedupKey,
+          });
+        }
+      })();
 
       return { status: "ok", alertsCreated: alerts.length };
     },
