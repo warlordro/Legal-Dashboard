@@ -256,12 +256,18 @@ export class Scheduler {
     const controller = new AbortController();
     const startMs = Date.now();
 
-    // Each runOne acquires its own withMaintenanceRead for the duration of
-    // its body (runner SOAP + DB writes + finalize). Lock is held alongside
-    // any sibling concurrent runs (read lock = shared) but a queued backup
-    // writer waits for this run to drain. See C1 commit message for the
-    // full rationale and the bug it fixes.
-    const work = withMaintenanceRead(async () => {
+    // Tier 3 #11: the runner.run() call is INTENTIONALLY outside any
+    // maintenance lock at this layer. SOAP I/O can take up to 10min on the
+    // wallclock budget, and pinning the read lock that long blocks the daily
+    // backup writer behind upstream PortalJust latency. Each runner is
+    // responsible for acquiring withMaintenanceRead around its own DB
+    // persistence (dosarSoapRunner does — see C2 atomicity comment there).
+    // The scheduler then takes a SECOND brief read lock around finalize +
+    // applyJobOutcome (sub-millisecond UPDATE/INSERT chain wrapped in
+    // db.transaction) — so the per-run lock-hold time collapses from
+    // "SOAP+DB" to "DB only" (worst-case ~ms, typical microseconds). Two
+    // brief acquisitions are cheaper for the queued backup than one long one.
+    const work = (async () => {
       let outcome: RunOutcome;
       try {
         outcome = await this.opts.runner.run({
@@ -288,27 +294,30 @@ export class Scheduler {
       // tick re-claims the same job and produces duplicate snapshots/alerts.
       // The source_error insertAlert inside applyJobOutcome is part of the
       // same atomic boundary so a half-applied recovery never persists.
-      getDb().transaction(() => {
-        finalize(runId, {
-          status: outcome.status,
-          endedAt: endIso,
-          durationMs,
-          httpStatus: outcome.httpStatus,
-          errorCode: outcome.errorCode,
-          errorMessage: outcome.errorMessage,
-          alertsCreated: outcome.alertsCreated ?? 0,
-        });
+      // Tier 3 #11: the lock now only wraps this terminal-commit transaction.
+      await withMaintenanceRead(async () => {
+        getDb().transaction(() => {
+          finalize(runId, {
+            status: outcome.status,
+            endedAt: endIso,
+            durationMs,
+            httpStatus: outcome.httpStatus,
+            errorCode: outcome.errorCode,
+            errorMessage: outcome.errorMessage,
+            alertsCreated: outcome.alertsCreated ?? 0,
+          });
 
-        // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
-        // state (fail_streak, next_run_at, last_*) untouched so the next boot
-        // resumes the job at its existing schedule. Counting it would inflate
-        // fail_streak on every clean shutdown and trip spurious source_error
-        // alerts on healthy jobs.
-        if (outcome.status !== "aborted") {
-          this.applyJobOutcome(job, runId, outcome, nowIso);
-        }
-      })();
-    }).finally(() => {
+          // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
+          // state (fail_streak, next_run_at, last_*) untouched so the next boot
+          // resumes the job at its existing schedule. Counting it would inflate
+          // fail_streak on every clean shutdown and trip spurious source_error
+          // alerts on healthy jobs.
+          if (outcome.status !== "aborted") {
+            this.applyJobOutcome(job, runId, outcome, nowIso);
+          }
+        })();
+      });
+    })().finally(() => {
       this.inflight.delete(job.id);
     });
 

@@ -509,13 +509,25 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
   // so a backup writer could race the runner's snapshot/alert/finalize
   // writes. After C1, runOne acquires its own withMaintenanceRead — a
   // queued backup must wait for the manual run to drain before proceeding.
-  it("manual runJobNow holds maintenance read for the run duration (C1)", async () => {
+  //
+  // Tier 3 #11 INVERTED this contract: the scheduler no longer holds the read
+  // lock during the runner body. The runner is responsible for acquiring its
+  // own withMaintenanceRead around its DB persistence (dosarSoapRunner does).
+  // The scheduler then takes a SECOND brief read lock for finalize +
+  // applyJobOutcome. Net effect: a backup queued during a mid-SOAP run is
+  // NOT pinned by upstream PortalJust latency — it can interleave during the
+  // lock-free SOAP phase.
+  it("manual runJobNow does NOT hold maintenance read across runner.run() (#11)", async () => {
     seedJob({
       cadenceSec: 600,
       nextRunAt: "2026-04-29T00:00:00.000Z",
     });
 
     let resolveRun: (() => void) | undefined;
+    // Mock runner with NO DB ops (so it acquires no internal read lock).
+    // In production dosarSoapRunner takes withMaintenanceRead around its
+    // own snapshot+alerts transaction; here we're asserting the SCHEDULER
+    // layer doesn't hold the lock during runner.run().
     const slowRunner: JobRunner = {
       run: async () => {
         await new Promise<void>((r) => {
@@ -538,29 +550,101 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
       .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
       .get(1) as ScheduledJob;
 
-    // Kick off the manual run; it returns 202-style with the runId once
-    // insertRunning has happened, but the runner is still parked.
+    // Kick off the manual run; runJobNow's brief read lock around
+    // insertRunning has already released by the time it returns.
     await sch.runJobNow(job);
-    // Yield so runOne's withMaintenanceRead is acquired (read lock = active).
+    // Yield so the runner is definitely parked inside its body.
     await new Promise((r) => setImmediate(r));
 
-    // Queue a writer behind the live reader. Writer-preference RWLock keeps
-    // it parked until the in-flight runOne releases.
+    // Queue a writer. With the #11 change, the scheduler holds NO read lock
+    // during the runner body, so the writer should enter immediately.
     let writerEntered = false;
     const writerPromise = withMaintenanceWrite(async () => {
       writerEntered = true;
     });
 
-    // Yield several times — the writer must NOT enter while the runner is
-    // still parked (runner held → reader held → writer queued).
+    // Yield several times — the writer should drain and enter while the
+    // runner is still parked. This is the #11 contract: lock-free SOAP.
     for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
-    expect(writerEntered).toBe(false);
-
-    // Release the runner. After it finalizes, the read lock drops and the
-    // writer wakes up.
-    resolveRun!();
-    await writerPromise;
     expect(writerEntered).toBe(true);
+    await writerPromise;
+
+    // Release the runner so finalize completes; without this the runOne
+    // promise leaks past the test boundary.
+    resolveRun!();
+    await sch.stop();
+  });
+
+  // Tier 3 #11 — the scheduler MUST still hold a read lock around the
+  // finalize transaction (finalize + markJobOutcome). Backup running mid-
+  // finalize would split that atomic boundary across the snapshot file.
+  it("runOne holds maintenance read around the finalize transaction (#11)", async () => {
+    seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-29T00:00:00.000Z",
+    });
+
+    // Hold a writer FIRST. Any reader queued behind it parks until the
+    // writer drains — including the scheduler's finalize-time read lock.
+    let releaseWriter: (() => void) | undefined;
+    const writerHeld = withMaintenanceWrite(async () => {
+      await new Promise<void>((r) => {
+        releaseWriter = r;
+      });
+    });
+    // Wait for the writer to actually be inside its critical section.
+    await new Promise((r) => setImmediate(r));
+
+    let runnerReturned = false;
+    const fastRunner: JobRunner = {
+      run: async () => {
+        runnerReturned = true;
+        return { status: "ok", alertsCreated: 0 };
+      },
+    };
+
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runner: fastRunner,
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    // Don't start() (would call recoverOrphanRuns, which acquires no lock
+    // but is unnecessary noise here). Manually flip running=true via start
+    // so runJobNow accepts. We also need to skip waiting on insertRunning
+    // since it would be parked behind the writer too — instead, kick a
+    // tickOnce path which is what production uses 99% of the time.
+    await sch.start();
+    // The runner.run() itself is lock-free (mock has no DB ops), so it
+    // returns quickly; finalize then waits for the writer to release.
+    const job = getDb()
+      .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
+      .get(1) as ScheduledJob;
+
+    // Fire the manual run — it parks at insertRunning's read lock first
+    // (which is queued behind the writer). Once the writer releases, the
+    // run proceeds; runner returns immediately, then finalize tries to
+    // re-acquire the read lock.
+    let runJobResolved = false;
+    const runPromise = sch
+      .runJobNow(job)
+      .then(() => { runJobResolved = true; });
+
+    // Yield several times — runJobNow's insertRunning is queued behind
+    // the writer and should NOT have resolved yet.
+    for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    expect(runJobResolved).toBe(false);
+    expect(runnerReturned).toBe(false);
+
+    // Release the writer. Now insertRunning can acquire, runJobNow returns,
+    // runner runs (no lock), finalize acquires read lock again → completes.
+    releaseWriter!();
+    await writerHeld;
+    await runPromise;
+    expect(runnerReturned).toBe(true);
+    expect(runJobResolved).toBe(true);
 
     await sch.stop();
   });
