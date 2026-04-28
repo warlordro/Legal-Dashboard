@@ -103,6 +103,28 @@ describe("POST /api/v1/monitoring/jobs", () => {
     expect(json.requestId).toBeTruthy();
   });
 
+  it("freshly-created job is claim-eligible immediately (C6)", async () => {
+    // Smoke finding: pre-C6 a new job had next_run_at = now + cadence, so a
+    // user creating a daily monitor saw "Niciodata" in the UI for 24h with no
+    // baseline snapshot. The first tick must run on the very next scheduler
+    // wake-up, not after a full cadence delay.
+    const app = buildTestApp();
+    const before = Date.now();
+    const res = await postJson(app, "/api/v1/monitoring/jobs", {
+      ...validDosarBody,
+      cadence_sec: 86400, // daily
+    });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as {
+      data: { id: number; next_run_at: string };
+    };
+    const nextRunMs = new Date(json.data.next_run_at).getTime();
+    // next_run_at must be at-or-before now (within a small tolerance for the
+    // post-insert SELECT round trip), NOT now + 86400_000.
+    expect(nextRunMs).toBeLessThanOrEqual(Date.now());
+    expect(nextRunMs).toBeGreaterThanOrEqual(before - 1000);
+  });
+
   it("writes an audit_log entry on fresh insert", async () => {
     const app = buildTestApp();
     const res = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);

@@ -59,7 +59,14 @@ export function createJob(input: CreateJobInput): CreateJobResult {
   const targetJson = JSON.stringify(body.target);
   const targetHash = canonicalSha256(body.target);
   const alertConfigJson = JSON.stringify(body.alert_config);
-  const nextRunAt = new Date(Date.now() + body.cadence_sec * 1000).toISOString();
+  // C6 hardening (smoke finding): freshly-created job runs on the NEXT
+  // scheduler tick, not after a full cadence. The previous now+cadence math
+  // meant a user creating a daily monitor saw "Niciodata" for 24h with no
+  // baseline snapshot, no UI feedback that the job was wired correctly.
+  // After the first run finalizes, markJobOutcome → computeNextRunAt aligns
+  // future ticks to the requested cadence, so the cadence contract still
+  // holds — only the FIRST tick is accelerated.
+  const nextRunAt = new Date().toISOString();
 
   // 1) client_request_id replay path — return existing row unchanged.
   if (body.client_request_id) {
