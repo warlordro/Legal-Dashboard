@@ -1,3 +1,4 @@
+import { useState } from "react";
 import DOMPurify from "dompurify";
 import { Bot, Check, ChevronDown, Circle, Download, Key, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
@@ -56,6 +57,7 @@ export interface DosareAiAnalysisPanelProps {
 }
 
 export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAnalysisPanelProps) {
+  const [exportingPdf, setExportingPdf] = useState<"simple" | "advanced" | null>(null);
   return (
     <>
       {/* Analiză AI - Collapsible per dosar */}
@@ -73,14 +75,24 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
           <div className="flex items-center gap-1.5">
             {ai.analysis[dosar.numar] && (
               <button
-                className="p-1 rounded hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-500 hover:text-violet-700 dark:hover:text-violet-300 transition-colors"
+                className="p-1 rounded hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-500 hover:text-violet-700 dark:hover:text-violet-300 transition-colors disabled:opacity-50"
                 title="Exportă PDF"
-                onClick={(e) => {
+                disabled={exportingPdf !== null}
+                onClick={async (e) => {
                   e.stopPropagation();
-                  exportAnalysisPDF(dosar.numar, dosar.institutie, dosar.obiect, ai.analysis[dosar.numar]);
+                  setExportingPdf("simple");
+                  try {
+                    await exportAnalysisPDF(dosar.numar, dosar.institutie, dosar.obiect, ai.analysis[dosar.numar]);
+                  } catch (err) {
+                    console.error("[ai] export simple pdf failed:", err);
+                  } finally {
+                    setExportingPdf(null);
+                  }
                 }}
               >
-                <Download className="h-3.5 w-3.5" />
+                {exportingPdf === "simple"
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Download className="h-3.5 w-3.5" />}
               </button>
             )}
             <ChevronDown className={`h-4 w-4 text-violet-500 transition-transform ${ai.collapsed.has(`ai-${dosar.numar}`) ? "rotate-180" : ""}`} />
@@ -187,19 +199,29 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
           <div className="flex items-center gap-1.5">
             {multi.result[dosar.numar] && (
               <button
-                className="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+                className="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors disabled:opacity-50"
                 title="Exportă PDF"
-                onClick={(e) => {
+                disabled={exportingPdf !== null}
+                onClick={async (e) => {
                   e.stopPropagation();
-                  const r = multi.result[dosar.numar];
-                  exportAnalysisPDF(
-                    dosar.numar, dosar.institutie, dosar.obiect,
-                    r.final, "advanced",
-                    JUDGE_MODELS_LIST.find((j) => j.key === r.judge.model)?.label || r.judge.model
-                  );
+                  setExportingPdf("advanced");
+                  try {
+                    const r = multi.result[dosar.numar];
+                    await exportAnalysisPDF(
+                      dosar.numar, dosar.institutie, dosar.obiect,
+                      r.final, "advanced",
+                      JUDGE_MODELS_LIST.find((j) => j.key === r.judge.model)?.label || r.judge.model
+                    );
+                  } catch (err) {
+                    console.error("[ai] export advanced pdf failed:", err);
+                  } finally {
+                    setExportingPdf(null);
+                  }
                 }}
               >
-                <Download className="h-3.5 w-3.5" />
+                {exportingPdf === "advanced"
+                  ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                  : <Download className="h-3.5 w-3.5" />}
               </button>
             )}
             <ChevronDown className={`h-4 w-4 ${mc.chevron} transition-transform ${ai.collapsed.has(`multi-${dosar.numar}`) ? "rotate-180" : ""}`} />

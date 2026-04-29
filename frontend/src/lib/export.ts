@@ -19,6 +19,76 @@ import {
   WHITE,
 } from "./excel-helpers";
 
+// ─── Worker helpers (orchestratori) ───────────────────────────────────────────
+// Builderii (build*) sunt pure si pot rula in worker; orchestratorii (export*)
+// fac round-trip prin worker si declanseaza download-ul din main thread.
+
+const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const MIME_PDF = "application/pdf";
+
+export interface ExportResult {
+  buffer: ArrayBuffer;
+  filename: string;
+  mime: string;
+}
+
+export interface AnalysisPdfArgs {
+  dosarNumar: string;
+  dosarInstitutie: string;
+  dosarObiect: string;
+  analysisText: string;
+  type?: "simple" | "advanced";
+  judgeModel?: string;
+}
+
+export type ExportJob =
+  | { kind: "dosareXlsx"; data: Dosar[] }
+  | { kind: "dosarePdf"; data: Dosar[] }
+  | { kind: "termeneXlsx"; data: Termen[] }
+  | { kind: "termenePdf"; data: Termen[] }
+  | { kind: "analysisPdf"; data: AnalysisPdfArgs }
+  | { kind: "manualPdf"; data: null };
+
+function triggerDownload(buffer: ArrayBuffer, filename: string, mime: string): void {
+  const blob = new Blob([buffer], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function runExportInWorker(job: ExportJob): Promise<ExportResult> {
+  const ExportWorker = (await import("./export.worker.ts?worker")).default;
+  return new Promise<ExportResult>((resolve, reject) => {
+    const worker = new ExportWorker();
+    worker.onmessage = (e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>) => {
+      worker.terminate();
+      if (!e.data.ok) {
+        reject(new Error(e.data.error));
+        return;
+      }
+      resolve({ buffer: e.data.buffer, filename: e.data.filename, mime: e.data.mime });
+    };
+    worker.onerror = (err: ErrorEvent) => {
+      worker.terminate();
+      reject(err.error ?? new Error(err.message || "Worker export error"));
+    };
+    worker.postMessage(job);
+  });
+}
+
+function uint8ToArrayBuffer(out: Uint8Array): ArrayBuffer {
+  // XLSX.write({ type:"array" }) returneaza Uint8Array; copiem intr-un ArrayBuffer
+  // standalone ca sa il putem transfera prin postMessage fara copy suplimentar.
+  const buffer = new ArrayBuffer(out.byteLength);
+  new Uint8Array(buffer).set(out);
+  return buffer;
+}
+
 function formatInstitutie(raw: string): string {
   if (!raw) return "-";
   return normalizeInstitutie(raw);
@@ -46,7 +116,7 @@ const styleSectionHeader = {
   alignment: { horizontal: "left", vertical: "center" },
 };
 
-export async function exportDosareExcel(dosare: Dosar[]) {
+export async function buildDosareXlsx(dosare: Dosar[]): Promise<ExportResult> {
   const XLSX = await import("xlsx-js-style");
 
   const totalSedinte = dosare.reduce((s, d) => s + d.sedinte.length, 0);
@@ -207,10 +277,11 @@ export async function exportDosareExcel(dosare: Dosar[]) {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, wsDosare as import("xlsx").WorkSheet, "Dosare");
   if (wsSedinte) XLSX.utils.book_append_sheet(wb, wsSedinte as import("xlsx").WorkSheet, "Sedinte");
-  XLSX.writeFile(wb, dosareFilename(dosare, "xlsx"));
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
+  return { buffer: uint8ToArrayBuffer(out), filename: dosareFilename(dosare, "xlsx"), mime: MIME_XLSX };
 }
 
-export async function exportTermeneExcel(termene: Termen[]) {
+export async function buildTermeneXlsx(termene: Termen[]): Promise<ExportResult> {
   const XLSX = await import("xlsx-js-style");
 
   const dateStr = new Date().toLocaleDateString("ro-RO");
@@ -256,7 +327,8 @@ export async function exportTermeneExcel(termene: Termen[]) {
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Termene");
-  XLSX.writeFile(wb, termeneFilename(termene, "xlsx"));
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
+  return { buffer: uint8ToArrayBuffer(out), filename: termeneFilename(termene, "xlsx"), mime: MIME_XLSX };
 }
 
 // Strip diacritics for PDF (jsPDF default font doesn't support them)
@@ -288,7 +360,7 @@ function formatSedintePDF(sedinte: Dosar["sedinte"]): string {
     .join("\n");
 }
 
-export async function exportDosarePDF(dosare: Dosar[]) {
+export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
   const { default: jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -353,10 +425,14 @@ export async function exportDosarePDF(dosare: Dosar[]) {
       );
     },
   });
-  doc.save(dosareFilename(dosare, "pdf"));
+  return {
+    buffer: doc.output("arraybuffer") as ArrayBuffer,
+    filename: dosareFilename(dosare, "pdf"),
+    mime: MIME_PDF,
+  };
 }
 
-export async function exportTermenePDF(termene: Termen[]) {
+export async function buildTermenePdf(termene: Termen[]): Promise<ExportResult> {
   const { default: jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
@@ -419,17 +495,39 @@ export async function exportTermenePDF(termene: Termen[]) {
       );
     },
   });
-  doc.save(termeneFilename(termene, "pdf"));
+  return {
+    buffer: doc.output("arraybuffer") as ArrayBuffer,
+    filename: termeneFilename(termene, "pdf"),
+    mime: MIME_PDF,
+  };
 }
 
-export async function exportAnalysisPDF(
-  dosarNumar: string,
-  dosarInstitutie: string,
-  dosarObiect: string,
-  analysisText: string,
-  type: "simple" | "advanced" = "simple",
-  judgeModel?: string
-) {
+// ─── Orchestratori (DOM-bound, ruleaza in main thread) ────────────────────────
+
+export async function exportDosareExcel(dosare: Dosar[]): Promise<void> {
+  const result = await runExportInWorker({ kind: "dosareXlsx", data: dosare });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function exportTermeneExcel(termene: Termen[]): Promise<void> {
+  const result = await runExportInWorker({ kind: "termeneXlsx", data: termene });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function exportDosarePDF(dosare: Dosar[]): Promise<void> {
+  const result = await runExportInWorker({ kind: "dosarePdf", data: dosare });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function exportTermenePDF(termene: Termen[]): Promise<void> {
+  const result = await runExportInWorker({ kind: "termenePdf", data: termene });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function buildAnalysisPdf(args: AnalysisPdfArgs): Promise<ExportResult> {
+  const { dosarNumar, dosarInstitutie, dosarObiect, analysisText } = args;
+  const type = args.type ?? "simple";
+  const judgeModel = args.judgeModel;
   const { default: jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -643,13 +741,17 @@ export async function exportAnalysisPDF(
   }
 
   const safeName = stripDiacritics(dosarNumar).replace(/[/\\]/g, "-");
-  doc.save(`analiza-${safeName}.pdf`);
+  return {
+    buffer: doc.output("arraybuffer") as ArrayBuffer,
+    filename: `analiza-${safeName}.pdf`,
+    mime: MIME_PDF,
+  };
 }
 
 // ========================================
 // MANUAL DE UTILIZARE — PDF Export
 // ========================================
-export async function exportManualPDF() {
+export async function buildManualPdf(): Promise<ExportResult> {
   const { default: jsPDF } = await import("jspdf");
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
@@ -1095,5 +1197,31 @@ export async function exportManualPDF() {
     doc.text(`${new Date().toLocaleDateString("ro-RO")}`, pageWidth - margin, pageHeight - 8, { align: "right" });
   }
 
-  doc.save("Legal-Dashboard-Manual-v1.0.0.pdf");
+  return {
+    buffer: doc.output("arraybuffer") as ArrayBuffer,
+    filename: "Legal-Dashboard-Manual-v1.0.0.pdf",
+    mime: MIME_PDF,
+  };
+}
+
+// ─── Orchestratori AI / Manual (route prin worker) ────────────────────────────
+
+export async function exportAnalysisPDF(
+  dosarNumar: string,
+  dosarInstitutie: string,
+  dosarObiect: string,
+  analysisText: string,
+  type: "simple" | "advanced" = "simple",
+  judgeModel?: string,
+): Promise<void> {
+  const result = await runExportInWorker({
+    kind: "analysisPdf",
+    data: { dosarNumar, dosarInstitutie, dosarObiect, analysisText, type, judgeModel },
+  });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function exportManualPDF(): Promise<void> {
+  const result = await runExportInWorker({ kind: "manualPdf", data: null });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }

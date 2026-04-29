@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { Download, CalendarDays, ExternalLink, ChevronDown, ChevronUp, Eye } from "lucide-react";
+import { Download, CalendarDays, ExternalLink, ChevronDown, ChevronUp, Eye, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
@@ -12,8 +12,8 @@ import { monitoring, MonitoringApiError } from "@/lib/api";
 
 interface TermeneTableProps {
   termene: Termen[];
-  onExportExcel: (selected?: Termen[]) => void;
-  onExportPDF: (selected?: Termen[]) => void;
+  onExportExcel: (selected?: Termen[]) => Promise<void> | void;
+  onExportPDF: (selected?: Termen[]) => Promise<void> | void;
   searchedName?: string;
 }
 
@@ -39,6 +39,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
   const [pageSize, setPageSize] = useState(20);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [lastExpandedKey, setLastExpandedKey] = useState<string | null>(null);
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
 
@@ -194,11 +195,41 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
           )}
         </div>
         <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => onExportExcel(getExportTermene())}>
-            <Download className="h-4 w-4" /> Excel {selected.size > 0 ? `(${selected.size})` : ""}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exporting !== null}
+            onClick={async () => {
+              setExporting("xlsx");
+              try {
+                await onExportExcel(getExportTermene());
+              } catch (e) {
+                console.error("[termene] export xlsx failed:", e);
+              } finally {
+                setExporting(null);
+              }
+            }}
+          >
+            {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {" "}Excel {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => onExportPDF(getExportTermene())}>
-            <Download className="h-4 w-4" /> PDF {selected.size > 0 ? `(${selected.size})` : ""}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exporting !== null}
+            onClick={async () => {
+              setExporting("pdf");
+              try {
+                await onExportPDF(getExportTermene());
+              } catch (e) {
+                console.error("[termene] export pdf failed:", e);
+              } finally {
+                setExporting(null);
+              }
+            }}
+          >
+            {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {" "}PDF {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
         </div>
       </div>
@@ -210,7 +241,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
               <th className="w-10 px-2 py-3 text-center">
                 <input
                   type="checkbox"
-                  className="h-4 w-4 rounded border-gray-300 accent-violet-600"
+                  className="h-4 w-4 rounded border-gray-300 accent-blue-600"
                   checked={paged.length > 0 && paged.every((t) => selected.has(getTermenKey(t)))}
                   onChange={toggleSelectAll}
                 />
@@ -241,7 +272,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                     <td className="w-10 px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
-                        className="h-4 w-4 rounded border-gray-300 accent-violet-600"
+                        className="h-4 w-4 rounded border-gray-300 accent-blue-600"
                         checked={isSelected}
                         onChange={() => toggleSelect(selectKey)}
                       />

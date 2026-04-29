@@ -16,8 +16,10 @@ import {
   WHITE,
 } from "./excel-helpers";
 
+// ─── Helpers (pure, no DOM) ───────────────────────────────────────────────────
+
 function stripDiacritics(s: string): string {
-  return (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "");
 }
 
 function partyLabel(p: RnpmParty): string {
@@ -46,21 +48,6 @@ function refLabel(r: RnpmBunPartyRef): string {
   return `${r.rol}:${r.tip_persoana}:${name}`;
 }
 
-async function fetchDetails(docs: RnpmDocument[], avizIds: (number | null)[]): Promise<Map<string, RnpmAvizFull>> {
-  const ids: number[] = [];
-  for (let i = 0; i < docs.length; i++) {
-    const id = avizIds[i];
-    if (id != null) ids.push(id);
-  }
-  if (ids.length === 0) return new Map();
-  const { items } = await fetchRnpmExport(ids);
-  const byIdentificator = new Map<string, RnpmAvizFull>();
-  for (const item of items) byIdentificator.set(item.aviz.identificator, item);
-  return byIdentificator;
-}
-
-// ─── Excel styling (sourced from ./excel-helpers, plus rnpm-only bits below) ──
-
 function styleLink(rowIdx: number): Record<string, unknown> {
   const alt = rowIdx % 2 === 1;
   return {
@@ -76,18 +63,39 @@ function setLink(ws: Record<string, unknown>, r: number, c: number, target: stri
   (ws[addr] as Record<string, unknown>).l = { Target: target, Tooltip: tooltip };
 }
 
-// ─── Export Excel (styled) ────────────────────────────────────────────────────
+function isNullish<T>(v: T | undefined | null): v is undefined | null {
+  return v == null;
+}
 
-export async function exportRnpmExcel(
-  docs: RnpmDocument[],
-  avizIds: (number | null)[],
-  searchType?: string
-) {
+function sanitizeFilename(s: string): string {
+  return s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "export";
+}
+
+// ─── Tipuri payload + result (worker boundary) ────────────────────────────────
+
+export interface RnpmExportPayload {
+  format: "xlsx" | "pdf";
+  docs: RnpmDocument[];
+  detailsEntries: [string, RnpmAvizFull][];
+  searchType?: string;
+}
+
+export interface RnpmExportResult {
+  buffer: ArrayBuffer;
+  filename: string;
+  mime: string;
+}
+
+const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
+const MIME_PDF = "application/pdf";
+
+// ─── Builder XLSX (pure, runs in worker or main) ──────────────────────────────
+
+export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExportResult> {
   const XLSX = await import("xlsx-js-style");
-  const details = await fetchDetails(docs, avizIds);
+  const { docs, searchType } = payload;
+  const details = new Map<string, RnpmAvizFull>(payload.detailsEntries);
 
-  // Avizele specifice nu au creditori/debitori separati — ci un singur bucket "Parti"
-  // (mapat pe coloana debitori in DB). Ajustam label-urile si schema sheet-urilor corespunzator.
   const isSpecifice = searchType === "specifice";
   const partyLabel2 = isSpecifice ? "Parti" : "Debitori";
 
@@ -201,7 +209,6 @@ export async function exportRnpmExcel(
       }
       styleCell(wsAvize, r, c, s);
     }
-    // Hyperlinks
     if (isNullish(fr)) return;
     const primary = fr.bunuri ?? fr.debitori ?? fr.creditori ?? fr.istoric;
     if (primary != null) {
@@ -220,14 +227,13 @@ export async function exportRnpmExcel(
     if (fr.istoric != null) setLink(wsAvize, r, NAV_COLS.istoric, `#Istoric!A${fr.istoric + 1}`, "Vezi istoric");
   });
 
-  // ─── Helper pentru child sheets (Creditori / Debitori / Bunuri / Istoric) ─
   type ChildRow = { aviz: string; values: (string | number)[] };
   const buildChildSheet = (
     name: string,
     headers: string[],
     widths: number[],
     rows: ChildRow[],
-    avizSummary: Map<string, number>, // identificator → row 0-indexed in Avize sheet
+    avizSummary: Map<string, number>,
   ) => {
     if (rows.length === 0) return null;
     const cols = headers.length;
@@ -262,15 +268,13 @@ export async function exportRnpmExcel(
     return ws;
   };
 
-  // avizRowOf: identificator → 0-indexed row in Avize sheet
   const avizRowOf = new Map<string, number>();
   docs.forEach((d, i) => avizRowOf.set(d.identificator.v, 4 + i));
 
-  // Build child rows
-  const creditoriRows: ChildRow[] = [];
-  const debitoriRows: ChildRow[] = [];
-  const bunuriRows: ChildRow[] = [];
-  const istoricRows: ChildRow[] = [];
+  const creditoriRows: { aviz: string; values: (string | number)[] }[] = [];
+  const debitoriRows: { aviz: string; values: (string | number)[] }[] = [];
+  const bunuriRows: { aviz: string; values: (string | number)[] }[] = [];
+  const istoricRows: { aviz: string; values: (string | number)[] }[] = [];
   for (const d of docs) {
     const full = details.get(d.identificator.v);
     if (!full) continue;
@@ -308,7 +312,6 @@ export async function exportRnpmExcel(
     }
   }
 
-  // Specifice n-are creditori separati — sarim peste sheet-ul Creditori complet.
   const wsCred = isSpecifice ? null : buildChildSheet(
     "Creditori",
     ["Aviz", "Tip", "Nr ordine", "Subscriptor", "Denumire", "Prenume", "Tip entitate",
@@ -350,34 +353,25 @@ export async function exportRnpmExcel(
   if (wsBun) XLSX.utils.book_append_sheet(wb, wsBun as import("xlsx").WorkSheet, "Bunuri");
   if (wsIst) XLSX.utils.book_append_sheet(wb, wsIst as import("xlsx").WorkSheet, "Istoric");
 
-  // Single-item export → foloseste identificatorul avizului ca nume de fisier.
-  // Multi-item → pattern clasic cu tip + data.
   const fileBase = docs.length === 1
     ? sanitizeFilename(docs[0].identificator.v)
     : `rnpm${searchType ? `_${searchType}` : ""}_${dateStr}`;
-  XLSX.writeFile(wb, `${fileBase}.xlsx`);
+
+  // XLSX.write({ type: "array" }) returneaza Uint8Array — copiem intr-un ArrayBuffer
+  // proaspat ca sa il putem transfera prin postMessage fara copy din partea runtime-ului.
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
+  const buffer = new ArrayBuffer(out.byteLength);
+  new Uint8Array(buffer).set(out);
+  return { buffer, filename: `${fileBase}.xlsx`, mime: MIME_XLSX };
 }
 
-// Pastram doar caractere sigure pentru nume de fisier (identificatorii RNPM
-// contin doar litere/cifre/cratima, dar suntem defensivi pentru cazuri viitoare).
-function sanitizeFilename(s: string): string {
-  return s.replace(/[^A-Za-z0-9._-]+/g, "_").replace(/^_+|_+$/g, "") || "export";
-}
+// ─── Builder PDF (pure, runs in worker or main) ───────────────────────────────
 
-function isNullish<T>(v: T | undefined | null): v is undefined | null {
-  return v == null;
-}
-
-// ─── Export PDF (neschimbat funcțional, doar detalii_comune la Bunuri) ────────
-
-export async function exportRnpmPDF(
-  docs: RnpmDocument[],
-  avizIds: (number | null)[],
-  searchType?: string
-) {
+export async function buildRnpmPdf(payload: RnpmExportPayload): Promise<RnpmExportResult> {
   const { default: jsPDF } = await import("jspdf");
   const autoTable = (await import("jspdf-autotable")).default;
-  const details = await fetchDetails(docs, avizIds);
+  const { docs, searchType } = payload;
+  const details = new Map<string, RnpmAvizFull>(payload.detailsEntries);
   const isSpecifice = searchType === "specifice";
   const partyLabel2 = isSpecifice ? "Parti" : "Debitori";
 
@@ -505,5 +499,87 @@ export async function exportRnpmPDF(
   const fileBase = docs.length === 1
     ? sanitizeFilename(docs[0].identificator.v)
     : `rnpm${searchType ? `_${searchType}` : ""}_${todayRo()}`;
-  doc.save(`${fileBase}.pdf`);
+
+  const buffer = doc.output("arraybuffer") as ArrayBuffer;
+  return { buffer, filename: `${fileBase}.pdf`, mime: MIME_PDF };
+}
+
+// ─── Orchestratori publici (DOM-safe doar in main thread) ─────────────────────
+
+async function fetchDetails(docs: RnpmDocument[], avizIds: (number | null)[]): Promise<Map<string, RnpmAvizFull>> {
+  const ids: number[] = [];
+  for (let i = 0; i < docs.length; i++) {
+    const id = avizIds[i];
+    if (id != null) ids.push(id);
+  }
+  if (ids.length === 0) return new Map();
+  const { items } = await fetchRnpmExport(ids);
+  const byIdentificator = new Map<string, RnpmAvizFull>();
+  for (const item of items) byIdentificator.set(item.aviz.identificator, item);
+  return byIdentificator;
+}
+
+function triggerDownload(buffer: ArrayBuffer, filename: string, mime: string): void {
+  const blob = new Blob([buffer], { type: mime });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  // Eliberam URL-ul dupa un tick (browser-ul are nevoie de el activ pe durata click-ului).
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+async function runInWorker(payload: RnpmExportPayload): Promise<RnpmExportResult> {
+  const ExportWorker = (await import("./rnpmExport.worker.ts?worker")).default;
+  return new Promise<RnpmExportResult>((resolve, reject) => {
+    const worker = new ExportWorker();
+    worker.onmessage = (e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>) => {
+      worker.terminate();
+      if (!e.data.ok) {
+        reject(new Error(e.data.error));
+        return;
+      }
+      resolve({ buffer: e.data.buffer, filename: e.data.filename, mime: e.data.mime });
+    };
+    worker.onerror = (err: ErrorEvent) => {
+      worker.terminate();
+      reject(err.error ?? new Error(err.message || "Worker export error"));
+    };
+    worker.postMessage(payload);
+  });
+}
+
+export async function exportRnpmExcel(
+  docs: RnpmDocument[],
+  avizIds: (number | null)[],
+  searchType?: string,
+): Promise<void> {
+  const details = await fetchDetails(docs, avizIds);
+  const payload: RnpmExportPayload = {
+    format: "xlsx",
+    docs,
+    detailsEntries: [...details.entries()],
+    searchType,
+  };
+  const result = await runInWorker(payload);
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function exportRnpmPDF(
+  docs: RnpmDocument[],
+  avizIds: (number | null)[],
+  searchType?: string,
+): Promise<void> {
+  const details = await fetchDetails(docs, avizIds);
+  const payload: RnpmExportPayload = {
+    format: "pdf",
+    docs,
+    detailsEntries: [...details.entries()],
+    searchType,
+  };
+  const result = await runInWorker(payload);
+  triggerDownload(result.buffer, result.filename, result.mime);
 }

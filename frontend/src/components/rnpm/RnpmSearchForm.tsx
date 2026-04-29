@@ -559,6 +559,7 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
+            className="h-4 w-4 rounded border-border accent-blue-600"
             checked={activ === true}
             onChange={(e) => setActiv(e.target.checked ? true : undefined)}
           />
@@ -567,6 +568,7 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
         <label className="flex items-center gap-2 text-sm">
           <input
             type="checkbox"
+            className="h-4 w-4 rounded border-border accent-blue-600"
             checked={nemodificat === true}
             onChange={(e) => setNemodificat(e.target.checked ? true : undefined)}
           />

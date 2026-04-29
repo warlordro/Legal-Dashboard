@@ -46,6 +46,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
+  const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [q, setQ] = useState("");
   const [searchType, setSearchType] = useState<"" | RnpmSearchType>("");
   const [activOnly, setActivOnly] = useState(false);
@@ -159,12 +160,16 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
     const { docs, avizIds } = toDocs(target);
     const types = new Set(target.map((a) => a.search_type));
     const suffix = types.size === 1 ? (searchType || [...types][0]) : "local";
+    setExporting(format);
     setLoading(true);
     try {
       if (format === "xlsx") await exportRnpmExcel(docs, avizIds, suffix);
       else await exportRnpmPDF(docs, avizIds, suffix);
+    } catch (err) {
+      console.error(`[rnpm] export ${format} failed:`, err);
     } finally {
       setLoading(false);
+      setExporting(null);
     }
   };
 
@@ -235,7 +240,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
           )}
         </div>
         <label className="flex items-center gap-1.5 text-sm">
-          <input type="checkbox" checked={activOnly} onChange={(e) => setActivOnly(e.target.checked)} />
+          <input type="checkbox" className="h-4 w-4 rounded border-border accent-blue-600" checked={activOnly} onChange={(e) => setActivOnly(e.target.checked)} />
           Doar active
         </label>
         <Button type="submit" size="sm" disabled={loading}>
@@ -273,10 +278,12 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
               </>
             )}
             <Button type="button" variant="outline" size="sm" onClick={() => handleExport("xlsx")} disabled={loading}>
-              <Download className="h-4 w-4" /> Excel {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+              {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {" "}Excel {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => handleExport("pdf")} disabled={loading}>
-              <Download className="h-4 w-4" /> PDF {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+              {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              {" "}PDF {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
             </Button>
           </div>
         </div>
@@ -294,7 +301,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
                     ref={(el) => { if (el) el.indeterminate = someVisibleSelected; }}
                     onChange={toggleAllVisible}
                     title={allVisibleSelected ? "Deselecteaza vizibile" : "Selecteaza vizibile"}
-                    className="cursor-pointer"
+                    className="h-4 w-4 rounded border-border accent-blue-600 cursor-pointer"
                   />
                 </th>
                 <th className="px-4 py-3 text-center">
@@ -337,7 +344,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
                       type="checkbox"
                       checked={selectedIds.has(a.id)}
                       onChange={() => toggleRow(a.id)}
-                      className="cursor-pointer"
+                      className="h-4 w-4 rounded border-border accent-blue-600 cursor-pointer"
                     />
                   </td>
                   <td className="px-4 py-3 font-mono text-sm whitespace-nowrap">{a.identificator}</td>

@@ -33,6 +33,11 @@ export default defineConfig({
       },
     },
   },
+  worker: {
+    // ES module worker: permite code-splitting (dynamic import xlsx/jspdf in worker).
+    // Default-ul Vite e "iife" care nu suporta multi-chunk.
+    format: "es",
+  },
   server: {
     port: 5173,
     proxy: {

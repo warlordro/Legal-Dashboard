@@ -1,5 +1,5 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, Download, ArrowUp, ArrowDown, ArrowUpDown, ChevronRight } from "lucide-react";
+import { Eye, Download, ArrowUp, ArrowDown, ArrowUpDown, ChevronRight, Loader2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -58,6 +58,7 @@ function formatElapsed(ms: number): string {
 export function RnpmResultsTable({ result, loading, onNeedMore, onOpenDetail, searchType, dateStart, dateEnd, elapsedMs }: RnpmResultsTableProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
 
   useEffect(() => {
@@ -223,17 +224,33 @@ export function RnpmResultsTable({ result, loading, onNeedMore, onOpenDetail, se
               Deselecteaza tot
             </button>
           )}
-          <Button variant="outline" size="sm" onClick={() => {
+          <Button variant="outline" size="sm" disabled={exporting !== null} onClick={async () => {
             const pairs = getExportPairs();
-            exportRnpmExcel(pairs.map((p) => p.doc), pairs.map((p) => p.avizId), searchType);
+            setExporting("xlsx");
+            try {
+              await exportRnpmExcel(pairs.map((p) => p.doc), pairs.map((p) => p.avizId), searchType);
+            } catch (err) {
+              console.error("[rnpm] export xlsx failed:", err);
+            } finally {
+              setExporting(null);
+            }
           }}>
-            <Download className="h-4 w-4" /> Excel {selected.size > 0 ? `(${selected.size})` : ""}
+            {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {" "}Excel {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => {
+          <Button variant="outline" size="sm" disabled={exporting !== null} onClick={async () => {
             const pairs = getExportPairs();
-            exportRnpmPDF(pairs.map((p) => p.doc), pairs.map((p) => p.avizId), searchType);
+            setExporting("pdf");
+            try {
+              await exportRnpmPDF(pairs.map((p) => p.doc), pairs.map((p) => p.avizId), searchType);
+            } catch (err) {
+              console.error("[rnpm] export pdf failed:", err);
+            } finally {
+              setExporting(null);
+            }
           }}>
-            <Download className="h-4 w-4" /> PDF {selected.size > 0 ? `(${selected.size})` : ""}
+            {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {" "}PDF {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
         </div>
       </div>
@@ -250,6 +267,7 @@ export function RnpmResultsTable({ result, loading, onNeedMore, onOpenDetail, se
               <th className="w-10 px-4 py-3">
                 <input
                   type="checkbox"
+                  className="h-4 w-4 rounded border-border accent-blue-600 cursor-pointer"
                   checked={paged.length > 0 && paged.every((p) => selected.has(p.doc.identificator.v))}
                   onChange={() => togglePage(paged.map((p) => p.doc))}
                   title="Selecteaza pagina"
@@ -309,6 +327,7 @@ export function RnpmResultsTable({ result, loading, onNeedMore, onOpenDetail, se
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
+                      className="h-4 w-4 rounded border-border accent-blue-600 cursor-pointer"
                       checked={selected.has(doc.identificator.v)}
                       onChange={() => toggleOne(doc.identificator.v)}
                     />

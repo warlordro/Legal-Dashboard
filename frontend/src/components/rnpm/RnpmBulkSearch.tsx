@@ -182,11 +182,11 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
 
       <div className="flex items-center gap-4 text-sm">
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={activ} onChange={(e) => setActiv(e.target.checked)} disabled={running} />
+          <input type="checkbox" className="h-4 w-4 rounded border-border accent-blue-600" checked={activ} onChange={(e) => setActiv(e.target.checked)} disabled={running} />
           Numai active
         </label>
         <label className="flex items-center gap-2">
-          <input type="checkbox" checked={nemodificat} onChange={(e) => setNemodificat(e.target.checked)} disabled={running} />
+          <input type="checkbox" className="h-4 w-4 rounded border-border accent-blue-600" checked={nemodificat} onChange={(e) => setNemodificat(e.target.checked)} disabled={running} />
           Nemodificate de alte inscrieri
         </label>
       </div>

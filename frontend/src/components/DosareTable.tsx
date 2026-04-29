@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from "react";
-import { ChevronDown, ChevronUp, FileText, Download, ExternalLink, Users, Calendar, Building2, Scale, FileCheck, Eye, Activity } from "lucide-react";
+import { ChevronDown, ChevronUp, FileText, Download, ExternalLink, Users, Calendar, Building2, Scale, FileCheck, Eye, Activity, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
@@ -27,8 +27,8 @@ interface ApiKeys {
 
 interface DosareTableProps {
   dosare: Dosar[];
-  onExportExcel: (selected?: Dosar[]) => void;
-  onExportPDF: (selected?: Dosar[]) => void;
+  onExportExcel: (selected?: Dosar[]) => Promise<void> | void;
+  onExportPDF: (selected?: Dosar[]) => Promise<void> | void;
   searchedName?: string;
   apiKeys?: ApiKeys;
   onConfigureApiKey?: () => void;
@@ -55,6 +55,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
   const [aiModel, setAiModel] = useState<string>("claude-sonnet");
   const [showKeyPrompt, setShowKeyPrompt] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [hiddenAnalysis, setHiddenAnalysis] = useState<Set<string>>(new Set());
   const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
   // Per-dosar monitor state: pending = request in flight, "added" / "exists" /
@@ -316,11 +317,41 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
               Deselecteaza tot
             </button>
           )}
-          <Button variant="outline" size="sm" onClick={() => onExportExcel(getExportDosare())}>
-            <Download className="h-4 w-4" /> Excel {selected.size > 0 ? `(${selected.size})` : ""}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exporting !== null}
+            onClick={async () => {
+              setExporting("xlsx");
+              try {
+                await onExportExcel(getExportDosare());
+              } catch (e) {
+                console.error("[dosare] export xlsx failed:", e);
+              } finally {
+                setExporting(null);
+              }
+            }}
+          >
+            {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {" "}Excel {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
-          <Button variant="outline" size="sm" onClick={() => onExportPDF(getExportDosare())}>
-            <Download className="h-4 w-4" /> PDF {selected.size > 0 ? `(${selected.size})` : ""}
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={exporting !== null}
+            onClick={async () => {
+              setExporting("pdf");
+              try {
+                await onExportPDF(getExportDosare());
+              } catch (e) {
+                console.error("[dosare] export pdf failed:", e);
+              } finally {
+                setExporting(null);
+              }
+            }}
+          >
+            {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            {" "}PDF {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
         </div>
       </div>
@@ -334,7 +365,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                   type="checkbox"
                   checked={allPageSelected}
                   onChange={toggleSelectAll}
-                  className="h-4 w-4 rounded border-border accent-violet-600 cursor-pointer"
+                  className="h-4 w-4 rounded border-border accent-blue-600 cursor-pointer"
                   title="Selecteaza/deselecteaza pagina curenta"
                 />
               </th>
@@ -389,7 +420,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                         type="checkbox"
                         checked={selected.has(dosar.numar)}
                         onChange={() => toggleSelect(dosar.numar)}
-                        className="h-4 w-4 rounded border-border accent-violet-600 cursor-pointer"
+                        className="h-4 w-4 rounded border-border accent-blue-600 cursor-pointer"
                       />
                     </td>
                     <td className="px-4 py-3 font-mono text-sm font-semibold">
