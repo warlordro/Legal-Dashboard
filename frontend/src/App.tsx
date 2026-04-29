@@ -83,20 +83,29 @@ function AppShell({
   const refreshUnreadAlerts = useCallback(async () => {
     try {
       const result = await alertsApi.list({ page: 1, pageSize: 1, onlyUnread: true });
-      setUnreadAlerts(result.unread ?? result.total);
+      setUnreadAlerts(result.unread);
     } catch (err) {
       console.warn("[alerts] unread count refresh failed", err);
     }
   }, []);
 
   const showDesktopNotification = useCallback((alert: MonitoringAlert) => {
+    // Suppress when the user is already looking at the app — the in-app badge
+    // and Alerts page are sufficient. Covers both Electron and browser modes.
+    if (typeof document !== "undefined"
+      && document.visibilityState === "visible"
+      && document.hasFocus()) {
+      return;
+    }
     const title = "Legal Dashboard - alerta noua";
     const body = alert.title.length > 120 ? `${alert.title.slice(0, 117)}...` : alert.title;
+    const tag = alert.dedup_key || `alert-${alert.id}`;
     if (window.desktopApi?.showNotification) {
       window.desktopApi.showNotification({
         title,
         body,
         silent: alert.severity === "info",
+        tag,
       }).catch((err) => console.warn("[alerts] native notification failed", err));
       return;
     }
@@ -105,7 +114,7 @@ function AppShell({
       try {
         new Notification(title, {
           body,
-          tag: `monitoring-alert-${alert.id}`,
+          tag,
           silent: alert.severity === "info",
         });
       } catch (err) {
@@ -124,8 +133,6 @@ function AppShell({
   }, []);
 
   useEffect(() => {
-    refreshUnreadAlerts();
-
     let stopped = false;
     let retryMs = 1000;
 
@@ -151,24 +158,25 @@ function AppShell({
       eventSourceRef.current = es;
       es.addEventListener("open", () => {
         retryMs = 1000;
+        // Refresh server-truth counter and bump streamVersion so the Alerts
+        // page re-fetches its visible list — covers any alerts dropped while
+        // the SSE connection was disconnected.
         refreshUnreadAlerts();
+        setAlertsStreamVersion((v) => v + 1);
       });
       es.addEventListener("alert", (event) => {
         try {
           const alert = JSON.parse((event as MessageEvent).data) as MonitoringAlert;
           if (!alert.read_at && !alert.dismissed_at) {
-            setUnreadAlerts((count) => count + 1);
             showDesktopNotification(alert);
           }
+          // Server-truth counter — avoids racing with optimistic increments.
+          refreshUnreadAlerts();
           setAlertsStreamVersion((v) => v + 1);
         } catch (err) {
           console.warn("[alerts] invalid SSE event", err);
           refreshUnreadAlerts();
         }
-      });
-      es.addEventListener("sync", () => {
-        refreshUnreadAlerts();
-        setAlertsStreamVersion((v) => v + 1);
       });
       es.onerror = () => {
         cleanupSource();

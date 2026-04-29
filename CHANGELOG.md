@@ -4,6 +4,46 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 30 Aprilie 2026 - v2.4.2 - PR-6 hardening (post-review hotfix)
+
+Hotfix peste v2.4.1 dupa full-review multi-agent pe suprafata alertelor. Fara feature noi - doar fixuri de corectitudine, izolare si robustete operationala.
+
+### Backend (`/api/v1/alerts`)
+
+- **Heartbeat SSE la 25s** (`event: ping`) ca sa supravietuiasca timeout-urilor de NAT/proxy idle (~60s); curatat in `onAbort`, in `.catch` pe writeSSE si dupa `await closed`.
+- **`retry: 3000`** pe primul frame `ready` ca EventSource sa reconecteze deterministic in 3s indiferent de browser.
+- **`recordAudit`** pe `PATCH /:id/seen`, `PATCH /:id/dismissed` si nou-aparutul `POST /seen-bulk`; auditul se scrie doar pe success path (nu pe 404 - ar fi leak de existenta cross-tenant).
+- **`bodyLimit`** dedicat: 4 KiB pe PATCH-uri, 8 KiB pe `seen-bulk` (max 100 ids).
+- **Cap per-owner pe SSE** (5 stream-uri): `subscribeToNewAlerts` arunca `TooManyAlertSubscribersError`; ruta scrie un frame final `{ "code": "too_many_streams" }` si inchide curat in loc de drop silent.
+- **`POST /api/v1/alerts/seen-bulk`** - inlocuieste N PATCH-uri sequential cu un singur UPDATE `IN (...)` tranzactional, audit agregat.
+- **`alertExistsForAnyOwner` helper** - util pentru detectia probelor cross-tenant in viitoare denial paths.
+
+### Backend repo (`monitoringAlertsRepository`)
+
+- **`insertAlert` complet tranzactional**: ownership guard + INSERT + readback intr-un singur `db.transaction`; `notifyNewAlert` defer-uit cu `queueMicrotask` ca listeneri (SSE writeSSE, etc.) sa nu mai ruleze sub SQLite write lock.
+- **`markAlertsSeen(ownerId, ids)`** - bulk seen tranzactional cu owner_id scoping si dedup pe ids.
+
+### Frontend (`Alerts.tsx`, `App.tsx`)
+
+- **Fix timezone in filtre data**: `from`/`to` foloseau `new Date(\`\${from}T00:00:00\`)` care interpreta string-ul ca UTC; pentru un user UTC+3 selectarea "30 Apr" intoarcea fereastra `29 Apr 21:00 - 30 Apr 20:59 UTC` si rata 3h de alerte. Inlocuit cu construire local-time prin constructorul multi-arg.
+- **markVisibleSeen** trece prin endpoint-ul nou `seen-bulk`; fallback `Promise.allSettled` pe per-id PATCH daca bulk-ul esueaza, in loc de loop sequential care abandoneaza la prima eroare.
+- **Notificari desktop suprimate cand fereastra e focused** (`document.hasFocus() && visibilityState === 'visible'`) - elimina double-feedback cand user-ul deja se uita la app.
+- **Counter unread server-truth**: scos `setUnreadAlerts(c => c + 1)` optimistic care racing cu refresh-ul; pe fiecare event `alert` se face refresh.
+- **Listener `sync` SSE mort sters** (backend nu emite niciodata `sync`).
+- **`alertsStreamVersion` bump pe reconnect open** ca pagina `Alerte` sa re-fetcheze lista dupa drop SSE si sa nu piarda alerte aparute in fereastra de disconnect.
+
+### Electron native notifications
+
+- **Dedup pe `tag`**: payload-ul `desktopApi.showNotification` accepta acum `tag?: string`; main process tine un `Map<tag, Notification>` (cap 100 cu evictie FIFO) si inchide notificarea anterioara cu acelasi tag inainte de a o arata pe cea noua. Renderer-ul trimite `dedup_key` ca tag.
+
+### Validare
+
+- Type-check: `npx tsc --noEmit -p backend/tsconfig.json` si `cd frontend && npx tsc --noEmit` - clean.
+- Biome: `npx biome check` pe toate fisierele atinse - clean.
+- Teste: amanate (better-sqlite3 ABI mismatch intre Electron NODE_MODULE_VERSION 145 si Node tester 137; rebuild necesita Electron oprit). Doua teste in `monitoringAlertsRepository.test.ts` deja actualizate pentru deferral microtask al `notifyNewAlert`.
+
+---
+
 ## 30 Aprilie 2026 - v2.4.1 - PR-6 Alerte UI + notificari desktop
 
 PR-6 transforma alertele generate de scheduler in workflow vizibil: inbox dedicat,

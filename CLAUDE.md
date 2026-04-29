@@ -4,7 +4,7 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web â€” fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.4.0** - 29 Aprilie 2026
+**v2.4.2** - 30 Aprilie 2026 (hotfix peste v2.4.1 PR-6 alerte)
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
@@ -16,6 +16,8 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 - âœ… **PR-4** v2.2.0 â€” monitoring scheduler + dosar_soap runner + full-review hardening Tier 2-6
 - âœ… **patch v2.3.0** â€” audit remediation: backup zilnic recurent, restore SQLite cu PRAGMA integrity check, graceful shutdown drain 30s, `idx_one_running_per_job` (migration 0005), executeSearch RNPM in maintenance lock, audit pe rute destructive RNPM, migration runner self-heal bidirectional pe line endings, export Web Worker pe RNPM + AI + Manual
 - ✅ **PR-5 v2.4.0** - bulk import Monitorizare cu `numar_dosar` sau `nume`, template XLSX cu dropdown cadenta, preview/commit name lists, auto-create jobs `name_soap`, runner SOAP pentru subiecti si fixuri post-review pentru race-uri `name_lists`/archive
+- ✅ **PR-6 v2.4.1** - inbox alerte (`/api/v1/alerts` + pagina React + sidebar badge), SSE stream live, IPC notificari native Electron
+- ✅ **patch v2.4.2** - PR-6 hotfix post full-review: SSE heartbeat 25s + `retry: 3000`, fix timezone in filtre data, audit pe `seen`/`dismissed`, `bodyLimit`, cap 5 stream-uri/owner, `seen-bulk` route + bulk repo helper, `insertAlert` tranzactional + `notifyNewAlert` deferred microtask, focus suppress pe notificari desktop, dedup native pe `tag`
 
 Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](SESSION-HANDOFF.md).
 

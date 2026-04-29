@@ -238,6 +238,15 @@ const MAX_PLAINTEXT = 8 * 1024;
 const MAX_CIPHERTEXT_B64 = 16 * 1024;
 const MAX_NOTIFICATION_TITLE = 120;
 const MAX_NOTIFICATION_BODY = 500;
+const MAX_NOTIFICATION_TAG = 200;
+const MAX_NOTIFICATION_TAG_MAP = 100;
+
+// Manual cross-platform dedup for notifications. Electron's Notification has no
+// stable `tag` field across platforms (libnotify uses tags, macOS/Windows use
+// other dedup mechanisms), so we close the previous Notification with the same
+// tag before showing the new one. Map insertion order is preserved, which gives
+// us a free LRU-by-insertion eviction when capacity is exceeded.
+const notificationsByTag = new Map();
 
 function registerSafeStorageIpc() {
   ipcMain.handle("safeStorage:available", () => safeStorage.isEncryptionAvailable());
@@ -284,8 +293,36 @@ function registerSafeStorageIpc() {
     const title = typeof payload.title === "string" ? payload.title.slice(0, MAX_NOTIFICATION_TITLE) : "";
     const body = typeof payload.body === "string" ? payload.body.slice(0, MAX_NOTIFICATION_BODY) : "";
     if (!title) return false;
+    // Defensive validation: drop tag silently if it's not a non-empty string of bounded length.
+    // Same defensive style as title/body — never error, just omit when malformed.
+    const tag =
+      typeof payload.tag === "string" && payload.tag.length >= 1 && payload.tag.length <= MAX_NOTIFICATION_TAG
+        ? payload.tag
+        : null;
     try {
-      new Notification({ title, body, silent: payload.silent === true }).show();
+      // Manual dedup: close any previous Notification carrying the same tag so the OS
+      // does not stack duplicates when SSE replays the same alert after a reconnect.
+      if (tag && notificationsByTag.has(tag)) {
+        const previous = notificationsByTag.get(tag);
+        try { previous.close(); } catch { /* already gone */ }
+        notificationsByTag.delete(tag);
+      }
+
+      const notification = new Notification({ title, body, silent: payload.silent === true });
+
+      if (tag) {
+        // Cap map size — eject oldest insertion if over capacity (Map preserves insertion order).
+        if (notificationsByTag.size >= MAX_NOTIFICATION_TAG_MAP) {
+          const oldestTag = notificationsByTag.keys().next().value;
+          if (oldestTag !== undefined) notificationsByTag.delete(oldestTag);
+        }
+        notificationsByTag.set(tag, notification);
+        notification.on("close", () => {
+          if (notificationsByTag.get(tag) === notification) notificationsByTag.delete(tag);
+        });
+      }
+
+      notification.show();
       return true;
     } catch (e) {
       console.warn("[notification] show failed:", e?.message || e);

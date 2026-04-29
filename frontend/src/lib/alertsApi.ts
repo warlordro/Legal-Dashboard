@@ -1,4 +1,4 @@
-import { MonitoringApiError } from "@/lib/api";
+import { MonitoringApiError, alertsSeenBulkRequest } from "@/lib/api";
 
 export type AlertKind =
   | "dosar_new"
@@ -113,6 +113,11 @@ export const alertsApi = {
   markSeen: async (id: number): Promise<MonitoringAlert> => {
     const res = await fetch(`/api/v1/alerts/${id}/seen`, { method: "PATCH" });
     return unwrapAlerts<MonitoringAlert>(res);
+  },
+
+  markAlertsSeen: async (ids: number[]): Promise<MonitoringAlert[]> => {
+    const res = await alertsSeenBulkRequest(ids);
+    return unwrapAlerts<MonitoringAlert[]>(res);
   },
 
   dismiss: async (id: number): Promise<MonitoringAlert> => {

@@ -82,6 +82,22 @@ export type AlertListener = (alert: MonitoringAlertRow) => void;
 
 const alertListenersByOwner = new Map<string, Set<AlertListener>>();
 
+// Per-owner SSE subscriber cap. Desktop multi-window scenarios (one renderer
+// per BrowserWindow + an occasional dev-tools reload) realistically need 2-3;
+// 5 leaves headroom without letting a bug spawn unbounded EventSource handles
+// that would each hold a SQLite handle + listener slot in memory.
+export const MAX_ALERT_SUBSCRIBERS_PER_OWNER = 5;
+
+export class TooManyAlertSubscribersError extends Error {
+  readonly code = "too_many_streams" as const;
+  constructor(ownerId: string) {
+    super(
+      `Owner ${ownerId} has reached the alert subscriber cap of ${MAX_ALERT_SUBSCRIBERS_PER_OWNER}.`,
+    );
+    this.name = "TooManyAlertSubscribersError";
+  }
+}
+
 export function subscribeToNewAlerts(
   ownerId: string,
   listener: AlertListener,
@@ -90,6 +106,14 @@ export function subscribeToNewAlerts(
   if (!listeners) {
     listeners = new Set();
     alertListenersByOwner.set(ownerId, listeners);
+  }
+  // Cap-check BEFORE inserting so a rejected subscribe leaves the set
+  // unchanged; otherwise a throwing path could leave behind a half-registered
+  // listener that the SSE handler can't clean up (it never received the
+  // unsubscribe callback). Returning a no-op unsubscribe here is harmless
+  // because we throw on the same line — the caller never sees it.
+  if (listeners.size >= MAX_ALERT_SUBSCRIBERS_PER_OWNER) {
+    throw new TooManyAlertSubscribersError(ownerId);
   }
   listeners.add(listener);
   return () => {
@@ -110,8 +134,14 @@ export function getAlertSubscriberCount(ownerId?: string): number {
 function notifyNewAlert(row: MonitoringAlertRow): void {
   const listeners = alertListenersByOwner.get(row.owner_id);
   if (!listeners || listeners.size === 0) return;
+  // Isolate per listener: a single SSE writer throwing (closed stream, etc.)
+  // must not abort the broadcast or unwind the insertAlert hot path.
   for (const listener of listeners) {
-    listener(row);
+    try {
+      listener(row);
+    } catch (err) {
+      console.error("[alerts] listener threw, isolating", err);
+    }
   }
 }
 
@@ -127,65 +157,86 @@ function notifyNewAlert(row: MonitoringAlertRow): void {
 // upsert collapses that to a single statement: either we win and the inserted
 // row is returned, or someone else won and we return their row. Same logical
 // outcome (single alert), no exceptions.
+//
+// The INSERT and the readback SELECT run inside a single db.transaction so
+// a concurrent DELETE on the just-inserted row can't slip between them and
+// turn our success path into the "row missing after upsert" throw. Listener
+// notification is deferred via queueMicrotask so callbacks never run inside
+// the SQLite write lock — a slow listener would otherwise back-pressure the
+// runner that produced the alert.
 export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
   const db = getDb();
   const detailJson = input.detail ? JSON.stringify(input.detail) : "{}";
 
-  // Tenant-isolation guard: refuse to write an alert when (jobId, ownerId) do
-  // not belong together. UNIQUE(job_id, dedup_key) on monitoring_alerts is NOT
-  // owner-scoped, so an inconsistent pair would otherwise let a tenant attach
-  // alerts onto another tenant's job (or read back the other tenant's row via
-  // the SELECT below). The repo header promises owner_id scoping on every
-  // query — this preserves that invariant in code until migration 0005 lands
-  // a DB-level trigger.
-  const jobOwner = db
-    .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
-    .get(input.jobId, input.ownerId);
-  if (!jobOwner) {
-    throw new Error(
-      `insertAlert: job ${input.jobId} not found for owner ${input.ownerId}`,
-    );
-  }
+  type InsertResult = { row: MonitoringAlertRow; inserted: boolean };
 
-  const info = db
-    .prepare(
-      `INSERT INTO monitoring_alerts
-         (owner_id, job_id, run_id, kind, severity, title, detail_json, dedup_key)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(job_id, dedup_key) DO NOTHING`,
-    )
-    .run(
-      input.ownerId,
-      input.jobId,
-      input.runId,
-      input.kind,
-      input.severity ?? "info",
-      input.title,
-      detailJson,
-      input.dedupKey,
-    );
+  const tx = db.transaction((): InsertResult => {
+    // Tenant-isolation guard: refuse to write an alert when (jobId, ownerId)
+    // do not belong together. UNIQUE(job_id, dedup_key) on monitoring_alerts
+    // is NOT owner-scoped, so an inconsistent pair would otherwise let a
+    // tenant attach alerts onto another tenant's job (or read back the other
+    // tenant's row via the SELECT below). The repo header promises owner_id
+    // scoping on every query — this preserves that invariant in code until
+    // migration 0005 lands a DB-level trigger.
+    const jobOwner = db
+      .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+      .get(input.jobId, input.ownerId);
+    if (!jobOwner) {
+      throw new Error(
+        `insertAlert: job ${input.jobId} not found for owner ${input.ownerId}`,
+      );
+    }
 
-  const row = db
-    .prepare(
-      `SELECT * FROM monitoring_alerts
-       WHERE job_id = ? AND dedup_key = ? AND owner_id = ?`,
-    )
-    .get(input.jobId, input.dedupKey, input.ownerId) as
-      | MonitoringAlertRow
-      | undefined;
+    const info = db
+      .prepare(
+        `INSERT INTO monitoring_alerts
+           (owner_id, job_id, run_id, kind, severity, title, detail_json, dedup_key)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(job_id, dedup_key) DO NOTHING`,
+      )
+      .run(
+        input.ownerId,
+        input.jobId,
+        input.runId,
+        input.kind,
+        input.severity ?? "info",
+        input.title,
+        detailJson,
+        input.dedupKey,
+      );
 
-  // ON CONFLICT DO NOTHING guarantees the row exists post-INSERT — either we
-  // inserted it or the conflicting row is already there. A missing row here
-  // means DB corruption or a concurrent DELETE; surface loudly rather than
-  // letting `undefined` propagate as a "cannot read property X of undefined"
-  // downstream.
-  if (!row) {
-    throw new Error(
-      `insertAlert: row missing after upsert (job_id=${input.jobId}, dedup_key=${input.dedupKey})`,
-    );
-  }
-  if (info.changes > 0) {
-    notifyNewAlert(row);
+    const row = db
+      .prepare(
+        `SELECT * FROM monitoring_alerts
+         WHERE job_id = ? AND dedup_key = ? AND owner_id = ?`,
+      )
+      .get(input.jobId, input.dedupKey, input.ownerId) as
+        | MonitoringAlertRow
+        | undefined;
+
+    // ON CONFLICT DO NOTHING guarantees the row exists post-INSERT — either
+    // we inserted it or the conflicting row is already there. A missing row
+    // here means DB corruption or a foreign-owner row already squatting on
+    // the same (job_id, dedup_key) pair (which the readback's owner_id
+    // filter excludes). Surface loudly rather than letting `undefined`
+    // propagate as a "cannot read property X of undefined" downstream.
+    if (!row) {
+      throw new Error(
+        `insertAlert: row missing after upsert (job_id=${input.jobId}, dedup_key=${input.dedupKey})`,
+      );
+    }
+    return { row, inserted: info.changes > 0 };
+  });
+
+  const { row, inserted } = tx();
+
+  if (inserted) {
+    // Defer listener fanout off the write path: SSE writers may do network
+    // I/O and we don't want them holding (or contending for) the SQLite
+    // write lock. queueMicrotask runs before the next macro-task so the
+    // observable ordering remains "transaction commits then listeners see
+    // the row", just on a fresh tick.
+    queueMicrotask(() => notifyNewAlert(row));
   }
   return row;
 }
@@ -313,3 +364,63 @@ export function dismissAlert(
   return getAlertById(ownerId, id);
 }
 
+// Bulk "mark seen" helper. Lets the frontend collapse N PATCH round trips
+// (one per alert) into a single request when the user opens the inbox or
+// hits "mark all seen". Owner-scoped at every step:
+//   - the UPDATE filters by owner_id, so cross-tenant ids in `ids` are
+//     silently ignored rather than mutated;
+//   - the readback also filters by owner_id, so the response can never
+//     surface another tenant's row even if a foreign id is present.
+// Wrapped in a transaction so the UPDATE + readback see a consistent
+// snapshot under concurrent writes.
+export function markAlertsSeen(
+  ownerId: string,
+  ids: number[],
+): MonitoringAlertRow[] {
+  if (ids.length === 0) return [];
+  // Defensive de-dup + integer coerce — a buggy caller passing the same id
+  // twice would otherwise inflate the placeholder list and the IN clause.
+  const uniqueIds = Array.from(
+    new Set(
+      ids.filter((id) => Number.isInteger(id) && id > 0),
+    ),
+  );
+  if (uniqueIds.length === 0) return [];
+
+  const db = getDb();
+  const placeholders = uniqueIds.map(() => "?").join(",");
+
+  const tx = db.transaction((): MonitoringAlertRow[] => {
+    db
+      .prepare(
+        `UPDATE monitoring_alerts
+         SET is_new = 0,
+             read_at = COALESCE(read_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+         WHERE owner_id = ? AND id IN (${placeholders})`,
+      )
+      .run(ownerId, ...uniqueIds);
+
+    return db
+      .prepare(
+        `SELECT * FROM monitoring_alerts
+         WHERE owner_id = ? AND id IN (${placeholders})
+         ORDER BY id ASC`,
+      )
+      .all(ownerId, ...uniqueIds) as MonitoringAlertRow[];
+  });
+
+  return tx();
+}
+
+// Cross-owner existence probe. Mirrors the helper in the jobs repo: lets the
+// alerts router distinguish "row doesn't exist anywhere" (ordinary 404) from
+// "row exists but belongs to a different owner" (a probe attempt that should
+// be audited as denied access in web mode). Returns only a boolean so it
+// can never leak the foreign owner_id back to the caller.
+export function alertExistsForAnyOwner(id: number): boolean {
+  return (
+    getDb()
+      .prepare(`SELECT 1 FROM monitoring_alerts WHERE id = ? LIMIT 1`)
+      .get(id) !== undefined
+  );
+}

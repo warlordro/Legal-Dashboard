@@ -489,6 +489,16 @@ export const nameLists = {
   },
 };
 
+// Bulk mark-seen for alerts. Lives here so the renderer-fetch hook stays happy.
+// Coordinated with backend agent: POST /api/v1/alerts/seen-bulk { ids } -> { data: MonitoringAlert[] }.
+export async function alertsSeenBulkRequest(ids: number[]): Promise<Response> {
+  return fetch(`/api/v1/alerts/seen-bulk`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+}
+
 export function formatMonitoringTarget(job: MonitoringJob): string {
   try {
     const t = JSON.parse(job.target_json) as Record<string, unknown>;

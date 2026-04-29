@@ -30,6 +30,25 @@ const severityOptions: Array<{ value: AlertSeverity | "all"; label: string }> = 
   { value: "info", label: "Info" },
 ];
 
+// Convert a YYYY-MM-DD date input (interpreted in the user's local timezone)
+// to an ISO string. `endOfDay=true` returns 23:59:59.999 local time, otherwise
+// 00:00:00.000 local. Using the multi-arg Date constructor keeps the wall-clock
+// boundary in local time, so a UTC+3 user filtering "30 Apr" actually queries
+// the full local-day window instead of being silently shifted into UTC.
+function localDateInputToIso(value: string, endOfDay: boolean): string | undefined {
+  if (!value) return undefined;
+  const [yearStr, monthStr, dayStr] = value.split("-");
+  const year = Number(yearStr);
+  const month = Number(monthStr);
+  const day = Number(dayStr);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return undefined;
+  const d = endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0);
+  if (Number.isNaN(d.getTime())) return undefined;
+  return d.toISOString();
+}
+
 function formatDateTime(iso: string): string {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;
@@ -110,8 +129,8 @@ export default function Alerts({
         severity,
         onlyUnread,
         includeDismissed,
-        from: from ? new Date(`${from}T00:00:00`).toISOString() : undefined,
-        to: to ? new Date(`${to}T23:59:59`).toISOString() : undefined,
+        from: localDateInputToIso(from, false),
+        to: localDateInputToIso(to, true),
       });
       setRows(result.rows);
       setTotal(result.total);
@@ -162,11 +181,28 @@ export default function Alerts({
   const markVisibleSeen = async () => {
     const unreadRows = rows.filter((row) => !row.read_at && !row.dismissed_at);
     if (unreadRows.length === 0) return;
+    const ids = unreadRows.map((row) => row.id);
     setLoading(true);
     setError(null);
     try {
-      for (const alert of unreadRows) {
-        await alertsApi.markSeen(alert.id);
+      // Prefer the bulk endpoint; fall back to per-id PATCH via Promise.allSettled
+      // if the backend hasn't wired the bulk route yet.
+      let usedBulk = false;
+      try {
+        await alertsApi.markAlertsSeen(ids);
+        usedBulk = true;
+      } catch (bulkErr) {
+        console.warn("[alerts] bulk seen failed, falling back to per-id", bulkErr);
+      }
+      if (!usedBulk) {
+        const results = await Promise.allSettled(
+          ids.map((id) => alertsApi.markSeen(id)),
+        );
+        for (const r of results) {
+          if (r.status === "rejected") {
+            console.warn("[alerts] mark seen failed for one alert", r.reason);
+          }
+        }
       }
       await load();
       onAlertsChanged?.();

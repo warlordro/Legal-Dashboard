@@ -19,7 +19,7 @@ import Database from "better-sqlite3";
 import path from "path";
 import os from "os";
 import fsPromises from "fs/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   dismissAlert,
@@ -314,7 +314,7 @@ describe("alert state mutations", () => {
 });
 
 describe("new alert subscribers", () => {
-  it("notifies only the matching owner and cleans up subscriptions", () => {
+  it("notifies only the matching owner and cleans up subscriptions", async () => {
     const jobIdA = seedJob(OWNER_A, "hA");
     const jobIdB = seedJob(OWNER_B, "hB");
     const runIdA = seedRun(OWNER_A, jobIdA);
@@ -351,11 +351,56 @@ describe("new alert subscribers", () => {
       dedupKey: "b1",
     });
 
+    // notifyNewAlert is now deferred via queueMicrotask so listeners run
+    // outside the SQLite write lock — drain the microtask queue before asserting.
+    await Promise.resolve();
+
     expect(seenA).toEqual([alertA.id]);
     expect(seenB).toEqual([alertB.id]);
 
     unsubA();
     unsubB();
     expect(getAlertSubscriberCount()).toBe(0);
+  });
+
+  it("isolates listener exceptions: a throwing listener does not break siblings or insertAlert", async () => {
+    const jobIdA = seedJob(OWNER_A, "hA");
+    const runIdA = seedRun(OWNER_A, jobIdA);
+    const seenSecond: number[] = [];
+
+    const errSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
+
+    const unsubFirst = subscribeToNewAlerts(OWNER_A, () => {
+      throw new Error("boom");
+    });
+    const unsubSecond = subscribeToNewAlerts(OWNER_A, (alert) => {
+      seenSecond.push(alert.id);
+    });
+
+    let inserted: ReturnType<typeof insertAlert> | undefined;
+    expect(() => {
+      inserted = insertAlert({
+        ownerId: OWNER_A,
+        jobId: jobIdA,
+        runId: runIdA,
+        kind: "dosar_new",
+        title: "isolated",
+        dedupKey: "iso",
+      });
+    }).not.toThrow();
+
+    expect(inserted?.id).toBeGreaterThan(0);
+
+    // notifyNewAlert is queueMicrotask-deferred — drain before checking.
+    await Promise.resolve();
+
+    expect(seenSecond).toEqual([inserted?.id]);
+    expect(errSpy).toHaveBeenCalled();
+
+    errSpy.mockRestore();
+    unsubFirst();
+    unsubSecond();
   });
 });
