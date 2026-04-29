@@ -1,6 +1,6 @@
 # Legal Dashboard — Roadmap de Hardening
 
-> Status update 2026-04-29: hardening-ul full-review pentru monitoring Tier 2-6 este complet si publicat in `v2.2.0`; patch-ul `v2.3.0` a adaugat audit remediation hardening (backup zilnic recurent, restore cu `PRAGMA integrity_check`, graceful shutdown drain 30s, `idx_one_running_per_job`, RNPM in maintenance lock, audit pe rute destructive RNPM, migration runner self-heal bidirectional, export Web Worker pe RNPM + AI + Manual). Itemele ramase in acest fisier sunt backlog general / web-mode, nu blocante pentru release-ul curent.
+> Status update 2026-04-29: hardening-ul full-review pentru monitoring Tier 2-6 este complet si publicat in `v2.2.0`; patch-ul `v2.3.0` a adaugat audit remediation hardening, iar `v2.4.0` a livrat PR-5 bulk name lists / `name_soap` cu fixuri post-review pe race-uri (backup zilnic recurent, restore cu `PRAGMA integrity_check`, graceful shutdown drain 30s, `idx_one_running_per_job`, RNPM in maintenance lock, audit pe rute destructive RNPM, migration runner self-heal bidirectional, export Web Worker pe RNPM + AI + Manual). Itemele ramase in acest fisier sunt backlog general / web-mode, nu blocante pentru release-ul curent.
 
 > **Scop:** lista de items care muta aplicatia din „production-ready pentru use intern" → „production-ready pentru deployment multi-user la firme externe".
 >

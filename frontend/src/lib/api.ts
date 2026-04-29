@@ -316,6 +316,11 @@ export interface CreateDosarMonitoringInput {
   client_request_id?: string;
 }
 
+export interface MonitoringCreateResult {
+  job: MonitoringJob;
+  created: boolean;
+}
+
 export interface CreateNameMonitoringInput {
   name_normalized: string;
   institutie?: string[];
@@ -342,6 +347,11 @@ export const monitoring = {
   },
 
   createDosar: async (input: CreateDosarMonitoringInput): Promise<MonitoringJob> => {
+    const result = await monitoring.createDosarWithResult(input);
+    return result.job;
+  },
+
+  createDosarWithResult: async (input: CreateDosarMonitoringInput): Promise<MonitoringCreateResult> => {
     const res = await fetch(`/api/v1/monitoring/jobs`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -353,7 +363,9 @@ export const monitoring = {
         client_request_id: input.client_request_id,
       }),
     });
-    return unwrapMonitoring<MonitoringJob>(res);
+    const created = res.status === 201;
+    const job = await unwrapMonitoring<MonitoringJob>(res);
+    return { job, created };
   },
 
   createName: async (input: CreateNameMonitoringInput): Promise<MonitoringJob> => {

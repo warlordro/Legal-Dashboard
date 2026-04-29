@@ -4,6 +4,38 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 29 Aprilie 2026 - v2.4.0 - PR-5 bulk name lists + name_soap monitoring
+
+PR-5 inchide sprintul de bulk import pentru monitorizare: acelasi fisier XLSX/CSV poate contine `numar_dosar` pentru joburi `dosar_soap` si `nume` pentru joburi `name_soap`. Flow-ul ruleaza in Electron desktop si pastreaza preview/commit pentru liste de nume.
+
+### Monitorizare bulk
+
+- Template XLSX `monitorizare-template.xlsx` cu coloanele `numar_dosar`, `nume`, `cadence_sec`, `notes` si dropdown Excel pentru `4h`, `8h`, `12h`, `24h`.
+- Reparat generatorul XLSX: `<dataValidations>` este injectat in ordinea OOXML corecta, inainte de `<ignoredErrors>`. Verificat prin download real din Electron si deschidere Excel COM hidden (`EXCEL_OPEN_OK`).
+- UI-ul bulk pastreaza flow-ul existent: `numar_dosar` creeaza `dosar_soap`, `nume` intra prin preview/commit `name_soap`; nu exista coloana vizibila CNP/CUI in template.
+- Statistica pentru dosare bulk foloseste statusul HTTP `201` vs `200`, nu o euristica pe `created_at`.
+
+### Backend name lists + name_soap
+
+- Migrari `0006..0009`: `name_lists`, `name_list_items`, FK invers `monitoring_jobs.name_list_id`, suport `name_soap` in CHECK-uri si `cadence_sec`/`notes` per item.
+- Rute `/api/v1/name-lists/preview` si `/api/v1/name-lists`/`/commit`, cu caps stricte pentru `xlsx@0.18.5` (10MB, 50000 rows, 20 cols) si re-validare server-side la commit.
+- Auto-create jobs cu cap 100/joburi per tranzactie si retry idempotent prin `(owner_id, source_sha256)`.
+- `nameSoapRunner` interogheaza PortalJust dupa subiect, salveaza snapshot-uri si emite alerte pentru dosare noi, schimbari de stadiu/categorie si intrare/iesire din relevanta.
+- Fix post-review: replay check-ul `createList()` ruleaza acum in `BEGIN IMMEDIATE`, iar `archiveList()` face blocking-check + archive atomic.
+
+### Validare
+
+- Backend: `npm test --workspace=backend` - 416/416 teste trecute.
+- Build productie: `npm run build` trecut.
+- CI GitHub PR #5: `docker-build` pass.
+- Electron desktop smoke: aplicatia pornita cu `ELECTRON_RUN_AS_NODE` curatat; template XLSX descarcat din Electron si deschis in Excel fara repair.
+
+### Risc acceptat
+
+- `xlsx@0.18.5` ramane temporar pentru compatibilitate cu flow-ul existent; riscul este mitigat prin caps stricte si documentat pentru migrare ulterioara la parser mai sigur.
+
+---
+
 ## 29 Aprilie 2026 - v2.3.0 - Audit remediation hardening + export Web Worker
 
 Patch peste v2.2.0 dupa auditul intern din 29 aprilie. Convergent catre robustete operationala in modul desktop si pregatire pentru cutover web. Niciuna dintre schimbari nu cere migrare manuala — la prima pornire dupa update, baza de date se aliniaza singura.

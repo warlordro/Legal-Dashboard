@@ -80,21 +80,20 @@ export interface CreateListResult {
 export function createList(input: CreateListInput): CreateListResult {
   const db = getDb();
 
-  // Replay path INAINTE de tranzactie — daca acelasi fisier a mai fost incarcat,
-  // returnam lista veche fara sa atingem items. Decizia adversa ar fi sa
-  // re-uploadul sa rescrie items, dar atunci join-ul cu monitoring_jobs prin
-  // monitoring_job_id ar fi invalidat (joburile vechi pierd lineage).
-  const existing = db
-    .prepare(
-      `SELECT * FROM name_lists
-       WHERE owner_id = ? AND source_sha256 = ?`,
-    )
-    .get(input.ownerId, input.sourceSha256) as NameListRow | undefined;
-  if (existing) {
-    return { list: existing, duplicate: true };
-  }
+  const tx = db.transaction((): CreateListResult => {
+    // Replay path in aceeasi tranzactie IMMEDIATE cu insertul. Altfel doua
+    // request-uri paralele pe acelasi sha256 puteau vedea ambele "missing",
+    // iar al doilea ajungea in UNIQUE violation in loc de duplicate graceful.
+    const existing = db
+      .prepare(
+        `SELECT * FROM name_lists
+         WHERE owner_id = ? AND source_sha256 = ?`,
+      )
+      .get(input.ownerId, input.sourceSha256) as NameListRow | undefined;
+    if (existing) {
+      return { list: existing, duplicate: true };
+    }
 
-  const tx = db.transaction((): NameListRow => {
     // total_rows = toate rindurile parsate (inclusiv 'rejected'); valid_rows
     // = rindurile care VOR deveni joburi pe commit (ok + warn). UI-ul afiseaza
     // ambele ca sa fie clar cati userii au fost respinsi.
@@ -143,16 +142,16 @@ export function createList(input: CreateListInput): CreateListResult {
       }
     }
 
-    return db
+    const list = db
       .prepare(`SELECT * FROM name_lists WHERE id = ?`)
       .get(listId) as NameListRow;
+    return { list, duplicate: false };
   });
 
   // BEGIN IMMEDIATE: scriem un nr. de rinduri proportional cu marimea
   // fisierului (pina la cap-ul aplicat la parser); IMMEDIATE elimina
   // race-ul cu un al doilea import paralel pe acelasi sha256.
-  const list = tx.immediate();
-  return { list, duplicate: false };
+  return tx.immediate();
 }
 
 export function getListById(
@@ -307,29 +306,32 @@ export function archiveList(
 ): ArchiveListResult {
   const db = getDb();
 
-  // Numara joburile care inca exista cu name_list_id = ?. Daca exista, refuzam
-  // archivarea (RESTRICT s-ar declansa abia la DELETE; archive este soft-delete
-  // dar pastram acelasi guard ca sa fie vizibil userului).
-  const blocking = (
-    db
+  const tx = db.transaction((): ArchiveListResult => {
+    // Check + update trebuie sa fie atomice. Altfel un job nou putea aparea
+    // intre COUNT si UPDATE, iar lista devenea archived desi avea blocking job.
+    const blocking = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM monitoring_jobs
+           WHERE owner_id = ? AND name_list_id = ?`,
+        )
+        .get(ownerId, listId) as { n: number }
+    ).n;
+
+    if (blocking > 0) {
+      return { archived: false, blockingJobs: blocking };
+    }
+
+    const info = db
       .prepare(
-        `SELECT COUNT(*) AS n FROM monitoring_jobs
-         WHERE owner_id = ? AND name_list_id = ?`,
+        `UPDATE name_lists
+           SET archived_at = datetime('now')
+         WHERE id = ? AND owner_id = ? AND archived_at IS NULL`,
       )
-      .get(ownerId, listId) as { n: number }
-  ).n;
+      .run(listId, ownerId);
 
-  if (blocking > 0) {
-    return { archived: false, blockingJobs: blocking };
-  }
+    return { archived: info.changes > 0, blockingJobs: 0 };
+  });
 
-  const info = db
-    .prepare(
-      `UPDATE name_lists
-         SET archived_at = datetime('now')
-       WHERE id = ? AND owner_id = ? AND archived_at IS NULL`,
-    )
-    .run(listId, ownerId);
-
-  return { archived: info.changes > 0, blockingJobs: 0 };
+  return tx.immediate();
 }

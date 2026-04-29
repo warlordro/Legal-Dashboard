@@ -1,6 +1,6 @@
 # Plan aprofundat — Monitorizare dosare/persoane + tranzitie web multi-user
 
-> Status update 2026-04-29: PR-0..PR-4 sunt livrate pe `main` si tag-uite `v2.2.0`. Patch `v2.3.0` publicat in aceeasi zi (audit remediation hardening + export Web Worker pe RNPM + AI + Manual). PR-5 este retargetat operational la `v2.4.0` (renumerotat — `v2.3.0` consumat de patch-ul de audit remediation). Restul acestui document ramane spec tehnic istoric si roadmap de lucru.
+> Status update 2026-04-29: PR-0..PR-4 sunt livrate pe `main` si tag-uite `v2.2.0`. Patch `v2.3.0` publicat in aceeasi zi (audit remediation hardening + export Web Worker pe RNPM + AI + Manual). PR-5 este livrat operational ca `v2.4.0` (renumerotat — `v2.3.0` consumat de patch-ul de audit remediation). Restul acestui document ramane spec tehnic istoric si roadmap de lucru.
 
 **Status**: draft v1.3, 2026-04-26 (post-v2.0.10) — sinteza din 8 agenti + advisor double-check + context "uz intern <100 angajati, fara plati, Google Workspace SSO confirmat, 1 dev + Claude Code".
 **Scope**: doua faze livrate **secvential** (nu intercalat), fiecare PR lasand desktop-ul functional.
