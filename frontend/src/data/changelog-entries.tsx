@@ -18,6 +18,50 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.4.2",
+    date: "30 Aprilie 2026",
+    subtitle: "Hotfix PR-6 - hardening post full-review",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Hardening backend alerte",
+        content:
+          "Refinari peste v2.4.1 dupa multi-agent review pe suprafata alertelor. Fara feature noi, doar corectitudine si izolare.",
+        bullets: [
+          "SSE heartbeat la 25s + retry: 3000 ca EventSource sa reconecteze deterministic indiferent de browser.",
+          "recordAudit pe seen, dismissed si pe noul seen-bulk - doar pe success path, ca sa nu ofere informatie de existenta cross-tenant pe 404.",
+          "bodyLimit dedicat pe rutele de mutatie (4 KiB pe PATCH-uri, 8 KiB pe seen-bulk).",
+          "Cap 5 stream-uri SSE per owner; clientii peste cap primesc un frame final cu codul too_many_streams in loc de drop silent.",
+          "POST /api/v1/alerts/seen-bulk inlocuieste N PATCH-uri cu un singur UPDATE tranzactional.",
+          "insertAlert acum complet tranzactional; notifyNewAlert e deferred prin queueMicrotask ca listenerii SSE sa nu mai ruleze sub SQLite write lock.",
+        ],
+      },
+      {
+        title: "Frontend - bug-fixes vizibile",
+        content:
+          "Doua probleme observabile au fost reparate plus cateva sterse din lipsa de utilitate.",
+        bullets: [
+          "Fix bug timezone in filtrele de data: pentru un user UTC+3 selectarea zilei \"30 Apr\" rata 3 ore de alerte din ziua respectiva. Filtrele construiesc acum fereastra in local time corect.",
+          "markVisibleSeen pleaca prin endpoint-ul nou seen-bulk; fallback Promise.allSettled pe per-id daca bulk-ul esueaza, in loc de loop sequential abandonat la prima eroare.",
+          "Notificarile native sunt suprimate cand fereastra e focused (focus + visibility) - elimina double-feedback cand user-ul deja se uita la app.",
+          "Counter unread devine server-truth pe fiecare event: scos optimistic increment care racing cu refresh-ul.",
+        ],
+      },
+      {
+        title: "Notificari Electron - dedup",
+        content:
+          "Payload-ul desktopApi.showNotification accepta acum tag (optional). Main process tine un Map<tag, Notification> cu cap 100 si inchide notificarea anterioara cu acelasi tag inainte de a o arata pe cea noua, ca sa nu se acumuleze duplicate la SSE replay.",
+      },
+      {
+        title: "Validare",
+        content:
+          "Type-check si biome clean. Smoke test live Electron: boot OK, scheduler running, /health + /api/v1/alerts + /alerts/stream + /monitoring/jobs toate 200. Vitest amanat pentru fereastra urmatoare de rebuild (better-sqlite3 ABI mismatch intre Electron si Node tester).",
+      },
+    ],
+  },
+  {
     version: "v2.4.1",
     date: "30 Aprilie 2026",
     subtitle: "PR-6 - Alerte UI + notificari desktop",

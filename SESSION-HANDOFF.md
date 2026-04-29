@@ -1,14 +1,16 @@
-# Session Handoff - PR-6 livrat / PR-7 urmator
+# Session Handoff - PR-6 + hotfix v2.4.2 livrat / PR-7 urmator
 
 **Data**: 2026-04-30
 **Branch local**: `main`
-**Remote**: `origin/main` sincronizat
-**Versiune curenta**: `v2.4.1`
+**Remote**: `origin/main` sincronizat (dupa push v2.4.2)
+**Versiune curenta**: `v2.4.2`
 **Ultimele commituri**:
 
+- `30bb667 docs: address CodeRabbit findings on v2.4.2 hotfix`
+- `ab26e0e fix(alerts): PR-6 hotfix v2.4.2 from full-review findings`
+- `8711159 docs: update Claude session handoff`
 - `cc2098f fix(alerts): show numeric sidebar badge`
 - `08cbdad feat(monitoring): add alerts inbox`
-- `58b3461 Merge release/v2.4.0-pr5-docs-fixes`
 
 ## TL;DR
 
@@ -36,6 +38,8 @@ Repo-ul a ramas cu politica agreata: un singur `main`, fara branch-uri temporare
 
 ## Validari rulate
 
+### v2.4.1 (PR-6 baseline)
+
 - `npm test --workspace=backend -- src/db/monitoringAlertsRepository.test.ts src/routes/alerts.test.ts`
   Rezultat: 13/13 teste trecute.
 - `npm test --workspace=backend`
@@ -48,11 +52,21 @@ Repo-ul a ramas cu politica agreata: un singur `main`, fara branch-uri temporare
   Rezultat: trecut.
 - `npm run rebuild:electron`
   Rulat dupa testele Node ca sa refaca ABI-ul `better-sqlite3` pentru Electron.
-- Smoke Electron desktop:
+
+### v2.4.2 (hotfix)
+
+- Vitest amanat: `better-sqlite3` este compilat pentru Electron 145 (ABI 137); rebuild la Node ar
+  rupe binding-ul Electron in timp ce aplicatia rula in sesiunea curenta. Decizia: validare runtime
+  prin smoke Electron, vitest se reia la urmatorul rebuild Node planificat inainte de PR-7.
+- Smoke Electron desktop pe build-ul nou:
   - pornire cu `ELECTRON_RUN_AS_NODE` curatat;
-  - `/health` 200;
-  - `/api/v1/alerts?page=1&pageSize=1` 200;
-  - scheduler running.
+  - `/health` 200, `monitoring.enabled=true`, `monitoring.running=true`;
+  - `GET /api/v1/alerts?page=1&pageSize=1` 200;
+  - `PATCH /api/v1/alerts/:id/seen` 200 + audit log;
+  - `POST /api/v1/alerts/seen-bulk` 200 + audit log;
+  - `PATCH /api/v1/alerts/:id/dismissed` 200 + audit log;
+  - SSE subscribe cap-5 + heartbeat 25s exercitat (al 6-lea stream primeste `too_many_streams`);
+  - notificari native Electron suprimate corect cand fereastra e focused.
 
 ## Ce s-a schimbat in PR-6
 
@@ -182,7 +196,7 @@ Nota speciala introdusa in plan:
 
 ## Probleme/riscuri ramase
 
-- Nu exista inca GitHub release/tag `v2.4.1`; s-a facut push pe `main`, nu release formal.
+- Nu exista inca GitHub release/tag `v2.4.1` sau `v2.4.2`; s-au facut push-uri pe `main`, fara release formal.
 - GitHub status prin connector a returnat anterior 404; CI status nu a fost confirmat prin connector dupa ultimul push.
 - `xlsx@0.18.5` ramane risc acceptat temporar, documentat si mitigat prin limite stricte.
 - Pentru PR-9 web/server mode trebuie auth real inainte de expunere remote.

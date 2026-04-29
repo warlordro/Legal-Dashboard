@@ -7,10 +7,16 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.4.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
-si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este PR-6:
-inbox `Alerte`, badge cu necitite in sidebar, stream live
-`/api/v1/alerts/stream`, mark read/dismiss si notificari native Electron.
+Versiune curenta: **2.4.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este patch
+**v2.4.2** - hotfix peste PR-6 dupa multi-agent review: heartbeat SSE 25s +
+`retry: 3000`, audit pe `seen`/`dismissed`/`seen-bulk`, `bodyLimit`, cap 5
+stream-uri/owner, endpoint nou `POST /api/v1/alerts/seen-bulk`, `insertAlert`
+tranzactional cu `notifyNewAlert` deferred prin `queueMicrotask`, fix
+timezone in filtrele de data, focus suppress pe notificari native, dedup pe
+`tag` in Electron Notification. Baza ramane PR-6: inbox `Alerte`, badge cu
+necitite in sidebar, stream live `/api/v1/alerts/stream`, mark read/dismiss
+si notificari native Electron.
 PR-5 ramane baza de bulk name lists / `name_soap`: upload XLSX/CSV direct din
 Monitorizare, template cu coloanele `numar_dosar`, `nume`, `cadence_sec`,
 `notes` si dropdown Excel pentru cadenta, preview/commit pentru liste de nume,
@@ -51,7 +57,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (424 teste in v2.4.1) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (424 teste in v2.4.1; v2.4.2 amana rulajul pana la urmatorul rebuild Node — verificat runtime prin smoke Electron) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

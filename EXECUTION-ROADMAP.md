@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-6 implementate local (v2.4.1, 2026-04-30). Urmatorul PR planificat: PR-7 AI usage tracking + per-user quota.
-> **Versiune document**: 1.4 (2026-04-30)
+> **Status**: PR-0..PR-6 + hotfix v2.4.2 livrate pe `main` (2026-04-30). Urmatorul PR planificat: PR-7 AI usage tracking + per-user quota.
+> **Versiune document**: 1.5 (2026-04-30)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
