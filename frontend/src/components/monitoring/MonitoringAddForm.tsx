@@ -29,7 +29,6 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
   const [formKind, setFormKind] = useState<"dosar" | "nume">("dosar");
   const [numarDosar, setNumarDosar] = useState("");
   const [nameValue, setNameValue] = useState("");
-  const [nameKind, setNameKind] = useState<"fizic" | "juridic">("fizic");
   const [institutie, setInstitutie] = useState<string[]>([]);
   const [cadenceSec, setCadenceSec] = useState(DEFAULT_CADENCE_SEC);
   const [notes, setNotes] = useState("");
@@ -66,7 +65,6 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
         }
         job = await monitoring.createName({
           name_normalized: trimmedName,
-          name_kind: nameKind,
           institutie: institutie.length > 0 ? institutie : undefined,
           cadence_sec: cadenceSec,
           notes: notes.trim() || undefined,
@@ -160,7 +158,7 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr,140px,140px] gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-[1fr,140px] gap-3">
                 <div>
                   <label className="text-xs font-medium mb-1 block">Nume subiect</label>
                   <Input
@@ -173,19 +171,6 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
                     minLength={2}
                     maxLength={200}
                   />
-                </div>
-                <div>
-                  <label className="text-xs font-medium mb-1 block">Tip</label>
-                  <select
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                    value={nameKind}
-                    onChange={(e) => setNameKind(e.target.value as "fizic" | "juridic")}
-                    disabled={submitting}
-                    title="PF = Persoana fizica, PJ = Persoana juridica"
-                  >
-                    <option value="fizic">PF</option>
-                    <option value="juridic">PJ</option>
-                  </select>
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block">Cadenta</label>

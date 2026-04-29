@@ -219,7 +219,7 @@ describe("POST /api/v1/monitoring/jobs", () => {
     const app = buildTestApp();
     const res = await postJson(app, "/api/v1/monitoring/jobs", {
       kind: "name_soap",
-      target: { name_normalized: "POPESCU ION", name_kind: "fizic" },
+      target: { name_normalized: "POPESCU ION" },
     });
     expect(res.status).toBe(422);
     const json = (await res.json()) as { error: { code: string; message: string } };

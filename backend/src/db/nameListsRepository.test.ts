@@ -41,7 +41,6 @@ function mkItem(
   overrides: Partial<CreateListItemInput> = {},
 ): CreateListItemInput {
   return {
-    nameKind: "fizic",
     nameRaw: "Ion Popescu",
     nameNormalized: "ion popescu",
     cnp: "1900101226789",

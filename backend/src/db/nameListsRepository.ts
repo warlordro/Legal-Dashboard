@@ -17,14 +17,12 @@
 import { getDb } from "./schema.ts";
 
 // Validation status pentru un rind individual din lista. Decizii:
-//   - 'ok'       — toate campurile prezente, name_kind explicit, dedup OK
-//   - 'warn'     — rindul e folosibil dar a aparut un default (ex: tip lipsea
-//                  si parser-ul a setat 'fizic'). Devine job pe commit.
+//   - 'ok'       — campurile prezente, dedup OK
+//   - 'warn'     — rindul e folosibil dar e duplicat in fisier. Devine job
+//                  pe commit (cu warn marker pe UI).
 //   - 'rejected' — rindul nu poate deveni job (nume gol, format invalid,
-//                  duplicat in fisier). NU devine job pe commit.
+//                  doar cifre). NU devine job pe commit.
 export type NameListItemValidation = "ok" | "warn" | "rejected";
-
-export type NameListItemKind = "fizic" | "juridic";
 
 export interface NameListRow {
   id: number;
@@ -42,7 +40,6 @@ export interface NameListItemRow {
   id: number;
   owner_id: string;
   list_id: number;
-  name_kind: NameListItemKind;
   name_raw: string;
   name_normalized: string;
   cnp: string | null;
@@ -54,7 +51,6 @@ export interface NameListItemRow {
 }
 
 export interface CreateListItemInput {
-  nameKind: NameListItemKind;
   nameRaw: string;
   nameNormalized: string;
   cnp?: string | null;
@@ -123,15 +119,14 @@ export function createList(input: CreateListInput): CreateListResult {
     if (input.items.length > 0) {
       const insertItem = db.prepare(
         `INSERT INTO name_list_items
-           (owner_id, list_id, name_kind, name_raw, name_normalized,
+           (owner_id, list_id, name_raw, name_normalized,
             cnp, cui, validation, validation_msg)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const item of input.items) {
         insertItem.run(
           input.ownerId,
           listId,
-          item.nameKind,
           item.nameRaw,
           item.nameNormalized,
           item.cnp ?? null,

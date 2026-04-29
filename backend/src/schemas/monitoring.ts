@@ -37,14 +37,19 @@ const TargetDosarSoap = z
 const TargetNameSoap = z
   .object({
     name_normalized: z.string().trim().min(2).max(200),
-    name_kind: z.enum(["fizic", "juridic"]),
     // Array of institutie codes (matches Cautare Dosare multi-select semantics).
-    // PR-4 runner will iterate per institutie. Empty/missing = search across all.
+    // PR-6 runner will iterate per institutie. Empty/missing = search across all.
     //
     // Order + duplicates do NOT affect the user's intent — searching {A, B} is
     // identical to {B, A} or {A, B, A}. We dedup + sort here so target_hash is
     // stable across cosmetic reorderings of the input array; otherwise the same
     // logical watch would mint two `monitoring_jobs` rows.
+    //
+    // PF/PJ (name_kind) was dropped before PR-6 lands: PortalJust SOAP
+    // CautareDosare takes only `numeParte` as raw string and has no entity-type
+    // parameter (see backend/src/soap.ts:186), so two jobs differing only in
+    // name_kind would emit identical queries. Keeping PF/PJ in target_hash
+    // would silently double the SOAP load with zero behavioral benefit.
     institutie: z
       .array(z.string().trim().min(2).max(200))
       .max(20)

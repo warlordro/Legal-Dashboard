@@ -169,8 +169,8 @@ describe("POST /api/v1/name-lists (commit)", () => {
     sourceFilename: "lista.csv",
     sourceSha256: SHA1,
     items: [
-      { nameRaw: "Ion Popescu", nameKind: "fizic" as const },
-      { nameRaw: "Acme SRL", nameKind: "juridic" as const },
+      { nameRaw: "Ion Popescu" },
+      { nameRaw: "Acme SRL" },
     ],
   };
 
@@ -243,8 +243,8 @@ describe("POST /api/v1/name-lists (commit)", () => {
       ...validBody,
       sourceSha256: SHA2,
       items: [
-        { nameRaw: "Ion Popescu", nameKind: "fizic" as const },
-        { nameRaw: "   ", nameKind: "fizic" as const }, // gol dupa trim
+        { nameRaw: "Ion Popescu" },
+        { nameRaw: "   " }, // gol dupa trim
       ],
     });
     expect(res.status).toBe(201);
@@ -267,9 +267,9 @@ describe("POST /api/v1/name-lists (commit)", () => {
       ...validBody,
       sourceSha256: "1".repeat(64),
       items: [
-        { nameRaw: "Ion", nameKind: "fizic" as const },
-        { nameRaw: "Maria", nameKind: "fizic" as const },
-        { nameRaw: "Ion", nameKind: "fizic" as const }, // duplicate
+        { nameRaw: "Ion" },
+        { nameRaw: "Maria" },
+        { nameRaw: "Ion" }, // duplicate
       ],
     });
     expect(orderA.status).toBe(201);
@@ -281,9 +281,9 @@ describe("POST /api/v1/name-lists (commit)", () => {
       ...validBody,
       sourceSha256: "2".repeat(64),
       items: [
-        { nameRaw: "Maria", nameKind: "fizic" as const },
-        { nameRaw: "Ion", nameKind: "fizic" as const },
-        { nameRaw: "Ion", nameKind: "fizic" as const }, // duplicate
+        { nameRaw: "Maria" },
+        { nameRaw: "Ion" },
+        { nameRaw: "Ion" }, // duplicate
       ],
     });
     expect(orderB.status).toBe(201);
@@ -348,7 +348,6 @@ describe("POST /api/v1/name-lists (commit)", () => {
     const app = buildTestApp();
     const items = Array.from({ length: 5 }, (_, i) => ({
       nameRaw: `Persoana ${i}`,
-      nameKind: "fizic" as const,
     }));
     const res = await postCommit(app, {
       title: "Lista mare",
@@ -375,7 +374,6 @@ describe("POST /api/v1/name-lists (commit)", () => {
     const app = buildTestApp();
     const items = Array.from({ length: 5 }, (_, i) => ({
       nameRaw: `Continua ${i}`,
-      nameKind: "fizic" as const,
     }));
     const sha = "d".repeat(64);
     const body = {

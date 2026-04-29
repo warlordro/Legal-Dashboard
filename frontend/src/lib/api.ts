@@ -318,7 +318,6 @@ export interface CreateDosarMonitoringInput {
 
 export interface CreateNameMonitoringInput {
   name_normalized: string;
-  name_kind: "fizic" | "juridic";
   institutie?: string[];
   cadence_sec?: number;
   notes?: string;
@@ -360,7 +359,6 @@ export const monitoring = {
   createName: async (input: CreateNameMonitoringInput): Promise<MonitoringJob> => {
     const target: Record<string, string | string[]> = {
       name_normalized: input.name_normalized,
-      name_kind: input.name_kind,
     };
     if (input.institutie && input.institutie.length > 0) {
       target.institutie = input.institutie;

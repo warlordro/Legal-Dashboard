@@ -222,8 +222,8 @@ nameListsRouter.post("/", limitCommitBody, async (c) => {
   const body = parsed.data;
 
   // Re-derivam validation + dedup pe server. Clientul nu mai trimite flag-uri
-  // de validation; le calculam aici din nameRaw + nameKind. Acelasi algoritm
-  // ca preview, deci ce era 'ok' in preview ramane 'ok' la commit.
+  // de validation; le calculam aici din nameRaw. Acelasi algoritm ca preview,
+  // deci ce era 'ok' in preview ramane 'ok' la commit.
   const validated = validateRawItems(body.items);
 
   // createList este idempotent pe (owner_id, sourceSha256): un re-upload al
@@ -238,7 +238,6 @@ nameListsRouter.post("/", limitCommitBody, async (c) => {
       sourceFilename: body.sourceFilename ?? null,
       sourceSha256: body.sourceSha256,
       items: validated.rows.map((it) => ({
-        nameKind: it.nameKind,
         nameRaw: it.nameRaw,
         nameNormalized: it.nameNormalized,
         cnp: it.cnp ?? null,
@@ -295,7 +294,6 @@ nameListsRouter.post("/", limitCommitBody, async (c) => {
                 kind: "name_soap",
                 target: {
                   name_normalized: item.name_normalized,
-                  name_kind: item.name_kind,
                 },
                 cadence_sec: defaultCadenceSec,
                 alert_config: defaultAlertConfig,

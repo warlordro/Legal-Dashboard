@@ -2,9 +2,9 @@
 //
 // Acopera:
 //   - format detection (CSV vs XLSX prin magic bytes)
-//   - header detection (sinonime nume/tip/cnp/cui)
+//   - header detection (sinonime nume/cnp/cui)
 //   - validare reject (nume gol, prea scurt, prea lung, doar cifre)
-//   - validare warn (tip lipsa/gol/necunoscut, duplicate intra-fisier)
+//   - validare warn (duplicate intra-fisier)
 //   - capurile (FILE_TOO_LARGE, TOO_MANY_ROWS, TOO_MANY_COLS, EMPTY_FILE,
 //     MISSING_NAME_COLUMN, PARSE_ERROR)
 //   - sha256 stabil per buffer
@@ -43,58 +43,40 @@ describe("normalizeName", () => {
 });
 
 describe("parseNameList — CSV", () => {
-  it("parseaza un fisier minimal cu nume + tip", () => {
-    const buf = csv("nume,tip\nIon Popescu,fizic\nAcme SRL,juridic\n");
+  it("parseaza un fisier minimal cu o coloana nume", () => {
+    const buf = csv("nume\nIon Popescu\nAcme SRL\n");
     const r = parseNameList(buf, { filename: "lista.csv" });
     expect(r.totals.total).toBe(2);
     expect(r.totals.ok).toBe(2);
     expect(r.totals.warn).toBe(0);
     expect(r.totals.rejected).toBe(0);
-    expect(r.rows[0]?.nameKind).toBe("fizic");
     expect(r.rows[0]?.nameNormalized).toBe("ion popescu");
-    expect(r.rows[1]?.nameKind).toBe("juridic");
+    expect(r.rows[1]?.nameNormalized).toBe("acme srl");
   });
 
   it("accepta separator ';' (Excel ro-RO export)", () => {
-    const buf = csv("nume;tip\nMaria;fizic\n");
+    const buf = csv("nume;cnp\nMaria;\n");
     const r = parseNameList(buf);
     expect(r.totals.ok).toBe(1);
     expect(r.rows[0]?.nameRaw).toBe("Maria");
   });
 
-  it("accepta sinonime de header (denumire / kind)", () => {
-    const buf = csv("denumire,kind\nIon,fizic\n");
+  it("accepta sinonime de header (denumire / name)", () => {
+    const buf = csv("denumire\nIon\n");
     const r = parseNameList(buf);
     expect(r.totals.ok).toBe(1);
-    expect(r.rows[0]?.nameKind).toBe("fizic");
+    expect(r.rows[0]?.nameRaw).toBe("Ion");
   });
 
-  it("default 'fizic' + warn cand coloana tip lipseste", () => {
-    const buf = csv("nume\nIon Popescu\nMaria\n");
+  it("ignora coloana 'tip' / 'kind' daca apare (backward-compat)", () => {
+    const buf = csv("nume,tip\nIon Popescu,fizic\nMaria,juridic\n");
     const r = parseNameList(buf);
-    expect(r.totals.warn).toBe(2);
-    expect(r.rows[0]?.nameKind).toBe("fizic");
-    expect(r.rows[0]?.validation).toBe("warn");
-    expect(r.rows[0]?.validationMsg).toContain("tip_lipsa");
-  });
-
-  it("default 'fizic' + warn cand coloana tip exista dar valoarea e goala", () => {
-    const buf = csv("nume,tip\nIon,\n");
-    const r = parseNameList(buf);
-    expect(r.totals.warn).toBe(1);
-    expect(r.rows[0]?.validationMsg).toContain("tip_gol");
-  });
-
-  it("warn pe valoare tip necunoscuta", () => {
-    const buf = csv("nume,tip\nIon,extraterestru\n");
-    const r = parseNameList(buf);
-    expect(r.totals.warn).toBe(1);
-    expect(r.rows[0]?.nameKind).toBe("fizic");
-    expect(r.rows[0]?.validationMsg).toContain("tip_necunoscut");
+    expect(r.totals.ok).toBe(2);
+    expect(r.rows[0]?.nameRaw).toBe("Ion Popescu");
   });
 
   it("captureaza CNP/CUI cand sunt prezente", () => {
-    const buf = csv("nume,tip,cnp,cui\nIon,fizic,1900101226789,\nAcme,juridic,,12345678\n");
+    const buf = csv("nume,cnp,cui\nIon,1900101226789,\nAcme,,12345678\n");
     const r = parseNameList(buf);
     expect(r.rows[0]?.cnp).toBe("1900101226789");
     expect(r.rows[0]?.cui).toBeNull();
@@ -106,14 +88,14 @@ describe("parseNameList — CSV", () => {
 describe("parseNameList — XLSX", () => {
   it("parseaza un fisier XLSX cu header + 2 rinduri", () => {
     const buf = xlsx([
-      ["nume", "tip"],
-      ["Ion Popescu", "fizic"],
-      ["Acme SRL", "juridic"],
+      ["nume"],
+      ["Ion Popescu"],
+      ["Acme SRL"],
     ]);
     const r = parseNameList(buf, { filename: "lista.xlsx" });
     expect(r.totals.ok).toBe(2);
-    expect(r.rows[0]?.nameKind).toBe("fizic");
-    expect(r.rows[1]?.nameKind).toBe("juridic");
+    expect(r.rows[0]?.nameRaw).toBe("Ion Popescu");
+    expect(r.rows[1]?.nameRaw).toBe("Acme SRL");
   });
 
   it("XLSX cu zip magic bytes corect identificat (filename irrelevant)", () => {
@@ -127,14 +109,17 @@ describe("parseNameList — XLSX", () => {
 
 describe("validation — reject", () => {
   it("rejecteaza nume gol", () => {
-    const buf = csv("nume,tip\n,fizic\n  ,fizic\n");
+    // CSV-ul are skip_empty_lines=true, deci o linie complet goala e ignorata.
+    // Pentru a forta validation='rejected' pe nume_gol, folosim o linie cu o
+    // alta coloana populata (cnp) si coloana 'nume' goala.
+    const buf = csv("nume,cnp\n,123\n  ,456\n");
     const r = parseNameList(buf);
     expect(r.totals.rejected).toBe(2);
     expect(r.rows[0]?.validationMsg).toContain("nume_gol");
   });
 
   it("rejecteaza nume sub MIN_NAME_LEN dupa normalizare", () => {
-    const buf = csv("nume,tip\nA,fizic\n");
+    const buf = csv("nume\nA\n");
     const r = parseNameList(buf);
     expect(r.totals.rejected).toBe(1);
     expect(r.rows[0]?.validationMsg).toContain("prea_scurt");
@@ -142,14 +127,14 @@ describe("validation — reject", () => {
 
   it("rejecteaza nume peste MAX_NAME_LEN", () => {
     const long = "X".repeat(MAX_NAME_LEN + 1);
-    const buf = csv(`nume,tip\n${long},fizic\n`);
+    const buf = csv(`nume\n${long}\n`);
     const r = parseNameList(buf);
     expect(r.totals.rejected).toBe(1);
     expect(r.rows[0]?.validationMsg).toContain("prea_lung");
   });
 
   it("rejecteaza nume care contine doar cifre", () => {
-    const buf = csv("nume,tip\n123456,fizic\n42 99 88,fizic\n");
+    const buf = csv("nume\n123456\n42 99 88\n");
     const r = parseNameList(buf);
     expect(r.totals.rejected).toBe(2);
     expect(r.rows[0]?.validationMsg).toContain("doar_cifre");
@@ -157,20 +142,13 @@ describe("validation — reject", () => {
 });
 
 describe("validation — warn (duplicate intra-fisier)", () => {
-  it("flag-uieste duplicate (name_normalized, name_kind)", () => {
-    const buf = csv("nume,tip\nIon Popescu,fizic\nion  popescu,fizic\nIoN PoPesCu,fizic\n");
+  it("flag-uieste duplicate dupa name_normalized", () => {
+    const buf = csv("nume\nIon Popescu\nion  popescu\nIoN PoPesCu\n");
     const r = parseNameList(buf);
     expect(r.totals.ok).toBe(1);
     expect(r.totals.warn).toBe(2);
     expect(r.rows[1]?.validationMsg).toContain("duplicate_in_file");
     expect(r.rows[2]?.validationMsg).toContain("duplicate_in_file");
-  });
-
-  it("aceeasi denumire cu tip diferit NU e duplicate", () => {
-    const buf = csv("nume,tip\nIon Popescu,fizic\nIon Popescu,juridic\n");
-    const r = parseNameList(buf);
-    expect(r.totals.ok).toBe(2);
-    expect(r.totals.warn).toBe(0);
   });
 });
 
@@ -205,7 +183,7 @@ describe("capuri si erori", () => {
 
 describe("sha256", () => {
   it("este stabil pentru acelasi buffer", () => {
-    const buf = csv("nume,tip\nIon,fizic\n");
+    const buf = csv("nume\nIon\n");
     const a = parseNameList(buf);
     const b = parseNameList(buf);
     expect(a.sha256).toBe(b.sha256);
@@ -213,8 +191,8 @@ describe("sha256", () => {
   });
 
   it("difera intre buffere distincte", () => {
-    const a = parseNameList(csv("nume,tip\nIon,fizic\n"));
-    const b = parseNameList(csv("nume,tip\nMaria,fizic\n"));
+    const a = parseNameList(csv("nume\nIon\n"));
+    const b = parseNameList(csv("nume\nMaria\n"));
     expect(a.sha256).not.toBe(b.sha256);
   });
 });

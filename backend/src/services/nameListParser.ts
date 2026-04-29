@@ -19,12 +19,15 @@
 //   * MAX_NAME_LEN — al treilea guard, per-rind, sa nu pierdem un buffer
 //                    cand un user copiaza tot un articol legal in coloana
 //
-// Validation rules (PLAN-monitoring-webmode.md §5.2 L460-464):
+// Validation rules:
 //   * name_normalized = lowercase + diacritic strip + collapse whitespace
-//   * name_kind: 'fizic' | 'juridic'; lipsa → 'fizic' + validation='warn'
 //   * Reject: nume empty, < 2 chars, > 200 chars, contine doar cifre
-//   * Dedup intra-fisier: (name_normalized, name_kind) apare 1×; duplicatele
-//                         primesc validation='warn' cu msg='duplicate_in_file'
+//   * Dedup intra-fisier: name_normalized apare 1×; duplicatele primesc
+//                         validation='warn' cu msg='duplicate_in_file'
+//
+// PF/PJ (name_kind) a fost scos din model: PortalJust SOAP CautareDosare
+// primeste doar `numeParte` ca string (vezi backend/src/soap.ts:186), deci
+// distinctia nu schimba query-ul si ar dubla joburile cu zero efect functional.
 
 import crypto from "node:crypto";
 import { parse as parseCsv } from "csv-parse/sync";
@@ -35,7 +38,6 @@ import * as XLSX from "xlsx";
 import { stripDiacritics } from "../util/textNormalize.ts";
 import type {
   CreateListItemInput,
-  NameListItemKind,
   NameListItemValidation,
 } from "../db/nameListsRepository.ts";
 
@@ -104,37 +106,35 @@ function isXlsxBuffer(buf: Buffer): boolean {
 }
 
 // Header normalization: lowercase + strip diacritics + trim. Acceptam
-// variante uzuale: "nume", "tip", "categorie", "cnp", "cui", "institutie".
-// Rezultatul mapat pe cheile interne ne permite sa dam liber userilor sa
-// scrie "Nume Persoana", "Tip persoana" sau "TIP".
+// variante uzuale: "nume", "cnp", "cui". Rezultatul mapat pe cheile interne
+// ne permite sa dam liber userilor sa scrie "Nume Persoana" sau "NUME".
 function normalizeHeader(h: string): string {
   return stripDiacritics(String(h ?? "")).toLowerCase().trim();
 }
 
 interface HeaderMap {
   nume: number;
-  tip?: number;
   cnp?: number;
   cui?: number;
 }
 
 // Cauta coloana "nume" in headere; daca lipseste → ParseError. Restul sunt
 // optionale. Acceptam cateva sinonime ca toleranta de input:
-//   nume      ← "nume", "name", "denumire"
-//   tip       ← "tip", "categorie", "kind"
-//   cnp       ← "cnp"
-//   cui       ← "cui", "cif"
+//   nume ← "nume", "name", "denumire"
+//   cnp  ← "cnp"
+//   cui  ← "cui", "cif"
+//
+// Coloana "tip" / "categorie" / "kind" e ignorata daca apare — kept-for-
+// backward-compat: fisiere vechi cu coloana tip nu sunt rejectate, doar
+// coloana e skipped.
 function buildHeaderMap(headers: string[]): HeaderMap {
   let nume = -1;
-  let tip: number | undefined;
   let cnp: number | undefined;
   let cui: number | undefined;
   for (let i = 0; i < headers.length; i++) {
     const h = normalizeHeader(headers[i] ?? "");
     if (nume === -1 && (h === "nume" || h === "name" || h === "denumire")) {
       nume = i;
-    } else if (tip === undefined && (h === "tip" || h === "categorie" || h === "kind")) {
-      tip = i;
     } else if (cnp === undefined && h === "cnp") {
       cnp = i;
     } else if (cui === undefined && (h === "cui" || h === "cif")) {
@@ -147,7 +147,7 @@ function buildHeaderMap(headers: string[]): HeaderMap {
       "Coloana 'nume' lipseste din header. Acceptate: 'nume', 'name', 'denumire'.",
     );
   }
-  return { nume, tip, cnp, cui };
+  return { nume, cnp, cui };
 }
 
 // Normalizare interna a numelui: lowercase + diacritic strip + collapse
@@ -159,25 +159,6 @@ export function normalizeName(s: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
-}
-
-// Determina name_kind dintr-o celula text. Acceptam variante uzuale:
-// 'fizic' / 'pf' / 'persoana fizica' → fizic
-// 'juridic' / 'pj' / 'persoana juridica' / 'societate' → juridic
-// Necunoscut sau gol → undefined (caller seteaza default + warn).
-function parseTip(raw: string): NameListItemKind | undefined {
-  const norm = normalizeHeader(raw);
-  if (!norm) return undefined;
-  if (norm === "fizic" || norm === "pf" || norm === "persoana fizica" || norm === "persoanafizica") {
-    return "fizic";
-  }
-  if (
-    norm === "juridic" || norm === "pj" || norm === "persoana juridica" ||
-    norm === "persoanajuridica" || norm === "societate"
-  ) {
-    return "juridic";
-  }
-  return undefined;
 }
 
 interface RawRow {
@@ -308,9 +289,6 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
   for (let i = 1; i < rawRows.length; i++) {
     const cells = rawRows[i]!.cells;
     const nameRaw = String(cells[headerMap.nume] ?? "").trim();
-    const tipRaw = headerMap.tip !== undefined
-      ? String(cells[headerMap.tip] ?? "")
-      : "";
     const cnpRaw = headerMap.cnp !== undefined
       ? String(cells[headerMap.cnp] ?? "").trim() || null
       : null;
@@ -319,11 +297,9 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
       : null;
 
     const nameNormalized = normalizeName(nameRaw);
-    const tipParsed = parseTip(tipRaw);
 
     let validation: NameListItemValidation = "ok";
     let validationMsg: string | null = null;
-    let nameKind: NameListItemKind = tipParsed ?? "fizic";
 
     // 1. Reject conditions (cea mai stricta categorie).
     if (!nameRaw || nameNormalized.length === 0) {
@@ -340,35 +316,17 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
       validationMsg = "nume_doar_cifre";
     }
 
-    // 2. Daca a trecut de reject, verificam dedup intra-fisier. Cheia e
-    //    (nameNormalized, nameKind) — duplicate cu acelasi nume dar tip
-    //    diferit raman ambele (caz legitim: PF si PJ cu aceeasi denumire,
-    //    e.g. "Stefan Ion" PF + "Stefan Ion SRL" PJ ar normaliza altfel,
-    //    dar aceeasi denumire fara distinctie SRL ar fi totusi cazuri rare).
+    // 2. Daca a trecut de reject, verificam dedup intra-fisier dupa
+    //    name_normalized. Aceeasi denumire la doua randuri = duplicat,
+    //    indiferent de capitalizare/diacritice (normalize aplica fold).
     if (validation !== "rejected") {
-      const key = `${nameNormalized}|${nameKind}`;
-      const prevIdx = seen.get(key);
+      const prevIdx = seen.get(nameNormalized);
       if (prevIdx !== undefined) {
         validation = "warn";
         validationMsg = `duplicate_in_file (apare prima data la randul ${prevIdx + 1})`;
       } else {
-        seen.set(key, i);
+        seen.set(nameNormalized, i);
       }
-    }
-
-    // 3. Tip lipsa → warn dar nu rejected (default fizic).
-    if (validation === "ok" && tipParsed === undefined && tipRaw.trim()) {
-      // Header-ul are coloana tip dar valoarea nu se mapeaza pe fizic/juridic.
-      validation = "warn";
-      validationMsg = `tip_necunoscut (presupus 'fizic')`;
-    } else if (validation === "ok" && headerMap.tip === undefined) {
-      // Nu exista coloana tip in fisier → warn la fiecare rind.
-      validation = "warn";
-      validationMsg = "tip_lipsa (presupus 'fizic')";
-    } else if (validation === "ok" && tipParsed === undefined) {
-      // Coloana tip exista dar e goala pe acest rind.
-      validation = "warn";
-      validationMsg = "tip_gol (presupus 'fizic')";
     }
 
     if (validation === "ok") okCount++;
@@ -377,7 +335,6 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
 
     rows.push({
       rowIndex: i,
-      nameKind,
       nameRaw,
       nameNormalized,
       cnp: cnpRaw,
@@ -400,22 +357,14 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
 }
 
 // Server-side re-validation entry point pentru /commit (defense-in-depth):
-// clientul trimite items raw {nameRaw, nameKind?, cnp?, cui?}; aici
-// re-derivam name_normalized + validation + dedup independent de orice flag
-// venit din UI. Decizia "ce devine job" trebuie sa fie autoritar a serverului,
-// nu a clientului — un client compromis nu poate marca un rind 'rejected' ca
+// clientul trimite items raw {nameRaw, cnp?, cui?}; aici re-derivam
+// name_normalized + validation + dedup independent de orice flag venit din
+// UI. Decizia "ce devine job" trebuie sa fie autoritara a serverului, nu a
+// clientului — un client compromis nu poate marca un rind 'rejected' ca
 // 'ok' modificand JSON-ul din retea.
-//
-// Diferenta fata de parseNameList: aici nu avem header (deci nu putem
-// distinge 'tip_lipsa' de 'tip_gol' — ambele se prezinta ca nameKind===
-// undefined). Reusim sa pastram aceleasi statusuri (ok/warn/rejected) si
-// aceeasi cheie de dedup (nameNormalized|nameKind), ceea ce face commit-ul
-// stabil indiferent de ordinea in care clientul a serializat items-ul.
 
 export interface RawNameItem {
   nameRaw: string;
-  // Optional: cand lipseste, default 'fizic' + warn (ca in parser).
-  nameKind?: NameListItemKind;
   cnp?: string | null;
   cui?: string | null;
 }
@@ -442,7 +391,6 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
     const item = items[i]!;
     const nameRaw = String(item.nameRaw ?? "").trim();
     const nameNormalized = normalizeName(nameRaw);
-    const nameKind: NameListItemKind = item.nameKind ?? "fizic";
     const cnp = item.cnp ?? null;
     const cui = item.cui ?? null;
 
@@ -464,26 +412,17 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
       validationMsg = "nume_doar_cifre";
     }
 
-    // 2. Dedup intra-batch — chee identica cu parseNameList: (nameNormalized,
-    //    nameKind). Asta garanteaza ca daca userul re-trimite acelasi fisier
-    //    (parsat → JSON → POST), dedup-ul produce acelasi efect ca preview-ul.
+    // 2. Dedup intra-batch — cheie identica cu parseNameList: name_normalized.
+    //    Asta garanteaza ca daca userul re-trimite acelasi fisier (parsat →
+    //    JSON → POST), dedup-ul produce acelasi efect ca preview-ul.
     if (validation !== "rejected") {
-      const key = `${nameNormalized}|${nameKind}`;
-      const prevIdx = seen.get(key);
+      const prevIdx = seen.get(nameNormalized);
       if (prevIdx !== undefined) {
         validation = "warn";
         validationMsg = `duplicate_in_batch (apare prima data la index ${prevIdx})`;
       } else {
-        seen.set(key, i);
+        seen.set(nameNormalized, i);
       }
-    }
-
-    // 3. Tip lipsa → warn. Spre deosebire de parser, aici nu putem distinge
-    //    tip_lipsa (coloana inexistenta) de tip_gol (celula goala) — ambele
-    //    se prezinta ca nameKind===undefined. Folosim un mesaj generic.
-    if (validation === "ok" && item.nameKind === undefined) {
-      validation = "warn";
-      validationMsg = "tip_lipsa (presupus 'fizic')";
     }
 
     if (validation === "ok") okCount++;
@@ -492,7 +431,6 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
 
     rows.push({
       inputIndex: i,
-      nameKind,
       nameRaw,
       nameNormalized,
       cnp,

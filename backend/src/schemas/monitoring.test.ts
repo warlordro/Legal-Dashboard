@@ -117,23 +117,15 @@ describe("JobCreateBodySchema — name_soap", () => {
   it("accepts valid name", () => {
     const r = JobCreateBodySchema.safeParse({
       kind: "name_soap",
-      target: { name_normalized: "popescu ion", name_kind: "fizic" },
+      target: { name_normalized: "popescu ion" },
     });
     expect(r.success).toBe(true);
-  });
-
-  it("rejects invalid name_kind", () => {
-    const r = JobCreateBodySchema.safeParse({
-      kind: "name_soap",
-      target: { name_normalized: "popescu ion", name_kind: "other" },
-    });
-    expect(r.success).toBe(false);
   });
 
   it("rejects too-short name", () => {
     const r = JobCreateBodySchema.safeParse({
       kind: "name_soap",
-      target: { name_normalized: "x", name_kind: "fizic" },
+      target: { name_normalized: "x" },
     });
     expect(r.success).toBe(false);
   });
@@ -143,7 +135,6 @@ describe("JobCreateBodySchema — name_soap", () => {
       kind: "name_soap",
       target: {
         name_normalized: "popescu ion",
-        name_kind: "fizic",
         institutie: ["CurteadeApelBUCURESTI", "TribunalulBucuresti"],
       },
     });
@@ -155,7 +146,6 @@ describe("JobCreateBodySchema — name_soap", () => {
       kind: "name_soap",
       target: {
         name_normalized: "popescu ion",
-        name_kind: "fizic",
         institutie: "Tribunalul Bucuresti",
       },
     });
@@ -167,9 +157,16 @@ describe("JobCreateBodySchema — name_soap", () => {
       kind: "name_soap",
       target: {
         name_normalized: "popescu ion",
-        name_kind: "fizic",
         institutie: Array(21).fill("X").map((x, i) => `${x}${i}`),
       },
+    });
+    expect(r.success).toBe(false);
+  });
+
+  it("rejects unknown target keys (no name_kind anymore)", () => {
+    const r = JobCreateBodySchema.safeParse({
+      kind: "name_soap",
+      target: { name_normalized: "popescu ion", name_kind: "fizic" },
     });
     expect(r.success).toBe(false);
   });
@@ -198,7 +195,7 @@ describe("JobCreateBodySchema — discriminated kind", () => {
     // dosar_soap with name_soap-style target
     const r = JobCreateBodySchema.safeParse({
       kind: "dosar_soap",
-      target: { name_normalized: "popescu", name_kind: "fizic" },
+      target: { name_normalized: "popescu" },
     });
     expect(r.success).toBe(false);
   });

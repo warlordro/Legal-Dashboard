@@ -180,8 +180,6 @@ export default function Monitorizare() {
               })
             : await monitoring.createName({
                 name_normalized: row.name_normalized,
-                name_kind: row.name_kind,
-                institutie: row.institutie,
                 cadence_sec: row.cadence_sec,
                 notes: row.notes,
                 client_request_id: reqId,
@@ -249,14 +247,13 @@ export default function Monitorizare() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-3">
-            Descarca template-ul, completeaza coloana <code className="px-1 rounded bg-muted">kind</code>{" "}
-            (<code className="px-1 rounded bg-muted">dosar</code> sau{" "}
-            <code className="px-1 rounded bg-muted">nume</code>) plus campurile relevante
-            (<code className="px-1 rounded bg-muted">numar_dosar</code> pentru dosar,{" "}
-            <code className="px-1 rounded bg-muted">name_normalized</code> +{" "}
-            <code className="px-1 rounded bg-muted">name_kind</code> pentru subiecti), apoi incarca-l inapoi.
-            Pentru subiecti, coloana <code className="px-1 rounded bg-muted">institutie</code> accepta mai multe
-            coduri separate prin virgula (ex: <code className="px-1 rounded bg-muted">CurteadeApelBUCURESTI, TribunalulBucuresti</code>).
+            Descarca template-ul, completeaza{" "}
+            <code className="px-1 rounded bg-muted">numar_dosar</code> SAU{" "}
+            <code className="px-1 rounded bg-muted">nume</code> pe fiecare rand (nu ambele),
+            optional <code className="px-1 rounded bg-muted">cadence_sec</code> (dropdown:{" "}
+            <code className="px-1 rounded bg-muted">4h</code>/<code className="px-1 rounded bg-muted">8h</code>/
+            <code className="px-1 rounded bg-muted">12h</code>/<code className="px-1 rounded bg-muted">24h</code>)
+            si <code className="px-1 rounded bg-muted">notes</code>, apoi incarca-l inapoi.
             Format: XLSX sau CSV.
           </p>
           <div className="flex flex-wrap items-center gap-3">

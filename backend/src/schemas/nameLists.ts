@@ -5,8 +5,8 @@
 //   - POST /             → JSON: { title, sourceFilename?, sourceSha256, items[],
 //                                  autoCreateJobs?, maxJobs? }
 //
-// Defense-in-depth: clientul trimite items raw {nameRaw, nameKind?, cnp?, cui?}
-// — fara validation/validationMsg/nameNormalized. Serverul re-deriva tot via
+// Defense-in-depth: clientul trimite items raw {nameRaw, cnp?, cui?} —
+// fara validation/validationMsg/nameNormalized. Serverul re-deriva tot via
 // validateRawItems(). UI poate afisa preview-ul cu validation flags-urile sale,
 // dar la /commit acele flag-uri sunt ignorate.
 
@@ -31,7 +31,6 @@ const MAX_ID_FIELD_LEN = 32;
 export const RawNameItemSchema = z
   .object({
     nameRaw: z.string().min(1).max(MAX_NAME_RAW_LEN_PER_ITEM),
-    nameKind: z.enum(["fizic", "juridic"]).optional(),
     cnp: z.string().max(MAX_ID_FIELD_LEN).nullable().optional(),
     cui: z.string().max(MAX_ID_FIELD_LEN).nullable().optional(),
   })
