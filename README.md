@@ -7,15 +7,19 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.3.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
-si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este patch-ul
-de audit remediation peste v2.2.0: backup zilnic recurent, restore SQLite cu
-PRAGMA integrity check, graceful shutdown cu drain HTTP 30s, finalize state-guarded
-+ index unic `idx_one_running_per_job` (migration 0005), executeSearch RNPM sub
-`withMaintenanceRead`, audit pe rutele destructive RNPM, migration runner cu
-self-heal bidirectional pe line endings (sha256 normalizat + `sha256Raw` +
-`sha256Crlf` + `MIGRATIONS_STRICT=1` pentru CI) si export XLSX/PDF mutat integral
-in Web Worker pe toate fluxurile (RNPM + AI + Manual).
+Versiune curenta: **2.4.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este PR-5
+bulk name lists / `name_soap`: upload XLSX/CSV direct din Monitorizare,
+template cu coloanele `numar_dosar`, `nume`, `cadence_sec`, `notes` si
+dropdown Excel pentru cadenta, preview/commit pentru liste de nume, auto-create
+joburi `name_soap`, runner SOAP pentru subiecti si alerte pe dosare noi,
+stadii/categorii/relevanta. Include fix post-review pentru race-uri la
+import/archive liste si statistica bulk dosar bazata pe statusul HTTP, nu pe
+timestamp. Patch-ul v2.3.0 ramane baza de hardening: backup zilnic, restore
+SQLite cu `PRAGMA integrity_check`, drain HTTP 30s, `idx_one_running_per_job`,
+RNPM in maintenance lock, audit pe rute destructive, migration runner
+self-heal bidirectional si export XLSX/PDF in Web Worker.
+
 
 ## Prerequisite
 
@@ -46,7 +50,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (357 teste in v2.3.0) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (416 teste in v2.4.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
@@ -54,11 +58,12 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 ## Monitoring
 
 Feature-ul de monitorizare este pornit implicit pe desktop incepand din v2.2.0.
-Scheduler-ul ruleaza joburi `dosar_soap`, salveaza snapshot-uri, detecteaza
-diferente intre sedinte/solutii si scrie audit log pentru mutatiile relevante.
-v2.3.0 adauga finalize state-guarded + index unic `idx_one_running_per_job` la
-nivel de DB, deci un singur run `running` simultan per job — recovery-ul de
-crash nu mai poate produce duplicate.
+Scheduler-ul ruleaza joburi `dosar_soap` si `name_soap`, salveaza snapshot-uri,
+detecteaza diferente intre sedinte/solutii/subiecti monitorizati si scrie audit
+log pentru mutatiile relevante. v2.4.0 adauga bulk import pentru nume si runner
+`name_soap`; v2.3.0 a adaugat finalize state-guarded + index unic
+`idx_one_running_per_job` la nivel de DB, deci un singur run `running` simultan
+per job - recovery-ul de crash nu mai poate produce duplicate.
 
 Kill switch-uri operationale:
 
@@ -66,7 +71,7 @@ Kill switch-uri operationale:
 - `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` exclude tipurile listate din
   claim-ul scheduler-ului fara modificari in DB.
 
-Tipurile `name_soap` si `aviz_rnpm` raman rezervate pentru PR-5+.
+Tipul `aviz_rnpm` ramane rezervat pentru PR-7+; `name_soap` este activ in v2.4.0.
 
 ## Server / Docker deploy
 

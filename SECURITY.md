@@ -76,7 +76,7 @@ and treat the current defaults as insufficient.
 
 ### Background monitoring activity
 
-The monitoring scheduler (live and hardened in v2.2.0, further hardened in v2.3.0, `backend/src/services/monitoring/scheduler.ts`) runs background jobs that periodically refresh dosar / termene state from PortalJust SOAP. It inherits the desktop trust model - same OS user, same SQLite, no extra network surface - and adds the following controls:
+The monitoring scheduler (live and hardened in v2.2.0, further hardened in v2.3.0 and extended with `name_soap` in v2.4.0, `backend/src/services/monitoring/scheduler.ts`) runs background jobs that periodically refresh dosar / termene state from PortalJust SOAP. It inherits the desktop trust model - same OS user, same SQLite, no extra network surface - and adds the following controls:
 
 - **Single-instance enforcement.** The scheduler runs only inside the Electron main process, which is itself gated by `app.requestSingleInstanceLock()`. There is no second writer racing the scheduler against the same SQLite file.
 - **Cooperative cancellation.** Every outbound SOAP request is wired through an `AbortSignal` chained to: (a) per-request timeout (`SOAP_REQUEST_TIMEOUT_MS`), and (b) the scheduler's shutdown signal. App-quit flushes in-flight runs instead of leaking sockets or holding SQLite WAL locks past process exit.
@@ -184,4 +184,5 @@ the report should be private. Please include:
 | 2026-04-18 | Documented accept of `xlsx` / `xlsx-js-style` parser CVEs (write-only usage, no reachable surface). Deferred items tracked in `AUDIT_DEFERRED_2026-04-18.md`. |
 | 2026-04-28 | Added "Background monitoring activity" section: scheduler trust model, AbortSignal cancellation, RWLock maintenance gate, outcome atomicity, source_error suppression, owner-scoped audit. |
 | 2026-04-29 | Synced monitoring security notes for v2.2.0: per-kind kill switch, mutation body caps, run retention purge, and environment variables. |
+| 2026-04-29 | v2.4.0 PR-5: bulk name lists / `name_soap`, mixed monitoring XLSX template, preview/commit with strict parser caps for `xlsx@0.18.5`, auto-create jobs cap 100, name SOAP runner alerts, and post-review transaction hardening for name list replay/archive races. |
 | 2026-04-29 | v2.3.0 audit remediation hardening: migration 0005 `idx_one_running_per_job` UNIQUE partial index, restore SQLite with `PRAGMA integrity_check`, recurring 24h backup timer, graceful shutdown HTTP drain 30s, RNPM `executeSearch` under `withMaintenanceRead`, audit on RNPM destructive routes (`POST /saved/delete-batch`, `DELETE /saved/:id`, `DELETE /searches/:id`), cross-tenant `existingSearchId` check via `belongsToOwner`, migration runner bidirectional CRLF self-heal + `MIGRATIONS_STRICT=1` CI gate, dependency bumps (dompurify, jspdf, jspdf-autotable). |

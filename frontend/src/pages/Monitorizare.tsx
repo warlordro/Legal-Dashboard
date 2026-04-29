@@ -19,7 +19,6 @@ import {
   MonitoringApiError,
 } from "@/lib/api";
 import { downloadBulkTemplate, parseBulkFile, type BulkRowDosar } from "@/lib/monitoringBulkTemplate";
-import { parseSqliteUtc } from "@/lib/utils";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
   { label: "4h", sec: 14400 },
@@ -215,14 +214,13 @@ export default function Monitorizare() {
       for (let i = 0; i < bulkDosarRows.length; i++) {
         const row = bulkDosarRows[i]!;
         try {
-          const job = await monitoring.createDosar({
+          const result = await monitoring.createDosarWithResult({
             numar_dosar: row.numar_dosar,
             cadence_sec: row.cadence_sec,
             notes: row.notes,
             client_request_id: `bulk-dosar-${row.numar_dosar}-${i}`,
           });
-          const justCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
-          if (justCreated) dosarAdded++;
+          if (result.created) dosarAdded++;
           else dosarExists++;
         } catch (err) {
           dosarErrors++;

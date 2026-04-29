@@ -18,6 +18,51 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.4.0",
+    date: "29 Aprilie 2026",
+    subtitle: "PR-5 - bulk name lists + name_soap monitoring",
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Monitorizare bulk",
+        content:
+          "Monitorizare accepta acum fisiere XLSX/CSV mixte: randurile cu numar_dosar creeaza joburi dosar_soap, iar randurile cu nume intra in flow-ul name_soap cu preview si commit.",
+        bullets: [
+          "Template XLSX cu numar_dosar, nume, cadence_sec si notes; coloana cadence_sec are dropdown 4h/8h/12h/24h.",
+          "Generatorul XLSX a fost reparat pentru Excel: dataValidations este scris in ordinea OOXML corecta, fara repair prompt.",
+          "Pentru bulk dosar, contorul adaugate/existente foloseste statusul HTTP 201/200, nu o euristica pe timestamp.",
+        ],
+      },
+      {
+        title: "Name lists + runner name_soap",
+        content:
+          "Backend-ul salveaza listele importate, pastreaza lineage catre joburile create si ruleaza interogari SOAP dupa subiect pentru alerte pe dosare nou aparute sau schimbate.",
+        bullets: [
+          "Preview/commit stateless cu re-validare server-side si capuri stricte pentru fisiere XLSX/CSV.",
+          "Auto-create jobs proceseaza maximum 100 joburi pe tranzactie si continua idempotent la retry.",
+          "Runner-ul name_soap emite alerte pentru dosare noi, stadiu/categorie schimbate si intrare/iesire din relevanta.",
+        ],
+      },
+      {
+        title: "Post-review hardening",
+        content:
+          "Race-urile semnalate in review au fost inchise local, fara schimbare de arhitectura.",
+        bullets: [
+          "createList muta duplicate-check-ul in tranzactie BEGIN IMMEDIATE.",
+          "archiveList face blocking-jobs check si update-ul archived_at atomic.",
+          "xlsx@0.18.5 ramane risc acceptat temporar, mitigat prin limite stricte si documentat pentru migrare ulterioara.",
+        ],
+      },
+      {
+        title: "Validare",
+        content:
+          "Backend 416/416 teste, build productie trecut, CI docker-build verde, smoke Electron desktop si Excel open pentru template XLSX.",
+      },
+    ],
+  },
+  {
     version: "v2.3.0",
     date: "29 Aprilie 2026",
     subtitle: "Audit remediation — Patch v2.3.0 + UX export",
