@@ -1,0 +1,5 @@
+# Forteaza line endings consistente pentru fisierele a caror integritate este
+# verificata via hash (migrari SQL). Fara aceasta directiva, git core.autocrlf
+# pe Windows converteste \n -> \r\n la checkout si invalideaza hash-urile
+# stocate in _schema_versions.
+backend/src/db/migrations/*.sql text eol=lf

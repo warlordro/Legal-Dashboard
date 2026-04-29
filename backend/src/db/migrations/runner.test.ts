@@ -32,7 +32,10 @@ function writeMigration(version: string, name: string, sql: string): string {
 }
 
 function sha256(s: string): string {
-  return createHash("sha256").update(s, "utf8").digest("hex");
+  // Reflecta normalizarea din runner.ts (CRLF -> LF + BOM scos) ca testele sa
+  // ramana valide indiferent de line-endings-ul fisierelor scrise temporar.
+  const normalized = s.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
 }
 
 function runDdl(d: Database.Database, sql: string): void {
@@ -108,6 +111,131 @@ describe("runMigrations - drift detection", () => {
     runMigrations(db, migrationsDir);
 
     fs.writeFileSync(path.join(migrationsDir, "0001_first.up.sql"), "CREATE TABLE t1_renamed (id INTEGER)");
+
+    expect(() => runMigrations(db, migrationsDir)).toThrow(/hash mismatch for 0001_first.up.sql/);
+  });
+
+  it("self-heals legacy raw-hash DBs (pre-normalization) by rewriting stored hash", () => {
+    const sql = "CREATE TABLE t1 (id INTEGER);\r\nCREATE TABLE t2 (id INTEGER);\r\n";
+    writeMigration("0001", "first", sql);
+    runMigrations(db, migrationsDir);
+
+    // Simulez un DB vechi: rescriu stored la hash-ul raw (CRLF inclus, ne-normalizat).
+    const rawHash = createHash("sha256").update(sql, "utf8").digest("hex");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(rawHash);
+
+    const r = runMigrations(db, migrationsDir);
+    expect(r.selfHealed).toEqual([1]);
+    expect(r.skipped).toEqual([]);
+
+    const row = db.prepare("SELECT sha256_up FROM _schema_versions WHERE version = 1").get() as { sha256_up: string };
+    expect(row.sha256_up).toBe(sha256(sql));
+  });
+
+  it("self-heals via CRLF-hash direction (LF on disk, stored hash was on CRLF version)", () => {
+    const sqlLf = "CREATE TABLE t1 (id INTEGER);\nCREATE TABLE t2 (id INTEGER);\n";
+    writeMigration("0001", "first", sqlLf);
+    runMigrations(db, migrationsDir);
+
+    const sqlCrlf = sqlLf.replace(/\n/g, "\r\n");
+    const crlfHash = createHash("sha256").update(sqlCrlf, "utf8").digest("hex");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(crlfHash);
+
+    const r = runMigrations(db, migrationsDir);
+    expect(r.selfHealed).toEqual([1]);
+
+    const row = db.prepare("SELECT sha256_up FROM _schema_versions WHERE version = 1").get() as { sha256_up: string };
+    expect(row.sha256_up).toBe(sha256(sqlLf));
+  });
+
+  it("self-heal does not re-run the migration SQL (legacy table not duplicated)", () => {
+    const sql = "CREATE TABLE legacy_table (id INTEGER PRIMARY KEY)";
+    writeMigration("0001", "first", sql);
+    runMigrations(db, migrationsDir);
+
+    const rawHash = createHash("sha256").update(sql, "utf8").digest("hex");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(rawHash);
+
+    expect(() => runMigrations(db, migrationsDir)).not.toThrow();
+    const cols = db.prepare("PRAGMA table_info(legacy_table)").all();
+    expect(cols.length).toBeGreaterThan(0);
+  });
+
+  it("self-heals multiple versions in one call", () => {
+    // SQL multiliniu cu CRLF ca raw-hash sa difere de cel normalizat.
+    const sql1 = "CREATE TABLE t1 (id INTEGER);\r\nCREATE INDEX i1 ON t1(id);\r\n";
+    const sql2 = "CREATE TABLE t2 (id INTEGER);\r\nCREATE INDEX i2 ON t2(id);\r\n";
+    writeMigration("0001", "first", sql1);
+    writeMigration("0002", "second", sql2);
+    runMigrations(db, migrationsDir);
+
+    const raw1 = createHash("sha256").update(sql1, "utf8").digest("hex");
+    const raw2 = createHash("sha256").update(sql2, "utf8").digest("hex");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(raw1);
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 2").run(raw2);
+
+    const r = runMigrations(db, migrationsDir);
+    expect(r.selfHealed).toEqual([1, 2]);
+    expect(r.applied).toEqual([]);
+    expect(r.skipped).toEqual([]);
+  });
+
+  it("self-heal + new migration coexist in same call (PR-5+ legacy boot path)", () => {
+    const sql1 = "CREATE TABLE t1 (id INTEGER);\r\nCREATE INDEX i1 ON t1(id);\r\n";
+    writeMigration("0001", "first", sql1);
+    runMigrations(db, migrationsDir);
+
+    const raw1 = createHash("sha256").update(sql1, "utf8").digest("hex");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(raw1);
+
+    writeMigration("0002", "second", "CREATE TABLE t2 (id INTEGER)");
+    const r = runMigrations(db, migrationsDir);
+
+    expect(r.selfHealed).toEqual([1]);
+    expect(r.applied).toEqual([2]);
+    expect(r.skipped).toEqual([]);
+  });
+
+  it("self-heal is idempotent on second run (UPDATE only fires once)", () => {
+    const sql = "CREATE TABLE t1 (id INTEGER);\r\nCREATE INDEX i1 ON t1(id);\r\n";
+    writeMigration("0001", "first", sql);
+    runMigrations(db, migrationsDir);
+
+    const raw = createHash("sha256").update(sql, "utf8").digest("hex");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(raw);
+
+    const r1 = runMigrations(db, migrationsDir);
+    const r2 = runMigrations(db, migrationsDir);
+
+    expect(r1.selfHealed).toEqual([1]);
+    expect(r2.selfHealed).toEqual([]);
+    expect(r2.skipped).toEqual([1]);
+  });
+
+  it("MIGRATIONS_STRICT=1 disables self-heal and throws on otherwise-healable mismatch", () => {
+    const sql = "CREATE TABLE t1 (id INTEGER);\r\nCREATE INDEX i1 ON t1(id);\r\n";
+    writeMigration("0001", "first", sql);
+    runMigrations(db, migrationsDir);
+
+    const raw = createHash("sha256").update(sql, "utf8").digest("hex");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(raw);
+
+    const previous = process.env.MIGRATIONS_STRICT;
+    process.env.MIGRATIONS_STRICT = "1";
+    try {
+      expect(() => runMigrations(db, migrationsDir)).toThrow(/MIGRATIONS_STRICT=1/);
+    } finally {
+      if (previous === undefined) delete process.env.MIGRATIONS_STRICT;
+      else process.env.MIGRATIONS_STRICT = previous;
+    }
+  });
+
+  it("true drift (neither raw, nor crlf, nor normalized matches) still throws", () => {
+    writeMigration("0001", "first", "CREATE TABLE t1 (id INTEGER)");
+    runMigrations(db, migrationsDir);
+
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1")
+      .run("0000000000000000000000000000000000000000000000000000000000000000");
 
     expect(() => runMigrations(db, migrationsDir)).toThrow(/hash mismatch for 0001_first.up.sql/);
   });

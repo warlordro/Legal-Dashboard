@@ -16,17 +16,51 @@ export interface MigrationFile {
   fullPath: string;
   sql: string;
   sha256: string;
+  sha256Raw: string;
+  sha256Crlf: string;
 }
 
 export interface RunMigrationsResult {
   applied: number[];
   skipped: number[];
+  selfHealed: number[];
   backfilled: boolean;
   totalKnown: number;
 }
 
+// Hash este calculat pe continut normalizat (CRLF -> LF + BOM scos) ca sa fie
+// stabil intre Windows si Linux. git autocrlf-ul implicit pe Windows poate sa
+// flippeze line-endings la checkout: fara normalizare, un checkout fresh ar
+// invalida toate hash-urile stocate si ar bloca boot-ul. Migrarile sunt SQL,
+// line-endings-ul nu schimba semantica.
 function sha256Hex(s: string): string {
+  const normalized = s.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  return createHash("sha256").update(normalized, "utf8").digest("hex");
+}
+
+// Hash raw (pre-normalizare) folosit pentru self-heal pe DB-uri vechi care au
+// stocat un hash calculat direct pe continutul de pe disk (CRLF inclus). Daca
+// raw match dar normalizat nu, rescriem stored la normalized: continutul e
+// neschimbat, doar reprezentarea hash-ului s-a stabilizat.
+//
+// CAVEAT: matching-ul `sha256Raw` depinde de bytes-urile de pe disk; daca
+// developerul re-checkout-eaza repo-ul cu git autocrlf setat diferit decat la
+// instalarea originala, raw-bytes-ul se schimba si self-heal-ul nu mai apuca
+// branch-ul (dar branch-ul `sha256Crlf` de mai jos il prinde in directia LF).
+function sha256Raw(s: string): string {
   return createHash("sha256").update(s, "utf8").digest("hex");
+}
+
+// Hash CRLF (LF -> CRLF) pentru self-heal in directia inversa: DB-uri create pe
+// Windows inainte de `.gitattributes text eol=lf` au stocat hash pe continut LF
+// (daca rulau intr-un environment fara autocrlf), iar dupa pull cu eol=lf+autocrlf
+// continutul de pe disk ramane LF. Caz mai rar: DB stocat cu hash CRLF iar
+// continutul curent e LF (autocrlf input + .gitattributes lf forteaza LF). Fara
+// branch-ul asta, runner-ul ar arunca "hash mismatch" pe legacy install valid.
+function sha256Crlf(s: string): string {
+  const stripped = s.replace(/^﻿/, "").replace(/\r\n/g, "\n");
+  const crlf = stripped.replace(/\n/g, "\r\n");
+  return createHash("sha256").update(crlf, "utf8").digest("hex");
 }
 
 // Synchronous on purpose - runs once at boot, never inside a request handler (CQ-6).
@@ -42,7 +76,15 @@ export function discoverMigrations(migrationsDir: string): MigrationFile[] {
     const version = Number(m[1]);
     const fullPath = path.join(migrationsDir, name);
     const sql = fs.readFileSync(fullPath, "utf8");
-    files.push({ version, name, fullPath, sql, sha256: sha256Hex(sql) });
+    files.push({
+      version,
+      name,
+      fullPath,
+      sql,
+      sha256: sha256Hex(sql),
+      sha256Raw: sha256Raw(sql),
+      sha256Crlf: sha256Crlf(sql),
+    });
   }
   files.sort((a, b) => a.version - b.version);
 
@@ -117,9 +159,19 @@ export function runMigrations(
     }
   }
 
+  // CI-only escape hatch: when MIGRATIONS_STRICT=1, self-heal este dezactivat
+  // si orice mismatch arunca - util pentru a prinde drift accidental in pipeline
+  // inainte ca un release sa il auto-vindece silentios pe instalarile users.
+  // Audit-ul intern (recordAudit) este OMIS deliberat pe self-heal: tabelul
+  // audit_log e creat in migration 0002, deci self-heal-ul pe v1 ar genera
+  // dependinta circulara. Logging-ul prin result.selfHealed + console in
+  // schema.ts e substitutul corect.
+  const strictMode = process.env.MIGRATIONS_STRICT === "1";
+
   const result: RunMigrationsResult = {
     applied: [],
     skipped: [],
+    selfHealed: [],
     backfilled,
     totalKnown: files.length,
   };
@@ -133,6 +185,30 @@ export function runMigrations(
         continue;
       }
       if (stored !== file.sha256) {
+        // Self-heal: DB-uri populate inainte de introducerea normalizarii au
+        // stocat hash-ul calculat fie pe bytes raw (CRLF de Windows inclus)
+        // fie pe LF normalized convertit ulterior la CRLF de git autocrlf.
+        // Daca *oricare* dintre cele doua hash-uri match, continutul nu s-a
+        // schimbat - rescriem stored la varianta normalizata si continuam.
+        // Daca nici unul nu match, e drift real si abortam.
+        const healMatch = stored === file.sha256Raw
+          ? "raw"
+          : stored === file.sha256Crlf
+            ? "crlf"
+            : null;
+        if (healMatch !== null) {
+          if (strictMode) {
+            throw new Error(
+              `[migrations] hash mismatch for ${file.name} (would self-heal via ${healMatch}, but MIGRATIONS_STRICT=1)`,
+            );
+          }
+          db
+            .prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = ?")
+            .run(file.sha256, file.version);
+          applied.set(file.version, file.sha256);
+          result.selfHealed.push(file.version);
+          continue;
+        }
         throw new Error(
           `[migrations] hash mismatch for ${file.name}: stored=${stored} computed=${file.sha256}. ` +
             `Migration files are immutable once applied - create a new ${String(file.version + 1).padStart(4, "0")}_*.up.sql to evolve the schema.`,

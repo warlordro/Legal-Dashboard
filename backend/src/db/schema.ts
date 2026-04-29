@@ -113,6 +113,12 @@ function initSchema(d: Database.Database): void {
   if (migrationResult.backfilled) {
     console.log(`[schema] legacy DB — backfilled _schema_versions(1, sentinel)`);
   }
+  if (migrationResult.selfHealed.length > 0) {
+    // Operator-visible signal: self-heal a rescris stored hash-ul (raw/CRLF -> normalized)
+    // pentru DB-uri produse inainte ca normalizarea sa fie introdusa. Fara log, un boot
+    // post-Litestream-restore arata identic cu un boot normal idempotent (PR-5+ web mode).
+    console.log(`[schema] self-healed hash normalization for migrations: ${migrationResult.selfHealed.join(", ")}`);
+  }
 
   // Phase 2 — legacy idempotent CREATE/ALTER block. Required for DBs backfilled
   // with the sentinel: those rows skip 0001_baseline so the historic ALTER chain
