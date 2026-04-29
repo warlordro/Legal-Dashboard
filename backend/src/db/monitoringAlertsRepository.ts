@@ -55,6 +55,66 @@ export interface InsertAlertInput {
   dedupKey: string;
 }
 
+export interface ListAlertsOptions {
+  ownerId: string;
+  page: number;
+  pageSize: number;
+  jobId?: number;
+  kind?: AlertKind;
+  severity?: AlertSeverity;
+  isNew?: boolean;
+  onlyUnread?: boolean;
+  dismissed?: boolean;
+  includeDismissed?: boolean;
+  from?: string;
+  to?: string;
+}
+
+export interface ListAlertsResult {
+  rows: MonitoringAlertRow[];
+  total: number;
+  page: number;
+  pageSize: number;
+  unread: number;
+}
+
+export type AlertListener = (alert: MonitoringAlertRow) => void;
+
+const alertListenersByOwner = new Map<string, Set<AlertListener>>();
+
+export function subscribeToNewAlerts(
+  ownerId: string,
+  listener: AlertListener,
+): () => void {
+  let listeners = alertListenersByOwner.get(ownerId);
+  if (!listeners) {
+    listeners = new Set();
+    alertListenersByOwner.set(ownerId, listeners);
+  }
+  listeners.add(listener);
+  return () => {
+    listeners?.delete(listener);
+    if (listeners?.size === 0) {
+      alertListenersByOwner.delete(ownerId);
+    }
+  };
+}
+
+export function getAlertSubscriberCount(ownerId?: string): number {
+  if (ownerId) return alertListenersByOwner.get(ownerId)?.size ?? 0;
+  let count = 0;
+  for (const listeners of alertListenersByOwner.values()) count += listeners.size;
+  return count;
+}
+
+function notifyNewAlert(row: MonitoringAlertRow): void {
+  const listeners = alertListenersByOwner.get(row.owner_id);
+  if (!listeners || listeners.size === 0) return;
+  for (const listener of listeners) {
+    listener(row);
+  }
+}
+
 // Idempotent insert keyed by (job_id, dedup_key). Returns the row that was
 // inserted OR the existing row when the dedup_key already exists for the job.
 // This is the contract PR-4's diff engine relies on: re-running the same diff
@@ -87,7 +147,7 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
     );
   }
 
-  db
+  const info = db
     .prepare(
       `INSERT INTO monitoring_alerts
          (owner_id, job_id, run_id, kind, severity, title, detail_json, dedup_key)
@@ -124,6 +184,132 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
       `insertAlert: row missing after upsert (job_id=${input.jobId}, dedup_key=${input.dedupKey})`,
     );
   }
+  if (info.changes > 0) {
+    notifyNewAlert(row);
+  }
   return row;
+}
+
+export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
+  const db = getDb();
+  const where: string[] = ["owner_id = ?"];
+  const params: (string | number | null)[] = [opts.ownerId];
+
+  if (opts.jobId !== undefined) {
+    where.push("job_id = ?");
+    params.push(opts.jobId);
+  }
+  if (opts.kind) {
+    where.push("kind = ?");
+    params.push(opts.kind);
+  }
+  if (opts.severity) {
+    where.push("severity = ?");
+    params.push(opts.severity);
+  }
+  if (opts.isNew !== undefined) {
+    where.push("is_new = ?");
+    params.push(opts.isNew ? 1 : 0);
+  }
+  if (opts.onlyUnread) {
+    where.push("read_at IS NULL");
+  }
+  if (opts.dismissed !== undefined) {
+    where.push(opts.dismissed ? "dismissed_at IS NOT NULL" : "dismissed_at IS NULL");
+  } else if (!opts.includeDismissed) {
+    where.push("dismissed_at IS NULL");
+  }
+  if (opts.from) {
+    where.push("created_at >= ?");
+    params.push(opts.from);
+  }
+  if (opts.to) {
+    where.push("created_at <= ?");
+    params.push(opts.to);
+  }
+
+  const whereSql = `WHERE ${where.join(" AND ")}`;
+  const total = (
+    db
+      .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts ${whereSql}`)
+      .get(...params) as { n: number }
+  ).n;
+
+  const offset = (opts.page - 1) * opts.pageSize;
+  const rows = db
+    .prepare(
+      `SELECT * FROM monitoring_alerts
+       ${whereSql}
+       ORDER BY created_at DESC, id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...params, opts.pageSize, offset) as MonitoringAlertRow[];
+
+  return {
+    rows,
+    total,
+    page: opts.page,
+    pageSize: opts.pageSize,
+    unread: countUnreadAlerts(opts.ownerId),
+  };
+}
+
+export function countUnreadAlerts(ownerId: string): number {
+  return (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) AS n
+         FROM monitoring_alerts
+         WHERE owner_id = ?
+           AND read_at IS NULL
+           AND dismissed_at IS NULL`,
+      )
+      .get(ownerId) as { n: number }
+  ).n;
+}
+
+export function getAlertById(
+  ownerId: string,
+  id: number,
+): MonitoringAlertRow | null {
+  const row = getDb()
+    .prepare(`SELECT * FROM monitoring_alerts WHERE id = ? AND owner_id = ?`)
+    .get(id, ownerId) as MonitoringAlertRow | undefined;
+  return row ?? null;
+}
+
+export function markAlertSeen(
+  ownerId: string,
+  id: number,
+): MonitoringAlertRow | null {
+  const db = getDb();
+  const info = db
+    .prepare(
+      `UPDATE monitoring_alerts
+       SET is_new = 0,
+           read_at = COALESCE(read_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+       WHERE id = ? AND owner_id = ?`,
+    )
+    .run(id, ownerId);
+  if (info.changes === 0) return null;
+  return getAlertById(ownerId, id);
+}
+
+export function dismissAlert(
+  ownerId: string,
+  id: number,
+): MonitoringAlertRow | null {
+  const db = getDb();
+  const info = db
+    .prepare(
+      `UPDATE monitoring_alerts
+       SET is_new = 0,
+           read_at = COALESCE(read_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+           dismissed_at = COALESCE(dismissed_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+       WHERE id = ? AND owner_id = ?`,
+    )
+    .run(id, ownerId);
+  if (info.changes === 0) return null;
+  return getAlertById(ownerId, id);
 }
 

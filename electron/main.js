@@ -1,4 +1,4 @@
-const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage, nativeTheme } = require("electron");
+const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage, nativeTheme, Notification } = require("electron");
 const path = require("path");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 
@@ -236,6 +236,8 @@ function startBackend() {
 // memory during encrypt/decrypt calls. Input sizes are capped to prevent abuse.
 const MAX_PLAINTEXT = 8 * 1024;
 const MAX_CIPHERTEXT_B64 = 16 * 1024;
+const MAX_NOTIFICATION_TITLE = 120;
+const MAX_NOTIFICATION_BODY = 500;
 
 function registerSafeStorageIpc() {
   ipcMain.handle("safeStorage:available", () => safeStorage.isEncryptionAvailable());
@@ -274,6 +276,20 @@ function registerSafeStorageIpc() {
       mainWindow?.setTitleBarOverlay?.(overlay);
     } catch (e) {
       console.warn("[theme] setTitleBarOverlay failed:", e?.message || e);
+    }
+  });
+
+  ipcMain.handle("notification:show", (_event, payload) => {
+    if (!payload || typeof payload !== "object") return false;
+    const title = typeof payload.title === "string" ? payload.title.slice(0, MAX_NOTIFICATION_TITLE) : "";
+    const body = typeof payload.body === "string" ? payload.body.slice(0, MAX_NOTIFICATION_BODY) : "";
+    if (!title) return false;
+    try {
+      new Notification({ title, body, silent: payload.silent === true }).show();
+      return true;
+    } catch (e) {
+      console.warn("[notification] show failed:", e?.message || e);
+      return false;
     }
   });
 }

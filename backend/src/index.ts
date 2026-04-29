@@ -16,6 +16,7 @@ import {
   getMonitoringSchedulerStatus,
 } from "./routes/monitoring.ts";
 import { nameListsRouter } from "./routes/nameLists.ts";
+import { alertsRouter } from "./routes/alerts.ts";
 import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
@@ -159,8 +160,10 @@ let monitoringScheduler: Scheduler | null = null;
 if (MONITORING_ENABLED) {
   app.route("/api/v1/monitoring", monitoringRouter);
   app.route("/api/v1/name-lists", nameListsRouter);
+  app.route("/api/v1/alerts", alertsRouter);
   console.log("[monitoring] routes mounted at /api/v1/monitoring");
   console.log("[monitoring] name-lists routes mounted at /api/v1/name-lists");
+  console.log("[monitoring] alerts routes mounted at /api/v1/alerts");
 }
 
 // Serve frontend static files in production

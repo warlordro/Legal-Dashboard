@@ -33,6 +33,7 @@
 │ scheduler in-process (single instance lock)│   │ scheduler with leader election (advisory lk) │
 │ no auth                                    │   │ JWT (httpOnly cookie) + refresh + admin role │
 │ AI keys: safeStorage IPC                   │   │ AI keys: server-side env (workspace level)   │
+│ Captcha keys: safeStorage/UI               │   │ Captcha keys: server-side env/config        │
 └────────────────────────────────────────────┘   └──────────────────────────────────────────────┘
                           │                                          │
                           └─── shared core ──────────────────────────┘
@@ -45,6 +46,7 @@ Decizii ferme:
 - **DB engine**: SQLite ramane pe desktop. Pentru web revizuit la Litestream + SQLite single-writer pentru v3.0 (vezi B.9); Postgres este post-launch (PR-13+). Repository layer abstract — schimbam doar driver.
 - **Job queue**: in-DB (tabel `monitoring_jobs` + `next_run_at` index partial `WHERE active=1`), NU Redis/BullMQ. Argumente: zero infrastructura noua pe desktop, throughput suficient (sute joburi/min), recovery trivial dupa restart.
 - **AI quotas**: tabel `ai_usage` cu rolling window 24h, scris **dupa** SDK call (capturam tokens reali). Cap global daily $ + cap per-user request count.
+- **RNPM captcha provider keys**: desktop pastreaza UI + Electron `safeStorage`; web/server mode foloseste chei 2Captcha/CapSolver centralizate in server env/config. Nu BYOK si nu chei transmise din browser.
 - **Exemptie owner_id**: `rnpm_bunuri_descrieri` ramane content-addressable shared lookup (cheia primara = sha256 al continutului), exclus din `owner_id` rule per HARDENING.md CM5. Toate celelalte tabele (existente + noi) trebuie sa contina `owner_id NOT NULL`.
 - **Migrations**: introducem `_schema_versions` table + ordered migration runner in **PR-0** (vezi §4) — astazi `initSchema()` aplica DDL idempotent ad-hoc; nu putem livra 7 tabele noi + tag 3.0.0 fara framework de migrari versionate.
 
@@ -325,7 +327,7 @@ Fiecare PR e merge-ready, lasa desktop functional, are tag de version bump si ro
 | **PR-6** | Alerte UI + notificari desktop | Inbox, dedup, filter, mark read/dismiss. Toast + Electron native notification. SSE stream `GET /api/v1/alerts/stream`. **DoD include EventSource cleanup la unmount** (`useEffect(() => { const es = new EventSource(...); return () => es.close(); }, [])`) + reconnect-with-backoff la disconnect (CQ-5 + CQ-8 conform). | 2.4.1 minor | LOW |
 | **PR-7** | AI usage tracking + per-user quota | `ai_usage` write-after-call, daily/24h sliding window check inainte. UI usage panel pe Setari. Pe desktop quota=infinit (bypass). | 2.5.0 minor | LOW |
 | **PR-8** | Admin pages + roles guard | `/admin/users`, `/admin/audit`, `/admin/quota`. Middleware role-check pe `*/admin/*`. Pe desktop ascunse din UI dar accesibile pentru testing. | 2.5.1 minor | LOW |
-| **PR-9** | Auth wire-up: **Google Workspace SSO** + data export/import desktop→web | Activare `getOwnerId` din JWT post-OIDC. OAuth2/OIDC flow cu Google ca IdP unic. Login local doar pentru `admin` (escape hatch daca SSO down). Buton "Export desktop data" (ZIP) + admin "Import for user X". **Breaking pe web mode doar** — desktop ramane backward-compatible (rutele legacy `/api/*` neatinse, AI keys via safeStorage, port 3002 in-process). Major bump 3.0.0 reflecta noul transport web + cutover envelope `/api/v1/*`. **DoD include update `.env.example`** cu `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, `WORKSPACE_DOMAIN`, `PUBLIC_URL` (CP-2 conform). | 3.0.0 major | HIGH |
+| **PR-9** | Auth wire-up: **Google Workspace SSO** + data export/import desktop→web | Activare `getOwnerId` din JWT post-OIDC. OAuth2/OIDC flow cu Google ca IdP unic. Login local doar pentru `admin` (escape hatch daca SSO down). Buton "Export desktop data" (ZIP) + admin "Import for user X". **Breaking pe web mode doar** — desktop ramane backward-compatible (rutele legacy `/api/*` neatinse, AI/captcha keys via safeStorage, port 3002 in-process). Major bump 3.0.0 reflecta noul transport web + cutover envelope `/api/v1/*`. RNPM captcha provider keys devin server-side env/config in web mode, fara BYOK/client/browser. **DoD include update `.env.example`** cu `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, `WORKSPACE_DOMAIN`, `PUBLIC_URL`, `CAPTCHA_PROVIDER`, `TWOCAPTCHA_API_KEY`, `CAPSOLVER_API_KEY` (CP-2 conform). | 3.0.0 major | HIGH |
 | **PR-10** | Litestream backup automat (GCS) | SQLite + Litestream replicare continua spre Google Cloud Storage `gs://legal-dashboard-backups/db` (regiunea `europe-west3`). Filesystem flock pentru leader election (un singur scheduler activ la un moment dat). Vezi config snippet sub tabel. **DoD include update `.env.example`** cu `GOOGLE_APPLICATION_CREDENTIALS`, `LITESTREAM_BUCKET`, `LITESTREAM_REGION`. | 3.1.0 minor | MEDIUM |
 | **PR-11** | Email notifiers (Google SMTP/relay) + cron jitter | Trimitem alertele si pe email-ul Workspace al userului. SMTP via Google relay sau provider extern. **DoD include update `.env.example`** cu `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `CONTACT_EMAIL`. | 3.2.0 minor | MEDIUM |
 | **PR-12** | Hardening final: hash-chain audit, retention cron, GDPR delete simplu | Hash-chain pe audit_log (compliance interna). Cron purge `monitoring_runs` 90 zile, `audit_log` 1 an. Admin "delete user data" cu cascade. | 3.3.0 minor | MEDIUM |
@@ -668,6 +670,7 @@ Setate in `.env.example` la PR-1 cu defaults clare; documentate in `README.md`.
 - ✅ **Pricing**: niciun tier — internal flat. AI quota default $5/zi/user, $50/zi global firma (admin override per user).
 - ✅ **Mobile / multi-tenant workspaces**: out of scope confirmat.
 - ✅ **AI keys**: centralizate in `.env` server (nu BYOK).
+- ✅ **Captcha provider keys**: desktop = UI + `safeStorage`; web/server = 2Captcha/CapSolver in `.env` server-side (nu BYOK, nu client/browser).
 - ✅ **Strategie sequencing**: Faza 1 (PR-0..PR-7) = monitoring desktop cu hooks web; Faza 2 (PR-8..PR-12) = web cutover. **NU intercalat**.
 
 ### 11.2 ✅ Decizii rezolvate 2026-04-27 (toate)
@@ -747,7 +750,7 @@ MEMORY noteaza Faza 9 cleanup `independent` de Faza 10. Pentru solo dev, nu pute
 | CP-7 pagination | §6 pagination rules |
 | CP-9 backup | §8.3 + RWLock vs scheduler |
 | CP-10 payments | Out of scope (free + simple Stripe in PR-13 viitor) |
-| CP-11 secrets | JWT secret env, AI keys env (web) / safeStorage (desktop) |
+| CP-11 secrets | JWT secret env, AI/captcha keys env (web) / safeStorage (desktop) |
 | CP-12 silent errors | `monitoring_runs.error_code/message` + audit_log |
 | CQ-2 tests | §7 |
 | CQ-7 architecture | §6 service/repo split (no SQL in routes pentru new endpoints) |
@@ -755,7 +758,7 @@ MEMORY noteaza Faza 9 cleanup `independent` de Faza 10. Pentru solo dev, nu pute
 
 ---
 
-**Sumar pentru lectura rapida**: **13 PR-uri** (PR-0..PR-12) esalonate, fiecare independent merge-able. **PR-0 = migration framework** (`_schema_versions` + runner ordonat — schema.ts azi nu are nimic versionat). **PR-1** = `getOwnerId` helper + 5 fix-uri latent owner_id leak in `avizRepository.ts`. **PR-3..PR-7** livreaza monitorizarea + bulk names + AI quotas pe desktop deja, fara breaking. **PR-9** = pivotul web (3.0.0): JWT + email verify + password reset + captcha + data export/import desktop→web. DDL complet definit (cu exemptie `rnpm_bunuri_descrieri`), scheduler defaults concrete (60s tick, **3** concurrency aliniat empiric `batch-dosare.ts:10`, **2** per-owner cap, tiered cadence free/paid, crash recovery la boot, retry 60s×2^n cap 1h, jitter intotdeauna), test harness real-SQLite + clock injection, rollback path per PR, customer comms 14 zile inainte de v3. **Reconcile HARDENING.md "Watched Dosare"** in §11.7.
+**Sumar pentru lectura rapida**: **13 PR-uri** (PR-0..PR-12) esalonate, fiecare independent merge-able. **PR-0 = migration framework** (`_schema_versions` + runner ordonat — schema.ts azi nu are nimic versionat). **PR-1** = `getOwnerId` helper + 5 fix-uri latent owner_id leak in `avizRepository.ts`. **PR-3..PR-7** livreaza monitorizarea + bulk names + AI quotas pe desktop deja, fara breaking. **PR-9** = pivotul web (3.0.0): JWT + Google Workspace SSO + data export/import desktop→web; RNPM captcha provider keys devin server-side env/config, nu BYOK/client. DDL complet definit (cu exemptie `rnpm_bunuri_descrieri`), scheduler defaults concrete (60s tick, **3** concurrency aliniat empiric `batch-dosare.ts:10`, **2** per-owner cap, tiered cadence free/paid, crash recovery la boot, retry 60s×2^n cap 1h, jitter intotdeauna), test harness real-SQLite + clock injection, rollback path per PR, customer comms 14 zile inainte de v3. **Reconcile HARDENING.md "Watched Dosare"** in §11.7.
 
 ---
 
@@ -888,4 +891,3 @@ Am rulat planul prin "ce s-ar sparge la stress?" si "ce ipoteza n-am justificat 
 - Reconcile HARDENING.md Watched Dosare → opsiunea A+B (supersede + alert config extensibility).
 
 Cost timp ajustat: 6-8 saptamani la doi devs paraleli devine **8-11 saptamani** dupa B.5 reductions + cresteri (PR-0 + B.11/B.12/B.14 + HARDENING reconcile + crash recovery).
-

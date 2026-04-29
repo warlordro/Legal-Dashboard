@@ -7,15 +7,16 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.4.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
-si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este PR-5
-bulk name lists / `name_soap`: upload XLSX/CSV direct din Monitorizare,
-template cu coloanele `numar_dosar`, `nume`, `cadence_sec`, `notes` si
-dropdown Excel pentru cadenta, preview/commit pentru liste de nume, auto-create
-joburi `name_soap`, runner SOAP pentru subiecti si alerte pe dosare noi,
-stadii/categorii/relevanta. Include fix post-review pentru race-uri la
-import/archive liste si statistica bulk dosar bazata pe statusul HTTP, nu pe
-timestamp. Patch-ul v2.3.0 ramane baza de hardening: backup zilnic, restore
+Versiune curenta: **2.4.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este PR-6:
+inbox `Alerte`, badge cu necitite in sidebar, stream live
+`/api/v1/alerts/stream`, mark read/dismiss si notificari native Electron.
+PR-5 ramane baza de bulk name lists / `name_soap`: upload XLSX/CSV direct din
+Monitorizare, template cu coloanele `numar_dosar`, `nume`, `cadence_sec`,
+`notes` si dropdown Excel pentru cadenta, preview/commit pentru liste de nume,
+auto-create joburi `name_soap`, runner SOAP pentru subiecti si alerte pe dosare
+noi, stadii/categorii/relevanta. Patch-ul v2.3.0 ramane baza de hardening:
+backup zilnic, restore
 SQLite cu `PRAGMA integrity_check`, drain HTTP 30s, `idx_one_running_per_job`,
 RNPM in maintenance lock, audit pe rute destructive, migration runner
 self-heal bidirectional si export XLSX/PDF in Web Worker.
@@ -50,7 +51,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (416 teste in v2.4.0) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (424 teste in v2.4.1) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
@@ -90,6 +91,9 @@ migrari DB.
 Toate variabilele de environment sunt in [backend/.env.example](backend/.env.example).
 Cheile API pentru AI pot fi setate fie in `.env` (precedence), fie din UI
 (salvate local prin safeStorage). Vezi `SECURITY.md` pentru detalii.
+Cheile 2Captcha / CapSolver raman in UI + safeStorage pe desktop; in planul
+web/server (PR-9) vor fi mutate server-side in `.env`/config si nu vor fi BYOK
+sau trimise din browser.
 
 Port backend default: `3002`. Suprascrie cu `LEGAL_DASHBOARD_PORT`.
 LAN exposure blocat by default; opt-in explicit cu `LEGAL_DASHBOARD_ALLOW_REMOTE=1`.

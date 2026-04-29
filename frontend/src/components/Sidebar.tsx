@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Scale, Search, CalendarDays, BarChart3, History, Trash2, FileSearch, FileLock2, ChevronDown, ChevronRight, Activity } from "lucide-react";
+import { Scale, Search, CalendarDays, BarChart3, History, Trash2, FileSearch, FileLock2, ChevronDown, ChevronRight, Activity, Bell } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
@@ -13,6 +13,7 @@ const navItems = [
   { to: "/termene", label: "Termene & Calendar", icon: CalendarDays },
   { to: "/rnpm", label: "Cautare RNPM", icon: FileLock2 },
   { to: "/monitorizare", label: "Monitorizare", icon: Activity },
+  { to: "/alerte", label: "Alerte", icon: Bell },
 ];
 
 interface SidebarProps {
@@ -26,6 +27,7 @@ interface SidebarProps {
   onRnpmHistoryClick: (type: RnpmSearchType, params: RnpmSearchParams) => void;
   onRnpmRemoveEntry: (id: string) => void;
   onRnpmClearHistory: () => void;
+  unreadAlerts?: number;
 }
 
 function cautariIcon(type: SearchHistoryEntry["type"]) {
@@ -36,7 +38,7 @@ function cautariIcon(type: SearchHistoryEntry["type"]) {
 
 const rnpmIcon = <FileLock2 className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />;
 
-export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory, hasApiKey, onConfigureApiKey, rnpmHistory, onRnpmHistoryClick, onRnpmRemoveEntry, onRnpmClearHistory }: SidebarProps) {
+export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory, hasApiKey, onConfigureApiKey, rnpmHistory, onRnpmHistoryClick, onRnpmRemoveEntry, onRnpmClearHistory, unreadAlerts = 0 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   // Open the section whose most recent entry is newest — so reopening the app
   // lands on whichever category the user was last active in.
@@ -99,7 +101,10 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
 
       {/* Navigation */}
       <nav className="space-y-1 p-2">
-        {navItems.map(({ to, label, icon: Icon, end }) => (
+        {navItems.map(({ to, label, icon: Icon, end }) => {
+          const showBadge = to === "/alerte" && unreadAlerts > 0;
+          const badgeText = unreadAlerts > 99 ? "99+" : String(unreadAlerts);
+          return (
           <NavLink
             key={to}
             to={to}
@@ -107,7 +112,7 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
             title={collapsed ? label : undefined}
             className={({ isActive }) =>
               cn(
-                "flex items-center rounded-lg text-sm font-medium transition-colors",
+                "relative flex items-center rounded-lg text-sm font-medium transition-colors",
                 collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
                 isActive
                   ? "bg-primary text-primary-foreground"
@@ -116,9 +121,22 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
             }
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {!collapsed && <span className="whitespace-nowrap overflow-hidden">{label}</span>}
+            {!collapsed && (
+              <>
+                <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
+                {showBadge && (
+                  <span className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                    {badgeText}
+                  </span>
+                )}
+              </>
+            )}
+            {collapsed && showBadge && (
+              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-600" />
+            )}
           </NavLink>
-        ))}
+          );
+        })}
       </nav>
 
       {/* History accordion: only one section open at a time */}

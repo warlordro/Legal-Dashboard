@@ -119,10 +119,13 @@ The scheduler does **not** add authentication, encryption, or rate-limiting to i
 | `MONITORING_ENABLED` | `1` in Electron | Set to `0` to disable monitoring routes and scheduler. |
 | `MONITORING_DISABLED_KINDS` | unset | Comma-separated monitoring kinds to skip in scheduler claims, for example `dosar_soap,name_soap`. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_AI_KEY` | unset | If set, override in-app keys. Use for server-mode deployments. |
+| `CAPTCHA_PROVIDER` / `TWOCAPTCHA_API_KEY` / `CAPSOLVER_API_KEY` | unset | Planned for PR-9 web/server mode. RNPM captcha provider keys must live server-side and must not be accepted from browser clients. Desktop v2.4.0 ignores these and keeps UI + safeStorage. |
 | `NODE_ENV` | `production` in Electron | `development` enables DevTools and the dev menu. |
 
-The 2Captcha / CapSolver key is **not** read from env — it is entered in-app
-and persisted via `safeStorage` on desktop (or obfuscated localStorage on web).
+Desktop v2.4.0: the 2Captcha / CapSolver key is **not** read from env; it is
+entered in-app and persisted via `safeStorage` on desktop. Planned PR-9
+web/server mode: captcha provider keys move to server-side env/config and are
+not BYOK / not supplied by the browser client.
 
 ## Out of scope — what the app does **not** protect against
 

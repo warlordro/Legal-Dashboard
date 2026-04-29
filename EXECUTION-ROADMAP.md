@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-5 livrate si publicate pe `main` (v2.4.0, 2026-04-29). Urmatorul PR: PR-6 Alerte UI + notificari desktop.
-> **Versiune document**: 1.3 (2026-04-29)
+> **Status**: PR-0..PR-6 implementate local (v2.4.1, 2026-04-30). Urmatorul PR planificat: PR-7 AI usage tracking + per-user quota.
+> **Versiune document**: 1.4 (2026-04-30)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
@@ -39,6 +39,7 @@ Acest document e **roadmap-ul de executie** â€” saptamanal, cu checkboxes s
 | 7 | Litestream target | **Google Cloud Storage** `legal-dashboard-backups` (europe-west3 Frankfurt). | 2026-04-27 |
 | 8 | Portal Just Integrat referinta | Sister project â€” port conceptual, NU 1:1 (port snapshot-by-keys, 4h cadence, email format). | 2026-04-27 |
 | 9 | HARDENING reconcile | Optiunea C â€” plan superseaza schema, HARDENING marcat OBSOLETE. Features pastrate in `alert_config_json`. | 2026-04-27 |
+| 10 | Captcha provider keys | Desktop ramane cu UI + Electron `safeStorage`; web/server mode muta cheile 2Captcha/CapSolver in `.env` server-side (NU BYOK, NU client/browser). | 2026-04-30 |
 
 ---
 
@@ -212,20 +213,20 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 
 ### Saptamana 7 â€” Alerte UI + notificari (PR-6)
 
-#### PR-6 â€” Alerte UI + notificari desktop
+#### PR-6 â€” Alerte UI + notificari desktop âœ… IMPLEMENTAT LOCAL 2026-04-30
 - **Scop**: user are un "inbox" de alerte, le poate marca read/dismiss, primeste si toast Windows nativ cand apar.
 - **User vede**: badge cu numar alerte necitite in sidebar + tab "Alerte" cu inbox + notification toast Windows.
 - **Tasks**:
-  - [ ] Routes: `GET /api/v1/alerts` (paginated), `PATCH /api/v1/alerts/:id/seen`, `PATCH /api/v1/alerts/:id/dismissed`, `GET /api/v1/alerts/stream` (SSE pentru push real-time).
-  - [ ] Frontend: pagina `Alerte.tsx` cu filter (kind, severity, daterange, only unread), bulk actions, dedup vizual.
-  - [ ] Electron: `new Notification({title, body})` cand SSE primeste alert nou.
-  - [ ] Badge in sidebar cu count `is_new=1` + `read_at IS NULL`.
+  - [x] Routes: `GET /api/v1/alerts` (paginated), `PATCH /api/v1/alerts/:id/seen`, `PATCH /api/v1/alerts/:id/dismissed`, `GET /api/v1/alerts/stream` (SSE pentru push real-time).
+  - [x] Frontend: pagina `Alerte.tsx` cu filter (kind, severity, daterange, only unread), bulk action pentru pagina vizibila si detalii defensive.
+  - [x] Electron: `new Notification({title, body})` in main process via IPC cand SSE primeste alert nou.
+  - [x] Badge in sidebar cu count `read_at IS NULL AND dismissed_at IS NULL`.
 - **DoD**:
-  - [ ] Alert detectat in PR-4 apare imediat in UI prin SSE.
-  - [ ] Marchezi citit â†’ badge scade.
-  - [ ] Notificare Windows cand app e in background.
-  - [ ] **EventSource cleanup verificat**: `useEffect(() => { const es = new EventSource('/api/v1/alerts/stream'); ...; return () => es.close(); }, [])`. Reconnect-with-backoff la disconnect (CQ-5 + CQ-8 conform). Test: navighezi de pe pagina Alerte â†’ connection-uri active in `netstat` scad la 0.
-- **Bump**: 2.4.1 minor/patch dupa PR-6, in functie de suprafata finala.
+  - [x] Alert nou este publicat prin SSE si UI face refresh.
+  - [x] Marchezi citit â†’ badge scade.
+  - [x] Notificare Windows prin Electron IPC cand app-ul primeste alerta noua.
+  - [x] **EventSource cleanup verificat in cod + test SSE backend**: `useEffect` inchide conexiunea si reconecteaza cu backoff la disconnect.
+- **Bump**: 2.4.1 patch.
 - **Risk**: LOW.
 
 ---
@@ -288,8 +289,9 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
   - [ ] Cezar exporta de pe desktop â†’ admin importa â†’ revine pe web â†’ vede datele lui.
   - [ ] Coleg din firma logheaza â†’ vede zero (e ok, nu importa pentru el).
   - [ ] Logout terge cookie + refresh token revoked.
-  - [ ] **Desktop ramane functional 1:1** â€” zero schimbare in UX desktop, rutele legacy `/api/*` neatinse, AI keys safeStorage neatinse, port 3002 in-process.
-  - [ ] **`.env.example` updated** cu `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, `WORKSPACE_DOMAIN`, `PUBLIC_URL` (CP-2 conform).
+  - [ ] **Desktop ramane functional 1:1** â€” zero schimbare in UX desktop, rutele legacy `/api/*` neatinse, AI/captcha keys safeStorage neatinse, port 3002 in-process.
+  - [ ] **Captcha provider keys server-side in web mode** â€” 2Captcha/CapSolver se citesc doar din server env/config si nu se accepta din browser/client/BYOK.
+  - [ ] **`.env.example` updated** cu `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, `WORKSPACE_DOMAIN`, `PUBLIC_URL`, `CAPTCHA_PROVIDER`, `TWOCAPTCHA_API_KEY`, `CAPSOLVER_API_KEY` (CP-2 conform).
 - **Bump**: 3.0.0 major. **Major bump reflecta noul transport web + cutover envelope `/api/v1/*` pe web mode**, NU breaking change pentru desktop. Aplicatia desktop instalata pe stationul user-ului continua sa functioneze identic dupa upgrade la 3.0.0.
 - **Risk**: ðŸ”´ HIGH. Chestii care pot rupe: scope-uri OAuth gresite, redirect URI mismatch, cookies cross-origin, token expiry edge cases, user with `@firma.ro` dar fara cont in users table â†’ first-login flow.
 
@@ -373,10 +375,10 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 - Multi-tenant workspaces (un singur tenant = firma).
 - Pricing tiers / payment processing (interna, gratuita).
 - Postgres migration (SQLite + Litestream forever pentru <100 useri).
-- BYOK AI keys (centralized in `.env`).
+- BYOK AI/captcha keys (centralized in server `.env` for web mode; desktop keeps local `safeStorage`).
 - 2FA local app-side (Google Workspace gestioneaza).
 - Public signup (numai useri din `@firma.ro` Workspace).
-- Captcha (gestionat by Workspace SSO).
+- Public signup / anti-bot captcha (gestionat by Workspace SSO). RNPM captcha provider keys raman server-side in web mode.
 - Email verify (Google deja confirmat).
 - GDPR DSAR public endpoints (admin manual delete suficient pentru intern).
 - Advanced CSRF protection peste SameSite cookie (suficient pentru intern).

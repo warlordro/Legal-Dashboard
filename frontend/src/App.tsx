@@ -9,9 +9,11 @@ import Dosare from "@/pages/Dosare";
 import Termene from "@/pages/Termene";
 import RnpmSearchPage from "@/pages/RnpmSearch";
 import Monitorizare from "@/pages/Monitorizare";
+import Alerts from "@/pages/Alerts";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
+import { alertsApi, type MonitoringAlert } from "@/lib/alertsApi";
 import type { Dosar, Termen, SearchParams } from "@/types";
 import type { RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
 
@@ -71,8 +73,119 @@ function AppShell({
 }) {
   const { pathname } = useLocation();
   const mainRef = useRef<HTMLElement>(null);
+  const reconnectTimerRef = useRef<number | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
+  const [unreadAlerts, setUnreadAlerts] = useState(0);
+  const [alertsStreamVersion, setAlertsStreamVersion] = useState(0);
+
+  const refreshUnreadAlerts = useCallback(async () => {
+    try {
+      const result = await alertsApi.list({ page: 1, pageSize: 1, onlyUnread: true });
+      setUnreadAlerts(result.unread ?? result.total);
+    } catch (err) {
+      console.warn("[alerts] unread count refresh failed", err);
+    }
+  }, []);
+
+  const showDesktopNotification = useCallback((alert: MonitoringAlert) => {
+    const title = "Legal Dashboard - alerta noua";
+    const body = alert.title.length > 120 ? `${alert.title.slice(0, 117)}...` : alert.title;
+    if (window.desktopApi?.showNotification) {
+      window.desktopApi.showNotification({
+        title,
+        body,
+        silent: alert.severity === "info",
+      }).catch((err) => console.warn("[alerts] native notification failed", err));
+      return;
+    }
+    if (!("Notification" in window)) return;
+    const notify = () => {
+      try {
+        new Notification(title, {
+          body,
+          tag: `monitoring-alert-${alert.id}`,
+          silent: alert.severity === "info",
+        });
+      } catch (err) {
+        console.warn("[alerts] desktop notification failed", err);
+      }
+    };
+    if (Notification.permission === "granted") {
+      notify();
+      return;
+    }
+    if (Notification.permission === "default") {
+      Notification.requestPermission().then((permission) => {
+        if (permission === "granted") notify();
+      }).catch((err) => console.warn("[alerts] notification permission failed", err));
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshUnreadAlerts();
+
+    let stopped = false;
+    let retryMs = 1000;
+
+    const cleanupSource = () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+        eventSourceRef.current = null;
+      }
+    };
+
+    const scheduleReconnect = () => {
+      if (stopped || reconnectTimerRef.current !== null) return;
+      reconnectTimerRef.current = window.setTimeout(() => {
+        reconnectTimerRef.current = null;
+        connect();
+      }, retryMs);
+      retryMs = Math.min(retryMs * 2, 30000);
+    };
+
+    const connect = () => {
+      cleanupSource();
+      const es = new EventSource("/api/v1/alerts/stream");
+      eventSourceRef.current = es;
+      es.addEventListener("open", () => {
+        retryMs = 1000;
+        refreshUnreadAlerts();
+      });
+      es.addEventListener("alert", (event) => {
+        try {
+          const alert = JSON.parse((event as MessageEvent).data) as MonitoringAlert;
+          if (!alert.read_at && !alert.dismissed_at) {
+            setUnreadAlerts((count) => count + 1);
+            showDesktopNotification(alert);
+          }
+          setAlertsStreamVersion((v) => v + 1);
+        } catch (err) {
+          console.warn("[alerts] invalid SSE event", err);
+          refreshUnreadAlerts();
+        }
+      });
+      es.addEventListener("sync", () => {
+        refreshUnreadAlerts();
+        setAlertsStreamVersion((v) => v + 1);
+      });
+      es.onerror = () => {
+        cleanupSource();
+        scheduleReconnect();
+      };
+    };
+
+    connect();
+    return () => {
+      stopped = true;
+      cleanupSource();
+      if (reconnectTimerRef.current !== null) {
+        window.clearTimeout(reconnectTimerRef.current);
+        reconnectTimerRef.current = null;
+      }
+    };
+  }, [refreshUnreadAlerts, showDesktopNotification]);
 
   useEffect(() => {
     const el = mainRef.current;
@@ -120,6 +233,7 @@ function AppShell({
         onRnpmHistoryClick={handleRnpmHistoryClick}
         onRnpmRemoveEntry={removeRnpmEntry}
         onRnpmClearHistory={clearRnpmHistory}
+        unreadAlerts={unreadAlerts}
       />
       <main ref={mainRef} className="flex-1 overflow-y-auto scrollbar-thin relative">
         {/* Dashboard only renders on "/" — no long-running ops */}
@@ -154,6 +268,12 @@ function AppShell({
           />
         </div>
         {pathname === "/monitorizare" && <Monitorizare />}
+        {pathname === "/alerte" && (
+          <Alerts
+            streamVersion={alertsStreamVersion}
+            onAlertsChanged={refreshUnreadAlerts}
+          />
+        )}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>
           <RnpmSearchPage
             captchaKey={activeCaptchaKey}

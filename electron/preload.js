@@ -19,4 +19,5 @@ contextBridge.exposeInMainWorld("desktopApi", {
   decryptKeys: (ciphertextB64) => invokeWithTimeout("safeStorage:decrypt", ciphertextB64),
   isEncryptionAvailable: () => invokeWithTimeout("safeStorage:available"),
   setWindowTheme: (theme) => invokeWithTimeout("window:setTheme", theme),
+  showNotification: (payload) => invokeWithTimeout("notification:show", payload),
 });

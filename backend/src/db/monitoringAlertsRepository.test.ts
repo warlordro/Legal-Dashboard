@@ -21,7 +21,14 @@ import os from "os";
 import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { insertAlert } from "./monitoringAlertsRepository.ts";
+import {
+  dismissAlert,
+  getAlertSubscriberCount,
+  insertAlert,
+  listAlerts,
+  markAlertSeen,
+  subscribeToNewAlerts,
+} from "./monitoringAlertsRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 let tmpRoot: string;
@@ -192,5 +199,163 @@ describe("insertAlert", () => {
         dedupKey: "collide",
       }),
     ).toThrow(/row missing after upsert/);
+  });
+});
+
+describe("listAlerts", () => {
+  it("paginates and filters by owner, job, kind, severity, new, and dismissed state", () => {
+    const jobIdA1 = seedJob(OWNER_A, "hA1");
+    const jobIdA2 = seedJob(OWNER_A, "hA2");
+    const jobIdB = seedJob(OWNER_B, "hB");
+    const runIdA1 = seedRun(OWNER_A, jobIdA1);
+    const runIdA2 = seedRun(OWNER_A, jobIdA2);
+    const runIdB = seedRun(OWNER_B, jobIdB);
+
+    const first = insertAlert({
+      ownerId: OWNER_A,
+      jobId: jobIdA1,
+      runId: runIdA1,
+      kind: "dosar_new",
+      severity: "info",
+      title: "first",
+      dedupKey: "a1",
+    });
+    const second = insertAlert({
+      ownerId: OWNER_A,
+      jobId: jobIdA2,
+      runId: runIdA2,
+      kind: "source_error",
+      severity: "critical",
+      title: "second",
+      dedupKey: "a2",
+    });
+    insertAlert({
+      ownerId: OWNER_B,
+      jobId: jobIdB,
+      runId: runIdB,
+      kind: "source_error",
+      severity: "critical",
+      title: "foreign",
+      dedupKey: "b1",
+    });
+    dismissAlert(OWNER_A, first.id);
+
+    const pageOne = listAlerts({ ownerId: OWNER_A, page: 1, pageSize: 1 });
+    expect(pageOne.total).toBe(1);
+    expect(pageOne.rows).toHaveLength(1);
+    expect(pageOne.rows[0].id).toBe(second.id);
+
+    const withDismissed = listAlerts({
+      ownerId: OWNER_A,
+      page: 1,
+      pageSize: 10,
+      includeDismissed: true,
+    });
+    expect(withDismissed.total).toBe(2);
+
+    const filtered = listAlerts({
+      ownerId: OWNER_A,
+      page: 1,
+      pageSize: 10,
+      jobId: jobIdA2,
+      kind: "source_error",
+      severity: "critical",
+      isNew: true,
+      dismissed: false,
+    });
+    expect(filtered.total).toBe(1);
+    expect(filtered.rows[0].id).toBe(second.id);
+
+    const dismissed = listAlerts({
+      ownerId: OWNER_A,
+      page: 1,
+      pageSize: 10,
+      dismissed: true,
+    });
+    expect(dismissed.rows.map((row) => row.id)).toEqual([first.id]);
+  });
+});
+
+describe("alert state mutations", () => {
+  it("marks alerts seen and dismissed with owner scoping", () => {
+    const jobIdA = seedJob(OWNER_A, "hA");
+    const jobIdB = seedJob(OWNER_B, "hB");
+    const runIdA = seedRun(OWNER_A, jobIdA);
+    const runIdB = seedRun(OWNER_B, jobIdB);
+    const alertA = insertAlert({
+      ownerId: OWNER_A,
+      jobId: jobIdA,
+      runId: runIdA,
+      kind: "dosar_new",
+      title: "owned",
+      dedupKey: "a1",
+    });
+    const alertB = insertAlert({
+      ownerId: OWNER_B,
+      jobId: jobIdB,
+      runId: runIdB,
+      kind: "dosar_new",
+      title: "foreign",
+      dedupKey: "b1",
+    });
+
+    expect(markAlertSeen(OWNER_A, alertB.id)).toBeNull();
+    const seen = markAlertSeen(OWNER_A, alertA.id);
+    expect(seen?.is_new).toBe(0);
+    expect(seen?.read_at).toBeTruthy();
+    expect(seen?.dismissed_at).toBeNull();
+
+    expect(dismissAlert(OWNER_A, alertB.id)).toBeNull();
+    const dismissed = dismissAlert(OWNER_A, alertA.id);
+    expect(dismissed?.is_new).toBe(0);
+    expect(dismissed?.read_at).toBeTruthy();
+    expect(dismissed?.dismissed_at).toBeTruthy();
+  });
+});
+
+describe("new alert subscribers", () => {
+  it("notifies only the matching owner and cleans up subscriptions", () => {
+    const jobIdA = seedJob(OWNER_A, "hA");
+    const jobIdB = seedJob(OWNER_B, "hB");
+    const runIdA = seedRun(OWNER_A, jobIdA);
+    const runIdB = seedRun(OWNER_B, jobIdB);
+    const seenA: number[] = [];
+    const seenB: number[] = [];
+
+    const unsubA = subscribeToNewAlerts(OWNER_A, (alert) => seenA.push(alert.id));
+    const unsubB = subscribeToNewAlerts(OWNER_B, (alert) => seenB.push(alert.id));
+    expect(getAlertSubscriberCount()).toBe(2);
+
+    const alertA = insertAlert({
+      ownerId: OWNER_A,
+      jobId: jobIdA,
+      runId: runIdA,
+      kind: "dosar_new",
+      title: "owned",
+      dedupKey: "a1",
+    });
+    insertAlert({
+      ownerId: OWNER_A,
+      jobId: jobIdA,
+      runId: runIdA,
+      kind: "dosar_new",
+      title: "duplicate",
+      dedupKey: "a1",
+    });
+    const alertB = insertAlert({
+      ownerId: OWNER_B,
+      jobId: jobIdB,
+      runId: runIdB,
+      kind: "dosar_new",
+      title: "foreign",
+      dedupKey: "b1",
+    });
+
+    expect(seenA).toEqual([alertA.id]);
+    expect(seenB).toEqual([alertB.id]);
+
+    unsubA();
+    unsubB();
+    expect(getAlertSubscriberCount()).toBe(0);
   });
 });

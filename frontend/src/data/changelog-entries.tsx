@@ -1,4 +1,4 @@
-import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity } from "lucide-react";
+import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity, Bell } from "lucide-react";
 
 export interface ChangeSection {
   title: string;
@@ -17,6 +17,51 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.4.1",
+    date: "30 Aprilie 2026",
+    subtitle: "PR-6 - Alerte UI + notificari desktop",
+    icon: <Bell className="h-5 w-5" />,
+    borderColor: "border-l-rose-500",
+    badgeClass: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400",
+    sections: [
+      {
+        title: "Inbox Alerte",
+        content:
+          "Alertele produse de monitorizare au acum pagina dedicata, cu lista paginata, filtre si actiuni clare.",
+        bullets: [
+          "Filtre dupa tip, severitate, interval, doar necitite si includere alerte inchise.",
+          "Actiuni pe alerta: marcheaza citit si inchide/dismiss.",
+          "Detaliile JSON sunt parsate defensiv si afisate compact, fara crash pe payload-uri vechi.",
+        ],
+      },
+      {
+        title: "Live badge + stream",
+        content:
+          "Sidebar-ul afiseaza numarul de alerte necitite, actualizat prin stream live si refresh automat la reconectare.",
+        bullets: [
+          "SSE pe /api/v1/alerts/stream cu cleanup la unmount si reconnect cu backoff.",
+          "Badge-ul scade dupa mark read/dismiss.",
+          "Fallback-ul la refresh pastreaza UI-ul corect daca stream-ul cade temporar.",
+        ],
+      },
+      {
+        title: "Notificari Electron",
+        content:
+          "Alertele noi trimit notificare nativa din Electron main process prin IPC ingust.",
+        bullets: [
+          "Renderer-ul cheama desktopApi.showNotification, iar main process foloseste new Notification.",
+          "Fallback Web Notification ramane doar pentru dev/web.",
+          "Input-ul notificarii este capat ca dimensiune in main process.",
+        ],
+      },
+      {
+        title: "Backend API",
+        content:
+          "Rute owner-scoped pentru inbox: GET /api/v1/alerts, PATCH seen/dismissed si stream SSE.",
+      },
+    ],
+  },
   {
     version: "v2.4.0",
     date: "29 Aprilie 2026",

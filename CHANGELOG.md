@@ -4,6 +4,48 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 30 Aprilie 2026 - v2.4.1 - PR-6 Alerte UI + notificari desktop
+
+PR-6 transforma alertele generate de scheduler in workflow vizibil: inbox dedicat,
+badge in sidebar, stream live si notificari native Electron.
+
+### Inbox alerte
+
+- Pagina noua `Alerte` cu lista paginata, filtre dupa tip/severitate/interval,
+  toggle pentru necitite si includere alerte inchise.
+- Actiuni pe rand: marcheaza citit si inchide/dismiss; pagina poate marca toate
+  alertele vizibile ca citite.
+- Detaliile din `detail_json` sunt parsate defensiv si afisate compact, fara sa
+  blocheze UI-ul daca un payload vechi nu respecta forma asteptata.
+
+### Backend alerts API
+
+- Rute noi owner-scoped: `GET /api/v1/alerts`,
+  `PATCH /api/v1/alerts/:id/seen`, `PATCH /api/v1/alerts/:id/dismissed` si
+  `GET /api/v1/alerts/stream`.
+- `monitoringAlertsRepository` are read-side helpers pentru listare, unread
+  count, seen/dismiss si subscriber in-process pentru SSE.
+- Inbox-ul exclude implicit alertele dismiss-uite; `includeDismissed=true`
+  ramane disponibil pentru audit operational.
+
+### Electron desktop
+
+- Sidebar-ul afiseaza badge cu alerte necitite.
+- Stream-ul SSE are cleanup la unmount si reconnect cu backoff; la reconectare
+  face refresh de count/lista ca sa nu piarda alerte.
+- Notificarile noi folosesc IPC catre Electron main process si `new Notification`
+  nativ; fallback-ul Web Notification ramane pentru dev/web.
+
+### Validare
+
+- Backend alerts tests: `npm test --workspace=backend -- src/db/monitoringAlertsRepository.test.ts src/routes/alerts.test.ts` - 13/13 teste trecute.
+- Backend full suite: `npm test --workspace=backend` - 424/424 teste trecute.
+- Type-check backend + frontend: `npm exec tsc --workspace=backend -- --noEmit` si `npm exec tsc --workspace=frontend -- --noEmit` trecute.
+- Build productie: `npm run build` trecut.
+- Smoke Electron desktop: pornire cu `ELECTRON_RUN_AS_NODE` curatat, `/health` 200 cu scheduler running, `/api/v1/alerts` 200.
+
+---
+
 ## 29 Aprilie 2026 - v2.4.0 - PR-5 bulk name lists + name_soap monitoring
 
 PR-5 inchide sprintul de bulk import pentru monitorizare: acelasi fisier XLSX/CSV poate contine `numar_dosar` pentru joburi `dosar_soap` si `nume` pentru joburi `name_soap`. Flow-ul ruleaza in Electron desktop si pastreaza preview/commit pentru liste de nume.
