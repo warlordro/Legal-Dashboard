@@ -40,7 +40,8 @@ Hotfix peste v2.4.1 dupa full-review multi-agent pe suprafata alertelor. Fara fe
 
 - Type-check: `npx tsc --noEmit -p backend/tsconfig.json` si `cd frontend && npx tsc --noEmit` - clean.
 - Biome: `npx biome check` pe toate fisierele atinse - clean.
-- Teste: amanate (better-sqlite3 ABI mismatch intre Electron NODE_MODULE_VERSION 145 si Node tester 137; rebuild necesita Electron oprit). Doua teste in `monitoringAlertsRepository.test.ts` deja actualizate pentru deferral microtask al `notifyNewAlert`.
+- **Smoke test live Electron desktop**: pornire OK cu `ELECTRON_RUN_AS_NODE` curatat, banner `Server: http://127.0.0.1:3002`, scheduler started (60s tick, claimLimit=25), `/health` 200, `GET /api/v1/alerts?onlyUnread=true` 200, `GET /api/v1/alerts/stream` 200 (subscribe cu cap-5 + heartbeat exersat), `GET /api/v1/monitoring/jobs` 200. Renderer incarca asseturile fara eroare.
+- Vitest: amanat - `better-sqlite3` ABI mismatch intre Electron `NODE_MODULE_VERSION 145` si Node tester 137; rebuild necesita Electron oprit. Modificarile de cod sunt verificate runtime prin smoke-ul de mai sus, nu doar tip-checked. Doua teste in `monitoringAlertsRepository.test.ts` deja actualizate pentru deferral-ul microtask al `notifyNewAlert` (asteapta sa fie rulate la urmatorul rebuild).
 
 ---
 

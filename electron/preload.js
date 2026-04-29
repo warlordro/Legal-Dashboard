@@ -15,9 +15,9 @@ function invokeWithTimeout(channel, payload) {
 
 // Exposed surface — keep narrow.
 //
-// showNotification accepts `{ title, body, tag? }`. The optional `tag` is forwarded
-// to the main process which uses it for cross-platform dedup (close + replace) so
-// SSE replays of the same alert do not stack duplicate OS notifications. Validation
+// `showNotification`'s `tag` field (see JSDoc below) is forwarded to the main
+// process which uses it for cross-platform dedup (close + replace) so SSE
+// replays of the same alert do not stack duplicate OS notifications. Validation
 // of `tag` lives in the main process — preload only forwards.
 contextBridge.exposeInMainWorld("desktopApi", {
   encryptKeys: (plaintext) => invokeWithTimeout("safeStorage:encrypt", plaintext),
