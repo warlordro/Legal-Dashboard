@@ -14,9 +14,11 @@
     "@google/generative-ai": "^0.24.1",
     "@hono/node-server": "^1.19.14",
     "better-sqlite3": "^12.9.0",
+    "csv-parse": "^5.6.0",
     "dotenv": "^16.6.1",
     "hono": "^4.12.14",
     "openai": "^6.33.0",
+    "xlsx": "^0.18.5",
     "zod": "4.3.6"
   },
   "engines": {
