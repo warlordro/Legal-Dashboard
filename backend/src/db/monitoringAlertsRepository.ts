@@ -1,12 +1,8 @@
-// Stub repository for monitoring_alerts (PR-3).
-//
-// The schema lands in PR-3 so the diff engine in PR-4 has a stable insert
-// surface to write against. We expose the minimal API needed for the PR-3
-// frontend to render an empty alerts list and mark items read — no diff
-// generation logic here. PR-4 fleshes out richer reads (group-by-job,
-// severity filters) and the actual `insertFromDiff()` path.
+// Repository for monitoring_alerts.
 //
 // Owner_id scoping is enforced on every query, same posture as the jobs repo.
+// Read-side helpers (listByJob, markRead) were removed in the post-v2.2.0
+// cleanup; reintroduce them when an alerts UI lands (PR-5/PR-6 timeline).
 
 import { getDb } from "./schema.ts";
 
@@ -109,38 +105,3 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
   return row;
 }
 
-export interface ListAlertsByJobOptions {
-  ownerId: string;
-  jobId: number;
-  unreadOnly?: boolean;
-  limit?: number;
-}
-
-export function listByJob(opts: ListAlertsByJobOptions): MonitoringAlertRow[] {
-  const where: string[] = ["owner_id = ?", "job_id = ?"];
-  const params: (string | number)[] = [opts.ownerId, opts.jobId];
-  if (opts.unreadOnly) where.push("read_at IS NULL");
-  const limit = Math.max(1, Math.min(opts.limit ?? 200, 1000));
-
-  return getDb()
-    .prepare(
-      `SELECT * FROM monitoring_alerts
-       WHERE ${where.join(" AND ")}
-       ORDER BY created_at DESC, id DESC
-       LIMIT ?`,
-    )
-    .all(...params, limit) as MonitoringAlertRow[];
-}
-
-// Mark alert read — clears `is_new` badge and sets `read_at`. Returns true on
-// success, false when the alert doesn't exist or doesn't belong to ownerId.
-export function markRead(ownerId: string, id: number): boolean {
-  const info = getDb()
-    .prepare(
-      `UPDATE monitoring_alerts
-       SET read_at = COALESCE(read_at, datetime('now')), is_new = 0
-       WHERE id = ? AND owner_id = ?`,
-    )
-    .run(id, ownerId);
-  return info.changes > 0;
-}

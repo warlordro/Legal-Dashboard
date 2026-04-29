@@ -1,25 +1,23 @@
 import type { RnpmDocument, RnpmAvizFull, RnpmParty, RnpmBun, RnpmBunPartyRef, RnpmIstoricEntry } from "@/types/rnpm";
 import { rnpmExport as fetchRnpmExport } from "@/lib/rnpmApi";
-
-function todayRo(): string {
-  return new Date().toLocaleDateString("ro-RO");
-}
+import {
+  cellAddr,
+  ensureCell,
+  mergeRow,
+  ROW_ALT,
+  sanitizeFormulaCells,
+  styleCell,
+  styleDataCell,
+  styleHeader,
+  styleRow,
+  styleStats,
+  styleTitle,
+  todayRo,
+  WHITE,
+} from "./excel-helpers";
 
 function stripDiacritics(s: string): string {
   return (s ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-}
-
-// SECURITY: prevent CSV/formula injection in exported XLSX — prefix leading =,+,-,@,tab,CR
-// with a single quote so Excel/LibreOffice render the value as plain text.
-const FORMULA_PREFIX = /^[=+\-@\t\r]/;
-function sanitizeFormulaCells(ws: Record<string, unknown>) {
-  for (const key of Object.keys(ws)) {
-    if (key.startsWith("!")) continue;
-    const cell = ws[key] as { t?: string; v?: unknown } | undefined;
-    if (cell && cell.t === "s" && typeof cell.v === "string" && FORMULA_PREFIX.test(cell.v)) {
-      cell.v = `'${cell.v}`;
-    }
-  }
 }
 
 function partyLabel(p: RnpmParty): string {
@@ -61,59 +59,7 @@ async function fetchDetails(docs: RnpmDocument[], avizIds: (number | null)[]): P
   return byIdentificator;
 }
 
-// ─── Excel styling (aliniat cu exportul PortalJust din src/lib/export.ts) ─────
-
-function colLetter(col: number): string {
-  let letter = "";
-  let n = col + 1;
-  while (n > 0) {
-    letter = String.fromCharCode(65 + ((n - 1) % 26)) + letter;
-    n = Math.floor((n - 1) / 26);
-  }
-  return letter;
-}
-
-function cellAddr(r: number, c: number): string {
-  return `${colLetter(c)}${r + 1}`;
-}
-
-function ensureCell(ws: Record<string, unknown>, addr: string, value: string | number = "") {
-  if (!ws[addr]) ws[addr] = { t: typeof value === "number" ? "n" : "s", v: value };
-}
-
-const BLUE_DARK  = "1E40AF";
-const BLUE_MAIN  = "2563EB";
-const BLUE_LIGHT = "DBEAFE";
-const ROW_ALT    = "EFF6FF";
-const WHITE      = "FFFFFF";
-const TEXT_DARK  = "111827";
-const TEXT_MID   = "374151";
-
-const styleTitle = {
-  font: { bold: true, sz: 13, color: { rgb: WHITE } },
-  fill: { patternType: "solid", fgColor: { rgb: BLUE_DARK } },
-  alignment: { horizontal: "center", vertical: "center" },
-};
-const styleStats = {
-  font: { sz: 9, italic: true, color: { rgb: TEXT_MID } },
-  fill: { patternType: "solid", fgColor: { rgb: "F1F5F9" } },
-  alignment: { horizontal: "left", vertical: "center" },
-};
-const styleHeader = {
-  font: { bold: true, sz: 9, color: { rgb: WHITE } },
-  fill: { patternType: "solid", fgColor: { rgb: BLUE_MAIN } },
-  alignment: { horizontal: "left", vertical: "center", wrapText: true },
-  border: { bottom: { style: "thin", color: { rgb: "1D4ED8" } } },
-};
-
-function styleData(rowIdx: number, bold = false): Record<string, unknown> {
-  const alt = rowIdx % 2 === 1;
-  return {
-    font: { sz: 9, bold, color: { rgb: TEXT_DARK } },
-    fill: { patternType: "solid", fgColor: { rgb: alt ? ROW_ALT : WHITE } },
-    alignment: { horizontal: "left", vertical: "top", wrapText: true },
-  };
-}
+// ─── Excel styling (sourced from ./excel-helpers, plus rnpm-only bits below) ──
 
 function styleLink(rowIdx: number): Record<string, unknown> {
   const alt = rowIdx % 2 === 1;
@@ -124,29 +70,10 @@ function styleLink(rowIdx: number): Record<string, unknown> {
   };
 }
 
-function styleRow(ws: Record<string, unknown>, r: number, numCols: number, style: Record<string, unknown>) {
-  for (let c = 0; c < numCols; c++) {
-    const addr = cellAddr(r, c);
-    ensureCell(ws, addr);
-    (ws[addr] as Record<string, unknown>).s = style;
-  }
-}
-
-function styleCell(ws: Record<string, unknown>, r: number, c: number, style: Record<string, unknown>) {
-  const addr = cellAddr(r, c);
-  ensureCell(ws, addr);
-  (ws[addr] as Record<string, unknown>).s = style;
-}
-
 function setLink(ws: Record<string, unknown>, r: number, c: number, target: string, tooltip?: string) {
   const addr = cellAddr(r, c);
   ensureCell(ws, addr);
   (ws[addr] as Record<string, unknown>).l = { Target: target, Tooltip: tooltip };
-}
-
-function mergeRow(ws: Record<string, unknown>, r: number, numCols: number) {
-  if (!ws["!merges"]) ws["!merges"] = [];
-  (ws["!merges"] as unknown[]).push({ s: { r, c: 0 }, e: { r, c: numCols - 1 } });
 }
 
 // ─── Export Excel (styled) ────────────────────────────────────────────────────
@@ -268,7 +195,7 @@ export async function exportRnpmExcel(
         (c === NAV_COLS.debitori && fr?.debitori) ||
         (c === NAV_COLS.bunuri && fr?.bunuri) ||
         (c === NAV_COLS.istoric && fr?.istoric);
-      const s = isLink ? styleLink(i) : styleData(i, isIdent);
+      const s = isLink ? styleLink(i) : styleDataCell(i, isIdent);
       if (isNav) {
         (s as { alignment: Record<string, unknown> }).alignment = { horizontal: "center", vertical: "top" };
       }
@@ -326,7 +253,7 @@ export async function exportRnpmExcel(
       for (let c = 0; c < cols; c++) {
         const isAvizCol = c === 0;
         const isLink = isAvizCol && avizRow != null;
-        styleCell(ws, r, c, isLink ? styleLink(i) : styleData(i, isAvizCol));
+        styleCell(ws, r, c, isLink ? styleLink(i) : styleDataCell(i, isAvizCol));
       }
       if (avizRow != null) {
         setLink(ws, r, 0, `#Avize!B${avizRow + 1}`, "Inapoi la aviz");

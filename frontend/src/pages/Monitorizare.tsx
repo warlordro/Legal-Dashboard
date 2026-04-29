@@ -3,13 +3,11 @@
 // has a way to seed the queue and verify writes today.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Plus, Trash2, RefreshCw, Pause, Play, Upload, Download, FileSpreadsheet, FileText, User } from "lucide-react";
-import * as XLSX from "xlsx";
+import { Activity, Trash2, RefreshCw, Pause, Play, Upload, Download, FileSpreadsheet } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { InstitutieSelect } from "@/components/InstitutieSelect";
+import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import {
   monitoring,
   formatMonitoringTarget,
@@ -17,6 +15,7 @@ import {
   type MonitoringJob,
 } from "@/lib/api";
 import { parseSqliteUtc } from "@/lib/utils";
+import { downloadBulkTemplate, parseBulkFile } from "@/lib/monitoringBulkTemplate";
 
 const NUMAR_DOSAR_RE = /^\d{1,7}\/\d{1,5}\/\d{4}(?:\/[A-Za-z0-9]+)?$/;
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
@@ -46,40 +45,6 @@ function formatCadence(sec: number): string {
   return `${Math.round(sec / 60)}min`;
 }
 
-// Bulk-import row shape — supports both dosar_soap and name_soap kinds.
-// Required column: `kind` (dosar | nume). Per-kind columns:
-//   kind=dosar: numar_dosar required
-//   kind=nume:  name_normalized required, name_kind required (fizic|juridic),
-//               institutie optional
-// Common: cadence_sec (optional, secunde — sugestii: 14400/28800/43200/86400), notes (optional).
-type BulkKind = "dosar" | "nume";
-
-interface BulkRowDosar {
-  rowNumber: number;
-  kind: "dosar";
-  numar_dosar: string;
-  cadence_sec?: number;
-  notes?: string;
-}
-
-interface BulkRowName {
-  rowNumber: number;
-  kind: "nume";
-  name_normalized: string;
-  name_kind: "fizic" | "juridic";
-  institutie?: string[];
-  cadence_sec?: number;
-  notes?: string;
-}
-
-type BulkRow = BulkRowDosar | BulkRowName;
-
-interface BulkRowInvalid {
-  rowNumber: number;
-  display: string;
-  message: string;
-}
-
 interface BulkResultItem {
   rowNumber: number;
   display: string;
@@ -95,142 +60,11 @@ interface BulkResult {
   items: BulkResultItem[];
 }
 
-function downloadBulkTemplate() {
-  const data: (string | number)[][] = [
-    ["kind", "numar_dosar", "name_normalized", "name_kind", "institutie", "cadence_sec", "notes"],
-    ["dosar", "1234/180/2024", "", "", "", 14400, "Client X — apel"],
-    ["dosar", "9012/3/2024/a1", "", "", "", 86400, "Verificare zilnica"],
-    ["nume", "", "POPESCU ION", "fizic", "", 86400, "Subiect — alerta dosare noi"],
-    ["nume", "", "SC EXAMPLE SRL BUCURESTI", "juridic", "CurteadeApelBUCURESTI, TribunalulBucuresti", 86400, "Mai multe institutii separate prin virgula"],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  ws["!cols"] = [
-    { wch: 8 },
-    { wch: 22 },
-    { wch: 32 },
-    { wch: 12 },
-    { wch: 28 },
-    { wch: 14 },
-    { wch: 40 },
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Monitorizare");
-  XLSX.writeFile(wb, "monitorizare-template.xlsx");
-}
-
-function parseBulkFile(
-  buffer: ArrayBuffer,
-  fileName: string,
-): { valid: BulkRow[]; invalid: BulkRowInvalid[] } {
-  const isCsv = /\.csv$/i.test(fileName);
-  const wb = isCsv
-    ? XLSX.read(new TextDecoder("utf-8").decode(new Uint8Array(buffer)), { type: "string" })
-    : XLSX.read(buffer, { type: "array" });
-  const sheet = wb.Sheets[wb.SheetNames[0]];
-  const valid: BulkRow[] = [];
-  const invalid: BulkRowInvalid[] = [];
-  if (!sheet) return { valid, invalid };
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-  rows.forEach((r, idx) => {
-    const rowNumber = idx + 2;
-    const cadenceRaw = r.cadence_sec;
-    const cadence_sec = typeof cadenceRaw === "number"
-      ? cadenceRaw
-      : cadenceRaw && String(cadenceRaw).trim()
-        ? Number(String(cadenceRaw).trim())
-        : undefined;
-    const cadenceFinal = Number.isFinite(cadence_sec) ? cadence_sec : undefined;
-    const notes = String(r.notes ?? "").trim() || undefined;
-
-    // Backward compat: if `kind` column is missing, treat as dosar (matches v1 template).
-    const kindRaw = String(r.kind ?? "").trim().toLowerCase();
-    const numarDosar = String(r.numar_dosar ?? "").trim();
-    const nameNorm = String(r.name_normalized ?? "").trim();
-
-    let kind: BulkKind;
-    if (kindRaw === "dosar" || kindRaw === "nume") {
-      kind = kindRaw;
-    } else if (kindRaw === "" && numarDosar) {
-      kind = "dosar";
-    } else if (kindRaw === "" && nameNorm) {
-      kind = "nume";
-    } else if (kindRaw === "" && !numarDosar && !nameNorm) {
-      return; // empty row — skip silently
-    } else {
-      invalid.push({
-        rowNumber,
-        display: numarDosar || nameNorm || "(gol)",
-        message: `kind invalid: '${kindRaw}' (asteptat: dosar / nume)`,
-      });
-      return;
-    }
-
-    if (kind === "dosar") {
-      if (!numarDosar) {
-        invalid.push({ rowNumber, display: "(gol)", message: "numar_dosar lipseste" });
-        return;
-      }
-      valid.push({
-        rowNumber,
-        kind: "dosar",
-        numar_dosar: numarDosar,
-        cadence_sec: cadenceFinal,
-        notes,
-      });
-    } else {
-      if (!nameNorm) {
-        invalid.push({ rowNumber, display: "(gol)", message: "name_normalized lipseste" });
-        return;
-      }
-      const nameKindRaw = String(r.name_kind ?? "").trim().toLowerCase();
-      if (nameKindRaw !== "fizic" && nameKindRaw !== "juridic") {
-        invalid.push({
-          rowNumber,
-          display: nameNorm,
-          message: `name_kind invalid: '${nameKindRaw}' (asteptat: fizic / juridic)`,
-        });
-        return;
-      }
-      // Bulk-template institutie cell: comma-separated codes (e.g.
-      // "CurteadeApelBUCURESTI, TribunalulBucuresti"). Empty cell = all institutii.
-      const institutieRaw = String(r.institutie ?? "").trim();
-      const institutie = institutieRaw
-        ? institutieRaw
-            .split(",")
-            .map((s) => s.trim())
-            .filter((s) => s.length > 0)
-        : undefined;
-      valid.push({
-        rowNumber,
-        kind: "nume",
-        name_normalized: nameNorm,
-        name_kind: nameKindRaw as "fizic" | "juridic",
-        institutie: institutie && institutie.length > 0 ? institutie : undefined,
-        cadence_sec: cadenceFinal,
-        notes,
-      });
-    }
-  });
-  return { valid, invalid };
-}
-
 export default function Monitorizare() {
   const confirm = useConfirm();
   const [jobs, setJobs] = useState<MonitoringJob[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  // Add-job form — supports both dosar and nume kinds via toggle.
-  const [formKind, setFormKind] = useState<"dosar" | "nume">("dosar");
-  const [numarDosar, setNumarDosar] = useState("");
-  const [nameValue, setNameValue] = useState("");
-  const [nameKind, setNameKind] = useState<"fizic" | "juridic">("fizic");
-  const [institutie, setInstitutie] = useState<string[]>([]);
-  const [cadenceSec, setCadenceSec] = useState(DEFAULT_CADENCE_SEC);
-  const [notes, setNotes] = useState("");
-  const [submitting, setSubmitting] = useState(false);
-  const [formError, setFormError] = useState<string | null>(null);
-  const [formSuccess, setFormSuccess] = useState<string | null>(null);
 
   // Bulk-upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -255,59 +89,6 @@ export default function Monitorizare() {
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setFormError(null);
-    setFormSuccess(null);
-    setSubmitting(true);
-    try {
-      let job: MonitoringJob;
-      if (formKind === "dosar") {
-        const trimmed = numarDosar.trim();
-        if (!NUMAR_DOSAR_RE.test(trimmed)) {
-          setFormError("Format invalid (asteptat: 1234/180/2024)");
-          setSubmitting(false);
-          return;
-        }
-        job = await monitoring.createDosar({
-          numar_dosar: trimmed,
-          cadence_sec: cadenceSec,
-          notes: notes.trim() || undefined,
-        });
-        setNumarDosar("");
-      } else {
-        const trimmedName = nameValue.trim();
-        if (trimmedName.length < 2) {
-          setFormError("Numele trebuie sa aiba minim 2 caractere");
-          setSubmitting(false);
-          return;
-        }
-        job = await monitoring.createName({
-          name_normalized: trimmedName,
-          name_kind: nameKind,
-          institutie: institutie.length > 0 ? institutie : undefined,
-          cadence_sec: cadenceSec,
-          notes: notes.trim() || undefined,
-        });
-        setNameValue("");
-        setInstitutie([]);
-      }
-      setFormSuccess(`Adaugat: ${formatMonitoringTarget(job)} (id ${job.id})`);
-      setNotes("");
-      await refresh();
-    } catch (err) {
-      if (err instanceof MonitoringApiError) {
-        setFormError(`${err.message} (${err.code})`);
-      } else if (err instanceof Error) {
-        setFormError(err.message);
-      } else {
-        setFormError("Eroare necunoscuta.");
-      }
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   const handleDelete = async (job: MonitoringJob) => {
     const ok = await confirm({
@@ -457,152 +238,7 @@ export default function Monitorizare() {
         </Button>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <Plus className="h-4 w-4" />
-            Adauga in monitorizare
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleAdd} className="space-y-3">
-            <div className="flex gap-1 border-b border-border">
-              <button
-                type="button"
-                onClick={() => { setFormKind("dosar"); setFormError(null); setFormSuccess(null); }}
-                className={`flex items-center gap-2 rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
-                  formKind === "dosar"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                }`}
-                disabled={submitting}
-              >
-                <FileText className="h-4 w-4" />
-                Nr. Dosar
-              </button>
-              <button
-                type="button"
-                onClick={() => { setFormKind("nume"); setFormError(null); setFormSuccess(null); }}
-                className={`flex items-center gap-2 rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
-                  formKind === "nume"
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                }`}
-                disabled={submitting}
-              >
-                <User className="h-4 w-4" />
-                Nume
-              </button>
-            </div>
-
-            {formKind === "dosar" ? (
-              <div className="grid grid-cols-1 sm:grid-cols-[1fr,140px] gap-3">
-                <div>
-                  <label className="text-xs font-medium mb-1 block">Numar dosar</label>
-                  <Input
-                    type="text"
-                    placeholder="1234/180/2024"
-                    value={numarDosar}
-                    onChange={(e) => setNumarDosar(e.target.value)}
-                    disabled={submitting}
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="text-xs font-medium mb-1 block">Cadenta</label>
-                  <select
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                    value={cadenceSec}
-                    onChange={(e) => setCadenceSec(Number(e.target.value))}
-                    disabled={submitting}
-                  >
-                    {CADENCE_OPTIONS.map((opt) => (
-                      <option key={opt.sec} value={opt.sec}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-[1fr,140px,140px] gap-3">
-                  <div>
-                    <label className="text-xs font-medium mb-1 block">Nume subiect</label>
-                    <Input
-                      type="text"
-                      placeholder="ex: POPESCU ION sau SC EXAMPLE SRL"
-                      value={nameValue}
-                      onChange={(e) => setNameValue(e.target.value)}
-                      disabled={submitting}
-                      required
-                      minLength={2}
-                      maxLength={200}
-                    />
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium mb-1 block">Tip</label>
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                      value={nameKind}
-                      onChange={(e) => setNameKind(e.target.value as "fizic" | "juridic")}
-                      disabled={submitting}
-                      title="PF = Persoana fizica, PJ = Persoana juridica"
-                    >
-                      <option value="fizic">PF</option>
-                      <option value="juridic">PJ</option>
-                    </select>
-                  </div>
-                  <div>
-                    <label className="text-xs font-medium mb-1 block">Cadenta</label>
-                    <select
-                      className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                      value={cadenceSec}
-                      onChange={(e) => setCadenceSec(Number(e.target.value))}
-                      disabled={submitting}
-                    >
-                      {CADENCE_OPTIONS.map((opt) => (
-                        <option key={opt.sec} value={opt.sec}>
-                          {opt.label}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div>
-                  <label className="text-xs font-medium mb-1 block">Institutii (optional)</label>
-                  <InstitutieSelect value={institutie} onChange={setInstitutie} />
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    Lasa gol pentru cautare in toate institutiile.
-                  </p>
-                </div>
-              </>
-            )}
-
-            <div>
-              <label className="text-xs font-medium mb-1 block">Note (optional)</label>
-              <Input
-                type="text"
-                placeholder="ex: Client X — apel"
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                disabled={submitting}
-                maxLength={2000}
-              />
-            </div>
-            <div className="flex items-center gap-3">
-              <Button
-                type="submit"
-                disabled={submitting || (formKind === "dosar" ? !numarDosar.trim() : !nameValue.trim())}
-              >
-                {submitting ? "Se adauga..." : "Adauga"}
-              </Button>
-              {formError && <span className="text-sm text-red-600">{formError}</span>}
-              {formSuccess && <span className="text-sm text-green-600">{formSuccess}</span>}
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      <MonitoringAddForm onJobAdded={refresh} />
 
       <Card>
         <CardHeader>
