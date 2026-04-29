@@ -189,16 +189,17 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 #### PR-5 — Bulk name lists + name_soap kind
 - **Scop**: user uploadeaza Excel/CSV cu lista nume clienti, sistemul creeaza automat job-uri de monitorizare pentru fiecare.
 - **User vede**: pagina noua "Liste monitorizate" cu upload XLSX/CSV + preview validation + commit.
-- **Tasks**:
-  - [ ] Migration `0005_name_lists.up.sql`: `name_lists`, `name_list_items` (0004 ocupat de hardening PR-4 — runs FK pe snapshots+alerts).
-  - [ ] **Constatare adversiala #6 (PR-4 review)**: `name_list_items.list_id` foloseste `ON DELETE RESTRICT` (NU CASCADE) si noul FK invers `monitoring_jobs.name_list_id` la fel. Motivare: stergerea CASCADE a unei liste cu joburi `name_soap` active orfana run-urile + alertele asociate fara warning operator. RESTRICT forteaza ordin explicit: archive-job → archive-list → delete-list. Detalii in `PLAN-monitoring-webmode.md` §2.3.
-  - [ ] Parser XLSX (deja in deps) + CSV (`csv-parse` adauga).
-  - [ ] Validare nume: trim + length 2..200, dedup intra-fisier pe `(name_normalized, name_kind)`, normalizare diacritic strip + collapse whitespace.
-  - [ ] Routes: `POST /api/v1/name-lists/preview` + `POST /api/v1/name-lists` (commit cu `auto_create_jobs`).
-  - [ ] Scheduler suporta `kind='name_soap'` — foloseste `cautareDosareDupaParte`. Captura imbogatita: `{version, fetched_at, dosare: [{numar, stadiu, categorie, instanta}]}`. Plafon 1MB pe `payload_json` (la depasire: trunchiere + alerta `source_error` cod `SNAPSHOT_OVERSIZE`).
-  - [ ] Diff per element pe `numar` (nu set diff): emit `dosar_new`, `dosar_disappeared` (configurabil), `stadiu_changed`, `categorie_changed`, `dosar_relevant_now`/`dosar_no_longer_relevant` cand schimba apartenenta la filtrul `alert_config.stadii`/`categorii`.
-  - [ ] Cheia dedup pe alerta: `${kind}|${numar}|${tranzitie}` (NU `runId`) — flapping pe acelasi dosar nu duplicheaza alertele la fiecare oscilare.
-  - [ ] UI: upload, preview cu validation per row, confirma commit, throttle 100 jobs/cerere.
+- **Tasks** (livrabil in 6 commits secventiale pe `feat/pr5-name-lists-bulk`):
+  - [x] **Commit 1/6** (`046fb66`) — Migration `0006_name_lists.up.sql` (renumerotat: 0005 consumat de `idx_one_running_per_job` din patch-ul v2.3.0): `name_lists`, `name_list_items`, FK invers `monitoring_jobs.name_list_id`. Plus `nameListsRepository` complet (15 teste).
+  - [x] **Constatare adversiala #6 (PR-4 review)**: `name_list_items.list_id` foloseste `ON DELETE RESTRICT` (NU CASCADE) si noul FK invers `monitoring_jobs.name_list_id` la fel. Motivare: stergerea CASCADE a unei liste cu joburi `name_soap` active orfana run-urile + alertele asociate fara warning operator. RESTRICT forteaza ordin explicit: archive-job → archive-list → delete-list. Detalii in `PLAN-monitoring-webmode.md` §2.3.
+  - [x] **Commit 2/6** (`ffc8ba7`) — Parser XLSX (`xlsx@0.18.5`) + CSV (`csv-parse@^5.6.0`). 24 teste in `nameListParser.test.ts` (format detection, header sinonime, validation reject/warn, capurile FILE_TOO_LARGE/TOO_MANY_ROWS/TOO_MANY_COLS).
+  - [x] Validare nume: trim + length 2..200, dedup intra-fisier pe `(name_normalized, name_kind)`, normalizare diacritic strip + collapse whitespace.
+  - [x] **Commit 3/6** (`e2743a4`) — Routes: `POST /api/v1/name-lists/preview` (multipart 10MB, stateless) + `POST /api/v1/name-lists` (JSON 15MB, autoCreateJobs sync cu cap 100 + lineage `name_list_id`, partial flag pe batch-urile urmatoare). 17 teste cu defense-in-depth re-validation server-side via `validateRawItems`.
+  - [ ] **Commit 4/6** — Scheduler suporta `kind='name_soap'` — foloseste `cautareDosareDupaParte`. Captura imbogatita: `{version, fetched_at, dosare: [{numar, stadiu, categorie, instanta}]}`. Plafon 1MB pe `payload_json` (la depasire: trunchiere + alerta `source_error` cod `SNAPSHOT_OVERSIZE`).
+  - [ ] **Commit 4/6** — Diff per element pe `numar` (nu set diff): emit `dosar_new`, `dosar_disappeared` (configurabil), `stadiu_changed`, `categorie_changed`, `dosar_relevant_now`/`dosar_no_longer_relevant` cand schimba apartenenta la filtrul `alert_config.stadii`/`categorii`.
+  - [ ] **Commit 4/6** — Cheia dedup pe alerta: `${kind}|${numar}|${tranzitie}` (NU `runId`) — flapping pe acelasi dosar nu duplicheaza alertele la fiecare oscilare.
+  - [ ] **Commit 5/6** — UI: upload, preview cu validation per row, confirma commit, throttle 100 jobs/cerere.
+  - [ ] **Commit 6/6** — k6 harness pentru bulk import (perf + correctness).
 - **DoD**:
   - [ ] Upload 100 nume → 100 joburi create + scheduler le proceseaza in batch-uri.
   - [ ] Captura per nume comparata per element pe `numar` → emit `dosar_new` la cei nou aparuti, `stadiu_changed` la tranzitii pe acelasi numar.
