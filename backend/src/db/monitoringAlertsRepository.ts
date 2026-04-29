@@ -67,6 +67,22 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
   const db = getDb();
   const detailJson = input.detail ? JSON.stringify(input.detail) : "{}";
 
+  // Tenant-isolation guard: refuse to write an alert when (jobId, ownerId) do
+  // not belong together. UNIQUE(job_id, dedup_key) on monitoring_alerts is NOT
+  // owner-scoped, so an inconsistent pair would otherwise let a tenant attach
+  // alerts onto another tenant's job (or read back the other tenant's row via
+  // the SELECT below). The repo header promises owner_id scoping on every
+  // query — this preserves that invariant in code until migration 0005 lands
+  // a DB-level trigger.
+  const jobOwner = db
+    .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+    .get(input.jobId, input.ownerId);
+  if (!jobOwner) {
+    throw new Error(
+      `insertAlert: job ${input.jobId} not found for owner ${input.ownerId}`,
+    );
+  }
+
   db
     .prepare(
       `INSERT INTO monitoring_alerts
@@ -88,9 +104,11 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
   const row = db
     .prepare(
       `SELECT * FROM monitoring_alerts
-       WHERE job_id = ? AND dedup_key = ?`,
+       WHERE job_id = ? AND dedup_key = ? AND owner_id = ?`,
     )
-    .get(input.jobId, input.dedupKey) as MonitoringAlertRow | undefined;
+    .get(input.jobId, input.dedupKey, input.ownerId) as
+      | MonitoringAlertRow
+      | undefined;
 
   // ON CONFLICT DO NOTHING guarantees the row exists post-INSERT — either we
   // inserted it or the conflicting row is already there. A missing row here
