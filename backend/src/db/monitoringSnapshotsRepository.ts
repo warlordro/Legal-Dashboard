@@ -9,6 +9,7 @@
 // trivial (canonicalized JSON, sub-kilobyte per snapshot, deleted on cadence).
 
 import { getDb } from "./schema.ts";
+import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "../services/monitoring/diff/types.ts";
 
 export interface MonitoringSnapshotRow {
   id: number;
@@ -37,7 +38,34 @@ export interface InsertSnapshotInput {
 }
 
 export function insertSnapshot(input: InsertSnapshotInput): number {
-  const info = getDb()
+  // Constatare adversiala #1 (defense in depth) — runner-ul filtreaza deja
+  // payload-urile oversize si emite SNAPSHOT_OVERSIZE inainte sa cheme aici.
+  // Repo-ul reaplica plafonul ca nu cumva un alt apelator (replay backfill,
+  // viitor runner) sa scrie un rand monstru; throw e mai sigur decat insert.
+  const payloadBytes = Buffer.byteLength(input.payloadJson, "utf8");
+  if (payloadBytes > SNAPSHOT_PAYLOAD_MAX_BYTES) {
+    throw new Error(
+      `insertSnapshot: payload ${payloadBytes}B exceeds cap ${SNAPSHOT_PAYLOAD_MAX_BYTES}B (job_id=${input.jobId})`,
+    );
+  }
+
+  // Constatare adversiala #2 — tenant-isolation guard simetric cu cel din
+  // monitoringAlertsRepository.insertAlert. Refuza scrierea cand (jobId,
+  // ownerId) nu se potrivesc in monitoring_jobs. Fara asta, un caller care
+  // amesteca un jobId al altui tenant ar putea atasa un snapshot pe jobul
+  // celuilalt, iar getLatestSnapshot(owner=A) l-ar returna in tickul urmator
+  // — diff cross-tenant contaminat.
+  const db = getDb();
+  const jobOwner = db
+    .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+    .get(input.jobId, input.ownerId);
+  if (!jobOwner) {
+    throw new Error(
+      `insertSnapshot: job ${input.jobId} not found for owner ${input.ownerId}`,
+    );
+  }
+
+  const info = db
     .prepare(
       `INSERT INTO monitoring_snapshots
          (owner_id, job_id, run_id, observed_at, payload_hash, payload_json)

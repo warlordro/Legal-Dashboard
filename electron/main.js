@@ -333,9 +333,23 @@ function createWindow() {
     }
   });
 
-  // SECURITY: Prevent navigation to external URLs
+  // SECURITY: Prevent navigation to external URLs.
+  // Use strict URL parsing (NOT startsWith) — userinfo prefix like
+  // `http://localhost:3002@attacker.example/` would otherwise pass a naive
+  // prefix check while the parser resolves to attacker.example.
   mainWindow.webContents.on("will-navigate", (event, url) => {
-    const allowed = url.startsWith(`http://localhost:${BACKEND_PORT}`) || url.startsWith(`http://127.0.0.1:${BACKEND_PORT}`);
+    let allowed = false;
+    try {
+      const parsed = new URL(url);
+      allowed =
+        parsed.protocol === "http:" &&
+        (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
+        parsed.port === String(BACKEND_PORT) &&
+        parsed.username === "" &&
+        parsed.password === "";
+    } catch {
+      allowed = false;
+    }
     if (!allowed) {
       event.preventDefault();
     }

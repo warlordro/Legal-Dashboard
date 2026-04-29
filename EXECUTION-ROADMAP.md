@@ -190,16 +190,20 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 - **Scop**: user uploadeaza Excel/CSV cu lista nume clienti, sistemul creeaza automat job-uri de monitorizare pentru fiecare.
 - **User vede**: pagina noua "Liste monitorizate" cu upload XLSX/CSV + preview validation + commit.
 - **Tasks**:
-  - [ ] Migration `0004_name_lists.up.sql`: `name_lists`, `name_list_items`.
+  - [ ] Migration `0005_name_lists.up.sql`: `name_lists`, `name_list_items` (0004 ocupat de hardening PR-4 — runs FK pe snapshots+alerts).
+  - [ ] **Constatare adversiala #6 (PR-4 review)**: `name_list_items.list_id` foloseste `ON DELETE RESTRICT` (NU CASCADE) si noul FK invers `monitoring_jobs.name_list_id` la fel. Motivare: stergerea CASCADE a unei liste cu joburi `name_soap` active orfana run-urile + alertele asociate fara warning operator. RESTRICT forteaza ordin explicit: archive-job → archive-list → delete-list. Detalii in `PLAN-monitoring-webmode.md` §2.3.
   - [ ] Parser XLSX (deja in deps) + CSV (`csv-parse` adauga).
-  - [ ] Validare CNP (13 cifre + checksum), CUI (2-10 cifre + RO prefix optional + checksum).
+  - [ ] Validare nume: trim + length 2..200, dedup intra-fisier pe `(name_normalized, name_kind)`, normalizare diacritic strip + collapse whitespace.
   - [ ] Routes: `POST /api/v1/name-lists/preview` + `POST /api/v1/name-lists` (commit cu `auto_create_jobs`).
-  - [ ] Scheduler suporta `kind='name_soap'` — foloseste `cautareDosareDupaParte` cu cap snapshot 1MB.
+  - [ ] Scheduler suporta `kind='name_soap'` — foloseste `cautareDosareDupaParte`. Captura imbogatita: `{version, fetched_at, dosare: [{numar, stadiu, categorie, instanta}]}`. Plafon 1MB pe `payload_json` (la depasire: trunchiere + alerta `source_error` cod `SNAPSHOT_OVERSIZE`).
+  - [ ] Diff per element pe `numar` (nu set diff): emit `dosar_new`, `dosar_disappeared` (configurabil), `stadiu_changed`, `categorie_changed`, `dosar_relevant_now`/`dosar_no_longer_relevant` cand schimba apartenenta la filtrul `alert_config.stadii`/`categorii`.
+  - [ ] Cheia dedup pe alerta: `${kind}|${numar}|${tranzitie}` (NU `runId`) — flapping pe acelasi dosar nu duplicheaza alertele la fiecare oscilare.
   - [ ] UI: upload, preview cu validation per row, confirma commit, throttle 100 jobs/cerere.
 - **DoD**:
-  - [ ] Upload 100 nume → 100 joburi create + scheduler le proceseaza in batches.
-  - [ ] Snapshot per nume comparat cu setul de `numarDosar` returnat → emit `dosar_new` la cei nou aparuti.
-  - [ ] Filtru `categorii`/`stadii` din `alert_config_json` aplicat post-fetch.
+  - [ ] Upload 100 nume → 100 joburi create + scheduler le proceseaza in batch-uri.
+  - [ ] Captura per nume comparata per element pe `numar` → emit `dosar_new` la cei nou aparuti, `stadiu_changed` la tranzitii pe acelasi numar.
+  - [ ] Filtru `categorii`/`stadii` din `alert_config_json` aplicat la pasul de emit alerta (nu la salvarea capturii) — schimbarea filtrului ia efect imediat, fara reseed.
+  - [ ] Test: oscilare portal (R1 vede dosar, R2 nu, R3 il vede) → dedup pe numar previne `dosar_disappeared`+`dosar_new` repetate la fiecare ciclu.
 - **Bump**: 2.3.0 minor.
 - **Risk**: 🟡 MEDIUM. Nume populare (ex: "POPESCU ION") pot returna >1000 dosare → trebuie sa documentam si capam in UI.
 
@@ -231,7 +235,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 - **Scop**: orice apel AI (Claude/OpenAI/Gemini) lasa un row in `ai_usage`. Pe desktop quota=infinit. Pe web (PR-9+) verificam inainte de call.
 - **User vede**: panou "AI Usage" in setari cu grafic last 30 days + cost cumulativ.
 - **Tasks**:
-  - [ ] Migration `0005_ai_usage.up.sql`: `ai_usage(owner_id, provider, model, input_tokens, output_tokens, cost_usd, called_at, request_id)`.
+  - [ ] Migration `0006_ai_usage.up.sql`: `ai_usage(owner_id, provider, model, input_tokens, output_tokens, cost_usd, called_at, request_id)` (renumerotat dupa hardening PR-4 + name_lists PR-5).
   - [ ] Wrapper `aiCallTracked()` care log-eaza dupa orice call AI existent.
   - [ ] Sliding window query: `SUM(cost_usd) FROM ai_usage WHERE called_at > now()-24h`.
   - [ ] UI panel cu Recharts (deja in deps).

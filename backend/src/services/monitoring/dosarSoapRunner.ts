@@ -20,7 +20,8 @@ import type { Dosar, SearchParams } from "../../soap.ts";
 import type { JobRunner, RunOutcome, ScheduledJob } from "./scheduler.ts";
 import { AlertConfigSchema } from "../../schemas/monitoring.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
-import { diffDosarSoap, type DiffSnapshotPayload } from "./diff.ts";
+import { diffDosarSoap, type DiffSnapshotPayload } from "./diff/dosarSoap.ts";
+import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
 import {
   getLatestSnapshot,
   insertSnapshot,
@@ -96,6 +97,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
       // it can acquire the exclusive lock. The atomic snapshot+alerts
       // transaction (C2 hardening) is preserved verbatim inside.
       let alertsCreated = 0;
+      let oversizeOutcome: RunOutcome | null = null;
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
         const prevSnapshot = prevRow
@@ -107,8 +109,46 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
           currentDosar,
           alertConfig,
           now: nowIso,
-          runId,
+          // Constatare adversiala #4: ancora stabila pentru cheile dedup ale
+          // tranzitiilor. Vezi `DiffInput.prevSnapshotId` in diff/dosarSoap.ts.
+          prevSnapshotId: prevRow?.id ?? null,
         });
+
+        // Constatare adversiala #1 — plafon dur pe payload_json. Verificarea
+        // se face INAINTE de tranzactia snapshot+alerts (intentionat in
+        // afara, ca alerta SNAPSHOT_OVERSIZE sa supravietuiasca chiar daca
+        // viitor cod adauga la tranzactie). Snapshotul oversize NU se
+        // scrie: prev_snapshot ramane baseline, urmatorul tick (cu payload
+        // normal) face diff valid contra lui. Treaza ca eroare de sursa
+        // (markJobOutcome → fail_streak++) ca un upstream care returneaza
+        // cantitati anormale sa intre in backoff la fel ca un SOAP_FAIL.
+        const newSnapshotJson = canonicalJson(newSnapshot);
+        const payloadBytes = Buffer.byteLength(newSnapshotJson, "utf8");
+        if (payloadBytes > SNAPSHOT_PAYLOAD_MAX_BYTES) {
+          insertAlert({
+            ownerId: job.owner_id,
+            jobId: job.id,
+            runId,
+            kind: "source_error",
+            severity: "warning",
+            title: "Snapshot peste plafon (1 MiB) — refuzat la scriere",
+            detail: {
+              error_code: "SNAPSHOT_OVERSIZE",
+              payload_bytes: payloadBytes,
+              max_bytes: SNAPSHOT_PAYLOAD_MAX_BYTES,
+              dropped_alerts: alerts.length,
+            },
+            dedupKey: `snapshot_oversize|${runId}`,
+          });
+          alertsCreated = 1;
+          oversizeOutcome = {
+            status: "error",
+            errorCode: "SNAPSHOT_OVERSIZE",
+            errorMessage: `payload ${payloadBytes}B > cap ${SNAPSHOT_PAYLOAD_MAX_BYTES}B`,
+            alertsCreated: 1,
+          };
+          return;
+        }
 
         // C2 hardening: snapshot + alerts must commit together. Without this,
         // a crash / SIGTERM / disk-full between insertSnapshot and the first
@@ -124,7 +164,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
             runId,
             observedAt: nowIso,
             payloadHash: canonicalSha256(newSnapshot),
-            payloadJson: canonicalJson(newSnapshot),
+            payloadJson: newSnapshotJson,
           });
           for (const alert of alerts) {
             insertAlert({
@@ -142,6 +182,9 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         alertsCreated = alerts.length;
       });
 
+      if (oversizeOutcome) {
+        return oversizeOutcome;
+      }
       return { status: "ok", alertsCreated };
     },
   };

@@ -158,6 +158,86 @@ describe("claimDueJobs — selection", () => {
   });
 });
 
+// Tier 4 #14 (rezolvare adversiala #3) — enabledKinds restrange claim-ul
+// la kindurile pentru care scheduler-ul are runner inregistrat. Caz fail-safe
+// critic: array gol = niciun runner = NU se atinge DB-ul (altfel s-ar marca
+// runuri 'running' fara executor, devenind orphan pana la recoverOrphanRuns).
+describe("claimDueJobs — enabledKinds filter", () => {
+  it("claims only kinds present in enabledKinds when provided", () => {
+    const dosarId = seedJob({
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      hashSeed: "h-dosar",
+      kind: "dosar_soap",
+    });
+    seedJob({
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      hashSeed: "h-name",
+      kind: "name_soap",
+    });
+    seedJob({
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      hashSeed: "h-rnpm",
+      kind: "aviz_rnpm",
+    });
+
+    const claimed = claimDueJobs({
+      now: NOW,
+      limit: 10,
+      enabledKinds: ["dosar_soap"],
+    });
+    expect(claimed.map((r) => r.job.id)).toEqual([dosarId]);
+  });
+
+  it("claims nothing when enabledKinds is an empty array (no runner registered)", () => {
+    seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z", kind: "dosar_soap" });
+    const claimed = claimDueJobs({ now: NOW, limit: 10, enabledKinds: [] });
+    expect(claimed.length).toBe(0);
+
+    // Niciun rand 'running' nu trebuie inserat in monitoring_runs — altfel
+    // recoverOrphanRuns ar avea de curatat la urmatoarea pornire.
+    const running = getDb()
+      .prepare(
+        `SELECT COUNT(*) as c FROM monitoring_runs WHERE status = 'running'`,
+      )
+      .get() as { c: number };
+    expect(running.c).toBe(0);
+  });
+
+  it("intersects enabledKinds cu MONITORING_DISABLED_KINDS (env wins)", () => {
+    seedJob({
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      hashSeed: "h-dosar",
+      kind: "dosar_soap",
+    });
+    const nameId = seedJob({
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      hashSeed: "h-name",
+      kind: "name_soap",
+    });
+
+    // Scheduler crede ca are runneri pentru ambele, dar operatorul a oprit
+    // dosar_soap din env — ramane doar name_soap.
+    process.env.MONITORING_DISABLED_KINDS = "dosar_soap";
+    const claimed = claimDueJobs({
+      now: NOW,
+      limit: 10,
+      enabledKinds: ["dosar_soap", "name_soap"],
+    });
+    expect(claimed.map((r) => r.job.id)).toEqual([nameId]);
+  });
+
+  it("treats undefined enabledKinds as 'no filter' (legacy behaviour)", () => {
+    seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z", kind: "dosar_soap" });
+    seedJob({
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      hashSeed: "h-name",
+      kind: "name_soap",
+    });
+    const claimed = claimDueJobs({ now: NOW, limit: 10 });
+    expect(claimed.length).toBe(2);
+  });
+});
+
 describe("claimDueJobs — limits & ordering", () => {
   it("respects the limit parameter", () => {
     seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z", hashSeed: "h1" });

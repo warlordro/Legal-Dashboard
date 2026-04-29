@@ -300,6 +300,14 @@ export function deleteJob(ownerId: string, id: number): boolean {
 export interface ClaimDueJobsInput {
   now: string;
   limit: number;
+  // Restrange claim-ul la kindurile pentru care scheduler-ul ruleaza un
+  // runner inregistrat. Compus cu MONITORING_DISABLED_KINDS din env.
+  //   undefined → fara filtru pe kind (toate kindurile, doar env-ul exclude)
+  //   []        → claim nul (no-op): un scheduler fara runneri nu trebuie sa
+  //               consume joburi din alte kinduri, altfel ar marca runuri
+  //               'running' fara sa aiba cine sa le execute
+  //   [k1, k2]  → doar kindurile listate (in plus filtrate de env)
+  enabledKinds?: JobKind[];
 }
 
 export interface ClaimedJob {
@@ -363,21 +371,39 @@ export function markJobOutcome(input: MarkJobOutcomeInput): boolean {
 }
 
 export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
+  // Caz fail-safe: scheduler fara runneri inregistrati. Daca am lasa
+  // claim-ul sa ruleze, am insera randuri 'running' in monitoring_runs pe
+  // care n-ar avea cine sa le finalizeze — orphan run pana la
+  // recoverOrphanRuns. Mai sigur: return imediat, niciun side-effect.
+  const enabledKinds = input.enabledKinds;
+  if (enabledKinds !== undefined && enabledKinds.length === 0) {
+    return [];
+  }
+
   const db = getDb();
   const tx = db.transaction((now: string, limit: number): ClaimedJob[] => {
     const disabledKinds = getDisabledMonitoringKinds();
-    const disabledKindSql =
-      disabledKinds.length > 0
-        ? `AND kind NOT IN (${disabledKinds.map(() => "?").join(", ")})`
-        : "";
-    const selectParams: (string | number)[] = [now, now, ...disabledKinds, limit];
+
+    const kindClauses: string[] = [];
+    const kindParams: string[] = [];
+    if (enabledKinds && enabledKinds.length > 0) {
+      kindClauses.push(`AND kind IN (${enabledKinds.map(() => "?").join(", ")})`);
+      kindParams.push(...enabledKinds);
+    }
+    if (disabledKinds.length > 0) {
+      kindClauses.push(`AND kind NOT IN (${disabledKinds.map(() => "?").join(", ")})`);
+      kindParams.push(...disabledKinds);
+    }
+    const kindSql = kindClauses.join(" ");
+
+    const selectParams: (string | number)[] = [now, now, ...kindParams, limit];
     const due = db
       .prepare(
         `SELECT * FROM monitoring_jobs
          WHERE active = 1
            AND (paused_until IS NULL OR paused_until <= ?)
            AND next_run_at <= ?
-           ${disabledKindSql}
+           ${kindSql}
            AND NOT EXISTS (
              SELECT 1 FROM monitoring_runs
              WHERE monitoring_runs.job_id = monitoring_jobs.id

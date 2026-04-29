@@ -37,8 +37,24 @@ export interface InsertRunningInput {
 
 // Insert a fresh `running` row at tick start; returns the new id so the
 // scheduler can finalize it later.
+//
+// Constatare adversiala #2 — tenant-isolation guard simetric cu cel din
+// monitoringAlertsRepository.insertAlert. Refuza scrierea daca (jobId,
+// ownerId) nu apartin impreuna in monitoring_jobs. Fara asta, un caller
+// care primeste un jobId al altui tenant ar putea atasa un run row in
+// numele lui, ceea ce ar contamina query-urile owner-scoped pe runs (audit,
+// purgeOldRuns by owner, viitor UI alerts run filter).
 export function insertRunning(input: InsertRunningInput): number {
-  const info = getDb()
+  const db = getDb();
+  const jobOwner = db
+    .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+    .get(input.jobId, input.ownerId);
+  if (!jobOwner) {
+    throw new Error(
+      `insertRunning: job ${input.jobId} not found for owner ${input.ownerId}`,
+    );
+  }
+  const info = db
     .prepare(
       `INSERT INTO monitoring_runs
          (owner_id, job_id, started_at, status)
@@ -61,6 +77,12 @@ export interface FinalizeInput {
 // Transition a `running` row to a terminal status. Returns true on success,
 // false when no row matched (already finalized or never existed). The
 // scheduler calls this exactly once per run.
+//
+// Audit 2026-04-29 #10: clauza WHERE include `status='running'` astfel incat
+// un finalizer intarziat (ex: un al doilea tick declansat de recovery + un
+// finalizer original care soseste tarziu) sa nu poata suprascrie un status
+// terminal deja inregistrat. Combinat cu indexul partial unique din migrarea
+// 0006 (un singur run `running` per job_id) garanteaza idempotenta finalize.
 export function finalize(runId: number, input: FinalizeInput): boolean {
   const info = getDb()
     .prepare(
@@ -72,7 +94,7 @@ export function finalize(runId: number, input: FinalizeInput): boolean {
              error_code = ?,
              error_message = ?,
              alerts_created = COALESCE(?, alerts_created)
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'running'`,
     )
     .run(
       input.status,

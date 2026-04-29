@@ -38,19 +38,19 @@ export default defineConfig({
     proxy: {
       // SSE endpoints need special config to avoid buffering/timeout
       "/api/dosare/load-more": {
-        target: "http://localhost:3001",
+        target: "http://localhost:3002",
         changeOrigin: true,
         timeout: 600000, // 10 minutes
         proxyTimeout: 600000,
       },
       "/api/termene/load-more": {
-        target: "http://localhost:3001",
+        target: "http://localhost:3002",
         changeOrigin: true,
         timeout: 600000,
         proxyTimeout: 600000,
       },
       "/api": {
-        target: "http://localhost:3001",
+        target: "http://localhost:3002",
         changeOrigin: true,
       },
     },

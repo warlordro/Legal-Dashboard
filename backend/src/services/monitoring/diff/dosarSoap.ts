@@ -21,14 +21,15 @@
 // a baseline (no alerts) because the snapshot's logical scope changed.
 
 import { createHash } from "node:crypto";
-import type { AlertConfig } from "../../schemas/monitoring.ts";
-import type { Dosar } from "../../soap.ts";
-import { canonicalJson } from "../../util/canonicalJson.ts";
+import type { AlertConfig } from "../../../schemas/monitoring.ts";
+import type { Dosar } from "../../../soap.ts";
+import { canonicalJson } from "../../../util/canonicalJson.ts";
 import {
   buildSedintaKey,
   buildSedintaKeyWithoutSolutie,
   normalizeStadiu,
-} from "./sedintaKey.ts";
+} from "../sedintaKey.ts";
+import type { DiffAlertEmit as GenericDiffAlertEmit } from "./types.ts";
 
 // --- types ----------------------------------------------------------------
 
@@ -39,7 +40,10 @@ export type DiffAlertKind =
   | "solutie_aparuta"
   | "dosar_disappeared";
 
-export type DiffAlertSeverity = "info" | "warning" | "critical";
+// Specializare a tipului generic din ./types.ts pe uniunea de alerte
+// emise de diff-ul dosar_soap. Pastrat ca alias public pentru ca
+// runner-ul poate (in viitor) avea nevoie sa tipeze rezultatul direct.
+export type DiffAlertEmit = GenericDiffAlertEmit<DiffAlertKind>;
 
 export interface DiffSnapshotPayload {
   sedintaKeys: string[];
@@ -48,29 +52,22 @@ export interface DiffSnapshotPayload {
   filterFingerprint: string;
 }
 
-export interface DiffAlertEmit {
-  kind: DiffAlertKind;
-  severity: DiffAlertSeverity;
-  title: string;
-  detail: Record<string, unknown>;
-  // Stable across re-runs of the same diff input. Caller persists with
-  // INSERT ... ON CONFLICT(job_id, dedup_key) DO NOTHING for idempotency.
-  dedupKey: string;
-}
-
 export interface DiffInput {
   prevSnapshot: DiffSnapshotPayload | null;
   currentDosar: Dosar | null;
   alertConfig: AlertConfig;
   // ISO timestamp; embedded in alert detail so the UI can render "observed at".
-  // No longer used for dedup keys (#19 — runId replaced it for compactness +
-  // direct lineage to the run row + guaranteed uniqueness regardless of clock).
+  // No longer used for dedup keys.
   now: string;
-  // Tier 4 #19: stable id of the run that produced this diff. Used as the
-  // time-anchor in transition dedup keys (dosar_new / dosar_disappeared) so
-  // each fresh appearance/disappearance episode gets a distinct key without
-  // depending on monotonic ISO timestamps.
-  runId: number;
+  // Constatare adversiala #4: stable anchor pentru cheile dedup ale tranzitiilor
+  // (dosar_new / dosar_disappeared). Folosim id-ul prev snapshot-ului — singurul
+  // identificator care e STABIL intre re-run-uri pe acelasi baseline (replay,
+  // manual-trigger, retry dupa eroare tranzitorie). Cu runId, doua executii
+  // succesive impotriva aceluiasi prev_snapshot ar genera chei diferite si ar
+  // emite duplicate; cu prev_snapshot_id, ON CONFLICT(job_id, dedup_key) DO
+  // NOTHING absoarbe corect retry-ul. Null doar atunci cand prev e null
+  // (primul tick), caz in care nu emitem nicio tranzitie oricum.
+  prevSnapshotId: number | null;
 }
 
 export interface DiffOutput {
@@ -170,7 +167,7 @@ function parseSedintaKey(key: string): {
 // --- main -----------------------------------------------------------------
 
 export function diffDosarSoap(input: DiffInput): DiffOutput {
-  const { prevSnapshot, currentDosar, alertConfig, now, runId } = input;
+  const { prevSnapshot, currentDosar, alertConfig, now, prevSnapshotId } = input;
   const filterFingerprint = computeFilterFingerprint(alertConfig);
 
   // Pre-diff filter: dosar that doesn't pass stadii/categorii is treated as
@@ -194,6 +191,15 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
   const alerts: DiffAlertEmit[] = [];
 
   // --- dosar appearance/disappearance transitions ---
+  // prevSnapshot e non-null aici (ramura de mai sus filtreaza prev=null), deci
+  // prevSnapshotId e si el non-null in caz uzual; folosim un fallback stabil
+  // doar ca defense-in-depth pentru un caller care ar trimite prev fara id.
+  //
+  // Prefix `s` (snapshot) namespace-eaza cheia pentru a evita coliziunea cu
+  // formatul vechi (runId-based) emis de versiunile <= 2.2.0. Fara prefix, un
+  // prevSnapshotId care coincide numeric cu un runId ramas in DB ar fi absorbit
+  // tacut de ON CONFLICT(job_id, dedup_key) DO NOTHING (false negative).
+  const transitionAnchor = `s${prevSnapshotId ?? "init"}`;
   if (prevSnapshot.lastDosarPresent && !filteredDosar) {
     if (alertConfig.notify_on_dosar_disappeared) {
       alerts.push({
@@ -201,7 +207,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
         severity: "warning",
         title: "Dosarul nu mai apare la PortalJust",
         detail: { observedAt: now },
-        dedupKey: `dosar_disappeared|${runId}`,
+        dedupKey: `dosar_disappeared|${transitionAnchor}`,
       });
     }
     return { newSnapshot, alerts, resetReason: null };
@@ -216,7 +222,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
       severity: "info",
       title: "Dosarul a aparut la PortalJust",
       detail: { observedAt: now, sedinteCount: filteredDosar.sedinte.length },
-      dedupKey: `dosar_new|${runId}`,
+      dedupKey: `dosar_new|${transitionAnchor}`,
     });
     return { newSnapshot, alerts, resetReason: null };
   }

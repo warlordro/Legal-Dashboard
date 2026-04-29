@@ -196,6 +196,17 @@ CREATE INDEX idx_runs_job_time ON monitoring_runs(job_id, started_at DESC);
 
 ### 2.3 Bulk name lists (PR-5)
 
+> **Constatare adversiala #6 (PR-4 review)** — politica FK pentru `name_list_items.list_id`
+> trebuie sa fie `ON DELETE RESTRICT`, nu `ON DELETE CASCADE`. Motivare:
+> joburile `name_soap` create dintr-o lista pastreaza un FK invers
+> (`monitoring_jobs` ar avea `name_list_id` in PR-5); o stergere CASCADE a unei
+> liste cu joburi active orfana run-urile / snapshot-urile / alertele asociate
+> fara ca operatorul sa fie avertizat. RESTRICT forteaza ordinul corect:
+> archive-job → archive-list → delete-list. Implementatorul PR-5 trebuie sa
+> oglindeasca politica si pe noul FK invers (`monitoring_jobs.name_list_id
+> REFERENCES name_lists(id) ON DELETE RESTRICT`) ca sa fie simetrica si sa
+> elimine punctele tacute de pierdere de lineage.
+
 ```sql
 -- Lista (import) — un fisier urcat de user devine o "lista" cu N nume
 CREATE TABLE name_lists (
@@ -214,7 +225,9 @@ CREATE TABLE name_lists (
 CREATE TABLE name_list_items (
   id            INTEGER PRIMARY KEY AUTOINCREMENT,
   owner_id      TEXT NOT NULL,
-  list_id       INTEGER NOT NULL REFERENCES name_lists(id) ON DELETE CASCADE,
+  -- #6: RESTRICT (NU CASCADE) — sterge lista doar dupa ce items + joburile
+  -- legate sunt arhivate explicit. Vezi banner-ul de mai sus.
+  list_id       INTEGER NOT NULL REFERENCES name_lists(id) ON DELETE RESTRICT,
   name_kind     TEXT NOT NULL CHECK(name_kind IN ('fizic','juridic','unknown')),
   name_raw      TEXT NOT NULL,
   name_normalized TEXT NOT NULL,                    -- folded + lowercase + trim spaces
@@ -223,6 +236,9 @@ CREATE TABLE name_list_items (
   validation    TEXT NOT NULL DEFAULT 'ok'         
                 CHECK(validation IN ('ok','warn','rejected')),
   validation_msg TEXT,
+  -- SET NULL aici e ok: stergerea jobului doar rupe lineage-ul invers (item-ul
+  -- ramane in lista), iar `archived_at` la nivel de job ofera un soft-delete
+  -- care pastreaza informatia. RESTRICT s-ar bate aici cu retentia automata.
   monitoring_job_id INTEGER REFERENCES monitoring_jobs(id) ON DELETE SET NULL,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
@@ -417,7 +433,7 @@ litestream restore -o /var/lib/legal-dashboard/legal-dashboard.db gs://legal-das
 2. Frontend POST `/api/v1/name-lists/preview` `multipart/form-data` (max 10 MB, max 50000 rows).
 3. Server:
    - Parser cu `xlsx` (deja in deps) sau `csv-parse` (de adaugat).
-   - Headers detectati: `nume`, `cnp`, `cui`, `tip` (`fizic`/`juridic`). Heuristici: 13 cifre → CNP, 8-10 cifre → CUI.
+   - Headers detectati: `nume`, `tip` (`fizic`/`juridic`), optional `institutie`. Daca `tip` lipseste → default `fizic` cu `validation='warn'` ("tip lipsa, presupus PF").
    - Returneaza preview JSON `{rows: [{name, kind, validation, msg}], totals: {ok, warn, rejected}, sha256}`.
    - **Nu persista nimic inca**.
 4. User confirma in UI ce import-eaza, da titlu listei → POST `/api/v1/name-lists` `{title, sha256, only_validations:['ok','warn']}`.
@@ -427,14 +443,27 @@ litestream restore -o /var/lib/legal-dashboard/legal-dashboard.db gs://legal-das
    - Optional: `auto_create_jobs:true` → fiecare row genereaza `monitoring_jobs(kind='name_soap')`. Throttle: max 100 joburi noi / cerere; restul async via background process.
 6. Scheduler ruleaza joburi `name_soap`:
    - `cautareDosareDupaParte({nume, institutie?}, {signal})`.
-   - Diff: compara setul de `numarDosar` returnat cu snapshot. Diff-uri noi → alert `kind='dosar_new'`. Diff-uri lipsa nu emit alert (poate fi expirate / arhivate; configurabil viitor).
-   - Throttle special: jobs `name_soap` pot returna multe rezultate; cap snapshot payload size la 1 MB.
+   - Captura imbogatita (varianta B — vezi rationale mai jos): `{version: 1, fetched_at, dosare: [{numar, stadiu, categorie, instanta}]}`. Cheia de identitate ramane `numar`; `stadiu` / `categorie` / `instanta` sunt atribute monitorizate.
+   - Diff per element pe `numar`:
+     - `numar` aparut nou → alerta `dosar_new`.
+     - `numar` disparut → alerta `dosar_disappeared` (configurabila prin `notify_on_dosar_disappeared`).
+     - acelasi `numar` cu `stadiu` modificat → alerta `stadiu_changed`.
+     - acelasi `numar` cu `categorie` modificata → alerta `categorie_changed`.
+     - intrare/iesire din filtrul `alert_config.stadii` sau `alert_config.categorii` → alerte `dosar_relevant_now` / `dosar_no_longer_relevant`.
+   - Cheia dedup pe alerta: `${kind}|${numar}|${tranzitie}` (NU `runId`) — flapping pe acelasi dosar nu creeaza alerte duplicate la fiecare oscilare a portalului.
+   - Plafon captura: 1 MB pe `payload_json`. La depasire (nume foarte popular, > ~3000 dosare): trunchiere + emite `source_error` cu cod `SNAPSHOT_OVERSIZE` si recomandare in mesaj sa filtreze prin institutie.
+   - Filtrele `alert_config.stadii` / `alert_config.categorii` se aplica la pasul de emit alerta, nu la salvarea capturii — schimbarea filtrului ia efect imediat fara reseed.
 
-**Validation rules** (din data-validation perspective):
-- `cnp`: 13 cifre + checksum CNP romanesc → `validation='ok'` daca pass, altfel `'warn'`.
-- `cui`: 2-10 cifre, optional prefix `RO`, checksum → `'ok'`/`'warn'`.
+**De ce captura imbogatita (varianta B), nu doar lista de numere (varianta A)**:
+A pierde tocmai semnalul valoros: cand un dosar trece din `Fond` in `Apel` dar `numar` ramane acelasi, setul de numere e identic intre tic-uri si diff-ul vede `{}`. Utilizatorul cu filtru `stadii: ["Apel"]` nu primeste alerta desi tranzitia il intereseaza direct. B detecteaza tranzitia si emite alerta corespunzatoare. Costul suplimentar (~200 octeti per dosar × pana la cateva mii de dosare = sub plafonul 1 MB cu marja larga) e justificat. Coerent cu captura `dosar_soap` care deja salveaza `sedintaKeys` + `sedinteWithSolution` (set imbogatit, nu lista plata).
+
+**Validation rules** (intrari import lista nume):
 - `name_normalized`: lowercase + diacritic strip + collapse whitespace.
-- Reject: nume empty, > 200 chars, contine doar cifre.
+- `name_kind`: `fizic` | `juridic`. Lipsa → default `fizic` + `validation='warn'`.
+- Reject: nume empty, < 2 chars, > 200 chars, contine doar cifre.
+- Dedup intra-fisier: `(name_normalized, name_kind)` apare 1×; duplicatele primesc `validation='warn'` cu `msg='duplicate_in_file'` si NU genereaza job.
+
+**In afara perimetrului** (decis explicit): validare CNP/CUI. PortalJust SOAP `cautareDosareDupaParte` accepta doar string nume + tip (PF/PJ); CNP/CUI nu sunt cheie de cautare. Daca apare un caz de utilizare viitor (ex: alerta "cand CNP X devine debitor pe RNPM"), va fi legat de modulul RNPM, nu de monitoring SOAP.
 
 ### 5.3 Tranzitie web (PR-9)
 

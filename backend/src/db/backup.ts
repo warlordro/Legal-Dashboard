@@ -1,5 +1,6 @@
 import path from "path";
 import fsPromises from "fs/promises";
+import Database from "better-sqlite3";
 import { getDb, getDbPath, closeDb } from "./schema.ts";
 import { RWLock } from "../util/rwlock.ts";
 
@@ -245,19 +246,24 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
       // ENOENT is benign — the sidecar legitimately does not exist. Anything
       // else (EBUSY on Windows from AV / open handle, EACCES, etc.) means the
       // file survived and will pair with the new DB after rename → silent
-      // corruption risk on next open. Log loudly but do not throw — preserves
-      // current restore-completes-anyway behavior; flip to throw in a future
-      // release if logs show this never fires in practice.
+      // corruption risk on next open. Audit 2026-04-29 #2: flipped to throw —
+      // a partial cleanup must abort the restore, not proceed silently. The
+      // user retries after closing the offending process (AV scanner / external
+      // sqlite client). Active DB handle is already closed (closeDb() above),
+      // so the only realistic culprits are external readers.
       const code = (e as NodeJS.ErrnoException)?.code;
       if (code !== "ENOENT") {
         logBackupEvent({
-          action: "restore",
+          action: "restore_failed",
           stage: "stale_sidecar_unlink_failed",
           source: name,
           sidecar: suffix,
           errnoCode: code,
           reason: e instanceof Error ? e.message : String(e),
         });
+        throw new Error(
+          `Nu am putut sterge sidecar-ul ${suffix} (${code}). Inchide programele care tin DB-ul deschis si reincearca.`,
+        );
       }
     }
   }
@@ -283,6 +289,59 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
     });
     throw new Error(
       `Restore esuat: ${e instanceof Error ? e.message : String(e)}`,
+    );
+  }
+
+  // Audit 2026-04-29 #2: confirma integritatea fisierului restaurat inainte
+  // de a-l accepta. Daca backup-ul sursa era corupt (bit-rot pe disk, scriere
+  // incompleta in trecut) restore-ul nu trebuie sa il puna in productie.
+  // Deschidem un handle temporar (closeDb() s-a apelat mai sus, deci singleton-ul
+  // e free) si rulam integrity_check; orice rezultat != "ok" abort-eaza.
+  try {
+    const verifyDb = new Database(dbPath, { readonly: true });
+    try {
+      const rows = verifyDb
+        .prepare("PRAGMA integrity_check")
+        .all() as Array<{ integrity_check: string }>;
+      const allOk = rows.length === 1 && rows[0]?.integrity_check === "ok";
+      if (!allOk) {
+        const summary = rows
+          .slice(0, 5)
+          .map((r) => r.integrity_check)
+          .join("; ");
+        logBackupEvent({
+          action: "restore_failed",
+          source: name,
+          stage: "integrity_check",
+          rows: rows.length,
+          summary,
+        });
+        throw new Error(
+          `integrity_check pe DB-ul restaurat a esuat: ${summary}`,
+        );
+      }
+    } finally {
+      verifyDb.close();
+    }
+  } catch (e) {
+    // Best-effort revert: incercam sa restauram pre-restore snapshot-ul
+    // automat, ca sa nu ramana userul cu un DB nepornibil. Daca revertul
+    // esueaza, mesajul indica explicit fisierul de recuperare.
+    if (dbExists) {
+      try {
+        await fsPromises.copyFile(preRestorePath, dbPath);
+      } catch (revertErr) {
+        logBackupEvent({
+          action: "restore_failed",
+          source: name,
+          stage: "auto_revert",
+          reason:
+            revertErr instanceof Error ? revertErr.message : String(revertErr),
+        });
+      }
+    }
+    throw new Error(
+      e instanceof Error ? e.message : String(e),
     );
   }
 

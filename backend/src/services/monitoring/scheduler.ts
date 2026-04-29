@@ -17,6 +17,7 @@
 
 import { computeNextRunAt } from "./backoff.ts";
 import type { Clock, TimerHandle } from "./clock.ts";
+import type { JobKind } from "../../schemas/monitoring.ts";
 import {
   claimDueJobs,
   markJobOutcome,
@@ -66,7 +67,13 @@ export interface JobRunner {
 
 export interface SchedulerOptions {
   clock: Clock;
-  runner: JobRunner;
+  // Registry indexat pe job.kind. Decuplaza scheduler-ul de orice runner
+  // specific: PR-4 inregistreaza dosar_soap, PR-5 va adauga name_soap, fara
+  // sa atinga aceasta clasa. Kindurile fara intrare in registry sunt
+  // excluse din claim (vezi enabledKinds din claimDueJobs) si — daca totusi
+  // ajung pe runOne, fie via runJobNow, fie printr-un drift schema/registry —
+  // primesc un outcome NO_RUNNER care le marcheaza terminal.
+  runners: Partial<Record<JobKind, JobRunner>>;
   tickIntervalMs: number;
   claimLimit: number;
   // Max steady-state jitter in seconds; 0 disables for tests.
@@ -140,7 +147,11 @@ export class Scheduler {
         // when this tick was queued and stop() ran in the meantime, we'd
         // otherwise wake up here and proceed to claim/run AFTER shutdown.
         if (!this.running) return;
-        claimed = claimDueJobs({ now, limit: this.opts.claimLimit });
+        claimed = claimDueJobs({
+          now,
+          limit: this.opts.claimLimit,
+          enabledKinds: this.enabledKinds(),
+        });
       });
 
       if (claimed.length === 0) return;
@@ -321,19 +332,33 @@ export class Scheduler {
     // brief acquisitions are cheaper for the queued backup than one long one.
     const work = (async () => {
       let outcome: RunOutcome;
-      try {
-        outcome = await this.opts.runner.run({
-          job,
-          runId,
-          nowIso,
-          signal: controller.signal,
-        });
-      } catch (err) {
+      const runner = this.opts.runners[job.kind as JobKind];
+      if (!runner) {
+        // Defense in depth: claimDueJobs.enabledKinds este filtrul de baza,
+        // dar runJobNow primeste joburi direct din DB fara filtrare. Daca
+        // un kind ramane in DB fara runner inregistrat (drift schema /
+        // misconfigurare la boot), marcam runul terminal in loc sa-l lasam
+        // orphan in 'running' pana la urmatorul restart cu recoverOrphanRuns.
         outcome = {
           status: "error",
-          errorCode: "RUNNER_THREW",
-          errorMessage: err instanceof Error ? err.message : String(err),
+          errorCode: "NO_RUNNER",
+          errorMessage: `No runner registered for kind '${job.kind}'`,
         };
+      } else {
+        try {
+          outcome = await runner.run({
+            job,
+            runId,
+            nowIso,
+            signal: controller.signal,
+          });
+        } catch (err) {
+          outcome = {
+            status: "error",
+            errorCode: "RUNNER_THREW",
+            errorMessage: err instanceof Error ? err.message : String(err),
+          };
+        }
       }
 
       const endIso = this.opts.clock.now().toISOString();
@@ -375,6 +400,14 @@ export class Scheduler {
 
     this.inflight.set(job.id, { controller, promise: work });
     await work;
+  }
+
+  // Lista kindurilor pentru care exista runner in registry. Scheduler-ul
+  // o paseaza la claimDueJobs ca sa nu mai consume joburi pe care nu le
+  // poate executa. Lista goala = scheduler fara runneri = no-op (vezi
+  // claimDueJobs guard).
+  private enabledKinds(): JobKind[] {
+    return Object.keys(this.opts.runners) as JobKind[];
   }
 
   private applyJobOutcome(

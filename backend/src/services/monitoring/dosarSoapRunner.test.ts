@@ -66,6 +66,19 @@ function seedJob(opts?: {
 }
 
 function seedRunningRow(jobId: number): number {
+  // Indexul partial unique idx_one_running_per_job (migrarea 0005) interzice
+  // doua randuri 'running' simultan pentru acelasi job. In productie scheduler-ul
+  // finalizeaza randul curent inainte de urmatorul tick; aici simulam acel
+  // contract finalizand orice rand 'running' anterior pe acelasi job inainte
+  // de a insera unul nou.
+  getDb()
+    .prepare(
+      `UPDATE monitoring_runs
+         SET status = 'aborted',
+             ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       WHERE job_id = ? AND status = 'running'`,
+    )
+    .run(jobId);
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
@@ -402,5 +415,74 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
         .get(job.id) as { n: number }
     ).n;
     expect(alertCount).toBe(0);
+  });
+});
+
+// Constatare adversiala #1 — plafon 1 MiB pe payload_json. Runner-ul refuza
+// scrierea snapshotului oversize si emite o alerta source_error/SNAPSHOT_OVERSIZE.
+// Asigura ca:
+//   - statusul outcome e "error" cu errorCode SNAPSHOT_OVERSIZE
+//   - alertul SNAPSHOT_OVERSIZE e persistat (1 alerta in DB)
+//   - prev_snapshot ramane neschimbat (niciun rand de snapshot scris)
+describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
+  function makeBigDosar(numar: string, count: number): Dosar {
+    // ~250 chars/sedinta in canonical JSON; 5000 sedinte trec confortabil de
+    // 1 MiB chiar tinand cont de deduplicarea cheilor in sedinteWithSolution.
+    const sedinte: Dosar["sedinte"] = Array.from({ length: count }, (_, i) => ({
+      complet: `Complet${i}`,
+      data: `2026-${String(((i % 12) + 1)).padStart(2, "0")}-${String(((i % 28) + 1)).padStart(2, "0")}`,
+      ora: `${String(i % 24).padStart(2, "0")}:00`,
+      solutie: "x".repeat(250),
+      solutieSumar: "",
+      documentSedinta: "",
+      numarDocument: "",
+      dataPronuntare: "",
+    }));
+    return makeDosar(numar, sedinte);
+  }
+
+  it("payload >1 MiB → outcome error SNAPSHOT_OVERSIZE + 1 alerta + niciun snapshot scris", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [makeBigDosar("1234/180/2024", 5000)],
+    });
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("error");
+    expect(out.errorCode).toBe("SNAPSHOT_OVERSIZE");
+    expect(out.errorMessage).toMatch(/payload \d+B > cap \d+B/);
+    expect(out.alertsCreated).toBe(1);
+
+    // Niciun snapshot scris — pastreaza prev (in cazul asta absent).
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+
+    // Alerta source_error cu detail.error_code = SNAPSHOT_OVERSIZE.
+    const alerts = getDb()
+      .prepare(
+        `SELECT kind, severity, detail_json, dedup_key
+           FROM monitoring_alerts
+          WHERE job_id = ?`,
+      )
+      .all(job.id) as {
+      kind: string;
+      severity: string;
+      detail_json: string;
+      dedup_key: string;
+    }[];
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]!.kind).toBe("source_error");
+    expect(alerts[0]!.severity).toBe("warning");
+    expect(alerts[0]!.dedup_key).toBe(`snapshot_oversize|${runId}`);
+    const detail = JSON.parse(alerts[0]!.detail_json);
+    expect(detail.error_code).toBe("SNAPSHOT_OVERSIZE");
+    expect(detail.payload_bytes).toBeGreaterThan(1 << 20);
+    expect(detail.max_bytes).toBe(1 << 20);
   });
 });

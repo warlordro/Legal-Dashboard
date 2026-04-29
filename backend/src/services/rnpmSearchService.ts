@@ -8,8 +8,9 @@ import {
   type RnpmDocument,
   type RnpmFullDetail,
 } from "./rnpmClient.ts";
-import { saveSearch } from "../db/searchRepository.ts";
+import { saveSearch, searchBelongsToOwner } from "../db/searchRepository.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
+import { withMaintenanceRead } from "../db/backup.ts";
 import { buildSaveAvizInput } from "./rnpmAvizMapper.ts";
 import { stripDiacriticsDeep } from "../util/textNormalize.ts";
 
@@ -74,6 +75,17 @@ export async function executeSearch(
   client: RnpmClient = defaultRnpmClient
 ): Promise<ExecuteSearchResult> {
   const ownerId = input.ownerId ?? "local";
+
+  // Tenant guard: refuza continuarile pe `existingSearchId` care nu apartin
+  // owner-ului curent (audit 2026-04-29 #11). Fara aceasta, un client local
+  // ar putea atasa avize la istoricul altui tenant in mod web mode.
+  if (
+    input.existingSearchId != null &&
+    !searchBelongsToOwner(input.existingSearchId, ownerId)
+  ) {
+    throw new RnpmError("searchId nu apartine owner-ului curent", 403);
+  }
+
   const batchSize = input.batchSize ?? DEFAULT_BATCH_SIZE;
   const fetchDetails = input.fetchDetails !== false;
   const concurrency = input.detailConcurrency ?? DEFAULT_DETAIL_CONCURRENCY;
@@ -204,7 +216,14 @@ export async function executeSearch(
           // Verificam explicit ca sa nu scriem in SQLite dupa ce user-ul a oprit cautarea.
           if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
           if (typeof detail.part1?.activ === "boolean") doc.activ = detail.part1.activ;
-          const avizId = persistAvizWithDetail(doc, detail, input.type, ownerId, searchId);
+          // Audit 2026-04-29 #8: scrierea SQLite trebuie sa fie bracketata de
+          // maintenance lock pentru a coopera cu restoreFromBackup. Wrap-ul e
+          // sub-ms (saveAvizFull e sync better-sqlite3); fetch-ul HTTP de mai
+          // sus ramane intentionat in afara, ca un user care opreste sa nu
+          // ramana prins in lock-ul reader pe latenta upstream.
+          const avizId = await withMaintenanceRead(async () =>
+            persistAvizWithDetail(doc, detail, input.type, ownerId, searchId),
+          );
           return { localIdx, doc, ok: true as const, avizId };
         } catch (e) {
           if (e instanceof DOMException && e.name === "AbortError") throw e;

@@ -269,6 +269,11 @@ rnpmRouter.delete("/saved/all", (c) => {
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
   try { compactDb(); } catch (e) { console.warn("[rnpm] compact after delete-all failed:", e); }
+  // Audit 2026-04-29 #15: ops destructive masive trebuie reconstruibile.
+  recordAudit(c, "aviz.delete_all", {
+    targetKind: "aviz",
+    detail: { deleted: count },
+  });
   return c.json({ deleted: count });
 });
 
@@ -280,7 +285,12 @@ rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
   if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per batch" }, 400);
-  return c.json({ deleted: deleteAvizeByIds(numIds) });
+  const deleted = deleteAvizeByIds(numIds);
+  recordAudit(c, "aviz.delete_batch", {
+    targetKind: "aviz",
+    detail: { requested: numIds.length, deleted },
+  });
+  return c.json({ deleted });
 });
 
 rnpmRouter.get("/stats", async (c) => {
@@ -411,6 +421,12 @@ rnpmRouter.delete("/saved/:id", (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
   const ok = deleteAviz(id);
+  recordAudit(c, "aviz.delete", {
+    targetKind: "aviz",
+    targetId: String(id),
+    outcome: ok ? "ok" : "error",
+    detail: { found: ok },
+  });
   return c.json({ deleted: ok });
 });
 
@@ -438,7 +454,14 @@ rnpmRouter.get("/searches", (c) => {
 rnpmRouter.delete("/searches/:id", (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
-  return c.json({ deleted: deleteSearch(id) });
+  const deleted = deleteSearch(id);
+  recordAudit(c, "search.delete", {
+    targetKind: "search",
+    targetId: String(id),
+    outcome: deleted ? "ok" : "error",
+    detail: { found: deleted },
+  });
+  return c.json({ deleted });
 });
 
 rnpmRouter.post("/captcha/balance", limitSmall, async (c) => {

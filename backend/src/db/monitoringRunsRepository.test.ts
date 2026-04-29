@@ -73,6 +73,48 @@ describe("insertRunning", () => {
     expect(row.ended_at).toBeNull();
     expect(row.duration_ms).toBeNull();
   });
+
+  // Constatare adversiala #2 — tenant-isolation guard simetric cu insertAlert.
+  // Fara guard, un caller care primeste un job_id al altui tenant ar putea
+  // atasa un run row in numele lui, contaminand query-urile owner-scoped pe
+  // runs (audit, purgeOldRuns by owner, viitor UI alerts run filter).
+  it("refuses to insert when (jobId, ownerId) belong to different tenants", () => {
+    const ownerA = "tenant-a";
+    const ownerB = "tenant-b";
+    const jobIdA = getDb()
+      .prepare(
+        `INSERT INTO monitoring_jobs
+           (owner_id, kind, target_json, target_hash, cadence_sec,
+            alert_config_json, next_run_at)
+         VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', ?)`,
+      )
+      .run(ownerA, "hA", NOW).lastInsertRowid as number;
+
+    expect(() =>
+      insertRunning({
+        ownerId: ownerB, // wrong owner for jobIdA
+        jobId: jobIdA,
+        startedAt: NOW,
+      }),
+    ).toThrow(/not found for owner/);
+
+    const count = (
+      getDb()
+        .prepare(`SELECT COUNT(*) AS n FROM monitoring_runs`)
+        .get() as { n: number }
+    ).n;
+    expect(count).toBe(0);
+  });
+
+  it("refuses to insert when jobId does not exist at all", () => {
+    expect(() =>
+      insertRunning({
+        ownerId: OWNER,
+        jobId: 99999,
+        startedAt: NOW,
+      }),
+    ).toThrow(/not found for owner/);
+  });
 });
 
 describe("finalize", () => {
@@ -166,11 +208,13 @@ describe("recoverOrphanRuns", () => {
     const jobA = seedJob();
     const jobB = seedJob();
 
-    const r1 = insertRunning({ ownerId: OWNER, jobId: jobA, startedAt: NOW });
-    const r2 = insertRunning({ ownerId: OWNER, jobId: jobB, startedAt: NOW });
-    // r3 is already terminal — recovery must NOT touch it.
+    // r3 este deja terminal — recovery NU trebuie sa-l atinga. Il inseram
+    // PRIMUL si-l finalizam astfel incat indexul partial unic
+    // idx_one_running_per_job sa permita ulterior un nou running pe jobA.
     const r3 = insertRunning({ ownerId: OWNER, jobId: jobA, startedAt: NOW });
     finalize(r3, { status: "ok", endedAt: NOW, durationMs: 100 });
+    const r1 = insertRunning({ ownerId: OWNER, jobId: jobA, startedAt: NOW });
+    const r2 = insertRunning({ ownerId: OWNER, jobId: jobB, startedAt: NOW });
 
     const recovered = recoverOrphanRuns();
     expect(recovered).toBe(2);
@@ -198,9 +242,11 @@ describe("purgeOldRuns", () => {
     const oldStartedAt = new Date(Date.now() - 91 * 86_400_000).toISOString();
     const freshStartedAt = new Date(Date.now() - 89 * 86_400_000).toISOString();
 
+    // idx_one_running_per_job permite un singur run `running` per job_id, deci
+    // finalizam fiecare run inainte de a-l insera pe urmatorul.
     const oldRun = insertRunning({ ownerId: OWNER, jobId, startedAt: oldStartedAt });
-    const freshRun = insertRunning({ ownerId: OWNER, jobId, startedAt: freshStartedAt });
     finalize(oldRun, { status: "ok", endedAt: oldStartedAt, durationMs: 100 });
+    const freshRun = insertRunning({ ownerId: OWNER, jobId, startedAt: freshStartedAt });
     finalize(freshRun, { status: "ok", endedAt: freshStartedAt, durationMs: 100 });
 
     const deleted = purgeOldRuns(90);

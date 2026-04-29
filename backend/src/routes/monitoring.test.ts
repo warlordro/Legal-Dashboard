@@ -779,7 +779,7 @@ describe("POST /jobs/:id/run + real Scheduler (#T6)", () => {
     const T = new Date("2026-04-28T10:00:00.000Z");
     const realScheduler = new Scheduler({
       clock: new FakeClock(T),
-      runner: noopOk,
+      runners: { dosar_soap: noopOk },
       // Long tickIntervalMs so the scheduler doesn't auto-tick during the
       // test; we drive runJobNow directly via the route.
       tickIntervalMs: 60_000,

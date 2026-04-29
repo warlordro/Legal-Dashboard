@@ -8,14 +8,14 @@
 // commit time only if the fixture coverage here is real.
 
 import { describe, expect, it } from "vitest";
-import type { AlertConfig } from "../../schemas/monitoring.ts";
-import type { Dosar } from "../../soap.ts";
+import type { AlertConfig } from "../../../schemas/monitoring.ts";
+import type { Dosar } from "../../../soap.ts";
 import {
   computeFilterFingerprint,
   diffDosarSoap,
   type DiffSnapshotPayload,
-} from "./diff.ts";
-import { buildSedintaKey, buildSedintaKeyWithoutSolutie } from "./sedintaKey.ts";
+} from "./dosarSoap.ts";
+import { buildSedintaKey, buildSedintaKeyWithoutSolutie } from "../sedintaKey.ts";
 
 // --- fixture helpers ------------------------------------------------------
 
@@ -67,7 +67,7 @@ function baselineSnapshot(
     currentDosar: dosar,
     alertConfig,
     now: "2026-04-27T10:00:00.000Z",
-    runId: 0,
+    prevSnapshotId: null,
   });
   return out.newSnapshot;
 }
@@ -83,7 +83,7 @@ describe("diffDosarSoap — first run / baseline", () => {
       currentDosar: null,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
     expect(out.newSnapshot.lastDosarPresent).toBe(false);
@@ -103,7 +103,7 @@ describe("diffDosarSoap — first run / baseline", () => {
       currentDosar: dosar,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
     expect(out.newSnapshot.lastDosarPresent).toBe(true);
@@ -128,7 +128,7 @@ describe("diffDosarSoap — stable observation", () => {
       currentDosar: dosar,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
     expect(out.newSnapshot.sedintaKeys).toEqual(prev.sedintaKeys);
@@ -143,7 +143,7 @@ describe("diffDosarSoap — stable observation", () => {
       currentDosar: dosar2,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
   });
@@ -168,7 +168,7 @@ describe("diffDosarSoap — termen_new", () => {
       currentDosar: after,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toHaveLength(1);
     expect(out.alerts[0]?.kind).toBe("termen_new");
@@ -184,7 +184,7 @@ describe("diffDosarSoap — termen_new", () => {
       currentDosar: after,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, notify_on_new_termen: false },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
     expect(out.newSnapshot.sedintaKeys).toHaveLength(1);
@@ -199,14 +199,15 @@ describe("diffDosarSoap — termen_new", () => {
       currentDosar: after,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     const b = diffDosarSoap({
       prevSnapshot: prev,
       currentDosar: after,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: "2099-01-01T00:00:00.000Z", // different now
-      runId: 999, // different runId — dedup key for termen_new is keyed by sedinta, not time
+      // SAME prevSnapshotId — same baseline, idempotent dedup key (#4).
+      prevSnapshotId: 100,
     });
     expect(a.alerts[0]?.dedupKey).toBe(b.alerts[0]?.dedupKey);
   });
@@ -228,7 +229,7 @@ describe("diffDosarSoap — termen_changed", () => {
       currentDosar: after,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toHaveLength(1);
     expect(out.alerts[0]?.kind).toBe("termen_changed");
@@ -257,7 +258,7 @@ describe("diffDosarSoap — termen_changed", () => {
       currentDosar: after,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts.every((a) => a.kind === "termen_new")).toBe(true);
     expect(out.alerts).toHaveLength(2);
@@ -282,7 +283,7 @@ describe("diffDosarSoap — solutie_aparuta", () => {
       currentDosar: after,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toHaveLength(1);
     expect(out.alerts[0]?.kind).toBe("solutie_aparuta");
@@ -310,7 +311,7 @@ describe("diffDosarSoap — solutie_aparuta", () => {
       currentDosar: after,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     const kinds = out.alerts.map((a) => a.kind);
     expect(kinds).toEqual(["solutie_aparuta"]);
@@ -325,7 +326,7 @@ describe("diffDosarSoap — solutie_aparuta", () => {
       currentDosar: after,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, notify_on_solution: false },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
   });
@@ -344,7 +345,7 @@ describe("diffDosarSoap — dosar_disappeared + reappearance", () => {
       currentDosar: null,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toHaveLength(1);
     expect(out.alerts[0]?.kind).toBe("dosar_disappeared");
@@ -359,14 +360,14 @@ describe("diffDosarSoap — dosar_disappeared + reappearance", () => {
       currentDosar: null,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     const after2 = diffDosarSoap({
       prevSnapshot: after1.newSnapshot,
       currentDosar: null,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: "2026-04-29T10:00:00.000Z",
-      runId: 2,
+      prevSnapshotId: 200,
     });
     expect(after2.alerts).toEqual([]);
   });
@@ -390,7 +391,7 @@ describe("diffDosarSoap — dosar_disappeared + reappearance", () => {
       currentDosar: dosar,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts.map((a) => a.kind)).toEqual(["dosar_new"]);
     expect(out.newSnapshot.lastDosarPresent).toBe(true);
@@ -404,11 +405,64 @@ describe("diffDosarSoap — dosar_disappeared + reappearance", () => {
       currentDosar: null,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, notify_on_dosar_disappeared: false },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
     // Snapshot still updates so we don't re-fire on next tick.
     expect(out.newSnapshot.lastDosarPresent).toBe(false);
+  });
+
+  // Constatare adversiala #4: ancora dedup pentru tranzitii e prev_snapshot_id
+  // (stabil pe acelasi baseline), nu runId (unic per executie). Doua diff-uri
+  // contra aceluiasi prev (replay / manual-trigger / retry tranzitoriu) trebuie
+  // sa produca aceeasi cheie dedup ca insertAlert sa absoarba duplicatul.
+  it("dosar_disappeared dedup key is stable across re-runs against the same prev_snapshot", () => {
+    const dosar = makeDosar({ sedinte: [makeSedinta({ data: "2026-04-19" })] });
+    const prev = baselineSnapshot(dosar);
+    const a = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: null,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    const b = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: null,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: "2099-01-01T00:00:00.000Z",
+      prevSnapshotId: 100,
+    });
+    expect(a.alerts[0]?.kind).toBe("dosar_disappeared");
+    expect(b.alerts[0]?.kind).toBe("dosar_disappeared");
+    expect(a.alerts[0]?.dedupKey).toBe(b.alerts[0]?.dedupKey);
+    expect(a.alerts[0]?.dedupKey).toBe("dosar_disappeared|s100");
+  });
+
+  it("dosar_new dedup key is stable across re-runs against the same prev_snapshot", () => {
+    const disappeared: DiffSnapshotPayload = {
+      sedintaKeys: [],
+      lastDosarPresent: false,
+      sedinteWithSolution: {},
+      filterFingerprint: computeFilterFingerprint(DEFAULT_ALERT_CONFIG),
+    };
+    const dosar = makeDosar({ sedinte: [makeSedinta({ data: "2026-04-19" })] });
+    const a = diffDosarSoap({
+      prevSnapshot: disappeared,
+      currentDosar: dosar,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      prevSnapshotId: 42,
+    });
+    const b = diffDosarSoap({
+      prevSnapshot: disappeared,
+      currentDosar: dosar,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: "2099-01-01T00:00:00.000Z",
+      prevSnapshotId: 42,
+    });
+    expect(a.alerts[0]?.dedupKey).toBe(b.alerts[0]?.dedupKey);
+    expect(a.alerts[0]?.dedupKey).toBe("dosar_new|s42");
   });
 });
 
@@ -431,7 +485,7 @@ describe("diffDosarSoap — filter changed reset", () => {
       currentDosar: after,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, stadii: ["Apel"] },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.alerts).toEqual([]);
     expect(out.resetReason).toBe("filter_changed");
@@ -446,7 +500,7 @@ describe("diffDosarSoap — filter changed reset", () => {
       currentDosar: dosar,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, categorii: ["Civil"] },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.resetReason).toBe("filter_changed");
     expect(out.alerts).toEqual([]);
@@ -460,7 +514,7 @@ describe("diffDosarSoap — filter changed reset", () => {
       currentDosar: dosar,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.resetReason).toBe(null);
   });
@@ -479,7 +533,7 @@ describe("diffDosarSoap — pre-diff filter (dosar excluded by alertConfig)", ()
       currentDosar: dosar,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, stadii: ["Apel"] },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.newSnapshot.lastDosarPresent).toBe(false);
     expect(out.newSnapshot.sedintaKeys).toEqual([]);
@@ -496,7 +550,7 @@ describe("diffDosarSoap — pre-diff filter (dosar excluded by alertConfig)", ()
       currentDosar: dosar,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, categorii: ["Civil"] },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.newSnapshot.lastDosarPresent).toBe(false);
   });
@@ -511,7 +565,7 @@ describe("diffDosarSoap — pre-diff filter (dosar excluded by alertConfig)", ()
       currentDosar: dosar,
       alertConfig: { ...DEFAULT_ALERT_CONFIG, stadii: ["APEL"] },
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     expect(out.newSnapshot.lastDosarPresent).toBe(true);
   });
@@ -532,7 +586,7 @@ describe("diffDosarSoap — snapshot shape", () => {
       currentDosar: dosar,
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
-      runId: 1,
+      prevSnapshotId: 100,
     });
     const k1 = buildSedintaKey({
       stadiuProcesual: "Apel",

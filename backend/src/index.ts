@@ -37,7 +37,13 @@ import dotenv from "dotenv";
 const __curdir = typeof __dirname !== "undefined"
   ? __dirname
   : path.dirname(fileURLToPath(import.meta.url));
-dotenv.config({ path: path.join(__curdir, "..", ".env"), override: true });
+// Audit 2026-04-29 R3: in productie nu suprascriem env-ul oferit de orchestrator
+// (Docker / systemd / Kubernetes secrets). `.env` din imagine ramane fallback,
+// dar nu poate sterge un secret injectat la runtime.
+dotenv.config({
+  path: path.join(__curdir, "..", ".env"),
+  override: process.env.NODE_ENV !== "production",
+});
 
 const app = new Hono();
 
@@ -192,21 +198,36 @@ try {
 // actual port-bind. Worse, EADDRINUSE etc. surface on the server's `error` event
 // — without an explicit handler the bind failure becomes an unhandledRejection and
 // `ready` would still flip to true.
+// Backup recurring (audit 2026-04-29 #7): doar boot-time invocation lasa un
+// proces cu uptime de zile fara backup-uri proaspete. Timer-ul ruleaza la 24h;
+// `runDailyBackup` are deja freshness guard intern, deci timer-ul nu duplica
+// snapshot-uri daca un alt proces a creat unul recent.
+const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let backupInterval: NodeJS.Timeout | null = null;
+
 const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   ready = true;
   // Defer the daily snapshot until the listener is verified up. Same fire-and-forget
   // semantics as before; keeps it off the boot critical path.
   runDailyBackup().catch((e) => console.warn("[backup] top-level:", e));
+  backupInterval = setInterval(() => {
+    runDailyBackup().catch((e) => console.warn("[backup] periodic:", e));
+  }, BACKUP_INTERVAL_MS);
+  // unref so a stuck timer doesn't keep Node alive past graceful shutdown.
+  backupInterval.unref?.();
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
   // shares the maintenance lock with backup so concurrent ticks pause cleanly
   // for a writer; starting it any earlier would race the schema/prewarm path
   // above.
   if (MONITORING_ENABLED) {
-    const runner = createDosarSoapRunner({ searchDosare: cautareDosare });
+    // Registry per kind. PR-5 va inregistra aici si name_soap (cand bulk
+    // name lists devin disponibile). Kindurile fara intrare aici sunt
+    // excluse din claim de claimDueJobs.enabledKinds.
+    const dosarSoapRunner = createDosarSoapRunner({ searchDosare: cautareDosare });
     monitoringScheduler = new Scheduler({
       clock: realClock,
-      runner,
+      runners: { dosar_soap: dosarSoapRunner },
       tickIntervalMs: 60_000,
       claimLimit: 25,
       jitterSecMax: 30,
@@ -228,23 +249,47 @@ httpServer.on("error", (err: Error) => {
 // - Server mode: SIGTERM/SIGINT from process manager or Ctrl+C.
 // - Electron mode: main.js calls the exported closer on `before-quit` (in-process bundle).
 // closeDb() is idempotent (null-guarded in schema.ts).
+const SHUTDOWN_DRAIN_MS = 30_000;
 let shuttingDown = false;
 async function gracefulShutdown(reason: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`[shutdown] ${reason} — draining scheduler + closing SQLite`);
-  // Order matters: stop the scheduler FIRST so no fresh tick claims a job
-  // after we close the DB handle. stop() aborts in-flight runners and waits
-  // for them to finalize their run rows before resolving.
-  if (monitoringScheduler) {
-    try {
-      await monitoringScheduler.stop();
-    } catch (e) {
-      console.error("[shutdown] scheduler.stop failed:", e);
-    }
-    setMonitoringScheduler(null);
-    monitoringScheduler = null;
+  console.log(`[shutdown] ${reason} — draining HTTP + scheduler + closing SQLite`);
+
+  // Audit 2026-04-29 R1: inchidem socket-ul de listen ca sa nu mai acceptam
+  // conexiuni noi, dar pastram conexiunile in-flight pana cand termina (sau
+  // pana la timeout-ul de drain). Fara asta, requesturi lung-running (AI/SSE)
+  // sunt taiate brutal la SIGTERM.
+  const closePromise = new Promise<void>((resolve) => {
+    httpServer.close((err) => {
+      if (err) console.error("[shutdown] httpServer.close error:", err);
+      resolve();
+    });
+  });
+  const drainTimeout = new Promise<void>((resolve) => {
+    setTimeout(() => {
+      console.warn(`[shutdown] HTTP drain timeout after ${SHUTDOWN_DRAIN_MS}ms — proceeding`);
+      resolve();
+    }, SHUTDOWN_DRAIN_MS).unref?.();
+  });
+
+  // Stop the scheduler in parallel with HTTP drain — both cooperate via the
+  // maintenance lock and the abort signal in JobRunner. Order matters only
+  // for closeDb() at the end.
+  const scheduler = monitoringScheduler;
+  monitoringScheduler = null;
+  setMonitoringScheduler(null);
+  const schedulerStop = scheduler
+    ? scheduler.stop().catch((e) => console.error("[shutdown] scheduler.stop failed:", e))
+    : Promise.resolve();
+
+  if (backupInterval) {
+    clearInterval(backupInterval);
+    backupInterval = null;
   }
+
+  await Promise.race([Promise.all([closePromise, schedulerStop]), drainTimeout]);
+
   try { closeDb(); } catch (e) {
     console.error("[shutdown] closeDb failed:", e);
   }

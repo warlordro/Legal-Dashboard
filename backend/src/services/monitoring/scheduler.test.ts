@@ -121,7 +121,7 @@ describe("Scheduler — crash recovery", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: new NoopOkRunner(),
+      runners: { dosar_soap: new NoopOkRunner() },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -146,7 +146,7 @@ describe("Scheduler — tick success path", () => {
     const runner = new NoopOkRunner();
     const sch = new Scheduler({
       clock,
-      runner,
+      runners: { dosar_soap: runner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -188,7 +188,7 @@ describe("Scheduler — tick error path", () => {
     const clock = new FakeClock(T0_DATE);
     const sch = new Scheduler({
       clock,
-      runner: new NoopErrorRunner(),
+      runners: { dosar_soap: new NoopErrorRunner() },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -212,7 +212,7 @@ describe("Scheduler — tick error path", () => {
     });
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: new NoopErrorRunner(),
+      runners: { dosar_soap: new NoopErrorRunner() },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -243,7 +243,7 @@ describe("Scheduler — tick error path", () => {
     });
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: new NoopErrorRunner(),
+      runners: { dosar_soap: new NoopErrorRunner() },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -278,7 +278,7 @@ describe("Scheduler — tick error path", () => {
     });
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: new NoopErrorRunner(),
+      runners: { dosar_soap: new NoopErrorRunner() },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -323,7 +323,7 @@ describe("Scheduler — getInflightAbortController", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: slowRunner,
+      runners: { dosar_soap: slowRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -361,7 +361,7 @@ describe("Scheduler — stop() race against parked tick", () => {
     const runner = new NoopOkRunner();
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner,
+      runners: { dosar_soap: runner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -419,7 +419,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     const runner = new NoopOkRunner();
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner,
+      runners: { dosar_soap: runner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -449,7 +449,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     });
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: new NoopOkRunner(),
+      runners: { dosar_soap: new NoopOkRunner() },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -481,7 +481,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: slowRunner,
+      runners: { dosar_soap: slowRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -539,7 +539,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: slowRunner,
+      runners: { dosar_soap: slowRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -605,7 +605,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: fastRunner,
+      runners: { dosar_soap: fastRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -673,7 +673,7 @@ describe("Scheduler — stop() drain", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: slowRunner,
+      runners: { dosar_soap: slowRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -729,7 +729,7 @@ describe("Scheduler — stop() drain", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: slowRunner,
+      runners: { dosar_soap: slowRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -784,7 +784,7 @@ describe("Scheduler — tick error survival (C4)", () => {
     const runner = new NoopOkRunner();
     const sch = new Scheduler({
       clock,
-      runner,
+      runners: { dosar_soap: runner },
       tickIntervalMs: 1_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -839,7 +839,7 @@ describe("Scheduler — runner reject becomes RUNNER_THREW (#T3)", () => {
     };
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: throwingRunner,
+      runners: { dosar_soap: throwingRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -883,7 +883,7 @@ describe("Scheduler — runner reject becomes RUNNER_THREW (#T3)", () => {
     };
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: oddRunner,
+      runners: { dosar_soap: oddRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -936,7 +936,7 @@ describe("Scheduler — concurrent tick lease semantics (#T4)", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: slowRunner,
+      runners: { dosar_soap: slowRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -989,7 +989,7 @@ describe("Scheduler — source_error recovery cycle (#T5)", () => {
     {
       const sch = new Scheduler({
         clock: new FakeClock(T0_DATE),
-        runner: new NoopErrorRunner(),
+        runners: { dosar_soap: new NoopErrorRunner() },
         tickIntervalMs: 60_000,
         claimLimit: 10,
         jitterSecMax: 0,
@@ -1016,7 +1016,7 @@ describe("Scheduler — source_error recovery cycle (#T5)", () => {
     {
       const sch = new Scheduler({
         clock: new FakeClock(new Date(T_RECOVERY)),
-        runner: new NoopOkRunner(),
+        runners: { dosar_soap: new NoopOkRunner() },
         tickIntervalMs: 60_000,
         claimLimit: 10,
         jitterSecMax: 0,
@@ -1037,7 +1037,7 @@ describe("Scheduler — source_error recovery cycle (#T5)", () => {
       const t = new Date(new Date(nextDue).getTime() + 60_000).toISOString();
       const sch = new Scheduler({
         clock: new FakeClock(new Date(t)),
-        runner: new NoopErrorRunner(),
+        runners: { dosar_soap: new NoopErrorRunner() },
         tickIntervalMs: 60_000,
         claimLimit: 10,
         jitterSecMax: 0,
@@ -1053,7 +1053,7 @@ describe("Scheduler — source_error recovery cycle (#T5)", () => {
     const t5 = new Date(new Date(nextDue).getTime() + 60_000).toISOString();
     const sch = new Scheduler({
       clock: new FakeClock(new Date(t5)),
-      runner: new NoopErrorRunner(),
+      runners: { dosar_soap: new NoopErrorRunner() },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -1091,7 +1091,7 @@ describe("Scheduler — recoverOrphanRuns runs before tick #1 (#T7)", () => {
     const runner = new NoopOkRunner();
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner,
+      runners: { dosar_soap: runner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -1144,7 +1144,7 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
     const clock = new FakeClock(T0_DATE);
     const sch = new Scheduler({
       clock,
-      runner: new NoopOkRunner(),
+      runners: { dosar_soap: new NoopOkRunner() },
       tickIntervalMs: 2 * 86_400_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -1166,7 +1166,7 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
     const clock = new FakeClock(T0_DATE);
     const sch = new Scheduler({
       clock,
-      runner: new NoopOkRunner(),
+      runners: { dosar_soap: new NoopOkRunner() },
       tickIntervalMs: 2 * 86_400_000,
       claimLimit: 10,
       jitterSecMax: 0,
@@ -1206,7 +1206,7 @@ describe("Scheduler — finalize lock window only (#T2)", () => {
 
     const sch = new Scheduler({
       clock: new FakeClock(T0_DATE),
-      runner: slowRunner,
+      runners: { dosar_soap: slowRunner },
       tickIntervalMs: 60_000,
       claimLimit: 10,
       jitterSecMax: 0,

@@ -67,3 +67,14 @@ export function deleteSearch(id: number, ownerId = "local"): boolean {
   const res = db.prepare(`DELETE FROM rnpm_searches WHERE id = ? AND owner_id = ?`).run(id, ownerId);
   return res.changes > 0;
 }
+
+// Tenant guard pentru continuari de cautare RNPM. Clientul poate trimite un
+// `existingSearchId` arbitrar; fara aceasta verificare, avizele descoperite
+// in continuare s-ar lega de istoricul altui owner. Vezi audit 2026-04-29 #11.
+export function searchBelongsToOwner(id: number, ownerId: string): boolean {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT 1 FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1`)
+    .get(id, ownerId);
+  return row !== undefined;
+}

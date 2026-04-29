@@ -136,6 +136,60 @@ describe("insertSnapshot", () => {
       .get(id) as { run_id: number | null };
     expect(row.run_id).toBeNull();
   });
+
+  // Constatare adversiala #2 — tenant-isolation guard simetric cu insertAlert.
+  // Fara guard, un caller care primeste un job_id al altui tenant ar putea
+  // atasa un snapshot in numele lui, iar getLatestSnapshot(owner=A) l-ar
+  // returna in tickul urmator -> diff cross-tenant contaminat.
+  it("refuses to insert when (jobId, ownerId) belong to different tenants", () => {
+    const ownerA = "tenant-a";
+    const ownerB = "tenant-b";
+    const jobIdA = getDb()
+      .prepare(
+        `INSERT INTO monitoring_jobs
+           (owner_id, kind, target_json, target_hash, cadence_sec,
+            alert_config_json, next_run_at)
+         VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
+      )
+      .run(ownerA, "hA").lastInsertRowid as number;
+    const runIdA = getDb()
+      .prepare(
+        `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
+         VALUES (?, ?, ?, 'running')`,
+      )
+      .run(ownerA, jobIdA, "2026-04-28T10:00:00.000Z").lastInsertRowid as number;
+
+    expect(() =>
+      insertSnapshot({
+        ownerId: ownerB, // wrong owner for jobIdA
+        jobId: jobIdA,
+        runId: runIdA,
+        observedAt: "2026-04-28T10:00:00.000Z",
+        payloadHash: "cross-tenant",
+        payloadJson: "{}",
+      }),
+    ).toThrow(/not found for owner/);
+
+    const count = (
+      getDb()
+        .prepare(`SELECT COUNT(*) AS n FROM monitoring_snapshots`)
+        .get() as { n: number }
+    ).n;
+    expect(count).toBe(0);
+  });
+
+  it("refuses to insert when jobId does not exist at all", () => {
+    expect(() =>
+      insertSnapshot({
+        ownerId: OWNER,
+        jobId: 99999,
+        runId: 1,
+        observedAt: "2026-04-28T10:00:00.000Z",
+        payloadHash: "ghost",
+        payloadJson: "{}",
+      }),
+    ).toThrow(/not found for owner/);
+  });
 });
 
 describe("getLatestSnapshot", () => {
