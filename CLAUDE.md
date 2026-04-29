@@ -69,7 +69,7 @@ legal-dashboard/
 - `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` — kill switch operational pentru a opri temporar claim-ul pe anumite tipuri de joburi de monitoring
 
 ## Arhitectura
-- **Frontend**: React 18, Vite 5, custom CSS (Tailwind in deps dar deprecat), Recharts, DOMPurify
+- **Frontend**: React 18, Vite 5, Tailwind + clsx + tailwind-merge (`cn()` helper, ~40 callers in `components/ui/`), Recharts, DOMPurify
 - **Backend**: Hono + `@hono/node-server`, SOAP XML parsing manual
 - **DB**: SQLite via `better-sqlite3`, repositories + schema cu `owner_id DEFAULT 'local'` pe toate tabelele
 - **AI**: Anthropic SDK, OpenAI SDK, Google Generative AI SDK
