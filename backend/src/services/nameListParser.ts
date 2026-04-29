@@ -116,13 +116,17 @@ interface HeaderMap {
   nume: number;
   cnp?: number;
   cui?: number;
+  cadenceSec?: number;
+  notes?: number;
 }
 
 // Cauta coloana "nume" in headere; daca lipseste → ParseError. Restul sunt
 // optionale. Acceptam cateva sinonime ca toleranta de input:
 //   nume ← "nume", "name", "denumire"
-//   cnp  ← "cnp"
-//   cui  ← "cui", "cif"
+//   cnp         ← "cnp"
+//   cui         ← "cui", "cif"
+//   cadence_sec ← "cadence_sec", "cadenta", "interval"
+//   notes       ← "notes", "note", "observatii"
 //
 // Coloana "tip" / "categorie" / "kind" e ignorata daca apare — kept-for-
 // backward-compat: fisiere vechi cu coloana tip nu sunt rejectate, doar
@@ -131,6 +135,8 @@ function buildHeaderMap(headers: string[]): HeaderMap {
   let nume = -1;
   let cnp: number | undefined;
   let cui: number | undefined;
+  let cadenceSec: number | undefined;
+  let notes: number | undefined;
   for (let i = 0; i < headers.length; i++) {
     const h = normalizeHeader(headers[i] ?? "");
     if (nume === -1 && (h === "nume" || h === "name" || h === "denumire")) {
@@ -139,6 +145,16 @@ function buildHeaderMap(headers: string[]): HeaderMap {
       cnp = i;
     } else if (cui === undefined && (h === "cui" || h === "cif")) {
       cui = i;
+    } else if (
+      cadenceSec === undefined &&
+      (h === "cadence_sec" || h === "cadenta" || h === "interval")
+    ) {
+      cadenceSec = i;
+    } else if (
+      notes === undefined &&
+      (h === "notes" || h === "note" || h === "observatii")
+    ) {
+      notes = i;
     }
   }
   if (nume === -1) {
@@ -147,7 +163,7 @@ function buildHeaderMap(headers: string[]): HeaderMap {
       "Coloana 'nume' lipseste din header. Acceptate: 'nume', 'name', 'denumire'.",
     );
   }
-  return { nume, cnp, cui };
+  return { nume, cnp, cui, cadenceSec, notes };
 }
 
 // Normalizare interna a numelui: lowercase + diacritic strip + collapse
@@ -159,6 +175,21 @@ export function normalizeName(s: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+const CADENCE_LABEL_MAP: Record<string, number> = {
+  "4h": 14400,
+  "8h": 28800,
+  "12h": 43200,
+  "24h": 86400,
+};
+
+function parseCadence(raw: unknown): number | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const s = String(raw).trim().toLowerCase();
+  if (!s) return null;
+  const n = CADENCE_LABEL_MAP[s] ?? Number(s);
+  return Number.isInteger(n) && n >= 600 && n <= 86400 ? n : null;
 }
 
 interface RawRow {
@@ -295,6 +326,12 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
     const cuiRaw = headerMap.cui !== undefined
       ? String(cells[headerMap.cui] ?? "").trim() || null
       : null;
+    const cadenceSec = headerMap.cadenceSec !== undefined
+      ? parseCadence(cells[headerMap.cadenceSec])
+      : null;
+    const notes = headerMap.notes !== undefined
+      ? String(cells[headerMap.notes] ?? "").trim() || null
+      : null;
 
     const nameNormalized = normalizeName(nameRaw);
 
@@ -339,6 +376,8 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
       nameNormalized,
       cnp: cnpRaw,
       cui: cuiRaw,
+      cadenceSec,
+      notes,
       validation,
       validationMsg,
     });
@@ -367,6 +406,8 @@ export interface RawNameItem {
   nameRaw: string;
   cnp?: string | null;
   cui?: string | null;
+  cadenceSec?: number | null;
+  notes?: string | null;
 }
 
 export interface ValidatedItem extends CreateListItemInput {
@@ -393,6 +434,8 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
     const nameNormalized = normalizeName(nameRaw);
     const cnp = item.cnp ?? null;
     const cui = item.cui ?? null;
+    const cadenceSec = item.cadenceSec ?? null;
+    const notes = item.notes ? String(item.notes).trim() || null : null;
 
     let validation: NameListItemValidation = "ok";
     let validationMsg: string | null = null;
@@ -435,6 +478,8 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
       nameNormalized,
       cnp,
       cui,
+      cadenceSec,
+      notes,
       validation,
       validationMsg,
     });

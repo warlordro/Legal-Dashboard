@@ -19,6 +19,7 @@ import { nameListsRouter } from "./routes/nameLists.ts";
 import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
+import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { closeDb } from "./db/schema.ts";
@@ -224,13 +225,11 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   // for a writer; starting it any earlier would race the schema/prewarm path
   // above.
   if (MONITORING_ENABLED) {
-    // Registry per kind. PR-5 va inregistra aici si name_soap (cand bulk
-    // name lists devin disponibile). Kindurile fara intrare aici sunt
-    // excluse din claim de claimDueJobs.enabledKinds.
     const dosarSoapRunner = createDosarSoapRunner({ searchDosare: cautareDosare });
+    const nameSoapRunner = createNameSoapRunner({ searchDosare: cautareDosare });
     monitoringScheduler = new Scheduler({
       clock: realClock,
-      runners: { dosar_soap: dosarSoapRunner },
+      runners: { dosar_soap: dosarSoapRunner, name_soap: nameSoapRunner },
       tickIntervalMs: 60_000,
       claimLimit: 25,
       jitterSecMax: 30,

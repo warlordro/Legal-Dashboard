@@ -44,6 +44,8 @@ export interface NameListItemRow {
   name_normalized: string;
   cnp: string | null;
   cui: string | null;
+  cadence_sec: number | null;
+  notes: string | null;
   validation: NameListItemValidation;
   validation_msg: string | null;
   monitoring_job_id: number | null;
@@ -55,6 +57,8 @@ export interface CreateListItemInput {
   nameNormalized: string;
   cnp?: string | null;
   cui?: string | null;
+  cadenceSec?: number | null;
+  notes?: string | null;
   validation: NameListItemValidation;
   validationMsg?: string | null;
 }
@@ -120,8 +124,8 @@ export function createList(input: CreateListInput): CreateListResult {
       const insertItem = db.prepare(
         `INSERT INTO name_list_items
            (owner_id, list_id, name_raw, name_normalized,
-            cnp, cui, validation, validation_msg)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+            cnp, cui, cadence_sec, notes, validation, validation_msg)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
       for (const item of input.items) {
         insertItem.run(
@@ -131,6 +135,8 @@ export function createList(input: CreateListInput): CreateListResult {
           item.nameNormalized,
           item.cnp ?? null,
           item.cui ?? null,
+          item.cadenceSec ?? null,
+          item.notes ?? null,
           item.validation,
           item.validationMsg ?? null,
         );

@@ -165,7 +165,6 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
     const nameNorm = String(
       r.nume ?? r.name_normalized ?? r.denumire ?? "",
     ).trim();
-
     if (!numarDosar && !nameNorm) {
       return; // empty row — skip silently
     }

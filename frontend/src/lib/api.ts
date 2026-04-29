@@ -395,6 +395,88 @@ export const monitoring = {
   },
 };
 
+export type NameListValidation = "ok" | "warn" | "rejected";
+
+export interface NameListPreviewRow {
+  rowIndex: number;
+  nameRaw: string;
+  nameNormalized: string;
+  cnp?: string | null;
+  cui?: string | null;
+  cadenceSec?: number | null;
+  notes?: string | null;
+  validation: NameListValidation;
+  validationMsg?: string | null;
+}
+
+export interface NameListTotals {
+  total: number;
+  ok: number;
+  warn: number;
+  rejected: number;
+}
+
+export interface NameListPreviewResult {
+  rows: NameListPreviewRow[];
+  totals: NameListTotals;
+  sha256: string;
+  sourceFilename: string | null;
+}
+
+export interface NameListCommitInput {
+  title: string;
+  sourceFilename?: string | null;
+  sourceSha256: string;
+  items: Array<{
+    nameRaw: string;
+    cnp?: string | null;
+    cui?: string | null;
+    cadenceSec?: number | null;
+    notes?: string | null;
+  }>;
+  autoCreateJobs?: boolean;
+  maxJobs?: number;
+}
+
+export interface NameListCommitResult {
+  list: {
+    id: number;
+    title: string;
+    source_filename: string | null;
+    source_sha256: string;
+    total_rows: number;
+    valid_rows: number;
+    created_at: string;
+    archived_at: string | null;
+  };
+  duplicate: boolean;
+  totals: NameListTotals;
+  jobsCreated: number;
+  jobsTotal: number;
+  partial: boolean;
+}
+
+export const nameLists = {
+  preview: async (file: File): Promise<NameListPreviewResult> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/v1/name-lists/preview`, {
+      method: "POST",
+      body: fd,
+    });
+    return unwrapMonitoring<NameListPreviewResult>(res);
+  },
+
+  commit: async (input: NameListCommitInput): Promise<NameListCommitResult> => {
+    const res = await fetch(`/api/v1/name-lists/commit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return unwrapMonitoring<NameListCommitResult>(res);
+  },
+};
+
 export function formatMonitoringTarget(job: MonitoringJob): string {
   try {
     const t = JSON.parse(job.target_json) as Record<string, unknown>;

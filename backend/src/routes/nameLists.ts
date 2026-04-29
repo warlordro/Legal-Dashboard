@@ -27,6 +27,7 @@ import { recordAudit } from "../db/auditRepository.ts";
 import {
   createList,
   getCommittableItems,
+  listLists,
   linkItemToJob,
 } from "../db/nameListsRepository.ts";
 import {
@@ -128,6 +129,19 @@ async function readLimitedJsonBody(
 
 export const nameListsRouter = new Hono();
 
+// GET / - list imported name lists for the current owner. Lightweight read
+// endpoint used by the UI and the PR-5 k6 harness.
+nameListsRouter.get("/", (c) => {
+  const ownerId = getOwnerId(c);
+  const page = Math.max(1, Number(c.req.query("page") ?? 1));
+  const pageSize = Math.min(100, Math.max(1, Number(c.req.query("pageSize") ?? 20)));
+  const includeArchived = c.req.query("includeArchived") === "true";
+  if (!Number.isInteger(page) || !Number.isInteger(pageSize)) {
+    return c.json(fail("invalid_query", "Parametri de cautare invalizi", c), 400);
+  }
+  return c.json(ok(listLists({ ownerId, page, pageSize, includeArchived }), c));
+});
+
 // POST /preview — multipart/form-data, field "file". Returneaza preview-ul
 // (rows + totals + sha256) fara sa atinga DB-ul. UI-ul afiseaza tabelul si
 // userul confirma cu /commit.
@@ -206,7 +220,7 @@ nameListsRouter.post("/preview", limitPreviewBody, async (c) => {
 // POST / — commit. Body JSON: {title, sourceFilename?, sourceSha256, items[],
 // autoCreateJobs?, maxJobs?}. Re-valideaza items-ul, creeaza lista (idempotent
 // pe sha256), opcional creeaza joburi monitoring_jobs(kind='name_soap').
-nameListsRouter.post("/", limitCommitBody, async (c) => {
+async function commitNameList(c: Context): Promise<Response> {
   const ownerId = getOwnerId(c);
 
   const bodyResult = await readLimitedJsonBody(c, COMMIT_BODY_LIMIT, commitTooLarge);
@@ -242,6 +256,8 @@ nameListsRouter.post("/", limitCommitBody, async (c) => {
         nameNormalized: it.nameNormalized,
         cnp: it.cnp ?? null,
         cui: it.cui ?? null,
+        cadenceSec: it.cadenceSec ?? null,
+        notes: it.notes ?? null,
         validation: it.validation,
         validationMsg: it.validationMsg ?? null,
       })),
@@ -295,8 +311,9 @@ nameListsRouter.post("/", limitCommitBody, async (c) => {
                 target: {
                   name_normalized: item.name_normalized,
                 },
-                cadence_sec: defaultCadenceSec,
+                cadence_sec: item.cadence_sec ?? defaultCadenceSec,
                 alert_config: defaultAlertConfig,
+                notes: item.notes ?? undefined,
               },
             });
             // linkItemToJob este idempotent (UPDATE doar daca
@@ -359,4 +376,7 @@ nameListsRouter.post("/", limitCommitBody, async (c) => {
     ),
     status,
   );
-});
+}
+
+nameListsRouter.post("/", limitCommitBody, commitNameList);
+nameListsRouter.post("/commit", limitCommitBody, commitNameList);

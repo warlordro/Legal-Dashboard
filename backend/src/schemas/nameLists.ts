@@ -33,6 +33,8 @@ export const RawNameItemSchema = z
     nameRaw: z.string().min(1).max(MAX_NAME_RAW_LEN_PER_ITEM),
     cnp: z.string().max(MAX_ID_FIELD_LEN).nullable().optional(),
     cui: z.string().max(MAX_ID_FIELD_LEN).nullable().optional(),
+    cadenceSec: z.number().int().min(600).max(86400).nullable().optional(),
+    notes: z.string().max(2000).nullable().optional(),
   })
   .strict();
 

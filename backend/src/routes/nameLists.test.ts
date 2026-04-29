@@ -66,11 +66,11 @@ async function postPreviewCsv(
 async function postCommit(
   app: ReturnType<typeof buildTestApp>,
   body: unknown,
-  opts: { owner?: string; rawBody?: string } = {},
+  opts: { owner?: string; rawBody?: string; path?: string } = {},
 ): Promise<Response> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.owner) headers["x-test-owner"] = opts.owner;
-  return app.request("/api/v1/name-lists", {
+  return app.request(opts.path ?? "/api/v1/name-lists", {
     method: "POST",
     headers,
     body: opts.rawBody !== undefined ? opts.rawBody : JSON.stringify(body),
@@ -194,6 +194,14 @@ describe("POST /api/v1/name-lists (commit)", () => {
     expect(json.data.duplicate).toBe(false);
     expect(json.data.totals.ok).toBe(2);
     expect(json.data.jobsCreated).toBe(0); // autoCreateJobs default false
+  });
+
+  it("accepta si aliasul /commit pentru flow-ul preview -> commit", async () => {
+    const app = buildTestApp();
+    const res = await postCommit(app, validBody, { path: "/api/v1/name-lists/commit" });
+    expect(res.status).toBe(201);
+    const json = (await res.json()) as { data: { list: { title: string } } };
+    expect(json.data.list.title).toBe("Lista test 1");
   });
 
   it("scrie audit row monitoring.name_list.created la insert nou", async () => {
@@ -470,5 +478,33 @@ describe("POST /api/v1/name-lists (commit)", () => {
     expect(bobJson.data.duplicate).toBe(false);
     expect(bobJson.data.list.id).not.toBe(aliceJson.data.list.id);
     expect(bobJson.data.list.owner_id).toBe("bob");
+  });
+});
+
+describe("GET /api/v1/name-lists", () => {
+  it("listeaza listele owner-scoped", async () => {
+    const app = buildTestApp();
+    await postCommit(app, {
+      title: "Lista Alice",
+      sourceFilename: "a.csv",
+      sourceSha256: "e".repeat(64),
+      items: [{ nameRaw: "Alice Test" }],
+    }, { owner: "alice" });
+    await postCommit(app, {
+      title: "Lista Bob",
+      sourceFilename: "b.csv",
+      sourceSha256: "f".repeat(64),
+      items: [{ nameRaw: "Bob Test" }],
+    }, { owner: "bob" });
+
+    const res = await app.request("/api/v1/name-lists?page=1&pageSize=10", {
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: { rows: Array<{ title: string }>; total: number };
+    };
+    expect(json.data.total).toBe(1);
+    expect(json.data.rows[0]!.title).toBe("Lista Alice");
   });
 });

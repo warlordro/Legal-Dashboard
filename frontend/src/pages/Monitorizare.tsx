@@ -10,14 +10,17 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import {
   monitoring,
+  nameLists,
   formatMonitoringTarget,
-  MonitoringApiError,
   type MonitoringJob,
+  type NameListPreviewResult,
+  type NameListCommitResult,
+  type NameListValidation,
+  MonitoringApiError,
 } from "@/lib/api";
+import { downloadBulkTemplate, parseBulkFile, type BulkRowDosar } from "@/lib/monitoringBulkTemplate";
 import { parseSqliteUtc } from "@/lib/utils";
-import { downloadBulkTemplate, parseBulkFile } from "@/lib/monitoringBulkTemplate";
 
-const NUMAR_DOSAR_RE = /^\d{1,7}\/\d{1,5}\/\d{4}(?:\/[A-Za-z0-9]+)?$/;
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
   { label: "4h", sec: 14400 },
   { label: "8h", sec: 28800 },
@@ -45,19 +48,10 @@ function formatCadence(sec: number): string {
   return `${Math.round(sec / 60)}min`;
 }
 
-interface BulkResultItem {
-  rowNumber: number;
-  display: string;
-  status: "added" | "exists" | "error";
-  message?: string;
-}
-
-interface BulkResult {
-  total: number;
+interface BulkDosarResult {
   added: number;
   exists: number;
   errors: number;
-  items: BulkResultItem[];
 }
 
 export default function Monitorizare() {
@@ -69,8 +63,13 @@ export default function Monitorizare() {
   // Bulk-upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
-  const [bulkProgress, setBulkProgress] = useState({ done: 0, total: 0 });
-  const [bulkResult, setBulkResult] = useState<BulkResult | null>(null);
+  const [bulkPreview, setBulkPreview] = useState<NameListPreviewResult | null>(null);
+  const [bulkTitle, setBulkTitle] = useState("");
+  const [bulkFilter, setBulkFilter] = useState<NameListValidation | "all">("all");
+  const [bulkCommit, setBulkCommit] = useState<NameListCommitResult | null>(null);
+  const [bulkCommitProgress, setBulkCommitProgress] = useState({ created: 0, remaining: 0 });
+  const [bulkDosarRows, setBulkDosarRows] = useState<BulkRowDosar[]>([]);
+  const [bulkDosarResult, setBulkDosarResult] = useState<BulkDosarResult | null>(null);
   const [bulkError, setBulkError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -133,83 +132,44 @@ export default function Monitorizare() {
   const handleBulkUpload = async (file: File) => {
     setBulkBusy(true);
     setBulkError(null);
-    setBulkResult(null);
-    setBulkProgress({ done: 0, total: 0 });
+    setBulkPreview(null);
+    setBulkCommit(null);
+    setBulkDosarRows([]);
+    setBulkDosarResult(null);
+    setBulkCommitProgress({ created: 0, remaining: 0 });
     try {
       const buffer = await file.arrayBuffer();
-      const { valid, invalid } = parseBulkFile(buffer, file.name);
-      if (valid.length === 0 && invalid.length === 0) {
-        setBulkError("Fisierul nu contine randuri valide.");
-        return;
-      }
-      const items: BulkResultItem[] = invalid.map((it) => ({
-        rowNumber: it.rowNumber,
-        display: it.display,
-        status: "error" as const,
-        message: it.message,
-      }));
-      let added = 0;
-      let exists = 0;
-      let errors = invalid.length;
-      const total = valid.length + invalid.length;
-      setBulkProgress({ done: invalid.length, total });
+      const parsedBulk = parseBulkFile(buffer, file.name);
+      const dosarRows = parsedBulk.valid.filter((row): row is BulkRowDosar => row.kind === "dosar");
+      const nameRows = parsedBulk.valid.filter((row) => row.kind === "nume");
+      setBulkDosarRows(dosarRows);
 
-      for (let i = 0; i < valid.length; i++) {
-        const row = valid[i];
-        const display = row.kind === "dosar" ? row.numar_dosar : row.name_normalized;
-        if (row.kind === "dosar" && !NUMAR_DOSAR_RE.test(row.numar_dosar)) {
-          items.push({
-            rowNumber: row.rowNumber,
-            display,
-            status: "error",
-            message: "Format numar_dosar invalid",
-          });
-          errors++;
-          setBulkProgress({ done: invalid.length + i + 1, total });
-          continue;
-        }
-        try {
-          // Idempotent per row — re-uploading same file skips duplicates.
-          const reqId = `bulk-${display}-${Date.now()}-${i}`;
-          const job = row.kind === "dosar"
-            ? await monitoring.createDosar({
-                numar_dosar: row.numar_dosar,
-                cadence_sec: row.cadence_sec,
-                notes: row.notes,
-                client_request_id: reqId,
-              })
-            : await monitoring.createName({
-                name_normalized: row.name_normalized,
-                cadence_sec: row.cadence_sec,
-                notes: row.notes,
-                client_request_id: reqId,
-              });
-          const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
-          items.push({
-            rowNumber: row.rowNumber,
-            display,
-            status: wasJustCreated ? "added" : "exists",
-          });
-          if (wasJustCreated) added++;
-          else exists++;
-        } catch (err) {
-          const msg = err instanceof MonitoringApiError
-            ? `${err.message} (${err.code})`
-            : err instanceof Error
-              ? err.message
-              : "Eroare";
-          items.push({
-            rowNumber: row.rowNumber,
-            display,
-            status: "error",
-            message: msg,
-          });
-          errors++;
-        }
-        setBulkProgress({ done: invalid.length + i + 1, total });
+      if (parsedBulk.invalid.length > 0) {
+        setBulkError(`${parsedBulk.invalid.length} randuri din XLSX au fost ignorate: ${parsedBulk.invalid[0]?.message ?? "format invalid"}`);
       }
-      setBulkResult({ total, added, exists, errors, items });
-      await refresh();
+
+      if (nameRows.length > 0) {
+        const csv = [
+          "nume,cadence_sec,notes",
+          ...nameRows.map((row) =>
+            [
+              csvCell(row.name_normalized),
+              row.cadence_sec ? String(row.cadence_sec) : "",
+              csvCell(row.notes ?? ""),
+            ].join(","),
+          ),
+        ].join("\n");
+        const nameFile = new File([`${csv}\n`], file.name.replace(/\.[^.]+$/, "-nume.csv"), {
+          type: "text/csv",
+        });
+        const preview = await nameLists.preview(nameFile);
+        setBulkPreview(preview);
+      } else if (dosarRows.length === 0) {
+        const preview = await nameLists.preview(file);
+        setBulkPreview(preview);
+      }
+      setBulkTitle(file.name.replace(/\.[^.]+$/, "") || "Lista nume");
+      setBulkFilter("all");
     } catch (err) {
       setBulkError(err instanceof Error ? err.message : "Eroare la procesare fisier.");
     } finally {
@@ -217,6 +177,100 @@ export default function Monitorizare() {
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
+
+  function csvCell(value: string): string {
+    if (!/[",\n\r]/.test(value)) return value;
+    return `"${value.replace(/"/g, '""')}"`;
+  }
+
+  const handleBulkCommit = async () => {
+    if (!bulkPreview && bulkDosarRows.length === 0) return;
+    const title = bulkTitle.trim();
+    if (!title) {
+      setBulkError("Completeaza un titlu pentru lista.");
+      return;
+    }
+
+    const committable = (bulkPreview?.rows ?? [])
+      .filter((row) => row.validation !== "rejected")
+      .map((row) => ({
+        nameRaw: row.nameRaw,
+        cadenceSec: row.cadenceSec ?? null,
+        notes: row.notes ?? null,
+      }));
+    if (committable.length === 0 && bulkDosarRows.length === 0) {
+      setBulkError("Nu exista randuri ok/warn sau dosare de importat.");
+      return;
+    }
+
+    setBulkBusy(true);
+    setBulkError(null);
+    setBulkCommit(null);
+    setBulkDosarResult(null);
+    setBulkCommitProgress({ created: 0, remaining: committable.length + bulkDosarRows.length });
+    try {
+      let dosarAdded = 0;
+      let dosarExists = 0;
+      let dosarErrors = 0;
+      for (let i = 0; i < bulkDosarRows.length; i++) {
+        const row = bulkDosarRows[i]!;
+        try {
+          const job = await monitoring.createDosar({
+            numar_dosar: row.numar_dosar,
+            cadence_sec: row.cadence_sec,
+            notes: row.notes,
+            client_request_id: `bulk-dosar-${row.numar_dosar}-${i}`,
+          });
+          const justCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
+          if (justCreated) dosarAdded++;
+          else dosarExists++;
+        } catch (err) {
+          dosarErrors++;
+          if (err instanceof MonitoringApiError) {
+            console.warn("[monitoring] bulk dosar row failed", {
+              row: row.rowNumber,
+              code: err.code,
+              message: err.message,
+            });
+          }
+        }
+        setBulkCommitProgress({ created: dosarAdded, remaining: bulkDosarRows.length - i - 1 + committable.length });
+      }
+      if (bulkDosarRows.length > 0) {
+        setBulkDosarResult({ added: dosarAdded, exists: dosarExists, errors: dosarErrors });
+      }
+
+      let last: NameListCommitResult | null = null;
+      let createdTotal = 0;
+      if (bulkPreview && committable.length > 0) {
+        do {
+          last = await nameLists.commit({
+            title,
+            sourceFilename: bulkPreview.sourceFilename,
+            sourceSha256: bulkPreview.sha256,
+            items: committable,
+            autoCreateJobs: true,
+            maxJobs: 100,
+          });
+          createdTotal += last.jobsCreated;
+          setBulkCommitProgress({
+            created: dosarAdded + createdTotal,
+            remaining: last.partial ? Math.max(last.jobsTotal - 100, 0) : 0,
+          });
+        } while (last.partial);
+        setBulkCommit(last);
+      }
+      await refresh();
+    } catch (err) {
+      setBulkError(err instanceof Error ? err.message : "Eroare la commit import.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const visiblePreviewRows = bulkPreview
+    ? bulkPreview.rows.filter((row) => bulkFilter === "all" || row.validation === bulkFilter)
+    : [];
 
   return (
     <div className="p-6 space-y-6 max-w-6xl mx-auto">
@@ -247,14 +301,10 @@ export default function Monitorizare() {
         </CardHeader>
         <CardContent>
           <p className="text-sm text-muted-foreground mb-3">
-            Descarca template-ul, completeaza{" "}
-            <code className="px-1 rounded bg-muted">numar_dosar</code> SAU{" "}
-            <code className="px-1 rounded bg-muted">nume</code> pe fiecare rand (nu ambele),
-            optional <code className="px-1 rounded bg-muted">cadence_sec</code> (dropdown:{" "}
-            <code className="px-1 rounded bg-muted">4h</code>/<code className="px-1 rounded bg-muted">8h</code>/
-            <code className="px-1 rounded bg-muted">12h</code>/<code className="px-1 rounded bg-muted">24h</code>)
-            si <code className="px-1 rounded bg-muted">notes</code>, apoi incarca-l inapoi.
-            Format: XLSX sau CSV.
+            Incarca XLSX/CSV cu <code className="px-1 rounded bg-muted">numar_dosar</code>{" "}
+            sau <code className="px-1 rounded bg-muted">nume</code>. Pentru nume, serverul face
+            preview ok/warn/rejected si pastreaza lineage-ul listei; pentru dosare se creeaza
+            joburi <code className="px-1 rounded bg-muted">dosar_soap</code> cu cadenta din rand.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="outline" size="sm" onClick={downloadBulkTemplate} disabled={bulkBusy}>
@@ -277,9 +327,7 @@ export default function Monitorizare() {
               disabled={bulkBusy}
             >
               <Upload className="h-4 w-4" />
-              {bulkBusy
-                ? `Se proceseaza... ${bulkProgress.done}/${bulkProgress.total}`
-                : "Incarca fisier"}
+              {bulkBusy ? "Se proceseaza..." : "Incarca fisier"}
             </Button>
           </div>
           {bulkError && (
@@ -287,43 +335,122 @@ export default function Monitorizare() {
               {bulkError}
             </div>
           )}
-          {bulkResult && (
-            <div className="mt-3 space-y-2">
-              <div className="flex flex-wrap items-center gap-2 text-sm">
-                <span className="rounded-md bg-green-100 px-2 py-0.5 text-green-700">
-                  {bulkResult.added} adaugate
-                </span>
-                <span className="rounded-md bg-amber-100 px-2 py-0.5 text-amber-800">
-                  {bulkResult.exists} deja existente
-                </span>
-                <span
-                  className={`rounded-md px-2 py-0.5 ${
-                    bulkResult.errors > 0
-                      ? "bg-red-100 text-red-700"
-                      : "bg-gray-100 text-gray-600"
-                  }`}
+          {(bulkPreview || bulkDosarRows.length > 0) && (
+            <div className="mt-4 space-y-4">
+              {bulkPreview && (
+                <div className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="rounded-md bg-green-100 px-2 py-0.5 text-green-700">
+                    {bulkPreview.totals.ok} nume ok
+                  </span>
+                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-amber-800">
+                    {bulkPreview.totals.warn} warn
+                  </span>
+                  <span className="rounded-md bg-red-100 px-2 py-0.5 text-red-700">
+                    {bulkPreview.totals.rejected} respinse
+                  </span>
+                  <span className="text-muted-foreground">din {bulkPreview.totals.total} randuri nume</span>
+                </div>
+              )}
+              {bulkDosarRows.length > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  {bulkDosarRows.length} randuri cu numar_dosar vor fi create ca joburi dosar_soap.
+                </div>
+              )}
+
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="grid gap-1 text-sm">
+                  <span className="text-xs text-muted-foreground">Titlu lista</span>
+                  <input
+                    className="h-9 min-w-72 rounded-md border border-input bg-background px-3 text-sm"
+                    value={bulkTitle}
+                    onChange={(e) => setBulkTitle(e.target.value)}
+                    disabled={bulkBusy}
+                  />
+                </label>
+                <label className="grid gap-1 text-sm">
+                  <span className="text-xs text-muted-foreground">Filtru preview</span>
+                  <select
+                    className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                    value={bulkFilter}
+                    onChange={(e) => setBulkFilter(e.target.value as NameListValidation | "all")}
+                  >
+                    <option value="all">toate</option>
+                    <option value="ok">ok</option>
+                    <option value="warn">warn</option>
+                    <option value="rejected">respinse</option>
+                  </select>
+                </label>
+                <Button
+                  size="sm"
+                  onClick={handleBulkCommit}
+                  disabled={
+                    bulkBusy ||
+                    ((bulkPreview?.totals.ok ?? 0) + (bulkPreview?.totals.warn ?? 0) === 0 &&
+                      bulkDosarRows.length === 0)
+                  }
                 >
-                  {bulkResult.errors} erori
-                </span>
-                <span className="text-muted-foreground">din {bulkResult.total} randuri</span>
+                  <Upload className="h-4 w-4" />
+                  {bulkBusy
+                    ? `Import... ${bulkCommitProgress.created} create`
+                    : "Confirma import"}
+                </Button>
               </div>
-              {bulkResult.errors > 0 && (
-                <details className="text-xs">
-                  <summary className="cursor-pointer text-muted-foreground hover:text-foreground">
-                    Detalii erori ({bulkResult.errors})
-                  </summary>
-                  <ul className="mt-2 space-y-1 pl-4 list-disc">
-                    {bulkResult.items
-                      .filter((it) => it.status === "error")
-                      .map((it, i) => (
-                        <li key={i}>
-                          rand {it.rowNumber} —{" "}
-                          <span className="font-mono">{it.display || "(gol)"}</span> —{" "}
-                          <span className="text-red-600">{it.message}</span>
-                        </li>
-                      ))}
-                  </ul>
-                </details>
+
+              {bulkPreview && (
+              <div className="max-h-72 overflow-auto rounded-md border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-background">
+                    <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                      <th className="px-3 py-2">Rand</th>
+                      <th className="px-3 py-2">Nume</th>
+                      <th className="px-3 py-2">Status</th>
+                      <th className="px-3 py-2">Mesaj</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {visiblePreviewRows.slice(0, 300).map((row) => (
+                      <tr key={row.rowIndex} className="border-b last:border-b-0">
+                        <td className="px-3 py-2 text-muted-foreground">{row.rowIndex + 1}</td>
+                        <td className="px-3 py-2 font-mono">{row.nameRaw || "(gol)"}</td>
+                        <td className="px-3 py-2">
+                          <span
+                            className={`rounded-md px-2 py-0.5 text-xs ${
+                              row.validation === "ok"
+                                ? "bg-green-100 text-green-700"
+                                : row.validation === "warn"
+                                ? "bg-amber-100 text-amber-800"
+                                : "bg-red-100 text-red-700"
+                            }`}
+                          >
+                            {row.validation}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">
+                          {row.validationMsg ?? "-"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              )}
+
+              {visiblePreviewRows.length > 300 && (
+                <div className="text-xs text-muted-foreground">
+                  Afisate primele 300 randuri din filtrul curent.
+                </div>
+              )}
+              {bulkCommit && (
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                  Lista #{bulkCommit.list.id} salvata. Joburi noi create:{" "}
+                  {bulkCommitProgress.created}. Duplicate: {bulkCommit.duplicate ? "da" : "nu"}.
+                </div>
+              )}
+              {bulkDosarResult && (
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                  Dosare bulk: {bulkDosarResult.added} adaugate, {bulkDosarResult.exists} deja existente,
+                  {bulkDosarResult.errors} erori.
+                </div>
               )}
             </div>
           )}
