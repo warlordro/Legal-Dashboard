@@ -41,6 +41,7 @@ export const versions: VersionEntry[] = [
           "Sidebar-ul afiseaza numarul de alerte necitite, actualizat prin stream live si refresh automat la reconectare.",
         bullets: [
           "SSE pe /api/v1/alerts/stream cu cleanup la unmount si reconnect cu backoff.",
+          "Badge-ul numeric rosu apare langa Alerte in sidebar expandat si peste clopotel in modul colapsat.",
           "Badge-ul scade dupa mark read/dismiss.",
           "Fallback-ul la refresh pastreaza UI-ul corect daca stream-ul cade temporar.",
         ],

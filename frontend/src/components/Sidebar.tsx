@@ -125,14 +125,16 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
               <>
                 <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
                 {showBadge && (
-                  <span className="ml-auto rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold leading-none text-white">
+                  <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
                     {badgeText}
                   </span>
                 )}
               </>
             )}
             {collapsed && showBadge && (
-              <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-red-600" />
+              <span className="absolute right-0 top-0 inline-flex min-w-4 translate-x-0.5 -translate-y-0.5 items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
+                {badgeText}
+              </span>
             )}
           </NavLink>
           );

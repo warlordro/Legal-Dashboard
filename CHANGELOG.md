@@ -31,6 +31,8 @@ badge in sidebar, stream live si notificari native Electron.
 ### Electron desktop
 
 - Sidebar-ul afiseaza badge cu alerte necitite.
+- Badge-ul este numeric si vizibil atat in sidebar expandat, cat si in modul
+  colapsat/icon-only.
 - Stream-ul SSE are cleanup la unmount si reconnect cu backoff; la reconectare
   face refresh de count/lista ca sa nu piarda alerte.
 - Notificarile noi folosesc IPC catre Electron main process si `new Notification`
