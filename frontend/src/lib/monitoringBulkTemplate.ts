@@ -74,6 +74,7 @@ function injectCadenceDropdown(xlsxBytes: Uint8Array): Uint8Array {
   if (!sheetBytes) return xlsxBytes; // unexpected — fail soft
 
   const sheetXml = strFromU8(sheetBytes);
+  if (sheetXml.includes("<dataValidations")) return xlsxBytes;
   const formula = CADENCE_LABELS.join(",");
   // Quotes in <formula1> sunt escaped ca &quot; — lista in-cell e
   // `"4h,8h,12h,24h"` (cu ghilimele literale incluse).
@@ -85,14 +86,38 @@ function injectCadenceDropdown(xlsxBytes: Uint8Array): Uint8Array {
     "</dataValidations>";
 
   let modified: string;
-  if (sheetXml.includes("<pageMargins")) {
-    modified = sheetXml.replace("<pageMargins", `${dv}<pageMargins`);
+  const finalAnchors = [
+    "<hyperlinks",
+    "<printOptions",
+    "<pageMargins",
+    "<pageSetup",
+    "<headerFooter",
+    "<rowBreaks",
+    "<colBreaks",
+    "<customProperties",
+    "<cellWatches",
+    "<ignoredErrors",
+    "<smartTags",
+    "<drawing",
+    "<legacyDrawing",
+    "<picture",
+    "<oleObjects",
+    "<controls",
+    "<webPublishItems",
+    "<tableParts",
+    "<extLst",
+  ];
+  const anchor = finalAnchors.find((token) => sheetXml.includes(token));
+  if (anchor) {
+    modified = sheetXml.replace(anchor, `${dv}${anchor}`);
+  } else if (sheetXml.includes("</sheetData>")) {
+    modified = sheetXml.replace("</sheetData>", `</sheetData>${dv}`);
   } else {
     modified = sheetXml.replace("</worksheet>", `${dv}</worksheet>`);
   }
 
   unzipped[sheetPath] = strToU8(modified);
-  return zipSync(unzipped);
+  return zipSync(unzipped, { level: 6 });
 }
 
 export function downloadBulkTemplate(): void {
