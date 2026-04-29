@@ -31,6 +31,11 @@ export interface MonitoringJobRow {
   fail_streak: number;
   notes: string | null;
   client_request_id: string | null;
+  // Lineage catre name_lists (PR-5): NULL pentru joburi create manual via
+  // /api/v1/monitoring/jobs; setat pentru joburi create automat de
+  // /api/v1/name-lists?autoCreateJobs=true. archiveList foloseste asta ca
+  // sa refuze archivarea cand exista joburi inca legate.
+  name_list_id: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -38,6 +43,13 @@ export interface MonitoringJobRow {
 export interface CreateJobInput {
   ownerId: string;
   body: JobCreateBody;
+  /**
+   * Lineage opcional pentru joburi auto-create-d dintr-o lista de nume
+   * (PR-5). Setat doar de /api/v1/name-lists pe path-ul autoCreateJobs;
+   * /api/v1/monitoring/jobs il lasa undefined (NULL in DB), pentru ca un
+   * user nu trebuie sa poata atribui un job la o name_list arbitrar via API.
+   */
+  nameListId?: number;
 }
 
 // Insert a new job. If client_request_id is provided AND a row already exists
@@ -98,8 +110,9 @@ export function createJob(input: CreateJobInput): CreateJobResult {
     .prepare(
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
-          alert_config_json, next_run_at, notes, client_request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          alert_config_json, next_run_at, notes, client_request_id,
+          name_list_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       ownerId,
@@ -111,6 +124,7 @@ export function createJob(input: CreateJobInput): CreateJobResult {
       nextRunAt,
       body.notes ?? null,
       body.client_request_id ?? null,
+      input.nameListId ?? null,
     );
 
   const job = db

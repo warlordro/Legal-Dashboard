@@ -398,3 +398,117 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
     sha256,
   };
 }
+
+// Server-side re-validation entry point pentru /commit (defense-in-depth):
+// clientul trimite items raw {nameRaw, nameKind?, cnp?, cui?}; aici
+// re-derivam name_normalized + validation + dedup independent de orice flag
+// venit din UI. Decizia "ce devine job" trebuie sa fie autoritar a serverului,
+// nu a clientului — un client compromis nu poate marca un rind 'rejected' ca
+// 'ok' modificand JSON-ul din retea.
+//
+// Diferenta fata de parseNameList: aici nu avem header (deci nu putem
+// distinge 'tip_lipsa' de 'tip_gol' — ambele se prezinta ca nameKind===
+// undefined). Reusim sa pastram aceleasi statusuri (ok/warn/rejected) si
+// aceeasi cheie de dedup (nameNormalized|nameKind), ceea ce face commit-ul
+// stabil indiferent de ordinea in care clientul a serializat items-ul.
+
+export interface RawNameItem {
+  nameRaw: string;
+  // Optional: cand lipseste, default 'fizic' + warn (ca in parser).
+  nameKind?: NameListItemKind;
+  cnp?: string | null;
+  cui?: string | null;
+}
+
+export interface ValidatedItem extends CreateListItemInput {
+  /** 0-based pozitia in array-ul de input (NU rowIndex din fisier — clientul
+   *  poate trimite items intr-o ordine diferita fata de fisierul original). */
+  inputIndex: number;
+}
+
+export interface ValidateResult {
+  rows: ValidatedItem[];
+  totals: ParseTotals;
+}
+
+export function validateRawItems(items: RawNameItem[]): ValidateResult {
+  const seen = new Map<string, number>();
+  const rows: ValidatedItem[] = [];
+  let okCount = 0;
+  let warnCount = 0;
+  let rejectedCount = 0;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i]!;
+    const nameRaw = String(item.nameRaw ?? "").trim();
+    const nameNormalized = normalizeName(nameRaw);
+    const nameKind: NameListItemKind = item.nameKind ?? "fizic";
+    const cnp = item.cnp ?? null;
+    const cui = item.cui ?? null;
+
+    let validation: NameListItemValidation = "ok";
+    let validationMsg: string | null = null;
+
+    // 1. Reject conditions — match exact fata de parseNameList.
+    if (!nameRaw || nameNormalized.length === 0) {
+      validation = "rejected";
+      validationMsg = "nume_gol";
+    } else if (nameNormalized.length < MIN_NAME_LEN) {
+      validation = "rejected";
+      validationMsg = `nume_prea_scurt (min ${MIN_NAME_LEN})`;
+    } else if (nameRaw.length > MAX_NAME_LEN) {
+      validation = "rejected";
+      validationMsg = `nume_prea_lung (max ${MAX_NAME_LEN})`;
+    } else if (/^\d+$/.test(nameNormalized.replace(/\s+/g, ""))) {
+      validation = "rejected";
+      validationMsg = "nume_doar_cifre";
+    }
+
+    // 2. Dedup intra-batch — chee identica cu parseNameList: (nameNormalized,
+    //    nameKind). Asta garanteaza ca daca userul re-trimite acelasi fisier
+    //    (parsat → JSON → POST), dedup-ul produce acelasi efect ca preview-ul.
+    if (validation !== "rejected") {
+      const key = `${nameNormalized}|${nameKind}`;
+      const prevIdx = seen.get(key);
+      if (prevIdx !== undefined) {
+        validation = "warn";
+        validationMsg = `duplicate_in_batch (apare prima data la index ${prevIdx})`;
+      } else {
+        seen.set(key, i);
+      }
+    }
+
+    // 3. Tip lipsa → warn. Spre deosebire de parser, aici nu putem distinge
+    //    tip_lipsa (coloana inexistenta) de tip_gol (celula goala) — ambele
+    //    se prezinta ca nameKind===undefined. Folosim un mesaj generic.
+    if (validation === "ok" && item.nameKind === undefined) {
+      validation = "warn";
+      validationMsg = "tip_lipsa (presupus 'fizic')";
+    }
+
+    if (validation === "ok") okCount++;
+    else if (validation === "warn") warnCount++;
+    else rejectedCount++;
+
+    rows.push({
+      inputIndex: i,
+      nameKind,
+      nameRaw,
+      nameNormalized,
+      cnp,
+      cui,
+      validation,
+      validationMsg,
+    });
+  }
+
+  return {
+    rows,
+    totals: {
+      total: rows.length,
+      ok: okCount,
+      warn: warnCount,
+      rejected: rejectedCount,
+    },
+  };
+}
