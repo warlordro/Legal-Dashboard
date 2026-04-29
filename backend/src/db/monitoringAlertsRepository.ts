@@ -12,6 +12,10 @@ export type AlertKind =
   | "termen_changed"
   | "solutie_aparuta"
   | "dosar_disappeared"
+  | "stadiu_changed"
+  | "categorie_changed"
+  | "dosar_relevant_now"
+  | "dosar_no_longer_relevant"
   | "aviz_changed"
   | "source_error";
 

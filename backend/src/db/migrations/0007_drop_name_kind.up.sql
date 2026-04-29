@@ -1,0 +1,27 @@
+-- 0007_drop_name_kind.up.sql — drop the `name_kind` column from
+-- name_list_items (PR-5 follow-up, decizia 2026-04-29).
+--
+-- Background. 0006 a creat coloana `name_kind TEXT NOT NULL CHECK(...)` pentru
+-- a distinge PF vs PJ in liste. Auditul plan §4 a stabilit ca distinctia nu
+-- schimba query-ul SOAP CautareDosare (parametrul este `numeParte` ca string
+-- raw — vezi backend/src/soap.ts:186), deci doua joburi care difera doar prin
+-- name_kind ar emite cereri identice. Coloana ramine doar zgomot operational.
+--
+-- Aceasta migratie:
+--   * sterge coloana `name_kind` din `name_list_items`
+--   * pastreaza tot restul (FK-uri, indexuri, randurile existente)
+--
+-- SQLite 3.35+ suporta `ALTER TABLE ... DROP COLUMN` direct daca:
+--   - coloana nu e PRIMARY KEY
+--   - coloana nu e UNIQUE
+--   - coloana nu e referentiata de un index
+--   - coloana nu apare in CHECK / FK / generated column
+-- name_kind apare doar intr-un CHECK pe propria coloana — DROP COLUMN il
+-- elimina automat impreuna cu coloana. Nu e nevoie de table-rebuild.
+--
+-- Reverse-out: 0007_drop_name_kind.down.sql adauga coloana inapoi cu o valoare
+-- sentinel ('fizic') pentru randurile existente, ca sa permita downgrade
+-- functional in dev (chiar daca informatia originala e pierduta — operatia e
+-- intentionata).
+
+ALTER TABLE name_list_items DROP COLUMN name_kind;

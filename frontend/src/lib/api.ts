@@ -318,7 +318,6 @@ export interface CreateDosarMonitoringInput {
 
 export interface CreateNameMonitoringInput {
   name_normalized: string;
-  name_kind: "fizic" | "juridic";
   institutie?: string[];
   cadence_sec?: number;
   notes?: string;
@@ -360,7 +359,6 @@ export const monitoring = {
   createName: async (input: CreateNameMonitoringInput): Promise<MonitoringJob> => {
     const target: Record<string, string | string[]> = {
       name_normalized: input.name_normalized,
-      name_kind: input.name_kind,
     };
     if (input.institutie && input.institutie.length > 0) {
       target.institutie = input.institutie;
@@ -394,6 +392,88 @@ export const monitoring = {
   deleteJob: async (id: number): Promise<void> => {
     const res = await fetch(`/api/v1/monitoring/jobs/${id}`, { method: "DELETE" });
     await unwrapMonitoring<{ deleted: boolean }>(res);
+  },
+};
+
+export type NameListValidation = "ok" | "warn" | "rejected";
+
+export interface NameListPreviewRow {
+  rowIndex: number;
+  nameRaw: string;
+  nameNormalized: string;
+  cnp?: string | null;
+  cui?: string | null;
+  cadenceSec?: number | null;
+  notes?: string | null;
+  validation: NameListValidation;
+  validationMsg?: string | null;
+}
+
+export interface NameListTotals {
+  total: number;
+  ok: number;
+  warn: number;
+  rejected: number;
+}
+
+export interface NameListPreviewResult {
+  rows: NameListPreviewRow[];
+  totals: NameListTotals;
+  sha256: string;
+  sourceFilename: string | null;
+}
+
+export interface NameListCommitInput {
+  title: string;
+  sourceFilename?: string | null;
+  sourceSha256: string;
+  items: Array<{
+    nameRaw: string;
+    cnp?: string | null;
+    cui?: string | null;
+    cadenceSec?: number | null;
+    notes?: string | null;
+  }>;
+  autoCreateJobs?: boolean;
+  maxJobs?: number;
+}
+
+export interface NameListCommitResult {
+  list: {
+    id: number;
+    title: string;
+    source_filename: string | null;
+    source_sha256: string;
+    total_rows: number;
+    valid_rows: number;
+    created_at: string;
+    archived_at: string | null;
+  };
+  duplicate: boolean;
+  totals: NameListTotals;
+  jobsCreated: number;
+  jobsTotal: number;
+  partial: boolean;
+}
+
+export const nameLists = {
+  preview: async (file: File): Promise<NameListPreviewResult> => {
+    const fd = new FormData();
+    fd.append("file", file);
+    const res = await fetch(`/api/v1/name-lists/preview`, {
+      method: "POST",
+      body: fd,
+    });
+    return unwrapMonitoring<NameListPreviewResult>(res);
+  },
+
+  commit: async (input: NameListCommitInput): Promise<NameListCommitResult> => {
+    const res = await fetch(`/api/v1/name-lists/commit`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return unwrapMonitoring<NameListCommitResult>(res);
   },
 };
 

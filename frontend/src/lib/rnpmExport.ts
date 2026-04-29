@@ -357,11 +357,13 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
     ? sanitizeFilename(docs[0].identificator.v)
     : `rnpm${searchType ? `_${searchType}` : ""}_${dateStr}`;
 
-  // XLSX.write({ type: "array" }) returneaza Uint8Array — copiem intr-un ArrayBuffer
-  // proaspat ca sa il putem transfera prin postMessage fara copy din partea runtime-ului.
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
-  const buffer = new ArrayBuffer(out.byteLength);
-  new Uint8Array(buffer).set(out);
+  // xlsx-js-style@1.2.0 returneaza ArrayBuffer pentru type:"array" (nu Uint8Array
+  // ca documenteaza SheetJS upstream); Uint8Array.set(ArrayBuffer) era no-op si
+  // emitea fisier plin de zerouri. Acceptam ambele forme si transferam buffer-ul.
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
+  const buffer: ArrayBuffer = out instanceof ArrayBuffer
+    ? out
+    : (out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer);
   return { buffer, filename: `${fileBase}.xlsx`, mime: MIME_XLSX };
 }
 

@@ -81,12 +81,13 @@ async function runExportInWorker(job: ExportJob): Promise<ExportResult> {
   });
 }
 
-function uint8ToArrayBuffer(out: Uint8Array): ArrayBuffer {
-  // XLSX.write({ type:"array" }) returneaza Uint8Array; copiem intr-un ArrayBuffer
-  // standalone ca sa il putem transfera prin postMessage fara copy suplimentar.
-  const buffer = new ArrayBuffer(out.byteLength);
-  new Uint8Array(buffer).set(out);
-  return buffer;
+// xlsx-js-style@1.2.0 returneaza ArrayBuffer pentru type:"array" (nu Uint8Array
+// ca documenteaza SheetJS upstream); `Uint8Array.set(ArrayBuffer)` se evalueaza
+// silentios la no-op (ArrayBuffer nu are .length) si rezulta un fisier plin de
+// zerouri. Acceptam ambele forme si producem un ArrayBuffer transferabil.
+function toTransferableBuffer(out: ArrayBuffer | Uint8Array): ArrayBuffer {
+  if (out instanceof ArrayBuffer) return out;
+  return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
 }
 
 function formatInstitutie(raw: string): string {
@@ -277,8 +278,8 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<ExportResult> {
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, wsDosare as import("xlsx").WorkSheet, "Dosare");
   if (wsSedinte) XLSX.utils.book_append_sheet(wb, wsSedinte as import("xlsx").WorkSheet, "Sedinte");
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
-  return { buffer: uint8ToArrayBuffer(out), filename: dosareFilename(dosare, "xlsx"), mime: MIME_XLSX };
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
+  return { buffer: toTransferableBuffer(out), filename: dosareFilename(dosare, "xlsx"), mime: MIME_XLSX };
 }
 
 export async function buildTermeneXlsx(termene: Termen[]): Promise<ExportResult> {
@@ -327,8 +328,8 @@ export async function buildTermeneXlsx(termene: Termen[]): Promise<ExportResult>
 
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Termene");
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as Uint8Array;
-  return { buffer: uint8ToArrayBuffer(out), filename: termeneFilename(termene, "xlsx"), mime: MIME_XLSX };
+  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
+  return { buffer: toTransferableBuffer(out), filename: termeneFilename(termene, "xlsx"), mime: MIME_XLSX };
 }
 
 // Strip diacritics for PDF (jsPDF default font doesn't support them)
