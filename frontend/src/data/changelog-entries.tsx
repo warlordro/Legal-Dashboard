@@ -18,6 +18,102 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.3.0",
+    date: "29 Aprilie 2026",
+    subtitle: "Audit remediation — Patch v2.3.0 + UX export",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-violet-500",
+    badgeClass: "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400",
+    sections: [
+      {
+        title: "Hardening reliability — backup, shutdown, finalize",
+        content:
+          "Audit-ul intern din 29 aprilie a generat un set de patch-uri convergente catre robustete operationala in modul desktop si pregatire pentru cutover web. Niciuna dintre schimbari nu cere migrare manuala — la prima pornire dupa update, baza de date se aliniaza singura.",
+        bullets: [
+          "Backup zilnic recurent — pana acum singurul backup automat era cel de la pornirea aplicatiei. Acum un setInterval la 24h declanseaza backup-ul si pe sesiuni lungi de tinut deschis (firme care nu inchid Electron-ul peste noapte).",
+          "Restore SQLite — pe restore, un PRAGMA integrity_check valideaza fisierul inainte sa-l promoveze; sidecar-urile WAL/SHM sunt sterse cu detection a erorilor non-ENOENT (nu mai trec in tacere peste un disk full).",
+          "Graceful shutdown — la SIGTERM/SIGINT, serverul HTTP face drain explicit cu timeout 30s inainte de oprirea scheduler-ului si inchiderea DB-ului. Nu mai pierde request-uri in curs daca Electron e inchis cu Quit.",
+          "Finalize state-guarded + index unic — un singur run \"running\" simultan per job de monitoring, garantat la nivel de DB (idx_one_running_per_job, migration 0005). Daca scheduler-ul ar reseta in timpul unei executii, recovery-ul nu mai poate produce duplicate.",
+        ],
+      },
+      {
+        title: "RNPM in maintenance lock + audit complet",
+        content:
+          "Loop-ul de persistenta din executeSearch (write-urile in DB ale rezultatelor RNPM) ruleaza acum sub withMaintenanceRead — la fel ca runner-ul SOAP de dosare. Inseamna ca un backup care intra in maintenance mode nu mai blocheaza scrierile la jumatate.",
+        bullets: [
+          "Write-urile DB intra in lock; fetch-ul HTTP catre rnpm.ro NU — nu prelungim lock-ul cu latenta de retea.",
+          "Toate cele 3 rute destructive RNPM au audit (POST /saved/delete-batch, DELETE /saved/:id, DELETE /searches/:id) — nicio stergere fara urma.",
+          "Cross-tenant searchId — executeSearch verifica searchRepository.belongsToOwner inainte de a accepta existingSearchId, prevenind reutilizarea cross-user a unui search vechi.",
+        ],
+      },
+      {
+        title: "Migration runner — self-heal bidirectional pe line endings",
+        content:
+          "Runner-ul de migrari calculeaza acum hash-ul SQL normalizat (CRLF→LF + BOM scos) ca sa fie stabil intre Windows si Linux. Self-heal-ul match in ambele directii: DB-uri vechi care au stocat hash-ul pe bytes raw (CRLF inclus) si DB-uri stocate pe varianta CRLF cand fisierul curent e LF. Drift real (continut SQL chiar diferit) arunca in continuare. Plus .gitattributes forteaza eol=lf pe fisierele de migrare.",
+        bullets: [
+          "Boot-uri pe Windows nu mai esueaza cu hash mismatch dupa un git checkout cu autocrlf activ — indiferent de directia conversiei.",
+          "Observability: result.selfHealed[] expune versiunile auto-vindecate; schema.ts loggeaza fiecare boot cu remediere.",
+          "MIGRATIONS_STRICT=1 dezactiveaza self-heal in CI — orice mismatch arunca, util pentru a prinde drift accidental inainte de release.",
+        ],
+      },
+      {
+        title: "Export — Web Worker pentru toate fluxurile (RNPM + AI + Manual)",
+        content:
+          "Generarea XLSX si PDF s-a mutat integral in Web Worker — RNPM avize, Dosare/Termene, panoul de analiza AI si Manualul aplicatiei. Pe sute/mii de avize, UI-ul nu mai ingheata; main thread-ul ramane disponibil pentru rendering. Butoanele afiseaza spinner imediat la apasare (in locul iconitei Download), feedback vizual instant ca fisierul se genereaza. Catch-block pe orice esec — daca worker-ul pica, butonul revine la starea initiala in loc sa ramana blocat.",
+        bullets: [
+          "Build-ul XLSX (cu styling per cell + hyperlink-uri navigabile) si PDF (jsPDF + autotable) e tot pe acelasi cod, doar mutat in worker.",
+          "ArrayBuffer transferat zero-copy intre worker si main thread.",
+          "Vite worker.format=\"es\" permite code-splitting (xlsx + jspdf chunk-uri lazy), pastrand bundle-ul principal sub 400 KB.",
+        ],
+      },
+      {
+        title: "Dependinte — bump-uri de securitate",
+        content:
+          "Stack-ul de export a primit bump-uri majore. dompurify ≥3.4.1, jspdf ≥4.2.1 (cu jspdf-autotable 5.0.7 compatibil), aliniate cu auditul de securitate intern din aprilie.",
+      },
+    ],
+  },
+  {
+    version: "v2.2.0",
+    date: "29 Aprilie 2026",
+    subtitle: "PR-4 — monitoring scheduler + dosar_soap runner + Tier 2-6 hardening",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Scheduler activ — joburile incep sa se execute automat",
+        content:
+          "PR-3 a livrat schema + UI-ul de monitorizare; PR-4 aduce inima sistemului: scheduler-ul. Tick la 60 secunde, claim_limit 25 joburi/tick, runner separat per kind — la momentul livrarii, kind-ul \"dosar_soap\" e implementat (interogheaza PortalJust prin SOAP). Adaugarea unui dosar la monitorizare cu cadenta 10 minute / 1 ora / 6 ore / 24 ore inseamna acum verificari reale, nu doar marcarea jobului.",
+        bullets: [
+          "Claim atomic via UPDATE...RETURNING cu WHERE next_run_at <= now() — doi scheduleri pe aceeasi DB (rare, dar posibil) nu pick-uiesc acelasi job de doua ori.",
+          "Backoff exponential pe esecuri SOAP cu jitter — daca PortalJust e jos, retry-urile nu il bombardeaza din nou la fiecare tick.",
+          "Recovery la pornire — runs lasate in starea \"running\" la oprire brusca sunt finalizate cu status=\"aborted\" la primul boot, fara double-spending.",
+          "Kill switch operational — MONITORING_DISABLED_KINDS=dosar_soap,name_soap exclude tipurile listate din claim, fara modificari in DB. Util cand un kind cauzeaza probleme si vrei sa il opresti instant.",
+        ],
+      },
+      {
+        title: "Detectie schimbari + alerte deduplicate",
+        content:
+          "Snapshot-urile sunt salvate cu hash determinist si comparate cu ultimul snapshot \"verde\". Diff-ul detecteaza adaugari/stergeri/modificari de termene si genereaza alerte in monitoring_alerts cu dedup_key — daca un termen e schimbat de cinci ori la rand, primesti o alerta cumulativa, nu cinci.",
+        bullets: [
+          "Sedinta key include stadiul (Apel/Fond/Recurs) — schimbarea instantei produce alerta separata, nu o suprascrie tacut.",
+          "Backfill snapshot la primul rul al jobului — al doilea run e prima ocazie de comparat, deci nu se trimite alerta \"Adaugat\" pentru toata starea initiala.",
+          "monitoring_runs purjate zilnic la 90 zile (history nu creste indefinit).",
+        ],
+      },
+      {
+        title: "Hardening Tier 2-6 — review absorbit pre-merge",
+        content:
+          "Bundle-ul cu PR-4 a trecut printr-un review intern in 6 tier-uri (Tier 1 = correctness, Tier 2-3 = race conditions, Tier 4 = concurrency, Tier 5-6 = polish + observability). 18 issue-uri trakate au fost rezolvate inainte de merge — printre cele mai relevante: idempotenta pe execute SOAP, CRLF safe in payload-uri, getOwnerId reused peste tot, audit log atomic in tx, observability cu request-id propagation.",
+        bullets: [
+          "333 teste backend verde (de la 192 in v2.1.0) — 141 noi acopera scheduler claim race, recovery boot, dosar_soap end-to-end cu fixture SOAP, alert dedup, retention cleanup.",
+          "Type-check + biome + smoke launch pe Windows verificate inainte de merge.",
+        ],
+      },
+    ],
+  },
+  {
     version: "v2.1.0",
     date: "27 Aprilie 2026",
     subtitle: "PR-3 — monitorizare automata: schema + API + UI",
