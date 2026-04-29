@@ -4,6 +4,52 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 29 Aprilie 2026 - v2.3.0 - Audit remediation hardening + export Web Worker
+
+Patch peste v2.2.0 dupa auditul intern din 29 aprilie. Convergent catre robustete operationala in modul desktop si pregatire pentru cutover web. Niciuna dintre schimbari nu cere migrare manuala — la prima pornire dupa update, baza de date se aliniaza singura.
+
+### Reliability — backup, shutdown, finalize state-guarded
+
+- **Backup zilnic recurent**: pana acum singurul backup automat era cel de la pornirea aplicatiei. Acum un `setInterval` la 24h declanseaza backup-ul si pe sesiuni lungi (firme care nu inchid Electron-ul peste noapte). Timer cleanup la `gracefulShutdown`.
+- **Restore SQLite hardened**: pe restore, `PRAGMA integrity_check` valideaza fisierul inainte sa-l promoveze; sidecar-urile WAL/SHM sunt sterse cu detection a erorilor non-ENOENT (nu mai trec in tacere peste un disk full).
+- **Graceful shutdown drain HTTP 30s**: la `SIGTERM` / `SIGINT`, serverul HTTP face drain explicit cu timeout 30s inainte de oprirea scheduler-ului si inchiderea DB-ului. Nu mai pierde request-uri in curs daca Electron e inchis cu Quit.
+- **Migration 0005 — `idx_one_running_per_job`**: index UNIQUE partial pe `monitoring_runs(job_id) WHERE status='running'`. Garanteaza la nivel de DB ca un singur run `running` simultan per job. Daca scheduler-ul ar reseta in timpul unei executii, recovery-ul nu mai poate produce duplicate.
+
+### RNPM — maintenance lock + audit complet pe rutele destructive
+
+- `executeSearch` (write-urile in DB ale rezultatelor RNPM) ruleaza acum sub `withMaintenanceRead` — la fel ca runner-ul SOAP de dosare. Backup-ul care intra in maintenance mode nu mai blocheaza scrierile la jumatate. Fetch-ul HTTP catre rnpm.ro NU intra in lock — nu prelungim lock-ul cu latenta de retea.
+- Toate cele 3 rute destructive RNPM scriu audit log: `POST /saved/delete-batch`, `DELETE /saved/:id`, `DELETE /searches/:id`. Nicio stergere fara urma.
+- `executeSearch` verifica `searchRepository.belongsToOwner` inainte de a accepta `existingSearchId`, prevenind reutilizarea cross-user a unui search vechi.
+
+### Migration runner — self-heal bidirectional pe line endings
+
+- Hash-ul SQL e calculat pe continut normalizat (CRLF → LF + BOM scos) ca sa fie stabil intre Windows si Linux. `git autocrlf` pe Windows nu mai invalideaza hash-urile la checkout.
+- Self-heal match in ambele directii: `sha256Raw` (DB-uri vechi care au stocat hash pe bytes raw, CRLF inclus) si `sha256Crlf` (DB-uri stocate pe varianta CRLF cand fisierul curent e LF). Drift real (continut SQL chiar diferit) arunca in continuare.
+- Observability: `RunMigrationsResult.selfHealed[]` expune versiunile auto-vindecate; `schema.ts` loggeaza fiecare boot cu remediere.
+- `MIGRATIONS_STRICT=1` dezactiveaza self-heal in CI — orice mismatch arunca, util pentru a prinde drift accidental inainte de release.
+- `.gitattributes` forteaza `eol=lf` pe `backend/src/db/migrations/*.sql` ca Windows-ul sa nu mai converteasca la checkout.
+
+### Export — Web Worker pentru toate fluxurile (RNPM + AI + Manual)
+
+- Generarea XLSX si PDF mutata integral in Web Worker — RNPM avize, Dosare/Termene, panoul de analiza AI si Manualul aplicatiei. Pe sute/mii de avize, UI-ul nu mai ingheata; main thread-ul ramane disponibil pentru rendering.
+- Butoanele afiseaza spinner imediat la apasare (in locul iconitei Download), feedback vizual instant ca fisierul se genereaza. Catch-block pe orice esec — daca worker-ul pica, butonul revine la starea initiala in loc sa ramana blocat.
+- Build-ul XLSX (cu styling per cell + hyperlink-uri navigabile) si PDF (`jsPDF` + `autotable`) e tot pe acelasi cod, doar mutat in worker.
+- ArrayBuffer transferat zero-copy intre worker si main thread.
+- Vite `worker.format="es"` permite code-splitting (xlsx + jspdf chunk-uri lazy), pastrand bundle-ul principal sub 400 KB.
+
+### Dependinte — bump-uri de securitate
+
+- `dompurify >= 3.4.1`, `jspdf >= 4.2.1` cu `jspdf-autotable 5.0.7` compatibil. Aliniate cu auditul de securitate intern din aprilie.
+
+### Teste + smoke
+
+- Backend: 357 teste trecute la `npm test` in `backend/` (de la 333 in v2.2.0). 24 noi acopera bidirectional self-heal (`sha256Raw` vs `sha256Crlf` branches), `MIGRATIONS_STRICT=1` strict mode, finalize state guards si recurrence backup timer.
+- Type-check backend + frontend curat (`npx tsc --noEmit` ambele workspace-uri).
+- Build productie trecut la `npm run build` — `export.worker` chunk emitted (~52 KB), main bundle sub 400 KB.
+- Smoke Electron: backup zilnic timer wired, scheduler running, joburi `dosar_soap` finaizeaza corect cu `idx_one_running_per_job` activ.
+
+---
+
 ## 29 Aprilie 2026 - v2.2.0 - PR-4 full-review hardening Tier 2-6
 
 Release de hardening peste monitoring scheduler + dosar_soap runner, rezultat din full-review. Include fix-uri critical/high deja commit-uite pe branch si inchide remaining Tier 4, Tier 5 si Tier 6.

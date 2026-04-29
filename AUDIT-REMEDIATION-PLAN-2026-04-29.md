@@ -4,6 +4,10 @@ Document derivat din verificarea AUDIT-REPORT-2026-04-29.md (auditor extern,
 2026-04-29) impotriva codului v2.2.0. Raportul original a fost arhivat dupa
 extragerea actiunilor concrete in acest plan.
 
+> **Status remediere**: actiunile rezultate au fost livrate ca patch `v2.3.0`
+> (2026-04-29) — vezi `CHANGELOG.md` si `SECURITY.md` change log row 2026-04-29
+> (audit remediation hardening).
+
 ## Verdict global
 
 28 findings auditate → **24 reale/partiale** (de remediat), **2 mitigate**

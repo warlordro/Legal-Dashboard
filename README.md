@@ -7,11 +7,15 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.2.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
-si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release publicat este
-PR-4 din roadmap-ul monitoring + web-readiness: scheduler-ul de monitorizare
-`dosar_soap` este activ pe desktop, iar hardening-ul full-review Tier 2-6 este
-inclus.
+Versiune curenta: **2.3.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este patch-ul
+de audit remediation peste v2.2.0: backup zilnic recurent, restore SQLite cu
+PRAGMA integrity check, graceful shutdown cu drain HTTP 30s, finalize state-guarded
++ index unic `idx_one_running_per_job` (migration 0005), executeSearch RNPM sub
+`withMaintenanceRead`, audit pe rutele destructive RNPM, migration runner cu
+self-heal bidirectional pe line endings (sha256 normalizat + `sha256Raw` +
+`sha256Crlf` + `MIGRATIONS_STRICT=1` pentru CI) si export XLSX/PDF mutat integral
+in Web Worker pe toate fluxurile (RNPM + AI + Manual).
 
 ## Prerequisite
 
@@ -42,16 +46,19 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (333 teste in v2.2.0) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (357 teste in v2.3.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
 
 ## Monitoring
 
-Feature-ul de monitorizare este pornit implicit pe desktop in v2.2.0. Scheduler-ul
-ruleaza joburi `dosar_soap`, salveaza snapshot-uri, detecteaza diferente intre
-sedinte/solutii si scrie audit log pentru mutatiile relevante.
+Feature-ul de monitorizare este pornit implicit pe desktop incepand din v2.2.0.
+Scheduler-ul ruleaza joburi `dosar_soap`, salveaza snapshot-uri, detecteaza
+diferente intre sedinte/solutii si scrie audit log pentru mutatiile relevante.
+v2.3.0 adauga finalize state-guarded + index unic `idx_one_running_per_job` la
+nivel de DB, deci un singur run `running` simultan per job — recovery-ul de
+crash nu mai poate produce duplicate.
 
 Kill switch-uri operationale:
 
