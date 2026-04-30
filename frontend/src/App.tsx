@@ -182,6 +182,16 @@ function AppShell({
           refreshUnreadAlerts();
         }
       });
+      // F7 — backend emits `alert_enriched` when the runner backfills
+      // solutie_sumar / numar_document / instanta on an existing alert (the
+      // PortalJust ruling text appears in a later tick than the alert itself).
+      // Bumping streamVersion is enough: the Alerts page listens on it and
+      // re-fetches the visible page, picking up the patched detail_json. We
+      // intentionally do NOT trigger a desktop notification or unread refresh
+      // — enrichment isn't a new alert and counters haven't moved.
+      es.addEventListener("alert_enriched", () => {
+        setAlertsStreamVersion((v) => v + 1);
+      });
       es.onerror = () => {
         cleanupSource();
         scheduleReconnect();

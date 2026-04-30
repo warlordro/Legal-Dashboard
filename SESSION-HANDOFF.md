@@ -1,14 +1,33 @@
-# Session Handoff - PR-8 v2.6.0 + patch v2.6.3 livrate / PR-9 urmator
+# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.4 livrate / PR-9 urmator
 
-**Data**: 2026-04-30
+**Data**: 2026-05-01
 **Branch local**: `main`
 **Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
-v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 (alerts inbox UX
-+ Monitorizare TINTA link + cadenta non-standard onesta). Tag-urile `v2.5.0`,
-`v2.5.1`, `v2.6.0`, `v2.6.1`, `v2.6.2`, `v2.6.3` nu sunt inca create.
-**Versiune curenta**: `v2.6.3`
+v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 + audit hardening
+v2.6.4. Tag-urile `v2.5.0`..`v2.6.4` nu sunt inca create.
+**Versiune curenta**: `v2.6.4`
 
 ## TL;DR
+
+Audit hardening **finalizat integral** in v2.6.4 (multi-agent review
+2026-04-30, follow-up 2026-05-01):
+
+- **F1**: DELETE in-flight check 409.
+- **F2**: remote bind FAIL-CLOSED — `LEGAL_DASHBOARD_ALLOW_REMOTE=1` refuza
+  pornirea fara ack `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`,
+  + middleware `originGuard` pe `/api/*` (CSRF defense, loopback bypass).
+- **F3**: backend migrat `xlsx@0.18.5` → `exceljs@^4.4.0`; xlsx in
+  devDependencies pentru fixture-uri test; timeout 30s pe parse.
+- **F4-F6**: enrichSolutie restrans (200/tick + 7d window + match relaxat).
+- **F7**: SSE `alert_enriched`.
+- **F8**: 10 teste P0 repository + 1 runner integration end-to-end pentru
+  enrichment.
+- **F9**: bulk delete atomic via `POST /jobs/bulk-delete`.
+- **F10**: `alerts_created` doar insert real; coloana noua `alerts_patched`
+  (migration 0012) pentru observabilitate enrichment.
+
+**Tests**: 546 passing (era 524 in v2.6.3 = +22 net new). Backend tsc clean,
+frontend tsc clean, build green.
 
 PR-8 este implementat local: admin pages + roles guard. Backend si frontend sunt
 livrate impreuna. Suprafata `/api/v1/me` + `/api/v1/admin/*` este live, cu trei

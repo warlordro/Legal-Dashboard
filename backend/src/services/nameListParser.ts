@@ -11,9 +11,9 @@
 // (cazul "user a redenumit .csv → .xlsx" e gestionat).
 //
 // Limite (audit plan 2026-04-29 #1 — "pin + plafon strict pe rows/cols la
-// import"). xlsx@0.18.5 are CVE-uri cunoscute pentru fisiere malicioase;
-// caps-urile sunt mitigarea documentata. Migration la exceljs sta inca in
-// roadmap pentru PR-7+, dar pana atunci aceste limite sunt LINIA DE GARDA:
+// import"). Parser-ul XLSX e acum exceljs (F3 audit 2026-05-01: am scos
+// `xlsx@0.18.5` din path-ul de read din cauza CVE-urilor active fara patch);
+// caps-urile raman LINIA DE GARDA si pentru parser-ul nou:
 //   * MAX_FILE_BYTES — primul guard, inainte de orice parsing
 //   * MAX_ROWS / MAX_COLS — al doilea guard, dupa ce header-ul e citit
 //   * MAX_NAME_LEN — al treilea guard, per-rind, sa nu pierdem un buffer
@@ -31,9 +31,11 @@
 
 import crypto from "node:crypto";
 import { parse as parseCsv } from "csv-parse/sync";
-// xlsx 0.18.5 expune o suprafata de tip module dar are issue-uri cu ESM
-// strict. Importul cu * as ne lasa sa apelam .read direct (este pe modul).
-import * as XLSX from "xlsx";
+// F3 audit (2026-05-01): migrare de la `xlsx@0.18.5` (CVE-uri active de
+// Prototype Pollution + ReDoS, fara patch upstream) la `exceljs@4.x`.
+// Suprafata de read e singura mutata; capurile MAX_FILE_BYTES / MAX_ROWS /
+// MAX_COLS raman mitigarea principala (parser-ul nou nu schimba acel model).
+import ExcelJS from "exceljs";
 
 import { stripDiacritics } from "../util/textNormalize.ts";
 import type {
@@ -226,53 +228,138 @@ function rowsFromCsv(buf: Buffer): RawRow[] {
   return parsed.map((cells, i) => ({ cells, rowIndex: i }));
 }
 
-function rowsFromXlsx(buf: Buffer): RawRow[] {
-  let workbook: XLSX.WorkBook;
-  try {
-    workbook = XLSX.read(buf, {
-      type: "buffer",
-      // Disable formula calc (we only read values) si codepage 1252 ca
-      // fallback — fisierele export-ate din Excel ro-RO uneori sunt CP1252.
-      cellFormula: false,
-      cellHTML: false,
-      cellNF: false,
-      cellStyles: false,
-      sheetRows: MAX_ROWS,
-    });
-  } catch (e) {
-    throw new ParseError(
-      "PARSE_ERROR",
-      `Eroare parse XLSX: ${e instanceof Error ? e.message : String(e)}`,
-    );
+// Timeout safety belt: zip-bomb XLSX ar putea stalla parser-ul; capul de 30s
+// limiteaza orice scenariu patologic. exceljs e streaming pe Node, dar
+// raman guardrail-ul si pentru ca operatia e async.
+const XLSX_PARSE_TIMEOUT_MS = 30_000;
+
+// Echivalent al `String(c ?? "")` din vechiul XLSX.utils.sheet_to_json cu
+// `raw:false`+`defval:""`: numerele/bool/date devin reprezentarea text a
+// celulei, formula -> rezultatul calculat (sau formula stringificata daca
+// nu e disponibil), rich text -> concatenarea fragmentelor.
+function cellToString(value: unknown): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") {
+    return String(value);
   }
-  const sheetName = workbook.SheetNames[0];
-  if (!sheetName) {
+  if (value instanceof Date) {
+    // ISO short (yyyy-mm-dd) cand nu are componenta de timp; altfel ISO full.
+    // Match cu output-ul "rezonabil" pe care il dadea xlsx cu raw:false: un
+    // string lizibil. Header-detection / validation nu depinde de format.
+    return value.toISOString();
+  }
+  if (typeof value === "object") {
+    const obj = value as Record<string, unknown>;
+    // CellRichTextValue: { richText: [{ text: ... }, ...] }
+    if (Array.isArray(obj.richText)) {
+      return (obj.richText as Array<{ text?: unknown }>)
+        .map((part) => String(part?.text ?? ""))
+        .join("");
+    }
+    // CellHyperlinkValue: { text, hyperlink }
+    if (typeof obj.text === "string") return obj.text;
+    // CellFormulaValue: { formula, result } — preferam result (raw:false-style)
+    if ("result" in obj) {
+      return cellToString(obj.result);
+    }
+    if (typeof obj.formula === "string") {
+      return `=${obj.formula}`;
+    }
+    // CellErrorValue: { error: '#N/A' | ... }
+    if (typeof obj.error === "string") return obj.error;
+  }
+  return String(value);
+}
+
+async function rowsFromXlsxAsync(buf: Buffer): Promise<RawRow[]> {
+  const workbook = new ExcelJS.Workbook();
+  // exceljs declara propriul `interface Buffer extends ArrayBuffer` in
+  // tipuri (mismatch cu Node Buffer); runtime-ul accepta Node Buffer fara
+  // probleme. Cast-ul aici e doar un type-bridge.
+  await workbook.xlsx.load(buf as unknown as ArrayBuffer);
+
+  const worksheet = workbook.worksheets[0];
+  if (!worksheet) {
     throw new ParseError("EMPTY_FILE", "Fisierul XLSX nu contine niciun sheet.");
   }
-  const sheet = workbook.Sheets[sheetName];
-  if (!sheet) {
-    throw new ParseError("EMPTY_FILE", "Sheet-ul principal este gol.");
+
+  const out: RawRow[] = [];
+  // includeEmpty:false → trimite la callback doar randurile cu macar o celula
+  // populata, similar `blankrows:false` din vechiul xlsx.
+  let outIdx = 0;
+  let exceeded = false;
+  worksheet.eachRow({ includeEmpty: false }, (row) => {
+    if (exceeded) return;
+    if (outIdx >= MAX_ROWS) {
+      // Nu rupem din callback (exceljs nu suporta abort), dar marcam plafonul
+      // ca sa raporteze TOO_MANY_ROWS in dispatchParse.
+      exceeded = true;
+      return;
+    }
+    // row.values e 1-indexed: index 0 e mereu undefined. Convertim la 0-based.
+    const raw = row.values;
+    const cells: string[] = [];
+    if (Array.isArray(raw)) {
+      for (let i = 1; i < raw.length; i++) {
+        cells.push(cellToString(raw[i]));
+      }
+    } else if (raw && typeof raw === "object") {
+      // Cazul cu chei numeric-string sau named: ne pliem peste cellCount ca
+      // sa pastram pozitiile (header indexing depinde de pozitia coloanei).
+      const colCount = row.cellCount ?? 0;
+      for (let i = 1; i <= colCount; i++) {
+        const cell = row.getCell(i);
+        cells.push(cellToString(cell.value));
+      }
+    }
+    out.push({ cells, rowIndex: outIdx });
+    outIdx++;
+  });
+
+  if (exceeded) {
+    // Adaugam un sentinel (un rind in plus peste MAX_ROWS) ca dispatchParse
+    // sa arunce TOO_MANY_ROWS uniform cu path-ul CSV.
+    out.push({ cells: [], rowIndex: out.length });
   }
 
-  // sheet_to_json cu header:1 returneaza array-of-arrays (nu obiecte). Mai
-  // robust pentru fisiere cu headere ne-uniforme (lipsesc, dubluri etc).
-  // raw:false → toate valorile vin ca string (nu mixed number/boolean).
-  // defval:"" → celulele goale → "" (in loc de undefined, care strica index).
-  const arr = XLSX.utils.sheet_to_json<string[]>(sheet, {
-    header: 1,
-    raw: false,
-    defval: "",
-    blankrows: false,
+  return out;
+}
+
+function rowsFromXlsx(buf: Buffer): Promise<RawRow[]> {
+  // Wrap in timeout (zip-bomb safety belt). exceljs nu expune cancellation,
+  // dar promise-ul ramane in flight — este acceptabil: file-size cap-ul (10MB)
+  // limiteaza memoria iar timeout-ul evita blocarea handler-ului HTTP.
+  let timer: NodeJS.Timeout | undefined;
+  const timeoutPromise = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => {
+      reject(new ParseError("PARSE_ERROR", "Parsing timeout"));
+    }, XLSX_PARSE_TIMEOUT_MS);
   });
-  return arr.map((cells, i) => ({
-    cells: Array.isArray(cells) ? cells.map((c) => String(c ?? "")) : [],
-    rowIndex: i,
-  }));
+  return Promise.race([
+    rowsFromXlsxAsync(buf).catch((e) => {
+      if (e instanceof ParseError) throw e;
+      throw new ParseError(
+        "PARSE_ERROR",
+        `Eroare parse XLSX: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }),
+    timeoutPromise,
+  ]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
 }
 
 // Principalul entry point. Distribuie pe XLSX vs CSV in functie de magic
 // bytes; aplica capurile; ruleaza validation per rind; returneaza preview-ul.
-export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult {
+//
+// Async din cauza migrarii la exceljs (F3 audit): parser-ul XLSX e
+// streaming-async; CSV path-ul ramane sincron dar e wrap-uit in acelasi
+// promise pentru simetrie.
+export async function parseNameList(
+  buf: Buffer,
+  opts: ParseOptions = {},
+): Promise<ParseResult> {
   if (buf.length === 0) {
     throw new ParseError("EMPTY_FILE", "Fisier gol.");
   }
@@ -285,7 +372,9 @@ export function parseNameList(buf: Buffer, opts: ParseOptions = {}): ParseResult
 
   const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
 
-  const rawRows = isXlsxBuffer(buf) ? rowsFromXlsx(buf) : rowsFromCsv(buf);
+  const rawRows = isXlsxBuffer(buf)
+    ? await rowsFromXlsx(buf)
+    : rowsFromCsv(buf);
   if (rawRows.length === 0) {
     throw new ParseError("EMPTY_FILE", "Fisierul nu contine niciun rand.");
   }

@@ -26,6 +26,7 @@ import {
 import {
   getLatestSnapshot,
 } from "../../db/monitoringSnapshotsRepository.ts";
+import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
 import { createDosarSoapRunner } from "./dosarSoapRunner.ts";
 import type { ScheduledJob } from "./scheduler.ts";
 import type { Dosar } from "../../soap.ts";
@@ -484,5 +485,113 @@ describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
     expect(detail.error_code).toBe("SNAPSHOT_OVERSIZE");
     expect(detail.payload_bytes).toBeGreaterThan(1 << 20);
     expect(detail.max_bytes).toBe(1 << 20);
+  });
+});
+
+// F8 enrichment integration — repository-level coverage already lives in
+// monitoringAlertsRepository.test.ts (10 P0 cases). This single test exercises
+// the end-to-end path through the runner: a `solutie_aparuta` alert exists
+// from a prior tick with empty ruling fields; on the next tick PortalJust
+// republishes the same sedinta with the ruling text now populated; the runner
+// invokes enrichSolutieAlertsForJob inside the snapshot+alerts transaction and
+// the existing alert's detail_json is patched in place.
+describe("dosarSoapRunner — F8 enrichment integration", () => {
+  it("patches existing solutie_aparuta alert when SOAP republishes the sedinta with full ruling text (F8 enrichment integration)", async () => {
+    const job = seedJob();
+
+    // Tick 0: pre-existing alert from a prior run, emitted when the ruling
+    // text was not yet published. detail carries the (data, ora, complet,
+    // solutie) tuple but NOT solutie_sumar / numar_document / data_pronuntare.
+    // Use a stable dedup_key distinct from anything the diff layer would emit
+    // on this tick so insertAlert stays a real insert and the assertion below
+    // can target this specific row.
+    const priorRunId = seedRunningRow(job.id);
+    const seededAlert = insertAlert({
+      ownerId: OWNER,
+      jobId: job.id,
+      runId: priorRunId,
+      kind: "solutie_aparuta",
+      severity: "info",
+      title: "Solutie pronuntata (pre-enrichment)",
+      detail: {
+        data: "2026-04-15",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+      },
+      dedupKey: "solutie_aparuta|test-pre-existing",
+    });
+    expect(seededAlert.inserted).toBe(true);
+    const alertId = seededAlert.row.id;
+    const baselineIsNew = seededAlert.row.is_new;
+    const baselineReadAt = seededAlert.row.read_at;
+    const baselineDismissedAt = seededAlert.row.dismissed_at;
+
+    // SOAP fixture: same numarDosar, same sedinta tuple, but now with the
+    // ruling fields populated (PortalJust published the hotarare in the
+    // window between the two ticks).
+    const sedintaWithRuling = {
+      complet: "C1",
+      data: "2026-04-15",
+      ora: "10:00",
+      solutie: "Admite",
+      solutieSumar: "Admite cererea reclamantului. Hotarare definitiva.",
+      documentSedinta: "",
+      numarDocument: "DOC/123/2026",
+      dataPronuntare: "2026-04-16",
+    };
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [
+        makeDosar("1234/180/2024", [sedintaWithRuling]),
+      ],
+    });
+
+    const runId = seedRunningRow(job.id);
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    // F10: surface enrichment patches via the run outcome so the scheduler can
+    // store alerts_patched on monitoring_runs. One alert was patched in place;
+    // no brand-new alerts were emitted for this fixture.
+    expect(out.alertsPatched).toBe(1);
+    expect(out.alertsCreated ?? 0).toBe(0);
+
+    // The pre-existing alert's detail_json now carries the ruling fields,
+    // while the original (data, ora, complet, solutie) tuple is preserved.
+    const patchedRow = getDb()
+      .prepare(
+        `SELECT detail_json, is_new, read_at, dismissed_at
+           FROM monitoring_alerts WHERE id = ?`,
+      )
+      .get(alertId) as {
+      detail_json: string;
+      is_new: number;
+      read_at: string | null;
+      dismissed_at: string | null;
+    };
+    const detail = JSON.parse(patchedRow.detail_json) as Record<string, unknown>;
+
+    expect(detail.solutie_sumar).toBe(
+      "Admite cererea reclamantului. Hotarare definitiva.",
+    );
+    expect(detail.numar_document).toBe("DOC/123/2026");
+    expect(detail.data_pronuntare).toBe("2026-04-16");
+
+    // Original tuple unchanged — enrichment merges, never overwrites.
+    expect(detail.data).toBe("2026-04-15");
+    expect(detail.ora).toBe("10:00");
+    expect(detail.complet).toBe("C1");
+    expect(detail.solutie).toBe("Admite");
+
+    // is_new / read_at / dismissed_at MUST NOT be mutated by the in-place
+    // detail patch — enrichment is a content backfill, not a re-notification.
+    expect(patchedRow.is_new).toBe(baselineIsNew);
+    expect(patchedRow.read_at).toBe(baselineReadAt);
+    expect(patchedRow.dismissed_at).toBe(baselineDismissedAt);
   });
 });

@@ -88,6 +88,11 @@ export interface MonitoringSchedulerHandle {
   // requiring monitoring-aware orchestration. Optional so test stubs that
   // only exercise runJobNow don't need to implement it.
   getStatus?(): { running: boolean; inflight: number };
+  // F1: DELETE /jobs/:id refuses to drop a row while a runner still holds
+  // its AbortController — the run finalizer would otherwise UPDATE a row
+  // that no longer exists and surface as RUNNER_THREW. Optional for the
+  // same reason as getStatus: legacy test stubs.
+  getInflightAbortController?(jobId: number): AbortController | undefined;
 }
 
 let scheduler: MonitoringSchedulerHandle | null = null;
@@ -299,6 +304,31 @@ monitoringRouter.delete("/jobs/:id", (c) => {
   if (!Number.isInteger(id) || id <= 0) {
     return c.json(fail("invalid_id", "ID invalid", c), 400);
   }
+  // F1: refuza DELETE cat timp un runner are AbortController activ pe job.
+  // Stergerea in mijlocul rularii lasa run finalizer-ul sa scrie pe o linie
+  // disparuta si emite RUNNER_THREW. Verificarea ramane in afara tranzactiei
+  // pentru ca este o lookup in memorie (Map), nu o operatie pe DB.
+  // Test: runner blocat + DELETE in paralel -> assert 409, fara
+  // RUNNER_THREW in monitoring_runs.
+  if (
+    scheduler &&
+    typeof scheduler.getInflightAbortController === "function" &&
+    scheduler.getInflightAbortController(id) !== undefined
+  ) {
+    recordAudit(c, "monitoring.job.delete_inflight", {
+      targetKind: "monitoring_job",
+      targetId: String(id),
+      outcome: "denied",
+    });
+    return c.json(
+      fail(
+        "job_in_flight",
+        "Jobul are o rulare in curs. Reincearca dupa finalizare.",
+        c,
+      ),
+      409,
+    );
+  }
   type DeleteResult = "ok" | "denied" | "not_found";
   const result: DeleteResult = getDb().transaction((): DeleteResult => {
     // Pre-state capture so the audit row preserves what was deleted
@@ -343,6 +373,131 @@ monitoringRouter.delete("/jobs/:id", (c) => {
     return c.json(fail("not_found", "Job inexistent", c), 404);
   }
   return c.json(ok({ deleted: true }, c));
+});
+
+// F9 — POST /jobs/bulk-delete: stergere in masa cu raportare detaliata.
+// Body: { ids: number[] } (max 100, fiecare integer pozitiv finit). Ruleaza
+// SELECT + delete per id intr-o singura tranzactie SQLite atomica. ID-urile
+// cu runner activ sunt marcate "inflight" (nu se sterg, asemanator F1) iar
+// cele inexistente pentru owner sunt marcate "not_found" (denied cross-owner
+// e fuzionat in not_found pentru ca raspunsul nu trebuie sa scurga
+// existenta). Audit unic agregat pe toata operatia.
+const BULK_DELETE_MAX = 100;
+monitoringRouter.post("/jobs/bulk-delete", limitMonitoringBody, async (c) => {
+  const ownerId = getOwnerId(c);
+  const bodyResult = await readLimitedJsonBody(c);
+  if (!bodyResult.ok) return bodyResult.response;
+  const body = bodyResult.body;
+
+  if (
+    body === null ||
+    typeof body !== "object" ||
+    !Array.isArray((body as { ids?: unknown }).ids)
+  ) {
+    return c.json(
+      fail("invalid_payload", "Payload invalid: ids[] obligatoriu.", c),
+      422,
+    );
+  }
+  const rawIds = (body as { ids: unknown[] }).ids;
+  if (rawIds.length === 0) {
+    return c.json(
+      fail("invalid_payload", "Lista de ID-uri este goala.", c),
+      422,
+    );
+  }
+  if (rawIds.length > BULK_DELETE_MAX) {
+    return c.json(
+      fail("too_many", "Maxim 100 ID-uri per cerere.", c),
+      400,
+    );
+  }
+  const ids: number[] = [];
+  for (const raw of rawIds) {
+    if (
+      typeof raw !== "number" ||
+      !Number.isFinite(raw) ||
+      !Number.isInteger(raw) ||
+      raw <= 0
+    ) {
+      return c.json(
+        fail(
+          "invalid_payload",
+          "ID invalid in lista (necesita integer pozitiv).",
+          c,
+        ),
+        422,
+      );
+    }
+    ids.push(raw);
+  }
+
+  // Tranzactie atomica: stergerile per id si audit-ul agregat se commit-eaza
+  // impreuna. Inflight check ramane in afara DB (lookup in Map), dar
+  // deciziile per id (deleted/inflight/not_found) sunt finalizate inauntru
+  // ca SELECT + DELETE sa nu se intercaleze cu o stergere concurenta din
+  // alta sesiune. Restul fisierului tine audit-ul in aceeasi tranzactie cu
+  // mutatia — pastram aceeasi conventie.
+  const deleted_ids: number[] = [];
+  const inflight_ids: number[] = [];
+  const not_found_ids: number[] = [];
+  try {
+    getDb().transaction(() => {
+      for (const id of ids) {
+        // Inflight check pe scheduler in memorie. Daca jobul are runner
+        // activ il marcam si trecem mai departe — nu rupem tranzactia.
+        if (
+          scheduler &&
+          typeof scheduler.getInflightAbortController === "function" &&
+          scheduler.getInflightAbortController(id) !== undefined
+        ) {
+          inflight_ids.push(id);
+          continue;
+        }
+        const before = getJobById(ownerId, id);
+        if (!before) {
+          // Cross-owner sau inexistent: ambele se intorc ca not_found
+          // pentru a nu scurge existenta prin status code-uri.
+          not_found_ids.push(id);
+          continue;
+        }
+        const okDel = deleteJob(ownerId, id);
+        if (!okDel) {
+          // Cursa concurenta cu alt session: tratam ca not_found.
+          not_found_ids.push(id);
+          continue;
+        }
+        deleted_ids.push(id);
+      }
+      recordAudit(c, "monitoring.job.bulk_deleted", {
+        targetKind: "monitoring_job",
+        detail: {
+          deleted_ids,
+          inflight_ids,
+          not_found_ids,
+          count: deleted_ids.length,
+        },
+      });
+    })();
+  } catch (err) {
+    console.error("[monitoring] bulk-delete failed:", err);
+    return c.json(
+      fail("internal_error", "Eroare la stergerea in masa.", c),
+      500,
+    );
+  }
+
+  return c.json(
+    ok(
+      {
+        deleted_ids,
+        inflight_ids,
+        not_found_ids,
+        total_deleted: deleted_ids.length,
+      },
+      c,
+    ),
+  );
 });
 
 // POST /jobs/:id/run — manual trigger. Per PLAN-monitoring-webmode.md L491:

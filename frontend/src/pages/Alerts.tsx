@@ -1,6 +1,7 @@
+import type { ReactNode } from "react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, ExternalLink, Eye, Filter, RefreshCw, Trash2 } from "lucide-react";
+import { Bell, CheckCheck, ExternalLink, Eye, FileText, Filter, RefreshCw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -14,7 +15,11 @@ import {
 } from "@/lib/alertsApi";
 import { cn } from "@/lib/utils";
 import { useFontSize } from "@/hooks/useFontSize";
-import { getPortalJustUrl } from "@/components/dosare-table-helpers";
+import {
+  formatInstitutie,
+  getPortalJustUrl,
+  getStadiuBadgeColor,
+} from "@/components/dosare-table-helpers";
 import { TablePagination } from "@/components/table-pagination";
 
 const kindOptions: Array<{ value: AlertKind | "all"; label: string }> = [
@@ -104,11 +109,21 @@ function getNested(detail: Record<string, unknown>, path: string[]): unknown {
   return cur;
 }
 
+interface AlertFact {
+  label: string;
+  // ReactNode lets us mix plain strings with styled chunks (Stadiu badge,
+  // structured Data sedintei + Ora rendering). The dd renderer handles both
+  // shapes — strings inherit the row's text-foreground color, JSX brings its
+  // own classes.
+  value: ReactNode;
+}
+
 interface AlertContext {
   numarDosar?: string;
   instanta?: string;
   nameNormalized?: string;
-  facts: Array<{ label: string; value: string }>;
+  hotarare?: { numarDoc?: string; dataPronuntare?: string; sumar?: string };
+  facts: AlertFact[];
   fallback: Array<{ label: string; value: string }>;
 }
 
@@ -162,9 +177,11 @@ function buildAlertContext(alert: MonitoringAlert): AlertContext {
   const nameNormalized =
     asString(detail.name_normalized) ?? asString(target.name_normalized);
 
-  const facts: Array<{ label: string; value: string }> = [];
-  const push = (label: string, value: string | undefined) => {
-    if (value) facts.push({ label, value });
+  const facts: AlertFact[] = [];
+  const push = (label: string, value: ReactNode | undefined) => {
+    if (value === undefined || value === null) return;
+    if (typeof value === "string" && value.trim().length === 0) return;
+    facts.push({ label, value });
   };
 
   // termen_changed: detail = { from: {data,ora,complet}, to: {data,ora,complet} }
@@ -177,22 +194,61 @@ function buildAlertContext(alert: MonitoringAlert): AlertContext {
     push("La", [toData, toOra].filter(Boolean).join(" · "));
     push("Complet", asString(getNested(detail, ["to", "complet"])) ?? asString(getNested(detail, ["from", "complet"])));
   } else {
-    push("Data sedintei", formatSedintaDate(detail.data));
-    push("Ora", asString(detail.ora));
+    // Date + ora rendered as one cohesive value so both share text-foreground
+    // (no muted "Ora" suffix). The 2-col grid would otherwise push the time
+    // onto the next row half, breaking the visual unit.
+    const sedintaData = formatSedintaDate(detail.data);
+    const sedintaOra = asString(detail.ora);
+    if (sedintaData || sedintaOra) {
+      // "Ora" reads as a sub-label inside the value, so it shares the muted
+      // color of the dt labels ("Data sedintei:", "Complet:", ...). The
+      // numeric time keeps text-foreground so the eye still tracks "what" vs
+      // "when" with one consistent gray-vs-black rhythm across the row.
+      push(
+        "Data sedintei",
+        <span className="text-foreground">
+          {sedintaData}
+          {sedintaData && sedintaOra ? "  " : ""}
+          {sedintaOra && (
+            <>
+              <span className="text-muted-foreground">Ora</span> {sedintaOra}
+            </>
+          )}
+        </span>,
+      );
+    }
     push("Complet", asString(detail.complet));
   }
 
-  push("Solutie", asString(detail.solutie));
-  // v2.6.2 — solutie_aparuta now includes the full ruling text + document
-  // identifier from SOAP. Surface them as facts so the user sees the rationale
-  // without leaving the app.
+  // For solutie_aparuta the title already reads "Solutie publicata: <solutie>"
+  // so the same value as a fact row would just be visual duplication. Skip
+  // for that kind only — keep for any future kind that may carry detail.solutie
+  // without surfacing it in the title.
+  if (alert.kind !== "solutie_aparuta") {
+    push("Solutie", asString(detail.solutie));
+  }
+  // v2.6.4 — solutie_aparuta carries the full ruling. Pull numar_document /
+  // data_pronuntare / solutie_sumar out of the regular facts grid into a
+  // dedicated callout block; cramming the multi-sentence ruling into a
+  // 2-column key:value grid alongside Data/Ora/Complet was visually awkward.
   const numarDoc = asString(detail.numar_document);
   const dataPronuntare = formatSedintaDate(detail.data_pronuntare);
-  if (numarDoc || dataPronuntare) {
-    push("Hotarare", [numarDoc, dataPronuntare].filter(Boolean).join(" · "));
+  const sumar = asString(detail.solutie_sumar);
+  const hotarare = numarDoc || dataPronuntare || sumar
+    ? { numarDoc, dataPronuntare, sumar }
+    : undefined;
+
+  // Stadiu rendered as a colored Badge to match Cautare Dosare styling
+  // (slate / sky / indigo / orange per stadiu kind).
+  const stadiuValue = asString(detail.stadiu) ?? asString(detail.stadiu_procesual);
+  if (stadiuValue) {
+    push(
+      "Stadiu",
+      <Badge variant="outline" className={cn("text-xs", getStadiuBadgeColor(stadiuValue))}>
+        {stadiuValue}
+      </Badge>,
+    );
   }
-  push("Solutie completa", asString(detail.solutie_sumar));
-  push("Stadiu", asString(detail.stadiu) ?? asString(detail.stadiu_procesual));
   push("Categorie", asString(detail.categorie));
 
   // dosar_new (name_soap) flat detail; stadiu/categorie/instanta already handled above.
@@ -205,7 +261,12 @@ function buildAlertContext(alert: MonitoringAlert): AlertContext {
     }
   }
 
-  if (instanta) push("Instanta", instanta);
+  // formatInstitutie humanizes "CurteadeApelSUCEAVA" → "Curtea de Apel SUCEAVA"
+  // so the alert reads like the Cautare Dosare detail card (single source of
+  // truth: lib/institutii.ts lookup table). Falls back to the raw string if
+  // the lookup misses, so unknown courts still show up rather than being
+  // silently dropped.
+  if (instanta) push("Instanta", formatInstitutie(instanta));
   if (nameNormalized) push("Nume monitorizat", nameNormalized);
 
   push("Mesaj", asString(detail.message));
@@ -227,7 +288,7 @@ function buildAlertContext(alert: MonitoringAlert): AlertContext {
     if (v) fallback.push({ label: humanizeKey(key), value: v });
   }
 
-  return { numarDosar, instanta, nameNormalized, facts, fallback };
+  return { numarDosar, instanta, nameNormalized, hotarare, facts, fallback };
 }
 
 function severityVariant(severity: AlertSeverity): "default" | "warning" | "destructive" {
@@ -523,6 +584,26 @@ export default function Alerts({
                           ))}
                         </dl>
                       )}
+                      {ctx.hotarare && (
+                        <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm">
+                          <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
+                            <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                            {ctx.hotarare.numarDoc
+                              ? `HOTARARE NR. ${ctx.hotarare.numarDoc}`
+                              : "Hotarare"}
+                          </span>
+                          {ctx.hotarare.dataPronuntare && (
+                            <span className="text-xs text-muted-foreground">
+                              {ctx.hotarare.dataPronuntare}
+                            </span>
+                          )}
+                          {ctx.hotarare.sumar && (
+                            <span className="basis-full break-words text-foreground/90">
+                              {ctx.hotarare.sumar.replace(/\s+/g, " ").trim()}
+                            </span>
+                          )}
+                        </div>
+                      )}
                       {ctx.fallback.length > 0 && (
                         <dl className="mt-2 grid gap-x-6 gap-y-0.5 text-xs text-muted-foreground sm:grid-cols-2">
                           {ctx.fallback.map((fact) => (
@@ -541,9 +622,10 @@ export default function Alerts({
                           size="sm"
                           onClick={handleOpen}
                           title={`Deschide ${ctx.numarDosar} in lista Dosare`}
+                          className="text-[12.5px]"
                         >
                           <Eye className="h-4 w-4" />
-                          Cauta in app
+                          Dosare
                         </Button>
                       )}
                       <Button
@@ -551,6 +633,7 @@ export default function Alerts({
                         size="sm"
                         onClick={() => markSeen(alert)}
                         disabled={busyId === alert.id || !!alert.read_at}
+                        className="text-[12.5px]"
                       >
                         <Eye className="h-4 w-4" />
                         Citit
@@ -560,6 +643,7 @@ export default function Alerts({
                         size="sm"
                         onClick={() => dismiss(alert)}
                         disabled={busyId === alert.id || !!alert.dismissed_at}
+                        className="text-[12.5px]"
                       >
                         <Trash2 className="h-4 w-4" />
                         Inchide

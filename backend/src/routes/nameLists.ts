@@ -190,9 +190,9 @@ nameListsRouter.post("/preview", limitPreviewBody, async (c) => {
     return previewTooLarge(c);
   }
 
-  let result: ReturnType<typeof parseNameList>;
+  let result: Awaited<ReturnType<typeof parseNameList>>;
   try {
-    result = parseNameList(buf, { filename: filename ?? undefined });
+    result = await parseNameList(buf, { filename: filename ?? undefined });
   } catch (err) {
     if (err instanceof ParseError) {
       return c.json(

@@ -1,6 +1,6 @@
 {
   "name": "legal-dashboard-backend",
-  "version": "2.6.3",
+  "version": "2.6.4",
   "private": true,
   "type": "module",
   "scripts": {
@@ -16,9 +16,9 @@
     "better-sqlite3": "^12.9.0",
     "csv-parse": "^5.6.0",
     "dotenv": "^16.6.1",
+    "exceljs": "^4.4.0",
     "hono": "^4.12.14",
     "openai": "^6.33.0",
-    "xlsx": "^0.18.5",
     "zod": "4.3.6"
   },
   "engines": {
@@ -26,6 +26,7 @@
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.4",
+    "xlsx": "^0.18.5"
   }
 }

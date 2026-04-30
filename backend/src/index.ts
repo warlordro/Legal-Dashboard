@@ -8,6 +8,7 @@ import { dosareRouter } from "./routes/dosare.ts";
 import { termeneRouter } from "./routes/termene.ts";
 import { aiRouter } from "./routes/ai.ts";
 import { rateLimit } from "./middleware/rate-limit.ts";
+import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
 import {
@@ -118,6 +119,13 @@ app.use("*", requestIdContext);
 
 app.use("/api/*", rateLimit);
 
+// F2 audit hardening (2026-04-30): CSRF defense on state-changing routes when
+// the backend is bound to a non-loopback interface. Mounted unconditionally —
+// the middleware itself short-circuits for safe methods + loopback peers, so
+// the desktop loopback path stays unchanged. Host/Origin parsing happens only
+// for cross-LAN POST/PUT/PATCH/DELETE.
+app.use("/api/*", originGuard);
+
 // Readiness flag: schema migrations + prewarm run before serve(), but if the DB
 // is locked by another tool or temporarily inaccessible we keep /health serving
 // 503 until ready=true. Container orchestrators / Electron splash poll this.
@@ -189,6 +197,38 @@ let hostname = rawHost;
 if (!loopback.has(rawHost) && process.env.LEGAL_DASHBOARD_ALLOW_REMOTE !== "1") {
   console.warn(`[security] HOST=${rawHost} ignored; set LEGAL_DASHBOARD_ALLOW_REMOTE=1 to opt in.`);
   hostname = "127.0.0.1";
+}
+
+// F2 (audit 2026-04-30): cand userul a optat explicit pentru bind non-loopback
+// (LEGAL_DASHBOARD_ALLOW_REMOTE=1) sau cand HOST configurat ramane non-loopback
+// dupa block-ul de mai sus, refuzam boot pana cand operatorul confirma in mod
+// explicit, prin LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet, ca a
+// inteles ca toate API-urile sunt expuse fara auth pana la PR-9. "WARNING in
+// log" e prea usor de scrolled-past — un crash la boot, in schimb, forteaza o
+// decizie. Cand ack-ul e prezent, banner-ul ramane (audit trail).
+const REMOTE_BIND_ACTIVE =
+  process.env.LEGAL_DASHBOARD_ALLOW_REMOTE === "1" || !loopback.has(hostname);
+if (REMOTE_BIND_ACTIVE) {
+  const ack = process.env.LEGAL_DASHBOARD_ACK_NO_AUTH;
+  if (ack !== "i-understand-no-auth-yet") {
+    fatalBoot(
+      "remote bind without auth ack",
+      new Error(
+        "LEGAL_DASHBOARD_ALLOW_REMOTE=1 (or non-loopback HOST) is set but " +
+          "LEGAL_DASHBOARD_ACK_NO_AUTH != 'i-understand-no-auth-yet'. " +
+          "Toate API-urile sunt expuse fara auth pana la PR-9; setati " +
+          "LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet ca sa " +
+          "confirmati ca intelegeti riscul, sau lasati hostname pe loopback.",
+      ),
+    );
+  }
+  console.warn("====================================================================");
+  console.warn("WARNING: Legal Dashboard ruleaza pe interfata non-loopback FARA AUTH.");
+  console.warn("Toate API-urile (monitoring, alerts, AI, RNPM, exports) sunt accesibile");
+  console.warn("oricarui client care poate ajunge la port. Nu folosi in productie pana");
+  console.warn("la PR-9 (auth real). Pentru desktop loopback, ignora acest mesaj.");
+  console.warn(`Ack acceptat: LEGAL_DASHBOARD_ACK_NO_AUTH=${ack}`);
+  console.warn("====================================================================");
 }
 
 // Run schema init + descriere migration + prewarm BEFORE binding the port. On

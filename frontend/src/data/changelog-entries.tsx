@@ -18,6 +18,46 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.6.4",
+    date: "1 Mai 2026",
+    subtitle: "Patch - audit hardening (multi-agent review) finalizat: DELETE in-flight, enrichment relaxed, SSE alert_enriched, bulk delete atomic, metrici precise, xlsx -> exceljs, fail-closed remote",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Monitorizare - DELETE blocheaza job-urile in-flight (F1)",
+        content:
+          "DELETE monitoring job verifica acum scheduler-ul in-flight si returneaza 409 daca jobul ruleaza activ; previne erori RUNNER_THREW cand userul sterge un job in timpul unui SOAP call.",
+      },
+      {
+        title: "Securitate - xlsx -> exceljs migration (F3)",
+        content:
+          "Backend-ul migrat de pe `xlsx@0.18.5` (CVE Prototype Pollution + ReDoS, fara fix upstream) pe `exceljs@^4.4.0` pentru parser-ul de fisiere uploaded. parseNameList devine async, cu safety belt 30s timeout pe parse. xlsx mutat in devDependencies (folosit doar de fixture-uri de test). xlsx-js-style ramane neschimbat pe path-ul de export (write-only, nu primeste input atacator).",
+      },
+      {
+        title: "Securitate - remote bind fail-closed + originGuard (F2)",
+        content:
+          "LEGAL_DASHBOARD_ALLOW_REMOTE=1 sau HOST non-loopback REFUZA pornirea (exit 1) pana cand operatorul confirma explicit ack-ul LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet. Cu ack prezent, middleware-ul originGuard pe /api/* blocheaza requesturi state-changing (POST/PUT/PATCH/DELETE) cu Origin/Referer mismatch fata de Host pentru caller-i non-loopback (403 csrf_origin_mismatch). Loopback (desktop la el insusi) trece liber.",
+      },
+      {
+        title: "Alerte - enrichment relaxed + SSE alert_enriched (F4+F5+F6+F7)",
+        content:
+          "enrichSolutieAlertsForJob proceseaza max 200 alerte/tick, filtreaza created_at >= now-7days si foloseste match relaxat (trim + fallback pe data/ora/complet) pentru a nu bloca backfill-ul hotararii. SSE eveniment nou `alert_enriched` notifica clientii cand o alerta veche primeste textul hotararii fara refresh manual.",
+      },
+      {
+        title: "Monitorizare - bulk delete atomic + metrici precise (F9+F10)",
+        content:
+          "Ruta noua `POST /jobs/bulk-delete` proceseaza atomic stergerile, raporteaza `deleted_ids` / `inflight_ids` / `not_found_ids`; frontend-ul pastreaza selectia esuata pentru retry. `alerts_created` reflecta doar inserturile reale (insertAlert returneaza `{row, inserted}`); coloana noua `monitoring_runs.alerts_patched` (migration 0012) contorizeaza separat enrichment-urile in-place.",
+      },
+      {
+        title: "Tests - 546 pass (era 524 in v2.6.3)",
+        content:
+          "10 P0 enrichment + 1 runner integration end-to-end + 7 originGuard + 1 alerts_patched repo + 3 nameListParser xlsx malformed/oversized.",
+      },
+    ],
+  },
+  {
     version: "v2.6.3",
     date: "30 Aprilie 2026",
     subtitle: "Patch - UX Monitorizare TINTA + cadenta non-standard onesta + paginare Alerte unificata",

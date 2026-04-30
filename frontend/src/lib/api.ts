@@ -329,6 +329,13 @@ export interface CreateNameMonitoringInput {
   client_request_id?: string;
 }
 
+export interface BulkDeleteResult {
+  deleted_ids: number[];
+  inflight_ids: number[];
+  not_found_ids: number[];
+  total_deleted: number;
+}
+
 export const monitoring = {
   list: async (params: {
     page?: number;
@@ -404,6 +411,15 @@ export const monitoring = {
   deleteJob: async (id: number): Promise<void> => {
     const res = await fetch(`/api/v1/monitoring/jobs/${id}`, { method: "DELETE" });
     await unwrapMonitoring<{ deleted: boolean }>(res);
+  },
+
+  bulkDeleteJobs: async (ids: number[]): Promise<BulkDeleteResult> => {
+    const res = await fetch(`/api/v1/monitoring/jobs/bulk-delete`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids }),
+    });
+    return unwrapMonitoring<BulkDeleteResult>(res);
   },
 };
 

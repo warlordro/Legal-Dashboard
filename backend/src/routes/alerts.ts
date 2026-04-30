@@ -7,6 +7,8 @@ import { z } from "zod";
 
 import { recordAudit } from "../db/auditRepository.ts";
 import {
+  addAlertEnrichmentListener,
+  type AlertEnrichmentPayload,
   dismissAlert,
   listAlerts,
   markAlertSeen,
@@ -172,6 +174,11 @@ alertsRouter.get("/stream", (c) => {
 
   return streamSSE(c, async (stream) => {
     let unsubscribe: (() => void) | null = null;
+    // F7 — separate unsubscribe for the enrichment channel. Kept distinct from
+    // the new-alert unsubscribe so the new-alert subscribe-cap path (which may
+    // throw and bail before we wire enrichment) doesn't have to special-case
+    // a half-initialised handle.
+    let unsubscribeEnriched: (() => void) | null = null;
     let heartbeat: NodeJS.Timeout | null = null;
 
     const stopHeartbeat = () => {
@@ -181,11 +188,17 @@ alertsRouter.get("/stream", (c) => {
       }
     };
 
+    const cleanupSubscriptions = () => {
+      unsubscribe?.();
+      unsubscribe = null;
+      unsubscribeEnriched?.();
+      unsubscribeEnriched = null;
+    };
+
     const closed = new Promise<void>((resolve) => {
       stream.onAbort(() => {
         stopHeartbeat();
-        unsubscribe?.();
-        unsubscribe = null;
+        cleanupSubscriptions();
         resolve();
       });
     });
@@ -215,8 +228,7 @@ alertsRouter.get("/stream", (c) => {
           .catch((err) => {
             console.error("[alerts] writeSSE failed, dropping subscriber", err);
             stopHeartbeat();
-            unsubscribe?.();
-            unsubscribe = null;
+            cleanupSubscriptions();
           });
       });
     } catch (err) {
@@ -229,6 +241,40 @@ alertsRouter.get("/stream", (c) => {
         .catch(() => undefined);
       return;
     }
+
+    // F7 — alert_enriched channel. listAlerts patches detail_json in place
+    // when the runner backfills solutie_sumar / numar_document / instanta on
+    // an existing alert; the inbox needs to see that mutation without a
+    // manual reload. The repository already partitions listeners per owner,
+    // but we double-check the payload's ownerId here so a future refactor
+    // (e.g. switching to a global listener bus) can't accidentally cross
+    // tenants. No subscriber cap on this channel — it shares the same
+    // EventSource handle as the new-alert subscription, so it's already
+    // bounded by the per-owner SSE-stream cap (5).
+    unsubscribeEnriched = addAlertEnrichmentListener(
+      ownerId,
+      (payload: AlertEnrichmentPayload) => {
+        if (payload.ownerId !== ownerId) return;
+        stream
+          .writeSSE({
+            event: "alert_enriched",
+            id: String(payload.id),
+            data: JSON.stringify({
+              id: payload.id,
+              jobId: payload.jobId,
+              detail: payload.detail,
+            }),
+          })
+          .catch((err) => {
+            console.error(
+              "[alerts] enrichment writeSSE failed, dropping subscriber",
+              err,
+            );
+            stopHeartbeat();
+            cleanupSubscriptions();
+          });
+      },
+    );
 
     // First event carries `retry: 3000` so EventSource clients reconnect
     // after 3s on disconnect (browser default is unspecified by the spec —
@@ -243,8 +289,7 @@ alertsRouter.get("/stream", (c) => {
       stream.writeSSE({ event: "ping", data: "{}" }).catch((err) => {
         console.error("[alerts] heartbeat writeSSE failed, dropping subscriber", err);
         stopHeartbeat();
-        unsubscribe?.();
-        unsubscribe = null;
+        cleanupSubscriptions();
       });
     }, 25_000);
 

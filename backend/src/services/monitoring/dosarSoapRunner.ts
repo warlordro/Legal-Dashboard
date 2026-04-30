@@ -26,7 +26,10 @@ import {
   getLatestSnapshot,
   insertSnapshot,
 } from "../../db/monitoringSnapshotsRepository.ts";
-import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import {
+  insertAlert,
+  enrichSolutieAlertsForJob,
+} from "../../db/monitoringAlertsRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 
@@ -97,6 +100,11 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
       // it can acquire the exclusive lock. The atomic snapshot+alerts
       // transaction (C2 hardening) is preserved verbatim inside.
       let alertsCreated = 0;
+      // F10 audit hardening: enrichment patches mutate detail_json on existing
+      // alerts (solutie_aparuta backfill). Tracked separately from
+      // alertsCreated so the per-tick run row reflects work done even when no
+      // brand-new alert was emitted.
+      let alertsPatched = 0;
       let oversizeOutcome: RunOutcome | null = null;
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
@@ -125,7 +133,10 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         const newSnapshotJson = canonicalJson(newSnapshot);
         const payloadBytes = Buffer.byteLength(newSnapshotJson, "utf8");
         if (payloadBytes > SNAPSHOT_PAYLOAD_MAX_BYTES) {
-          insertAlert({
+          // F10: numaram doar inserturile reale, nu generarile diff-ului —
+          // dedup_key duplicat = no-op, nu vrem sa inflam metrica
+          // `alerts_created` din `monitoring_runs`.
+          const oversizeResult = insertAlert({
             ownerId: job.owner_id,
             jobId: job.id,
             runId,
@@ -140,12 +151,13 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
             },
             dedupKey: `snapshot_oversize|${runId}`,
           });
-          alertsCreated = 1;
+          const oversizeInserted = oversizeResult.inserted ? 1 : 0;
+          alertsCreated = oversizeInserted;
           oversizeOutcome = {
             status: "error",
             errorCode: "SNAPSHOT_OVERSIZE",
             errorMessage: `payload ${payloadBytes}B > cap ${SNAPSHOT_PAYLOAD_MAX_BYTES}B`,
-            alertsCreated: 1,
+            alertsCreated: oversizeInserted,
           };
           return;
         }
@@ -157,6 +169,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         // against the new snapshot and never re-emits the missed alerts.
         // better-sqlite3 transactions are synchronous; the runner is async
         // only on the SOAP call above, which has already resolved here.
+        let insertedCount = 0;
         getDb().transaction(() => {
           insertSnapshot({
             ownerId: job.owner_id,
@@ -180,8 +193,11 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
           if (currentDosar?.stadiuProcesual) {
             dosarContext.stadiu = currentDosar.stadiuProcesual;
           }
+          // F10: numaram doar inserturile reale, nu generarile diff-ului —
+          // dedup_key duplicat = no-op, nu vrem sa inflam metrica
+          // `alerts_created` din `monitoring_runs`.
           for (const alert of alerts) {
-            insertAlert({
+            const result = insertAlert({
               ownerId: job.owner_id,
               jobId: job.id,
               runId,
@@ -191,15 +207,43 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
               detail: { ...dosarContext, ...alert.detail },
               dedupKey: alert.dedupKey,
             });
+            if (result.inserted) insertedCount += 1;
+          }
+          // v2.6.4 — backfill ruling text on existing solutie_aparuta alerts
+          // whose detail_json was frozen with empty solutie_sumar / numar_document
+          // / data_pronuntare because PortalJust hadn't yet published the ruling
+          // when the alert was emitted. Idempotent: no-op once detail already
+          // carries the fields. Inside the same transaction as the diff inserts
+          // so a partial failure rolls everything back.
+          if (currentDosar) {
+            // F10: capture patch count so finalize() can store it as
+            // alerts_patched. Idempotent re-runs (no-op patches) return 0.
+            alertsPatched = enrichSolutieAlertsForJob(
+              job.owner_id,
+              job.id,
+              (currentDosar.sedinte ?? []).map((s) => ({
+                data: s.data,
+                ora: s.ora,
+                complet: s.complet,
+                solutie: s.solutie ?? "",
+                solutieSumar: s.solutieSumar,
+                numarDocument: s.numarDocument,
+                dataPronuntare: s.dataPronuntare,
+              })),
+              {
+                instanta: currentDosar.institutie,
+                stadiu: currentDosar.stadiuProcesual,
+              },
+            );
           }
         })();
-        alertsCreated = alerts.length;
+        alertsCreated = insertedCount;
       });
 
       if (oversizeOutcome) {
         return oversizeOutcome;
       }
-      return { status: "ok", alertsCreated };
+      return { status: "ok", alertsCreated, alertsPatched };
     },
   };
 }

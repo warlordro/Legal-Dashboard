@@ -26,6 +26,7 @@ export interface MonitoringRunRow {
   error_code: string | null;
   error_message: string | null;
   alerts_created: number;
+  alerts_patched: number;
   duration_ms: number | null;
 }
 
@@ -72,6 +73,10 @@ export interface FinalizeInput {
   errorCode?: string;
   errorMessage?: string;
   alertsCreated?: number;
+  // F10 audit hardening: count of alerts whose detail_json was patched on this
+  // tick (e.g. solutie_aparuta backfill). Tracked separately from
+  // alertsCreated so an enrichment-heavy run doesn't read as "did nothing".
+  alertsPatched?: number;
 }
 
 // Transition a `running` row to a terminal status. Returns true on success,
@@ -93,7 +98,8 @@ export function finalize(runId: number, input: FinalizeInput): boolean {
              http_status = ?,
              error_code = ?,
              error_message = ?,
-             alerts_created = COALESCE(?, alerts_created)
+             alerts_created = COALESCE(?, alerts_created),
+             alerts_patched = COALESCE(?, alerts_patched)
        WHERE id = ? AND status = 'running'`,
     )
     .run(
@@ -104,6 +110,7 @@ export function finalize(runId: number, input: FinalizeInput): boolean {
       input.errorCode ?? null,
       input.errorMessage ?? null,
       input.alertsCreated ?? null,
+      input.alertsPatched ?? null,
       runId,
     );
   return info.changes > 0;

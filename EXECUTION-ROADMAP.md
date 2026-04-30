@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30). Urmatorul PR planificat: PR-9 Auth pluggable (desktop noop / web SSO).
-> **Versiune document**: 1.7 (2026-04-30)
+> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1..v2.6.3 + audit hardening v2.6.4 (2026-05-01). Urmatorul PR planificat: PR-9 Auth pluggable (desktop noop / web SSO).
+> **Versiune document**: 1.8 (2026-05-01)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
@@ -433,3 +433,4 @@ Vezi PLAN-monitoring-webmode.md Â§0 pentru rationale complet.
 - **v1.5** (2026-04-30): PR-6 livrat ca `v2.4.1` + patch `v2.4.2` (full-review hardening: SSE heartbeat, audit pe seen/dismissed, bodyLimit, cap stream-uri/owner, focus suppress).
 - **v1.6** (2026-04-30): PR-7 livrat ca `v2.5.0` (AI usage tracking: migration `0010_ai_usage`, cost integer milli, `/api/v1/ai-usage/summary`, panou Setari API) + patch `v2.5.1` (multi-review hardening: closed-lower-bound, UTC-midnight, `markShuttingDown` latch, `inflightRef` AbortController).
 - **v1.7** (2026-04-30): PR-8 livrat ca `v2.6.0` (admin pages + roles guard: middleware `requireRole`, `/api/v1/me`, suprafata `/api/v1/admin/{users,audit,users/:id/quota}`, migration `0011_user_quota_overrides`, hook `useCurrentUser` + componenta `AdminGate`, sidebar conditional `Administrare`, trei pagini admin Users/Audit/Quota; guardrails irreversibile `last_admin` 409 si `self_deactivation` 409). 524/524 teste backend.
+- **v1.8** (2026-05-01): patch-uri UX `v2.6.1` (alerte cu context dosar + identitate Windows), `v2.6.2` (card scaling + linkificare PortalJust + detail enrichment) si `v2.6.3` (TINTA link + cadenta non-standard onesta + Alerte pagination unified) inregistrate; audit hardening `v2.6.4` finalizat dupa multi-agent review: F1 DELETE in-flight 409, F2 fail-closed remote (`LEGAL_DASHBOARD_ACK_NO_AUTH` ack required) + middleware nou `originGuard` CSRF pe `/api/*`, F3 migrare `xlsx@0.18.5` → `exceljs@^4.4.0` in `nameListParser.ts` (async + safety belt 30s, `xlsx` mutat in devDependencies), F4-F6 enrichSolutie restrans (200/tick + 7d window + match relaxat), F7 SSE `alert_enriched`, F9 `POST /jobs/bulk-delete` atomic cu raport detaliat, F10 `alerts_created` reflecta inserturi reale + coloana noua `monitoring_runs.alerts_patched` (migration `0012`). **546/546 teste** (era 524 in v2.6.3, +22 noi).

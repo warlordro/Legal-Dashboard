@@ -53,6 +53,12 @@ export type ScheduledJob = MonitoringJobRow;
 export interface RunOutcome {
   status: TerminalRunStatus;
   alertsCreated?: number;
+  // F10 audit hardening: enrichment patches applied to existing alerts on this
+  // tick (e.g. solutie_aparuta backfill via enrichSolutieAlertsForJob). Tracked
+  // separately from alertsCreated so an enrichment-heavy run is not reported as
+  // alertsCreated=0. Only dosar_soap currently emits this; name_soap always
+  // leaves it undefined → finalize stores 0.
+  alertsPatched?: number;
   httpStatus?: number;
   errorCode?: string;
   errorMessage?: string;
@@ -409,6 +415,7 @@ export class Scheduler {
             errorCode: outcome.errorCode,
             errorMessage: outcome.errorMessage,
             alertsCreated: outcome.alertsCreated ?? 0,
+            alertsPatched: outcome.alertsPatched ?? 0,
           });
 
           // 'aborted' is graceful drain, NOT a retry-able failure. Leave job

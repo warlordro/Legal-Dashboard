@@ -7,19 +7,33 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.6.3**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.6.4**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.6.3** - patch UX Monitorizare + Alerte: coloana TINTA in tabelul de
-joburi `dosar_soap` afiseaza acum numarul ca link extern catre `portal.just.ro`
-+ buton mic Search care declanseaza auto-search in lista Dosare (acelasi
-mecanism `pendingSearch` ca in inbox-ul Alerte), dropdown-ul de cadenta
-prepende un option `"<valoare> (custom)"` cu border amber cand DB-ul are o
-valoare in afara optiunilor standard ({4h, 8h, 12h, 24h}) ca UI-ul sa nu mai
-afiseze fals "4h" peste un job care ruleaza la 10min, paginarea inbox-ului
-de alerte adopta componenta `TablePagination` partajata (la fel ca in Cautare
-Dosare / RNPM, page-size selector + numere de pagina + input de salt) si
-zoom-ul cardului de alerta scade un pixel suplimentar pe scara fontului
-(`zoom: (slider.value - 3) / slider.value`).
+**v2.6.4** - audit hardening dupa multi-agent review (finalizat): F1 `DELETE
+/monitoring/jobs/:id` returneaza 409 `job_in_flight` cand runner-ul are
+`AbortController` activ pe job (previne `RUNNER_THREW`); F2 `LEGAL_DASHBOARD_ALLOW_REMOTE=1`
+REFUZA pornirea fara ack `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`
++ middleware nou `originGuard` pe `/api/*` blocheaza state-change cu Origin
+mismatch (403 `csrf_origin_mismatch`); F3 `nameListParser.ts` migrat de pe
+`xlsx@0.18.5` (CVE Prototype Pollution + ReDoS) pe `exceljs@^4.4.0`,
+`parseNameList` async cu safety belt 30s, `xlsx` mutat in devDependencies;
+F4+F5+F6 `enrichSolutieAlertsForJob` restrans — fereastra 7 zile + cap 200
+alerte/tick + early return + match relaxat `(data, ora, complet)` cu fallback
+cand textul `solutie` se schimba intre alerta initiala si publicarea hotararii;
+F7 frame SSE nou `alert_enriched` ca alertele vechi primesc textul hotararii
+fara refresh manual; F9 ruta noua `POST /monitoring/jobs/bulk-delete` atomica
+(cap 100, raport `deleted_ids`/`inflight_ids`/`not_found_ids`); F10
+`alerts_created` din `monitoring_runs` reflecta doar inserturile reale
+(`insertAlert` returneaza `{row, inserted}`) + coloana noua `alerts_patched`
+(migration `0012`) contorizeaza separat enrichment-urile in-place. 546/546
+teste backend (era 524 in v2.6.3, +22 noi).
+Baza ramane v2.6.3 - patch UX Monitorizare + Alerte: coloana TINTA in tabelul
+de joburi `dosar_soap` afiseaza numarul ca link extern catre `portal.just.ro`
++ buton mic Search care declanseaza auto-search in lista Dosare,
+dropdown-ul de cadenta prepende option `"<valoare> (custom)"` cu border
+amber cand DB-ul are o valoare in afara optiunilor standard, paginarea
+inbox-ului de alerte adopta `TablePagination` partajata, zoom-ul cardului
+de alerta scade un pixel suplimentar pe scara fontului.
 Baza ramane v2.6.2 - patch UX inbox alerte: cardul de alerta scaleaza dinamic
 sub slider-ul de fonturi prin `zoom`, "Dosar: <numar>" e link extern catre
 `portal.just.ro`, butonul navigheaza in Dosare, `solutie_aparuta` include
@@ -89,7 +103,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (524 teste, neschimbate in v2.6.3) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (546 teste in v2.6.4, era 524 in v2.6.3) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

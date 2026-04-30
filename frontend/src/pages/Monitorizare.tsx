@@ -3,6 +3,7 @@
 // has a way to seed the queue and verify writes today.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import {
   Activity,
   Trash2,
@@ -13,7 +14,7 @@ import {
   Download,
   FileSpreadsheet,
   ExternalLink,
-  Search,
+  Eye,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -70,9 +71,13 @@ export default function Monitorizare({
   onOpenDosar?: (numarDosar: string) => void;
 } = {}) {
   const confirm = useConfirm();
+  const navigate = useNavigate();
   const [jobs, setJobs] = useState<MonitoringJob[]>([]);
+  const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   // Bulk-upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -92,6 +97,7 @@ export default function Monitorizare({
     try {
       const result = await monitoring.list({ pageSize: 100 });
       setJobs(result.rows);
+      setTotal(result.total);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Eroare la incarcarea jobs.");
     } finally {
@@ -102,6 +108,79 @@ export default function Monitorizare({
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // Prune selection of IDs that no longer exist (after refresh / bulk delete)
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev;
+      const live = new Set(jobs.map((j) => j.id));
+      let changed = false;
+      const next = new Set<number>();
+      for (const id of prev) {
+        if (live.has(id)) next.add(id);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [jobs]);
+
+  const allSelected = jobs.length > 0 && jobs.every((j) => selectedIds.has(j.id));
+  const someSelected = selectedIds.size > 0 && !allSelected;
+
+  const toggleAll = () => {
+    setSelectedIds(allSelected ? new Set() : new Set(jobs.map((j) => j.id)));
+  };
+
+  const toggleOne = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) return;
+    const ok = await confirm({
+      title: `Sterge ${ids.length} ${ids.length === 1 ? "monitorizare" : "monitorizari"}?`,
+      message: `Stergi ${ids.length} ${ids.length === 1 ? "job monitorizat" : "joburi monitorizate"}. Cele cu rulare in curs vor ramane (le poti retry mai tarziu).`,
+      confirmLabel: "Sterge",
+      destructive: true,
+    });
+    if (!ok) return;
+    setBulkDeleting(true);
+    setError(null);
+    try {
+      const result = await monitoring.bulkDeleteJobs(ids);
+      const deletedSet = new Set(result.deleted_ids);
+      // Pastram in selectie ce nu s-a sters (inflight + not_found pentru retry).
+      setSelectedIds((prev) => {
+        const next = new Set<number>();
+        for (const id of prev) if (!deletedSet.has(id)) next.add(id);
+        return next;
+      });
+      const parts: string[] = [];
+      if (result.deleted_ids.length > 0) {
+        parts.push(`${result.deleted_ids.length} ${result.deleted_ids.length === 1 ? "stersa" : "sterse"}`);
+      }
+      if (result.inflight_ids.length > 0) {
+        parts.push(`${result.inflight_ids.length} in rulare`);
+      }
+      if (result.not_found_ids.length > 0) {
+        parts.push(`${result.not_found_ids.length} ${result.not_found_ids.length === 1 ? "inexistent" : "inexistente"}`);
+      }
+      if (result.inflight_ids.length > 0 || result.not_found_ids.length > 0) {
+        setError(parts.join(", ") + ".");
+      }
+      await refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la stergerea bulk.");
+    } finally {
+      setBulkDeleting(false);
+    }
+  };
 
   const handleDelete = async (job: MonitoringJob) => {
     const ok = await confirm({
@@ -472,14 +551,43 @@ export default function Monitorizare({
 
       <Card>
         <CardHeader>
-          <CardTitle className="text-base">
-            Joburi active{jobs.length > 0 ? ` (${jobs.length})` : ""}
-          </CardTitle>
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-base">
+              Joburi active{jobs.length > 0 ? ` (${jobs.length})` : ""}
+              {selectedIds.size > 0 && (
+                <span className="ml-2 text-sm font-normal text-muted-foreground">
+                  · {selectedIds.size} selectate
+                </span>
+              )}
+            </CardTitle>
+            {selectedIds.size > 0 && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={handleBulkDelete}
+                disabled={bulkDeleting}
+                title={`Sterge ${selectedIds.size} joburi selectate`}
+              >
+                <Trash2 className="h-4 w-4" />
+                {bulkDeleting ? "Se sterg..." : `Sterge selectate (${selectedIds.size})`}
+              </Button>
+            )}
+          </div>
         </CardHeader>
         <CardContent>
           {error && (
             <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
               {error}
+            </div>
+          )}
+          {jobs.length >= 100 && (
+            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-400">
+              Sunt cel putin {jobs.length} joburi vizibile{total > jobs.length ? ` (din ${total} total)` : ""}; pot exista mai multe nelistate. Foloseste filtre pentru a reduce setul.
+            </div>
+          )}
+          {total > jobs.length && jobs.length < 100 && (
+            <div className="mb-3 text-xs text-muted-foreground">
+              Selectia opereaza doar pe pagina vizibila ({jobs.length} din {total}).
             </div>
           )}
           {loading && jobs.length === 0 && (
@@ -493,9 +601,22 @@ export default function Monitorizare({
           )}
           {jobs.length > 0 && (
             <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+              <table className="w-full text-[13px]">
                 <thead>
                   <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                    <th className="w-8 px-3 py-2">
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 cursor-pointer accent-primary"
+                        checked={allSelected}
+                        ref={(el) => {
+                          if (el) el.indeterminate = someSelected;
+                        }}
+                        onChange={toggleAll}
+                        aria-label={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
+                        title={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
+                      />
+                    </th>
                     <th className="px-3 py-2">Tinta</th>
                     <th className="px-3 py-2">Tip</th>
                     <th className="px-3 py-2">Cadenta</th>
@@ -510,36 +631,65 @@ export default function Monitorizare({
                     const target = formatMonitoringTarget(job);
                     const isDosar = job.kind === "dosar_soap";
                     return (
-                    <tr key={job.id} className="border-b hover:bg-accent/30">
+                    <tr
+                      key={job.id}
+                      className={`border-b hover:bg-accent/30 ${
+                        selectedIds.has(job.id) ? "bg-accent/40" : ""
+                      }`}
+                    >
+                      <td className="px-3 py-2">
+                        <input
+                          type="checkbox"
+                          className="h-4 w-4 cursor-pointer accent-primary"
+                          checked={selectedIds.has(job.id)}
+                          onChange={() => toggleOne(job.id)}
+                          aria-label={`Selecteaza ${formatMonitoringTarget(job)}`}
+                        />
+                      </td>
                       <td className="px-3 py-2 font-mono">
                         {isDosar ? (
-                          <div className="flex items-center gap-1.5">
-                            <a
-                              href={getPortalJustUrl(target)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              title={`Deschide ${target} pe portal.just.ro`}
-                              className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary/80 hover:underline"
-                            >
-                              {target}
-                              <ExternalLink className="h-3 w-3 shrink-0" />
-                            </a>
-                            {onOpenDosar && (
-                              <button
-                                type="button"
-                                onClick={() => onOpenDosar(target)}
-                                title={`Cauta ${target} in lista Dosare`}
-                                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex w-[180px] items-center">
+                              <a
+                                href={getPortalJustUrl(target)}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                title={`Deschide ${target} pe portal.just.ro`}
+                                className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary/80 hover:underline"
                               >
-                                <Search className="h-3.5 w-3.5" />
-                              </button>
+                                {target}
+                                <ExternalLink className="h-3 w-3 shrink-0" />
+                              </a>
+                            </span>
+                            {onOpenDosar && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => {
+                                  onOpenDosar(target);
+                                  navigate("/dosare");
+                                }}
+                                title={`Deschide ${target} in lista Dosare`}
+                                // Match the visual size of the same button in
+                                // Alerts cards. There the parent has CSS
+                                // `zoom: ~0.833` (font Normal), so an
+                                // unscaled `size="sm" + text-[12.5px]` button
+                                // here looks bigger than the equivalent in
+                                // Alerts. Compensating with h-7 / px-2.5 /
+                                // text-[10.5px] / icon 3.5 keeps the two
+                                // pages visually consistent.
+                                className="h-7 gap-1.5 px-2.5 text-[10.5px]"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Dosare
+                              </Button>
                             )}
                           </div>
                         ) : (
                           target
                         )}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground">
+                      <td className="px-3 py-2">
                         {job.kind === "dosar_soap" ? "Dosar"
                           : job.kind === "name_soap" ? "Subiect"
                           : job.kind === "aviz_rnpm" ? "Aviz RNPM"
@@ -575,10 +725,10 @@ export default function Monitorizare({
                           );
                         })()}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground">
+                      <td className="px-3 py-2">
                         {formatDateTime(job.next_run_at)}
                       </td>
-                      <td className="px-3 py-2 text-muted-foreground">
+                      <td className="px-3 py-2">
                         {formatDateTime(job.last_run_at)}
                       </td>
                       <td className="px-3 py-2">

@@ -69,7 +69,7 @@ function seedAlert(
     title: "Alerta",
     dedupKey: crypto.randomUUID(),
     ...overrides,
-  });
+  }).row;
 }
 
 beforeEach(async () => {

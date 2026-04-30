@@ -137,8 +137,32 @@ describe("finalize", () => {
     expect(row.ended_at).toBe("2026-04-28T10:00:05.000Z");
     expect(row.duration_ms).toBe(5000);
     expect(row.alerts_created).toBe(2);
+    expect(row.alerts_patched).toBe(0);
     expect(row.error_code).toBeNull();
     expect(row.error_message).toBeNull();
+  });
+
+  // F10 audit hardening: alerts_patched tracks enrichment patches applied to
+  // existing alerts (e.g. solutie_aparuta backfill). Tracked separately from
+  // alerts_created so an enrichment-only tick is observable, not invisible.
+  it("persists alerts_patched independently from alerts_created (F10)", () => {
+    const jobId = seedJob();
+    const runId = insertRunning({ ownerId: OWNER, jobId, startedAt: NOW });
+
+    const ok = finalize(runId, {
+      status: "ok",
+      endedAt: "2026-04-28T10:00:05.000Z",
+      durationMs: 5000,
+      alertsCreated: 0,
+      alertsPatched: 3,
+    });
+    expect(ok).toBe(true);
+
+    const row = getDb()
+      .prepare(`SELECT * FROM monitoring_runs WHERE id = ?`)
+      .get(runId) as MonitoringRunRow;
+    expect(row.alerts_created).toBe(0);
+    expect(row.alerts_patched).toBe(3);
   });
 
   it("transitions running → error with error_code/error_message", () => {

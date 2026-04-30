@@ -4,6 +4,27 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.6.4] - 2026-05-01
+
+### Audit hardening (multi-agent review) — finalizat
+
+- **F1**: DELETE monitoring job verifica scheduler in-flight, returneaza 409 daca jobul ruleaza activ; previne RUNNER_THREW cand userul sterge in timpul SOAP.
+- **F2 (hard fail)**: `LEGAL_DASHBOARD_ALLOW_REMOTE=1` sau HOST non-loopback REFUZA pornirea daca nu e prezent ack explicit `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`. Suplimentar, middleware `originGuard` pe `/api/*` blocheaza requesturi state-changing (POST/PUT/PATCH/DELETE) cu Origin/Referer mismatch fata de Host pentru caller-i non-loopback. Bypass automat pentru loopback (desktop la el insusi) si pentru metode safe (GET/HEAD/OPTIONS).
+- **F3 (xlsx → exceljs)**: backend `nameListParser.ts` migrat de pe `xlsx@0.18.5` (CVE Prototype Pollution + ReDoS, no upstream fix) pe `exceljs@^4.4.0`. `parseNameList` devine `async`, ruleaza cu safety belt 30s timeout pe parse (Promise.race) si pastreaza limitele MAX_FILE_BYTES / MAX_ROWS / MAX_COLS. `xlsx` mutat de pe `dependencies` pe `devDependencies` in backend (folosit doar de fixture-uri de test). 2 teste noi: PARSE_ERROR pe zip stream malformed, TOO_MANY_ROWS pe XLSX peste cap.
+- **F4+F5+F6**: enrichSolutieAlertsForJob limita 200 alerte/tick + filtru created_at >= now-7days + match relaxat (trim+fallback pe data/ora/complet) ca textul solutiei sa nu blocheze backfill-ul hotararii.
+- **F7**: SSE eveniment nou `alert_enriched` notifica clientii cand o alerta veche primeste textul hotararii (fara refresh manual).
+- **F8 (test coverage)**: 10 teste P0 noi pentru `enrichSolutieAlertsForJob` la nivel repository (idempotency, izolare cross-tenant, fereastra 7d, JSON corupt, fallback whitespace, listener fanout, scope per-owner, etc.) + 1 integration test runner-level pe `dosarSoapRunner` care exerseaza path-ul end-to-end (alerta veche fara solutie_sumar → tick nou cu hotarare → detail_json patch-uit).
+- **F9**: bulk delete ATOMIC backend (`POST /jobs/bulk-delete`) cu raport pe `deleted_ids`/`inflight_ids`/`not_found_ids`; frontend pastreaza selectia esuata pentru retry.
+- **F10**: `alerts_created` numara doar inserturile reale (insertAlert returneaza `{row, inserted}`); dedup no-op nu mai infla metrica. **Coloana noua `monitoring_runs.alerts_patched`** (migration 0012) contorizeaza separat enrichment-urile in-place — un tick care patch-uieste 5 alerte fara insert nou raporteaza `alerts_created=0, alerts_patched=5`.
+
+### Schema
+- Migration **0012_monitoring_runs_alerts_patched** — `ALTER TABLE monitoring_runs ADD COLUMN alerts_patched INTEGER NOT NULL DEFAULT 0`. Auto-aplicata la boot.
+
+### Tests
+- 546 teste pass (era 524 in v2.6.3) — 10 P0 enrichment + 1 runner integration + 7 originGuard + 1 alerts_patched repo + 3 nameListParser xlsx malformed/oversized.
+
+---
+
 ## 30 Aprilie 2026 - v2.6.3 - UX Monitorizare TINTA + cadenta non-standard honesty + Alerte pagination unified
 
 Patch UX continuu dupa v2.6.2: in tabelul de joburi din Monitorizare coloana TINTA

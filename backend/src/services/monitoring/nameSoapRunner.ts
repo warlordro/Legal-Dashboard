@@ -89,7 +89,10 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
         const newSnapshotJson = canonicalJson(newSnapshot);
         const payloadBytes = Buffer.byteLength(newSnapshotJson, "utf8");
         if (payloadBytes > SNAPSHOT_PAYLOAD_MAX_BYTES) {
-          insertAlert({
+          // F10: numaram doar inserturile reale, nu generarile diff-ului —
+          // dedup_key duplicat = no-op, nu vrem sa inflam metrica
+          // `alerts_created` din `monitoring_runs`.
+          const oversizeResult = insertAlert({
             ownerId: job.owner_id,
             jobId: job.id,
             runId,
@@ -105,16 +108,18 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
             },
             dedupKey: `snapshot_oversize|${runId}`,
           });
-          alertsCreated = 1;
+          const oversizeInserted = oversizeResult.inserted ? 1 : 0;
+          alertsCreated = oversizeInserted;
           oversizeOutcome = {
             status: "error",
             errorCode: "SNAPSHOT_OVERSIZE",
             errorMessage: `payload ${payloadBytes}B > cap ${SNAPSHOT_PAYLOAD_MAX_BYTES}B`,
-            alertsCreated: 1,
+            alertsCreated: oversizeInserted,
           };
           return;
         }
 
+        let insertedCount = 0;
         getDb().transaction(() => {
           insertSnapshot({
             ownerId: job.owner_id,
@@ -129,8 +134,11 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
           // pure, so we attach name_normalized at the runner boundary; per-dosar
           // alerts already include numar_dosar in their detail from the diff.
           const targetContext = { name_normalized: target.name_normalized };
+          // F10: numaram doar inserturile reale, nu generarile diff-ului —
+          // dedup_key duplicat = no-op, nu vrem sa inflam metrica
+          // `alerts_created` din `monitoring_runs`.
           for (const alert of alerts) {
-            insertAlert({
+            const result = insertAlert({
               ownerId: job.owner_id,
               jobId: job.id,
               runId,
@@ -140,12 +148,18 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
               detail: { ...targetContext, ...alert.detail },
               dedupKey: alert.dedupKey,
             });
+            if (result.inserted) insertedCount += 1;
           }
         })();
-        alertsCreated = alerts.length;
+        alertsCreated = insertedCount;
       });
 
       if (oversizeOutcome) return oversizeOutcome;
+      // F10 asymmetry note: name_soap does not call enrichSolutieAlertsForJob
+      // (the sedinta-level backfill is anchored to numar_dosar identity, which
+      // a name watch lacks). alertsPatched is intentionally omitted -> finalize
+      // stores 0. If a name-list enrichment path is added later, surface the
+      // count here the same way dosarSoapRunner does.
       return { status: "ok", alertsCreated };
     },
   };

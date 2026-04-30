@@ -138,29 +138,27 @@ not BYOK / not supplied by the browser client.
   allowlisting. If `xlsx-js-style`, `better-sqlite3`, or `@hono/node-server`
   ships a malicious update, the app is compromised. Mitigation: review
   lockfile diffs, use `npm ci` in CI, run `npm audit` regularly.
-- **`xlsx` / `xlsx-js-style` parser CVEs (accepted risk).** `npm audit`
-  currently flags:
-  - `CVE-2023-30533` — Prototype Pollution in SheetJS parser (high)
-  - `CVE-2024-22363` — ReDoS in SheetJS (high)
-
-  Both affect the `xlsx.read()` / parsing path when the library is fed an
-  attacker-controlled spreadsheet. Legal Dashboard uses `xlsx-js-style`
-  **exclusively for `writeFile()`** — generating .xlsx output from data
-  already validated inside the app (dosare / termene / avize). There is no
-  code path that calls `XLSX.read()` or accepts user-uploaded spreadsheets.
-  The CVEs therefore have no reachable attack surface in this deployment.
-
-  Follow-up: when `xlsx-js-style` catches up with upstream (no patch released
-  at time of writing) or when we have bandwidth to migrate the 3 export
-  pipelines to `exceljs` (~4–6h), the risk is re-evaluated and this
-  acceptance is removed. Tracked in `AUDIT_DEFERRED_2026-04-18.md`.
+- **`xlsx` parser CVEs — REZOLVAT in v2.6.4.** Backend-ul foloseste acum
+  `exceljs@^4.4.0` pentru `XLSX.read()`-ul reachable via
+  `/api/v1/name-lists/preview` si `/commit` (PR-5, bulk import Monitorizare).
+  `xlsx@0.18.5` ramane in `devDependencies` doar pentru fixture-urile de
+  test — nu mai ajunge in bundle-ul productie. Mitigari active in
+  `nameListParser.ts`: cap 10MB body, max 50K rows, max 20 cols, timeout 30s
+  pe parse (Promise.race). Frontend-ul pastreaza `xlsx-js-style.writeFile()`
+  pentru EXPORT (date deja validate intern, nu primeste spreadsheets de la
+  atacatori) — neafectat de CVE-uri pe path-ul write-only.
 - **Unsigned Windows binaries.** We do not currently code-sign Windows
   installers. SmartScreen will warn on first launch. Obtaining and wiring an
   EV / OV certificate is tracked separately.
-- **LAN-mode hardening.** Setting `LEGAL_DASHBOARD_ALLOW_REMOTE=1` exposes the
-  backend to every host that can reach the interface. We do **not** currently
-  add authentication, TLS, or per-user isolation when that happens. If you
-  need this, put the backend behind a reverse proxy with TLS + auth.
+- **LAN-mode hardening (v2.6.4 — fail-closed by default).** Setting
+  `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (or HOST non-loopback) refuza acum pornirea
+  backend-ului pana cand operatorul confirma explicit ack-ul `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`.
+  Cand ack-ul e prezent, request-urile state-changing (POST/PUT/PATCH/DELETE)
+  de la peers non-loopback sunt validate prin `originGuard` middleware:
+  Origin/Referer trebuie sa match-uiasca Host-ul, altfel 403
+  `csrf_origin_mismatch`. Loopback (desktop la el insusi) trece liber pe
+  toate metodele. Auth real + TLS + per-user isolation raman blocker pana
+  la PR-9 — pana atunci, ack-ul e doar belt-and-suspenders pe retea privata.
 - **SOAP traffic to `portalquery.just.ro`.** Upstream is HTTP-by-default for a
   legacy government service. The app uses HTTPS where the endpoint supports
   it, but certain portals do not; this is intentional and documented here so

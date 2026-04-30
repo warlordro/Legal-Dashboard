@@ -22,12 +22,15 @@ import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  addAlertEnrichmentListener,
   dismissAlert,
+  enrichSolutieAlertsForJob,
   getAlertSubscriberCount,
   insertAlert,
   listAlerts,
   markAlertSeen,
   subscribeToNewAlerts,
+  type AlertEnrichmentPayload,
 } from "./monitoringAlertsRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
@@ -80,7 +83,7 @@ describe("insertAlert", () => {
   it("writes a row and returns it on the happy path", () => {
     const jobId = seedJob(OWNER_A, "h1");
     const runId = seedRun(OWNER_A, jobId);
-    const row = insertAlert({
+    const { row, inserted } = insertAlert({
       ownerId: OWNER_A,
       jobId,
       runId,
@@ -90,6 +93,7 @@ describe("insertAlert", () => {
       detail: { foo: "bar" },
       dedupKey: "k1",
     });
+    expect(inserted).toBe(true);
     expect(row.id).toBeGreaterThan(0);
     expect(row.owner_id).toBe(OWNER_A);
     expect(row.job_id).toBe(jobId);
@@ -103,7 +107,7 @@ describe("insertAlert", () => {
   it("is idempotent on (job_id, dedup_key) — second call returns the same row", () => {
     const jobId = seedJob(OWNER_A, "h1");
     const runId = seedRun(OWNER_A, jobId);
-    const first = insertAlert({
+    const { row: first, inserted: firstInserted } = insertAlert({
       ownerId: OWNER_A,
       jobId,
       runId,
@@ -111,7 +115,7 @@ describe("insertAlert", () => {
       title: "first",
       dedupKey: "same",
     });
-    const second = insertAlert({
+    const { row: second, inserted: secondInserted } = insertAlert({
       ownerId: OWNER_A,
       jobId,
       runId,
@@ -119,6 +123,8 @@ describe("insertAlert", () => {
       title: "second-ignored", // ON CONFLICT DO NOTHING, original wins
       dedupKey: "same",
     });
+    expect(firstInserted).toBe(true);
+    expect(secondInserted).toBe(false);
     expect(second.id).toBe(first.id);
     expect(second.title).toBe("first");
 
@@ -211,7 +217,7 @@ describe("listAlerts", () => {
     const runIdA2 = seedRun(OWNER_A, jobIdA2);
     const runIdB = seedRun(OWNER_B, jobIdB);
 
-    const first = insertAlert({
+    const { row: first } = insertAlert({
       ownerId: OWNER_A,
       jobId: jobIdA1,
       runId: runIdA1,
@@ -220,7 +226,7 @@ describe("listAlerts", () => {
       title: "first",
       dedupKey: "a1",
     });
-    const second = insertAlert({
+    const { row: second } = insertAlert({
       ownerId: OWNER_A,
       jobId: jobIdA2,
       runId: runIdA2,
@@ -282,7 +288,7 @@ describe("alert state mutations", () => {
     const jobIdB = seedJob(OWNER_B, "hB");
     const runIdA = seedRun(OWNER_A, jobIdA);
     const runIdB = seedRun(OWNER_B, jobIdB);
-    const alertA = insertAlert({
+    const { row: alertA } = insertAlert({
       ownerId: OWNER_A,
       jobId: jobIdA,
       runId: runIdA,
@@ -290,7 +296,7 @@ describe("alert state mutations", () => {
       title: "owned",
       dedupKey: "a1",
     });
-    const alertB = insertAlert({
+    const { row: alertB } = insertAlert({
       ownerId: OWNER_B,
       jobId: jobIdB,
       runId: runIdB,
@@ -326,7 +332,7 @@ describe("new alert subscribers", () => {
     const unsubB = subscribeToNewAlerts(OWNER_B, (alert) => seenB.push(alert.id));
     expect(getAlertSubscriberCount()).toBe(2);
 
-    const alertA = insertAlert({
+    const { row: alertA } = insertAlert({
       ownerId: OWNER_A,
       jobId: jobIdA,
       runId: runIdA,
@@ -342,7 +348,7 @@ describe("new alert subscribers", () => {
       title: "duplicate",
       dedupKey: "a1",
     });
-    const alertB = insertAlert({
+    const { row: alertB } = insertAlert({
       ownerId: OWNER_B,
       jobId: jobIdB,
       runId: runIdB,
@@ -391,16 +397,399 @@ describe("new alert subscribers", () => {
       });
     }).not.toThrow();
 
-    expect(inserted?.id).toBeGreaterThan(0);
+    expect(inserted?.row.id).toBeGreaterThan(0);
 
     // notifyNewAlert is queueMicrotask-deferred — drain before checking.
     await Promise.resolve();
 
-    expect(seenSecond).toEqual([inserted?.id]);
+    expect(seenSecond).toEqual([inserted?.row.id]);
     expect(errSpy).toHaveBeenCalled();
 
     errSpy.mockRestore();
     unsubFirst();
     unsubSecond();
+  });
+});
+
+// F8 — backfill / enrichment of solutie_aparuta alerts when PortalJust
+// publishes the ruling text *after* the initial alert was emitted. The
+// runner calls enrichSolutieAlertsForJob on every dosar_soap tick; these
+// tests lock in the contract before more callers depend on it.
+describe("enrichSolutieAlertsForJob", () => {
+  function seedSolutieAlert(
+    ownerId: string,
+    jobId: number,
+    runId: number,
+    detail: Record<string, unknown>,
+    dedupKey = `solutie-${crypto.randomUUID()}`,
+  ): number {
+    const { row } = insertAlert({
+      ownerId,
+      jobId,
+      runId,
+      kind: "solutie_aparuta",
+      title: "Solutie pronuntata",
+      detail,
+      dedupKey,
+    });
+    return row.id;
+  }
+
+  it("patches solutie_sumar / numar_document / data_pronuntare on a matching alert", () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    const alertId = seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+
+    const patched = enrichSolutieAlertsForJob(OWNER_A, jobId, [
+      {
+        data: "2026-04-01",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+        solutieSumar: "Admite cererea reclamantului.",
+        numarDocument: "DOC/123",
+        dataPronuntare: "2026-04-02",
+      },
+    ]);
+
+    expect(patched).toBe(1);
+    const detailJson = (
+      getDb()
+        .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
+        .get(alertId) as { detail_json: string }
+    ).detail_json;
+    const detail = JSON.parse(detailJson);
+    expect(detail.solutie_sumar).toBe("Admite cererea reclamantului.");
+    expect(detail.numar_document).toBe("DOC/123");
+    expect(detail.data_pronuntare).toBe("2026-04-02");
+  });
+
+  it("is idempotent — second call with the same data is a no-op", () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+
+    const sedinte = [
+      {
+        data: "2026-04-01",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+        solutieSumar: "Admite cererea.",
+      },
+    ];
+
+    expect(enrichSolutieAlertsForJob(OWNER_A, jobId, sedinte)).toBe(1);
+    expect(enrichSolutieAlertsForJob(OWNER_A, jobId, sedinte)).toBe(0);
+  });
+
+  it("never crosses tenant boundaries — owner B's alerts are not patched", () => {
+    const jobIdA = seedJob(OWNER_A, "hA");
+    const jobIdB = seedJob(OWNER_B, "hB");
+    const runIdA = seedRun(OWNER_A, jobIdA);
+    const runIdB = seedRun(OWNER_B, jobIdB);
+
+    const aId = seedSolutieAlert(OWNER_A, jobIdA, runIdA, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+    const bId = seedSolutieAlert(OWNER_B, jobIdB, runIdB, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+
+    // Owner A enriches with sedinta data; owner B's matching alert must NOT
+    // be touched even though the (data, ora, complet, solutie) tuple matches.
+    const patched = enrichSolutieAlertsForJob(OWNER_A, jobIdA, [
+      {
+        data: "2026-04-01",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+        solutieSumar: "Owner A only",
+      },
+    ]);
+    expect(patched).toBe(1);
+
+    const detailA = JSON.parse(
+      (
+        getDb()
+          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
+          .get(aId) as { detail_json: string }
+      ).detail_json,
+    );
+    const detailB = JSON.parse(
+      (
+        getDb()
+          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
+          .get(bId) as { detail_json: string }
+    ).detail_json,
+    );
+    expect(detailA.solutie_sumar).toBe("Owner A only");
+    expect(detailB.solutie_sumar).toBeUndefined();
+  });
+
+  it("falls back to (data, ora, complet) match when the solutie text diverges (whitespace/typo)", () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    const alertId = seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite cererea",
+    });
+
+    // PortalJust republishes with slightly different text.
+    const patched = enrichSolutieAlertsForJob(OWNER_A, jobId, [
+      {
+        data: "2026-04-01",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite cererea formulata", // diverged
+        solutieSumar: "Hotarare definitiva.",
+      },
+    ]);
+    expect(patched).toBe(1);
+    const detail = JSON.parse(
+      (
+        getDb()
+          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
+          .get(alertId) as { detail_json: string }
+      ).detail_json,
+    );
+    expect(detail.solutie_sumar).toBe("Hotarare definitiva.");
+  });
+
+  it("skips alerts older than 7 days so historical context isn't overwritten after fond->apel transitions", () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    const alertId = seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2025-12-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Respinge",
+    });
+
+    // Manually backdate the alert past the 7-day window.
+    getDb()
+      .prepare(
+        `UPDATE monitoring_alerts SET created_at = datetime('now', '-30 days') WHERE id = ?`,
+      )
+      .run(alertId);
+
+    const patched = enrichSolutieAlertsForJob(
+      OWNER_A,
+      jobId,
+      [
+        {
+          data: "2025-12-01",
+          ora: "10:00",
+          complet: "C1",
+          solutie: "Respinge",
+          solutieSumar: "Should not patch.",
+        },
+      ],
+      { instanta: "Curtea de Apel SUCEAVA", stadiu: "Apel" },
+    );
+    expect(patched).toBe(0);
+    const detail = JSON.parse(
+      (
+        getDb()
+          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
+          .get(alertId) as { detail_json: string }
+      ).detail_json,
+    );
+    expect(detail.solutie_sumar).toBeUndefined();
+    expect(detail.instanta).toBeUndefined();
+    expect(detail.stadiu).toBeUndefined();
+  });
+
+  it("skips rows with corrupt detail_json without aborting the batch", () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    const goodId = seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+    const corruptId = seedSolutieAlert(
+      OWNER_A,
+      jobId,
+      runId,
+      { data: "2026-04-02", ora: "11:00", complet: "C2", solutie: "Respinge" },
+      "corrupt",
+    );
+    // Corrupt the detail_json on one row directly.
+    getDb()
+      .prepare(`UPDATE monitoring_alerts SET detail_json = '{not json' WHERE id = ?`)
+      .run(corruptId);
+
+    const patched = enrichSolutieAlertsForJob(OWNER_A, jobId, [
+      {
+        data: "2026-04-01",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+        solutieSumar: "OK",
+      },
+      {
+        data: "2026-04-02",
+        ora: "11:00",
+        complet: "C2",
+        solutie: "Respinge",
+        solutieSumar: "Should be skipped — corrupt JSON",
+      },
+    ]);
+    expect(patched).toBe(1);
+    const goodDetail = JSON.parse(
+      (
+        getDb()
+          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
+          .get(goodId) as { detail_json: string }
+      ).detail_json,
+    );
+    expect(goodDetail.solutie_sumar).toBe("OK");
+  });
+
+  it("backfills dosar-level instanta/stadiu independently of sedinta matches", () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    const alertId = seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+
+    // No sedinta candidates — only dosar context.
+    const patched = enrichSolutieAlertsForJob(
+      OWNER_A,
+      jobId,
+      [],
+      { instanta: "Curtea de Apel SUCEAVA", stadiu: "Apel" },
+    );
+    expect(patched).toBe(1);
+    const detail = JSON.parse(
+      (
+        getDb()
+          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
+          .get(alertId) as { detail_json: string }
+      ).detail_json,
+    );
+    expect(detail.instanta).toBe("Curtea de Apel SUCEAVA");
+    expect(detail.stadiu).toBe("Apel");
+  });
+
+  it("returns 0 quickly when there are no candidates and no dosar context (cheap no-op)", () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+
+    expect(
+      enrichSolutieAlertsForJob(OWNER_A, jobId, [
+        {
+          // sedinta with no enrichable fields filtered out internally
+          data: "2026-04-01",
+          ora: "10:00",
+          complet: "C1",
+          solutie: "Admite",
+        },
+      ]),
+    ).toBe(0);
+  });
+
+  it("emits an alert_enriched listener payload after commit (deferred via microtask)", async () => {
+    const jobId = seedJob(OWNER_A, "h1");
+    const runId = seedRun(OWNER_A, jobId);
+    const alertId = seedSolutieAlert(OWNER_A, jobId, runId, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+
+    const heard: AlertEnrichmentPayload[] = [];
+    const unsub = addAlertEnrichmentListener(OWNER_A, (payload) => {
+      heard.push(payload);
+    });
+
+    enrichSolutieAlertsForJob(OWNER_A, jobId, [
+      {
+        data: "2026-04-01",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+        solutieSumar: "Hotarare.",
+      },
+    ]);
+
+    // notifyAlertEnriched is queueMicrotask-deferred — drain before asserting.
+    await Promise.resolve();
+    expect(heard).toHaveLength(1);
+    expect(heard[0].id).toBe(alertId);
+    expect(heard[0].ownerId).toBe(OWNER_A);
+    expect(heard[0].detail.solutie_sumar).toBe("Hotarare.");
+    unsub();
+  });
+
+  it("scopes enrichment listeners per-owner (B does not hear A's events)", async () => {
+    const jobIdA = seedJob(OWNER_A, "hA");
+    const jobIdB = seedJob(OWNER_B, "hB");
+    const runIdA = seedRun(OWNER_A, jobIdA);
+    const runIdB = seedRun(OWNER_B, jobIdB);
+    seedSolutieAlert(OWNER_A, jobIdA, runIdA, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+    seedSolutieAlert(OWNER_B, jobIdB, runIdB, {
+      data: "2026-04-01",
+      ora: "10:00",
+      complet: "C1",
+      solutie: "Admite",
+    });
+
+    const heardA: AlertEnrichmentPayload[] = [];
+    const heardB: AlertEnrichmentPayload[] = [];
+    const unsubA = addAlertEnrichmentListener(OWNER_A, (p) => heardA.push(p));
+    const unsubB = addAlertEnrichmentListener(OWNER_B, (p) => heardB.push(p));
+
+    enrichSolutieAlertsForJob(OWNER_A, jobIdA, [
+      {
+        data: "2026-04-01",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+        solutieSumar: "A only",
+      },
+    ]);
+
+    await Promise.resolve();
+    expect(heardA).toHaveLength(1);
+    expect(heardB).toHaveLength(0);
+
+    unsubA();
+    unsubB();
   });
 });
