@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-7 v2.5.0 implementate local + patch v2.5.1 (hardening post multi-review) (2026-04-30). Urmatorul PR planificat: PR-8 Admin pages + roles guard.
-> **Versiune document**: 1.6 (2026-04-30)
+> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30). Urmatorul PR planificat: PR-9 Auth pluggable (desktop noop / web SSO).
+> **Versiune document**: 1.7 (2026-04-30)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
@@ -259,12 +259,13 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 - **User vede pe desktop**: nimic (pagina hidden).
 - **User vede pe web admin**: dashboard `/admin/users`, `/admin/audit`, `/admin/quota`.
 - **Tasks**:
-  - [ ] Middleware `requireRole('admin')` pe toate `*/admin/*`.
-  - [ ] UI: lista users cu role + status, audit log search, quota override per user.
+  - [x] Middleware `requireRole('admin')` pe toate `*/admin/*`.
+  - [x] UI: lista users cu role + status, audit log search, quota override per user.
   - [ ] Pe desktop: pagina exista dar `rol='local'` â‰  `admin`, deci 403. UI ascunde linkul.
 - **DoD**: ruta `/admin/users` accesibila doar daca `currentUser.role='admin'`.
-- **Bump**: 2.5.1 minor.
+- **Bump**: 2.6.0 minor.
 - **Risk**: LOW.
+- **Status**: LIVRAT 2026-04-30 (v2.6.0). Vezi CHANGELOG si SESSION-HANDOFF pentru detalii implementare.
 
 ---
 
@@ -429,3 +430,6 @@ Vezi PLAN-monitoring-webmode.md Â§0 pentru rationale complet.
 - **v1.2** (2026-04-29): PR-4 + full-review hardening marcat DONE, tag `v2.2.0` publicat, PR-5 retargetat la `v2.3.0`.
 - **v1.3** (2026-04-29): patch `v2.3.0` (audit remediation + export Web Worker) publicat; bump-urile PR-5..PR-8 renumerotate la `v2.4.0..v2.5.1` ca sa nu suprascrie patch-ul.
 - **v1.4** (2026-04-29): PR-5 marcat livrat pe `main` ca `v2.4.0`; urmatorul PR este PR-6 Alerte UI + notificari desktop.
+- **v1.5** (2026-04-30): PR-6 livrat ca `v2.4.1` + patch `v2.4.2` (full-review hardening: SSE heartbeat, audit pe seen/dismissed, bodyLimit, cap stream-uri/owner, focus suppress).
+- **v1.6** (2026-04-30): PR-7 livrat ca `v2.5.0` (AI usage tracking: migration `0010_ai_usage`, cost integer milli, `/api/v1/ai-usage/summary`, panou Setari API) + patch `v2.5.1` (multi-review hardening: closed-lower-bound, UTC-midnight, `markShuttingDown` latch, `inflightRef` AbortController).
+- **v1.7** (2026-04-30): PR-8 livrat ca `v2.6.0` (admin pages + roles guard: middleware `requireRole`, `/api/v1/me`, suprafata `/api/v1/admin/{users,audit,users/:id/quota}`, migration `0011_user_quota_overrides`, hook `useCurrentUser` + componenta `AdminGate`, sidebar conditional `Administrare`, trei pagini admin Users/Audit/Quota; guardrails irreversibile `last_admin` 409 si `self_deactivation` 409). 524/524 teste backend.

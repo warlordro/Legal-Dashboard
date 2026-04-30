@@ -4,7 +4,7 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web â€” fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.5.1** - 30 Aprilie 2026 (PR-7 hardening post multi-review)
+**v2.6.2** - 30 Aprilie 2026 (patch: UX inbox alerte - card scaling + dosar link extern + solutie completa)
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
@@ -20,6 +20,9 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 - ✅ **patch v2.4.2** - PR-6 hotfix post full-review: SSE heartbeat 25s + `retry: 3000`, fix timezone in filtre data, audit pe `seen`/`dismissed`, `bodyLimit`, cap 5 stream-uri/owner, `seen-bulk` route + bulk repo helper, `insertAlert` tranzactional + `notifyNewAlert` deferred microtask, focus suppress pe notificari desktop, dedup native pe `tag`
 - ✅ **PR-7 v2.5.0** - AI usage tracking: migration `0010_ai_usage`, `aiUsageRepository`, cost model integer `cost_usd_milli`, post-call tracking pentru single + multi-agent, endpoint `/api/v1/ai-usage/summary`, panou AI Usage in Setari API
 - ✅ **patch v2.5.1** - PR-7 hardening post multi-review: closed-lower-bound pe ferestre de timp, `summary30d` aliniat la UTC-midnight ca seria daily, `withMaintenanceRead` pe `/summary`, `purgeOldAiUsage(90)` in scheduler zilnic, `markShuttingDown()` latch ca microtask-urile post-shutdown sa nu redeschida DB-ul, multi-agent `analystsAbort` shared, `httpStatus` clamped `[100,599]`, price-table miss warn one-shot, insert SQLite deferred via `queueMicrotask`, fix timezone pe seria daily UI, `inflightRef` AbortController pe refresh, caption "Informativ" pentru quota desktop
+- ✅ **PR-8 v2.6.0** - admin pages + roles guard: middleware `requireRole(...allowed)` cu audit `auth.denied`, ruta `GET /api/v1/me`, suprafata `/api/v1/admin/{users,audit,users/:id/quota}`, migration `0011_user_quota_overrides`, hook `useCurrentUser` + componenta `AdminGate`, sidebar conditional Administrare, pagini `/admin/{users,audit,quota}`, guardrails self-demote (`last_admin` 409) + self-deactivation (`self_deactivation` 409), audit envelope `before`/`after` pe writes
+- ✅ **patch v2.6.1** - alerte cu context dosar + identitate Windows: `dosarSoapRunner`/`nameSoapRunner` injecteaza `numar_dosar`/`instanta`/`stadiu`/`name_normalized` in `detail` la limita runner-ului (diff-ul ramane pur), `pages/Alerts.tsx` afiseaza detail structurat (data formatata `dd.mm.yyyy`, ora, complet, solutie, stadiu) + buton "Cauta dosar" care reuseste mecanismul `pendingSearch` din App.tsx pentru auto-search in Dosare, `electron/main.js` apeleaza `app.setAppUserModelId("ro.legaldashboard.app")` ca taskbar-ul si native notifications sa nu mai foloseasca icon-ul default Electron
+- ✅ **patch v2.6.2** - UX inbox alerte: card scaling reactiv (font + padding + gap) `zoom: (slider.value-2)/slider.value` legat de `useFontSize`, `Dosar: <numar>` linkificat extern catre `portal.just.ro` (prin `setWindowOpenHandler` whitelist), buton "Cauta in app" cu titlu corect, `diff/dosarSoap.ts` adauga `solutie_sumar`/`numar_document`/`data_pronuntare` la `solutie_aparuta` ca textul integral al hotararii sa apara in card, `buildAlertContext` parseaza si valorile din "Detalii suplimentare" (humanizate, JSON-stringificate, 200ch cap), `listAlerts` LEFT JOIN `monitoring_jobs` cu emit `job_target_json`/`job_kind` ca alertele pre-enrichment sa primeasca tot `numar_dosar`, linia tehnica `Job/Run/Dedup` eliminata din card
 
 Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](SESSION-HANDOFF.md).
 
@@ -68,7 +71,7 @@ legal-dashboard/
 - `npm run dev:frontend` â€” Vite dev server pe 5173
 - `npm run build` â€” build productie (frontend + backend CJS)
 - `npm run dist` â€” electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` â€” vitest backend (440 teste in v2.5.1, +8 fata de v2.5.0)
+- `npm test --workspace=backend` â€” vitest backend (524 teste, neschimbate in v2.6.1)
 - `npx tsc --noEmit -p backend/tsconfig.json` â€” type-check backend
 - `cd frontend && npx tsc --noEmit` â€” type-check frontend
 - `npx biome check` â€” lint + format check

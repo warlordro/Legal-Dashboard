@@ -1,4 +1,4 @@
-import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity, Bell } from "lucide-react";
+import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity, Bell, Users as UsersIcon } from "lucide-react";
 
 export interface ChangeSection {
   title: string;
@@ -17,6 +17,168 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.6.2",
+    date: "30 Aprilie 2026",
+    subtitle: "Patch - UX inbox alerte (card scaling + dosar link extern + solutie completa)",
+    icon: <Bell className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Frontend - card scaling reactiv",
+        content:
+          "Cardul de alerta se scaleaza dinamic 2px sub slider-ul de fonturi, pastrand UI-ul aerisit fara sa modifice scala globala.",
+        bullets: [
+          "Hook useFontSize re-folosit; alertCardZoom = (fontSize.value - 2) / fontSize.value aplicat ca CSS zoom pe CardContent.",
+          "Re-render reactiv pe schimbarea sliderului (Mic/Normal/Mare/Extra) - cardul ramane mereu cu o treapta mai mic, fara hardcode pe Tailwind classes.",
+          "Font + padding + gap se scaleaza proportional via zoom (Chromium-supported in Electron), nu doar font-size.",
+        ],
+      },
+      {
+        title: "Frontend - dosar link extern + buton corect",
+        content:
+          "Numarul dosarului din header e link extern catre PortalJust, iar butonul cauta in lista locala Dosare.",
+        bullets: [
+          "<a target=\"_blank\"> catre portal.just.ro/SitePages/cautare.aspx?k=<numar> via getPortalJustUrl helper - whitelist .just.ro deja activ in setWindowOpenHandler + shell.openExternal.",
+          "Buton renamed Cauta in app cu icon Eye + title Deschide ... in lista Dosare; mecanismul pendingSearch din App.tsx ramane intact.",
+          "Tooltip pe link-ul de dosar: Deschide <numar> pe portal.just.ro.",
+        ],
+      },
+      {
+        title: "Backend + frontend - solutie_aparuta cu hotararea integrala",
+        content:
+          "Alertele de tip solutie_aparuta arata acum textul integral al hotararii (nr. document + data pronuntare + sumar) in loc de solutia scurta.",
+        bullets: [
+          "dosarSoapRunner emite solutie_sumar / numar_document / data_pronuntare in detail (campurile erau deja parsate de soap.ts dar neutilizate).",
+          "Frontend afiseaza Hotarare: <numar_document> · <data_pronuntare> + Solutie completa: <solutie_sumar> ca facts dedicati.",
+          "Cheile sunt incluse in setul consumed pentru a nu duplica in Detalii suplimentare.",
+        ],
+      },
+      {
+        title: "Backend - JOIN pentru alerte pre-enrichment",
+        content:
+          "Alertele vechi (create inainte de v2.6.1) primesc numar_dosar via LEFT JOIN pe monitoring_jobs.target_json, fara backfill destructiv.",
+        bullets: [
+          "listAlerts: SELECT a.*, j.target_json AS job_target_json, j.kind AS job_kind FROM monitoring_alerts a LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id.",
+          "owner_id check defensiv pe JOIN; toate WHERE clauses qualified cu alias-ul a (kind / source exista pe ambele tabele).",
+          "MonitoringAlert types extinse in alertsApi.ts cu job_target_json + job_kind optionali.",
+          "buildAlertContext: parseaza job_target_json ca fallback pentru numar_dosar cand detail.numar_dosar lipseste.",
+        ],
+      },
+      {
+        title: "Frontend - Detalii suplimentare cu valori",
+        content:
+          "Sectiunea fallback afiseaza acum chei + valori humanizate (JSON-stringificate, scurtate la 200ch) in loc de o lista plata de chei.",
+        bullets: [
+          "humanizeKey: snake_case -> Title case; stringifyFallbackValue: primitive sau JSON.stringify, drop pe null/empty/array gol.",
+          "Render <dl> 2-col cu chei muted + valori in monospace, text-xs ca sa nu invadeze cardul.",
+        ],
+      },
+      {
+        title: "UX cleanup",
+        content:
+          "Linia tehnica Job #N · Run #M · Dedup: ... a fost scoasa din card - era zgomot UX vizibil end-userilor; ramane disponibil in Backoffice/audit.",
+      },
+      {
+        title: "Validari",
+        content:
+          "524/524 teste backend (toMatchObject partial-match in dosarSoap.test.ts si monitoringAlertsRepository.test.ts - safe sa adaugam campuri). Type-check backend + frontend clean. Smoke desktop confirma scaling reactiv + link extern + solutie integrala.",
+      },
+    ],
+  },
+  {
+    version: "v2.6.1",
+    date: "30 Aprilie 2026",
+    subtitle: "Patch - alerte cu context dosar + identitate Windows",
+    icon: <Bell className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Alerte - context complet pe fiecare notificare",
+        content:
+          "Inboxul Alerte si notificarile native arata acum dosarul, instanta si data formatata; un buton dedicat declanseaza cautarea in Dosare.",
+        bullets: [
+          "Backend: dosarSoapRunner injecteaza numar_dosar (din job target), instanta si stadiu (din SOAP curent) in detail-ul fiecarei alerte; nameSoapRunner injecteaza name_normalized.",
+          "Frontend: detail-ul afiseaza Dosar (font-mono), Data sedintei (dd.mm.yyyy din ISO), Ora, Complet, Solutie, Stadiu, Categorie ca perechi label/value.",
+          "termen_changed arata explicit De la / La cu ora respectiva; stadiu_changed / categorie_changed arata Schimbare: from -> to.",
+          "Buton Cauta dosar (cand numar_dosar e prezent) navigheaza in Dosare cu auto-search prin mecanismul existent pendingSearch.",
+        ],
+      },
+      {
+        title: "Electron - identitate Windows",
+        content:
+          "Apel app.setAppUserModelId(\"ro.legaldashboard.app\") inainte de orice fereastra, ca Windows sa asocieze procesul cu icon-ul real.",
+        bullets: [
+          "Fix: taskbar-ul in dev nu mai arata icon-ul default Atom-Electron; native notifications nu mai sunt atribuite electron.app.Electron.",
+          "appId din electron-builder e identic, deci pe install NSIS pictograma ramane consistenta cu pictograma dev.",
+        ],
+      },
+      {
+        title: "Validare",
+        content:
+          "524/524 teste backend (testele existente folosesc partial-match pentru detail, deci nu erau afectate). Type-check backend si frontend clean. Smoke desktop confirma alerte cu numar_dosar + buton functional + icon corect.",
+      },
+    ],
+  },
+  {
+    version: "v2.6.0",
+    date: "30 Aprilie 2026",
+    subtitle: "PR-8 - admin pages + roles guard",
+    icon: <UsersIcon className="h-5 w-5" />,
+    borderColor: "border-l-indigo-500",
+    badgeClass: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
+    sections: [
+      {
+        title: "Backend - guard de rol + suprafete admin",
+        content:
+          "Middleware nou requireRole(...allowed) si rute /api/v1/me + /api/v1/admin/* gated, pregatite pentru cutoverul web din PR-9.",
+        bullets: [
+          "requireRole(...): 401 cand userul nu exista, 403 cand statusul nu e active sau rolul nu e in allowlist; fiecare refuz scrie audit auth.denied cu reason si required.",
+          "GET /api/v1/me: profilul callerului in envelope v1 (id, email, role, status, createdAt, lastLoginAt).",
+          "GET /admin/users (paginare + search/role/status), GET /admin/users/:id, PATCH role/status, GET /admin/audit (since closed-lower / until open-upper), GET/PUT/DELETE /admin/users/:id/quota.",
+          "Migration 0011_user_quota_overrides: PK (user_id, feature), daily_limit_usd_milli >= 0, ON DELETE CASCADE pe user.",
+        ],
+      },
+      {
+        title: "Backend - guardrails irreversibile",
+        content:
+          "Doua refuzuri 409 prevenirea blocarii adminului de a iesi singur din sistem.",
+        bullets: [
+          "last_admin: PATCH /admin/users/:id/role refuza self-demotion cand callerul ar ramane zero administratori activi; audit admin.users.demote_blocked pe esec.",
+          "self_deactivation: PATCH /admin/users/:id/status refuza un caller care isi schimba propriul status in non-active; audit admin.users.update_status doar pe succes.",
+          "Toate write-urile (role, status, quota upsert/delete) scriu audit cu before/after in detail_json. Read-urile NU scriu audit pentru a evita poluarea.",
+        ],
+      },
+      {
+        title: "Frontend - hook + componente shared",
+        content:
+          "useCurrentUser fetch-uieste /me la mount (AbortController + retry via tick); AdminGate randeaza 403 pentru non-admini.",
+        bullets: [
+          "Hook useCurrentUser: { user, loading, error, refresh } - folosit de Sidebar (decide afisarea sectiunii Administrare) si AdminGate (gating client-side).",
+          "AdminGate: ecran 403 cu mesaj romanesc cand user?.role !== admin. Pur cosmetic - serverul re-verifica rolul pe fiecare call /api/v1/admin/*.",
+          "Sidebar: cand rolul e admin, afiseaza sectiunea Administrare cu trei iteme (Utilizatori, Audit, Cote). Iconite identice in modul collapsed.",
+          "lib/api.ts: tipuri MeProfile / AdminUser / AuditEvent / QuotaOverride si helperi me.get + admin.{listUsers, getUser, updateRole, updateStatus, listAudit, listQuota, upsertQuota, deleteQuota}.",
+        ],
+      },
+      {
+        title: "Frontend - pagini admin",
+        content:
+          "Trei pagini noi sub /admin/*, fiecare wrapped in AdminGate.",
+        bullets: [
+          "/admin/users: tabel paginat cu inline select pentru rol si status, confirmari prin useConfirm, refresh /me automat dupa schimbare proprie de rol.",
+          "/admin/audit: tabel cu rand expandabil per eveniment - timestamp, action, outcome, owner/actor/target, IP plus detail_json pretty-printed la expansiune.",
+          "/admin/quota: workflow in doua etape - cauta utilizator, vezi/edit-eaza override-urile lui. Limitele in USD (3 zecimale), salvate ca milli-USD.",
+        ],
+      },
+      {
+        title: "Validare",
+        content:
+          "524/524 teste backend (de la 440 in v2.5.1, +84 noi). Type-check backend si frontend clean. Smoke test end-to-end pe /me, gate, /admin/users, /admin/audit?since, quota PUT/GET, self-demote 409.",
+      },
+    ],
+  },
   {
     version: "v2.5.1",
     date: "30 Aprilie 2026",

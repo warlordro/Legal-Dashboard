@@ -1,93 +1,108 @@
-# Session Handoff - PR-7 + hardening v2.5.1 livrate / PR-8 urmator
+# Session Handoff - PR-8 v2.6.0 livrat / PR-9 urmator
 
 **Data**: 2026-04-30
-**Branch local**: `main`
-**Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch-ul v2.5.1 (hardening post multi-review). Tag-urile `v2.5.0` si `v2.5.1` nu sunt inca create.
-**Versiune curenta**: `v2.5.1`
+**Branch local**: `main` (cu fisiere noi PR-8, neraportate inca)
+**Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
+v2.5.1 + PR-8 v2.6.0 (admin pages + roles guard). Tag-urile `v2.5.0`,
+`v2.5.1` si `v2.6.0` nu sunt inca create.
+**Versiune curenta**: `v2.6.0`
 
 ## TL;DR
 
-PR-7 este implementat local: AI usage tracking + quota visibility.
+PR-8 este implementat local: admin pages + roles guard. Backend si frontend sunt
+livrate impreuna. Suprafata `/api/v1/me` + `/api/v1/admin/*` este live, cu trei
+pagini admin (`/admin/users`, `/admin/audit`, `/admin/quota`) gated client-side
+prin `AdminGate` si server-side prin `requireRole('admin')`.
 
 Aplicatia are acum:
 
-- migration `0010_ai_usage`;
-- repository `aiUsageRepository`;
-- cost model per provider/model cu fallback safe la 0;
-- tracking post-call in `withAiLogging()` pentru single si multi-agent;
-- endpoint `GET /api/v1/ai-usage/summary`;
-- panou `AI Usage` in Setari API cu 24h / 30 zile / grafic daily;
-- `AGENTS.md` pointeaza explicit spre `CLAUDE.md`, `SESSION-HANDOFF.md` si `EXECUTION-ROADMAP.md`.
+- middleware `requireRole(...allowed: UserRole[])` cu audit `auth.denied` pe
+  refuz (reason `user_not_found` | `user_inactive` | `role_mismatch`);
+- ruta `GET /api/v1/me` care returneaza profilul callerului in envelope v1;
+- suprafata `/api/v1/admin/users{,/:id,/:id/role,/:id/status,/:id/quota,/:id/quota/:feature}` +
+  `/api/v1/admin/audit` (toate gated cu `requireRole('admin')`);
+- migration `0011_user_quota_overrides` (PK `(user_id, feature)`, ON DELETE
+  CASCADE);
+- guardrails `last_admin` 409 (self-demote) si `self_deactivation` 409 (status
+  non-active pe self), audit `before`/`after` pe writes;
+- hook `useCurrentUser` + componenta `AdminGate`;
+- sidebar conditional `Administrare` cand `user.role === 'admin'`;
+- trei pagini admin (Users / Audit / Quota) cu UI complet (filters, paginare,
+  inline edit, expandable detail, useConfirm pe scoateri).
 
-Nu s-au schimbat prompturile sau flow-ul AI. PR-7 este strict observability/quota visibility.
+## Ce s-a schimbat in PR-8
 
-## Ce s-a schimbat in PR-7
+### Backend - middleware + rute
 
-### Backend
+Fisiere noi:
 
-Fisiere principale:
+- `backend/src/middleware/requireRole.ts` (+ test 10 cazuri)
+- `backend/src/routes/me.ts`
+- `backend/src/routes/admin.ts` (+ test ~30 cazuri)
+- `backend/src/db/userQuotaRepository.ts` (+ test 13 cazuri)
+- `backend/src/db/migrations/0011_user_quota_overrides.{up,down}.sql`
 
-- `backend/src/db/migrations/0010_ai_usage.up.sql`
-- `backend/src/db/migrations/0010_ai_usage.down.sql`
-- `backend/src/db/aiUsageRepository.ts`
-- `backend/src/services/aiUsage.ts`
-- `backend/src/services/ai.ts`
-- `backend/src/routes/ai.ts`
-- `backend/src/routes/aiUsage.ts`
-- `backend/src/index.ts`
+Fisiere modificate:
 
-Contracte:
+- `backend/src/db/auditRepository.ts` - functie noua `listAuditEvents(opts)` cu
+  filtre `ownerId | actorId | action | actionLike | targetKind | targetId |
+  outcome | since (closed lower bound, ts >= ?) | until (open upper bound,
+  ts < ?) | limit (1..500) | offset`. Helper `clampAuditLimit` /
+  `clampAuditOffset`. Audit listing nu scrie audit (read-only).
+- `backend/src/db/auditRepository.test.ts` - 12 cazuri noi.
+- `backend/src/index.ts` - mount `meRouter` la `/api/v1/me` si `adminRouter`
+  la `/api/v1/admin`.
 
-- `POST /api/ai/analyze`
-  - response shape legacy ramane `{ analysis }` / `{ error }`;
-  - scrie 1 row in `ai_usage` dupa call SDK reusit sau pornit si esuat;
-  - `NO_API_KEY` nu scrie row fiindca nu porneste call extern.
-- `POST /api/ai/analyze-multi`
-  - scrie cate un row per call real: analist 1, analist 2, judge daca faza judge este atinsa.
-- `GET /api/v1/ai-usage/summary`
-  - v1 envelope `{ data, requestId }`;
-  - `data.summary24h`, `data.summary30d`, `data.daily[]`, `data.generatedAt`;
-  - costul expus in UI este `cost_usd_milli / 1000`.
+### Frontend - hook + componente + pagini
 
-### Frontend
+Fisiere noi:
 
-Fisiere principale:
+- `frontend/src/hooks/useCurrentUser.ts`
+- `frontend/src/components/AdminGate.tsx`
+- `frontend/src/pages/admin/Users.tsx`
+- `frontend/src/pages/admin/Audit.tsx`
+- `frontend/src/pages/admin/Quota.tsx`
 
-- `frontend/src/components/AIUsagePanel.tsx`
-- `frontend/src/lib/aiUsageApi.ts`
-- `frontend/src/components/ApiKeyDialog.tsx`
-- `frontend/src/lib/chart-colors.ts`
+Fisiere modificate:
 
-Comportament:
-
-- panoul este in dialogul `Setari API`;
-- are loading/error/empty states;
-- afiseaza cost 24h, cost 30 zile, tokeni input/output, cost mediu per apel;
-- graficul foloseste Recharts si seria last 30 days.
+- `frontend/src/lib/api.ts` - tipuri `UserRole` / `UserStatus` / `MeProfile` /
+  `AdminUser` / `PaginatedUsers` / `AuditEvent` / `PaginatedAudit` /
+  `QuotaOverride` / `QuotaListResult`; helperi `me.get()` si
+  `admin.{listUsers,getUser,updateRole,updateStatus,listAudit,listQuota,
+  upsertQuota,deleteQuota}`.
+- `frontend/src/components/Sidebar.tsx` - secțiunea condiționată
+  "Administrare" cu trei iteme (Utilizatori, Audit, Cote).
+- `frontend/src/App.tsx` - trei rute noi `/admin/users`, `/admin/audit`,
+  `/admin/quota` wrapped in `<AdminGate>`.
 
 ### Documentatie / versiune
 
-- `package.json`, `backend/package.json`, `frontend/package.json`, `package-lock.json` bump la `2.5.0`;
-- `CHANGELOG.md` si in-app changelog actualizate;
+- `package.json`, `backend/package.json`, `frontend/package.json` bump la
+  `2.6.0`;
+- `CHANGELOG.md` extins cu intrare v2.6.0;
+- `frontend/src/data/changelog-entries.tsx` extins cu intrare v2.6.0;
 - `README.md`, `STATUS.md`, `CLAUDE.md`, `EXECUTION-ROADMAP.md` actualizate.
 
 ## Validari rulate
 
-Status valid pentru hardening pass v2.5.1 (peste baseline `2c30a91` v2.5.0).
-
-- `npm test --workspace=backend -- src/db/aiUsageRepository.test.ts src/services/aiUsage.test.ts src/routes/aiUsage.test.ts`
-  - Rezultat: **15/15 teste trecute** post-hardening (clossed-lower-bound + AI_MODELS price-table coverage + 3 error-path service tests + 3 route integration tests).
-- `npm test --workspace=backend`
-  - Rezultat: **440/440 teste trecute** (+8 fata de v2.5.0, conform asteptarii: noul `routes/aiUsage.test.ts` integration + closed-lower-bound case + AI_MODELS price coverage + 3 error-path service tests).
+- `npm test --workspace=backend` - **524/524 teste trecute** (de la 440 in
+  v2.5.1, +84 noi: `userQuotaRepository.test.ts` 13, `requireRole.test.ts` 10,
+  `auditRepository.test.ts` extensii 12, `admin.test.ts` ~30 + ajustari fine).
 - `npx tsc --noEmit -p backend/tsconfig.json` - clean.
 - `cd frontend && npx tsc --noEmit` - clean.
-- `npx biome check` pe fisierele atinse - clean.
-- `npm rebuild better-sqlite3` (Node ABI) → `npm test` → `npm run rebuild:electron` (Electron ABI) - sequence completata cu succes.
-- TODO smoke desktop post-commit pentru a confirma in runtime `withMaintenanceRead` pe `/summary`, `markShuttingDown` pe graceful shutdown si `purgeOldAiUsage(90)` in scheduler-ul zilnic.
+- Smoke test end-to-end prin curl: `/me`, gate behavior (403 cand local nu este
+  admin), `/admin/users` listing cu filtre, `/admin/audit?since=...` (closed
+  lower bound), quota PUT/GET, self-demote 409 cu mesaj romanesc.
+- `npm rebuild better-sqlite3` (Node ABI) → `npm test` → `npm run rebuild:electron`
+  (Electron ABI) - sequence completata cu succes.
+- TODO smoke desktop post-commit ca sa confirm in runtime sidebar conditional
+  pentru admin si non-admin (promovare manuala `local` la admin via SQLite
+  direct, apoi revocare).
 
 ## Reguli active pentru urmatorul agent
 
-- Executa doar planul agreat. Daca vezi o problema care cere schimbare fundamentala, anunta si asteapta aprobare.
+- Executa doar planul agreat. Daca vezi o problema care cere schimbare
+  fundamentala, anunta si asteapta aprobare.
 - Nu scoate flow-uri existente care functioneaza.
 - Electron smoke inseamna aplicatia desktop Electron, nu doar web localhost.
 - La lansare Electron:
@@ -97,46 +112,53 @@ Status valid pentru hardening pass v2.5.1 (peste baseline `2c30a91` v2.5.0).
 - Daca rulezi teste Node si atingi `better-sqlite3`:
   - pentru Vitest poate fi necesar `npm rebuild better-sqlite3`;
   - dupa teste ruleaza obligatoriu `npm run rebuild:electron`.
-- SQLite nu permite modificarea unui CHECK existent via `ALTER TABLE`; pentru CHECK-uri trebuie rebuild de tabel sau drop complet de CHECK.
+- SQLite nu permite modificarea unui CHECK existent via `ALTER TABLE`; pentru
+  CHECK-uri trebuie rebuild de tabel sau drop complet de CHECK.
 - Nu lasa procese Electron/backend pornite inutil daca nu sunt necesare.
+- **Promovarea la admin pe desktop ramane manuala**:
+  `UPDATE users SET role='admin' WHERE id='local';` direct in SQLite. Acesta
+  este un workflow tehnic acceptat pentru sprintul curent; PR-9 va expune un
+  mecanism mai prietenos legat de SSO web.
 
 ## Probleme/riscuri ramase
 
-- PR-7 (v2.5.0) si patch-ul de hardening v2.5.1 sunt commit-uite local; push-ul pe `origin/main` se executa in aceeasi sesiune. Tag-urile `v2.5.0` si `v2.5.1` nu sunt inca create pe GitHub.
-- **Hardening post-multi-review (working tree, peste `2c30a91`)** — adresseaza findings primite pe PR-7 si ataca off-by-one + race conditions + cancellation gaps + shutdown safety:
-  - `backend/src/db/aiUsageRepository.ts` — toate query-urile pe fereastra de timp folosesc acum `ts >= ?` (closed lower bound, fix off-by-one pentru randuri care aterizeaza exact la `since`); `nonNegativeInteger` redenumit `clampToNonNegativeInteger` cu predicate `< 0` (acum accepta corect zero); helper exportat `utcDayStart(now, daysBack)`; `listAiUsageLastDays` calculeaza `since` aliniat la UTC-midnight si returneaza `{ rows, since, until }` (BREAKING signature); functie noua `purgeOldAiUsage(retentionDays)` pentru retention.
-  - `backend/src/routes/aiUsage.ts` — `summary30d` aliniat la aceeasi fereastra UTC-midnight−29d ca seria daily (era `now − 30×24h`, mismatched); handler-ul wrapped in `withMaintenanceRead` ca sa coopereze cu daily backup writer.
-  - `backend/src/services/aiUsage.ts` — `httpStatus` clamped la [100,599] sau null; `console.warn` one-shot (JSON) pe price-table miss cu dedup pe provider+model; insert-failure log structurat single-line JSON (`action: "ai_usage.persist_failed"`); insert SQLite deferred via `queueMicrotask` ca sa iasa de pe response hot path; comentariu cross-reference intre CHECK provider din migration `0010_ai_usage` si price map.
-  - `backend/src/services/ai.ts` — best-effort token extraction din SDK error objects (input_tokens/output_tokens/promptTokenCount/candidatesTokenCount); `signal?: AbortSignal` adaugat pe `callAnthropic`/`callOpenAI`/`callGoogle`/`callModel`, compus cu timeout intern via `AbortSignal.any` pentru cancellation propagation.
-  - `backend/src/routes/ai.ts` multi-agent — `analystsAbort` AbortController shared, asa incat un analist esuat anuleaza sibling-ul in loc sa-l lase pana la 180s timeout.
-  - `backend/src/db/schema.ts` — export nou `markShuttingDown()` care inchide DB si seteaza un latch one-way `shuttingDown`; `getDb()` arunca daca este apelat post-shutdown — previne late `recordAiUsageSafely` microtasks de a redeschide DB-ul.
-  - `backend/src/index.ts` — `gracefulShutdown` foloseste acum `markShuttingDown()` in loc de `closeDb()` dupa drain.
-  - `backend/src/services/monitoring/scheduler.ts` — `purgeOldAiUsage(90)` cuplat in acelasi timer zilnic ca `purgeOldRuns`, cu try/catch independent.
-  - `frontend/src/components/AIUsagePanel.tsx` — fix timezone bug (`new Date(\`${value}T00:00:00Z\`)` + `timeZone: "UTC"`); `inflightRef` AbortController ca refresh re-fire sa anuleze request-ul anterior; caption "Informativ" — quota este informativa pe desktop.
-  - Teste: fisier nou `backend/src/routes/aiUsage.test.ts` (route-level integration: envelope shape, owner isolation, daily-sum=summary30d invariant); `aiUsageRepository.test.ts` extins cu closed-lower-bound case si noul return shape; `services/aiUsage.test.ts` extins cu AI_MODELS price-table coverage (fiecare modelId are pret nenul).
-- Nu exista inca GitHub release/tag `v2.4.1`, `v2.4.2` sau `v2.5.0`.
-- Lansarea pe profilul normal a returnat `process_singleton_win.cc:457 Lock file can not be created! Error code: 5`
-  desi nu ramasese proces Electron vizibil. Smoke-ul PR-7 a fost rulat pe profil temporar curat in `C:\tmp`.
-- Cost modelul AI foloseste valori configurate in cod pentru modelele curente din aplicatie; daca providerii schimba preturile, trebuie actualizat manual. Hardening-ul a adaugat warn one-shot la price-table miss, dar valorile raman manuale.
-- Pe desktop quota este informativa/bypass (acum si etichetat explicit "Informativ" in UI). Enforce real ramane pentru web PR-9+.
+- PR-7 (v2.5.0), patch v2.5.1 si PR-8 v2.6.0 sunt commit-uite local; push-ul pe
+  `origin/main` nu este inca facut. Tag-urile aferente nu sunt inca create pe
+  GitHub.
+- `useCurrentUser` se apeleaza din mai multe locuri (Sidebar + AdminGate per
+  pagina admin). Pe desktop call-ul este local si rapid; daca devine vizibil in
+  load tests pe web mode, va fi lift-ed in context shared (sau cache-uit).
+- Pe desktop quota este informativa/bypass. Enforce real ramane pentru web
+  PR-9+.
 - Pentru PR-9 web/server mode trebuie auth real inainte de expunere remote.
-- `xlsx@0.18.5` ramane risc acceptat temporar, documentat si mitigat prin limite stricte.
+- `xlsx@0.18.5` ramane risc acceptat temporar, documentat si mitigat prin
+  limite stricte.
 
 ## Urmatoarea etapa
 
 Conform roadmap:
 
-### PR-8 - Admin pages + roles guard
+### PR-9 - Auth pluggable (desktop noop / web SSO)
 
 Scop:
 
-- pagini `/admin/*` ascunse pe desktop;
-- pe web, acces doar pentru `role='admin'`;
-- pregateste audit/quota override pentru PR-9+ fara sa expuna functionalitate pe desktop.
+- abstractizeaza identitatea callerului in spatele `getOwnerId(c)` astfel incat
+  desktop continua cu user `local` seedat, iar build-ul web-mode foloseste un
+  provider de auth real (target: SSO Workspace cu sesiuni JWT/cookie + user
+  upsert in `users`);
+- toate suprafetele `/api/v1/admin/*` raman gated prin `requireRole`, dar
+  `getOwnerId` returneaza acum userul autentificat (nu `local`);
+- guardrails admin (`last_admin` / `self_deactivation`) raman valabile.
 
 Tasks planificate:
 
-1. Middleware `requireRole('admin')` pe toate rutele admin viitoare.
-2. UI skeleton pentru users/audit/quota.
-3. Desktop: link ascuns si 403 daca ruta este apelata direct.
-4. Teste pentru role guard si owner/admin separation.
+1. Definire `AuthProvider` interface si implementarea desktop (noop, returneaza
+   `local`).
+2. Implementare provider web cu integrare SSO Workspace (token validation +
+   user upsert in `users`).
+3. Build-flag in `backend/src/index.ts` care alege provider-ul in functie de
+   `LEGAL_DASHBOARD_AUTH_MODE` (`desktop` default, `web` opt-in).
+4. Pagina admin pentru promovarea unui user la admin (alternativa la SQLite
+   direct), cu confirm explicit + audit.
+5. Teste: provider desktop (noop), provider web (token valid/invalid/expired),
+   integration `/me` cu provider web.

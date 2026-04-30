@@ -4,6 +4,289 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 30 Aprilie 2026 - v2.6.2 - UX inbox alerte (card scaling + dosar link extern + solutie completa)
+
+Patch UX dupa feedback in productie pe v2.6.1: cardul de alerta era prea mare
+relativ la restul UI-ului si nu se reasculta la slider-ul de fonturi; numarul
+de dosar era plain text fara legatura cu PortalJust; alertele de tip
+`solutie_aparuta` afisau doar campul scurt `solutie` ("Nefondat") fara textul
+integral al hotararii; "Detalii suplimentare" enumerau doar cheile, dropind
+valorile; alertele pre-enrichment (Run-uri pre-v2.6.1) ramaneau fara
+`numar_dosar` chiar daca jobul lor il avea in `target_json`.
+
+### Frontend - card scaling reactiv
+
+- `pages/Alerts.tsx` aplica `style={{ zoom: (slider.value - 2) / slider.value }}`
+  pe `<CardContent>`. Constant 2px sub slider-ul de fonturi, in toate cele
+  patru pozitii (Mic 16/14, Normal 18/16, Mare 20/18, Extra 22/20). `zoom`
+  scaleaza simultan font + padding + gap (Chromium-supported, Electron 41 OK).
+  Ratio-ul se recalculeaza prin `useFontSize()` la fiecare re-render, deci
+  cardul se schimba imediat cand utilizatorul muta slider-ul.
+- `useFontSize` neschimbat (am incercat o rebazare a scalei initial, dar
+  feedback-ul utilizatorului a fost ca scala globala nu trebuie atinsa - doar
+  cardul de alerta sa fie mai mic decat slider-ul).
+
+### Frontend - dosar link extern + buton corect
+
+- `Dosar: <numar>` din header-ul cardului e acum `<a target="_blank">` cu
+  href `https://portal.just.ro/SitePages/cautare.aspx?k=<encodeURIComponent>`,
+  pictograma `ExternalLink` 12px alaturi de numar. Click-ul navigheaza prin
+  `setWindowOpenHandler` (whitelist `portal.just.ro` deja activ) → 
+  `shell.openExternal` → browser-ul default OS. Nu strica setul de protectii
+  pentru CSP / popup-uri (nicio extindere de allowlist).
+- Buton secundar redenumit "Cauta in app" cu pictograma `Eye` (era `ExternalLink`
+  + "Cauta dosar" cu titlu inseelator "in PortalJust"). Pastreaza comportament:
+  `onOpenDosar(numar)` → `pendingSearch` mecanism in `App.tsx` → tab Dosare
+  cu auto-search.
+
+### Backend + frontend - solutie_aparuta cu hotararea integrala
+
+- `services/monitoring/diff/dosarSoap.ts` la emit-ul `solutie_aparuta` adauga
+  acum in `detail`: `solutie_sumar` (textul lung al hotararii, ex.
+  "Respinge apelurile ca nefondate. Definitivă..."), `numar_document`
+  ("113/2026") si `data_pronuntare`. Toate trei sunt deja parsate de
+  `soap.ts` din `<DosarSedinta>` SOAP, doar nu erau propagate.
+- `pages/Alerts.tsx` `buildAlertContext` afiseaza:
+  - `Hotarare: <numar_document> · <dd.mm.yyyy>` (cand cel putin unul prezent);
+  - `Solutie completa: <solutie_sumar>` ca rand separat in `<dl>` 2-col cu
+    text-wrap natural pe valoare lunga.
+- Tests (`diff/dosarSoap.test.ts`) folosesc `toMatchObject` partial-match pe
+  detail, deci adaugarea celor trei campuri nu sparge nimic. 524/524 verzi.
+
+### Backend - JOIN pentru alerte pre-enrichment
+
+- `db/monitoringAlertsRepository.ts` `listAlerts` aliasaza `monitoring_alerts`
+  ca `a`, qualifica toate clauzele `WHERE` (necesare ca `kind` exista pe ambele
+  table-uri) si LEFT JOIN-eaza `monitoring_jobs j ON j.id = a.job_id AND
+  j.owner_id = a.owner_id` (defensiv pe owner ca un row misowned nu leak-eaza).
+  SELECT emite `j.target_json AS job_target_json` si `j.kind AS job_kind`
+  pe rand. INNER nu, LEFT - alertele a caror joburi au fost sterse continua
+  sa apara cu fields NULL.
+- `MonitoringAlertRow` extins cu `job_target_json?: string | null` si
+  `job_kind?: string | null`. `MonitoringAlert` (frontend type) la fel.
+- `buildAlertContext` parseaza `alert.job_target_json` (try/catch) si o
+  foloseste ca fallback pentru `numar_dosar`/`instanta`/`name_normalized`
+  cand `detail_json` nu le are (alerte pre-v2.6.1).
+- COUNT-ul `total` ramane fara JOIN (nicio coloana din `monitoring_jobs` nu
+  apare in WHERE), deci performance-ul agregatului nu sufera.
+
+### Frontend - "Detalii suplimentare" cu valori
+
+- `buildAlertContext` schimba `fallbackKeys: string[]` in `fallback: { label,
+  value }[]`. `humanizeKey` converteste `snake_case`/`camelCase` in label
+  capitalizat ("foo_bar_baz" → "Foo bar baz"). `stringifyFallbackValue`
+  serializeaza primitive direct, obiecte/array-uri JSON-stringificate cu cap
+  la 200 caractere si elipsa, iar valori null/empty/empty-object dropate.
+- Render-ul foloseste `<dl>` 2-coloane (la fel ca `facts`) cu styling mai
+  discret (text-xs muted-foreground). Nu mai apare lista nuda de chei fara
+  context.
+
+### UX cleanup
+
+- Linia tehnica `Job #X · Run #Y · Dedup: ...` din footer-ul cardului scoasa
+  complet (debug-info zgomotoasa pentru utilizator final). Daca debug e
+  necesar, dedup_key ramane disponibil in API response.
+
+### Validari
+
+- `npx tsc --noEmit -p backend/tsconfig.json` clean.
+- `cd frontend && npx tsc --noEmit` clean.
+- `npm run build` produce `dist-frontend/` + `dist-backend/index.cjs`
+  (3.7MB, neschimbat de marime).
+- 524/524 vitest verzi (necesita `npm rebuild better-sqlite3` dupa
+  `npm run rebuild:electron` - workflow standard din CLAUDE.md).
+- Smoke desktop: card-ul se rescaleaza la fiecare miscare a slider-ului,
+  link-ul Dosar deschide `portal.just.ro` in browser-ul default OS, butonul
+  "Cauta in app" deschide tab-ul Dosare cu pre-search.
+
+---
+
+## 30 Aprilie 2026 - v2.6.1 - alerte cu context dosar + identitate Windows
+
+Patch UX dupa feedback in productie pe v2.6.0: alertele de monitorizare nu
+purtau identificare suficienta (numar dosar, formatare data, link spre
+cautare) si iconita aplicatiei pe Windows aparea ca default Electron in
+taskbar / native notifications.
+
+### Backend - alerte enrichment
+
+- `dosarSoapRunner` adauga `numar_dosar` (din `target.numar_dosar`),
+  `instanta` si `stadiu` (din `currentDosar`, daca prezent) la fiecare alerta
+  inainte de insert. Diff-ul ramane pur (nu primeste context external);
+  enrichmentul se face la limita runner-ului. Dedup key si payload de diff
+  raman neschimbate.
+- `nameSoapRunner` adauga `name_normalized` (din `target.name_normalized`)
+  la fiecare alerta. Per-dosar alerts (`dosar_new`, `stadiu_changed`, etc.)
+  pastreaza `numar` din diff-ul intern.
+- 524/524 teste vitest verzi (zero modificari de assertions: testele
+  existente folosesc `toMatchObject` partial-match si tolereaza fields noi).
+
+### Frontend - alerte cu detail structurat + link spre Dosare
+
+- `pages/Alerts.tsx` inlocuieste `detailPreview` (single-line) cu
+  `buildAlertContext(alert)` care extrage `numarDosar`, `instanta`,
+  `nameNormalized` si o lista `facts` (label/value perechi):
+  - data sedintei reformatata `dd.mm.yyyy` (parsa din `2026-04-30T00:00:00`
+    sau ISO complet);
+  - ora, complet, solutie, stadiu, categorie afisate ca `dt`/`dd`;
+  - `termen_changed` arata `from`/`to` ca "De la" / "La";
+  - `stadiu_changed` / `categorie_changed` arata "Schimbare: from -> to";
+  - fallback pentru chei necunoscute pastreaza extensibilitatea.
+- buton "Cauta dosar" (cand `numar_dosar` e prezent) reuseste mecanismul
+  existent `pendingSearch` din App.tsx: `onOpenDosar(numar)` →
+  `handleHistoryClick("dosare", { numarDosar })` → `navigate("/dosare")` →
+  Dosare auto-executa search via `pendingSearch` effect.
+- `numar_dosar` afisat font-mono prominent sub titlu.
+
+### Electron - identitate Windows
+
+- `electron/main.js` apeleaza `app.setAppUserModelId("ro.legaldashboard.app")`
+  inainte de orice `BrowserWindow` / `Notification`. Fix: in dev mode taskbar-ul
+  nu mai arata icon-ul default Atom-Electron; native notifications nu mai
+  sunt atribuite "electron.app.Electron". `appId` din electron-builder
+  config e identic, deci pe NSIS install grupare ramane consistenta.
+
+### Validari
+
+- `npx tsc --noEmit -p backend/tsconfig.json` clean.
+- `cd frontend && npx tsc --noEmit` clean.
+- `npm test --workspace=backend` 524/524 verde.
+- Smoke desktop: alerta `solutie_aparuta` afiseaza acum numar dosar +
+  data formatata + complet + solutie; buton "Cauta dosar" navigheaza si
+  declanseaza cautare in Dosare.
+- Icon-ul aplicatiei in taskbar dev = icon.ico din `build/`.
+
+---
+
+## 30 Aprilie 2026 - v2.6.0 - PR-8 admin pages + roles guard
+
+PR-8 livreaza primul ecran admin si guard-ul de rol care va proteja in PR-9
+toate suprafetele admin in mod web. Pe desktop, "local" este seedat ca user
+normal, iar adminul se promoveaza dintr-o sesiune SQLite directa
+(`UPDATE users SET role='admin' WHERE id='local';`) sau dintr-o pagina admin
+existenta dupa ce primul admin a fost promovat manual.
+
+### Backend - middleware + rute
+
+- **Middleware nou `requireRole(...allowed: UserRole[])`**: rezolva userul prin
+  `getOwnerId(c)` + `getUserById`, refuza cu 401 cand userul nu exista, 403 cand
+  statusul nu este `active` sau cand rolul nu este in allowlist. Fiecare refuz
+  scrie un audit `auth.denied` cu `reason` (`user_not_found` | `user_inactive` |
+  `role_mismatch`), `userId`, `role`/`status` curent si `required` (lista
+  rolurilor cerute). Construire fara roluri arunca eroare la timpul setup-ului.
+- **Ruta noua `GET /api/v1/me`**: returneaza profilul callerului in envelope
+  v1 - `id`, `email`, `displayName`, `role`, `status`, `createdAt`,
+  `lastLoginAt`. Folosita de UI pentru a decide ce sectiuni de admin se
+  afiseaza si pentru gating client-side la `/admin/*`.
+- **Rute noi `/api/v1/admin/*`** (toate gated cu `requireRole('admin')`):
+  - `GET /admin/users` - listare paginata cu filtre `search` (email/nume),
+    `role`, `status`, `page`, `pageSize`.
+  - `GET /admin/users/:id` - detaliu user.
+  - `PATCH /admin/users/:id/role` - **guardrail self-demotion**: refuz 409
+    `last_admin` cand callerul incearca sa-si retrogradeze rolul ramanand
+    zero administratori activi; audit `admin.users.demote_blocked` pe esec.
+    Pe succes, audit `admin.users.update_role` cu `before`/`after`.
+  - `PATCH /admin/users/:id/status` - **guardrail self-deactivation**: refuz
+    409 `self_deactivation` cand callerul isi schimba statusul in
+    non-`active`; audit `admin.users.update_status` pe succes.
+  - `GET /admin/audit` - jurnal cu filtre `actionLike` (LIKE `%x%`), `ownerId`,
+    `actorId`, `targetKind`, `targetId`, `outcome`, `since` (closed lower
+    bound, `ts >= ?`), `until` (open upper bound, `ts < ?`), pagination.
+  - `GET /admin/users/:id/quota` + `PUT` (upsert) + `DELETE` (idempotent) -
+    override-uri zilnice per feature stocate ca `cost_usd_milli` integer.
+- **Migration `0011_user_quota_overrides`**: tabel cu PK `(user_id, feature)`,
+  `daily_limit_usd_milli` (NOT NULL CHECK >= 0), `updated_at` (default
+  `CURRENT_TIMESTAMP`), `updated_by` (nullable, FK soft pe users).
+  `ON DELETE CASCADE` pe user pentru cleanup automat.
+- **Convenții ferestre de timp**: `since` este closed lower bound (`ts >= ?`),
+  `until` este open upper bound (`ts < ?`) - aliniat cu `aiUsageRepository`
+  din PR-7 hardening, asa incat un admin care compara audit cu AI usage pe
+  acelasi interval vede aceleasi randuri.
+- **Audit pe writes only**: read-urile (list, get, audit list, quota list) nu
+  scriu in audit_log ca sa nu polueze. Write-urile (role, status, quota
+  upsert/delete) scriu envelope cu `before`/`after` in `detail_json`.
+
+### Frontend - hook + componente shared
+
+- **Hook nou `useCurrentUser`**: fetch `/api/v1/me` la mount, expune
+  `{ user, loading, error, refresh }`. AbortController pe unmount, retry via
+  `tick` state. Folosit de Sidebar (decide afisarea sectiunii Admin) si de
+  `AdminGate` (decide accesul la rutele `/admin/*`).
+- **Componenta `AdminGate`**: ruleaza in jurul fiecarei pagini admin si
+  arata un ecran 403 cand `user?.role !== "admin"`. Guard pur cosmetic -
+  serverul re-verifica rolul pe fiecare call `/api/v1/admin/*`.
+- **Sidebar**: cand `user?.role === "admin"`, randeaza o sectiune
+  "Administrare" cu trei iteme - `Utilizatori`, `Audit`, `Cote`. Iconite
+  identice in modul collapsed.
+- **`lib/api.ts`**: tipuri si helper noi - `UserRole`, `UserStatus`,
+  `MeProfile`, `AdminUser`, `PaginatedUsers`, `AuditEvent`, `PaginatedAudit`,
+  `QuotaOverride`, `QuotaListResult`. Exporturi `me.get()` si
+  `admin.{listUsers,getUser,updateRole,updateStatus,listAudit,listQuota,upsertQuota,deleteQuota}`.
+  Reuseaza `unwrapMonitoring` + `MonitoringApiError` pentru a beneficia de
+  acelasi error-handling ca rutele monitoring.
+
+### Frontend - pagini admin
+
+- **`/admin/users`**: tabel paginat cu inline `<select>` pentru rol si
+  status. Confirmari prin `useConfirm` la fiecare schimbare. Self-demotion
+  blocata si client-side cu mesaj romanesc cand callerul incearca sa-si
+  schimbe rolul. Refresh `/me` automat dupa schimbare proprie de rol pentru
+  a-si actualiza Sidebar-ul (admin -> user ascunde sectiunea Administrare).
+- **`/admin/audit`**: tabel cu rand expandabil per eveniment - prima linie
+  arata timestamp, action, outcome (badge color-coded), owner, actor, target
+  si IP; expansiunea afiseaza `detail_json` pretty-printed plus `userAgent`.
+  Filtre: `action` (substring match), `ownerId`, `actorId`, `targetKind`,
+  `outcome`, `from`/`to` (date inputs in timezone local, convertite la ISO
+  cu boundaries 00:00:00.000 / 23:59:59.999 ca pe Alerts).
+- **`/admin/quota`**: workflow in doua etape - cauta utilizator (reuseaza
+  `admin.listUsers`), apoi vezi/edit-eaza override-urile lui. Limitele se
+  introduc in USD (decimale pana la trei zecimale) si se salveaza ca
+  milli-USD pentru aliniere cu modelul de cost AI din PR-7. Delete e
+  idempotent si confirmat prin `useConfirm`.
+
+### Routing & UX
+
+- `App.tsx`: trei rute noi `/admin/users`, `/admin/audit`, `/admin/quota`,
+  fiecare wrapped in `<AdminGate>`. 403 placeholder cu mesaj romanesc cand
+  userul nu este admin.
+- Sidebar randeaza sectiunea Administrare doar cand server-ul a confirmat
+  prin `/me` ca rolul este `admin` - non-adminii nu vad linkurile, dar pot
+  ajunge la URL prin tastare directa unde primesc 403.
+
+### Teste & validare
+
+- **Backend full suite**: 524 teste trecute (de la 440 in v2.5.1, +84 noi).
+  - `requireRole.test.ts` (10 cazuri): allowlist single-role, multi-role,
+    rol mismatch, suspended, deleted, ghost user (401), construction-time
+    error fara roluri, audit pe `role_mismatch` si `user_inactive`.
+  - `userQuotaRepository.test.ts` (13 cazuri): read paths, ordering by
+    feature, scope per user_id, upsert idempotent, zero limit valid,
+    negative/non-integer rejected, empty feature rejected, ON DELETE CASCADE.
+  - `auditRepository.test.ts` extins cu 12 cazuri pe `listAuditEvents`:
+    filtre per camp, closed lower bound `since`, open upper bound `until`,
+    `since`+`until` tile fara overlap, pagination cu total separat de pagesize,
+    limit clamped `[1,500]`.
+  - `admin.test.ts` (~30 cazuri): gate (non-admin 403, admin 200, suspended
+    admin 403), users list/filters/pagination, get user 200/404, PATCH role
+    cu audit, invalid role 400, self-demote blocked + allowed cand alt admin
+    exista, PATCH status cu audit, self-deactivation blocked, audit list cu
+    `since`/`outcome`, malformed datetime 400, quota CRUD, idempotent delete.
+- **Type-check** backend si frontend: clean.
+- **Smoke test end-to-end** pe rutele noi prin curl: `/me`, gate behavior
+  (403 cand local nu este admin), `/admin/users` listing, `/admin/audit`
+  cu `since`, quota PUT/GET, self-demote 409 cu mesaj romanesc.
+
+### Cunoscut & limitari
+
+- **`useCurrentUser` se apeleaza din mai multe locuri** (Sidebar +
+  AdminGate per pagina admin). Pe desktop call-ul este local si rapid;
+  daca devine vizibil in load tests pe web mode, va fi lift-ed in
+  context shared.
+- **Promovarea primului admin pe desktop** ramane manuala (UPDATE direct
+  in SQLite). PR-9 va expune un mecanism mai prietenos legat de SSO.
+
+---
+
 ## 30 Aprilie 2026 - v2.5.1 - PR-7 hardening (post multi-review)
 
 Patch peste v2.5.0 dupa multi-agent review pe suprafata AI usage tracking.

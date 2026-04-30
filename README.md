@@ -7,14 +7,35 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.5.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.6.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.5.1** - PR-7 hardening post multi-review: closed-lower-bound pe ferestre
-de timp, `summary30d` aliniat la UTC-midnight ca seria daily, `withMaintenanceRead`
-pe `/summary`, `purgeOldAiUsage(90)` in scheduler zilnic, multi-agent
-`analystsAbort` shared, `markShuttingDown()` latch, fix timezone pe seria daily
-UI, `inflightRef` AbortController pe refresh si caption "Informativ" pentru
-quota desktop. Baza ramane v2.5.0 - PR-7 AI usage tracking: migration
+**v2.6.2** - patch UX inbox alerte: cardul de alerta scaleaza dinamic 2px
+sub slider-ul de fonturi (font + padding + gap) prin `zoom`, "Dosar: <numar>"
+e link extern catre `portal.just.ro/SitePages/cautare.aspx?k=...` (deschis
+prin `setWindowOpenHandler` + `shell.openExternal`), butonul navigheaza in
+Dosare cu titlu corect ("Deschide ... in lista Dosare"), `solutie_aparuta`
+include acum `solutie_sumar`/`numar_document`/`data_pronuntare` pe detail
+asa ca textul integral al hotararii apare in card, "Detalii suplimentare"
+afiseaza chei + valori (humanizate, JSON-stringificate, scurtate la 200ch),
+`listAlerts` LEFT JOIN `monitoring_jobs` ca alertele vechi sa primeasca
+`numar_dosar` din `target_json` chiar daca runner-ul nu enrich-uise `detail`,
+linia tehnica `Job/Run/Dedup` scoasa din card (zgomot UX).
+Baza ramane v2.6.1 - alerte cu context dosar + identitate Windows: alertele
+de monitorizare arata acum `numar_dosar` (injectat la nivelul runner-ului),
+data formatata `dd.mm.yyyy`, ora, complet, solutie + buton "Cauta dosar" care
+declanseaza search in Dosare; `app.setAppUserModelId` rezolva icon-ul
+default Electron in taskbar-ul Windows si in native notifications.
+Baza ramane v2.6.0 - PR-8 admin pages + roles guard: middleware nou
+`requireRole(...allowed)` cu audit `auth.denied`, ruta `GET /api/v1/me`,
+suprafata `/api/v1/admin/{users,audit,users/:id/quota}`, migration
+`0011_user_quota_overrides`, hook `useCurrentUser` + componenta `AdminGate`,
+sidebar conditional `Administrare` si trei pagini admin (`/admin/users`,
+`/admin/audit`, `/admin/quota`). Guardrails irreversibile pe `last_admin` 409
+(self-demote) si `self_deactivation` 409 (status non-active pe self).
+Baza ramane v2.5.1 - PR-7 hardening: closed-lower-bound pe ferestre de timp,
+`summary30d` aliniat la UTC-midnight, `purgeOldAiUsage(90)`,
+`markShuttingDown()` latch si `inflightRef` AbortController pe refresh.
+Baza ramane v2.5.0 - PR-7 AI usage tracking: migration
 `0010_ai_usage`, tracking owner-scoped dupa fiecare call SDK AI, cost calculat
 ca integer `cost_usd_milli`, endpoint `/api/v1/ai-usage/summary` si panou
 "AI Usage" in Setari API cu cost ultimele 24h / 30 zile. Baza ramane PR-6: inbox `Alerte`,
@@ -60,7 +81,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (432 teste in v2.5.0) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (524 teste, neschimbate in v2.6.2) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
