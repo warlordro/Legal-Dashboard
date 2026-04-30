@@ -59,6 +59,8 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
               { label: "11. Sidebar si Navigare", id: "sidebar" },
               { label: "12. Personalizare (Tema & Font)", id: "personalizare" },
               { label: "13. Securitate si Confidentialitate", id: "securitate" },
+              { label: "14. Monitorizare automata", id: "monitorizare" },
+              { label: "15. Inbox Alerte", id: "alerte" },
             ].map((item) => (
               <button
                 key={item.id}

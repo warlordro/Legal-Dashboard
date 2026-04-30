@@ -1,4 +1,4 @@
-import { Search, CalendarDays, BarChart3, FileSpreadsheet, Brain, Shield, Settings, Monitor, MousePointerClick, ArrowUpDown, Loader2, Database } from "lucide-react";
+import { Search, CalendarDays, BarChart3, FileSpreadsheet, Brain, Shield, Settings, Monitor, MousePointerClick, ArrowUpDown, Loader2, Database, Activity, Bell } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 
@@ -643,6 +643,136 @@ export function ManualChapters() {
             Ministerului Justitiei), dar este important sa stii ca sunt procesate de serverele furnizorului AI conform
             politicilor lor de confidentialitate.
           </p>
+        </SubSection>
+      </Section>
+
+      {/* 14. Monitorizare automata */}
+      <Section id="monitorizare" icon={<Activity className="h-5 w-5 text-emerald-500" />} title="14. Monitorizare automata">
+        <p>
+          Pagina <strong className="text-foreground">Monitorizare</strong> programeaza interogari periodice catre
+          PortalJust si genereaza alerte cand apar dosare noi sau se schimba starea celor existente. Doua tipuri de
+          joburi sunt suportate: <code className="text-foreground">dosar_soap</code> (urmareste un numar exact de
+          dosar) si <code className="text-foreground">name_soap</code> (urmareste toate dosarele unde apare un
+          subiect / nume parte). Joburile ruleaza in fundal in backend si nu necesita ca aplicatia sa fie deschisa
+          tot timpul — orice rezultat nou apare in inbox-ul de Alerte la urmatoarea pornire.
+        </p>
+
+        <SubSection title="Adauga un job pentru un dosar (numar exact):">
+          <BulletList items={[
+            "Apasa butonul Adauga in coltul din dreapta-sus al paginii Monitorizare",
+            "Selecteaza tipul Dosar (numar exact) si introdu numarul exact al dosarului (formatul oficial cu separatori si anul)",
+            "Selecteaza institutia (instanta) — fara institutie corecta jobul nu va gasi rezultate",
+            "Alege cadenta: la cat timp se reinterogheaza (1h, 6h, 12h, 24h sau valoare custom in secunde)",
+            "Apasa Salveaza — jobul porneste automat si va rula prima oara la urmatorul tick al schedulerului",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Adauga un job pentru un subiect (dupa nume):">
+          <BulletList items={[
+            "Selecteaza tipul Nume (subiect) — descopera automat dosare noi unde apare numele",
+            "Introdu numele exact (persoana fizica sau juridica) asa cum apare in dosare la PortalJust",
+            "Cadenta recomandata: 6h-24h (interogarea pe nume e mai costisitoare la upstream)",
+            "Salveaza — la fiecare rulare jobul compara lista actuala de dosare cu snapshot-ul anterior si emite alerte pentru dosare noi sau care si-au schimbat statusul",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Import in masa din Excel:">
+          <BulletList items={[
+            "Apasa Import XLSX — descarca template-ul oficial cu doua coloane (numar_dosar SAU nume) si un dropdown de cadenta",
+            "Completeaza fiecare rand cu un singur tip (numar SAU nume, nu ambele)",
+            "Optional: bifeaza coloana institutie pentru numere de dosar — accelereaza prima rulare",
+            "Incarca fisierul completat — pagina afiseaza un preview cu validarea fiecarui rand (verde = ok, rosu = eroare cu motiv)",
+            "Apasa Confirma import doar dupa ce verifici preview-ul — randurile cu erori sunt sarite, restul devin joburi active",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Tabelul de joburi — coloane si actiuni:">
+          <BulletList items={[
+            "Status — pastila activ (verde) sau pauza (gri)",
+            "Tip — dosar_soap sau name_soap, cu numarul / numele monitorizat",
+            "Institutie — pentru dosare; subiectii nu au institutie fixa",
+            "Cadenta — la cat timp ruleaza (afisat in formatul citibil: 1h, 6h, 12h, 1z)",
+            "Ultima rulare — data + status (ok / warn / error) cu tooltip pentru detalii la eroare",
+            "Urmatoarea rulare — cand schedulerul va incerca din nou",
+            "Actiuni — Pauza / Reia (toggle), Editeaza (cadenta + nume), Sterge (cu confirmare)",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Istoric rulari:">
+          <BulletList items={[
+            "Click pe un rand de job deschide istoricul ultimelor rulari cu durata, status si numar de alerte emise",
+            "Erorile au mesaj structurat (timeout, captcha esuata, upstream 5xx, etc.) pentru diagnoza rapida",
+            "Istoricul este pastrat 90 zile (purjat zilnic automat) — pentru audit pe termen lung exporta periodic",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Limite si comportament operational:">
+          <BulletList items={[
+            "Schedulerul ruleaza intern la fiecare ~30s si claim-uieste joburile scadente cu lock atomic — niciodata doua rulari paralele pentru acelasi job",
+            "Daca aplicatia este oprita, jobul este reluat automat la urmatoarea pornire — fara rulari pierdute, doar amanate",
+            "Backup-ul zilnic SQLite sincronizeaza un read-lock cu schedulerul (jobs noi pot fi adaugati, dar runner-ul asteapta cateva secunde)",
+            "Variabila de mediu MONITORING_DISABLED_KINDS permite admin-ului sa opreasca temporar un tip (ex: dosar_soap) fara a sterge joburile",
+          ]} />
+        </SubSection>
+      </Section>
+
+      {/* 15. Inbox Alerte */}
+      <Section id="alerte" icon={<Bell className="h-5 w-5 text-rose-500" />} title="15. Inbox Alerte">
+        <p>
+          Pagina <strong className="text-foreground">Alerte</strong> centralizeaza toate notificarile generate de
+          joburile de monitorizare. Fiecare alerta este o schimbare detectata: un dosar nou aparut pentru un subiect
+          urmarit, un termen sau status modificat la un dosar urmarit, sau o categorie / relevanta schimbata.
+          Inbox-ul este per-owner si se sincronizeaza in timp real (SSE) intre paginile aplicatiei.
+        </p>
+
+        <SubSection title="Vizualizare si filtrare:">
+          <BulletList items={[
+            "Lista paginata cu cele mai noi alerte primele — fiecare card afiseaza tipul (badge colorat), dosarul / subiectul, data si un rezumat al schimbarii",
+            "Filtreaza dupa tip (dosar nou / status / categorie / relevanta), dupa interval de date (de la / pana la — corect pe fusul orar local), dupa job sau dupa stare (necitite / toate)",
+            "Click pe o alerta deschide detaliul cu diferenta exacta (camp x: vechi → nou) si link direct catre dosarul aferent",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Stari si actiuni:">
+          <BulletList items={[
+            "Necitita — alerta noua, nu a fost vazuta inca; afisata cu fundal accent si numarata in badge-ul rosu din sidebar",
+            "Vazuta — apasa pe alerta sau scroll-eaza prin lista (auto-mark dupa cateva secunde de vizibilitate)",
+            "Marcheaza toate ca vazute — buton la nivelul listei, foloseste endpoint-ul bulk seen-bulk pentru un singur apel HTTP",
+            "Respinsa (dismiss) — ascunde definitiv alerta; ramane in audit dar nu mai apare in inbox",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Stream live (SSE):">
+          <BulletList items={[
+            "Cand pagina sau aplicatia este deschisa, primesti alerte in timp real prin EventSource (Server-Sent Events)",
+            "Stream-ul are heartbeat la 25s si reconectare automata cu backoff in caz de cadere de retea",
+            "Maxim 5 stream-uri simultane per cont — suficient pentru desktop + browser; conexiunile mai vechi sunt inchise automat",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Notificari native desktop:">
+          <BulletList items={[
+            "In aplicatia Electron, alertele noi declanseaza notificari de sistem (Windows Action Center, macOS Notification Center)",
+            "Notificarile sunt suprimate cand fereastra este focusata — nu primesti notificare daca deja te uiti la aplicatie",
+            "Dedup pe tag: daca primesti repede mai multe alerte pentru acelasi dosar, doar ultima ramane vizibila in tray",
+            "Click pe notificare aduce fereastra in fata si deschide direct pagina Alerte cu alerta selectata",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Badge-ul din sidebar:">
+          <BulletList items={[
+            "Badge rosu cu numar — afiseaza cate alerte necitite ai (cap la 99+)",
+            "Vizibil atat in sidebar expanded cat si collapsed",
+            "Se actualizeaza in timp real prin acelasi stream SSE — fara refresh manual",
+          ]} />
+        </SubSection>
+
+        <SubSection title="Audit si retentie:">
+          <BulletList items={[
+            "Fiecare actiune (seen, bulk seen, dismiss) este logata in audit_log cu owner, timestamp si payload",
+            "Alertele raman in DB dupa dismiss — doar ascunse din inbox; pot fi recuperate la nevoie de admin",
+            "Sincronizate cu istoricul de rulari al jobului care le-a generat — trasabilitate completa de la modificare la job-ul declansator",
+          ]} />
         </SubSection>
       </Section>
     </>

@@ -882,6 +882,8 @@ export async function buildManualPdf(): Promise<ExportResult> {
     "10. Sidebar si Navigare",
     "11. Personalizare (Tema & Font)",
     "12. Securitate si Confidentialitate",
+    "13. Monitorizare automata",
+    "14. Inbox Alerte",
   ];
   for (const ch of chapters) {
     doc.setFontSize(10);

@@ -329,7 +329,7 @@ export default function Monitorizare() {
             </Button>
           </div>
           {bulkError && (
-            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
               {bulkError}
             </div>
           )}
@@ -337,13 +337,13 @@ export default function Monitorizare() {
             <div className="mt-4 space-y-4">
               {bulkPreview && (
                 <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="rounded-md bg-green-100 px-2 py-0.5 text-green-700">
+                  <span className="rounded-md bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
                     {bulkPreview.totals.ok} nume ok
                   </span>
-                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-amber-800">
+                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
                     {bulkPreview.totals.warn} warn
                   </span>
-                  <span className="rounded-md bg-red-100 px-2 py-0.5 text-red-700">
+                  <span className="rounded-md bg-red-100 px-2 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">
                     {bulkPreview.totals.rejected} respinse
                   </span>
                   <span className="text-muted-foreground">din {bulkPreview.totals.total} randuri nume</span>
@@ -414,10 +414,10 @@ export default function Monitorizare() {
                           <span
                             className={`rounded-md px-2 py-0.5 text-xs ${
                               row.validation === "ok"
-                                ? "bg-green-100 text-green-700"
+                                ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                                 : row.validation === "warn"
-                                ? "bg-amber-100 text-amber-800"
-                                : "bg-red-100 text-red-700"
+                                ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
+                                : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
                             }`}
                           >
                             {row.validation}
@@ -439,13 +439,13 @@ export default function Monitorizare() {
                 </div>
               )}
               {bulkCommit && (
-                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-400">
                   Lista #{bulkCommit.list.id} salvata. Joburi noi create:{" "}
                   {bulkCommitProgress.created}. Duplicate: {bulkCommit.duplicate ? "da" : "nu"}.
                 </div>
               )}
               {bulkDosarResult && (
-                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-400">
                   Dosare bulk: {bulkDosarResult.added} adaugate, {bulkDosarResult.exists} deja existente,
                   {bulkDosarResult.errors} erori.
                 </div>
@@ -463,7 +463,7 @@ export default function Monitorizare() {
         </CardHeader>
         <CardContent>
           {error && (
-            <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
               {error}
             </div>
           )}
@@ -526,11 +526,11 @@ export default function Monitorizare() {
                       </td>
                       <td className="px-3 py-2">
                         {job.active ? (
-                          <span className="text-xs rounded-md bg-green-100 px-2 py-0.5 text-green-700">
+                          <span className="text-xs rounded-md bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
                             activ
                           </span>
                         ) : (
-                          <span className="text-xs rounded-md bg-gray-100 px-2 py-0.5 text-gray-600">
+                          <span className="text-xs rounded-md bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                             pauza
                           </span>
                         )}
@@ -538,10 +538,10 @@ export default function Monitorizare() {
                           <span
                             className={`ml-1 text-xs rounded-md px-2 py-0.5 ${
                               job.last_status === "ok"
-                                ? "bg-green-50 text-green-700"
+                                ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400"
                                 : job.last_status === "error"
-                                ? "bg-red-50 text-red-700"
-                                : "bg-amber-50 text-amber-700"
+                                ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                             }`}
                           >
                             {job.last_status}
