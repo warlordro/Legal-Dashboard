@@ -660,8 +660,8 @@ export function ManualChapters() {
         <SubSection title="Adauga un job pentru un dosar (numar exact):">
           <BulletList items={[
             "Apasa butonul Adauga in coltul din dreapta-sus al paginii Monitorizare",
-            "Selecteaza tipul Dosar (numar exact) si introdu numarul exact al dosarului (formatul oficial cu separatori si anul)",
-            "Selecteaza institutia (instanta) — fara institutie corecta jobul nu va gasi rezultate",
+            "Selecteaza tipul Dosar (numar exact) si introdu numarul exact al dosarului (formatul oficial cu separatori si anul, ex: 1234/180/2024)",
+            "Pentru dosar dupa numar nu se cere institutia — PortalJust gaseste dosarul direct dupa numar in toate instantele",
             "Alege cadenta: la cat timp se reinterogheaza (1h, 6h, 12h, 24h sau valoare custom in secunde)",
             "Apasa Salveaza — jobul porneste automat si va rula prima oara la urmatorul tick al schedulerului",
           ]} />
@@ -671,6 +671,7 @@ export function ManualChapters() {
           <BulletList items={[
             "Selecteaza tipul Nume (subiect) — descopera automat dosare noi unde apare numele",
             "Introdu numele exact (persoana fizica sau juridica) asa cum apare in dosare la PortalJust",
+            "Institutii — optional, lista multipla de instante; lasa gol pentru cautare in toate (recomandat daca nu stii unde litigheaza subiectul)",
             "Cadenta recomandata: 6h-24h (interogarea pe nume e mai costisitoare la upstream)",
             "Salveaza — la fiecare rulare jobul compara lista actuala de dosare cu snapshot-ul anterior si emite alerte pentru dosare noi sau care si-au schimbat statusul",
           ]} />
@@ -680,7 +681,6 @@ export function ManualChapters() {
           <BulletList items={[
             "Apasa Import XLSX — descarca template-ul oficial cu doua coloane (numar_dosar SAU nume) si un dropdown de cadenta",
             "Completeaza fiecare rand cu un singur tip (numar SAU nume, nu ambele)",
-            "Optional: bifeaza coloana institutie pentru numere de dosar — accelereaza prima rulare",
             "Incarca fisierul completat — pagina afiseaza un preview cu validarea fiecarui rand (verde = ok, rosu = eroare cu motiv)",
             "Apasa Confirma import doar dupa ce verifici preview-ul — randurile cu erori sunt sarite, restul devin joburi active",
           ]} />
@@ -690,7 +690,7 @@ export function ManualChapters() {
           <BulletList items={[
             "Status — pastila activ (verde) sau pauza (gri)",
             "Tip — dosar_soap sau name_soap, cu numarul / numele monitorizat",
-            "Institutie — pentru dosare; subiectii nu au institutie fixa",
+            "Institutie — afisata daca a fost selectata la creare (optionala pentru dosare; subiectii nu au institutie fixa)",
             "Cadenta — la cat timp ruleaza (afisat in formatul citibil: 1h, 6h, 12h, 1z)",
             "Ultima rulare — data + status (ok / warn / error) cu tooltip pentru detalii la eroare",
             "Urmatoarea rulare — cand schedulerul va incerca din nou",
