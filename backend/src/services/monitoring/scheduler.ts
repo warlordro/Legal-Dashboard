@@ -31,6 +31,7 @@ import {
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 
@@ -41,6 +42,11 @@ const SOURCE_ERROR_THRESHOLD = 5;
 const SOURCE_ERROR_BACKOFF_SEC = 3600;
 const RUN_RETENTION_DAYS = 90;
 const RUN_PURGE_INTERVAL_MS = 86_400_000;
+// ai_usage retention mirrors monitoring_runs: 90 days, purged on the same
+// daily timer. PR-7 logs every AI call; without this, the table grows
+// monotonically and the /summary card ranges (24h / 30d) are unaffected
+// while disk and SQLite scan time creep up indefinitely.
+const AI_USAGE_RETENTION_DAYS = 90;
 
 export type ScheduledJob = MonitoringJobRow;
 
@@ -300,10 +306,31 @@ export class Scheduler {
           error: err instanceof Error ? err.message : String(err),
           stack: err instanceof Error ? err.stack : undefined,
         });
-      } finally {
-        this.purgeTimerHandle = undefined;
-        this.scheduleRunPurge();
       }
+
+      // AI usage retention runs alongside the run purge so a single daily
+      // wakeup handles both. Independent try/catch — a failure in one must
+      // not skip the other (monitoring_runs is operational, ai_usage is
+      // observability; both matter, neither blocks the loop).
+      try {
+        const deletedUsage = purgeOldAiUsage(AI_USAGE_RETENTION_DAYS);
+        if (deletedUsage > 0) {
+          console.log(JSON.stringify({
+            action: "ai_usage.purged",
+            deleted_count: deletedUsage,
+            retention_days: AI_USAGE_RETENTION_DAYS,
+            ts: this.opts.clock.now().toISOString(),
+          }));
+        }
+      } catch (err) {
+        console.error("[scheduler] purgeOldAiUsage threw, continuing loop", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      }
+
+      this.purgeTimerHandle = undefined;
+      this.scheduleRunPurge();
     }, RUN_PURGE_INTERVAL_MS);
   }
 

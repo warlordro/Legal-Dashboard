@@ -1,9 +1,9 @@
-# Session Handoff - PR-7 v2.5.0 implementat local / PR-8 urmator
+# Session Handoff - PR-7 + hardening v2.5.1 livrate / PR-8 urmator
 
 **Data**: 2026-04-30
 **Branch local**: `main`
-**Remote**: `origin/main` era sincronizat cu v2.4.2 inainte de PR-7; PR-7 este local, nepushed.
-**Versiune curenta**: `v2.5.0`
+**Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch-ul v2.5.1 (hardening post multi-review). Tag-urile `v2.5.0` si `v2.5.1` nu sunt inca create.
+**Versiune curenta**: `v2.5.1`
 
 ## TL;DR
 
@@ -73,25 +73,17 @@ Comportament:
 
 ## Validari rulate
 
-- `npm test --workspace=backend -- src/db/aiUsageRepository.test.ts src/services/aiUsage.test.ts src/services/ai.test.ts`
-  - Rezultat: 24/24 teste trecute.
+Status valid pentru hardening pass v2.5.1 (peste baseline `2c30a91` v2.5.0).
+
+- `npm test --workspace=backend -- src/db/aiUsageRepository.test.ts src/services/aiUsage.test.ts src/routes/aiUsage.test.ts`
+  - Rezultat: **15/15 teste trecute** post-hardening (clossed-lower-bound + AI_MODELS price-table coverage + 3 error-path service tests + 3 route integration tests).
 - `npm test --workspace=backend`
-  - Rezultat: 432/432 teste trecute.
-- `npm exec tsc --workspace=backend -- --noEmit`
-  - Rezultat: trecut.
-- `npm exec tsc --workspace=frontend -- --noEmit`
-  - Rezultat: trecut.
-- `npm run build`
-  - Rezultat: trecut.
-- Electron smoke desktop
-  - Lansare cu `ELECTRON_RUN_AS_NODE` curatat si profil temporar `C:\tmp\legal-dashboard-smoke-pr7-*`.
-  - `/health` 200, `monitoring.enabled=true`, `monitoring.running=true`, `inflight=0`.
-  - `GET /api/v1/ai-usage/summary` 200, envelope v1 cu `summary24h`, `summary30d`, `daily[30]`.
-  - `GET /api/v1/alerts?page=1&pageSize=1` 200.
-- `npm rebuild better-sqlite3`
-  - Rulat inainte de Vitest pentru ABI Node.
-- `npm run rebuild:electron`
-  - Rulat dupa testele Node ca sa refaca ABI-ul `better-sqlite3` pentru Electron.
+  - Rezultat: **440/440 teste trecute** (+8 fata de v2.5.0, conform asteptarii: noul `routes/aiUsage.test.ts` integration + closed-lower-bound case + AI_MODELS price coverage + 3 error-path service tests).
+- `npx tsc --noEmit -p backend/tsconfig.json` - clean.
+- `cd frontend && npx tsc --noEmit` - clean.
+- `npx biome check` pe fisierele atinse - clean.
+- `npm rebuild better-sqlite3` (Node ABI) → `npm test` → `npm run rebuild:electron` (Electron ABI) - sequence completata cu succes.
+- TODO smoke desktop post-commit pentru a confirma in runtime `withMaintenanceRead` pe `/summary`, `markShuttingDown` pe graceful shutdown si `purgeOldAiUsage(90)` in scheduler-ul zilnic.
 
 ## Reguli active pentru urmatorul agent
 
@@ -110,12 +102,23 @@ Comportament:
 
 ## Probleme/riscuri ramase
 
-- PR-7 nu este inca push-uit pe GitHub.
+- PR-7 (v2.5.0) si patch-ul de hardening v2.5.1 sunt commit-uite local; push-ul pe `origin/main` se executa in aceeasi sesiune. Tag-urile `v2.5.0` si `v2.5.1` nu sunt inca create pe GitHub.
+- **Hardening post-multi-review (working tree, peste `2c30a91`)** — adresseaza findings primite pe PR-7 si ataca off-by-one + race conditions + cancellation gaps + shutdown safety:
+  - `backend/src/db/aiUsageRepository.ts` — toate query-urile pe fereastra de timp folosesc acum `ts >= ?` (closed lower bound, fix off-by-one pentru randuri care aterizeaza exact la `since`); `nonNegativeInteger` redenumit `clampToNonNegativeInteger` cu predicate `< 0` (acum accepta corect zero); helper exportat `utcDayStart(now, daysBack)`; `listAiUsageLastDays` calculeaza `since` aliniat la UTC-midnight si returneaza `{ rows, since, until }` (BREAKING signature); functie noua `purgeOldAiUsage(retentionDays)` pentru retention.
+  - `backend/src/routes/aiUsage.ts` — `summary30d` aliniat la aceeasi fereastra UTC-midnight−29d ca seria daily (era `now − 30×24h`, mismatched); handler-ul wrapped in `withMaintenanceRead` ca sa coopereze cu daily backup writer.
+  - `backend/src/services/aiUsage.ts` — `httpStatus` clamped la [100,599] sau null; `console.warn` one-shot (JSON) pe price-table miss cu dedup pe provider+model; insert-failure log structurat single-line JSON (`action: "ai_usage.persist_failed"`); insert SQLite deferred via `queueMicrotask` ca sa iasa de pe response hot path; comentariu cross-reference intre CHECK provider din migration `0010_ai_usage` si price map.
+  - `backend/src/services/ai.ts` — best-effort token extraction din SDK error objects (input_tokens/output_tokens/promptTokenCount/candidatesTokenCount); `signal?: AbortSignal` adaugat pe `callAnthropic`/`callOpenAI`/`callGoogle`/`callModel`, compus cu timeout intern via `AbortSignal.any` pentru cancellation propagation.
+  - `backend/src/routes/ai.ts` multi-agent — `analystsAbort` AbortController shared, asa incat un analist esuat anuleaza sibling-ul in loc sa-l lase pana la 180s timeout.
+  - `backend/src/db/schema.ts` — export nou `markShuttingDown()` care inchide DB si seteaza un latch one-way `shuttingDown`; `getDb()` arunca daca este apelat post-shutdown — previne late `recordAiUsageSafely` microtasks de a redeschide DB-ul.
+  - `backend/src/index.ts` — `gracefulShutdown` foloseste acum `markShuttingDown()` in loc de `closeDb()` dupa drain.
+  - `backend/src/services/monitoring/scheduler.ts` — `purgeOldAiUsage(90)` cuplat in acelasi timer zilnic ca `purgeOldRuns`, cu try/catch independent.
+  - `frontend/src/components/AIUsagePanel.tsx` — fix timezone bug (`new Date(\`${value}T00:00:00Z\`)` + `timeZone: "UTC"`); `inflightRef` AbortController ca refresh re-fire sa anuleze request-ul anterior; caption "Informativ" — quota este informativa pe desktop.
+  - Teste: fisier nou `backend/src/routes/aiUsage.test.ts` (route-level integration: envelope shape, owner isolation, daily-sum=summary30d invariant); `aiUsageRepository.test.ts` extins cu closed-lower-bound case si noul return shape; `services/aiUsage.test.ts` extins cu AI_MODELS price-table coverage (fiecare modelId are pret nenul).
 - Nu exista inca GitHub release/tag `v2.4.1`, `v2.4.2` sau `v2.5.0`.
 - Lansarea pe profilul normal a returnat `process_singleton_win.cc:457 Lock file can not be created! Error code: 5`
   desi nu ramasese proces Electron vizibil. Smoke-ul PR-7 a fost rulat pe profil temporar curat in `C:\tmp`.
-- Cost modelul AI foloseste valori configurate in cod pentru modelele curente din aplicatie; daca providerii schimba preturile, trebuie actualizat manual.
-- Pe desktop quota este informativa/bypass. Enforce real ramane pentru web PR-9+.
+- Cost modelul AI foloseste valori configurate in cod pentru modelele curente din aplicatie; daca providerii schimba preturile, trebuie actualizat manual. Hardening-ul a adaugat warn one-shot la price-table miss, dar valorile raman manuale.
+- Pe desktop quota este informativa/bypass (acum si etichetat explicit "Informativ" in UI). Enforce real ramane pentru web PR-9+.
 - Pentru PR-9 web/server mode trebuie auth real inainte de expunere remote.
 - `xlsx@0.18.5` ramane risc acceptat temporar, documentat si mitigat prin limite stricte.
 

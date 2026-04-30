@@ -18,6 +18,64 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.5.1",
+    date: "30 Aprilie 2026",
+    subtitle: "Hotfix PR-7 - hardening post multi-review",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Aliniere fereastra de timp + retention",
+        content:
+          "Fix corectitudine pe seria daily si totalurile 30 zile, plus retention automat pentru ai_usage.",
+        bullets: [
+          "Toate query-urile pe fereastra de timp folosesc acum ts >= ? (closed lower bound) - fix off-by-one pentru randuri care aterizeaza exact la since.",
+          "summary30d aliniat la aceeasi fereastra UTC-midnight ca seria daily (era now − 30×24h, mismatched cu bucket-urile zilnice).",
+          "Handler /api/v1/ai-usage/summary wrapped in withMaintenanceRead pentru cooperare cu daily backup writer.",
+          "Functie noua purgeOldAiUsage(90) in scheduler-ul zilnic alaturi de purgeOldRuns, cu try/catch independent.",
+        ],
+      },
+      {
+        title: "Cancellation + shutdown safety",
+        content:
+          "Multi-agent flow nu mai lasa siblings idle si DB-ul nu mai poate fi redeschis post-shutdown.",
+        bullets: [
+          "Multi-agent: analystsAbort AbortController shared - un analist esuat anuleaza sibling-ul, evita 180s timeout idle.",
+          "signal? AbortSignal propagat in callAnthropic, callOpenAI, callGoogle si callModel; compus cu timeout intern via AbortSignal.any.",
+          "markShuttingDown() latch one-way: getDb() arunca daca este apelat post-shutdown - previne late recordAiUsageSafely microtasks de a redeschide DB-ul.",
+          "Token extraction din SDK error objects: usageInput/usageOutput sunt acum populate din e.usage cand SDK-ul arunca dar a contorizat partial.",
+        ],
+      },
+      {
+        title: "Safety + observability",
+        content:
+          "Logging structurat + clamps defensive ca log-ul sa ramana curat la valori out-of-range.",
+        bullets: [
+          "httpStatus clamped la [100,599] sau null cand SDK-ul intoarce o valoare in afara intervalului HTTP standard.",
+          "Price-table miss warn one-shot (JSON structurat) cu dedup pe provider+model - fara spam in log la modelele noi fara pret.",
+          "Insert-failure log structurat single-line JSON (action: ai_usage.persist_failed).",
+          "Insert SQLite deferred via queueMicrotask ca sa iasa de pe response hot path al call-ului SDK.",
+        ],
+      },
+      {
+        title: "Frontend - timezone + cancellation + transparenta",
+        content:
+          "Etichetele zilei coincid acum cu bucket-urile UTC din backend si refresh-ul anuleaza request-ul anterior.",
+        bullets: [
+          "Fix timezone bug pe seria daily: new Date(`${value}T00:00:00Z`) + timeZone: UTC in formatDateLabel.",
+          "inflightRef AbortController in AIUsagePanel - refresh re-fire anuleaza request-ul anterior in loc sa lase doua request-uri in zbor.",
+          "Caption Informativ etichetat explicit in panel: pe desktop nu exista quota enforce, costurile efective sunt facturate de provider.",
+        ],
+      },
+      {
+        title: "Validare",
+        content:
+          "440/440 teste backend (de la 432, +8 din hardening pass). Type-check backend si frontend clean. Biome lint/format clean. Sequence npm rebuild better-sqlite3 → npm test → npm run rebuild:electron completata.",
+      },
+    ],
+  },
+  {
     version: "v2.5.0",
     date: "30 Aprilie 2026",
     subtitle: "PR-7 - AI usage tracking + quota visibility",

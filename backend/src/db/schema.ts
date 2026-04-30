@@ -28,6 +28,12 @@ function preMigrationBackup(src: string, label: string): void {
 }
 
 let db: Database.Database | null = null;
+// Once closeDb() runs (graceful shutdown drain), reject any late getDb()
+// callers — without this, a deferred ai_usage write on the microtask queue
+// would silently re-open the DB after the WAL was checkpointed and the
+// process is moments from exit, leaving an unflushed handle. Pattern mirrors
+// the scheduler.running guard inside `tickOnce` after withMaintenanceRead.
+let shuttingDown = false;
 
 export function getDbPath(): string {
   return process.env.LEGAL_DASHBOARD_DB_PATH
@@ -35,6 +41,9 @@ export function getDbPath(): string {
 }
 
 export function getDb(): Database.Database {
+  if (shuttingDown) {
+    throw new Error("DB closed; refusing to reopen during shutdown");
+  }
   if (db) return db;
 
   const dbPath = getDbPath();
@@ -335,6 +344,15 @@ function initSchema(d: Database.Database): void {
 }
 
 export function closeDb(): void {
+  if (db) { db.close(); db = null; }
+}
+
+// Production shutdown sets this AFTER awaiting in-flight drains so any late
+// `recordAiUsageSafely` microtask (or other deferred write) cannot reopen
+// the DB on its way out. Tests use closeDb() between cases without this
+// latch — they only need the handle reset, not the one-way shutdown lock.
+export function markShuttingDown(): void {
+  shuttingDown = true;
   if (db) { db.close(); db = null; }
 }
 

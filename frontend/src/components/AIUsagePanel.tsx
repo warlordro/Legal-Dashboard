@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, BarChart3, Bot, Clock3, RefreshCw, Zap } from "lucide-react";
 import {
   Area,
@@ -31,10 +31,18 @@ function formatUsd(value: number): string {
   return usdFormatter.format(value);
 }
 
+// Backend buckets days at UTC midnight (`substr(ts, 1, 10)`), so the label
+// must read the date as UTC. Parsing `YYYY-MM-DDT00:00:00` without a `Z`
+// would treat it as local time and shift the label by one day west of UTC
+// for users east of UTC (or vice versa).
 function formatDateLabel(value: string): string {
-  const d = new Date(`${value}T00:00:00`);
+  const d = new Date(`${value}T00:00:00Z`);
   if (Number.isNaN(d.getTime())) return value;
-  return d.toLocaleDateString("ro-RO", { day: "2-digit", month: "short" });
+  return d.toLocaleDateString("ro-RO", {
+    day: "2-digit",
+    month: "short",
+    timeZone: "UTC",
+  });
 }
 
 function totalTokens(point: Pick<AiUsageDailyPoint, "inputTokens" | "outputTokens">): number {
@@ -79,27 +87,40 @@ export function AIUsagePanel() {
   const [state, setState] = useState<LoadState>("loading");
   const [data, setData] = useState<AiUsageSummaryResult | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // The active fetch's controller. Refresh and unmount both abort it so an
+  // in-flight summary cannot land after a newer request started or after the
+  // panel went away (which would otherwise call setState on an unmounted tree).
+  const inflightRef = useRef<AbortController | null>(null);
 
-  const load = useCallback(async (signal?: AbortSignal) => {
+  const load = useCallback(async () => {
+    inflightRef.current?.abort();
+    const controller = new AbortController();
+    inflightRef.current = controller;
     setState("loading");
     setError(null);
     try {
-      const result = await aiUsageApi.summary(signal);
-      if (signal?.aborted) return;
+      const result = await aiUsageApi.summary(controller.signal);
+      if (controller.signal.aborted) return;
       setData(result);
       setState("ready");
     } catch (err) {
-      if (signal?.aborted) return;
+      if (controller.signal.aborted) return;
       setData(null);
       setError(err instanceof Error ? err.message : "Eroare la incarcarea usage-ului AI.");
       setState("error");
+    } finally {
+      if (inflightRef.current === controller) {
+        inflightRef.current = null;
+      }
     }
   }, []);
 
   useEffect(() => {
-    const controller = new AbortController();
-    load(controller.signal);
-    return () => controller.abort();
+    load();
+    return () => {
+      inflightRef.current?.abort();
+      inflightRef.current = null;
+    };
   }, [load]);
 
   const chartData = useMemo(() => {
@@ -122,6 +143,9 @@ export function AIUsagePanel() {
           </h4>
           <p className="mt-0.5 text-[11px] text-muted-foreground">
             Costuri si volum pentru apelurile AI inregistrate pe userul curent.
+          </p>
+          <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">
+            Informativ. Pe desktop nu exista quota enforce — costurile efective sunt facturate de provider.
           </p>
         </div>
         <Button

@@ -221,6 +221,22 @@ export async function withAiLogging<T>(
     // SDK errors (Anthropic / OpenAI APIError) expose `.status` with the HTTP
     // status code. Capture it so dashboards can split 4xx/5xx vs network/abort.
     const httpStatus = (e as { status?: unknown })?.status;
+    // SDKs occasionally surface partial-usage on a failure (e.g. an OpenAI
+    // request that streamed N input tokens before the upstream cut the
+    // connection, or an Anthropic 429 with an attached usage block). Forward
+    // it best-effort so a partially-consumed call still shows up on the cost
+    // card; safeTokenCount in recordAiUsageSafely defends against junk shapes.
+    const errUsage = (e as { usage?: { input_tokens?: unknown; output_tokens?: unknown; promptTokenCount?: unknown; candidatesTokenCount?: unknown } })?.usage;
+    const usageInput = typeof errUsage?.input_tokens === "number"
+      ? errUsage.input_tokens
+      : typeof errUsage?.promptTokenCount === "number"
+        ? errUsage.promptTokenCount
+        : undefined;
+    const usageOutput = typeof errUsage?.output_tokens === "number"
+      ? errUsage.output_tokens
+      : typeof errUsage?.candidatesTokenCount === "number"
+        ? errUsage.candidatesTokenCount
+        : undefined;
     logAiCall({
       provider,
       model,
@@ -228,16 +244,33 @@ export async function withAiLogging<T>(
       status: "error",
       errorType,
       httpStatus: typeof httpStatus === "number" ? httpStatus : undefined,
+      usageInput,
+      usageOutput,
     });
     recordAiUsageSafely({
       tracking,
       provider,
       model,
-      meta: { httpStatus: typeof httpStatus === "number" ? httpStatus : undefined },
+      meta: {
+        httpStatus: typeof httpStatus === "number" ? httpStatus : undefined,
+        usageInput,
+        usageOutput,
+      },
       wasAborted: isTimeoutOrAbort(e),
     });
     throw e;
   }
+}
+
+// Compose the per-call timeout signal with an optional caller-supplied parent
+// (e.g. multi-agent flow's shared controller, so a failing analyst cancels its
+// sibling instead of letting it run for the full multi-timeout). Falls back to
+// the timeout-only signal when no parent is supplied. Requires Node 20+ for
+// AbortSignal.any — backend runtime is Node 22+ (see CLAUDE.md).
+function composeSignal(timeout: number, parent?: AbortSignal): AbortSignal {
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  if (!parent) return timeoutSignal;
+  return AbortSignal.any([timeoutSignal, parent]);
 }
 
 async function callAnthropic(
@@ -246,6 +279,7 @@ async function callAnthropic(
   prompt: string,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
+  signal?: AbortSignal,
 ): Promise<string> {
   return withAiLogging("anthropic", modelId, async () => {
     const client = new Anthropic({ apiKey });
@@ -253,7 +287,7 @@ async function callAnthropic(
       model: modelId,
       max_tokens: AI_MAX_TOKENS,
       messages: [{ role: "user", content: prompt }],
-    }, { signal: AbortSignal.timeout(timeout) });
+    }, { signal: composeSignal(timeout, signal) });
     const value = message.content
       .flatMap((block) => (block.type === "text" ? [block.text] : []))
       .join("");
@@ -273,6 +307,7 @@ async function callOpenAI(
   prompt: string,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
+  signal?: AbortSignal,
 ): Promise<string> {
   return withAiLogging("openai", modelId, async () => {
     const { default: OpenAI } = await import("openai");
@@ -281,7 +316,7 @@ async function callOpenAI(
       model: modelId,
       input: prompt,
       max_output_tokens: AI_MAX_TOKENS,
-    }, { signal: AbortSignal.timeout(timeout) });
+    }, { signal: composeSignal(timeout, signal) });
     const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
     return {
       value: response.output_text || "",
@@ -299,26 +334,25 @@ async function callGoogle(
   prompt: string,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
+  signal?: AbortSignal,
 ): Promise<string> {
   return withAiLogging("google", modelId, async () => {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");
     const genAI = new GoogleGenerativeAI(apiKey);
     const model = genAI.getGenerativeModel({ model: modelId, generationConfig: { maxOutputTokens: AI_MAX_TOKENS } });
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeout);
-    try {
-      const result = await model.generateContent({ contents: [{ role: "user", parts: [{ text: prompt }] }] }, { signal: controller.signal as AbortSignal });
-      const usage = (result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
-      return {
-        value: result.response.text(),
-        meta: {
-          usageInput: usage?.promptTokenCount,
-          usageOutput: usage?.candidatesTokenCount,
-        },
-      };
-    } finally {
-      clearTimeout(timer);
-    }
+    const composed = composeSignal(timeout, signal);
+    const result = await model.generateContent(
+      { contents: [{ role: "user", parts: [{ text: prompt }] }] },
+      { signal: composed as AbortSignal },
+    );
+    const usage = (result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
+    return {
+      value: result.response.text(),
+      meta: {
+        usageInput: usage?.promptTokenCount,
+        usageOutput: usage?.candidatesTokenCount,
+      },
+    };
   }, tracking);
 }
 
@@ -369,13 +403,14 @@ export async function callModel(
   apiKeys: Record<string, string>,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
+  signal?: AbortSignal,
 ): Promise<string> {
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");
   const apiKey = getApiKey(model.provider, apiKeys);
   if (!apiKey) throw new Error(`NO_API_KEY:${model.provider}`);
-  if (model.provider === "anthropic") return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking);
-  if (model.provider === "openai") return callOpenAI(apiKey, model.modelId, prompt, timeout, tracking);
-  if (model.provider === "google") return callGoogle(apiKey, model.modelId, prompt, timeout, tracking);
+  if (model.provider === "anthropic") return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking, signal);
+  if (model.provider === "openai") return callOpenAI(apiKey, model.modelId, prompt, timeout, tracking, signal);
+  if (model.provider === "google") return callGoogle(apiKey, model.modelId, prompt, timeout, tracking, signal);
   throw new Error("Provider necunoscut");
 }

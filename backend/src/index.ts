@@ -24,7 +24,7 @@ import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts"
 import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
-import { closeDb } from "./db/schema.ts";
+import { markShuttingDown } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { fileURLToPath } from "url";
@@ -297,8 +297,12 @@ async function gracefulShutdown(reason: string): Promise<void> {
 
   await Promise.race([Promise.all([closePromise, schedulerStop]), drainTimeout]);
 
-  try { closeDb(); } catch (e) {
-    console.error("[shutdown] closeDb failed:", e);
+  // markShuttingDown() closes the DB AND latches the open-guard so any
+  // microtask-deferred ai_usage write that lost the race against drain
+  // throws instead of silently reopening a fresh handle on its way out.
+  // Plain closeDb() is fine for tests; production drain wants the latch.
+  try { markShuttingDown(); } catch (e) {
+    console.error("[shutdown] markShuttingDown failed:", e);
   }
 }
 process.on("SIGTERM", () => {

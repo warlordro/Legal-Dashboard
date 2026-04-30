@@ -120,15 +120,37 @@ describe("AI usage queries", () => {
   });
 
   it("groups last-days usage without leaking another owner", () => {
-    const rows = listAiUsageLastDays({
+    const result = listAiUsageLastDays({
       ownerId: "alice",
       days: 30,
       now: new Date("2026-04-30T12:00:00.000Z"),
     });
 
-    expect(rows.map((row) => [row.day, row.calls, row.costUsdMilli])).toEqual([
+    expect(result.rows.map((row) => [row.day, row.calls, row.costUsdMilli])).toEqual([
       ["2026-04-29", 1, 1],
       ["2026-04-30", 1, 3],
     ]);
+    expect(result.since).toBe("2026-04-01T00:00:00.000Z");
+    expect(result.until).toBe("2026-04-30T12:00:00.000Z");
+  });
+
+  it("includes rows whose ts equals the window start (closed lower bound)", () => {
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      feature: "dosar_summary",
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsdMilli: 1,
+      ts: "2026-04-30T00:00:00.000Z",
+    });
+
+    const totals = getAiUsageTotals({
+      ownerId: "alice",
+      since: "2026-04-30T00:00:00.000Z",
+    });
+
+    expect(totals.calls).toBe(2);
   });
 });

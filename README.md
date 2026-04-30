@@ -7,12 +7,17 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.5.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.5.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.5.0** - PR-7 AI usage tracking: migration `0010_ai_usage`, tracking
-owner-scoped dupa fiecare call SDK AI, cost calculat ca integer
-`cost_usd_milli`, endpoint `/api/v1/ai-usage/summary` si panou "AI Usage" in
-Setari API cu cost ultimele 24h / 30 zile. Baza ramane PR-6: inbox `Alerte`,
+**v2.5.1** - PR-7 hardening post multi-review: closed-lower-bound pe ferestre
+de timp, `summary30d` aliniat la UTC-midnight ca seria daily, `withMaintenanceRead`
+pe `/summary`, `purgeOldAiUsage(90)` in scheduler zilnic, multi-agent
+`analystsAbort` shared, `markShuttingDown()` latch, fix timezone pe seria daily
+UI, `inflightRef` AbortController pe refresh si caption "Informativ" pentru
+quota desktop. Baza ramane v2.5.0 - PR-7 AI usage tracking: migration
+`0010_ai_usage`, tracking owner-scoped dupa fiecare call SDK AI, cost calculat
+ca integer `cost_usd_milli`, endpoint `/api/v1/ai-usage/summary` si panou
+"AI Usage" in Setari API cu cost ultimele 24h / 30 zile. Baza ramane PR-6: inbox `Alerte`,
 badge cu necitite in sidebar, stream live `/api/v1/alerts/stream`, mark
 read/dismiss si notificari native Electron.
 PR-5 ramane baza de bulk name lists / `name_soap`: upload XLSX/CSV direct din

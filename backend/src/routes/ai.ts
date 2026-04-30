@@ -144,23 +144,35 @@ aiRouter.post("/analyze-multi", async (c) => {
     // Stream phase events so the UI can show progress (analysts take 30-60s each,
     // judge 60-120s — without streaming the user sees a blank spinner for up to 4 min).
     return streamSSE(c, async (stream) => {
+      // Shared cancellation for the analyst pair: when one analyst rejects,
+      // Promise.all rethrows immediately and the catch below aborts the
+      // controller, cancelling the sibling's in-flight HTTP request instead
+      // of letting it run to its full AI_MULTI_TIMEOUT (180s) and burn tokens.
+      const analystsAbort = new AbortController();
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
         const p1 = callModel(analysts[0], prompt, keys, AI_MULTI_TIMEOUT, {
           ...trackingBase,
           feature: "dosar_multi_analyst",
-        }).then(async (text) => {
+        }, analystsAbort.signal).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 1 }) });
           return text;
         });
         const p2 = callModel(analysts[1], prompt, keys, AI_MULTI_TIMEOUT, {
           ...trackingBase,
           feature: "dosar_multi_analyst",
-        }).then(async (text) => {
+        }, analystsAbort.signal).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
         });
-        const [analysisA, analysisB] = await Promise.all([p1, p2]);
+        let analysisA: string;
+        let analysisB: string;
+        try {
+          [analysisA, analysisB] = await Promise.all([p1, p2]);
+        } catch (err) {
+          analystsAbort.abort();
+          throw err;
+        }
 
         // Phase 3: judge reconciliation.
         await stream.writeSSE({ event: "judge_started", data: "{}" });

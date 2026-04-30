@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getDb, closeDb } from "../db/schema.ts";
 import { estimateAiCostUsdMilli } from "./aiUsage.ts";
-import { withAiLogging } from "./ai.ts";
+import { withAiLogging, AI_MODELS } from "./ai.ts";
 
 let tmpRoot: string;
 let dbPath: string;
@@ -56,6 +56,25 @@ describe("estimateAiCostUsdMilli", () => {
   });
 });
 
+describe("AI_MODELS price table coverage", () => {
+  // Every modelId registered in AI_MODELS must have a matching entry in the
+  // price table — otherwise a successful AI call lands a row with cost=0,
+  // which the user-facing summary card hides under the empty-state branch.
+  // This test fails loudly the moment a new model is added without its
+  // pricing.
+  it("has a non-zero price entry for every registered AI_MODELS modelId", () => {
+    for (const [, model] of Object.entries(AI_MODELS)) {
+      const cost = estimateAiCostUsdMilli({
+        provider: model.provider as "anthropic" | "openai" | "google",
+        model: model.modelId,
+        inputTokens: 1_000_000,
+        outputTokens: 0,
+      });
+      expect(cost, `missing price entry for ${model.provider}/${model.modelId}`).toBeGreaterThan(0);
+    }
+  });
+});
+
 describe("AI service usage tracking", () => {
   it("writes usage only after the AI call resolves", async () => {
     let rowsBeforeResolve = -1;
@@ -102,5 +121,80 @@ describe("AI service usage tracking", () => {
     expect(row.cost_usd_milli).toBe(2_250);
     expect(row.request_id).toBe("req-write-after-call");
     expect(row.feature).toBe("dosar_summary");
+  });
+
+  it("writes a row on the failure path with the SDK status code and aborted flag", async () => {
+    const sdkError = Object.assign(new Error("rate limited"), {
+      name: "APIError",
+      status: 429,
+      usage: { input_tokens: 7, output_tokens: 0 },
+    });
+
+    await expect(
+      withAiLogging(
+        "anthropic",
+        "claude-sonnet-4-6",
+        async () => {
+          throw sdkError;
+        },
+        { ownerId: "alice", feature: "dosar_summary", requestId: "req-error" },
+      ),
+    ).rejects.toBe(sdkError);
+
+    // Microtask defer in recordAiUsageSafely lands the row after the rejection
+    // returns. One queueMicrotask flush is enough — no event-loop yield needed.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = getDb()
+      .prepare(`SELECT * FROM ai_usage`)
+      .get() as {
+        owner_id: string;
+        http_status: number | null;
+        was_aborted: number;
+        input_tokens: number;
+        request_id: string;
+      };
+    expect(row.owner_id).toBe("alice");
+    expect(row.http_status).toBe(429);
+    expect(row.was_aborted).toBe(0);
+    expect(row.input_tokens).toBe(7);
+    expect(row.request_id).toBe("req-error");
+  });
+
+  it("clamps an out-of-range http_status to null", async () => {
+    const sdkError = Object.assign(new Error("upstream weirdness"), { status: 999 });
+    await expect(
+      withAiLogging(
+        "openai",
+        "gpt-5.4-mini",
+        async () => {
+          throw sdkError;
+        },
+        { ownerId: "alice", feature: "dosar_summary" },
+      ),
+    ).rejects.toBe(sdkError);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = getDb()
+      .prepare(`SELECT http_status FROM ai_usage`)
+      .get() as { http_status: number | null };
+    expect(row.http_status).toBeNull();
+  });
+
+  it("does not write a row when tracking context is omitted", async () => {
+    const value = await withAiLogging(
+      "openai",
+      "gpt-5.4-mini",
+      async () => ({ value: "x", meta: { usageInput: 5, usageOutput: 0, httpStatus: 200 } }),
+      // tracking deliberately undefined
+    );
+    expect(value).toBe("x");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM ai_usage`).get() as { n: number }).n;
+    expect(count).toBe(0);
   });
 });

@@ -4,6 +4,87 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 30 Aprilie 2026 - v2.5.1 - PR-7 hardening (post multi-review)
+
+Patch peste v2.5.0 dupa multi-agent review pe suprafata AI usage tracking.
+Fara feature noi - doar fixuri de corectitudine, izolare si robustete operationala
+identificate de cei 5 agenti de review.
+
+### Backend - aliniere fereastra de timp + retention
+
+- **`aiUsageRepository`**: toate query-urile pe fereastra de timp folosesc `ts >= ?`
+  (closed lower bound) - fix off-by-one pentru randuri care aterizeaza exact la
+  `since`. `nonNegativeInteger` redenumit `clampToNonNegativeInteger` cu predicate
+  `< 0` (acum accepta corect `0`). Helper exportat `utcDayStart(now, daysBack)`.
+  `listAiUsageLastDays` calculeaza `since` aliniat la UTC-midnight si returneaza
+  `{ rows, since, until }`.
+- **`purgeOldAiUsage(retentionDays)`**: functie noua, cuplata in scheduler-ul
+  zilnic alaturi de `purgeOldRuns` cu try/catch independent. Retention 90 zile.
+- **`routes/aiUsage.ts`**: `summary30d` aliniat la aceeasi fereastra UTC-midnight
+  ca seria daily (era `now − 30×24h`, mismatched). Handler-ul wrapped in
+  `withMaintenanceRead` ca sa coopereze cu daily backup writer.
+
+### Backend - cancellation + shutdown safety
+
+- **Multi-agent abort propagation**: `analystsAbort` AbortController shared, asa
+  incat un analist esuat anuleaza sibling-ul in loc sa-l lase pana la 180s
+  timeout. `signal?: AbortSignal` adaugat pe `callAnthropic`/`callOpenAI`/
+  `callGoogle`/`callModel`, compus cu timeout intern via `AbortSignal.any`.
+- **Shutdown latch**: export nou `markShuttingDown()` in `db/schema.ts` care
+  inchide DB si seteaza un latch one-way. `getDb()` arunca daca este apelat
+  post-shutdown - previne late `recordAiUsageSafely` microtasks de a redeschide
+  DB-ul. `gracefulShutdown` foloseste `markShuttingDown()` in loc de `closeDb()`
+  dupa drain.
+- **Token extraction din SDK errors**: `withAiLogging` extrage acum
+  `input_tokens`/`promptTokenCount` ca `usageInput` si
+  `output_tokens`/`candidatesTokenCount` ca `usageOutput` din `e.usage` cand SDK-ul
+  arunca dar a contorizat deja partial.
+
+### Backend - safety & observability
+
+- **`httpStatus` clamped** la `[100,599]` sau `null` cand SDK-ul intoarce o
+  valoare in afara intervalului HTTP standard.
+- **Price-table miss warn one-shot** (JSON structurat) cu dedup pe
+  `provider+model` ca sa nu spam-uiasca log-ul cand un model nou e adaugat in
+  `AI_MODELS` fara pret.
+- **Insert-failure log structurat** single-line JSON
+  (`action: "ai_usage.persist_failed"`).
+- **Insert SQLite deferred via `queueMicrotask`** ca sa iasa de pe response hot
+  path al call-ului SDK.
+- **Comentariu cross-reference** intre `CHECK (provider IN (...))` din migration
+  `0010_ai_usage` si price map din `services/aiUsage.ts`.
+
+### Frontend - timezone + cancellation
+
+- **Fix timezone bug pe seria daily**: `new Date(\`${value}T00:00:00Z\`)` +
+  `timeZone: "UTC"` in `formatDateLabel` ca etichetele sa coincida cu bucket-urile
+  UTC din backend.
+- **`inflightRef` AbortController** in `AIUsagePanel.tsx` - refresh re-fire
+  anuleaza request-ul anterior in loc sa lase doua request-uri in zbor.
+- **Caption "Informativ"** etichetat explicit in panel: pe desktop nu exista
+  quota enforce, costurile efective sunt facturate de provider.
+
+### Teste
+
+- **Fisier nou** `backend/src/routes/aiUsage.test.ts` (route-level integration):
+  envelope shape, owner isolation, daily-sum=summary30d invariant.
+- **`aiUsageRepository.test.ts`** extins cu closed-lower-bound case si noul
+  return shape `{ rows, since, until }`.
+- **`services/aiUsage.test.ts`** extins cu AI_MODELS price-table coverage
+  (fiecare modelId are pret nenul), error-path tests (429 cu usage), clamps pe
+  `http_status` out-of-range si "no row when tracking omitted".
+
+### Validare
+
+- Backend full suite: `npm test --workspace=backend` - **440/440 teste trecute**
+  (de la 432 in v2.5.0, +8 din hardening pass).
+- Type-check backend si frontend: clean.
+- Biome lint/format check pe fisierele modificate: clean.
+- `npm rebuild better-sqlite3` (Node ABI) → `npm test` → `npm run rebuild:electron`
+  (Electron ABI) - sequence completata cu succes.
+
+---
+
 ## 30 Aprilie 2026 - v2.5.0 - PR-7 AI usage tracking + quota visibility
 
 PR-7 inchide Faza 1: fiecare apel AI real lasa audit operational persistat,

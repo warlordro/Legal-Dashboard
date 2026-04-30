@@ -4,7 +4,7 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web â€” fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.5.0** - 30 Aprilie 2026 (PR-7 AI usage tracking + quota visibility)
+**v2.5.1** - 30 Aprilie 2026 (PR-7 hardening post multi-review)
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
@@ -19,6 +19,7 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 - ✅ **PR-6 v2.4.1** - inbox alerte (`/api/v1/alerts` + pagina React + sidebar badge), SSE stream live, IPC notificari native Electron
 - ✅ **patch v2.4.2** - PR-6 hotfix post full-review: SSE heartbeat 25s + `retry: 3000`, fix timezone in filtre data, audit pe `seen`/`dismissed`, `bodyLimit`, cap 5 stream-uri/owner, `seen-bulk` route + bulk repo helper, `insertAlert` tranzactional + `notifyNewAlert` deferred microtask, focus suppress pe notificari desktop, dedup native pe `tag`
 - ✅ **PR-7 v2.5.0** - AI usage tracking: migration `0010_ai_usage`, `aiUsageRepository`, cost model integer `cost_usd_milli`, post-call tracking pentru single + multi-agent, endpoint `/api/v1/ai-usage/summary`, panou AI Usage in Setari API
+- ✅ **patch v2.5.1** - PR-7 hardening post multi-review: closed-lower-bound pe ferestre de timp, `summary30d` aliniat la UTC-midnight ca seria daily, `withMaintenanceRead` pe `/summary`, `purgeOldAiUsage(90)` in scheduler zilnic, `markShuttingDown()` latch ca microtask-urile post-shutdown sa nu redeschida DB-ul, multi-agent `analystsAbort` shared, `httpStatus` clamped `[100,599]`, price-table miss warn one-shot, insert SQLite deferred via `queueMicrotask`, fix timezone pe seria daily UI, `inflightRef` AbortController pe refresh, caption "Informativ" pentru quota desktop
 
 Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](SESSION-HANDOFF.md).
 
@@ -67,7 +68,7 @@ legal-dashboard/
 - `npm run dev:frontend` â€” Vite dev server pe 5173
 - `npm run build` â€” build productie (frontend + backend CJS)
 - `npm run dist` â€” electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` â€” vitest backend (432 teste in v2.5.0)
+- `npm test --workspace=backend` â€” vitest backend (440 teste in v2.5.1, +8 fata de v2.5.0)
 - `npx tsc --noEmit -p backend/tsconfig.json` â€” type-check backend
 - `cd frontend && npx tsc --noEmit` â€” type-check frontend
 - `npx biome check` â€” lint + format check

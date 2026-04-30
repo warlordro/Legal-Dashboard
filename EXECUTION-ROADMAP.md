@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-7 v2.5.0 implementate local (2026-04-30). Urmatorul PR planificat: PR-8 Admin pages + roles guard.
-> **Versiune document**: 1.5 (2026-04-30)
+> **Status**: PR-0..PR-7 v2.5.0 implementate local + patch v2.5.1 (hardening post multi-review) (2026-04-30). Urmatorul PR planificat: PR-8 Admin pages + roles guard.
+> **Versiune document**: 1.6 (2026-04-30)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
