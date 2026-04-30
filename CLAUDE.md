@@ -4,7 +4,7 @@
 Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web â€” fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
-**v2.4.2** - 30 Aprilie 2026 (hotfix peste v2.4.1 PR-6 alerte)
+**v2.5.0** - 30 Aprilie 2026 (PR-7 AI usage tracking + quota visibility)
 
 Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 
@@ -18,6 +18,7 @@ Vezi `CHANGELOG.md` pentru istoric complet si `SECURITY.md` pentru threat model.
 - ✅ **PR-5 v2.4.0** - bulk import Monitorizare cu `numar_dosar` sau `nume`, template XLSX cu dropdown cadenta, preview/commit name lists, auto-create jobs `name_soap`, runner SOAP pentru subiecti si fixuri post-review pentru race-uri `name_lists`/archive
 - ✅ **PR-6 v2.4.1** - inbox alerte (`/api/v1/alerts` + pagina React + sidebar badge), SSE stream live, IPC notificari native Electron
 - ✅ **patch v2.4.2** - PR-6 hotfix post full-review: SSE heartbeat 25s + `retry: 3000`, fix timezone in filtre data, audit pe `seen`/`dismissed`, `bodyLimit`, cap 5 stream-uri/owner, `seen-bulk` route + bulk repo helper, `insertAlert` tranzactional + `notifyNewAlert` deferred microtask, focus suppress pe notificari desktop, dedup native pe `tag`
+- ✅ **PR-7 v2.5.0** - AI usage tracking: migration `0010_ai_usage`, `aiUsageRepository`, cost model integer `cost_usd_milli`, post-call tracking pentru single + multi-agent, endpoint `/api/v1/ai-usage/summary`, panou AI Usage in Setari API
 
 Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](SESSION-HANDOFF.md).
 
@@ -38,14 +39,14 @@ legal-dashboard/
 â”‚   â”œâ”€â”€ tsconfig.json  # strict: true, noEmit (type-check only)
 â”‚   â””â”€â”€ src/
 â”‚       â”œâ”€â”€ index.ts   # Bootstrap: CSP, CORS, mount routers, prewarm, backup, shutdown
-â”‚       â”œâ”€â”€ routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts, monitoring.ts
+â”‚       â”œâ”€â”€ routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts, aiUsage.ts, monitoring.ts
 â”‚       â”œâ”€â”€ services/  # rnpmSearchService, captchaSolver, rnpmClient,
-â”‚       â”‚              # ai.ts (Claude/OpenAI/Gemini), batch-dosare.ts, monitoring/*
+â”‚       â”‚              # ai.ts (Claude/OpenAI/Gemini), aiUsage.ts, batch-dosare.ts, monitoring/*
 â”‚       â”œâ”€â”€ middleware/# rate-limit.ts (real-IP), static-frontend.ts (path-traversal guard),
 â”‚       â”‚              # owner.ts (getOwnerId helper, PR-1)
 â”‚       â”œâ”€â”€ db/        # schema.ts, avizRepository.ts, searchRepository.ts,
 â”‚       â”‚              # backup.ts (owner_id everywhere), auditRepository.ts (recordAudit, PR-2),
-â”‚       â”‚              # migrations/ (versioned DDL: 0001 baseline, 0002 users/sessions/audit, 0003 monitoring, 0004 runs FK, 0005 idx_one_running_per_job)
+â”‚       â”‚              # aiUsageRepository.ts, migrations/ (0001..0010, latest ai_usage)
 â”‚       â”œâ”€â”€ util/      # textNormalize (SQLite rnpm_norm diacritic fold), validation.ts
 â”‚       â”œâ”€â”€ soap.ts    # SOAP client pentru PortalJust
 â”‚       â””â”€â”€ intervals.ts
@@ -66,7 +67,7 @@ legal-dashboard/
 - `npm run dev:frontend` â€” Vite dev server pe 5173
 - `npm run build` â€” build productie (frontend + backend CJS)
 - `npm run dist` â€” electron-builder pentru Windows NSIS
-- `npm test --workspace=backend` â€” vitest backend (416 teste in v2.4.0)
+- `npm test --workspace=backend` â€” vitest backend (432 teste in v2.5.0)
 - `npx tsc --noEmit -p backend/tsconfig.json` â€” type-check backend
 - `cd frontend && npx tsc --noEmit` â€” type-check frontend
 - `npx biome check` â€” lint + format check
@@ -101,6 +102,7 @@ legal-dashboard/
 - **SOAP cancellation**: `AbortSignal` extern propagat pana in fetch-ul PortalJust, combinat cu timeout intern
 - **Monitoring operational kill switch**: `MONITORING_DISABLED_KINDS` exclude tipurile listate din scheduler claim fara modificari in DB
 - **Monitoring run retention**: `monitoring_runs` este purjat zilnic la 90 zile pentru a limita cresterea istoricului operational
+- **AI usage tracking**: orice call SDK reusit sau pornit si esuat scrie owner-scoped in `ai_usage` dupa call, fara SQLite lock peste I/O extern
 
 ### Riscuri acceptate
 - SOAP HTTP upstream (portalquery.just.ro nu ofera HTTPS) â€” date publice, fara autentificare

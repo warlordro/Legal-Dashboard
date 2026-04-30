@@ -4,6 +4,45 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 30 Aprilie 2026 - v2.5.0 - PR-7 AI usage tracking + quota visibility
+
+PR-7 inchide Faza 1: fiecare apel AI real lasa audit operational persistat,
+iar utilizatorul vede costul estimat in Setari API. Prompturile si flow-ul AI
+au ramas neschimbate.
+
+### Backend (`ai_usage`)
+
+- **Migration `0010_ai_usage`**: tabel owner-scoped cu `provider`, `model`,
+  `input_tokens`, `output_tokens`, `cost_usd_milli`, `http_status`,
+  `was_aborted`, `request_id` si `feature`.
+- **`aiUsageRepository`**: insert normalizat, totals pe sliding window, breakdown
+  provider/feature si serie zilnica owner-scoped.
+- **Cost model safe**: preturi per provider/model stocate in cod ca integer
+  milli-USD; fallback la `0` cand modelul sau tokenii lipsesc.
+- **Tracking post-call**: `withAiLogging()` persista usage dupa call SDK, fara
+  SQLite lock peste I/O extern. `NO_API_KEY` nu se contorizeaza fiindca nu
+  porneste un call SDK.
+- **Multi-agent**: analiza avansata scrie cate un row per call real (doi
+  analisti + judge cand faza judge este atinsa).
+- **Ruta noua**: `GET /api/v1/ai-usage/summary` returneaza cost 24h, cost 30
+  zile si serie daily last 30 days in envelope v1.
+
+### Frontend
+
+- **Panou `AI Usage` in Setari API** cu loading/error/empty states.
+- **Graf Recharts last 30 days** plus carduri pentru cost ultimele 24h si 30
+  zile, tokeni input/output si cost mediu per apel.
+
+### Validare
+
+- Backend full suite: `npm test --workspace=backend` - 432/432 teste trecute.
+- Type-check backend si frontend - clean.
+- Build productie: `npm run build` - trecut.
+- `better-sqlite3` a fost reconstruit pentru Node inainte de Vitest si readus
+  pe ABI Electron cu `npm run rebuild:electron` dupa teste.
+
+---
+
 ## 30 Aprilie 2026 - v2.4.2 - PR-6 hardening (post-review hotfix)
 
 Hotfix peste v2.4.1 dupa full-review multi-agent pe suprafata alertelor. Fara feature noi - doar fixuri de corectitudine, izolare si robustete operationala.

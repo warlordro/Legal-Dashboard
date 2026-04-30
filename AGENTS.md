@@ -14,6 +14,13 @@ Keep it lightweight. Choose only the roles needed, explain the active roles
 briefly when useful, then execute normally. Do not add ceremony to simple
 one-step tasks.
 
+## Project State Source
+
+Read `CLAUDE.md` before starting a new development PR. It carries the fuller
+current sprint context, accepted risks, web-readiness bridge, build notes, and
+runtime traps. Then read `SESSION-HANDOFF.md` for the immediate next-session
+handoff and `EXECUTION-ROADMAP.md` for the active PR checklist.
+
 ## Scope Discipline
 
 Execute the agreed plan. You may make local implementation changes, bug fixes,

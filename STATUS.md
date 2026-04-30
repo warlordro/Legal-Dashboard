@@ -1,8 +1,10 @@
 # Legal Dashboard — Status Implementare
 
-**Data:** 2026-04-30 (v2.4.2: hotfix PR-6 dupa multi-agent full-review)
-**Versiune curenta:** v2.4.2
-**Status global:** 10/10 pasi completi. Sprint monitoring + web mode: PR-0..PR-6 + hotfix v2.4.2 livrate pe `main`; urmatorul PR este PR-7 AI usage tracking + per-user quota.
+**Data:** 2026-04-30 (v2.5.0: PR-7 AI usage tracking + quota visibility)
+**Versiune curenta:** v2.5.0
+**Status global:** 10/10 pasi completi. Sprint monitoring + web mode: PR-0..PR-7 implementate local; urmatorul PR este PR-8 Admin pages + roles guard.
+
+**Livrat recent (v2.5.0):** PR-7 - AI usage tracking + per-user quota visibility. Backend - migration `0010_ai_usage`, `aiUsageRepository`, cost model integer `cost_usd_milli`, owner-scoped totals/sliding window, post-call tracking in `withAiLogging()` pentru single analysis si multi-agent (analisti + judge), ruta `/api/v1/ai-usage/summary` cu envelope v1. Frontend - panou `AI Usage` in Setari API cu cost ultimele 24h/30 zile, grafic Recharts last 30 days, loading/error/empty states. Validare - 432/432 backend tests verde, backend/frontend typecheck verde, build productie trecut, `npm run rebuild:electron` rulat dupa testele Node.
 
 **Livrat recent (v2.4.2):** Hotfix peste PR-6 dupa full-review multi-agent. Backend - heartbeat SSE 25s + `retry: 3000`, `bodyLimit` per ruta (4KB pe PATCH, 8KB pe POST seen-bulk), audit pe `seen`/`dismissed`/`seen-bulk`, cap 5 stream-uri concurente per owner cu frame `too_many_streams`, `insertAlert` complet tranzactional cu `notifyNewAlert` deferred prin `queueMicrotask` ca listenerii sa nu vada `read_at`/`dismissed_at` partiale. Frontend - filtrele de data folosesc `Date(YYYY, M-1, D)` local (timezone fix), `markVisibleSeen` foloseste bulk POST `/seen-bulk` cu fallback per-id, badge-ul refresh-uieste din server in loc de optimistic update. Electron - notificari native cu dedup pe `tag` (Map cap 100, FIFO eviction), suprimate cand fereastra e focusata. Validare - smoke Electron OK, `/health` 200, toate endpoint-urile alerts 200, SSE subscribe cap-5 + heartbeat exercitat la runtime. Teste vitest amanate pana la urmatorul rebuild Node (`better-sqlite3` ABI lock pe Electron 145).
 

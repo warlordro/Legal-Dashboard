@@ -17,6 +17,7 @@ import {
 } from "./routes/monitoring.ts";
 import { nameListsRouter } from "./routes/nameLists.ts";
 import { alertsRouter } from "./routes/alerts.ts";
+import { aiUsageRouter } from "./routes/aiUsage.ts";
 import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
@@ -148,6 +149,7 @@ app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
 app.route("/api/termene", termeneRouter);
 app.route("/api/ai", aiRouter);
+app.route("/api/v1/ai-usage", aiUsageRouter);
 
 // Monitoring (routes + scheduler) is default-ON since PR-4 C6: desktop users
 // get the feature "for free" on upgrade. The kill switch MONITORING_ENABLED=0

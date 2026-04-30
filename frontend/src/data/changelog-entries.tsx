@@ -18,6 +18,41 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.5.0",
+    date: "30 Aprilie 2026",
+    subtitle: "PR-7 - AI usage tracking + quota visibility",
+    icon: <BrainCircuit className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Usage AI persistent",
+        content:
+          "Fiecare call real catre Claude, OpenAI sau Gemini lasa acum un row owner-scoped in ai_usage, fara sa schimbe prompturile sau flow-ul de analiza.",
+        bullets: [
+          "Migration 0010_ai_usage adauga provider, model, input/output tokens, cost_usd_milli, http_status, was_aborted, request_id si feature.",
+          "withAiLogging persista usage dupa call SDK; NO_API_KEY nu este contorizat fiindca nu porneste niciun call extern.",
+          "Analiza multi-agent scrie cate un row per call real: analist 1, analist 2 si judge daca ajunge la faza judge.",
+          "Costurile sunt estimate ca integer milli-USD, cu fallback safe la 0 cand lipseste modelul sau token usage.",
+        ],
+      },
+      {
+        title: "Panou AI Usage",
+        content:
+          "Setari API include acum vizibilitate pe costul AI pentru userul curent.",
+        bullets: [
+          "GET /api/v1/ai-usage/summary returneaza cost 24h, cost 30 zile si serie daily last 30 days.",
+          "Panoul afiseaza carduri de cost, grafic Recharts, tokeni input/output, cost mediu per apel si stari loading/error/empty.",
+        ],
+      },
+      {
+        title: "Validare",
+        content:
+          "432/432 teste backend trecute, backend/frontend typecheck clean, build productie trecut. better-sqlite3 a fost reconstruit pentru Node inainte de Vitest si readus pe ABI Electron dupa teste.",
+      },
+    ],
+  },
+  {
     version: "v2.4.2",
     date: "30 Aprilie 2026",
     subtitle: "Hotfix PR-6 - hardening post full-review",

@@ -1,4 +1,10 @@
 import Anthropic from "@anthropic-ai/sdk";
+import {
+  recordAiUsageSafely,
+  type AiUsageCallMeta,
+  type AiUsageProvider,
+  type AiUsageTrackingContext,
+} from "./aiUsage.ts";
 
 // AI Models configuration
 export const AI_MODELS: Record<string, { provider: string; modelId: string }> = {
@@ -157,11 +163,7 @@ Raspunde in romana, clar si concis. Foloseste un limbaj accesibil dar precis jur
 // Structured AI call log: single-line JSON to stdout. Lets ops grep
 // `"action":"ai_call"` after-the-fact for latency / failure rate per provider.
 // Persistent `audit_log` table is deferred to Faza 5 (compliance).
-type AiCallMeta = {
-  httpStatus?: number;
-  usageInput?: number;
-  usageOutput?: number;
-};
+type AiCallMeta = AiUsageCallMeta;
 
 function logAiCall(entry: {
   provider: string;
@@ -192,10 +194,11 @@ export function isTimeoutOrAbort(e: unknown): boolean {
   return /Abort|Timeout/.test(ctorName);
 }
 
-async function withAiLogging<T>(
-  provider: string,
+export async function withAiLogging<T>(
+  provider: AiUsageProvider,
   model: string,
   fn: () => Promise<{ value: T; meta?: AiCallMeta }>,
+  tracking?: AiUsageTrackingContext,
 ): Promise<T> {
   const start = Date.now();
   try {
@@ -207,6 +210,7 @@ async function withAiLogging<T>(
       status: "ok",
       ...meta,
     });
+    recordAiUsageSafely({ tracking, provider, model, meta });
     return value;
   } catch (e) {
     const errorType = isTimeoutOrAbort(e)
@@ -225,11 +229,24 @@ async function withAiLogging<T>(
       errorType,
       httpStatus: typeof httpStatus === "number" ? httpStatus : undefined,
     });
+    recordAiUsageSafely({
+      tracking,
+      provider,
+      model,
+      meta: { httpStatus: typeof httpStatus === "number" ? httpStatus : undefined },
+      wasAborted: isTimeoutOrAbort(e),
+    });
     throw e;
   }
 }
 
-async function callAnthropic(apiKey: string, modelId: string, prompt: string, timeout = AI_TIMEOUT): Promise<string> {
+async function callAnthropic(
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  timeout = AI_TIMEOUT,
+  tracking?: AiUsageTrackingContext,
+): Promise<string> {
   return withAiLogging("anthropic", modelId, async () => {
     const client = new Anthropic({ apiKey });
     const message = await client.messages.create({
@@ -247,10 +264,16 @@ async function callAnthropic(apiKey: string, modelId: string, prompt: string, ti
         usageOutput: message.usage?.output_tokens,
       },
     };
-  });
+  }, tracking);
 }
 
-async function callOpenAI(apiKey: string, modelId: string, prompt: string, timeout = AI_TIMEOUT): Promise<string> {
+async function callOpenAI(
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  timeout = AI_TIMEOUT,
+  tracking?: AiUsageTrackingContext,
+): Promise<string> {
   return withAiLogging("openai", modelId, async () => {
     const { default: OpenAI } = await import("openai");
     const client = new OpenAI({ apiKey });
@@ -267,10 +290,16 @@ async function callOpenAI(apiKey: string, modelId: string, prompt: string, timeo
         usageOutput: usage?.output_tokens,
       },
     };
-  });
+  }, tracking);
 }
 
-async function callGoogle(apiKey: string, modelId: string, prompt: string, timeout = AI_TIMEOUT): Promise<string> {
+async function callGoogle(
+  apiKey: string,
+  modelId: string,
+  prompt: string,
+  timeout = AI_TIMEOUT,
+  tracking?: AiUsageTrackingContext,
+): Promise<string> {
   return withAiLogging("google", modelId, async () => {
     const { GoogleGenerativeAI } = await import("@google/generative-ai");
     const genAI = new GoogleGenerativeAI(apiKey);
@@ -290,7 +319,7 @@ async function callGoogle(apiKey: string, modelId: string, prompt: string, timeo
     } finally {
       clearTimeout(timer);
     }
-  });
+  }, tracking);
 }
 
 export { callAnthropic, callOpenAI, callGoogle };
@@ -334,13 +363,19 @@ export function getApiKey(provider: string, keys: Record<string, string>): strin
   return "";
 }
 
-export async function callModel(modelKey: string, prompt: string, apiKeys: Record<string, string>, timeout = AI_TIMEOUT): Promise<string> {
+export async function callModel(
+  modelKey: string,
+  prompt: string,
+  apiKeys: Record<string, string>,
+  timeout = AI_TIMEOUT,
+  tracking?: AiUsageTrackingContext,
+): Promise<string> {
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");
   const apiKey = getApiKey(model.provider, apiKeys);
   if (!apiKey) throw new Error(`NO_API_KEY:${model.provider}`);
-  if (model.provider === "anthropic") return callAnthropic(apiKey, model.modelId, prompt, timeout);
-  if (model.provider === "openai") return callOpenAI(apiKey, model.modelId, prompt, timeout);
-  if (model.provider === "google") return callGoogle(apiKey, model.modelId, prompt, timeout);
+  if (model.provider === "anthropic") return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking);
+  if (model.provider === "openai") return callOpenAI(apiKey, model.modelId, prompt, timeout, tracking);
+  if (model.provider === "google") return callGoogle(apiKey, model.modelId, prompt, timeout, tracking);
   throw new Error("Provider necunoscut");
 }

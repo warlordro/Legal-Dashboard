@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Key, X } from "lucide-react";
+import { AIUsagePanel } from "@/components/AIUsagePanel";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
 import type { useApiKey } from "@/hooks/useApiKey";
@@ -73,7 +74,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
         aria-modal="true"
         aria-labelledby="api-key-dialog-title"
         tabIndex={-1}
-        className="w-full max-w-3xl rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[90vh] overflow-y-auto focus:outline-none"
+        className="w-full max-w-5xl rounded-xl border border-border bg-card p-6 shadow-2xl max-h-[90vh] overflow-y-auto focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between mb-4">
@@ -88,6 +89,8 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
         <p className="mb-4 text-sm text-muted-foreground">
           Introdu cheile API pentru furnizorii AI pe care doresti sa ii folosesti. Poti configura unul sau mai multi.
         </p>
+
+        <AIUsagePanel />
 
         {/* AI providers — side-by-side */}
         <div className="mb-3 grid grid-cols-3 gap-3">

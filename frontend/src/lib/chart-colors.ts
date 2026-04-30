@@ -19,4 +19,5 @@ export const CHART_FILLS = {
   primary: "#3b82f6", // blue — neutral default for stadii/role bars
   accent: "#14b8a6", // teal — secondary series (institutii)
   termene: "#a855f7", // purple — termene/calendar series
+  aiUsage: "#0ea5e9", // sky - AI usage cost trend
 } as const;

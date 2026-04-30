@@ -1,6 +1,6 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-6 + hotfix v2.4.2 livrate pe `main` (2026-04-30). Urmatorul PR planificat: PR-7 AI usage tracking + per-user quota.
+> **Status**: PR-0..PR-7 v2.5.0 implementate local (2026-04-30). Urmatorul PR planificat: PR-8 Admin pages + roles guard.
 > **Versiune document**: 1.5 (2026-04-30)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
@@ -237,13 +237,14 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 - **Scop**: orice apel AI (Claude/OpenAI/Gemini) lasa un row in `ai_usage`. Pe desktop quota=infinit. Pe web (PR-9+) verificam inainte de call.
 - **User vede**: panou "AI Usage" in setari cu grafic last 30 days + cost cumulativ.
 - **Tasks**:
-  - [ ] Migration `00xx_ai_usage.up.sql` (urmatorul numar liber dupa PR-6/PR-7): `ai_usage(owner_id, provider, model, input_tokens, output_tokens, cost_usd, called_at, request_id)`.
-  - [ ] Wrapper `aiCallTracked()` care log-eaza dupa orice call AI existent.
-  - [ ] Sliding window query: `SUM(cost_usd) FROM ai_usage WHERE called_at > now()-24h`.
-  - [ ] UI panel cu Recharts (deja in deps).
+  - [x] Migration `0010_ai_usage.up.sql`: `ai_usage(owner_id, ts, provider, model, input_tokens, output_tokens, cost_usd_milli, http_status, was_aborted, request_id, feature)`.
+  - [x] Integrare minim invaziva in `withAiLogging()` care persista dupa orice call AI existent, fara sa schimbe prompturi/flow.
+  - [x] Sliding window queries pentru 24h / 30 zile + serie zilnica owner-scoped.
+  - [x] UI panel cu Recharts in Setari API.
 - **DoD**:
-  - [ ] Faci 3 analize AI â†’ 3 rows in `ai_usage` cu cost calculat.
-  - [ ] Panel afiseaza cost ultimele 24h + 30 zile.
+  - [x] Analiza single scrie 1 row; analiza multi-agent scrie cate un row per SDK call (2 analisti + judge cand ajunge la faza judge).
+  - [x] Panel afiseaza cost ultimele 24h + 30 zile.
+  - [x] Validare: `npm test --workspace=backend` 432/432, backend/frontend typecheck, `npm run build`; `npm run rebuild:electron` rulat dupa testele Node.
 - **Bump**: 2.5.0 minor.
 - **Risk**: LOW.
 

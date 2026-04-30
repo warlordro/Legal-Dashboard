@@ -3,6 +3,7 @@ import { streamSSE } from "hono/streaming";
 import {
   AI_MODELS,
   AI_MULTI_TIMEOUT,
+  AI_TIMEOUT,
   JUDGE_MODELS,
   MAX_AI_BODY_SIZE,
   buildJudgePrompt,
@@ -14,6 +15,9 @@ import {
   getApiKey,
   validateAiBody,
 } from "../services/ai.ts";
+import { getOwnerId } from "../middleware/owner.ts";
+import { getRequestId } from "../middleware/requestId.ts";
+import type { AiUsageTrackingContext } from "../services/aiUsage.ts";
 
 export const aiRouter = new Hono();
 
@@ -71,13 +75,18 @@ aiRouter.post("/analyze", async (c) => {
     }
 
     const prompt = buildPrompt(dosar);
-    const dispatch: Record<string, (key: string, modelId: string, prompt: string) => Promise<string>> = {
+    const tracking: AiUsageTrackingContext = {
+      ownerId: getOwnerId(c),
+      requestId: getRequestId(c),
+      feature: "dosar_summary",
+    };
+    const dispatch: Record<string, (key: string, modelId: string, prompt: string, timeout: number, tracking?: AiUsageTrackingContext) => Promise<string>> = {
       anthropic: callAnthropic,
       openai: callOpenAI,
       google: callGoogle,
     };
     const providerFn = dispatch[selectedModel.provider];
-    const text = providerFn ? await providerFn(apiKey, selectedModel.modelId, prompt) : "";
+    const text = providerFn ? await providerFn(apiKey, selectedModel.modelId, prompt, AI_TIMEOUT, tracking) : "";
 
     return c.json({ analysis: text });
   } catch (err: unknown) {
@@ -127,17 +136,27 @@ aiRouter.post("/analyze-multi", async (c) => {
 
     const { dosar, analysts, judge } = body;
     const prompt = buildPrompt(dosar);
+    const trackingBase = {
+      ownerId: getOwnerId(c),
+      requestId: getRequestId(c),
+    };
 
     // Stream phase events so the UI can show progress (analysts take 30-60s each,
     // judge 60-120s — without streaming the user sees a blank spinner for up to 4 min).
     return streamSSE(c, async (stream) => {
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
-        const p1 = callModel(analysts[0], prompt, keys, AI_MULTI_TIMEOUT).then(async (text) => {
+        const p1 = callModel(analysts[0], prompt, keys, AI_MULTI_TIMEOUT, {
+          ...trackingBase,
+          feature: "dosar_multi_analyst",
+        }).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 1 }) });
           return text;
         });
-        const p2 = callModel(analysts[1], prompt, keys, AI_MULTI_TIMEOUT).then(async (text) => {
+        const p2 = callModel(analysts[1], prompt, keys, AI_MULTI_TIMEOUT, {
+          ...trackingBase,
+          feature: "dosar_multi_analyst",
+        }).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
         });
@@ -146,7 +165,10 @@ aiRouter.post("/analyze-multi", async (c) => {
         // Phase 3: judge reconciliation.
         await stream.writeSSE({ event: "judge_started", data: "{}" });
         const judgePrompt = buildJudgePrompt(dosar, analysisA, analysts[0], analysisB, analysts[1]);
-        const finalAnalysis = await callModel(judge, judgePrompt, keys, AI_MULTI_TIMEOUT);
+        const finalAnalysis = await callModel(judge, judgePrompt, keys, AI_MULTI_TIMEOUT, {
+          ...trackingBase,
+          feature: "dosar_multi_judge",
+        });
 
         await stream.writeSSE({
           event: "done",

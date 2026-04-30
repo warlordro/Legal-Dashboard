@@ -1,188 +1,102 @@
-# Session Handoff - PR-6 + hotfix v2.4.2 livrat / PR-7 urmator
+# Session Handoff - PR-7 v2.5.0 implementat local / PR-8 urmator
 
 **Data**: 2026-04-30
 **Branch local**: `main`
-**Remote**: `origin/main` sincronizat (dupa push v2.4.2)
-**Versiune curenta**: `v2.4.2`
-**Ultimele commituri**:
-
-- `30bb667 docs: address CodeRabbit findings on v2.4.2 hotfix`
-- `ab26e0e fix(alerts): PR-6 hotfix v2.4.2 from full-review findings`
-- `8711159 docs: update Claude session handoff`
-- `cc2098f fix(alerts): show numeric sidebar badge`
-- `08cbdad feat(monitoring): add alerts inbox`
+**Remote**: `origin/main` era sincronizat cu v2.4.2 inainte de PR-7; PR-7 este local, nepushed.
+**Versiune curenta**: `v2.5.0`
 
 ## TL;DR
 
-PR-6 este implementat, testat, commit-uit si push-uit pe `main`.
+PR-7 este implementat local: AI usage tracking + quota visibility.
 
 Aplicatia are acum:
 
-- pagina `Alerte` cu inbox paginat;
-- filtre dupa tip, severitate, interval, doar necitite si include dismissed;
-- actiuni `Citit` si `Inchide`;
-- badge numeric rosu in sidebar pentru alerte active necitite;
-- badge numeric si in modul sidebar colapsat, peste iconita clopotel;
-- SSE live pe `/api/v1/alerts/stream` cu reconnect/backoff;
-- notificari native Electron prin IPC `desktopApi.showNotification`;
-- fallback Web Notification pentru dev/web.
+- migration `0010_ai_usage`;
+- repository `aiUsageRepository`;
+- cost model per provider/model cu fallback safe la 0;
+- tracking post-call in `withAiLogging()` pentru single si multi-agent;
+- endpoint `GET /api/v1/ai-usage/summary`;
+- panou `AI Usage` in Setari API cu 24h / 30 zile / grafic daily;
+- `AGENTS.md` pointeaza explicit spre `CLAUDE.md`, `SESSION-HANDOFF.md` si `EXECUTION-ROADMAP.md`.
 
-Repo-ul a ramas cu politica agreata: un singur `main`, fara branch-uri temporare remote.
+Nu s-au schimbat prompturile sau flow-ul AI. PR-7 este strict observability/quota visibility.
 
-## Status curent
-
-- `git status --short --branch`: curat, `main...origin/main`.
-- Electron este pornit in sesiunea curenta.
-- `/health`: `ok`, `monitoring.enabled=true`, `monitoring.running=true`, `inflight=0`.
-- Port backend: `127.0.0.1:3002`.
-
-## Validari rulate
-
-### v2.4.1 (PR-6 baseline)
-
-- `npm test --workspace=backend -- src/db/monitoringAlertsRepository.test.ts src/routes/alerts.test.ts`
-  Rezultat: 13/13 teste trecute.
-- `npm test --workspace=backend`
-  Rezultat: 424/424 teste trecute.
-- `npm exec tsc --workspace=backend -- --noEmit`
-  Rezultat: trecut.
-- `npm exec tsc --workspace=frontend -- --noEmit`
-  Rezultat: trecut.
-- `npm run build`
-  Rezultat: trecut.
-- `npm run rebuild:electron`
-  Rulat dupa testele Node ca sa refaca ABI-ul `better-sqlite3` pentru Electron.
-
-### v2.4.2 (hotfix)
-
-- Vitest amanat: `better-sqlite3` este compilat pentru Electron 145 (ABI 137); rebuild la Node ar
-  rupe binding-ul Electron in timp ce aplicatia rula in sesiunea curenta. Decizia: validare runtime
-  prin smoke Electron, vitest se reia la urmatorul rebuild Node planificat inainte de PR-7.
-- Smoke Electron desktop pe build-ul nou:
-  - pornire cu `ELECTRON_RUN_AS_NODE` curatat;
-  - `/health` 200, `monitoring.enabled=true`, `monitoring.running=true`;
-  - `GET /api/v1/alerts?page=1&pageSize=1` 200;
-  - `PATCH /api/v1/alerts/:id/seen` 200 + audit log;
-  - `POST /api/v1/alerts/seen-bulk` 200 + audit log;
-  - `PATCH /api/v1/alerts/:id/dismissed` 200 + audit log;
-  - SSE subscribe cap-5 + heartbeat 25s exercitat (al 6-lea stream primeste `too_many_streams`);
-  - notificari native Electron suprimate corect cand fereastra e focused.
-
-## Ce s-a schimbat in PR-6
+## Ce s-a schimbat in PR-7
 
 ### Backend
 
 Fisiere principale:
 
-- `backend/src/db/monitoringAlertsRepository.ts`
-- `backend/src/routes/alerts.ts`
-- `backend/src/routes/alerts.test.ts`
+- `backend/src/db/migrations/0010_ai_usage.up.sql`
+- `backend/src/db/migrations/0010_ai_usage.down.sql`
+- `backend/src/db/aiUsageRepository.ts`
+- `backend/src/services/aiUsage.ts`
+- `backend/src/services/ai.ts`
+- `backend/src/routes/ai.ts`
+- `backend/src/routes/aiUsage.ts`
 - `backend/src/index.ts`
 
 Contracte:
 
-- `GET /api/v1/alerts`
-  - query: `page`, `pageSize`, `kind`, `severity`, `onlyUnread`, `includeDismissed`, `from`, `to`;
-  - raspuns: `{ rows, total, page, pageSize, unread }`.
-- `PATCH /api/v1/alerts/:id/seen`
-- `PATCH /api/v1/alerts/:id/dismissed`
-- `GET /api/v1/alerts/stream`
-  - event `ready`;
-  - event `alert`, cu `id` setat la alert id.
-
-Comportament:
-
-- toate rutele sunt owner-scoped;
-- dismissed alerts sunt excluse default din inbox;
-- `includeDismissed=true` le aduce inapoi pentru audit operational;
-- `unread` = `read_at IS NULL AND dismissed_at IS NULL`;
-- `insertAlert()` publica in SSE doar cand insertul este nou, nu pe dedup replay.
+- `POST /api/ai/analyze`
+  - response shape legacy ramane `{ analysis }` / `{ error }`;
+  - scrie 1 row in `ai_usage` dupa call SDK reusit sau pornit si esuat;
+  - `NO_API_KEY` nu scrie row fiindca nu porneste call extern.
+- `POST /api/ai/analyze-multi`
+  - scrie cate un row per call real: analist 1, analist 2, judge daca faza judge este atinsa.
+- `GET /api/v1/ai-usage/summary`
+  - v1 envelope `{ data, requestId }`;
+  - `data.summary24h`, `data.summary30d`, `data.daily[]`, `data.generatedAt`;
+  - costul expus in UI este `cost_usd_milli / 1000`.
 
 ### Frontend
 
 Fisiere principale:
 
-- `frontend/src/pages/Alerts.tsx`
-- `frontend/src/lib/alertsApi.ts`
-- `frontend/src/App.tsx`
-- `frontend/src/components/Sidebar.tsx`
+- `frontend/src/components/AIUsagePanel.tsx`
+- `frontend/src/lib/aiUsageApi.ts`
+- `frontend/src/components/ApiKeyDialog.tsx`
+- `frontend/src/lib/chart-colors.ts`
 
 Comportament:
 
-- ruta UI: `/alerte`;
-- badge rosu numeric pe `Alerte`;
-- badge numeric in collapsed sidebar;
-- stream global in `AppShell`;
-- cleanup: `EventSource.close()` in cleanup-ul `useEffect`;
-- reconnect cu backoff pana la 30s;
-- la reconnect se face refresh de count/lista;
-- mark read / dismiss scad badge-ul.
+- panoul este in dialogul `Setari API`;
+- are loading/error/empty states;
+- afiseaza cost 24h, cost 30 zile, tokeni input/output, cost mediu per apel;
+- graficul foloseste Recharts si seria last 30 days.
 
-### Electron
+### Documentatie / versiune
 
-Fisiere:
+- `package.json`, `backend/package.json`, `frontend/package.json`, `package-lock.json` bump la `2.5.0`;
+- `CHANGELOG.md` si in-app changelog actualizate;
+- `README.md`, `STATUS.md`, `CLAUDE.md`, `EXECUTION-ROADMAP.md` actualizate.
 
-- `electron/main.js`
-- `electron/preload.js`
-- `frontend/src/types/desktop-api.d.ts`
+## Validari rulate
 
-IPC nou:
-
-- `desktopApi.showNotification({ title, body, silent })`
-- main process foloseste `new Notification({ title, body, silent }).show()`.
-- title/body sunt capate ca dimensiune in main process.
-
-## Reguli de produs importante
-
-### Baseline monitorizare
-
-Regula confirmata de user:
-
-- T0 = momentul inregistrarii monitorizarii.
-- Tot ce exista la T0 pe dosar sau pe numele monitorizat este considerat deja stiut.
-- Nu se emit alerte initiale pentru starea existenta.
-- Conteaza doar ce apare/se schimba la T+1.
-
-Aceasta regula este foarte importanta pentru `dosar_soap` si mai ales pentru `name_soap`, unde un nume poate avea multiple dosare deja existente.
-
-### Badge Alerte
-
-Userul a cerut explicit badge tip iPhone notification number:
-
-- rosu, sa sara in ochi;
-- cu numar, nu doar punct;
-- vizibil si in sidebar expandat;
-- vizibil si in collapsed/icon-only mode.
-
-Implementarea curenta:
-
-- expanded: langa label-ul `Alerte`;
-- collapsed: peste clopotel;
-- peste `99` afiseaza `99+`;
-- count logic: `read_at IS NULL AND dismissed_at IS NULL`.
-
-## Documentatie actualizata
-
-- `CHANGELOG.md`
-- `frontend/src/data/changelog-entries.tsx`
-- `README.md`
-- `EXECUTION-ROADMAP.md`
-- `PLAN-monitoring-webmode.md`
-- `SECURITY.md`
-- `backend/.env.example`
-
-Nota speciala introdusa in plan:
-
-- captcha provider keys pentru RNPM:
-  - desktop actual = UI + Electron `safeStorage`;
-  - web/server mode = server-side env/config (`CAPTCHA_PROVIDER`, `TWOCAPTCHA_API_KEY`, `CAPSOLVER_API_KEY`);
-  - nu BYOK si nu browser/client-supplied.
+- `npm test --workspace=backend -- src/db/aiUsageRepository.test.ts src/services/aiUsage.test.ts src/services/ai.test.ts`
+  - Rezultat: 24/24 teste trecute.
+- `npm test --workspace=backend`
+  - Rezultat: 432/432 teste trecute.
+- `npm exec tsc --workspace=backend -- --noEmit`
+  - Rezultat: trecut.
+- `npm exec tsc --workspace=frontend -- --noEmit`
+  - Rezultat: trecut.
+- `npm run build`
+  - Rezultat: trecut.
+- Electron smoke desktop
+  - Lansare cu `ELECTRON_RUN_AS_NODE` curatat si profil temporar `C:\tmp\legal-dashboard-smoke-pr7-*`.
+  - `/health` 200, `monitoring.enabled=true`, `monitoring.running=true`, `inflight=0`.
+  - `GET /api/v1/ai-usage/summary` 200, envelope v1 cu `summary24h`, `summary30d`, `daily[30]`.
+  - `GET /api/v1/alerts?page=1&pageSize=1` 200.
+- `npm rebuild better-sqlite3`
+  - Rulat inainte de Vitest pentru ABI Node.
+- `npm run rebuild:electron`
+  - Rulat dupa testele Node ca sa refaca ABI-ul `better-sqlite3` pentru Electron.
 
 ## Reguli active pentru urmatorul agent
 
 - Executa doar planul agreat. Daca vezi o problema care cere schimbare fundamentala, anunta si asteapta aprobare.
 - Nu scoate flow-uri existente care functioneaza.
-- Monitorizarea se face dupa numar dosar sau nume; nu elimina suportul pentru `numar_dosar`.
 - Electron smoke inseamna aplicatia desktop Electron, nu doar web localhost.
 - La lansare Electron:
   - curata `ELECTRON_RUN_AS_NODE`;
@@ -196,31 +110,30 @@ Nota speciala introdusa in plan:
 
 ## Probleme/riscuri ramase
 
-- Nu exista inca GitHub release/tag `v2.4.1` sau `v2.4.2`; s-au facut push-uri pe `main`, fara release formal.
-- GitHub status prin connector a returnat anterior 404; CI status nu a fost confirmat prin connector dupa ultimul push.
-- `xlsx@0.18.5` ramane risc acceptat temporar, documentat si mitigat prin limite stricte.
+- PR-7 nu este inca push-uit pe GitHub.
+- Nu exista inca GitHub release/tag `v2.4.1`, `v2.4.2` sau `v2.5.0`.
+- Lansarea pe profilul normal a returnat `process_singleton_win.cc:457 Lock file can not be created! Error code: 5`
+  desi nu ramasese proces Electron vizibil. Smoke-ul PR-7 a fost rulat pe profil temporar curat in `C:\tmp`.
+- Cost modelul AI foloseste valori configurate in cod pentru modelele curente din aplicatie; daca providerii schimba preturile, trebuie actualizat manual.
+- Pe desktop quota este informativa/bypass. Enforce real ramane pentru web PR-9+.
 - Pentru PR-9 web/server mode trebuie auth real inainte de expunere remote.
-- SSE alerts este in-process, suficient pentru desktop single backend; in web multi-instance va necesita strategie de leader/broker/poll fallback.
+- `xlsx@0.18.5` ramane risc acceptat temporar, documentat si mitigat prin limite stricte.
 
 ## Urmatoarea etapa
 
 Conform roadmap:
 
-### PR-7 - AI usage tracking + per-user quota
+### PR-8 - Admin pages + roles guard
 
 Scop:
 
-- orice apel AI lasa row in `ai_usage`;
-- pe desktop quota = informativ / bypass;
-- pe web, PR-9+ foloseste quota inainte de call.
+- pagini `/admin/*` ascunse pe desktop;
+- pe web, acces doar pentru `role='admin'`;
+- pregateste audit/quota override pentru PR-9+ fara sa expuna functionalitate pe desktop.
 
 Tasks planificate:
 
-1. Migration urmatorul numar liber dupa `0009`: `ai_usage`.
-2. Repository `aiUsageRepository`.
-3. Wrapper `aiCallTracked()` sau integrare minim invaziva in serviciul AI existent.
-4. Cost model per provider/model, cu fallback safe cand token/cost lipsesc.
-5. UI panel in setari pentru ultimele 24h / 30 zile.
-6. Teste backend pentru write-after-call, owner scope si query sliding window.
-
-Atentie: nu schimba prompturile/flow-ul AI fara cerere explicita; PR-7 este observability/quota, nu redesign AI.
+1. Middleware `requireRole('admin')` pe toate rutele admin viitoare.
+2. UI skeleton pentru users/audit/quota.
+3. Desktop: link ascuns si 403 daca ruta este apelata direct.
+4. Teste pentru role guard si owner/admin separation.
