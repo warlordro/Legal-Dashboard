@@ -29,6 +29,12 @@ export interface MonitoringAlert {
   created_at: string;
   read_at: string | null;
   dismissed_at: string | null;
+  // v2.6.2 — joined from monitoring_jobs by listAlerts so the UI can backfill
+  // numar_dosar / name_normalized for alerts that pre-date runner enrichment
+  // (where detail_json lacks the identifying fields). Optional: SSE-pushed
+  // alerts and old API responses won't have it.
+  job_target_json?: string | null;
+  job_kind?: string | null;
 }
 
 export interface AlertsListResult {

@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   getAuditEvents,
+  listAuditEvents,
   recordAudit,
   type AuditOutcome,
 } from "./auditRepository.ts";
@@ -258,5 +259,123 @@ describe("getAuditEvents() — read paths", () => {
     expect(getAuditEvents({ ownerId: "x", limit: 2 })).toHaveLength(2);
     // limit <= 0 falls back to 1, not 0
     expect(getAuditEvents({ ownerId: "x", limit: 0 })).toHaveLength(1);
+  });
+});
+
+describe("listAuditEvents() — admin filters + pagination", () => {
+  beforeEach(() => {
+    // Spread events across multiple owners + outcomes so the admin filters
+    // have something to slice. Manually setting ts via raw SQL because
+    // recordAudit uses datetime('now') and we need deterministic ordering for
+    // the time-window tests.
+    const db = getDb();
+    const stmt = db.prepare(
+      `INSERT INTO audit_log
+         (owner_id, actor_id, action, target_kind, target_id, outcome, ts)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    stmt.run("alice", "alice", "user.login", null, null, "ok", "2026-04-01T10:00:00Z");
+    stmt.run("alice", "alice", "monitoring.create", "monitoring_job", "1", "ok", "2026-04-15T10:00:00Z");
+    stmt.run("alice", "admin-bob", "admin.suspend_user", "user", "alice", "ok", "2026-04-20T10:00:00Z");
+    stmt.run("bob", "bob", "user.login", null, null, "denied", "2026-04-22T10:00:00Z");
+    stmt.run(null, null, "system.boot", null, null, "ok", "2026-04-25T10:00:00Z");
+  });
+
+  it("returns all owners + total when ownerId is undefined", () => {
+    const r = listAuditEvents();
+    expect(r.total).toBe(5);
+    expect(r.rows).toHaveLength(5);
+  });
+
+  it("scopes to ownerId when provided", () => {
+    const r = listAuditEvents({ ownerId: "alice" });
+    expect(r.total).toBe(3);
+    expect(r.rows.map((e) => e.action)).toEqual([
+      "admin.suspend_user",
+      "monitoring.create",
+      "user.login",
+    ]);
+  });
+
+  it("filters system events with ownerId: null", () => {
+    const r = listAuditEvents({ ownerId: null });
+    expect(r.total).toBe(1);
+    expect(r.rows[0].action).toBe("system.boot");
+  });
+
+  it("filters by actorId (admin acting on tenant)", () => {
+    const r = listAuditEvents({ actorId: "admin-bob" });
+    expect(r.total).toBe(1);
+    expect(r.rows[0].action).toBe("admin.suspend_user");
+  });
+
+  it("filters by exact action", () => {
+    const r = listAuditEvents({ action: "user.login" });
+    expect(r.total).toBe(2);
+  });
+
+  it("filters by action substring (LIKE)", () => {
+    const r = listAuditEvents({ actionLike: "monitoring" });
+    expect(r.total).toBe(1);
+    expect(r.rows[0].action).toBe("monitoring.create");
+  });
+
+  it("filters by targetKind", () => {
+    const r = listAuditEvents({ targetKind: "user" });
+    expect(r.total).toBe(1);
+    expect(r.rows[0].action).toBe("admin.suspend_user");
+  });
+
+  it("filters by outcome", () => {
+    const r = listAuditEvents({ outcome: "denied" });
+    expect(r.total).toBe(1);
+    expect(r.rows[0].owner_id).toBe("bob");
+  });
+
+  it("since is a closed lower bound (ts >= since)", () => {
+    const r = listAuditEvents({ since: "2026-04-20T10:00:00Z" });
+    expect(r.total).toBe(3);
+    // Includes the boundary row (admin.suspend_user @ 2026-04-20T10:00:00Z).
+    expect(r.rows.some((e) => e.action === "admin.suspend_user")).toBe(true);
+  });
+
+  it("until is an open upper bound (ts < until)", () => {
+    const r = listAuditEvents({ until: "2026-04-20T10:00:00Z" });
+    expect(r.total).toBe(2);
+    // Excludes the boundary row.
+    expect(r.rows.some((e) => e.action === "admin.suspend_user")).toBe(false);
+  });
+
+  it("since + until tile windows without overlap", () => {
+    const w1 = listAuditEvents({
+      since: "2026-04-01T00:00:00Z",
+      until: "2026-04-20T10:00:00Z",
+    });
+    const w2 = listAuditEvents({
+      since: "2026-04-20T10:00:00Z",
+      until: "2026-04-26T00:00:00Z",
+    });
+    const total = w1.total + w2.total;
+    expect(total).toBe(5);
+    const allIds = new Set([...w1.rows, ...w2.rows].map((e) => e.id));
+    expect(allIds.size).toBe(total);
+  });
+
+  it("pagination returns total separate from page size", () => {
+    const page1 = listAuditEvents({ limit: 2, offset: 0 });
+    const page2 = listAuditEvents({ limit: 2, offset: 2 });
+    expect(page1.total).toBe(5);
+    expect(page2.total).toBe(5);
+    expect(page1.rows).toHaveLength(2);
+    expect(page2.rows).toHaveLength(2);
+    const ids = new Set([...page1.rows, ...page2.rows].map((e) => e.id));
+    expect(ids.size).toBe(4);
+  });
+
+  it("limit is clamped to [1, 500]", () => {
+    const small = listAuditEvents({ limit: 0 });
+    expect(small.rows).toHaveLength(1);
+    const big = listAuditEvents({ limit: 99999 });
+    expect(big.rows.length).toBeLessThanOrEqual(500);
   });
 });

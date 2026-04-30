@@ -290,6 +290,12 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
             ora: sed.ora,
             complet: sed.complet,
             solutie: sed.solutie,
+            // v2.6.2 — full ruling text + document anchor for the alerts UI
+            // so the user sees the rationale without opening PortalJust. SOAP
+            // returns these only when the ruling is published.
+            solutie_sumar: sed.solutieSumar,
+            numar_document: sed.numarDocument,
+            data_pronuntare: sed.dataPronuntare,
           },
           dedupKey: `solutie_aparuta|${sub}`,
         });

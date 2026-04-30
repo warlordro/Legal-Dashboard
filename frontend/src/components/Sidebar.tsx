@@ -1,11 +1,12 @@
 import { useState, useRef, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Scale, Search, CalendarDays, BarChart3, History, Trash2, FileSearch, FileLock2, ChevronDown, ChevronRight, Activity, Bell } from "lucide-react";
+import { Scale, Search, CalendarDays, BarChart3, History, Trash2, FileSearch, FileLock2, ChevronDown, ChevronRight, Activity, Bell, Users as UsersIcon, ClipboardList, Gauge, ShieldCheck } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
 import { HistoryEntryRow } from "./sidebar-history-entry";
 import { SidebarFooter } from "./sidebar-footer";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: BarChart3, end: true },
@@ -14,6 +15,12 @@ const navItems = [
   { to: "/rnpm", label: "Cautare RNPM", icon: FileLock2 },
   { to: "/monitorizare", label: "Monitorizare", icon: Activity },
   { to: "/alerte", label: "Alerte", icon: Bell },
+];
+
+const adminNavItems = [
+  { to: "/admin/users", label: "Utilizatori", icon: UsersIcon },
+  { to: "/admin/audit", label: "Audit", icon: ClipboardList },
+  { to: "/admin/quota", label: "Cote", icon: Gauge },
 ];
 
 interface SidebarProps {
@@ -51,6 +58,8 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
   const popoverRef = useRef<HTMLDivElement>(null);
   const popoverBtnRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
+  const { user } = useCurrentUser();
+  const isAdmin = user?.role === "admin";
 
   const handleEntryClick = (entry: SearchHistoryEntry) => {
     setPopoverSection(null);
@@ -140,6 +149,41 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
           );
         })}
       </nav>
+
+      {/* Admin section — gated on role; hidden completely otherwise so non-admins
+          never see the entries. The same role is re-checked server-side on every
+          /api/v1/admin/* call, so this is purely cosmetic. */}
+      {isAdmin && (
+        <nav className="space-y-1 border-t border-border p-2">
+          {!collapsed && (
+            <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <ShieldCheck className="h-3 w-3" />
+              Administrare
+            </div>
+          )}
+          {adminNavItems.map(({ to, label, icon: Icon }) => (
+            <NavLink
+              key={to}
+              to={to}
+              title={collapsed ? label : undefined}
+              className={({ isActive }) =>
+                cn(
+                  "relative flex items-center rounded-lg text-sm font-medium transition-colors",
+                  collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                )
+              }
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {!collapsed && (
+                <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
+              )}
+            </NavLink>
+          ))}
+        </nav>
+      )}
 
       {/* History accordion: only one section open at a time */}
       {!collapsed && (history.length > 0 || rnpmHistory.length > 0) && (

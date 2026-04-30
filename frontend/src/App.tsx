@@ -10,6 +10,10 @@ import Termene from "@/pages/Termene";
 import RnpmSearchPage from "@/pages/RnpmSearch";
 import Monitorizare from "@/pages/Monitorizare";
 import Alerts from "@/pages/Alerts";
+import AdminUsers from "@/pages/admin/Users";
+import AdminAudit from "@/pages/admin/Audit";
+import AdminQuota from "@/pages/admin/Quota";
+import { AdminGate } from "@/components/AdminGate";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
@@ -280,7 +284,17 @@ function AppShell({
           <Alerts
             streamVersion={alertsStreamVersion}
             onAlertsChanged={refreshUnreadAlerts}
+            onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
           />
+        )}
+        {pathname === "/admin/users" && (
+          <AdminGate><AdminUsers /></AdminGate>
+        )}
+        {pathname === "/admin/audit" && (
+          <AdminGate><AdminAudit /></AdminGate>
+        )}
+        {pathname === "/admin/quota" && (
+          <AdminGate><AdminQuota /></AdminGate>
         )}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>
           <RnpmSearchPage

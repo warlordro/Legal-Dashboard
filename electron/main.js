@@ -2,6 +2,16 @@ const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage,
 const path = require("path");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 
+// Windows: setAppUserModelId must run before any window/notification is shown
+// so the OS associates this process with the correct app identity. Without it,
+// the taskbar shows the default Electron atom icon and native notifications
+// are attributed to "electron.app.Electron". Must match the appId in
+// electron-builder config (build.appId in package.json) for the packaged
+// install to inherit the same shortcut grouping.
+if (process.platform === "win32") {
+  app.setAppUserModelId("ro.legaldashboard.app");
+}
+
 // SECURITY: single-instance lock — prevents concurrent SQLite writers from corrupting the DB
 if (!app.requestSingleInstanceLock()) {
   app.quit();

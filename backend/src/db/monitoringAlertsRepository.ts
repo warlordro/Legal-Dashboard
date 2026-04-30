@@ -38,6 +38,12 @@ export interface MonitoringAlertRow {
   // rows written before migration 0004 retain NULL; ON DELETE SET NULL on
   // the FK keeps the alert when a run row is purged by retention.
   run_id: number | null;
+  // v2.6.2 — joined from monitoring_jobs in listAlerts to backfill numar_dosar /
+  // name_normalized when an old alert (pre-runner-enrichment) lacks them in
+  // detail_json. Optional: insertAlert / getAlertById do not populate it; only
+  // listAlerts (the only consumer of the alerts UI) emits these fields.
+  job_target_json?: string | null;
+  job_kind?: string | null;
 }
 
 export interface InsertAlertInput {
@@ -243,55 +249,67 @@ export function insertAlert(input: InsertAlertInput): MonitoringAlertRow {
 
 export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
   const db = getDb();
-  const where: string[] = ["owner_id = ?"];
+  // v2.6.2 — alias monitoring_alerts as `a` so the row SELECT can LEFT JOIN
+  // monitoring_jobs without column-name ambiguity (`kind` exists on both).
+  // Filters all live on monitoring_alerts; qualified explicitly here.
+  const where: string[] = ["a.owner_id = ?"];
   const params: (string | number | null)[] = [opts.ownerId];
 
   if (opts.jobId !== undefined) {
-    where.push("job_id = ?");
+    where.push("a.job_id = ?");
     params.push(opts.jobId);
   }
   if (opts.kind) {
-    where.push("kind = ?");
+    where.push("a.kind = ?");
     params.push(opts.kind);
   }
   if (opts.severity) {
-    where.push("severity = ?");
+    where.push("a.severity = ?");
     params.push(opts.severity);
   }
   if (opts.isNew !== undefined) {
-    where.push("is_new = ?");
+    where.push("a.is_new = ?");
     params.push(opts.isNew ? 1 : 0);
   }
   if (opts.onlyUnread) {
-    where.push("read_at IS NULL");
+    where.push("a.read_at IS NULL");
   }
   if (opts.dismissed !== undefined) {
-    where.push(opts.dismissed ? "dismissed_at IS NOT NULL" : "dismissed_at IS NULL");
+    where.push(opts.dismissed ? "a.dismissed_at IS NOT NULL" : "a.dismissed_at IS NULL");
   } else if (!opts.includeDismissed) {
-    where.push("dismissed_at IS NULL");
+    where.push("a.dismissed_at IS NULL");
   }
   if (opts.from) {
-    where.push("created_at >= ?");
+    where.push("a.created_at >= ?");
     params.push(opts.from);
   }
   if (opts.to) {
-    where.push("created_at <= ?");
+    where.push("a.created_at <= ?");
     params.push(opts.to);
   }
 
   const whereSql = `WHERE ${where.join(" AND ")}`;
   const total = (
     db
-      .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts ${whereSql}`)
+      .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts a ${whereSql}`)
       .get(...params) as { n: number }
   ).n;
 
   const offset = (opts.page - 1) * opts.pageSize;
+  // LEFT JOIN scoped on (job_id, owner_id) so a misowned job row (shouldn't
+  // happen — defensive) cannot leak target_json across tenants. LEFT (not
+  // INNER) so an alert whose job was deleted still shows up; the joined
+  // columns just come back NULL.
   const rows = db
     .prepare(
-      `SELECT * FROM monitoring_alerts
+      `SELECT a.*,
+              j.target_json AS job_target_json,
+              j.kind AS job_kind
+       FROM monitoring_alerts a
+       LEFT JOIN monitoring_jobs j
+         ON j.id = a.job_id AND j.owner_id = a.owner_id
        ${whereSql}
-       ORDER BY created_at DESC, id DESC
+       ORDER BY a.created_at DESC, a.id DESC
        LIMIT ? OFFSET ?`,
     )
     .all(...params, opts.pageSize, offset) as MonitoringAlertRow[];

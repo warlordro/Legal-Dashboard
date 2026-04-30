@@ -18,6 +18,8 @@ import {
 import { nameListsRouter } from "./routes/nameLists.ts";
 import { alertsRouter } from "./routes/alerts.ts";
 import { aiUsageRouter } from "./routes/aiUsage.ts";
+import { meRouter } from "./routes/me.ts";
+import { adminRouter } from "./routes/admin.ts";
 import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
@@ -150,6 +152,10 @@ app.route("/api/dosare", dosareRouter);
 app.route("/api/termene", termeneRouter);
 app.route("/api/ai", aiRouter);
 app.route("/api/v1/ai-usage", aiUsageRouter);
+// PR-8: current-user profile (always mounted) + admin surface (gated by
+// requireRole('admin') inside the router so non-admins get 403, not 404).
+app.route("/api/v1/me", meRouter);
+app.route("/api/v1/admin", adminRouter);
 
 // Monitoring (routes + scheduler) is default-ON since PR-4 C6: desktop users
 // get the feature "for free" on upgrade. The kill switch MONITORING_ENABLED=0

@@ -166,6 +166,20 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
             payloadHash: canonicalSha256(newSnapshot),
             payloadJson: newSnapshotJson,
           });
+          // Enrich every alert with the dosar identity so the inbox/native
+          // notification can self-describe without a join back to jobs/snapshots.
+          // The diff layer is pure (knows only the snapshot shape) so we attach
+          // numar_dosar (always) + instanta (when the dosar is currently
+          // visible) at the runner boundary, where target/currentDosar live.
+          const dosarContext: Record<string, unknown> = {
+            numar_dosar: target.numar_dosar,
+          };
+          if (currentDosar?.institutie) {
+            dosarContext.instanta = currentDosar.institutie;
+          }
+          if (currentDosar?.stadiuProcesual) {
+            dosarContext.stadiu = currentDosar.stadiuProcesual;
+          }
           for (const alert of alerts) {
             insertAlert({
               ownerId: job.owner_id,
@@ -174,7 +188,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
               kind: alert.kind,
               severity: alert.severity,
               title: alert.title,
-              detail: alert.detail,
+              detail: { ...dosarContext, ...alert.detail },
               dedupKey: alert.dedupKey,
             });
           }

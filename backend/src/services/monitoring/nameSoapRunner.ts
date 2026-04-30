@@ -124,6 +124,11 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
             payloadHash: canonicalSha256(newSnapshot),
             payloadJson: newSnapshotJson,
           });
+          // Inbox/native notification need to identify the watched name and
+          // (when the alert is per-dosar) the specific case. The diff layer is
+          // pure, so we attach name_normalized at the runner boundary; per-dosar
+          // alerts already include numar_dosar in their detail from the diff.
+          const targetContext = { name_normalized: target.name_normalized };
           for (const alert of alerts) {
             insertAlert({
               ownerId: job.owner_id,
@@ -132,7 +137,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
               kind: alert.kind,
               severity: alert.severity,
               title: alert.title,
-              detail: alert.detail,
+              detail: { ...targetContext, ...alert.detail },
               dedupKey: alert.dedupKey,
             });
           }

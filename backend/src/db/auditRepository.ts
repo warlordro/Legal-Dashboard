@@ -143,3 +143,116 @@ export function getAuditEvents(opts: {
     .prepare(`SELECT * FROM audit_log ${whereSql} ORDER BY ts DESC, id DESC LIMIT ?`)
     .all(...params, limit) as AuditRow[];
 }
+
+// PR-8 admin viewer. Returns rows + total for pagination, supports filters used
+// by the admin Audit page: time window (since / until, ISO strings), action
+// substring, target kind/id, owner, actor. The "ownerId: undefined" case
+// returns events from ALL owners (admin scope), distinct from "ownerId: null"
+// which returns only system-level events.
+export interface ListAuditEventsOpts {
+  ownerId?: string | null | undefined;
+  actorId?: string;
+  action?: string;
+  actionLike?: string;
+  targetKind?: string;
+  targetId?: string;
+  outcome?: AuditOutcome;
+  since?: string;
+  until?: string;
+  limit?: number;
+  offset?: number;
+}
+
+export interface ListAuditEventsResult {
+  rows: AuditRow[];
+  total: number;
+}
+
+function clampAuditLimit(limit: number | undefined): number {
+  const n = typeof limit === "number" && Number.isFinite(limit) ? Math.floor(limit) : 50;
+  if (n < 1) return 1;
+  if (n > 500) return 500;
+  return n;
+}
+
+function clampAuditOffset(offset: number | undefined): number {
+  const n = typeof offset === "number" && Number.isFinite(offset) ? Math.floor(offset) : 0;
+  return n < 0 ? 0 : n;
+}
+
+function buildAuditWhere(opts: ListAuditEventsOpts): {
+  sql: string;
+  params: (string | number | null)[];
+} {
+  const where: string[] = [];
+  const params: (string | number | null)[] = [];
+  if (opts.ownerId !== undefined) {
+    if (opts.ownerId === null) {
+      where.push("owner_id IS NULL");
+    } else {
+      where.push("owner_id = ?");
+      params.push(opts.ownerId);
+    }
+  }
+  if (opts.actorId) {
+    where.push("actor_id = ?");
+    params.push(opts.actorId);
+  }
+  if (opts.action) {
+    where.push("action = ?");
+    params.push(opts.action);
+  }
+  if (opts.actionLike) {
+    where.push("action LIKE ?");
+    params.push(`%${opts.actionLike}%`);
+  }
+  if (opts.targetKind) {
+    where.push("target_kind = ?");
+    params.push(opts.targetKind);
+  }
+  if (opts.targetId) {
+    where.push("target_id = ?");
+    params.push(opts.targetId);
+  }
+  if (opts.outcome) {
+    where.push("outcome = ?");
+    params.push(opts.outcome);
+  }
+  if (opts.since) {
+    // Closed lower bound (ts >= since) — matches the AI usage windowing
+    // convention (PR-7 hardening) so admins comparing audit events to AI
+    // usage windows see consistent intervals.
+    where.push("ts >= ?");
+    params.push(opts.since);
+  }
+  if (opts.until) {
+    // Open upper bound (ts < until) so successive windows tile without overlap.
+    where.push("ts < ?");
+    params.push(opts.until);
+  }
+  return {
+    sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
+    params,
+  };
+}
+
+export function listAuditEvents(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {
+  const db = getDb();
+  const { sql: whereSql, params } = buildAuditWhere(opts);
+  const limit = clampAuditLimit(opts.limit);
+  const offset = clampAuditOffset(opts.offset);
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM audit_log ${whereSql}
+       ORDER BY ts DESC, id DESC
+       LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as AuditRow[];
+
+  const totalRow = db
+    .prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`)
+    .get(...params) as { n: number };
+
+  return { rows, total: totalRow.n };
+}
