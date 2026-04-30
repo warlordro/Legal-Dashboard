@@ -1,11 +1,12 @@
-# Session Handoff - PR-8 v2.6.0 livrat / PR-9 urmator
+# Session Handoff - PR-8 v2.6.0 + patch v2.6.3 livrate / PR-9 urmator
 
 **Data**: 2026-04-30
-**Branch local**: `main` (cu fisiere noi PR-8, neraportate inca)
+**Branch local**: `main`
 **Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
-v2.5.1 + PR-8 v2.6.0 (admin pages + roles guard). Tag-urile `v2.5.0`,
-`v2.5.1` si `v2.6.0` nu sunt inca create.
-**Versiune curenta**: `v2.6.0`
+v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 (alerts inbox UX
++ Monitorizare TINTA link + cadenta non-standard onesta). Tag-urile `v2.5.0`,
+`v2.5.1`, `v2.6.0`, `v2.6.1`, `v2.6.2`, `v2.6.3` nu sunt inca create.
+**Versiune curenta**: `v2.6.3`
 
 ## TL;DR
 

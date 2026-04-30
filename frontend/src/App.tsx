@@ -279,7 +279,11 @@ function AppShell({
             consumePendingSearch={consumePendingSearch}
           />
         </div>
-        {pathname === "/monitorizare" && <Monitorizare />}
+        {pathname === "/monitorizare" && (
+          <Monitorizare
+            onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
+          />
+        )}
         {pathname === "/alerte" && (
           <Alerts
             streamVersion={alertsStreamVersion}

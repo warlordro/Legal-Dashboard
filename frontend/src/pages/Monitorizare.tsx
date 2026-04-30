@@ -3,7 +3,18 @@
 // has a way to seed the queue and verify writes today.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Activity, Trash2, RefreshCw, Pause, Play, Upload, Download, FileSpreadsheet } from "lucide-react";
+import {
+  Activity,
+  Trash2,
+  RefreshCw,
+  Pause,
+  Play,
+  Upload,
+  Download,
+  FileSpreadsheet,
+  ExternalLink,
+  Search,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -19,6 +30,7 @@ import {
   MonitoringApiError,
 } from "@/lib/api";
 import { downloadBulkTemplate, parseBulkFile, type BulkRowDosar } from "@/lib/monitoringBulkTemplate";
+import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
   { label: "4h", sec: 14400 },
@@ -26,7 +38,6 @@ const CADENCE_OPTIONS: { label: string; sec: number }[] = [
   { label: "12h", sec: 43200 },
   { label: "24h", sec: 86400 },
 ];
-const DEFAULT_CADENCE_SEC = 14400;
 
 function formatDateTime(iso: string | null): string {
   if (!iso) return "-";
@@ -53,7 +64,11 @@ interface BulkDosarResult {
   errors: number;
 }
 
-export default function Monitorizare() {
+export default function Monitorizare({
+  onOpenDosar,
+}: {
+  onOpenDosar?: (numarDosar: string) => void;
+} = {}) {
   const confirm = useConfirm();
   const [jobs, setJobs] = useState<MonitoringJob[]>([]);
   const [loading, setLoading] = useState(false);
@@ -491,9 +506,39 @@ export default function Monitorizare() {
                   </tr>
                 </thead>
                 <tbody>
-                  {jobs.map((job) => (
+                  {jobs.map((job) => {
+                    const target = formatMonitoringTarget(job);
+                    const isDosar = job.kind === "dosar_soap";
+                    return (
                     <tr key={job.id} className="border-b hover:bg-accent/30">
-                      <td className="px-3 py-2 font-mono">{formatMonitoringTarget(job)}</td>
+                      <td className="px-3 py-2 font-mono">
+                        {isDosar ? (
+                          <div className="flex items-center gap-1.5">
+                            <a
+                              href={getPortalJustUrl(target)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title={`Deschide ${target} pe portal.just.ro`}
+                              className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary/80 hover:underline"
+                            >
+                              {target}
+                              <ExternalLink className="h-3 w-3 shrink-0" />
+                            </a>
+                            {onOpenDosar && (
+                              <button
+                                type="button"
+                                onClick={() => onOpenDosar(target)}
+                                title={`Cauta ${target} in lista Dosare`}
+                                className="inline-flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                              >
+                                <Search className="h-3.5 w-3.5" />
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          target
+                        )}
+                      </td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {job.kind === "dosar_soap" ? "Dosar"
                           : job.kind === "name_soap" ? "Subiect"
@@ -501,22 +546,34 @@ export default function Monitorizare() {
                           : job.kind}
                       </td>
                       <td className="px-3 py-2">
-                        <select
-                          className="h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                          value={
-                            CADENCE_OPTIONS.some((o) => o.sec === job.cadence_sec)
-                              ? job.cadence_sec
-                              : DEFAULT_CADENCE_SEC
-                          }
-                          onChange={(e) => handleCadenceChange(job, Number(e.target.value))}
-                          title="Modifica intervalul de verificare"
-                        >
-                          {CADENCE_OPTIONS.map((opt) => (
-                            <option key={opt.sec} value={opt.sec}>
-                              {opt.label}
-                            </option>
-                          ))}
-                        </select>
+                        {(() => {
+                          const isStandard = CADENCE_OPTIONS.some((o) => o.sec === job.cadence_sec);
+                          return (
+                            <select
+                              className={`h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                                isStandard ? "" : "border-amber-500 text-amber-700 dark:text-amber-400"
+                              }`}
+                              value={job.cadence_sec}
+                              onChange={(e) => handleCadenceChange(job, Number(e.target.value))}
+                              title={
+                                isStandard
+                                  ? "Modifica intervalul de verificare"
+                                  : `Cadenta non-standard (${formatCadence(job.cadence_sec)}). Alege o optiune din lista pentru a o normaliza.`
+                              }
+                            >
+                              {!isStandard && (
+                                <option value={job.cadence_sec}>
+                                  {formatCadence(job.cadence_sec)} (custom)
+                                </option>
+                              )}
+                              {CADENCE_OPTIONS.map((opt) => (
+                                <option key={opt.sec} value={opt.sec}>
+                                  {opt.label}
+                                </option>
+                              ))}
+                            </select>
+                          );
+                        })()}
                       </td>
                       <td className="px-3 py-2 text-muted-foreground">
                         {formatDateTime(job.next_run_at)}
@@ -569,7 +626,8 @@ export default function Monitorizare() {
                         </div>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

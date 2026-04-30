@@ -18,6 +18,66 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.6.3",
+    date: "30 Aprilie 2026",
+    subtitle: "Patch - UX Monitorizare TINTA + cadenta non-standard onesta + paginare Alerte unificata",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Monitorizare - coloana TINTA cu link PortalJust + buton cautare",
+        content:
+          "In tabelul de joburi, numarul dosarului e acum link extern catre portal.just.ro plus un buton mic Search care declanseaza auto-search in lista Dosare (acelasi pattern ca in inbox-ul Alerte).",
+        bullets: [
+          "<a target=\"_blank\"> catre portal.just.ro/SitePages/cautare.aspx?k=<numar> via getPortalJustUrl helper, cu icon ExternalLink 12px.",
+          "Buton 24x24 cu icon Search langa numar -> onOpenDosar(numar) -> handleHistoryClick(\"dosare\", { numarDosar }) -> pendingSearch -> tab Dosare cu auto-search.",
+          "Aplicabil doar joburilor dosar_soap (numar canonic care intra in URL). name_soap / aviz_rnpm raman plain text.",
+        ],
+      },
+      {
+        title: "Monitorizare - dropdown cadenta onest pentru valori non-standard",
+        content:
+          "Dropdown-ul nu mai minte: cand cadence_sec din DB nu e in {4h, 8h, 12h, 24h}, prepende un option \"<valoare> (custom)\" cu border amber, in loc sa afiseze fals \"4h\".",
+        bullets: [
+          "Bug investigat empiric: job 1234/180/2024 (smoke-hardening leftover) avea cadence_sec=600 (10min) in DB; UI afisa silent \"4h\" iar runner-ul folosea valoarea reala -> next_run = last_run + 10min, nu + 4h.",
+          "Fix: cand !CADENCE_OPTIONS.some(o => o.sec === job.cadence_sec), prepende <option value={job.cadence_sec}>{formatCadence(job.cadence_sec)} (custom)</option> si seteaza select.value la valoarea reala.",
+          "Border + text amber (border-amber-500 text-amber-700) ca avertisment vizual; tooltip explica cum sa normalizezi.",
+          "Backend Zod accepta min(600).max(86400) deci dropdown-ul reflecta acum corect realitatea fara a constrange backend-ul.",
+        ],
+      },
+      {
+        title: "Alerte - paginare unificata cu restul aplicatiei",
+        content:
+          "Inbox-ul de alerte foloseste acum componenta partajata TablePagination (la fel ca Cautare Dosare / RNPM / Termene), cu page-size selector + numere de pagina + input de salt.",
+        bullets: [
+          "TablePagination wrappata in <Card> ca dimensiunile zonei sa match-uiasca exact restul tabelelor.",
+          "Page intern 0-indexed (componenta) cu conversie +1 la apelul backend (1-indexed).",
+          "pageSize devine state controlat (default 25) cu reset la pagina 0 cand se schimba.",
+          "Filtrele (kind / severity / from / to / onlyUnread / includeDismissed) reseteaza pagina la 0.",
+        ],
+      },
+      {
+        title: "Alerte - card zoom -1px aditional pe scara",
+        content:
+          "Cardul de alerta scade cu inca un pixel pe toata scara slider-ului fata de v2.6.2.",
+        bullets: [
+          "alertCardZoom = (fontSize.value - 3) / fontSize.value (era - 2). La pozitiile slider (16/18/20/22) zoom-ul devine 81.3% / 83.3% / 85% / 86.4%.",
+          "useFontSize ramane neschimbat - doar coeficientul cardului.",
+        ],
+      },
+      {
+        title: "Validari",
+        content:
+          "Type-check curat, smoke desktop confirma comportamentul, 524 teste backend neschimbate (modificarile sunt strict frontend + prop-passing).",
+        bullets: [
+          "npx tsc --noEmit (frontend) clean.",
+          "Smoke: TINTA dosar_soap deschide portal.just.ro + butonul Search navigheaza in Dosare; dropdown afiseaza \"10min (custom)\" cu amber pe job-ul cu cadenta non-standard; selectia \"4h\" normalizeaza la 14400 dupa refresh; paginare Alerte identica vizual cu Cautare Dosare; zoom card reactiv la slider.",
+        ],
+      },
+    ],
+  },
+  {
     version: "v2.6.2",
     date: "30 Aprilie 2026",
     subtitle: "Patch - UX inbox alerte (card scaling + dosar link extern + solutie completa)",

@@ -15,8 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useFontSize } from "@/hooks/useFontSize";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
-
-const PAGE_SIZE = 25;
+import { TablePagination } from "@/components/table-pagination";
 
 const kindOptions: Array<{ value: AlertKind | "all"; label: string }> = [
   { value: "all", label: "Toate tipurile" },
@@ -248,7 +247,8 @@ export default function Alerts({
 }) {
   const navigate = useNavigate();
   const [rows, setRows] = useState<MonitoringAlert[]>([]);
-  const [page, setPage] = useState(1);
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(25);
   const [total, setTotal] = useState(0);
   const [unread, setUnread] = useState(0);
   const [kind, setKind] = useState<AlertKind | "all">("all");
@@ -266,17 +266,17 @@ export default function Alerts({
   // all four slider positions, and the ratio updates reactively when the user
   // moves the slider because useFontSize re-renders this component.
   const fontSize = useFontSize();
-  const alertCardZoom = (fontSize.value - 2) / fontSize.value;
+  const alertCardZoom = (fontSize.value - 3) / fontSize.value;
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await alertsApi.list({
-        page,
-        pageSize: PAGE_SIZE,
+        page: page + 1,
+        pageSize,
         kind,
         severity,
         onlyUnread,
@@ -292,14 +292,14 @@ export default function Alerts({
     } finally {
       setLoading(false);
     }
-  }, [from, includeDismissed, kind, onlyUnread, page, severity, to]);
+  }, [from, includeDismissed, kind, onlyUnread, page, pageSize, severity, to]);
 
   useEffect(() => {
     load();
   }, [load, streamVersion]);
 
   useEffect(() => {
-    setPage(1);
+    setPage(0);
   }, [from, includeDismissed, kind, onlyUnread, severity, to]);
 
   const markSeen = async (alert: MonitoringAlert) => {
@@ -572,25 +572,18 @@ export default function Alerts({
           })}
         </div>
 
-        <div className="flex items-center justify-between">
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || loading}
-          >
-            Inapoi
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Pagina {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Inainte
-          </Button>
-        </div>
+        {totalPages > 1 && (
+          <Card>
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => { setPageSize(size); setPage(0); }}
+              disabled={loading}
+            />
+          </Card>
+        )}
       </div>
     </div>
   );

@@ -7,19 +7,27 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.6.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.6.3**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.6.2** - patch UX inbox alerte: cardul de alerta scaleaza dinamic 2px
-sub slider-ul de fonturi (font + padding + gap) prin `zoom`, "Dosar: <numar>"
-e link extern catre `portal.just.ro/SitePages/cautare.aspx?k=...` (deschis
-prin `setWindowOpenHandler` + `shell.openExternal`), butonul navigheaza in
-Dosare cu titlu corect ("Deschide ... in lista Dosare"), `solutie_aparuta`
-include acum `solutie_sumar`/`numar_document`/`data_pronuntare` pe detail
-asa ca textul integral al hotararii apare in card, "Detalii suplimentare"
-afiseaza chei + valori (humanizate, JSON-stringificate, scurtate la 200ch),
-`listAlerts` LEFT JOIN `monitoring_jobs` ca alertele vechi sa primeasca
-`numar_dosar` din `target_json` chiar daca runner-ul nu enrich-uise `detail`,
-linia tehnica `Job/Run/Dedup` scoasa din card (zgomot UX).
+**v2.6.3** - patch UX Monitorizare + Alerte: coloana TINTA in tabelul de
+joburi `dosar_soap` afiseaza acum numarul ca link extern catre `portal.just.ro`
++ buton mic Search care declanseaza auto-search in lista Dosare (acelasi
+mecanism `pendingSearch` ca in inbox-ul Alerte), dropdown-ul de cadenta
+prepende un option `"<valoare> (custom)"` cu border amber cand DB-ul are o
+valoare in afara optiunilor standard ({4h, 8h, 12h, 24h}) ca UI-ul sa nu mai
+afiseze fals "4h" peste un job care ruleaza la 10min, paginarea inbox-ului
+de alerte adopta componenta `TablePagination` partajata (la fel ca in Cautare
+Dosare / RNPM, page-size selector + numere de pagina + input de salt) si
+zoom-ul cardului de alerta scade un pixel suplimentar pe scara fontului
+(`zoom: (slider.value - 3) / slider.value`).
+Baza ramane v2.6.2 - patch UX inbox alerte: cardul de alerta scaleaza dinamic
+sub slider-ul de fonturi prin `zoom`, "Dosar: <numar>" e link extern catre
+`portal.just.ro`, butonul navigheaza in Dosare, `solutie_aparuta` include
+`solutie_sumar`/`numar_document`/`data_pronuntare` pe detail, "Detalii
+suplimentare" afiseaza chei + valori (humanizate, JSON-stringificate, scurtate
+la 200ch), `listAlerts` LEFT JOIN `monitoring_jobs` ca alertele vechi sa
+primeasca `numar_dosar` din `target_json` chiar daca runner-ul nu enrich-uise
+`detail`, linia tehnica `Job/Run/Dedup` scoasa din card.
 Baza ramane v2.6.1 - alerte cu context dosar + identitate Windows: alertele
 de monitorizare arata acum `numar_dosar` (injectat la nivelul runner-ului),
 data formatata `dd.mm.yyyy`, ora, complet, solutie + buton "Cauta dosar" care
@@ -81,7 +89,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (524 teste, neschimbate in v2.6.2) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (524 teste, neschimbate in v2.6.3) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

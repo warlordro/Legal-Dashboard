@@ -4,6 +4,93 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## 30 Aprilie 2026 - v2.6.3 - UX Monitorizare TINTA + cadenta non-standard honesty + Alerte pagination unified
+
+Patch UX continuu dupa v2.6.2: in tabelul de joburi din Monitorizare coloana TINTA
+era plain text — fara legatura cu PortalJust si fara scurtatura catre cautarea
+in-app, desi inbox-ul Alerte avea exact acest pattern. Mai grav: dropdown-ul
+de cadenta minte. Empiric pe v2.6.2 un job (`1234/180/2024`, leftover de
+smoke-hardening din PR-4) avea `cadence_sec=600` (10min) in DB, dar UI-ul
+afisa silent "4h" (`DEFAULT_CADENCE_SEC`) pentru ca 600 nu era in
+`CADENCE_OPTIONS`. Runner-ul folosea valoarea reala (next_run = last_run +
+~10min cu jitter), deci utilizatorul vedea o cadenta in tabel si una complet
+diferita la verificarile efective. In paralel, paginarea inbox-ului Alerte
+era custom (Inapoi / Inainte) cu cardurile stivuite vertical, fara page-size
+selector, in timp ce restul aplicatiei (Cautare Dosare, RNPM) folosesc deja
+componenta `TablePagination` partajata.
+
+### Frontend - Monitorizare TINTA cu link + buton cautare
+
+- `frontend/src/pages/Monitorizare.tsx` randeaza coloana TINTA pentru joburi
+  `dosar_soap` cu `<a href={getPortalJustUrl(numar)} target="_blank">` +
+  pictograma `ExternalLink` 12px (acelasi pattern ca in `pages/Alerts.tsx`).
+  Whitelist-ul `portal.just.ro` din `setWindowOpenHandler` ramane neschimbat.
+- Buton mic 24x24 cu pictograma `Search` langa numarul dosarului. Click →
+  `onOpenDosar(numar)` propagat din `App.tsx` ca `handleHistoryClick("dosare",
+  { numarDosar })` → `pendingSearch` → tab Dosare cu auto-search. Acelasi
+  mecanism deja folosit de butonul "Cauta in app" din inbox-ul Alerte.
+- Pentru joburi `name_soap` / `aviz_rnpm` TINTA ramane plain text (nu ai un
+  numar de dosar canonic care sa intre intr-un URL `cautare.aspx?k=`).
+- `App.tsx` adauga prop-ul `onOpenDosar` pe randarea Monitorizare, pe acelasi
+  pattern cu Alerts.
+
+### Frontend - dropdown cadenta non-standard onest
+
+- `frontend/src/pages/Monitorizare.tsx` (linia ~503-530): cand
+  `job.cadence_sec` nu e in `CADENCE_OPTIONS` (4h / 8h / 12h / 24h),
+  dropdown-ul prepende un option dinamic `"<formatCadence> (custom)"` cu
+  valoarea reala (ex: "10min (custom)") si `select.value = job.cadence_sec`,
+  deci utilizatorul vede exact valoarea din DB. Border + text amber
+  (`border-amber-500 text-amber-700`) ca avertisment vizual. Tooltip:
+  `Cadenta non-standard (10min). Alege o optiune din lista pentru a o
+  normaliza.`. Selectia oricarei optiuni standard normalizeaza prin
+  `handleCadenceChange` (PATCH existent → `updateJob` reschedule).
+- `DEFAULT_CADENCE_SEC` constant eliminat din pagina (orphan dupa fix; ramane
+  in `MonitoringAddForm` ca default pentru job nou).
+- Backend Zod accepta `min(600).max(86400)` deci optiunile UI nu sunt
+  exhaustive — fix-ul reflecta corect realitatea fara a constrange backend-ul
+  (job-uri create programatic / smoke / migration pot avea cadente arbitrare
+  in interval).
+
+### Frontend - paginare inbox Alerte unificata
+
+- `frontend/src/pages/Alerts.tsx` foloseste acum componenta partajata
+  `TablePagination` (`@/components/table-pagination`), aceeasi ca in Cautare
+  Dosare / RNPM / Termene. Wrappata in `<Card>` ca dimensiunile zonei sa
+  match-uiasca exact (border + padding standard).
+- `page` schimbat de la 1-indexed la 0-indexed (componenta foloseste
+  0-indexed). API-ul backend ramane 1-indexed, deci `alertsApi.list({ page:
+  page + 1, pageSize })` la apelul de fetch.
+- `pageSize` devine state controlat (default 25) cu setter via
+  `onPageSizeChange={(size) => { setPageSize(size); setPage(0); }}`.
+- Constanta `PAGE_SIZE = 25` eliminata; `totalPages = Math.ceil(total /
+  pageSize)`.
+- Filtrele (kind / severity / from / to / onlyUnread / includeDismissed)
+  reseteaza pagina la 0 in `useEffect` cand se schimba.
+
+### Frontend - alert card zoom −1px aditional
+
+- `frontend/src/pages/Alerts.tsx` (linia ~268): `alertCardZoom = (fontSize.value
+  - 3) / fontSize.value` (era `- 2`). Cardul de alerta scade cu inca un pixel
+  pe toata scara slider-ului. La pozitiile slider-ului (Mic 16, Normal 18,
+  Mare 20, Extra 22), zoom-ul devine 13/16=81.3%, 15/18=83.3%, 17/20=85%,
+  19/22=86.4%. La toate pozitiile cardul ramane perceptibil mai compact decat
+  restul UI-ului dar cu spatiere lizibila.
+
+### Validari
+
+- `npx tsc --noEmit` (frontend) clean.
+- 524/524 teste backend neschimbate (modificarile sunt strict frontend +
+  prop-passing in `App.tsx`).
+- Smoke desktop: TINTA pe job `dosar_soap` deschide portal.just.ro in browser
+  + butonul Search navigheaza in Dosare cu auto-search; dropdown-ul afiseaza
+  "10min (custom)" cu border amber pe job-ul `1234/180/2024`; selectarea "4h"
+  normalizeaza valoarea la 14400 si elimina border-ul amber dupa refresh;
+  paginarea Alerte arata identic cu Cautare Dosare; zoom cardului reactiv la
+  slider.
+
+---
+
 ## 30 Aprilie 2026 - v2.6.2 - UX inbox alerte (card scaling + dosar link extern + solutie completa)
 
 Patch UX dupa feedback in productie pe v2.6.1: cardul de alerta era prea mare
