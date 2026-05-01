@@ -269,38 +269,38 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 
 ---
 
-### Saptamana 10-11 â€” Google SSO + cutover web (PR-9) â€” **PR-UL CRITIC**
+### Saptamana 10-11 - Web auth seam + cutover viitor
 
-> **Tema**: aici se schimba totul. Aplicatia devine accesibila prin browser.
+> **Tema**: separa auth seam-ul conservator de cutover-ul web real. PR-9 nu
+> livreaza SSO/deploy complet; doar pregateste granita fail-closed.
 
-#### PR-9 â€” Auth wire-up: Google Workspace SSO + data export/import
-- **Scop**: deployment server real, login Google, useri din firma se autentifica si vad fiecare dosarele lui. Cezar exporta datele de pe desktop si le importa pentru `cdragos@firma.ro`.
-- **User vede**: in browser, https://legal.firma.ro â†’ login Google â†’ dashboard cu datele lui.
+#### PR-9 - Auth pluggable seam (branch curent)
+- **Scop**: desktop ramane pe identitatea `local`, iar `LEGAL_DASHBOARD_AUTH_MODE=web`
+  valideaza JWT/cookie si refuza fallback-ul la `local`.
+- **User vede**: nimic nou in desktop; web mode este opt-in tehnic pentru teste.
 - **Tasks**:
-  - [ ] Google Cloud Console: client OAuth2 / OIDC, domain restriction `@firma.ro`, redirect URI `https://legal.firma.ro/auth/callback`.
-  - [ ] Backend: routes `/auth/google`, `/auth/callback`, `/auth/logout` cu library `oauth4webapi` sau `arctic`.
-  - [ ] JWT (HS256) in cookie HttpOnly + Secure + SameSite=Lax. Refresh token 7 zile.
-  - [ ] `getOwnerId(c)` schimbat: returneaza `c.var.user.id` daca login, altfel respinge 401 in mod web.
-  - [ ] Login local: form basic doar pentru `email IN admin_allowlist`, argon2id + lockout. Escape hatch daca SSO down.
-  - [ ] Buton desktop "Export pentru web" â†’ ZIP cu DB filtered pe `owner_id='local'` + JSON manifest.
-  - [ ] Admin web "Import for user" â†’ unzip + remap `owner_id='local'` â†’ `cdragos@firma.ro` + replay.
-  - [ ] Server deployment: Docker image existing + nginx reverse proxy + Let's Encrypt cert.
-  - [ ] Env discriminator `APP_MODE=web`.
+  - [x] Auth provider interface: desktop noop + web JWT validation.
+  - [x] `getOwnerId(c)` returneaza userul autentificat in web mode.
+  - [x] `/api/v1/auth/login|logout|refresh`: login ramane 501; logout sterge
+    cookie; refresh reemite JWT cookie.
+  - [x] Env discriminator `LEGAL_DASHBOARD_AUTH_MODE=web` (`APP_MODE` ramane alias).
+  - [x] Remote bind cere `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT secret + ack.
+  - [x] `/health` public si non-sensitive in toate modurile.
 - **DoD**:
-  - [ ] Cezar logheaza pe https://legal.firma.ro cu Google â†’ vede zero date (e cont nou).
-  - [ ] Cezar exporta de pe desktop â†’ admin importa â†’ revine pe web â†’ vede datele lui.
-  - [ ] Coleg din firma logheaza â†’ vede zero (e ok, nu importa pentru el).
-  - [ ] Logout terge cookie + refresh token revoked.
-  - [ ] **Desktop ramane functional 1:1** â€” zero schimbare in UX desktop, rutele legacy `/api/*` neatinse, AI/captcha keys safeStorage neatinse, port 3002 in-process.
-  - [ ] **Captcha provider keys server-side in web mode** â€” 2Captcha/CapSolver se citesc doar din server env/config si nu se accepta din browser/client/BYOK.
-  - [ ] **`.env.example` updated** cu `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `JWT_SECRET`, `WORKSPACE_DOMAIN`, `PUBLIC_URL`, `CAPTCHA_PROVIDER`, `TWOCAPTCHA_API_KEY`, `CAPSOLVER_API_KEY` (CP-2 conform).
-- **Bump**: 3.0.0 major. **Major bump reflecta noul transport web + cutover envelope `/api/v1/*` pe web mode**, NU breaking change pentru desktop. Aplicatia desktop instalata pe stationul user-ului continua sa functioneze identic dupa upgrade la 3.0.0.
-- **Risk**: ðŸ”´ HIGH. Chestii care pot rupe: scope-uri OAuth gresite, redirect URI mismatch, cookies cross-origin, token expiry edge cases, user with `@firma.ro` dar fara cont in users table â†’ first-login flow.
+  - [x] Desktop ramane functional 1:1.
+  - [x] Web missing/invalid token returneaza envelope cu `requestId`.
+  - [x] Pre-auth rate limit protejeaza requesturile fara auth valida.
+  - [x] Docs descriu user pre-seed si faptul ca SSO/cutover raman viitoare.
+- **Bump**: fara bump pe branch (ramane 2.6.8); bump-ul se face in PR-ul de release dupa merge.
+- **Risk**: MEDIUM. Este auth seam, nu productie web cutover.
 
-**MITIGARE OBLIGATORIE inainte de PR-9**:
-- [ ] Test cu **un cont Google** Workspace real (cere un cont test la admin Workspace).
-- [ ] Staging deploy (subdomeniu staging.legal.firma.ro) inainte de prod.
-- [ ] Rollback plan: pastreaza login local activ ca fallback â‡’ daca SSO buggy, intri local cu admin si dezactivezi SSO temporar.
+#### PR-10..PR-12 - Future web cutover
+- Google Cloud Console: client OAuth2/OIDC, domain restriction `@firma.ro`,
+  redirect URI `https://legal.firma.ro/auth/callback`.
+- Backend real Google SSO + server-side sessions/revocation.
+- Export/import desktop-web si remap `owner_id='local'` catre user real.
+- Server deployment: Docker image, reverse proxy, TLS, Litestream.
+- Captcha provider keys server-side in web mode; niciodata BYOK/browser-supplied.
 
 ---
 

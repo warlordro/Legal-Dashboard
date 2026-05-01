@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { Hono } from "hono";
-import { rateLimit, _resetRateLimitForTest } from "./rate-limit.ts";
+import {
+  rateLimit,
+  preAuthRateLimit,
+  resetPreAuthRateLimit,
+  _resetRateLimitForTest,
+} from "./rate-limit.ts";
+import { requestIdContext } from "./requestId.ts";
 
 vi.mock("@hono/node-server/conninfo", () => ({
   getConnInfo: vi.fn(),
@@ -19,6 +25,7 @@ function buildApp(): Hono {
 beforeEach(() => {
   mockedGetConnInfo.mockReset();
   _resetRateLimitForTest();
+  resetPreAuthRateLimit();
 });
 
 function buildAppWithOwner(): Hono {
@@ -157,5 +164,58 @@ describe("rateLimit — per-owner isolation", () => {
 
     const r = await app.request("/api/ping");
     expect(r.status).toBe(200);
+  });
+});
+
+describe("PR-9 fix B2 - pre-auth rate limit", () => {
+  it("returns 429 on the 61st failed unauthenticated request from the same IP", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.50" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.get("/api/ping", (c) =>
+      c.json(
+        {
+          data: null,
+          error: { code: "unauthorized", message: "Authentication token is required." },
+          requestId: c.get("requestId"),
+        },
+        401,
+      ),
+    );
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request("/api/ping");
+      expect(res.status).toBe(401);
+    }
+
+    const limited = await app.request("/api/ping");
+    expect(limited.status).toBe(429);
+    expect(await limited.json()).toMatchObject({
+      data: null,
+      error: { code: "rate_limited" },
+      requestId: expect.any(String),
+    });
+  });
+
+  it("does not consume the pre-auth bucket for successful authenticated requests", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.51" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.get("/api/ping", (c) => c.json({ ok: true, requestId: c.get("requestId") }));
+
+    for (let i = 0; i < 61; i++) {
+      const res = await app.request("/api/ping", {
+        headers: { authorization: "Bearer valid-token-shape" },
+      });
+      expect(res.status).toBe(200);
+    }
   });
 });

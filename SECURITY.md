@@ -66,6 +66,23 @@ and treat the current defaults as insufficient.
   `getConnInfo(c).remote.address` — header-spoofing (`X-Forwarded-For`) cannot
   bypass the limiter. Loopback gets a higher ceiling than other addresses
   because all traffic is the same user.
+- **Auth pluggable seam (PR-9 branch).** `LEGAL_DASHBOARD_AUTH_MODE=desktop`
+  remains the default and sets the seeded `local` identity. In
+  `LEGAL_DASHBOARD_AUTH_MODE=web`, API requests fail closed unless they carry a
+  valid HS256 session token/JWT via `Authorization: Bearer ...` or the
+  `legal_dashboard_session` HttpOnly cookie; the token subject must map to an
+  active row in `users`. Missing/invalid/expired tokens do not fall back to
+  `local`. This is the backend seam only; real Google Workspace SSO/deploy/TLS
+  cutover remains out of scope for this branch.
+- **Boot guard remote+desktop refused (PR-9).** `LEGAL_DASHBOARD_ALLOW_REMOTE=1`
+  cere `LEGAL_DASHBOARD_AUTH_MODE=web`, JWT secret valid si ack explicit.
+  Desktop/local pe LAN este refuzat la boot.
+- **Pre-auth rate limit (PR-9).** `/api/*` are un bucket IP-only inainte de
+  `ownerContext`, ca floods cu token missing/invalid sa nu epuizeze la infinit
+  HMAC/user lookup. Requesturile autentificate cu succes elibereaza bucket-ul
+  pre-auth si raman guvernate de limiter-ul per-owner.
+- **`/health` public si non-sensitive.** Ruta este mount-uita inainte de auth si
+  nu contine PII sau statistici DB; readiness probes functioneaza fara token.
 - **AI key precedence**: if `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or
   `GOOGLE_AI_KEY` are set in the backend environment, they take precedence
   over keys submitted in the request body. This lets an operator who runs the
@@ -113,9 +130,17 @@ The scheduler does **not** add authentication, encryption, or rate-limiting to i
 | Variable | Default | Purpose |
 |---|---|---|
 | `HOST` | `127.0.0.1` | Bind address. Non-loopback values are ignored unless `LEGAL_DASHBOARD_ALLOW_REMOTE=1`. |
-| `LEGAL_DASHBOARD_ALLOW_REMOTE` | unset | Set to `1` to allow non-loopback `HOST` binds. Required for shared / LAN deployments. |
+| `LEGAL_DASHBOARD_ALLOW_REMOTE` | unset | Set to `1` to allow non-loopback `HOST` binds. Requires web auth + explicit ack. |
+| `LEGAL_DASHBOARD_ACK_NO_AUTH` | unset | Must be `i-understand-no-auth-yet` when remote bind is enabled. |
 | `LEGAL_DASHBOARD_PORT` | `3002` | Backend port. Electron sets this automatically. |
 | `LEGAL_DASHBOARD_DB_PATH` | `%APPDATA%/legal-dashboard/legal-dashboard.db` | SQLite path. Electron sets this. |
+| `LEGAL_DASHBOARD_AUTH_MODE` | `desktop` | Auth provider selector. `desktop` keeps `local`; `web` requires signed JWT/session auth. |
+| `APP_MODE` | unset | Backward-compatible alias for `LEGAL_DASHBOARD_AUTH_MODE` when the primary variable is unset. |
+| `LEGAL_DASHBOARD_JWT_SECRET` / `JWT_SECRET` | unset | Required in web auth mode; minimum 32 characters. |
+| `LEGAL_DASHBOARD_JWT_ISSUER` / `LEGAL_DASHBOARD_JWT_AUDIENCE` | unset | Optional JWT claim checks in web auth mode. |
+| `LEGAL_DASHBOARD_JWT_TTL_SECONDS` | `3600` | TTL for refreshed web auth session tokens; allowed range `60..86400`. |
+| `LEGAL_DASHBOARD_AUTH_TOKEN_TTL_SECONDS` | unset | Legacy alias for JWT TTL. |
+| `LEGAL_DASHBOARD_AUTH_COOKIE_SECURE` | secure in web mode | Set to `0` only for local HTTP testing. |
 | `MONITORING_ENABLED` | `1` in Electron | Set to `0` to disable monitoring routes and scheduler. |
 | `MONITORING_DISABLED_KINDS` | unset | Comma-separated monitoring kinds to skip in scheduler claims, for example `dosar_soap,name_soap`. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_AI_KEY` | unset | If set, override in-app keys. Use for server-mode deployments. |
@@ -157,8 +182,8 @@ not BYOK / not supplied by the browser client.
   de la peers non-loopback sunt validate prin `originGuard` middleware:
   Origin/Referer trebuie sa match-uiasca Host-ul, altfel 403
   `csrf_origin_mismatch`. Loopback (desktop la el insusi) trece liber pe
-  toate metodele. Auth real + TLS + per-user isolation raman blocker pana
-  la PR-9 — pana atunci, ack-ul e doar belt-and-suspenders pe retea privata.
+  toate metodele. Remote bind in `desktop` mode este refuzat; TLS, SSO real si
+  token revocation raman pentru PR-10+.
 - **SOAP traffic to `portalquery.just.ro`.** Upstream is HTTP-by-default for a
   legacy government service. The app uses HTTPS where the endpoint supports
   it, but certain portals do not; this is intentional and documented here so

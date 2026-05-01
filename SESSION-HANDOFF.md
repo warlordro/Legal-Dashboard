@@ -389,6 +389,15 @@ Conform roadmap:
 
 ### PR-9 - Auth pluggable (desktop noop / web SSO)
 
+Status pe branch `feat/pr9-auth-pluggable`:
+
+- implementarea conservatoare este auth seam, nu SSO/deploy complet: desktop
+  ramane `local`; web mode valideaza JWT/session si refuza fallback-ul la
+  `local`;
+- real Google Workspace OAuth/OIDC, import/export desktop-web, deploy server,
+  TLS si cutover de productie raman in afara acestui branch pana exista
+  configuratie reala si aprobare explicita.
+
 Scop:
 
 - abstractizeaza identitatea callerului in spatele `getOwnerId(c)` astfel incat
@@ -403,11 +412,12 @@ Tasks planificate:
 
 1. Definire `AuthProvider` interface si implementarea desktop (noop, returneaza
    `local`).
-2. Implementare provider web cu integrare SSO Workspace (token validation +
-   user upsert in `users`).
+2. Implementare provider web fail-closed cu validare JWT/session locala,
+   cookie `legal_dashboard_session`, user lookup in `users` si status `active`.
 3. Build-flag in `backend/src/index.ts` care alege provider-ul in functie de
-   `LEGAL_DASHBOARD_AUTH_MODE` (`desktop` default, `web` opt-in).
-4. Pagina admin pentru promovarea unui user la admin (alternativa la SQLite
-   direct), cu confirm explicit + audit.
+   `LEGAL_DASHBOARD_AUTH_MODE` (`desktop` default, `web` opt-in; `APP_MODE`
+   acceptat doar ca alias).
+4. Rute minime `/api/v1/auth/login|logout|refresh`: login ramane 501 pana la
+   providerul SSO real; logout curata cookie-ul; refresh emite cookie HttpOnly.
 5. Teste: provider desktop (noop), provider web (token valid/invalid/expired),
-   integration `/me` cu provider web.
+   cookie flags, regresii admin/audit.

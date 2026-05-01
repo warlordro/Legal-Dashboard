@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { getDb } from "./schema.ts";
-import { getOwnerId } from "../middleware/owner.ts";
+import { getActorId, getOwnerId } from "../middleware/owner.ts";
 
 // Audit outcomes per PLAN-monitoring-webmode.md §2.4. Stored as TEXT with a
 // CHECK constraint on the column, so divergence here vs DDL would surface as a
@@ -43,10 +43,7 @@ function readContext(c: Context): {
   userAgent: string | null;
 } {
   const ownerId = getOwnerId(c);
-  // Until PR-9 wires real auth, actor === owner. Spec for PR-9: actor_id is the
-  // authenticated user id (which may differ from owner_id when an admin
-  // operates on another tenant).
-  const actorId = ownerId;
+  const actorId = getActorId(c);
   let ip: string | null = null;
   try {
     ip = getConnInfo(c).remote.address ?? null;

@@ -1,5 +1,6 @@
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
@@ -7,9 +8,10 @@ import { rnpmRouter } from "./routes/rnpm.ts";
 import { dosareRouter } from "./routes/dosare.ts";
 import { termeneRouter } from "./routes/termene.ts";
 import { aiRouter } from "./routes/ai.ts";
-import { rateLimit } from "./middleware/rate-limit.ts";
+import { preAuthRateLimit, rateLimit } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
+import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
 import {
   monitoringRouter,
@@ -22,6 +24,7 @@ import { aiUsageRouter } from "./routes/aiUsage.ts";
 import { meRouter } from "./routes/me.ts";
 import { adminRouter } from "./routes/admin.ts";
 import { dashboardRouter } from "./routes/dashboard.ts";
+import { authRouter } from "./routes/auth.ts";
 import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
@@ -86,7 +89,9 @@ if (process.env.NODE_ENV !== "production") {
     cors({
       origin: ["http://localhost:5173", "http://localhost:4173"],
       allowMethods: ["GET", "POST", "OPTIONS"],
-      allowHeaders: ["Content-Type"],
+      // PR-9 M3: Bearer auth necesita ca preflight-ul sa permita Authorization,
+      // altfel browser-ul dev (Vite) nu poate trimite token-ul dupa OPTIONS.
+      allowHeaders: ["Content-Type", "Authorization"],
     })
   );
 }
@@ -107,31 +112,44 @@ function fatalBoot(reason: string, err: unknown): never {
   process.exit(1);
 }
 
-// PR-1 web-readiness seam: populate c.get("ownerId") for every request.
-// Desktop and Faza 1 = "local"; PR-9 swaps for JWT-derived user id. Mounted
-// before rateLimit so a future per-owner rate-limit can read the variable.
-app.use("*", ownerContext);
+try {
+  validateAuthConfig();
+} catch (e) {
+  fatalBoot("auth config invalid", e);
+}
 
-// PR-3: per-request correlation id, surfaced on /api/v1/* envelope responses
-// and on `x-request-id` response header. Must run after ownerContext but
-// before any handler that uses recordAudit (audit_log can't see requestId yet,
-// but downstream loggers will).
+// PR-9 fix B3: requestId trebuie sa existe inainte ca ownerContext sa returneze
+// 401/403, ca raspunsurile auth sa includa `x-request-id` si `requestId` in
+// envelope (fail()).
 app.use("*", requestIdContext);
 
-app.use("/api/*", rateLimit);
+// PR-9 fix B4: /health trebuie sa fie disponibil fara DB user lookup. Mount-uit
+// inainte de ownerContext, ca readiness probes sa nu cada cand users.local
+// lipseste sau auth web nu are token.
+app.get("/health", healthHandler);
+
+// PR-9 fix B2: pre-auth IP-only rate limiter pe /api/* (cheap, no DB).
+// Floods cu token missing/invalid se opresc inainte sa loveasca ownerContext.
+app.use("/api/*", preAuthRateLimit);
+
+// PR-1 web-readiness seam: populate c.get("ownerId") for every request.
+// Desktop remains "local"; PR-9 web mode swaps for JWT-derived user id and
+// fails closed for API calls.
+app.use("*", ownerContext);
 
 // F2 audit hardening (2026-04-30): CSRF defense on state-changing routes when
 // the backend is bound to a non-loopback interface. Mounted unconditionally —
 // the middleware itself short-circuits for safe methods + loopback peers, so
 // the desktop loopback path stays unchanged. Host/Origin parsing happens only
 // for cross-LAN POST/PUT/PATCH/DELETE.
+app.use("/api/*", rateLimit);
 app.use("/api/*", originGuard);
 
 // Readiness flag: schema migrations + prewarm run before serve(), but if the DB
 // is locked by another tool or temporarily inaccessible we keep /health serving
 // 503 until ready=true. Container orchestrators / Electron splash poll this.
 let ready = false;
-app.get("/health", (c) => {
+function healthHandler(c: Context): Response {
   if (!ready) {
     return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
   }
@@ -154,13 +172,14 @@ app.get("/health", (c) => {
     service: "Legal Dashboard API",
     monitoring,
   });
-});
+}
 
 app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
 app.route("/api/termene", termeneRouter);
 app.route("/api/ai", aiRouter);
 app.route("/api/v1/ai-usage", aiUsageRouter);
+app.route("/api/v1/auth", authRouter);
 // PR-8: current-user profile (always mounted) + admin surface (gated by
 // requireRole('admin') inside the router so non-admins get 403, not 404).
 app.route("/api/v1/me", meRouter);
@@ -213,6 +232,22 @@ if (!loopback.has(rawHost) && process.env.LEGAL_DASHBOARD_ALLOW_REMOTE !== "1") 
 const REMOTE_BIND_ACTIVE =
   process.env.LEGAL_DASHBOARD_ALLOW_REMOTE === "1" || !loopback.has(hostname);
 if (REMOTE_BIND_ACTIVE) {
+  // PR-9 fix B1: remote bind FARA auth web e refuz pentru ca toti clientii LAN
+  // ar aparea ca shared `local` (audit trail inutil, ownership leak). Singurul
+  // mod sanatos sa expui pe LAN e auth_mode=web cu JWT secret real.
+  const authMode = getAuthMode();
+  if (authMode !== "web") {
+    fatalBoot(
+      "remote bind requires auth_mode=web",
+      new Error(
+        "LEGAL_DASHBOARD_ALLOW_REMOTE=1 (or non-loopback HOST) este setat dar " +
+          `LEGAL_DASHBOARD_AUTH_MODE='${authMode}'. Remote bind cere ` +
+          "LEGAL_DASHBOARD_AUTH_MODE=web + LEGAL_DASHBOARD_JWT_SECRET valid. " +
+          "Pentru desktop local, lasa hostname pe loopback (127.0.0.1).",
+      ),
+    );
+  }
+
   const ack = process.env.LEGAL_DASHBOARD_ACK_NO_AUTH;
   if (ack !== "i-understand-no-auth-yet") {
     fatalBoot(
@@ -220,17 +255,16 @@ if (REMOTE_BIND_ACTIVE) {
       new Error(
         "LEGAL_DASHBOARD_ALLOW_REMOTE=1 (or non-loopback HOST) is set but " +
           "LEGAL_DASHBOARD_ACK_NO_AUTH != 'i-understand-no-auth-yet'. " +
-          "Toate API-urile sunt expuse fara auth pana la PR-9; setati " +
+          "Remote bind ramane opt-in explicit pana la SSO/deploy final; setati " +
           "LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet ca sa " +
           "confirmati ca intelegeti riscul, sau lasati hostname pe loopback.",
       ),
     );
   }
   console.warn("====================================================================");
-  console.warn("WARNING: Legal Dashboard ruleaza pe interfata non-loopback FARA AUTH.");
-  console.warn("Toate API-urile (monitoring, alerts, AI, RNPM, exports) sunt accesibile");
-  console.warn("oricarui client care poate ajunge la port. Nu folosi in productie pana");
-  console.warn("la PR-9 (auth real). Pentru desktop loopback, ignora acest mesaj.");
+  console.warn("WARNING: Legal Dashboard ruleaza pe interfata non-loopback.");
+  console.warn(`Auth mode: ${authMode} (JWT validation activ).`);
+  console.warn("Toate API-urile sunt accesibile oricarui client cu token valid.");
   console.warn(`Ack acceptat: LEGAL_DASHBOARD_ACK_NO_AUTH=${ack}`);
   console.warn("====================================================================");
 }

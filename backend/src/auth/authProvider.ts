@@ -1,0 +1,97 @@
+import type { Context } from "hono";
+import { getCookie } from "hono/cookie";
+import { getAuthMode, getJwtAudience, getJwtIssuer, requireJwtSecret, type AuthMode } from "./config.ts";
+import { verifyAuthToken, type AuthJwtPayload } from "./jwt.ts";
+import { getUserById, type UserRow } from "../db/userRepository.ts";
+
+export const AUTH_COOKIE_NAME = "legal_dashboard_session";
+
+export interface AuthenticatedContext {
+  ownerId: string;
+  actorId: string;
+  user: UserRow | null;
+  tokenPayload?: AuthJwtPayload;
+}
+
+export interface AuthProvider {
+  mode: AuthMode;
+  authenticate(c: Context): AuthenticatedContext;
+}
+
+export class AuthenticationError extends Error {
+  constructor(
+    public readonly status: 401 | 403,
+    public readonly code: string,
+    message: string,
+  ) {
+    super(message);
+    this.name = "AuthenticationError";
+  }
+}
+
+function readBearerToken(c: Context): string | null {
+  const authorization = c.req.header("authorization");
+  if (!authorization) return null;
+  const match = /^Bearer\s+(.+)$/i.exec(authorization.trim());
+  return match?.[1] ?? null;
+}
+
+function readRequestToken(c: Context): string | null {
+  return readBearerToken(c) ?? getCookie(c, AUTH_COOKIE_NAME) ?? null;
+}
+
+export class DesktopAuthProvider implements AuthProvider {
+  readonly mode = "desktop" as const;
+
+  authenticate(): AuthenticatedContext {
+    const user = getUserById("local");
+    return {
+      ownerId: "local",
+      actorId: "local",
+      user,
+    };
+  }
+}
+
+export class WebJwtAuthProvider implements AuthProvider {
+  readonly mode = "web" as const;
+
+  authenticate(c: Context): AuthenticatedContext {
+    const token = readRequestToken(c);
+    if (!token) {
+      throw new AuthenticationError(401, "unauthorized", "Authentication token is required.");
+    }
+
+    let payload: AuthJwtPayload;
+    try {
+      payload = verifyAuthToken(token, {
+        secret: requireJwtSecret(),
+        issuer: getJwtIssuer(),
+        audience: getJwtAudience(),
+      });
+    } catch (err) {
+      const code = err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "invalid_token";
+      throw new AuthenticationError(401, code, "Authentication token is invalid.");
+    }
+
+    const user = getUserById(payload.sub);
+    if (user === null) {
+      throw new AuthenticationError(401, "user_not_found", "Authenticated user does not exist.");
+    }
+    if (user.status !== "active") {
+      throw new AuthenticationError(403, "account_inactive", "Account is not active.");
+    }
+
+    return {
+      ownerId: user.id,
+      actorId: user.id,
+      user,
+      tokenPayload: payload,
+    };
+  }
+}
+
+export function getAuthProvider(): AuthProvider {
+  const mode = getAuthMode();
+  return mode === "web" ? new WebJwtAuthProvider() : new DesktopAuthProvider();
+}

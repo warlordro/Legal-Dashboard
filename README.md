@@ -211,6 +211,37 @@ sau trimise din browser.
 Port backend default: `3002`. Suprascrie cu `LEGAL_DASHBOARD_PORT`.
 LAN exposure blocat by default; opt-in explicit cu `LEGAL_DASHBOARD_ALLOW_REMOTE=1`.
 
+## Auth modes (PR-9)
+
+Aplicatia suporta doua moduri de autentificare:
+
+- **desktop** (default): single-user `local` identity, no token validation.
+  Folosit cand backend-ul ruleaza in-process via Electron.
+- **web**: JWT validation pe `Authorization: Bearer <token>` sau cookie
+  `legal_dashboard_session`. Cere `LEGAL_DASHBOARD_JWT_SECRET` (32+ bytes).
+
+### Env vars
+
+- `LEGAL_DASHBOARD_AUTH_MODE` - `desktop` | `web` (default `desktop`)
+- `LEGAL_DASHBOARD_JWT_SECRET` - required pentru web mode
+- `LEGAL_DASHBOARD_JWT_ISSUER` - optional, default `legal-dashboard`
+- `LEGAL_DASHBOARD_JWT_AUDIENCE` - optional
+- `LEGAL_DASHBOARD_JWT_TTL_SECONDS` - optional, default `3600`
+- `LEGAL_DASHBOARD_ALLOW_REMOTE=1` - opt-in pentru bind non-loopback; cere
+  `LEGAL_DASHBOARD_AUTH_MODE=web` + `LEGAL_DASHBOARD_ACK_NO_AUTH`
+- `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet` - confirmare boot
+  pentru bind non-loopback
+
+### Setup user pentru web mode
+
+JWT `sub` trebuie sa mapeze la o coloana activa `users.id`. Pre-seedati userii
+manual pana la PR-10/PR-11 (server-side sessions + Google SSO). `/api/v1/auth/login`
+returneaza 501 in acest sprint - login-ul real vine in PR-11.
+
+### `/health`
+
+`/health` ramane public si non-sensitive in toate modurile.
+
 ## Arhitectura (scurt)
 
 - `electron/main.js` - main process: single-instance lock, CSP, safeStorage IPC,

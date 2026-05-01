@@ -60,3 +60,74 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
 export function _resetRateLimitForTest(): void {
   rateLimitMap.clear();
 }
+
+// PR-9 fix B2: limiter pre-auth, IP-only, montat inainte de ownerContext.
+// Scop: floods cu token missing/invalid sunt oprite la nivelul IP fara sa
+// loveasca ownerContext la infinit. Bucket separat ca sa nu interfereze cu
+// limiter-ul per-owner. Requesturile care trec auth cu succes elibereaza
+// bucket-ul dupa next(), astfel traficul valid ramane guvernat doar de
+// limiter-ul existing per-owner.
+const PRE_AUTH_LIMIT = 60; // failed unauthenticated requests / minut / IP
+const PRE_AUTH_PREFIX = "preauth:";
+const preAuthMap = new Map<string, { count: number; resetTime: number }>();
+
+function releasePreAuthAttempt(key: string): void {
+  const entry = preAuthMap.get(key);
+  if (!entry) return;
+  entry.count -= 1;
+  if (entry.count <= 0) preAuthMap.delete(key);
+}
+
+export async function preAuthRateLimit(c: Context, next: Next): Promise<Response | void> {
+  const ip = getConnInfo(c).remote.address;
+  if (!ip) {
+    return c.json(
+      {
+        data: null,
+        error: { code: "origin_unavailable", message: "Origine indisponibila." },
+        requestId: c.get("requestId") ?? "",
+      },
+      503,
+    );
+  }
+
+  const key = `${PRE_AUTH_PREFIX}${ip}`;
+  const now = Date.now();
+  const entry = preAuthMap.get(key);
+
+  if (!entry || now > entry.resetTime) {
+    preAuthMap.set(key, { count: 1, resetTime: now + RATE_WINDOW });
+  } else {
+    entry.count += 1;
+    if (entry.count > PRE_AUTH_LIMIT) {
+      return c.json(
+        {
+          data: null,
+          error: { code: "rate_limited", message: "Too many unauthenticated requests." },
+          requestId: c.get("requestId") ?? "",
+        },
+        429,
+      );
+    }
+  }
+
+  await next();
+
+  // Doar esecurile de autentificare consuma bucket-ul pre-auth. Traficul valid,
+  // inclusiv requesturile care ajung la limiter-ul per-owner, nu trebuie blocat
+  // de acest bucket cheap.
+  if (c.res.status !== 401 && c.res.status !== 403) {
+    releasePreAuthAttempt(key);
+  }
+
+  if (preAuthMap.size > 1000) {
+    for (const [k, v] of preAuthMap) {
+      if (now > v.resetTime) preAuthMap.delete(k);
+    }
+  }
+}
+
+// Export pentru teste: reset bucket-ul intre teste.
+export function resetPreAuthRateLimit(): void {
+  preAuthMap.clear();
+}
