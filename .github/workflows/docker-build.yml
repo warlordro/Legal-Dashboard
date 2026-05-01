@@ -70,9 +70,12 @@ jobs:
           # interface. The security guard refuses non-loopback HOST without the
           # explicit ALLOW_REMOTE opt-in — it's the same gate users hit when
           # exposing the LAN port at home.
+          # v2.6.4 (F2) adds a fail-closed gate: ALLOW_REMOTE=1 also requires
+          # ACK_NO_AUTH=i-understand-no-auth-yet until PR-9 ships real auth.
           docker run -d --name ld-ci -p 3002:3002 \
             -e HOST=0.0.0.0 \
             -e LEGAL_DASHBOARD_ALLOW_REMOTE=1 \
+            -e LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet \
             legal-dashboard:ci
           # Poll /health every 2s for 60s. start-period=120s keeps healthcheck
           # green during prewarm, but the endpoint itself flips to 200 as soon
