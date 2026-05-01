@@ -689,6 +689,48 @@ export const admin = {
   },
 };
 
+// PR-A (v2.7.0) — dashboard summary endpoint pentru KPI strip-ul de pe homepage.
+// Owner-scoped intern in backend, fara params expuse aici. Polling-uit la 30s
+// din Dashboard.tsx + refresh on-demand cand SSE livreaza un alert nou (delta
+// pe alerts.unseen).
+export interface DashboardJobsBlock {
+  active: number;
+  byKind: { dosar_soap: number; name_soap: number };
+}
+
+export interface DashboardAlertsBlock {
+  unseen: number;
+  last24h: number;
+}
+
+export interface DashboardRunsBlock {
+  ok: number;
+  error: number;
+  timeout: number;
+  total: number;
+}
+
+export interface DashboardAiBlock {
+  costUsd: number;
+  calls: number;
+  tokens: number;
+}
+
+export interface DashboardSummary {
+  jobs: DashboardJobsBlock;
+  alerts: DashboardAlertsBlock;
+  runs: DashboardRunsBlock;
+  ai: DashboardAiBlock;
+  generatedAt: string;
+}
+
+export const dashboardApi = {
+  summary: async (signal?: AbortSignal): Promise<DashboardSummary> => {
+    const res = await fetch("/api/v1/dashboard/summary", { signal });
+    return unwrapMonitoring<DashboardSummary>(res);
+  },
+};
+
 export function formatMonitoringTarget(job: MonitoringJob): string {
   try {
     const t = JSON.parse(job.target_json) as Record<string, unknown>;

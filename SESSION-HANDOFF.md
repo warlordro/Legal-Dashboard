@@ -1,14 +1,89 @@
-# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.8 livrate / PR-9 urmator
+# Session Handoff - PR-A v2.7.0 livrat (Dashboard redesign sprint, 1/3) / PR-B v2.8.0 urmator
 
-**Data**: 2026-05-01
-**Branch local**: `main`
+**Data**: 2026-05-02
+**Branch local**: `feat/dashboard-redesign`
 **Remote**: `main` local este sincronizat cu `origin/main` la commit-ul
-`8e0eaa6` (`fix: v2.6.8 - review-driven hardening...`). PR-7 v2.5.0, patch
-v2.5.1, PR-8 v2.6.0 si patch-urile v2.6.1..v2.6.8 sunt deja pe `origin/main`.
+`8e0eaa6` (`fix: v2.6.8 - review-driven hardening...`). Branch-ul
+`feat/dashboard-redesign` contine commit-ul de PR-A v2.7.0 (push-ul catre
+`origin/feat/dashboard-redesign` se face in pasul de commit).
+PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0 si patch-urile v2.6.1..v2.6.8 sunt
+deja pe `origin/main`.
 **Tag-uri locale**: `v2.5.0`..`v2.6.8` exista local. Tag-urile `v2.6.5`..
 `v2.6.8` au fost create local la 2026-05-01; push-ul tag-urilor catre GitHub
-ramane nefacut fara confirmare explicita.
-**Versiune curenta**: `v2.6.8`
+ramane nefacut fara confirmare explicita. Tag `v2.7.0` nu este creat inca —
+se creeaza dupa merge in `main` si dupa PR-B+PR-C complete.
+**Versiune curenta**: `v2.7.0`
+
+## TL;DR (v2.7.0 — PR-A: Dashboard redesign sprint, 1/3 — KPI strip + Quick Actions)
+
+Prima livrare din sprint-ul de Dashboard redesign (3 PR-uri secventiale:
+PR-A v2.7.0 KPI+QuickActions, PR-B v2.8.0 timeline+charts, PR-C v2.9.0
+reports). Zero schema change, zero migration. Endpoint nou owner-scoped
+agregare + 2 componente UI noi peste pagina Dashboard existenta.
+
+**Backend - endpoint nou `/api/v1/dashboard/summary`:**
+
+- `backend/src/routes/dashboard.ts`: read-only aggregation, owner-scoped via
+  `getOwnerId(c)`, wrapped in `withMaintenanceRead` ca sa coexiste cu
+  backup/restore. Returneaza envelope v1 prin `ok(payload, c)`.
+- 4 blocuri agregate: `jobs.active` + `jobs.byKind {dosar_soap, name_soap}`,
+  `alerts.unseen` + `alerts.last24h`, `runs {ok, error, timeout, total}`
+  (status `aborted` foldat in bucket `error`, runs `running` excluse din
+  totals), `ai {costUsd, calls, tokens}` 24h cu closed lower bound +
+  `cost_usd_milli/1000` conversie.
+- Mount in `backend/src/index.ts`: `app.route("/api/v1/dashboard",
+  dashboardRouter)`.
+
+**Frontend - KPI strip + Quick Actions:**
+
+- `frontend/src/components/dashboard/KpiStrip.tsx`: 4 carduri responsive
+  (stacked → 2 col → 4 col), iconite ListChecks (blue), Bell (amber),
+  Activity (green), Sparkles (purple). Loading skeleton cu Loader2, error
+  state inline destructive. Helperi locali `formatUsd` (sub-cent precision)
+  si `formatTokens` (k/M).
+- `frontend/src/components/dashboard/QuickActions.tsx`: 6 butoane in grid
+  (2 → 3 → 6 col): "Cauta dosar" (/dosare), "Monitorizare" (/monitorizare),
+  "RNPM" (/rnpm), "Alerte" (/alerte), "Termene" (/termene), "Export raport"
+  (FileDown, `disabled: true`, tooltip "Disponibil in v2.9.0 (PR-C)").
+- `frontend/src/pages/Dashboard.tsx`: KpiStrip + QuickActions plasate
+  deasupra `LastDosareCard`. State `summary`/`summaryLoading`/`summaryError`
+  + `summaryAbortRef`. Polling 30s prin `setInterval` cu `AbortController`
+  per request (AbortError ignorat, MonitoringApiError extras la mesaj).
+
+**Frontend - API surface:**
+
+- `frontend/src/lib/api.ts`: adaugat `dashboardApi.summary(signal?)` care
+  reuseste `unwrapMonitoring`/`MonitoringApiError`. Interfete exportate:
+  `DashboardSummary`, `DashboardJobsBlock`, `DashboardAlertsBlock`,
+  `DashboardRunsBlock`, `DashboardAiBlock`. Surface adaugata in `api.ts`
+  (NU intr-un fisier `dashboardApi.ts` separat) ca sa nu loveasca
+  hook-ul `block-renderer-fetch.mjs` care interzice raw fetch in afara
+  `lib/api.ts` sau `lib/rnpmApi.ts`.
+
+**Tests:**
+
+- `backend/src/routes/dashboard.test.ts`: 7 teste noi. Pattern Hono test
+  app cu middleware `x-test-owner` + `requestIdContext`.
+- Acoperire: envelope+empty state, `jobs.byKind` filtru active vs paused,
+  alerts unseen vs last24h windowing, runs status bucketing cu `aborted`
+  foldat in `error`, still-running excluse cu doua joburi separate
+  (constraint `idx_one_running_per_job` permite un singur `running` per
+  job_id), AI 24h aggregation, owner isolation 2 tenants.
+
+**Coordonare cu Codex (PR-9 auth pluggable):**
+
+- Codex landase initial work-ul de PR-9 (auth/, owner.test.ts, auth.ts,
+  auth.test.ts + modificari pe auditRepository/owner/index/.env.example/
+  SECURITY/SESSION-HANDOFF) pe branch-ul `feat/dashboard-redesign` din
+  eroare. Pastrat in stash labelat pentru pop pe branch-ul corect
+  `feat/pr9-auth-pluggable`. `dashboard.ts` pre-existent salvat in
+  `/c/tmp/pr-a-backup/` pe durata stash-ului si restaurat dupa.
+
+**Verificari**: `npx tsc --noEmit -p backend/tsconfig.json` → OK,
+`npx tsc --noEmit` (frontend) → OK, `npm test --workspace=backend` →
+**553/553 verzi** (546 baseline din v2.6.4 + 7 noi PR-A), `npm run build`
+→ OK, `biome check` pe fisierele atinse → OK, smoke headless backend cu
+`curl /api/v1/dashboard/summary` → envelope v1 corect.
 
 ## TL;DR (v2.6.8 — Review-driven hardening: a11y + template fragility + doc accuracy)
 

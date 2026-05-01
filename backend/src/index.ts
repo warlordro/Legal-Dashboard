@@ -21,6 +21,7 @@ import { alertsRouter } from "./routes/alerts.ts";
 import { aiUsageRouter } from "./routes/aiUsage.ts";
 import { meRouter } from "./routes/me.ts";
 import { adminRouter } from "./routes/admin.ts";
+import { dashboardRouter } from "./routes/dashboard.ts";
 import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
@@ -164,6 +165,9 @@ app.route("/api/v1/ai-usage", aiUsageRouter);
 // requireRole('admin') inside the router so non-admins get 403, not 404).
 app.route("/api/v1/me", meRouter);
 app.route("/api/v1/admin", adminRouter);
+// PR-A (v2.7.0): dashboard summary aggregation endpoint pentru KPI strip.
+// Owner-scoped, wrapped in withMaintenanceRead pentru a coexista cu backup/restore.
+app.route("/api/v1/dashboard", dashboardRouter);
 
 // Monitoring (routes + scheduler) is default-ON since PR-4 C6: desktop users
 // get the feature "for free" on upgrade. The kill switch MONITORING_ENABLED=0

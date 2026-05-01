@@ -443,3 +443,23 @@ export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
   // .immediate() runs the transaction with BEGIN IMMEDIATE. See block comment.
   return tx.immediate(input.now, input.limit);
 }
+
+// PR-A v2.7.0: aggregare pentru /api/v1/dashboard/summary. Numara joburile
+// active grupate pe kind, owner-scoped. Tipurile pe care UI-ul nu le breakdown
+// (e.g. aviz_rnpm) sunt incluse in suma totala dar nu separate — caller-ul
+// decide cum sa le mapeze in DashboardJobsBlock.byKind.
+export interface JobsByKindRow {
+  kind: JobKind;
+  n: number;
+}
+
+export function aggregateActiveJobsByKindForOwner(ownerId: string): JobsByKindRow[] {
+  return getDb()
+    .prepare(
+      `SELECT kind, COUNT(*) AS n
+       FROM monitoring_jobs
+       WHERE owner_id = ? AND active = 1
+       GROUP BY kind`,
+    )
+    .all(ownerId) as JobsByKindRow[];
+}

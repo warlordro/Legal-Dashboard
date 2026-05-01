@@ -151,3 +151,28 @@ export function purgeOldRuns(retentionDays = 90): number {
     .run(cutoff);
   return info.changes;
 }
+
+// PR-A v2.7.0: aggregare pentru /api/v1/dashboard/summary (runs block).
+// Numara doar randurile terminale (`ended_at IS NOT NULL`) — KPI-ul UI este
+// "completed runs in the last 24h", nu "started in the last 24h". Caller-ul
+// foldeaza `aborted` peste `error` la prezentare.
+export interface RunsByStatusRow {
+  status: string;
+  n: number;
+}
+
+export function aggregateFinalizedRunsByStatusSince(
+  ownerId: string,
+  since: string,
+): RunsByStatusRow[] {
+  return getDb()
+    .prepare(
+      `SELECT status, COUNT(*) AS n
+       FROM monitoring_runs
+       WHERE owner_id = ?
+         AND ended_at IS NOT NULL
+         AND ended_at >= ?
+       GROUP BY status`,
+    )
+    .all(ownerId, since) as RunsByStatusRow[];
+}

@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1..v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5..v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01). Urmatorul PR planificat: PR-9 Auth pluggable (desktop noop / web SSO).
-> **Versiune document**: 1.12 (2026-05-01)
+> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1..v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5..v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01) + **PR-A v2.7.0 Dashboard redesign sprint, 1/3 — KPI strip + QuickActions** (2026-05-02, branch `feat/dashboard-redesign`). Urmatorul PR planificat: PR-9 Auth pluggable (desktop noop / web SSO) — Codex incepe in paralel pe `feat/pr9-auth-pluggable`. Sprint Dashboard redesign continua cu PR-B v2.8.0 (timeline+charts) si PR-C v2.9.0 (reports).
+> **Versiune document**: 1.13 (2026-05-02)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)

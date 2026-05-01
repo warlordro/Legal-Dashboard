@@ -401,6 +401,21 @@ export function countUnreadAlerts(ownerId: string): number {
   ).n;
 }
 
+// PR-A v2.7.0: count pentru /api/v1/dashboard/summary (alerts.last24h).
+// `since` e ISO string, comparat lexicografic cu created_at — sigur cat timp
+// emit-ul ramane format ISO complet (Z-suffix sau offset explicit).
+export function countAlertsCreatedSince(ownerId: string, since: string): number {
+  return (
+    getDb()
+      .prepare(
+        `SELECT COUNT(*) AS n
+         FROM monitoring_alerts
+         WHERE owner_id = ? AND created_at >= ?`,
+      )
+      .get(ownerId, since) as { n: number }
+  ).n;
+}
+
 export function getAlertById(
   ownerId: string,
   id: number,

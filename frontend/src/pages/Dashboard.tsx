@@ -1,6 +1,6 @@
-import { useCallback, useState } from "react";
-import { Scale, FileSearch, CalendarDays, ArrowRight, ScrollText, BookOpen } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Scale, ScrollText, BookOpen } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,6 +9,15 @@ import type { Dosar, SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry } from "@/types/rnpm";
 import { LastDosareCard, LastRnpmCard } from "./dashboard-summary-cards";
 import { ChangelogDialog, ManualDialog } from "./dashboard-modals";
+import { KpiStrip } from "@/components/dashboard/KpiStrip";
+import { QuickActions } from "@/components/dashboard/QuickActions";
+import { dashboardApi, MonitoringApiError, type DashboardSummary } from "@/lib/api";
+
+// PR-A (v2.7.0) — refresh-uim KPI strip-ul la fiecare 30s. SSE delta pe
+// alerts.unseen ramane pentru PR-B (cand prop-ul `alertsStreamVersion`
+// din App.tsx va fi plumb-uit pana aici); polling-ul curent surprinde
+// orice alert nou in maximum 30s, ceea ce e suficient pentru MVP.
+const SUMMARY_POLL_MS = 30_000;
 
 const APP_VERSION = `v${__APP_VERSION__}`;
 
@@ -28,29 +37,6 @@ interface DashboardProps {
   history: SearchHistoryEntry[];
   onHistoryClick: (type: "dosare" | "termene", params: SearchParams) => void;
 }
-
-const features = [
-  {
-    icon: FileSearch,
-    title: "Cautare Dosare",
-    description:
-      "Cauta dosare dupa numar, parti implicate sau obiectul cauzei. Filtrare dupa tip instanta si institutie.",
-    to: "/dosare",
-    badges: ["Penal", "Civil", "Contencios adm.", "Litigii munca", "Faliment", "Profesionisti", "Altele"],
-    color: "text-blue-500",
-    bg: "bg-blue-500/10",
-  },
-  {
-    icon: CalendarDays,
-    title: "Termene & Calendar",
-    description:
-      "Vizualizeaza termene viitoare, istoricul sedintelor si solutiile pronuntate. Export pentru planificare.",
-    to: "/termene",
-    badges: ["Penal", "Civil", "Contencios adm.", "Litigii munca", "Faliment", "Profesionisti", "Altele"],
-    color: "text-purple-500",
-    bg: "bg-purple-500/10",
-  },
-];
 
 const tipuriProces = [
   { label: "Penal", desc: "Dosare penale, infractiuni", color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
@@ -83,6 +69,43 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
   const [showChangelog, setShowChangelog] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [isDownloadingManual, setIsDownloadingManual] = useState(false);
+  const [summary, setSummary] = useState<DashboardSummary | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
+  // AbortController coalesces overlapping requests when polling fires while
+  // a previous request is still in flight (slow network, sleep/wake, etc.).
+  const summaryAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    const fetchSummary = async () => {
+      summaryAbortRef.current?.abort();
+      const controller = new AbortController();
+      summaryAbortRef.current = controller;
+      setSummaryLoading(true);
+      try {
+        const data = await dashboardApi.summary(controller.signal);
+        if (cancelled) return;
+        setSummary(data);
+        setSummaryError(null);
+      } catch (err) {
+        if (cancelled) return;
+        if ((err as { name?: string })?.name === "AbortError") return;
+        const message = err instanceof MonitoringApiError ? err.message : "Eroare necunoscuta.";
+        setSummaryError(message);
+      } finally {
+        if (!cancelled) setSummaryLoading(false);
+      }
+    };
+    void fetchSummary();
+    const interval = window.setInterval(fetchSummary, SUMMARY_POLL_MS);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+      summaryAbortRef.current?.abort();
+    };
+  }, []);
+
   const hasDosareData = dosareState.searched && dosareState.allDosare.length > 0;
   const lastDosareEntry = history.find((e) => e.type === "dosare");
   // Live state wins; fall back to persisted history entry after restart.
@@ -142,6 +165,10 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
         </div>
       </div>
 
+      <KpiStrip data={summary} loading={summaryLoading} error={summaryError} />
+
+      <QuickActions />
+
       {dosareCard && (
         <LastDosareCard
           count={dosareCard.count}
@@ -153,36 +180,6 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
       )}
 
       {lastRnpm && <LastRnpmCard entry={lastRnpm} />}
-
-      {/* Feature cards */}
-      <div className="grid gap-4 sm:grid-cols-2">
-        {features.map(({ icon: Icon, title, description, to, badges, color, bg }) => (
-          <Card key={to} className="group hover:shadow-md transition-shadow">
-            <CardHeader>
-              <div className={`mb-3 flex h-10 w-10 items-center justify-center rounded-lg ${bg}`}>
-                <Icon className={`h-5 w-5 ${color}`} />
-              </div>
-              <CardTitle>{title}</CardTitle>
-              <CardDescription>{description}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="mb-4 flex flex-wrap gap-1.5">
-                {badges.map((b) => (
-                  <Badge key={b} variant="secondary">
-                    {b}
-                  </Badge>
-                ))}
-              </div>
-              <Link
-                to={to}
-                className="inline-flex items-center gap-2 rounded-md bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground shadow transition-colors hover:bg-primary/90"
-              >
-                Deschide <ArrowRight className="h-4 w-4" />
-              </Link>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
 
       {/* Tipuri de procese */}
       <div>

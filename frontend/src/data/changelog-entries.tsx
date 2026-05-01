@@ -18,6 +18,52 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.7.0",
+    date: "2 Mai 2026",
+    subtitle:
+      "PR-A din sprintul de Dashboard redesign (1 din 3): endpoint nou /api/v1/dashboard/summary owner-scoped + KPI strip cu 4 carduri (Joburi, Alerte, Runs 24h, Cost AI) + Quick Actions cu 6 butoane deasupra LastDosareCard, polling 30s",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "Backend - endpoint nou /api/v1/dashboard/summary",
+        content:
+          "Read-only aggregation owner-scoped (via getOwnerId), wrapped in withMaintenanceRead ca sa coexiste cu backup/restore. Returneaza envelope v1 cu 4 blocuri: jobs.active + jobs.byKind {dosar_soap, name_soap}; alerts.unseen + alerts.last24h; runs {ok, error, timeout, total} cu status 'aborted' foldat in bucket 'error' si runs 'running' excluse din totals; ai {costUsd, calls, tokens} pentru ultimele 24h cu closed lower bound si conversie cost_usd_milli/1000. Plus generatedAt timestamp. Zero schema change, zero migration.",
+      },
+      {
+        title: "Frontend - KPI strip cu 4 carduri responsive",
+        content:
+          "Componenta KpiStrip noua afiseaza cele 4 metrici esentiale cu iconite distinctive: Joburi active (ListChecks albastru, sub-text 'X dosare, Y subiecti'), Alerte (Bell amber, sub-text 'X necitite / Y in 24h'), Runs 24h (Activity verde, sub-text 'X ok / Y err / Z timeout'), Cost AI 24h (Sparkles violet, sub-text 'X calls, Y tokens'). Grid responsive: stacked pe mobile, 2 col pe tablet, 4 col pe desktop. Loading state cu Loader2 spinner pe fiecare card. Eroare inline destructive cand fetch-ul esueaza. Helperi formatUsd (sub-cent precision) si formatTokens (k/M).",
+      },
+      {
+        title: "Frontend - Quick Actions cu 6 butoane",
+        content:
+          "Componenta QuickActions noua sub KPI strip cu 6 butoane in grid (2 col mobile -> 3 col tablet -> 6 col desktop): 'Cauta dosar' (/dosare), 'Monitorizare' (/monitorizare), 'RNPM' (/rnpm), 'Alerte' (/alerte), 'Termene' (/termene), 'Export raport' (FileDown, disabled cu tooltip 'Disponibil in v2.9.0 (PR-C)'). Navigare via react-router Link, fara JavaScript imperative.",
+      },
+      {
+        title: "Frontend - integrare Dashboard.tsx cu polling 30s",
+        content:
+          "KpiStrip si QuickActions plasate deasupra LastDosareCard in pages/Dashboard.tsx. State summary/summaryLoading/summaryError + summaryAbortRef. useEffect cu fetchSummary async (AbortController per request, AbortError ignorat, MonitoringApiError extras la mesaj) + setInterval 30s + cleanup pe unmount. Polling-ul nu blocheaza UI-ul si se aborteaza corect cand utilizatorul navigheaza inainte de raspuns.",
+      },
+      {
+        title: "Frontend - dashboardApi.summary in lib/api.ts",
+        content:
+          "Surface noua dashboardApi.summary(signal?) adaugata in frontend/src/lib/api.ts (NU intr-un fisier separat) ca sa nu loveasca hook-ul block-renderer-fetch.mjs care interzice raw fetch in afara lib/api.ts sau lib/rnpmApi.ts. Reuseste unwrapMonitoring si MonitoringApiError. Interfete exportate: DashboardSummary, DashboardJobsBlock, DashboardAlertsBlock, DashboardRunsBlock, DashboardAiBlock.",
+      },
+      {
+        title: "Tests - 553 pass (546 baseline + 7 noi PR-A)",
+        content:
+          "7 teste noi in routes/dashboard.test.ts cu pattern Hono test app + middleware x-test-owner + requestIdContext. Acoperire: envelope v1 + empty state, jobs.byKind filtru active vs paused, alerts unseen vs last24h windowing (closed lower bound), runs status bucketing cu aborted foldat in error, still-running excluse cu doua joburi separate (constraint idx_one_running_per_job permite un singur 'running' per job_id la un moment dat), AI 24h aggregation, owner isolation 2 tenants. Backend tsc verde, frontend tsc verde, biome verde pe fisierele atinse, build OK, smoke headless backend cu curl /api/v1/dashboard/summary -> envelope v1 corect.",
+      },
+      {
+        title: "Sprint Dashboard redesign (1 din 3)",
+        content:
+          "PR-A v2.7.0 livreaza KPI strip + Quick Actions. Urmatorii pasi: PR-B v2.8.0 (timeline activitate + charts), PR-C v2.9.0 (rapoarte exportabile). Butonul 'Export raport' din QuickActions ramane disabled pana la PR-C. Coordonare cu Codex pe PR-9 Auth pluggable in paralel pe branch separat (feat/pr9-auth-pluggable).",
+      },
+    ],
+  },
+  {
     version: "v2.6.8",
     date: "1 Mai 2026",
     subtitle: "Review-driven hardening peste v2.6.7 - fix HTML a11y pe cardul de bulk import, derivare CADENCE_COL_LETTER din HEADERS, eroare clara la header lipsa in parser, corectare claim stale despre xlsx in docs",

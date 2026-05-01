@@ -4,6 +4,63 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.7.0] - 2026-05-02
+
+### PR-A v2.7.0 - KPI strip + Quick Actions pe Dashboard
+
+Prima livrare din sprint-ul de redesign al Dashboard-ului
+(PLAN-dashboard-redesign.md). Aduce un rezumat operational live deasupra
+cardurilor existente, fara sa schimbe nimic din fluxurile actuale.
+
+**Backend - endpoint nou `/api/v1/dashboard/summary`:**
+
+- `backend/src/routes/dashboard.ts`: endpoint owner-scoped care agrega 4
+  blocuri intr-o singura cerere - joburi active (cu breakdown
+  `dosar_soap`/`name_soap`), alerte (necitite + ultimele 24h), rulari
+  ultimele 24h (ok / error / timeout / total, cu `aborted` foldat in error),
+  cost AI ultimele 24h (USD + calls + total tokens).
+- Wrapped in `withMaintenanceRead` ca sa coexiste cu backup/restore (RWLock).
+- Fereastra de 24h calculata server-side cu `closed lower bound` consecvent
+  cu pattern-ul din `aiUsageRepository.getAiUsageTotals` - fara off-by-one.
+- Envelope v1 standard `{ data, requestId }` via `ok()` helper; nu adauga
+  endpoint-uri de scriere (read-only aggregation).
+
+**Frontend - KPI strip + Quick Actions deasupra Last cards:**
+
+- `frontend/src/components/dashboard/KpiStrip.tsx`: 4 carduri responsive
+  (mobile stacked -> md 2 col -> lg 4 col) cu icon + label + valoare +
+  subline contextuala ("+N noi in ultimele 24h", "M ok / X erori / Y
+  timeout"). Loading state cu spinner per card; error state inline (nu
+  blocheaza restul paginii).
+- `frontend/src/components/dashboard/QuickActions.tsx`: 6 butoane spre
+  fluxurile principale (Cauta dosar, Adauga monitorizare, Cauta RNPM, Vezi
+  alerte, Vezi termene). Al saselea (Export raport) ramane disabled cu
+  tooltip "Disponibil in v2.9.0 (PR-C)" - placeholder onorat pana cand PR-C
+  livreaza modal-ul de raport on demand.
+- `frontend/src/pages/Dashboard.tsx`: integrate KpiStrip + QuickActions
+  inserate deasupra `LastDosareCard`. Polling la 30s prin `setInterval` cu
+  `AbortController` per request (coalesce overlap pe sleep/wake). SSE delta
+  pe `alerts.unseen` ramane pentru PR-B impreuna cu plumbing-ul
+  `alertsStreamVersion` din App.tsx.
+
+**Frontend API surface:**
+
+- `frontend/src/lib/api.ts`: tipurile `DashboardSummary`,
+  `Dashboard{Jobs,Alerts,Runs,Ai}Block` + obiectul
+  `dashboardApi.summary(signal?)` care reuseste `unwrapMonitoring` si
+  `MonitoringApiError` pentru consistenta cu restul suprafetei v1.
+
+**Tests:**
+
+- `backend/src/routes/dashboard.test.ts`: 7 teste - envelope shape, empty
+  state, jobs.byKind (active filter), alerts.unseen vs last24h windowing,
+  runs status bucketing (cu `aborted` in error + still-running excluse), AI
+  aggregation (calls + tokens + costUsd din milli), izolare `owner_id`
+  (doua tenants concurente). 553/553 backend tests verzi (era 546 baseline
+  in v2.6.8, +7 noi in PR-A).
+
+---
+
 ## [2.6.8] - 2026-05-01
 
 ### Review-driven hardening: HTML a11y + template fragility + doc accuracy
