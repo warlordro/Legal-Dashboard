@@ -2,11 +2,12 @@
 
 **Data**: 2026-05-01
 **Branch local**: `main`
-**Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
-v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 + audit hardening
-v2.6.4 + UX polish v2.6.5 + name_soap parity v2.6.6 + export Monitorizare v2.6.7
-+ review-driven hardening v2.6.8.
-Tag-urile `v2.5.0`..`v2.6.8` nu sunt inca create.
+**Remote**: `main` local este sincronizat cu `origin/main` la commit-ul
+`8e0eaa6` (`fix: v2.6.8 - review-driven hardening...`). PR-7 v2.5.0, patch
+v2.5.1, PR-8 v2.6.0 si patch-urile v2.6.1..v2.6.8 sunt deja pe `origin/main`.
+**Tag-uri locale**: `v2.5.0`..`v2.6.8` exista local. Tag-urile `v2.6.5`..
+`v2.6.8` au fost create local la 2026-05-01; push-ul tag-urilor catre GitHub
+ramane nefacut fara confirmare explicita.
 **Versiune curenta**: `v2.6.8`
 
 ## TL;DR (v2.6.8 — Review-driven hardening: a11y + template fragility + doc accuracy)
@@ -59,8 +60,13 @@ noi, entries istorice raman ca atare.
 
 **Verificari**: `npx tsc --noEmit` (frontend) → OK; `npm run build` → 15.64s
 build complet, fara erori noi. Smoke desktop OK (Electron pornit, `/health`
-200, monitoring `running: true`). 524/524 backend tests neschimbate
+200, monitoring `running: true`). 546/546 backend tests neschimbate
 (modificarile sunt strict frontend + un fisier MD).
+
+**Revalidare Codex 2026-05-01**: backend tsc OK, frontend tsc OK,
+`npm test --workspace=backend` OK (546/546 dupa rebuild Node ABI),
+`npm run build` OK, `npm run rebuild:electron` OK, smoke Electron hidden OK
+cu `/health` 200 si monitoring `running: true`, `inflight: 0`.
 
 ## TL;DR (v2.6.7 — Export Monitorizare Excel + PDF cu paritate Dosare/Termene)
 
@@ -277,9 +283,11 @@ Fisiere modificate:
 
 ## Probleme/riscuri ramase
 
-- PR-7 (v2.5.0), patch v2.5.1 si PR-8 v2.6.0 sunt commit-uite local; push-ul pe
-  `origin/main` nu este inca facut. Tag-urile aferente nu sunt inca create pe
-  GitHub.
+- `main` local este sincronizat cu `origin/main` la `8e0eaa6` (v2.6.8).
+  Tag-urile locale exista pana la `v2.6.8`, dar tag-urile `v2.6.5`..`v2.6.8`
+  nu au fost push-uite catre GitHub in aceasta sesiune.
+- `package-lock.json` a fost resincronizat la versiunea `2.6.8` pentru root,
+  backend si frontend.
 - `useCurrentUser` se apeleaza din mai multe locuri (Sidebar + AdminGate per
   pagina admin). Pe desktop call-ul este local si rapid; daca devine vizibil in
   load tests pe web mode, va fi lift-ed in context shared (sau cache-uit).
