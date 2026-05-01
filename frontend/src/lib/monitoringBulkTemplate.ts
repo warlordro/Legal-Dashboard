@@ -14,13 +14,67 @@
 //     acceptate pentru backward-compat cu fisiere vechi.
 //   * `notes` cosmetic.
 //
-// XLSX dropdown: SheetJS Community (`xlsx` 0.18.5) nu scrie dataValidations,
-// deci post-procesam fisierul: unzip → injecteaza <dataValidations> in
-// xl/worksheets/sheet1.xml → rezip. Folosim `fflate` (~8KB, tree-shakeable),
-// deja prezent ca tranzitiv via xlsx-js-style.
+// Design (2026-05-01): template-ul foloseste acelasi stil vizual cu celelalte
+// export-uri din aplicatie (titlu BLUE_DARK, header BLUE_MAIN, randuri
+// alternante) prin `xlsx-js-style` + helperii din `excel-helpers.ts`. Parser-ul
+// detecteaza automat rândul de header astfel încât atât template-ul nou (cu
+// titlu+stats deasupra) cât si fisierele vechi (header pe randul 1) sunt
+// acceptate.
+//
+// XLSX dropdown: nici SheetJS Community (`xlsx` 0.18.5) nici `xlsx-js-style`
+// nu scriu dataValidations, deci post-procesam fisierul: unzip → injecteaza
+// <dataValidations> in xl/worksheets/sheet1.xml → rezip. Folosim `fflate`
+// (~8KB, tree-shakeable), deja prezent ca tranzitiv via xlsx-js-style.
 
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import * as XLSX from "xlsx";
+import {
+  BLUE_DARK,
+  BLUE_MAIN,
+  cellAddr,
+  mergeRow,
+  ROW_ALT,
+  sanitizeFormulaCells,
+  styleCell,
+  styleRow,
+  TEXT_DARK,
+  TEXT_MID,
+  todayRo,
+  WHITE,
+} from "./excel-helpers";
+
+// Stiluri locale clonate din excel-helpers cu font sz: 10 (vs default 9 la
+// celelalte export-uri). Template-ul are mai putine date decat exporturile de
+// dosare/termene, deci putem permite text mai mare fara sa stricam aspectul.
+const TEMPLATE_FONT_SIZE = 10;
+
+const tplStyleTitle = {
+  font: { bold: true, sz: 13, color: { rgb: WHITE } },
+  fill: { patternType: "solid", fgColor: { rgb: BLUE_DARK } },
+  alignment: { horizontal: "center", vertical: "center" },
+};
+
+const tplStyleStats = {
+  font: { sz: TEMPLATE_FONT_SIZE, italic: true, color: { rgb: TEXT_MID } },
+  fill: { patternType: "solid", fgColor: { rgb: "F1F5F9" } },
+  alignment: { horizontal: "left", vertical: "center" },
+};
+
+const tplStyleHeader = {
+  font: { bold: true, sz: TEMPLATE_FONT_SIZE, color: { rgb: WHITE } },
+  fill: { patternType: "solid", fgColor: { rgb: BLUE_MAIN } },
+  alignment: { horizontal: "left", vertical: "center", wrapText: true },
+  border: { bottom: { style: "thin", color: { rgb: "1D4ED8" } } },
+};
+
+function tplStyleDataCell(rowIdx: number, bold = false): Record<string, unknown> {
+  const alt = rowIdx % 2 === 1;
+  return {
+    font: { sz: TEMPLATE_FONT_SIZE, bold, color: { rgb: TEXT_DARK } },
+    fill: { patternType: "solid", fgColor: { rgb: alt ? ROW_ALT : WHITE } },
+    alignment: { horizontal: "left", vertical: "top", wrapText: true },
+  };
+}
 
 export type BulkKind = "dosar" | "nume";
 
@@ -63,8 +117,21 @@ const CADENCE_LABEL_MAP: Record<string, number> = {
 
 const CADENCE_LABELS = ["4h", "8h", "12h", "24h"] as const;
 
-// Injecteaza un <dataValidation type="list"> peste C2:C1000 (coloana cadence)
-// in sheet1.xml. OOXML cere ca <dataValidations> sa apara DUPA <sheetData> /
+// Layout constants pentru template stilizat.
+const HEADERS = ["numar_dosar", "nume", "cadence_sec", "notes"] as const;
+const COL_WIDTHS = [22, 32, 14, 40];
+const NUM_COLS = HEADERS.length;
+const TITLE_ROW = 0;
+const STATS_ROW = 1;
+const HEADER_ROW = 3;
+const DATA_START_ROW = 4;
+// Coloana cadence_sec este indexul 2 = coloana C in Excel.
+const CADENCE_COL_LETTER = "C";
+// 1000 randuri de date in plus (sufficient pentru cazuri uzuale).
+const CADENCE_DV_RANGE_END = DATA_START_ROW + 1000;
+
+// Injecteaza un <dataValidation type="list"> peste C{DATA_START}:C{END} in
+// sheet1.xml. OOXML cere ca <dataValidations> sa apara DUPA <sheetData> /
 // <conditionalFormatting>, dar INAINTE de <pageMargins>; fallback la inainte
 // de </worksheet> daca <pageMargins> lipseste.
 function injectCadenceDropdown(xlsxBytes: Uint8Array): Uint8Array {
@@ -78,9 +145,11 @@ function injectCadenceDropdown(xlsxBytes: Uint8Array): Uint8Array {
   const formula = CADENCE_LABELS.join(",");
   // Quotes in <formula1> sunt escaped ca &quot; — lista in-cell e
   // `"4h,8h,12h,24h"` (cu ghilimele literale incluse).
+  // sqref foloseste numerotare 1-based (Excel), deci DATA_START_ROW (=4) → randul 5 in Excel.
+  const sqref = `${CADENCE_COL_LETTER}${DATA_START_ROW + 1}:${CADENCE_COL_LETTER}${CADENCE_DV_RANGE_END + 1}`;
   const dv =
     '<dataValidations count="1">' +
-    '<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="C2:C1000">' +
+    `<dataValidation type="list" allowBlank="1" showInputMessage="1" showErrorMessage="1" sqref="${sqref}">` +
     `<formula1>&quot;${formula}&quot;</formula1>` +
     "</dataValidation>" +
     "</dataValidations>";
@@ -120,32 +189,73 @@ function injectCadenceDropdown(xlsxBytes: Uint8Array): Uint8Array {
   return zipSync(unzipped, { level: 6 });
 }
 
-export function downloadBulkTemplate(): void {
-  const data: (string | number)[][] = [
-    ["numar_dosar", "nume", "cadence_sec", "notes"],
-    ["1234/180/2024", "", "4h", "Client X — apel"],
-    ["9012/3/2024/a1", "", "24h", "Verificare zilnica"],
-    ["", "POPESCU ION", "24h", "Subiect — alerta dosare noi"],
-    ["", "SC EXAMPLE SRL BUCURESTI", "24h", "Mai multe variante de scriere → alerta agregata"],
-  ];
-  const ws = XLSX.utils.aoa_to_sheet(data);
-  ws["!cols"] = [
-    { wch: 22 },
-    { wch: 32 },
-    { wch: 14 },
-    { wch: 40 },
-  ];
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws, "Monitorizare");
+const SAMPLE_ROWS: (string | number | null)[][] = [
+  ["1234/180/2024", "", "4h", "Client X — apel"],
+  ["9012/3/2024/a1", "", "24h", "Verificare zilnica"],
+  ["", "POPESCU ION", "24h", "Subiect — alerta dosare noi"],
+  ["", "SC EXAMPLE SRL BUCURESTI", "24h", "Mai multe variante de scriere → alerta agregata"],
+];
 
-  const arrayBuffer = XLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer;
-  const withDropdown = injectCadenceDropdown(new Uint8Array(arrayBuffer));
+export async function downloadBulkTemplate(): Promise<void> {
+  const StyledXLSX = await import("xlsx-js-style");
+
+  const aoa: (string | number | null)[][] = [
+    ["LEGAL DASHBOARD — TEMPLATE MONITORIZARE", ...Array(NUM_COLS - 1).fill(null)],
+    [
+      `Generat: ${todayRo()}  |  Completeaza UNA din coloanele numar_dosar SAU nume per rand. Cadenta: 4h / 8h / 12h / 24h (dropdown).`,
+      ...Array(NUM_COLS - 1).fill(null),
+    ],
+    Array(NUM_COLS).fill(null),
+    [...HEADERS],
+    ...SAMPLE_ROWS,
+  ];
+
+  const ws = StyledXLSX.utils.aoa_to_sheet(aoa) as Record<string, unknown>;
+  ws["!cols"] = COL_WIDTHS.map((w) => ({ wch: w }));
+  ws["!rows"] = [{ hpt: 22 }, { hpt: 16 }, { hpt: 6 }, { hpt: 18 }];
+
+  mergeRow(ws, TITLE_ROW, NUM_COLS);
+  mergeRow(ws, STATS_ROW, NUM_COLS);
+  styleRow(ws, TITLE_ROW, NUM_COLS, tplStyleTitle);
+  styleRow(ws, STATS_ROW, NUM_COLS, tplStyleStats);
+  styleRow(ws, HEADER_ROW, NUM_COLS, tplStyleHeader);
+
+  // Data rows — bold pe coloana 0 (numar_dosar) cand e populata, ca in
+  // export-urile de Dosare/Termene. Aici tratam atat coloana 0 cat si 1 ca
+  // "identificator" (bold doar daca celula e populata, ca sa nu apara bold pe
+  // celula goala dintr-un rand cu nume).
+  SAMPLE_ROWS.forEach((row, i) => {
+    const r = DATA_START_ROW + i;
+    for (let c = 0; c < NUM_COLS; c++) {
+      const isIdent = c === 0 || c === 1;
+      const populated = row[c] !== null && row[c] !== "" && row[c] !== undefined;
+      styleCell(ws, r, c, tplStyleDataCell(i, isIdent && populated));
+    }
+    // Asigura ca celula vizibila a referintei (cellAddr) exista chiar si pentru
+    // valorile gol-string, ca sa primeasca culoarea de fundal alternativa.
+    for (let c = 0; c < NUM_COLS; c++) {
+      const addr = cellAddr(r, c);
+      if (!ws[addr]) {
+        ws[addr] = { t: "s", v: "" };
+        styleCell(ws, r, c, tplStyleDataCell(i, false));
+      }
+    }
+  });
+
+  sanitizeFormulaCells(ws);
+
+  const wb = StyledXLSX.utils.book_new();
+  StyledXLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Monitorizare");
+
+  const out = StyledXLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer | Uint8Array;
+  const bytes = out instanceof ArrayBuffer ? new Uint8Array(out) : out;
+  const withDropdown = injectCadenceDropdown(bytes);
   // Copy into a fresh ArrayBuffer (not SharedArrayBuffer) to satisfy Blob's
   // BlobPart type — fflate's Uint8Array can be backed by ArrayBufferLike.
-  const out = new Uint8Array(withDropdown.byteLength);
-  out.set(withDropdown);
+  const finalBytes = new Uint8Array(withDropdown.byteLength);
+  finalBytes.set(withDropdown);
 
-  const blob = new Blob([out.buffer], {
+  const blob = new Blob([finalBytes.buffer], {
     type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
   });
   const url = URL.createObjectURL(blob);
@@ -168,6 +278,21 @@ function parseCadence(raw: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+// Detecteaza randul de header cautand celule care contin "numar_dosar" /
+// "nume" / "name_normalized" / "denumire". Suporta atat template-ul nou (header
+// pe randul 4 = index 3) cat si fisiere flat (header pe randul 1 = index 0).
+function findHeaderRow(rows: unknown[][]): number {
+  const targets = new Set(["numar_dosar", "nume", "name_normalized", "denumire"]);
+  for (let i = 0; i < Math.min(rows.length, 20); i++) {
+    const row = rows[i] ?? [];
+    for (const cell of row) {
+      const s = String(cell ?? "").trim().toLowerCase();
+      if (targets.has(s)) return i;
+    }
+  }
+  return -1;
+}
+
 export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResult {
   const isCsv = /\.csv$/i.test(fileName);
   const wb = isCsv
@@ -177,21 +302,40 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
   const valid: BulkRow[] = [];
   const invalid: BulkRowInvalid[] = [];
   if (!sheet) return { valid, invalid };
-  const rows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: "" });
-  rows.forEach((r, idx) => {
-    const rowNumber = idx + 2;
-    const cadenceFinal = parseCadence(r.cadence_sec);
-    const notes = String(r.notes ?? "").trim() || undefined;
 
-    const numarDosar = String(r.numar_dosar ?? "").trim();
-    // Sinonime tolerante pentru coloana de nume (template nostru = "nume",
-    // dar acceptam si "name_normalized" / "denumire" ca user-ii sa nu fie
-    // blocati daca refolosesc un export vechi).
-    const nameNorm = String(
-      r.nume ?? r.name_normalized ?? r.denumire ?? "",
-    ).trim();
+  // Citim ca matrice raw, gasim randul de header, apoi parsam manual.
+  const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
+  const headerIdx = findHeaderRow(matrix);
+  if (headerIdx < 0) return { valid, invalid };
+
+  const headerRow = (matrix[headerIdx] ?? []).map((c) =>
+    String(c ?? "").trim().toLowerCase(),
+  );
+  const colNumarDosar = headerRow.indexOf("numar_dosar");
+  // Acceptam sinonime pentru coloana de nume (template nostru = "nume", dar
+  // si "name_normalized" / "denumire" pentru exporturi vechi).
+  let colNume = headerRow.indexOf("nume");
+  if (colNume < 0) colNume = headerRow.indexOf("name_normalized");
+  if (colNume < 0) colNume = headerRow.indexOf("denumire");
+  const colCadence = headerRow.indexOf("cadence_sec");
+  const colNotes = headerRow.indexOf("notes");
+
+  for (let i = headerIdx + 1; i < matrix.length; i++) {
+    const row = matrix[i] ?? [];
+    // rowNumber este numarul Excel (1-based) — utilizat in mesajele de eroare
+    // pentru ca user-ul sa il poata localiza in foaia originala.
+    const rowNumber = i + 1;
+
+    const numarDosar =
+      colNumarDosar >= 0 ? String(row[colNumarDosar] ?? "").trim() : "";
+    const nameNorm = colNume >= 0 ? String(row[colNume] ?? "").trim() : "";
+    const cadenceFinal =
+      colCadence >= 0 ? parseCadence(row[colCadence]) : undefined;
+    const notes =
+      colNotes >= 0 ? String(row[colNotes] ?? "").trim() || undefined : undefined;
+
     if (!numarDosar && !nameNorm) {
-      return; // empty row — skip silently
+      continue; // empty row — skip silently
     }
 
     if (numarDosar && nameNorm) {
@@ -201,7 +345,7 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
         message:
           "Ambele coloane sunt populate. Un rand = un job: pune numar_dosar SAU nume, nu ambele.",
       });
-      return;
+      continue;
     }
 
     if (numarDosar) {
@@ -212,7 +356,7 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
         cadence_sec: cadenceFinal,
         notes,
       });
-      return;
+      continue;
     }
 
     valid.push({
@@ -222,6 +366,6 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
       cadence_sec: cadenceFinal,
       notes,
     });
-  });
+  }
   return { valid, invalid };
 }

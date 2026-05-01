@@ -4,6 +4,91 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.6.5] - 2026-05-01
+
+### UX polish Monitorizare
+
+Patch frontend-only peste v2.6.4. Inbox-ul Monitorizare primeste un val de polish
+in zona vizibilitatii joburilor: link-ul TINTA devine vizual prima ancora din
+rand (bold), cardul de bulk import nu mai ocupa permanent jumatate din pagina
+(devine collapsible cu default colapsat), template-ul XLSX descarcat nu mai e
+un grid plain ci match-uieste vizual celelalte exporturi Excel din aplicatie,
+iar notele introduse la creare sau import devin in fine vizibile in tabel
+(erau write-only — stocate dar niciodata redate).
+
+### Frontend - Monitorizare TINTA bold
+
+- `frontend/src/pages/Monitorizare.tsx` — link-ul `<a>` din coloana TINTA
+  pentru joburi `dosar_soap` schimba `font-medium` → `font-bold`. Numarul
+  dosarului devine prima ancora vizuala din rand (consecvent cu pattern-ul
+  "primary action surface" din inbox-ul Alerte).
+
+### Frontend - bulk import collapsible + descriere non-tehnica
+
+- Cardul "Adaugare bulk din fisier" din `Monitorizare.tsx` foloseste acum un
+  state `bulkOpen` (default `false`) si afiseaza un buton clickable pe header
+  cu icon `ChevronDown`/`ChevronRight`. `<CardContent>` se randeaza condional
+  doar cand cardul e deschis — pagina nu mai pierde un screenful pentru o
+  zona pe care utilizatorul o foloseste rar.
+- Descrierea cardului trece de pe `text-muted-foreground` (gri pal) pe
+  `text-foreground` (negru/inversa pe dark mode) pentru lizibilitate, iar
+  textul tehnic ("XLSX/CSV cu numar_dosar / nume / cadence_sec / notes…") se
+  rescrie in romana simpla pentru utilizatori non-tehnici: explica fluxul
+  in trei pasi (descarca template → completeaza → incarca), fara mentiunea
+  numelor de coloane.
+
+### Frontend - template XLSX restilizat la nivelul exporturilor
+
+- `frontend/src/lib/monitoringBulkTemplate.ts` rescris sa foloseasca
+  `xlsx-js-style` (dinamic import) cu acelasi limbaj vizual ca restul
+  exporturilor Excel din aplicatie (`excel-helpers.ts`). Layout-ul:
+  - **Row 1** — titlu "Template Adaugare Bulk Monitorizare" merged pe
+    coloanele A:E, font 13 bold alb, fill `BLUE_DARK`, centrat.
+  - **Row 2** — caption "Generat la <data RO> · adauga maxim 1000 randuri"
+    italic gri pe fundal `F1F5F9`.
+  - **Row 4** — header BLUE_MAIN, alb bold, border-bottom `1D4ED8`,
+    `wrapText`. Coloanele: `numar_dosar`, `nume`, `cadence_sec`, `instanta`,
+    `notes`.
+  - **Row 5+** — alternating row fill (`ROW_ALT` pe randurile impare,
+    `WHITE` pe pare), font 10 plain, `vertical: top`, `wrapText`.
+- Constant nou `TEMPLATE_FONT_SIZE = 10` aplicat consecvent pe header / data
+  / stats. Latimi de coloane recalibrate (16ch numar_dosar, 28ch nume, 12ch
+  cadence_sec, 18ch instanta, 30ch notes).
+- Dropdown-ul de validare `cadence_sec` se aplica acum pe range `C5:C1004`
+  (era `C2:C1001` pe template-ul vechi flat) — post-process OOXML cu
+  `fflate` ca `xlsx-js-style` nu emite `<dataValidations>` direct.
+- `parseBulkFile` detecteaza header-ul dinamic prin `findHeaderRow()` —
+  scaneaza primele 20 randuri si identifica primul rand cu `numar_dosar`,
+  `nume`, `name_normalized` sau `denumire`. Fisierele exportate cu
+  template-ul nou (header pe row 4) si fisierele vechi flat (header pe
+  row 1) sunt ambele acceptate fara forking de path.
+- `downloadBulkTemplate` devine `async` (necesita `await import()` pe
+  `xlsx-js-style` + `fflate`) — toate apelurile de pe pagina updated cu
+  `await`.
+
+### Frontend - note inline sub TINTA (Varianta B)
+
+- Field-ul `notes` din formularul de monitorizare era write-only — colectat
+  in UI, persistent in `monitoring_jobs.notes`, dar niciodata vizibil in
+  tabelul de joburi. Patch-ul afiseaza nota in **aceeasi celula TINTA**, sub
+  link+buton, pe randurile cu `job.notes` populat:
+  - render conditionat (`{job.notes && (…)}`) — randurile fara nota raman
+    compacte, fara spatiu in plus si fara coloana noua.
+  - `text-xs italic text-muted-foreground` (gri italic, font sm) +
+    `font-sans` ca sa rupa mostenirea `font-mono` din `<td>`.
+  - `truncate max-w-[420px]` cu `title={job.notes}` pentru tooltip pe hover
+    (textul integral disponibil fara modal).
+- Variant respinsa: coloana separata "Note" intre Status si Actiuni —
+  introducea spatiu mort pe randurile fara nota si crestea latimea totala a
+  tabelului in zona deja crowded.
+
+### Tests
+
+- 546 teste pass (neschimbate fata de v2.6.4 — modificarile sunt strict
+  frontend + un singur helper de parse fara backend touch).
+
+---
+
 ## [2.6.4] - 2026-05-01
 
 ### Audit hardening (multi-agent review) — finalizat

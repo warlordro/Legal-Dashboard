@@ -1,13 +1,43 @@
-# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.4 livrate / PR-9 urmator
+# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.5 livrate / PR-9 urmator
 
 **Data**: 2026-05-01
 **Branch local**: `main`
 **Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
 v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 + audit hardening
-v2.6.4. Tag-urile `v2.5.0`..`v2.6.4` nu sunt inca create.
-**Versiune curenta**: `v2.6.4`
+v2.6.4 + UX polish v2.6.5. Tag-urile `v2.5.0`..`v2.6.5` nu sunt inca create.
+**Versiune curenta**: `v2.6.5`
 
-## TL;DR
+## TL;DR (v2.6.5 — UX polish Monitorizare frontend-only)
+
+Patch UX peste v2.6.4 (zero backend touch, zero schema). Inbox-ul Monitorizare
+primeste un val de polish:
+
+- **TINTA bold** — link-ul `<a>` pentru joburi `dosar_soap` schimba
+  `font-medium` → `font-bold`. Numarul devine prima ancora vizuala.
+- **Bulk import collapsible** — cardul "Adaugare bulk din fisier" foloseste
+  state `bulkOpen` (default `false`) cu icon `ChevronDown`/`ChevronRight`;
+  `<CardContent>` randat condional. Descrierea trece pe `text-foreground`
+  (negru) cu text rescris in romana simpla pentru non-tehnici (descarca →
+  completeaza → incarca, fara mentiunea numelor de coloane).
+- **Template XLSX restilizat** — `monitoringBulkTemplate.ts` rescris cu
+  `xlsx-js-style` la nivelul exporturilor: titlu `BLUE_DARK` merged A:E,
+  header `BLUE_MAIN` border-bottom `1D4ED8`, alternating row fill, font 10,
+  dropdown `cadence_sec` mutat pe `C5:C1004`. `parseBulkFile` detecteaza
+  header-ul dinamic prin `findHeaderRow()` ca template nou (header row 4)
+  si fisiere vechi flat (header row 1) sa fie ambele acceptate.
+  `downloadBulkTemplate` devine `async`.
+- **Note inline sub TINTA** — field-ul `notes` (era write-only — colectat in
+  form, persistent in DB, dar niciodata redat) devine vizibil in tabel sub
+  link+buton in **aceeasi celula TINTA**, conditionat pe `{job.notes && (…)}`
+  ca randurile fara nota sa ramana compacte. Styling
+  `text-xs italic text-muted-foreground font-sans truncate max-w-[420px]` cu
+  tooltip integral pe hover. Variant respinsa: coloana separata "Note"
+  intre Status si Actiuni — introducea spatiu mort si crestea latimea
+  tabelului in zona deja crowded.
+
+**Tests**: 546 pass (neschimbate fata de v2.6.4).
+
+## TL;DR (v2.6.4 — audit hardening anterior)
 
 Audit hardening **finalizat integral** in v2.6.4 (multi-agent review
 2026-04-30, follow-up 2026-05-01):

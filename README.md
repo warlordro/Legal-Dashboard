@@ -7,9 +7,27 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.6.4**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.6.5**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.6.4** - audit hardening dupa multi-agent review (finalizat): F1 `DELETE
+**v2.6.5** - patch UX polish frontend-only Monitorizare: link-ul TINTA pentru
+joburile `dosar_soap` devine `font-bold` (numarul devine prima ancora vizuala
+din rand, consecvent cu inbox-ul Alerte); cardul "Adaugare bulk din fisier"
+devine collapsible (default colapsat) cu buton clickable pe header si icon
+`ChevronDown`/`ChevronRight`, descrierea trece de pe gri (`text-muted-foreground`)
+pe negru (`text-foreground`) si textul tehnic se rescrie in romana simpla
+pentru utilizatori non-tehnici; template-ul XLSX bulk restilizat sa
+match-uiasca exporturile celelalte (xlsx-js-style cu titlu BLUE_DARK centrat
+merged A:E, header BLUE_MAIN border-bottom 1D4ED8, randuri alternate
+ROW_ALT/WHITE, font 10, dropdown cadenta mutat pe `C5:C1004`); `parseBulkFile`
+detecteaza header-ul dinamic (scaneaza primele 20 randuri) ca fisierele
+vechi flat sa ramana compatibile cu template-ul nou; field-ul `notes` din
+formularul de monitorizare devine in fine vizibil — randat inline sub
+link-ul TINTA in **aceeasi celula**, conditionat pe `{job.notes && (…)}` ca
+randurile fara nota sa ramana compacte (text mic italic gri, truncate cu
+tooltip integral pe hover). 546/546 teste backend (neschimbate fata de v2.6.4
+— modificarile sunt strict frontend).
+Baza ramane v2.6.4 - audit hardening dupa multi-agent review (finalizat):
+F1 `DELETE
 /monitoring/jobs/:id` returneaza 409 `job_in_flight` cand runner-ul are
 `AbortController` activ pe job (previne `RUNNER_THREW`); F2 `LEGAL_DASHBOARD_ALLOW_REMOTE=1`
 REFUZA pornirea fara ack `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`
@@ -103,7 +121,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (546 teste in v2.6.4, era 524 in v2.6.3) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (546 teste in v2.6.5, neschimbate fata de v2.6.4) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

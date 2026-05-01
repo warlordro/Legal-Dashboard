@@ -18,6 +18,41 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.6.5",
+    date: "1 Mai 2026",
+    subtitle: "Patch UX Monitorizare - TINTA bold, bulk import collapsible + descriere non-tehnica, template XLSX restilizat la nivelul exporturilor, nota inline italic sub TINTA",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Monitorizare - TINTA bold",
+        content:
+          "Link-ul cu numarul dosarului din coloana TINTA (joburi dosar_soap) trece de pe font-medium pe font-bold. Numarul devine prima ancora vizuala din rand, consecvent cu pattern-ul 'primary action surface' din inbox-ul Alerte.",
+      },
+      {
+        title: "Monitorizare - card bulk import collapsible",
+        content:
+          "Cardul 'Adaugare bulk din fisier' nu mai ocupa permanent jumatate din pagina. Header-ul devine clickable cu icon ChevronDown/ChevronRight; CardContent randat condional (default colapsat). Descrierea trece de pe gri pal pe negru pentru lizibilitate, iar textul tehnic se rescrie in romana simpla: descarca template -> completeaza -> incarca, fara nume de coloane.",
+      },
+      {
+        title: "Monitorizare - template XLSX restilizat",
+        content:
+          "Template-ul bulk descarcat din pagina foloseste acum acelasi limbaj vizual ca toate celelalte exporturi Excel din aplicatie: titlu BLUE_DARK merged peste coloane (centrat, bold alb 13), header BLUE_MAIN cu border-bottom 1D4ED8 si wrapText, randuri alternate ROW_ALT/WHITE, font 10 plain. Latimi recalibrate (16/28/12/18/30 ch). Dropdown-ul de cadenta ramane functional pe range-ul C5:C1004 (post-process OOXML cu fflate). Fisierele bulk vechi (header pe primul rand, fara titlu/stats) raman compatibile - parser-ul detecteaza header-ul dinamic in primele 20 randuri.",
+      },
+      {
+        title: "Monitorizare - note inline sub TINTA",
+        content:
+          "Field-ul 'Note' din formularul de adaugare era write-only - colectat in UI, persistent in DB, dar niciodata vizibil in tabel. Patch-ul afiseaza nota inline sub link+buton in aceeasi celula TINTA pe randurile cu notes populat (text mic italic gri, truncate la 420px cu tooltip integral pe hover). Randurile fara nota raman compacte - randare conditionata, fara coloana noua si fara spatiu mort.",
+      },
+      {
+        title: "Tests - 546 pass (neschimbate)",
+        content:
+          "Modificarile sunt strict frontend (UI styling + un singur helper de parse). Suita backend de 546 teste ramane neschimbata fata de v2.6.4.",
+      },
+    ],
+  },
+  {
     version: "v2.6.4",
     date: "1 Mai 2026",
     subtitle: "Patch - audit hardening (multi-agent review) finalizat: DELETE in-flight, enrichment relaxed, SSE alert_enriched, bulk delete atomic, metrici precise, xlsx -> exceljs, fail-closed remote",

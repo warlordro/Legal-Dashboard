@@ -15,6 +15,8 @@ import {
   FileSpreadsheet,
   ExternalLink,
   Eye,
+  ChevronDown,
+  ChevronRight,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,6 +84,7 @@ export default function Monitorizare({
   // Bulk-upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkOpen, setBulkOpen] = useState(false);
   const [bulkPreview, setBulkPreview] = useState<NameListPreviewResult | null>(null);
   const [bulkTitle, setBulkTitle] = useState("");
   const [bulkFilter, setBulkFilter] = useState<NameListValidation | "all">("all");
@@ -385,18 +388,32 @@ export default function Monitorizare({
       <MonitoringAddForm onJobAdded={refresh} />
 
       <Card>
-        <CardHeader>
-          <CardTitle className="text-base flex items-center gap-2">
-            <FileSpreadsheet className="h-4 w-4" />
-            Adaugare bulk din fisier
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground mb-3">
-            Incarca XLSX/CSV cu <code className="px-1 rounded bg-muted">numar_dosar</code>{" "}
-            sau <code className="px-1 rounded bg-muted">nume</code>. Pentru nume, serverul face
-            preview ok/warn/rejected si pastreaza lineage-ul listei; pentru dosare se creeaza
-            joburi <code className="px-1 rounded bg-muted">dosar_soap</code> cu cadenta din rand.
+        <button
+          type="button"
+          onClick={() => setBulkOpen((v) => !v)}
+          aria-expanded={bulkOpen}
+          aria-controls="bulk-import-content"
+          className="w-full text-left"
+        >
+          <CardHeader className="cursor-pointer hover:bg-accent/30 transition-colors">
+            <CardTitle className="text-base flex items-center gap-2">
+              {bulkOpen ? (
+                <ChevronDown className="h-4 w-4" />
+              ) : (
+                <ChevronRight className="h-4 w-4" />
+              )}
+              <FileSpreadsheet className="h-4 w-4" />
+              Adaugare bulk din fisier
+            </CardTitle>
+          </CardHeader>
+        </button>
+        {bulkOpen && (
+        <CardContent id="bulk-import-content">
+          <p className="text-sm text-foreground mb-3">
+            Adauga in masa mai multe dosare sau nume dintr-un fisier Excel (XLSX) sau CSV.
+            Descarca mai intai template-ul ca sa vezi ce coloane trebuie completate, apoi
+            incarca-l inapoi cu randurile tale. Aplicatia adauga automat fiecare rand in
+            monitorizare cu cadenta pe care o pui in fisier.
           </p>
           <div className="flex flex-wrap items-center gap-3">
             <Button variant="outline" size="sm" onClick={downloadBulkTemplate} disabled={bulkBusy}>
@@ -547,6 +564,7 @@ export default function Monitorizare({
             </div>
           )}
         </CardContent>
+        )}
       </Card>
 
       <Card>
@@ -655,7 +673,7 @@ export default function Monitorizare({
                                 target="_blank"
                                 rel="noopener noreferrer"
                                 title={`Deschide ${target} pe portal.just.ro`}
-                                className="inline-flex items-center gap-1 font-medium text-primary hover:text-primary/80 hover:underline"
+                                className="inline-flex items-center gap-1 font-bold text-primary hover:text-primary/80 hover:underline"
                               >
                                 {target}
                                 <ExternalLink className="h-3 w-3 shrink-0" />
@@ -687,6 +705,14 @@ export default function Monitorizare({
                           </div>
                         ) : (
                           target
+                        )}
+                        {job.notes && (
+                          <div
+                            className="mt-1 max-w-[420px] truncate text-xs italic text-muted-foreground font-sans"
+                            title={job.notes}
+                          >
+                            {job.notes}
+                          </div>
                         )}
                       </td>
                       <td className="px-3 py-2">
