@@ -1,12 +1,66 @@
-# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.7 livrate / PR-9 urmator
+# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.8 livrate / PR-9 urmator
 
 **Data**: 2026-05-01
 **Branch local**: `main`
 **Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
 v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 + audit hardening
-v2.6.4 + UX polish v2.6.5 + name_soap parity v2.6.6 + export Monitorizare v2.6.7.
-Tag-urile `v2.5.0`..`v2.6.7` nu sunt inca create.
-**Versiune curenta**: `v2.6.7`
+v2.6.4 + UX polish v2.6.5 + name_soap parity v2.6.6 + export Monitorizare v2.6.7
++ review-driven hardening v2.6.8.
+Tag-urile `v2.5.0`..`v2.6.8` nu sunt inca create.
+**Versiune curenta**: `v2.6.8`
+
+## TL;DR (v2.6.8 — Review-driven hardening: a11y + template fragility + doc accuracy)
+
+Patch frontend + docs peste v2.6.7 (zero backend touch, zero schema). Trei
+probleme reale gasite la verificarea unor nitpick-uri automate; aplicate strict
+1:1 fara scope creep. Style commitment ramane: structured-section pe entries
+noi, entries istorice raman ca atare.
+
+**Frontend - HTML button nesting (Monitorizare bulk import):**
+
+- `frontend/src/pages/Monitorizare.tsx`: cardul "Adaugare bulk din fisier"
+  folosea `<button>` ca wrapper peste `<CardHeader>` (div) si `<CardTitle>`
+  (h3) — HTML interzice block-elemente in `<button>`. Handler-ul muta direct
+  pe `<CardHeader role="button" tabIndex={0}>` cu `onClick` + `onKeyDown`
+  (Enter/Space cu `preventDefault`).
+- `aria-expanded` + `aria-controls` pastrate. Adaugat
+  `focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring`
+  pentru focus vizibil la tastatura.
+
+**Frontend - derivare `CADENCE_COL_LETTER`:**
+
+- `frontend/src/lib/monitoringBulkTemplate.ts`: literalul `"C"` inlocuit cu
+  `colIndexToLetter(HEADERS.indexOf("cadence_sec"))`. Helper nou
+  `colIndexToLetter(idx)` (0-based → A, B, ..., Z, AA, ...) baza 26 cu
+  prefix-ul standard Excel.
+- Boot-time guard `throw new Error(...)` cand `cadence_sec` lipseste din
+  `HEADERS`. Reordonarea coloanelor nu mai poate sa desincronizeze silent
+  `<dataValidation sqref="...">` injectat cu `fflate` in
+  `xl/worksheets/sheet1.xml`.
+
+**Frontend - eroare vizibila pentru header lipsa:**
+
+- `parseBulkFile`: cand `findHeaderRow(matrix) < 0`, in loc de silent return
+  cu `valid=[]`+`invalid=[]`, parser-ul push-uieste o intrare in `invalid[]`
+  cu mesaj clar — "Header lipsa: fisierul nu contine niciuna dintre coloanele
+  recunoscute (numar_dosar, nume, name_normalized, denumire). Descarca
+  template-ul si reincearca."
+- UI-ul care afiseaza `invalid[]` are acum un semnal de eroare in loc de
+  "0 randuri".
+
+**Docs - corectare claim stale despre `xlsx@0.18.5`:**
+
+- `SESSION-HANDOFF.md` lines 235-236 (acest document, in sectiunea
+  "Probleme/riscuri ramase") spuneau "xlsx@0.18.5 ramane risc acceptat
+  temporar..." — claim invalid post-v2.6.4. Linia rescrisa: parser-ul
+  `nameListParser.ts` ruleaza pe `exceljs@^4.4.0`, `xlsx` mutat in
+  `devDependencies`, ramane folosit doar tranzitiv pe path-ul write-only prin
+  `xlsx-js-style` si in fixturile de test.
+
+**Verificari**: `npx tsc --noEmit` (frontend) → OK; `npm run build` → 15.64s
+build complet, fara erori noi. Smoke desktop OK (Electron pornit, `/health`
+200, monitoring `running: true`). 524/524 backend tests neschimbate
+(modificarile sunt strict frontend + un fisier MD).
 
 ## TL;DR (v2.6.7 — Export Monitorizare Excel + PDF cu paritate Dosare/Termene)
 
@@ -232,8 +286,10 @@ Fisiere modificate:
 - Pe desktop quota este informativa/bypass. Enforce real ramane pentru web
   PR-9+.
 - Pentru PR-9 web/server mode trebuie auth real inainte de expunere remote.
-- `xlsx@0.18.5` ramane risc acceptat temporar, documentat si mitigat prin
-  limite stricte.
+- `xlsx@0.18.5` nu mai este pe path-ul de parsare a inputului user (in v2.6.4
+  `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
+  ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
+  si in fixturile de test — fara expunere directa la fisiere uploadate.
 
 ## Urmatoarea etapa
 

@@ -18,6 +18,46 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.6.8",
+    date: "1 Mai 2026",
+    subtitle: "Review-driven hardening peste v2.6.7 - fix HTML a11y pe cardul de bulk import, derivare CADENCE_COL_LETTER din HEADERS, eroare clara la header lipsa in parser, corectare claim stale despre xlsx in docs",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Frontend - HTML button nesting fix (Monitorizare bulk import)",
+        content:
+          "Cardul 'Adaugare bulk din fisier' din /monitorizare folosea <button> ca wrapper peste <CardHeader> (div) si <CardTitle> (h3). HTML interzice block-elemente in <button> - markup invalid, comportament a11y inconsistent intre browsere. Handler-ul (toggle deschide/inchide) muta acum direct pe <CardHeader> cu role='button', tabIndex=0, onClick si onKeyDown care intercepteaza Enter si Space cu preventDefault. aria-expanded si aria-controls pastrate. Adaugat focus-visible:ring-2 focus-visible:ring-ring pentru focus vizibil la tastatura.",
+      },
+      {
+        title: "Frontend - derivare CADENCE_COL_LETTER din HEADERS",
+        content:
+          "In monitoringBulkTemplate.ts literalul 'C' inlocuit cu colIndexToLetter(HEADERS.indexOf('cadence_sec')). Helper nou colIndexToLetter (0-based -> A, B, ..., Z, AA, ...) baza 26. Boot-time guard cand cadence_sec lipseste din HEADERS. Reordonarea coloanelor in HEADERS nu mai poate sa desincronizeze silent dropdown-ul OOXML <dataValidation sqref='...'> injectat cu fflate.",
+      },
+      {
+        title: "Frontend - eroare vizibila pentru fisier bulk fara header recunoscut",
+        content:
+          "parseBulkFile push-uieste in invalid[] o intrare cu mesaj clar 'Header lipsa: fisierul nu contine niciuna dintre coloanele recunoscute (numar_dosar, nume, name_normalized, denumire). Descarca template-ul si reincearca.' cand findHeaderRow esueaza. Anterior: silent return cu valid=[] si invalid=[], utilizatorul nu primea niciun semnal de eroare.",
+      },
+      {
+        title: "Docs - corectare claim stale despre xlsx@0.18.5",
+        content:
+          "SESSION-HANDOFF.md sectiunea 'Probleme/riscuri ramase' spunea 'xlsx@0.18.5 ramane risc acceptat temporar...' - invalid post-v2.6.4. Rescris: post-v2.6.4 nameListParser.ts ruleaza pe exceljs@^4.4.0, xlsx mutat in devDependencies, ramane folosit doar tranzitiv pe path-ul write-only prin xlsx-js-style si in fixturile de test.",
+      },
+      {
+        title: "Style commitment - structured-section pe entries noi",
+        content:
+          "Pe future CHANGELOG / STATUS / ROADMAP / SESSION-HANDOFF entries, sectiunile vor fi structurate cu sub-headere bold (Frontend, Backend, Tests, etc.) in loc de paragrafe monolitice. Entries istorice nu se retrofiteaza - costul de mentenanta depaseste beneficiul.",
+      },
+      {
+        title: "Tests - 524 pass (neschimbate)",
+        content:
+          "Patch frontend + un fisier MD. Zero modificari pe backend, repo, scheduler. Suita backend de 524 teste ramane neschimbata fata de v2.6.7. tsc --noEmit (frontend) verde, npm run build complet in 15.64s fara erori.",
+      },
+    ],
+  },
+  {
     version: "v2.6.7",
     date: "1 Mai 2026",
     subtitle: "Export Monitorizare Excel + PDF cu paritate Dosare/Termene - butoane in CardHeader, builderii noi reuseaza paleta de stiluri existenta, Web Worker dispatch",

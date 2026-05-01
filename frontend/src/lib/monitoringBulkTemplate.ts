@@ -125,8 +125,25 @@ const TITLE_ROW = 0;
 const STATS_ROW = 1;
 const HEADER_ROW = 3;
 const DATA_START_ROW = 4;
-// Coloana cadence_sec este indexul 2 = coloana C in Excel.
-const CADENCE_COL_LETTER = "C";
+
+// Convert a 0-based column index to an Excel column letter (A, B, ..., Z, AA, ...).
+function colIndexToLetter(idx: number): string {
+  let n = idx;
+  let s = "";
+  do {
+    s = String.fromCharCode(65 + (n % 26)) + s;
+    n = Math.floor(n / 26) - 1;
+  } while (n >= 0);
+  return s;
+}
+
+// Derivat din HEADERS ca reordonarea coloanelor sa nu desincronizeze
+// dropdown-ul de cadenta din Excel.
+const CADENCE_COL_INDEX = HEADERS.indexOf("cadence_sec" as (typeof HEADERS)[number]);
+if (CADENCE_COL_INDEX < 0) {
+  throw new Error("monitoringBulkTemplate: HEADERS must include 'cadence_sec'");
+}
+const CADENCE_COL_LETTER = colIndexToLetter(CADENCE_COL_INDEX);
 // 1000 randuri de date in plus (sufficient pentru cazuri uzuale).
 const CADENCE_DV_RANGE_END = DATA_START_ROW + 1000;
 
@@ -298,7 +315,15 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
   // Citim ca matrice raw, gasim randul de header, apoi parsam manual.
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
   const headerIdx = findHeaderRow(matrix);
-  if (headerIdx < 0) return { valid, invalid };
+  if (headerIdx < 0) {
+    invalid.push({
+      rowNumber: 1,
+      display: fileName,
+      message:
+        "Header lipsa: fisierul nu contine niciuna dintre coloanele recunoscute (numar_dosar, nume, name_normalized, denumire). Descarca template-ul si reincearca.",
+    });
+    return { valid, invalid };
+  }
 
   const headerRow = (matrix[headerIdx] ?? []).map((c) =>
     String(c ?? "").trim().toLowerCase(),

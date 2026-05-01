@@ -4,6 +4,90 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.6.8] - 2026-05-01
+
+### Review-driven hardening: HTML a11y + template fragility + doc accuracy
+
+Patch de polish post-review pe diff-ul v2.6.7. Trei probleme reale gasite la
+verificarea unor nitpick-uri automate; aplicate strict 1:1 fara scope creep.
+
+**Frontend - fix HTML button nesting (Monitorizare bulk import header):**
+
+- `frontend/src/pages/Monitorizare.tsx`: cardul "Adaugare bulk din fisier"
+  folosea `<button>` ca wrapper peste `<CardHeader>` (div) si `<CardTitle>`
+  (h3). HTML interzice block-elemente in `<button>` — invalid markup +
+  comportament a11y inconsistent intre browsere.
+- Fix: handler-ul (toggle deschide/inchide) muta direct pe `<CardHeader>` cu
+  `role="button"` + `tabIndex={0}` + `onClick` + `onKeyDown` (Enter / Space cu
+  `preventDefault`). Pastrat `aria-expanded` + `aria-controls`. Adaugat
+  `focus-visible:ring-2 focus-visible:ring-ring` ca focus-ul de la tastatura
+  sa fie vizibil.
+
+**Frontend - derivare `CADENCE_COL_LETTER` din `HEADERS`:**
+
+- `frontend/src/lib/monitoringBulkTemplate.ts`: literalul `"C"` inlocuit cu
+  `colIndexToLetter(HEADERS.indexOf("cadence_sec"))`. Reordonarea coloanelor
+  in `HEADERS` nu mai poate sa desincronizeze silent dropdown-ul de cadenta
+  injectat in OOXML (ar fi inceput sa pointeze pe coloana gresita fara nicio
+  eroare la build sau la runtime).
+- Helper nou `colIndexToLetter(idx)` (0-based → A, B, ..., Z, AA, ...) in
+  acelasi fisier; bazic, fara dep noua. Boot-time guard
+  (`throw new Error(...)` cand `cadence_sec` lipseste din `HEADERS`) ca
+  simptomul sa apara la primul download al template-ului, nu silent in Excel.
+
+**Frontend - eroare vizibila pentru fisier bulk fara header recunoscut:**
+
+- `frontend/src/lib/monitoringBulkTemplate.ts:parseBulkFile`: cand
+  `findHeaderRow(matrix) < 0`, in loc de `return { valid, invalid }` silent
+  (utilizatorul vedea zero valid + zero invalid si presupunea ca fisierul e
+  gol), parser-ul push-uieste o intrare in `invalid` cu mesaj clar — "Header
+  lipsa: fisierul nu contine niciuna dintre coloanele recunoscute (numar_dosar,
+  nume, name_normalized, denumire). Descarca template-ul si reincearca." UI-ul
+  care afiseaza `invalid[]` are acum un semnal de eroare in loc de "0 randuri".
+
+**Docs - corectare claim stale despre `xlsx@0.18.5`:**
+
+- `SESSION-HANDOFF.md` lines 235-236 spuneau "xlsx@0.18.5 ramane risc acceptat
+  temporar, documentat si mitigat prin limite stricte" — invalid post-v2.6.4
+  (parser-ul `nameListParser.ts` a fost migrat pe `exceljs@^4.4.0`, `xlsx`
+  mutat in `devDependencies`). Rescris cu adevarul curent: nu mai e pe path-ul
+  de parsare a inputului user, ramane folosit doar tranzitiv pe path-ul
+  write-only prin `xlsx-js-style` si in fixturile de test.
+
+**Style commitment - structured-section pe entries noi:**
+
+- Pe future CHANGELOG / STATUS / ROADMAP / SESSION-HANDOFF entries, sectiunile
+  vor fi structurate cu sub-headere bold (`**Frontend:**`, `**Backend:**`,
+  `**Tests:**`, etc.) in loc de paragrafe monolitice. Entries istorice nu se
+  retrofiteaza — costul de mentenanta depaseste beneficiul.
+
+### Verificari
+
+- `npx tsc --noEmit` (frontend) → OK, fara erori noi.
+- `npm run build` (root) → frontend build complet (15.64s), backend bundle
+  4.0mb, fara erori noi. Doar warning-ul existent pentru chunks > 500kb.
+- Manual: `/monitorizare` → cardul "Adaugare bulk din fisier" se deschide cu
+  click si cu Enter/Space; `aria-expanded` toggle confirmat; focus ring
+  vizibil la tastatura.
+
+### Fisiere modificate
+
+- `frontend/src/pages/Monitorizare.tsx` — 3 linii structurale (button → div
+  role=button), +5 linii (onKeyDown).
+- `frontend/src/lib/monitoringBulkTemplate.ts` — +14 linii (helper
+  `colIndexToLetter` + derivare `CADENCE_COL_LETTER`), +9 linii (push pe
+  `invalid` la header lipsa).
+- `SESSION-HANDOFF.md` — 2 linii rescrise.
+
+### Risc / regression surface
+
+- Zero modificari pe backend, repository sau scheduler — pur frontend
+  additive + un text in MD. Aceleasi librarii in bundle.
+- Tests: 524/524 backend raman verzi (modificarile sunt strict frontend +
+  un fisier MD).
+
+---
+
 ## [2.6.7] - 2026-05-01
 
 ### Export Monitorizare (Excel + PDF) — paritate cu Dosare/Termene

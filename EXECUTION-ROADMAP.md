@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1..v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5..v2.6.6 + export Monitorizare v2.6.7 (2026-05-01). Urmatorul PR planificat: PR-9 Auth pluggable (desktop noop / web SSO).
-> **Versiune document**: 1.11 (2026-05-01)
+> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1..v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5..v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01). Urmatorul PR planificat: PR-9 Auth pluggable (desktop noop / web SSO).
+> **Versiune document**: 1.12 (2026-05-01)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)

@@ -411,25 +411,30 @@ export default function Monitorizare({
       <MonitoringAddForm onJobAdded={refresh} />
 
       <Card>
-        <button
-          type="button"
+        <CardHeader
+          role="button"
+          tabIndex={0}
           onClick={() => setBulkOpen((v) => !v)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setBulkOpen((v) => !v);
+            }
+          }}
           aria-expanded={bulkOpen}
           aria-controls="bulk-import-content"
-          className="w-full text-left"
+          className="cursor-pointer hover:bg-accent/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
-          <CardHeader className="cursor-pointer hover:bg-accent/30 transition-colors">
-            <CardTitle className="text-base flex items-center gap-2">
-              {bulkOpen ? (
-                <ChevronDown className="h-4 w-4" />
-              ) : (
-                <ChevronRight className="h-4 w-4" />
-              )}
-              <FileSpreadsheet className="h-4 w-4" />
-              Adaugare bulk din fisier
-            </CardTitle>
-          </CardHeader>
-        </button>
+          <CardTitle className="text-base flex items-center gap-2">
+            {bulkOpen ? (
+              <ChevronDown className="h-4 w-4" />
+            ) : (
+              <ChevronRight className="h-4 w-4" />
+            )}
+            <FileSpreadsheet className="h-4 w-4" />
+            Adaugare bulk din fisier
+          </CardTitle>
+        </CardHeader>
         {bulkOpen && (
         <CardContent id="bulk-import-content">
           <p className="text-sm text-foreground mb-3">

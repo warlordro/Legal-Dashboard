@@ -7,25 +7,41 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.6.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.6.8**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.6.7** - export Monitorizare Excel + PDF cu paritate Dosare/Termene:
-butoane Excel + PDF in CardHeader "Joburi active" (vizibile cand
-`jobs.length > 0`), state partajat `exporting: "xlsx" | "pdf" | null` cu
-`Loader2` spin pe butonul activ; cand `selectedIds.size > 0`, exportul
-acopera doar selectia (suffix `(N)`), altfel toate joburile vizibile —
-pattern identic cu `DosareTable`. Builderii noi `buildMonitoringXlsx` +
-`buildMonitoringPdf` reuseaza paleta de stiluri si helperii existenti din
-`lib/export.ts` — XLSX cu titlu `PORTALJUST DASHBOARD — MONITORIZARE`
-BLUE_DARK, header BLUE_MAIN, randuri alternate ROW_ALT/WHITE, font 10,
-`sanitizeFormulaCells` pe formula-injection guard; PDF landscape A4
-helvetica cu header `[37,99,235]`, alternate row `[245,247,250]`,
-`stripDiacritics` pe text, footer "Pagina N" — exact ca exporturile Termene
-si Dosare. 8 coloane (#, Tinta, Tip, Cadenta, Ultima rulare, Urmatoarea
-verif., Status, Note). ExportJob extins cu `monitoringXlsx`+`monitoringPdf`,
-dispatch in `export.worker.ts` (build off main thread). Filename pattern
-`monitorizare_<target_or_dataRO>.<ext>`. Zero modificari pe backend, repo
-sau scheduler — pur frontend additive; 524/524 teste backend raman verzi.
+**v2.6.8** - review-driven hardening peste v2.6.7. Trei fix-uri reale gasite
+la verificarea unor nitpick-uri automate.
+
+**Frontend - HTML button nesting:** cardul "Adaugare bulk din fisier" din
+`/monitorizare` folosea `<button>` ca wrapper peste `<CardHeader>` (div) si
+`<CardTitle>` (h3), markup invalid HTML. Handler-ul muta direct pe
+`<CardHeader role="button" tabIndex={0}>` cu `onClick` + `onKeyDown`
+(Enter/Space cu `preventDefault`); `aria-expanded`/`aria-controls` pastrate;
+adaugat `focus-visible:ring` pentru focus vizibil la tastatura.
+
+**Frontend - derivare `CADENCE_COL_LETTER`:** in `monitoringBulkTemplate.ts`
+literalul `"C"` inlocuit cu `colIndexToLetter(HEADERS.indexOf("cadence_sec"))`
+(helper nou, baza 26). Reordonarea coloanelor `HEADERS` nu mai poate sa
+desincronizeze silent `<dataValidation sqref="...">` injectat in OOXML.
+
+**Frontend - eroare clara la header lipsa:** `parseBulkFile` push-uieste in
+`invalid[]` mesajul "Header lipsa: fisierul nu contine niciuna dintre
+coloanele recunoscute..." cand `findHeaderRow` esueaza, in loc de silent
+return care lasa utilizatorul cu "0 randuri" fara explicatie.
+
+**Docs:** `SESSION-HANDOFF.md` — claim-ul "xlsx@0.18.5 ramane risc acceptat..."
+rescris (post-v2.6.4 `nameListParser.ts` ruleaza pe `exceljs@^4.4.0`; xlsx
+ramane doar tranzitiv pe path-ul write-only prin `xlsx-js-style`).
+
+Zero modificari pe backend; 524/524 teste backend raman verzi.
+
+Baza ramane v2.6.7 - export Monitorizare Excel + PDF cu paritate
+Dosare/Termene: butoane Excel + PDF in CardHeader "Joburi active" cu
+`Loader2` spin, builderii noi `buildMonitoringXlsx`/`buildMonitoringPdf`
+reuseaza paleta din `lib/export.ts` (BLUE_DARK titlu, BLUE_MAIN header,
+ROW_ALT/WHITE alternativ, sanitizeFormulaCells pe XLSX, stripDiacritics
+pe PDF), filename pattern `monitorizare_<target_or_dataRO>.<ext>`,
+ExportJob extins + dispatch in Web Worker.
 
 Baza ramane v2.6.6 - UX polish Monitorizare name_soap parity:
 randurile cu `job.kind === "name_soap"` randeaza target-ul `font-bold` urmat
