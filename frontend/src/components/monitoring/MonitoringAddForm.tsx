@@ -90,13 +90,13 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
 
   return (
     <Card>
-      <CardHeader>
+      <CardHeader className="py-3">
         <CardTitle className="text-base flex items-center gap-2">
           <Plus className="h-4 w-4" />
           Adauga in monitorizare
         </CardTitle>
       </CardHeader>
-      <CardContent>
+      <CardContent className="pt-0 pb-4">
         <form onSubmit={handleAdd} className="space-y-3">
           <div className="flex gap-1 border-b border-border">
             <button

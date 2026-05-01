@@ -189,12 +189,11 @@ function injectCadenceDropdown(xlsxBytes: Uint8Array): Uint8Array {
   return zipSync(unzipped, { level: 6 });
 }
 
-const SAMPLE_ROWS: (string | number | null)[][] = [
-  ["1234/180/2024", "", "4h", "Client X — apel"],
-  ["9012/3/2024/a1", "", "24h", "Verificare zilnica"],
-  ["", "POPESCU ION", "24h", "Subiect — alerta dosare noi"],
-  ["", "SC EXAMPLE SRL BUCURESTI", "24h", "Mai multe variante de scriere → alerta agregata"],
-];
+// Pre-stylate empty data rows pentru ca utilizatorul sa aiba un spatiu de
+// completat cu fundal alternativ ROW_ALT/WHITE deja aplicat. Anterior aceasta
+// zona continea exemple ("1234/180/2024", "POPESCU ION", "Client X — apel"
+// etc.) — eliminate la cerere ca sa nu fie nevoie sa fie sterse manual.
+const EMPTY_DATA_ROWS_COUNT = 4;
 
 export async function downloadBulkTemplate(): Promise<void> {
   const StyledXLSX = await import("xlsx-js-style");
@@ -207,7 +206,9 @@ export async function downloadBulkTemplate(): Promise<void> {
     ],
     Array(NUM_COLS).fill(null),
     [...HEADERS],
-    ...SAMPLE_ROWS,
+    ...Array.from({ length: EMPTY_DATA_ROWS_COUNT }, () =>
+      Array(NUM_COLS).fill("") as (string | number | null)[],
+    ),
   ];
 
   const ws = StyledXLSX.utils.aoa_to_sheet(aoa) as Record<string, unknown>;
@@ -220,27 +221,18 @@ export async function downloadBulkTemplate(): Promise<void> {
   styleRow(ws, STATS_ROW, NUM_COLS, tplStyleStats);
   styleRow(ws, HEADER_ROW, NUM_COLS, tplStyleHeader);
 
-  // Data rows — bold pe coloana 0 (numar_dosar) cand e populata, ca in
-  // export-urile de Dosare/Termene. Aici tratam atat coloana 0 cat si 1 ca
-  // "identificator" (bold doar daca celula e populata, ca sa nu apara bold pe
-  // celula goala dintr-un rand cu nume).
-  SAMPLE_ROWS.forEach((row, i) => {
+  // Empty data rows — fundal alternativ ROW_ALT/WHITE pe celulele goale ca
+  // utilizatorul sa aiba o zona vizibila de completat. Cellele goale primesc
+  // string vid (`""`) ca sa fie randate si stilizate (altfel xlsx-js-style le
+  // sare in aoa_to_sheet).
+  for (let i = 0; i < EMPTY_DATA_ROWS_COUNT; i++) {
     const r = DATA_START_ROW + i;
     for (let c = 0; c < NUM_COLS; c++) {
-      const isIdent = c === 0 || c === 1;
-      const populated = row[c] !== null && row[c] !== "" && row[c] !== undefined;
-      styleCell(ws, r, c, tplStyleDataCell(i, isIdent && populated));
-    }
-    // Asigura ca celula vizibila a referintei (cellAddr) exista chiar si pentru
-    // valorile gol-string, ca sa primeasca culoarea de fundal alternativa.
-    for (let c = 0; c < NUM_COLS; c++) {
       const addr = cellAddr(r, c);
-      if (!ws[addr]) {
-        ws[addr] = { t: "s", v: "" };
-        styleCell(ws, r, c, tplStyleDataCell(i, false));
-      }
+      if (!ws[addr]) ws[addr] = { t: "s", v: "" };
+      styleCell(ws, r, c, tplStyleDataCell(i, false));
     }
-  });
+  }
 
   sanitizeFormulaCells(ws);
 
