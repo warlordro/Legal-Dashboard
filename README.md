@@ -33,7 +33,7 @@ return care lasa utilizatorul cu "0 randuri" fara explicatie.
 rescris (post-v2.6.4 `nameListParser.ts` ruleaza pe `exceljs@^4.4.0`; xlsx
 ramane doar tranzitiv pe path-ul write-only prin `xlsx-js-style`).
 
-Zero modificari pe backend; 524/524 teste backend raman verzi.
+Zero modificari pe backend; 546/546 teste backend raman verzi.
 
 Baza ramane v2.6.7 - export Monitorizare Excel + PDF cu paritate
 Dosare/Termene: butoane Excel + PDF in CardHeader "Joburi active" cu

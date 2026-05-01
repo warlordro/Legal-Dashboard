@@ -83,7 +83,7 @@ verificarea unor nitpick-uri automate; aplicate strict 1:1 fara scope creep.
 
 - Zero modificari pe backend, repository sau scheduler — pur frontend
   additive + un text in MD. Aceleasi librarii in bundle.
-- Tests: 524/524 backend raman verzi (modificarile sunt strict frontend +
+- Tests: 546/546 backend raman verzi (modificarile sunt strict frontend +
   un fisier MD).
 
 ---
@@ -156,7 +156,7 @@ template-uri stilizate, acelasi flow Web Worker.
 ### Risc / regression surface
 
 - Zero modificari pe backend, repository sau scheduler — pur frontend additive.
-- Niciun test backend afectat (524/524 raman verzi). Aceleasi librarii
+- Niciun test backend afectat (546/546 raman verzi). Aceleasi librarii
   `xlsx-js-style` si `jspdf`/`jspdf-autotable` deja in bundle.
 
 ---

@@ -68,6 +68,15 @@ build complet, fara erori noi. Smoke desktop OK (Electron pornit, `/health`
 `npm run build` OK, `npm run rebuild:electron` OK, smoke Electron hidden OK
 cu `/health` 200 si monitoring `running: true`, `inflight: 0`.
 
+**Doc drift cleanup 2026-05-01 (post-revalidare)**: 9 entries stale care
+declarau "524/524 teste" pentru v2.6.7 + v2.6.8 actualizate la "546/546"
+(baseline din v2.6.4 +22 noi). Atinse: `CHANGELOG.md` (v2.6.7+v2.6.8
+entries), `CLAUDE.md` (v2.6.7+v2.6.8 + linia comanda `npm test`),
+`README.md`, `STATUS.md` (linia validare v2.6.8),
+`frontend/src/data/changelog-entries.tsx` (sectiunea Tests v2.6.8).
+Entries istorice (v2.6.0..v2.6.3, ACCEPTANCE-PR-8, MULTI-AGENT-REVIEW)
+pastrate ca snapshot in time — 524 era corect la momentul release-ului.
+
 ## TL;DR (v2.6.7 — Export Monitorizare Excel + PDF cu paritate Dosare/Termene)
 
 Patch frontend-only peste v2.6.6 (zero backend touch, zero schema). Pagina

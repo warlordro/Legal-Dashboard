@@ -51,9 +51,9 @@ export const versions: VersionEntry[] = [
           "Pe future CHANGELOG / STATUS / ROADMAP / SESSION-HANDOFF entries, sectiunile vor fi structurate cu sub-headere bold (Frontend, Backend, Tests, etc.) in loc de paragrafe monolitice. Entries istorice nu se retrofiteaza - costul de mentenanta depaseste beneficiul.",
       },
       {
-        title: "Tests - 524 pass (neschimbate)",
+        title: "Tests - 546 pass (neschimbate)",
         content:
-          "Patch frontend + un fisier MD. Zero modificari pe backend, repo, scheduler. Suita backend de 524 teste ramane neschimbata fata de v2.6.7. tsc --noEmit (frontend) verde, npm run build complet in 15.64s fara erori.",
+          "Patch frontend + un fisier MD. Zero modificari pe backend, repo, scheduler. Suita backend de 546 teste ramane neschimbata fata de v2.6.7. tsc --noEmit (frontend) verde, npm run build complet in 15.64s fara erori.",
       },
     ],
   },
