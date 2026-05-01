@@ -1,12 +1,41 @@
-# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.6 livrate / PR-9 urmator
+# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.7 livrate / PR-9 urmator
 
 **Data**: 2026-05-01
 **Branch local**: `main`
 **Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
 v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 + audit hardening
-v2.6.4 + UX polish v2.6.5 + name_soap parity v2.6.6. Tag-urile `v2.5.0`..`v2.6.6`
-nu sunt inca create.
-**Versiune curenta**: `v2.6.6`
+v2.6.4 + UX polish v2.6.5 + name_soap parity v2.6.6 + export Monitorizare v2.6.7.
+Tag-urile `v2.5.0`..`v2.6.7` nu sunt inca create.
+**Versiune curenta**: `v2.6.7`
+
+## TL;DR (v2.6.7 — Export Monitorizare Excel + PDF cu paritate Dosare/Termene)
+
+Patch frontend-only peste v2.6.6 (zero backend touch, zero schema). Pagina
+`/monitorizare` primeste paritate completa cu `/dosare` si `/termene` la export:
+
+- **Butoane Excel + PDF** in CardHeader "Joburi active", vizibile cand
+  `jobs.length > 0`. State partajat `exporting: "xlsx" | "pdf" | null` cu
+  `Loader2` spin pe butonul activ. Disabled in timpul generarii.
+- **Selectie sau toate** — `getExportJobs()` returneaza
+  `selectedIds.size === 0 ? jobs : jobs.filter(...)`. Suffix `(N)` pe label
+  cand selectia e activa, pattern identic cu `DosareTable`.
+- **Builderii noi `buildMonitoringXlsx` + `buildMonitoringPdf`** in
+  `frontend/src/lib/export.ts` reuseaza paleta de stiluri si helperii existenti
+  — XLSX cu titlu `PORTALJUST DASHBOARD — MONITORIZARE` BLUE_DARK merged A:H,
+  header BLUE_MAIN, randuri alternate ROW_ALT/WHITE font 10, 8 coloane
+  (#, Tinta, Tip, Cadenta, Ultima rulare, Urmatoarea verif., Status, Note),
+  `sanitizeFormulaCells(ws)` pre-write. PDF landscape A4 helvetica cu header
+  `[37,99,235]`, alternate row `[245,247,250]`, `stripDiacritics(...)` pe text,
+  footer "Pagina N" centrat.
+- **Web Worker dispatch** — `ExportJob` discriminated union extins cu
+  `monitoringXlsx` + `monitoringPdf`, switch cases noi in `export.worker.ts`.
+  Build-ul ruleaza off main thread cu transferable buffer.
+- **Filename pattern**: `monitorizare_<sanitized_target>.xlsx` (single job) sau
+  `monitorizare_<dataRO>.xlsx` (multiple) — consecvent cu `dosare_*`/`termene_*`.
+
+**Tests**: 546 pass (neschimbate fata de v2.6.4..v2.6.6 — modificari strict
+frontend additive). Validare: `npx tsc --noEmit` (frontend) verde,
+`npm run build` complet in 13.94s.
 
 ## TL;DR (v2.6.6 — UX polish Monitorizare name_soap parity)
 

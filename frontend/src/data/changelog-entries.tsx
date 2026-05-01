@@ -18,6 +18,41 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.6.7",
+    date: "1 Mai 2026",
+    subtitle: "Export Monitorizare Excel + PDF cu paritate Dosare/Termene - butoane in CardHeader, builderii noi reuseaza paleta de stiluri existenta, Web Worker dispatch",
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Monitorizare - butoane Excel + PDF in CardHeader",
+        content:
+          "Pagina /monitorizare primeste paritate completa cu /dosare si /termene la export. Doua butoane noi (Excel + PDF) adaugate in CardHeader-ul 'Joburi active', vizibile cand exista cel putin un job. State partajat exporting cu Loader2 spin pe butonul activ; ambele butoane raman dezactivate in timpul generarii. Cand utilizatorul are joburi selectate (checkbox-uri), exportul acopera doar selectia, cu suffix (N) pe label - altfel exporta toate joburile vizibile. Pattern identic cu DosareTable si TermeneTable.",
+      },
+      {
+        title: "Excel - design identic cu Termene/Dosare",
+        content:
+          "Builderul nou buildMonitoringXlsx reuseaza paleta de stiluri din aplicatie: titlu 'PORTALJUST DASHBOARD - MONITORIZARE' BLUE_DARK 13 bold alb merged peste 8 coloane, subtitlu cu data si numar joburi, header BLUE_MAIN bold alb, randuri alternate ROW_ALT/WHITE font 10. Cele 8 coloane: #, Tinta, Tip, Cadenta, Ultima rulare, Urmatoarea verif., Status, Note. Latimi 5/30/12/10/18/18/16/30 ch. Formula-injection guard sanitizeFormulaCells aplicat pre-write (prefix ' pe celule care incep cu =+-@\\t\\r). Filename: monitorizare_<tinta>.xlsx pentru un singur job sau monitorizare_<dataRO>.xlsx pentru export multiplu - consecvent cu dosare_*/termene_*.",
+      },
+      {
+        title: "PDF - landscape A4 cu acelasi look",
+        content:
+          "Builderul nou buildMonitoringPdf foloseste jsPDF + jspdf-autotable in landscape A4 cu fontul helvetica, header [37,99,235] (albastru) cu text alb, randuri alternate [245,247,250], dimensiuni font/padding identice cu PDF-urile Termene/Dosare. Coloana Tinta apare cellWidth 50 fontStyle bold pentru lectura rapida. Footer 'Pagina N' centrat pe fiecare pagina. stripDiacritics pe text (jsPDF default font nu suporta diacritice).",
+      },
+      {
+        title: "Web Worker dispatch - UI ramane responsiv",
+        content:
+          "ExportJob discriminated union extins cu kind 'monitoringXlsx' si 'monitoringPdf'. Worker-ul export.worker.ts primeste cele doua case-uri noi in switch si trimite buffer-ul inapoi cu transferable. Build-ul efectiv (xlsx-js-style + jspdf) ruleaza off main thread - spinner-ul React ramane fluid pana la salvare chiar si pe runs cu sute de joburi. Pattern identic cu RNPM, AI si Manual.",
+      },
+      {
+        title: "Tests - 546 pass (neschimbate)",
+        content:
+          "Patch frontend-only additive. Zero modificari pe backend, repo sau scheduler. Suita backend de 546 teste ramane neschimbata fata de v2.6.4..v2.6.6.",
+      },
+    ],
+  },
+  {
     version: "v2.6.6",
     date: "1 Mai 2026",
     subtitle: "Patch UX Monitorizare - name_soap parity (buton Dosare + target bold + label 'Nume') + swap coloane Ultima rulare / Urmatoarea verif.",

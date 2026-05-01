@@ -7,19 +7,35 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.6.6**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.6.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.6.6** - patch UX polish frontend-only Monitorizare — name_soap parity:
+**v2.6.7** - export Monitorizare Excel + PDF cu paritate Dosare/Termene:
+butoane Excel + PDF in CardHeader "Joburi active" (vizibile cand
+`jobs.length > 0`), state partajat `exporting: "xlsx" | "pdf" | null` cu
+`Loader2` spin pe butonul activ; cand `selectedIds.size > 0`, exportul
+acopera doar selectia (suffix `(N)`), altfel toate joburile vizibile —
+pattern identic cu `DosareTable`. Builderii noi `buildMonitoringXlsx` +
+`buildMonitoringPdf` reuseaza paleta de stiluri si helperii existenti din
+`lib/export.ts` — XLSX cu titlu `PORTALJUST DASHBOARD — MONITORIZARE`
+BLUE_DARK, header BLUE_MAIN, randuri alternate ROW_ALT/WHITE, font 10,
+`sanitizeFormulaCells` pe formula-injection guard; PDF landscape A4
+helvetica cu header `[37,99,235]`, alternate row `[245,247,250]`,
+`stripDiacritics` pe text, footer "Pagina N" — exact ca exporturile Termene
+si Dosare. 8 coloane (#, Tinta, Tip, Cadenta, Ultima rulare, Urmatoarea
+verif., Status, Note). ExportJob extins cu `monitoringXlsx`+`monitoringPdf`,
+dispatch in `export.worker.ts` (build off main thread). Filename pattern
+`monitorizare_<target_or_dataRO>.<ext>`. Zero modificari pe backend, repo
+sau scheduler — pur frontend additive; 524/524 teste backend raman verzi.
+
+Baza ramane v2.6.6 - UX polish Monitorizare name_soap parity:
 randurile cu `job.kind === "name_soap"` randeaza target-ul `font-bold` urmat
 de buton `Dosare` cu icon `Eye`, identic vizual cu randurile `dosar_soap`;
-click → prop nou `onOpenName(target)` propagat din `App.tsx` ca
+click → prop `onOpenName(target)` propagat din `App.tsx` ca
 `handleHistoryClick("dosare", { numeParte: nume })`, reuseste flow-ul existent
-`pendingSearch` (SearchParams accepta deja `numeParte`); coloana TIP afiseaza
-"Nume" pentru `name_soap` (era "Subiect"), consecvent cu formularul de
-adaugare si cu coloana `nume` din template-ul XLSX (v2.6.5); ordinea coloanelor
-in tabel devine "Ultima rulare → Urmatoarea verif." (era invers) pentru
-lectura naturala fapte→predictie. 546/546 teste backend (neschimbate fata de
-v2.6.5 — modificari strict frontend label + render path).
+`pendingSearch`; coloana TIP afiseaza "Nume" pentru `name_soap` (era "Subiect"),
+consecvent cu formularul de adaugare si cu coloana `nume` din template-ul XLSX
+(v2.6.5); ordinea coloanelor in tabel devine "Ultima rulare → Urmatoarea verif."
+(era invers) pentru lectura naturala fapte→predictie.
 Baza ramane v2.6.5 - patch UX polish frontend-only Monitorizare: link-ul
 TINTA pentru joburile `dosar_soap` devine `font-bold` (numarul devine prima
 ancora vizuala din rand, consecvent cu inbox-ul Alerte); cardul "Adaugare bulk din fisier"
@@ -132,7 +148,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (546 teste in v2.6.6, neschimbate fata de v2.6.5) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (546 teste in v2.6.7, neschimbate fata de v2.6.4..v2.6.6 — patch v2.6.7 e frontend-only) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

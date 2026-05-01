@@ -4,6 +4,79 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.6.7] - 2026-05-01
+
+### Export Monitorizare (Excel + PDF) — paritate cu Dosare/Termene
+
+Pana acum pagina Monitorizare nu avea export, desi colega ei Dosare si Termene
+ofereau XLSX + PDF. Patch-ul aduce paritate: aceeasi suprafata UI, aceleasi
+template-uri stilizate, acelasi flow Web Worker.
+
+### Frontend - butoane export in CardHeader "Joburi active"
+
+- `frontend/src/pages/Monitorizare.tsx`: doua butoane `Excel` + `PDF` adaugate
+  langa actiunea destructive existenta (`Sterge selectate`). Vizibile cand
+  `jobs.length > 0`. State partajat `exporting: "xlsx" | "pdf" | null` dezactiveaza
+  ambele butoane in timpul generarii si afiseaza `Loader2` spin pe butonul activ.
+  Cand `selectedIds.size > 0`, butoanele exporta doar selectia (suffix `(N)`),
+  altfel exporta toate joburile vizibile — pattern identic cu `DosareTable`.
+- Helperi noi: `getExportJobs()` (selectie sau toate) si `handleExport(kind)`
+  (cu try/finally + reset state). Erorile se afiseaza in banner-ul `error`
+  existent al paginii.
+
+### Frontend - builderi pure pe Web Worker
+
+- `frontend/src/lib/export.ts`: `buildMonitoringXlsx(jobs)` si
+  `buildMonitoringPdf(jobs)` adaugati. **Design identic cu Termene/Dosare** —
+  XLSX-ul foloseste `BLUE_DARK` pentru titlu (`PORTALJUST DASHBOARD —
+  MONITORIZARE`), `BLUE_MAIN` pentru header, `ROW_ALT/WHITE` alternativ pe
+  randuri, font 10, helperii `styleTitle/styleStats/styleHeader/styleDataCell`
+  partajati. PDF-ul ruleaza in `landscape` A4, `helvetica`, header
+  `[37,99,235]`, alternateRowStyles `[245,247,250]`, footer "Pagina N" — exact
+  ca exporturile Termene si Dosare.
+- 8 coloane: `#`, `Tinta`, `Tip`, `Cadenta`, `Ultima rulare`, `Urmatoarea verif.`,
+  `Status`, `Note`. `formatMonitoringTarget(job)` reuseste helperul existent
+  din `lib/api.ts`; cadenta umanizata (4h, 24h, 7z, 30min); status combina
+  `active` (activ/pauza) cu `last_status` (ok/error/partial/skipped).
+- `sanitizeFormulaCells(ws)` aplicat pe XLSX (formula-injection guard pe
+  `=+-@\t\r`), `stripDiacritics` pe PDF (jsPDF default font nu suporta
+  diacritice).
+- Filename pattern: `monitorizare_<target>.xlsx` cand exporti un singur job
+  (sanitizat), `monitorizare_<dataRO>.xlsx` cand exporti mai multe — consecvent
+  cu `dosare_*` si `termene_*`.
+
+### Frontend - worker dispatcher
+
+- `frontend/src/lib/export.worker.ts`: doua case-uri noi `monitoringXlsx` si
+  `monitoringPdf` in switch-ul existent. ExportJob discriminated union extins
+  cu cele doua kind-uri. UI-ul ramane responsiv pe runs cu sute de joburi
+  (build-ul nu blocheaza main thread-ul).
+
+### Verificari
+
+- `npx tsc --noEmit` (frontend) → OK
+- `npm run build` → 13.94s build complet, fara erori, doar warning-ul existent
+  pentru `export.ts` static + dinamic import
+- Manual: butoane vizibile pe `/monitorizare`, exportul descarca fisier
+  corect numit, Excel-ul deschis in Office afiseaza titlul stilizat, PDF-ul
+  deschis in viewer afiseaza tabelul cu paginare
+
+### Fisiere modificate
+
+- `frontend/src/pages/Monitorizare.tsx` — imports, state, helperi, butoane
+- `frontend/src/lib/export.ts` — `buildMonitoringXlsx`, `buildMonitoringPdf`,
+  `exportMonitoringExcel`, `exportMonitoringPDF`, `monitoringFilename` +
+  helperii pentru cadenta/data/kind/status
+- `frontend/src/lib/export.worker.ts` — dispatch cases noi
+
+### Risc / regression surface
+
+- Zero modificari pe backend, repository sau scheduler — pur frontend additive.
+- Niciun test backend afectat (524/524 raman verzi). Aceleasi librarii
+  `xlsx-js-style` si `jspdf`/`jspdf-autotable` deja in bundle.
+
+---
+
 ## [2.6.6] - 2026-05-01
 
 ### UX polish Monitorizare — name_soap parity

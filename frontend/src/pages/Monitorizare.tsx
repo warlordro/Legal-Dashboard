@@ -17,6 +17,7 @@ import {
   Eye,
   ChevronDown,
   ChevronRight,
+  Loader2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -33,6 +34,7 @@ import {
   MonitoringApiError,
 } from "@/lib/api";
 import { downloadBulkTemplate, parseBulkFile, type BulkRowDosar } from "@/lib/monitoringBulkTemplate";
+import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
@@ -82,6 +84,7 @@ export default function Monitorizare({
   const [error, setError] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
 
   // Bulk-upload state
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -200,6 +203,24 @@ export default function Monitorizare({
       await refresh();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la stergere.");
+    }
+  };
+
+  const getExportJobs = (): MonitoringJob[] =>
+    selectedIds.size === 0 ? jobs : jobs.filter((j) => selectedIds.has(j.id));
+
+  const handleExport = async (kind: "xlsx" | "pdf") => {
+    const data = getExportJobs();
+    if (data.length === 0) return;
+    setExporting(kind);
+    setError(null);
+    try {
+      if (kind === "xlsx") await exportMonitoringExcel(data);
+      else await exportMonitoringPDF(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la export.");
+    } finally {
+      setExporting(null);
     }
   };
 
@@ -580,18 +601,60 @@ export default function Monitorizare({
                 </span>
               )}
             </CardTitle>
-            {selectedIds.size > 0 && (
-              <Button
-                variant="destructive"
-                size="sm"
-                onClick={handleBulkDelete}
-                disabled={bulkDeleting}
-                title={`Sterge ${selectedIds.size} joburi selectate`}
-              >
-                <Trash2 className="h-4 w-4" />
-                {bulkDeleting ? "Se sterg..." : `Sterge selectate (${selectedIds.size})`}
-              </Button>
-            )}
+            <div className="flex items-center gap-2">
+              {jobs.length > 0 && (
+                <>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exporting !== null}
+                    onClick={() => handleExport("xlsx")}
+                    title={
+                      selectedIds.size > 0
+                        ? `Export Excel pentru ${selectedIds.size} joburi selectate`
+                        : `Export Excel pentru toate cele ${jobs.length} joburi`
+                    }
+                  >
+                    {exporting === "xlsx" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}{" "}
+                    Excel {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={exporting !== null}
+                    onClick={() => handleExport("pdf")}
+                    title={
+                      selectedIds.size > 0
+                        ? `Export PDF pentru ${selectedIds.size} joburi selectate`
+                        : `Export PDF pentru toate cele ${jobs.length} joburi`
+                    }
+                  >
+                    {exporting === "pdf" ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Download className="h-4 w-4" />
+                    )}{" "}
+                    PDF {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+                  </Button>
+                </>
+              )}
+              {selectedIds.size > 0 && (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleBulkDelete}
+                  disabled={bulkDeleting}
+                  title={`Sterge ${selectedIds.size} joburi selectate`}
+                >
+                  <Trash2 className="h-4 w-4" />
+                  {bulkDeleting ? "Se sterg..." : `Sterge selectate (${selectedIds.size})`}
+                </Button>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent>

@@ -4,6 +4,8 @@ import {
   buildDosareXlsx,
   buildDosarePdf,
   buildManualPdf,
+  buildMonitoringPdf,
+  buildMonitoringXlsx,
   buildTermeneXlsx,
   buildTermenePdf,
   type ExportJob,
@@ -32,6 +34,12 @@ ctx.onmessage = async (e: MessageEvent<ExportJob>) => {
         break;
       case "termenePdf":
         result = await buildTermenePdf(e.data.data);
+        break;
+      case "monitoringXlsx":
+        result = await buildMonitoringXlsx(e.data.data);
+        break;
+      case "monitoringPdf":
+        result = await buildMonitoringPdf(e.data.data);
         break;
       case "analysisPdf":
         result = await buildAnalysisPdf(e.data.data);
