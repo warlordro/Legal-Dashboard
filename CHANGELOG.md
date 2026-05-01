@@ -4,6 +4,52 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.6.6] - 2026-05-01
+
+### UX polish Monitorizare — name_soap parity
+
+Patch frontend-only peste v2.6.5. Doua frecari minore ramase pe inbox-ul
+Monitorizare dupa polish-ul TINTA: randurile `name_soap` (subiectii din bulk
+import) nu aveau buton de cautare in-app, iar coloana TIP afisa "Subiect" desi
+formularul de adaugare si template-ul XLSX folosesc consecvent termenul "Nume".
+
+### Frontend - Dosare button pe randuri name_soap
+
+- `frontend/src/pages/Monitorizare.tsx` (linia ~705): randurile cu
+  `job.kind === "name_soap"` randeaza acum target-ul (numele subiectului) in
+  `font-bold` urmat de un buton `Dosare` cu pictograma `Eye`, identic vizual cu
+  butonul de pe randurile `dosar_soap`. Click → `onOpenName(target)` →
+  `navigate("/dosare")`. Pattern consecvent: orice TINTA din inbox-ul de
+  monitorizare ofera o scurtatura catre cautarea in-app.
+- `frontend/src/App.tsx` (linia ~295): prop nou `onOpenName` propagat ca
+  `handleHistoryClick("dosare", { numeParte: nume })`. SearchParams accepta
+  deja optional `numeParte`, deci `pendingSearch` flow-ul existent
+  (Dosare → auto-search) functioneaza fara modificari pe `Dosare.tsx`.
+
+### Frontend - "Subiect" → "Nume" in coloana TIP
+
+- `frontend/src/pages/Monitorizare.tsx` (linia ~743): label-ul afisat pentru
+  joburi `name_soap` schimba "Subiect" → "Nume" pentru consecventa cu
+  formularul de adaugare (`MonitoringAddForm` foloseste "nume") si cu coloana
+  `nume` din template-ul XLSX (v2.6.5). Restul kind-urilor raman neschimbate
+  (`dosar_soap` → "Dosar", `aviz_rnpm` → "Aviz RNPM").
+
+### Frontend - swap coloane "Ultima rulare" / "Urmatoarea verif."
+
+- `frontend/src/pages/Monitorizare.tsx`: ordinea coloanelor in tabel devine
+  **Ultima rulare → Urmatoarea verif.** (era invers). Citirea naturala in
+  cazul unui inbox de monitorizare este "ce s-a intamplat ultima oara, apoi
+  cand verific din nou" — coloana cu fapte (last_run_at) inainte de cea cu
+  predictia (next_run_at). Swap-ul atinge atat header-ul cat si celulele
+  `<td>`, fara modificari la datele transmise de API sau la formatare.
+
+### Tests
+
+- 546 teste pass (neschimbate fata de v2.6.5 — modificarile sunt strict
+  frontend label + render path, fara backend touch).
+
+---
+
 ## [2.6.5] - 2026-05-01
 
 ### UX polish Monitorizare

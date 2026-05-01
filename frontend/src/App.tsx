@@ -292,6 +292,7 @@ function AppShell({
         {pathname === "/monitorizare" && (
           <Monitorizare
             onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
+            onOpenName={(nume) => handleHistoryClick("dosare", { numeParte: nume })}
           />
         )}
         {pathname === "/alerte" && (

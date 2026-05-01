@@ -69,8 +69,10 @@ interface BulkDosarResult {
 
 export default function Monitorizare({
   onOpenDosar,
+  onOpenName,
 }: {
   onOpenDosar?: (numarDosar: string) => void;
+  onOpenName?: (nume: string) => void;
 } = {}) {
   const confirm = useConfirm();
   const navigate = useNavigate();
@@ -638,8 +640,8 @@ export default function Monitorizare({
                     <th className="px-3 py-2">Tinta</th>
                     <th className="px-3 py-2">Tip</th>
                     <th className="px-3 py-2">Cadenta</th>
-                    <th className="px-3 py-2">Urmatoarea verif.</th>
                     <th className="px-3 py-2">Ultima rulare</th>
+                    <th className="px-3 py-2">Urmatoarea verif.</th>
                     <th className="px-3 py-2">Status</th>
                     <th className="px-3 py-2 text-right">Actiuni</th>
                   </tr>
@@ -703,6 +705,27 @@ export default function Monitorizare({
                               </Button>
                             )}
                           </div>
+                        ) : job.kind === "name_soap" ? (
+                          <div className="flex items-center gap-2">
+                            <span className="inline-flex w-[180px] items-center font-bold">
+                              {target}
+                            </span>
+                            {onOpenName && (
+                              <Button
+                                variant="default"
+                                size="sm"
+                                onClick={() => {
+                                  onOpenName(target);
+                                  navigate("/dosare");
+                                }}
+                                title={`Cauta dosare pentru ${target}`}
+                                className="h-7 gap-1.5 px-2.5 text-[10.5px]"
+                              >
+                                <Eye className="h-3.5 w-3.5" />
+                                Dosare
+                              </Button>
+                            )}
+                          </div>
                         ) : (
                           target
                         )}
@@ -717,7 +740,7 @@ export default function Monitorizare({
                       </td>
                       <td className="px-3 py-2">
                         {job.kind === "dosar_soap" ? "Dosar"
-                          : job.kind === "name_soap" ? "Subiect"
+                          : job.kind === "name_soap" ? "Nume"
                           : job.kind === "aviz_rnpm" ? "Aviz RNPM"
                           : job.kind}
                       </td>
@@ -752,10 +775,10 @@ export default function Monitorizare({
                         })()}
                       </td>
                       <td className="px-3 py-2">
-                        {formatDateTime(job.next_run_at)}
+                        {formatDateTime(job.last_run_at)}
                       </td>
                       <td className="px-3 py-2">
-                        {formatDateTime(job.last_run_at)}
+                        {formatDateTime(job.next_run_at)}
                       </td>
                       <td className="px-3 py-2">
                         {job.active ? (

@@ -18,6 +18,36 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.6.6",
+    date: "1 Mai 2026",
+    subtitle: "Patch UX Monitorizare - name_soap parity (buton Dosare + target bold + label 'Nume') + swap coloane Ultima rulare / Urmatoarea verif.",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Monitorizare - buton Dosare pe randuri name_soap",
+        content:
+          "Randurile cu kind 'name_soap' (subiectii din bulk import) randeaza acum target-ul (numele subiectului) font-bold urmat de butonul 'Dosare' cu icon Eye, identic vizual cu randurile dosar_soap. Click pe buton declanseaza auto-search in tab-ul Dosare prin acelasi flow pendingSearch existent, doar ca filtrul se aplica pe campul 'Nume parte' in loc de 'Numar dosar'. Pattern consecvent: orice TINTA din inbox-ul de monitorizare ofera o scurtatura catre cautarea in-app.",
+      },
+      {
+        title: "Monitorizare - 'Subiect' redenumit 'Nume' in coloana TIP",
+        content:
+          "Label-ul afisat in coloana TIP pentru joburile name_soap schimba 'Subiect' in 'Nume', consecvent cu formularul de adaugare (foloseste 'nume') si cu coloana 'nume' din template-ul XLSX (v2.6.5). Restul kind-urilor raman neschimbate (dosar_soap -> 'Dosar', aviz_rnpm -> 'Aviz RNPM').",
+      },
+      {
+        title: "Monitorizare - swap coloane 'Ultima rulare' / 'Urmatoarea verif.'",
+        content:
+          "Ordinea coloanelor in tabelul de joburi devine 'Ultima rulare -> Urmatoarea verif.' (era invers). Citirea naturala in cazul unui inbox de monitorizare este 'ce s-a intamplat ultima oara, apoi cand verific din nou' - coloana cu fapte (last_run_at) inainte de cea cu predictia (next_run_at). Swap-ul atinge atat header-ul cat si celulele, fara modificari la datele din API.",
+      },
+      {
+        title: "Tests - 546 pass (neschimbate)",
+        content:
+          "Modificarile sunt strict frontend (label + render path + ordine coloane). Suita backend de 546 teste ramane neschimbata fata de v2.6.5.",
+      },
+    ],
+  },
+  {
     version: "v2.6.5",
     date: "1 Mai 2026",
     subtitle: "Patch UX Monitorizare - TINTA bold, bulk import collapsible + descriere non-tehnica, template XLSX restilizat la nivelul exporturilor, nota inline italic sub TINTA",

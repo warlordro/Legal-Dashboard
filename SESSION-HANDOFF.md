@@ -1,11 +1,33 @@
-# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.5 livrate / PR-9 urmator
+# Session Handoff - PR-8 v2.6.0 + patch-uri v2.6.1..v2.6.6 livrate / PR-9 urmator
 
 **Data**: 2026-05-01
 **Branch local**: `main`
 **Remote**: `origin/main` urmeaza sa primeasca push-ul cu PR-7 v2.5.0 + patch
 v2.5.1 + PR-8 v2.6.0 + patch-urile UX v2.6.1, v2.6.2, v2.6.3 + audit hardening
-v2.6.4 + UX polish v2.6.5. Tag-urile `v2.5.0`..`v2.6.5` nu sunt inca create.
-**Versiune curenta**: `v2.6.5`
+v2.6.4 + UX polish v2.6.5 + name_soap parity v2.6.6. Tag-urile `v2.5.0`..`v2.6.6`
+nu sunt inca create.
+**Versiune curenta**: `v2.6.6`
+
+## TL;DR (v2.6.6 — UX polish Monitorizare name_soap parity)
+
+Patch UX peste v2.6.5 (zero backend touch, zero schema). Doua frecari minore
+ramase pe inbox-ul Monitorizare dupa v2.6.5:
+
+- **Buton `Dosare` pe `name_soap`** — randurile cu `job.kind === "name_soap"`
+  randeaza target-ul (numele subiectului) `font-bold` urmat de buton `Dosare`
+  cu icon `Eye`, identic vizual cu randurile `dosar_soap`. Click →
+  `onOpenName(target)` propagat in `App.tsx` ca
+  `handleHistoryClick("dosare", { numeParte: nume })` → flow-ul existent
+  `pendingSearch` rezolva auto-search-ul in tab-ul Dosare.
+- **"Subiect" → "Nume"** — coloana TIP afiseaza acum "Nume" pentru `name_soap`,
+  consecvent cu formularul de adaugare (`MonitoringAddForm` foloseste "nume")
+  si cu coloana `nume` din template-ul XLSX (v2.6.5).
+- **Swap "Ultima rulare" / "Urmatoarea verif."** — ordinea coloanelor in tabel
+  devine "Ultima rulare → Urmatoarea verif." pentru lectura naturala
+  fapte→predictie. Header + celule swap-uite, restul randului neatins.
+
+**Tests**: 546 pass (neschimbate fata de v2.6.5 — modificari strict frontend
+label + render path).
 
 ## TL;DR (v2.6.5 — UX polish Monitorizare frontend-only)
 
