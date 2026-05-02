@@ -831,3 +831,175 @@ describe("POST /jobs/:id/run + real Scheduler (#T6)", () => {
     });
   });
 });
+
+// Stage 1 (refactor) — caracterizeaza POST /jobs/bulk-delete (F9 din v2.6.4).
+// Protejaza Stage 2b (raw SQL move) si Stage 6 (envelope migration).
+// Comportament de pastrat:
+//   - 422 daca body lipseste / ids[] missing / id non-pozitiv / lista goala.
+//   - 400 cand lista depaseste 100.
+//   - tranzactie atomica: deleted_ids / inflight_ids / not_found_ids returnate.
+//   - inflight check pe scheduler.getInflightAbortController.
+//   - cross-owner = not_found (no leak).
+//   - audit unic agregat cu actiunea monitoring.job.bulk_deleted.
+class StubInflightScheduler implements MonitoringSchedulerHandle {
+  inflightIds = new Set<number>();
+  async runJobNow(): Promise<{ runId: number }> {
+    return { runId: 1 };
+  }
+  getInflightAbortController(jobId: number): AbortController | undefined {
+    return this.inflightIds.has(jobId) ? new AbortController() : undefined;
+  }
+}
+
+describe("POST /api/v1/monitoring/jobs/bulk-delete (Stage 1 caracterizare)", () => {
+  it("returneaza 422 cand ids lipseste din body", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs/bulk-delete", {});
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("invalid_payload");
+  });
+
+  it("returneaza 422 cand ids[] e gol", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs/bulk-delete", {
+      ids: [],
+    });
+    expect(res.status).toBe(422);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("invalid_payload");
+  });
+
+  it("returneaza 422 cand un id nu e integer pozitiv", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs/bulk-delete", {
+      ids: [1, -2],
+    });
+    expect(res.status).toBe(422);
+  });
+
+  it("returneaza 400 cand lista depaseste 100 ids", async () => {
+    const app = buildTestApp();
+    const res = await postJson(app, "/api/v1/monitoring/jobs/bulk-delete", {
+      ids: Array.from({ length: 101 }, (_, i) => i + 1),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("too_many");
+  });
+
+  it("sterge joburile existente si raporteaza deleted_ids + total_deleted", async () => {
+    const app = buildTestApp();
+    const ids: number[] = [];
+    for (let i = 0; i < 3; i++) {
+      const create = await postJson(app, "/api/v1/monitoring/jobs", {
+        kind: "dosar_soap" as const,
+        target: { numar_dosar: `100${i}/180/2024` },
+        cadence_sec: 3600,
+      });
+      const created = (await create.json()) as { data: { id: number } };
+      ids.push(created.data.id);
+    }
+    const res = await postJson(app, "/api/v1/monitoring/jobs/bulk-delete", {
+      ids,
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: {
+        deleted_ids: number[];
+        inflight_ids: number[];
+        not_found_ids: number[];
+        total_deleted: number;
+      };
+    };
+    expect(json.data.deleted_ids.sort()).toEqual([...ids].sort());
+    expect(json.data.inflight_ids).toEqual([]);
+    expect(json.data.not_found_ids).toEqual([]);
+    expect(json.data.total_deleted).toBe(3);
+  });
+
+  it("marcheaza id-urile cross-owner ca not_found (no leak)", async () => {
+    const app = buildTestApp();
+    const create = await postJson(
+      app,
+      "/api/v1/monitoring/jobs",
+      {
+        kind: "dosar_soap" as const,
+        target: { numar_dosar: "2222/180/2024" },
+        cadence_sec: 3600,
+      },
+      { owner: "alice" },
+    );
+    const created = (await create.json()) as { data: { id: number } };
+
+    const res = await postJson(
+      app,
+      "/api/v1/monitoring/jobs/bulk-delete",
+      { ids: [created.data.id] },
+      { owner: "bob" },
+    );
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: {
+        deleted_ids: number[];
+        not_found_ids: number[];
+        total_deleted: number;
+      };
+    };
+    expect(json.data.deleted_ids).toEqual([]);
+    expect(json.data.not_found_ids).toEqual([created.data.id]);
+    expect(json.data.total_deleted).toBe(0);
+  });
+
+  it("marcheaza id-urile inflight via scheduler.getInflightAbortController", async () => {
+    const sched = new StubInflightScheduler();
+    setMonitoringScheduler(sched);
+    const app = buildTestApp();
+    const create = await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "dosar_soap" as const,
+      target: { numar_dosar: "3333/180/2024" },
+      cadence_sec: 3600,
+    });
+    const created = (await create.json()) as { data: { id: number } };
+    sched.inflightIds.add(created.data.id);
+
+    const res = await postJson(app, "/api/v1/monitoring/jobs/bulk-delete", {
+      ids: [created.data.id],
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: { deleted_ids: number[]; inflight_ids: number[] };
+    };
+    expect(json.data.deleted_ids).toEqual([]);
+    expect(json.data.inflight_ids).toEqual([created.data.id]);
+  });
+
+  it("scrie un singur audit row monitoring.job.bulk_deleted cu detaliul agregat", async () => {
+    const app = buildTestApp();
+    const ids: number[] = [];
+    for (let i = 0; i < 2; i++) {
+      const create = await postJson(app, "/api/v1/monitoring/jobs", {
+        kind: "dosar_soap" as const,
+        target: { numar_dosar: `444${i}/180/2024` },
+        cadence_sec: 3600,
+      });
+      const created = (await create.json()) as { data: { id: number } };
+      ids.push(created.data.id);
+    }
+    await postJson(app, "/api/v1/monitoring/jobs/bulk-delete", { ids });
+
+    const events = getAuditEvents({
+      ownerId: "local",
+      action: "monitoring.job.bulk_deleted",
+    });
+    expect(events).toHaveLength(1);
+    const detail = JSON.parse(events[0].detail_json) as {
+      deleted_ids: number[];
+      inflight_ids: number[];
+      not_found_ids: number[];
+      count: number;
+    };
+    expect(detail.deleted_ids.sort()).toEqual([...ids].sort());
+    expect(detail.count).toBe(2);
+  });
+});
