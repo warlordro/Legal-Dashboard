@@ -450,14 +450,14 @@ export async function buildManualPdf(): Promise<ExportResult> {
     doc.setFontSize(7);
     doc.setFont("helvetica", "normal");
     doc.setTextColor(...textMuted);
-    doc.text("Legal Dashboard — Manual de Utilizare v1.0.0", margin, pageHeight - 8);
+    doc.text(`Legal Dashboard — Manual de Utilizare v${__APP_VERSION__}`, margin, pageHeight - 8);
     doc.text(`Pagina ${i} din ${totalPages}`, pageWidth / 2, pageHeight - 8, { align: "center" });
     doc.text(`${new Date().toLocaleDateString("ro-RO")}`, pageWidth - margin, pageHeight - 8, { align: "right" });
   }
 
   return {
     buffer: doc.output("arraybuffer") as ArrayBuffer,
-    filename: "Legal-Dashboard-Manual-v1.0.0.pdf",
+    filename: `Legal-Dashboard-Manual-v${__APP_VERSION__}.pdf`,
     mime: MIME_PDF,
   };
 }

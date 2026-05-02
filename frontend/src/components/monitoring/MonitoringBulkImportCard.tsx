@@ -184,7 +184,22 @@ export function MonitoringBulkImportCard({
       let last: NameListCommitResult | null = null;
       let createdTotal = 0;
       if (bulkPreview && committable.length > 0) {
+        // Server-side commit is paginated via maxJobs=100. We iterate until
+        // partial=false. Two guards keep this from spinning forever if the
+        // backend ever stops making progress (idempotency dedup mismatch,
+        // server-side rate-limit, etc.):
+        //  - hard iteration cap MAX_ITERATIONS bounds total calls;
+        //  - inner check breaks out the loop if jobsCreated===0 means we did
+        //    a full round-trip without advancing.
+        const MAX_ITERATIONS = 50;
+        let iteration = 0;
         do {
+          if (iteration >= MAX_ITERATIONS) {
+            throw new Error(
+              `Import oprit dupa ${MAX_ITERATIONS} cereri partiale fara finalizare. Reincearca sau contacteaza suportul.`,
+            );
+          }
+          iteration += 1;
           last = await nameLists.commit({
             title,
             sourceFilename: bulkPreview.sourceFilename,
@@ -198,6 +213,11 @@ export function MonitoringBulkImportCard({
             created: dosarAdded + createdTotal,
             remaining: last.partial ? Math.max(last.jobsTotal - 100, 0) : 0,
           });
+          if (last.partial && last.jobsCreated === 0) {
+            throw new Error(
+              "Importul nu mai progreseaza (0 joburi noi intr-o cerere partiala). Reincearca mai tarziu.",
+            );
+          }
         } while (last.partial);
         setBulkCommit(last);
       }
