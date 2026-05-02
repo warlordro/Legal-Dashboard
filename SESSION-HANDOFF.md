@@ -1,4 +1,4 @@
-# Session Handoff - PR-C v2.9.0 Export raport livrat / sprint Dashboard redesign incheiat
+# Session Handoff - patch v2.9.1 livrat / sprint Dashboard redesign incheiat la v2.9.0
 
 **Data**: 2026-05-02
 **Branch local**: `main`
@@ -6,7 +6,9 @@
 `579ce7b` (`fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`).
 Patch v2.7.1 (electron taskbar icon dev mode) commit-uit local in `b11c706`.
 PR-B v2.8.0 (timeline + charts) commit-uit local in `ea7419e`. PR-C v2.9.0
-(Export raport) urmeaza commit-ul de release peste local.
+(Export raport) commit-uit local in `72e662f`. Patch v2.9.1 (Timeline scoasa
+din Dashboard + refactor sweep documentat retroactiv in changelog) urmeaza
+commit-ul de release peste local.
 
 Trei commits push-uite in v2.7.0 release pe origin:
 - `c74a77e` `feat: v2.7.0 - PR-A Dashboard redesign sprint (1/3)` (squashed 4 → 1)
@@ -16,17 +18,75 @@ Trei commits push-uite in v2.7.0 release pe origin:
 Local-only:
 - `b11c706` `chore(dev): v2.7.1 - dev mode taskbar icon`
 - `ea7419e` `feat: v2.8.0 - PR-B Dashboard timeline + charts (2/3)`
-- (urmator) commit `feat: v2.9.0 - PR-C Dashboard Export raport (3/3)`
+- `72e662f` `feat: v2.9.0 - PR-C Dashboard Export raport (3/3, sprint incheiat)`
+- (urmator) commit `fix: v2.9.1 - elimina Timeline din Dashboard + documenteaza refactor sweep in changelog`
 
 PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0, patch-urile v2.6.1 → v2.6.8, PR-A
-v2.7.0 si PR-9 v2.7.0 sunt pe `origin/main`. v2.7.1 + v2.8.0 + v2.9.0 raman
-locale pana la push.
+v2.7.0 si PR-9 v2.7.0 sunt pe `origin/main`. v2.7.1 + v2.8.0 + v2.9.0 + v2.9.1
+raman locale pana la push.
 
 **Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`. `v2.7.1` +
-`v2.8.0` + `v2.9.0` urmeaza dupa commit-uri.
+`v2.8.0` + `v2.9.0` + `v2.9.1` urmeaza dupa commit-uri.
 
-**Versiune curenta**: `v2.9.0` (PR-C Dashboard Export raport, 3/3 — sprint
-Dashboard redesign incheiat)
+**Versiune curenta**: `v2.9.1` (patch UX post-feedback — Timeline scoasa din
+pagina Dashboard, refactor sweep 11 stagii post-v2.7.0 documentat retroactiv
+in in-app changelog)
+
+## v2.9.1 — patch UX post-feedback: Timeline scoasa din Dashboard + refactor sweep in changelog
+
+Patch UX in urma feedback-ului direct user pe build-ul live de v2.9.0:
+
+> "nu este o informatie relevanta pentru cineva non-tehnic, ori gasim o alta
+> informatie relevant aori o eliminam de tot! De asemenea nu am regasit in
+> changlelog in ap refator-ul pe care l-am facut"
+
+**Decizie aplicata**: optiunea (b) — eliminam de tot. Sectiunea "Activitate
+recenta" (componenta `Timeline`, introdusa in PR-B v2.8.0) randa rulari de
+monitorizare + audit cu format tehnic ("Run ok (dosar_soap) · 2.6s · 0
+alerte noi · 2h in urma") inutil pentru utilizatorii non-tehnici si redundant
+cu pagina dedicata `/alerte` (filtre + paginatie completa + context dosar
+enrichment).
+
+**Frontend**:
+- `pages/Dashboard.tsx`: import `Timeline` scos, render `<Timeline />` scos.
+  Comentariu inline care explica decizia + leaga de feedback.
+- `components/dashboard/Timeline.tsx` ramane in arbore (nu il stergem — poate
+  fi reactivat pentru un panou administrativ separat). Pagina Dashboard
+  ramane cu KpiStrip + QuickActions + LastDosareCard + LastRnpmCard + Charts
+  + "Informatii API + Versiune".
+- `frontend/src/data/changelog-entries.tsx`: intrare noua `v2.9.1` (Sparkles
+  icon, emerald) + intrare retroactiva `Refactor 11 stagii (post-v2.7.0)`
+  (Layers icon, purple) intre v2.7.1 si v2.7.0 care documenteaza sweep-ul
+  intern absent pana acum din UI.
+
+**Backend**: endpoint-ul `GET /api/v1/dashboard/timeline` ramane montat
+(necitit de UI) ca sa nu sparga clientii externi sau test app-ul. Niciun
+test backend modificat.
+
+**Refactor 11 stagii documentat retroactiv** (Stage 0 → Stage 10, livrat in
+11 commit-uri secventiale dupa tag-ul v2.7.0 si inainte de PR-B v2.8.0):
+- Stage 0-1: vitest + jsdom infra + suite caracterizare frontend
+- Stage 2a-2c: structured logging in loadMoreSSE silent catches +
+  jobExistsForAnyOwner mutat in repository + classifyRawName extras pur
+- Stage 3-5: buildAlertContext extras (~250 LOC) + MonitoringBulkImportCard
+  extras (~400 LOC) + datetime-formatters dedupe
+- Stage 7: lib/export.ts spart in 3 (lib/pdf-helpers + lib/export-analysis +
+  lib/export-manual), 1400 LOC -> 698 LOC (50% reducere)
+- Stage 8: lib/api.ts spart per-domeniu cu wrapper apiFetch (lib/monitoringApi
+  + lib/adminApi + lib/dashboardApi + barrel re-exports), 762 LOC -> ~370 LOC
+- Stage 9: useAlertsStream extras din AppShell (~130 LOC mutati)
+- Stage 10: monitoringAlertsEnrichment extras (~180 LOC + subsistem
+  alert_enriched mutat in modul propriu); repository 704 LOC -> ~485 LOC
+
+**Tests**: 645/645 verzi (timeline endpoint backend ramane functional +
+acoperit; niciun test backend modificat; frontend type-check curat dupa
+scoaterea importului).
+
+**Ramas de facut**:
+- Push commits + tag-uri (`v2.7.1`, `v2.8.0`, `v2.9.0`, `v2.9.1`) pe origin
+- Smoke desktop nou pe build-ul de v2.9.1 (verifica vizual ca pagina
+  Dashboard nu mai contine Timeline si ca in-app changelog afiseaza noile
+  intrari)
 
 ## v2.9.0 — PR-C: Dashboard Export raport (3/3 din sprint redesign — ULTIMUL)
 
@@ -220,8 +280,6 @@ timeline + charts cu interval custom) + activeaza butonul disabled "Export
 raport" din QuickActions.
 
 ---
-
-## v2.7.1 — patch UX: dev mode taskbar icon
 
 ## v2.7.1 — patch UX: dev mode taskbar icon
 

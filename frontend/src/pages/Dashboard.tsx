@@ -11,7 +11,6 @@ import { LastDosareCard, LastRnpmCard } from "./dashboard-summary-cards";
 import { ChangelogDialog, ManualDialog } from "./dashboard-modals";
 import { KpiStrip } from "@/components/dashboard/KpiStrip";
 import { QuickActions } from "@/components/dashboard/QuickActions";
-import { Timeline } from "@/components/dashboard/Timeline";
 import { Charts } from "@/components/dashboard/Charts";
 import { dashboardApi, MonitoringApiError, type DashboardSummary } from "@/lib/api";
 
@@ -173,9 +172,10 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
 
       {lastRnpm && <LastRnpmCard entry={lastRnpm} />}
 
-      {/* PR-B (v2.8.0) — Activitate + tendinte */}
+      {/* PR-B (v2.8.0) — Tendinte agregate. Timeline-ul a fost eliminat in
+          v2.9.1: continutul "Run ok / dosar_soap" nu era util pentru utilizatori
+          non-tehnici (alertele actionable au pagina dedicata /alerte). */}
       <Charts />
-      <Timeline />
 
       {/* API Info + Version */}
       <div className="grid gap-4 sm:grid-cols-2">

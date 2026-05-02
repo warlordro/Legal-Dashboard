@@ -7,20 +7,29 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.9.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.9.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.9.0** - PR-C din sprint-ul de redesign al Dashboard-ului (3/3, ultimul):
-Quick Action "Export raport" devine functional. Modal cu picker `range` (7d /
-30d) + `format` (XLSX / PDF) genereaza un raport agregat printr-un endpoint
-nou `GET /api/v1/dashboard/report?range=7d|30d` (snapshot atomic
-owner-scoped + `withMaintenanceRead`) si construieste fisierul off-main-thread
-in Web Worker (3 sheets XLSX: Sumar / Activitate zilnica / Cronologie; PDF
-landscape A4 cu aceleasi 3 sectiuni). 645/645 teste backend (era 640 in
-v2.8.0, +5 noi pentru `/report`). Predecesor **v2.8.0** - PR-B Dashboard
-timeline + charts (eliminata sectiunea statica "TIPURI DE PROCESE
-DISPONIBILE", inlocuita cu Timeline cursor-paginated + 3 charts daily
-7d/30d). Inainte: **v2.7.1** - patch UX dev mode taskbar icon
-(`ensureDevTaskbarShortcut()`).
+**v2.9.1** - patch UX post-feedback: eliminata sectiunea "Activitate recenta"
+(componenta `Timeline`, introdusa in PR-B v2.8.0) din pagina Dashboard. Lista
+randa "Run ok (dosar_soap) · 2.6s · 0 alerte noi · 2h in urma" plus event-uri
+de audit — feedback explicit user a marcat continutul ca prea tehnic pentru
+utilizatorii non-tehnici si redundant cu pagina dedicata `/alerte` (filtre +
+paginatie + context dosar enrichment). Componenta `Timeline.tsx` ramane in
+arbore, endpoint-ul `GET /api/v1/dashboard/timeline` ramane montat necitit de
+UI ca sa nu sparga clientii externi. In-app changelog: intrare noua v2.9.1 +
+intrare retroactiva "Refactor 11 stagii (post-v2.7.0)" care documenteaza
+sweep-ul intern absent pana acum din UI. Predecesor **v2.9.0** - PR-C din
+sprint-ul de redesign al Dashboard-ului (3/3, ultimul): Quick Action "Export
+raport" devine functional. Modal cu picker `range` (7d / 30d) + `format`
+(XLSX / PDF) genereaza un raport agregat printr-un endpoint nou
+`GET /api/v1/dashboard/report?range=7d|30d` (snapshot atomic owner-scoped +
+`withMaintenanceRead`) si construieste fisierul off-main-thread in Web Worker
+(3 sheets XLSX: Sumar / Activitate zilnica / Cronologie; PDF landscape A4 cu
+aceleasi 3 sectiuni). 645/645 teste backend (era 640 in v2.8.0, +5 noi pentru
+`/report`). Predecesor **v2.8.0** - PR-B Dashboard timeline + charts
+(eliminata sectiunea statica "TIPURI DE PROCESE DISPONIBILE", inlocuita cu
+Timeline cursor-paginated + 3 charts daily 7d/30d). Inainte: **v2.7.1** -
+patch UX dev mode taskbar icon (`ensureDevTaskbarShortcut()`).
 
 **PR-C Backend - endpoint nou `/api/v1/dashboard/report`:** snapshot atomic
 owner-scoped via `getOwnerId(c)`, wrapped in `withMaintenanceRead`. Validare

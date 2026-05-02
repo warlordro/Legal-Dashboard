@@ -4,6 +4,68 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.9.1] - 2026-05-02
+
+### Patch UX post-feedback - Timeline scoasa din Dashboard + refactor sweep documentat retroactiv
+
+Patch UX in urma feedback-ului direct: sectiunea "Activitate recenta"
+(componenta `Timeline`, introdusa in PR-B v2.8.0) randa rulari de monitorizare
+si event-uri de audit cu format tehnic ("Run ok (dosar_soap) · 2.6s · 0
+alerte noi · 2h in urma") inutil pentru utilizatorii non-tehnici si redundant
+cu pagina dedicata `/alerte` (care are filtre, paginatie completa si context
+dosar enrichment via PR-6.x). Importul si render-ul `<Timeline />` au fost
+scoase din `pages/Dashboard.tsx`. Componenta `Timeline.tsx` ramane in arbore
+(poate fi reactivata pentru un panou administrativ separat). Pagina Dashboard
+ramane cu KpiStrip + QuickActions + LastDosareCard + LastRnpmCard + Charts +
+"Informatii API + Versiune". Endpoint-ul backend
+`GET /api/v1/dashboard/timeline` ramane montat (necitit de UI) ca sa nu
+sparga clientii externi sau test app-ul.
+
+Adaugata si o intrare retroactiva in in-app changelog ("Refactor 11 stagii
+(post-v2.7.0)") care documenteaza sweep-ul intern de refactorizare livrat in
+11 commit-uri secventiale dupa tag-ul v2.7.0 si inainte de PR-B v2.8.0:
+- Stage 0-1: vitest + jsdom infra pe workspace frontend + suite caracterizare
+- Stage 2a-2c: structured logging in loadMoreSSE silent catches +
+  jobExistsForAnyOwner mutat la repository + classifyRawName extras helper pur
+- Stage 3-5: buildAlertContext extras (~250 LOC), MonitoringBulkImportCard
+  extras (~400 LOC), datetime-formatters dedupe
+- Stage 7: lib/export.ts spart in 3 (lib/pdf-helpers + lib/export-analysis +
+  lib/export-manual), de la 1400 LOC la 698 LOC
+- Stage 8: lib/api.ts spart per-domeniu cu wrapper apiFetch (lib/monitoringApi
+  + lib/adminApi + lib/dashboardApi + barrel re-exports), de la 762 LOC la
+  ~370 LOC
+- Stage 9: useAlertsStream hook extras din AppShell (~130 LOC mutati)
+- Stage 10: monitoringAlertsEnrichment extras din monitoringAlertsRepository
+  (~180 LOC + subsistem alert_enriched mutat in modul propriu); repository
+  scade de la 704 la ~485 LOC
+
+**Tests**: 645/645 verzi (timeline endpoint backend ramane functional +
+acoperit; niciun test backend modificat; frontend type-check curat dupa
+scoaterea importului).
+
+### Frontend - pages/Dashboard.tsx
+
+- Eliminat import `import { Timeline } from "@/components/dashboard/Timeline"`
+- Eliminat render `<Timeline />` din JSX (era pozitionat dupa `<Charts />`)
+- Comentariu inline care explica decizia (linkat la feedback-ul user-ului)
+
+### Frontend - frontend/src/data/changelog-entries.tsx
+
+- Inserata noua intrare `v2.9.1` cu `Sparkles` icon + emerald border + 4
+  sectiuni (Frontend Timeline elim, Backend endpoint pastrat, justificarea,
+  Tests)
+- Inserata intrare retroactiva `Refactor 11 stagii (post-v2.7.0)` intre
+  v2.7.1 si v2.7.0 cu `Layers` icon + purple border + 9 sectiuni stagii
+
+### Docs
+
+- README.md: hero block actualizat cu v2.9.1, citatul feedback-ului inclus
+- CLAUDE.md: "Versiune Curenta" rescris pentru v2.9.1, sprint list extins
+- SESSION-HANDOFF.md: header actualizat, sectiune v2.9.1 in fata
+- package.json + frontend/package.json + backend/package.json: bump 2.9.0 -> 2.9.1
+
+---
+
 ## [2.9.0] - 2026-05-02
 
 ### PR-C v2.9.0 - Export raport dashboard (a treia si ultima livrare din sprintul de redesign)

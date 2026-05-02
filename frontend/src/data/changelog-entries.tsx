@@ -18,6 +18,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.9.1",
+    date: "2 Mai 2026",
+    subtitle:
+      "Patch UX post-feedback: eliminata sectiunea 'Activitate recenta' (timeline-ul cu 'Run ok / dosar_soap', durate in secunde si event-uri de audit) din pagina Dashboard. Continutul era prea tehnic pentru utilizatori non-tehnici si redundant cu pagina dedicata /alerte (care are filtre, paginatie completa si context dosar enrichment). Charts-urile zilnice raman vizibile, KPI strip-ul afiseaza in continuare numarul de alerte necitite cu badge in sidebar.",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Frontend - Timeline eliminat din pagina Dashboard",
+        content:
+          "Componenta Timeline (introdusa in PR-B v2.8.0) randa o lista descrescatoare cu evenimente din 3 surse: alerte, rulari de monitorizare si intrari de audit. Liniile dominate de 'Run ok (dosar_soap) - 2.6s - 0 alerte noi - 2h in urma' nu aduceau valoare pentru utilizatorii care nu citesc log-uri de runner; alertele propriu-zise erau diluate in feed-ul tehnic. Importul si render-ul lui <Timeline /> au fost scoase din pages/Dashboard.tsx; fisierul componentei ramane in arbore (poate fi reactivat ulterior pentru un panou administrativ separat). Pagina Dashboard ramane cu KpiStrip, QuickActions, LastDosareCard, LastRnpmCard, Charts, Informatii API + Versiune.",
+      },
+      {
+        title: "Backend - endpoint /api/v1/dashboard/timeline pastrat (necitit)",
+        content:
+          "Endpoint-ul ramane montat ca sa nu sparga clientii externi (ex. test app, integrari viitoare). Niciun apel din UI nu il mai foloseste dupa scoaterea componentei. Cand un panou administrativ va avea nevoie de feed-ul detaliat, componenta + endpoint-ul sunt deja gata si testate.",
+      },
+      {
+        title: "De ce s-a luat decizia",
+        content:
+          "Audienta principala a aplicatiei sunt avocati si paralegali, nu operatori de sistem. Pagina Dashboard trebuie sa raspunda la 'ce trebuie sa fac astazi' (alerte unseen, dosare cu termen apropiat, KPI-uri), nu 'cum a mers ultima rulare a scheduler-ului'. Detaliile operationale raman disponibile pentru audit prin pagina /admin/audit (rezervata role-ului admin) si prin pagina /alerte unde alertele sunt enrichuite cu context dosar (numar dosar, instanta, complet, solutie).",
+      },
+      {
+        title: "Tests - 645/645 verzi",
+        content:
+          "Niciun test backend modificat (timeline endpoint-ul ramane functional + acoperit). Frontend type-check curat dupa scoaterea importului. Re-build complet frontend + electron rebuild pentru ABI better-sqlite3.",
+      },
+    ],
+  },
+  {
     version: "v2.9.0",
     date: "2 Mai 2026",
     subtitle:
@@ -142,6 +173,62 @@ export const versions: VersionEntry[] = [
         title: "Operational",
         content:
           "Primul npm run electron:dev dupa update creeaza shortcut-ul si apoi taskbar-ul afiseaza icon-ul corect (poate fi nevoie de restart Explorer la prima rulare daca Windows cache-uieste icon-ul vechi). Restart-urile ulterioare reuseaza shortcut-ul existent. Build NSIS neafectat, zero teste noi (boot-time helper, fara regresie pe paths existente).",
+      },
+    ],
+  },
+  {
+    version: "Refactor 11 stagii (post-v2.7.0)",
+    date: "2 Mai 2026",
+    subtitle:
+      "Sweep intern de refactorizare livrat in 11 commit-uri secventiale dupa tag-ul v2.7.0 si inainte de PR-B v2.8.0. Zero schimbare functionala vizibila pentru utilizator (toate cele 42 teste frontend + 630 teste backend de la momentul respectiv au ramas verzi); scopul a fost reducerea LOC-ului din fisierele monolitice si separarea responsabilitatilor pentru a putea livra rapid PR-B + PR-C peste o baza curata. Niciun bump de semver pentru ca nu s-a schimbat contractul public — doar organizarea interna a codului.",
+    icon: <Layers className="h-5 w-5" />,
+    borderColor: "border-l-purple-500",
+    badgeClass: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+    sections: [
+      {
+        title: "Stage 0-1 - infrastructura de teste pentru caracterizare",
+        content:
+          "Wired vitest + jsdom pe workspace-ul frontend (era doar pe backend). Adaugat suite de teste de caracterizare pentru rute si componente atinse de stagiile urmatoare (lib/api, monitoring repository, alerts route), ca sa avem un safety net peste comportamentul existent inainte de mutari mari. Aceste teste raman in arbore si captureaza contractele actuale.",
+      },
+      {
+        title: "Stage 2a-2c - logging structurat + repository moves",
+        content:
+          "2a: structured logging in loadMoreSSE silent catches (lib/api.ts) — erorile SSE nu mai sunt inghitite tacit. 2b: jobExistsForAnyOwner mutat din rute monitoring catre repository-ul de joburi (separare clean: rutele nu mai cunosc structura tabelei). 2c: helper classifyRawName extras din nameListParser intr-o functie pura testabila independent.",
+      },
+      {
+        title: "Stage 3-5 - extractii frontend pentru pagini dense",
+        content:
+          "Stage 3: buildAlertContext extras din pages/Alerts.tsx in lib/alert-context.tsx (~250 LOC mutati). Stage 4: MonitoringBulkImportCard extras din pages/Monitorizare.tsx (~400 LOC mutati intr-o componenta autonoma cu props clare). Stage 5: deduplicat formatDateTime + formatCadence in lib/datetime-formatters.ts (eliminat ~3 copii ale acelorasi helperi).",
+      },
+      {
+        title: "Stage 7 - lib/export.ts spart in trei",
+        content:
+          "lib/export.ts a scazut de la 1400 LOC la 698 LOC (50% mai mic). Extracted: lib/pdf-helpers.ts (29 LOC) cu MIME_PDF + stripDiacritics + ExportResult partajate; lib/export-analysis.ts (243 LOC) cu buildAnalysisPdf; lib/export-manual.ts (463 LOC) cu buildManualPdf si cele 14 sectiuni de manual. Worker-ul de export importa din modulele noi; build-urile XLSX raman in export.ts (impart excel-helpers).",
+      },
+      {
+        title: "Stage 8 - lib/api.ts spart per domeniu (barrel pattern)",
+        content:
+          "lib/api.ts a scazut de la 762 LOC la ~370 LOC. Extracted: lib/monitoringApi.ts (joburi + name lists), lib/adminApi.ts (me + admin + audit + quota), lib/dashboardApi.ts (summary). Path-ul de import @/lib/api functioneaza in continuare: api.ts re-exporta simbolurile mutate pentru retro-compat cu toate paginile, hook-urile si testele. Helper nou apiFetch() (thin wrapper peste fetch global) — toate modulele per-domeniu trec prin el, ca in viitor sa putem injecta cross-cutting concerns (auth header, request-id, web-mode origin pin) intr-un singur loc.",
+      },
+      {
+        title: "Stage 9 - useAlertsStream extras din AppShell",
+        content:
+          "~130 LOC de plumbing EventSource (refs, reconnect backoff, handler-e alert + alert_enriched, gating pentru notificari desktop, refresh server-truth pe unread) mutati din App.tsx intr-un hook nou hooks/useAlertsStream. Hook-ul expune {unreadAlerts, streamVersion, refreshUnreadAlerts} si traieste langa singurul lui consumer. App.tsx: -130 / +2.",
+      },
+      {
+        title: "Stage 10 - monitoringAlertsEnrichment extras backend",
+        content:
+          "enrichSolutieAlertsForJob (~180 LOC) plus subsistemul alert_enriched (AlertEnrichmentPayload/Listener types, addAlertEnrichmentListener, removeAlertEnrichmentListener, notifyAlertEnriched, map per-owner cu Set) mutate din monitoringAlertsRepository.ts intr-un modul propriu. Repository-ul scade de la 704 la ~485 LOC si ramane focusat pe row CRUD; subsistemul de enrichment (logica F4-F7 pentru backfill solutie_sumar / numar_document / data_pronuntare / instanta / stadiu pe alertele existente) primeste o casa autonoma langa SSE fanout-ul pe care il detine.",
+      },
+      {
+        title: "Sweep final + doc reconciliation",
+        content:
+          "Cleanup post-refactor: cn() helper aplicat pe sase locuri unde foloseam template-literal conditional className (MonitoringBulkImportCard, Monitorizare); paralelizare chunked Promise.all (CHUNK=5) pentru bulk commit dosar; documentatie inline pentru pattern-ul cursor-pagination din /api/v1/rnpm/searches (deviere documentata fata de regula 'offset pe listari principale'). CLAUDE.md 'Structura Proiect' refresh-uita sa reflecte fisierele noi (lib/monitoringApi etc., lib/dashboardApi, hooks/useAlertsStream, db/monitoringAlertsEnrichment). SESSION-HANDOFF corectat — claim-ul ca 'dashboardApi e inline in api.ts' a devenit fals dupa Stage 8 si a fost rescris.",
+      },
+      {
+        title: "Verificare",
+        content:
+          "Toate stagiile au fost merge-uite secvential cu suite-le verzi: 42/42 frontend + 630/630 backend la momentul respectiv. Type-check + biome pe fisierele atinse curat. Retro-compat pastrata: niciun consumer extern (pagini, hook-uri, teste) nu a trebuit modificat in afara de Stage 4 (un singur import schimbat in Monitorizare.tsx).",
       },
     ],
   },
