@@ -7,33 +7,47 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.6.8**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.7.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.6.8** - review-driven hardening peste v2.6.7. Trei fix-uri reale gasite
-la verificarea unor nitpick-uri automate.
+**v2.7.0** - dual delivery: PR-A Dashboard redesign sprint (1/3) + PR-9 Auth
+pluggable seam (desktop noop / web JWT). 591/591 teste backend (era 546 in
+v2.6.8, +45 net new in PR-A si PR-9).
 
-**Frontend - HTML button nesting:** cardul "Adaugare bulk din fisier" din
-`/monitorizare` folosea `<button>` ca wrapper peste `<CardHeader>` (div) si
-`<CardTitle>` (h3), markup invalid HTML. Handler-ul muta direct pe
-`<CardHeader role="button" tabIndex={0}>` cu `onClick` + `onKeyDown`
-(Enter/Space cu `preventDefault`); `aria-expanded`/`aria-controls` pastrate;
-adaugat `focus-visible:ring` pentru focus vizibil la tastatura.
+**PR-A Backend - endpoint nou `/api/v1/dashboard/summary`:** read-only
+aggregation owner-scoped via `getOwnerId(c)`, wrapped in `withMaintenanceRead`
+ca sa coexiste cu backup/restore. 4 blocuri: `jobs.active` + `jobs.byKind`,
+`alerts.unseen` + `alerts.last24h`, `runs {ok, error, timeout, aborted, total}`
+(running excluse din totals; `aborted` ca bucket separat post-review),
+`ai {costUsd, calls, tokens}` 24h cu closed lower bound + `cost_usd_milli/1000`.
 
-**Frontend - derivare `CADENCE_COL_LETTER`:** in `monitoringBulkTemplate.ts`
-literalul `"C"` inlocuit cu `colIndexToLetter(HEADERS.indexOf("cadence_sec"))`
-(helper nou, baza 26). Reordonarea coloanelor `HEADERS` nu mai poate sa
-desincronizeze silent `<dataValidation sqref="...">` injectat in OOXML.
+**PR-A Frontend - KPI strip + Quick Actions:** `KpiStrip` cu 4 carduri
+responsive (stacked → 2 col → 4 col, iconite ListChecks/Bell/Activity/Sparkles)
+si `QuickActions` cu 6 butoane (2 → 3 → 6 col: Cauta dosar, Monitorizare,
+RNPM, Alerte, Termene + Export raport disabled cu tooltip "Disponibil in
+v2.9.0 (PR-C)"); ambele plasate deasupra `LastDosareCard` in
+`pages/Dashboard.tsx`. Polling 30s prin `setInterval` cu `AbortController` per
+request. Sprint Dashboard redesign continua cu PR-B v2.8.0 (timeline+charts)
+si PR-C v2.9.0 (reports).
 
-**Frontend - eroare clara la header lipsa:** `parseBulkFile` push-uieste in
-`invalid[]` mesajul "Header lipsa: fisierul nu contine niciuna dintre
-coloanele recunoscute..." cand `findHeaderRow` esueaza, in loc de silent
-return care lasa utilizatorul cu "0 randuri" fara explicatie.
+**PR-9 Backend - auth pluggable:** `AuthProvider` interface cu doua
+implementari: `DesktopAuthProvider` returneaza `{ ownerId: "local" }` 1:1
+(comportament identic cu pre-PR-9), `WebJwtAuthProvider` cere Bearer token sau
+cookie `legal_dashboard_session`, valideaza HS256 cu `jose` + issuer +
+audience, verifica userul activ in DB. Middleware `ownerContext()` set-eaza
+`c.set("ownerId"|"actorId"|"authUser", ...)` si scrie audit `auth.denied` pe
+401/403 cu wrap try/catch.
 
-**Docs:** `SESSION-HANDOFF.md` — claim-ul "xlsx@0.18.5 ramane risc acceptat..."
-rescris (post-v2.6.4 `nameListParser.ts` ruleaza pe `exceljs@^4.4.0`; xlsx
-ramane doar tranzitiv pe path-ul write-only prin `xlsx-js-style`).
+**PR-9 Boot gate fail-closed:** `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (sau bind
+non-loopback) cere acum `LEGAL_DASHBOARD_AUTH_MODE=web` +
+`LEGAL_DASHBOARD_JWT_SECRET` (>=32 chars) + `LEGAL_DASHBOARD_JWT_ISSUER` +
+`LEGAL_DASHBOARD_JWT_AUDIENCE` + `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`.
+Desktop noop mode nu mai poate sa porneasca pe interfata remota. Migration nou
+`0013_idx_runs_owner_ended` pentru queries 24h din dashboard summary.
 
-Zero modificari pe backend; 546/546 teste backend raman verzi.
+Baza ramane v2.6.8 - review-driven hardening: HTML button nesting fix in
+`/monitorizare` (CardHeader cu `role="button"`+`onKeyDown`), derivare
+`CADENCE_COL_LETTER` din `HEADERS.indexOf("cadence_sec")`, eroare vizibila la
+header lipsa in `parseBulkFile`.
 
 Baza ramane v2.6.7 - export Monitorizare Excel + PDF cu paritate
 Dosare/Termene: butoane Excel + PDF in CardHeader "Joburi active" cu
@@ -164,7 +178,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (546 teste in v2.6.7, neschimbate fata de v2.6.4..v2.6.6 — patch v2.6.7 e frontend-only) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (591 teste in v2.7.0: 553 dupa PR-A + 38 noi in PR-9; baseline 546 din v2.6.4..v2.6.8) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

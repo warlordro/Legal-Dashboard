@@ -1,6 +1,6 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0..PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1..v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5..v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01) + **PR-A v2.7.0 Dashboard redesign sprint, 1/3 — KPI strip + QuickActions** + **PR-9 v2.7.0 Auth pluggable seam (desktop noop / web JWT)** (ambele mergeate in `main` 2026-05-02, tag `v2.7.0` push-uit pe `origin`). Sprint Dashboard redesign continua cu PR-B v2.8.0 (timeline+charts) si PR-C v2.9.0 (reports). PR-10..PR-12 raman in viitor pentru cutover-ul web complet (Google SSO + Litestream + Docker deploy).
+> **Status**: PR-0 → PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1 → v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5 → v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01) + **PR-A v2.7.0 Dashboard redesign sprint, 1/3 — KPI strip + QuickActions** + **PR-9 v2.7.0 Auth pluggable seam (desktop noop / web JWT)** (ambele mergeate in `main` 2026-05-02, tag `v2.7.0` push-uit pe `origin`). Sprint Dashboard redesign continua cu PR-B v2.8.0 (timeline+charts) si PR-C v2.9.0 (reports). PR-10 → PR-12 raman in viitor pentru cutover-ul web complet (Google SSO + Litestream + Docker deploy).
 > **Versiune document**: 1.13 (2026-05-02)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
@@ -294,7 +294,7 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 - **Bump**: fara bump pe branch (ramane 2.6.8); bump-ul se face in PR-ul de release dupa merge.
 - **Risk**: MEDIUM. Este auth seam, nu productie web cutover.
 
-#### PR-10..PR-12 - Future web cutover
+#### PR-10 → PR-12 - Future web cutover
 - Google Cloud Console: client OAuth2/OIDC, domain restriction `@firma.ro`,
   redirect URI `https://legal.firma.ro/auth/callback`.
 - Backend real Google SSO + server-side sessions/revocation.

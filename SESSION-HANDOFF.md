@@ -9,10 +9,10 @@ Trei commits noi push-uite in v2.7.0 release:
 - `61580a4` `fix: PR-9 audit pack 2026-05-02 - B1-B4 + P0/P1 tests + docs sync`
 - `579ce7b` `fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`
 
-PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0, patch-urile v2.6.1..v2.6.8, PR-A
+PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0, patch-urile v2.6.1 → v2.6.8, PR-A
 v2.7.0 si PR-9 v2.7.0 sunt acum pe `origin/main`.
 
-**Tag-uri**: `v2.5.0`..`v2.6.8` + `v2.7.0` push-uite pe `origin`.
+**Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`.
 
 **Versiune curenta**: `v2.7.0` (release dual: PR-A Dashboard + PR-9 Auth pluggable)
 
@@ -92,7 +92,7 @@ agregare + 2 componente UI noi peste pagina Dashboard existenta.
 A doua livrare in v2.7.0 (mergeata pe `main` impreuna cu PR-A in 3 commits:
 `c74a77e` PR-A squashed, `61580a4` PR-9 audit pack, `579ce7b` Tier 1+2 review
 hardening). Codex livreaza seam-ul de autentificare separat de cutover-ul web
-complet (PR-10..PR-12 raman in viitor). Desktop pastreaza identitatea `local`
+complet (PR-10 → PR-12 raman in viitor). Desktop pastreaza identitatea `local`
 1:1, `web` mode devine opt-in tehnic cu JWT validation fail-closed.
 
 **Backend - auth provider interface:**
@@ -255,7 +255,7 @@ Patch frontend-only peste v2.6.6 (zero backend touch, zero schema). Pagina
 - **Filename pattern**: `monitorizare_<sanitized_target>.xlsx` (single job) sau
   `monitorizare_<dataRO>.xlsx` (multiple) — consecvent cu `dosare_*`/`termene_*`.
 
-**Tests**: 546 pass (neschimbate fata de v2.6.4..v2.6.6 — modificari strict
+**Tests**: 546 pass (neschimbate fata de v2.6.4 → v2.6.6 — modificari strict
 frontend additive). Validare: `npx tsc --noEmit` (frontend) verde,
 `npm run build` complet in 13.94s.
 
@@ -445,17 +445,19 @@ Fisiere modificate:
 
 ## Probleme/riscuri ramase
 
-- `main` local este sincronizat cu `origin/main` la `8e0eaa6` (v2.6.8).
-  Tag-urile locale exista pana la `v2.6.8`, dar tag-urile `v2.6.5`..`v2.6.8`
-  nu au fost push-uite catre GitHub in aceasta sesiune.
-- `package-lock.json` a fost resincronizat la versiunea `2.6.8` pentru root,
-  backend si frontend.
+- `main` local este sincronizat cu `origin/main` la `579ce7b` (v2.7.0,
+  PR-A + PR-9 review hardening). Tag-ul `v2.7.0` push-uit pe `origin`
+  impreuna cu tag-urile `v2.5.0` → `v2.6.8` din sesiunea precedenta.
+- `package.json`, `backend/package.json`, `frontend/package.json` si
+  `package-lock.json` resincronizate la versiunea `2.7.0`.
 - `useCurrentUser` se apeleaza din mai multe locuri (Sidebar + AdminGate per
   pagina admin). Pe desktop call-ul este local si rapid; daca devine vizibil in
   load tests pe web mode, va fi lift-ed in context shared (sau cache-uit).
 - Pe desktop quota este informativa/bypass. Enforce real ramane pentru web
-  PR-9+.
-- Pentru PR-9 web/server mode trebuie auth real inainte de expunere remote.
+  cutover (PR-10 → PR-12).
+- PR-9 livreaza seam-ul de auth (desktop noop / web JWT validation), dar
+  cutover-ul real web — Google Workspace SSO/OIDC, deploy server, TLS,
+  Litestream backup — ramane in PR-10 → PR-12.
 - `xlsx@0.18.5` nu mai este pe path-ul de parsare a inputului user (in v2.6.4
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
@@ -463,39 +465,33 @@ Fisiere modificate:
 
 ## Urmatoarea etapa
 
-Conform roadmap:
+Conform roadmap, PR-A din sprint-ul Dashboard redesign este livrat. Urmatoarea
+livrare este **PR-B v2.8.0** (al 2-lea PR din 3 in sprintul Dashboard
+redesign).
 
-### PR-9 - Auth pluggable (desktop noop / web SSO)
+### PR-B v2.8.0 - Dashboard timeline + charts
 
-Status pe branch `feat/pr9-auth-pluggable`:
+Scop (planificat):
 
-- implementarea conservatoare este auth seam, nu SSO/deploy complet: desktop
-  ramane `local`; web mode valideaza JWT/session si refuza fallback-ul la
-  `local`;
-- real Google Workspace OAuth/OIDC, import/export desktop-web, deploy server,
-  TLS si cutover de productie raman in afara acestui branch pana exista
-  configuratie reala si aprobare explicita.
+- timeline de evenimente recente (alerte + run-uri + audit relevant) cu
+  paginare server-side si filtrare pe tip eveniment;
+- charts pentru tendinte 7d/30d (alerte/zi, run success rate, AI cost);
+- reuseste endpoint-ul `/api/v1/dashboard/summary` pentru KPI-uri si adauga
+  endpoint nou `/api/v1/dashboard/timeline` + `/api/v1/dashboard/charts`;
+- zero schema change preferabil (foloseste `monitoring_runs`, `alerts`,
+  `audit_log`, `ai_usage` existente cu agregari).
 
-Scop:
+### PR-C v2.9.0 - Dashboard reports
 
-- abstractizeaza identitatea callerului in spatele `getOwnerId(c)` astfel incat
-  desktop continua cu user `local` seedat, iar build-ul web-mode foloseste un
-  provider de auth real (target: SSO Workspace cu sesiuni JWT/cookie + user
-  upsert in `users`);
-- toate suprafetele `/api/v1/admin/*` raman gated prin `requireRole`, dar
-  `getOwnerId` returneaza acum userul autentificat (nu `local`);
-- guardrails admin (`last_admin` / `self_deactivation`) raman valabile.
+Scop (planificat):
 
-Tasks planificate:
+- export raport agregat (XLSX + PDF) cu KPI-uri + timeline + charts pentru
+  intervale custom (7d/30d/custom);
+- activeaza butonul "Export raport" din `QuickActions` (acum disabled cu
+  tooltip "Disponibil in v2.9.0 (PR-C)").
 
-1. Definire `AuthProvider` interface si implementarea desktop (noop, returneaza
-   `local`).
-2. Implementare provider web fail-closed cu validare JWT/session locala,
-   cookie `legal_dashboard_session`, user lookup in `users` si status `active`.
-3. Build-flag in `backend/src/index.ts` care alege provider-ul in functie de
-   `LEGAL_DASHBOARD_AUTH_MODE` (`desktop` default, `web` opt-in; `APP_MODE`
-   acceptat doar ca alias).
-4. Rute minime `/api/v1/auth/login|logout|refresh`: login ramane 501 pana la
-   providerul SSO real; logout curata cookie-ul; refresh emite cookie HttpOnly.
-5. Teste: provider desktop (noop), provider web (token valid/invalid/expired),
-   cookie flags, regresii admin/audit.
+### PR-10 → PR-12 - Cutover web complet (in viitor)
+
+- Google Workspace SSO/OIDC peste seam-ul de auth livrat in PR-9;
+- import/export desktop ↔ web (migration cale identitate `local` → user real);
+- deploy server (Litestream backup, Docker, TLS, monitoring extern).
