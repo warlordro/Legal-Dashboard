@@ -6,8 +6,9 @@
 //   - owner isolation: rows for another owner do not leak into the summary
 //   - jobs block: byKind breakdown counts only active=1, ignores other kinds
 //   - alerts block: unseen excludes read/dismissed; last24h windowed by created_at
-//   - runs block: ok/error/timeout buckets, aborted folded into error, only
+//   - runs block: ok/error/timeout/aborted buckets, only
 //     terminal rows (ended_at IS NOT NULL) are counted
+//   - performance: runs aggregation uses idx_runs_owner_ended
 //   - ai block: 24h totals (calls + tokens + costUsd derived from milli)
 
 import Database from "better-sqlite3";
@@ -86,7 +87,7 @@ interface SummaryResponse {
   data: {
     jobs: { active: number; byKind: { dosar_soap: number; name_soap: number } };
     alerts: { unseen: number; last24h: number };
-    runs: { ok: number; error: number; timeout: number; total: number };
+    runs: { ok: number; error: number; timeout: number; aborted: number; total: number };
     ai: { costUsd: number; calls: number; tokens: number };
     generatedAt: string;
   };
@@ -119,7 +120,7 @@ describe("GET /api/v1/dashboard/summary", () => {
     expect(body.requestId).toBe("req-empty-1");
     expect(body.data.jobs).toEqual({ active: 0, byKind: { dosar_soap: 0, name_soap: 0 } });
     expect(body.data.alerts).toEqual({ unseen: 0, last24h: 0 });
-    expect(body.data.runs).toEqual({ ok: 0, error: 0, timeout: 0, total: 0 });
+    expect(body.data.runs).toEqual({ ok: 0, error: 0, timeout: 0, aborted: 0, total: 0 });
     expect(body.data.ai).toEqual({ costUsd: 0, calls: 0, tokens: 0 });
     expect(typeof body.data.generatedAt).toBe("string");
   });
@@ -195,7 +196,7 @@ describe("GET /api/v1/dashboard/summary", () => {
     expect(body.data.alerts.last24h).toBe(2);
   });
 
-  it("runs block buckets ok/error/timeout and folds aborted into error", async () => {
+  it("runs block buckets aborted separately from error", async () => {
     const jobId = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "runs" });
     seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
     seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
@@ -211,8 +212,24 @@ describe("GET /api/v1/dashboard/summary", () => {
     expect(body.data.runs.total).toBe(5);
     expect(body.data.runs.ok).toBe(2);
     expect(body.data.runs.timeout).toBe(1);
-    // error includes aborted (1 explicit error + 1 aborted = 2).
-    expect(body.data.runs.error).toBe(2);
+    expect(body.data.runs.error).toBe(1);
+    expect(body.data.runs.aborted).toBe(1);
+  });
+
+  it("uses idx_runs_owner_ended for finalized runs aggregation", () => {
+    const explain = getDb()
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT status, COUNT(*) AS n
+         FROM monitoring_runs
+         WHERE owner_id = ?
+           AND ended_at IS NOT NULL
+           AND ended_at >= ?
+         GROUP BY status`,
+      )
+      .all("alice", "2026-05-01T00:00:00.000Z") as Array<{ detail: string }>;
+
+    expect(explain.some((row) => row.detail.includes("idx_runs_owner_ended"))).toBe(true);
   });
 
   it("excludes still-running rows from runs aggregation (only ended_at IS NOT NULL)", async () => {

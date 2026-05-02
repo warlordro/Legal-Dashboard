@@ -66,6 +66,8 @@ describe("PR-9 index boot/auth boundaries", () => {
       LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
       LEGAL_DASHBOARD_AUTH_MODE: "web",
       LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
     });
 
     const health = await waitForHealth(port);

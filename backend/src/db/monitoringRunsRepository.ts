@@ -155,7 +155,8 @@ export function purgeOldRuns(retentionDays = 90): number {
 // PR-A v2.7.0: aggregare pentru /api/v1/dashboard/summary (runs block).
 // Numara doar randurile terminale (`ended_at IS NOT NULL`) — KPI-ul UI este
 // "completed runs in the last 24h", nu "started in the last 24h". Caller-ul
-// foldeaza `aborted` peste `error` la prezentare.
+// decide prezentarea statusurilor terminale; dashboard-ul tine `aborted`
+// separat de `error` ca restart/drain noise sa nu para source failure.
 export interface RunsByStatusRow {
   status: string;
   n: number;

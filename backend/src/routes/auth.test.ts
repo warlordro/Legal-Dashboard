@@ -18,7 +18,7 @@ const SECRET = "0123456789abcdef0123456789abcdef";
 let tmpRoot: string;
 
 interface ErrorBody {
-  error: { code: string };
+  error: { code: string; message: string };
 }
 
 beforeEach(async () => {
@@ -59,7 +59,8 @@ describe("/api/v1/auth", () => {
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as ErrorBody;
-    expect(body.error.code).toBe("auth_provider_not_configured");
+    expect(body.error.code).toBe("not_implemented");
+    expect(body.error.message).toContain("Login endpoint nu este disponibil in v2.7.x");
   });
 
   it("clears the session cookie on logout without requiring a valid token", async () => {

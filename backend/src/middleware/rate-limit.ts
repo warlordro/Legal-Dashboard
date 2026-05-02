@@ -103,7 +103,7 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
       return c.json(
         {
           data: null,
-          error: { code: "rate_limited", message: "Too many unauthenticated requests." },
+          error: { code: "rate_limited", message: "Prea multe cereri neautentificate." },
           requestId: c.get("requestId") ?? "",
         },
         429,
@@ -113,10 +113,9 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
 
   await next();
 
-  // Doar esecurile de autentificare consuma bucket-ul pre-auth. Traficul valid,
-  // inclusiv requesturile care ajung la limiter-ul per-owner, nu trebuie blocat
-  // de acest bucket cheap.
-  if (c.res.status !== 401 && c.res.status !== 403) {
+  // Doar path-urile autentificate cu succes elibereaza bucket-ul pre-auth.
+  // 3xx/4xx/5xx raman consumate ca sa nu poata fi folosite pentru bypass.
+  if (c.res.status >= 200 && c.res.status < 300) {
     releasePreAuthAttempt(key);
   }
 

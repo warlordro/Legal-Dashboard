@@ -201,6 +201,71 @@ describe("PR-9 fix B2 - pre-auth rate limit", () => {
     });
   });
 
+  it("retine bucket-ul pentru requesturi care ajung in 404", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.52" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request("/api/missing");
+      expect(res.status).toBe(404);
+    }
+
+    const limited = await app.request("/api/missing");
+    expect(limited.status).toBe(429);
+  });
+
+  it("retine bucket-ul pentru requesturi care ajung in 500", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.53" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.get("/api/boom", (c) => c.json({ error: "boom" }, 500));
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request("/api/boom");
+      expect(res.status).toBe(500);
+    }
+
+    const limited = await app.request("/api/boom");
+    expect(limited.status).toBe(429);
+  });
+
+  it("retine bucket-ul pentru requesturi care ajung in 403", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.54" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.get("/api/denied", (c) =>
+      c.json(
+        {
+          data: null,
+          error: { code: "forbidden", message: "Acces interzis." },
+          requestId: c.get("requestId"),
+        },
+        403,
+      ),
+    );
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request("/api/denied");
+      expect(res.status).toBe(403);
+    }
+
+    const limited = await app.request("/api/denied");
+    expect(limited.status).toBe(429);
+  });
+
   it("does not consume the pre-auth bucket for successful authenticated requests", async () => {
     mockedGetConnInfo.mockReturnValue({
       remote: { address: "10.0.0.51" },

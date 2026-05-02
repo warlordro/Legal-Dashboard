@@ -3,7 +3,7 @@
 // 4 cards aliniate orizontal pe md+, stacked pe mobile:
 //   - Joburi active (cu byKind tooltip)
 //   - Alerte necitite (cu delta last24h ca subline)
-//   - Rulari ultimele 24h (ok / error / timeout)
+//   - Rulari ultimele 24h (ok / error / timeout / aborted)
 //   - Cost AI ultimele 24h (USD + token count)
 //
 // Datele vin din /api/v1/dashboard/summary (vezi dashboardApi din lib/api.ts).
@@ -99,7 +99,7 @@ export function KpiStrip({ data, loading, error }: KpiStripProps) {
     : `+${data.alerts.last24h} noi in ultimele 24h`;
   const runsSubline = data.runs.total === 0
     ? "Nicio rulare in ultimele 24h"
-    : `${data.runs.ok} ok / ${data.runs.error} erori / ${data.runs.timeout} timeout`;
+    : `${data.runs.ok} ok / ${data.runs.error} erori / ${data.runs.timeout} timeout / ${data.runs.aborted} oprite`;
   const aiSubline = data.ai.calls === 0
     ? "Niciun call in ultimele 24h"
     : `${data.ai.calls} call-uri, ${formatTokens(data.ai.tokens)} tokens`;
@@ -131,6 +131,7 @@ export function KpiStrip({ data, loading, error }: KpiStripProps) {
         label="Rulari 24h"
         value={String(data.runs.total)}
         subline={runsSubline}
+        tooltip="Aborted inseamna restart, crash recovery sau oprire controlata, separat de erorile runnerului."
         iconColor="text-green-500"
         iconBg="bg-green-500/10"
       />

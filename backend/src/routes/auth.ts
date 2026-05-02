@@ -7,6 +7,7 @@ import {
   getJwtAudience,
   getJwtIssuer,
   getTokenTtlSeconds,
+  isAuthCookieSecureDisabled,
   requireJwtSecret,
 } from "../auth/config.ts";
 import { signAuthToken } from "../auth/jwt.ts";
@@ -17,7 +18,7 @@ import { fail, ok } from "../util/envelope.ts";
 export const authRouter = new Hono();
 
 function secureCookie(): boolean {
-  if (process.env.LEGAL_DASHBOARD_AUTH_COOKIE_SECURE === "0") return false;
+  if (isAuthCookieSecureDisabled()) return false;
   return getAuthMode() === "web";
 }
 
@@ -34,8 +35,8 @@ function writeSessionCookie(c: Context, token: string, maxAge: number): void {
 authRouter.post("/login", (c) => {
   return c.json(
     fail(
-      "auth_provider_not_configured",
-      "Login-ul real SSO/OAuth este intentionat in afara acestui PR auth-pluggable.",
+      "not_implemented",
+      "Login endpoint nu este disponibil in v2.7.x. Vezi PR-10 pentru SSO/IdP cutover.",
       c,
     ),
     501,

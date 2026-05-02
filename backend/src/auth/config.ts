@@ -2,6 +2,13 @@ export type AuthMode = "desktop" | "web";
 
 const WEB_SECRET_MIN_LENGTH = 32;
 
+function firstNonEmpty(...values: Array<string | undefined>): string | null {
+  for (const value of values) {
+    if (value && value.trim() !== "") return value;
+  }
+  return null;
+}
+
 function readMode(raw: string | undefined): AuthMode {
   const mode = (raw ?? "desktop").trim().toLowerCase();
   if (mode === "desktop" || mode === "web") return mode;
@@ -15,19 +22,19 @@ export function getAuthMode(env: NodeJS.ProcessEnv = process.env): AuthMode {
 }
 
 export function getJwtSecret(env: NodeJS.ProcessEnv = process.env): string | null {
-  const secret = env.LEGAL_DASHBOARD_JWT_SECRET ?? env.JWT_SECRET ?? null;
-  if (secret === null || secret.trim() === "") return null;
-  return secret;
+  return firstNonEmpty(env.LEGAL_DASHBOARD_JWT_SECRET, env.JWT_SECRET);
 }
 
 export function getJwtIssuer(env: NodeJS.ProcessEnv = process.env): string | null {
-  const issuer = env.LEGAL_DASHBOARD_JWT_ISSUER ?? null;
-  return issuer && issuer.trim() !== "" ? issuer : null;
+  return firstNonEmpty(env.LEGAL_DASHBOARD_JWT_ISSUER, env.JWT_ISSUER);
 }
 
 export function getJwtAudience(env: NodeJS.ProcessEnv = process.env): string | null {
-  const audience = env.LEGAL_DASHBOARD_JWT_AUDIENCE ?? null;
-  return audience && audience.trim() !== "" ? audience : null;
+  return firstNonEmpty(env.LEGAL_DASHBOARD_JWT_AUDIENCE, env.JWT_AUDIENCE);
+}
+
+export function isAuthCookieSecureDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.LEGAL_DASHBOARD_AUTH_COOKIE_SECURE === "0" || env.AUTH_COOKIE_SECURE === "0";
 }
 
 export function getTokenTtlSeconds(env: NodeJS.ProcessEnv = process.env): number {
@@ -47,7 +54,7 @@ export function requireJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
   const secret = getJwtSecret(env);
   if (!secret || secret.length < WEB_SECRET_MIN_LENGTH) {
     throw new Error(
-      `LEGAL_DASHBOARD_JWT_SECRET must be set and at least ${WEB_SECRET_MIN_LENGTH} characters when auth mode is web.`,
+      `JWT_SECRET este obligatoriu in web mode si trebuie sa aiba cel putin ${WEB_SECRET_MIN_LENGTH} caractere.`,
     );
   }
   return secret;
@@ -57,6 +64,20 @@ export function validateAuthConfig(env: NodeJS.ProcessEnv = process.env): void {
   const mode = getAuthMode(env);
   if (mode === "web") {
     requireJwtSecret(env);
+    if (!getJwtIssuer(env)) {
+      throw new Error("JWT_ISSUER este obligatoriu in web mode.");
+    }
+    if (!getJwtAudience(env)) {
+      throw new Error("JWT_AUDIENCE este obligatoriu in web mode.");
+    }
     getTokenTtlSeconds(env);
+    if (isAuthCookieSecureDisabled(env)) {
+      if (env.NODE_ENV === "production") {
+        throw new Error("AUTH_COOKIE_SECURE=0 nu este permis in productie web.");
+      }
+      console.warn(
+        "[auth.config] AUTH_COOKIE_SECURE=0 permite cookie peste HTTP. Nu folosi in productie.",
+      );
+    }
   }
 }

@@ -23,8 +23,10 @@ import { ok } from "../util/envelope.ts";
 // is anchored to wall-clock time at request time and trivially comparable
 // against `created_at`/`started_at`/`ended_at` ISO columns.
 //
-// Wrapped in withMaintenanceRead — same posture as /api/v1/ai-usage/summary —
-// so a daily backup or restore in flight does not race against the SELECTs.
+// Wrapped in withMaintenanceRead: backup.ts exposes a real writer-preference
+// RWLock, not a no-op. Keeping the dashboard under the same gate lets backup /
+// restore get a clean maintenance window instead of competing with the 30s KPI
+// poll stream.
 
 export const dashboardRouter = new Hono();
 
@@ -47,6 +49,7 @@ interface RunsBlock {
   ok: number;
   error: number;
   timeout: number;
+  aborted: number;
   total: number;
 }
 
@@ -88,22 +91,28 @@ function readAlertsBlock(ownerId: string, since24h: string): AlertsBlock {
 function readRunsBlock(ownerId: string, since24h: string): RunsBlock {
   // Window key is `ended_at` (terminal transition time). `running` rows lack
   // ended_at and are excluded — the KPI is "completed runs in the last 24h",
-  // not "started in the last 24h". Aborted rows are folded into `error` for
-  // the headline KPI card; timeout is broken out because operators tune
-  // cadence based on it.
+  // not "started in the last 24h". Aborted is surfaced separately because
+  // crash recovery / graceful drain are restart noise, not source failures.
   const rows = aggregateFinalizedRunsByStatusSince(ownerId, since24h);
   let okCount = 0;
   let errorCount = 0;
   let timeoutCount = 0;
+  let abortedCount = 0;
   let total = 0;
   for (const row of rows) {
     total += row.n;
     if (row.status === "ok") okCount = row.n;
     else if (row.status === "error") errorCount += row.n;
     else if (row.status === "timeout") timeoutCount = row.n;
-    else if (row.status === "aborted") errorCount += row.n;
+    else if (row.status === "aborted") abortedCount = row.n;
   }
-  return { ok: okCount, error: errorCount, timeout: timeoutCount, total };
+  return {
+    ok: okCount,
+    error: errorCount,
+    timeout: timeoutCount,
+    aborted: abortedCount,
+    total,
+  };
 }
 
 function readAiBlock(ownerId: string, since24h: string, until: string): AiBlock {

@@ -1,9 +1,11 @@
 import type { Context, Next } from "hono";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import {
   AuthenticationError,
   getAuthProvider,
   type AuthenticatedContext,
 } from "../auth/authProvider.ts";
+import { recordAudit } from "../db/auditRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { fail } from "../util/envelope.ts";
 import { getRequestId } from "./requestId.ts";
@@ -22,17 +24,49 @@ declare module "hono" {
 function shouldAuthenticatePath(c: Context): boolean {
   if (getAuthMode() === "desktop") return true;
   if (!c.req.path.startsWith("/api/")) return false;
+  // /auth/refresh ramane autentificat in v2.7.x: token expirat => auth.denied
+  // si re-login in PR-10, nu grace-window implementat partial in seam-ul curent.
   return c.req.path !== "/api/v1/auth/login" && c.req.path !== "/api/v1/auth/logout";
 }
 
 function writeAuthError(c: Context, err: AuthenticationError): Response {
+  const requestId = getRequestId(c);
   // PR-9 fix B3: foloseste envelope-ul standard fail() ca raspunsul sa contina
   // requestId si sa fie consistent cu /api/v1/* pe toate path-urile API.
   // Logam structurat fara token/cookie body.
   console.warn(
-    `[auth.denied] requestId=${getRequestId(c)} path=${c.req.path} method=${c.req.method} code=${err.code} status=${err.status}`,
+    `[auth.denied] requestId=${requestId} path=${c.req.path} method=${c.req.method} code=${err.code} status=${err.status}`,
   );
+  try {
+    recordAudit(null, "auth.denied", {
+      ownerId: null,
+      actorId: null,
+      outcome: "denied",
+      targetKind: "http_request",
+      targetId: c.req.path,
+      ip: readRemoteIp(c),
+      userAgent: c.req.header("user-agent") ?? null,
+      detail: {
+        requestId,
+        method: c.req.method,
+        code: err.code,
+        status: err.status,
+      },
+    });
+  } catch (auditErr) {
+    console.error(
+      `[auth.audit_failed] ${auditErr instanceof Error ? auditErr.message : "unknown"}`,
+    );
+  }
   return c.json(fail(err.code, err.message, c), err.status);
+}
+
+function readRemoteIp(c: Context): string | null {
+  try {
+    return getConnInfo(c).remote.address ?? null;
+  } catch {
+    return null;
+  }
 }
 
 // PR-9 auth seam: desktop stays a noop `local` identity; web mode resolves the

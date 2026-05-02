@@ -6,6 +6,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { signAuthToken } from "../auth/jwt.ts";
+import { getAuditEvents } from "../db/auditRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserStatus } from "../db/userRepository.ts";
 import { requestIdContext } from "./requestId.ts";
@@ -17,7 +18,7 @@ let tmpRoot: string;
 
 interface ErrorBody {
   data: null;
-  error: { code: string };
+  error: { code: string; message?: string };
   requestId: string;
 }
 
@@ -97,6 +98,51 @@ describe("ownerContext auth seam", () => {
     expect(res.headers.get("x-request-id")).toBe(body.requestId);
   });
 
+  it("records auth.denied audit events for failed web authentication", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", {
+      headers: { "user-agent": "vitest-auth-denied" },
+    });
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as ErrorBody;
+    const events = getAuditEvents({ ownerId: null, action: "auth.denied" });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      owner_id: null,
+      actor_id: null,
+      action: "auth.denied",
+      target_kind: "http_request",
+      target_id: "/api/whoami",
+      outcome: "denied",
+      user_agent: "vitest-auth-denied",
+    });
+    expect(JSON.parse(events[0].detail_json)).toEqual({
+      requestId: body.requestId,
+      method: "GET",
+      code: "unauthorized",
+      status: 401,
+    });
+  });
+
+  it("still returns auth errors when auth.denied audit persistence fails", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    closeDb();
+    process.env.LEGAL_DASHBOARD_DB_PATH = tmpRoot;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami");
+
+    expect(res.status).toBe(401);
+    const body = (await res.json()) as ErrorBody;
+    expect(body.error.code).toBe("unauthorized");
+    expect(body.requestId).toMatch(/[0-9a-f-]{36}/i);
+  });
+
   it("authenticates a valid web JWT and sets owner/actor from the user", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
     process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
@@ -127,13 +173,19 @@ describe("ownerContext auth seam", () => {
       headers: { authorization: `Bearer ${tokenFor("alice", 100)}` },
     });
     expect(expired.status).toBe(401);
-    expect(((await expired.json()) as ErrorBody).error.code).toBe("token_expired");
+    expect(((await expired.json()) as ErrorBody).error).toMatchObject({
+      code: "unauthorized",
+      message: "Token de autentificare invalid.",
+    });
 
     const inactive = await app.request("/api/whoami", {
       headers: { authorization: `Bearer ${tokenFor("bob")}` },
     });
-    expect(inactive.status).toBe(403);
-    expect(((await inactive.json()) as ErrorBody).error.code).toBe("account_inactive");
+    expect(inactive.status).toBe(401);
+    expect(((await inactive.json()) as ErrorBody).error).toMatchObject({
+      code: "unauthorized",
+      message: "Token de autentificare invalid.",
+    });
   });
 
   it("returns an envelope with requestId for invalid signatures", async () => {
@@ -150,7 +202,10 @@ describe("ownerContext auth seam", () => {
     const body = (await res.json()) as ErrorBody;
     expect(body).toMatchObject({
       data: null,
-      error: { code: "invalid_signature" },
+      error: {
+        code: "unauthorized",
+        message: "Token de autentificare invalid.",
+      },
       requestId: expect.any(String),
     });
     expect(res.headers.get("x-request-id")).toBe(body.requestId);
@@ -168,7 +223,10 @@ describe("ownerContext auth seam", () => {
     expect(res.status).toBe(401);
     expect(await res.json()).toMatchObject({
       data: null,
-      error: { code: "user_not_found" },
+      error: {
+        code: "unauthorized",
+        message: "Token de autentificare invalid.",
+      },
       requestId: expect.any(String),
     });
   });

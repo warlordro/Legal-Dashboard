@@ -59,7 +59,7 @@ export class WebJwtAuthProvider implements AuthProvider {
   authenticate(c: Context): AuthenticatedContext {
     const token = readRequestToken(c);
     if (!token) {
-      throw new AuthenticationError(401, "unauthorized", "Authentication token is required.");
+      throw new AuthenticationError(401, "unauthorized", "Token de autentificare necesar.");
     }
 
     let payload: AuthJwtPayload;
@@ -70,16 +70,23 @@ export class WebJwtAuthProvider implements AuthProvider {
         audience: getJwtAudience(),
       });
     } catch (err) {
-      const code = err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "invalid_token";
-      throw new AuthenticationError(401, code, "Authentication token is invalid.");
+      const internalCode = err instanceof Error && "code" in err
+        ? String((err as { code: unknown }).code)
+        : "invalid_token";
+      console.warn(
+        `[auth.jwt_invalid] internalCode=${internalCode} message=${err instanceof Error ? err.message : "unknown"}`,
+      );
+      throw new AuthenticationError(401, "unauthorized", "Token de autentificare invalid.");
     }
 
     const user = getUserById(payload.sub);
     if (user === null) {
-      throw new AuthenticationError(401, "user_not_found", "Authenticated user does not exist.");
+      console.warn(`[auth.user_denied] internalCode=user_not_found sub=${payload.sub}`);
+      throw new AuthenticationError(401, "unauthorized", "Token de autentificare invalid.");
     }
     if (user.status !== "active") {
-      throw new AuthenticationError(403, "account_inactive", "Account is not active.");
+      console.warn(`[auth.user_denied] internalCode=account_inactive sub=${payload.sub} status=${user.status}`);
+      throw new AuthenticationError(401, "unauthorized", "Token de autentificare invalid.");
     }
 
     return {

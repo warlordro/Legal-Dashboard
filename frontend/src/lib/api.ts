@@ -707,6 +707,7 @@ export interface DashboardRunsBlock {
   ok: number;
   error: number;
   timeout: number;
+  aborted: number;
   total: number;
 }
 
