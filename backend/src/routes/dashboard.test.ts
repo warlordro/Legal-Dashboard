@@ -1,6 +1,7 @@
-// Integration tests for /api/v1/dashboard/summary (PR-A v2.7.0).
+// Integration tests for /api/v1/dashboard/{summary,timeline,charts}
+// (PR-A v2.7.0 + PR-B v2.8.0).
 //
-// Coverage:
+// Coverage (summary):
 //   - envelope shape: { data: { jobs, alerts, runs, ai, generatedAt }, requestId }
 //   - empty state: zero rows -> all blocks zeroed but well-formed
 //   - owner isolation: rows for another owner do not leak into the summary
@@ -10,6 +11,20 @@
 //     terminal rows (ended_at IS NOT NULL) are counted
 //   - performance: runs aggregation uses idx_runs_owner_ended
 //   - ai block: 24h totals (calls + tokens + costUsd derived from milli)
+//
+// Coverage (timeline, PR-B):
+//   - envelope shape, empty state
+//   - merged DESC stream of alerts + runs + curated audit
+//   - cursor pagination (nextCursor + ts < cursor)
+//   - audit curation: only listed actions OR outcome != 'ok' surface
+//   - owner isolation across all three sources
+//
+// Coverage (charts, PR-B):
+//   - envelope shape; range=7d default; range=30d
+//   - daily series backfill (zero-fill missing days)
+//   - runs daily pivot (ok/error/timeout/aborted columns per day)
+//   - AI daily costUsd derived from cost_usd_milli/1000
+//   - invalid range -> 400 with envelope error code
 
 import Database from "better-sqlite3";
 import path from "path";
@@ -22,6 +37,7 @@ import { closeDb, getDb } from "../db/schema.ts";
 import { insertAlert } from "../db/monitoringAlertsRepository.ts";
 import { insertRunning, finalize } from "../db/monitoringRunsRepository.ts";
 import { insertAiUsage } from "../db/aiUsageRepository.ts";
+import { recordAudit } from "../db/auditRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { dashboardRouter } from "./dashboard.ts";
 
@@ -316,5 +332,312 @@ describe("GET /api/v1/dashboard/summary", () => {
     expect(body.data.alerts.last24h).toBe(0);
     expect(body.data.ai.calls).toBe(0);
     expect(body.data.ai.costUsd).toBe(0);
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// PR-B v2.8.0 — /api/v1/dashboard/timeline
+// ────────────────────────────────────────────────────────────────────────────
+
+interface TimelineEvent {
+  id: string;
+  ts: string;
+  kind: "alert" | "run" | "audit";
+  severity: "info" | "warning" | "critical";
+  title: string;
+  detail: Record<string, unknown>;
+}
+
+interface TimelineResponse {
+  data: {
+    events: TimelineEvent[];
+    nextCursor: string | null;
+    generatedAt: string;
+  };
+  requestId: string;
+}
+
+function backdateAlert(alertId: number, ts: string): void {
+  getDb()
+    .prepare(`UPDATE monitoring_alerts SET created_at = ? WHERE id = ?`)
+    .run(ts, alertId);
+}
+
+function backdateRun(runId: number, endedAt: string): void {
+  getDb()
+    .prepare(`UPDATE monitoring_runs SET ended_at = ? WHERE id = ?`)
+    .run(endedAt, runId);
+}
+
+function backdateAudit(auditId: number, ts: string): void {
+  getDb()
+    .prepare(`UPDATE audit_log SET ts = ? WHERE id = ?`)
+    .run(ts, auditId);
+}
+
+function lastAuditId(): number {
+  return (
+    getDb()
+      .prepare(`SELECT MAX(id) AS id FROM audit_log`)
+      .get() as { id: number }
+  ).id;
+}
+
+describe("GET /api/v1/dashboard/timeline", () => {
+  it("returns the v1 envelope with empty events on a fresh DB", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/timeline?limit=10", {
+      headers: { "x-test-owner": "alice", "x-request-id": "req-tl-empty" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as TimelineResponse;
+    expect(body.requestId).toBe("req-tl-empty");
+    expect(body.data.events).toEqual([]);
+    expect(body.data.nextCursor).toBeNull();
+    expect(typeof body.data.generatedAt).toBe("string");
+  });
+
+  it("merges alerts + runs + curated audit into one DESC stream", async () => {
+    const jobId = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "tl" });
+    const runId = seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
+    backdateRun(runId, "2026-04-30T10:00:00.000Z");
+    const a = insertAlert({
+      ownerId: "alice",
+      jobId,
+      runId,
+      kind: "termen_new",
+      title: "Alert older",
+      detail: { x: 1 },
+      dedupKey: "tl-a",
+    });
+    backdateAlert(a.row.id, "2026-04-30T11:00:00.000Z");
+    const b = insertAlert({
+      ownerId: "alice",
+      jobId,
+      runId,
+      kind: "solutie_aparuta",
+      title: "Alert newer",
+      detail: { x: 2 },
+      dedupKey: "tl-b",
+    });
+    backdateAlert(b.row.id, "2026-04-30T13:00:00.000Z");
+    recordAudit(null, "monitoring.job.deleted", {
+      ownerId: "alice",
+      detail: { reason: "user click" },
+    });
+    backdateAudit(lastAuditId(), "2026-04-30T12:00:00.000Z");
+
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/timeline?limit=10", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as TimelineResponse;
+    expect(body.data.events).toHaveLength(4);
+    // DESC by ts: alert b (13:00) > audit (12:00) > alert a (11:00) > run (10:00)
+    expect(body.data.events.map((e) => e.kind)).toEqual([
+      "alert",
+      "audit",
+      "alert",
+      "run",
+    ]);
+    expect(body.data.nextCursor).toBeNull();
+  });
+
+  it("paginates via cursor (events strictly older than the cursor)", async () => {
+    const jobId = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "page" });
+    // Single shared run, backdated older than all alerts so the timeline
+    // doesn't intermix it with the alert pages we're asserting on.
+    const sharedRun = seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
+    backdateRun(sharedRun, "2026-04-20T00:00:00.000Z");
+    // Seed 5 alerts at 1h intervals (newest first when ORDER BY DESC).
+    for (let i = 0; i < 5; i++) {
+      const r = insertAlert({
+        ownerId: "alice",
+        jobId,
+        runId: sharedRun,
+        kind: "termen_new",
+        title: `Alert ${i}`,
+        detail: { i },
+        dedupKey: `tl-page-${i}`,
+      });
+      // Backdate so each is 1h older than the previous.
+      backdateAlert(r.row.id, `2026-04-25T${10 + i}:00:00.000Z`);
+    }
+
+    const app = buildTestApp();
+    // First page: 2 events. Newest = i=4 (14:00), then i=3 (13:00).
+    const page1Res = await app.request("/api/v1/dashboard/timeline?limit=2", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const page1 = (await page1Res.json()) as TimelineResponse;
+    expect(page1.data.events).toHaveLength(2);
+    expect(page1.data.events[0].title).toBe("Alert 4");
+    expect(page1.data.events[1].title).toBe("Alert 3");
+    expect(page1.data.nextCursor).toBe("2026-04-25T13:00:00.000Z");
+
+    // Second page: cursor = nextCursor → returns events with ts < 13:00.
+    const page2Res = await app.request(
+      `/api/v1/dashboard/timeline?limit=2&cursor=${encodeURIComponent(page1.data.nextCursor!)}`,
+      { headers: { "x-test-owner": "alice" } },
+    );
+    const page2 = (await page2Res.json()) as TimelineResponse;
+    // First event on page 2 is Alert 2 (12:00).
+    const titles2 = page2.data.events.map((e) => e.title);
+    expect(titles2[0]).toBe("Alert 2");
+    expect(titles2[1]).toBe("Alert 1");
+  });
+
+  it("audit curation: surfaces curated actions; ignores chatty actions; surfaces non-ok outcomes", async () => {
+    // Seed three audit rows for alice:
+    //   - "alert_seen" with outcome=ok → NOT in curated list, should be filtered out
+    //   - "monitoring.job.deleted" → curated
+    //   - "alert_seen" with outcome=denied → NOT curated but outcome != ok, surfaces
+    recordAudit(null, "alert_seen", { ownerId: "alice", outcome: "ok" });
+    backdateAudit(lastAuditId(), "2026-04-25T10:00:00.000Z");
+    recordAudit(null, "monitoring.job.deleted", { ownerId: "alice" });
+    backdateAudit(lastAuditId(), "2026-04-25T11:00:00.000Z");
+    recordAudit(null, "alert_seen", { ownerId: "alice", outcome: "denied" });
+    backdateAudit(lastAuditId(), "2026-04-25T12:00:00.000Z");
+
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/timeline?limit=10", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as TimelineResponse;
+    const titles = body.data.events.map((e) => e.title);
+    expect(titles).toContain("monitoring.job.deleted");
+    expect(titles).toContain("alert_seen"); // the denied one
+    // The first "alert_seen" (ok outcome, not curated) must not surface.
+    // Both alert_seen rows share the same title; we asserted exactly one denied
+    // surfaced by counting events:
+    const auditEvents = body.data.events.filter((e) => e.kind === "audit");
+    expect(auditEvents).toHaveLength(2);
+  });
+
+  it("does not leak another owner's events into the timeline", async () => {
+    const bobJob = seedJob({ ownerId: "bob", kind: "dosar_soap", hashSuffix: "leak" });
+    const bobRun = seedFinalizedRun({ ownerId: "bob", jobId: bobJob, status: "error" });
+    insertAlert({
+      ownerId: "bob",
+      jobId: bobJob,
+      runId: bobRun,
+      kind: "termen_new",
+      title: "Bob's alert — must not appear",
+      detail: {},
+      dedupKey: "bob-tl",
+    });
+    recordAudit(null, "monitoring.job.deleted", { ownerId: "bob" });
+
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/timeline?limit=10", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as TimelineResponse;
+    expect(body.data.events).toEqual([]);
+    expect(body.data.nextCursor).toBeNull();
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// PR-B v2.8.0 — /api/v1/dashboard/charts
+// ────────────────────────────────────────────────────────────────────────────
+
+interface ChartsResponse {
+  data: {
+    range: "7d" | "30d";
+    since: string;
+    until: string;
+    series: {
+      alerts: { day: string; count: number }[];
+      runs: { day: string; ok: number; error: number; timeout: number; aborted: number; total: number }[];
+      aiCost: { day: string; costUsd: number; calls: number; tokens: number }[];
+    };
+    generatedAt: string;
+  };
+  requestId: string;
+}
+
+describe("GET /api/v1/dashboard/charts", () => {
+  it("default range is 7d; backfills empty days with zeroes", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/charts", {
+      headers: { "x-test-owner": "alice", "x-request-id": "req-charts-default" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ChartsResponse;
+    expect(body.requestId).toBe("req-charts-default");
+    expect(body.data.range).toBe("7d");
+    expect(body.data.series.alerts).toHaveLength(7);
+    expect(body.data.series.runs).toHaveLength(7);
+    expect(body.data.series.aiCost).toHaveLength(7);
+    // All days zero on a fresh DB.
+    for (const p of body.data.series.alerts) expect(p.count).toBe(0);
+    for (const p of body.data.series.runs) expect(p.total).toBe(0);
+    for (const p of body.data.series.aiCost) expect(p.costUsd).toBe(0);
+  });
+
+  it("range=30d returns 30 days for each series", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/charts?range=30d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as ChartsResponse;
+    expect(body.data.range).toBe("30d");
+    expect(body.data.series.alerts).toHaveLength(30);
+    expect(body.data.series.runs).toHaveLength(30);
+    expect(body.data.series.aiCost).toHaveLength(30);
+  });
+
+  it("invalid range returns 400 with envelope error code", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/charts?range=99d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string }; data: null };
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe("invalid_range");
+  });
+
+  it("aggregates runs by day and pivots into ok/error/timeout/aborted columns", async () => {
+    const jobId = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "charts" });
+    // Two runs today: 1 ok, 1 error. SQLite will bucket both into today's row.
+    seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
+    seedFinalizedRun({ ownerId: "alice", jobId, status: "error" });
+
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/charts?range=7d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as ChartsResponse;
+    // Today is the LAST point in the grid (since = 6 days ago, ordered ASC).
+    const today = body.data.series.runs[6];
+    expect(today.total).toBe(2);
+    expect(today.ok).toBe(1);
+    expect(today.error).toBe(1);
+    expect(today.timeout).toBe(0);
+    expect(today.aborted).toBe(0);
+  });
+
+  it("AI cost daily series converts cost_usd_milli/1000 to USD", async () => {
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      feature: "dosar_summary",
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsdMilli: 2_500, // 2.5 USD
+    });
+
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/charts?range=7d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as ChartsResponse;
+    const today = body.data.series.aiCost[6];
+    expect(today.costUsd).toBeCloseTo(2.5, 3);
+    expect(today.calls).toBe(1);
+    expect(today.tokens).toBe(150);
   });
 });

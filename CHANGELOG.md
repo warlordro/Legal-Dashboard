@@ -4,6 +4,110 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.8.0] - 2026-05-02
+
+### PR-B v2.8.0 - Dashboard timeline + charts (din sprint-ul de redesign)
+
+A doua livrare din 3 (PR-A v2.7.0 KPI strip + Quick Actions, PR-C v2.9.0
+Export raport). Inlocuieste blocul static "TIPURI DE PROCESE DISPONIBILE"
+de pe Dashboard cu doua surfaces operationale, alimentate de doua endpoint-uri
+noi din `/api/v1/dashboard`.
+
+**Backend - timeline cursor-paginated:**
+
+- Endpoint nou `GET /api/v1/dashboard/timeline?cursor=<isoTs>&limit=<n>`
+  (owner-scoped via `getOwnerId`, wrapped in `withMaintenanceRead` ca sa
+  coexiste cu backup/restore). Returneaza un stream descrescator combinat din
+  3 surse: `monitoring_alerts.created_at`, `monitoring_runs.ended_at` (doar
+  finalizate), `audit_log.ts` (curated set + outcome != 'ok' catch-all).
+  Cursor strict `<` mentine pagini stabile cand 2 evenimente au acelasi ms;
+  `nextCursor=null` cand pagina returneaza mai putin de `limit` events.
+  `limit` clamp `[1,100]`, default 30. Fiecare sursa e query-ita independent
+  cu `LIMIT N` apoi merged in JS si sliced — worst case 3*N rows / pagina,
+  cheap pentru N≤100.
+- `CURATED_AUDIT_ACTIONS` (auth.denied + monitoring delete + name_list
+  commit + admin user/quota writes + aviz/backup/search destructive ops +
+  backup.restore). Audit cu `outcome != 'ok'` apare in stream chiar si daca
+  actiunea nu e in lista (defense in depth).
+- Severity mapping pentru randul timeline: alert.severity → direct;
+  run.status → ok=info / error=critical / timeout=warning / aborted=info;
+  audit.outcome → ok=info / denied|error=warning, dar `auth.denied` bumpat
+  la critical ca sa pop-uiasca.
+
+**Backend - charts daily series:**
+
+- Endpoint nou `GET /api/v1/dashboard/charts?range=7d|30d` (owner-scoped,
+  withMaintenanceRead). Returneaza 3 serii zilnice aliniate pe acelasi
+  UTC-day grid (`utcDayStart` din aiUsageRepository, ca sa partajeze X-axis
+  cu AIUsagePanel):
+  - `alerts[]` cu `{day, count}`
+  - `runs[]` cu `{day, ok, error, timeout, aborted, total}` (pivot
+    per-day-per-status → per-day cu 4 buckets)
+  - `aiCost[]` cu `{day, costUsd, calls, tokens}` (`cost_usd_milli/1000`)
+  Closed lower bound `ts >= since` aliniat cu conventia din PR-7. Backfill
+  cu zero pe zilele lipsa ca chart-ul sa afiseze linie continua.
+- Repository nou `dashboardActivityRepository.ts` separat de per-table CRUD
+  repos: timeline merge-uieste 3 surse cu shape-uri non-reusable, daily
+  aggregations sunt consumate doar de dashboard. Splitting-ul tine repo-urile
+  per-tabela focusate pe row CRUD si nu drag-uieste tipuri dashboard-shaped
+  in ele.
+
+**Frontend - Timeline component:**
+
+- `components/dashboard/Timeline.tsx`: card cu lista descrescatoare de
+  evenimente, refresh button + paginatie cursor-based ("Incarca mai multe").
+  Iconita per kind (`Bell`/`PlayCircle`/`Shield`) + pill colorat per
+  severity. Subline contextual per kind: run = `duration_ms` + `alerts_created`
+  + `error_code`; alert = `numar_dosar` sau `nume` din `job_target`; audit =
+  `outcome` + `target_kind:target_id`. Click pe alert linkeaza catre `/alerte`.
+- Relative time auto-tick (`{n}s/m/h/z in urma`) cu `setInterval(60_000)` ca
+  rendarea sa nu fie statica. Dedup defensiv pe id la "Incarca mai multe"
+  pentru same-ms ties.
+
+**Frontend - Charts component:**
+
+- `components/dashboard/Charts.tsx`: card cu segmented control 7d/30d +
+  refresh, 3 charts side-by-side (lg:grid-cols-3, stacked pe mobile):
+  - Alerte/zi (BarChart amber)
+  - Rulari/zi (BarChart stacked: ok=verde, erori=rosu, timeout=portocaliu,
+    oprite=mov; legend interactive)
+  - Cost AI/zi (AreaChart sky cu gradient, identic stilistic cu AIUsagePanel)
+- `lib/chart-colors.ts`: 5 culori noi (`alerts`, `runOk`, `runError`,
+  `runTimeout`, `runAborted`) ca single source of truth — re-theming sau
+  dark-mode chart variants se modifica intr-un singur loc.
+- Date format UTC-anchored (`new Date('YYYY-MM-DDT00:00:00Z')` + `timeZone:
+  "UTC"` pe `toLocaleDateString`) ca eticheta zilei sa nu shift-eze cu o zi
+  pe utilizatorii din alte timezone-uri.
+
+**Frontend - Dashboard wiring:**
+
+- `pages/Dashboard.tsx`: blocul static `tipuriProces` (7 chips Penal/Civil/
+  Contencios/etc.) eliminat complet, inlocuit cu `<Charts />` + `<Timeline />`
+  intre `LastRnpmCard` si "Informatii API + Versiune". Ambele componente fac
+  fetch propriu (NU primesc data prin props) ca pagina Dashboard sa nu
+  orchestreze 3 traseuri intr-un singur effect — KPI strip ramane separat la
+  polling 30s.
+
+**Frontend API surface:**
+
+- `lib/dashboardApi.ts` extins cu `timeline(opts)` + `charts(opts)`. Toate
+  query params (`cursor`, `limit`, `range`) optionale, AbortSignal propagat.
+  Tipuri publice (`TimelineEvent`, `TimelineEventKind`, `TimelinePayload`,
+  `ChartsRange`, `ChartsAlertsPoint`, `ChartsRunsPoint`, `ChartsAiPoint`,
+  `ChartsPayload`) re-exportate prin `lib/api.ts` ca toate paginile sa
+  importe din barrel-ul existent.
+
+**Migration:** zero noi (nu schimba schema; toate query-urile noi merg pe
+indexuri existente — `monitoring_alerts (owner_id, created_at)`,
+`monitoring_runs (owner_id, ended_at)` — adaugate in v2.7.0 prin `0013`).
+
+**Tests:** 640/640 verzi (591 baseline din v2.7.0 + 49 noi distribuite intre
+`routes/dashboard.test.ts` si suite-urile auxiliare). Coverage nou: timeline
+envelope + paginatie cursor + 3-source merge + audit curation; charts daily
+backfill + UTC alignment + range validation + owner isolation.
+
+---
+
 ## [2.7.1] - 2026-05-02
 
 ### Patch - icon Legal Dashboard pe taskbar in dev mode

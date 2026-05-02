@@ -11,6 +11,8 @@ import { LastDosareCard, LastRnpmCard } from "./dashboard-summary-cards";
 import { ChangelogDialog, ManualDialog } from "./dashboard-modals";
 import { KpiStrip } from "@/components/dashboard/KpiStrip";
 import { QuickActions } from "@/components/dashboard/QuickActions";
+import { Timeline } from "@/components/dashboard/Timeline";
+import { Charts } from "@/components/dashboard/Charts";
 import { dashboardApi, MonitoringApiError, type DashboardSummary } from "@/lib/api";
 
 // PR-A (v2.7.0) — refresh-uim KPI strip-ul la fiecare 30s. SSE delta pe
@@ -37,16 +39,6 @@ interface DashboardProps {
   history: SearchHistoryEntry[];
   onHistoryClick: (type: "dosare" | "termene", params: SearchParams) => void;
 }
-
-const tipuriProces = [
-  { label: "Penal", desc: "Dosare penale, infractiuni", color: "bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400" },
-  { label: "Civil", desc: "Litigii civile, proprietate, familie", color: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400" },
-  { label: "Contencios administrativ si fiscal", desc: "Litigii cu autoritati publice", color: "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400" },
-  { label: "Litigii de munca", desc: "Conflicte de munca, salarii", color: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400" },
-  { label: "Faliment", desc: "Proceduri de faliment si lichidare", color: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400" },
-  { label: "Litigii cu profesionistii", desc: "Litigii comerciale intre profesionisti", color: "bg-teal-100 text-teal-800 dark:bg-teal-900/30 dark:text-teal-400" },
-  { label: "Altele", desc: "Alte categorii de cauze", color: "bg-gray-100 text-gray-800 dark:bg-gray-900/30 dark:text-gray-400" },
-];
 
 function getUniqueCategories(dosare: Dosar[]): string[] {
   const cats = new Set<string>();
@@ -181,20 +173,9 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
 
       {lastRnpm && <LastRnpmCard entry={lastRnpm} />}
 
-      {/* Tipuri de procese */}
-      <div>
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-muted-foreground">
-          Tipuri de Procese Disponibile
-        </h2>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {tipuriProces.map(({ label, desc, color }) => (
-            <div key={label} className="flex items-center gap-3 rounded-xl border border-border bg-card p-3 hover:bg-muted/30 transition-colors">
-              <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${color}`}>{label}</span>
-              <span className="text-xs text-muted-foreground">{desc}</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* PR-B (v2.8.0) — Activitate + tendinte */}
+      <Charts />
+      <Timeline />
 
       {/* API Info + Version */}
       <div className="grid gap-4 sm:grid-cols-2">

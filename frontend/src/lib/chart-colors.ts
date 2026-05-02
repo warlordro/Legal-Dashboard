@@ -20,4 +20,9 @@ export const CHART_FILLS = {
   accent: "#14b8a6", // teal — secondary series (institutii)
   termene: "#a855f7", // purple — termene/calendar series
   aiUsage: "#0ea5e9", // sky - AI usage cost trend
+  alerts: "#f59e0b", // amber - dashboard alerts daily series
+  runOk: "#22c55e", // green - runs ok bucket
+  runError: "#ef4444", // red - runs error bucket
+  runTimeout: "#f97316", // orange - runs timeout bucket
+  runAborted: "#a855f7", // purple - runs aborted bucket (operational, not failure)
 } as const;

@@ -367,5 +367,14 @@ export {
   type DashboardRunsBlock,
   type DashboardAiBlock,
   type DashboardSummary,
+  type TimelineEvent,
+  type TimelineEventKind,
+  type TimelineEventSeverity,
+  type TimelinePayload,
+  type ChartsRange,
+  type ChartsAlertsPoint,
+  type ChartsRunsPoint,
+  type ChartsAiPoint,
+  type ChartsPayload,
 } from "./dashboardApi";
 

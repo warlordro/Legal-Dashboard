@@ -7,15 +7,40 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.7.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.8.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.7.1** - patch UX: icon Legal Dashboard apare corect in taskbar Windows si
-in dev mode (`npm run electron:dev`), nu doar pe build-ul NSIS instalat —
-helper nou `ensureDevTaskbarShortcut()` creeaza per-user shortcut Start Menu
-cu AUMID `ro.legaldashboard.app` + `build/icon.ico`. Predecesor **v2.7.0** -
-dual delivery: PR-A Dashboard redesign sprint (1/3) + PR-9 Auth pluggable seam
-(desktop noop / web JWT). 591/591 teste backend (era 546 in v2.6.8, +45 net
-new in PR-A si PR-9).
+**v2.8.0** - PR-B din sprint-ul de redesign al Dashboard-ului (2/3): inlocuim
+blocul static "TIPURI DE PROCESE DISPONIBILE" cu un timeline operational
+(alerts + runs + curated audit, paginat dupa cursor) si trei chart-uri zilnice
+(alerts/runs/aiCost) aliniate pe acelasi UTC-day grid pentru ferestre 7d sau
+30d. Backend expune doua endpoint-uri noi `/api/v1/dashboard/{timeline,charts}`,
+ambele owner-scoped + `withMaintenanceRead`. 640/640 teste backend (era 591 in
+v2.7.0, +49 noi in PR-B). Predecesor **v2.7.1** - patch UX: icon Legal
+Dashboard apare corect in taskbar Windows si in dev mode (helper nou
+`ensureDevTaskbarShortcut()`).
+
+**PR-B Backend - timeline cursor-paginated:** `GET /api/v1/dashboard/timeline?
+cursor=<isoTs>&limit=<n>` returneaza un stream descrescator combinat din 3
+surse: `monitoring_alerts.created_at`, `monitoring_runs.ended_at` (doar
+finalizate), `audit_log.ts` (curated set + `outcome != 'ok'` catch-all).
+Cursor strict `<` mentine pagini stabile cand 2 evenimente au acelasi ms;
+`limit` clamp `[1,100]`, default 30. Repository nou
+`dashboardActivityRepository.ts` separat de per-table CRUD repos.
+
+**PR-B Backend - charts daily series:** `GET /api/v1/dashboard/charts?range=7d|
+30d` returneaza 3 serii aliniate pe acelasi UTC-day grid (`utcDayStart` din
+aiUsageRepository, partajat cu AIUsagePanel): alerts count, runs split
+ok/error/timeout/aborted, aiCost USD+calls+tokens. Closed lower bound `ts >=
+since` aliniat cu PR-7. Backfill cu zero pe zilele lipsa.
+
+**PR-B Frontend - Timeline + Charts:** `components/dashboard/Timeline.tsx`
+randeaza lista cu iconita per kind (Bell/PlayCircle/Shield), pill colorat per
+severity, subline contextual (run = duration+alerts_created+error_code; alert
+= numar_dosar/nume din job_target; audit = outcome+target), buton "Incarca
+mai multe" pe `nextCursor`. `components/dashboard/Charts.tsx` randeaza 3
+charts side-by-side cu segmented control 7d/30d (BarChart amber pentru
+alerte, BarChart stacked pentru runs cu legend interactive, AreaChart sky
+pentru cost AI). `lib/chart-colors.ts` centralizeaza paleta.
 
 **PR-A Backend - endpoint nou `/api/v1/dashboard/summary`:** read-only
 aggregation owner-scoped via `getOwnerId(c)`, wrapped in `withMaintenanceRead`

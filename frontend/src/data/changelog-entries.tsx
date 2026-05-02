@@ -18,6 +18,57 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.8.0",
+    date: "2 Mai 2026",
+    subtitle:
+      "PR-B din sprintul de Dashboard redesign (2 din 3): Timeline cu paginatie cursor (alerte + runs finalizate + audit curat) + Charts cu segmented control 7d/30d (alerte/zi, runs/zi pe status, cost AI/zi). Eliminata sectiunea 'Tipuri de Procese Disponibile' (chips statice fara valoare operationala) ca sa faca loc Charts + Timeline.",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "Backend - GET /api/v1/dashboard/timeline cu paginatie cursor",
+        content:
+          "Endpoint owner-scoped (via getOwnerId) wrapped in withMaintenanceRead. Merge 3 surse pe owner: alerts (toate, severitate directa), monitoring_runs (doar finalizate, status mapat: ok=info / error=critical / timeout=warning / aborted=info), audit_log (CURATED_AUDIT_ACTIONS allowlist + outcome != 'ok' catch-all). Cursor format 'ts|id' cu strict less-than ('<') pe (ts, id) ca sa permita progress stabil chiar pe evenimente cu acelasi ms. Limit clamped [1, 100], default 30. Returneaza envelope v1 cu items[] sortate ts DESC tiebreak id DESC + nextCursor null cand stack-ul e gol.",
+      },
+      {
+        title: "Backend - GET /api/v1/dashboard/charts cu range 7d|30d",
+        content:
+          "Endpoint owner-scoped care returneaza 3 serii daily backfilled (zero-filled days, fara gap-uri vizuale): alerts (count/zi) bar amber, runs (ok+error+timeout+aborted/zi) bar stacked, ai (costUsd+calls+tokens/zi) area sky cu gradient. Grid pe UTC days via utcDayStart(now, days-1) pentru consistenta cu AIUsagePanel din PR-7. Aggregari prin substr(ts, 1, 10) ca day key. Closed lower bound (ts >= since) pentru convention compat cu PR-7.",
+      },
+      {
+        title: "Backend - repository nou backend/src/db/dashboardActivityRepository.ts",
+        content:
+          "Helperi: listAlertsBefore (cursor query alerts), listFinalizedRunsBefore (cursor query runs cu ended_at NOT NULL), listCuratedAuditBefore (cursor query audit_log cu allowlist OR outcome != 'ok'), aggregateAlertsByDayInRange + aggregateFinalizedRunsByDayAndStatusInRange (charts daily). CURATED_AUDIT_ACTIONS exportat: auth.denied, monitoring.job.deleted, monitoring.name_list.committed, admin.users.*, aviz.delete_*, backup.delete_all, backup.restore, search.delete. Toate folosesc strict '<' pe (ts, id) cu prepared statements.",
+      },
+      {
+        title: "Frontend - componenta Timeline cu paginatie cursor",
+        content:
+          "Componenta noua frontend/src/components/dashboard/Timeline.tsx cu PAGE_SIZE=30. Map KIND_META (alert=Bell amber, run=Activity verde, audit=Shield slate). Map SEVERITY_BG (info/warning/critical -> bg colored stripes). Helperi formatTs (DD.MM.YYYY HH:MM), relativeTime ('acum 2h'), eventSubline (sub-text per kind). Click pe alert -> /alerte (React Router Link). useEffect cu setInterval(60_000) ca relativeTime sa tick-uiasca live. AbortController per cerere (initial + loadMore) cu cleanup pe unmount. Dedup defensive pe id ca sa nu se dublneasca evenimente la boundary cursor.",
+      },
+      {
+        title: "Frontend - componenta Charts cu segmented control 7d/30d",
+        content:
+          "Componenta noua frontend/src/components/dashboard/Charts.tsx cu RANGE_OPTIONS=[7d, 30d]. State range default 7d, segmented control pe header. 3 ResponsiveContainer wrap (Recharts BarChart amber pentru alerte, BarChart stacked pentru runs cu legenda culori from chart-colors.ts: runOk verde / runError rosu / runTimeout portocaliu / runAborted violet, AreaChart sky cu gradient pentru cost AI). Tooltip-uri dedicate per chart. Helper formatDateLabel UTC-anchored (new Date('YYYY-MM-DDT00:00:00Z') + timeZone:'UTC') ca sa nu shifteze ziua pe utilizatori in alte timezone-uri. isEmpty helper -> empty state cand toate seriile sunt 0.",
+      },
+      {
+        title: "Frontend - integrare Dashboard.tsx + paleta noua chart-colors.ts",
+        content:
+          "Eliminat array-ul tipuriProces (7 chips statice) si blocul de render aferent ('Tipuri de Procese Disponibile'). Plasate <Charts /> + <Timeline /> intre LastRnpmCard si blocul 'API Info + Version'. Paleta extinsa in lib/chart-colors.ts cu alerts (#f59e0b), runOk (#22c55e), runError (#ef4444), runTimeout (#f97316), runAborted (#a855f7).",
+      },
+      {
+        title: "Frontend - dashboardApi extins cu timeline + charts",
+        content:
+          "frontend/src/lib/dashboardApi.ts: tipuri noi exportate TimelineEvent / TimelinePayload / ChartsRange / ChartsAlertsPoint / ChartsRunsPoint / ChartsAiPoint / ChartsPayload. Metode noi dashboardApi.timeline({cursor?, limit?, signal?}) si dashboardApi.charts({range?, signal?}). lib/api.ts re-exports extinse cu noile tipuri ca import-urile sa ramana centrate prin barrel.",
+      },
+      {
+        title: "Tests - 640/640 verzi",
+        content:
+          "Suite backend la 640 teste verzi (591 baseline din v2.7.0 + 49 noi pentru timeline cursor pagination, charts daily aggregation, owner isolation pe ambele endpoint-uri, cursor strict less-than tiebreak, audit allowlist + outcome catch-all, run status mapping). Pattern Hono test app cu x-test-owner middleware + requestIdContext reuzat din PR-A. Type-check backend + frontend + biome curat pe fisierele atinse.",
+      },
+    ],
+  },
+  {
     version: "v2.7.1",
     date: "2 Mai 2026",
     subtitle:

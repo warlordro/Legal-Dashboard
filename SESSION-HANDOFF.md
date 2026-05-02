@@ -1,24 +1,112 @@
-# Session Handoff - v2.7.1 dev taskbar icon patch livrat / PR-B v2.8.0 urmator
+# Session Handoff - PR-B v2.8.0 timeline + charts livrat / PR-C v2.9.0 urmator
 
 **Data**: 2026-05-02
 **Branch local**: `main`
 **Remote**: `main` local este sincronizat cu `origin/main` la commit-ul
 `579ce7b` (`fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`).
-Patch v2.7.1 in pregatire pentru commit local (electron taskbar icon fix), apoi
-PR-B v2.8.0.
+Patch v2.7.1 (electron taskbar icon dev mode) commit-uit local in `b11c706`.
+PR-B v2.8.0 (timeline + charts) urmeaza commit-ul de release peste local.
 
-Trei commits noi push-uite in v2.7.0 release:
+Trei commits push-uite in v2.7.0 release pe origin:
 - `c74a77e` `feat: v2.7.0 - PR-A Dashboard redesign sprint (1/3)` (squashed 4 → 1)
 - `61580a4` `fix: PR-9 audit pack 2026-05-02 - B1-B4 + P0/P1 tests + docs sync`
 - `579ce7b` `fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`
 
+Local-only:
+- `b11c706` `chore(dev): v2.7.1 - dev mode taskbar icon` (commit local in pregatire pentru push)
+
 PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0, patch-urile v2.6.1 → v2.6.8, PR-A
-v2.7.0 si PR-9 v2.7.0 sunt acum pe `origin/main`.
+v2.7.0 si PR-9 v2.7.0 sunt pe `origin/main`. v2.7.1 + v2.8.0 raman locale
+pana la push.
 
-**Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`. `v2.7.1`
-urmeaza dupa commit local.
+**Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`. `v2.7.1` +
+`v2.8.0` urmeaza dupa commit-uri.
 
-**Versiune curenta**: `v2.7.1` (patch UX: dev mode taskbar icon Legal Dashboard)
+**Versiune curenta**: `v2.8.0` (PR-B Dashboard timeline + charts, 2/3 din sprint redesign)
+
+## v2.8.0 — PR-B: Dashboard timeline + charts (2/3 din sprint redesign)
+
+A doua livrare din 3. Inlocuieste blocul static "TIPURI DE PROCESE
+DISPONIBILE" de pe Dashboard cu doua surfaces operationale alimentate de doua
+endpoint-uri noi `/api/v1/dashboard/{timeline,charts}`. Zero schema change
+(toate query-urile noi merg pe indexurile existente, inclusiv `0013` adaugat
+in v2.7.0 pentru `monitoring_runs(owner_id, ended_at DESC)`).
+
+**Backend — timeline cursor-paginated:**
+
+- `backend/src/routes/dashboard.ts`: endpoint nou `GET /timeline?cursor=&limit=`
+  owner-scoped via `getOwnerId(c)`, wrapped in `withMaintenanceRead`. Returneaza
+  un stream descrescator combinat din 3 surse: `monitoring_alerts.created_at`,
+  `monitoring_runs.ended_at` (doar finalizate), `audit_log.ts` (curated set +
+  `outcome != 'ok'` catch-all). Cursor strict `<` mentine paginatia stabila
+  cand 2 evenimente au acelasi ms; `nextCursor=null` cand pagina returneaza
+  mai putin de `limit`. Limit clamp `[1,100]`, default 30. Worst case 3*N rows
+  per pagina (cheap pentru N≤100).
+- Severity mapping: alert.severity → direct; run.status → ok=info /
+  error=critical / timeout=warning / aborted=info; audit.outcome → ok=info /
+  denied|error=warning, dar `auth.denied` bumped la critical.
+
+**Backend — charts daily series:**
+
+- Endpoint nou `GET /charts?range=7d|30d` (owner-scoped, withMaintenanceRead).
+  3 serii zilnice aliniate pe acelasi UTC-day grid (`utcDayStart` din
+  aiUsageRepository, ca sa partajeze X-axis cu AIUsagePanel): alerts count,
+  runs split (ok/error/timeout/aborted/total), aiCost USD+calls+tokens
+  (`cost_usd_milli/1000`). Closed lower bound `ts >= since` aliniat cu PR-7.
+  Backfill cu zero pe zilele lipsa.
+
+**Backend — repository nou:**
+
+- `backend/src/db/dashboardActivityRepository.ts`: separat de per-table CRUD
+  repos. `CURATED_AUDIT_ACTIONS` (auth.denied + monitoring delete + name_list
+  commit + admin user/quota writes + aviz/backup/search destructive ops +
+  backup.restore). Helperi: `listAlertsBefore`, `listFinalizedRunsBefore`,
+  `listCuratedAuditBefore` (timeline cursor queries cu LEFT JOIN pe
+  monitoring_jobs); `aggregateAlertsByDayInRange`,
+  `aggregateFinalizedRunsByDayAndStatusInRange` (charts daily aggregations).
+
+**Frontend — Timeline + Charts:**
+
+- `frontend/src/components/dashboard/Timeline.tsx`: lista descrescatoare cu
+  iconita per kind (Bell/PlayCircle/Shield), pill colorat per severity,
+  subline contextual per kind (run = duration_ms+alerts_created+error_code;
+  alert = numar_dosar/nume din job_target; audit = outcome+target). Buton
+  "Incarca mai multe" pe nextCursor; refresh manual; relative time
+  auto-tick `setInterval(60_000)`. Click pe alert linkeaza catre `/alerte`.
+  Dedup defensiv pe id la "Incarca mai multe" pentru same-ms ties.
+- `frontend/src/components/dashboard/Charts.tsx`: 3 charts side-by-side
+  (lg:grid-cols-3, stacked pe mobile) cu segmented control 7d/30d:
+  BarChart amber pentru alerte/zi, BarChart stacked pentru rulari/zi (ok=verde,
+  erori=rosu, timeout=portocaliu, oprite=mov, legend interactive), AreaChart
+  sky cu gradient pentru cost AI/zi (identic stilistic cu AIUsagePanel).
+  Date format UTC-anchored ca eticheta zilei sa nu shift-eze pe utilizatorii
+  din alte timezone-uri.
+- `frontend/src/lib/chart-colors.ts`: 5 culori noi (`alerts`, `runOk`,
+  `runError`, `runTimeout`, `runAborted`).
+- `frontend/src/pages/Dashboard.tsx`: blocul static `tipuriProces` (7 chips)
+  eliminat complet, inlocuit cu `<Charts />` + `<Timeline />` intre
+  `LastRnpmCard` si "Informatii API + Versiune". Ambele componente fac fetch
+  propriu (NU primesc data prin props) ca pagina sa nu orchestreze 3 trase
+  intr-un singur effect — KPI strip ramane separat la polling 30s.
+- `frontend/src/lib/dashboardApi.ts` extins cu `timeline(opts)` + `charts(opts)`,
+  AbortSignal propagat. Tipuri publice (`TimelineEvent`, `TimelineEventKind`,
+  `TimelinePayload`, `ChartsRange`, `ChartsAlertsPoint`, `ChartsRunsPoint`,
+  `ChartsAiPoint`, `ChartsPayload`) re-exportate prin `frontend/src/lib/api.ts`.
+
+**Migration:** zero noi (folosim indexurile existente).
+
+**Tests:** 640/640 verzi (591 baseline din v2.7.0 + 49 noi distribuite intre
+`routes/dashboard.test.ts` si suite-urile auxiliare). Coverage nou: timeline
+envelope + paginatie cursor + 3-source merge + audit curation; charts daily
+backfill + UTC alignment + range validation + owner isolation.
+
+**Next:** PR-C v2.9.0 — endpoint Export raport (XLSX + PDF pentru KPI +
+timeline + charts cu interval custom) + activeaza butonul disabled "Export
+raport" din QuickActions.
+
+---
+
+## v2.7.1 — patch UX: dev mode taskbar icon
 
 ## v2.7.1 — patch UX: dev mode taskbar icon
 
