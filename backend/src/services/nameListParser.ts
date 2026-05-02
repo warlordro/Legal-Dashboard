@@ -194,6 +194,48 @@ function parseCadence(raw: unknown): number | null {
   return Number.isInteger(n) && n >= 600 && n <= 86400 ? n : null;
 }
 
+// Reguli de validare per-rind impartite intre /preview (parseNameList) si
+// /commit (validateRawItems). Reject + dedup sunt identice pe ambele cai;
+// difera doar formatul mesajului de duplicat (preview = numar rand 1-based din
+// fisier, commit = index 0-based din array-ul JSON).
+//
+// Side-effect: muteaza `seen` doar cand rindul e acceptat ca "first
+// occurrence" — un rind rejected nu blocheaza dedup-ul pentru un duplicat
+// valid mai tarziu.
+function classifyRawName(
+  nameRaw: string,
+  nameNormalized: string,
+  seen: Map<string, number>,
+  currentIdx: number,
+  formatDuplicateMsg: (prevIdx: number) => string,
+): { validation: NameListItemValidation; validationMsg: string | null } {
+  if (!nameRaw || nameNormalized.length === 0) {
+    return { validation: "rejected", validationMsg: "nume_gol" };
+  }
+  if (nameNormalized.length < MIN_NAME_LEN) {
+    return {
+      validation: "rejected",
+      validationMsg: `nume_prea_scurt (min ${MIN_NAME_LEN})`,
+    };
+  }
+  if (nameRaw.length > MAX_NAME_LEN) {
+    return {
+      validation: "rejected",
+      validationMsg: `nume_prea_lung (max ${MAX_NAME_LEN})`,
+    };
+  }
+  if (/^\d+$/.test(nameNormalized.replace(/\s+/g, ""))) {
+    return { validation: "rejected", validationMsg: "nume_doar_cifre" };
+  }
+
+  const prevIdx = seen.get(nameNormalized);
+  if (prevIdx !== undefined) {
+    return { validation: "warn", validationMsg: formatDuplicateMsg(prevIdx) };
+  }
+  seen.set(nameNormalized, currentIdx);
+  return { validation: "ok", validationMsg: null };
+}
+
 interface RawRow {
   cells: string[];
   rowIndex: number;
@@ -424,36 +466,13 @@ export async function parseNameList(
 
     const nameNormalized = normalizeName(nameRaw);
 
-    let validation: NameListItemValidation = "ok";
-    let validationMsg: string | null = null;
-
-    // 1. Reject conditions (cea mai stricta categorie).
-    if (!nameRaw || nameNormalized.length === 0) {
-      validation = "rejected";
-      validationMsg = "nume_gol";
-    } else if (nameNormalized.length < MIN_NAME_LEN) {
-      validation = "rejected";
-      validationMsg = `nume_prea_scurt (min ${MIN_NAME_LEN})`;
-    } else if (nameRaw.length > MAX_NAME_LEN) {
-      validation = "rejected";
-      validationMsg = `nume_prea_lung (max ${MAX_NAME_LEN})`;
-    } else if (/^\d+$/.test(nameNormalized.replace(/\s+/g, ""))) {
-      validation = "rejected";
-      validationMsg = "nume_doar_cifre";
-    }
-
-    // 2. Daca a trecut de reject, verificam dedup intra-fisier dupa
-    //    name_normalized. Aceeasi denumire la doua randuri = duplicat,
-    //    indiferent de capitalizare/diacritice (normalize aplica fold).
-    if (validation !== "rejected") {
-      const prevIdx = seen.get(nameNormalized);
-      if (prevIdx !== undefined) {
-        validation = "warn";
-        validationMsg = `duplicate_in_file (apare prima data la randul ${prevIdx + 1})`;
-      } else {
-        seen.set(nameNormalized, i);
-      }
-    }
+    const { validation, validationMsg } = classifyRawName(
+      nameRaw,
+      nameNormalized,
+      seen,
+      i,
+      (prev) => `duplicate_in_file (apare prima data la randul ${prev + 1})`,
+    );
 
     if (validation === "ok") okCount++;
     else if (validation === "warn") warnCount++;
@@ -526,36 +545,13 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
     const cadenceSec = item.cadenceSec ?? null;
     const notes = item.notes ? String(item.notes).trim() || null : null;
 
-    let validation: NameListItemValidation = "ok";
-    let validationMsg: string | null = null;
-
-    // 1. Reject conditions — match exact fata de parseNameList.
-    if (!nameRaw || nameNormalized.length === 0) {
-      validation = "rejected";
-      validationMsg = "nume_gol";
-    } else if (nameNormalized.length < MIN_NAME_LEN) {
-      validation = "rejected";
-      validationMsg = `nume_prea_scurt (min ${MIN_NAME_LEN})`;
-    } else if (nameRaw.length > MAX_NAME_LEN) {
-      validation = "rejected";
-      validationMsg = `nume_prea_lung (max ${MAX_NAME_LEN})`;
-    } else if (/^\d+$/.test(nameNormalized.replace(/\s+/g, ""))) {
-      validation = "rejected";
-      validationMsg = "nume_doar_cifre";
-    }
-
-    // 2. Dedup intra-batch — cheie identica cu parseNameList: name_normalized.
-    //    Asta garanteaza ca daca userul re-trimite acelasi fisier (parsat →
-    //    JSON → POST), dedup-ul produce acelasi efect ca preview-ul.
-    if (validation !== "rejected") {
-      const prevIdx = seen.get(nameNormalized);
-      if (prevIdx !== undefined) {
-        validation = "warn";
-        validationMsg = `duplicate_in_batch (apare prima data la index ${prevIdx})`;
-      } else {
-        seen.set(nameNormalized, i);
-      }
-    }
+    const { validation, validationMsg } = classifyRawName(
+      nameRaw,
+      nameNormalized,
+      seen,
+      i,
+      (prev) => `duplicate_in_batch (apare prima data la index ${prev})`,
+    );
 
     if (validation === "ok") okCount++;
     else if (validation === "warn") warnCount++;
