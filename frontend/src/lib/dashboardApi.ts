@@ -94,6 +94,23 @@ export interface ChartsPayload {
   generatedAt: string;
 }
 
+// PR-C v2.9.0 — report payload (one-shot aggregation for the Export raport flow).
+export interface ReportTimelineBlock {
+  events: TimelineEvent[];
+  truncated: boolean;
+  limitPerSource: number;
+}
+
+export interface DashboardReportPayload {
+  range: ChartsRange;
+  since: string;
+  until: string;
+  summary: DashboardSummary;
+  charts: ChartsPayload;
+  timeline: ReportTimelineBlock;
+  generatedAt: string;
+}
+
 export const dashboardApi = {
   summary: async (signal?: AbortSignal): Promise<DashboardSummary> => {
     const res = await apiFetch("/api/v1/dashboard/summary", { signal });
@@ -119,5 +136,15 @@ export const dashboardApi = {
     const url = `/api/v1/dashboard/charts${qs ? `?${qs}` : ""}`;
     const res = await apiFetch(url, { signal: opts.signal });
     return unwrapMonitoring<ChartsPayload>(res);
+  },
+  report: async (
+    opts: { range?: ChartsRange; signal?: AbortSignal } = {},
+  ): Promise<DashboardReportPayload> => {
+    const params = new URLSearchParams();
+    if (opts.range) params.set("range", opts.range);
+    const qs = params.toString();
+    const url = `/api/v1/dashboard/report${qs ? `?${qs}` : ""}`;
+    const res = await apiFetch(url, { signal: opts.signal });
+    return unwrapMonitoring<DashboardReportPayload>(res);
   },
 };

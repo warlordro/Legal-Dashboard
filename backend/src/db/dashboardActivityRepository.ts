@@ -167,6 +167,84 @@ export function listCuratedAuditBefore(opts: {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
+// PR-C v2.9.0 — Report endpoint timeline rows in a closed window.
+//
+// Same shape as the *Before helpers above, but bounded by [since, until]
+// instead of `< cursor`. Used by /api/v1/dashboard/report which returns the
+// full event list inside the requested 7d/30d range so the report builder
+// can render it in one pass without paging.
+//
+// LIMIT is enforced by the caller (route clamps to a hard cap, default 500
+// per source) to keep the payload bounded if a noisy owner has thousands of
+// events per week.
+// ────────────────────────────────────────────────────────────────────────────
+
+export function listAlertsInRange(opts: {
+  ownerId: string;
+  since: string;
+  until: string;
+  limit: number;
+}): TimelineAlertRow[] {
+  return getDb()
+    .prepare(
+      `SELECT a.id, a.created_at AS ts, a.kind, a.severity, a.title, a.detail_json,
+              a.job_id, j.kind AS job_kind, j.target_json AS job_target_json
+       FROM monitoring_alerts a
+       LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id
+       WHERE a.owner_id = ?
+         AND a.created_at >= ?
+         AND a.created_at <= ?
+       ORDER BY a.created_at DESC, a.id DESC
+       LIMIT ?`,
+    )
+    .all(opts.ownerId, opts.since, opts.until, opts.limit) as TimelineAlertRow[];
+}
+
+export function listFinalizedRunsInRange(opts: {
+  ownerId: string;
+  since: string;
+  until: string;
+  limit: number;
+}): TimelineRunRow[] {
+  return getDb()
+    .prepare(
+      `SELECT r.id, r.ended_at AS ts, r.status, r.job_id, r.duration_ms,
+              r.alerts_created, r.alerts_patched, r.error_code, r.error_message,
+              r.http_status, j.kind AS job_kind
+       FROM monitoring_runs r
+       LEFT JOIN monitoring_jobs j ON j.id = r.job_id AND j.owner_id = r.owner_id
+       WHERE r.owner_id = ?
+         AND r.ended_at IS NOT NULL
+         AND r.ended_at >= ?
+         AND r.ended_at <= ?
+       ORDER BY r.ended_at DESC, r.id DESC
+       LIMIT ?`,
+    )
+    .all(opts.ownerId, opts.since, opts.until, opts.limit) as TimelineRunRow[];
+}
+
+export function listCuratedAuditInRange(opts: {
+  ownerId: string;
+  since: string;
+  until: string;
+  limit: number;
+}): TimelineAuditRow[] {
+  const placeholders = CURATED_AUDIT_ACTIONS.map(() => "?").join(",");
+  return getDb()
+    .prepare(
+      `SELECT id, ts, action, target_kind, target_id, outcome, detail_json, actor_id
+       FROM audit_log
+       WHERE owner_id = ?
+         AND ts >= ?
+         AND ts <= ?
+         AND (action IN (${placeholders}) OR outcome != 'ok')
+       ORDER BY ts DESC, id DESC
+       LIMIT ?`,
+    )
+    .all(opts.ownerId, opts.since, opts.until, ...CURATED_AUDIT_ACTIONS, opts.limit) as TimelineAuditRow[];
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 // Charts: daily aggregations for [since, until], anchored to UTC-midnight by
 // the caller (uses utcDayStart from aiUsageRepository so all three series share
 // the same X-axis). substr(ts, 1, 10) buckets by `YYYY-MM-DD` (the ISO date

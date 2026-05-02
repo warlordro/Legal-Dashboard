@@ -41,7 +41,9 @@ export type ExportJob =
   | { kind: "monitoringXlsx"; data: MonitoringJob[] }
   | { kind: "monitoringPdf"; data: MonitoringJob[] }
   | { kind: "analysisPdf"; data: AnalysisPdfArgs }
-  | { kind: "manualPdf"; data: null };
+  | { kind: "manualPdf"; data: null }
+  | { kind: "reportXlsx"; data: import("./dashboardApi").DashboardReportPayload }
+  | { kind: "reportPdf"; data: import("./dashboardApi").DashboardReportPayload };
 
 function triggerDownload(buffer: ArrayBuffer, filename: string, mime: string): void {
   const blob = new Blob([buffer], { type: mime });
@@ -694,5 +696,21 @@ export async function exportAnalysisPDF(
 
 export async function exportManualPDF(): Promise<void> {
   const result = await runExportInWorker({ kind: "manualPdf", data: null });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+// ─── Orchestratori raport (PR-C v2.9.0) ──────────────────────────────────────
+
+export async function exportReportXlsx(
+  payload: import("./dashboardApi").DashboardReportPayload,
+): Promise<void> {
+  const result = await runExportInWorker({ kind: "reportXlsx", data: payload });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function exportReportPdf(
+  payload: import("./dashboardApi").DashboardReportPayload,
+): Promise<void> {
+  const result = await runExportInWorker({ kind: "reportPdf", data: payload });
   triggerDownload(result.buffer, result.filename, result.mime);
 }

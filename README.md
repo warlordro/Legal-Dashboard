@@ -7,17 +7,45 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.8.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.9.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.8.0** - PR-B din sprint-ul de redesign al Dashboard-ului (2/3): inlocuim
-blocul static "TIPURI DE PROCESE DISPONIBILE" cu un timeline operational
-(alerts + runs + curated audit, paginat dupa cursor) si trei chart-uri zilnice
-(alerts/runs/aiCost) aliniate pe acelasi UTC-day grid pentru ferestre 7d sau
-30d. Backend expune doua endpoint-uri noi `/api/v1/dashboard/{timeline,charts}`,
-ambele owner-scoped + `withMaintenanceRead`. 640/640 teste backend (era 591 in
-v2.7.0, +49 noi in PR-B). Predecesor **v2.7.1** - patch UX: icon Legal
-Dashboard apare corect in taskbar Windows si in dev mode (helper nou
-`ensureDevTaskbarShortcut()`).
+**v2.9.0** - PR-C din sprint-ul de redesign al Dashboard-ului (3/3, ultimul):
+Quick Action "Export raport" devine functional. Modal cu picker `range` (7d /
+30d) + `format` (XLSX / PDF) genereaza un raport agregat printr-un endpoint
+nou `GET /api/v1/dashboard/report?range=7d|30d` (snapshot atomic
+owner-scoped + `withMaintenanceRead`) si construieste fisierul off-main-thread
+in Web Worker (3 sheets XLSX: Sumar / Activitate zilnica / Cronologie; PDF
+landscape A4 cu aceleasi 3 sectiuni). 645/645 teste backend (era 640 in
+v2.8.0, +5 noi pentru `/report`). Predecesor **v2.8.0** - PR-B Dashboard
+timeline + charts (eliminata sectiunea statica "TIPURI DE PROCESE
+DISPONIBILE", inlocuita cu Timeline cursor-paginated + 3 charts daily
+7d/30d). Inainte: **v2.7.1** - patch UX dev mode taskbar icon
+(`ensureDevTaskbarShortcut()`).
+
+**PR-C Backend - endpoint nou `/api/v1/dashboard/report`:** snapshot atomic
+owner-scoped via `getOwnerId(c)`, wrapped in `withMaintenanceRead`. Validare
+`range` 400 `invalid_range` daca nu e `7d`/`30d`. Reuseste blocurile
+`readJobsBlock`/`readAlertsBlock`/`readRunsBlock`/`readAiBlock` (PR-A) pentru
+sumar si agregarile zilnice (PR-B charts) pentru `charts`. Trei helperi noi
+in `dashboardActivityRepository.ts`: `listAlertsInRange`,
+`listFinalizedRunsInRange`, `listCuratedAuditInRange` (window inchis
+`ts >= since AND ts <= until`, ordonate `(ts, id) DESC`, cap
+`REPORT_TIMELINE_LIMIT = 500` per sursa). Cele 3 surse merge-uite si sortate
+`ts DESC, id DESC`; `truncated = true` daca oricare sursa atinge cap-ul.
+
+**PR-C Frontend - builders + modal:** `frontend/src/lib/export-report.ts`
+expune `buildReportXlsx` (3 sheets: Sumar 13 randuri KPI, Activitate zilnica
+9 coloane day x metrics, Cronologie 5 coloane events cu detail JSON
+serializat 800ch cap; paleta `BLUE_DARK` titlu / `BLUE_MAIN` header /
+`ROW_ALT`/`WHITE` alternativ; `sanitizeFormulaCells` pe formula injection)
+si `buildReportPdf` (landscape A4 helvetica cu 3 sectiuni, `stripDiacritics`,
+footer "Pagina N", italic note daca `truncated=true`). Filename pattern
+`raport_dashboard_<range>_<dataRO>.<ext>`. ExportJob extins cu `reportXlsx` +
+`reportPdf`, dispatch in `export.worker.ts` (build off main thread).
+`ReportExportModal` (parent-controlled `open`/`onClose`, segmented control
+range + format, `AbortController` per cerere, `aria-modal`+ ESC suport)
+randat din `QuickActions` care are acum buton `<button onClick>` pentru
+Export raport (era `disabled` in PR-A v2.7.0).
 
 **PR-B Backend - timeline cursor-paginated:** `GET /api/v1/dashboard/timeline?
 cursor=<isoTs>&limit=<n>` returneaza un stream descrescator combinat din 3
@@ -207,7 +235,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (591 teste in v2.7.0: 553 dupa PR-A + 38 noi in PR-9; baseline 546 din v2.6.4..v2.6.8) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (645 teste in v2.9.0: 640 baseline din v2.8.0 + 5 noi pentru `/report`; 591 din v2.7.0; baseline 546 din v2.6.4..v2.6.8) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

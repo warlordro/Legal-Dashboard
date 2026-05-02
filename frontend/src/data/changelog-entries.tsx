@@ -18,6 +18,57 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.9.0",
+    date: "2 Mai 2026",
+    subtitle:
+      "PR-C din sprintul de Dashboard redesign (3 din 3, ULTIMUL): activeaza Quick Action 'Export raport' care era disabled din PR-A v2.7.0. Modal cu picker range (7d/30d) + format (XLSX/PDF) genereaza raport agregat printr-un endpoint nou /api/v1/dashboard/report (snapshot atomic owner-scoped + withMaintenanceRead) si construieste fisierul off-main-thread in Web Worker (3 sheets XLSX: Sumar / Activitate zilnica / Cronologie; PDF landscape A4 cu aceleasi 3 sectiuni). Sprint Dashboard redesign incheiat.",
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Backend - GET /api/v1/dashboard/report cu range 7d|30d",
+        content:
+          "Endpoint nou owner-scoped (via getOwnerId) wrapped in withMaintenanceRead, snapshot atomic ca sa coexiste cu backup/restore. Validare range: 400 invalid_range daca lipseste sau nu e 7d/30d. Returneaza payload {range, since, until, summary, charts, timeline, generatedAt}. summary reuseste blocurile readJobsBlock/readAlertsBlock/readRunsBlock/readAiBlock din PR-A v2.7.0. charts reuseste agregarile zilnice din PR-B v2.8.0 (UTC-day grid via utcDayStart). timeline merge-uieste 3 surse pe fereastra [since, until] cu cap REPORT_TIMELINE_LIMIT=500 per sursa; truncated=true daca oricare sursa atinge cap-ul.",
+      },
+      {
+        title: "Backend - dashboardActivityRepository extins cu 3 helperi InRange",
+        content:
+          "Helperi noi listAlertsInRange / listFinalizedRunsInRange / listCuratedAuditInRange in backend/src/db/dashboardActivityRepository.ts. Window inchis (ts >= since AND ts <= until), ordonate (ts, id) DESC, cap parametric prin limit. Reuseste CURATED_AUDIT_ACTIONS allowlist + outcome != 'ok' catch-all definite in PR-B v2.8.0. Pattern identic cu helperii Before existenti din PR-B (LEFT JOIN pe monitoring_jobs pentru context job_kind/job_target).",
+      },
+      {
+        title: "Frontend - lib/export-report.ts: builders XLSX + PDF (file nou)",
+        content:
+          "buildReportXlsx(payload) intoarce 3 sheets: Sumar (13 randuri KPI: jobs/alerts/runs/ai); Activitate zilnica (9 coloane: data + alerts + runs ok/error/timeout/aborted/total + ai cost/calls); Cronologie (5 coloane: data, kind, severity, titlu, detail JSON serializat 800ch cap). Paleta partajata cu lib/export.ts: BLUE_DARK titlu, BLUE_MAIN header, ROW_ALT/WHITE alternativ, sanitizeFormulaCells pe formula injection guard. buildReportPdf(payload) construieste jsPDF landscape A4 helvetica cu 3 sectiuni (Sumar 3 col, Activitate zilnica 9 col, Cronologie pe pagina noua 4 col). stripDiacritics pe text Romana. Footer 'Pagina N'. Italic note daca truncated=true. Filename pattern raport_dashboard_<range>_<dataRO>.<ext>.",
+      },
+      {
+        title: "Frontend - export.worker.ts: dispatch reportXlsx + reportPdf",
+        content:
+          "ExportJob union din lib/export.ts extins cu {kind: 'reportXlsx', data: DashboardReportPayload} si {kind: 'reportPdf', data: DashboardReportPayload}. Orchestratorii noi exportReportXlsx(payload) + exportReportPdf(payload) posteaza job-ul catre Worker; rezultatul se descarca prin triggerDownload. Build-ul off main thread asigura UI responsive pe ranges 30d cu sute de evenimente.",
+      },
+      {
+        title: "Frontend - ReportExportModal (file nou) + QuickActions wiring",
+        content:
+          "components/dashboard/ReportExportModal.tsx parent-controlled (open/onClose, NU context provider) ca sa pastreze form state intern. State range default 7d, format default xlsx, busy, error. useRef AbortController pentru cancellation, useEffect reset state la open, ESC handler cand nu e busy, cleanup aborts pe unmount. handleGenerate apeleaza dashboardApi.report({range, signal}) -> ramifica catre exportReportXlsx/exportReportPdf -> inchide la success. Accesibil: role='dialog', aria-modal, aria-labelledby='report-export-title', aria-label='Inchide' pe X. Segmented controls pentru range si format cu active-state styling. components/dashboard/QuickActions.tsx: butonul 'Export raport' devine <button onClick> care deschide modalul (era disabled cu tooltip 'Disponibil in v2.9.0' din PR-A v2.7.0); cele 5 butoane cu rute raman <Link>.",
+      },
+      {
+        title: "Frontend - dashboardApi extins cu metoda report",
+        content:
+          "lib/dashboardApi.ts: tipuri noi exportate ReportTimelineBlock + DashboardReportPayload. Metoda noua dashboardApi.report({range?, signal?}) reuseste apiFetch + unwrapMonitoring. lib/api.ts re-exports extinse cu noile tipuri ca import-urile sa ramana centrate prin barrel.",
+      },
+      {
+        title: "Tests - 645/645 verzi",
+        content:
+          "Suite backend la 645 teste verzi (640 baseline din v2.8.0 + 5 noi in routes/dashboard.test.ts): envelope + empty state owner-scoped cand DB-ul e gol; 400 invalid_range pe range absent / invalid; 30d grid cu 30 entries in charts; timeline merge cu 1 alert + 1 run + 1 audit verifica order DESC (ts DESC, id DESC tiebreak); owner isolation pe charts+timeline (alice vs bob). Type-check backend + frontend curat pe fisierele atinse.",
+      },
+      {
+        title: "Sprint Dashboard redesign incheiat",
+        content:
+          "PR-A v2.7.0 (KPI strip + Quick Actions cu Export raport disabled), PR-B v2.8.0 (timeline cursor-paginated + 3 charts daily 7d/30d, eliminata sectiunea statica 'Tipuri de Procese Disponibile'), PR-C v2.9.0 (Export raport functional). Urmator sprint planificat: PR-10 -> PR-12 server-side sessions + Google SSO + cutover web complet.",
+      },
+    ],
+  },
+  {
     version: "v2.8.0",
     date: "2 Mai 2026",
     subtitle:

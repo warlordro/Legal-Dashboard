@@ -10,6 +10,7 @@ import {
 } from "./export";
 import { buildAnalysisPdf } from "./export-analysis";
 import { buildManualPdf } from "./export-manual";
+import { buildReportPdf, buildReportXlsx } from "./export-report";
 import type { ExportResult } from "./pdf-helpers";
 
 // Web Worker care preia generarea XLSX/PDF de pe main thread pentru dosare,
@@ -46,6 +47,12 @@ ctx.onmessage = async (e: MessageEvent<ExportJob>) => {
         break;
       case "manualPdf":
         result = await buildManualPdf();
+        break;
+      case "reportXlsx":
+        result = await buildReportXlsx(e.data.data);
+        break;
+      case "reportPdf":
+        result = await buildReportPdf(e.data.data);
         break;
     }
     ctx.postMessage(

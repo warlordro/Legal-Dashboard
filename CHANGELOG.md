@@ -4,6 +4,99 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.9.0] - 2026-05-02
+
+### PR-C v2.9.0 - Export raport dashboard (a treia si ultima livrare din sprintul de redesign)
+
+Inchide sprintul de redesign al Dashboard-ului (PR-A v2.7.0 KPI strip + Quick
+Actions, PR-B v2.8.0 timeline + charts, PR-C v2.9.0 export raport). Activeaza
+butonul "Export raport" din Quick Actions cu un modal de selectie interval +
+format care delega generarea unui workbook XLSX (3 sheet-uri) sau a unui PDF
+landscape catre worker-ul de export, alimentat dintr-un singur snapshot
+consistent al backend-ului.
+
+**Backend - GET /api/v1/dashboard/report?range=7d|30d:**
+
+- Endpoint nou owner-scoped (`getOwnerId`), wrapped in `withMaintenanceRead`
+  pentru consistenta cu PR-A si PR-B (snapshot atomic peste backup/restore).
+  Returneaza un envelope v1 care contine 4 blocuri:
+  - `summary`: aceeasi forma ca `/summary` (KPI 24h - jobs, alerts, runs cu
+    `aborted` separat de `error`, ai cost+calls+tokens).
+  - `charts`: aceeasi forma ca `/charts` (3 serii daily backfilled - alerts,
+    runs pivotate pe status ok/error/timeout/aborted, ai cost+calls+tokens),
+    grid pe UTC days via `utcDayStart` ca toate seriile sa aiba acelasi X-axis.
+  - `timeline`: lista bounded cu toate evenimentele in `[since, until]`
+    (alerts + finalized runs + curated audit), cap `REPORT_TIMELINE_LIMIT=500`
+    per sursa cu flag `truncated: boolean` cand vreuna dintre surse atinge
+    limita (UI/PDF afiseaza nota informativa, nu eroare).
+  - `range`, `since`, `until`, `generatedAt` - meta consistente.
+- Reuseste helperii `readJobsBlock`/`readAlertsBlock`/`readRunsBlock`/`readAiBlock`
+  + `aggregateAlertsByDayInRange` + `aggregateFinalizedRunsByDayAndStatusInRange`
+  din PR-A si PR-B, iar pentru timeline-ul windowed introduce 3 helperi noi in
+  `dashboardActivityRepository.ts`: `listAlertsInRange`, `listFinalizedRunsInRange`,
+  `listCuratedAuditInRange` (closed `[since, until]`, ordering DESC pe `(ts, id)`,
+  acelasi `CURATED_AUDIT_ACTIONS` allowlist + `outcome != 'ok'` catch-all).
+- Validare interval: `range` trebuie sa fie `7d` sau `30d`, altfel 400 cu
+  envelope `error.code="invalid_range"` (acelasi pattern ca `/charts`).
+- Merge in JS al timeline-ului cu sort `ts DESC` + tiebreak `id DESC`,
+  identic cu cel folosit la `/timeline` (acelasi `mergeAndSliceTimeline`-style
+  cod inline ca sa pastram comportament unitar).
+
+**Frontend - dashboardApi.report:**
+
+- Metoda noua `dashboardApi.report({range?, signal?})` in `lib/dashboardApi.ts`
+  (range default `7d`, suporta `AbortSignal` ca toate celelalte). Tipuri noi
+  exportate: `ReportTimelineBlock` si `DashboardReportPayload`. Re-exportate
+  prin barrel-ul `lib/api.ts` ca import-urile sa ramana centrate.
+
+**Frontend - builder-i `buildReportXlsx` + `buildReportPdf`:**
+
+- Modul nou `lib/export-report.ts` - 2 builderi puri (fara DOM, ruleaza in
+  worker) pentru XLSX si PDF. XLSX: 3 sheet-uri ("Sumar" cu 13 KPI-uri formatate,
+  "Activitate zilnica" cu 9 coloane day x metrics, "Cronologie" cu evenimente
+  expandate inclusiv detail JSON serializat la 800ch cap), styling reuzat din
+  `excel-helpers.ts` (BLUE_DARK title, BLUE_MAIN header, alternate row, ROW_ALT)
+  + `sanitizeFormulaCells` pe toate cele 3 sheet-uri (formula-injection guard).
+  PDF: landscape A4 helvetica cu titlu, sumar table (3 col), activitate zilnica
+  table (9 col), cronologie table pe pagina noua (4 col), `stripDiacritics` pe
+  text RO, footer "Pagina N", nota italica daca `truncated=true`.
+- Filename pattern `raport_dashboard_<range>_<dataRO>.<ext>`.
+- `ExportJob` extins cu kind-uri `reportXlsx` + `reportPdf`, dispatch wired in
+  `export.worker.ts` ca buildurile sa nu blocheze main thread-ul nici pe 30d
+  range cu sute de evenimente.
+- Orchestratori `exportReportXlsx` + `exportReportPdf` adaugati in `export.ts`
+  (round-trip prin worker + `triggerDownload` pe main thread).
+
+**Frontend - ReportExportModal + QuickActions wiring:**
+
+- Componenta noua `components/dashboard/ReportExportModal.tsx` - modal
+  controllat de parent (open/onClose) cu picker interval (segmented control
+  7d/30d) si format (XLSX/PDF). Generate: ruleaza fetch raport prin
+  `dashboardApi.report` + delega builderul ales catre worker. State `busy`
+  blocheaza inputurile + arata `Loader2` spin pe butonul de generare; `error`
+  inline; ESC inchide cand nu e in lucru; click pe overlay inchide; cleanup
+  pe unmount aborteaza request-ul. Accesibil: `role="dialog"`, `aria-modal`,
+  `aria-labelledby`, buton X cu `aria-label`.
+- `QuickActions` rescris ca state `reportOpen` + buton "Export raport" pe
+  `<button onClick>` (nu mai e disabled), iconul slate `FileDown`. Restul
+  butoanelor raman `<Link>`-uri react-router; signature-ul `QuickAction`
+  acum poate purta fie `to` (link), fie `onClick` (handler).
+
+**Tests - 645/645 verzi:**
+
+- 5 teste noi in `routes/dashboard.test.ts` pentru `/report`:
+  - envelope shape + empty state (timeline empty, charts backfilled la 7 zile,
+    summary zerourat, `truncated:false`).
+  - `range=42d` -> 400 cu `error.code="invalid_range"`.
+  - `range=30d` extinde grid-ul charts la 30 zile (toate cele 3 serii).
+  - timeline merge alerts + finalized runs + curated audit cu order DESC
+    verificat (1 alert + 1 run + 1 audit = 3 events, ordering monotonic).
+  - owner isolation pe ambele blocks (timeline + charts) - bob-ul nu trebuie
+    sa apara in raportul lui alice.
+- Total: 640 baseline din v2.8.0 + 5 noi = 645.
+
+---
+
 ## [2.8.0] - 2026-05-02
 
 ### PR-B v2.8.0 - Dashboard timeline + charts (din sprint-ul de redesign)

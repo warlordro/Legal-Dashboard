@@ -16,8 +16,11 @@ import {
   aggregateAlertsByDayInRange,
   aggregateFinalizedRunsByDayAndStatusInRange,
   listAlertsBefore,
+  listAlertsInRange,
   listCuratedAuditBefore,
+  listCuratedAuditInRange,
   listFinalizedRunsBefore,
+  listFinalizedRunsInRange,
   type TimelineAlertRow,
   type TimelineAuditRow,
   type TimelineRunRow,
@@ -471,6 +474,146 @@ dashboardRouter.get("/charts", async (c) => {
         runs: Array.from(runsByDay.values()),
         aiCost,
       },
+      generatedAt: until,
+    };
+  });
+
+  return c.json(ok(payload, c));
+});
+
+// ────────────────────────────────────────────────────────────────────────────
+// PR-C (v2.9.0) — Dashboard report endpoint.
+//
+// GET /api/v1/dashboard/report?range=7d|30d
+//
+// Single round-trip aggregation used by the "Export raport" flow on the
+// dashboard. Returns:
+//   - summary: same shape as /summary (KPI snapshot at request time)
+//   - charts: same shape as /charts (daily series for the requested window)
+//   - timeline: bounded list of all timeline events in the [since, until]
+//     window (alerts + finalized runs + curated audit), capped at
+//     REPORT_TIMELINE_LIMIT per source so a noisy owner cannot blow up the
+//     response. Truncation is signalled via `timeline.truncated: true` so the
+//     report can footnote the user.
+//
+// Why one endpoint vs three (summary + charts + timeline)? The report needs
+// a snapshot consistent across all three blocks; a single round-trip wrapped
+// in withMaintenanceRead guarantees that. Two separate calls could interleave
+// with backup/restore boundaries.
+// ────────────────────────────────────────────────────────────────────────────
+
+const REPORT_TIMELINE_LIMIT = 500;
+
+export interface ReportTimelineBlock {
+  events: TimelineEvent[];
+  truncated: boolean;
+  limitPerSource: number;
+}
+
+export interface DashboardReportPayload {
+  range: ChartsRange;
+  since: string;
+  until: string;
+  summary: DashboardSummaryPayload;
+  charts: ChartsPayload;
+  timeline: ReportTimelineBlock;
+  generatedAt: string;
+}
+
+dashboardRouter.get("/report", async (c) => {
+  const parsed = rangeToDays(c.req.query("range"));
+  if (!parsed) {
+    return c.json(fail("invalid_range", "range must be one of: 7d, 30d", c), 400);
+  }
+  const { range, days } = parsed;
+  const ownerId = getOwnerId(c);
+  const now = new Date();
+  const sinceDate = utcDayStart(now, days - 1);
+  const since = sinceDate.toISOString();
+  const until = now.toISOString();
+  const since24h = new Date(now.getTime() - 86_400_000).toISOString();
+
+  const payload: DashboardReportPayload = await withMaintenanceRead(async () => {
+    // Summary block (same as /summary; KPI snapshot at request time, 24h window).
+    const summary: DashboardSummaryPayload = {
+      jobs: readJobsBlock(ownerId),
+      alerts: readAlertsBlock(ownerId, since24h),
+      runs: readRunsBlock(ownerId, since24h),
+      ai: readAiBlock(ownerId, since24h, until),
+      generatedAt: until,
+    };
+
+    // Charts block (same as /charts; daily series anchored to UTC-midnight).
+    const grid = buildDayGrid(sinceDate, days);
+    const alertRows = aggregateAlertsByDayInRange({ ownerId, since, until });
+    const alertsByDay = new Map(alertRows.map((r) => [r.day, r.count]));
+    const alertsSeries: ChartsAlertsPoint[] = grid.map((day) => ({
+      day,
+      count: alertsByDay.get(day) ?? 0,
+    }));
+    const runRows = aggregateFinalizedRunsByDayAndStatusInRange({ ownerId, since, until });
+    const runsByDay = new Map<string, ChartsRunsPoint>();
+    for (const day of grid) {
+      runsByDay.set(day, { day, ok: 0, error: 0, timeout: 0, aborted: 0, total: 0 });
+    }
+    for (const row of runRows) {
+      const point = runsByDay.get(row.day);
+      if (!point) continue;
+      point.total += row.n;
+      if (row.status === "ok") point.ok += row.n;
+      else if (row.status === "error") point.error += row.n;
+      else if (row.status === "timeout") point.timeout += row.n;
+      else if (row.status === "aborted") point.aborted += row.n;
+    }
+    const aiResp = listAiUsageLastDays({ ownerId, days, now });
+    const aiByDay = new Map(aiResp.rows.map((r) => [r.day, r]));
+    const aiCost: ChartsAiPoint[] = grid.map((day) => {
+      const r = aiByDay.get(day);
+      return {
+        day,
+        costUsd: r ? Math.max(0, r.costUsdMilli) / 1_000 : 0,
+        calls: r ? r.calls : 0,
+        tokens: r ? r.inputTokens + r.outputTokens : 0,
+      };
+    });
+    const charts: ChartsPayload = {
+      range,
+      since,
+      until,
+      series: { alerts: alertsSeries, runs: Array.from(runsByDay.values()), aiCost },
+      generatedAt: until,
+    };
+
+    // Timeline block: all events in [since, until], capped per source. Each
+    // source is limited independently; truncation is reported as a single
+    // boolean so the UI/PDF can footnote it (we do not paginate the report —
+    // truncation here means "capacity exhausted, see live timeline for the
+    // long tail" rather than "more pages available").
+    const limit = REPORT_TIMELINE_LIMIT;
+    const alertsRows = listAlertsInRange({ ownerId, since, until, limit });
+    const runsRows = listFinalizedRunsInRange({ ownerId, since, until, limit });
+    const auditRows = listCuratedAuditInRange({ ownerId, since, until, limit });
+    const truncated =
+      alertsRows.length === limit ||
+      runsRows.length === limit ||
+      auditRows.length === limit;
+    const merged = [
+      ...alertsRows.map(alertRowToEvent),
+      ...runsRows.map(runRowToEvent),
+      ...auditRows.map(auditRowToEvent),
+    ];
+    merged.sort((a, b) => {
+      if (a.ts === b.ts) return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+      return a.ts < b.ts ? 1 : -1;
+    });
+
+    return {
+      range,
+      since,
+      until,
+      summary,
+      charts,
+      timeline: { events: merged, truncated, limitPerSource: limit },
       generatedAt: until,
     };
   });

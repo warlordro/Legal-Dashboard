@@ -641,3 +641,145 @@ describe("GET /api/v1/dashboard/charts", () => {
     expect(today.tokens).toBe(150);
   });
 });
+
+// ──────────────────────────────────────────────────────────────────────────
+// PR-C v2.9.0 — /report endpoint tests
+// ──────────────────────────────────────────────────────────────────────────
+
+interface ReportResponse {
+  data: {
+    range: "7d" | "30d";
+    since: string;
+    until: string;
+    summary: SummaryResponse["data"];
+    charts: ChartsResponse["data"];
+    timeline: {
+      events: Array<{ id: string; ts: string; kind: string; severity: string; title: string }>;
+      truncated: boolean;
+      limitPerSource: number;
+    };
+    generatedAt: string;
+  };
+  requestId: string;
+}
+
+describe("GET /api/v1/dashboard/report", () => {
+  it("returns the v1 envelope with summary + charts + timeline blocks well-formed in empty state", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/report?range=7d", {
+      headers: { "x-test-owner": "alice", "x-request-id": "req-report-empty" },
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as ReportResponse;
+    expect(body.requestId).toBe("req-report-empty");
+    expect(body.data.range).toBe("7d");
+    expect(body.data.summary.jobs).toEqual({ active: 0, byKind: { dosar_soap: 0, name_soap: 0 } });
+    expect(body.data.charts.series.alerts).toHaveLength(7);
+    expect(body.data.charts.series.runs).toHaveLength(7);
+    expect(body.data.charts.series.aiCost).toHaveLength(7);
+    expect(body.data.timeline.events).toEqual([]);
+    expect(body.data.timeline.truncated).toBe(false);
+    expect(body.data.timeline.limitPerSource).toBeGreaterThan(0);
+    expect(typeof body.data.generatedAt).toBe("string");
+  });
+
+  it("invalid range returns 400 with envelope error code", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/report?range=42d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { code: string }; data: null };
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe("invalid_range");
+  });
+
+  it("range=30d expands grid to 30 days", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/report?range=30d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as ReportResponse;
+    expect(body.data.range).toBe("30d");
+    expect(body.data.charts.series.alerts).toHaveLength(30);
+    expect(body.data.charts.series.runs).toHaveLength(30);
+    expect(body.data.charts.series.aiCost).toHaveLength(30);
+  });
+
+  it("timeline merges alerts + finalized runs + curated audit in DESC order", async () => {
+    const jobId = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "report-timeline" });
+    const runId = seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
+    insertAlert({
+      ownerId: "alice",
+      jobId,
+      runId,
+      kind: "termen_new",
+      title: "Termen nou pentru dosar X",
+      detail: { foo: "bar" },
+      dedupKey: "k-report-1",
+    });
+    recordAudit(null, "auth.denied", {
+      ownerId: "alice",
+      targetKind: "session",
+      outcome: "denied",
+      detail: { reason: "missing_token" },
+    });
+
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/report?range=7d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as ReportResponse;
+    // 1 alert + 1 finalized run + 1 audit = 3 events.
+    expect(body.data.timeline.events).toHaveLength(3);
+    const kinds = body.data.timeline.events.map((e) => e.kind);
+    expect(kinds).toContain("alert");
+    expect(kinds).toContain("run");
+    expect(kinds).toContain("audit");
+    // DESC ordering: each ts is >= the next.
+    for (let i = 1; i < body.data.timeline.events.length; i++) {
+      expect(body.data.timeline.events[i - 1].ts >= body.data.timeline.events[i].ts).toBe(true);
+    }
+  });
+
+  it("owner isolation: events from other owners are excluded from timeline + charts", async () => {
+    const aliceJob = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "iso-alice" });
+    const aliceRun = seedFinalizedRun({ ownerId: "alice", jobId: aliceJob, status: "ok" });
+    insertAlert({
+      ownerId: "alice",
+      jobId: aliceJob,
+      runId: aliceRun,
+      kind: "termen_new",
+      title: "Alice alert",
+      detail: {},
+      dedupKey: "k-iso-alice",
+    });
+
+    const bobJob = seedJob({ ownerId: "bob", kind: "dosar_soap", hashSuffix: "iso-bob" });
+    const bobRun = seedFinalizedRun({ ownerId: "bob", jobId: bobJob, status: "error" });
+    insertAlert({
+      ownerId: "bob",
+      jobId: bobJob,
+      runId: bobRun,
+      kind: "termen_new",
+      title: "Bob alert",
+      detail: {},
+      dedupKey: "k-iso-bob",
+    });
+
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/dashboard/report?range=7d", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const body = (await res.json()) as ReportResponse;
+    const titles = body.data.timeline.events.map((e) => e.title);
+    expect(titles).toContain("Alice alert");
+    expect(titles).not.toContain("Bob alert");
+    // Charts: alice's day = 1 alert + 1 ok run; bob's data must not bleed in.
+    const todayAlerts = body.data.charts.series.alerts[6];
+    expect(todayAlerts.count).toBe(1);
+    const todayRuns = body.data.charts.series.runs[6];
+    expect(todayRuns.ok).toBe(1);
+    expect(todayRuns.error).toBe(0);
+  });
+});

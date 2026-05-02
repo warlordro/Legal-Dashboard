@@ -376,5 +376,7 @@ export {
   type ChartsRunsPoint,
   type ChartsAiPoint,
   type ChartsPayload,
+  type ReportTimelineBlock,
+  type DashboardReportPayload,
 } from "./dashboardApi";
 
