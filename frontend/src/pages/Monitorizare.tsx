@@ -27,6 +27,7 @@ import {
 } from "@/lib/api";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
+import { cn } from "@/lib/utils";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
@@ -215,7 +216,7 @@ export default function Monitorizare({
           </div>
         </div>
         <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           Reincarca
         </Button>
       </div>
@@ -350,9 +351,10 @@ export default function Monitorizare({
                     return (
                     <tr
                       key={job.id}
-                      className={`border-b hover:bg-accent/30 ${
-                        selectedIds.has(job.id) ? "bg-accent/40" : ""
-                      }`}
+                      className={cn(
+                        "border-b hover:bg-accent/30",
+                        selectedIds.has(job.id) && "bg-accent/40",
+                      )}
                     >
                       <td className="px-3 py-2">
                         <input
@@ -446,9 +448,10 @@ export default function Monitorizare({
                           const isStandard = CADENCE_OPTIONS.some((o) => o.sec === job.cadence_sec);
                           return (
                             <select
-                              className={`h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
-                                isStandard ? "" : "border-amber-500 text-amber-700 dark:text-amber-400"
-                              }`}
+                              className={cn(
+                                "h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                                !isStandard && "border-amber-500 text-amber-700 dark:text-amber-400",
+                              )}
                               value={job.cadence_sec}
                               onChange={(e) => handleCadenceChange(job, Number(e.target.value))}
                               title={
@@ -489,13 +492,12 @@ export default function Monitorizare({
                         )}
                         {job.last_status && (
                           <span
-                            className={`ml-1 text-xs rounded-md px-2 py-0.5 ${
-                              job.last_status === "ok"
-                                ? "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                                : job.last_status === "error"
-                                ? "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                                : "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
-                            }`}
+                            className={cn(
+                              "ml-1 text-xs rounded-md px-2 py-0.5",
+                              job.last_status === "ok" && "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                              job.last_status === "error" && "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                              (job.last_status === "partial" || job.last_status === "skipped") && "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
+                            )}
                           >
                             {job.last_status}
                           </span>

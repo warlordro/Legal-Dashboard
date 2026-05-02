@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { cn } from "@/lib/utils";
 import {
   monitoring,
   nameLists,
@@ -134,28 +135,47 @@ export function MonitoringBulkImportCard({
       let dosarAdded = 0;
       let dosarExists = 0;
       let dosarErrors = 0;
-      for (let i = 0; i < bulkDosarRows.length; i++) {
-        const row = bulkDosarRows[i]!;
-        try {
-          const result = await monitoring.createDosarWithResult({
-            numar_dosar: row.numar_dosar,
-            cadence_sec: row.cadence_sec,
-            notes: row.notes,
-            client_request_id: `bulk-dosar-${row.numar_dosar}-${i}`,
-          });
-          if (result.created) dosarAdded++;
+      // Chunk parallelism: 5 in flight at a time. Sequential per-row was the
+      // dominant bottleneck on lists with 50+ dosare (each round-trip ~80ms);
+      // pure Promise.all on 100+ requests risks 429 from the small-mutation
+      // rate limit. Five strikes the balance — 5x faster than sequential
+      // while staying well under the per-IP minute budget.
+      const CHUNK = 5;
+      let processed = 0;
+      for (let start = 0; start < bulkDosarRows.length; start += CHUNK) {
+        const slice = bulkDosarRows.slice(start, start + CHUNK);
+        const results = await Promise.all(
+          slice.map(async (row, idx) => {
+            try {
+              const result = await monitoring.createDosarWithResult({
+                numar_dosar: row.numar_dosar,
+                cadence_sec: row.cadence_sec,
+                notes: row.notes,
+                client_request_id: `bulk-dosar-${row.numar_dosar}-${start + idx}`,
+              });
+              return { ok: true as const, created: result.created };
+            } catch (err) {
+              if (err instanceof MonitoringApiError) {
+                console.warn("[monitoring] bulk dosar row failed", {
+                  row: row.rowNumber,
+                  code: err.code,
+                  message: err.message,
+                });
+              }
+              return { ok: false as const };
+            }
+          }),
+        );
+        for (const r of results) {
+          if (!r.ok) dosarErrors++;
+          else if (r.created) dosarAdded++;
           else dosarExists++;
-        } catch (err) {
-          dosarErrors++;
-          if (err instanceof MonitoringApiError) {
-            console.warn("[monitoring] bulk dosar row failed", {
-              row: row.rowNumber,
-              code: err.code,
-              message: err.message,
-            });
-          }
         }
-        setBulkCommitProgress({ created: dosarAdded, remaining: bulkDosarRows.length - i - 1 + committable.length });
+        processed += slice.length;
+        setBulkCommitProgress({
+          created: dosarAdded,
+          remaining: bulkDosarRows.length - processed + committable.length,
+        });
       }
       if (bulkDosarRows.length > 0) {
         setBulkDosarResult({ added: dosarAdded, exists: dosarExists, errors: dosarErrors });
@@ -335,13 +355,12 @@ export function MonitoringBulkImportCard({
                       <td className="px-3 py-2 font-mono">{row.nameRaw || "(gol)"}</td>
                       <td className="px-3 py-2">
                         <span
-                          className={`rounded-md px-2 py-0.5 text-xs ${
-                            row.validation === "ok"
-                              ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400"
-                              : row.validation === "warn"
-                              ? "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400"
-                              : "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                          }`}
+                          className={cn(
+                            "rounded-md px-2 py-0.5 text-xs",
+                            row.validation === "ok" && "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                            row.validation === "warn" && "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+                            row.validation === "rejected" && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                          )}
                         >
                           {row.validation}
                         </span>
@@ -369,7 +388,7 @@ export function MonitoringBulkImportCard({
             )}
             {bulkDosarResult && (
               <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-400">
-                Dosare bulk: {bulkDosarResult.added} adaugate, {bulkDosarResult.exists} deja existente,
+                Dosare bulk: {bulkDosarResult.added} adaugate, {bulkDosarResult.exists} deja existente,{" "}
                 {bulkDosarResult.errors} erori.
               </div>
             )}

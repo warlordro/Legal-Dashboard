@@ -441,6 +441,15 @@ rnpmRouter.post("/saved/export", limitExport, async (c) => {
   return c.json({ items: getAvizeByIds(numIds) });
 });
 
+// Cursor pagination is intentional here — deliberate deviation from the
+// CLAUDE.md "offset-based on listari principale" guideline. RNPM searches is
+// a personal history log (monotonically growing IDs, "load more" UX, no
+// "page 5 of 12" indicator), where cursor wins on two counts:
+//   1. Inserts at the head don't shift offsets of older rows mid-scroll.
+//   2. No SELECT COUNT(*) per page hit — `total` is meaningless for a stream.
+// The offset rule applies to enumerable listings (admin users, audit,
+// monitoring jobs, alerts inbox) where total + page numbers matter for the
+// UI. Locked by characterization test in routes/rnpm.contract.test.ts.
 rnpmRouter.get("/searches", (c) => {
   const limit = Number(c.req.query("limit") ?? 50);
   const cursorStr = c.req.query("cursor");
