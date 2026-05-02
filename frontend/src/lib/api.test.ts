@@ -93,14 +93,11 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
     expect(result.partial).toBeUndefined();
   });
 
-  it("BUG cunoscut v2.7.0: event:error livreaza mesaj generic, nu parsed.error", async () => {
-    // Inner catch (line 116) inghite orice Error cu mesaj != "Eroare la
-    // incarcarea extinsa." crezand ca e JSON parse error. Doar cand
-    // parsed.error e absent (fallback la "Eroare la incarcarea extinsa.")
-    // mesajul propagat ajunge inca prin outer catch. In ambele cazuri
-    // outer catch rescrie mesajul la "Conexiunea a fost intrerupta..."
-    // daca accumulated == 0. Stage 2a trebuie sa repare aceasta dubla
-    // pierdere de informatie.
+  it("propaga mesajul real din event: error in loc sa-l inlocuiasca cu generic", async () => {
+    // Stage 2a (HIGH-7): SseExplicitError marker class permite outer catch-ului
+    // sa distinga erorile explicite de server de stream-end / abort. Mesajul
+    // server-ului (parsed.error) ajunge as-is la caller in loc de "Conexiunea
+    // a fost intrerupta inainte de finalizare." (vechiul comportament v2.7.0).
     fetchSpy.mockResolvedValue(
       makeSseResponse([
         'event: error\ndata: {"error":"Upstream PortalJust 503"}\n\n',
@@ -108,7 +105,21 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
     );
 
     await expect(api.dosare.loadMore({} as any)).rejects.toThrow(
-      "Conexiunea a fost intrerupta inainte de finalizare.",
+      "Upstream PortalJust 503",
+    );
+  });
+
+  it("propaga fallback generic cand event: error nu contine parsed.error", async () => {
+    // Cand server-ul trimite event: error fara camp .error, marker-ul foloseste
+    // mesajul fallback "Eroare la incarcarea extinsa." (nu "Conexiunea...").
+    fetchSpy.mockResolvedValue(
+      makeSseResponse([
+        'event: error\ndata: {"detail":"missing error field"}\n\n',
+      ]),
+    );
+
+    await expect(api.dosare.loadMore({} as any)).rejects.toThrow(
+      "Eroare la incarcarea extinsa.",
     );
   });
 
@@ -152,12 +163,11 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
     );
   });
 
-  it("ignora data: cu JSON malformed (silent catch documentat pentru Stage 2a)", async () => {
-    // Comportament observat in v2.7.0: data: cu JSON corupt e inghitit silent
-    // (cade in catch, mesajul nu e "Eroare la incarcarea extinsa.", deci skip).
-    // Stage 2a va inlocui acest catch tacut cu logging structurat — testul
-    // va trebui actualizat atunci sa verifice apelul de logger, dar
-    // contractul "nu blocheaza stream-ul" trebuie pastrat.
+  it("logheaza JSON malformed pe linia data: dar nu blocheaza stream-ul (Stage 2a)", async () => {
+    // Stage 2a: silent catch inlocuit cu console.warn + continue. Stream-ul
+    // continua sa proceseze batch-urile valide ulterioare; JSON-ul corupt
+    // nu mai e indistinct de erorile reale (acelea ies prin SseExplicitError).
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     fetchSpy.mockResolvedValue(
       makeSseResponse([
         "event: batch\ndata: {bad json\n",
@@ -168,6 +178,10 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
 
     const result = await api.dosare.loadMore({} as any);
     expect(result.data).toHaveLength(1);
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("[loadMoreSSE]"),
+      expect.any(Error),
+    );
   });
 
   it("invoca onBatch pentru fiecare batch primit", async () => {

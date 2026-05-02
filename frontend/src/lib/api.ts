@@ -39,6 +39,16 @@ interface LoadMoreResult<T> {
   partial?: boolean; // true if stopped before completion
 }
 
+// Marker pentru erorile raportate explicit de server prin `event: error`.
+// Outer catch-ul re-arunca aceste erori ca atare in loc sa le inlocuiasca cu
+// mesajul generic "Conexiunea a fost intrerupta..." (HIGH-7, Stage 2a).
+class SseExplicitError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SseExplicitError";
+  }
+}
+
 async function loadMoreSSE<T>(
   url: string,
   params: Record<string, string | string[] | undefined>,
@@ -97,40 +107,47 @@ async function loadMoreSSE<T>(
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith("data: ")) {
           const data = line.slice(6);
+          let parsed: any;
           try {
-            const parsed = JSON.parse(data);
-            if (currentEvent === "progress" && onProgress) {
-              onProgress(parsed as LoadMoreProgress);
-            } else if (currentEvent === "batch") {
-              // Accumulate new items from this interval
-              if (parsed.data && Array.isArray(parsed.data)) {
-                accumulated.push(...parsed.data);
-                onBatch?.(parsed.data as T[]);
-              }
-            } else if (currentEvent === "done") {
-              doneResult = parsed;
-            } else if (currentEvent === "error") {
-              throw new Error(parsed.error || "Eroare la incarcarea extinsa.");
+            parsed = JSON.parse(data);
+          } catch (parseErr) {
+            // JSON malformed pe linia data: — logam structurat si continuam
+            // (Stage 2a: inainte era silent catch indistinct de erorile reale).
+            console.warn("[loadMoreSSE] linie data: cu JSON malformed, ignorata:", parseErr);
+            currentEvent = "";
+            continue;
+          }
+          if (currentEvent === "progress" && onProgress) {
+            onProgress(parsed as LoadMoreProgress);
+          } else if (currentEvent === "batch") {
+            // Accumulate new items from this interval
+            if (parsed.data && Array.isArray(parsed.data)) {
+              accumulated.push(...parsed.data);
+              onBatch?.(parsed.data as T[]);
             }
-          } catch (e) {
-            if (e instanceof Error && e.message !== "Eroare la incarcarea extinsa.") {
-              // JSON parse error, ignore
-            } else {
-              throw e;
-            }
+          } else if (currentEvent === "done") {
+            doneResult = parsed;
+          } else if (currentEvent === "error") {
+            throw new SseExplicitError(parsed.error || "Eroare la incarcarea extinsa.");
           }
           currentEvent = "";
         }
       }
     }
-  } catch {
-    // On any error (including abort), return what we have so far
+  } catch (e) {
+    if (e instanceof SseExplicitError) {
+      // Eroare raportata explicit de server prin event: error — propagam
+      // mesajul as-is in loc sa-l inlocuim cu generic "Conexiunea intrerupta".
+      throw new Error(e.message);
+    }
+    // On any other error (including abort), return what we have so far
     if (accumulated.length > 0) {
       return { data: accumulated, total: accumulated.length, warnings: [], partial: true };
     }
     if (signal?.aborted) {
       throw new DOMException("Anulat de utilizator", "AbortError");
     }
+    console.warn("[loadMoreSSE] stream intrerupt fara done si fara batch:", e);
     throw new Error("Conexiunea a fost intrerupta inainte de finalizare.");
   }
 
