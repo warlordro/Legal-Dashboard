@@ -1,3 +1,4 @@
+/// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
@@ -37,6 +38,11 @@ export default defineConfig({
     // ES module worker: permite code-splitting (dynamic import xlsx/jspdf in worker).
     // Default-ul Vite e "iife" care nu suporta multi-chunk.
     format: "es",
+  },
+  test: {
+    environment: "node",
+    globals: true,
+    include: ["src/**/*.test.{ts,tsx}"],
   },
   server: {
     port: 5173,
