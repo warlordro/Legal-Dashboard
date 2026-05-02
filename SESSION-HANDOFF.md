@@ -1,18 +1,20 @@
-# Session Handoff - PR-A v2.7.0 livrat (Dashboard redesign sprint, 1/3) / PR-B v2.8.0 urmator
+# Session Handoff - PR-A + PR-9 v2.7.0 livrate si tag-uite / PR-B v2.8.0 urmator
 
 **Data**: 2026-05-02
-**Branch local**: `feat/dashboard-redesign`
+**Branch local**: `main`
 **Remote**: `main` local este sincronizat cu `origin/main` la commit-ul
-`8e0eaa6` (`fix: v2.6.8 - review-driven hardening...`). Branch-ul
-`feat/dashboard-redesign` contine commit-ul de PR-A v2.7.0 (push-ul catre
-`origin/feat/dashboard-redesign` se face in pasul de commit).
-PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0 si patch-urile v2.6.1..v2.6.8 sunt
-deja pe `origin/main`.
-**Tag-uri locale**: `v2.5.0`..`v2.6.8` exista local. Tag-urile `v2.6.5`..
-`v2.6.8` au fost create local la 2026-05-01; push-ul tag-urilor catre GitHub
-ramane nefacut fara confirmare explicita. Tag `v2.7.0` nu este creat inca —
-se creeaza dupa merge in `main` si dupa PR-B+PR-C complete.
-**Versiune curenta**: `v2.7.0`
+`579ce7b` (`fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`).
+Trei commits noi push-uite in v2.7.0 release:
+- `c74a77e` `feat: v2.7.0 - PR-A Dashboard redesign sprint (1/3)` (squashed 4 → 1)
+- `61580a4` `fix: PR-9 audit pack 2026-05-02 - B1-B4 + P0/P1 tests + docs sync`
+- `579ce7b` `fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`
+
+PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0, patch-urile v2.6.1..v2.6.8, PR-A
+v2.7.0 si PR-9 v2.7.0 sunt acum pe `origin/main`.
+
+**Tag-uri**: `v2.5.0`..`v2.6.8` + `v2.7.0` push-uite pe `origin`.
+
+**Versiune curenta**: `v2.7.0` (release dual: PR-A Dashboard + PR-9 Auth pluggable)
 
 ## TL;DR (v2.7.0 — PR-A: Dashboard redesign sprint, 1/3 — KPI strip + Quick Actions)
 
@@ -84,6 +86,82 @@ agregare + 2 componente UI noi peste pagina Dashboard existenta.
 **553/553 verzi** (546 baseline din v2.6.4 + 7 noi PR-A), `npm run build`
 → OK, `biome check` pe fisierele atinse → OK, smoke headless backend cu
 `curl /api/v1/dashboard/summary` → envelope v1 corect.
+
+## TL;DR (v2.7.0 — PR-9: Auth pluggable seam — desktop noop / web JWT)
+
+A doua livrare in v2.7.0 (mergeata pe `main` impreuna cu PR-A in 3 commits:
+`c74a77e` PR-A squashed, `61580a4` PR-9 audit pack, `579ce7b` Tier 1+2 review
+hardening). Codex livreaza seam-ul de autentificare separat de cutover-ul web
+complet (PR-10..PR-12 raman in viitor). Desktop pastreaza identitatea `local`
+1:1, `web` mode devine opt-in tehnic cu JWT validation fail-closed.
+
+**Backend - auth provider interface:**
+
+- `backend/src/auth/authProvider.ts`: `AuthProvider` interface. `DesktopAuthProvider`
+  returneaza `{ ownerId: "local", actorId: "local", user: getUserById("local") }`.
+  `WebJwtAuthProvider` cere Bearer token sau cookie `legal_dashboard_session`,
+  valideaza HS256 cu `jose`, verifica issuer + audience, valideaza userul in
+  DB cu status `active` (401 daca lipseste, 403 daca inactiv, 401 daca token
+  expirat/invalid).
+- `backend/src/auth/jwt.ts`: `verifyAuthToken({ secret, issuer, audience })`.
+  Codes interne (`jwt_expired`, `jwt_invalid_audience`, `jwt_invalid_issuer`,
+  `jwt_invalid_signature`, `jwt_malformed`) sunt logate via `console.warn`;
+  raspunsul public foloseste `unauthorized` ca sa nu leak-uiasca detalii.
+- `backend/src/auth/config.ts`: `getAuthMode()` (default `desktop`).
+  `validateAuthConfig()` arunca daca `JWT_ISSUER` sau `JWT_AUDIENCE` lipsesc
+  in `web` mode. `firstNonEmpty()` helper accepta atat `LEGAL_DASHBOARD_*`
+  cat si nume neprefixate. `isAuthCookieSecureDisabled()` arunca eroare la
+  boot daca `AUTH_COOKIE_SECURE=0` in productie (doar warn in dev).
+
+**Backend - middleware ownerContext + audit auth.denied:**
+
+- `backend/src/middleware/owner.ts`: `ownerContext()` apeleaza provider-ul
+  curent, set-eaza `c.set("ownerId"|"actorId"|"authUser", ...)`. Pe orice
+  respingere de auth (401/403): apeleaza `recordAudit(null, "auth.denied",
+  { ownerId: null, actorId: null, outcome: "denied", targetKind:
+  "http_request", targetId: c.req.path, ip: readRemoteIp(c), userAgent:
+  c.req.header("user-agent") ?? null, detail: { requestId, method, code,
+  status } })` wrapped in try/catch (audit failure nu blocheaza raspunsul).
+- Mesajele auth sunt traduse in romana, raspunsurile folosesc envelope-ul
+  standard `fail()` cu `requestId`.
+
+**Backend - rate-limit pre-auth fix + rute auth + migration 0013:**
+
+- `backend/src/middleware/rate-limit.ts`: `releasePreAuthAttempt(key)` se
+  apeleaza doar pe 2xx (era inversat - decrementa counter pe ne-2xx, ceea
+  ce nega scopul). Mesaj tradus: "Prea multe cereri neautentificate".
+- `backend/src/routes/auth.ts`: `POST /api/v1/auth/login` returneaza 501
+  `not_implemented` cu pointer catre PR-10. `POST /api/v1/auth/logout`
+  sterge cookie-ul. Cookie-ul de sesiune se construieste prin
+  `secureCookie()` care respecta `AUTH_COOKIE_SECURE` cu hard error in
+  productie cand e dezactivat.
+- `backend/src/db/migrations/0013_idx_runs_owner_ended.up.sql`: index nou
+  `idx_runs_owner_ended ON monitoring_runs(owner_id, ended_at DESC) WHERE
+  ended_at IS NOT NULL` pentru queries 24h din dashboard summary.
+
+**Backend + Frontend - dashboard runs.aborted ca bucket separat:**
+
+- `backend/src/routes/dashboard.ts`: schema `RunsBlock` are camp nou
+  `aborted: number`. `readRunsBlock` NU mai foldeaza `aborted` in `error`
+  (era pierdere semantica - run-urile abortate manual nu sunt erori).
+- `backend/src/db/monitoringRunsRepository.ts`: query separat pentru
+  `aborted` count.
+- `frontend/src/lib/api.ts`: `DashboardRunsBlock` interface gained `aborted:
+  number`.
+- `frontend/src/components/dashboard/KpiStrip.tsx`: subline arata
+  `"X ok / X erori / X timeout / X oprite"` cu tooltip explicativ.
+
+**Tests + validari PR-9:**
+
+- 38 teste noi (591/591 backend verzi - era 553 baseline PR-A): `auth/jwt.test.ts`,
+  `auth/config.test.ts`, `middleware/owner.test.ts`, `middleware/rate-limit.test.ts`,
+  `routes/auth.test.ts`, `routes/dashboard.test.ts` (cu cazurile noi pentru
+  aborted bucket).
+- `tsc --noEmit` backend si frontend verzi, `biome check` verde, `npm run
+  build` (backend CJS + frontend Vite) verde, smoke desktop boot OK -
+  `/api/v1/me`, `/api/v1/dashboard/summary`, `/api/v1/alerts/stream` toate 200.
+
+**Tag `v2.7.0` push-uit pe `origin`** dupa validarea integrala.
 
 ## TL;DR (v2.6.8 — Review-driven hardening: a11y + template fragility + doc accuracy)
 

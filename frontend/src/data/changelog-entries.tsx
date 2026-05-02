@@ -52,14 +52,39 @@ export const versions: VersionEntry[] = [
           "Surface noua dashboardApi.summary(signal?) adaugata in frontend/src/lib/api.ts (NU intr-un fisier separat) ca sa nu loveasca hook-ul block-renderer-fetch.mjs care interzice raw fetch in afara lib/api.ts sau lib/rnpmApi.ts. Reuseste unwrapMonitoring si MonitoringApiError. Interfete exportate: DashboardSummary, DashboardJobsBlock, DashboardAlertsBlock, DashboardRunsBlock, DashboardAiBlock.",
       },
       {
-        title: "Tests - 553 pass (546 baseline + 7 noi PR-A)",
+        title: "Tests - 591 pass (553 PR-A + 38 PR-9 noi)",
         content:
-          "7 teste noi in routes/dashboard.test.ts cu pattern Hono test app + middleware x-test-owner + requestIdContext. Acoperire: envelope v1 + empty state, jobs.byKind filtru active vs paused, alerts unseen vs last24h windowing (closed lower bound), runs status bucketing cu aborted foldat in error, still-running excluse cu doua joburi separate (constraint idx_one_running_per_job permite un singur 'running' per job_id la un moment dat), AI 24h aggregation, owner isolation 2 tenants. Backend tsc verde, frontend tsc verde, biome verde pe fisierele atinse, build OK, smoke headless backend cu curl /api/v1/dashboard/summary -> envelope v1 corect.",
+          "PR-A: 7 teste in routes/dashboard.test.ts (envelope v1 + empty state, jobs.byKind filtru active, alerts windowing, runs bucketing, AI 24h aggregation, owner isolation 2 tenants). PR-9: 38 teste in auth/jwt.test.ts, auth/config.test.ts, middleware/owner.test.ts, middleware/rate-limit.test.ts, routes/auth.test.ts (JWT validare iss+aud, missing/invalid token, account_inactive, rate-limit predicate fix, auth.denied audit, cookie secure flag in productie, pre-auth bucket, dashboard aborted bucket separat). Backend tsc verde, frontend tsc verde, biome verde, npm run build verde, smoke desktop boot OK (/api/v1/me + /api/v1/dashboard/summary + /api/v1/alerts/stream toate 200).",
       },
       {
-        title: "Sprint Dashboard redesign (1 din 3)",
+        title: "PR-9 Backend - Auth pluggable seam (desktop noop / web JWT)",
         content:
-          "PR-A v2.7.0 livreaza KPI strip + Quick Actions. Urmatorii pasi: PR-B v2.8.0 (timeline activitate + charts), PR-C v2.9.0 (rapoarte exportabile). Butonul 'Export raport' din QuickActions ramane disabled pana la PR-C. Coordonare cu Codex pe PR-9 Auth pluggable in paralel pe branch separat (feat/pr9-auth-pluggable).",
+          "Codex livreaza in paralel cu PR-A: AuthProvider interface cu DesktopAuthProvider (returneaza identitatea local/local 1:1) si WebJwtAuthProvider (cere Bearer token sau cookie legal_dashboard_session, valideaza HS256 cu jose, verifica issuer + audience, valideaza userul in DB cu status active). Codes interne JWT (jwt_expired, jwt_invalid_audience, jwt_invalid_issuer, jwt_invalid_signature, jwt_malformed) sunt logate via console.warn; raspunsul public foloseste 'unauthorized' ca sa nu leak-uiasca detalii catre atacatori. Mesajele auth sunt traduse in romana, raspunsurile folosesc envelope-ul standard fail() cu requestId.",
+      },
+      {
+        title: "PR-9 Middleware - ownerContext + audit auth.denied",
+        content:
+          "Middleware ownerContext apeleaza provider-ul curent si seteaza ownerId/actorId/authUser pe context. Pe orice respingere de auth (401/403): apeleaza recordAudit(null, 'auth.denied', { ownerId: null, actorId: null, outcome: 'denied', targetKind: 'http_request', targetId: c.req.path, ip, userAgent, detail: { requestId, method, code, status } }) wrapped in try/catch (audit failure nu blocheaza raspunsul). Rate-limit pre-auth predicat fix: releasePreAuthAttempt(key) se apeleaza doar pe 2xx (era inversat - decrementa counter pe ne-2xx, ceea ce nega scopul). Mesaj tradus: 'Prea multe cereri neautentificate'.",
+      },
+      {
+        title: "PR-9 Config - JWT issuer/audience required + cookie secure in productie",
+        content:
+          "validateAuthConfig() arunca daca JWT_ISSUER sau JWT_AUDIENCE lipsesc in web mode (preventie de cross-product token replay). Helper firstNonEmpty() accepta atat LEGAL_DASHBOARD_* cat si nume neprefixate (env compatibility). isAuthCookieSecureDisabled() arunca eroare la boot daca AUTH_COOKIE_SECURE=0 in productie (doar warn in dev). Rute auth: POST /api/v1/auth/login returneaza 501 not_implemented cu pointer catre PR-10 (SSO se livreaza in cutover-ul web real); POST /api/v1/auth/logout sterge cookie-ul de sesiune.",
+      },
+      {
+        title: "PR-9 Migration 0013 - index pentru queries 24h",
+        content:
+          "Migration 0013_idx_runs_owner_ended cu up/down: CREATE INDEX IF NOT EXISTS idx_runs_owner_ended ON monitoring_runs(owner_id, ended_at DESC) WHERE ended_at IS NOT NULL. Index partial pentru queries de stats (24h windows in dashboard summary), evita scanare full table cand ai mii de runs istorice.",
+      },
+      {
+        title: "Dashboard runs.aborted ca bucket separat (post-review fix)",
+        content:
+          "Inainte de Tier 2 hardening, KpiStrip arata 'X ok / X erori / X timeout' cu run-urile abortate manual foldate in 'erori' - era pierdere semantica. Acum schema RunsBlock are camp nou aborted: number, monitoringRunsRepository face query separat, KpiStrip arata 'X ok / X erori / X timeout / X oprite' cu tooltip explicativ ce inseamna fiecare bucket.",
+      },
+      {
+        title: "Sprint Dashboard redesign (1 din 3) + PR-9 mergeat",
+        content:
+          "PR-A v2.7.0 livreaza KPI strip + Quick Actions. PR-9 v2.7.0 livreaza auth seam-ul. Ambele mergeate impreuna in main 2026-05-02 (commits c74a77e PR-A squashed + 61580a4 PR-9 audit pack + 579ce7b Tier 1+2 review hardening), tag v2.7.0 push-uit pe origin. Urmatorii pasi: PR-B v2.8.0 (timeline activitate + charts), PR-C v2.9.0 (rapoarte exportabile). Butonul 'Export raport' din QuickActions ramane disabled pana la PR-C. PR-10..PR-12 raman in viitor pentru cutover-ul web complet (Google SSO + Litestream + Docker deploy).",
       },
     ],
   },

@@ -59,6 +59,99 @@ cardurilor existente, fara sa schimbe nimic din fluxurile actuale.
   (doua tenants concurente). 553/553 backend tests verzi (era 546 baseline
   in v2.6.8, +7 noi in PR-A).
 
+### PR-9 v2.7.0 - Auth pluggable seam (desktop noop / web JWT)
+
+A doua livrare mergeata in v2.7.0 (commit `61580a4` pe main). Codex livreaza
+seam-ul de autentificare separat de cutover-ul web complet (PR-10..PR-12
+raman in viitor). Desktop pastreaza identitatea `local` 1:1, `web` mode
+devine opt-in tehnic cu JWT validation fail-closed.
+
+**Backend - auth provider interface:**
+
+- `backend/src/auth/authProvider.ts`: `AuthProvider` interface cu doua
+  implementari - `DesktopAuthProvider` (returneaza `local`/`local`) si
+  `WebJwtAuthProvider` (cere Bearer token sau cookie `legal_dashboard_session`,
+  valideaza HS256 cu `jose`, verifica issuer + audience, valideaza userul in
+  DB cu status `active`).
+- `backend/src/auth/jwt.ts`: `verifyAuthToken({ secret, issuer, audience })`
+  - codes interne: `jwt_expired`, `jwt_invalid_audience`, `jwt_invalid_issuer`,
+  `jwt_invalid_signature`, `jwt_malformed`. Codes interne sunt logate via
+  `console.warn`; raspunsul public foloseste `unauthorized` ca sa nu leak-uiasca
+  detalii catre atacatori.
+- `backend/src/auth/config.ts`: `getAuthMode()` (default `desktop`),
+  `validateAuthConfig()` care arunca daca `JWT_ISSUER`/`JWT_AUDIENCE` lipsesc
+  in `web` mode, `firstNonEmpty()` helper accepta atat `LEGAL_DASHBOARD_*`
+  cat si nume neprefixate, `isAuthCookieSecureDisabled()` arunca eroare la
+  boot daca `AUTH_COOKIE_SECURE=0` in productie (doar warn in dev).
+
+**Backend - middleware ownerContext:**
+
+- `backend/src/middleware/owner.ts`: `ownerContext()` apeleaza provider-ul
+  curent, set-eaza `c.set("ownerId"|"actorId"|"authUser", ...)`.
+- Pe orice respingere de auth (401/403): apeleaza `recordAudit(null,
+  "auth.denied", { ownerId: null, actorId: null, outcome: "denied",
+  targetKind: "http_request", targetId: c.req.path, ip, userAgent, detail:
+  { requestId, method, code, status } })` wrapped in try/catch (audit failure
+  nu blocheaza raspunsul).
+- Mesajele auth sunt traduse in romana, raspunsurile folosesc envelope-ul
+  standard `fail()` cu `requestId`.
+
+**Backend - rate-limit pre-auth:**
+
+- `backend/src/middleware/rate-limit.ts`: predicat fix - `releasePreAuthAttempt(key)`
+  se apeleaza doar pe 2xx (era inversat - decrementa counter pe ne-2xx, ceea
+  ce nega scopul).
+- Mesaj tradus: "Prea multe cereri neautentificate".
+
+**Backend - rute auth:**
+
+- `backend/src/routes/auth.ts`: `POST /api/v1/auth/login` returneaza 501
+  `not_implemented` cu pointer catre PR-10 (SSO se livreaza in cutover-ul
+  web real). `POST /api/v1/auth/logout` sterge cookie-ul de sesiune.
+- Cookie-ul de sesiune se construieste prin `secureCookie()` care respecta
+  `AUTH_COOKIE_SECURE` cu hard error in productie cand e dezactivat.
+
+**Backend - migration 0013:**
+
+- `backend/src/db/migrations/0013_idx_runs_owner_ended.up.sql`: index nou
+  `idx_runs_owner_ended ON monitoring_runs(owner_id, ended_at DESC) WHERE
+  ended_at IS NOT NULL` pentru queries de stats (24h windows in dashboard
+  summary).
+- Down migration drop-uieste indexul.
+
+**Backend - dashboard runs.aborted ca bucket separat (post-review fix):**
+
+- `backend/src/routes/dashboard.ts`: schema `RunsBlock` are camp nou
+  `aborted: number`. `readRunsBlock` NU mai foldeaza `aborted` in `error`
+  (era pierdere semantica - run-urile abortate manual nu sunt erori).
+- `backend/src/db/monitoringRunsRepository.ts`: query separat pentru
+  `aborted` count.
+
+**Frontend - KPI strip arata aborted separat:**
+
+- `frontend/src/lib/api.ts`: `DashboardRunsBlock` interface gained `aborted:
+  number`.
+- `frontend/src/components/dashboard/KpiStrip.tsx`: subline arata
+  `"X ok / X erori / X timeout / X oprite"` cu tooltip explicativ.
+
+**Tests - 591 pass (553 baseline PR-A + 38 noi):**
+
+- `backend/src/auth/jwt.test.ts`, `backend/src/auth/config.test.ts`,
+  `backend/src/middleware/owner.test.ts`, `backend/src/middleware/rate-limit.test.ts`,
+  `backend/src/routes/auth.test.ts`, `backend/src/routes/dashboard.test.ts` -
+  acopera P0/P1: JWT validare iss+aud, missing/invalid token, account_inactive,
+  rate-limit predicate fix, auth.denied audit, cookie secure flag, pre-auth
+  bucket, dashboard aborted bucket. 591/591 backend verzi.
+- `tsc --noEmit` backend si frontend verzi, `biome check` verde, `npm run
+  build` (backend CJS + frontend Vite) verde, smoke desktop boot OK -
+  `/api/v1/me`, `/api/v1/dashboard/summary`, `/api/v1/alerts/stream` toate 200.
+
+**Co-developat cu PR-A pe main:**
+
+- `c74a77e` PR-A v2.7.0 Dashboard redesign (squashed 4 commits in 1).
+- `61580a4` PR-9 audit pack 2026-05-02 - B1-B4 + P0/P1 tests + docs sync.
+- `579ce7b` PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration).
+
 ---
 
 ## [2.6.8] - 2026-05-01
