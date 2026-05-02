@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { admin, type AuditEvent } from "@/lib/api";
+import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 50;
@@ -27,19 +28,6 @@ function localDateInputToIso(value: string, endOfDay: boolean): string | undefin
     : new Date(y, m - 1, d, 0, 0, 0, 0);
   if (Number.isNaN(dt.getTime())) return undefined;
   return dt.toISOString();
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("ro-RO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  });
 }
 
 function outcomeVariant(outcome: AuditEvent["outcome"]): "success" | "warning" | "destructive" {
@@ -272,7 +260,7 @@ export default function AdminAudit() {
                             </button>
                           </td>
                           <td className="px-3 py-2 align-top text-xs text-muted-foreground whitespace-nowrap">
-                            {formatDateTime(row.ts)}
+                            {formatIsoDateTime(row.ts, { seconds: true })}
                           </td>
                           <td className="px-3 py-2 align-top font-mono text-xs">{row.action}</td>
                           <td className="px-3 py-2 align-top">

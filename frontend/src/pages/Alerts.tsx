@@ -13,6 +13,7 @@ import {
   type MonitoringAlert,
 } from "@/lib/alertsApi";
 import { buildAlertContext } from "@/lib/alert-context";
+import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 import { useFontSize } from "@/hooks/useFontSize";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
@@ -51,19 +52,6 @@ function localDateInputToIso(value: string, endOfDay: boolean): string | undefin
   if (Number.isNaN(d.getTime())) return undefined;
   return d.toISOString();
 }
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("ro-RO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 
 function severityVariant(severity: AlertSeverity): "default" | "warning" | "destructive" {
   if (severity === "critical") return "destructive";
@@ -330,7 +318,7 @@ export default function Alerts({
                         <Badge variant="outline">{alertKindLabels[alert.kind]}</Badge>
                         {unreadRow && <Badge variant="success">Nou</Badge>}
                         {alert.dismissed_at && <Badge variant="secondary">Inchisa</Badge>}
-                        <span className="text-xs text-muted-foreground">{formatDateTime(alert.created_at)}</span>
+                        <span className="text-xs text-muted-foreground">{formatIsoDateTime(alert.created_at)}</span>
                       </div>
                       <h2 className="mt-2 text-base font-semibold text-foreground">{alert.title}</h2>
                       {ctx.numarDosar && (

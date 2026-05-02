@@ -26,6 +26,7 @@ import {
   type MonitoringJob,
 } from "@/lib/api";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
+import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
@@ -34,25 +35,6 @@ const CADENCE_OPTIONS: { label: string; sec: number }[] = [
   { label: "12h", sec: 43200 },
   { label: "24h", sec: 86400 },
 ];
-
-function formatDateTime(iso: string | null): string {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("ro-RO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function formatCadence(sec: number): string {
-  if (sec >= 86400) return `${Math.round(sec / 86400)}z`;
-  if (sec >= 3600) return `${Math.round(sec / 3600)}h`;
-  return `${Math.round(sec / 60)}min`;
-}
 
 export default function Monitorizare({
   onOpenDosar,
@@ -490,10 +472,10 @@ export default function Monitorizare({
                         })()}
                       </td>
                       <td className="px-3 py-2">
-                        {formatDateTime(job.last_run_at)}
+                        {formatIsoDateTime(job.last_run_at)}
                       </td>
                       <td className="px-3 py-2">
-                        {formatDateTime(job.next_run_at)}
+                        {formatIsoDateTime(job.next_run_at)}
                       </td>
                       <td className="px-3 py-2">
                         {job.active ? (

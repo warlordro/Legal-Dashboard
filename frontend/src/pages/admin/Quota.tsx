@@ -9,6 +9,7 @@ import {
   type AdminUser,
   type QuotaOverride,
 } from "@/lib/api";
+import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
 // Daily limits are stored as integer milli-USD ($0.001 = 1 milli) to match the
@@ -25,18 +26,6 @@ function parseUsdInputToMilli(value: string): number | null {
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n < 0) return null;
   return Math.round(n * MILLI);
-}
-
-function formatDateTime(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("ro-RO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 export default function AdminQuota() {
@@ -283,7 +272,7 @@ export default function AdminQuota() {
                         <td className="px-3 py-2 align-top">
                           <span className="font-mono">${milliToUsd(row.dailyLimitUsdMilli)}</span>
                         </td>
-                        <td className="px-3 py-2 align-top text-xs text-muted-foreground">{formatDateTime(row.updatedAt)}</td>
+                        <td className="px-3 py-2 align-top text-xs text-muted-foreground">{formatIsoDateTime(row.updatedAt)}</td>
                         <td className="px-3 py-2 align-top font-mono text-xs">{row.updatedBy ?? "-"}</td>
                         <td className="px-3 py-2 align-top text-right">
                           <div className="flex justify-end gap-1">
