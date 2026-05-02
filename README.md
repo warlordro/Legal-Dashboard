@@ -7,11 +7,15 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.7.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.7.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.7.0** - dual delivery: PR-A Dashboard redesign sprint (1/3) + PR-9 Auth
-pluggable seam (desktop noop / web JWT). 591/591 teste backend (era 546 in
-v2.6.8, +45 net new in PR-A si PR-9).
+**v2.7.1** - patch UX: icon Legal Dashboard apare corect in taskbar Windows si
+in dev mode (`npm run electron:dev`), nu doar pe build-ul NSIS instalat —
+helper nou `ensureDevTaskbarShortcut()` creeaza per-user shortcut Start Menu
+cu AUMID `ro.legaldashboard.app` + `build/icon.ico`. Predecesor **v2.7.0** -
+dual delivery: PR-A Dashboard redesign sprint (1/3) + PR-9 Auth pluggable seam
+(desktop noop / web JWT). 591/591 teste backend (era 546 in v2.6.8, +45 net
+new in PR-A si PR-9).
 
 **PR-A Backend - endpoint nou `/api/v1/dashboard/summary`:** read-only
 aggregation owner-scoped via `getOwnerId(c)`, wrapped in `withMaintenanceRead`

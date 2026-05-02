@@ -4,6 +4,42 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.7.1] - 2026-05-02
+
+### Patch - icon Legal Dashboard pe taskbar in dev mode
+
+Fix mic dar vizibil: pana acum, `npm run electron:dev` afisa icon-ul implicit
+Electron (atom) in taskbar Windows in loc de icon-ul aplicatiei. Build-ul
+NSIS instalat avea icon-ul corect (electron-builder injecteaza AUMID si
+shortcut-uri Start Menu), dar dev mode nu — Windows nu putea rezolva
+`appUserModelId` la un icon fara un shortcut inregistrat.
+
+**Electron - shortcut Start Menu auto-generat in dev mode:**
+
+- `electron/main.js`: helper nou `ensureDevTaskbarShortcut()` apelat in
+  `app.whenReady()`. Skip pe pachetele NSIS (`app.isPackaged`) si pe
+  non-Windows. Creeaza per-user `Legal Dashboard (Dev).lnk` in Start Menu cu
+  `target=process.execPath`, `args="<projectRoot>"`, `icon=build/icon.ico`,
+  `appUserModelId="ro.legaldashboard.app"`. Idempotent: skip daca shortcut-ul
+  exista deja. Erorile sunt try/catch + `console.warn` (nu blocheaza boot-ul).
+
+**De ce e nevoie de shortcut:** Windows leaga AUMID-ul declarat de
+`app.setAppUserModelId(...)` la icon-ul declarat in shortcut-ul Start Menu cu
+acelasi AUMID. Fara shortcut, taskbar-ul foloseste icon-ul executabil-ului
+(electron.exe), nu icon-ul aplicatiei. Pe build-ul NSIS, electron-builder
+genereaza shortcut-ul automat la install — dev mode nu trecea prin acel
+flow, deci shortcut-ul nu exista.
+
+**Operational:** primul `npm run electron:dev` dupa update creeaza
+shortcut-ul si apoi taskbar-ul afiseaza icon-ul corect (poate fi nevoie de
+restart Explorer la prima rulare, daca Windows cache-uieste icon-ul vechi).
+Restart-urile ulterioare reuseaza shortcut-ul existent.
+
+**Tests:** zero teste noi (boot-time helper, fara regresie pe paths
+existente). Build NSIS neafectat.
+
+---
+
 ## [2.7.0] - 2026-05-02
 
 ### PR-A v2.7.0 - KPI strip + Quick Actions pe Dashboard

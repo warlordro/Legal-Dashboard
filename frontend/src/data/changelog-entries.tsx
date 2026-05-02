@@ -18,6 +18,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.7.1",
+    date: "2 Mai 2026",
+    subtitle:
+      "Patch UX: icon Legal Dashboard apare corect in taskbar Windows si in dev mode (npm run electron:dev), nu doar pe build-ul NSIS instalat. Helper nou ensureDevTaskbarShortcut() creeaza per-user 'Legal Dashboard (Dev).lnk' in Start Menu cu AUMID + icon.ico, ca Windows sa rezolve corect icon-ul taskbar-ului.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-slate-500",
+    badgeClass: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400",
+    sections: [
+      {
+        title: "Electron - shortcut Start Menu auto-generat in dev mode",
+        content:
+          "Helper nou ensureDevTaskbarShortcut() apelat in app.whenReady(). Skip pe pachetele NSIS (app.isPackaged) si pe non-Windows. Creeaza per-user 'Legal Dashboard (Dev).lnk' in %APPDATA%\\Microsoft\\Windows\\Start Menu\\Programs cu target=process.execPath, args=projectRoot, icon=build/icon.ico, appUserModelId='ro.legaldashboard.app'. Idempotent: skip daca shortcut-ul exista deja. Erorile sunt try/catch + console.warn (nu blocheaza boot-ul).",
+      },
+      {
+        title: "De ce e nevoie de shortcut",
+        content:
+          "Windows leaga AUMID-ul declarat de app.setAppUserModelId(...) la icon-ul declarat in shortcut-ul Start Menu cu acelasi AUMID. Fara shortcut, taskbar-ul foloseste icon-ul executabil-ului (electron.exe), nu icon-ul aplicatiei. Pe build-ul NSIS, electron-builder genereaza shortcut-ul automat la install — dev mode nu trecea prin acel flow, deci shortcut-ul nu exista.",
+      },
+      {
+        title: "Operational",
+        content:
+          "Primul npm run electron:dev dupa update creeaza shortcut-ul si apoi taskbar-ul afiseaza icon-ul corect (poate fi nevoie de restart Explorer la prima rulare daca Windows cache-uieste icon-ul vechi). Restart-urile ulterioare reuseaza shortcut-ul existent. Build NSIS neafectat, zero teste noi (boot-time helper, fara regresie pe paths existente).",
+      },
+    ],
+  },
+  {
     version: "v2.7.0",
     date: "2 Mai 2026",
     subtitle:

@@ -1,9 +1,12 @@
-# Session Handoff - PR-A + PR-9 v2.7.0 livrate si tag-uite / PR-B v2.8.0 urmator
+# Session Handoff - v2.7.1 dev taskbar icon patch livrat / PR-B v2.8.0 urmator
 
 **Data**: 2026-05-02
 **Branch local**: `main`
 **Remote**: `main` local este sincronizat cu `origin/main` la commit-ul
 `579ce7b` (`fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`).
+Patch v2.7.1 in pregatire pentru commit local (electron taskbar icon fix), apoi
+PR-B v2.8.0.
+
 Trei commits noi push-uite in v2.7.0 release:
 - `c74a77e` `feat: v2.7.0 - PR-A Dashboard redesign sprint (1/3)` (squashed 4 → 1)
 - `61580a4` `fix: PR-9 audit pack 2026-05-02 - B1-B4 + P0/P1 tests + docs sync`
@@ -12,9 +15,33 @@ Trei commits noi push-uite in v2.7.0 release:
 PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0, patch-urile v2.6.1 → v2.6.8, PR-A
 v2.7.0 si PR-9 v2.7.0 sunt acum pe `origin/main`.
 
-**Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`.
+**Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`. `v2.7.1`
+urmeaza dupa commit local.
 
-**Versiune curenta**: `v2.7.0` (release dual: PR-A Dashboard + PR-9 Auth pluggable)
+**Versiune curenta**: `v2.7.1` (patch UX: dev mode taskbar icon Legal Dashboard)
+
+## v2.7.1 — patch UX: dev mode taskbar icon
+
+Pana la v2.7.0, `npm run electron:dev` afisa icon-ul implicit Electron (atom)
+in taskbar Windows in loc de icon-ul aplicatiei. Build-ul NSIS instalat avea
+icon-ul corect (electron-builder injecteaza AUMID si shortcut-uri Start Menu),
+dar dev mode nu — Windows nu putea rezolva `appUserModelId` la un icon fara un
+shortcut inregistrat.
+
+**Electron - shortcut Start Menu auto-generat in dev mode:**
+
+- `electron/main.js`: helper nou `ensureDevTaskbarShortcut()` apelat in
+  `app.whenReady()`. Skip pe pachetele NSIS (`app.isPackaged`) si pe
+  non-Windows. Creeaza per-user `Legal Dashboard (Dev).lnk` in
+  `%APPDATA%\Microsoft\Windows\Start Menu\Programs` cu `target=process.execPath`,
+  `args="<projectRoot>"`, `icon=build/icon.ico`,
+  `appUserModelId="ro.legaldashboard.app"`. Idempotent (skip daca shortcut-ul
+  exista). Erorile try/catch + `console.warn` (nu blocheaza boot-ul).
+
+**Operational:** primul `npm run electron:dev` dupa update creeaza shortcut-ul
+si apoi taskbar-ul afiseaza icon-ul corect (poate fi nevoie de restart Explorer
+la prima rulare daca Windows cache-uieste icon-ul vechi). Build NSIS neafectat,
+zero teste noi.
 
 ## TL;DR (v2.7.0 — PR-A: Dashboard redesign sprint, 1/3 — KPI strip + Quick Actions)
 

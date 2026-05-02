@@ -1,5 +1,6 @@
-const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage, nativeTheme, Notification } = require("electron");
+const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage, nativeTheme, Notification, shell } = require("electron");
 const path = require("path");
+const fs = require("fs");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 
 // Windows: setAppUserModelId must run before any window/notification is shown
@@ -472,7 +473,47 @@ function createWindow() {
   });
 }
 
+// Windows dev-mode taskbar icon fix. In packaged builds electron-builder creates
+// a Start Menu shortcut with the right AUMID + icon, so the OS can resolve our
+// AppUserModelId to the Legal Dashboard icon. In dev (`electron .`), there is
+// no such shortcut, so the taskbar falls back to electron.exe's default atom
+// icon even though setAppUserModelId() runs. Workaround: drop a per-user Start
+// Menu shortcut on first dev launch with the same AUMID + icon — Windows then
+// uses that shortcut's icon for any process that registers the same AUMID.
+// Idempotent: skipped when the shortcut already exists or in packaged builds.
+function ensureDevTaskbarShortcut() {
+  if (process.platform !== "win32") return;
+  if (app.isPackaged) return;
+  try {
+    const startMenu = path.join(
+      app.getPath("appData"),
+      "Microsoft",
+      "Windows",
+      "Start Menu",
+      "Programs",
+    );
+    const shortcutPath = path.join(startMenu, "Legal Dashboard (Dev).lnk");
+    if (fs.existsSync(shortcutPath)) return;
+    fs.mkdirSync(startMenu, { recursive: true });
+    const projectRoot = path.join(__dirname, "..");
+    shell.writeShortcutLink(shortcutPath, "create", {
+      target: process.execPath,
+      args: `"${projectRoot}"`,
+      cwd: projectRoot,
+      icon: path.join(projectRoot, "build", "icon.ico"),
+      iconIndex: 0,
+      description: "Legal Dashboard (development)",
+      appUserModelId: "ro.legaldashboard.app",
+    });
+    console.log(`[main] dev taskbar icon shortcut created at ${shortcutPath}`);
+  } catch (err) {
+    console.warn("[main] could not create dev taskbar shortcut:", err && err.message ? err.message : err);
+  }
+}
+
 app.whenReady().then(async () => {
+  ensureDevTaskbarShortcut();
+
   // SECURITY: Set CSP header for all responses
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
