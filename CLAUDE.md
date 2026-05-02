@@ -39,26 +39,45 @@ Detalii in [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) si [SESSION-HANDOFF.md](
 legal-dashboard/
 â”œâ”€â”€ frontend/          # React 18 + TypeScript + Vite + custom CSS
 â”‚   â””â”€â”€ src/
-â”‚       â”œâ”€â”€ pages/     # Dashboard, Dosare, Termene, RnpmSearch, Changelog, Manual
+â”‚       â”œâ”€â”€ pages/     # Dashboard, Dosare, Termene, RnpmSearch, Changelog, Manual,
+â”‚       â”‚              # Alerts, Monitorizare, plus admin pages (admin/*)
 â”‚       â”œâ”€â”€ components/# DosareTable, TermeneTable, Sidebar, MetricsPanel, CalendarView,
-â”‚       â”‚              # DosarModal, InstitutieSelect, SearchForm, TermeneMetrics, rnpm/*, ui/
+â”‚       â”‚              # DosarModal, InstitutieSelect, SearchForm, TermeneMetrics,
+â”‚       â”‚              # AdminGate, AIUsagePanel, table-pagination, rnpm/*, ui/,
+â”‚       â”‚              # monitoring/* (MonitoringAddForm, MonitoringBulkImportCard),
+â”‚       â”‚              # dashboard/* (KpiStrip, QuickActions)
 â”‚       â”œâ”€â”€ hooks/     # useApiKey (safeStorage IPC), useDialog, useFontSize,
-â”‚       â”‚              # useRnpmHistory, useSearchHistory, useTheme
-â”‚       â”œâ”€â”€ lib/       # api.ts, rnpmApi.ts, export.ts, rnpmExport.ts,
-â”‚       â”‚              # chart-colors.ts, institutii.ts, utils.ts
+â”‚       â”‚              # useRnpmHistory, useSearchHistory, useTheme,
+â”‚       â”‚              # useAlertsStream (SSE lifecycle), useCurrentUser
+â”‚       â”œâ”€â”€ lib/       # api.ts (re-export barrel), rnpmApi.ts, monitoringApi.ts,
+â”‚       â”‚              # alertsApi.ts, aiUsageApi.ts, adminApi.ts, dashboardApi.ts,
+â”‚       â”‚              # export.ts (+ worker), rnpmExport.ts (+ worker),
+â”‚       â”‚              # export-analysis.ts, export-manual.ts, excel-helpers.ts,
+â”‚       â”‚              # pdf-helpers.ts, changelog-pdf.ts, monitoringBulkTemplate.ts,
+â”‚       â”‚              # alert-context.tsx, datetime-formatters.ts,
+â”‚       â”‚              # chart-colors.ts, institutii.ts, utils.ts (cn() helper)
 â”‚       â””â”€â”€ types/     # desktop-api.d.ts, index.ts, rnpm.ts
 â”œâ”€â”€ backend/           # Node.js 22+ + Hono (port 3002)
 â”‚   â”œâ”€â”€ tsconfig.json  # strict: true, noEmit (type-check only)
 â”‚   â””â”€â”€ src/
 â”‚       â”œâ”€â”€ index.ts   # Bootstrap: CSP, CORS, mount routers, prewarm, backup, shutdown
-â”‚       â”œâ”€â”€ routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts, aiUsage.ts, monitoring.ts
+â”‚       â”œâ”€â”€ routes/    # rnpm.ts, dosare.ts (SOAP search), termene.ts, ai.ts, aiUsage.ts,
+â”‚       â”‚              # monitoring.ts, alerts.ts (+ SSE), nameLists.ts, dashboard.ts,
+â”‚       â”‚              # me.ts, admin.ts, auth.ts (PR-9 seam, login â†’ 501 pana la PR-10)
+â”‚       â”œâ”€â”€ auth/      # PR-9 seam: authProvider.ts (Desktop noop / Web JWT HS256),
+â”‚       â”‚              # jwt.ts (jose verify), config.ts (validateAuthConfig)
 â”‚       â”œâ”€â”€ services/  # rnpmSearchService, captchaSolver, rnpmClient,
 â”‚       â”‚              # ai.ts (Claude/OpenAI/Gemini), aiUsage.ts, batch-dosare.ts, monitoring/*
 â”‚       â”œâ”€â”€ middleware/# rate-limit.ts (real-IP), static-frontend.ts (path-traversal guard),
-â”‚       â”‚              # owner.ts (getOwnerId helper, PR-1)
+â”‚       â”‚              # owner.ts (getOwnerId + ownerContext PR-9), originGuard.ts (CSRF),
+â”‚       â”‚              # requireRole.ts (PR-8 admin guard), requestId.ts
 â”‚       â”œâ”€â”€ db/        # schema.ts, avizRepository.ts, searchRepository.ts,
-â”‚       â”‚              # backup.ts (owner_id everywhere), auditRepository.ts (recordAudit, PR-2),
-â”‚       â”‚              # aiUsageRepository.ts, migrations/ (0001..0010, latest ai_usage)
+â”‚       â”‚              # backup.ts (owner_id everywhere), auditRepository.ts (recordAudit),
+â”‚       â”‚              # aiUsageRepository.ts, userRepository.ts, userQuotaRepository.ts,
+â”‚       â”‚              # monitoringJobsRepository.ts, monitoringRunsRepository.ts,
+â”‚       â”‚              # monitoringSnapshotsRepository.ts, monitoringAlertsRepository.ts,
+â”‚       â”‚              # monitoringAlertsEnrichment.ts (Stage 10 split), nameListsRepository.ts,
+â”‚       â”‚              # migrations/ (0001..0013, latest idx_runs_owner_ended)
 â”‚       â”œâ”€â”€ util/      # textNormalize (SQLite rnpm_norm diacritic fold), validation.ts
 â”‚       â”œâ”€â”€ soap.ts    # SOAP client pentru PortalJust
 â”‚       â””â”€â”€ intervals.ts

@@ -54,13 +54,16 @@ agregare + 2 componente UI noi peste pagina Dashboard existenta.
 
 **Frontend - API surface:**
 
-- `frontend/src/lib/api.ts`: adaugat `dashboardApi.summary(signal?)` care
+- `frontend/src/lib/dashboardApi.ts`: `dashboardApi.summary(signal?)` care
   reuseste `unwrapMonitoring`/`MonitoringApiError`. Interfete exportate:
   `DashboardSummary`, `DashboardJobsBlock`, `DashboardAlertsBlock`,
-  `DashboardRunsBlock`, `DashboardAiBlock`. Surface adaugata in `api.ts`
-  (NU intr-un fisier `dashboardApi.ts` separat) ca sa nu loveasca
-  hook-ul `block-renderer-fetch.mjs` care interzice raw fetch in afara
-  `lib/api.ts` sau `lib/rnpmApi.ts`.
+  `DashboardRunsBlock`, `DashboardAiBlock`. **Update post-refactor (Stage 8):**
+  surface-ul a fost extras intr-un fisier dedicat `dashboardApi.ts` (alaturi
+  de `monitoringApi.ts`, `adminApi.ts`, `aiUsageApi.ts`, `alertsApi.ts`).
+  `lib/api.ts` ramane barrel cu re-export, deci `import { dashboardApi } from
+  "@/lib/api"` continua sa functioneze fara churn la apelanti, iar hook-ul
+  `block-renderer-fetch.mjs` ramane satisfacut pentru ca `apiFetch` (singurul
+  raw fetch) sta tot in `api.ts`.
 
 **Tests:**
 
