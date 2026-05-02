@@ -141,6 +141,18 @@ export function getJobById(ownerId: string, id: number): MonitoringJobRow | null
   return row ?? null;
 }
 
+// Cross-owner existence probe. Returnata explicit ca boolean ca sa nu scurga
+// niciodata foreign owner_id catre caller. Folosita de PATCH/DELETE pentru a
+// distinge "row inexistent" (nu se auditeaza) de "row exista la alt owner"
+// (denied access — trebuie auditat pentru reconstruct antifraud in web mode).
+export function jobExistsForAnyOwner(id: number): boolean {
+  return (
+    getDb()
+      .prepare(`SELECT 1 AS one FROM monitoring_jobs WHERE id = ? LIMIT 1`)
+      .get(id) !== undefined
+  );
+}
+
 export interface ListJobsOptions {
   ownerId: string;
   page: number;

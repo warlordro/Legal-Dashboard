@@ -19,6 +19,7 @@ import {
   createJob,
   deleteJob,
   getJobById,
+  jobExistsForAnyOwner,
   listJobs,
   updateJob,
   type MonitoringJobRow,
@@ -199,19 +200,6 @@ monitoringRouter.post("/jobs", limitMonitoringBody, async (c) => {
   const status = result.duplicate ? 200 : 201;
   return c.json(ok(result.job, c), status);
 });
-
-// Cross-owner existence probe. Used by PATCH/DELETE to distinguish "row
-// doesn't exist anywhere" (not interesting to audit) from "row exists but
-// belongs to a different owner" (a denied access attempt — must be audited
-// for compliance / antifraud reconstruction in web mode). Returns only a
-// boolean so this never leaks the foreign owner_id back to the caller.
-function jobExistsForAnyOwner(id: number): boolean {
-  return (
-    getDb()
-      .prepare(`SELECT 1 AS one FROM monitoring_jobs WHERE id = ? LIMIT 1`)
-      .get(id) !== undefined
-  );
-}
 
 // Best-effort JSON parse for audit detail capture; never throws out of an
 // audit path. Falls back to the raw string so the row is still informative
