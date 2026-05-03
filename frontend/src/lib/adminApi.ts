@@ -19,6 +19,28 @@ export interface MeProfile {
   lastLoginAt: string | null;
 }
 
+export type EmailMinSeverity = "info" | "warning" | "critical";
+
+export interface EmailSettings {
+  ownerId: string;
+  enabled: boolean;
+  toAddress: string | null;
+  minSeverity: EmailMinSeverity;
+  createdAt: string;
+  updatedAt: string;
+  mailerConfigured: boolean;
+}
+
+export interface UpsertEmailSettingsInput {
+  enabled: boolean;
+  toAddress: string | null;
+  minSeverity?: EmailMinSeverity;
+}
+
+export type TestEmailResult =
+  | { ok: true }
+  | { ok: false; reason: "mailer_disabled" | "no_recipient" | "send_failed" | string };
+
 export interface AdminUser extends MeProfile {}
 
 export interface PaginatedUsers {
@@ -100,6 +122,34 @@ export const me = {
   get: async (signal?: AbortSignal): Promise<MeProfile> => {
     const res = await apiFetch("/api/v1/me", { signal });
     return unwrapMonitoring<MeProfile>(res);
+  },
+
+  emailSettings: {
+    get: async (signal?: AbortSignal): Promise<EmailSettings> => {
+      const res = await apiFetch("/api/v1/me/email-settings", { signal });
+      return unwrapMonitoring<EmailSettings>(res);
+    },
+
+    put: async (
+      input: UpsertEmailSettingsInput,
+      signal?: AbortSignal,
+    ): Promise<EmailSettings> => {
+      const res = await apiFetch("/api/v1/me/email-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(input),
+        signal,
+      });
+      return unwrapMonitoring<EmailSettings>(res);
+    },
+
+    test: async (signal?: AbortSignal): Promise<TestEmailResult> => {
+      const res = await apiFetch("/api/v1/me/email-settings/test", {
+        method: "POST",
+        signal,
+      });
+      return unwrapMonitoring<TestEmailResult>(res);
+    },
   },
 };
 

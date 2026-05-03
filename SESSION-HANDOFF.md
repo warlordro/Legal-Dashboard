@@ -1,4 +1,4 @@
-# Session Handoff - patch v2.9.2 notificari native Windows/macOS
+# Session Handoff - PR-11 v2.10.0 Email notifiers
 
 **Data**: 2026-05-03
 **Branch local**: `main`
@@ -31,8 +31,65 @@ raman locale pana la push.
 **Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`. `v2.7.1` +
 `v2.8.0` + `v2.9.0` + `v2.9.1` urmeaza dupa commit-uri.
 
-**Versiune curenta**: `v2.9.2` (patch notificari native Windows/macOS:
-status OS, notificare test, panou UI si gating defensiv pentru toast-uri).
+**Versiune curenta**: `v2.10.0` (PR-11 Email notifiers: SMTP optional,
+setari per-owner, rute `/api/v1/me/email-settings`, panou UI si email trimis
+doar pentru alerte nou inserate).
+
+## v2.10.0 - PR-11 Email notifiers
+
+Scop: alertele generate de monitorizare raman in sistemul intern al aplicatiei
+(`/alerte` + badge rosu + SSE + notificari native), iar email-ul devine un
+canal suplimentar optional. Default-ul este OFF; lipsa `SMTP_*` nu blocheaza
+boot-ul.
+
+**Backend**:
+- Migration `0014_email_settings` creeaza `owner_email_settings` cu
+  `enabled`, `to_address`, `min_severity`, `created_at`, `updated_at`.
+  `min_severity` ramane metadata compatibila cu schema alertelor; email-ul nu
+  filtreaza dupa severitate.
+- `ownerEmailSettingsRepository.ts` expune get/upsert owner-scoped, trim pentru
+  adresa si cap 320 caractere.
+- `services/email/mailer.ts` foloseste `nodemailer`, citeste doar `SMTP_*` din
+  env, construieste subject/body pentru alerte si escape-uieste HTML-ul.
+- `services/email/alertEmailDispatcher.ts` verifica settings active si
+  recipient; erorile SMTP sunt prinse si logate.
+- `monitoringAlertsRepository.insertAlert()` declanseaza dispatcher-ul prin
+  `queueMicrotask` doar cand `inserted=true`, separat de fanout-ul SSE.
+- `/api/v1/me/email-settings` GET/PUT + `/test`, cu audit pe update/test.
+- GET precompleteaza `toAddress` cu emailul real al userului autentificat cand
+  nu exista setari salvate; desktop `local@desktop` ramane manual/blank.
+
+**Frontend**:
+- `EmailSettingsPanel` nou in `ApiKeyDialog`, langa `NotificationStatusPanel`.
+- Panoul expune doar activare, adresa email, status SMTP, Save si Test; cand
+  este activ, canalul email trimite toate alertele noi de monitorizare.
+- `adminApi.ts` extinde `me.emailSettings.{get,put,test}` si tipurile sunt
+  re-exportate prin `lib/api.ts`.
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json`,
+  `package-lock.json` bump la `2.10.0`.
+- `backend/.env.example` documenteaza `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+  `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE`.
+- `CHANGELOG.md`, in-app changelog, `README.md`, `CLAUDE.md`,
+  `SESSION-HANDOFF.md`, `EXECUTION-ROADMAP.md`, `SECURITY.md` actualizate.
+
+**Decizii de design**:
+- `nodemailer`, nu SDK provider-specific, ca sa ramana compatibil cu Gmail
+  SMTP relay, Resend SMTP sau alt provider SMTP.
+- `owner_email_settings`, nu global config, ca web mode sa poata trimite catre
+  destinatarul owner-ului fara query param sau shared mutable state.
+- `queueMicrotask`, nu `await` in `insertAlert`, ca SMTP latency/failure sa nu
+  tina lock-uri SQLite si sa nu sparga inbox-ul/SSE-ul.
+
+**Validari partiale rulate in timpul implementarii**:
+- `npm test --workspace=backend -- ownerEmailSettingsRepository.test.ts mailer.test.ts alertEmailDispatcher.test.ts me.test.ts --pool threads` - 34/34 passed.
+- `npm test --workspace=frontend -- EmailSettingsPanel.test.ts` - 5/5 passed
+  dupa rerun escalat (prima incercare a lovit `spawn EPERM` in Vite config).
+
+**Ramas pentru finalul sesiunii**:
+- full backend/frontend tests, type-check, build, `npm run rebuild:electron`,
+  smoke Electron desktop.
 
 ## v2.9.2 - notificari native Windows/macOS
 

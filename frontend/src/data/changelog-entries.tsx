@@ -1,4 +1,4 @@
-import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity, Bell, Users as UsersIcon } from "lucide-react";
+import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity, Bell, Mail, Users as UsersIcon } from "lucide-react";
 
 export interface ChangeSection {
   title: string;
@@ -17,6 +17,52 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.10.0",
+    date: "3 Mai 2026",
+    subtitle:
+      "PR-11 Email notifiers: alertele de monitorizare pot fi trimise si prin SMTP, pe langa inbox-ul /alerte, badge-ul rosu, SSE si notificarile native. Canalul email este optional, default OFF si izolat de insert-ul alertei.",
+    icon: <Mail className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Backend - setari email owner-scoped",
+        content:
+          "Migration 0014_email_settings adauga tabela owner_email_settings cu enabled, to_address si min_severity. min_severity ramane metadata compatibila cu schema alertelor, dar email-ul nu filtreaza dupa severitate. Repository-ul nou ownerEmailSettingsRepository pastreaza izolarea pe owner, normalizeaza adresa si lasa default-ul OFF.",
+      },
+      {
+        title: "Backend - mailer SMTP provider-agnostic",
+        content:
+          "services/email/mailer.ts foloseste nodemailer si citeste doar SMTP_* din env. Daca SMTP lipseste, aplicatia porneste normal si mailer-ul ramane disabled. HTML-ul emailului escape-uieste payload-ul alertei, iar text body ramane fallback plain.",
+      },
+      {
+        title: "Backend - hook izolat pe alerta noua",
+        content:
+          "insertAlert trimite email doar cand randul este nou, prin queueMicrotask separat de SSE. Dispatcher-ul verifica enabled si destinatarul; orice eroare SMTP este logata si nu sparge insert-ul, inbox-ul sau broadcast-ul live.",
+      },
+      {
+        title: "Frontend - panou Notificari email",
+        content:
+          "Dialogul de configurare include acum EmailSettingsPanel: checkbox activare, adresa email, status SMTP, buton Salveaza si buton Trimite test. Cand este activ, canalul email trimite toate alertele noi de monitorizare. Testul este disponibil doar cand SMTP este configurat si exista destinatar salvat.",
+      },
+      {
+        title: "Frontend - polish Monitorizare (coloana Detalii + modal instante)",
+        content:
+          "Coloana Tip a fost inlocuita cu coloana Detalii care afiseaza un buton circular Info doar pentru joburile name_soap cu scope restrans la o lista de instante. Click pe pictograma deschide un modal cu lista instantelor monitorizate (label uman din catalog, iconita Building2 per item, inchidere prin click in afara, ESC sau X). Numele lung pentru name_soap face acum break-words si se aliniaza cu butonul Dosare la dreapta, deci layout-ul nu se mai rupe nici cand sidebar-ul este collapsed. Exportul Monitorizare (Excel + PDF) suffix-eaza tinta name_soap cu lista instantelor sau cu Toate instantele cand scope-ul este universal.",
+      },
+      {
+        title: "Electron - taskbar Windows: AUMID dev separat de packaged",
+        content:
+          "Dev si packaged folosesc acum AUMID-uri distincte (ro.legaldashboard.dev vs ro.legaldashboard.app), ca instalatorul NSIS si sesiunile electron:dev sa nu mai imparta scurtatura sau icon-ul. Shortcut-ul de dev este rescris cand exista deja, iar mainWindow.setIcon este apelat explicit dupa creare ca Windows sa lege fereastra de icon-ul corect. Helper nou launch-electron-dev.cjs cloneaza electron.exe in Legal Dashboard Dev.exe si patch-uieste metadata cu rcedit (icon + ProductName + FileDescription) inainte de launch.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Adaugate 34 teste backend pentru owner settings, mailer, dispatcher si rutele /me/email-settings, plus 5 teste frontend pentru helperii panoului email.",
+      },
+    ],
+  },
   {
     version: "v2.9.2",
     date: "3 Mai 2026",

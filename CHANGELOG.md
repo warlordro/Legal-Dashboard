@@ -4,6 +4,105 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.0] - 2026-05-03
+
+### PR-11 Email notifiers - SMTP optional pentru alertele de monitorizare
+
+Adauga un canal email peste fluxul existent de alerte. Inbox-ul `/alerte`,
+badge-ul rosu, SSE-ul si notificarile native Windows/macOS raman sursa de
+adevar; email-ul este strict aditiv, opt-in si izolat de hot path-ul de insert.
+
+### Backend
+
+- Migration noua `0014_email_settings` cu tabela `owner_email_settings`
+  owner-scoped: `enabled`, `to_address`, `min_severity`, `created_at`,
+  `updated_at`. `min_severity` ramane metadata compatibila cu schema alertelor,
+  dar email-ul nu filtreaza dupa severitate. Default-ul este OFF.
+- Repository nou `ownerEmailSettingsRepository.ts` cu `getEmailSettings`,
+  `upsertEmailSettings`, trim/cap 320 pentru `to_address` si conversie DB
+  snake_case -> domain camelCase.
+- Service nou `services/email/mailer.ts` pe `nodemailer`: citeste doar
+  `SMTP_*` din env, nu blocheaza boot-ul cand lipsesc, construieste subject,
+  HTML body escaped si text body pentru alerte, plus `sendTestEmail`.
+- Dispatcher nou `services/email/alertEmailDispatcher.ts` care verifica
+  setarile owner-ului, `enabled` si destinatarul; orice eroare de send este
+  logata si izolata.
+- `monitoringAlertsRepository.insertAlert()` declanseaza email doar pentru
+  inserturi reale (`inserted=true`), prin `queueMicrotask`, separat de SSE.
+- Rute noi in `/api/v1/me`: `GET /email-settings`,
+  `PUT /email-settings`, `POST /email-settings/test`, cu audit pe write/test.
+- Cand nu exista setari salvate, `GET /email-settings` precompleteaza adresa
+  userului autentificat daca este un email real; desktop-ul `local@desktop`
+  ramane blank. Trimiterea ramane opt-in.
+
+### Frontend
+
+- Panou nou `EmailSettingsPanel` in dialogul de configurare chei API, langa
+  statusul notificarilor native: enable/disable, adresa email, status SMTP,
+  save si test. Cand este activ, canalul email trimite toate alertele noi de
+  monitorizare.
+- `adminApi.ts` extinde suprafata `me.emailSettings` cu `get`, `put`, `test`;
+  tipurile sunt re-exportate prin barrel-ul `lib/api.ts`.
+
+### Docs
+
+- `backend/.env.example` documenteaza `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`,
+  `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE`.
+- README, CLAUDE, SESSION-HANDOFF, EXECUTION-ROADMAP si in-app changelog
+  actualizate la `v2.10.0`.
+
+**Tests**: 34 teste backend noi pentru repository, mailer, dispatcher si rute
+`/me/email-settings`; 5 teste frontend noi pentru helperii panoului email.
+
+### Polish Monitorizare - coloana Detalii + modal instante
+
+Sub-feedback empiric din pagina Monitorizare (joburi `name_soap` cu scope
+restrans la o lista de instante): textul "Toate instantele" inflama tabelul
+fara sa raspunda la intrebarea reala "care instante?", iar layout-ul lui
+`name_soap` se rupea cand numele subiectului depasea coloana fixa.
+
+- Coloana `Tip` (Dosar / Nume / Aviz RNPM) inlocuita cu coloana noua
+  `Detalii` care afiseaza un buton circular cu pictograma `Info` (galben /
+  amber) doar pentru `name_soap` cu scope restrans. Click pe pictograma
+  deschide un modal `role="dialog"` `aria-modal` cu lista instantelor
+  monitorizate (label uman din catalogul `INSTITUTII`) - `Building2` per item,
+  inchidere prin click in afara, ESC, sau X. `text-[15px]` titlu,
+  `text-[13px]` lista pentru densitate suficienta cand scope-ul are 10+
+  instante. Tip-ul jobului ramane derivabil din formatul tintei (numar dosar
+  vs nume) si din indicii ramasi (link extern PortalJust pe dosare, label
+  `Eye Dosare` pe nume).
+- Numele lung pentru `name_soap` face acum `break-words` cu
+  `min-w-[180px] flex-1`, iar butonul Dosare are `shrink-0`, deci ramane
+  ancorat la dreapta cu spacing `justify-between` cand sidebar-ul este
+  collapsed (mai mult spatiu pentru numele/firma) si cu wrap natural in
+  randul existent cand este expandat.
+- Helperii partajati: `getInstitutieLabel` extras in `lib/institutii.ts`,
+  `getNameSoapInstitutie` in `lib/monitoringApi.ts`. Folositi acum si la
+  exportul Monitorizare (Excel + PDF) care suffix-eaza tinta `name_soap` cu
+  `[Curtea de Apel ALBA IULIA, ...]` sau `[Toate instantele]`, asa incat
+  raportul exportat sa nu mai fie ambiguu fata de UI-ul live.
+
+### Polish taskbar Windows - icon dev separat
+
+Continuare patch v2.7.1: AUMID-urile pentru dev (`ro.legaldashboard.dev`) si
+packaged (`ro.legaldashboard.app`) sunt separate, ca instalatorul NSIS sa nu
+mai imparta scurtatura cu sesiunile `electron:dev` si Windows sa nu mai
+amestece icon-urile in taskbar. `ensureDevTaskbarShortcut()` rescrie shortcut-ul
+existent in loc sa il sara, asa incat o schimbare de icon sau project root sa
+fie aplicata fara reseed manual. `mainWindow.setIcon()` apelat explicit dupa
+`new BrowserWindow(...)` in dev, ca Windows sa lege fereastra de icon-ul corect
+chiar si cand `setAppUserModelId()` a fost apelat dar AUMID-ul nu este inca
+inregistrat.
+
+Helper nou `scripts/launch-electron-dev.cjs` (apelat din `npm run electron:dev`)
+clone-uieste `electron.exe` in `Legal Dashboard Dev.exe` si patch-uieste
+metadata cu `rcedit.exe` (icon, ProductName, FileDescription, InternalName,
+OriginalFilename), apoi launch-eaza copia. Pe Windows fara `rcedit.exe` (lipsa
+`electron-winstaller`), launcher-ul cade gracefully la binarul Electron native
+si avertizeaza in stdout.
+
+---
+
 ## [2.9.2] - 2026-05-03
 
 ### Patch notificari native - status Windows/macOS + notificare test

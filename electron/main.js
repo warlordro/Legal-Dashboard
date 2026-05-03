@@ -2,6 +2,7 @@ const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage,
 const path = require("path");
 const fs = require("fs");
 const pkg = require(path.join(__dirname, "..", "package.json"));
+const APP_USER_MODEL_ID = app.isPackaged ? "ro.legaldashboard.app" : "ro.legaldashboard.dev";
 
 // Windows: setAppUserModelId must run before any window/notification is shown
 // so the OS associates this process with the correct app identity. Without it,
@@ -10,7 +11,7 @@ const pkg = require(path.join(__dirname, "..", "package.json"));
 // electron-builder config (build.appId in package.json) for the packaged
 // install to inherit the same shortcut grouping.
 if (process.platform === "win32") {
-  app.setAppUserModelId("ro.legaldashboard.app");
+  app.setAppUserModelId(APP_USER_MODEL_ID);
 }
 
 // SECURITY: single-instance lock — prevents concurrent SQLite writers from corrupting the DB
@@ -176,6 +177,7 @@ const HEALTH_POLL_INTERVAL_MS = 200;
 const HEALTH_POLL_INITIAL_DELAY_MS = 300;
 const BACKEND_PORT = Number(process.env.LEGAL_DASHBOARD_PORT) || 3002;
 process.env.LEGAL_DASHBOARD_PORT = String(BACKEND_PORT);
+const APP_ICON_PATH = path.join(__dirname, "..", "build", process.platform === "darwin" ? "icon-1024.png" : "icon.ico");
 
 // Dynamic window sizing based on monitor work area (no zoom — OS DPI scaling handles that)
 function getWindowSize() {
@@ -508,7 +510,7 @@ function createWindow() {
     minWidth: 900,
     minHeight: 600,
     title: "Legal Dashboard",
-    icon: path.join(__dirname, "..", "build", process.platform === "darwin" ? "icon-1024.png" : "icon.ico"),
+    icon: APP_ICON_PATH,
     // Background matches Tailwind `bg-background` in dark mode (hsl(222 47% 7%) ~ #090E1A)
     // — removes the white flash before the renderer is ready.
     backgroundColor: "#090E1A",
@@ -532,6 +534,15 @@ function createWindow() {
       devTools: IS_DEV,
     },
   });
+  // Windows can keep showing electron.exe's atom in dev launches unless the
+  // native window icon is set explicitly after BrowserWindow creation too.
+  if (process.platform === "win32") {
+    try {
+      mainWindow.setIcon(APP_ICON_PATH);
+    } catch (err) {
+      console.warn("[main] could not set taskbar icon:", err && err.message ? err.message : err);
+    }
+  }
   mainWindow.setMenuBarVisibility(false);
 
   mainWindow.loadURL(`http://localhost:${BACKEND_PORT}`);
@@ -628,7 +639,9 @@ function createWindow() {
 // icon even though setAppUserModelId() runs. Workaround: drop a per-user Start
 // Menu shortcut on first dev launch with the same AUMID + icon — Windows then
 // uses that shortcut's icon for any process that registers the same AUMID.
-// Idempotent: skipped when the shortcut already exists or in packaged builds.
+// Idempotent: rewritten when the existing shortcut points at a stale icon or
+// project path, because Windows may otherwise keep resolving the AUMID to an
+// old Electron shortcut.
 function ensureDevTaskbarShortcut() {
   if (process.platform !== "win32") return;
   if (app.isPackaged) return;
@@ -641,19 +654,20 @@ function ensureDevTaskbarShortcut() {
       "Programs",
     );
     const shortcutPath = path.join(startMenu, "Legal Dashboard (Dev).lnk");
-    if (fs.existsSync(shortcutPath)) return;
     fs.mkdirSync(startMenu, { recursive: true });
     const projectRoot = path.join(__dirname, "..");
-    shell.writeShortcutLink(shortcutPath, "create", {
+    const shortcutDetails = {
       target: process.execPath,
       args: `"${projectRoot}"`,
       cwd: projectRoot,
-      icon: path.join(projectRoot, "build", "icon.ico"),
+      icon: APP_ICON_PATH,
       iconIndex: 0,
       description: "Legal Dashboard (development)",
-      appUserModelId: "ro.legaldashboard.app",
-    });
-    console.log(`[main] dev taskbar icon shortcut created at ${shortcutPath}`);
+      appUserModelId: APP_USER_MODEL_ID,
+    };
+    const operation = fs.existsSync(shortcutPath) ? "replace" : "create";
+    shell.writeShortcutLink(shortcutPath, operation, shortcutDetails);
+    console.log(`[main] dev taskbar icon shortcut ${operation}d at ${shortcutPath}`);
   } catch (err) {
     console.warn("[main] could not create dev taskbar shortcut:", err && err.message ? err.message : err);
   }

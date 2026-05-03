@@ -1,6 +1,6 @@
 {
   "name": "legal-dashboard",
-  "version": "2.9.2",
+  "version": "2.10.0",
   "private": true,
   "main": "electron/main.js",
   "workspaces": [
@@ -15,7 +15,7 @@
     "check:worktree": "node scripts/check-worktree.mjs",
     "prebuild": "node scripts/check-worktree.mjs",
     "build": "node --experimental-strip-types scripts/build.js",
-    "electron:dev": "electron .",
+    "electron:dev": "node scripts/launch-electron-dev.cjs",
     "clean:release": "node -e \"require('fs').rmSync('release', {recursive:true, force:true})\"",
     "predist": "npm run clean:release",
     "predist:mac": "npm run clean:release",

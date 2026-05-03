@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Key, X } from "lucide-react";
 import { AIUsagePanel } from "@/components/AIUsagePanel";
+import { EmailSettingsPanel } from "@/components/EmailSettingsPanel";
 import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
@@ -93,6 +94,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
 
         <AIUsagePanel />
         <NotificationStatusPanel />
+        <EmailSettingsPanel />
 
         {/* AI providers — side-by-side */}
         <div className="mb-3 grid grid-cols-3 gap-3">

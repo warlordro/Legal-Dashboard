@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0 → PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1 → v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5 → v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01) + **PR-A v2.7.0 Dashboard redesign sprint, 1/3 — KPI strip + QuickActions** + **PR-9 v2.7.0 Auth pluggable seam (desktop noop / web JWT)** + PR-B v2.8.0 + PR-C v2.9.0 + patch UX v2.9.1 + **patch v2.9.2 notificari native Windows/macOS**. PR-10 → PR-12 raman in viitor pentru cutover-ul web complet (Google SSO + Litestream + Docker deploy).
-> **Versiune document**: 1.14 (2026-05-03)
+> **Status**: PR-0 → PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1 → v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5 → v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01) + **PR-A v2.7.0 Dashboard redesign sprint, 1/3 — KPI strip + QuickActions** + **PR-9 v2.7.0 Auth pluggable seam (desktop noop / web JWT)** + PR-B v2.8.0 + PR-C v2.9.0 + patch UX v2.9.1 + **patch v2.9.2 notificari native Windows/macOS** + **PR-11 v2.10.0 Email notifiers**. PR-10 si PR-12 sunt eliminate; web cutover ramane reevaluabil separat.
+> **Versiune document**: 1.15 (2026-05-03)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
@@ -40,6 +40,7 @@ Acest document e **roadmap-ul de executie** â€” saptamanal, cu checkboxes s
 | 8 | Portal Just Integrat referinta | Sister project â€” port conceptual, NU 1:1 (port snapshot-by-keys, 4h cadence, email format). | 2026-04-27 |
 | 9 | HARDENING reconcile | Optiunea C â€” plan superseaza schema, HARDENING marcat OBSOLETE. Features pastrate in `alert_config_json`. | 2026-04-27 |
 | 10 | Captcha provider keys | Desktop ramane cu UI + Electron `safeStorage`; web/server mode muta cheile 2Captcha/CapSolver in `.env` server-side (NU BYOK, NU client/browser). | 2026-04-30 |
+| 11 | **PR-10 Litestream/GCS — ELIMINAT** | Decizia #7 (GCS backup) si PR-10 sunt scoase din scope. Motivul: solo dev fara firma, cost-benefit negativ. Ramane backup-ul zilnic local din v2.3.0. La cutover web (daca se intampla), reevaluam cu Cloudflare R2 sau Backblaze B2 ca alternative S3-compatibile. PR-12 GDPR delete tot eliminat (nu suntem firma de avocatura, nu prelucram date pe seama unor clienti). Ramase active pentru web cutover: **doar SSO (PR-9 livrat) + Email notifiers (PR-11)**. | 2026-05-03 |
 
 ---
 
@@ -308,9 +309,14 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 
 ---
 
-### Saptamana 12 â€” Backup automat (PR-10)
+### Saptamana 12 â€” Backup automat (PR-10) — ❌ ELIMINAT 2026-05-03
 
-#### PR-10 â€” Litestream backup automat (GCS)
+> **STATUS: SCOS DIN SCOPE.** Vezi decizia #11 in decision log. Backup-ul zilnic
+> local din v2.3.0 ramane singura strategie. Continutul de mai jos e pastrat
+> doar ca referinta istorica daca cineva reintroduce stage-ul cu alt provider
+> (Cloudflare R2 / Backblaze B2 in loc de GCS).
+
+#### PR-10 â€” Litestream backup automat (GCS) — ❌ ELIMINAT
 - **Scop**: in fiecare secunda, schimbarile DB sunt replicate la Google Cloud Storage. Daca serverul moare, restore in <5 min cu pierdere maxima 10s.
 - **User vede**: nimic (background).
 - **Tasks**:
@@ -335,18 +341,24 @@ Fiecare PR are: scop in 1 fraza, rezultat utilizator (ce se schimba pentru user)
 #### PR-11 â€” Email notifiers (Google SMTP/relay)
 - **Scop**: user primeste alertele si pe email-ul Workspace.
 - **Tasks**:
-  - [ ] SMTP config Google Workspace (smtp-relay.gmail.com, SPF/DKIM in DNS).
-  - [ ] Backend `mailer.ts` cu nodemailer (port direct din PJI `index.ts:80-99`).
-  - [ ] Template HTML email (port din PJI `index.ts:215-231`) â€” subject `[Legal Dashboard] N alerte`, body cu lista + link deep-link la app.
-  - [ ] Cron jitter: trimite digest 1Ã—/zi cu toate alerte non-critical, immediate doar pentru `severity=critical`.
-  - [ ] Per-user setting `email_alerts_enabled: bool` + `digest_frequency: immediate|daily|off`.
+  - [x] SMTP config documentat in `.env.example`; operatorul completeaza `SMTP_*` si DNS/SPF/DKIM ramane operational, in afara codului.
+  - [x] Backend `mailer.ts` cu nodemailer, provider-agnostic si disabled cand `SMTP_*` lipsesc.
+  - [x] Template HTML email escaped + text fallback; subject `[Legal Dashboard] <severitate>: <kind>`, body cu detail JSON si deep-link `legal-dashboard://alerts/:id`.
+  - [x] PR-11 executat ca immediate per alert, conform brief-ului dedicat; digest zilnic a ramas non-scope pentru PR viitor optional.
+  - [x] Per-user setting in tabela `owner_email_settings`: `enabled`, `to_address`, `min_severity` compatibil cu schema alertelor; UI-ul nu expune prag de severitate, iar email-ul trimite toate alertele noi de monitorizare cand este activ.
 - **DoD**:
-  - [ ] Alert critical â†’ email in <30s; alert info â†’ in digest seara.
-  - [ ] **`.env.example` updated** cu `SMTP_HOST=smtp-relay.gmail.com`, `SMTP_PORT=587`, `SMTP_USER=...`, `SMTP_PASS=...` (App Password Google), `SMTP_FROM=alerts@firma.ro`, `CONTACT_EMAIL=admin@firma.ro` (CP-2 conform).
-- **Bump**: 3.2.0 minor.
+  - [x] Alert nou inserat (`inserted=true`) â†’ email dispatch pe `queueMicrotask`, fara sa blocheze insert/SSE/native notifications.
+  - [x] **`.env.example` updated** cu `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`, `SMTP_SECURE`.
+- **Bump**: 2.10.0 minor.
 - **Risk**: ðŸŸ¡ MEDIUM. Atentie: SPF/DKIM gresit â†’ email-uri in spam. Test cu mai multi recipients.
 
-#### PR-12 â€” Hardening final
+#### PR-12 â€” Hardening final — ❌ ELIMINAT 2026-05-03
+> **STATUS: SCOS DIN SCOPE.** Vezi decizia #11. GDPR delete nu e necesar pentru
+> uz personal (nu suntem firma de avocatura, doar verificam dosare publice de pe
+> portaljust.ro). Hash-chain audit pe single-user e compliance theatre. Cron purge
+> `monitoring_runs > 90d` deja livrat in v2.5.1. Continutul de mai jos e referinta
+> istorica.
+
 - **Scop**: hash-chain audit log (compliance), cron retention, GDPR delete simplu.
 - **Tasks**:
   - [ ] Hash-chain pe `audit_log`: fiecare row contine `prev_hash`. La verificare, recomputi lant si confirmi integritate.
@@ -442,3 +454,4 @@ Vezi PLAN-monitoring-webmode.md Â§0 pentru rationale complet.
 - **v1.10** (2026-05-01): patch UX `v2.6.6` (frontend-only) Monitorizare — name_soap parity + swap coloane: butonul `Dosare` adaugat pe randurile `name_soap` (target `font-bold` + icon `Eye`, identic vizual cu randurile `dosar_soap`); click → prop nou `onOpenName(target)` propagat din `App.tsx` ca `handleHistoryClick("dosare", { numeParte: nume })`, reuseste flow-ul existent `pendingSearch` (SearchParams accepta deja optional `numeParte`); coloana TIP afiseaza "Nume" pentru `name_soap` (era "Subiect"), consecvent cu formularul de adaugare si cu coloana `nume` din template-ul XLSX (v2.6.5); ordinea coloanelor in tabel devine "Ultima rulare → Urmatoarea verif." (era invers) pentru lectura naturala fapte→predictie. 546/546 teste backend (neschimbate fata de v2.6.5 — modificari strict frontend label + render path).
 - **v1.11** (2026-05-01): patch `v2.6.7` (frontend-only) export Monitorizare Excel + PDF cu paritate Dosare/Termene — butoane `Excel` + `PDF` adaugate in CardHeader "Joburi active" (vizibile cand `jobs.length > 0`), state partajat `exporting: "xlsx" | "pdf" | null` + `Loader2` spin pe butonul activ, `getExportJobs()` returneaza selectia (suffix `(N)`) sau toate joburile vizibile (pattern identic cu `DosareTable`); builderii noi `buildMonitoringXlsx(jobs)` + `buildMonitoringPdf(jobs)` in `frontend/src/lib/export.ts` reuseaza paleta de stiluri si helperii existenti — XLSX cu titlu `PORTALJUST DASHBOARD — MONITORIZARE` BLUE_DARK merged A:H, header BLUE_MAIN, randuri alternate ROW_ALT/WHITE font 10, 8 coloane (#, Tinta, Tip, Cadenta, Ultima rulare, Urmatoarea verif., Status, Note), `sanitizeFormulaCells` pe formula-injection guard; PDF landscape A4 helvetica cu header `[37,99,235]`, alternate row `[245,247,250]`, `stripDiacritics(...)` pe text, footer "Pagina N"; `ExportJob` discriminated union extins cu `monitoringXlsx` + `monitoringPdf`, dispatch in `frontend/src/lib/export.worker.ts` (build off main thread cu transferable buffer); filename pattern `monitorizare_<sanitized_target>.xlsx` (single) sau `monitorizare_<dataRO>.xlsx` (multiple). 546/546 teste backend (neschimbate fata de v2.6.4..v2.6.6 — patch frontend additive).
 - **v1.14** (2026-05-03): patch v2.9.2 inregistrat - notificari native Windows/macOS cu status IPC, notificare test si gating defensiv peste alertele de monitorizare.
+- **v1.15** (2026-05-03): PR-11 v2.10.0 inregistrat - email notifiers prin SMTP/nodemailer, setari per-owner, panou UI si scope clar fara digest/retry/PR-10/PR-12.

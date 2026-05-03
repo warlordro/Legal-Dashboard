@@ -328,6 +328,7 @@ export {
   monitoring,
   nameLists,
   formatMonitoringTarget,
+  getNameSoapInstitutie,
   type MonitoringJob,
   type MonitoringJobKind,
   type MonitoringJobStatus,
@@ -350,6 +351,10 @@ export {
   type UserRole,
   type UserStatus,
   type MeProfile,
+  type EmailMinSeverity,
+  type EmailSettings,
+  type UpsertEmailSettingsInput,
+  type TestEmailResult,
   type AdminUser,
   type PaginatedUsers,
   type AuditEvent,
@@ -379,4 +384,3 @@ export {
   type ReportTimelineBlock,
   type DashboardReportPayload,
 } from "./dashboardApi";
-

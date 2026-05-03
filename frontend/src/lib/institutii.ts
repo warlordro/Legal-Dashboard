@@ -19,6 +19,14 @@ export const INSTITUTII_GROUPS = [
 
 export type InstitutieGroup = (typeof INSTITUTII_GROUPS)[number];
 
+// Resolve a stored institutie value (e.g. "TribunalulBUCURESTI") to its
+// human-friendly label (e.g. "Tribunalul București"). Falls back to the raw
+// value if the catalog does not contain it (defensive: covers stale jobs whose
+// target_json predates a catalog rename).
+export function getInstitutieLabel(val: string): string {
+  return INSTITUTII.find((i) => i.value === val)?.label ?? val;
+}
+
 export const INSTITUTII: Institutie[] = [
   // ── Curți de Apel ──────────────────────────────────────────────────
   { value: 'CurteadeApelALBAIULIA', label: 'Curtea de Apel Alba Iulia', group: 'Curți de Apel' },

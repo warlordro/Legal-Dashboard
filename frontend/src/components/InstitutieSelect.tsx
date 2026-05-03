@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from "react";
 import { Search, X, Building2, ChevronDown, Check } from "lucide-react";
-import { INSTITUTII, INSTITUTII_GROUPS } from "@/lib/institutii";
+import { INSTITUTII, INSTITUTII_GROUPS, getInstitutieLabel } from "@/lib/institutii";
 
 function stripDiacritics(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -11,9 +11,7 @@ interface InstitutieSelectProps {
   onChange: (value: string[]) => void;
 }
 
-function getLabel(val: string): string {
-  return INSTITUTII.find((i) => i.value === val)?.label ?? val;
-}
+const getLabel = getInstitutieLabel;
 
 function sortedByLabel(vals: string[]): string[] {
   return [...vals].sort((a, b) => getLabel(a).localeCompare(getLabel(b), "ro"));

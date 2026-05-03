@@ -14,6 +14,9 @@ import {
   ExternalLink,
   Eye,
   Loader2,
+  Building2,
+  Info,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -23,8 +26,10 @@ import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulk
 import {
   monitoring,
   formatMonitoringTarget,
+  getNameSoapInstitutie,
   type MonitoringJob,
 } from "@/lib/api";
+import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
@@ -53,6 +58,16 @@ export default function Monitorizare({
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
+  const [openInstantePopover, setOpenInstantePopover] = useState<number | null>(null);
+
+  useEffect(() => {
+    if (openInstantePopover === null) return;
+    const handleEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpenInstantePopover(null);
+    };
+    document.addEventListener("keydown", handleEsc);
+    return () => document.removeEventListener("keydown", handleEsc);
+  }, [openInstantePopover]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -336,7 +351,7 @@ export default function Monitorizare({
                       />
                     </th>
                     <th className="px-3 py-2">Tinta</th>
-                    <th className="px-3 py-2">Tip</th>
+                    <th className="px-3 py-2 text-center">Detalii</th>
                     <th className="px-3 py-2">Cadenta</th>
                     <th className="px-3 py-2">Ultima rulare</th>
                     <th className="px-3 py-2">Urmatoarea verif.</th>
@@ -367,8 +382,8 @@ export default function Monitorizare({
                       </td>
                       <td className="px-3 py-2 font-mono">
                         {isDosar ? (
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex w-[180px] items-center">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="inline-flex min-w-[180px] flex-1 items-center">
                               <a
                                 href={getPortalJustUrl(target)}
                                 target="_blank"
@@ -405,26 +420,32 @@ export default function Monitorizare({
                             )}
                           </div>
                         ) : job.kind === "name_soap" ? (
-                          <div className="flex items-center gap-2">
-                            <span className="inline-flex w-[180px] items-center font-bold">
-                              {target}
-                            </span>
-                            {onOpenName && (
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => {
-                                  onOpenName(target);
-                                  navigate("/dosare");
-                                }}
-                                title={`Cauta dosare pentru ${target}`}
-                                className="h-7 gap-1.5 px-2.5 text-[10.5px]"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                                Dosare
-                              </Button>
-                            )}
-                          </div>
+                          (() => {
+                            const scope = getNameSoapInstitutie(job) ?? [];
+                            const labels = scope.map(getInstitutieLabel);
+                            return (
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="block min-w-[180px] flex-1 break-words font-bold leading-tight">
+                                  {target}
+                                </span>
+                                {onOpenName && (
+                                  <Button
+                                    variant="default"
+                                    size="sm"
+                                    onClick={() => {
+                                      onOpenName(target);
+                                      navigate("/dosare");
+                                    }}
+                                    title={`Cauta dosare pentru ${target}`}
+                                    className="h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
+                                  >
+                                    <Eye className="h-3.5 w-3.5" />
+                                    Dosare
+                                  </Button>
+                                )}
+                              </div>
+                            );
+                          })()
                         ) : (
                           target
                         )}
@@ -437,11 +458,25 @@ export default function Monitorizare({
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2">
-                        {job.kind === "dosar_soap" ? "Dosar"
-                          : job.kind === "name_soap" ? "Nume"
-                          : job.kind === "aviz_rnpm" ? "Aviz RNPM"
-                          : job.kind}
+                      <td className="px-3 py-2 text-center">
+                        {job.kind === "name_soap" && (() => {
+                          const scope = getNameSoapInstitutie(job) ?? [];
+                          if (scope.length === 0) return null;
+                          return (
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setOpenInstantePopover(job.id);
+                              }}
+                              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-yellow-500 hover:bg-yellow-100 hover:text-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-950 dark:hover:text-yellow-300"
+                              title={`${scope.length} ${scope.length === 1 ? "instanta monitorizata" : "instante monitorizate"} — click pentru detalii`}
+                              aria-label={`Vezi ${scope.length} ${scope.length === 1 ? "instanta" : "instante"}`}
+                            >
+                              <Info className="h-4 w-4" />
+                            </button>
+                          );
+                        })()}
                       </td>
                       <td className="px-3 py-2">
                         {(() => {
@@ -532,6 +567,55 @@ export default function Monitorizare({
           )}
         </CardContent>
       </Card>
+      {openInstantePopover !== null && (() => {
+        const job = jobs.find((j) => j.id === openInstantePopover);
+        if (!job || job.kind !== "name_soap") return null;
+        const scope = getNameSoapInstitutie(job) ?? [];
+        const labels = scope.map(getInstitutieLabel);
+        if (labels.length === 0) return null;
+        return (
+          <div
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+            onClick={() => setOpenInstantePopover(null)}
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="instante-modal-title"
+          >
+            <div
+              className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-3 flex items-start justify-between gap-3 border-b border-border pb-2">
+                <div className="min-w-0">
+                  <h3 id="instante-modal-title" className="text-[15px] font-semibold text-foreground">
+                    Instante monitorizate ({labels.length})
+                  </h3>
+                  <p className="mt-0.5 truncate text-[13px] font-medium text-foreground/80">
+                    {formatMonitoringTarget(job)}
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setOpenInstantePopover(null)}
+                  className="rounded p-1 text-foreground hover:bg-muted"
+                  title="Inchide"
+                  aria-label="Inchide"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <ul className="max-h-[60vh] space-y-1 overflow-y-auto text-[13px] text-foreground">
+                {labels.map((label) => (
+                  <li key={label} className="flex items-start gap-2 py-1">
+                    <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                    <span>{label}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

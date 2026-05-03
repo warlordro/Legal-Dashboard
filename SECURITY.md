@@ -90,6 +90,11 @@ and treat the current defaults as insufficient.
 - **SOAP fan-out cap** (`MAX_SOAP_FANOUT = 500`) on `/api/dosare/load-more`
   and `/api/termene/load-more` to prevent an attacker (or a buggy client) from
   amplifying one request into thousands of upstream SOAP calls.
+- **Email notifier isolation (PR-11).** SMTP credentials are read only from
+  server-side `SMTP_*` environment variables. Per-owner email settings default
+  to disabled, HTML email bodies escape alert payloads, and SMTP failures are
+  logged without blocking alert insert, SSE, native notifications, or the
+  in-app alerts inbox.
 
 ### Background monitoring activity
 
@@ -143,6 +148,7 @@ The scheduler does **not** add authentication, encryption, or rate-limiting to i
 | `LEGAL_DASHBOARD_AUTH_COOKIE_SECURE` | secure in web mode | Set to `0` only for local HTTP testing. |
 | `MONITORING_ENABLED` | `1` in Electron | Set to `0` to disable monitoring routes and scheduler. |
 | `MONITORING_DISABLED_KINDS` | unset | Comma-separated monitoring kinds to skip in scheduler claims, for example `dosar_soap,name_soap`. |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_SECURE` | unset | Optional SMTP channel for alert emails. Incomplete config disables email without blocking boot. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_AI_KEY` | unset | If set, override in-app keys. Use for server-mode deployments. |
 | `CAPTCHA_PROVIDER` / `TWOCAPTCHA_API_KEY` / `CAPSOLVER_API_KEY` | unset | Planned for PR-9 web/server mode. RNPM captcha provider keys must live server-side and must not be accepted from browser clients. Desktop v2.4.0 ignores these and keeps UI + safeStorage. |
 | `NODE_ENV` | `production` in Electron | `development` enables DevTools and the dev menu. |

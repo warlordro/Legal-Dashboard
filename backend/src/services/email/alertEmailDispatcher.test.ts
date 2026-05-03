@@ -1,0 +1,120 @@
+import Database from "better-sqlite3";
+import path from "path";
+import os from "os";
+import fsPromises from "fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
+import { upsertEmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
+import { closeDb, getDb } from "../../db/schema.ts";
+import { dispatchAlertEmail } from "./alertEmailDispatcher.ts";
+import { sendAlertEmail } from "./mailer.ts";
+
+vi.mock("./mailer.ts", () => ({
+  sendAlertEmail: vi.fn(),
+}));
+
+const sendAlertEmailMock = vi.mocked(sendAlertEmail);
+let tmpRoot: string;
+
+function alert(overrides: Partial<MonitoringAlertRow> = {}): MonitoringAlertRow {
+  return {
+    id: 42,
+    owner_id: "local",
+    job_id: 7,
+    run_id: 9,
+    kind: "termen_new",
+    severity: "warning",
+    title: "Termen nou",
+    detail_json: "{}",
+    dedup_key: "job-7|termen",
+    is_new: 1,
+    created_at: "2026-05-03T10:00:00.000Z",
+    read_at: null,
+    dismissed_at: null,
+    ...overrides,
+  };
+}
+
+beforeEach(async () => {
+  tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-email-dispatch-"));
+  const dbPath = path.join(tmpRoot, "legal-dashboard.db");
+  process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+  const seed = new Database(dbPath);
+  seed.close();
+  getDb();
+  sendAlertEmailMock.mockReset();
+  sendAlertEmailMock.mockResolvedValue({ ok: true });
+});
+
+afterEach(async () => {
+  closeDb();
+  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+});
+
+describe("dispatchAlertEmail", () => {
+  it("does nothing without settings", async () => {
+    await dispatchAlertEmail(alert());
+    expect(sendAlertEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("does nothing when disabled", async () => {
+    upsertEmailSettings("local", {
+      enabled: false,
+      toAddress: "alerts@firma.ro",
+      minSeverity: "info",
+    });
+    await dispatchAlertEmail(alert());
+    expect(sendAlertEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("does nothing without recipient", async () => {
+    upsertEmailSettings("local", {
+      enabled: true,
+      toAddress: null,
+      minSeverity: "info",
+    });
+    await dispatchAlertEmail(alert());
+    expect(sendAlertEmailMock).not.toHaveBeenCalled();
+  });
+
+  it("sends monitoring alerts regardless of the legacy stored minSeverity", async () => {
+    upsertEmailSettings("local", {
+      enabled: true,
+      toAddress: "alerts@firma.ro",
+      minSeverity: "critical",
+    });
+    await dispatchAlertEmail(alert({ severity: "warning" }));
+    expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("sends when settings match", async () => {
+    upsertEmailSettings("local", {
+      enabled: true,
+      toAddress: "alerts@firma.ro",
+      minSeverity: "warning",
+    });
+    await dispatchAlertEmail(alert({ severity: "critical" }));
+    expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("isolates mailer failures", async () => {
+    upsertEmailSettings("local", {
+      enabled: true,
+      toAddress: "alerts@firma.ro",
+      minSeverity: "info",
+    });
+    sendAlertEmailMock.mockRejectedValue(new Error("boom"));
+    await expect(dispatchAlertEmail(alert())).resolves.toBeUndefined();
+  });
+
+  it("does not use severity as an email gate", async () => {
+    upsertEmailSettings("local", {
+      enabled: true,
+      toAddress: "alerts@firma.ro",
+      minSeverity: "warning",
+    });
+    await dispatchAlertEmail(alert({ severity: "debug" as never }));
+    expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
+  });
+});

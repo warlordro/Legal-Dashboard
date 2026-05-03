@@ -253,3 +253,18 @@ export function formatMonitoringTarget(job: MonitoringJob): string {
     return job.target_json;
   }
 }
+
+// For name_soap jobs only: returns the institutie scope as a string array.
+// `null` -> not a name_soap job. `[]` -> name_soap watching all courts.
+// Non-empty -> watching only those courts.
+export function getNameSoapInstitutie(job: MonitoringJob): string[] | null {
+  if (job.kind !== "name_soap") return null;
+  try {
+    const t = JSON.parse(job.target_json) as Record<string, unknown>;
+    const raw = t.institutie;
+    if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === "string");
+    return [];
+  } catch {
+    return [];
+  }
+}

@@ -5,6 +5,7 @@
 // cleanup; reintroduce them when an alerts UI lands (PR-5/PR-6 timeline).
 
 import { getDb } from "./schema.ts";
+import { dispatchAlertEmail } from "../services/email/alertEmailDispatcher.ts";
 
 export type AlertKind =
   | "dosar_new"
@@ -256,6 +257,9 @@ export function insertAlert(input: InsertAlertInput): InsertAlertResult {
     // observable ordering remains "transaction commits then listeners see
     // the row", just on a fresh tick.
     queueMicrotask(() => notifyNewAlert(row));
+    queueMicrotask(() => {
+      void dispatchAlertEmail(row);
+    });
   }
   return { row, inserted };
 }

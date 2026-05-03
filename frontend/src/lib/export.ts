@@ -1,7 +1,7 @@
 import type { Dosar, Termen } from "@/types";
 import { formatDate } from "./utils";
-import { normalizeInstitutie } from "./institutii";
-import { formatMonitoringTarget, type MonitoringJob } from "./api";
+import { normalizeInstitutie, getInstitutieLabel } from "./institutii";
+import { formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "./api";
 import {
   BLUE_DARK,
   BLUE_LIGHT,
@@ -105,6 +105,17 @@ function dosareFilename(dosare: Dosar[], ext: "xlsx" | "pdf"): string {
 function termeneFilename(termene: Termen[], ext: "xlsx" | "pdf"): string {
   if (termene.length === 1) return `termen_${sanitizeNr(termene[0].numarDosar)}.${ext}`;
   return `termene_${todayRo()}.${ext}`;
+}
+
+// Same as formatMonitoringTarget but for name_soap appends the institutie scope
+// so an exported report makes the watch perimeter unambiguous (the question the
+// UI table already answers via a Building2 chip subline).
+function monitoringTargetCell(job: MonitoringJob): string {
+  const base = formatMonitoringTarget(job) || "-";
+  if (job.kind !== "name_soap") return base;
+  const scope = getNameSoapInstitutie(job) ?? [];
+  if (scope.length === 0) return `${base} [Toate instantele]`;
+  return `${base} [${scope.map(getInstitutieLabel).join(", ")}]`;
 }
 
 function monitoringFilename(jobs: MonitoringJob[], ext: "xlsx" | "pdf"): string {
@@ -380,7 +391,7 @@ export async function buildMonitoringXlsx(jobs: MonitoringJob[]): Promise<Export
     M_HEADERS,
     ...jobs.map((j, i) => [
       i + 1,
-      formatMonitoringTarget(j) || "-",
+      monitoringTargetCell(j),
       monitoringKindLabel(j.kind),
       formatMonitoringCadence(j.cadence_sec),
       formatMonitoringDateTime(j.last_run_at),
@@ -592,7 +603,7 @@ export async function buildMonitoringPdf(jobs: MonitoringJob[]): Promise<ExportR
     head: [["#", "Tinta", "Tip", "Cadenta", "Ultima rulare", "Urmatoarea verif.", "Status", "Note"]],
     body: jobs.map((j, i) => [
       String(i + 1),
-      stripDiacritics(formatMonitoringTarget(j) || "-"),
+      stripDiacritics(monitoringTargetCell(j)),
       monitoringKindLabel(j.kind),
       formatMonitoringCadence(j.cadence_sec),
       formatMonitoringDateTime(j.last_run_at),

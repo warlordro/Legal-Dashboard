@@ -7,15 +7,18 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.9.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.10.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.9.2** - patch notificari native: alertele de monitorizare raman in inbox-ul
-aplicatiei si in badge-ul rosu, iar canalul Windows/macOS are acum status citibil
-din Electron, buton de test in dialogul de configurare si gating defensiv cand
-sistemul de operare raporteaza ca toast-urile sunt blocate. Dependintele
-`windows-notification-state` si `macos-notification-state` sunt optionale si
-incluse in packaging-ul desktop; daca statusul OS nu poate fi citit, alerta
-interna nu se pierde. Predecesor **v2.9.1** - patch UX post-feedback: eliminata
+**v2.10.0** - PR-11 Email notifiers: alertele de monitorizare pot fi trimise si
+prin SMTP, pe langa inbox-ul `/alerte`, badge-ul rosu, SSE si notificarile
+native. Canalul email este optional, default OFF, configurat prin `SMTP_*` in
+`backend/.env` si izolat de insert-ul alertei: daca SMTP lipseste sau trimite
+eroare, alerta ramane in aplicatie. Predecesor **v2.9.2** - patch notificari
+native: alertele de monitorizare raman in inbox-ul aplicatiei si in badge-ul
+rosu, iar canalul Windows/macOS are status citibil din Electron, buton de test
+in dialogul de configurare si gating defensiv cand sistemul de operare raporteaza
+ca toast-urile sunt blocate. Predecesor **v2.9.1** - patch UX post-feedback:
+eliminata
 sectiunea "Activitate recenta"
 (componenta `Timeline`, introdusa in PR-B v2.8.0) din pagina Dashboard. Lista
 randa "Run ok (dosar_soap) · 2.6s · 0 alerte noi · 2h in urma" plus event-uri
@@ -251,7 +254,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (645 teste in v2.9.0: 640 baseline din v2.8.0 + 5 noi pentru `/report`; 591 din v2.7.0; baseline 546 din v2.6.4..v2.6.8) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (679 teste dupa PR-11: 645 baseline v2.9.x + 34 noi email settings/mailer/dispatcher/routes) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
@@ -294,6 +297,13 @@ Cheile API pentru AI pot fi setate fie in `.env` (precedence), fie din UI
 Cheile 2Captcha / CapSolver raman in UI + safeStorage pe desktop; in planul
 web/server (PR-9) vor fi mutate server-side in `.env`/config si nu vor fi BYOK
 sau trimise din browser.
+
+Notificarile email sunt optionale. Pentru a activa canalul SMTP, completeaza
+`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` si optional
+`SMTP_SECURE` in `backend/.env`, apoi activeaza destinatarul din dialogul de
+configurare al aplicatiei. Fara aceste variabile, aplicatia porneste normal si
+email-ul ramane dezactivat. In web mode, adresa de login este precompletata ca
+destinatar propus; pe desktop (`local@desktop`) campul ramane manual.
 
 Port backend default: `3002`. Suprascrie cu `LEGAL_DASHBOARD_PORT`.
 LAN exposure blocat by default; opt-in explicit cu `LEGAL_DASHBOARD_ALLOW_REMOTE=1`.
