@@ -7,10 +7,18 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.10.6**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.10.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release este **v2.10.6** - patch hardening peste v2.10.5, fara
+Ultimul release este **v2.10.7** - patch UX Monitorizare peste v2.10.6.
+Titlul tabelului `Joburi active` afiseaza acum totalul real din raspunsul
+paginat (`total`, de exemplu 616), nu doar randurile incarcate pe pagina curenta
+(`jobs.length`, de exemplu 100). Tooltip-urile Excel/PDF spun explicit ca
+exportul fara selectie acopera joburile vizibile pe pagina. Tag-ul `v2.10.7`
+este release target pentru macOS DMG si Windows NSIS installer, iar push-ul pe
+`main` ruleaza Docker Build.
+
+Predecesor **v2.10.6** - patch hardening peste v2.10.5, fara
 comportament nou. Absoarbe in totalitate findings-urile review-ului
 (`useDebouncedValue` rescris cu callback `flush`, `JobKindTabs` cu navigatie
 tastatura conform WAI-ARIA — ArrowLeft/Right, Home/End, roving tabindex,
@@ -281,7 +289,10 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
 | `npm run build` | Build productie (frontend + backend CJS bundle) |
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (679 teste dupa PR-11: 645 baseline v2.9.x + 34 noi email settings/mailer/dispatcher/routes) |
+| `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
+| `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (721 teste dupa v2.10.6) |
+| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (73 teste dupa v2.10.6) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
@@ -314,7 +325,10 @@ nativ si trebuie compilat pe platforma tinta.
 
 Docker foloseste acelasi lockfile prin `npm ci --workspace=backend --omit=dev`
 si are `start-period=120s` pe healthcheck pentru boot-uri lente cu prewarm /
-migrari DB.
+migrari DB. Workflow-ul GitHub Actions `Docker Build` ruleaza la push pe
+`main`, iar workflow-urile `Build macOS` si `Build Windows` ruleaza la tag-uri
+`v*` (de exemplu `v2.10.7`) ca sa ataseze DMG-ul macOS si installer-ul Windows
+la GitHub Release.
 
 ## Configurare
 

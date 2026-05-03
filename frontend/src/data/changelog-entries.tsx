@@ -18,6 +18,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.7",
+    date: "3 Mai 2026",
+    subtitle:
+      "Patch UX Monitorizare: titlul tabelului Joburi active afiseaza totalul real de joburi active, nu doar randurile incarcate pe pagina curenta. Bump de release pentru Docker, macOS DMG si Windows NSIS installer.",
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "Monitorizare - total real in header",
+        content:
+          "CardHeader-ul din Monitorizare foloseste acum totalul paginat returnat de backend pentru Joburi active (de exemplu 616), nu jobs.length (100 cand pagina curenta are pageSize 100). Textul Selectia opereaza doar pe pagina vizibila ramane sursa clara pentru cate randuri sunt incarcate/selectabile pe pagina.",
+      },
+      {
+        title: "Export - clarificare pagina vizibila",
+        content:
+          "Tooltip-urile Excel/PDF spun explicit ca exportul fara selectie acopera toate joburile vizibile, nu intregul total paginat. Comportamentul ramane neschimbat; fix-ul este de claritate UI.",
+      },
+      {
+        title: "Release targets",
+        content:
+          "Versiunea 2.10.7 este pregatita pentru push pe main si tag v2.10.7. Push-ul pe main ruleaza Docker Build, iar tag-ul v2.10.7 declanseaza workflow-urile GitHub Actions pentru macOS DMG si Windows NSIS installer.",
+      },
+    ],
+  },
+  {
     version: "v2.10.6",
     date: "3 Mai 2026",
     subtitle:

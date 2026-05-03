@@ -4,6 +4,32 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.7] - 2026-05-03
+
+### UX Monitorizare - contor total in titlul tabelului
+
+Patch frontend + docs peste v2.10.6. Corecteaza confuzia din pagina
+`Monitorizare` unde header-ul `Joburi active (100)` afisa numarul de randuri
+incarcate pe pagina curenta, nu totalul real de joburi active.
+
+### Frontend
+
+- `frontend/src/pages/Monitorizare.tsx`: titlul cardului foloseste acum
+  `total` din raspunsul paginat (`Joburi active (616)`), nu `jobs.length`
+  (`100` cand pagina este setata la 100 randuri).
+- Tooltip-urile butoanelor Excel/PDF spun explicit ca exportul fara selectie
+  acopera joburile vizibile pe pagina curenta, ca sa ramana aliniate cu textul
+  existent `Selectia opereaza doar pe pagina vizibila (100 din 616)`.
+
+### Release targets
+
+- Bump la `2.10.7` in root/backend/frontend manifests si lockfile.
+- Push-ul pe `main` declanseaza workflow-ul Docker Build; tag-ul `v2.10.7`
+  declanseaza workflow-urile GitHub Actions pentru macOS DMG si Windows NSIS
+  installer.
+
+---
+
 ## [2.10.6] - 2026-05-03
 
 ### Hardening post-v2.10.5 — review findings + curatare backlog

@@ -295,7 +295,7 @@ export default function Monitorizare({
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-base">
-              Joburi active{jobs.length > 0 ? ` (${jobs.length})` : ""}
+              Joburi active{total > 0 ? ` (${total})` : ""}
               {selectedIds.size > 0 && (
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
                   · {selectedIds.size} selectate
@@ -313,7 +313,7 @@ export default function Monitorizare({
                     title={
                       selectedIds.size > 0
                         ? `Export Excel pentru ${selectedIds.size} joburi selectate`
-                        : `Export Excel pentru toate cele ${jobs.length} joburi`
+                        : `Export Excel pentru toate cele ${jobs.length} joburi vizibile`
                     }
                   >
                     {exporting === "xlsx" ? (
@@ -331,7 +331,7 @@ export default function Monitorizare({
                     title={
                       selectedIds.size > 0
                         ? `Export PDF pentru ${selectedIds.size} joburi selectate`
-                        : `Export PDF pentru toate cele ${jobs.length} joburi`
+                        : `Export PDF pentru toate cele ${jobs.length} joburi vizibile`
                     }
                   >
                     {exporting === "pdf" ? (

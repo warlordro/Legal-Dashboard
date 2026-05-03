@@ -1,7 +1,7 @@
 ﻿# Execution Roadmap â€” Monitorizare + Web Mode
 
-> **Status**: PR-0 → PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1 → v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5 → v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01) + **PR-A v2.7.0 Dashboard redesign sprint, 1/3 — KPI strip + QuickActions** + **PR-9 v2.7.0 Auth pluggable seam (desktop noop / web JWT)** + PR-B v2.8.0 + PR-C v2.9.0 + patch UX v2.9.1 + **patch v2.9.2 notificari native Windows/macOS** + **PR-11 v2.10.0 Email notifiers**. PR-10 si PR-12 sunt eliminate; web cutover ramane reevaluabil separat.
-> **Versiune document**: 1.16 (2026-05-03)
+> **Status**: PR-0 → PR-8 v2.6.0 implementate local (2026-04-30) + patch-uri UX v2.6.1 → v2.6.3 + audit hardening v2.6.4 + UX polish Monitorizare v2.6.5 → v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8 (2026-05-01) + **PR-A v2.7.0 Dashboard redesign sprint, 1/3 — KPI strip + QuickActions** + **PR-9 v2.7.0 Auth pluggable seam (desktop noop / web JWT)** + PR-B v2.8.0 + PR-C v2.9.0 + patch UX v2.9.1 + **patch v2.9.2 notificari native Windows/macOS** + **PR-11 v2.10.0 Email notifiers** + patch UX v2.10.7 Monitorizare total count. PR-10 si PR-12 sunt eliminate; web cutover ramane reevaluabil separat.
+> **Versiune document**: 1.18 (2026-05-03)
 > **Owner**: Cezar (solo dev) + Claude Code
 > **Spec tehnic complet**: [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md)
 > **Threat model**: [SECURITY.md](SECURITY.md) | **Hardening backlog**: [HARDENING.md](HARDENING.md)
@@ -457,3 +457,4 @@ Vezi PLAN-monitoring-webmode.md Â§0 pentru rationale complet.
 - **v1.15** (2026-05-03): PR-11 v2.10.0 inregistrat - email notifiers prin SMTP/nodemailer, setari per-owner, panou UI si scope clar fara digest/retry/PR-10/PR-12.
 - **v1.16** (2026-05-03): patch v2.10.5 inregistrat - Task B/C din `CODEX-BACKLOG.md`: Dashboard KPI redenumit `Monitorizari active`, subline umanizat `X Dosare, Y Nume`, pagina Alerte cu tab-bar `Toate / Dosare / Nume` + search debounced dupa targetul jobului (`jobKind` + `q` pe `/api/v1/alerts`). Task A ramane neimplementat.
 - **v1.17** (2026-05-03): patch v2.10.6 inregistrat - hardening review fara comportament nou (`useDebouncedValue` cu callback `flush`, `JobKindTabs` cu navigatie tastatura WAI-ARIA + roving tabindex, `escapeLikeMeta` extras si folosit in `auditRepository` + `userRepository`, JSDoc `@example` pe pairing `ESCAPE '\\'`); seeder `seed-test-alerts.cjs` sters; Task A scos din backlog si din memoria persistenta. 721/721 backend + 73/73 frontend.
+- **v1.18** (2026-05-03): patch v2.10.7 inregistrat - `Monitorizare` afiseaza `Joburi active (${total})` pe totalul real al listarii paginated, nu pe `jobs.length` din pagina curenta; tooltip-urile Excel/PDF clarifica exportul pe joburile vizibile. Release targets: push `main` pentru Docker Build, tag `v2.10.7` pentru macOS DMG + Windows NSIS installer.

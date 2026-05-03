@@ -1,6 +1,27 @@
-# Session Handoff - v2.10.6 (review hardening + cleanup backlog)
+# Session Handoff - v2.10.7 (UX Monitorizare total count)
 
 **Data**: 2026-05-03
+
+## v2.10.7 - UX Monitorizare total count + release targets
+
+Patch frontend + docs peste v2.10.6.
+
+**Frontend**:
+- `frontend/src/pages/Monitorizare.tsx`: CardHeader-ul `Joburi active` afiseaza
+  acum totalul real din raspunsul paginat (`total`), nu `jobs.length`.
+  Exemplu: cu 616 joburi totale si `pageSize=100`, header-ul devine
+  `Joburi active (616)`, iar textul de sub filtre ramane
+  `Selectia opereaza doar pe pagina vizibila (100 din 616)`.
+- Tooltip-urile Excel/PDF clarifica faptul ca exportul fara selectie acopera
+  joburile vizibile pe pagina curenta.
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json` si
+  `package-lock.json` sincronizate la `2.10.7`.
+- `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md`,
+  `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md` si acest handoff actualizate.
+- Release targets: push pe `main` pentru Docker Build; tag `v2.10.7` pentru
+  workflow-urile macOS DMG si Windows NSIS installer.
 
 ## v2.10.6 - Review hardening + cleanup backlog (peste v2.10.5)
 
