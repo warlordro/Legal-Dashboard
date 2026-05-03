@@ -26,6 +26,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Type-check + test gate runs BEFORE electron-builder so better-sqlite3
+      # is still bound to Node's ABI (npm ci prebuild). electron-builder's
+      # internal npmRebuild then flips it to Electron's ABI for packaging.
+      - name: Backend type-check
+        run: npx tsc --noEmit -p backend/tsconfig.json
+
+      - name: Backend tests
+        run: npm test --workspace=backend -- --run
+
+      - name: Frontend type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm test -- --run
+
       - name: Build app (backend + frontend)
         run: npm run build
 
@@ -39,7 +56,12 @@ jobs:
         uses: actions/upload-artifact@v6
         continue-on-error: true
         with:
-          name: legal-dashboard-mac
+          # Artifact name includes ref (tag like v2.10.7 or branch name on
+          # workflow_dispatch) + run_id to keep concurrent / re-run uploads
+          # distinguishable. Avoids the legacy fixed `legal-dashboard-mac`
+          # which silently overwrote prior runs and bundled both x64 + arm64
+          # DMGs under the same indistinct name.
+          name: legal-dashboard-mac-${{ github.ref_name }}-run${{ github.run_id }}
           path: |
             release/*.dmg
             release/*.dmg.blockmap

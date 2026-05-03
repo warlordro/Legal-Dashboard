@@ -1,6 +1,54 @@
-# Session Handoff - v2.10.7 (UX Monitorizare total count)
+# Session Handoff - v2.10.8 (CI hardening — test gate + artifact naming)
 
-**Data**: 2026-05-03
+**Data**: 2026-05-04
+
+## v2.10.8 - CI hardening (test gate + artifact naming)
+
+Patch CI-only peste v2.10.7. Absorbe integral findings-urile "Defer separat"
+listate in handoff-ul anterior pentru `.github/workflows/build-windows.yml`
+si `.github/workflows/build-mac.yml`. Zero modificari pe codul backend /
+frontend / Electron in afara version bump-ului.
+
+**GitHub Actions — test gate inainte de packaging**:
+- `.github/workflows/build-windows.yml` adauga, intre `npm ci` si
+  `Rebuild native modules for Electron ABI`, patru pasi:
+  - `npx tsc --noEmit -p backend/tsconfig.json`;
+  - `npm test --workspace=backend -- --run`;
+  - `cd frontend && npx tsc --noEmit`;
+  - `cd frontend && npm test -- --run`.
+  Ordinea conteaza: `npm ci` lasa `better-sqlite3` cu ABI Node, deci testele
+  vitest ruleaza inainte de `rebuild:electron` care flips ABI-ul; daca testele
+  ruleaza dupa rebuild Electron, `vitest` se prabuseste cu mismatch ABI.
+- `.github/workflows/build-mac.yml` adauga aceiasi 4 pasi intre `npm ci` si
+  `Build app (backend + frontend)`. Pe Mac nu exista step `rebuild:electron`
+  separat — electron-builder are `npmRebuild` intern care flips ABI la
+  packaging time, deci testele ruleaza inainte de `npm run build`.
+- Un fail de tipuri sau teste blocheaza generarea artefactelor — nu se mai pot
+  publica releases cu cod care nu trece type-check sau teste.
+
+**GitHub Actions — artifact naming aliniat**:
+- `actions/upload-artifact` (atat Windows cat si Mac) foloseste pattern-ul
+  `legal-dashboard-{platform}-${{ github.ref_name }}-run${{ github.run_id }}`.
+  Inainte: `legal-dashboard-windows` / `legal-dashboard-mac` — nume fixe care
+  permit overwrite la rerun pe acelasi tag si nu lasa istoric retentionable.
+- Pattern-ul include atat `ref_name` (tag-ul / branch-ul) cat si `run_id`
+  pentru a deduplica re-rulari pe acelasi tag (de exemplu cand un job esueaza
+  din motive infrastructurale si e re-trigger-uit manual).
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json` si
+  `package-lock.json` sincronizate la `2.10.8`.
+- `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md`,
+  `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md` si acest handoff
+  actualizate. Sectiunea "Defer separat" stearsa din v2.10.7 pentru ca
+  findings-urile sunt absorbite.
+
+**Validare**:
+- `npx tsc --noEmit -p backend/tsconfig.json` verde local.
+- `cd frontend && npx tsc --noEmit` verde local.
+- Workflow-urile vor fi validate la urmatorul push pe `main` / la urmatorul
+  tag de release; ordinea pe Windows e testata logic (testele ruleaza inainte
+  de `rebuild:electron`).
 
 ## v2.10.7 - UX Monitorizare total count
 
@@ -22,19 +70,9 @@ Patch frontend + docs peste v2.10.6.
   `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md`, `CODEX-BACKLOG.md` si
   acest handoff actualizate.
 
-**Defer separat**:
-- Findings-urile legate de workflow metadata / release artifact naming raman
-  pentru o sesiune separata. v2.10.7 ramane scoped la fixul de count din
-  Monitorizare, fara schimbare de workflow in starea finala.
-- De facut pe viitor in `.github/workflows/build-windows.yml`:
-  - adauga type-check si teste inainte de packaging;
-  - aliniaza numele artifactului cu workflow-ul macOS, preferabil incluzand
-    versiunea/ref-ul si `github.run_id` ca sa nu existe ambiguitate intre run-uri.
-- De facut pe viitor in `.github/workflows/build-mac.yml`:
-  - adauga type-check si teste inainte de packaging;
-  - evita artifact name fix (`legal-dashboard-mac`) cand build-ul poate produce
-    mai multe fisiere/architectures; foloseste nume cu versiune/ref/run ca sa
-    previi overwrite-uri sau artefacte greu de distins.
+**Note**: findings-urile workflow metadata / release artifact naming care erau
+listate aici ca "defer separat" au fost absorbite in v2.10.8 (vezi sectiunea
+de mai sus).
 
 ## v2.10.6 - Review hardening + cleanup backlog (peste v2.10.5)
 

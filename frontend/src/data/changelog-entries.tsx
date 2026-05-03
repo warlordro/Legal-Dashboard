@@ -18,6 +18,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.8",
+    date: "4 Mai 2026",
+    subtitle:
+      "Patch CI-only peste v2.10.7. Workflow-urile de packaging (Windows + macOS) ruleaza acum type-check + teste inainte sa construiasca binarele, iar artifact name-urile includ ref + run_id ca sa nu existe overwrite-uri intre run-uri concurente.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "CI - test gate inainte de packaging",
+        content:
+          "Workflow-urile build-windows.yml si build-mac.yml ruleaza acum, intre npm ci si packaging, 4 step-uri noi: Backend type-check (tsc --noEmit -p backend/tsconfig.json), Backend tests (npm test --workspace=backend -- --run), Frontend type-check (cd frontend && tsc --noEmit), Frontend tests (cd frontend && npm test -- --run). Ordinea este importanta: gate-ul ruleaza cat timp better-sqlite3 are prebuild-ul Node, inainte ca rebuild:electron (Windows) sau electron-builder npmRebuild (Mac) sa flipeze ABI-ul pe Electron.",
+      },
+      {
+        title: "CI - artifact naming cu ref + run_id",
+        content:
+          "Numele fixe legal-dashboard-windows si legal-dashboard-mac inlocuite cu pattern legal-dashboard-{platform}-${ref}-run${run_id}. Pentru tag pushes (v2.10.8) numele devine de exemplu legal-dashboard-windows-v2.10.8-run<id>; pentru workflow_dispatch include numele branch-ului. Eviti overwrite-uri silentioase intre run-uri concurente sau re-run-uri in aceeasi fereastra de retentie de 14 zile.",
+      },
+      {
+        title: "Documentatie",
+        content:
+          "Toate sectiunile Defer separat / De facut pe viitor / Backlog tehnic minor referitoare la workflow-urile de packaging au fost scoase din SESSION-HANDOFF.md, EXECUTION-ROADMAP.md, README.md, STATUS.md si CLAUDE.md. CHANGELOG.md primeste entry-ul v2.10.8.",
+      },
+    ],
+  },
+  {
     version: "v2.10.7",
     date: "3 Mai 2026",
     subtitle:

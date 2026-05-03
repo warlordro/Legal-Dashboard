@@ -7,17 +7,24 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.10.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.10.8**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release este **v2.10.7** - patch UX Monitorizare peste v2.10.6.
-Titlul tabelului `Joburi active` afiseaza acum totalul real din raspunsul
+Ultimul release este **v2.10.8** - patch CI-only peste v2.10.7. Workflow-urile
+GitHub Actions (`build-windows.yml` si `build-mac.yml`) ruleaza acum
+`tsc --noEmit` + `vitest run` pentru backend si frontend **inainte** de
+packaging — pe Windows ordinea conteaza pentru ABI-ul `better-sqlite3` (testele
+ruleaza cu ABI Node, inainte de `rebuild:electron` care flips la ABI Electron).
+`actions/upload-artifact` foloseste pattern-ul
+`legal-dashboard-{platform}-${{ github.ref_name }}-run${{ github.run_id }}` ca
+sa pastreze artefactele istorice cand acelasi tag este re-rulat. Backlog-ul
+"GitHub Actions packaging hardening" este inchis si scos din docs.
+
+Predecesor **v2.10.7** - patch UX Monitorizare peste v2.10.6.
+Titlul tabelului `Joburi active` afiseaza totalul real din raspunsul
 paginat (`total`, de exemplu 616), nu doar randurile incarcate pe pagina curenta
 (`jobs.length`, de exemplu 100). Tooltip-urile Excel/PDF spun explicit ca
-exportul fara selectie acopera joburile vizibile pe pagina. Documentatia este
-sincronizata: `CODEX-BACKLOG.md` ramane istoric inchis pentru Task B/C livrate
-si Task A eliminat, iar fixurile de workflow metadata raman pentru o sesiune
-separata.
+exportul fara selectie acopera joburile vizibile pe pagina.
 
 Predecesor **v2.10.6** - patch hardening peste v2.10.5, fara
 comportament nou. Absoarbe in totalitate findings-urile review-ului

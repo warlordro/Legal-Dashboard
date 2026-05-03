@@ -4,6 +4,56 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.8] - 2026-05-04
+
+### CI hardening — type-check + test gate inainte de packaging + artifact naming
+
+Patch CI-only peste v2.10.7. Rezolva findings-urile deferate explicit din
+v2.10.7 (`Findings-urile de workflow metadata / release artifact naming raman
+deferate pentru o sesiune separata`) fara sa modifice cod aplicativ; binarele
+NSIS / DMG produse nu se schimba functional.
+
+### CI / GitHub Actions
+
+- `.github/workflows/build-windows.yml`: introduse 4 step-uri noi intre
+  `npm ci` si `Rebuild native modules for Electron ABI` — `Backend type-check`
+  (`npx tsc --noEmit -p backend/tsconfig.json`), `Backend tests`
+  (`npm test --workspace=backend -- --run`), `Frontend type-check`
+  (`cd frontend && npx tsc --noEmit`), `Frontend tests`
+  (`cd frontend && npm test -- --run`). Ordinea e importanta: gate-ul ruleaza
+  cat timp `better-sqlite3` e prebuild-uit pentru ABI-ul Node (din `npm ci`),
+  inainte ca `rebuild:electron` sa il flipeze pe ABI-ul Electron, ca `vitest`
+  (Node) sa nu crash-uiasca la load.
+- `.github/workflows/build-mac.yml`: aceleasi 4 step-uri introduse intre
+  `npm ci` si `Build app (backend + frontend)`. Mac nu are step explicit
+  `rebuild:electron` (electron-builder face npmRebuild intern la packaging),
+  asa ca testele ruleaza inainte de `npm run build` ca sa pastreze ABI-ul Node.
+- Artifact naming aliniat intre Windows si macOS: numele fixe
+  `legal-dashboard-windows` / `legal-dashboard-mac` inlocuite cu pattern
+  `legal-dashboard-{platform}-${{ github.ref_name }}-run${{ github.run_id }}`.
+  Pentru tag pushes (`v2.10.8`) numele devine
+  `legal-dashboard-windows-v2.10.8-run<id>`; pentru `workflow_dispatch` pe
+  branch include numele branch-ului. Eviti overwrite-uri silentioase intre
+  run-uri concurente sau re-run-uri in aceeasi fereastra de retentie de 14
+  zile.
+
+### Documentatie
+
+- `CHANGELOG.md` (acest fisier), `README.md`, `STATUS.md`,
+  `SESSION-HANDOFF.md`, `EXECUTION-ROADMAP.md`, `CLAUDE.md` actualizate
+  pentru v2.10.8 — sectiunile "De facut pe viitor" / "raman deferate" / "
+  Backlog tehnic minor" referitoare la workflow-uri scoase, marcate ca
+  livrate.
+- `frontend/src/data/changelog-entries.tsx`: entry nou v2.10.8 in changelog-ul
+  din aplicatie.
+
+### Versionare
+
+- Bump la `2.10.8` in `package.json`, `backend/package.json`,
+  `frontend/package.json` si `package-lock.json` (root + workspace pkgs).
+
+---
+
 ## [2.10.7] - 2026-05-03
 
 ### UX Monitorizare - contor total in titlul tabelului
