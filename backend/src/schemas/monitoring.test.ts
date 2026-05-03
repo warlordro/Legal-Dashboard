@@ -255,4 +255,19 @@ describe("JobListQuerySchema", () => {
     const r = JobListQuerySchema.parse({ active: "true" });
     expect(r.active).toBe(true);
   });
+
+  it("accepts q (search) si trim-uieste whitespace", () => {
+    const r = JobListQuerySchema.parse({ q: "  ion  " });
+    expect(r.q).toBe("ion");
+  });
+
+  it("respinge q gol dupa trim", () => {
+    const r = JobListQuerySchema.safeParse({ q: "   " });
+    expect(r.success).toBe(false);
+  });
+
+  it("respinge q peste 100 caractere", () => {
+    const r = JobListQuerySchema.safeParse({ q: "x".repeat(101) });
+    expect(r.success).toBe(false);
+  });
 });

@@ -115,7 +115,7 @@ export function getMonitoringSchedulerStatus():
 
 export const monitoringRouter = new Hono();
 
-// GET /jobs?page=1&pageSize=20&kind=dosar_soap&active=true
+// GET /jobs?page=1&pageSize=20&kind=dosar_soap&active=true&q=ion
 monitoringRouter.get("/jobs", (c) => {
   const ownerId = getOwnerId(c);
   const queryResult = JobListQuerySchema.safeParse(c.req.query());

@@ -75,12 +75,14 @@ export const monitoring = {
     pageSize?: number;
     kind?: MonitoringJobKind;
     active?: boolean;
+    q?: string;
   } = {}): Promise<MonitoringListResult> => {
     const search = new URLSearchParams();
     if (params.page !== undefined) search.set("page", String(params.page));
     if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
     if (params.kind) search.set("kind", params.kind);
     if (params.active !== undefined) search.set("active", String(params.active));
+    if (params.q && params.q.trim()) search.set("q", params.q.trim());
     const qs = search.toString();
     const res = await apiFetch(`/api/v1/monitoring/jobs${qs ? "?" + qs : ""}`);
     return unwrapMonitoring<MonitoringListResult>(res);

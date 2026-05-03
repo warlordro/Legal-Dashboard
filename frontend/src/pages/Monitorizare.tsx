@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { Input } from "@/components/ui/input";
 import { TablePagination } from "@/components/table-pagination";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
@@ -63,6 +64,12 @@ export default function Monitorizare({
   // v2.10.3 paginare server-side. Backend cap: 100 / pagina (JobListQuerySchema).
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(50);
+  // v2.10.4 filtru kind ("all" = fara filtru) + search free-text.
+  // searchInput = ce e tastat acum; debouncedQuery = ce ajunge la API
+  // (debounce 300ms). UI 0-indexed; filtrele reseteaza pagina la 0.
+  const [kindFilter, setKindFilter] = useState<"all" | "dosar_soap" | "name_soap">("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   // v2.10.1 #12: focus restoration — store the element that opened the modal
   // so we can return focus to it on close (a11y: tab order continuity).
   const lastFocusedRef = useRef<HTMLElement | null>(null);
@@ -92,7 +99,12 @@ export default function Monitorizare({
     setError(null);
     try {
       // Server is 1-indexed; UI keeps 0-indexed pages for TablePagination parity.
-      const result = await monitoring.list({ page: page + 1, pageSize });
+      const result = await monitoring.list({
+        page: page + 1,
+        pageSize,
+        kind: kindFilter === "all" ? undefined : kindFilter,
+        q: debouncedQuery || undefined,
+      });
       setJobs(result.rows);
       setTotal(result.total);
     } catch (e) {
@@ -100,11 +112,24 @@ export default function Monitorizare({
     } finally {
       setLoading(false);
     }
-  }, [page, pageSize]);
+  }, [page, pageSize, kindFilter, debouncedQuery]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // v2.10.4 debounce search input -> debouncedQuery (300ms).
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  // Reset page la 0 cand filtrul de tip / query-ul efectiv (debounced) se schimba,
+  // altfel utilizatorul aplica un filtru pe pagina 7 si vede gol pana cand
+  // recovery-ul de mai jos retro-decrementeaza pagina.
+  useEffect(() => {
+    setPage(0);
+  }, [kindFilter, debouncedQuery]);
 
   // If a delete leaves the current page empty (e.g. last item on last page),
   // step back so the user doesn't land on an empty grid.
@@ -338,6 +363,55 @@ export default function Monitorizare({
           </div>
         </CardHeader>
         <CardContent>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="inline-flex rounded-md border border-input bg-background p-0.5">
+              {(["all", "dosar_soap", "name_soap"] as const).map((k) => {
+                const label = k === "all" ? "Toate" : k === "dosar_soap" ? "Dosare" : "Nume";
+                const active = kindFilter === k;
+                return (
+                  <button
+                    key={k}
+                    type="button"
+                    onClick={() => setKindFilter(k)}
+                    className={cn(
+                      "rounded px-3 py-1 text-xs font-medium transition-colors",
+                      active
+                        ? "bg-primary text-primary-foreground"
+                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+            <div className="relative min-w-[260px] flex-1 max-w-md">
+              <Input
+                type="text"
+                value={searchInput}
+                onChange={(e) => setSearchInput(e.target.value)}
+                placeholder="Cauta dupa nume sau numar dosar..."
+                className="pr-8"
+                aria-label="Cautare in lista de monitorizari"
+              />
+              {searchInput && (
+                <button
+                  type="button"
+                  onClick={() => setSearchInput("")}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                  aria-label="Sterge cautarea"
+                  title="Sterge cautarea"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
+            {(kindFilter !== "all" || debouncedQuery) && (
+              <span className="text-xs text-muted-foreground">
+                {total} {total === 1 ? "rezultat" : "rezultate"}
+              </span>
+            )}
+          </div>
           {error && (
             <div className="mb-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
               {error}
@@ -351,7 +425,22 @@ export default function Monitorizare({
           {loading && jobs.length === 0 && (
             <div className="text-sm text-muted-foreground">Se incarca...</div>
           )}
-          {!loading && jobs.length === 0 && !error && (
+          {!loading && jobs.length === 0 && !error && (kindFilter !== "all" || debouncedQuery) && (
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>Niciun rezultat pentru filtrele aplicate.</span>
+              <button
+                type="button"
+                onClick={() => {
+                  setKindFilter("all");
+                  setSearchInput("");
+                }}
+                className="text-xs text-primary hover:underline"
+              >
+                Reseteaza filtrele
+              </button>
+            </div>
+          )}
+          {!loading && jobs.length === 0 && !error && kindFilter === "all" && !debouncedQuery && (
             <div className="text-sm text-muted-foreground">
               Niciun job activ. Adauga primul dosar sau subiect mai sus, incarca un fisier bulk,
               sau marcheaza un dosar din pagina <strong>Cautare Dosare</strong>.

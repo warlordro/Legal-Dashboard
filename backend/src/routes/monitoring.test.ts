@@ -570,6 +570,88 @@ describe("GET /jobs — query handling", () => {
     const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("invalid_query");
   });
+
+  it("filtreaza dupa q pe numar dosar (case + diacritic insensitive)", async () => {
+    const app = buildTestApp();
+    await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/180/2024" },
+      cadence_sec: 3600,
+    });
+    await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "9999/180/2024" },
+      cadence_sec: 3600,
+    });
+
+    const r = await app.request("/api/v1/monitoring/jobs?q=1234");
+    const j = (await r.json()) as {
+      data: { total: number; rows: { target_json: string }[] };
+    };
+    expect(j.data.total).toBe(1);
+    expect(JSON.parse(j.data.rows[0]!.target_json)).toMatchObject({
+      numar_dosar: "1234/180/2024",
+    });
+  });
+
+  it("filtreaza dupa q pe nume (matches name_normalized, diacritic-insensitive)", async () => {
+    const app = buildTestApp();
+    await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "name_soap",
+      target: { name_normalized: "STEFAN POPESCU" },
+      cadence_sec: 3600,
+    });
+    await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "name_soap",
+      target: { name_normalized: "ANA IONESCU" },
+      cadence_sec: 3600,
+    });
+
+    // Query cu diacritice trebuie sa matcheze valoarea fara diacritice in DB.
+    const r = await app.request("/api/v1/monitoring/jobs?q=" + encodeURIComponent("Ștefan"));
+    const j = (await r.json()) as {
+      data: { total: number; rows: { target_json: string }[] };
+    };
+    expect(j.data.total).toBe(1);
+    expect(JSON.parse(j.data.rows[0]!.target_json)).toMatchObject({
+      name_normalized: "STEFAN POPESCU",
+    });
+  });
+
+  it("filtreaza q + kind combinate (filtre AND-ed)", async () => {
+    const app = buildTestApp();
+    await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/180/2024" },
+      cadence_sec: 3600,
+    });
+    await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "name_soap",
+      target: { name_normalized: "FIRMA 1234 SRL" },
+      cadence_sec: 3600,
+    });
+
+    const r = await app.request("/api/v1/monitoring/jobs?q=1234&kind=name_soap");
+    const j = (await r.json()) as {
+      data: { total: number; rows: { kind: string }[] };
+    };
+    expect(j.data.total).toBe(1);
+    expect(j.data.rows[0]!.kind).toBe("name_soap");
+  });
+
+  it("escapeaza wildcard-uri din q (50% nu degenereaza in match-all)", async () => {
+    const app = buildTestApp();
+    await postJson(app, "/api/v1/monitoring/jobs", {
+      kind: "name_soap",
+      target: { name_normalized: "FIRMA AB" },
+      cadence_sec: 3600,
+    });
+
+    // % literal in input nu trebuie sa se transforme in wildcard SQL.
+    const r = await app.request("/api/v1/monitoring/jobs?q=" + encodeURIComponent("%"));
+    const j = (await r.json()) as { data: { total: number } };
+    expect(j.data.total).toBe(0);
+  });
 });
 
 // PR-4 C5: manual trigger route. Uses a controllable stub scheduler so the

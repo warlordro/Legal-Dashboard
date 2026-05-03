@@ -4,6 +4,70 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.4] - 2026-05-03
+
+### UX Monitorizare - filtre kind (Dosare/Nume) + search box diacritic-insensitive
+
+Patch UX peste v2.10.3 — singura zona afectata e pagina `Monitorizare`.
+Modulele `Cautare Dosare` si `Termene & Calendar` raman intacte.
+
+Probleme adresate:
+1. Pe DB-uri cu sute de joburi mixte (dosar_soap + name_soap), nu exista un mod
+   rapid de a vedea doar lista de dosare sau doar lista de nume monitorizate.
+2. Cu paginare server-side (introdusa in v2.10.3), lookup-ul unui job specific
+   prin scroll + paginatie e ineficient.
+
+### Backend - GET /api/v1/monitoring/jobs primeste param `q`
+
+`backend/src/schemas/monitoring.ts` (`JobListQuerySchema`):
+- Field nou `q: z.string().trim().min(1).max(100).optional()`. Trim aplicat
+  inainte de validare; `.min(1)` respinge string gol post-trim cu 400.
+
+`backend/src/db/monitoringJobsRepository.ts` (`listJobs`):
+- Cand `q` e prezent, WHERE-ul adauga un OR pe trei `json_extract`-uri:
+  `target_json.numar_dosar` (dosar_soap), `target_json.name_normalized`
+  (name_soap), `target_json.identificator` (placeholder aviz_rnpm).
+- Match diacritic-insensitive + case-insensitive prin `rnpm_norm()` pe coloane.
+  Param-ul `q` e trecut o singura data prin `stripDiacritics().toLowerCase()`
+  pe RHS, apoi `LIKE %...%` cu meta-caractere `%`, `_`, `\` escapate cu `\`
+  ESCAPE clause — input "50%" nu degenereaza in wildcard SQL.
+- Acest comportament reproduce semantica `Cautare Dosare`: cautarea cu
+  diacritice match-uieste fara diacritice si invers ("Ștefan" → "STEFAN
+  POPESCU" si "Stefan" → "Ștefan Popescu").
+
+### Frontend - filtre Toate/Dosare/Nume + search input
+
+`frontend/src/lib/monitoringApi.ts`:
+- `monitoring.list({ ..., q })` accepta noul param. Trim + drop pe gol inainte
+  de a-l atasa la `URLSearchParams`.
+
+`frontend/src/pages/Monitorizare.tsx`:
+- State nou `kindFilter` (`"all" | "dosar_soap" | "name_soap"`) +
+  `searchInput` (raw) + `debouncedQuery` (300ms debounce -> evita request
+  spam la fiecare keystroke).
+- Tab-bar de 3 butoane (`Toate`, `Dosare`, `Nume`) + `Input` cu icon `X` pentru
+  clear, randate intr-o linie deasupra hint-ului `Selectia opereaza doar pe
+  pagina vizibila`. Buton activ marcat cu `bg-primary` + `text-primary-foreground`.
+- Counter discret `{total} rezultate` afisat doar cand exista filtre active.
+- Empty state contextualizat: `"Niciun rezultat pentru filtrele aplicate.
+  Reseteaza filtrele"` (cu link clickable care reseteaza ambele field-uri),
+  vs. mesajul vechi de "niciun job activ" pastrat doar pentru cazul fara filtre.
+- `useEffect([kindFilter, debouncedQuery])` reseteaza `page` la 0 cand filtrele
+  se schimba — altfel utilizatorul aplica filtru pe pagina 7 si vede gol pana
+  la recovery-ul de retro-decrementare.
+
+### Tests
+
+- `backend/src/schemas/monitoring.test.ts`: 3 noi (`q` trim, gol post-trim,
+  >100 chars).
+- `backend/src/routes/monitoring.test.ts`: 4 noi (`q` matches numar_dosar,
+  `q` cu diacritice matcheaza valoare fara diacritice, `q` + `kind` AND-ed,
+  wildcard `%` escapat la match literal).
+
+**697 teste backend** (zero regresii pe restul suite-ului).
+
+---
+
 ## [2.10.3] - 2026-05-03
 
 ### UX Monitorizare - paginare server-side, buton Anuleaza, normalizare UPPERCASE

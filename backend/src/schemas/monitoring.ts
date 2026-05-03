@@ -143,7 +143,12 @@ export const JobUpdateBodySchema = z
 
 export type JobUpdateBody = z.infer<typeof JobUpdateBodySchema>;
 
-// Query string for GET /jobs — pagination + optional kind filter.
+// Query string for GET /jobs — pagination + optional kind/active/q filters.
+// `q` (free-text search) face match diacritic-insensitive case-insensitive pe:
+//   - target_json.numar_dosar (dosar_soap)
+//   - target_json.name_normalized (name_soap)
+//   - target_json.identificator (aviz_rnpm — placeholder pana la PR-aviz)
+// Limita 100 char ca sa nu generam LIKE patterns absurde.
 export const JobListQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
@@ -153,6 +158,7 @@ export const JobListQuerySchema = z
       .enum(["true", "false"])
       .transform((v) => v === "true")
       .optional(),
+    q: z.string().trim().min(1).max(100).optional(),
   })
   .strict();
 

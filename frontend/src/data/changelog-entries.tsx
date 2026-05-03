@@ -18,6 +18,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.4",
+    date: "3 Mai 2026",
+    subtitle:
+      "Patch UX Monitorizare — filtre kind (Toate / Dosare / Nume) + search box pe lista de monitorizari. Cautarea e diacritic-insensitive si case-insensitive (la fel ca in Cautare Dosare): query cu diacritice matcheaza valori fara diacritice si invers. Modulele Cautare Dosare si Termene & Calendar raman intacte.",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Frontend - tab-bar Toate / Dosare / Nume + search input",
+        content:
+          "Pagina Monitorizare primeste deasupra tabelului un tab-bar de 3 butoane (Toate / Dosare / Nume) si un input de cautare cu icon X pentru clear. Filtrul de tip ascunde cealalta categorie (de ex. Dosare ascunde toate jobs name_soap), iar input-ul filtreaza dupa numar dosar sau dupa nume. Counter discret \"{total} rezultate\" afisat doar cand exista filtre active. Empty state contextualizat: cand filtrele aplicate nu au rezultat, se afiseaza un mesaj cu link \"Reseteaza filtrele\" in loc de mesajul vechi de \"niciun job activ\".",
+      },
+      {
+        title: "Frontend - debounce 300ms + reset paginatie pe schimbare filtru",
+        content:
+          "Search input-ul foloseste un debouncedQuery cu delay 300ms ca sa evite request spam la fiecare keystroke. Schimbarea kindFilter sau a debouncedQuery reseteaza automat pagina la 0, altfel utilizatorul aplica un filtru pe pagina 7 si vede gol pana la recovery-ul de retro-decrementare.",
+      },
+      {
+        title: "Backend - GET /api/v1/monitoring/jobs?q=...",
+        content:
+          "JobListQuerySchema capata field q (trim + max 100 chars). listJobs adauga WHERE OR pe trei json_extract-uri: target_json.numar_dosar (dosar_soap), name_normalized (name_soap), identificator (placeholder aviz_rnpm). Match-ul foloseste rnpm_norm() pe coloane (strip diacritice + lowercase) si LIKE %...% cu meta-caractere %, _, \\ escapate cu \\ ESCAPE — input \"50%\" nu degenereaza in wildcard SQL. Comportamentul reproduce semantica Cautare Dosare: query cu diacritice matcheaza valori fara diacritice si invers.",
+      },
+      {
+        title: "Tests",
+        content:
+          "3 teste noi de schema (q trim, gol post-trim respins, > 100 chars respins) + 4 teste de integrare (q matches numar_dosar, q cu diacritice matches valoare fara diacritice in DB, q + kind AND-ed corect, wildcard % escapat la match literal). 697 teste backend (zero regresii).",
+      },
+    ],
+  },
+  {
     version: "v2.10.3",
     date: "3 Mai 2026",
     subtitle:
