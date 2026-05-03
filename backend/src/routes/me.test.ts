@@ -10,7 +10,7 @@ import { getEmailSettings, upsertEmailSettings } from "../db/ownerEmailSettingsR
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
-import { meRouter } from "./me.ts";
+import { meRouter, resetEmailTestCooldownForTests } from "./me.ts";
 import { isMailerConfigured, sendTestEmail } from "../services/email/mailer.ts";
 
 vi.mock("../services/email/mailer.ts", () => ({
@@ -51,6 +51,7 @@ beforeEach(async () => {
   isMailerConfiguredMock.mockReset();
   sendTestEmailMock.mockReset();
   isMailerConfiguredMock.mockReturnValue(false);
+  resetEmailTestCooldownForTests();
 });
 
 afterEach(async () => {

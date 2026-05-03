@@ -7,13 +7,23 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.10.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.10.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.10.0** - PR-11 Email notifiers: alertele de monitorizare pot fi trimise si
-prin SMTP, pe langa inbox-ul `/alerte`, badge-ul rosu, SSE si notificarile
-native. Canalul email este optional, default OFF, configurat prin `SMTP_*` in
-`backend/.env` si izolat de insert-ul alertei: daca SMTP lipseste sau trimite
-eroare, alerta ramane in aplicatie. Predecesor **v2.9.2** - patch notificari
+**v2.10.2** - patch UX peste v2.10.1 (frontend-only, zero backend): coloana
+Detalii din tabelul Monitorizare se afiseaza doar cand cel putin un job are
+continut de aratat (name_soap cu scope restrans pe instante); panourile
+Analiza AI din Cautare Dosare sunt inlocuite cu un banner discret cand nicio
+cheie API (Anthropic / OpenAI / Google) nu este configurata, iar la salvarea
+primei chei panourile reapar automat. Predecesor **v2.10.1** - PR-11 review
+hardening (14 fixes + a11y): SMTP timeouts explicite, per-owner cooldown 60s
+pe `/email-settings/test`, transport cache prin Promise (anti race-condition),
+SMTP_PORT validation, BCC-uri si HTML escape complet pe payload-ul email-ului
+de alerta. Predecesor **v2.10.0** - PR-11 Email notifiers: alertele de
+monitorizare pot fi trimise si prin SMTP, pe langa inbox-ul `/alerte`,
+badge-ul rosu, SSE si notificarile native. Canalul email este optional,
+default OFF, configurat prin `SMTP_*` in `backend/.env` si izolat de
+insert-ul alertei: daca SMTP lipseste sau trimite eroare, alerta ramane in
+aplicatie. Predecesor **v2.9.2** - patch notificari
 native: alertele de monitorizare raman in inbox-ul aplicatiei si in badge-ul
 rosu, iar canalul Windows/macOS are status citibil din Electron, buton de test
 in dialogul de configurare si gating defensiv cand sistemul de operare raporteaza

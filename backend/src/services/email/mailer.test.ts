@@ -143,6 +143,9 @@ describe("send email", () => {
       port: 587,
       secure: false,
       auth: { user: "smtp-user", pass: "smtp-pass" },
+      connectionTimeout: 10_000,
+      greetingTimeout: 5_000,
+      socketTimeout: 15_000,
     });
     expect(mocks.sendMail).toHaveBeenCalledWith(
       expect.objectContaining({
