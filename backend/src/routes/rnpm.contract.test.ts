@@ -31,13 +31,17 @@ import { rnpmRouter } from "./rnpm.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
+import { updateUserRole } from "../db/userRepository.ts";
 
 let tmpRoot: string;
 
 function buildApp() {
-  // The rnpm router currently hardcodes ownerId = "local" everywhere — no
-  // ownerContext middleware needed. We mount it bare so tests reflect what
-  // production actually exposes.
+  // v2.11.0 web-readiness closure: rutele globale (/saved/all, /compact,
+  // /backups, /backups/restore, /open-*-folder) sunt gated de
+  // requireRole("admin"). Pe desktop, getOwnerId(c) returneaza fallback
+  // "local"; testele seed-uiesc un user `local` cu role=admin in beforeEach
+  // ca guard-ul sa lase requestul prin. Restul rutelor (/saved, /searches,
+  // /stats) raman fara guard si folosesc ownerId-ul fallback fara probleme.
   const app = new Hono();
   app.route("/api/v1/rnpm", rnpmRouter);
   return app;
@@ -71,6 +75,11 @@ beforeEach(async () => {
   const seed = new Database(dbPath);
   seed.close();
   getDb();
+  // v2.11.0 closure: rute /saved/all, /compact, /backups* sunt gated admin.
+  // Migration 0002 seed-uieste user-ul `local` cu role=user; promovam la admin
+  // ca requireRole("admin") sa accepte requesturile (in productie, owner-ul
+  // desktop e admin via 0006_admin_roles bootstrap, vezi `setupBootstrapAdmin`).
+  updateUserRole("local", "admin");
 });
 
 afterEach(async () => {
@@ -455,5 +464,86 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
     expect(res.status).toBe(400);
     const body = await jsonOf<{ error: string }>(res);
     expect(typeof body.error).toBe("string");
+  });
+});
+
+// v2.11.0 web-readiness closure (#12): rutele care primesc captchaKey in body
+// (search, bulk, captcha/balance) sunt gated cu 501 in `web` mode pana cand
+// exista per-user server-side captcha key storage. Desktop ramane neschimbat.
+describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => {
+  // Salvam si restauram env-ul ca testele care urmeaza in alte fisiere sa nu
+  // fie poluate. `getAuthMode()` citeste process.env la fiecare apel, asa ca
+  // mutarea variabilei e suficienta.
+  let savedAuthMode: string | undefined;
+  beforeEach(() => {
+    savedAuthMode = process.env.LEGAL_DASHBOARD_AUTH_MODE;
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+  });
+  afterEach(() => {
+    if (savedAuthMode === undefined) delete process.env.LEGAL_DASHBOARD_AUTH_MODE;
+    else process.env.LEGAL_DASHBOARD_AUTH_MODE = savedAuthMode;
+  });
+
+  it("POST /search returns 501 in web mode without consuming the body", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci", params: {}, captchaKey: "x".repeat(20) }),
+    });
+    expect(res.status).toBe(501);
+    const body = await jsonOf<{ error: string }>(res);
+    expect(typeof body.error).toBe("string");
+    expect(body.error).toMatch(/web mode|server-side|captcha/i);
+  });
+
+  it("POST /bulk returns 501 in web mode", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/bulk", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        items: [{ type: "ipoteci", params: {} }],
+        captchaKey: "x".repeat(20),
+      }),
+    });
+    expect(res.status).toBe(501);
+  });
+
+  it("POST /captcha/balance returns 501 in web mode", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captchaKey: "x".repeat(20) }),
+    });
+    expect(res.status).toBe(501);
+  });
+});
+
+// Closure #2 verification: defense-in-depth — un user non-admin nu poate
+// accesa rutele globale chiar daca getOwnerId returneaza id-ul lui.
+describe("requireRole(admin) gate on global rnpm routes (closure #2)", () => {
+  beforeEach(() => {
+    // Demoteaza user-ul local promovat in beforeEach principal: requireRole
+    // trebuie sa returneze 403 pentru un user fara rol admin.
+    updateUserRole("local", "user");
+  });
+
+  it("DELETE /saved/all returns 403 for non-admin", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/saved/all", { method: "DELETE" });
+    expect(res.status).toBe(403);
+  });
+
+  it("POST /compact returns 403 for non-admin", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/compact", { method: "POST" });
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /backups returns 403 for non-admin", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/backups");
+    expect(res.status).toBe(403);
+  });
+
+  it("DELETE /backups returns 403 for non-admin", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/backups", { method: "DELETE" });
+    expect(res.status).toBe(403);
   });
 });

@@ -51,3 +51,6 @@ Thumbs.db
 *.AppImage
 *.deb
 *.rpm
+
+# RNPM debug dumps — contin PII real (CUI, denumire, identificator) si nu trebuie commit
+backend/rnpm-dumps/

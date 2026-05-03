@@ -14,6 +14,9 @@ import { getDbPath, compactDb } from "../db/schema.ts";
 import { getBackupDir, deleteAllBackups, listBackupsWithMeta, restoreFromBackup } from "../db/backup.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { mkdir } from "node:fs/promises";
+import { getOwnerId } from "../middleware/owner.ts";
+import { requireRole } from "../middleware/requireRole.ts";
+import { getAuthMode } from "../auth/config.ts";
 
 function parseProvider(v: unknown): CaptchaProvider | undefined {
   return v === "capsolver" || v === "2captcha" ? v : undefined;
@@ -70,7 +73,12 @@ export const rnpmRouter = new Hono();
 // CP-B8: opt-in idempotency. Clients may include `clientRequestId` (uuid) in the body;
 // a second request with the same (ownerId, clientRequestId) while the first is still
 // in-flight returns 409. Missing `clientRequestId` = legacy behavior (no dedup).
-// Swap ownerId source when multi-user ships; current single-user build always uses "local".
+// Web-readiness closure (v2.11.0): inflight map cheia foloseste owner-ul real
+// (`getOwnerId(c)` din `ownerContext`); pe desktop ramane "local" via fallback,
+// in web mode izoleaza tenants. Acelasi ownerId este propagat la
+// `executeSearch`/`executeBulkSearch` ca service-ul + repo-urile sa scrie sub
+// owner-ul corect — singura schimbare de comportament pe desktop e zero
+// (continua sa scrie sub "local").
 const inflightRequests = new Map<string, Promise<unknown>>();
 function inflightKey(ownerId: string, clientRequestId: string): string {
   return `${ownerId}:${clientRequestId}`;
@@ -82,7 +90,27 @@ function parseClientRequestId(body: Record<string, unknown> | null): string | nu
   return v;
 }
 
+// Web-readiness closure (#12): in `desktop` mode, `captchaKey` vine din
+// safeStorage in renderer si e trimis cu fiecare request — comportament
+// pastrat. In `web` mode browserul nu trebuie sa puna cheia in body
+// (localStorage/inspectabil), asa ca rutele care primesc `captchaKey`
+// raspund 501 pana cand exista per-user server-side storage. Rutele de
+// `/saved`, `/searches`, `/stats`, `/backups/*` raman functionale; doar
+// caile care fac call efectiv la captcha provider sunt blocate.
+function rejectCaptchaKeyInWebMode(c: import("hono").Context): Response | null {
+  if (getAuthMode() !== "web") return null;
+  return c.json(
+    {
+      error:
+        "RNPM in web mode necesita stocare server-side a cheii captcha (neimplementat in v2.11.0). Folositi desktop sau asteptati per-user key storage.",
+    },
+    501,
+  );
+}
+
 rnpmRouter.post("/search", limitSearch, async (c) => {
+  const webGate = rejectCaptchaKeyInWebMode(c);
+  if (webGate) return webGate;
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
   const { type, params, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, startRnpmPage, batchSize, gcode, searchId } = (body ?? {}) as {
@@ -104,8 +132,9 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const existingGcode = typeof gcode === "string" && gcode.length > 0 ? gcode : undefined;
   const existingSearchId = typeof searchId === "number" && Number.isFinite(searchId) ? searchId : undefined;
 
+  const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
-  const dedupKey = clientRequestId ? inflightKey("local", clientRequestId) : null;
+  const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
   if (dedupKey && inflightRequests.has(dedupKey)) {
     return c.json({ error: "Cerere deja in curs (dedup clientRequestId)" }, 409);
   }
@@ -117,6 +146,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     captchaProvider: provider,
     fallback2CaptchaKey: typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
     captchaMode: captchaMode === "race" ? "race" : "sequential",
+    ownerId,
     startRnpmPage: startPage,
     batchSize: batch,
     existingGcode,
@@ -159,6 +189,8 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
 });
 
 rnpmRouter.post("/bulk", limitBulk, async (c) => {
+  const webGate = rejectCaptchaKeyInWebMode(c);
+  if (webGate) return webGate;
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
   const { items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as { items?: unknown; captchaKey?: unknown; captchaProvider?: unknown; fallback2CaptchaKey?: unknown; captchaMode?: unknown };
@@ -170,8 +202,9 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   }
   const provider = parseProvider(captchaProvider);
 
+  const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
-  const dedupKey = clientRequestId ? inflightKey("local", clientRequestId) : null;
+  const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
   if (dedupKey && inflightRequests.has(dedupKey)) {
     return c.json({ error: "Bulk deja in curs (dedup clientRequestId)" }, 409);
   }
@@ -206,7 +239,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     const bulkRun = executeBulkSearch(
       validItems,
       captchaKey,
-      "local",
+      ownerId,
       (p) => { void send(p); },
       defaultRnpmClient,
       controller.signal,
@@ -264,7 +297,7 @@ rnpmRouter.get("/saved/:id", (c) => {
   return c.json(aviz);
 });
 
-rnpmRouter.delete("/saved/all", (c) => {
+rnpmRouter.delete("/saved/all", requireRole("admin"), (c) => {
   const count = deleteAllAvize();
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
@@ -312,7 +345,7 @@ rnpmRouter.get("/stats", async (c) => {
 // `require("electron")` is marked external at bundle time (scripts/build.js) so it
 // resolves at runtime inside the main process; web deployments will hit the catch
 // and return 501.
-rnpmRouter.post("/open-db-folder", (c) => {
+rnpmRouter.post("/open-db-folder", requireRole("admin"), (c) => {
   const dbPath = getDbPath();
   try {
     // esbuild emits `require("electron")` verbatim in the CJS bundle because
@@ -330,7 +363,7 @@ rnpmRouter.post("/open-db-folder", (c) => {
   }
 });
 
-rnpmRouter.post("/compact", (c) => {
+rnpmRouter.post("/compact", requireRole("admin"), (c) => {
   try {
     const result = compactDb();
     return c.json({ ok: true, ...result });
@@ -344,7 +377,7 @@ rnpmRouter.post("/compact", (c) => {
 // later can reconstruct who wiped/rolled back the database. Audit on both
 // success and failure paths — a failed restore that left a pre-restore
 // snapshot behind still matters for reconstruction.
-rnpmRouter.delete("/backups", async (c) => {
+rnpmRouter.delete("/backups", requireRole("admin"), async (c) => {
   try {
     const deleted = await deleteAllBackups();
     recordAudit(c, "backup.delete_all", {
@@ -363,7 +396,7 @@ rnpmRouter.delete("/backups", async (c) => {
   }
 });
 
-rnpmRouter.get("/backups", async (c) => {
+rnpmRouter.get("/backups", requireRole("admin"), async (c) => {
   try {
     const backups = await listBackupsWithMeta();
     return c.json({ backups });
@@ -373,7 +406,7 @@ rnpmRouter.get("/backups", async (c) => {
   }
 });
 
-rnpmRouter.post("/backups/restore", limitSmall, async (c) => {
+rnpmRouter.post("/backups/restore", requireRole("admin"), limitSmall, async (c) => {
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
   const name = (body as { name?: unknown })?.name;
@@ -400,7 +433,7 @@ rnpmRouter.post("/backups/restore", limitSmall, async (c) => {
   }
 });
 
-rnpmRouter.post("/open-backups-folder", async (c) => {
+rnpmRouter.post("/open-backups-folder", requireRole("admin"), async (c) => {
   const dir = getBackupDir();
   try {
     await mkdir(dir, { recursive: true });
@@ -474,6 +507,8 @@ rnpmRouter.delete("/searches/:id", (c) => {
 });
 
 rnpmRouter.post("/captcha/balance", limitSmall, async (c) => {
+  const webGate = rejectCaptchaKeyInWebMode(c);
+  if (webGate) return webGate;
   let body: unknown;
   try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
   const { captchaKey, captchaProvider } = (body ?? {}) as { captchaKey?: unknown; captchaProvider?: unknown };

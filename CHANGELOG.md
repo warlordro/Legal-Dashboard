@@ -4,6 +4,46 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.11.0] - 2026-05-04
+
+### Web-readiness closure + dependency CVE remediation + PII cleanup
+
+Release minor peste v2.10.8 care absoarbe primul lot din `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md`. Trei axe: (1) operational urgent — PII real in git si CVE HIGH `nodemailer`, (2) inchidere bridge web-readiness pentru rutele RNPM (owner propagation, admin guard, AUTH_MODE=web gate), (3) dependency hygiene fara migrare `xlsx`. Comportament desktop neschimbat: `getOwnerId` cade pe `"local"`, user-ul `local` e admin via bootstrap din `0006_admin_roles`, AUTH_MODE default e `desktop`.
+
+### Securitate - PII si CVE
+
+- **`backend/rnpm-dumps/`**: directorul si dump-ul real care contine CUI 39029401, denumire `INSTANT FACTORING IFN` si `J40/3635/2018` scoase din git index (`git rm --cached`); pattern `backend/rnpm-dumps/` adaugat in `.gitignore` pentru a preveni recommit. Fisierul ramane local pentru referinta. Istoricul git inca pastreaza dump-ul; o curatare cu `git filter-repo` ramane optionala (repository privat, blast radius mic).
+- **CVE HIGH `nodemailer` DoS via `addressparser` recursiv** (GHSA-rcmh-qjqh-p98v, CVSS 7.5): bump `^6.9.13` → `^7.0.13`. Acopera si CVE moderate GHSA-mm7p-fcc7-pg87 (interpretation conflict pe domenii). Cele 2 SMTP command injection ramase (GHSA-c7w3-x93f-qmm8 + GHSA-vvjj-xcjg-gr5g, range `<=8.0.4`) cer `transport.name` sau `envelope.size` controlate de atacator; nu sunt expuse user-controlled in `services/email/mailer.ts`.
+- **CVE moderate `@anthropic-ai/sdk` Insecure Default File Permissions in Local Filesystem Memory Tool** (GHSA-p7fg-763f-g4gf): bump `^0.90.0` → `^0.92.0` (semver major; nu folosim Local Filesystem Memory Tool, dar aplicam fix-ul ca recomandat).
+- `xlsx@0.18.5` (HIGH Prototype Pollution + ReDoS, no upstream fix) ramane risc acceptat — folosit doar in frontend `monitoringBulkTemplate.ts` pentru parsare template; migrarea catre `exceljs` e amanata pentru o sesiune separata. Backend `nameListParser.ts` e deja pe `exceljs@^4.4.0` din v2.6.4. `uuid <14.0.0` (transitive via `exceljs`) ramane CVE moderat documentat (atacul cere buf cu lungime controlata, exceljs nu il expune pe acel path).
+
+### Backend - web-readiness closure pentru RNPM
+
+- **Closure #1 (owner propagation)**: `routes/rnpm.ts` inlocuieste cele trei hardcodari `"local"` (idempotency `dedupKey` pe `/search` + `/bulk` si argumentul `executeBulkSearch`) cu `getOwnerId(c)`. Service-ul accepta deja `ownerId`; `executeSearch` primeste acum `ownerId: getOwnerId(c)` explicit ca `searchId`-ul si `aviz`-ul nou create sa fie scrise sub owner-ul real al request-ului. Pe desktop ramane `"local"` via fallback in `getOwnerId`; in web mode izoleaza inflight map + scriituri intre tenants.
+- **Closure #2 (admin guard pe rute globale)**: `requireRole("admin")` montat pe `DELETE /saved/all`, `POST /compact`, `GET /backups`, `DELETE /backups`, `POST /backups/restore`, `POST /open-db-folder`, `POST /open-backups-folder`. Pe desktop, user-ul `local` e admin via `0006_admin_roles` bootstrap, deci comportament neschimbat. In web mode, doar admini pot face wipe global / compact / backup ops.
+- **Closure #12 (AUTH_MODE=web gate pe captchaKey body)**: helper `rejectCaptchaKeyInWebMode(c)` in `routes/rnpm.ts` raspunde 501 cu mesaj romanesc cand `getAuthMode() === "web"`, montat pe `POST /search`, `POST /bulk`, `POST /captcha/balance`. Defense-in-depth pentru ce ar fi un anti-pattern in web (cheie captcha plain in body / localStorage / fetch DevTools). Per-user server-side key storage ramane TBD pentru un release viitor.
+
+### Tests
+
+- **728 teste backend** (de la 721 baseline v2.10.6 — +7 noi in `routes/rnpm.contract.test.ts`): 3 pentru gate-ul AUTH_MODE=web (`/search`, `/bulk`, `/captcha/balance` returneaza 501) + 4 pentru defense-in-depth admin guard (`updateUserRole("local","user")` urmat de 403 pe `/saved/all`, `/compact`, `GET /backups`, `DELETE /backups`).
+- Test setup actualizat: `beforeEach` promoveaza user-ul `local` (seed-uit de migration 0002 cu role=user) la `admin` via `updateUserRole("local","admin")`, ca rutele admin-gated sa fie testabile in vitest fara seam-ul `setupBootstrapAdmin` din productie.
+- **73 teste frontend** neschimbate.
+
+### Build script
+
+- `scripts/build-server.js`: ZIP output rebrand `portaljust-server-${version}.zip` → `legal-dashboard-server-${version}.zip`; titlul console + README.txt aliniate la branding-ul actual.
+
+### Documentatie
+
+- `CHANGELOG.md` (acest fisier), `README.md`, `STATUS.md`, `SESSION-HANDOFF.md`, `EXECUTION-ROADMAP.md`, `CLAUDE.md` actualizate pentru v2.11.0.
+- `frontend/src/data/changelog-entries.tsx`: entry nou v2.11.0 in changelog-ul din aplicatie.
+
+### Versionare
+
+- Bump la `2.11.0` in `package.json`, `backend/package.json`, `frontend/package.json` si `package-lock.json` (root + workspace pkgs).
+
+---
+
 ## [2.10.8] - 2026-05-04
 
 ### CI hardening — type-check + test gate inainte de packaging + artifact naming

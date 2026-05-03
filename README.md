@@ -7,10 +7,27 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.10.8**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.11.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release este **v2.10.8** - patch CI-only peste v2.10.7. Workflow-urile
+Ultimul release este **v2.11.0** - deep-review remediation peste v2.10.8.
+Absoarbe `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md` (PR A operational + PR
+Web-Readiness Closure) cu exceptia trecerii frontend `xlsx` → `exceljs` (deferata
+ca scope separat). Securitate: directorul `backend/rnpm-dumps/` cu PII real
+(CUI, denumire, identificator) a fost adaugat in `.gitignore` ca sa nu mai poata
+fi commit-at accidental; `nodemailer` `^6.9.13` → `^7.0.13` (HIGH DoS
+GHSA-rcmh-qjqh-p98v / CVSS 7.5 patched 7.0.11+); `@anthropic-ai/sdk` `^0.90.0`
+→ `^0.92.0` (moderate file-perms GHSA-p7fg-763f-g4gf). Backend: `routes/rnpm.ts`
+propaga `ownerId = getOwnerId(c)` end-to-end (search/bulk + dedup
+`inflightKey(ownerId, ...)` ); `requireRole("admin")` aplicat pe rutele globale
+RNPM (`DELETE /saved/all`, `POST /compact`, `DELETE/GET/POST /backups{,/restore}`,
+`POST /open-{db,backups}-folder`); `POST /search`/`/bulk`/`/captcha/balance`
+returneaza 501 in `AUTH_MODE=web` (RNPM necesita per-user key storage
+server-side, neimplementat). Build: `scripts/build-server.js` rebrand
+`portaljust` → `legal-dashboard`. Tests: 728/728 backend (+7 contract noi pe
+admin guard + web-mode 501), 73/73 frontend.
+
+Predecesor **v2.10.8** - patch CI-only peste v2.10.7. Workflow-urile
 GitHub Actions (`build-windows.yml` si `build-mac.yml`) ruleaza acum
 `tsc --noEmit` + `vitest run` pentru backend si frontend **inainte** de
 packaging — pe Windows ordinea conteaza pentru ABI-ul `better-sqlite3` (testele

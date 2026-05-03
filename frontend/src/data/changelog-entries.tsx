@@ -18,6 +18,52 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.11.0",
+    date: "4 Mai 2026",
+    subtitle:
+      "Release minor peste v2.10.8. Inchidem primul lot din review-ul extern: PII real (un dump RNPM cu CUI/denumire) scos din git, CVE HIGH nodemailer DoS si CVE moderate Anthropic SDK fix-uite, plus inchiderea bridge-ului web-readiness pentru RNPM (owner propagation, admin guard, AUTH_MODE=web gate). Pe desktop comportamentul ramane neschimbat.",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-rose-500",
+    badgeClass: "bg-rose-100 text-rose-800 dark:bg-rose-900/30 dark:text-rose-400",
+    sections: [
+      {
+        title: "Securitate - dump RNPM scos din git + .gitignore",
+        content:
+          "Un dump RNPM real (CUI 39029401, denumire INSTANT FACTORING IFN, identificator J40/3635/2018) era trackuit in git la backend/rnpm-dumps/. L-am scos din index cu git rm --cached si am adaugat pattern-ul backend/rnpm-dumps/ in .gitignore ca sa nu se mai recommiteze. Fisierul ramane local pentru referinta; istoricul git inca il pastreaza, dar repository-ul este privat si blast-radius-ul ramane mic.",
+      },
+      {
+        title: "Securitate - bump nodemailer + Anthropic SDK",
+        content:
+          "nodemailer ^6.9.13 → ^7.0.13 acopera CVE HIGH GHSA-rcmh-qjqh-p98v (DoS via addressparser recursiv) si CVE moderate GHSA-mm7p-fcc7-pg87 (interpretation conflict pe domenii). @anthropic-ai/sdk ^0.90.0 → ^0.92.0 inchide CVE moderate GHSA-p7fg-763f-g4gf (Insecure Default File Permissions in Local Filesystem Memory Tool — nu il folosim, dar aplicam fix-ul ca recomandat). xlsx@0.18.5 ramane risc acceptat: HIGH Prototype Pollution + ReDoS fara fix upstream, folosit doar in template-ul de bulk import.",
+      },
+      {
+        title: "Backend - RNPM owner propagation end-to-end (closure #1)",
+        content:
+          "routes/rnpm.ts inlocuieste cele trei hardcodari ownerId='local' (inflight map pe /search + /bulk si argumentul executeBulkSearch) cu getOwnerId(c). executeSearch primeste acum ownerId explicit ca searchId si aviz-urile noi sa fie scrise sub owner-ul real. Pe desktop fallback ramane local; in web mode izoleaza tenants la nivel de cache si DB.",
+      },
+      {
+        title: "Backend - admin guard pe rute globale RNPM (closure #2)",
+        content:
+          "requireRole('admin') montat pe DELETE /saved/all, POST /compact, GET /backups, DELETE /backups, POST /backups/restore, POST /open-db-folder, POST /open-backups-folder. Pe desktop user-ul local e admin via 0006_admin_roles bootstrap, deci comportament neschimbat. In web mode, wipe global / compact / backup ops sunt accesibile doar admin-ilor.",
+      },
+      {
+        title: "Backend - AUTH_MODE=web gate pe captchaKey body (closure #12)",
+        content:
+          "Helper-ul rejectCaptchaKeyInWebMode(c) returneaza 501 cu mesaj romanesc pe POST /search, /bulk, /captcha/balance cand AUTH_MODE=web. Browserul nu trebuie sa puna cheia in body (localStorage / DevTools fetch); per-user server-side key storage ramane TBD pentru un release viitor.",
+      },
+      {
+        title: "Tests - 728 backend (+7 noi) / 73 frontend",
+        content:
+          "Adaugate in routes/rnpm.contract.test.ts: 3 teste pentru gate-ul AUTH_MODE=web (501 pe /search, /bulk, /captcha/balance) + 4 teste pentru admin guard defense-in-depth (403 pe /saved/all, /compact, GET/DELETE /backups dupa demote-ul user-ului local la role=user). Test setup promoveaza user-ul local la admin via updateUserRole pentru rutele admin-gated.",
+      },
+      {
+        title: "Build script + Docs",
+        content:
+          "scripts/build-server.js: ZIP output rebrand portaljust-server-${version}.zip → legal-dashboard-server-${version}.zip; titlul console + README.txt aliniate la branding. CHANGELOG.md, STATUS.md, README.md, SESSION-HANDOFF.md, EXECUTION-ROADMAP.md, CLAUDE.md actualizate. Versionare bump la 2.11.0 in toate cele 3 manifests + package-lock.json.",
+      },
+    ],
+  },
+  {
     version: "v2.10.8",
     date: "4 Mai 2026",
     subtitle:

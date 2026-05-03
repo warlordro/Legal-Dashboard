@@ -1,6 +1,106 @@
-# Session Handoff - v2.10.8 (CI hardening — test gate + artifact naming)
+# Session Handoff - v2.11.0 (deep-review remediation — PII/CVE + web-readiness closure)
 
 **Data**: 2026-05-04
+
+## v2.11.0 - Deep-review remediation (PR A operational + Web-Readiness Closure)
+
+Sweep peste v2.10.8 care absoarbe `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md`
+(PR A operational + PR Web-Readiness Closure) **cu o singura exceptie**:
+trecerea frontend `xlsx` → `exceljs` ramane deferata ca scope separat. xlsx
+nu mai e pe path-ul de input user din v2.6.4 (mutat in `devDependencies`,
+folosit doar pe path write-only prin `xlsx-js-style` si in fixturile de test).
+
+**Securitate (PII + CVE)**:
+- `.gitignore`: directorul `backend/rnpm-dumps/` (PII real RNPM — CUI,
+  denumire, identificator) adaugat ca pattern explicit. Continea fisiere `.txt`
+  cu raspunsuri SOAP capturate in dev pentru investigatii — nu mai pot fi
+  commit-ate accidental.
+- `backend/package.json`: `nodemailer` `^6.9.13` → `^7.0.13`. CVE GHSA-rcmh-qjqh-p98v
+  (HIGH DoS, CVSS 7.5) este patched in 7.0.11+. SemVer major bump (6→7) — usage
+  existent in `services/email/mailer.ts` (`createTransport`, `verify`,
+  `sendMail`) ramane API-compatibil, fara modificari de cod necesare.
+- `backend/package.json`: `@anthropic-ai/sdk` `^0.90.0` → `^0.92.0`. CVE
+  GHSA-p7fg-763f-g4gf (moderate file-perms) patched. Usage existent in
+  `services/ai.ts` (`new Anthropic({...})`, `messages.create`) ramane neschimbat.
+- `npm audit` final: 4 high/moderate (de la 6 inainte). Remaining: `xlsx@0.18.5`
+  HIGH (no upstream fix, mutat in devDependencies — accepted), `uuid <14.0.0`
+  moderate transitiv (accepted), 2 nodemailer SMTP injection (necesita crafted
+  `transport.name`/`envelope.size` — threat realistic foarte scazut, accepted).
+
+**Backend — Closure deep-review #1 (RNPM owner propagation)**:
+- `backend/src/routes/rnpm.ts`: `POST /search` si `POST /bulk` calculeaza
+  `const ownerId = getOwnerId(c);` la inceputul handler-ului si propaga prin
+  `executeSearch({..., ownerId})` si `executeBulkSearch(items, captchaKey,
+  ownerId, ...)`. Anterior aceste rute foloseau `"local"` hardcodat indiferent
+  de modul AUTH (in desktop e safe pentru ca `getOwnerId` returneaza `"local"`,
+  dar pe path-ul web ar fi mascat owner-ul real al request-ului).
+- `inflightKey(ownerId, clientRequestId)` pentru dedup-ul idempotency: anterior
+  `inflightKey("local", clientRequestId)` ar fi colizionat intre useri diferiti
+  in web mode care emit acelasi `clientRequestId` (UUID v4 ar face coliziunea
+  improbabila statistic, dar cleanup-ul nu mai e robust impotriva attacker-ului
+  intentionat).
+
+**Backend — Closure #2 (admin guard pe global routes)**:
+- `requireRole("admin")` aplicat ca middleware pe rutele "global state" din
+  `routes/rnpm.ts`:
+  - `DELETE /saved/all` (sterge **toate** avizele salvate din DB)
+  - `POST /compact` (VACUUM SQLite + WAL checkpoint global)
+  - `DELETE /backups` (sterge fisiere backup de pe disc)
+  - `GET /backups` (lista fisierelor backup — informatie operationala)
+  - `POST /backups/restore` (overwrite DB live)
+  - `POST /open-db-folder` (deschide directorul `userData` in OS)
+  - `POST /open-backups-folder` (deschide directorul backup in OS)
+  - In desktop usage flow, `local` user e seed-uit cu role `user` (vezi
+    migration 0002), iar bootstrap admin se face manual via 0006_admin_roles.
+    Pe path-ul web aceste rute sunt **strict admin-only**, fara middleware ar
+    permite oricarui caller autentificat sa stearga datele globale sau sa lanseze
+    restore.
+
+**Backend — Closure #12 (web mode captchaKey body refuz)**:
+- Helper nou `rejectCaptchaKeyInWebMode(c)` in `routes/rnpm.ts` returneaza
+  `501` cu mesaj romanesc cand `getAuthMode() === "web"`. Aplicat la inceputul
+  handler-elor pentru `POST /search`, `POST /bulk`, `POST /captcha/balance`.
+  Ratiunea: in web mode, cheia 2Captcha/CapSolver vine din body-ul request-ului
+  fara stocare server-side; expune cheia in network call si o face accesibila
+  oricarui middleware/proxy intermediar. v2.11.0 nu implementeaza per-user key
+  storage server-side (necesita migration noua + UI nou), deci RNPM ramane
+  **intentionat dezactivat in web mode**.
+
+**Build script — rebrand**:
+- `scripts/build-server.js`: `outName = "portaljust-server-${version}"` →
+  `"legal-dashboard-server-${version}"`; banner CLI si `README.txt` aliniate.
+  Anterior generau ZIP-uri cu nume care confunda artefactul cu PortalJust.
+
+**Tests — 728 backend (de la 721)**:
+- `backend/src/routes/rnpm.contract.test.ts` adauga 7 teste noi:
+  - 3 teste pentru web-mode 501 gate (set `LEGAL_DASHBOARD_AUTH_MODE=web`,
+    POST `/search`/`/bulk`/`/captcha/balance` cu body valid → expect 501 + mesaj
+    romanesc).
+  - 4 teste pentru admin-required rejection: `updateUserRole("local", "user")`
+    in `beforeEach`, apoi DELETE `/saved/all`, POST `/compact`, POST
+    `/backups/restore`, GET `/backups` → expect 403.
+- `beforeEach` adauga `updateUserRole("local", "admin")` ca testele existente
+  sa treaca dupa adaugarea middleware-ului. Migration 0002 seed-uieste `local`
+  cu role=user, deci rutele admin-required ar fi 403 fara promote explicit.
+- 73/73 frontend neschimbate.
+
+**Validare**:
+- `npx tsc --noEmit -p backend/tsconfig.json` verde local.
+- `cd frontend && npx tsc --noEmit` verde local.
+- `npm test --workspace=backend -- --run` 728/728 verde.
+- `cd frontend && npm test -- --run` 73/73 verde.
+- `npx biome check` verde.
+- `npm rebuild better-sqlite3` rulat dupa testele Node ca Electron sa porneasca
+  cu ABI corect la urmatorul `electron:dev` (testele lasa ABI 145 pentru Node 24,
+  Electron 41 cere ABI 137).
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json` si
+  `package-lock.json` sincronizate la `2.11.0`. Bump minor (nu patch) pentru ca
+  pune in pluso o feature noua (web-mode 501 gate + admin guard pe rute
+  globale RNPM) care schimba contractul API observabil din afara.
+- `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md`,
+  `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md` si acest handoff actualizate.
 
 ## v2.10.8 - CI hardening (test gate + artifact naming)
 

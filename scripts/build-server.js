@@ -8,11 +8,11 @@ const root = resolve(__dirname, "..");
 
 const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf-8"));
 const version = pkg.version;
-const outName = `portaljust-server-${version}`;
+const outName = `legal-dashboard-server-${version}`;
 const outDir = resolve(root, "server-release", outName);
 const zipPath = resolve(root, "server-release", `${outName}.zip`);
 
-console.log(`=== Building PortalJust Dashboard Server v${version} ===\n`);
+console.log(`=== Building Legal Dashboard Server v${version} ===\n`);
 
 // 1. Run main build (frontend + backend)
 console.log("[1/4] Building frontend + backend...");
@@ -59,7 +59,7 @@ if not exist node_modules\\better-sqlite3 (
 set NODE_ENV=production
 node dist-backend\\index.cjs
 `);
-writeFileSync(join(outDir, "README.txt"), `PortalJust Dashboard Server v${version}
+writeFileSync(join(outDir, "README.txt"), `Legal Dashboard Server v${version}
 ========================================
 
 Cerinte: Node.js v22+
