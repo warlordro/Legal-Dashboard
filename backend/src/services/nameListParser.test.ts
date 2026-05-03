@@ -38,8 +38,8 @@ function xlsx(rows: string[][]): Buffer {
 }
 
 describe("normalizeName", () => {
-  it("strip-uieste diacritice + lowercase + collapse whitespace", () => {
-    expect(normalizeName("Ștefăn   Țîrcă  ")).toBe("stefan tirca");
+  it("strip-uieste diacritice + UPPERCASE + collapse whitespace", () => {
+    expect(normalizeName("Ștefăn   Țîrcă  ")).toBe("STEFAN TIRCA");
   });
   it("trateaza null/undefined ca string gol", () => {
     expect(normalizeName(null as unknown as string)).toBe("");
@@ -55,8 +55,8 @@ describe("parseNameList — CSV", () => {
     expect(r.totals.ok).toBe(2);
     expect(r.totals.warn).toBe(0);
     expect(r.totals.rejected).toBe(0);
-    expect(r.rows[0]?.nameNormalized).toBe("ion popescu");
-    expect(r.rows[1]?.nameNormalized).toBe("acme srl");
+    expect(r.rows[0]?.nameNormalized).toBe("ION POPESCU");
+    expect(r.rows[1]?.nameNormalized).toBe("ACME SRL");
   });
 
   it("accepta separator ';' (Excel ro-RO export)", async () => {

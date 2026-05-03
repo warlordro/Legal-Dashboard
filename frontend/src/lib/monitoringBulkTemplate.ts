@@ -345,7 +345,10 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
 
     const numarDosar =
       colNumarDosar >= 0 ? String(row[colNumarDosar] ?? "").trim() : "";
-    const nameNorm = colNume >= 0 ? String(row[colNume] ?? "").trim() : "";
+    // Regula import (2026-05-03): numele de monitorizare sunt mereu UPPERCASE.
+    // PortalJust SOAP CautareDosare e case-insensitive pe numeParte, deci
+    // schimbarea nu afecteaza match-ul; uniformitatea ajuta UI-ul si dedup-ul.
+    const nameNorm = colNume >= 0 ? String(row[colNume] ?? "").trim().toUpperCase() : "";
     const cadenceFinal =
       colCadence >= 0 ? parseCadence(row[colCadence]) : undefined;
     const notes =

@@ -57,7 +57,8 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
         });
         setNumarDosar("");
       } else {
-        const trimmedName = nameValue.trim();
+        // Regula import (2026-05-03): numele de monitorizare sunt mereu UPPERCASE.
+        const trimmedName = nameValue.trim().toUpperCase();
         if (trimmedName.length < 2) {
           setFormError("Numele trebuie sa aiba minim 2 caractere");
           setSubmitting(false);

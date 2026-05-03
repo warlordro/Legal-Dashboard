@@ -5,6 +5,7 @@ import {
   FileSpreadsheet,
   ChevronDown,
   ChevronRight,
+  X,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -229,6 +230,18 @@ export function MonitoringBulkImportCard({
     }
   };
 
+  const handleBulkCancel = () => {
+    setBulkPreview(null);
+    setBulkCommit(null);
+    setBulkDosarRows([]);
+    setBulkDosarResult(null);
+    setBulkCommitProgress({ created: 0, remaining: 0 });
+    setBulkError(null);
+    setBulkTitle("");
+    setBulkFilter("all");
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  };
+
   const visiblePreviewRows = bulkPreview
     ? bulkPreview.rows.filter((row) => bulkFilter === "all" || row.validation === bulkFilter)
     : [];
@@ -354,6 +367,15 @@ export function MonitoringBulkImportCard({
                 {bulkBusy
                   ? `Import... ${bulkCommitProgress.created} create`
                   : "Confirma import"}
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleBulkCancel}
+                disabled={bulkBusy}
+              >
+                <X className="h-4 w-4" />
+                Anuleaza
               </Button>
             </div>
 

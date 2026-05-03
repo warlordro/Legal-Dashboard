@@ -168,13 +168,18 @@ function buildHeaderMap(headers: string[]): HeaderMap {
   return { nume, cnp, cui, cadenceSec, notes };
 }
 
-// Normalizare interna a numelui: lowercase + diacritic strip + collapse
+// Normalizare interna a numelui: UPPERCASE + diacritic strip + collapse
 // whitespace. Folosita ATAT pentru CHECK-ul de min/max chars CAT si pentru
 // dedup-ul intra-fisier. Pastram name_raw exact cum a fost in fisier ca sa-l
 // putem afisa in UI / log-uri.
+//
+// Regula UPPERCASE (2026-05-03): toate numele de monitorizare se stocheaza in
+// UPPERCASE — uniform indiferent ca utilizatorul tasteaza "popescu ion" sau
+// imports XLSX cu mixed case. PortalJust SOAP CautareDosare e case-insensitive
+// pe numeParte, deci schimbarea nu afecteaza match-ul.
 export function normalizeName(s: string): string {
   return stripDiacritics(String(s ?? ""))
-    .toLowerCase()
+    .toUpperCase()
     .replace(/\s+/g, " ")
     .trim();
 }

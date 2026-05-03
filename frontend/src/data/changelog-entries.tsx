@@ -18,6 +18,47 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.3",
+    date: "3 Mai 2026",
+    subtitle:
+      "Patch UX Monitorizare + filtru strict word match name_soap. Paginare server-side pe pagina Monitorizare (10/25/50/100 joburi/pagina) inlocuieste limita statica de 100; buton Anuleaza pe import bulk; uniformizare UPPERCASE pe toate caile de input (XLSX, CSV, manual). Backend: nameSoapRunner filtreaza false-pozitivele PortalJust cerand TOATE cuvintele numelui in aceeasi parte; suffix-urile legale (SRL/SA/etc.) sunt ignorate la match indiferent de forma (S.R.L. ≡ SRL).",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "Frontend - paginare server-side pe Monitorizare",
+        content:
+          "Pagina Monitorizare afisa pana acum maxim 100 joburi cu un banner static \"Sunt cel putin 100 joburi vizibile (din 617 total)\". Acum tabelul are paginare standard cu state page/pageSize, TablePagination randat sub tabel, optiuni 10/25/50/100/pagina (cap-ul 100 matches limita backend JobListQuerySchema). Recovery automat la pagina goala dupa delete (decrement page daca jobs.length=0 si total>0 si page>0).",
+      },
+      {
+        title: "Frontend - buton Anuleaza pe import bulk",
+        content:
+          "MonitoringBulkImportCard primeste un buton Anuleaza (cu icon X, variant outline) langa Confirma import. Click reseteaza preview/dosar rows/error/title/filter + goleste fileInput, fara confirmare suplimentara — flow-ul e non-destructive (preview-ul nu inseamna inca commit in DB).",
+      },
+      {
+        title: "Frontend + backend - normalizare UPPERCASE pe import",
+        content:
+          "Numele de monitorizare se stocheaza acum UNIFORM in UPPERCASE indiferent de calea de input. PortalJust SOAP CautareDosare e case-insensitive pe numeParte, deci match-ul nu se schimba; uniformitatea elimina vizual amestecul \"AMBKEVEN SRL\" + \"global learning logistics srl\" din tabel. nameListParser.normalizeName (backend) face .toUpperCase() — defense-in-depth pe orice path care intra prin validare. monitoringBulkTemplate.ts (parser XLSX/CSV) si MonitoringAddForm.tsx (form manual) uppercaseaza la sursa. Datele vechi raman lowercase (fara migratie destructiva); randurile noi importate sunt UPPERCASE.",
+      },
+      {
+        title: "Backend - filtru strict word match name_soap",
+        content:
+          "PortalJust SOAP CautareDosare returneaza dosare pe match substring pe oricare dintre cuvintele din numeParte (\"GLOBAL LEARNING LOGISTICS\" prinde si \"GLOBAL LOGISTICS SA\"). nameSoapRunner aplica acum un filtru post-fetch: un dosar e pastrat doar daca exista o parte (dosar.parti[i].nume) ai carei tokeni contin TOATE tokenii numelui monitorizat. Match-ul e strict pe egalitate de tokeni (nu substring), case-insensitive, fara diacritice. Caracterul & e promovat ca token de sine statator: \"ABC&XYZ\" si \"ABC & XYZ\" se echivaleaza la nivel de token.",
+      },
+      {
+        title: "Backend - exceptie suffix legal",
+        content:
+          "Suffix-urile legale (SRL, SA, SCA, SNC, SCS, PFA, IF pentru RO + LLC, LTD, INC pentru entitati intl) sunt eliminate de la coada listei de tokeni inainte de comparare, indiferent de forma (SRL, S.R.L., S.R.L, SRL.). Target \"GLOBAL LEARNING LOGISTICS\" matcheaza parte \"GLOBAL LEARNING LOGISTICS SRL\"; target \"X SRL\" matcheaza parte \"X\"; variatiile S.R.L. vs SRL nu mai produc false-negative.",
+      },
+      {
+        title: "Tests",
+        content:
+          "6 teste noi in nameSoapRunner.test.ts (tokenize &, strip diacritice, all-words required, multi-party match, parti goale → false, runner-level filter, & literal). 3 teste actualizate in nameListParser.test.ts pe output UPPERCASE. 690 teste backend total (zero regresii).",
+      },
+    ],
+  },
+  {
     version: "v2.10.2",
     date: "3 Mai 2026",
     subtitle:

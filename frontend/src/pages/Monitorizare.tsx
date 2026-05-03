@@ -21,6 +21,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { TablePagination } from "@/components/table-pagination";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
 import {
@@ -59,6 +60,9 @@ export default function Monitorizare({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [openInstantePopover, setOpenInstantePopover] = useState<number | null>(null);
+  // v2.10.3 paginare server-side. Backend cap: 100 / pagina (JobListQuerySchema).
+  const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState(50);
   // v2.10.1 #12: focus restoration — store the element that opened the modal
   // so we can return focus to it on close (a11y: tab order continuity).
   const lastFocusedRef = useRef<HTMLElement | null>(null);
@@ -87,7 +91,8 @@ export default function Monitorizare({
     setLoading(true);
     setError(null);
     try {
-      const result = await monitoring.list({ pageSize: 100 });
+      // Server is 1-indexed; UI keeps 0-indexed pages for TablePagination parity.
+      const result = await monitoring.list({ page: page + 1, pageSize });
       setJobs(result.rows);
       setTotal(result.total);
     } catch (e) {
@@ -95,11 +100,22 @@ export default function Monitorizare({
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, pageSize]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  // If a delete leaves the current page empty (e.g. last item on last page),
+  // step back so the user doesn't land on an empty grid.
+  useEffect(() => {
+    if (loading) return;
+    if (jobs.length === 0 && total > 0 && page > 0) {
+      setPage((p) => Math.max(0, p - 1));
+    }
+  }, [jobs.length, total, page, loading]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   // Prune selection of IDs that no longer exist (after refresh / bulk delete)
   useEffect(() => {
@@ -327,12 +343,7 @@ export default function Monitorizare({
               {error}
             </div>
           )}
-          {jobs.length >= 100 && (
-            <div className="mb-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-400">
-              Sunt cel putin {jobs.length} joburi vizibile{total > jobs.length ? ` (din ${total} total)` : ""}; pot exista mai multe nelistate. Foloseste filtre pentru a reduce setul.
-            </div>
-          )}
-          {total > jobs.length && jobs.length < 100 && (
+          {total > jobs.length && (
             <div className="mb-3 text-xs text-muted-foreground">
               Selectia opereaza doar pe pagina vizibila ({jobs.length} din {total}).
             </div>
@@ -591,6 +602,20 @@ export default function Monitorizare({
             </div>
             );
           })()}
+          {total > 0 && (
+            <TablePagination
+              page={page}
+              totalPages={totalPages}
+              pageSize={pageSize}
+              pageSizes={[10, 25, 50, 100]}
+              onPageChange={setPage}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(0);
+              }}
+              disabled={loading}
+            />
+          )}
         </CardContent>
       </Card>
       {openInstantePopover !== null && (() => {

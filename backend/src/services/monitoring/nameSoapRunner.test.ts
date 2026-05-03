@@ -6,7 +6,11 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
 import { getLatestSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
-import { createNameSoapRunner } from "./nameSoapRunner.ts";
+import {
+  createNameSoapRunner,
+  dosarMatchesAllNameTokens,
+  tokenizeNameForMatch,
+} from "./nameSoapRunner.ts";
 import type { ScheduledJob } from "./scheduler.ts";
 import type { Dosar } from "../../soap.ts";
 
@@ -85,6 +89,12 @@ function makeDosar(
   stadiuProcesual = "fond",
   categorieCaz = "civil",
   institutie = "Judecatoria Test",
+  // Default party-ul match-uieste targetul implicit "ion popescu" — strict
+  // word filter (2026-05-03) cere ca MACAR o parte sa contina toate cuvintele
+  // numelui monitorizat.
+  parti: Array<{ nume: string; calitateParte: string }> = [
+    { nume: "Ion Popescu", calitateParte: "Reclamant" },
+  ],
 ): Dosar {
   return {
     numar,
@@ -94,7 +104,7 @@ function makeDosar(
     categorieCaz,
     stadiuProcesual,
     obiect: "test",
-    parti: [],
+    parti,
     sedinte: [],
   };
 }
@@ -228,5 +238,136 @@ describe("nameSoapRunner - SOAP error", () => {
     expect(out.status).toBe("error");
     expect(out.errorCode).toBe("SOAP_FAIL");
     expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+  });
+});
+
+describe("nameSoapRunner - strict word filter", () => {
+  it("tokenizeNameForMatch trateaza '&' ca token de sine statator", () => {
+    expect(tokenizeNameForMatch("Smith & Jones")).toEqual(["SMITH", "&", "JONES"]);
+    expect(tokenizeNameForMatch("Smith&Jones")).toEqual(["SMITH", "&", "JONES"]);
+    expect(tokenizeNameForMatch("ABC&XYZ srl")).toEqual(["ABC", "&", "XYZ", "SRL"]);
+  });
+
+  it("tokenizeNameForMatch strip-uieste diacritice + UPPERCASE", () => {
+    expect(tokenizeNameForMatch("Țara Românească")).toEqual(["TARA", "ROMANEASCA"]);
+  });
+
+  it("dosarMatchesAllNameTokens cere TOATE cuvintele intr-o singura parte", () => {
+    const target = "GLOBAL LEARNING LOGISTICS";
+    const matchDosar: Dosar = {
+      numar: "1/1/2024",
+      data: "",
+      institutie: "",
+      departament: "",
+      categorieCaz: "",
+      stadiuProcesual: "",
+      obiect: "",
+      parti: [{ nume: "Global Learning Logistics SRL", calitateParte: "Reclamant" }],
+      sedinte: [],
+    };
+    const partialDosar: Dosar = {
+      ...matchDosar,
+      parti: [{ nume: "Global Logistics SA", calitateParte: "Reclamant" }],
+    };
+    expect(dosarMatchesAllNameTokens(matchDosar, target)).toBe(true);
+    expect(dosarMatchesAllNameTokens(partialDosar, target)).toBe(false);
+  });
+
+  it("dosarMatchesAllNameTokens accepta match in oricare dintre parti", () => {
+    const target = "ION POPESCU";
+    const dosar: Dosar = {
+      numar: "1/1/2024",
+      data: "",
+      institutie: "",
+      departament: "",
+      categorieCaz: "",
+      stadiuProcesual: "",
+      obiect: "",
+      parti: [
+        { nume: "Acme SRL", calitateParte: "Reclamant" },
+        { nume: "Ion Popescu", calitateParte: "Parat" },
+      ],
+      sedinte: [],
+    };
+    expect(dosarMatchesAllNameTokens(dosar, target)).toBe(true);
+  });
+
+  it("dosarMatchesAllNameTokens returneaza false pe parti goale", () => {
+    const dosar: Dosar = {
+      numar: "1/1/2024",
+      data: "",
+      institutie: "",
+      departament: "",
+      categorieCaz: "",
+      stadiuProcesual: "",
+      obiect: "",
+      parti: [],
+      sedinte: [],
+    };
+    expect(dosarMatchesAllNameTokens(dosar, "ION POPESCU")).toBe(false);
+  });
+
+  it("filtru runner: SOAP returneaza dosare false-pozitive, ele NU ajung in snapshot", async () => {
+    const job = seedJob({
+      targetJson: '{"name_normalized":"GLOBAL LEARNING LOGISTICS"}',
+    });
+    const runner = createNameSoapRunner({
+      searchDosare: async () => [
+        // Match strict — ramane.
+        makeDosar("1/1/2024", "fond", "civil", "Judecatoria Test", [
+          { nume: "Global Learning Logistics SRL", calitateParte: "Reclamant" },
+        ]),
+        // False-pozitiv — lipseste "LEARNING" → filtrat afara.
+        makeDosar("2/2/2024", "fond", "civil", "Judecatoria Test", [
+          { nume: "Global Logistics SA", calitateParte: "Reclamant" },
+        ]),
+      ],
+    });
+
+    const out = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    const snap = getLatestSnapshot(job.owner_id, job.id);
+    const payload = JSON.parse(snap!.payload_json) as { dosare: Array<{ numar: string }> };
+    expect(payload.dosare.map((d) => d.numar)).toEqual(["1/1/2024"]);
+  });
+
+  it("filtru runner: '&' este matched literal", async () => {
+    const job = seedJob({
+      targetJson: '{"name_normalized":"SMITH & JONES"}',
+    });
+    const runner = createNameSoapRunner({
+      searchDosare: async () => [
+        // Match — "&" e prezent.
+        makeDosar("1/1/2024", "fond", "civil", "Judecatoria Test", [
+          { nume: "Smith & Jones LLC", calitateParte: "Reclamant" },
+        ]),
+        // False-pozitiv — fara "&".
+        makeDosar("2/2/2024", "fond", "civil", "Judecatoria Test", [
+          { nume: "Smith Jones LLC", calitateParte: "Reclamant" },
+        ]),
+        // False-pozitiv — "AND" in loc de "&".
+        makeDosar("3/3/2024", "fond", "civil", "Judecatoria Test", [
+          { nume: "Smith and Jones LLC", calitateParte: "Reclamant" },
+        ]),
+      ],
+    });
+
+    const out = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    const snap = getLatestSnapshot(job.owner_id, job.id);
+    const payload = JSON.parse(snap!.payload_json) as { dosare: Array<{ numar: string }> };
+    expect(payload.dosare.map((d) => d.numar)).toEqual(["1/1/2024"]);
   });
 });

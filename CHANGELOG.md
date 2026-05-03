@@ -4,6 +4,102 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.3] - 2026-05-03
+
+### UX Monitorizare - paginare server-side, buton Anuleaza, normalizare UPPERCASE
+
+Patch UX peste v2.10.2 ca reactie la feedback-ul direct pe build-ul live: pagina
+`Monitorizare` taia lista la 100 joburi vizibile (banner static "Sunt cel putin
+100 joburi vizibile (din 617 total)"), fluxul de import bulk nu avea cale
+explicita de iesire dupa preview, iar numele de monitorizare ajungeau in DB cu
+mixed case (rezultat: tabelul afisa simultan `AMBKEVEN SRL` si `global learning
+logistics srl` desi sunt aceeasi clasa de date).
+
+### Frontend - paginare server-side pe Monitorizare
+
+`frontend/src/pages/Monitorizare.tsx`:
+- State nou `page`/`pageSize` (default 0/50). UI 0-indexed, server 1-indexed.
+- `refresh()` re-fetcheaza pe schimbare via `useCallback([page, pageSize])` si
+  `useEffect([refresh])`; recovery automat pe pagina goala dupa delete (decrement
+  daca `jobs.length === 0 && total > 0 && page > 0`).
+- `<TablePagination>` randat sub tabel cand `total > 0`. `pageSizes=[10,25,50,100]`
+  matches cap-ul backend `JobListQuerySchema.pageSize.max(100)`.
+- Eliminat banner-ul vechi `>= 100`. Hint nou: `"Selectia opereaza doar pe pagina
+  vizibila ({jobs.length} din {total})"` doar cand `total > jobs.length`.
+
+### Frontend - buton Anuleaza pe import bulk
+
+`frontend/src/components/monitoring/MonitoringBulkImportCard.tsx`:
+- Handler `handleBulkCancel()` reseteaza preview/dosar rows/error/title/filter +
+  goleste fileInput. Fara reload, fara confirmare — flow non-destructive (nu am
+  comis inca nimic in DB).
+- Buton `<Button variant="outline">Anuleaza</Button>` cu `<X>` icon adaugat
+  langa `Confirma import`. Disabled in timpul `bulkBusy`.
+
+### Backend + frontend - normalizare UPPERCASE pe import
+
+Regula noua: numele de monitorizare se stocheaza UNIFORM in UPPERCASE,
+indiferent de calea de input (XLSX bulk, CSV bulk, manual add). PortalJust SOAP
+`CautareDosare` accepta `numeParte` case-insensitive, deci match-ul nu se
+schimba; uniformitatea elimina "AMBKEVEN SRL" vs "ambkeven srl" din UI.
+
+- `backend/src/services/nameListParser.ts`: `normalizeName()` schimbat din
+  `.toLowerCase()` in `.toUpperCase()`. Defense-in-depth — orice path trece prin
+  `validateRawItems` (commit) sau `parseNameList` (preview) primeste valoarea
+  uppercase, fara ca clientul sa poata bypass-a.
+- `frontend/src/lib/monitoringBulkTemplate.ts`: parser-ul XLSX/CSV uppercaseaza
+  `nameNorm` la extractia din celula.
+- `frontend/src/components/monitoring/MonitoringAddForm.tsx`: form-ul manual
+  uppercaseaza inputul inainte de submit (`monitoring.createName`).
+
+Datele vechi din DB raman lowercase — nu adaugam migratie destructiva pe
+schema; randurile noi importate vor fi UPPERCASE de aici inainte. Re-importul
+aceleiasi liste produce aceeasi semnatura `target_hash` consistent (toate
+input-urile trec acum prin acelasi normalizator).
+
+### Backend - filtru strict word match + suffix legal ignorat (name_soap)
+
+Problema: PortalJust SOAP `CautareDosare` returneaza dosare care fac match pe
+**oricare** dintre cuvintele din `numeParte` (substring search). Pentru un nume
+multi-cuvant precum `GLOBAL LEARNING LOGISTICS` portalul intoarce si
+`GLOBAL LOGISTICS SA`, `LEARNING SOLUTIONS SRL` etc., generand alerte
+fals-pozitive masive in inbox-ul de monitorizare.
+
+Solutia: filtru post-fetch in runner-ul `name_soap` care pastreaza un dosar
+**doar** daca exista cel putin o parte (din `dosar.parti[]`) ale carei tokeni
+contin TOATE tokenii numelui monitorizat. Match-ul e strict pe egalitate de
+tokeni (nu substring), case-insensitive, fara diacritice. Caracterul `&` e
+promovat ca token de sine statator, deci `ABC&XYZ` si `ABC & XYZ` se
+echivaleaza (`["ABC", "&", "XYZ"]` in ambele cazuri).
+
+**Exceptie suffix legal:** SRL, SA, SCA, SNC, SCS, PFA, IF (RO) + LLC, LTD,
+INC (intl) sunt eliminate de la coada listei de tokeni inainte de comparare,
+indiferent de forma (`SRL`, `S.R.L.`, `S.R.L`, `SRL.`). Asta inseamna ca:
+- Target `GLOBAL LEARNING LOGISTICS` matcheaza parte `GLOBAL LEARNING LOGISTICS SRL`.
+- Target `GLOBAL LEARNING LOGISTICS SRL` matcheaza parte `GLOBAL LEARNING LOGISTICS`.
+- Variatiile `S.R.L.` vs `SRL` nu mai produc false-negative.
+
+`backend/src/services/monitoring/nameSoapRunner.ts`:
+- Helperi noi exportati: `tokenizeNameForMatch`, `stripLegalSuffix`,
+  `dosarMatchesAllNameTokens`. Set constant `LEGAL_SUFFIX_TOKENS`.
+- `fetchForTarget` aplica filtrul peste rezultatul agregat din toate
+  `institutii` (filtrul se executa o singura data pe Map-ul deduplicat).
+
+### Tests
+
+- `backend/src/services/nameListParser.test.ts`: actualizat 3 assertion-uri pe
+  output-ul `normalizeName` / `nameNormalized` la UPPERCASE.
+- `backend/src/services/monitoring/nameSoapRunner.test.ts`: adaugat 6 teste in
+  describe-ul "nameSoapRunner - strict word filter" (tokenizare `&`, strip
+  diacritice, all-words required intr-o singura parte, multi-party match, parti
+  goale → false, runner-level filter elimina false-pozitive, runner accepta `&`
+  literal). `makeDosar` default updated sa includa o parte `Ion Popescu` (matches
+  default target name) altfel testele baseline picau pe `parti=[]`.
+
+**690 teste** pass (zero regresii pe restul suite-ului).
+
+---
+
 ## [2.10.2] - 2026-05-03
 
 ### Patch UX peste v2.10.1 - eliminam zone goale din UI

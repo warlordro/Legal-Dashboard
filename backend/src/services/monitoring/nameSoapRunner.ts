@@ -2,6 +2,7 @@ import type { Dosar, SearchParams } from "../../soap.ts";
 import type { JobRunner, RunOutcome, ScheduledJob } from "./scheduler.ts";
 import { AlertConfigSchema } from "../../schemas/monitoring.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
+import { stripDiacritics } from "../../util/textNormalize.ts";
 import {
   buildNameSoapSnapshot,
   diffNameSoap,
@@ -181,7 +182,92 @@ async function fetchForTarget(
       if (dosar.numar) byNumar.set(dosar.numar, dosar);
     }
   }
-  return Array.from(byNumar.values());
+  // Strict-word filter (2026-05-03): PortalJust returneaza dosare unde oricare
+  // dintre cuvintele numele subiectului apare ca substring intr-una dintre
+  // parti. Asta produce false-pozitive masive ("GLOBAL LOGISTICS SA" ajunge in
+  // rezultat cand monitorizam "GLOBAL LEARNING LOGISTICS"). Aplicam un filtru
+  // post-fetch: pastram doar dosarele unde MACAR O parte are TOATE cuvintele
+  // numelui ca tokeni distincti. "&" e tratat ca propriul token indiferent
+  // de spatii ("ABC&XYZ" si "ABC & XYZ" sunt echivalente).
+  const matching: Dosar[] = [];
+  for (const dosar of byNumar.values()) {
+    if (dosarMatchesAllNameTokens(dosar, target.name_normalized)) {
+      matching.push(dosar);
+    }
+  }
+  return matching;
+}
+
+// Tokenizare comuna pentru target + parti: diacritice strip + UPPERCASE +
+// "&" promovat ca token de sine statator + split pe whitespace.
+export function tokenizeNameForMatch(s: string): string[] {
+  return stripDiacritics(String(s ?? ""))
+    .toUpperCase()
+    .replace(/&/g, " & ")
+    .split(/\s+/)
+    .filter(Boolean);
+}
+
+// Sufixele de forma juridica (SRL, SA si echivalente) NU sunt parte din
+// numele subiectului — pot lipsi sau aparea in forme diverse ("S.R.L.",
+// "S.R.L", "SRL.") fara sa schimbe identitatea entitatii. Ignoram aceste
+// tokeni de la coada listei la match. Cheia in set este forma fara puncte
+// (S.R.L. → SRL la lookup).
+const LEGAL_SUFFIX_TOKENS = new Set([
+  "SRL", // Societate cu Raspundere Limitata
+  "SA",  // Societate pe Actiuni
+  "SCA", // Societate Civila de Avocati / in Comandita pe Actiuni
+  "SNC", // Societate in Nume Colectiv
+  "SCS", // Societate in Comandita Simpla
+  "PFA", // Persoana Fizica Autorizata
+  "IF",  // Intreprindere Familiala
+  "LLC", // Limited Liability Company (entitati internationale uzuale)
+  "LTD", // Limited
+  "INC", // Incorporated
+]);
+
+function isLegalSuffixToken(token: string): boolean {
+  // Strip "." (S.R.L. → SRL) si "," (rare) inainte de lookup.
+  const cleaned = token.replace(/[.,]/g, "");
+  return LEGAL_SUFFIX_TOKENS.has(cleaned);
+}
+
+// Elimina suffix-urile legale CONSECUTIVE de la coada listei. "X SRL" → ["X"];
+// "X S.R.L." → ["X"]; "X" (fara suffix) → ["X"]; "Y LLC LTD" → ["Y"]. Pastram
+// "II" / cifre romane si alte cuvinte care nu apar in lista legala.
+export function stripLegalSuffix(tokens: string[]): string[] {
+  let end = tokens.length;
+  while (end > 0 && isLegalSuffixToken(tokens[end - 1]!)) {
+    end--;
+  }
+  return tokens.slice(0, end);
+}
+
+// Strict word match: TOATE cuvintele targetului (excluzand sufixul legal de
+// forma juridica) trebuie sa apara ca tokeni distincti in MACAR O parte
+// (dosar.parti[i].nume), tokenizata si curatata identic. SRL/SA in target sau
+// in party sunt ignorate — nu valideaza, nu invalideaza match-ul.
+//
+// Cazul fara parti = false (fara nume sa verificam → nu confirmam match-ul).
+export function dosarMatchesAllNameTokens(
+  dosar: Dosar,
+  targetName: string,
+): boolean {
+  const targetCore = stripLegalSuffix(tokenizeNameForMatch(targetName));
+  if (targetCore.length === 0) return true;
+  if (!dosar.parti || dosar.parti.length === 0) return false;
+  for (const parte of dosar.parti) {
+    const partySet = new Set(stripLegalSuffix(tokenizeNameForMatch(parte.nume)));
+    let allPresent = true;
+    for (const token of targetCore) {
+      if (!partySet.has(token)) {
+        allPresent = false;
+        break;
+      }
+    }
+    if (allPresent) return true;
+  }
+  return false;
 }
 
 export type { ScheduledJob };
