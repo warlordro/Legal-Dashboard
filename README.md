@@ -7,9 +7,16 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.9.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.9.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
-**v2.9.1** - patch UX post-feedback: eliminata sectiunea "Activitate recenta"
+**v2.9.2** - patch notificari native: alertele de monitorizare raman in inbox-ul
+aplicatiei si in badge-ul rosu, iar canalul Windows/macOS are acum status citibil
+din Electron, buton de test in dialogul de configurare si gating defensiv cand
+sistemul de operare raporteaza ca toast-urile sunt blocate. Dependintele
+`windows-notification-state` si `macos-notification-state` sunt optionale si
+incluse in packaging-ul desktop; daca statusul OS nu poate fi citit, alerta
+interna nu se pierde. Predecesor **v2.9.1** - patch UX post-feedback: eliminata
+sectiunea "Activitate recenta"
 (componenta `Timeline`, introdusa in PR-B v2.8.0) din pagina Dashboard. Lista
 randa "Run ok (dosar_soap) · 2.6s · 0 alerte noi · 2h in urma" plus event-uri
 de audit — feedback explicit user a marcat continutul ca prea tehnic pentru

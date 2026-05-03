@@ -24,6 +24,8 @@ contextBridge.exposeInMainWorld("desktopApi", {
   decryptKeys: (ciphertextB64) => invokeWithTimeout("safeStorage:decrypt", ciphertextB64),
   isEncryptionAvailable: () => invokeWithTimeout("safeStorage:available"),
   setWindowTheme: (theme) => invokeWithTimeout("window:setTheme", theme),
+  getNotificationStatus: () => invokeWithTimeout("notification:getStatus"),
+  showTestNotification: () => invokeWithTimeout("notification:test"),
   /**
    * @param {{ title: string, body?: string, tag?: string, silent?: boolean }} payload
    */

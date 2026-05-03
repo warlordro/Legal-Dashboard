@@ -4,6 +4,45 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.9.2] - 2026-05-03
+
+### Patch notificari native - status Windows/macOS + notificare test
+
+Intareste fluxul existent de alerte desktop: alertele generate de monitorizare
+raman in inbox-ul aplicatiei si in badge-ul rosu, iar canalul nativ Windows /
+macOS este verificat separat inainte de trimiterea toast-ului. Daca sistemul de
+operare blocheaza notificarile sau statusul nu poate fi citit, alerta interna
+nu se pierde.
+
+### Electron
+
+- `electron/main.js`: adaugat IPC `notification:getStatus` care returneaza
+  `{ platform, supported, state, canNotify, reason }`.
+- `electron/main.js`: adaugat IPC `notification:test` pentru notificare manuala
+  de verificare din UI.
+- `electron/main.js`: `notification:show` verifica statusul OS si suprima
+  toast-ul cand Windows/macOS raporteaza explicit ca notificarile sunt blocate.
+- `package.json`: adaugate optional dependencies
+  `windows-notification-state` si `macos-notification-state`, plus includere in
+  `electron-builder` `files` si `asarUnpack` pentru build-urile desktop.
+
+### Frontend
+
+- `frontend/src/components/NotificationStatusPanel.tsx`: panou nou in dialogul
+  de configurare chei API, cu status notificari sistem, refresh si buton Test.
+- `frontend/src/hooks/useAlertsStream.ts`: payload-ul notificarii este construit
+  prin helper testabil, statusul nativ este cache-uit 60s, iar fallback-ul web
+  cu `Notification.requestPermission()` ramane compatibil.
+- `frontend/src/types/desktop-api.d.ts`: extins contractul `desktopApi` cu
+  `getNotificationStatus()` si `showTestNotification()`.
+
+**Tests**: adaugat `frontend/src/hooks/useAlertsStream.test.ts` pentru payload,
+trunchiere body si gating pe status OS. Validari finale: frontend 45/45,
+backend 645/645, backend type-check, frontend type-check, `npm run build`,
+`npm run rebuild:electron` si smoke Electron desktop cu `/health` OK.
+
+---
+
 ## [2.9.1] - 2026-05-02
 
 ### Patch UX post-feedback - Timeline scoasa din Dashboard + refactor sweep documentat retroactiv

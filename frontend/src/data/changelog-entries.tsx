@@ -18,6 +18,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.9.2",
+    date: "3 Mai 2026",
+    subtitle:
+      "Patch notificari native: alertele de monitorizare pastreaza inbox-ul si badge-ul din aplicatie, dar canalul Windows/macOS are acum status citibil, buton de test si gating defensiv cand sistemul de operare blocheaza toast-urile.",
+    icon: <Bell className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Electron - status nativ Windows/macOS",
+        content:
+          "electron/main.js expune IPC nou notification:getStatus care intoarce platform, supported, state, canNotify si reason. Pe Windows foloseste optional windows-notification-state, iar pe macOS optional macos-notification-state. Daca modulul nativ lipseste sau OS-ul nu poate fi interogat, statusul devine unknown si alertele interne raman functionale.",
+      },
+      {
+        title: "Electron - notificare test + gating defensiv",
+        content:
+          "notification:test trimite o notificare manuala de verificare. notification:show verifica statusul OS inainte de afisare si suprima toast-ul cand Windows/macOS raporteaza explicit ca notificarile sunt blocate. Dedup-ul pe tag si limitele title/body/tag raman pastrate.",
+      },
+      {
+        title: "Frontend - panou Notificari sistem",
+        content:
+          "Dialogul de configurare chei API include acum un panou Notificari sistem cu status, refresh si buton Test. Mesajul clarifica faptul ca alertele raman in aplicatie chiar daca sistemul nativ nu poate afisa toast-ul.",
+      },
+      {
+        title: "Frontend - useAlertsStream hardening",
+        content:
+          "Hook-ul care consuma /api/v1/alerts/stream construieste payload-ul notificarii prin helper testabil, cache-uieste statusul nativ 60s si pastreaza fallback-ul Web Notification API pentru modul browser. Alertele read/dismissed nu declanseaza notificari native, iar alert_enriched ramane fara toast.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Adaugat useAlertsStream.test.ts pentru payload, trunchiere body si gating pe status OS. Validari: test frontend nou, backend type-check si frontend type-check curate.",
+      },
+    ],
+  },
+  {
     version: "v2.9.1",
     date: "2 Mai 2026",
     subtitle:

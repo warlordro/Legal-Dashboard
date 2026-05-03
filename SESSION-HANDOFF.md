@@ -1,7 +1,10 @@
-# Session Handoff - patch v2.9.1 livrat / sprint Dashboard redesign incheiat la v2.9.0
+# Session Handoff - patch v2.9.2 notificari native Windows/macOS
 
-**Data**: 2026-05-02
+**Data**: 2026-05-03
 **Branch local**: `main`
+**Nota 2026-05-03**: acest handoff a fost adus la v2.9.2. Blocul istoric de
+mai jos despre v2.7.1-v2.9.1 ramas "local-only" este depasit de starea Git
+curenta; `v2.9.1` era deja pe `origin/main` la inceputul acestui patch.
 **Remote**: `main` local este sincronizat cu `origin/main` la commit-ul
 `579ce7b` (`fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`).
 Patch v2.7.1 (electron taskbar icon dev mode) commit-uit local in `b11c706`.
@@ -28,9 +31,56 @@ raman locale pana la push.
 **Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`. `v2.7.1` +
 `v2.8.0` + `v2.9.0` + `v2.9.1` urmeaza dupa commit-uri.
 
-**Versiune curenta**: `v2.9.1` (patch UX post-feedback — Timeline scoasa din
-pagina Dashboard, refactor sweep 11 stagii post-v2.7.0 documentat retroactiv
-in in-app changelog)
+**Versiune curenta**: `v2.9.2` (patch notificari native Windows/macOS:
+status OS, notificare test, panou UI si gating defensiv pentru toast-uri).
+
+## v2.9.2 - notificari native Windows/macOS
+
+Scop: alertele generate de monitorizare raman in sistemul intern al aplicatiei
+(`/alerte` + badge rosu), iar toast-urile native Windows/macOS devin un canal
+suplimentar verificabil, nu un single point of failure.
+
+**Electron**:
+- `electron/main.js`: helperi noi pentru status notificari native.
+- IPC nou `notification:getStatus` -> `{ platform, supported, state, canNotify, reason }`.
+- IPC nou `notification:test` pentru notificare manuala de verificare.
+- `notification:show` verifica statusul OS si nu trimite toast cand OS-ul
+  raporteaza explicit blocare.
+- Dependinte optionale noi: `windows-notification-state@^2.0.0` si
+  `macos-notification-state@^3.0.0`.
+- `electron-builder` include modulele optionale in `files` + `asarUnpack`.
+- `npm run rebuild:electron` ruleaza prin `scripts/rebuild-electron.cjs` si
+  reconstruieste doar modulele native relevante platformei curente.
+
+**Frontend**:
+- `NotificationStatusPanel` nou in `ApiKeyDialog`, cu status, refresh si buton
+  Test.
+- `desktopApi` extins cu `getNotificationStatus` si `showTestNotification`.
+- `useAlertsStream` construieste payload-ul prin helper testabil, cache-uieste
+  statusul nativ 60s si pastreaza fallback-ul web `Notification.requestPermission`.
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json`,
+  `package-lock.json` bump la `2.9.2`.
+- `CHANGELOG.md`, in-app changelog, `README.md`, `CLAUDE.md`,
+  `SESSION-HANDOFF.md`, `EXECUTION-ROADMAP.md` actualizate.
+
+**Validari finale**:
+- `npm test --workspace=frontend -- useAlertsStream.test.ts` - 3/3 passed
+  dupa rerun escalat (prima incercare a lovit `spawn EPERM`).
+- `npx tsc --noEmit -p backend/tsconfig.json` - OK.
+- `npx tsc --noEmit` in `frontend/` - OK.
+- `npm test --workspace=frontend` - 45/45 passed.
+- `npm rebuild better-sqlite3` (Node ABI) - OK, apoi
+  `npm test --workspace=backend -- --pool threads` - 645/645 passed.
+- `npm run rebuild:electron` - OK dupa scriptul platform-aware.
+- `npm run build` - OK.
+- Smoke Electron desktop final: app pornita cu `ELECTRON_RUN_AS_NODE` curatat,
+  `/health` 200 cu `service: "Legal Dashboard API"`, monitoring `running: true`,
+  `inflight: 0`.
+
+**Ramas in aceasta sesiune**:
+- commit + tag `v2.9.2` + push commit si tag pe GitHub.
 
 ## v2.9.1 — patch UX post-feedback: Timeline scoasa din Dashboard + refactor sweep in changelog
 

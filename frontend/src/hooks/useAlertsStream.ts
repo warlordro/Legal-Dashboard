@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { alertsApi, type MonitoringAlert } from "@/lib/alertsApi";
+import type { DesktopNotificationStatus } from "@/types/desktop-api";
 
 export interface UseAlertsStreamResult {
   unreadAlerts: number;
@@ -14,9 +15,23 @@ export interface UseAlertsStreamResult {
   refreshUnreadAlerts: () => Promise<void>;
 }
 
+export function buildAlertNotificationPayload(alert: MonitoringAlert) {
+  return {
+    title: "Legal Dashboard - alerta noua",
+    body: alert.title.length > 120 ? `${alert.title.slice(0, 117)}...` : alert.title,
+    silent: alert.severity === "info",
+    tag: alert.dedup_key || `alert-${alert.id}`,
+  };
+}
+
+export function notificationStatusAllowsNative(status: DesktopNotificationStatus | null): boolean {
+  return status?.canNotify !== false;
+}
+
 export function useAlertsStream(): UseAlertsStreamResult {
   const reconnectTimerRef = useRef<number | null>(null);
   const eventSourceRef = useRef<EventSource | null>(null);
+  const notificationStatusRef = useRef<{ value: DesktopNotificationStatus | null; checkedAt: number } | null>(null);
   const [unreadAlerts, setUnreadAlerts] = useState(0);
   const [streamVersion, setStreamVersion] = useState(0);
 
@@ -29,7 +44,22 @@ export function useAlertsStream(): UseAlertsStreamResult {
     }
   }, []);
 
-  const showDesktopNotification = useCallback((alert: MonitoringAlert) => {
+  const getDesktopNotificationStatus = useCallback(async () => {
+    if (!window.desktopApi?.getNotificationStatus) return null;
+    const cached = notificationStatusRef.current;
+    if (cached && Date.now() - cached.checkedAt < 60_000) return cached.value;
+    try {
+      const value = await window.desktopApi.getNotificationStatus();
+      notificationStatusRef.current = { value, checkedAt: Date.now() };
+      return value;
+    } catch (err) {
+      console.warn("[alerts] native notification status failed", err);
+      notificationStatusRef.current = { value: null, checkedAt: Date.now() };
+      return null;
+    }
+  }, []);
+
+  const showDesktopNotification = useCallback(async (alert: MonitoringAlert) => {
     // Suppress when the user is already looking at the app — the in-app badge
     // and Alerts page are sufficient. Covers both Electron and browser modes.
     if (typeof document !== "undefined"
@@ -37,25 +67,23 @@ export function useAlertsStream(): UseAlertsStreamResult {
       && document.hasFocus()) {
       return;
     }
-    const title = "Legal Dashboard - alerta noua";
-    const body = alert.title.length > 120 ? `${alert.title.slice(0, 117)}...` : alert.title;
-    const tag = alert.dedup_key || `alert-${alert.id}`;
+    const payload = buildAlertNotificationPayload(alert);
     if (window.desktopApi?.showNotification) {
-      window.desktopApi.showNotification({
-        title,
-        body,
-        silent: alert.severity === "info",
-        tag,
-      }).catch((err) => console.warn("[alerts] native notification failed", err));
+      const status = await getDesktopNotificationStatus();
+      if (!notificationStatusAllowsNative(status)) {
+        console.warn("[alerts] native notification blocked", status?.reason || status?.state);
+        return;
+      }
+      window.desktopApi.showNotification(payload).catch((err) => console.warn("[alerts] native notification failed", err));
       return;
     }
     if (!("Notification" in window)) return;
     const notify = () => {
       try {
-        new Notification(title, {
-          body,
-          tag,
-          silent: alert.severity === "info",
+        new Notification(payload.title, {
+          body: payload.body,
+          tag: payload.tag,
+          silent: payload.silent,
         });
       } catch (err) {
         console.warn("[alerts] desktop notification failed", err);
@@ -70,7 +98,7 @@ export function useAlertsStream(): UseAlertsStreamResult {
         if (permission === "granted") notify();
       }).catch((err) => console.warn("[alerts] notification permission failed", err));
     }
-  }, []);
+  }, [getDesktopNotificationStatus]);
 
   useEffect(() => {
     let stopped = false;
@@ -108,7 +136,7 @@ export function useAlertsStream(): UseAlertsStreamResult {
         try {
           const alert = JSON.parse((event as MessageEvent).data) as MonitoringAlert;
           if (!alert.read_at && !alert.dismissed_at) {
-            showDesktopNotification(alert);
+            showDesktopNotification(alert).catch((err) => console.warn("[alerts] native notification failed", err));
           }
           // Server-truth counter — avoids racing with optimistic increments.
           refreshUnreadAlerts();

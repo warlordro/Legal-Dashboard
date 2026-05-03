@@ -1,6 +1,6 @@
 {
   "name": "legal-dashboard",
-  "version": "2.9.1",
+  "version": "2.9.2",
   "private": true,
   "main": "electron/main.js",
   "workspaces": [
@@ -11,7 +11,7 @@
     "dev:backend": "npm run dev --workspace=backend",
     "dev:frontend": "npm run dev --workspace=frontend",
     "install:all": "npm install",
-    "rebuild:electron": "npx --yes @electron/rebuild -f -w better-sqlite3",
+    "rebuild:electron": "node scripts/rebuild-electron.cjs",
     "check:worktree": "node scripts/check-worktree.mjs",
     "prebuild": "node scripts/check-worktree.mjs",
     "build": "node --experimental-strip-types scripts/build.js",
@@ -40,11 +40,15 @@
       "node_modules/better-sqlite3/**/*",
       "node_modules/bindings/**/*",
       "node_modules/file-uri-to-path/**/*",
+      "node_modules/windows-notification-state/**/*",
+      "node_modules/macos-notification-state/**/*",
       "package.json"
     ],
     "asarUnpack": [
       "dist-frontend/**/*",
-      "node_modules/better-sqlite3/**/*"
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/windows-notification-state/**/*",
+      "node_modules/macos-notification-state/**/*"
     ],
     "win": {
       "icon": "build/icon.ico",
@@ -111,5 +115,9 @@
     "esbuild": "^0.27.4",
     "png-to-ico": "^3.0.1",
     "sharp": "^0.34.5"
+  },
+  "optionalDependencies": {
+    "macos-notification-state": "^3.0.0",
+    "windows-notification-state": "^2.0.0"
   }
 }
