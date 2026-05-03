@@ -18,6 +18,9 @@ Patch frontend + docs peste v2.10.6.
 **Docs / versiune**:
 - `package.json`, `backend/package.json`, `frontend/package.json` si
   `package-lock.json` sincronizate la `2.10.7`.
+- `package.json` aliniaza `npm run dist` cu workflow-ul Windows: `build`,
+  `rebuild:electron`, apoi `electron-builder --win --config.npmRebuild=false`.
+  Asta evita rebuild-ul modulului optional macOS pe Windows.
 - `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md`,
   `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md` si acest handoff actualizate.
 - Release targets: push pe `main` pentru Docker Build; tag `v2.10.7` pentru

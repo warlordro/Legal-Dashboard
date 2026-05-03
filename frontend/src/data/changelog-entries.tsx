@@ -39,7 +39,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Release targets",
         content:
-          "Versiunea 2.10.7 este pregatita pentru push pe main si tag v2.10.7. Push-ul pe main ruleaza Docker Build, iar tag-ul v2.10.7 declanseaza workflow-urile GitHub Actions pentru macOS DMG si Windows NSIS installer.",
+          "Versiunea 2.10.7 este pregatita pentru push pe main si tag v2.10.7. Push-ul pe main ruleaza Docker Build, iar tag-ul v2.10.7 declanseaza workflow-urile GitHub Actions pentru macOS DMG si Windows NSIS installer. Scriptul local npm run dist este aliniat cu workflow-ul Windows: rebuild Electron explicit, apoi electron-builder cu npmRebuild=false.",
       },
     ],
   },
