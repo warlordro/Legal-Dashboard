@@ -4,6 +4,95 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.2] - 2026-05-03
+
+### Patch UX peste v2.10.1 - eliminam zone goale din UI
+
+Patch frontend-only peste v2.10.1 (zero backend, zero schema, zero migration).
+Rezolva doua iritari vizuale observate in build-ul live: header de coloana
+afisat permanent fara continut in tabelul Monitorizare, plus doua panouri AI
+mereu vizibile pe pagina Cautare Dosare chiar si pentru utilizatorii fara
+chei API configurate. Ambele cazuri lasau zone goale care ocupau spatiu pe
+ecran fara sa aduca informatie.
+
+### Frontend - tabel Monitorizare adaptiv (coloana Detalii)
+
+Coloana `Detalii` (introdusa in v2.10.0) randeaza un buton `Info` (galben)
+**doar** pentru `name_soap` cu scope restrans la o lista de instante (click
+deschide modal-ul cu lista). Pentru `dosar_soap` si pentru `name_soap` care
+monitorizeaza toate instantele, celula este goala — deci pe DB-uri tipic
+desktop unde majoritatea joburilor sunt `dosar_soap`, intregul header DETALII
+ramanea o coloana inutila care fura ~80px din latimea tabelului.
+
+- `frontend/src/pages/Monitorizare.tsx`: helper-ul `showDetailsColumn`
+  calculat o singura data per render printr-un IIFE care wrap-uieste blocul
+  `jobs.length > 0`. Verifica daca exista cel putin un job `name_soap` cu
+  `getNameSoapInstitutie(job).length > 0`.
+- `<th>DETALII</th>` randat condiional pe `showDetailsColumn`.
+- `<td>` corespunzator randat condiional pe acelasi flag (per row), ca grid-ul
+  sa ramana aliniat cand coloana e ascunsa.
+
+### Frontend - panourile AI inlocuite cu banner discret pana la prima cheie
+
+Pe pagina `/dosare`, expandarea unui rand afisa pana acum doua panouri
+colapsate: `Analiza AI` (single-model) si `Analiza AI Avansata (multi-agent)`.
+Erau vizibile chiar si cand `keys.anthropic`, `keys.openai` si `keys.google`
+erau toate goale — utilizatorul vedea doua butoane pe care nu le putea folosi,
+plus un mesaj inline "Configureaza cel putin o cheie API".
+
+Solutia aleasa NU este sa ascundem complet feature-ul (utilizatorii noi
+n-ar afla niciodata ca exista), ci sa-l surface-am minimal:
+
+- `frontend/src/components/dosare-ai-analysis-panel.tsx`:
+  `DosareAiAnalysisPanel` verifica `ai.hasAnyKey` la nivel de top. Cand
+  flag-ul e `false`, randeaza un banner single-line discret in locul
+  panourilor:
+
+  ```tsx
+  <div className="mt-2 flex items-center gap-2 rounded-md border border-dashed border-violet-200 bg-violet-50/40 px-3 py-1.5 text-xs text-violet-700 ...">
+    <Bot className="h-3.5 w-3.5 shrink-0" />
+    <span>
+      Analize AI (single + multi-agent) disponibile dupa configurarea unei
+      cheie API in <strong>Setari API</strong>.
+    </span>
+  </div>
+  ```
+
+- Cand prima cheie e salvata in safeStorage si rand-ul Cautare Dosare se
+  re-randeaza, banner-ul dispare iar panourile reapar automat —
+  `hasAnyKey` reactiv din `useApiKey`.
+- Discoverability-ul pentru "adauga cheie" ramane si in dialogul Setari API
+  (NotificationStatusPanel + EmailSettingsPanel + sectiunea AI Keys), dar
+  banner-ul de aici inchide gap-ul pentru utilizatorii care nu deschid acel
+  dialog imediat.
+
+### Decizii de design
+
+- `showDetailsColumn` calculat o singura data per render (nu per row), pentru
+  a evita re-evaluarea `getNameSoapInstitutie(job)` `O(N)` pe fiecare celula.
+- Helper-ul ramane local (nu mutat in `lib/`) — singura componenta care are
+  nevoie de el este pagina Monitorizare.
+- `DosareAiAnalysisPanel` foloseste flag-ul `ai.hasAnyKey` care era deja
+  propagat prin props (folosit pentru `showKeyPrompt`). Nu am adaugat
+  tipuri noi sau callback-uri suplimentare.
+- Modal-ul `Detalii instante` (cu focus trap din v2.10.1) ramane neatins.
+
+### Validari
+
+- `npx tsc --noEmit` (frontend) — clean.
+- Lint pe fisierele atinse — clean.
+- `npm run build` — verde.
+- Smoke desktop dupa rebuild + restart Electron: header `DETALII` dispare
+  cand toate joburile vizibile sunt `dosar_soap`; panourile AI dispar cand
+  toate cheile sunt goale.
+
+### Tests
+
+- Niciun test nou: schimbare strict UX render. Acoperirea backend (683 teste
+  in v2.10.1) ramane neschimbata.
+
+---
+
 ## [2.10.1] - 2026-05-03
 
 ### PR-11 review hardening - patch peste v2.10.0

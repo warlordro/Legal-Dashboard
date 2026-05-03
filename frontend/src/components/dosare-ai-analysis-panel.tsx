@@ -58,6 +58,21 @@ export interface DosareAiAnalysisPanelProps {
 
 export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAnalysisPanelProps) {
   const [exportingPdf, setExportingPdf] = useState<"simple" | "advanced" | null>(null);
+  // When no provider key is configured, replace both AI panels with a single
+  // discreet banner. Hiding completely would erase the feature from view, so
+  // first-time users would never realize AI analysis is available. The banner
+  // surfaces the capability + points to Setari API as the entry point, without
+  // showing two collapsed empty panels.
+  if (!ai.hasAnyKey) {
+    return (
+      <div className="mt-2 flex items-center gap-2 rounded-md border border-dashed border-violet-200 bg-violet-50/40 px-3 py-1.5 text-xs text-violet-700 dark:border-violet-800/60 dark:bg-violet-950/20 dark:text-violet-300">
+        <Bot className="h-3.5 w-3.5 shrink-0" />
+        <span>
+          Analize AI (single + multi-agent) disponibile dupa configurarea unei chei API in <strong>Setari API</strong>.
+        </span>
+      </div>
+    );
+  }
   return (
     <>
       {/* Analiză AI - Collapsible per dosar */}

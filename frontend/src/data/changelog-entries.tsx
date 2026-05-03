@@ -18,6 +18,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.2",
+    date: "3 Mai 2026",
+    subtitle:
+      "Patch UX peste v2.10.1 (frontend-only, zero backend): coloana Detalii din tabelul Monitorizare se afiseaza doar cand cel putin un job are continut de aratat; panourile Analiza AI din Cautare Dosare sunt inlocuite cu un banner discret cand nicio cheie API (Anthropic / OpenAI / Google) nu este configurata, iar la salvarea primei chei panourile reapar automat.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-purple-500",
+    badgeClass: "bg-purple-100 text-purple-800 dark:bg-purple-900/30 dark:text-purple-400",
+    sections: [
+      {
+        title: "Frontend - tabel Monitorizare adaptiv",
+        content:
+          "Helper-ul showDetailsColumn calculat o singura data per render verifica daca exista cel putin un job name_soap cu scope restrans (getNameSoapInstitutie(job).length > 0). Header-ul DETALII si celula corespunzatoare se randeaza condiional, deci utilizatorii care monitorizeaza doar dosare (cazul tipic desktop) nu mai vad o coloana goala.",
+      },
+      {
+        title: "Frontend - panourile AI inlocuite cu banner pana la prima cheie",
+        content:
+          "DosareAiAnalysisPanel verifica ai.hasAnyKey la nivel de top: cand niciuna dintre cheile Anthropic / OpenAI / Google nu este configurata, in locul celor doua panouri colapsate (Analiza AI + Analiza AI Avansata) randeaza un banner discret cu border dashed, icon Bot si textul \"Analize AI (single + multi-agent) disponibile dupa configurarea unei chei API in Setari API\". Astfel, utilizatorii noi afla ca exista feature-ul si stiu unde sa configureze cheia, fara sa vada doua butoane colapsate inutile. Cand prima cheie este salvata, panourile reapar automat.",
+      },
+      {
+        title: "Backend",
+        content:
+          "Zero modificari backend. Patch frontend-only, zero schema, zero migration.",
+      },
+    ],
+  },
+  {
     version: "v2.10.1",
     date: "3 Mai 2026",
     subtitle:

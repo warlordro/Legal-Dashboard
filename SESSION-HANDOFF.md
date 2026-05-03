@@ -63,38 +63,30 @@ cu produsul: "email = toate alertele noi de monitorizare").
 | Cooldown POST `/email-settings/test` (60s/owner) | Ruta returneaza 429 cu `Retry-After`; audit `me.email_settings.test outcome=denied reason=cooldown` | Limita built-in vs user click loop pe butonul "Trimite test" |
 | `drainEmailDispatches(timeoutMs)` | Asteapta SMTP-urile in flight inainte sa inchida DB-ul; default 10s, shutdown 5s | Gracefull shutdown — invocat automat din `gracefulShutdown()` |
 **Branch local**: `main`
-**Nota 2026-05-03**: acest handoff a fost adus la v2.9.2. Blocul istoric de
-mai jos despre v2.7.1-v2.9.1 ramas "local-only" este depasit de starea Git
-curenta; `v2.9.1` era deja pe `origin/main` la inceputul acestui patch.
+
 **Remote**: `main` local este sincronizat cu `origin/main` la commit-ul
-`579ce7b` (`fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`).
-Patch v2.7.1 (electron taskbar icon dev mode) commit-uit local in `b11c706`.
-PR-B v2.8.0 (timeline + charts) commit-uit local in `ea7419e`. PR-C v2.9.0
-(Export raport) commit-uit local in `72e662f`. Patch v2.9.1 (Timeline scoasa
-din Dashboard + refactor sweep documentat retroactiv in changelog) urmeaza
-commit-ul de release peste local.
+`cebf061` (`fix: v2.10.1 - PR-11 review hardening (14 fixes + a11y)`).
+Working tree clean, zero commits ahead/behind.
 
-Trei commits push-uite in v2.7.0 release pe origin:
-- `c74a77e` `feat: v2.7.0 - PR-A Dashboard redesign sprint (1/3)` (squashed 4 → 1)
-- `61580a4` `fix: PR-9 audit pack 2026-05-02 - B1-B4 + P0/P1 tests + docs sync`
-- `579ce7b` `fix: PR-A + PR-9 review hardening (Tier 1 + Tier 2 + 0013 migration)`
-
-Local-only:
+**Commits push-uite peste v2.7.0 release** (toate pe `origin/main`):
 - `b11c706` `chore(dev): v2.7.1 - dev mode taskbar icon`
 - `ea7419e` `feat: v2.8.0 - PR-B Dashboard timeline + charts (2/3)`
 - `72e662f` `feat: v2.9.0 - PR-C Dashboard Export raport (3/3, sprint incheiat)`
-- (urmator) commit `fix: v2.9.1 - elimina Timeline din Dashboard + documenteaza refactor sweep in changelog`
+- `ec71d42` `fix: v2.9.1 - patch UX post-feedback (Timeline eliminat + retroactive refactor in changelog)`
+- `50018de` `fix: v2.9.2 native notification status`
+- `58f9957` `feat: v2.10.0 - PR-11 Email notifiers + UX polish Monitorizare`
+- `cebf061` `fix: v2.10.1 - PR-11 review hardening (14 fixes + a11y)`
 
-PR-7 v2.5.0, patch v2.5.1, PR-8 v2.6.0, patch-urile v2.6.1 → v2.6.8, PR-A
-v2.7.0 si PR-9 v2.7.0 sunt pe `origin/main`. v2.7.1 + v2.8.0 + v2.9.0 + v2.9.1
-raman locale pana la push.
+**Tag-uri**: `v2.0.7` → `v2.10.1` push-uite pe `origin` (inclusiv `v2.7.1`,
+`v2.8.0`, `v2.9.0`, `v2.9.1`, `v2.9.2`, `v2.10.0`, `v2.10.1` create si
+push-uite in sesiunea de cleanup 2026-05-03).
 
-**Tag-uri**: `v2.5.0` → `v2.6.8` + `v2.7.0` push-uite pe `origin`. `v2.7.1` +
-`v2.8.0` + `v2.9.0` + `v2.9.1` urmeaza dupa commit-uri.
-
-**Versiune curenta**: `v2.10.0` (PR-11 Email notifiers: SMTP optional,
-setari per-owner, rute `/api/v1/me/email-settings`, panou UI si email trimis
-doar pentru alerte nou inserate).
+**Versiune curenta**: `v2.10.1` (PR-11 review hardening: 14 fix-uri din
+multi-agent review absorbite peste v2.10.0 — SMTP timeouts + cooldown
+`/test` 60s/owner + queue FIFO `MAX_CONCURRENT=1` + drain pe shutdown +
+focus trap modal Detalii instante). v2.10.0 baseline livrat email notifiers
+prin SMTP optional, setari per-owner, rute `/api/v1/me/email-settings`,
+panou UI si email trimis doar pentru alerte nou inserate.
 
 ## v2.10.0 - PR-11 Email notifiers
 
@@ -904,19 +896,25 @@ Fisiere modificate:
 
 ## Probleme/riscuri ramase
 
-- `main` local este sincronizat cu `origin/main` la `579ce7b` (v2.7.0,
-  PR-A + PR-9 review hardening). Tag-ul `v2.7.0` push-uit pe `origin`
-  impreuna cu tag-urile `v2.5.0` → `v2.6.8` din sesiunea precedenta.
+- `main` local este sincronizat cu `origin/main` la `cebf061` (v2.10.1,
+  PR-11 review hardening). Tag-urile `v2.0.7` → `v2.10.1` sunt toate pe
+  `origin`.
 - `package.json`, `backend/package.json`, `frontend/package.json` si
-  `package-lock.json` resincronizate la versiunea `2.7.0`.
+  `package-lock.json` sincronizate la versiunea `2.10.1`.
 - `useCurrentUser` se apeleaza din mai multe locuri (Sidebar + AdminGate per
   pagina admin). Pe desktop call-ul este local si rapid; daca devine vizibil in
   load tests pe web mode, va fi lift-ed in context shared (sau cache-uit).
 - Pe desktop quota este informativa/bypass. Enforce real ramane pentru web
-  cutover (PR-10 → PR-12).
-- PR-9 livreaza seam-ul de auth (desktop noop / web JWT validation), dar
-  cutover-ul real web — Google Workspace SSO/OIDC, deploy server, TLS,
-  Litestream backup — ramane in PR-10 → PR-12.
+  cutover viitor (daca se reia).
+- PR-9 livreaza seam-ul de auth (desktop noop / web JWT validation). Cutover-ul
+  real web — Google Workspace SSO/OIDC, deploy server, TLS, backup
+  S3-compatible — este reevaluabil separat (PR-10 GCS si PR-12 GDPR delete +
+  hash-chain audit eliminate prin decizia #11 din `EXECUTION-ROADMAP.md`,
+  2026-05-03).
+- Email canal SMTP (PR-11) ramane optional; dispatcher scurt-circuiteaza cand
+  `SMTP_*` lipsesc (vezi tabela "Kill switches operationale" mai sus).
+  Cooldown 60s/owner pe `/api/v1/me/email-settings/test` previne abuz vs
+  Gmail/O365 SMTP throttling.
 - `xlsx@0.18.5` nu mai este pe path-ul de parsare a inputului user (in v2.6.4
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
@@ -924,33 +922,33 @@ Fisiere modificate:
 
 ## Urmatoarea etapa
 
-Conform roadmap, PR-A din sprint-ul Dashboard redesign este livrat. Urmatoarea
-livrare este **PR-B v2.8.0** (al 2-lea PR din 3 in sprintul Dashboard
-redesign).
+Sprintul de monitorizare + email este incheiat. Roadmap-ul oficial
+(`EXECUTION-ROADMAP.md`) nu mai are PR-uri planificate dupa v2.10.1 — PR-10
+(Litestream/GCS) si PR-12 (GDPR delete + hash-chain audit) au fost eliminate
+prin decizia #11 (cost-benefit negativ pentru solo dev fara firma; compliance
+theatre pentru uz personal).
 
-### PR-B v2.8.0 - Dashboard timeline + charts
+Directii deschise (toate optionale, fara timeline):
 
-Scop (planificat):
+### A. Web cutover viitor (reevaluabil separat)
 
-- timeline de evenimente recente (alerte + run-uri + audit relevant) cu
-  paginare server-side si filtrare pe tip eveniment;
-- charts pentru tendinte 7d/30d (alerte/zi, run success rate, AI cost);
-- reuseste endpoint-ul `/api/v1/dashboard/summary` pentru KPI-uri si adauga
-  endpoint nou `/api/v1/dashboard/timeline` + `/api/v1/dashboard/charts`;
-- zero schema change preferabil (foloseste `monitoring_runs`, `alerts`,
-  `audit_log`, `ai_usage` existente cu agregari).
+- Google Workspace SSO real peste seam-ul PR-9 (desktop noop / web JWT
+  validation deja livrat in v2.7.0).
+- Deploy server: Docker image, reverse proxy, TLS.
+- Backup S3-compatible (Cloudflare R2 / Backblaze B2 ca alternativa la GCS
+  eliminat).
+- Captcha provider keys (2Captcha / CapSolver) muta-le in `.env` server-side
+  in web mode; desktop pastreaza Electron `safeStorage`.
 
-### PR-C v2.9.0 - Dashboard reports
+### B. Digest email zilnic (extensie optionala peste PR-11)
 
-Scop (planificat):
+- PR-11 livreaza dispatch immediate per alerta. Digest-ul zilnic (un singur
+  email cu rezumatul alertelor din ultima zi) era explicit marcat
+  "non-scope pentru PR viitor optional" in `EXECUTION-ROADMAP.md` L347.
+- Necesita un cron in scheduler + template HTML separat + setting per-owner
+  pentru digest vs immediate vs both.
 
-- export raport agregat (XLSX + PDF) cu KPI-uri + timeline + charts pentru
-  intervale custom (7d/30d/custom);
-- activeaza butonul "Export raport" din `QuickActions` (acum disabled cu
-  tooltip "Disponibil in v2.9.0 (PR-C)").
+### C. Continuare ad-hoc
 
-### PR-10 → PR-12 - Cutover web complet (in viitor)
-
-- Google Workspace SSO/OIDC peste seam-ul de auth livrat in PR-9;
-- import/export desktop ↔ web (migration cale identitate `local` → user real);
-- deploy server (Litestream backup, Docker, TLS, monitoring extern).
+- Bug fixes / UX polish pe fluxurile existente (Monitorizare, Alerte,
+  Dashboard, Admin) pe baza feedback-ului direct din uz real.

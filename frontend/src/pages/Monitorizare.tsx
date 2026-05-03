@@ -346,7 +346,14 @@ export default function Monitorizare({
               sau marcheaza un dosar din pagina <strong>Cautare Dosare</strong>.
             </div>
           )}
-          {jobs.length > 0 && (
+          {jobs.length > 0 && (() => {
+            // Show "Detalii" column only when at least one job has scoped instances
+            // to surface (Info modal). Otherwise the column header occupies horizontal
+            // space without ever rendering content for any row.
+            const showDetailsColumn = jobs.some(
+              (job) => job.kind === "name_soap" && (getNameSoapInstitutie(job)?.length ?? 0) > 0,
+            );
+            return (
             <div className="overflow-x-auto">
               <table className="w-full text-[13px]">
                 <thead>
@@ -365,7 +372,9 @@ export default function Monitorizare({
                       />
                     </th>
                     <th className="px-3 py-2">Tinta</th>
-                    <th className="px-3 py-2 text-center">Detalii</th>
+                    {showDetailsColumn && (
+                      <th className="px-3 py-2 text-center">Detalii</th>
+                    )}
                     <th className="px-3 py-2">Cadenta</th>
                     <th className="px-3 py-2">Ultima rulare</th>
                     <th className="px-3 py-2">Urmatoarea verif.</th>
@@ -472,26 +481,28 @@ export default function Monitorizare({
                           </div>
                         )}
                       </td>
-                      <td className="px-3 py-2 text-center">
-                        {job.kind === "name_soap" && (() => {
-                          const scope = getNameSoapInstitutie(job) ?? [];
-                          if (scope.length === 0) return null;
-                          return (
-                            <button
-                              type="button"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setOpenInstantePopover(job.id);
-                              }}
-                              className="inline-flex h-5 w-5 items-center justify-center rounded-full text-yellow-500 hover:bg-yellow-100 hover:text-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-950 dark:hover:text-yellow-300"
-                              title={`${scope.length} ${scope.length === 1 ? "instanta monitorizata" : "instante monitorizate"} — click pentru detalii`}
-                              aria-label={`Vezi ${scope.length} ${scope.length === 1 ? "instanta" : "instante"}`}
-                            >
-                              <Info className="h-4 w-4" />
-                            </button>
-                          );
-                        })()}
-                      </td>
+                      {showDetailsColumn && (
+                        <td className="px-3 py-2 text-center">
+                          {job.kind === "name_soap" && (() => {
+                            const scope = getNameSoapInstitutie(job) ?? [];
+                            if (scope.length === 0) return null;
+                            return (
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setOpenInstantePopover(job.id);
+                                }}
+                                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-yellow-500 hover:bg-yellow-100 hover:text-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-950 dark:hover:text-yellow-300"
+                                title={`${scope.length} ${scope.length === 1 ? "instanta monitorizata" : "instante monitorizate"} — click pentru detalii`}
+                                aria-label={`Vezi ${scope.length} ${scope.length === 1 ? "instanta" : "instante"}`}
+                              >
+                                <Info className="h-4 w-4" />
+                              </button>
+                            );
+                          })()}
+                        </td>
+                      )}
                       <td className="px-3 py-2">
                         {(() => {
                           const isStandard = CADENCE_OPTIONS.some((o) => o.sec === job.cadence_sec);
@@ -578,7 +589,8 @@ export default function Monitorizare({
                 </tbody>
               </table>
             </div>
-          )}
+            );
+          })()}
         </CardContent>
       </Card>
       {openInstantePopover !== null && (() => {
