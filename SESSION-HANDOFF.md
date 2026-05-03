@@ -26,6 +26,15 @@ Patch frontend + docs peste v2.10.6.
 - Findings-urile legate de workflow metadata / release artifact naming raman
   pentru o sesiune separata. v2.10.7 ramane scoped la fixul de count din
   Monitorizare, fara schimbare de workflow in starea finala.
+- De facut pe viitor in `.github/workflows/build-windows.yml`:
+  - adauga type-check si teste inainte de packaging;
+  - aliniaza numele artifactului cu workflow-ul macOS, preferabil incluzand
+    versiunea/ref-ul si `github.run_id` ca sa nu existe ambiguitate intre run-uri.
+- De facut pe viitor in `.github/workflows/build-mac.yml`:
+  - adauga type-check si teste inainte de packaging;
+  - evita artifact name fix (`legal-dashboard-mac`) cand build-ul poate produce
+    mai multe fisiere/architectures; foloseste nume cu versiune/ref/run ca sa
+    previi overwrite-uri sau artefacte greu de distins.
 
 ## v2.10.6 - Review hardening + cleanup backlog (peste v2.10.5)
 
