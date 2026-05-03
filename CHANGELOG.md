@@ -21,6 +21,13 @@ incarcate pe pagina curenta, nu totalul real de joburi active.
   acopera joburile vizibile pe pagina curenta, ca sa ramana aliniate cu textul
   existent `Selectia opereaza doar pe pagina vizibila (100 din 616)`.
 
+### Documentatie
+
+- `CODEX-BACKLOG.md` a fost inchis ca document istoric: Task B/C sunt livrate
+  in v2.10.5, iar Task A este eliminat din scope din v2.10.6.
+- Findings-urile de workflow metadata / release artifact naming raman deferate
+  pentru o sesiune separata; starea finala v2.10.7 nu schimba workflow-urile.
+
 - Bump la `2.10.7` in root/backend/frontend manifests si lockfile.
 
 ---

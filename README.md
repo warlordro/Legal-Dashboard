@@ -14,7 +14,10 @@ Ultimul release este **v2.10.7** - patch UX Monitorizare peste v2.10.6.
 Titlul tabelului `Joburi active` afiseaza acum totalul real din raspunsul
 paginat (`total`, de exemplu 616), nu doar randurile incarcate pe pagina curenta
 (`jobs.length`, de exemplu 100). Tooltip-urile Excel/PDF spun explicit ca
-exportul fara selectie acopera joburile vizibile pe pagina.
+exportul fara selectie acopera joburile vizibile pe pagina. Documentatia este
+sincronizata: `CODEX-BACKLOG.md` ramane istoric inchis pentru Task B/C livrate
+si Task A eliminat, iar fixurile de workflow metadata raman pentru o sesiune
+separata.
 
 Predecesor **v2.10.6** - patch hardening peste v2.10.5, fara
 comportament nou. Absoarbe in totalitate findings-urile review-ului

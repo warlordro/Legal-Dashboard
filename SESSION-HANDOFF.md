@@ -19,7 +19,13 @@ Patch frontend + docs peste v2.10.6.
 - `package.json`, `backend/package.json`, `frontend/package.json` si
   `package-lock.json` sincronizate la `2.10.7`.
 - `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md`,
-  `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md` si acest handoff actualizate.
+  `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md`, `CODEX-BACKLOG.md` si
+  acest handoff actualizate.
+
+**Defer separat**:
+- Findings-urile legate de workflow metadata / release artifact naming raman
+  pentru o sesiune separata. v2.10.7 ramane scoped la fixul de count din
+  Monitorizare, fara schimbare de workflow in starea finala.
 
 ## v2.10.6 - Review hardening + cleanup backlog (peste v2.10.5)
 
@@ -93,9 +99,10 @@ si elimina script-ul tactic `seed-test-alerts.cjs`. Task A din `CODEX-BACKLOG.md
 ## v2.10.5 - Dashboard KPI rename + Alerte tab-bar/search (istoric anterior)
 
 Aceasta sesiune a implementat doar Task B si Task C din `CODEX-BACKLOG.md`.
-Task A (`Editare job monitorizare existent`) ramane explicit neimplementat:
-`JobUpdateBodySchema` nu accepta inca `target`, iar `monitoringJobsRepository`
-nu recomputeaza `target_hash` pe PATCH.
+La momentul v2.10.5, Task A (`Editare job monitorizare existent`) a ramas
+explicit neimplementat: `JobUpdateBodySchema` nu accepta `target`, iar
+`monitoringJobsRepository` nu recomputeaza `target_hash` pe PATCH. In v2.10.6,
+Task A a fost scos integral din backlog.
 
 **Dashboard**:
 - `frontend/src/components/dashboard/KpiStrip.tsx`: KPI-ul `Joburi active`
@@ -116,8 +123,8 @@ nu recomputeaza `target_hash` pe PATCH.
   `package-lock.json` sincronizate la `2.10.5`.
 - `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md` si
   `README.md` actualizate pentru v2.10.5.
-- `CODEX-BACKLOG.md` ramane documentul de backlog curent; Task A ramane in el
-  pentru o sesiune viitoare.
+- `CODEX-BACKLOG.md` este acum document istoric: Task B/C sunt livrate, iar
+  Task A a fost eliminat in v2.10.6.
 
 **Validari rulate**:
 - `npm rebuild better-sqlite3` - OK dupa oprirea proceselor stale

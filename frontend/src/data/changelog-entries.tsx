@@ -36,6 +36,11 @@ export const versions: VersionEntry[] = [
         content:
           "Tooltip-urile Excel/PDF spun explicit ca exportul fara selectie acopera toate joburile vizibile, nu intregul total paginat. Comportamentul ramane neschimbat; fix-ul este de claritate UI.",
       },
+      {
+        title: "Documentatie - backlog inchis",
+        content:
+          "CODEX-BACKLOG.md ramane document istoric: Task B/C sunt livrate in v2.10.5, Task A este eliminat din scope din v2.10.6, iar findings-urile de workflow metadata raman deferate pentru o sesiune separata. v2.10.7 nu schimba workflow-urile finale.",
+      },
     ],
   },
   {
