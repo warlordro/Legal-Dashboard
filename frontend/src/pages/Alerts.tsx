@@ -9,7 +9,6 @@ import {
   alertsApi,
   alertKindLabels,
   severityLabels,
-  type AlertJobKind,
   type AlertKind,
   type AlertSeverity,
   type MonitoringAlert,
@@ -17,8 +16,10 @@ import {
 import { buildAlertContext } from "@/lib/alert-context";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useFontSize } from "@/hooks/useFontSize";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
+import { JobKindTabs, type JobKindFilter } from "@/components/monitoring/JobKindTabs";
 import { TablePagination } from "@/components/table-pagination";
 
 const kindOptions: Array<{ value: AlertKind | "all"; label: string }> = [
@@ -77,9 +78,16 @@ export default function Alerts({
   const [total, setTotal] = useState(0);
   const [unread, setUnread] = useState(0);
   const [kind, setKind] = useState<AlertKind | "all">("all");
-  const [jobKind, setJobKind] = useState<AlertJobKind | "all">("all");
+  const [jobKind, setJobKind] = useState<JobKindFilter>("all");
   const [searchInput, setSearchInput] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  // page reset is wired into searchInput's onChange (event-handler batching),
+  // not into the debounce settle callback — the setTimeout boundary in
+  // useDebouncedValue doesn't reliably batch setDebounced + setPage in React
+  // 18, which produced an extra fetch with the stale page. The fetch still
+  // fires only after debounce settles; only the page indicator moves eagerly.
+  // `flushQuery("")` short-circuits the 300ms wait on Reset so the next fetch
+  // doesn't run with a stale `q` for one settle window.
+  const [debouncedQuery, flushQuery] = useDebouncedValue(searchInput.trim(), 300);
   const [severity, setSeverity] = useState<AlertSeverity | "all">("all");
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [includeDismissed, setIncludeDismissed] = useState(false);
@@ -127,15 +135,6 @@ export default function Alerts({
   useEffect(() => {
     load();
   }, [load, streamVersion]);
-
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(searchInput.trim()), 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  useEffect(() => {
-    setPage(0);
-  }, [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, severity, to]);
 
   const markSeen = async (alert: MonitoringAlert) => {
     setBusyId(alert.id);
@@ -243,38 +242,22 @@ export default function Alerts({
           </CardHeader>
           <CardContent>
             <div className="mb-3 flex flex-wrap items-center gap-2">
-              <div
-                role="tablist"
-                aria-label="Filtreaza alertele dupa tipul jobului"
-                className="inline-flex rounded-md border border-input bg-background p-0.5"
-              >
-                {(["all", "dosar_soap", "name_soap"] as const).map((k) => {
-                  const label = k === "all" ? "Toate" : k === "dosar_soap" ? "Dosare" : "Nume";
-                  const active = jobKind === k;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      role="tab"
-                      aria-selected={active}
-                      onClick={() => setJobKind(k)}
-                      className={cn(
-                        "rounded px-3 py-1 text-xs font-medium transition-colors",
-                        active
-                          ? "bg-primary text-primary-foreground"
-                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                      )}
-                    >
-                      {label}
-                    </button>
-                  );
-                })}
-              </div>
+              <JobKindTabs
+                value={jobKind}
+                onChange={(k) => {
+                  setJobKind(k);
+                  setPage(0);
+                }}
+                ariaLabel="Filtreaza alertele dupa tipul jobului"
+              />
               <div className="relative min-w-[260px] max-w-md flex-1">
                 <Input
                   type="text"
                   value={searchInput}
-                  onChange={(e) => setSearchInput(e.target.value)}
+                  onChange={(e) => {
+                    setSearchInput(e.target.value);
+                    setPage(0);
+                  }}
                   placeholder="Cauta dupa nume sau numar dosar..."
                   className="pr-8"
                   aria-label="Cautare in alerte"
@@ -282,7 +265,11 @@ export default function Alerts({
                 {searchInput && (
                   <button
                     type="button"
-                    onClick={() => setSearchInput("")}
+                    onClick={() => {
+                      flushQuery("");
+                      setSearchInput("");
+                      setPage(0);
+                    }}
                     className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
                     aria-label="Sterge cautarea"
                     title="Sterge cautarea"
@@ -295,7 +282,10 @@ export default function Alerts({
             <div className="grid gap-3 md:grid-cols-6">
               <select
                 value={kind}
-                onChange={(event) => setKind(event.target.value as AlertKind | "all")}
+                onChange={(event) => {
+                  setKind(event.target.value as AlertKind | "all");
+                  setPage(0);
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
                 {kindOptions.map((option) => (
@@ -304,7 +294,10 @@ export default function Alerts({
               </select>
               <select
                 value={severity}
-                onChange={(event) => setSeverity(event.target.value as AlertSeverity | "all")}
+                onChange={(event) => {
+                  setSeverity(event.target.value as AlertSeverity | "all");
+                  setPage(0);
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
                 {severityOptions.map((option) => (
@@ -314,20 +307,29 @@ export default function Alerts({
               <input
                 type="date"
                 value={from}
-                onChange={(event) => setFrom(event.target.value)}
+                onChange={(event) => {
+                  setFrom(event.target.value);
+                  setPage(0);
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="date"
                 value={to}
-                onChange={(event) => setTo(event.target.value)}
+                onChange={(event) => {
+                  setTo(event.target.value);
+                  setPage(0);
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <label className="flex h-9 items-center gap-2 rounded-md border border-input px-3 text-sm">
                 <input
                   type="checkbox"
                   checked={onlyUnread}
-                  onChange={(event) => setOnlyUnread(event.target.checked)}
+                  onChange={(event) => {
+                    setOnlyUnread(event.target.checked);
+                    setPage(0);
+                  }}
                 />
                 Necitite
               </label>
@@ -335,7 +337,10 @@ export default function Alerts({
                 <input
                   type="checkbox"
                   checked={includeDismissed}
-                  onChange={(event) => setIncludeDismissed(event.target.checked)}
+                  onChange={(event) => {
+                    setIncludeDismissed(event.target.checked);
+                    setPage(0);
+                  }}
                 />
                 Inchise
               </label>
@@ -359,9 +364,10 @@ export default function Alerts({
                     <button
                       type="button"
                       onClick={() => {
+                        flushQuery("");
                         setJobKind("all");
                         setSearchInput("");
-                        setDebouncedQuery("");
+                        setPage(0);
                       }}
                       className="text-xs text-primary hover:underline"
                     >

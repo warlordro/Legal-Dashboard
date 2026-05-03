@@ -6,7 +6,7 @@
 
 import { getDb } from "./schema.ts";
 import { dispatchAlertEmail } from "../services/email/alertEmailDispatcher.ts";
-import { stripDiacritics } from "../util/textNormalize.ts";
+import { buildRnpmLikePattern } from "../util/textNormalize.ts";
 
 export type AlertKind =
   | "dosar_new"
@@ -285,14 +285,23 @@ export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
     where.push("j.kind = ?");
     params.push(opts.jobKind);
   }
-  if (opts.q) {
+  if (opts.q?.trim()) {
+    // Search across both the monitored target (job.target_json) and the alert
+    // payload (alert.detail_json + alert.title). The target match keeps the
+    // original v2.10.5 semantics ("everything for dosar X / name Y"); the
+    // detail/title match catches dosare discovered by name_soap jobs and any
+    // other identifiers/text the user can see in the alert card. `trim()` la
+    // intrare blocheaza whitespace-only `q` care altfel ar deveni `%   %` si
+    // ar match-ui orice rand cu 3 spatii.
     where.push(`(
       rnpm_norm(json_extract(j.target_json, '$.numar_dosar')) LIKE ? ESCAPE '\\'
       OR rnpm_norm(json_extract(j.target_json, '$.name_normalized')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(json_extract(a.detail_json, '$.numar_dosar')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(json_extract(a.detail_json, '$.name_normalized')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(a.title) LIKE ? ESCAPE '\\'
     )`);
-    const escaped = stripDiacritics(opts.q).toLowerCase().replace(/[\\%_]/g, "\\$&");
-    const like = `%${escaped}%`;
-    params.push(like, like);
+    const like = buildRnpmLikePattern(opts.q.trim());
+    params.push(like, like, like, like, like);
   }
   if (opts.kind) {
     where.push("a.kind = ?");

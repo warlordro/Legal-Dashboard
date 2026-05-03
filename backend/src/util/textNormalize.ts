@@ -10,6 +10,35 @@ export function stripDiacritics(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
+// Escape user-supplied SQL LIKE meta characters (%, _, \) so the bound value
+// matches as a literal. Pair every consumer with `ESCAPE '\\'` in SQL.
+//
+// CONTRACT: omitting `ESCAPE '\\'` makes SQLite treat the literal backslash
+// as a normal character, which leaves `%` and `_` active as wildcards.
+//
+// @example
+//   const where = "email LIKE ? ESCAPE '\\\\'";
+//   stmt.all(`%${escapeLikeMeta(userInput)}%`);
+export function escapeLikeMeta(s: string): string {
+  return s.replace(/[\\%_]/g, "\\$&");
+}
+
+// Build a contains-match pattern for SQLite `... LIKE ? ESCAPE '\\'` clauses
+// that use `rnpm_norm(col)` on the column side. Mirrors that normalization on
+// the RHS (NFD strip + lowercase) and escapes user-supplied LIKE meta (% _ \)
+// so e.g. "50%" matches the literal string instead of a wildcard.
+//
+// CONTRACT: every call site MUST pair the bound parameter with `ESCAPE '\\'`,
+// otherwise the leading `\` in escaped meta becomes a literal match and SQLite
+// treats `%`/`_` as wildcards again.
+//
+// @example
+//   const where = "rnpm_norm(name) LIKE ? ESCAPE '\\\\'";
+//   stmt.all(buildRnpmLikePattern(userInput));  // safe vs wildcard injection
+export function buildRnpmLikePattern(q: string): string {
+  return `%${escapeLikeMeta(stripDiacritics(q).toLowerCase())}%`;
+}
+
 // Walk a params-shaped object and strip diacritics from every string leaf.
 // Used on RNPM /search + /bulk bodies: guarantees any backend path (bulk, future
 // obligatiuni, etc.) benefits without needing frontend changes.

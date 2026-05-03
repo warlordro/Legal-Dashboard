@@ -1,8 +1,77 @@
-# Session Handoff - v2.10.5 (Dashboard/Alerte UX + backlog B/C)
+# Session Handoff - v2.10.6 (review hardening + cleanup backlog)
 
 **Data**: 2026-05-03
 
-## v2.10.5 - Dashboard KPI rename + Alerte tab-bar/search
+## v2.10.6 - Review hardening + cleanup backlog (peste v2.10.5)
+
+Patch fara comportament nou. Absoarbe integral findings-urile review-ului
+`REVIEW-FINDINGS-2026-05-03.md` (Critical + High + Medium + Low + nice-to-have)
+si elimina script-ul tactic `seed-test-alerts.cjs`. Task A din `CODEX-BACKLOG.md`
+(editare job monitorizare) este scos din backlog si din memoria persistenta.
+
+**Frontend**:
+- `frontend/src/hooks/useDebouncedValue.ts`: rescris cu tuple `[value, flush]`.
+  `flush(next)` permite resetarea sincrona la apasari de buton (clear-X / Reset
+  filter) ca debounced state-ul sa nu mai fluture printr-un val intermediar.
+- `frontend/src/pages/Alerts.tsx`: `jobKind` ingustat de la `AlertJobKind` la
+  `JobKindFilter`; reset-handlerii cheama `flushQuery("")` inainte de
+  `setSearchInput("")`. Cast-ul mort dropuit.
+- `frontend/src/pages/Monitorizare.tsx`: same pattern (`flushQuery("")`).
+- `frontend/src/components/monitoring/JobKindTabs.tsx`: navigatie tastatura
+  conform WAI-ARIA Authoring Practices — ArrowLeft / ArrowRight cu wrap,
+  Home / End jump la extreme, roving tabindex (`tabIndex={active ? 0 : -1}`),
+  focus mutat sincron pe tab-ul selectat. Tipul handler-ului corectat la
+  `KeyboardEvent<HTMLButtonElement>`.
+
+**Backend**:
+- `backend/src/util/textNormalize.ts`: helper nou `escapeLikeMeta(s)` extras ca
+  utilitate reutilizabila pentru orice path care trece input user prin
+  `LIKE ? ESCAPE '\\'`. JSDoc `@example` documenteaza explicit contractul
+  (omiterea `ESCAPE` lasa `\` literal si re-enable-uieste `%` / `_` ca
+  wildcards).
+- `backend/src/db/auditRepository.ts`: `listAuditEvents` (`actionLike`)
+  foloseste acum `escapeLikeMeta` + `ESCAPE '\\'` — defense-in-depth pentru
+  admin paths unde user input ajunge in clauze LIKE.
+- `backend/src/db/userRepository.ts`: `listUsers` (`search` peste `email` +
+  `display_name`) — same pattern.
+- `backend/src/db/monitoringJobsRepository.ts` si
+  `backend/src/db/monitoringAlertsRepository.ts`: filtru `q` are guard
+  `q?.trim()` defensiv (Zod-ul deja face trim, dar repo-ul nu mai depinde
+  de el).
+
+**Cleanup**:
+- `scripts/seed-test-alerts.cjs` sters (script tactic, nu mai are utilitate).
+- `CODEX-BACKLOG.md`: Task A (editare job monitorizare) scos integral.
+  `MEMORY.md` si memory file `project_backlog_edit_monitoring_job.md` curatate.
+
+**Tests**:
+- Backend: nou `backend/src/util/textNormalize.test.ts` (11 teste) + 3 teste
+  wildcard pentru `getAvize` (`%`, `_`, `\` literali → 0 rezultate).
+  **721/721 backend** (de la 703 in v2.10.5, +18).
+- Frontend: noi `frontend/src/hooks/useDebouncedValue.test.ts` (6 teste,
+  harness manual cu `react-dom/client` + React 18 `act`),
+  `frontend/src/components/monitoring/JobKindTabs.test.tsx` (9 teste — render,
+  aria-selected, click, roving tabindex, ArrowLeft/Right, Home/End, ignored
+  keys), `frontend/src/lib/alertsApi.test.ts` (7 teste pentru constructia
+  query string). **73/73 frontend**.
+
+**Validari rulate**:
+- `npx tsc --noEmit -p backend/tsconfig.json` - OK.
+- `cd frontend && npx tsc --noEmit` - OK (dupa fix tip
+  `KeyboardEvent<HTMLButtonElement>` in `JobKindTabs.tsx:29`).
+- `npm rebuild better-sqlite3 --workspace=backend` - OK (ABI Node restaurat
+  pentru vitest dupa Electron).
+- `npm test --workspace=backend` - 721/721 passed.
+- `cd frontend && npm test -- --run` - 73/73 passed.
+- `npm run rebuild:electron` - OK (ABI Electron restaurat dupa testele Node).
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json` si
+  `package-lock.json` sincronizate la `2.10.6`.
+- `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md`,
+  `README.md`, `STATUS.md`, `EXECUTION-ROADMAP.md` actualizate pentru v2.10.6.
+
+## v2.10.5 - Dashboard KPI rename + Alerte tab-bar/search (istoric anterior)
 
 Aceasta sesiune a implementat doar Task B si Task C din `CODEX-BACKLOG.md`.
 Task A (`Editare job monitorizare existent`) ramane explicit neimplementat:

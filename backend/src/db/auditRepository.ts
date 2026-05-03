@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { getDb } from "./schema.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
+import { escapeLikeMeta } from "../util/textNormalize.ts";
 
 // Audit outcomes per PLAN-monitoring-webmode.md §2.4. Stored as TEXT with a
 // CHECK constraint on the column, so divergence here vs DDL would surface as a
@@ -200,8 +201,11 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
     params.push(opts.action);
   }
   if (opts.actionLike) {
-    where.push("action LIKE ?");
-    params.push(`%${opts.actionLike}%`);
+    // Escape user-controlled LIKE meta (% _ \) so admin search by "monitoring"
+    // doesn't surface the entire table when somebody pastes "%". `action`
+    // values are static identifiers — no diacritic handling needed here.
+    where.push("action LIKE ? ESCAPE '\\'");
+    params.push(`%${escapeLikeMeta(opts.actionLike)}%`);
   }
   if (opts.targetKind) {
     where.push("target_kind = ?");

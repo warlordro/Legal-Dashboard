@@ -110,7 +110,7 @@ export const alertsApi = {
     if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
     if (params.kind && params.kind !== "all") search.set("kind", params.kind);
     if (params.jobKind && params.jobKind !== "all") search.set("jobKind", params.jobKind);
-    if (params.q) search.set("q", params.q);
+    if (params.q && params.q.trim()) search.set("q", params.q.trim());
     if (params.severity && params.severity !== "all") search.set("severity", params.severity);
     if (params.onlyUnread !== undefined) search.set("onlyUnread", String(params.onlyUnread));
     if (params.includeDismissed !== undefined) search.set("includeDismissed", String(params.includeDismissed));

@@ -11,7 +11,7 @@
 
 import { getDb } from "./schema.ts";
 import { canonicalSha256 } from "../util/canonicalJson.ts";
-import { stripDiacritics } from "../util/textNormalize.ts";
+import { buildRnpmLikePattern } from "../util/textNormalize.ts";
 import type { JobCreateBody, JobKind, JobUpdateBody } from "../schemas/monitoring.ts";
 
 export type JobStatus = "ok" | "error" | "partial" | "skipped";
@@ -182,12 +182,13 @@ export function listJobs(opts: ListJobsOptions): ListJobsResult {
     where.push("active = ?");
     params.push(opts.active ? 1 : 0);
   }
-  if (opts.q) {
+  if (opts.q?.trim()) {
     // Diacritic-insensitive + case-insensitive contains match.
     // Pattern: `rnpm_norm(json_extract(target_json, '$.numar'))` strips
     // diacritics + lowercases on the COLUMN side, normalizam param-ul o
     // singura data in JS pe RHS. LIKE meta `% _ \` escapate cu '\' ca user
-    // input "50%" sa nu degenereze in wildcard.
+    // input "50%" sa nu degenereze in wildcard. `trim()` la intrare blocheaza
+    // " " care altfel ar produce `%   %` (match pe orice rand cu 3 spatii).
     where.push(
       `(
         rnpm_norm(json_extract(target_json, '$.numar_dosar')) LIKE ? ESCAPE '\\'
@@ -195,8 +196,7 @@ export function listJobs(opts: ListJobsOptions): ListJobsResult {
         OR rnpm_norm(json_extract(target_json, '$.identificator')) LIKE ? ESCAPE '\\'
       )`,
     );
-    const escaped = stripDiacritics(opts.q).toLowerCase().replace(/[\\%_]/g, "\\$&");
-    const like = `%${escaped}%`;
+    const like = buildRnpmLikePattern(opts.q.trim());
     params.push(like, like, like);
   }
   const whereSql = `WHERE ${where.join(" AND ")}`;

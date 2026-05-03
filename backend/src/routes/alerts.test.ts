@@ -264,6 +264,66 @@ describe("GET /api/v1/alerts", () => {
     expect(json.data.rows).toHaveLength(0);
   });
 
+  it("searches alert detail_json.numar_dosar (dosare discovered by name_soap)", async () => {
+    const app = buildTestApp();
+    const nameJob = seedJob(OWNER_A, "name-discover", {
+      kind: "name_soap",
+      target: { name_normalized: "ACME SRL" },
+    });
+    const runId = seedRun(OWNER_A, nameJob);
+    seedAlert(OWNER_A, {
+      jobId: nameJob,
+      runId,
+      title: "Dosar nou pentru ACME SRL",
+      detail: { numar_dosar: "5014/SEED/2025", name_normalized: "ACME SRL" },
+      dedupKey: "n1",
+    });
+    seedAlert(OWNER_A, {
+      jobId: nameJob,
+      runId,
+      title: "Alt dosar",
+      detail: { numar_dosar: "9999/X/2024", name_normalized: "ACME SRL" },
+      dedupKey: "n2",
+    });
+
+    const res = await app.request("/api/v1/alerts?q=5014", {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertListResponse;
+    expect(json.data.total).toBe(1);
+    expect(json.data.rows[0].title).toBe("Dosar nou pentru ACME SRL");
+  });
+
+  it("searches alert title text (any token visible to user)", async () => {
+    const app = buildTestApp();
+    const job = seedJob(OWNER_A, "title-search", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const runId = seedRun(OWNER_A, job);
+    seedAlert(OWNER_A, {
+      jobId: job,
+      runId,
+      title: "Termen nou: Sala 5",
+      dedupKey: "t1",
+    });
+    seedAlert(OWNER_A, {
+      jobId: job,
+      runId,
+      title: "Solutie aparuta",
+      dedupKey: "t2",
+    });
+
+    const res = await app.request("/api/v1/alerts?q=sala", {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertListResponse;
+    expect(json.data.total).toBe(1);
+    expect(json.data.rows[0].title).toBe("Termen nou: Sala 5");
+  });
+
   it("ANDs q with jobKind", async () => {
     const app = buildTestApp();
     const dosarJob = seedJob(OWNER_A, "and-dosar", {

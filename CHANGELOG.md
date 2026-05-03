@@ -4,6 +4,60 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.6] - 2026-05-03
+
+### Hardening post-v2.10.5 — review findings + curatare backlog
+
+Patch peste v2.10.5 fara schimbari functionale vizibile. Absoarbe in totalitate
+findings-urile review-ului `REVIEW-FINDINGS-2026-05-03.md` (Critical + High +
+Medium + Low + nice-to-have), elimina script-ul `seed-test-alerts.cjs` si scoate
+din backlog Task A (editare job monitorizare).
+
+### Frontend
+
+- `useDebouncedValue` rescris cu tuple-return `[value, flush]`. Callback-ul
+  `flush(next)` permite resetarea sincrona la apasari de buton (clear-X / Reset
+  filtre) ca debounced state-ul sa nu mai fluture printr-un val intermediar.
+- `Alerts.tsx`: `jobKind` ingustat de la `AlertJobKind` la tipul tab-bar-ului
+  (`JobKindFilter`); cast-ul mort dropuit. Reset-handlerii cheama `flushQuery("")`
+  inainte sa puna input-ul gol.
+- `Monitorizare.tsx`: same pattern (`flushQuery("")` pe clear-X si Reset filter).
+- `JobKindTabs`: navigatie tastatura conform WAI-ARIA Authoring Practices —
+  ArrowLeft / ArrowRight cu wrap, Home / End jump la extreme, roving tabindex
+  (`tabIndex={active ? 0 : -1}`), focus mutat sincron pe tab-ul selectat.
+
+### Backend
+
+- `escapeLikeMeta(s)` extras in `util/textNormalize.ts` ca helper reutilizabil
+  pentru orice path care trece input user prin `LIKE ? ESCAPE '\\'`. JSDoc
+  documenteaza explicit contractul (omiterea `ESCAPE` lasa `\` literal si re-
+  enable-uieste `%` / `_` ca wildcards).
+- `auditRepository.listAuditEvents` (`actionLike`) si
+  `userRepository.listUsers` (`search` peste `email` + `display_name`) folosesc
+  acum `escapeLikeMeta` + `ESCAPE '\\'` — defense-in-depth pentru admin paths
+  unde user input ajunge in clauze LIKE.
+- `monitoringJobsRepository` si `monitoringAlertsRepository`: filtru `q` are
+  guard `q?.trim()` defensiv (Zod-ul deja face trim, dar repo-ul nu mai depinde
+  de el).
+
+### Tests
+
+- Backend: nou `util/textNormalize.test.ts` (11 teste) + 3 teste wildcard pentru
+  `getAvize` (`%`, `_`, `\` literali → 0 rezultate). **721 teste backend**.
+- Frontend: noi `useDebouncedValue.test.ts` (6 teste, harness manual cu
+  `react-dom/client` + React 18 `act` din `react`), `JobKindTabs.test.tsx`
+  (9 teste — render, aria-selected, click, roving tabindex, ArrowLeft/Right,
+  Home/End, ignored keys), `alertsApi.test.ts` (7 teste pentru constructia
+  query string). **73 teste frontend**.
+
+### Cleanup
+
+- Sters `scripts/seed-test-alerts.cjs` (script tactic, nu mai are utilitate).
+- Scos Task A din `CODEX-BACKLOG.md` si memoria persistenta — feature-ul de
+  editare job monitorizare ramane decis-out-of-scope.
+
+---
+
 ## [2.10.5] - 2026-05-03
 
 ### UX Dashboard + Alerte - KPI umanizat si filtre pe sursa jobului

@@ -7,18 +7,25 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.10.5**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.10.6**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release este **v2.10.5** - patch UX Dashboard + Alerte: KPI-ul
-`Joburi active` devine `Monitorizari active`, sublinia tehnica devine
-`X Dosare, Y Nume`, iar pagina `Alerte` primeste tab-bar
-`Toate / Dosare / Nume` si cautare debounced dupa targetul jobului
-(`numar_dosar` / `name_normalized`). Backend-ul expune
-`GET /api/v1/alerts?jobKind=...&q=...`, cu match fara diacritice si total
-paginat corect prin acelasi JOIN.
+Ultimul release este **v2.10.6** - patch hardening peste v2.10.5, fara
+comportament nou. Absoarbe in totalitate findings-urile review-ului
+(`useDebouncedValue` rescris cu callback `flush`, `JobKindTabs` cu navigatie
+tastatura conform WAI-ARIA — ArrowLeft/Right, Home/End, roving tabindex,
+helper `escapeLikeMeta` extras si folosit in `auditRepository` +
+`userRepository`, JSDoc `@example` pe pairing `ESCAPE '\\'`). Sterge script-ul
+tactic `seed-test-alerts.cjs` si scoate Task A din backlog (editare job
+monitorizare). 721/721 backend + 73/73 frontend.
 
 Istoric anterior:
+**v2.10.5** - patch UX Dashboard + Alerte: KPI-ul `Joburi active` devine
+`Monitorizari active`, sublinia tehnica devine `X Dosare, Y Nume`, iar pagina
+`Alerte` primeste tab-bar `Toate / Dosare / Nume` si cautare debounced dupa
+targetul jobului (`numar_dosar` / `name_normalized`). Backend-ul expune
+`GET /api/v1/alerts?jobKind=...&q=...`, cu match fara diacritice si total
+paginat corect prin acelasi JOIN.
 **v2.10.2** - patch UX peste v2.10.1 (frontend-only, zero backend): coloana
 Detalii din tabelul Monitorizare se afiseaza doar cand cel putin un job are
 continut de aratat (name_soap cu scope restrans pe instante); panourile

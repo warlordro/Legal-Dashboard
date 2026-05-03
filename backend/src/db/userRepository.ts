@@ -1,4 +1,5 @@
 import { getDb } from "./schema.ts";
+import { escapeLikeMeta } from "../util/textNormalize.ts";
 
 // Roles and statuses must match the CHECK constraints from
 // 0002_users_sessions_audit.up.sql. Drift here vs DDL would be caught by
@@ -56,9 +57,10 @@ function buildWhere(opts: ListUsersOpts): { sql: string; params: (string | numbe
   if (opts.search) {
     // Case-insensitive prefix-or-substring match across email + display_name.
     // SQLite LIKE is case-insensitive for ASCII by default, which covers all
-    // Workspace addresses we'll see.
-    const like = `%${opts.search}%`;
-    where.push("(email LIKE ? OR display_name LIKE ?)");
+    // Workspace addresses we'll see. Escape user-supplied LIKE meta (% _ \)
+    // so an admin searching "%" doesn't surface every row in the table.
+    const like = `%${escapeLikeMeta(opts.search)}%`;
+    where.push("(email LIKE ? ESCAPE '\\' OR display_name LIKE ? ESCAPE '\\')");
     params.push(like, like);
   }
   if (opts.role) {

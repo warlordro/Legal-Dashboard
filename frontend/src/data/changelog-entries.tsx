@@ -18,6 +18,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.6",
+    date: "3 Mai 2026",
+    subtitle:
+      "Patch hardening peste v2.10.5, fara comportament nou. Absoarbe integral findings-urile review-ului (frontend hooks + accesibilitate tastatura WAI-ARIA, backend defense-in-depth pe LIKE in admin paths). Sterge un script tactic vechi si scoate Task A din backlog.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Frontend - useDebouncedValue cu callback flush",
+        content:
+          "Hook-ul useDebouncedValue rescris cu tuple [value, flush]. Callback-ul flush(next) permite resetarea sincrona la apasari de buton (clear-X / Reset filter), asa ca debounced state-ul nu mai fluture printr-un val intermediar inainte sa ajunga la zero. Folosit in Alerts.tsx si Monitorizare.tsx.",
+      },
+      {
+        title: "Frontend - JobKindTabs cu navigatie tastatura WAI-ARIA",
+        content:
+          "Tab-bar-ul Toate / Dosare / Nume primeste navigatie completa: ArrowLeft / ArrowRight cu wrap, Home / End jump la primul / ultimul tab, roving tabindex (tabIndex={active ? 0 : -1}) ca doar tab-ul activ sa fie focusabil prin Tab. Tipul handler-ului corectat la KeyboardEvent<HTMLButtonElement>.",
+      },
+      {
+        title: "Backend - escapeLikeMeta + ESCAPE in admin paths",
+        content:
+          "Helper escapeLikeMeta(s) extras in util/textNormalize.ts ca utilitate reutilizabila pentru orice path care trece input user prin LIKE ? ESCAPE '\\\\'. JSDoc @example documenteaza explicit contractul (omiterea ESCAPE lasa \\ literal si re-enable-uieste % / _ ca wildcards). auditRepository.listAuditEvents si userRepository.listUsers folosesc acum escapeLikeMeta + ESCAPE — defense-in-depth pe admin paths.",
+      },
+      {
+        title: "Cleanup",
+        content:
+          "Script-ul scripts/seed-test-alerts.cjs sters (era o utilitate tactica fara scop continuu). Task A din CODEX-BACKLOG.md (editare job monitorizare) scos integral din backlog si din memoria persistenta.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Backend: nou util/textNormalize.test.ts (11 teste pentru stripDiacritics, buildRnpmLikePattern cu wildcards %, _, \\, stripDiacriticsDeep) + 3 wildcard tests in repository-isolation.test.ts pentru getAvize. 721/721 backend (de la 703, +18). Frontend: noi useDebouncedValue.test.ts, JobKindTabs.test.tsx, alertsApi.test.ts. 73/73 frontend.",
+      },
+    ],
+  },
+  {
     version: "v2.10.5",
     date: "3 Mai 2026",
     subtitle:

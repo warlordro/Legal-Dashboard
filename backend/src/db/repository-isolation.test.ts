@@ -269,4 +269,27 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
     expect(own.total).toBe(1);
     expect(own.items[0]?.identificator).toBe("AVA1");
   });
+
+  // H-7: defend `getAvize` searchText against LIKE wildcard injection. Without
+  // the `\` escape in `buildRnpmLikePattern` + `ESCAPE '\\'` clause, a user
+  // typing "%" would surface every row in the table.
+  it("getAvize: searchText='%' returns zero results (no wildcard bleed)", () => {
+    saveAvizFull(makeAviz(OWNER_A, "AVA1"));
+    saveAvizFull(makeAviz(OWNER_A, "AVA2"));
+    const result = getAvize({ ownerId: OWNER_A, searchText: "%" });
+    expect(result.total).toBe(0);
+  });
+
+  it("getAvize: searchText='_' returns zero results (no single-char wildcard)", () => {
+    saveAvizFull(makeAviz(OWNER_A, "AVA1"));
+    saveAvizFull(makeAviz(OWNER_A, "AVA2"));
+    const result = getAvize({ ownerId: OWNER_A, searchText: "_" });
+    expect(result.total).toBe(0);
+  });
+
+  it("getAvize: searchText='\\' (literal backslash) returns zero results", () => {
+    saveAvizFull(makeAviz(OWNER_A, "AVA1"));
+    const result = getAvize({ ownerId: OWNER_A, searchText: "\\" });
+    expect(result.total).toBe(0);
+  });
 });

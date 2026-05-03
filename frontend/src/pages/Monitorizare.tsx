@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { TablePagination } from "@/components/table-pagination";
+import { JobKindTabs, type JobKindFilter } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
 import {
@@ -35,6 +36,7 @@ import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
@@ -66,10 +68,17 @@ export default function Monitorizare({
   const [pageSize, setPageSize] = useState(50);
   // v2.10.4 filtru kind ("all" = fara filtru) + search free-text.
   // searchInput = ce e tastat acum; debouncedQuery = ce ajunge la API
-  // (debounce 300ms). UI 0-indexed; filtrele reseteaza pagina la 0.
-  const [kindFilter, setKindFilter] = useState<"all" | "dosar_soap" | "name_soap">("all");
+  // (debounce 300ms). UI 0-indexed; filtrele reseteaza pagina la 0 inline,
+  // pentru a evita double-fetch-ul (setPage in efect separat ar trigger-a o
+  // a doua rulare a `refresh` cand pagina curenta nu era 0).
+  const [kindFilter, setKindFilter] = useState<JobKindFilter>("all");
   const [searchInput, setSearchInput] = useState("");
-  const [debouncedQuery, setDebouncedQuery] = useState("");
+  // page reset is wired into searchInput's onChange (event-handler batching),
+  // not into the debounce settle callback — the setTimeout boundary in
+  // useDebouncedValue doesn't reliably batch setDebounced + setPage in React
+  // 18, which produced an extra fetch with the stale page. `flushQuery("")` on
+  // Reset bypasses the 300ms wait so the next fetch sees the cleared `q`.
+  const [debouncedQuery, flushQuery] = useDebouncedValue(searchInput.trim(), 300);
   // v2.10.1 #12: focus restoration — store the element that opened the modal
   // so we can return focus to it on close (a11y: tab order continuity).
   const lastFocusedRef = useRef<HTMLElement | null>(null);
@@ -117,19 +126,6 @@ export default function Monitorizare({
   useEffect(() => {
     refresh();
   }, [refresh]);
-
-  // v2.10.4 debounce search input -> debouncedQuery (300ms).
-  useEffect(() => {
-    const t = setTimeout(() => setDebouncedQuery(searchInput.trim()), 300);
-    return () => clearTimeout(t);
-  }, [searchInput]);
-
-  // Reset page la 0 cand filtrul de tip / query-ul efectiv (debounced) se schimba,
-  // altfel utilizatorul aplica un filtru pe pagina 7 si vede gol pana cand
-  // recovery-ul de mai jos retro-decrementeaza pagina.
-  useEffect(() => {
-    setPage(0);
-  }, [kindFilter, debouncedQuery]);
 
   // If a delete leaves the current page empty (e.g. last item on last page),
   // step back so the user doesn't land on an empty grid.
@@ -364,38 +360,22 @@ export default function Monitorizare({
         </CardHeader>
         <CardContent>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <div
-              role="tablist"
-              aria-label="Filtreaza joburile dupa tip"
-              className="inline-flex rounded-md border border-input bg-background p-0.5"
-            >
-              {(["all", "dosar_soap", "name_soap"] as const).map((k) => {
-                const label = k === "all" ? "Toate" : k === "dosar_soap" ? "Dosare" : "Nume";
-                const active = kindFilter === k;
-                return (
-                  <button
-                    key={k}
-                    type="button"
-                    role="tab"
-                    aria-selected={active}
-                    onClick={() => setKindFilter(k)}
-                    className={cn(
-                      "rounded px-3 py-1 text-xs font-medium transition-colors",
-                      active
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
-                    )}
-                  >
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
+            <JobKindTabs
+              value={kindFilter}
+              onChange={(k) => {
+                setKindFilter(k);
+                setPage(0);
+              }}
+              ariaLabel="Filtreaza joburile dupa tip"
+            />
             <div className="relative min-w-[260px] flex-1 max-w-md">
               <Input
                 type="text"
                 value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
+                onChange={(e) => {
+                  setSearchInput(e.target.value);
+                  setPage(0);
+                }}
                 placeholder="Cauta dupa nume sau numar dosar..."
                 className="pr-8"
                 aria-label="Cautare in lista de monitorizari"
@@ -403,7 +383,11 @@ export default function Monitorizare({
               {searchInput && (
                 <button
                   type="button"
-                  onClick={() => setSearchInput("")}
+                  onClick={() => {
+                    flushQuery("");
+                    setSearchInput("");
+                    setPage(0);
+                  }}
                   className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
                   aria-label="Sterge cautarea"
                   title="Sterge cautarea"
@@ -437,8 +421,10 @@ export default function Monitorizare({
               <button
                 type="button"
                 onClick={() => {
+                  flushQuery("");
                   setKindFilter("all");
                   setSearchInput("");
+                  setPage(0);
                 }}
                 className="text-xs text-primary hover:underline"
               >

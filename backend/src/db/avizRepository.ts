@@ -1,5 +1,5 @@
 import { getDb, checkpointWal } from "./schema.ts";
-import { stripDiacritics } from "../util/textNormalize.ts";
+import { buildRnpmLikePattern } from "../util/textNormalize.ts";
 
 export interface AvizRecord {
   id: number;
@@ -359,8 +359,7 @@ export function getAvize(opts: GetAvizeOptions = {}): OffsetPage<AvizRecord> {
       OR EXISTS (SELECT 1 FROM rnpm_creditori c WHERE c.aviz_id = a.id AND c.owner_id = a.owner_id AND (rnpm_norm(c.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cnp) LIKE ? ESCAPE '\\'))
       OR EXISTS (SELECT 1 FROM rnpm_debitori d WHERE d.aviz_id = a.id AND d.owner_id = a.owner_id AND (rnpm_norm(d.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cnp) LIKE ? ESCAPE '\\'))
     )`);
-    const escaped = stripDiacritics(opts.searchText).toLowerCase().replace(/[\\%_]/g, "\\$&");
-    const like = `%${escaped}%`;
+    const like = buildRnpmLikePattern(opts.searchText);
     for (let i = 0; i < 12; i++) params.push(like);
   }
 

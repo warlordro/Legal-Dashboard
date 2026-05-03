@@ -1,0 +1,97 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { alertsApi } from "./alertsApi";
+
+// Capture the URL passed to fetch and respond with the minimal envelope shape
+// the unwrap helper expects. We only care about how the list params translate
+// to the query string — not about the response body.
+
+let lastCalledUrl: string | null = null;
+
+function envelopeOk(): Response {
+  const body = JSON.stringify({
+    data: { rows: [], total: 0, page: 1, pageSize: 25, unread: 0 },
+    requestId: "test-req-id",
+  });
+  return new Response(body, {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+beforeEach(() => {
+  lastCalledUrl = null;
+  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
+    lastCalledUrl = url;
+    return envelopeOk();
+  }));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+function params(url: string): URLSearchParams {
+  const idx = url.indexOf("?");
+  return new URLSearchParams(idx === -1 ? "" : url.slice(idx + 1));
+}
+
+describe("alertsApi.list URL construction", () => {
+  it("trims surrounding whitespace from `q` before encoding", async () => {
+    await alertsApi.list({ q: "   abc   " });
+    expect(params(lastCalledUrl!).get("q")).toBe("abc");
+  });
+
+  it("omits the `q` parameter when it trims to empty", async () => {
+    await alertsApi.list({ q: "   " });
+    expect(params(lastCalledUrl!).has("q")).toBe(false);
+  });
+
+  it("omits `q` when undefined", async () => {
+    await alertsApi.list({});
+    expect(params(lastCalledUrl!).has("q")).toBe(false);
+  });
+
+  it("omits `kind` and `jobKind` when set to 'all'", async () => {
+    await alertsApi.list({ kind: "all", jobKind: "all" });
+    expect(params(lastCalledUrl!).has("kind")).toBe(false);
+    expect(params(lastCalledUrl!).has("jobKind")).toBe(false);
+  });
+
+  it("forwards a concrete `jobKind` filter as-is", async () => {
+    await alertsApi.list({ jobKind: "dosar_soap" });
+    expect(params(lastCalledUrl!).get("jobKind")).toBe("dosar_soap");
+  });
+
+  it("forwards aviz_rnpm even though the UI tab strip doesn't surface it", async () => {
+    // The state in Alerts.tsx is now narrowed to JobKindFilter (no aviz_rnpm),
+    // but the network type still permits it for future use. Documenting the
+    // current contract so any narrowing here is a deliberate choice.
+    await alertsApi.list({ jobKind: "aviz_rnpm" });
+    expect(params(lastCalledUrl!).get("jobKind")).toBe("aviz_rnpm");
+  });
+
+  it("encodes pagination + filters together", async () => {
+    await alertsApi.list({
+      page: 2,
+      pageSize: 50,
+      severity: "warning",
+      onlyUnread: true,
+      includeDismissed: false,
+      from: "2026-05-01T00:00:00.000Z",
+      to: "2026-05-03T23:59:59.999Z",
+    });
+    const p = params(lastCalledUrl!);
+    expect(p.get("page")).toBe("2");
+    expect(p.get("pageSize")).toBe("50");
+    expect(p.get("severity")).toBe("warning");
+    expect(p.get("onlyUnread")).toBe("true");
+    expect(p.get("includeDismissed")).toBe("false");
+    expect(p.get("from")).toBe("2026-05-01T00:00:00.000Z");
+    expect(p.get("to")).toBe("2026-05-03T23:59:59.999Z");
+  });
+
+  it("hits the bare path with no querystring when called with no params", async () => {
+    await alertsApi.list();
+    expect(lastCalledUrl).toBe("/api/v1/alerts");
+  });
+});
