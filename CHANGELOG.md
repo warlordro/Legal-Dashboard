@@ -21,15 +21,7 @@ incarcate pe pagina curenta, nu totalul real de joburi active.
   acopera joburile vizibile pe pagina curenta, ca sa ramana aliniate cu textul
   existent `Selectia opereaza doar pe pagina vizibila (100 din 616)`.
 
-### Release targets
-
 - Bump la `2.10.7` in root/backend/frontend manifests si lockfile.
-- Scriptul local `npm run dist` este aliniat cu workflow-ul Windows: rebuild
-  Electron explicit, apoi `electron-builder --config.npmRebuild=false`, ca sa
-  nu incerce sa compileze modulul optional macOS pe Windows.
-- Push-ul pe `main` declanseaza workflow-ul Docker Build; tag-ul `v2.10.7`
-  declanseaza workflow-urile GitHub Actions pentru macOS DMG si Windows NSIS
-  installer.
 
 ---
 

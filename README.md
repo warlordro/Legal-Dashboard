@@ -14,9 +14,7 @@ Ultimul release este **v2.10.7** - patch UX Monitorizare peste v2.10.6.
 Titlul tabelului `Joburi active` afiseaza acum totalul real din raspunsul
 paginat (`total`, de exemplu 616), nu doar randurile incarcate pe pagina curenta
 (`jobs.length`, de exemplu 100). Tooltip-urile Excel/PDF spun explicit ca
-exportul fara selectie acopera joburile vizibile pe pagina. Tag-ul `v2.10.7`
-este release target pentru macOS DMG si Windows NSIS installer, iar push-ul pe
-`main` ruleaza Docker Build.
+exportul fara selectie acopera joburile vizibile pe pagina.
 
 Predecesor **v2.10.6** - patch hardening peste v2.10.5, fara
 comportament nou. Absoarbe in totalitate findings-urile review-ului
@@ -325,10 +323,7 @@ nativ si trebuie compilat pe platforma tinta.
 
 Docker foloseste acelasi lockfile prin `npm ci --workspace=backend --omit=dev`
 si are `start-period=120s` pe healthcheck pentru boot-uri lente cu prewarm /
-migrari DB. Workflow-ul GitHub Actions `Docker Build` ruleaza la push pe
-`main`, iar workflow-urile `Build macOS` si `Build Windows` ruleaza la tag-uri
-`v*` (de exemplu `v2.10.7`) ca sa ataseze DMG-ul macOS si installer-ul Windows
-la GitHub Release.
+migrari DB.
 
 ## Configurare
 

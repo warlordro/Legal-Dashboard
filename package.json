@@ -20,7 +20,7 @@
     "predist": "npm run clean:release",
     "predist:mac": "npm run clean:release",
     "predist:all": "npm run clean:release",
-    "dist": "npm run build && npm run rebuild:electron && electron-builder --win --config.npmRebuild=false",
+    "dist": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:all": "npm run build && electron-builder --win --mac",
     "dist:server": "node --experimental-strip-types scripts/build-server.js"

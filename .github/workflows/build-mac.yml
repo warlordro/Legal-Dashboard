@@ -1,5 +1,4 @@
-name: Build macOS DMG
-run-name: macOS DMG ${{ github.ref_name || github.sha }}
+name: Build macOS
 
 on:
   workflow_dispatch:
@@ -40,7 +39,7 @@ jobs:
         uses: actions/upload-artifact@v6
         continue-on-error: true
         with:
-          name: legal-dashboard-mac-${{ github.ref_name }}
+          name: legal-dashboard-mac
           path: |
             release/*.dmg
             release/*.dmg.blockmap
@@ -67,14 +66,6 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v3
         with:
-          name: "Legal Dashboard ${{ github.ref_name }}"
-          body: |
-            Legal Dashboard ${{ github.ref_name }} release artifacts.
-
-            Includes:
-            - macOS DMG
-            - Windows NSIS installer, uploaded by the Windows workflow
-            - Docker image published by the Docker workflow to GHCR
           files: |
             release/*.dmg
             release/*.dmg.blockmap
