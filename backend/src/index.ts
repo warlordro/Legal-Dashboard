@@ -29,6 +29,7 @@ import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
 import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
+import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { markShuttingDown } from "./db/schema.ts";
@@ -380,6 +381,16 @@ async function gracefulShutdown(reason: string): Promise<void> {
   }
 
   await Promise.race([Promise.all([closePromise, schedulerStop]), drainTimeout]);
+
+  // v2.10.1 #7: flush queued email dispatches before closing the DB. The
+  // dispatcher reads owner_email_settings + writes audit on failure; if the
+  // DB is closed first those writes throw under markShuttingDown(). Short
+  // timeout — email is best-effort, we don't block shutdown forever.
+  try {
+    await drainEmailDispatches(5_000);
+  } catch (e) {
+    console.error("[shutdown] drainEmailDispatches failed:", e);
+  }
 
   // markShuttingDown() closes the DB AND latches the open-guard so any
   // microtask-deferred ai_usage write that lost the race against drain

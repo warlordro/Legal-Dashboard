@@ -2,7 +2,7 @@
 // (PR-3 surface). Cron scheduling lands in PR-4; this page exists so the user
 // has a way to seed the queue and verify writes today.
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -59,14 +59,28 @@ export default function Monitorizare({
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [openInstantePopover, setOpenInstantePopover] = useState<number | null>(null);
+  // v2.10.1 #12: focus restoration — store the element that opened the modal
+  // so we can return focus to it on close (a11y: tab order continuity).
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+  const modalCloseRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     if (openInstantePopover === null) return;
+    lastFocusedRef.current = document.activeElement as HTMLElement | null;
     const handleEsc = (e: KeyboardEvent) => {
       if (e.key === "Escape") setOpenInstantePopover(null);
     };
     document.addEventListener("keydown", handleEsc);
-    return () => document.removeEventListener("keydown", handleEsc);
+    // Move focus into the modal after mount so SR users land inside the dialog.
+    queueMicrotask(() => modalCloseRef.current?.focus());
+    return () => {
+      document.removeEventListener("keydown", handleEsc);
+      // Restore focus only if the previously-focused element is still in the DOM.
+      const prev = lastFocusedRef.current;
+      if (prev && document.contains(prev)) {
+        prev.focus();
+      }
+    };
   }, [openInstantePopover]);
 
   const refresh = useCallback(async () => {
@@ -595,9 +609,10 @@ export default function Monitorizare({
                   </p>
                 </div>
                 <button
+                  ref={modalCloseRef}
                   type="button"
                   onClick={() => setOpenInstantePopover(null)}
-                  className="rounded p-1 text-foreground hover:bg-muted"
+                  className="rounded p-1 text-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
                   title="Inchide"
                   aria-label="Inchide"
                 >

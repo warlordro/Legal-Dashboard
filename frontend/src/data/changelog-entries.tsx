@@ -18,6 +18,47 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.1",
+    date: "3 Mai 2026",
+    subtitle:
+      "PR-11 review hardening: 14 fixuri tehnice peste v2.10.0 (SMTP timeouts, queue concurency cap, drain la shutdown, audit pe send_failed, cooldown pe /test, focus trap pe modal Detalii). Filtrul de severitate ramane neaplicat — design intentionat pentru v2.10.x.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Backend - SMTP reliability",
+        content:
+          "Mailer-ul cache-uieste promise-ul transport-ului (nu transport-ul rezolvat), deci doua dispatch-uri concurente nu mai construiesc doua connection pool-uri. Timeout-uri SMTP explicite (10s connect, 5s greeting, 15s socket) ca un relay hung sa nu pin-uiasca dispatch-ul. SMTP_PORT in afara intervalului 1..65535 sau NaN forteaza mailer-ul off cu log clar.",
+      },
+      {
+        title: "Backend - dispatcher cu queue + drain",
+        content:
+          "Dispatcher-ul ruleaza acum pe queue FIFO cu MAX_CONCURRENT=1: un burst de alerte nu mai spawn-uieste multe sendMail() in paralel pe acelasi SMTP relay (Gmail = 100/zi, O365 = 30/min). Short-circuit pe isMailerConfigured() inainte de SELECT pe owner_email_settings. Audit email.dispatch.failed pe send_failed sau exceptii — outage-ul SMTP silent devine vizibil pe trail. Graceful shutdown apeleaza drainEmailDispatches(5s) inainte sa inchida DB-ul.",
+      },
+      {
+        title: "Backend - rute /email-settings",
+        content:
+          "PUT /email-settings face minSeverity optional in body si pastreaza valoarea stocata cand field-ul lipseste (era silent overwrite cu default). POST /email-settings/test are cooldown 60s/owner cu 429 + Retry-After si audit outcome=denied reason=cooldown — relay-ul SMTP nu mai poate fi spammed dintr-un click loop pe butonul Trimite test.",
+      },
+      {
+        title: "Frontend - a11y modal Detalii instante",
+        content:
+          "Modal-ul Detalii (introdus in v2.10.0) capteaza acum focus-ul pe butonul de inchidere la deschidere si restaureaza focus-ul precedent la inchidere. ESC inchide modal-ul; pe butoanele de inchidere apare focus-visible:ring pentru navigatia tastatura.",
+      },
+      {
+        title: "CI",
+        content:
+          "Workflow-ul Docker Build ruleaza acum tsc --noEmit pe backend si vitest pe backend inainte de docker build. Local nu se pot rula testele backend cand Electron a recompilat better-sqlite3 pentru ABI-ul lui — CI-ul cu Node 22 prebuild ABI-correct inchide gap-ul.",
+      },
+      {
+        title: "Tests",
+        content:
+          "4 teste noi in alertEmailDispatcher.test.ts: short-circuit cand mailer-ul nu e configurat, audit pe send_failed, drainEmailDispatches resolva dupa settle, pendingDispatchCountForTests semnaleaza inflight.",
+      },
+    ],
+  },
+  {
     version: "v2.10.0",
     date: "3 Mai 2026",
     subtitle:

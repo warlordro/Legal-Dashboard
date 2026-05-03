@@ -1,6 +1,67 @@
-# Session Handoff - PR-11 v2.10.0 Email notifiers
+# Session Handoff - v2.10.1 (PR-11 review hardening)
 
 **Data**: 2026-05-03
+
+## v2.10.1 - PR-11 review hardening
+
+Patch peste v2.10.0 care absoarbe 14 fix-uri din `/multi-review` (corectitudine,
+fiabilitate, securitate, observabilitate, teste, a11y) si o decizie explicita
+de a NU schimba design-ul (filtrul de severitate ramane neaplicat — aliniere
+cu produsul: "email = toate alertele noi de monitorizare").
+
+**Backend**:
+- `mailer.ts` cache-uieste `Promise<Transporter>` (nu transport-ul rezolvat):
+  primele apeluri concurente nu mai construiesc doua connection pool-uri.
+- Timeout-uri SMTP explicite (`connectionTimeout=10s`, `greetingTimeout=5s`,
+  `socketTimeout=15s`) — nodemailer-ul implicit poate astepta minute intregi.
+- `readMailerConfig()` rejecteaza port-uri in afara `[1, 65535]` sau NaN.
+- `me.ts` PUT `/email-settings` foloseste `minSeverity.optional()`; cand
+  field-ul lipseste din body, valoarea stocata e pastrata (era silent
+  overwrite cu default `info`).
+- `me.ts` POST `/email-settings/test` are cooldown 60s/owner ca sa previna
+  SMTP abuse (SMTP relay-uri ca Gmail/O365 throttleaza agresiv); audit pe
+  `outcome=denied` cu `reason=cooldown` si `Retry-After`.
+- `alertEmailDispatcher.ts` rescris cu queue FIFO `MAX_CONCURRENT=1` (Gmail =
+  100/zi, O365 = 30/min), short-circuit pe `isMailerConfigured()` inainte de
+  SELECT, audit `email.dispatch.failed` pe `send_failed`/exceptii.
+- `index.ts` apeleaza `drainEmailDispatches(5_000)` in `gracefulShutdown`
+  inainte sa inchida DB-ul, ca audit-urile post-send sa nu loveasca un DB
+  inchis.
+
+**Frontend**:
+- `Monitorizare.tsx` modal "Detalii instante" are focus trap: la deschidere
+  capturam `document.activeElement`, focus pe X cu `queueMicrotask`, ESC
+  ramane pe modal, la inchidere restauram focus-ul daca elementul anterior
+  inca exista in DOM (`focus-visible:ring-amber-500`).
+
+**Docs si CI**:
+- `0014_email_settings.up.sql` ramane neschimbat (migratiile sunt imutabile
+  prin `runner.ts` SHA-256 hash); discrepanta `DEFAULT 'warning'` vs cod
+  `'info'` documentata in `ownerEmailSettingsRepository.ts` ca seam pentru
+  un viitor preset filtrat.
+- `.github/workflows/docker-build.yml` ruleaza `npx tsc --noEmit -p backend`
+  + `npm test --workspace=backend -- --run` inainte de build. Local nu se
+  pot rula testele backend cand Electron a recompilat `better-sqlite3`
+  pentru ABI-ul lui — CI-ul aluneca pe Node 22 cu prebuild ABI-correct si
+  inchide gap-ul.
+
+**Tests**:
+- 4 teste noi in `alertEmailDispatcher.test.ts` (short-circuit cand mailer-ul
+  nu e configurat, audit pe `send_failed`, `drainEmailDispatches` resolva
+  dupa settle, `pendingDispatchCountForTests` semnaleaza inflight).
+- Mock-ul existent extins cu `isMailerConfigured: vi.fn(() => true)` ca
+  testele anterioare sa nu cada pe import nou.
+
+## Kill switches operationale (post-v2.10.1)
+
+| Variabila / mecanism | Effect cand activat | Cand folosesti |
+|----------------------|---------------------|----------------|
+| `SMTP_HOST/PORT/USER/PASS/FROM` lipsesc sau invalide | `isMailerConfigured()` ramane `false`; dispatcher-ul scurt-circuiteaza inainte de SELECT, panoul UI arata "SMTP off" | Default desktop / mod degraded controlat (test in productie SMTP fara incident) |
+| `SMTP_SECURE=true|false` | Forteaza TLS implicit/explicit; default = `port === 465` | Cand provider-ul SMTP cere STARTTLS pe 587 (`SMTP_SECURE=false`) sau implicit TLS pe 465 |
+| `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` | Scheduler-ul nu mai claim-uieste tipurile listate; joburile raman in DB, alertele existente raman accesibile | Stop temporar pe sursa upstream cu probleme (PortalJust SOAP rate-limit) |
+| `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (+ `ACK_NO_AUTH=...` + `AUTH_MODE=web`) | Backend-ul accepta bind non-loopback; pre-v2.7.0 era default | Setup web/server, niciodata desktop |
+| Cooldown POST `/email-settings/test` (60s/owner) | Ruta returneaza 429 cu `Retry-After`; audit `me.email_settings.test outcome=denied reason=cooldown` | Limita built-in vs user click loop pe butonul "Trimite test" |
+| `drainEmailDispatches(timeoutMs)` | Asteapta SMTP-urile in flight inainte sa inchida DB-ul; default 10s, shutdown 5s | Gracefull shutdown — invocat automat din `gracefulShutdown()` |
 **Branch local**: `main`
 **Nota 2026-05-03**: acest handoff a fost adus la v2.9.2. Blocul istoric de
 mai jos despre v2.7.1-v2.9.1 ramas "local-only" este depasit de starea Git

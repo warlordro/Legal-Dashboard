@@ -15,7 +15,11 @@ export type EmailSendResult =
   | { ok: true }
   | { ok: false; reason: "mailer_disabled" | "no_recipient" | "send_failed" };
 
-let cachedTransport: Transporter | null = null;
+// v2.10.1 #8: cache the in-flight Promise rather than the resolved Transporter
+// so concurrent first calls don't double-build the transport (each
+// nodemailer.createTransport opens a connection pool — building two on race is
+// a leak). A single Promise that all callers await converges on one transport.
+let cachedTransportPromise: Promise<Transporter> | null = null;
 let mailerStatusLogged = false;
 
 export function readMailerConfig(): MailerConfig | null {
@@ -25,7 +29,11 @@ export function readMailerConfig(): MailerConfig | null {
   const pass = process.env.SMTP_PASS;
   const from = process.env.SMTP_FROM?.trim();
   const secureEnv = process.env.SMTP_SECURE?.trim().toLowerCase();
-  if (!host || !Number.isFinite(port) || !user || !pass || !from) return null;
+  // v2.10.1 #11: SMTP_PORT must be in the TCP range. Out-of-range or NaN ports
+  // were previously passed through to nodemailer which would fail later with a
+  // less obvious error.
+  if (!host || !Number.isFinite(port) || port < 1 || port > 65535) return null;
+  if (!user || !pass || !from) return null;
   const secure = secureEnv === "true" ? true : secureEnv === "false" ? false : port === 465;
   return { host, port, user, pass, from, secure };
 }
@@ -35,7 +43,7 @@ export function isMailerConfigured(): boolean {
 }
 
 async function getTransport(): Promise<Transporter | null> {
-  if (cachedTransport) return cachedTransport;
+  if (cachedTransportPromise) return cachedTransportPromise;
   const config = readMailerConfig();
   if (!config) {
     if (!mailerStatusLogged) {
@@ -44,18 +52,31 @@ async function getTransport(): Promise<Transporter | null> {
     }
     return null;
   }
-  const nodemailer = await import("nodemailer");
-  cachedTransport = nodemailer.createTransport({
-    host: config.host,
-    port: config.port,
-    secure: config.secure,
-    auth: { user: config.user, pass: config.pass },
+  cachedTransportPromise = (async () => {
+    const nodemailer = await import("nodemailer");
+    // v2.10.1 #2: explicit timeouts so a hung SMTP server doesn't pin the
+    // alert dispatch microtask forever. Defaults in nodemailer are minutes
+    // (or none) — too long for a user-facing notification path.
+    return nodemailer.createTransport({
+      host: config.host,
+      port: config.port,
+      secure: config.secure,
+      auth: { user: config.user, pass: config.pass },
+      connectionTimeout: 10_000,
+      greetingTimeout: 5_000,
+      socketTimeout: 15_000,
+    });
+  })().catch((err) => {
+    // Don't poison the cache on first-build failure — the next call should
+    // be allowed to retry rather than getting a permanently rejected promise.
+    cachedTransportPromise = null;
+    throw err;
   });
-  return cachedTransport;
+  return cachedTransportPromise;
 }
 
 export function resetMailerForTests(): void {
-  cachedTransport = null;
+  cachedTransportPromise = null;
   mailerStatusLogged = false;
 }
 

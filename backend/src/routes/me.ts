@@ -27,11 +27,15 @@ const limitMeBody = bodyLimit({
   onError: (c) => c.json(fail("payload_too_large", "Payload prea mare", c), 413),
 });
 
+// v2.10.1 #1: minSeverity ramane optional in body — clientii care nu il trimit
+// (panoul curent EmailSettingsPanel nu il editeaza) nu mai sufera silent
+// overwrite peste valoarea stocata. Cand lipseste, handler-ul preia valoarea
+// existenta sau cade pe default-ul repository-ului.
 const EmailSettingsBodySchema = z
   .object({
     enabled: z.boolean(),
     toAddress: z.string().trim().email().max(320).nullable(),
-    minSeverity: z.enum(["info", "warning", "critical"]).default("info"),
+    minSeverity: z.enum(["info", "warning", "critical"]).optional(),
   })
   .strict();
 
@@ -96,7 +100,14 @@ meRouter.put("/email-settings", limitMeBody, async (c) => {
   }
 
   const before = getEmailSettings(ownerId);
-  const after = upsertEmailSettings(ownerId, parsed.data);
+  // v2.10.1 #1: preserve stored minSeverity if the caller didn't send it.
+  const minSeverity =
+    parsed.data.minSeverity ?? before?.minSeverity ?? "info";
+  const after = upsertEmailSettings(ownerId, {
+    enabled: parsed.data.enabled,
+    toAddress: parsed.data.toAddress,
+    minSeverity,
+  });
   recordAudit(c, "me.email_settings.update", {
     targetKind: "owner_email_settings",
     targetId: ownerId,
@@ -104,6 +115,17 @@ meRouter.put("/email-settings", limitMeBody, async (c) => {
   });
   return c.json(ok(toEmailSettingsDto(after), c), 200);
 });
+
+// v2.10.1 #3: per-owner cooldown for /email-settings/test. SMTP test sends
+// hit the real upstream — we don't want a stuck UI button or a malicious
+// caller looping the endpoint to dispatch dozens of test emails per minute.
+// 60 s is long enough to discourage abuse and short enough that a normal user
+// retry after a typo isn't blocked.
+const TEST_COOLDOWN_MS = 60_000;
+const lastTestSendByOwner = new Map<string, number>();
+export function resetEmailTestCooldownForTests(): void {
+  lastTestSendByOwner.clear();
+}
 
 meRouter.post("/email-settings/test", async (c) => {
   const ownerId = getOwnerId(c);
@@ -126,6 +148,31 @@ meRouter.post("/email-settings/test", async (c) => {
     });
     return c.json(fail("mailer_disabled", "SMTP_* nu este configurat", c), 503);
   }
+
+  // v2.10.1 #3: per-owner cooldown.
+  const now = Date.now();
+  const last = lastTestSendByOwner.get(ownerId) ?? 0;
+  const elapsed = now - last;
+  if (elapsed < TEST_COOLDOWN_MS) {
+    const retryAfterSec = Math.ceil((TEST_COOLDOWN_MS - elapsed) / 1000);
+    recordAudit(c, "me.email_settings.test", {
+      outcome: "denied",
+      targetKind: "owner_email_settings",
+      targetId: ownerId,
+      detail: { reason: "cooldown", retryAfterSec },
+    });
+    c.header("Retry-After", String(retryAfterSec));
+    return c.json(
+      fail(
+        "cooldown",
+        `Asteapta ${retryAfterSec}s inainte sa retrimiti email-ul de test`,
+        c,
+        { retryAfterSec },
+      ),
+      429,
+    );
+  }
+  lastTestSendByOwner.set(ownerId, now);
 
   const result = await sendTestEmail(settings.toAddress);
   recordAudit(c, "me.email_settings.test", {

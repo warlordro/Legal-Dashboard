@@ -51,6 +51,17 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # v2.10.1 #5: gate merges on backend test suite. Local Electron dev
+      # rebuilds better-sqlite3 against Electron's ABI, so `npm test` cannot
+      # run on the dev box without `npm run rebuild:electron` first. CI runs
+      # against a clean Node 22 install, so the better-sqlite3 prebuild is
+      # ABI-correct here — this is the only place the suite reliably runs.
+      - name: Backend type-check
+        run: npx tsc --noEmit -p backend/tsconfig.json
+
+      - name: Backend tests
+        run: npm test --workspace=backend -- --run
+
       - name: Build (backend CJS + frontend static)
         run: npm run build
 

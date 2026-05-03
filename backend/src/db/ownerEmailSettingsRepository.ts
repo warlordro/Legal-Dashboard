@@ -1,5 +1,14 @@
 import { getDb } from "./schema.ts";
 
+// v2.10.1 note: `min_severity` ramane stocat per-owner, dar dispatcher-ul NU
+// foloseste valoarea ca filtru — design explicit din v2.10.0 ("email = toate
+// alertele noi de monitorizare cand canalul este activ"). Coloana ramane pe
+// schema ca seam pentru un viitor preset filtrat. SQL-ul din 0014.up.sql
+// declara DEFAULT 'warning' pentru min_severity; codul Node nu loveste niciodata
+// default-ul fiindca `upsertEmailSettings` ataseaza intotdeauna o valoare
+// explicita ('info' cand input-ul nu o specifica) — discrepanta e doar pentru
+// raw-SQL tooling, nu pentru runtime-ul aplicatiei.
+
 export type EmailMinSeverity = "info" | "warning" | "critical";
 
 export interface EmailSettings {

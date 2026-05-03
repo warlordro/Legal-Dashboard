@@ -4,6 +4,87 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.1] - 2026-05-03
+
+### PR-11 review hardening - patch peste v2.10.0
+
+Patch care absoarbe 14 fix-uri tehnice din `/multi-review` (deep-code-reviewer,
+backend-reliability-reviewer, test-architect, release-readiness-reviewer,
+claude-guard) si o decizie explicita de a NU schimba design-ul (filtrul de
+severitate ramane neaplicat — produsul a fost decis ca "email = toate alertele
+noi de monitorizare" in v2.10.0; daca se vrea filtrare pe `min_severity`, va
+fi o iteratie viitoare cu UI explicit, nu o schimbare silentioasa).
+
+### Backend - email pipeline reliability
+
+- `mailer.ts` cache-uieste `Promise<Transporter>` in loc de transport-ul
+  rezolvat: doua dispatch-uri concurente nu mai construiesc doua connection
+  pool-uri SMTP. Pe fail-ul primului build, cache-ul se reseteaza astfel incat
+  apelul urmator sa retry-uiasca, in loc sa reziste cu un Promise rejectat.
+- Timeout-uri SMTP explicite (`connectionTimeout=10s`, `greetingTimeout=5s`,
+  `socketTimeout=15s`). Default-urile nodemailer sunt minute / nelimitate;
+  pentru un canal user-facing prefera fail rapid in audit decat retry stuck.
+- `readMailerConfig()` returneaza `null` cand `SMTP_PORT` este NaN sau in
+  afara intervalului `[1, 65535]`. Eroarea de validare apare la boot, nu mai
+  tarziu, pe primul send.
+- `alertEmailDispatcher.ts` rescris cu queue FIFO si `MAX_CONCURRENT=1`. Un
+  burst de alerte nu mai spawn-uieste multe `sendMail()` in paralel pe acelasi
+  SMTP relay (Gmail = 100/zi, O365 = 30/min — limite agresive).
+- `dispatchAlertEmail` short-circuiteaza cand `isMailerConfigured()` returneaza
+  `false`: nu mai face SELECT pe `owner_email_settings` cand SMTP-ul e off.
+- `dispatchAlertEmail` scrie audit `email.dispatch.failed`
+  `outcome=error` pe `send_failed` sau exceptii: un outage SMTP silent devine
+  vizibil pe trail-ul de audit (vechiul cod doar logona la `console.error`).
+- `drainEmailDispatches(timeoutMs)` exportat: asteapta queue-ul sa se goleasca
+  (default 10s, shutdown 5s). `index.ts` apeleaza drain-ul in `gracefulShutdown`
+  inainte sa inchida DB-ul, deci audit-urile post-send nu mai lovesc un DB
+  inchis.
+
+### Backend - rute si validare
+
+- `me.ts` PUT `/email-settings` foloseste `minSeverity.optional()`; cand
+  field-ul lipseste din body, valoarea stocata e pastrata in upsert (era
+  silent overwrite cu default `"info"`).
+- `me.ts` POST `/email-settings/test` are cooldown 60s/owner: previne SMTP
+  abuse pe relay throttled si ofera UX clar (return 429 cu `Retry-After`,
+  audit `outcome=denied reason=cooldown`).
+
+### Frontend - a11y modal Detalii instante
+
+- `Monitorizare.tsx` adauga focus trap si focus restoration pe modal-ul
+  Detalii (introdus in v2.10.0): la deschidere capturam `document.activeElement`
+  si focus-am butonul de inchidere; ESC inchide; la inchidere restauram
+  focus-ul daca elementul anterior inca exista in DOM. `focus-visible:ring-2`
+  pe butoanele de inchidere.
+
+### Docs
+
+- `0014_email_settings.up.sql` ramane neschimbat (migratiile sunt imutabile
+  prin `runner.ts` SHA-256 hash). Discrepanta `DEFAULT 'warning'` vs cod
+  `"info"` documentata in `ownerEmailSettingsRepository.ts` ca seam pentru un
+  viitor preset filtrat.
+- `SESSION-HANDOFF.md` are sectiunea "Kill switches operationale" care
+  enumera `SMTP_*`, `MONITORING_DISABLED_KINDS`, cooldown-ul `/test`, drain-ul
+  graceful si gate-ul `LEGAL_DASHBOARD_ALLOW_REMOTE`.
+
+### CI
+
+- `.github/workflows/docker-build.yml` ruleaza `npx tsc --noEmit` pe backend
+  + `npm test --workspace=backend -- --run` inainte de Docker build. Local nu
+  se pot rula testele backend cand Electron a recompilat `better-sqlite3`
+  pentru ABI-ul lui (`npm run rebuild:electron` necesar). CI-ul pe Node 22 cu
+  prebuild ABI-correct inchide gap-ul.
+
+### Tests
+
+- 4 teste noi in `alertEmailDispatcher.test.ts` (short-circuit cand mailer-ul
+  nu e configurat, audit pe `send_failed`, `drainEmailDispatches` resolva
+  dupa settle, `pendingDispatchCountForTests` semnaleaza inflight).
+- Mock-ul existent extins cu `isMailerConfigured: vi.fn(() => true)` pentru
+  paritate cu noul import in dispatcher.
+
+---
+
 ## [2.10.0] - 2026-05-03
 
 ### PR-11 Email notifiers - SMTP optional pentru alertele de monitorizare
