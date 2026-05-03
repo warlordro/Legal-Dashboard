@@ -6,6 +6,7 @@
 
 import { getDb } from "./schema.ts";
 import { dispatchAlertEmail } from "../services/email/alertEmailDispatcher.ts";
+import { stripDiacritics } from "../util/textNormalize.ts";
 
 export type AlertKind =
   | "dosar_new"
@@ -67,6 +68,8 @@ export interface ListAlertsOptions {
   page: number;
   pageSize: number;
   jobId?: number;
+  jobKind?: "dosar_soap" | "name_soap" | "aviz_rnpm";
+  q?: string;
   kind?: AlertKind;
   severity?: AlertSeverity;
   isNew?: boolean;
@@ -268,13 +271,28 @@ export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
   const db = getDb();
   // v2.6.2 — alias monitoring_alerts as `a` so the row SELECT can LEFT JOIN
   // monitoring_jobs without column-name ambiguity (`kind` exists on both).
-  // Filters all live on monitoring_alerts; qualified explicitly here.
+  // Filters are qualified explicitly here. jobKind/q intentionally filter on
+  // the joined job row: alerts whose job was deleted have no target to match,
+  // so they are excluded only when those target-based filters are active.
   const where: string[] = ["a.owner_id = ?"];
   const params: (string | number | null)[] = [opts.ownerId];
 
   if (opts.jobId !== undefined) {
     where.push("a.job_id = ?");
     params.push(opts.jobId);
+  }
+  if (opts.jobKind) {
+    where.push("j.kind = ?");
+    params.push(opts.jobKind);
+  }
+  if (opts.q) {
+    where.push(`(
+      rnpm_norm(json_extract(j.target_json, '$.numar_dosar')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(json_extract(j.target_json, '$.name_normalized')) LIKE ? ESCAPE '\\'
+    )`);
+    const escaped = stripDiacritics(opts.q).toLowerCase().replace(/[\\%_]/g, "\\$&");
+    const like = `%${escaped}%`;
+    params.push(like, like);
   }
   if (opts.kind) {
     where.push("a.kind = ?");
@@ -306,9 +324,13 @@ export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
   }
 
   const whereSql = `WHERE ${where.join(" AND ")}`;
+  const needsJobJoin = opts.jobKind !== undefined || opts.q !== undefined;
+  const countJoinSql = needsJobJoin
+    ? "LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id"
+    : "";
   const total = (
     db
-      .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts a ${whereSql}`)
+      .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts a ${countJoinSql} ${whereSql}`)
       .get(...params) as { n: number }
   ).n;
 

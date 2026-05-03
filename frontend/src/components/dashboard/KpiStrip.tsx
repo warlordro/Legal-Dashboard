@@ -1,7 +1,7 @@
 // PR-A (v2.7.0) — KPI strip pentru pagina Dashboard.
 //
 // 4 cards aliniate orizontal pe md+, stacked pe mobile:
-//   - Joburi active (cu byKind tooltip)
+//   - Monitorizari active (cu byKind tooltip)
 //   - Alerte necitite (cu delta last24h ca subline)
 //   - Rulari ultimele 24h (ok / error / timeout / aborted)
 //   - Cost AI ultimele 24h (USD + token count)
@@ -93,7 +93,7 @@ export function KpiStrip({ data, loading, error }: KpiStripProps) {
     );
   }
 
-  const jobsByKind = `${data.jobs.byKind.dosar_soap} dosar_soap, ${data.jobs.byKind.name_soap} name_soap`;
+  const jobsByKind = `${data.jobs.byKind.dosar_soap} Dosare, ${data.jobs.byKind.name_soap} Nume`;
   const alertsSubline = data.alerts.last24h === 0
     ? "0 noi in ultimele 24h"
     : `+${data.alerts.last24h} noi in ultimele 24h`;
@@ -111,7 +111,7 @@ export function KpiStrip({ data, loading, error }: KpiStripProps) {
     >
       <KpiCard
         icon={ListChecks}
-        label="Joburi active"
+        label="Monitorizari active"
         value={String(data.jobs.active)}
         subline={jobsByKind}
         tooltip={`${data.jobs.active} joburi de monitorizare active (${jobsByKind})`}

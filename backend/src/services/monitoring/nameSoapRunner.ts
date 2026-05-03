@@ -249,12 +249,15 @@ export function stripLegalSuffix(tokens: string[]): string[] {
 // in party sunt ignorate — nu valideaza, nu invalideaza match-ul.
 //
 // Cazul fara parti = false (fara nume sa verificam → nu confirmam match-ul).
+// Cazul targetCore gol (target = doar sufixe legale, ex. "SRL") = false: nu
+// avem cu ce sa facem match strict; fail-closed ca sa nu inundam inbox-ul cu
+// pseudo-pozitive (orice dosar cu o parte SRL ar trece).
 export function dosarMatchesAllNameTokens(
   dosar: Dosar,
   targetName: string,
 ): boolean {
   const targetCore = stripLegalSuffix(tokenizeNameForMatch(targetName));
-  if (targetCore.length === 0) return true;
+  if (targetCore.length === 0) return false;
   if (!dosar.parti || dosar.parti.length === 0) return false;
   for (const parte of dosar.parti) {
     const partySet = new Set(stripLegalSuffix(tokenizeNameForMatch(parte.nume)));

@@ -20,7 +20,10 @@
 //                    cand un user copiaza tot un articol legal in coloana
 //
 // Validation rules:
-//   * name_normalized = lowercase + diacritic strip + collapse whitespace
+//   * name_normalized = UPPERCASE + diacritic strip + collapse whitespace
+//     (v2.10.3 — uniformizam cu MonitoringAddForm + monitoringBulkTemplate;
+//      defense-in-depth: parser-ul aplica UPPERCASE chiar daca clientul
+//      transmite mixed-case in /commit)
 //   * Reject: nume empty, < 2 chars, > 200 chars, contine doar cifre
 //   * Dedup intra-fisier: name_normalized apare 1×; duplicatele primesc
 //                         validation='warn' cu msg='duplicate_in_file'

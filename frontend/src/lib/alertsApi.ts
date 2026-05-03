@@ -14,6 +14,7 @@ export type AlertKind =
   | "source_error";
 
 export type AlertSeverity = "info" | "warning" | "critical";
+export type AlertJobKind = "dosar_soap" | "name_soap" | "aviz_rnpm";
 
 export interface MonitoringAlert {
   id: number;
@@ -96,6 +97,8 @@ export const alertsApi = {
     page?: number;
     pageSize?: number;
     kind?: AlertKind | "all";
+    jobKind?: AlertJobKind | "all";
+    q?: string;
     severity?: AlertSeverity | "all";
     onlyUnread?: boolean;
     includeDismissed?: boolean;
@@ -106,6 +109,8 @@ export const alertsApi = {
     if (params.page !== undefined) search.set("page", String(params.page));
     if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
     if (params.kind && params.kind !== "all") search.set("kind", params.kind);
+    if (params.jobKind && params.jobKind !== "all") search.set("jobKind", params.jobKind);
+    if (params.q) search.set("q", params.q);
     if (params.severity && params.severity !== "all") search.set("severity", params.severity);
     if (params.onlyUnread !== undefined) search.set("onlyUnread", String(params.onlyUnread));
     if (params.includeDismissed !== undefined) search.set("includeDismissed", String(params.includeDismissed));

@@ -7,8 +7,18 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.10.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
-si [SECURITY.md](SECURITY.md) pentru threat model. Ultimul release este
+Versiune curenta: **2.10.5**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+si [SECURITY.md](SECURITY.md) pentru threat model.
+
+Ultimul release este **v2.10.5** - patch UX Dashboard + Alerte: KPI-ul
+`Joburi active` devine `Monitorizari active`, sublinia tehnica devine
+`X Dosare, Y Nume`, iar pagina `Alerte` primeste tab-bar
+`Toate / Dosare / Nume` si cautare debounced dupa targetul jobului
+(`numar_dosar` / `name_normalized`). Backend-ul expune
+`GET /api/v1/alerts?jobKind=...&q=...`, cu match fara diacritice si total
+paginat corect prin acelasi JOIN.
+
+Istoric anterior:
 **v2.10.2** - patch UX peste v2.10.1 (frontend-only, zero backend): coloana
 Detalii din tabelul Monitorizare se afiseaza doar cand cel putin un job are
 continut de aratat (name_soap cu scope restrans pe instante); panourile

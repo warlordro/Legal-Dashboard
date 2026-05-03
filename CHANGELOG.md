@@ -4,6 +4,50 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.10.5] - 2026-05-03
+
+### UX Dashboard + Alerte - KPI umanizat si filtre pe sursa jobului
+
+Patch peste v2.10.4. Task A din `CODEX-BACKLOG.md` ramane neimplementat
+deocamdata; aceasta versiune acopera doar Task B si Task C.
+
+### Dashboard
+
+- KPI-ul `Joburi active` devine `Monitorizari active`.
+- Sublinia tehnica `X dosar_soap, Y name_soap` devine `X Dosare, Y Nume`.
+
+### Alerte
+
+- Pagina `Alerte` primeste tab-bar `Toate / Dosare / Nume`, ortogonal fata de
+  select-ul existent pe event-kind (`dosar_new`, `termen_changed`, etc.).
+- Search input nou cu debounce 300ms cauta dupa targetul jobului:
+  `numar_dosar` pentru `dosar_soap` si `name_normalized` pentru `name_soap`.
+- Filtrele existente (event-kind, severitate, necitite, inchise, interval date)
+  raman neschimbate si se combina cu noul `jobKind` / `q`.
+- Empty state contextualizat cand tab-bar/search nu au rezultate si link pentru
+  resetarea filtrelor noi.
+
+### Backend
+
+- `GET /api/v1/alerts` accepta query params noi: `jobKind` si `q`.
+- `listAlerts` aplica filtrele noi pe `monitoring_jobs` prin LEFT JOIN-ul deja
+  folosit pentru target enrichment; alertele ale caror joburi au fost sterse
+  sunt excluse doar cand aceste filtre target-based sunt active.
+- `q` foloseste `rnpm_norm(...) LIKE ... ESCAPE '\'`, deci cautarea este
+  case-insensitive, diacritic-insensitive si trateaza `%`, `_`, `\` ca literali.
+- `COUNT(*)` foloseste acelasi JOIN cand `jobKind` sau `q` sunt active, ca
+  `total` sa ramana sincronizat cu lista paginata.
+
+### Tests
+
+- `backend/src/routes/alerts.test.ts`: 5 teste noi pentru `jobKind`, cautare pe
+  `numar_dosar`, cautare pe `name_normalized` cu/fara diacritice, wildcard `%`
+  literal si combinatia `q + jobKind`.
+
+**703 teste backend** asteptate dupa aceasta versiune.
+
+---
+
 ## [2.10.4] - 2026-05-03
 
 ### UX Monitorizare - filtre kind (Dosare/Nume) + search box diacritic-insensitive
@@ -56,15 +100,28 @@ Probleme adresate:
   se schimba — altfel utilizatorul aplica filtru pe pagina 7 si vede gol pana
   la recovery-ul de retro-decrementare.
 
+### Backend - fail-closed pe target = doar sufix legal
+
+- `dosarMatchesAllNameTokens(targetCore=[])` returneaza acum `false`
+  (fail-closed) in loc de `true`. Un target compus exclusiv din sufixe legale
+  ("SRL", "S.R.L.", "SRL LLC") e marginal (input-ul UPPERCASE + min 2 chars il
+  blocheaza la `/commit`), dar pasul ramane defense-in-depth: in vechea forma,
+  un astfel de target ar fi lasat sa treaca toate dosarele pe care PortalJust
+  le returna prin substring-match, dezvalindu-l ca o gaura de pseudo-pozitive.
+
 ### Tests
 
 - `backend/src/schemas/monitoring.test.ts`: 3 noi (`q` trim, gol post-trim,
   >100 chars).
 - `backend/src/routes/monitoring.test.ts`: 4 noi (`q` matches numar_dosar,
   `q` cu diacritice matcheaza valoare fara diacritice, `q` + `kind` AND-ed,
-  wildcard `%` escapat la match literal).
+  wildcard `%` escapat la match literal). Toate folosesc `QListResponse` shape
+  partajat si afirma explicit `r.status === 200`.
+- `backend/src/services/monitoring/nameSoapRunner.test.ts`: 1 nou (fail-closed
+  pe target compus exclusiv din sufixe legale, 3 variante: `"SRL"`, `"S.R.L."`,
+  `"  SRL  LLC  "`).
 
-**697 teste backend** (zero regresii pe restul suite-ului).
+**698 teste backend** (zero regresii pe restul suite-ului).
 
 ---
 

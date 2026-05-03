@@ -1,5 +1,13 @@
 # Legal Dashboard — Status Implementare
 
+**Data curenta:** 2026-05-03 (v2.10.5: Dashboard KPI rename + tab-bar/search pe pagina Alerte; Task A din `CODEX-BACKLOG.md` ramane neimplementat)
+**Versiune curenta reala:** v2.10.5
+**Status global curent:** Sprint monitoring + web mode livrat pana la PR-11 si patch-uri UX v2.10.5. PR-10 si PR-12 sunt eliminate prin decizia #11 din `EXECUTION-ROADMAP.md`; web cutover ramane reevaluabil separat. Backlog curent: Task A - editarea joburilor de monitorizare existente.
+
+**Livrat recent (v2.10.5):** Patch UX Dashboard + Alerte peste v2.10.4. Dashboard-ul afiseaza `Monitorizari active` in loc de `Joburi active`, cu subline `X Dosare, Y Nume`. Pagina Alerte primeste tab-bar `Toate / Dosare / Nume` si search debounced dupa targetul jobului; filtrele existente pe event-kind, severitate, unread/dismissed si interval date raman neschimbate si se combina cu noile filtre. Backend-ul expune `GET /api/v1/alerts?jobKind=...&q=...`, cu match fara diacritice si wildcard-uri LIKE escapate; `COUNT(*)` foloseste acelasi JOIN ca lista paginata cand filtrele target-based sunt active. Validare: 703/703 backend tests, backend/frontend type-check, Biome, build productie, rebuild Electron si smoke desktop `/health` OK.
+
+---
+
 **Data:** 2026-05-01 (v2.6.8: review-driven hardening peste v2.6.7 — fix HTML a11y pe cardul "Adaugare bulk din fisier" + derivare `CADENCE_COL_LETTER` din `HEADERS` + eroare clara la header lipsa in `parseBulkFile` + corectare claim stale despre `xlsx@0.18.5` in `SESSION-HANDOFF.md`)
 **Versiune curenta:** v2.6.8
 **Status global:** 10/10 pasi completi. Sprint monitoring + web mode: PR-0..PR-8 implementate local + patch-uri UX v2.6.1..v2.6.3 + audit hardening v2.6.4 + UX polish v2.6.5..v2.6.6 + export Monitorizare v2.6.7 + review-driven hardening v2.6.8; urmatorul PR este PR-9 Auth pluggable (desktop noop / web SSO).

@@ -21,6 +21,11 @@ let tmpRoot: string;
 const OWNER_A = "alice";
 const OWNER_B = "bob";
 
+interface AlertListResponse {
+  data: { rows: MonitoringAlertRow[]; total: number; page: number; pageSize: number };
+  requestId: string;
+}
+
 function buildTestApp() {
   const app = new Hono();
   app.use("*", async (c, next) => {
@@ -32,15 +37,24 @@ function buildTestApp() {
   return app;
 }
 
-function seedJob(ownerId: string, hashSeed: string): number {
+function seedJob(
+  ownerId: string,
+  hashSeed: string,
+  options: {
+    kind?: "dosar_soap" | "name_soap" | "aviz_rnpm";
+    target?: Record<string, unknown>;
+  } = {},
+): number {
+  const kind = options.kind ?? "dosar_soap";
+  const target = options.target ?? {};
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at)
-       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
+       VALUES (?, ?, ?, ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
     )
-    .run(ownerId, hashSeed);
+    .run(ownerId, kind, JSON.stringify(target), hashSeed);
   return info.lastInsertRowid as number;
 }
 
@@ -150,6 +164,127 @@ describe("GET /api/v1/alerts", () => {
     expect(res.status).toBe(400);
     const json = await res.json() as { error: { code: string } };
     expect(json.error.code).toBe("invalid_query");
+  });
+
+  it("filters alerts by source job kind", async () => {
+    const app = buildTestApp();
+    const dosarJob = seedJob(OWNER_A, "dosar-kind", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const nameJob = seedJob(OWNER_A, "name-kind", {
+      kind: "name_soap",
+      target: { name_normalized: "STEFAN POPESCU" },
+    });
+    seedAlert(OWNER_A, { jobId: dosarJob, runId: seedRun(OWNER_A, dosarJob), title: "dosar" });
+    seedAlert(OWNER_A, { jobId: nameJob, runId: seedRun(OWNER_A, nameJob), title: "name" });
+
+    const res = await app.request("/api/v1/alerts?jobKind=dosar_soap", {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json() as AlertListResponse;
+    expect(json.data.total).toBe(1);
+    expect(json.data.rows[0].job_kind).toBe("dosar_soap");
+    expect(json.data.rows[0].title).toBe("dosar");
+  });
+
+  it("searches target numar_dosar diacritic-insensitive and keeps total in sync", async () => {
+    const app = buildTestApp();
+    const matchJob = seedJob(OWNER_A, "dosar-q-match", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const missJob = seedJob(OWNER_A, "dosar-q-miss", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "9999/3/2024" },
+    });
+    seedAlert(OWNER_A, { jobId: matchJob, runId: seedRun(OWNER_A, matchJob), title: "match" });
+    seedAlert(OWNER_A, { jobId: missJob, runId: seedRun(OWNER_A, missJob), title: "miss" });
+
+    const res = await app.request("/api/v1/alerts?q=1234", {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json() as AlertListResponse;
+    expect(json.data.total).toBe(1);
+    expect(json.data.rows).toHaveLength(1);
+    expect(json.data.rows[0].title).toBe("match");
+  });
+
+  it("searches target name_normalized with and without diacritics", async () => {
+    const app = buildTestApp();
+    const stefanJob = seedJob(OWNER_A, "name-stefan", {
+      kind: "name_soap",
+      target: { name_normalized: "STEFAN POPESCU" },
+    });
+    const ionJob = seedJob(OWNER_A, "name-ion", {
+      kind: "name_soap",
+      target: { name_normalized: "ION POPESCU" },
+    });
+    seedAlert(OWNER_A, { jobId: stefanJob, runId: seedRun(OWNER_A, stefanJob), title: "stefan" });
+    seedAlert(OWNER_A, { jobId: ionJob, runId: seedRun(OWNER_A, ionJob), title: "ion" });
+
+    const plain = await app.request("/api/v1/alerts?q=stefan", {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(plain.status).toBe(200);
+    const plainJson = await plain.json() as AlertListResponse;
+    expect(plainJson.data.total).toBe(1);
+    expect(plainJson.data.rows[0].title).toBe("stefan");
+
+    const accented = await app.request(`/api/v1/alerts?q=${encodeURIComponent("Ștefan")}`, {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(accented.status).toBe(200);
+    const accentedJson = await accented.json() as AlertListResponse;
+    expect(accentedJson.data.total).toBe(1);
+    expect(accentedJson.data.rows[0].title).toBe("stefan");
+  });
+
+  it("treats SQL wildcard characters in q as literals", async () => {
+    const app = buildTestApp();
+    const firstJob = seedJob(OWNER_A, "wild-first", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const secondJob = seedJob(OWNER_A, "wild-second", {
+      kind: "name_soap",
+      target: { name_normalized: "STEFAN POPESCU" },
+    });
+    seedAlert(OWNER_A, { jobId: firstJob, runId: seedRun(OWNER_A, firstJob), title: "first" });
+    seedAlert(OWNER_A, { jobId: secondJob, runId: seedRun(OWNER_A, secondJob), title: "second" });
+
+    const res = await app.request(`/api/v1/alerts?q=${encodeURIComponent("%")}`, {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json() as AlertListResponse;
+    expect(json.data.total).toBe(0);
+    expect(json.data.rows).toHaveLength(0);
+  });
+
+  it("ANDs q with jobKind", async () => {
+    const app = buildTestApp();
+    const dosarJob = seedJob(OWNER_A, "and-dosar", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const nameJob = seedJob(OWNER_A, "and-name", {
+      kind: "name_soap",
+      target: { name_normalized: "DOSAR 1234 TEST" },
+    });
+    seedAlert(OWNER_A, { jobId: dosarJob, runId: seedRun(OWNER_A, dosarJob), title: "dosar" });
+    seedAlert(OWNER_A, { jobId: nameJob, runId: seedRun(OWNER_A, nameJob), title: "name" });
+
+    const res = await app.request("/api/v1/alerts?q=1234&jobKind=name_soap", {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(res.status).toBe(200);
+    const json = await res.json() as AlertListResponse;
+    expect(json.data.total).toBe(1);
+    expect(json.data.rows[0].title).toBe("name");
+    expect(json.data.rows[0].job_kind).toBe("name_soap");
   });
 });
 

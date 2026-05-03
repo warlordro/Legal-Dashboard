@@ -321,14 +321,14 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
       clock: realClock,
       runners: { dosar_soap: dosarSoapRunner, name_soap: nameSoapRunner },
       tickIntervalMs: 60_000,
-      claimLimit: 25,
+      claimLimit: 50,
       jitterSecMax: 30,
     });
     setMonitoringScheduler(monitoringScheduler);
     monitoringScheduler.start().catch((e) => {
       console.error("[monitoring] scheduler.start failed:", e);
     });
-    console.log("[monitoring] scheduler started (60s tick, claimLimit=25)");
+    console.log("[monitoring] scheduler started (60s tick, claimLimit=50)");
   }
 });
 httpServer.on("error", (err: Error) => {

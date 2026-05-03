@@ -364,7 +364,11 @@ export default function Monitorizare({
         </CardHeader>
         <CardContent>
           <div className="mb-3 flex flex-wrap items-center gap-2">
-            <div className="inline-flex rounded-md border border-input bg-background p-0.5">
+            <div
+              role="tablist"
+              aria-label="Filtreaza joburile dupa tip"
+              className="inline-flex rounded-md border border-input bg-background p-0.5"
+            >
               {(["all", "dosar_soap", "name_soap"] as const).map((k) => {
                 const label = k === "all" ? "Toate" : k === "dosar_soap" ? "Dosare" : "Nume";
                 const active = kindFilter === k;
@@ -372,6 +376,8 @@ export default function Monitorizare({
                   <button
                     key={k}
                     type="button"
+                    role="tab"
+                    aria-selected={active}
                     onClick={() => setKindFilter(k)}
                     className={cn(
                       "rounded px-3 py-1 text-xs font-medium transition-colors",

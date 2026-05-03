@@ -307,6 +307,26 @@ describe("nameSoapRunner - strict word filter", () => {
     expect(dosarMatchesAllNameTokens(dosar, "ION POPESCU")).toBe(false);
   });
 
+  it("dosarMatchesAllNameTokens fail-closed cand targetul e doar sufix legal (SRL)", () => {
+    // Target = "SRL" → dupa stripLegalSuffix devine [], deci nu mai avem
+    // cuvinte de match. Returnam false ca sa nu trecem TOATE dosarele cu
+    // o parte SRL (ar fi inundatie de pseudo-pozitive).
+    const dosar: Dosar = {
+      numar: "1/1/2024",
+      data: "",
+      institutie: "",
+      departament: "",
+      categorieCaz: "",
+      stadiuProcesual: "",
+      obiect: "",
+      parti: [{ nume: "Acme Trading SRL", calitateParte: "Reclamant" }],
+      sedinte: [],
+    };
+    expect(dosarMatchesAllNameTokens(dosar, "SRL")).toBe(false);
+    expect(dosarMatchesAllNameTokens(dosar, "S.R.L.")).toBe(false);
+    expect(dosarMatchesAllNameTokens(dosar, "  SRL  LLC  ")).toBe(false);
+  });
+
   it("filtru runner: SOAP returneaza dosare false-pozitive, ele NU ajung in snapshot", async () => {
     const job = seedJob({
       targetJson: '{"name_normalized":"GLOBAL LEARNING LOGISTICS"}',

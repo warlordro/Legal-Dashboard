@@ -1,13 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, ExternalLink, Eye, FileText, Filter, RefreshCw, Trash2 } from "lucide-react";
+import { Bell, CheckCheck, ExternalLink, Eye, FileText, Filter, RefreshCw, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   alertsApi,
   alertKindLabels,
   severityLabels,
+  type AlertJobKind,
   type AlertKind,
   type AlertSeverity,
   type MonitoringAlert,
@@ -75,6 +77,9 @@ export default function Alerts({
   const [total, setTotal] = useState(0);
   const [unread, setUnread] = useState(0);
   const [kind, setKind] = useState<AlertKind | "all">("all");
+  const [jobKind, setJobKind] = useState<AlertJobKind | "all">("all");
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [severity, setSeverity] = useState<AlertSeverity | "all">("all");
   const [onlyUnread, setOnlyUnread] = useState(false);
   const [includeDismissed, setIncludeDismissed] = useState(false);
@@ -101,6 +106,8 @@ export default function Alerts({
         page: page + 1,
         pageSize,
         kind,
+        jobKind,
+        q: debouncedQuery || undefined,
         severity,
         onlyUnread,
         includeDismissed,
@@ -115,15 +122,20 @@ export default function Alerts({
     } finally {
       setLoading(false);
     }
-  }, [from, includeDismissed, kind, onlyUnread, page, pageSize, severity, to]);
+  }, [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, page, pageSize, severity, to]);
 
   useEffect(() => {
     load();
   }, [load, streamVersion]);
 
   useEffect(() => {
+    const t = setTimeout(() => setDebouncedQuery(searchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [searchInput]);
+
+  useEffect(() => {
     setPage(0);
-  }, [from, includeDismissed, kind, onlyUnread, severity, to]);
+  }, [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, severity, to]);
 
   const markSeen = async (alert: MonitoringAlert) => {
     setBusyId(alert.id);
@@ -191,10 +203,13 @@ export default function Alerts({
   const filteredSummary = useMemo(() => {
     const parts = [`${total} total`];
     if (unread > 0) parts.push(`${unread} necitite`);
+    if (jobKind === "dosar_soap") parts.push("Dosare");
+    if (jobKind === "name_soap") parts.push("Nume");
+    if (debouncedQuery) parts.push(`cautare: ${debouncedQuery}`);
     if (onlyUnread) parts.push("doar necitite");
     if (includeDismissed) parts.push("include inchise");
     return parts.join(" · ");
-  }, [includeDismissed, onlyUnread, total, unread]);
+  }, [debouncedQuery, includeDismissed, jobKind, onlyUnread, total, unread]);
 
   return (
     <div className="min-h-full bg-background p-6">
@@ -227,6 +242,56 @@ export default function Alerts({
             </CardTitle>
           </CardHeader>
           <CardContent>
+            <div className="mb-3 flex flex-wrap items-center gap-2">
+              <div
+                role="tablist"
+                aria-label="Filtreaza alertele dupa tipul jobului"
+                className="inline-flex rounded-md border border-input bg-background p-0.5"
+              >
+                {(["all", "dosar_soap", "name_soap"] as const).map((k) => {
+                  const label = k === "all" ? "Toate" : k === "dosar_soap" ? "Dosare" : "Nume";
+                  const active = jobKind === k;
+                  return (
+                    <button
+                      key={k}
+                      type="button"
+                      role="tab"
+                      aria-selected={active}
+                      onClick={() => setJobKind(k)}
+                      className={cn(
+                        "rounded px-3 py-1 text-xs font-medium transition-colors",
+                        active
+                          ? "bg-primary text-primary-foreground"
+                          : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                      )}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="relative min-w-[260px] max-w-md flex-1">
+                <Input
+                  type="text"
+                  value={searchInput}
+                  onChange={(e) => setSearchInput(e.target.value)}
+                  placeholder="Cauta dupa nume sau numar dosar..."
+                  className="pr-8"
+                  aria-label="Cautare in alerte"
+                />
+                {searchInput && (
+                  <button
+                    type="button"
+                    onClick={() => setSearchInput("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-0.5 text-muted-foreground hover:text-foreground"
+                    aria-label="Sterge cautarea"
+                    title="Sterge cautarea"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            </div>
             <div className="grid gap-3 md:grid-cols-6">
               <select
                 value={kind}
@@ -288,7 +353,24 @@ export default function Alerts({
           {rows.length === 0 && !loading && (
             <Card>
               <CardContent className="flex min-h-40 items-center justify-center text-sm text-muted-foreground">
-                Nu exista alerte pentru filtrele curente.
+                {jobKind !== "all" || debouncedQuery ? (
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span>Niciun rezultat pentru filtrele aplicate.</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setJobKind("all");
+                        setSearchInput("");
+                        setDebouncedQuery("");
+                      }}
+                      className="text-xs text-primary hover:underline"
+                    >
+                      Reseteaza filtrele
+                    </button>
+                  </div>
+                ) : (
+                  "Nu exista alerte pentru filtrele curente."
+                )}
               </CardContent>
             </Card>
           )}

@@ -1,6 +1,58 @@
-# Session Handoff - v2.10.1 (PR-11 review hardening)
+# Session Handoff - v2.10.5 (Dashboard/Alerte UX + backlog B/C)
 
 **Data**: 2026-05-03
+
+## v2.10.5 - Dashboard KPI rename + Alerte tab-bar/search
+
+Aceasta sesiune a implementat doar Task B si Task C din `CODEX-BACKLOG.md`.
+Task A (`Editare job monitorizare existent`) ramane explicit neimplementat:
+`JobUpdateBodySchema` nu accepta inca `target`, iar `monitoringJobsRepository`
+nu recomputeaza `target_hash` pe PATCH.
+
+**Dashboard**:
+- `frontend/src/components/dashboard/KpiStrip.tsx`: KPI-ul `Joburi active`
+  devine `Monitorizari active`.
+- Sublinia `X dosar_soap, Y name_soap` devine `X Dosare, Y Nume`.
+
+**Alerte**:
+- `backend/src/routes/alerts.ts`: query schema accepta `jobKind` si `q`.
+- `backend/src/db/monitoringAlertsRepository.ts`: `listAlerts` filtreaza pe
+  `monitoring_jobs` pentru `jobKind` / `q`, folosind `rnpm_norm(...) LIKE ...
+  ESCAPE '\'`; `COUNT(*)` include acelasi JOIN cand aceste filtre sunt active.
+- `frontend/src/lib/alertsApi.ts`: `alertsApi.list()` propaga `jobKind` si `q`.
+- `frontend/src/pages/Alerts.tsx`: tab-bar `Toate / Dosare / Nume`, search
+  debounced 300ms, reset page pe schimbare filtru si empty state cu reset.
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json` si
+  `package-lock.json` sincronizate la `2.10.5`.
+- `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `CLAUDE.md` si
+  `README.md` actualizate pentru v2.10.5.
+- `CODEX-BACKLOG.md` ramane documentul de backlog curent; Task A ramane in el
+  pentru o sesiune viitoare.
+
+**Validari rulate**:
+- `npm rebuild better-sqlite3` - OK dupa oprirea proceselor stale
+  `Legal Dashboard Dev`.
+- `npm test --workspace=backend -- alerts.test.ts` - 10/10 passed.
+- `npm test --workspace=backend` - 703/703 passed.
+- `npx tsc --noEmit -p backend/tsconfig.json` - OK.
+- `cd frontend && npx tsc --noEmit` - OK.
+- `npx biome check` - OK.
+- `git diff --check` - OK.
+- `npm run build` - OK, cu warning-uri Vite existente despre chunk size /
+  dynamic import.
+- `npm run rebuild:electron` - OK.
+- Smoke Electron desktop: `/health` 200,
+  `{"status":"ok","service":"Legal Dashboard API","monitoring":{"enabled":true,"running":true,"inflight":0}}`.
+
+**Git state inainte de commit/push**:
+- Branch local: `main`, ahead fata de `origin/main` cu v2.10.3 si v2.10.4,
+  plus modificarile v2.10.5 in working tree.
+- Remote: `https://github.com/warlordro/Legal-Dashboard.git`.
+- Userul a aprobat explicit commit + push pe GitHub in aceasta sesiune.
+
+## v2.10.1 - PR-11 review hardening (istoric anterior)
 
 ## v2.10.1 - PR-11 review hardening
 

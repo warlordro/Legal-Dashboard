@@ -18,6 +18,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.10.5",
+    date: "3 Mai 2026",
+    subtitle:
+      "Patch UX Dashboard + Alerte: KPI-ul de monitorizari este umanizat, iar pagina Alerte primeste tab-bar Toate / Dosare / Nume plus cautare dupa targetul jobului. Filtrele vechi raman neschimbate si se combina cu cele noi.",
+    icon: <Bell className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Dashboard - KPI Monitorizari active",
+        content:
+          "Cardul vechi Joburi active devine Monitorizari active, iar sublinia tehnica X dosar_soap, Y name_soap devine X Dosare, Y Nume. Schimbarea este strict de label, fara impact pe contractul /api/v1/dashboard/summary.",
+      },
+      {
+        title: "Alerte - tab-bar sursa job + search",
+        content:
+          "Pagina Alerte primeste tab-bar Toate / Dosare / Nume si input de cautare cu debounce 300ms. Search-ul cauta in targetul jobului: numar_dosar pentru dosar_soap si name_normalized pentru name_soap. Select-ul existent pe tipul evenimentului, severitatea, Necitite/Inchise si intervalul de date raman neschimbate.",
+      },
+      {
+        title: "Backend - GET /api/v1/alerts?jobKind=...&q=...",
+        content:
+          "AlertListQuerySchema accepta jobKind si q. listAlerts filtreaza pe monitoring_jobs prin LEFT JOIN, foloseste rnpm_norm() pentru match case-insensitive si fara diacritice, escape-uieste meta-caracterele LIKE si include acelasi JOIN in COUNT ca totalul paginat sa fie corect.",
+      },
+      {
+        title: "Tests",
+        content:
+          "5 teste noi in alerts.test.ts: jobKind, q pe numar_dosar, q pe name_normalized cu/fara diacritice, wildcard % literal si q + jobKind AND-ed corect. 703 teste backend asteptate.",
+      },
+    ],
+  },
+  {
     version: "v2.10.4",
     date: "3 Mai 2026",
     subtitle:
@@ -42,9 +73,14 @@ export const versions: VersionEntry[] = [
           "JobListQuerySchema capata field q (trim + max 100 chars). listJobs adauga WHERE OR pe trei json_extract-uri: target_json.numar_dosar (dosar_soap), name_normalized (name_soap), identificator (placeholder aviz_rnpm). Match-ul foloseste rnpm_norm() pe coloane (strip diacritice + lowercase) si LIKE %...% cu meta-caractere %, _, \\ escapate cu \\ ESCAPE — input \"50%\" nu degenereaza in wildcard SQL. Comportamentul reproduce semantica Cautare Dosare: query cu diacritice matcheaza valori fara diacritice si invers.",
       },
       {
+        title: "Backend - fail-closed pe target = doar sufix legal",
+        content:
+          "dosarMatchesAllNameTokens(targetCore=[]) returneaza acum false (fail-closed) in loc de true: un target compus exclusiv din sufixe legale (\"SRL\", \"S.R.L.\", \"SRL LLC\") nu mai trece tot ce returneaza PortalJust ca pseudo-pozitiv. Cazul e marginal (input-ul UPPERCASE + min 2 chars il blocheaza la /commit), dar pasul ramane defense-in-depth.",
+      },
+      {
         title: "Tests",
         content:
-          "3 teste noi de schema (q trim, gol post-trim respins, > 100 chars respins) + 4 teste de integrare (q matches numar_dosar, q cu diacritice matches valoare fara diacritice in DB, q + kind AND-ed corect, wildcard % escapat la match literal). 697 teste backend (zero regresii).",
+          "3 teste noi de schema (q trim, gol post-trim respins, > 100 chars respins) + 4 teste de integrare (q matches numar_dosar, q cu diacritice matches valoare fara diacritice in DB, q + kind AND-ed corect, wildcard % escapat la match literal) + 1 test runner pe fail-closed sufix legal. 698 teste backend (zero regresii).",
       },
     ],
   },
@@ -85,7 +121,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Tests",
         content:
-          "6 teste noi in nameSoapRunner.test.ts (tokenize &, strip diacritice, all-words required, multi-party match, parti goale → false, runner-level filter, & literal). 3 teste actualizate in nameListParser.test.ts pe output UPPERCASE. 690 teste backend total (zero regresii).",
+          "7 teste noi in nameSoapRunner.test.ts (tokenize &, strip diacritice, all-words required, multi-party match, parti goale → false, runner-level filter, & literal). 3 teste actualizate in nameListParser.test.ts pe output UPPERCASE. 690 teste backend total (zero regresii).",
       },
     ],
   },

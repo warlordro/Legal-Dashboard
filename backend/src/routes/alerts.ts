@@ -49,6 +49,8 @@ const AlertListQuerySchema = z
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
     jobId: z.coerce.number().int().min(1).optional(),
+    jobKind: z.enum(["dosar_soap", "name_soap", "aviz_rnpm"]).optional(),
+    q: z.string().trim().min(1).max(100).optional(),
     kind: z
       .enum([
         "dosar_new",
