@@ -31,11 +31,15 @@ const limitMeBody = bodyLimit({
 // (panoul curent EmailSettingsPanel nu il editeaza) nu mai sufera silent
 // overwrite peste valoarea stocata. Cand lipseste, handler-ul preia valoarea
 // existenta sau cade pe default-ul repository-ului.
+// v2.13.0: dailyReportEnabled adaugat ca optional ca PUT-urile vechi (UI inca
+// nedeployed) sa nu reseteze flag-ul; cand lipseste, handler-ul preia valoarea
+// existenta sau cade pe `false`.
 const EmailSettingsBodySchema = z
   .object({
     enabled: z.boolean(),
     toAddress: z.string().trim().email().max(320).nullable(),
     minSeverity: z.enum(["info", "warning", "critical"]).optional(),
+    dailyReportEnabled: z.boolean().optional(),
   })
   .strict();
 
@@ -103,10 +107,14 @@ meRouter.put("/email-settings", limitMeBody, async (c) => {
   // v2.10.1 #1: preserve stored minSeverity if the caller didn't send it.
   const minSeverity =
     parsed.data.minSeverity ?? before?.minSeverity ?? "info";
+  // v2.13.0: same treatment for dailyReportEnabled — preserve when omitted.
+  const dailyReportEnabled =
+    parsed.data.dailyReportEnabled ?? before?.dailyReportEnabled ?? false;
   const after = upsertEmailSettings(ownerId, {
     enabled: parsed.data.enabled,
     toAddress: parsed.data.toAddress,
     minSeverity,
+    dailyReportEnabled,
   });
   recordAudit(c, "me.email_settings.update", {
     targetKind: "owner_email_settings",

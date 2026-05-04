@@ -34,6 +34,7 @@ import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventServi
 import { purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
+import { isLikelyTooLongForPortalJust } from "../nameListParser.ts";
 
 // 5 consecutive failures = the source is broken, not flaky. Spec
 // PLAN-monitoring-webmode.md L390: emit one source_error alert and slow the
@@ -49,6 +50,30 @@ const RUN_PURGE_INTERVAL_MS = 86_400_000;
 const AI_USAGE_RETENTION_DAYS = 90;
 
 export type ScheduledJob = MonitoringJobRow;
+
+// Inferenta best-effort a cauzei probabile cand un job trips source_error.
+// Pentru name_soap cu SOAP_FAIL pe un nume normalizat care depaseste limitele
+// empirice PortalJust → flag pentru UI ca utilizatorul sa stie ca trebuie sa
+// scurteze numele, nu ca PortalJust e jos efectiv.
+function computeProbableCause(
+  job: MonitoringJobRow,
+  outcome: RunOutcome,
+): string | null {
+  if (job.kind !== "name_soap") return null;
+  if (outcome.errorCode !== "SOAP_FAIL") return null;
+  try {
+    const target = JSON.parse(job.target_json) as { name_normalized?: string };
+    if (
+      target?.name_normalized &&
+      isLikelyTooLongForPortalJust(target.name_normalized)
+    ) {
+      return "nume_prea_lung_pentru_portaljust";
+    }
+  } catch {
+    // target_json malformat — nu blocam alerta de baza pentru asta.
+  }
+  return null;
+}
 
 export interface RunOutcome {
   status: TerminalRunStatus;
@@ -489,18 +514,29 @@ export class Scheduler {
     // run id that exposed the trip, so each fresh streak (after a recovery)
     // can re-emit on its next 5th fail with a different runId.
     if (failStreak === SOURCE_ERROR_THRESHOLD) {
+      // Probable-cause enrichment pentru name_soap: daca PortalJust a esuat
+      // pe un nume care depaseste pragurile empirice (~107 chars / 13 cuvinte),
+      // adaugam motivul probabil + un titlu mai actionabil. Userul vede direct
+      // "scurteaza numele" in loc de "sursa indisponibila".
+      const probableCause = computeProbableCause(job, outcome);
+      const baseTitle = "Sursa indisponibila (5 esecuri consecutive)";
+      const enrichedTitle =
+        probableCause === "nume_prea_lung_pentru_portaljust"
+          ? "Sursa indisponibila — nume prea lung pentru PortalJust (5 esecuri consecutive)"
+          : baseTitle;
       insertAlert({
         ownerId: job.owner_id,
         jobId: job.id,
         runId,
         kind: "source_error",
         severity: "warning",
-        title: "Sursa indisponibila (5 esecuri consecutive)",
+        title: enrichedTitle,
         detail: {
           fail_streak: failStreak,
           last_error_code: outcome.errorCode ?? null,
           last_error_message: outcome.errorMessage ?? null,
           next_run_at: nextRunAt.toISOString(),
+          ...(probableCause ? { probable_cause: probableCause } : {}),
         },
         dedupKey: `source_error|${runId}`,
       });

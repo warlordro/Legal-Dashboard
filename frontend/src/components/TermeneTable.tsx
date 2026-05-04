@@ -25,8 +25,10 @@ function getSolutieBadgeVariant(solutie: string): "default" | "secondary" | "out
   return "outline";
 }
 
+// PortalJust SharePoint indexer nu retine sufixul de dosar asociat (/a, /a1, /a2 ...).
 function getPortalJustUrl(numar: string): string {
-  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(numar)}`;
+  const parent = numar.replace(/\/a\d*$/i, "");
+  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(parent)}`;
 }
 
 function formatInstitutie(raw: string): string {

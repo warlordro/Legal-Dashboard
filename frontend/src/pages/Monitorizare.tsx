@@ -194,15 +194,38 @@ export default function Monitorizare({
     }
   };
 
-  const getExportJobs = (): MonitoringJob[] =>
-    selectedIds.size === 0 ? jobs : jobs.filter((j) => selectedIds.has(j.id));
+  // Cand exista selectie -> exporta doar randurile bifate (sunt pe pagina curenta).
+  // Altfel -> fetch toate paginile (cu filtrele kind/q active aplicate) ca user-ul
+  // sa nu primeasca doar randurile vizibile pe pagina afisata.
+  const fetchAllJobsForExport = async (): Promise<MonitoringJob[]> => {
+    const PAGE_SIZE = 100;
+    const collected: MonitoringJob[] = [];
+    let pageNum = 1;
+    while (true) {
+      const result = await monitoring.list({
+        page: pageNum,
+        pageSize: PAGE_SIZE,
+        kind: kindFilter === "all" ? undefined : kindFilter,
+        q: debouncedQuery || undefined,
+      });
+      collected.push(...result.rows);
+      if (collected.length >= result.total || result.rows.length === 0) break;
+      pageNum += 1;
+      // Hard guard impotriva loop-ului infinit pe un total nestabil intre cereri.
+      if (pageNum > 1000) break;
+    }
+    return collected;
+  };
 
   const handleExport = async (kind: "xlsx" | "pdf") => {
-    const data = getExportJobs();
-    if (data.length === 0) return;
     setExporting(kind);
     setError(null);
     try {
+      const data =
+        selectedIds.size > 0
+          ? jobs.filter((j) => selectedIds.has(j.id))
+          : await fetchAllJobsForExport();
+      if (data.length === 0) return;
       if (kind === "xlsx") await exportMonitoringExcel(data);
       else await exportMonitoringPDF(data);
     } catch (err) {
@@ -280,7 +303,7 @@ export default function Monitorizare({
                     title={
                       selectedIds.size > 0
                         ? `Export Excel pentru ${selectedIds.size} joburi selectate`
-                        : `Export Excel pentru toate cele ${jobs.length} joburi vizibile`
+                        : `Export Excel pentru toate cele ${total} joburi (toate paginile)`
                     }
                   >
                     {exporting === "xlsx" ? (
@@ -298,7 +321,7 @@ export default function Monitorizare({
                     title={
                       selectedIds.size > 0
                         ? `Export PDF pentru ${selectedIds.size} joburi selectate`
-                        : `Export PDF pentru toate cele ${jobs.length} joburi vizibile`
+                        : `Export PDF pentru toate cele ${total} joburi (toate paginile)`
                     }
                   >
                     {exporting === "pdf" ? (

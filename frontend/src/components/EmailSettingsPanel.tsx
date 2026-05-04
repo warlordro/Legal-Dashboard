@@ -10,17 +10,20 @@ type ActionState = "idle" | "saving" | "testing";
 interface EmailSettingsDraft {
   enabled: boolean;
   toAddress: string;
+  dailyReportEnabled: boolean;
 }
 
 const DEFAULT_DRAFT: EmailSettingsDraft = {
   enabled: false,
   toAddress: "",
+  dailyReportEnabled: false,
 };
 
 function toDraft(settings: EmailSettings): EmailSettingsDraft {
   return {
     enabled: settings.enabled,
     toAddress: settings.toAddress ?? "",
+    dailyReportEnabled: settings.dailyReportEnabled,
   };
 }
 
@@ -28,11 +31,15 @@ export function canSaveEmailSettings(
   draft: EmailSettingsDraft,
   original: EmailSettingsDraft | null,
 ): boolean {
-  if (draft.enabled && draft.toAddress.trim().length === 0) return false;
+  // Trimite mail = nevoie de adresa, indiferent ce flag e activat.
+  if ((draft.enabled || draft.dailyReportEnabled) && draft.toAddress.trim().length === 0) {
+    return false;
+  }
   if (draft.toAddress.trim().length > 320) return false;
   if (!original) return true;
   return (
     draft.enabled !== original.enabled
+    || draft.dailyReportEnabled !== original.dailyReportEnabled
     || draft.toAddress.trim() !== original.toAddress.trim()
   );
 }
@@ -88,6 +95,7 @@ export function EmailSettingsPanel() {
       const next = await me.emailSettings.put({
         enabled: draft.enabled,
         toAddress: draft.toAddress.trim() || null,
+        dailyReportEnabled: draft.dailyReportEnabled,
       });
       setSettings(next);
       setDraft(toDraft(next));
@@ -180,6 +188,28 @@ export function EmailSettingsPanel() {
             className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-sky-500 focus:outline-none focus:ring-2 focus:ring-sky-500/20"
           />
         </label>
+
+        <div className="rounded-md border border-border bg-background px-3 py-2">
+          <label className="flex items-start gap-2 text-sm cursor-pointer">
+            <input
+              type="checkbox"
+              checked={draft.dailyReportEnabled}
+              onChange={(e) =>
+                setDraft((prev) => ({ ...prev, dailyReportEnabled: e.target.checked }))
+              }
+              className="mt-0.5 h-4 w-4"
+            />
+            <span>
+              <span className="font-medium">Trimite raport zilnic la 09:00</span>
+              <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                Un singur email cu toate alertele din ziua precedenta. Pe desktop
+                aplicatia trebuie sa fie deschisa la ora 09:00 — daca este inchisa,
+                ziua respectiva nu este recuperata. Pe web, raportul ruleaza
+                automat la ora server-ului.
+              </span>
+            </span>
+          </label>
+        </div>
       </div>
 
       {message && (

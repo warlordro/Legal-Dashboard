@@ -24,6 +24,8 @@ import {
   ParseError,
   normalizeName,
   parseNameList,
+  PORTALJUST_WARN_CHAR_LIMIT,
+  PORTALJUST_WARN_WORD_LIMIT,
 } from "./nameListParser.ts";
 
 function csv(s: string): Buffer {
@@ -115,19 +117,19 @@ describe("parseNameList — XLSX", () => {
 describe("validation — reject", () => {
   it("rejecteaza nume gol", async () => {
     // CSV-ul are skip_empty_lines=true, deci o linie complet goala e ignorata.
-    // Pentru a forta validation='rejected' pe nume_gol, folosim o linie cu o
+    // Pentru a forta validation='rejected' pe nume gol, folosim o linie cu o
     // alta coloana populata (cnp) si coloana 'nume' goala.
     const buf = csv("nume,cnp\n,123\n  ,456\n");
     const r = await parseNameList(buf);
     expect(r.totals.rejected).toBe(2);
-    expect(r.rows[0]?.validationMsg).toContain("nume_gol");
+    expect(r.rows[0]?.validationMsg).toMatch(/Nume lipsa/i);
   });
 
   it("rejecteaza nume sub MIN_NAME_LEN dupa normalizare", async () => {
     const buf = csv("nume\nA\n");
     const r = await parseNameList(buf);
     expect(r.totals.rejected).toBe(1);
-    expect(r.rows[0]?.validationMsg).toContain("prea_scurt");
+    expect(r.rows[0]?.validationMsg).toMatch(/prea scurt/i);
   });
 
   it("rejecteaza nume peste MAX_NAME_LEN", async () => {
@@ -135,14 +137,14 @@ describe("validation — reject", () => {
     const buf = csv(`nume\n${long}\n`);
     const r = await parseNameList(buf);
     expect(r.totals.rejected).toBe(1);
-    expect(r.rows[0]?.validationMsg).toContain("prea_lung");
+    expect(r.rows[0]?.validationMsg).toMatch(/prea lung/i);
   });
 
   it("rejecteaza nume care contine doar cifre", async () => {
     const buf = csv("nume\n123456\n42 99 88\n");
     const r = await parseNameList(buf);
     expect(r.totals.rejected).toBe(2);
-    expect(r.rows[0]?.validationMsg).toContain("doar_cifre");
+    expect(r.rows[0]?.validationMsg).toMatch(/doar cifre/i);
   });
 });
 
@@ -152,8 +154,51 @@ describe("validation — warn (duplicate intra-fisier)", () => {
     const r = await parseNameList(buf);
     expect(r.totals.ok).toBe(1);
     expect(r.totals.warn).toBe(2);
-    expect(r.rows[1]?.validationMsg).toContain("duplicate_in_file");
-    expect(r.rows[2]?.validationMsg).toContain("duplicate_in_file");
+    expect(r.rows[1]?.validationMsg).toMatch(/Duplicat/i);
+    expect(r.rows[2]?.validationMsg).toMatch(/Duplicat/i);
+  });
+});
+
+describe("validation — warn (nume lung pentru PortalJust)", () => {
+  it("flag-uieste nume cu peste PORTALJUST_WARN_CHAR_LIMIT caractere", async () => {
+    // 1 cuvant lung de 110 char: depaseste pragul de char dar nu pe cel de cuvinte
+    const longName = "A".repeat(PORTALJUST_WARN_CHAR_LIMIT + 10);
+    const buf = csv(`nume\n${longName}\n`);
+    const r = await parseNameList(buf);
+    expect(r.totals.warn).toBe(1);
+    expect(r.totals.ok).toBe(0);
+    expect(r.rows[0]?.validation).toBe("warn");
+    expect(r.rows[0]?.validationMsg).toMatch(/Nume lung/i);
+    expect(r.rows[0]?.validationMsg).toMatch(/PortalJust/i);
+  });
+
+  it("flag-uieste nume cu peste PORTALJUST_WARN_WORD_LIMIT cuvinte", async () => {
+    // 13 cuvinte scurte (sub 100 chars): depaseste doar pragul de cuvinte
+    const words = Array.from({ length: PORTALJUST_WARN_WORD_LIMIT + 1 }, (_, i) => `W${i}`).join(" ");
+    expect(words.length).toBeLessThanOrEqual(PORTALJUST_WARN_CHAR_LIMIT);
+    const buf = csv(`nume\n${words}\n`);
+    const r = await parseNameList(buf);
+    expect(r.totals.warn).toBe(1);
+    expect(r.rows[0]?.validation).toBe("warn");
+    expect(r.rows[0]?.validationMsg).toMatch(/Nume lung/i);
+  });
+
+  it("nu flag-uieste nume normal (sub ambele praguri)", async () => {
+    const buf = csv("nume\nIon Popescu Constantin\n");
+    const r = await parseNameList(buf);
+    expect(r.totals.ok).toBe(1);
+    expect(r.totals.warn).toBe(0);
+  });
+
+  it("flag-uieste exemplul real GLOBALSAT (14 cuvinte / 114 chars dupa normalizare)", async () => {
+    // Exemplul empiric care a declansat fix-ul; verifica integrarea pragurilor.
+    const buf = csv(
+      "nume\nGLOBALSAT DISTRIBUTION OF MOBILE TELEPHONY AND OFFICE AUTOMATION PRODUCTS SOCIETE ANONYME PALLINI GRECIA SUCURSALA BUCURESTI\n",
+    );
+    const r = await parseNameList(buf);
+    expect(r.totals.warn).toBe(1);
+    expect(r.rows[0]?.validation).toBe("warn");
+    expect(r.rows[0]?.validationMsg).toMatch(/Nume lung/i);
   });
 });
 

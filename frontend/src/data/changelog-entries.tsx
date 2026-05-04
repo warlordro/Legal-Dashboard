@@ -18,6 +18,114 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.13.1",
+    date: "5 Mai 2026",
+    subtitle:
+      "Patch peste v2.13.0 care strange capetele libere semnalate dupa lansarea export-ului de alerte: 4 kind-uri ascunse din dropdown-ul Alerte (sunt inerte in starea curenta a UI-ului), strip al sufixului /aN pentru link-urile portal.just.ro (SharePoint indexer-ul nu retine asociatii), hyperlink clickabil pe coloana \"Numar Dosar\" / \"Tinta\" in PDF-urile Dosare/Termene/Monitorizare, si Monitorizare export care pagineaza prin toate paginile cand nu exista selectie.",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-cyan-500",
+    badgeClass: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
+    sections: [
+      {
+        title: "Alerte - 4 kind-uri ascunse din dropdown",
+        content:
+          "Dropdown-ul \"Tip alerta\" exclude acum 4 tipuri inerte in starea curenta a UI-ului: \"Relevant acum\" si \"Nu mai este relevant\" (cer alert_config.stadii sau .categorii setate per job, dar formularul de Monitorizare nu le expune, deci tranzitia nu se declanseaza), \"Aviz modificat\" (rezervat pentru runner-ul RNPM neimplementat), si \"Dosar disparut\" (gated de notify_on_dosar_disappeared cu default false fara toggle in UI). Alertele istorice cu aceste kind-uri isi pastreaza label-ul in badge - doar dropdown-ul de filtrare le ascunde.",
+      },
+      {
+        title: "Link-uri portal.just.ro - strip /aN suffix",
+        content:
+          "Link-ul catre portal.just.ro din alerte/export/PDF strip-uieste sufixul /a, /a1, /a2... ca search-ul SharePoint sa returneze pagina parinte. SharePoint indexer-ul nu retine sufixele de dosar asociat, asa ca cautarea pe parintele 1234/5/2025 returneaza pagina care contine link-uri spre toate asociatii lui (utilizatorul gaseste de acolo dosarul cautat).",
+      },
+      {
+        title: "PDF - hyperlinks pe coloana Numar Dosar / Tinta",
+        content:
+          "Exporturile PDF din Cautare Dosare, Termene si Monitorizare au acum link clickabil pe coloana Numar Dosar / Tinta (text albastru ca user-ul sa vada vizual ca celula e clickabila). Pattern-ul reia ce s-a livrat in v2.13.0 pentru export-ul de alerte: side-band Map<rowIndex, url> + didDrawCell care apeleaza doc.link la dimensiunea celulei. La Monitorizare, link-ul se aplica doar pentru job-urile dosar_soap si name_soap (aviz_rnpm necesita alta sursa).",
+      },
+      {
+        title: "Monitorizare export - toate paginile cand nu e selectie",
+        content:
+          "Cand utilizatorul apasa Excel sau PDF fara nicio selectie pe pagina Monitorizare, exportul nu mai e limitat la randurile vizibile pe pagina curenta - pagineaza prin toate paginile (cu filtrele kind/q active aplicate) pana acopera totalul. Cand exista selectie, exportul ramane limitat la randurile bifate (ca inainte). Tooltip-urile s-au schimbat din \"vizibile\" in \"toate cele N joburi (toate paginile)\".",
+      },
+    ],
+  },
+  {
+    version: "v2.13.0",
+    date: "5 Mai 2026",
+    subtitle:
+      "Release minor peste v2.12.1. Livreaza cele doua capabilitati cerute pe pagina Alerte: (1) export Excel/PDF cu link direct catre dosarele identificate (selectie / filtre curente / interval, cap 10k randuri), si (2) raport zilnic pe email cu toate alertele din ziua precedenta. Migration nou (0015) adauga 2 coloane in owner_email_settings, fara breaking changes pe contractele existente.",
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    borderColor: "border-l-cyan-500",
+    badgeClass: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
+    sections: [
+      {
+        title: "Export alerte - Excel + PDF cu link portal.just.ro",
+        content:
+          "Pagina Alerte capata buton Exporta + modal cu radio Excel/PDF si radio Selectie / Filtre curente / Interval. Fiecare rand de raport contine numarul dosarului ca hyperlink live catre portal.just.ro/SitePages/cautare.aspx?k=... (slash-ul si diacriticele sunt encoded corect). PDF-ul respecta hyperlink-ul prin pdfmake. Filename: alerte_N_dd-mm-yyyy.xlsx / .pdf.",
+      },
+      {
+        title: "Export - 3 moduri (selectie / filtre / interval) cap 10k",
+        content:
+          "POST /api/v1/alerts/export accepta mode: ids (selectia checkboxurilor, max 10k), filters (filtrele curente din UI - severitate, kind, jobKind, q, unread, includeDismissed, from/to), sau range (interval [from, to] ISO). Cand totalul depaseste 10k, ruta returneaza 413 cu details.total ca utilizatorul sa restraga filtrul. Selectia cross-owner returneaza doar randurile owner-ului curent (audit + WHERE owner_id = ?).",
+      },
+      {
+        title: "Raport zilnic email (web only) - flag in Setari",
+        content:
+          "Setari -> Notificari email primeste checkbox nou \"Trimite raport zilnic la 09:00\" controlat de field nou dailyReportEnabled. Pe desktop, optiunea e vizibila dar fara efect (SMTP nu e configurabil); pe web, scheduler-ul ruleaza la fiecare 5 minute si fires email-ul la ora locala 09:00 (configurabila via DAILY_REPORT_HOUR env) pentru fiecare owner cu flag activ si address valida.",
+      },
+      {
+        title: "Raport - fereastra ziua precedenta + dedup + retry",
+        content:
+          "Email-ul include doar alertele cu created_at in fereastra [yesterday 00:00 local, today 00:00 local). Subiect: [Legal Dashboard] Raport zilnic dd.mm.yyyy - N alerta/alerte. Body grupat pe severitate (critic -> warning -> info), cu link portal.just.ro per dosar si em-dash placeholder cand numarul dosarului lipseste. Dedup via last_daily_report_sent_for: o singura zi nu primeste raport dublu chiar daca scheduler-ul ruleaza de mai multe ori. Retry best-effort: pe failure, flag-ul NU se updateaza, deci ziua urmatoare se reincearca cu fereastra noua.",
+      },
+      {
+        title: "Migration 0015 + audit trail",
+        content:
+          "0015_daily_report_settings.up.sql adauga in owner_email_settings: daily_report_enabled INTEGER NOT NULL DEFAULT 0 (independent de enabled - utilizatorul poate primi per-alert imediat dar NU raport zilnic, sau invers) + last_daily_report_sent_for TEXT NULL (formatul YYYY-MM-DD local). Audit emis: email.daily_report.sent (ok cu subject + rowCount) sau email.daily_report.failed (error cu reason si message daca a fost exceptie).",
+      },
+    ],
+  },
+  {
+    version: "v2.12.1",
+    date: "4 Mai 2026",
+    subtitle:
+      "Patch peste v2.12.0 care raspunde la trei probleme operationale ridicate pe import-ul bulk de monitorizare: limita statica de 300 randuri vizibile, mesaje de validare opace (warn / respins fara motiv clar), si alerta source_error generica cand un nume monitorizat depaseste limitele PortalJust. Niciun migration, niciun schema change, niciun contract HTTP/IPC modificat.",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Bulk import - preview integral cu paginare 100/pagina",
+        content:
+          "Limita statica de 300 randuri vizibile inlocuita cu paginare server-style identica cu pagina principala (default 100/pagina, optiuni 25 / 50 / 100 / 250). Toate randurile parse-uite raman in state si sunt accesibile la commit; vizibilitatea in tabel e doar paginata. Reset automat al paginii la schimbarea filtrului sau la cancel.",
+      },
+      {
+        title: "Bulk import - control selectie rand cu rand",
+        content:
+          "Coloana noua \"Actiune\" cu buton Exclude/Include per rand (icoana X / Plus). Randurile excluse afiseaza strikethrough + badge \"exclus\" si NU contribuie la commit. Linga dropdown-ul de filtru, checkbox \"Exclude warn-urile automat\" scoate in masa toate randurile cu validation === \"warn\" (badge \"auto-exclus\"). Counter-ul de commit reflecta numarul efectiv de joburi care vor fi create dupa toate filtrele.",
+      },
+      {
+        title: "Bulk import - legenda statusuri + nota dedup",
+        content:
+          "Legenda colapsabila explica explicit ce inseamna ok / warn / respins si clarifica deduplicarea automata: duplicat la import = NU se creeaza job duplicat (constraint UNIQUE owner_id + target_hash + kind). Contorul reflecta doar joburile unice care intra in DB.",
+      },
+      {
+        title: "Validare nume - mesaje humanizate cu motiv si actiune",
+        content:
+          "classifyRawName din nameListParser rescris cu mesaje romanesti complete care explica motivul si actiunea recomandata. Exemple: \"Nume lipsa - completeaza coloana 'nume' sau cnp/cui pentru a putea cauta automat\" (vs. cod tehnic vechi); \"Duplicat - apare prima oara la randul X (NU se va crea job duplicat: deduplicare automata la import)\".",
+      },
+      {
+        title: "Warn nou - nume prea lung pentru PortalJust",
+        content:
+          "Regula noua nume_lung (warn) declansata cand numele normalizat depaseste 100 caractere SAU 12 cuvinte. Calibrata empiric pe limita PortalJust (~107 chars / ~13 cuvinte la nume multi-cuvant). Mesajul: \"Nume lung pentru PortalJust - depaseste limita empirica si poate produce esecuri repetate. Considera scurtarea numelui sau cauta dupa CUI/CNP.\" Apare la preview inainte de commit, deci utilizatorul poate decide sa excluda randul sau sa scurteze.",
+      },
+      {
+        title: "Alerta source_error contextualizata pentru nume lungi",
+        content:
+          "Cand un job name_soap esueaza repetat cu SOAP_FAIL pe un nume care depaseste limitele empirice PortalJust, alerta source_error (5 esecuri consecutive) primeste probable_cause: nume_prea_lung_pentru_portaljust si titlu specific \"Nume prea lung pentru PortalJust\". Detail-ul JSON include nameNormalized, length, wordCount. Utilizatorul vede direct in inbox ca PortalJust nu e jos, ci numele monitorizat trebuie scurtat.",
+      },
+    ],
+  },
+  {
     version: "v2.12.0",
     date: "4 Mai 2026",
     subtitle:

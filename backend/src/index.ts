@@ -30,6 +30,10 @@ import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
 import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
 import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
+import {
+  startDailyReportScheduler,
+  stopDailyReportScheduler,
+} from "./services/email/dailyReportScheduler.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { markShuttingDown } from "./db/schema.ts";
@@ -330,6 +334,13 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
     });
     console.log("[monitoring] scheduler started (60s tick, claimLimit=50)");
   }
+
+  // v2.13.0: daily report scheduler. Runs at 5min cadence; gates internally on
+  // local hour matching DAILY_REPORT_HOUR (default 9). Best-effort on desktop
+  // — if the app is closed at the configured hour, the report skips that day.
+  // Independent of MONITORING_ENABLED: a user might disable monitoring jobs but
+  // still want digests of historical alerts (highly unusual but cheap to allow).
+  startDailyReportScheduler();
 });
 httpServer.on("error", (err: Error) => {
   // Async event: under Electron this becomes uncaughtException → main.js
@@ -390,6 +401,15 @@ async function gracefulShutdown(reason: string): Promise<void> {
     await drainEmailDispatches(5_000);
   } catch (e) {
     console.error("[shutdown] drainEmailDispatches failed:", e);
+  }
+
+  // v2.13.0: stop the daily report scheduler and wait for any in-flight tick
+  // to settle. Tick reads/writes owner_email_settings + audit_log, same
+  // shutdown ordering reasoning as drainEmailDispatches above.
+  try {
+    await stopDailyReportScheduler();
+  } catch (e) {
+    console.error("[shutdown] stopDailyReportScheduler failed:", e);
   }
 
   // markShuttingDown() closes the DB AND latches the open-guard so any

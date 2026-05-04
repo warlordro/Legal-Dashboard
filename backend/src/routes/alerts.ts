@@ -11,11 +11,13 @@ import {
   type AlertEnrichmentPayload,
   dismissAlert,
   listAlerts,
+  listAlertsByIds,
   markAlertSeen,
   markAlertsSeen,
   subscribeToNewAlerts,
   type MonitoringAlertRow,
 } from "../db/monitoringAlertsRepository.ts";
+import { deriveAlertDigestRow } from "../services/email/dailyReportTemplate.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { fail, ok } from "../util/envelope.ts";
 
@@ -43,6 +45,69 @@ const AlertBulkSeenSchema = z
     ids: z.array(z.number().int().min(1)).min(1).max(100),
   })
   .strict();
+
+// v2.13.0: export endpoint accepta trei moduri exclusive:
+//   - mode "ids": selectie explicita (Selecteaza randuri pe pagina, max 10k)
+//   - mode "filters": aceleasi query params ca GET / (Toate filtrele active)
+//   - mode "range": doar interval de date (subset al "filters")
+// Cap fix la 10k randuri pentru a nu suprasolicita memoria browser-ului in
+// renderingul XLSX/PDF. Daca total depaseste, returnam 413 cu count-ul real
+// ca user-ul sa stranga filtrele.
+const ALERT_EXPORT_MAX_ROWS = 10_000;
+const ALERT_EXPORT_BODY_LIMIT = 256 * 1024;
+const limitAlertExportBody = bodyLimit({
+  maxSize: ALERT_EXPORT_BODY_LIMIT,
+  onError: (c) => c.json(fail("payload_too_large", "Payload prea mare", c), 413),
+});
+
+const AlertExportFiltersSchema = z
+  .object({
+    jobKind: z.enum(["dosar_soap", "name_soap", "aviz_rnpm"]).optional(),
+    q: z.string().trim().min(1).max(100).optional(),
+    kind: z
+      .enum([
+        "dosar_new",
+        "termen_new",
+        "termen_changed",
+        "solutie_aparuta",
+        "dosar_disappeared",
+        "stadiu_changed",
+        "categorie_changed",
+        "dosar_relevant_now",
+        "dosar_no_longer_relevant",
+        "aviz_changed",
+        "source_error",
+      ])
+      .optional(),
+    severity: z.enum(["info", "warning", "critical"]).optional(),
+    onlyUnread: z.boolean().optional(),
+    includeDismissed: z.boolean().optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+  })
+  .strict();
+
+const AlertExportBodySchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("ids"),
+      ids: z.array(z.number().int().min(1)).min(1).max(ALERT_EXPORT_MAX_ROWS),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("filters"),
+      filters: AlertExportFiltersSchema.optional().default({}),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("range"),
+      from: z.string().datetime(),
+      to: z.string().datetime(),
+    })
+    .strict(),
+]);
 
 const AlertListQuerySchema = z
   .object({
@@ -169,6 +234,122 @@ alertsRouter.post("/seen-bulk", limitAlertBulkBody, async (c) => {
     });
   }
   return c.json(ok(rows, c));
+});
+
+alertsRouter.post("/export", limitAlertExportBody, async (c) => {
+  const ownerId = getOwnerId(c);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(fail("invalid_body", "Body invalid", c), 400);
+  }
+  const parsed = AlertExportBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+
+  let rows: MonitoringAlertRow[] = [];
+  if (parsed.data.mode === "ids") {
+    rows = listAlertsByIds(ownerId, parsed.data.ids);
+  } else if (parsed.data.mode === "filters") {
+    const f = parsed.data.filters;
+    // First pass: count via listAlerts pageSize=1 to detect cap overflow before
+    // pulling the full result set into memory. listAlerts returns total even
+    // when pageSize is small, so this stays cheap.
+    const probe = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: 1,
+      jobKind: f.jobKind,
+      q: f.q,
+      kind: f.kind,
+      severity: f.severity,
+      onlyUnread: f.onlyUnread,
+      includeDismissed: f.includeDismissed,
+      from: f.from,
+      to: f.to,
+    });
+    if (probe.total > ALERT_EXPORT_MAX_ROWS) {
+      return c.json(
+        fail(
+          "too_many_rows",
+          `Exportul depaseste limita de ${ALERT_EXPORT_MAX_ROWS} randuri (rezultat: ${probe.total}). Restrange filtrele.`,
+          c,
+          { total: probe.total, max: ALERT_EXPORT_MAX_ROWS },
+        ),
+        413,
+      );
+    }
+    const full = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: ALERT_EXPORT_MAX_ROWS,
+      jobKind: f.jobKind,
+      q: f.q,
+      kind: f.kind,
+      severity: f.severity,
+      onlyUnread: f.onlyUnread,
+      includeDismissed: f.includeDismissed,
+      from: f.from,
+      to: f.to,
+    });
+    rows = full.rows;
+  } else {
+    // mode === "range"
+    const probe = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: 1,
+      from: parsed.data.from,
+      to: parsed.data.to,
+      includeDismissed: true,
+    });
+    if (probe.total > ALERT_EXPORT_MAX_ROWS) {
+      return c.json(
+        fail(
+          "too_many_rows",
+          `Exportul depaseste limita de ${ALERT_EXPORT_MAX_ROWS} randuri (rezultat: ${probe.total}). Restrange intervalul.`,
+          c,
+          { total: probe.total, max: ALERT_EXPORT_MAX_ROWS },
+        ),
+        413,
+      );
+    }
+    const full = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: ALERT_EXPORT_MAX_ROWS,
+      from: parsed.data.from,
+      to: parsed.data.to,
+      includeDismissed: true,
+    });
+    rows = full.rows;
+  }
+
+  // Decorate with derived numar_dosar + dosarLink so the frontend doesn't
+  // need to re-implement detail/target parsing for hyperlink cells. The raw
+  // row is preserved in `alert` so consumers that want full structure (e.g.
+  // future webhook export) still have it.
+  const decorated = rows.map((alert) => {
+    const derived = deriveAlertDigestRow(alert);
+    return {
+      alert,
+      numarDosar: derived.numarDosar,
+      dosarLink: derived.dosarLink,
+      kindLabel: derived.kindLabel,
+      severityLabel: derived.severityLabel,
+      nameMonitored: derived.nameMonitored,
+    };
+  });
+
+  recordAudit(c, "alerts.export", {
+    targetKind: "monitoring_alert",
+    targetId: String(rows.length),
+    detail: { mode: parsed.data.mode, count: rows.length },
+  });
+
+  return c.json(ok({ rows: decorated, count: decorated.length }, c));
 });
 
 alertsRouter.get("/stream", (c) => {

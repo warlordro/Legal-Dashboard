@@ -61,6 +61,20 @@ export const MAX_COLS = 20;
 export const MAX_NAME_LEN = 200;
 export const MIN_NAME_LEN = 2;
 
+// Praguri "warn nume lung" pentru PortalJust SOAP CautareDosare.
+// Empiric (4 Mai 2026): serverul incepe sa raspunda cu fault SQL pe nume reale
+// la ~107 chars / ~13 cuvinte. Folosim 100 / 12 ca prag conservator pentru
+// avertizare la preview — nu rejectam (numele E valid din punct de vedere
+// model), doar semnalam ca exista risc real ca cautarea sa esueze.
+export const PORTALJUST_WARN_CHAR_LIMIT = 100;
+export const PORTALJUST_WARN_WORD_LIMIT = 12;
+
+export function isLikelyTooLongForPortalJust(nameNormalized: string): boolean {
+  if (nameNormalized.length > PORTALJUST_WARN_CHAR_LIMIT) return true;
+  const wordCount = nameNormalized.split(/\s+/).filter(Boolean).length;
+  return wordCount > PORTALJUST_WARN_WORD_LIMIT;
+}
+
 export interface ParsedRow extends CreateListItemInput {
   // Index-ul fizic in fisier (0-based, EXCLUSIV header). UI-ul il afiseaza
   // ca "Rand 42" cu offset-ul de 2 (header + 1-based) ca user-ul sa-l
@@ -217,27 +231,43 @@ function classifyRawName(
   formatDuplicateMsg: (prevIdx: number) => string,
 ): { validation: NameListItemValidation; validationMsg: string | null } {
   if (!nameRaw || nameNormalized.length === 0) {
-    return { validation: "rejected", validationMsg: "nume_gol" };
+    return {
+      validation: "rejected",
+      validationMsg: "Nume lipsa (celula goala in fisier)",
+    };
   }
   if (nameNormalized.length < MIN_NAME_LEN) {
     return {
       validation: "rejected",
-      validationMsg: `nume_prea_scurt (min ${MIN_NAME_LEN})`,
+      validationMsg: `Nume prea scurt (sub ${MIN_NAME_LEN} caractere) — minim ${MIN_NAME_LEN}`,
     };
   }
   if (nameRaw.length > MAX_NAME_LEN) {
     return {
       validation: "rejected",
-      validationMsg: `nume_prea_lung (max ${MAX_NAME_LEN})`,
+      validationMsg: `Nume prea lung (peste ${MAX_NAME_LEN} caractere) — maxim ${MAX_NAME_LEN}`,
     };
   }
   if (/^\d+$/.test(nameNormalized.replace(/\s+/g, ""))) {
-    return { validation: "rejected", validationMsg: "nume_doar_cifre" };
+    return {
+      validation: "rejected",
+      validationMsg: "Numele contine doar cifre — PortalJust nu accepta",
+    };
   }
 
   const prevIdx = seen.get(nameNormalized);
   if (prevIdx !== undefined) {
     return { validation: "warn", validationMsg: formatDuplicateMsg(prevIdx) };
+  }
+  // Warn pentru nume care depasesc limitele empirice ale PortalJust.
+  // NU mutam in `seen`: a doua aparitie a aceluiasi nume primeste tot
+  // warn nume_lung (mai informativ decat warn duplicate intr-o lista
+  // unde fiecare aparitie are aceeasi problema reala).
+  if (isLikelyTooLongForPortalJust(nameNormalized)) {
+    return {
+      validation: "warn",
+      validationMsg: `Nume lung (${nameNormalized.length} caractere / ${nameNormalized.split(/\s+/).filter(Boolean).length} cuvinte) — PortalJust limiteaza la ~${PORTALJUST_WARN_CHAR_LIMIT} caractere si ${PORTALJUST_WARN_WORD_LIMIT} cuvinte; cautarea poate da eroare`,
+    };
   }
   seen.set(nameNormalized, currentIdx);
   return { validation: "ok", validationMsg: null };
@@ -478,7 +508,7 @@ export async function parseNameList(
       nameNormalized,
       seen,
       i,
-      (prev) => `duplicate_in_file (apare prima data la randul ${prev + 1})`,
+      (prev) => `Duplicat — apare prima oara la randul ${prev + 1} (NU se va crea job duplicat: deduplicare automata la import)`,
     );
 
     if (validation === "ok") okCount++;
@@ -557,7 +587,7 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
       nameNormalized,
       seen,
       i,
-      (prev) => `duplicate_in_batch (apare prima data la index ${prev})`,
+      (prev) => `Duplicat — apare prima oara la index ${prev} (NU se va crea job duplicat: deduplicare automata la import)`,
     );
 
     if (validation === "ok") okCount++;

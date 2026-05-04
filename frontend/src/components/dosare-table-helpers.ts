@@ -33,6 +33,10 @@ export function formatInstitutie(raw: string): string {
   return normalizeInstitutie(raw);
 }
 
+// PortalJust SharePoint indexer nu retine sufixul de dosar asociat (/a, /a1, /a2 ...).
+// Strip-ul cauta dosarul parinte ca search-ul sa returneze macar contextul; user-ul
+// gaseste asociatii din pagina parinte.
 export function getPortalJustUrl(numar: string): string {
-  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(numar)}`;
+  const parent = numar.replace(/\/a\d*$/i, "");
+  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(parent)}`;
 }

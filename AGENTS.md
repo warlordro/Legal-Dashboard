@@ -47,7 +47,7 @@ integrated VS Code terminal unless the user explicitly asks for a visible
 terminal/log window.
 
 On this machine, the shell environment may contain `ELECTRON_RUN_AS_NODE=1`.
-If that variable is inherited, `electron` behaves like Node and
+If that variable is inherited, `electron` behave like Node and
 `require("electron").app` is `undefined`. Before launching the app, clear it
 for the Electron process, for example:
 

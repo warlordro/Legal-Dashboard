@@ -493,6 +493,44 @@ export function markAlertsSeen(
   return tx();
 }
 
+// v2.13.0: bulk read pentru export. Accepta o lista de id-uri si returneaza
+// doar randurile care apartin owner-ului dat (dedup + filter). Folosita de
+// POST /api/v1/alerts/export pe modul "selectie explicita". Chunk-ing in
+// batches de 500 ca sa nu lovim limita parametrilor SQLite (default 999) —
+// better-sqlite3 are bind variabile mai mare dar 500 ramane confortabil.
+const ALERT_BY_IDS_CHUNK = 500;
+
+export function listAlertsByIds(
+  ownerId: string,
+  ids: number[],
+): MonitoringAlertRow[] {
+  if (ids.length === 0) return [];
+  const uniqueIds = Array.from(
+    new Set(ids.filter((id) => Number.isInteger(id) && id > 0)),
+  );
+  if (uniqueIds.length === 0) return [];
+  const db = getDb();
+  const out: MonitoringAlertRow[] = [];
+  for (let i = 0; i < uniqueIds.length; i += ALERT_BY_IDS_CHUNK) {
+    const chunk = uniqueIds.slice(i, i + ALERT_BY_IDS_CHUNK);
+    const placeholders = chunk.map(() => "?").join(",");
+    const rows = db
+      .prepare(
+        `SELECT a.*,
+                j.target_json AS job_target_json,
+                j.kind AS job_kind
+         FROM monitoring_alerts a
+         LEFT JOIN monitoring_jobs j
+           ON j.id = a.job_id AND j.owner_id = a.owner_id
+         WHERE a.owner_id = ? AND a.id IN (${placeholders})
+         ORDER BY a.created_at DESC, a.id DESC`,
+      )
+      .all(ownerId, ...chunk) as MonitoringAlertRow[];
+    out.push(...rows);
+  }
+  return out;
+}
+
 // Cross-owner existence probe. Mirrors the helper in the jobs repo: lets the
 // alerts router distinguish "row doesn't exist anywhere" (ordinary 404) from
 // "row exists but belongs to a different owner" (a probe attempt that should

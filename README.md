@@ -7,10 +7,36 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.12.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.13.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release este **v2.12.0** - MIN-VIABLE seam refactors peste v2.11.0.
+Ultimul release este **v2.13.0** - Export alerte + raport zilnic email peste v2.12.1.
+Sweep care livreaza cele doua capabilitati cerute pe pagina Alerte: (1) export Excel/PDF
+cu link direct catre dosarele identificate (selectie / filtre curente / interval, cap
+10k randuri) — ruta noua `POST /api/v1/alerts/export` cu Zod `discriminatedUnion("mode")`
+si pagina Alerte cu checkbox per rand + buton "Exporta" + modal radio Excel/PDF; (2)
+raport zilnic pe email cu toate alertele din ziua precedenta — flag nou `dailyReportEnabled`
+in `owner_email_settings` (migration `0015`), scheduler ruleaza la ora locala configurabila
+(default 09:00, env `DAILY_REPORT_HOUR`), fereastra `[yesterday 00:00, today 00:00 local)`,
+dedup via `last_daily_report_sent_for` (zi marcata doar pe success), audit
+`email.daily_report.sent/failed`, format subiect `[Legal Dashboard] Raport zilnic
+dd.mm.yyyy — N alerte`. **789 teste backend** (de la 751: +17 template + 12 scheduler
++ 7 export route + 2 me daily flag) si **81 teste frontend** (de la 73: +3 alertsApi
+exportAlerts + 3 export-alerts XLSX + 2 EmailSettingsPanel daily flag).
+
+Predecesor **v2.12.1** - UX bulk import + nume lungi PortalJust peste v2.12.0.
+Patch care raspunde la trei probleme operationale ridicate de utilizator pe import-ul
+bulk de monitorizare: (1) limita statica de 300 randuri vizibile inlocuita cu paginare
+server-style 100/pagina + coloana "Actiune" cu Exclude/Include per rand + checkbox
+"Exclude warn-urile automat"; (2) mesaje de validare humanizate cu motiv si actiune
+recomandata, regula noua `nume_lung` (warn) la >100 chars sau >12 cuvinte calibrata
+empiric pe limita PortalJust, legenda colapsabila statusuri + nota dedup automat;
+(3) alerta `source_error` enrich cu `probable_cause: nume_prea_lung_pentru_portaljust`
+cand un job `name_soap` esueaza repetat pe nume care depasesc limitele PortalJust
+(titlul devine "Nume prea lung pentru PortalJust", detail JSON include nameNormalized
+si length/wordCount). Fara migrari, fara schimbari de schema sau contract HTTP/IPC.
+
+Predecesor v2.12.0 - MIN-VIABLE seam refactors peste v2.11.0.
 Sweep care absoarbe sectiunea "MIN-VIABLE seams" din `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md`
 plus un fix de paginare la dashboard timeline. Patru cuturi mici cu boundary
 clar, fara migrari, fara schimbari de API observabile: (1) `services/alerts/alertEventService.ts`

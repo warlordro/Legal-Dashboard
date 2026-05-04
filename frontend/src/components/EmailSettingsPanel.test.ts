@@ -4,6 +4,7 @@ import { canSaveEmailSettings } from "./EmailSettingsPanel";
 const original = {
   enabled: false,
   toAddress: "",
+  dailyReportEnabled: false,
 };
 
 describe("EmailSettingsPanel helpers", () => {
@@ -16,12 +17,7 @@ describe("EmailSettingsPanel helpers", () => {
   });
 
   it("blocks save when address is over 320 characters", () => {
-    expect(
-      canSaveEmailSettings(
-        { ...original, toAddress: `${"a".repeat(312)}@firma.ro` },
-        original,
-      ),
-    ).toBe(false);
+    expect(canSaveEmailSettings({ ...original, toAddress: `${"a".repeat(312)}@firma.ro` }, original)).toBe(false);
   });
 
   it("does not save unchanged drafts", () => {
@@ -32,8 +28,21 @@ describe("EmailSettingsPanel helpers", () => {
     expect(
       canSaveEmailSettings(
         { ...original, toAddress: "  alerts@firma.ro  " },
-        { ...original, toAddress: "alerts@firma.ro" },
-      ),
+        { ...original, toAddress: "alerts@firma.ro" }
+      )
     ).toBe(false);
+  });
+
+  it("requires address when only daily report flag is on", () => {
+    expect(canSaveEmailSettings({ ...original, dailyReportEnabled: true, toAddress: "" }, original)).toBe(false);
+  });
+
+  it("treats daily flag flip as a saveable change", () => {
+    expect(
+      canSaveEmailSettings(
+        { ...original, dailyReportEnabled: true, toAddress: "alerts@firma.ro" },
+        { ...original, toAddress: "alerts@firma.ro" }
+      )
+    ).toBe(true);
   });
 });

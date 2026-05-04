@@ -20,6 +20,7 @@ import {
   WHITE,
 } from "./excel-helpers";
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
+import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 import type { AnalysisPdfArgs } from "./export-analysis";
 
 // Re-export so existing consumers (export.worker.ts, callers of export.ts) keep
@@ -458,6 +459,14 @@ export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
   const totalSedinte = dosare.reduce((sum, d) => sum + d.sedinte.length, 0);
   doc.text(`Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${dosare.length} dosare, ${totalSedinte} sedinte`, 14, 22);
 
+  // Side-band: row index → portal.just.ro URL pentru coloana "Numar Dosar"
+  // (autotable nu are acces la valoarea originala in didDrawCell, doar la
+  // textul rendat). Pattern preluat din export-alerts.ts.
+  const dosarLinks = new Map<number, string>();
+  dosare.forEach((d, i) => {
+    if (d.numar) dosarLinks.set(i, getPortalJustUrl(d.numar));
+  });
+
   autoTable(doc, {
     startY: 28,
     head: [["#", "Numar Dosar", "Data", "Institutie", "Categorie / Stadiu", "Obiect", "Parti", "Sedinte"]],
@@ -489,7 +498,7 @@ export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
     alternateRowStyles: { fillColor: [245, 247, 250] },
     columnStyles: {
       0: { cellWidth: 7, halign: "center" },
-      1: { cellWidth: 24, fontStyle: "bold" },
+      1: { cellWidth: 24, fontStyle: "bold", textColor: [29, 78, 216] },
       2: { cellWidth: 16 },
       3: { cellWidth: 28 },
       4: { cellWidth: 24 },
@@ -498,6 +507,20 @@ export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
       7: { cellWidth: "auto" },
     },
     margin: { left: 10, right: 10 },
+    didDrawCell: (data: {
+      section: string;
+      column: { index: number };
+      row: { index: number };
+      cell: { x: number; y: number; width: number; height: number };
+    }) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const url = dosarLinks.get(data.row.index);
+      if (!url) return;
+      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
+        url,
+      });
+    },
     didDrawPage: (data: { pageNumber: number }) => {
       doc.setFontSize(7);
       doc.setFont("helvetica", "normal");
@@ -527,6 +550,11 @@ export async function buildTermenePdf(termene: Termen[]): Promise<ExportResult> 
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text(`Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${termene.length} termene`, 14, 22);
+
+  const dosarLinks = new Map<number, string>();
+  termene.forEach((t, i) => {
+    if (t.numarDosar) dosarLinks.set(i, getPortalJustUrl(t.numarDosar));
+  });
 
   autoTable(doc, {
     startY: 28,
@@ -559,7 +587,7 @@ export async function buildTermenePdf(termene: Termen[]): Promise<ExportResult> 
     alternateRowStyles: { fillColor: [245, 247, 250] },
     columnStyles: {
       0: { cellWidth: 8, halign: "center" },
-      1: { cellWidth: 28, fontStyle: "bold" },
+      1: { cellWidth: 28, fontStyle: "bold", textColor: [29, 78, 216] },
       2: { cellWidth: 18 },
       3: { cellWidth: 12 },
       4: { cellWidth: 32 },
@@ -568,6 +596,20 @@ export async function buildTermenePdf(termene: Termen[]): Promise<ExportResult> 
       7: { cellWidth: "auto" },
     },
     margin: { left: 14, right: 14 },
+    didDrawCell: (data: {
+      section: string;
+      column: { index: number };
+      row: { index: number };
+      cell: { x: number; y: number; width: number; height: number };
+    }) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const url = dosarLinks.get(data.row.index);
+      if (!url) return;
+      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
+        url,
+      });
+    },
     didDrawPage: (data: { pageNumber: number }) => {
       doc.setFontSize(7);
       doc.setFont("helvetica", "normal");
@@ -597,6 +639,16 @@ export async function buildMonitoringPdf(jobs: MonitoringJob[]): Promise<ExportR
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text(`Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${jobs.length} joburi`, 14, 22);
+
+  // Link pe coloana "Tinta" doar pentru dosar_soap (numar dosar) si name_soap
+  // (nume → cautare PortalJust). aviz_rnpm cere alta sursa, deci fara link.
+  const tintaLinks = new Map<number, string>();
+  jobs.forEach((j, i) => {
+    if (j.kind === "dosar_soap" || j.kind === "name_soap") {
+      const target = formatMonitoringTarget(j);
+      if (target && target !== j.target_json) tintaLinks.set(i, getPortalJustUrl(target));
+    }
+  });
 
   autoTable(doc, {
     startY: 28,
@@ -629,7 +681,7 @@ export async function buildMonitoringPdf(jobs: MonitoringJob[]): Promise<ExportR
     alternateRowStyles: { fillColor: [245, 247, 250] },
     columnStyles: {
       0: { cellWidth: 8, halign: "center" },
-      1: { cellWidth: 50, fontStyle: "bold" },
+      1: { cellWidth: 50, fontStyle: "bold", textColor: [29, 78, 216] },
       2: { cellWidth: 18 },
       3: { cellWidth: 16 },
       4: { cellWidth: 30 },
@@ -638,6 +690,20 @@ export async function buildMonitoringPdf(jobs: MonitoringJob[]): Promise<ExportR
       7: { cellWidth: "auto" },
     },
     margin: { left: 10, right: 10 },
+    didDrawCell: (data: {
+      section: string;
+      column: { index: number };
+      row: { index: number };
+      cell: { x: number; y: number; width: number; height: number };
+    }) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const url = tintaLinks.get(data.row.index);
+      if (!url) return;
+      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
+        url,
+      });
+    },
     didDrawPage: (data: { pageNumber: number }) => {
       doc.setFontSize(7);
       doc.setFont("helvetica", "normal");

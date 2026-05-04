@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, ExternalLink, Eye, FileText, Filter, RefreshCw, Trash2, X } from "lucide-react";
+import { Bell, CheckCheck, Download, ExternalLink, Eye, FileText, Filter, RefreshCw, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -21,13 +21,33 @@ import { useFontSize } from "@/hooks/useFontSize";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 import { JobKindTabs, type JobKindFilter } from "@/components/monitoring/JobKindTabs";
 import { TablePagination } from "@/components/table-pagination";
+import { AlertsExportModal } from "@/components/AlertsExportModal";
+
+// Tipurile rezervate pentru runner-e / configuratii care nu sunt cablate inca:
+//  - dosar_relevant_now / dosar_no_longer_relevant cer filtre alert_config.stadii
+//    sau .categorii setate per job, dar UI-ul de Monitorizare nu le expune, deci
+//    `dosarPassesFilter` returneaza mereu true si tranzitia nu se declanseaza.
+//  - aviz_changed e rezervat pentru monitoring-ul RNPM care nu are runner.
+//  - dosar_disappeared e gated de alert_config.notify_on_dosar_disappeared cu
+//    default false, iar UI-ul nu expune toggle-ul, deci ramane inert.
+// Le ascundem din dropdown-ul de filtrare ca sa nu sugeram optiuni inerte;
+// alertKindLabels ramane neschimbat ca eventualele alerte istorice cu aceste
+// kind-uri sa-si pastreze label-ul in badge.
+const HIDDEN_KIND_FILTERS: ReadonlySet<AlertKind> = new Set([
+  "dosar_relevant_now",
+  "dosar_no_longer_relevant",
+  "aviz_changed",
+  "dosar_disappeared",
+]);
 
 const kindOptions: Array<{ value: AlertKind | "all"; label: string }> = [
   { value: "all", label: "Toate tipurile" },
-  ...Object.entries(alertKindLabels).map(([value, label]) => ({
-    value: value as AlertKind,
-    label,
-  })),
+  ...Object.entries(alertKindLabels)
+    .filter(([value]) => !HIDDEN_KIND_FILTERS.has(value as AlertKind))
+    .map(([value, label]) => ({
+      value: value as AlertKind,
+      label,
+    })),
 ];
 
 const severityOptions: Array<{ value: AlertSeverity | "all"; label: string }> = [
@@ -96,6 +116,10 @@ export default function Alerts({
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // v2.13.0 — selectie multipla pentru export. Set ca sa fie O(1) la
+  // toggle si select-all, si pentru ca ordinea nu conteaza la backend.
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   // Each alert card renders one step smaller than the user's font slider.
   // Constant 2px delta keeps the visual feel "always slightly smaller" across
@@ -224,6 +248,49 @@ export default function Alerts({
     }
   };
 
+  const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);
+  const allVisibleSelected =
+    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected =
+    !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
+
+  const toggleAlertSelected = useCallback((id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const toggleSelectAllVisible = useCallback(() => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (visibleIds.every((id) => next.has(id))) {
+        for (const id of visibleIds) next.delete(id);
+      } else {
+        for (const id of visibleIds) next.add(id);
+      }
+      return next;
+    });
+  }, [visibleIds]);
+
+  const clearSelection = useCallback(() => setSelectedIds(new Set()), []);
+
+  const exportFilters = useMemo(
+    () => ({
+      jobKind: jobKind === "all" ? undefined : jobKind,
+      q: debouncedQuery || undefined,
+      kind: kind === "all" ? undefined : kind,
+      severity: severity === "all" ? undefined : severity,
+      onlyUnread: onlyUnread || undefined,
+      includeDismissed: includeDismissed || undefined,
+      from: localDateInputToIso(from, false),
+      to: localDateInputToIso(to, true),
+    }),
+    [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, severity, to],
+  );
+
   const filteredSummary = useMemo(() => {
     const parts = [`${total} total`];
     if (unread > 0) parts.push(`${unread} necitite`);
@@ -238,24 +305,12 @@ export default function Alerts({
   return (
     <div className="min-h-full bg-background p-6">
       <div className="mx-auto max-w-7xl space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <Bell className="h-6 w-6 text-primary" />
-              Alerte
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">{filteredSummary}</p>
-          </div>
-          <div className="flex items-center gap-2">
-            <Button variant="outline" onClick={load} disabled={loading}>
-              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-              Refresh
-            </Button>
-            <Button onClick={markVisibleSeen} disabled={loading || rows.every((row) => row.read_at || row.dismissed_at)}>
-              <CheckCheck className="h-4 w-4" />
-              Marcheaza pagina
-            </Button>
-          </div>
+        <div>
+          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+            <Bell className="h-6 w-6 text-primary" />
+            Alerte
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">{filteredSummary}</p>
         </div>
 
         <Card>
@@ -379,6 +434,74 @@ export default function Alerts({
           </div>
         )}
 
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            {rows.length > 0 ? (
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={allVisibleSelected}
+                  ref={(el) => {
+                    if (el) el.indeterminate = someVisibleSelected;
+                  }}
+                  onChange={toggleSelectAllVisible}
+                  aria-label="Selecteaza toate alertele de pe pagina"
+                />
+                <span className="text-foreground">
+                  Selecteaza pagina
+                  <span className="ml-1 text-muted-foreground">({rows.length})</span>
+                </span>
+              </label>
+            ) : (
+              <span className="text-muted-foreground">Nicio alerta de selectat</span>
+            )}
+            {selectedIds.size > 0 && (
+              <>
+                <span className="text-muted-foreground">·</span>
+                <span className="text-foreground">
+                  {selectedIds.size} {selectedIds.size === 1 ? "alerta selectata" : "alerte selectate"}
+                </span>
+                <button
+                  type="button"
+                  onClick={clearSelection}
+                  className="text-xs text-primary hover:underline"
+                >
+                  Deselecteaza tot
+                </button>
+              </>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={load} disabled={loading}>
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              Refresh
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setExportModalOpen(true)}
+              disabled={loading || (total === 0 && selectedIds.size === 0)}
+              title="Exporta alerte in Excel sau PDF (cu link-uri spre dosare)"
+            >
+              <Download className="h-4 w-4" />
+              Export
+              {selectedIds.size > 0 && (
+                <span className="ml-1 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                  {selectedIds.size}
+                </span>
+              )}
+            </Button>
+            <Button
+              size="sm"
+              onClick={markVisibleSeen}
+              disabled={loading || rows.length === 0 || rows.every((row) => row.read_at || row.dismissed_at)}
+            >
+              <CheckCheck className="h-4 w-4" />
+              Marcheaza pagina
+            </Button>
+          </div>
+        </div>
+
         <div className="space-y-3">
           {rows.length === 0 && !loading && (
             <Card>
@@ -427,6 +550,13 @@ export default function Alerts({
                   <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
+                        <input
+                          type="checkbox"
+                          checked={selectedIds.has(alert.id)}
+                          onChange={() => toggleAlertSelected(alert.id)}
+                          aria-label={`Selecteaza alerta ${alert.title}`}
+                          className="mr-1 h-4 w-4 cursor-pointer accent-primary"
+                        />
                         <Badge variant={severityVariant(alert.severity)}>{severityLabels[alert.severity]}</Badge>
                         <Badge variant="outline">{alertKindLabels[alert.kind]}</Badge>
                         {unreadRow && <Badge variant="success">Nou</Badge>}
@@ -544,6 +674,13 @@ export default function Alerts({
           </Card>
         )}
       </div>
+      <AlertsExportModal
+        open={exportModalOpen}
+        onClose={() => setExportModalOpen(false)}
+        selectedIds={Array.from(selectedIds)}
+        currentFilters={exportFilters}
+        filteredTotal={total}
+      />
     </div>
   );
 }

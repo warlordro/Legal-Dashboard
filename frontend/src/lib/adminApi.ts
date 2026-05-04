@@ -26,6 +26,8 @@ export interface EmailSettings {
   enabled: boolean;
   toAddress: string | null;
   minSeverity: EmailMinSeverity;
+  dailyReportEnabled: boolean;
+  lastDailyReportSentFor: string | null;
   createdAt: string;
   updatedAt: string;
   mailerConfigured: boolean;
@@ -35,6 +37,7 @@ export interface UpsertEmailSettingsInput {
   enabled: boolean;
   toAddress: string | null;
   minSeverity?: EmailMinSeverity;
+  dailyReportEnabled?: boolean;
 }
 
 export type TestEmailResult =

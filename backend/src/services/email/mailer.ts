@@ -183,6 +183,32 @@ export async function sendAlertEmail(
   }
 }
 
+// v2.13.0: helper trimite email pre-randat (HTML + text + subject) catre o
+// adresa data. Folosit de dailyReportScheduler — rendarea sta in
+// dailyReportTemplate, mailer-ul nu are nimic de stiut despre alerte.
+export async function sendComposedEmail(
+  toAddress: string,
+  composed: { subject: string; html: string; text: string },
+): Promise<EmailSendResult> {
+  const transport = await getTransport();
+  if (!transport) return { ok: false, reason: "mailer_disabled" };
+  const config = readMailerConfig();
+  if (!config) return { ok: false, reason: "mailer_disabled" };
+  try {
+    await transport.sendMail({
+      from: config.from,
+      to: toAddress,
+      subject: composed.subject,
+      html: composed.html,
+      text: composed.text,
+    });
+    return { ok: true };
+  } catch (err) {
+    console.error("[email] sendComposedEmail failed", err);
+    return { ok: false, reason: "send_failed" };
+  }
+}
+
 export async function sendTestEmail(toAddress: string): Promise<EmailSendResult> {
   const transport = await getTransport();
   if (!transport) return { ok: false, reason: "mailer_disabled" };

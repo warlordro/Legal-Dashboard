@@ -56,6 +56,32 @@ function seedJob(opts: {
   return info.lastInsertRowid as number;
 }
 
+function seedNameSoapJob(opts: {
+  nameNormalized: string;
+  cadenceSec?: number;
+  nextRunAt: string;
+  failStreak?: number;
+}): number {
+  const db = getDb();
+  const targetJson = JSON.stringify({ name_normalized: opts.nameNormalized });
+  const info = db
+    .prepare(
+      `INSERT INTO monitoring_jobs
+         (owner_id, kind, target_json, target_hash, cadence_sec,
+          alert_config_json, next_run_at, fail_streak)
+       VALUES (?, 'name_soap', ?, ?, ?, '{}', ?, ?)`,
+    )
+    .run(
+      OWNER,
+      targetJson,
+      `hash-name-${Math.random()}`,
+      opts.cadenceSec ?? 14400,
+      opts.nextRunAt,
+      opts.failStreak ?? 0,
+    );
+  return info.lastInsertRowid as number;
+}
+
 function readJob(id: number) {
   return getDb()
     .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
@@ -101,6 +127,16 @@ class NoopErrorRunner implements JobRunner {
       status: "error",
       errorCode: "TEST_FAIL",
       errorMessage: "synthetic failure",
+    };
+  }
+}
+
+class SoapFailRunner implements JobRunner {
+  async run(): Promise<RunOutcome> {
+    return {
+      status: "error",
+      errorCode: "SOAP_FAIL",
+      errorMessage: "Eroare la comunicarea cu serviciul PortalJust.",
     };
   }
 }
@@ -301,6 +337,107 @@ describe("Scheduler — tick error path", () => {
         .get(jobId) as { n: number }
     ).n;
     expect(alertCount).toBe(0);
+  });
+});
+
+// Probable-cause enrichment pe source_error: pentru name_soap care esueaza pe
+// PortalJust cu un nume care depaseste limitele empirice (~107 chars / 13
+// cuvinte), alerta primeste detail.probable_cause + un titlu actionabil.
+describe("Scheduler — source_error probable_cause enrichment", () => {
+  it("name_soap SOAP_FAIL pe nume lung → probable_cause si titlu actionabil", async () => {
+    const longName = "GLOBALSAT DISTRIBUTION OF MOBILE TELEPHONY AND OFFICE AUTOMATION PRODUCTS SOCIETE ANONYME PALLINI GRECIA SUCURSALA BUCURESTI";
+    const jobId = seedNameSoapJob({
+      nameNormalized: longName,
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      failStreak: 4,
+    });
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runners: { name_soap: new SoapFailRunner() },
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    const alert = getDb()
+      .prepare(
+        `SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?`,
+      )
+      .get(jobId) as { title: string; detail_json: string };
+    expect(alert).toBeDefined();
+    expect(alert.title).toMatch(/nume prea lung/i);
+    const detail = JSON.parse(alert.detail_json) as {
+      probable_cause?: string;
+    };
+    expect(detail.probable_cause).toBe("nume_prea_lung_pentru_portaljust");
+  });
+
+  it("name_soap SOAP_FAIL pe nume scurt → fara probable_cause; titlu generic", async () => {
+    const jobId = seedNameSoapJob({
+      nameNormalized: "ION POPESCU",
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      failStreak: 4,
+    });
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runners: { name_soap: new SoapFailRunner() },
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    const alert = getDb()
+      .prepare(
+        `SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?`,
+      )
+      .get(jobId) as { title: string; detail_json: string };
+    expect(alert).toBeDefined();
+    expect(alert.title).toBe("Sursa indisponibila (5 esecuri consecutive)");
+    const detail = JSON.parse(alert.detail_json) as {
+      probable_cause?: string;
+    };
+    expect(detail.probable_cause).toBeUndefined();
+  });
+
+  it("dosar_soap SOAP_FAIL → fara probable_cause (nu se aplica pe alt kind)", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      failStreak: 4,
+    });
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runners: { dosar_soap: new SoapFailRunner() },
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    const alert = getDb()
+      .prepare(
+        `SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?`,
+      )
+      .get(jobId) as { title: string; detail_json: string };
+    expect(alert).toBeDefined();
+    expect(alert.title).toBe("Sursa indisponibila (5 esecuri consecutive)");
+    const detail = JSON.parse(alert.detail_json) as {
+      probable_cause?: string;
+    };
+    expect(detail.probable_cause).toBeUndefined();
   });
 });
 

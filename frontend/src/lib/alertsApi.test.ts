@@ -20,10 +20,13 @@ function envelopeOk(): Response {
 
 beforeEach(() => {
   lastCalledUrl = null;
-  vi.stubGlobal("fetch", vi.fn(async (url: string) => {
-    lastCalledUrl = url;
-    return envelopeOk();
-  }));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (url: string) => {
+      lastCalledUrl = url;
+      return envelopeOk();
+    })
+  );
 });
 
 afterEach(() => {
@@ -93,5 +96,64 @@ describe("alertsApi.list URL construction", () => {
   it("hits the bare path with no querystring when called with no params", async () => {
     await alertsApi.list();
     expect(lastCalledUrl).toBe("/api/v1/alerts");
+  });
+});
+
+describe("alertsApi.exportAlerts", () => {
+  let lastInit: RequestInit | undefined;
+
+  beforeEach(() => {
+    lastInit = undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        lastCalledUrl = url;
+        lastInit = init;
+        return new Response(
+          JSON.stringify({
+            data: { rows: [], count: 0 },
+            requestId: "req",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+    );
+  });
+
+  it("POSTs ids payload as JSON to /export", async () => {
+    await alertsApi.exportAlerts({ mode: "ids", ids: [1, 2, 3] });
+    expect(lastCalledUrl).toBe("/api/v1/alerts/export");
+    expect(lastInit?.method).toBe("POST");
+    expect(JSON.parse(lastInit?.body as string)).toEqual({
+      mode: "ids",
+      ids: [1, 2, 3],
+    });
+  });
+
+  it("POSTs filters payload, omitting empty filter object only when caller does", async () => {
+    await alertsApi.exportAlerts({
+      mode: "filters",
+      filters: { severity: "warning", q: "abc" },
+    });
+    const body = JSON.parse(lastInit?.body as string) as {
+      mode: string;
+      filters: { severity: string; q: string };
+    };
+    expect(body.mode).toBe("filters");
+    expect(body.filters.severity).toBe("warning");
+    expect(body.filters.q).toBe("abc");
+  });
+
+  it("POSTs range payload with both ISO bounds", async () => {
+    await alertsApi.exportAlerts({
+      mode: "range",
+      from: "2026-04-01T00:00:00.000Z",
+      to: "2026-04-30T23:59:59.999Z",
+    });
+    expect(JSON.parse(lastInit?.body as string)).toEqual({
+      mode: "range",
+      from: "2026-04-01T00:00:00.000Z",
+      to: "2026-04-30T23:59:59.999Z",
+    });
   });
 });

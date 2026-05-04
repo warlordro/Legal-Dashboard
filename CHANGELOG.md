@@ -4,6 +4,179 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.13.1] - 2026-05-05
+
+### UX polish post-export — kind-uri ascunse, link-uri PDF, Monitorizare export all-pages
+
+Patch peste v2.13.0 care strange capetele libere semnalate dupa lansarea export-ului de alerte.
+Patru sub-changes cu boundary clar, fara migrari, fara schimbari de contract.
+
+### Frontend — Alerts kind dropdown (4 kind-uri ascunse)
+
+- **`frontend/src/pages/Alerts.tsx`**: introduce `HIDDEN_KIND_FILTERS: ReadonlySet<AlertKind>` care exclude
+  din dropdown patru tipuri inerte in starea curenta a UI-ului:
+  - `dosar_relevant_now` si `dosar_no_longer_relevant` — cer `alert_config.stadii` sau `.categorii`
+    setate per job, dar formularul de Monitorizare nu le expune, deci `dosarPassesFilter` ramane mereu
+    true si tranzitia nu se declanseaza niciodata.
+  - `aviz_changed` — rezervat pentru runner-ul `aviz_rnpm` neimplementat.
+  - `dosar_disappeared` — gated de `notify_on_dosar_disappeared` cu default `false` si fara toggle in UI.
+- `alertKindLabels` ramane neschimbat, ca eventualele alerte istorice cu aceste kind-uri sa-si pastreze
+  label-ul in badge.
+
+### Frontend — PortalJust /aN suffix strip
+
+- **`frontend/src/components/dosare-table-helpers.ts`**: `getPortalJustUrl(numar)` strip `/a`, `/a1`,
+  `/a2`... cu `replace(/\/a\d*$/i, "")` inainte de `encodeURIComponent`. SharePoint indexer-ul
+  PortalJust nu retine sufixele de dosar asociat; cautarea pe parintele (`1234/5/2025`) returneaza
+  pagina care contine link-uri spre toate asociatii lui.
+
+### Frontend — PDF hyperlinks Dosare/Termene/Monitorizare
+
+- **`frontend/src/lib/export.ts`**: `buildDosarePdf`, `buildTermenePdf`, `buildMonitoringPdf` adauga
+  link clickabil pe coloana "Numar Dosar" / "Tinta" folosind acelasi pattern din `lib/export-alerts.ts`:
+  - Side-band `Map<rowIndex, string>` (autotable nu are acces la valoarea originala in `didDrawCell`,
+    doar la textul rendat).
+  - `columnStyles[1].textColor = [29, 78, 216]` ca user-ul sa vada vizual ca celula e clickabila.
+  - `didDrawCell` apeleaza `doc.link(cell.x, cell.y, cell.width, cell.height, { url })` doar pe
+    `section === "body"` AND `column.index === 1`.
+- La Monitorizare, link-ul se aplica doar pentru `dosar_soap` si `name_soap` (`aviz_rnpm` necesita
+  alta sursa) si guard-uieste cazul `target === j.target_json` care indica ca `formatMonitoringTarget`
+  a esuat sa parseze JSON-ul.
+
+### Frontend — Monitorizare export all-pages
+
+- **`frontend/src/pages/Monitorizare.tsx`**: `handleExport` distinge intre selectie si non-selectie:
+  - Selectie (`selectedIds.size > 0`) — filter local pe `jobs` (selectia e mereu pe pagina curenta).
+  - Non-selectie — `fetchAllJobsForExport()` care pagineaza prin `monitoring.list({page, pageSize: 100, kind, q})`
+    pana la `collected.length >= result.total` sau `result.rows.length === 0`; hard guard `pageNum > 1000`
+    impotriva loop-ului pe total nestabil intre cereri.
+  - Filtrele active (`kindFilter` + `debouncedQuery`) propagate la fetch ca exportul sa respecte ce vede
+    utilizatorul, nu intregul DB.
+- Tooltip-urile Excel/PDF se schimba din "vizibile" in "toate cele ${total} joburi (toate paginile)".
+
+### Build & Tests
+
+- `tsc --noEmit -p backend/tsconfig.json` — verde.
+- `cd frontend && npx tsc --noEmit` — verde.
+- `npx biome check` — verde (project baseline pentru CRLF/import-protocol/non-null pre-existing).
+- **789 teste backend** + **81 teste frontend** neschimbate (UX-only patch fara teste noi).
+
+### Versionare
+
+- Bump manifest/lockfile la `2.13.1` (patch — UX-only, fara migrari/schema/contract break).
+
+---
+
+## [2.13.0] - 2026-05-05
+
+### Export alerte (Excel/PDF cu link portal.just.ro) + raport zilnic email
+
+Sweep peste v2.12.1 care livreaza cele doua capabilitati cerute de utilizator pe pagina Alerte: export Excel/PDF cu link direct catre dosarele identificate (selectie / filtre curente / interval), si raport zilnic pe email cu toate alertele din ziua precedenta. Migration nou (`0015_daily_report_settings`) adauga 2 coloane in `owner_email_settings`, fara modificari pe contractele rutelor existente.
+
+### Backend — POST /api/v1/alerts/export (3 moduri, cap 10k)
+
+- **`backend/src/routes/alerts.ts`**: nou endpoint `POST /export` cu Zod `discriminatedUnion("mode", [...])`:
+  - `mode: "ids"` — `ids: number[]` (cap 10k); foloseste `listAlertsByIds(ownerId, ids)` care filtreaza pe `id IN (...) AND owner_id = ?`, deci selectia cross-owner returneaza doar randurile owner-ului curent.
+  - `mode: "filters"` — `filters: AlertListQuery` (acelasi shape ca `GET /api/v1/alerts`); reuses `listAlerts` cu `pageSize: 10000, page: 1`.
+  - `mode: "range"` — `from + to: ISO string`; ANDed cu `owner_id`, mapat la `listAlerts({from, to, includeDismissed})`.
+- **Cap 10k**: returneaza `413 Payload Too Large` cu `details.total` cand depaseste, ca utilizatorul sa vada cate randuri ar fi incluse si sa restraga filtrul.
+- **`backend/src/db/monitoringAlertsRepository.ts`**: nou `listAlertsByIds(ownerId, ids: number[]): MonitoringAlertRow[]` cu chunk-uire la 999 (limita SQLite host-parameters); join optional pe `monitoring_jobs` ca raspunsul sa includa `job_target_json` necesar pentru `deriveAlertDigestRow` fallback chain.
+- **`backend/src/services/email/dailyReportTemplate.ts`**: helper `deriveAlertDigestRow(alert: MonitoringAlertRow): {alert, numarDosar, dosarLink, kindLabel, severityLabel, nameMonitored}` reutilizat intre route export si template raport zilnic; fallback chain `detail_json → job_target_json → null` pentru `numar_dosar` + `name_normalized`; `getPortalJustUrl(numarDosar)` foloseste `encodeURIComponent` ca slash-ul si diacriticele sa fie encoded corect in querystring.
+- **Audit**: `alerts.export` cu `mode + count` in `detail_json`; `outcome: ok` cand `count > 0`, `not_found` cand selectia returneaza 0 randuri.
+
+### Backend — Raport zilnic email (scheduler + template)
+
+- **Migration `0015_daily_report_settings.up.sql`** — adauga in `owner_email_settings`:
+  - `daily_report_enabled INTEGER NOT NULL DEFAULT 0` (independent de `enabled`, ca utilizatorul sa primeasca per-alert imediat dar NU raport zilnic, sau invers).
+  - `last_daily_report_sent_for TEXT NULL` — formatul `YYYY-MM-DD` in zona locala; populat doar dupa `send.ok === true` (sau `rowCount === 0` care marcheaza ziua ca acoperita ca sa nu retry-uim acelasi gol).
+- **`backend/src/services/email/dailyReportTemplate.ts`** — `renderDailyReport({reportDateLocal, alerts}): {subject, html, text, rowCount}`:
+  - Subiect: `[Legal Dashboard] Raport zilnic dd.mm.yyyy — N alerta` (singular pentru `N === 1`) / `N alerte`.
+  - Grupare in HTML pe severitate (`critical → warning → info`); fiecare grup afiseaza titlul, dosar (cu hyperlink portal.just.ro pe `<a href="...">numar_dosar</a>`), kind label RO, timestamp; em-dash placeholder cand `numarDosar === null`.
+  - HTML escaping defense-in-depth pe `title` ca `<script>` sa nu fie interpretat (template injection prevention).
+  - Hint footer: "Modifica preferinte: Setari → Notificari email" (atat in HTML cat si text).
+- **`backend/src/services/email/dailyReportScheduler.ts`** — `runDailyReportTick(deps?: SchedulerDeps): Promise<TickResult>`:
+  - Opts injected for testing: `now`, `formatLocalDate`, `reportHour` (default `process.env.DAILY_REPORT_HOUR || 9`), `mailerConfigured` (default `isMailerConfigured()`), `send` (default `sendComposedEmail`).
+  - **Fire window**: doar la ora locala configurata (default `09:00`); SKIP daca `mailerConfigured === false` (web deploy fara SMTP variabile = boot graceful).
+  - **Owner selection**: `daily_report_enabled = 1 AND enabled = 1 AND to_address IS NOT NULL AND last_daily_report_sent_for != today_local`.
+  - **Yesterday window**: `[yesterday 00:00:00 local, today 00:00:00 local)` convertit la UTC pentru filtru SQL `created_at >= ? AND created_at < ?`.
+  - **Best-effort retry**: `last_daily_report_sent_for` se updateaza DOAR pe `ok` sau `rowCount === 0`; `send` exception → audit `email.daily_report.failed` cu `reason: "exception"` + `message`, NU updateaza flag-ul, deci urmatoarea zi reincearca cu fereastra noua.
+  - **Audit**: `email.daily_report.sent` (outcome ok) cu `subject + rowCount` / `email.daily_report.failed` (outcome error) cu `reason + (message?)`.
+- **`backend/src/services/email/mailer.ts`** — `sendComposedEmail({to, subject, html, text}): Promise<{ok: true} | {ok: false, reason}>` reutilizat de scheduler; partajeaza cache-ul de transporter SMTP cu dispatcher-ul de alerte per-event.
+- **`backend/src/index.ts`** — bootstrap-ul porneste `setInterval` care apeleaza `runDailyReportTick()` la fiecare 5 minute; graceful shutdown drain-uieste tick-ul curent.
+
+### Frontend — Modal export + buton "Exporta" + lib export-alerts
+
+- **`frontend/src/components/AlertsExportModal.tsx`** — modal cu radio Excel/PDF + radio "Selectie / Filtre curente / Interval"; pe "Interval" expune `<input type="date">` pentru `from`/`to`; preview count-ul (cu warning rosu pe `count > 10000`); butonul "Confirma" disabled cand range invalid sau count > cap.
+- **`frontend/src/lib/export-alerts.ts`** — `buildAlertsXlsx({rows}): Promise<{buffer: ArrayBuffer, mime, filename}>` + `buildAlertsPdf({rows}): Promise<{...}>`:
+  - Excel: foloseste `xlsx-js-style` cu hyperlink `{l: {Target: dosarLink}}` pe celula `numarDosar` (Excel afiseaza link-ul live, click → portal.just.ro); coloane: data, severitate, kind, dosar, nume monitorizat, titlu, status (citit/necitit/respins).
+  - PDF: foloseste `pdfmake`; fiecare rand are coloana `Dosar` rendered ca link cu `link: dosarLink` (PDF readers respecta hyperlink-ul).
+  - Filename pattern: `alerte_{count}_{dd-mm-yyyy}.xlsx` / `.pdf` — incarca data din clock-ul local.
+- **`frontend/src/lib/alertsApi.ts`** — nou `exportAlerts(payload: ExportPayload): Promise<{rows: AlertExportRow[], count, total}>` care POST-eaza la `/export` cu envelope unwrap; `dailyReportEnabled` field adaugat in `MeEmailSettings` types.
+- **`frontend/src/pages/Alerts.tsx`** — checkbox de selectie per rand + "Selecteaza toate (pagina curenta)" master checkbox; buton "Exporta" cu dropdown Excel/PDF; lansand modalul cu `selectedIds` pre-completat in mode "ids".
+
+### Frontend — toggle email "Trimite raport zilnic la 09:00"
+
+- **`frontend/src/components/EmailSettingsPanel.tsx`** — checkbox nou "Trimite raport zilnic la 09:00 (web only)" controlat de field `dailyReportEnabled` din `me.ts` GET/PUT `/email-settings`; helper `hasUnsavedChanges` extins ca flipping flag-ul cu address valida sa fie saveable; tooltip explica ca pe desktop SMTP nu e configurabil deci raportul ramane OFF (configurabil din web).
+
+### Tests
+
+- **789 teste backend** (de la 751 in v2.12.1):
+  - 17 noi in `services/email/dailyReportTemplate.test.ts` — `getPortalJustUrl` (slashes + diacritice), `deriveAlertDigestRow` (detail JSON, target_json fallback, null path, invalid JSON recovery, name_normalized extraction, severity+kind labels, fallback to raw kind), `renderDailyReport` (zero rows + Romanian subject, singular noun, HTML escape vs template injection, severity grouping order, dosar hyperlink, em-dash placeholder, rowCount, unsubscribe hint).
+  - 12 noi in `services/email/dailyReportScheduler.test.ts` — fire window (3: out of hour, in hour zero candidates, SMTP not configured), owner selection (4: daily flag dedup, last_daily_report_sent_for, enabled=false, null toAddress), zero-alert path, send outcomes (3: ok marks day, failure does NOT mark day, exception isolation), yesterday-window correctness.
+  - 7 noi in `routes/alerts.test.ts` "POST /api/v1/alerts/export" — invalid mode 400, ids decorate + dosar info, ids owner isolation, filters ANDed cu owner scope, range with includeDismissed, range without bounds 400, ids empty array 400.
+  - 2 noi in `routes/me.test.ts` — daily flag GET surface + PUT update.
+- **81 teste frontend** (de la 73):
+  - 3 noi in `lib/alertsApi.test.ts` "exportAlerts" — ids/filters/range payload encoding via POST.
+  - 3 noi in `lib/export-alerts.test.ts` — XLSX mime + buffer, filename `alerte_N_dd-mm-yyyy.xlsx`, zero-row workbook.
+  - 2 noi in `components/EmailSettingsPanel.test.ts` — daily flag requires address, flipping daily flag is saveable.
+- tsc backend + frontend verde, biome verde pentru testele noi (project baseline pentru CRLF/import-protocol/non-null pre-existing in fisierele extinse).
+
+### Versionare
+
+- Bump manifest/lockfile la `2.13.0` (minor — schimba contractul HTTP cu rute noi `/api/v1/alerts/export` + DDL nou cu migration `0015`, dar fara breaking changes pe rute existente).
+
+---
+
+## [2.12.1] - 2026-05-04
+
+### UX bulk import — preview integral, mesaje clare, alerta contextualizata pe nume lungi
+
+Patch peste v2.12.0 care raspunde la trei probleme operationale ridicate de utilizator pe import-ul bulk de monitorizare. Niciun migration, niciun schema change, niciun contract HTTP/IPC modificat — doar UX si o imbogatire de detail in alerta `source_error`.
+
+### Frontend — preview integral cu paginare + control selectie
+
+- **`frontend/src/components/monitoring/MonitoringBulkImportCard.tsx`**: limita statica de 300 randuri vizibile inlocuita cu paginare server-style identica cu pagina principala (`TablePagination`, default 100/pagina, `pageSizes=[25, 50, 100, 250]`). Toate randurile parse-uite raman in state si sunt accesibile la commit; vizibilitatea in tabel e doar paginata. Reset automat al paginii la schimbarea filtrului sau la cancel.
+- **Coloana noua "Actiune" + Exclude/Include per rand**: buton cu icon `<X>` / `<Plus>` ce muta randul intr-un `Set<rowIndex>` (`excludedRows`); randurile excluse se afiseaza cu strikethrough + badge "exclus" si **nu** mai contribuie la commit.
+- **Checkbox "Exclude warn-urile automat"**: filtru bulk linga dropdown-ul existent; cand e bifat, toate randurile cu `validation === "warn"` sunt scoase din commit (afiseaza badge "auto-exclus") fara sa modifice `excludedRows` per-rand. Astfel utilizatorul poate alege strategia (per-rand, in masa pe warn, sau hibrid).
+- **Legenda statusuri** (`<details>` colapsabil): explica explicit ce inseamna ok / warn / respins si **clarifica deduplicarea automata** prin constraint `UNIQUE(owner_id, target_hash, kind)` — duplicat la import = NU se creeaza job duplicat, contorul reflecta doar joburile unice.
+- **Counter de commit recalibrat**: `effectiveCommittableCount` ia in calcul respins (auto-out) + manual-excluse + warn-uri auto-excluse, deci textul "X randuri vor fi adaugate" e mereu corect inainte de commit.
+
+### Backend — humanize mesaje validare + warn nume lung pentru PortalJust
+
+- **`backend/src/services/nameListParser.ts` `classifyRawName`**: rescris cu mesaje romanesti complete care explica motivul si actiunea recomandata. Exemple: "Nume lipsa — completeaza coloana 'nume' sau cnp/cui pentru a putea cauta automat" (vs. fostul cod tehnic `nume_gol`); "Nume prea scurt — minimum 3 caractere" (vs. `prea_scurt`); "Duplicat — apare prima oara la randul X (NU se va crea job duplicat: deduplicare automata la import)". Toate testele existente migrate de la `.toContain("nume_gol")` la `.toMatch(/Nume lipsa/i)`.
+- **Regula noua `nume_lung` (warn)**: declansata cand `nameNormalized.length > 100` OR `wordCount > 12`. Calibrata empiric: PortalJust accepta nume pure-char pana la ~120 chars dar refuza inputuri multi-cuvant cu 13+ tokeni cu eroare "Eroare la comunicarea cu serviciul" (probabil limita interna SQL LIKE per-token). Constante exportate: `PORTALJUST_WARN_CHAR_LIMIT = 100`, `PORTALJUST_WARN_WORD_LIMIT = 12`. Helper exportat `isLikelyTooLongForPortalJust(nameNormalized: string): boolean` reutilizat de scheduler.
+- **Mesajul warn-ului `nume_lung`**: "Nume lung pentru PortalJust — depaseste limita empirica (~100 caractere / ~12 cuvinte) si poate produce esecuri repetate. Considera scurtarea numelui sau cauta dupa CUI/CNP." Apare la preview inainte de commit, deci utilizatorul poate decide sa excluda randul sau sa scurteze.
+
+### Backend — alerta `source_error` enrich cu `probable_cause`
+
+- **`backend/src/services/monitoring/scheduler.ts`**: helper nou `computeProbableCause(job, outcome)`. Pentru `name_soap` cu `errorCode === "SOAP_FAIL"`, parseaza `target_json`, extrage `name_normalized`, si daca `isLikelyTooLongForPortalJust(name_normalized)` returneaza `"nume_prea_lung_pentru_portaljust"`; altfel `null`.
+- **Alerta enriched la `failStreak === SOURCE_ERROR_THRESHOLD` (= 5)**: cand `probable_cause === "nume_prea_lung_pentru_portaljust"`, titlul devine "Nume prea lung pentru PortalJust (5 esecuri consecutive)" iar `detail` JSON include `{ probable_cause, name_normalized, length, word_count }`. In rest, comportamentul ramane identic (titlul generic "Sursa indisponibila" + `dedup_key` neschimbat → o singura alerta active per job).
+- **De ce conteaza**: utilizatorul vede direct in inbox-ul Alerte ca PortalJust nu e jos, ci numele monitorizat trebuie scurtat. Inainte, alerta `source_error` era opaca ("Eroare la comunicarea cu serviciul"); acum diagnosticul e expus la nivelul produsului.
+
+### Tests
+
+- **751 teste backend** (de la 744 in v2.12.0):
+  - 4 noi in `services/nameListParser.test.ts` "validation — warn (nume lung pentru PortalJust)" — char limit, word limit, exemplul real GLOBALSAT (148 chars / 17 cuvinte) din raportul utilizatorului, nume scurt continua sa fie ok.
+  - 3 noi in `services/monitoring/scheduler.test.ts` "Scheduler — source_error probable_cause enrichment" — name_soap cu nume lung emite probable_cause; name_soap cu nume scurt nu emite probable_cause; dosar_soap nu emite niciodata probable_cause indiferent de outcome.
+- 73/73 frontend neschimbate (fixurile UI nu schimba contractele componentelor existente; testele de hook si tabs raman valide).
+- tsc backend + frontend verde, biome verde pentru lintul nou (`useExhaustiveDependencies` false-positive pe `useEffect([bulkFilter, bulkPreview])` silentiat cu `biome-ignore` + comentariu de motiv).
+
+### Versionare
+
+- Bump manifest/lockfile la `2.12.1` (patch — UX + mici imbogatiri observabile in mesajele de validare si alert detail, **fara** migrari/schema/contract break).
+
+---
+
 ## [2.12.0] - 2026-05-04
 
 ### Code health — MIN-VIABLE seam refactors + dashboard pagination fix

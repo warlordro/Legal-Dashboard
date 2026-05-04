@@ -7,8 +7,10 @@ import { formatDate } from "@/lib/utils";
 import type { Termen } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
 
+// PortalJust SharePoint indexer nu retine sufixul de dosar asociat (/a, /a1, /a2 ...).
 function getPortalJustUrl(numar: string): string {
-  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(numar)}`;
+  const parent = numar.replace(/\/a\d*$/i, "");
+  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(parent)}`;
 }
 
 interface CalendarViewProps {

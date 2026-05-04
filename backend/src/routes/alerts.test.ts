@@ -7,11 +7,7 @@ import fsPromises from "fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  getAlertSubscriberCount,
-  insertAlert,
-  type MonitoringAlertRow,
-} from "../db/monitoringAlertsRepository.ts";
+import { getAlertSubscriberCount, insertAlert, type MonitoringAlertRow } from "../db/monitoringAlertsRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { alertsRouter } from "./alerts.ts";
@@ -43,7 +39,7 @@ function seedJob(
   options: {
     kind?: "dosar_soap" | "name_soap" | "aviz_rnpm";
     target?: Record<string, unknown>;
-  } = {},
+  } = {}
 ): number {
   const kind = options.kind ?? "dosar_soap";
   const target = options.target ?? {};
@@ -52,7 +48,7 @@ function seedJob(
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at)
-       VALUES (?, ?, ?, ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
+       VALUES (?, ?, ?, ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`
     )
     .run(ownerId, kind, JSON.stringify(target), hashSeed);
   return info.lastInsertRowid as number;
@@ -62,16 +58,13 @@ function seedRun(ownerId: string, jobId: number): number {
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-       VALUES (?, ?, ?, 'running')`,
+       VALUES (?, ?, ?, 'running')`
     )
     .run(ownerId, jobId, "2026-04-28T10:00:00.000Z");
   return info.lastInsertRowid as number;
 }
 
-function seedAlert(
-  ownerId: string,
-  overrides: Partial<Parameters<typeof insertAlert>[0]> = {},
-): MonitoringAlertRow {
+function seedAlert(ownerId: string, overrides: Partial<Parameters<typeof insertAlert>[0]> = {}): MonitoringAlertRow {
   const jobId = overrides.jobId ?? seedJob(ownerId, `${ownerId}-${crypto.randomUUID()}`);
   const runId = overrides.runId ?? seedRun(ownerId, jobId);
   return insertAlert({
@@ -88,10 +81,7 @@ function seedAlert(
 
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-alert-routes-"));
-  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(
-    tmpRoot,
-    "legal-dashboard.db",
-  );
+  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
   const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
   seed.close();
   getDb();
@@ -129,7 +119,7 @@ describe("GET /api/v1/alerts", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(page.status).toBe(200);
-    const pageJson = await page.json() as {
+    const pageJson = (await page.json()) as {
       data: { rows: MonitoringAlertRow[]; total: number; page: number; pageSize: number };
       requestId: string;
     };
@@ -140,10 +130,10 @@ describe("GET /api/v1/alerts", () => {
 
     const filtered = await app.request(
       "/api/v1/alerts?kind=source_error&severity=critical&isNew=true&dismissed=false",
-      { headers: { "x-test-owner": OWNER_A } },
+      { headers: { "x-test-owner": OWNER_A } }
     );
     expect(filtered.status).toBe(200);
-    const filteredJson = await filtered.json() as {
+    const filteredJson = (await filtered.json()) as {
       data: { rows: MonitoringAlertRow[]; total: number };
     };
     expect(filteredJson.data.total).toBe(1);
@@ -153,7 +143,7 @@ describe("GET /api/v1/alerts", () => {
     const bob = await app.request("/api/v1/alerts", {
       headers: { "x-test-owner": OWNER_B },
     });
-    const bobJson = await bob.json() as { data: { rows: MonitoringAlertRow[]; total: number } };
+    const bobJson = (await bob.json()) as { data: { rows: MonitoringAlertRow[]; total: number } };
     expect(bobJson.data.total).toBe(1);
     expect(bobJson.data.rows[0].owner_id).toBe(OWNER_B);
   });
@@ -162,7 +152,7 @@ describe("GET /api/v1/alerts", () => {
     const app = buildTestApp();
     const res = await app.request("/api/v1/alerts?pageSize=999");
     expect(res.status).toBe(400);
-    const json = await res.json() as { error: { code: string } };
+    const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("invalid_query");
   });
 
@@ -183,7 +173,7 @@ describe("GET /api/v1/alerts", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(res.status).toBe(200);
-    const json = await res.json() as AlertListResponse;
+    const json = (await res.json()) as AlertListResponse;
     expect(json.data.total).toBe(1);
     expect(json.data.rows[0].job_kind).toBe("dosar_soap");
     expect(json.data.rows[0].title).toBe("dosar");
@@ -206,7 +196,7 @@ describe("GET /api/v1/alerts", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(res.status).toBe(200);
-    const json = await res.json() as AlertListResponse;
+    const json = (await res.json()) as AlertListResponse;
     expect(json.data.total).toBe(1);
     expect(json.data.rows).toHaveLength(1);
     expect(json.data.rows[0].title).toBe("match");
@@ -229,7 +219,7 @@ describe("GET /api/v1/alerts", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(plain.status).toBe(200);
-    const plainJson = await plain.json() as AlertListResponse;
+    const plainJson = (await plain.json()) as AlertListResponse;
     expect(plainJson.data.total).toBe(1);
     expect(plainJson.data.rows[0].title).toBe("stefan");
 
@@ -237,7 +227,7 @@ describe("GET /api/v1/alerts", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(accented.status).toBe(200);
-    const accentedJson = await accented.json() as AlertListResponse;
+    const accentedJson = (await accented.json()) as AlertListResponse;
     expect(accentedJson.data.total).toBe(1);
     expect(accentedJson.data.rows[0].title).toBe("stefan");
   });
@@ -259,7 +249,7 @@ describe("GET /api/v1/alerts", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(res.status).toBe(200);
-    const json = await res.json() as AlertListResponse;
+    const json = (await res.json()) as AlertListResponse;
     expect(json.data.total).toBe(0);
     expect(json.data.rows).toHaveLength(0);
   });
@@ -341,7 +331,7 @@ describe("GET /api/v1/alerts", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(res.status).toBe(200);
-    const json = await res.json() as AlertListResponse;
+    const json = (await res.json()) as AlertListResponse;
     expect(json.data.total).toBe(1);
     expect(json.data.rows[0].title).toBe("name");
     expect(json.data.rows[0].job_kind).toBe("name_soap");
@@ -358,7 +348,7 @@ describe("PATCH /api/v1/alerts/:id/seen and /dismissed", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(seen.status).toBe(200);
-    const seenJson = await seen.json() as { data: MonitoringAlertRow };
+    const seenJson = (await seen.json()) as { data: MonitoringAlertRow };
     expect(seenJson.data.is_new).toBe(0);
     expect(seenJson.data.read_at).toBeTruthy();
     expect(seenJson.data.dismissed_at).toBeNull();
@@ -368,7 +358,7 @@ describe("PATCH /api/v1/alerts/:id/seen and /dismissed", () => {
       headers: { "x-test-owner": OWNER_A },
     });
     expect(dismissed.status).toBe(200);
-    const dismissedJson = await dismissed.json() as { data: MonitoringAlertRow };
+    const dismissedJson = (await dismissed.json()) as { data: MonitoringAlertRow };
     expect(dismissedJson.data.is_new).toBe(0);
     expect(dismissedJson.data.dismissed_at).toBeTruthy();
   });
@@ -433,5 +423,202 @@ describe("GET /api/v1/alerts/stream", () => {
     await reader!.cancel();
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(getAlertSubscriberCount(OWNER_A)).toBe(0);
+  });
+});
+
+interface AlertExportRow {
+  alert: MonitoringAlertRow;
+  numarDosar: string | null;
+  dosarLink: string | null;
+  kindLabel: string;
+  severityLabel: string;
+  nameMonitored: string | null;
+}
+
+interface AlertExportResponse {
+  data: { rows: AlertExportRow[]; count: number };
+  requestId: string;
+}
+
+describe("POST /api/v1/alerts/export", () => {
+  it("rejects an unrecognised mode with 400 invalid_body", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/alerts/export", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "garbage" }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("invalid_body");
+  });
+
+  it("returns the exact alerts requested by ids and decorates with dosar info", async () => {
+    const app = buildTestApp();
+    const job = seedJob(OWNER_A, "ids-job", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const runId = seedRun(OWNER_A, job);
+    const a = seedAlert(OWNER_A, {
+      jobId: job,
+      runId,
+      title: "first",
+      detail: { numar_dosar: "1234/3/2024" },
+      dedupKey: "ids-1",
+    });
+    const b = seedAlert(OWNER_A, {
+      jobId: job,
+      runId,
+      title: "second",
+      detail: { numar_dosar: "9999/X/2025" },
+      dedupKey: "ids-2",
+    });
+    seedAlert(OWNER_A, { title: "noise", dedupKey: "ids-3" });
+
+    const res = await app.request("/api/v1/alerts/export", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "ids", ids: [a.id, b.id] }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertExportResponse;
+    expect(json.data.count).toBe(2);
+    const ids = json.data.rows.map((r) => r.alert.id).sort((x, y) => x - y);
+    expect(ids).toEqual([a.id, b.id].sort((x, y) => x - y));
+    const first = json.data.rows.find((r) => r.alert.id === a.id);
+    expect(first?.numarDosar).toBe("1234/3/2024");
+    expect(first?.dosarLink).toBe("https://portal.just.ro/SitePages/cautare.aspx?k=1234%2F3%2F2024");
+  });
+
+  it("does not leak cross-owner alerts requested by id", async () => {
+    const app = buildTestApp();
+    const foreign = seedAlert(OWNER_B, { title: "foreign", dedupKey: "leak-1" });
+    const own = seedAlert(OWNER_A, { title: "own", dedupKey: "leak-2" });
+
+    const res = await app.request("/api/v1/alerts/export", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "ids", ids: [foreign.id, own.id] }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertExportResponse;
+    expect(json.data.count).toBe(1);
+    expect(json.data.rows[0].alert.id).toBe(own.id);
+  });
+
+  it("supports filters mode and ANDs them with owner scope", async () => {
+    const app = buildTestApp();
+    const dosarJob = seedJob(OWNER_A, "filt-dosar", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const nameJob = seedJob(OWNER_A, "filt-name", {
+      kind: "name_soap",
+      target: { name_normalized: "ACME SRL" },
+    });
+    seedAlert(OWNER_A, {
+      jobId: dosarJob,
+      runId: seedRun(OWNER_A, dosarJob),
+      title: "dosar one",
+      severity: "critical",
+      dedupKey: "f1",
+    });
+    seedAlert(OWNER_A, {
+      jobId: nameJob,
+      runId: seedRun(OWNER_A, nameJob),
+      title: "name one",
+      severity: "info",
+      dedupKey: "f2",
+    });
+
+    const res = await app.request("/api/v1/alerts/export", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode: "filters",
+        filters: { jobKind: "dosar_soap" },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertExportResponse;
+    expect(json.data.count).toBe(1);
+    expect(json.data.rows[0].alert.title).toBe("dosar one");
+  });
+
+  it("supports range mode and includes dismissed alerts in the window", async () => {
+    const app = buildTestApp();
+    const job = seedJob(OWNER_A, "range-job");
+    const runId = seedRun(OWNER_A, job);
+    const inWindow = seedAlert(OWNER_A, {
+      jobId: job,
+      runId,
+      title: "inside",
+      dedupKey: "r1",
+    });
+    seedAlert(OWNER_A, { jobId: job, runId, title: "noise", dedupKey: "r2" });
+
+    // Force the in-window alert to a known created_at and dismiss it; the
+    // noise alert keeps its current_timestamp default which won't fall inside
+    // the historical range we ask for below.
+    getDb()
+      .prepare("UPDATE monitoring_alerts SET created_at = ?, dismissed_at = ? WHERE id = ?")
+      .run("2026-04-15T10:00:00.000Z", "2026-04-15T11:00:00.000Z", inWindow.id);
+
+    const res = await app.request("/api/v1/alerts/export", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        mode: "range",
+        from: "2026-04-15T00:00:00.000Z",
+        to: "2026-04-15T23:59:59.000Z",
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertExportResponse;
+    expect(json.data.count).toBe(1);
+    expect(json.data.rows[0].alert.id).toBe(inWindow.id);
+    expect(json.data.rows[0].alert.dismissed_at).toBeTruthy();
+  });
+
+  it("rejects range mode without both from + to (Zod 400)", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/alerts/export", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "range", from: "2026-04-15T00:00:00.000Z" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects ids mode with empty array", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/alerts/export", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "ids", ids: [] }),
+    });
+    expect(res.status).toBe(400);
   });
 });

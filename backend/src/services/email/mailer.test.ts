@@ -60,6 +60,8 @@ const settings: EmailSettings = {
   enabled: true,
   toAddress: "user@firma.ro",
   minSeverity: "warning",
+  dailyReportEnabled: false,
+  lastDailyReportSentFor: null,
   createdAt: "2026-05-03T10:00:00.000Z",
   updatedAt: "2026-05-03T10:00:00.000Z",
 };

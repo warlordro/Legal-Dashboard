@@ -138,4 +138,52 @@ export const alertsApi = {
     const res = await apiFetch(`/api/v1/alerts/${id}/dismissed`, { method: "PATCH" });
     return unwrapAlerts<MonitoringAlert>(res);
   },
+
+  exportAlerts: async (
+    payload: AlertExportRequest,
+    signal?: AbortSignal,
+  ): Promise<AlertExportResult> => {
+    const res = await apiFetch("/api/v1/alerts/export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    });
+    return unwrapAlerts<AlertExportResult>(res);
+  },
 };
+
+// v2.13.0 — export discriminated union mirrors AlertExportBodySchema in
+// backend/src/routes/alerts.ts. "ids" pentru selectia explicita, "filters"
+// pentru exact aceleasi query params ca lista, "range" pentru export rapid pe
+// interval (subset al "filters" cu includeDismissed=true).
+export type AlertExportRequest =
+  | { mode: "ids"; ids: number[] }
+  | {
+      mode: "filters";
+      filters?: {
+        jobKind?: AlertJobKind;
+        q?: string;
+        kind?: AlertKind;
+        severity?: AlertSeverity;
+        onlyUnread?: boolean;
+        includeDismissed?: boolean;
+        from?: string;
+        to?: string;
+      };
+    }
+  | { mode: "range"; from: string; to: string };
+
+export interface AlertExportRow {
+  alert: MonitoringAlert;
+  numarDosar: string | null;
+  dosarLink: string | null;
+  kindLabel: string;
+  severityLabel: string;
+  nameMonitored: string | null;
+}
+
+export interface AlertExportResult {
+  rows: AlertExportRow[];
+  count: number;
+}
