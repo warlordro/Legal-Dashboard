@@ -75,6 +75,21 @@ function getNotificationStatus() {
         ...normalizeNotificationCapability(state, process.platform),
       };
     } catch (err) {
+      // MODULE_NOT_FOUND happens in dev environments without Visual Studio C++
+      // Build Tools where the optional native dep failed to compile. Treat it
+      // as optimistic-available (same path as Linux) rather than a hard error,
+      // because the packaged installer always ships the prebuilt .node from
+      // CI runner. Genuine runtime failures (module loaded but throws) keep
+      // the diagnostic "unknown" status.
+      if (err && err.code === "MODULE_NOT_FOUND") {
+        return {
+          platform: process.platform,
+          supported,
+          state: "available",
+          canNotify: true,
+          reason: "Notificarile native sunt disponibile prin Electron (status detaliat indisponibil in dev fara modulul nativ).",
+        };
+      }
       return {
         platform: process.platform,
         supported,
@@ -96,6 +111,15 @@ function getNotificationStatus() {
         ...normalizeNotificationCapability(state, process.platform),
       };
     } catch (err) {
+      if (err && err.code === "MODULE_NOT_FOUND") {
+        return {
+          platform: process.platform,
+          supported,
+          state: "available",
+          canNotify: true,
+          reason: "Notificarile native sunt disponibile prin Electron (status detaliat indisponibil in dev fara modulul nativ).",
+        };
+      }
       return {
         platform: process.platform,
         supported,
