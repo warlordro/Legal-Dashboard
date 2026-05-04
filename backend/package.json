@@ -12,15 +12,15 @@
     "@2captcha/captcha-solver": "^1.3.5",
     "@anthropic-ai/sdk": "^0.92.0",
     "@google/generative-ai": "^0.24.1",
-    "@hono/node-server": "^1.19.14",
+    "@hono/node-server": "^2.0.1",
     "better-sqlite3": "^12.9.0",
     "csv-parse": "^5.6.0",
     "dotenv": "^16.6.1",
     "exceljs": "^4.4.0",
-    "hono": "^4.12.14",
+    "hono": "^4.12.16",
     "nodemailer": "^7.0.13",
     "openai": "^6.33.0",
-    "zod": "4.3.6"
+    "zod": "4.4.2"
   },
   "engines": {
     "node": ">=22"
