@@ -1,19 +1,48 @@
 # Codex Backlog - Legal Dashboard
 
-> Status curent: inchis / document istoric.
+> Status curent: redeschis 2026-05-05 cu un task nou (vezi mai jos).
 > Generat initial: 2026-05-03 (post v2.10.4).
-> Inchis: 2026-05-03.
+> Inchis (rundă 1): 2026-05-03 — Task B/C livrate in v2.10.5, Task A scos in v2.10.6.
+> Redeschis: 2026-05-05.
 > Repo: `Legal Dashboard` (Electron + Hono + better-sqlite3).
 
-Acest backlog nu mai contine task-uri active.
+## Task-uri active
 
-- Task B si Task C au fost livrate in v2.10.5.
-- Task A (`Editare job monitorizare existent`) a fost scos din scope in v2.10.6.
-- v2.10.7 este doar patch UX pentru pagina `Monitorizare`: header-ul `Joburi active` afiseaza totalul real paginat, nu doar randurile vizibile pe pagina curenta.
+### Task D - Alerte: bulk dismiss (selectie + toate existente)
 
-Documentul ramane in repo ca istoric pentru contextul deciziilor si pentru a explica ce s-a livrat din backlog-ul initial.
+**Status:** propus 2026-05-05, post v2.13.1. Neimplementat.
+
+#### Context
+
+Pagina `Alerte` are deja:
+- checkbox per rand cu Set<number> pentru selectie multipla (introdus in v2.13.0 pentru export);
+- buton `Marcheaza pagina` care marcheaza ca *citite* alertele de pe pagina curenta (NU le inchide / dismiss).
+
+Lipseste capacitatea de a inchide (dismiss) alerte in bulk, fie pe selectie, fie pe toate cele existente in inboxul vizibil.
+
+Backend-ul are deja `POST /api/v1/alerts/:id/dismiss` per-alert (single). Pentru bulk e nevoie fie de loop pe client (slow + N audit events + race conditions cu SSE), fie endpoint nou de tip `POST /api/v1/alerts/dismiss-bulk` cu Zod `discriminatedUnion("mode", [ids|filters])` — aceeasi forma ca la export pentru consistenta.
+
+#### Acceptance criteria
+
+- [ ] Buton `Inchide selectia` apare in toolbar-ul de selectie din `Alerts.tsx` cand `selectedIds.size > 0`; disabled altfel.
+- [ ] Buton `Inchide toate` (cu confirmare modal) marcheaza dismissed toate alertele care satisfac filtrele curente (jobKind, q, kind, severity, onlyUnread, includeDismissed=false implicit, from, to).
+- [ ] Endpoint nou `POST /api/v1/alerts/dismiss-bulk` cu Zod `discriminatedUnion("mode", [{ids: number[]} | {filters: AlertListQuery}])`, cap 10k randuri, audit `alerts.dismiss_bulk` cu `mode + count` in detail_json.
+- [ ] WHERE owner_id = ? guard pe ambele moduri (cross-owner protection).
+- [ ] Refresh inbox + recompute `unread`/`total` dupa bulk dismiss.
+- [ ] SSE stream nu fanout-eaza individual pe fiecare ID (ar inunda clientul); foloseste un singur eveniment `alerts.refresh` cand bulk-ul depaseste un prag (de ex. 50).
+- [ ] Test backend pentru: success path (ids + filters), 413 la peste 10k, 0 randuri returneaza 200 cu count: 0, owner-isolation.
+- [ ] Test frontend pentru: confirmation modal pentru `Inchide toate` (impact mai mare), counter actualizat dupa dismiss bulk.
+
+#### Note de design
+
+- `Inchide selectia` foloseste mode: "ids" — cap 10k, dar selectia umana realista < 100 randuri.
+- `Inchide toate` foloseste mode: "filters" cu filtrele curente; daca `includeDismissed=true` e activ, butonul ramane dezactivat (nu inchidem alerte deja inchise).
+- Idempotency: a doua chemare nu schimba nimic (dismissed_at deja setat; UPDATE WHERE dismissed_at IS NULL).
+- Audit-ul listeaza `count` (nu `ids[]`) pentru ca un mode: "filters" cu 1000 randuri ar umfla audit_log.
 
 ---
+
+## Task-uri inchise / istorice
 
 ## Task B - Rename Dashboard KPI
 
