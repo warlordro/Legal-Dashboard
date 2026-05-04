@@ -2,7 +2,7 @@
 // (PR-3 surface). Cron scheduling lands in PR-4; this page exists so the user
 // has a way to seed the queue and verify writes today.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   Activity,
@@ -23,7 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { TablePagination } from "@/components/table-pagination";
-import { JobKindTabs, type JobKindFilter } from "@/components/monitoring/JobKindTabs";
+import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
 import {
@@ -36,7 +36,7 @@ import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
-import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
@@ -55,30 +55,32 @@ export default function Monitorizare({
 } = {}) {
   const confirm = useConfirm();
   const navigate = useNavigate();
-  const [jobs, setJobs] = useState<MonitoringJob[]>([]);
-  const [total, setTotal] = useState(0);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Data-fetch + paging/filter state lives in the hook; this page owns
+  // selection, modals, mutations, and the export pipeline.
+  const {
+    jobs,
+    total,
+    totalPages,
+    loading,
+    error,
+    page,
+    pageSize,
+    kindFilter,
+    searchInput,
+    debouncedQuery,
+    setPage,
+    setPageSize,
+    setKindFilter,
+    setSearchInput,
+    flushQuery,
+    refresh,
+    setError,
+    setJobs,
+  } = useMonitoringJobs();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [openInstantePopover, setOpenInstantePopover] = useState<number | null>(null);
-  // v2.10.3 paginare server-side. Backend cap: 100 / pagina (JobListQuerySchema).
-  const [page, setPage] = useState(0);
-  const [pageSize, setPageSize] = useState(50);
-  // v2.10.4 filtru kind ("all" = fara filtru) + search free-text.
-  // searchInput = ce e tastat acum; debouncedQuery = ce ajunge la API
-  // (debounce 300ms). UI 0-indexed; filtrele reseteaza pagina la 0 inline,
-  // pentru a evita double-fetch-ul (setPage in efect separat ar trigger-a o
-  // a doua rulare a `refresh` cand pagina curenta nu era 0).
-  const [kindFilter, setKindFilter] = useState<JobKindFilter>("all");
-  const [searchInput, setSearchInput] = useState("");
-  // page reset is wired into searchInput's onChange (event-handler batching),
-  // not into the debounce settle callback — the setTimeout boundary in
-  // useDebouncedValue doesn't reliably batch setDebounced + setPage in React
-  // 18, which produced an extra fetch with the stale page. `flushQuery("")` on
-  // Reset bypasses the 300ms wait so the next fetch sees the cleared `q`.
-  const [debouncedQuery, flushQuery] = useDebouncedValue(searchInput.trim(), 300);
   // v2.10.1 #12: focus restoration — store the element that opened the modal
   // so we can return focus to it on close (a11y: tab order continuity).
   const lastFocusedRef = useRef<HTMLElement | null>(null);
@@ -102,41 +104,6 @@ export default function Monitorizare({
       }
     };
   }, [openInstantePopover]);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      // Server is 1-indexed; UI keeps 0-indexed pages for TablePagination parity.
-      const result = await monitoring.list({
-        page: page + 1,
-        pageSize,
-        kind: kindFilter === "all" ? undefined : kindFilter,
-        q: debouncedQuery || undefined,
-      });
-      setJobs(result.rows);
-      setTotal(result.total);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Eroare la incarcarea jobs.");
-    } finally {
-      setLoading(false);
-    }
-  }, [page, pageSize, kindFilter, debouncedQuery]);
-
-  useEffect(() => {
-    refresh();
-  }, [refresh]);
-
-  // If a delete leaves the current page empty (e.g. last item on last page),
-  // step back so the user doesn't land on an empty grid.
-  useEffect(() => {
-    if (loading) return;
-    if (jobs.length === 0 && total > 0 && page > 0) {
-      setPage((p) => Math.max(0, p - 1));
-    }
-  }, [jobs.length, total, page, loading]);
-
-  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   // Prune selection of IDs that no longer exist (after refresh / bulk delete)
   useEffect(() => {

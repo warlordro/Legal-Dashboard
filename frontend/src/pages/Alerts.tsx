@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Bell, CheckCheck, ExternalLink, Eye, FileText, Filter, RefreshCw, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -106,7 +106,16 @@ export default function Alerts({
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // Abort the in-flight list() when filters change before the previous response
+  // lands, otherwise an out-of-order resolution overwrites fresh state with
+  // stale rows (race condition: type fast in the search box, server delays the
+  // wide query, narrow query lands first, wide query overwrites).
+  const listAbortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
+    listAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    listAbortRef.current = ctrl;
     setLoading(true);
     setError(null);
     try {
@@ -121,19 +130,35 @@ export default function Alerts({
         includeDismissed,
         from: localDateInputToIso(from, false),
         to: localDateInputToIso(to, true),
+        signal: ctrl.signal,
       });
+      if (ctrl.signal.aborted) return;
       setRows(result.rows);
       setTotal(result.total);
       setUnread(result.unread);
     } catch (err) {
+      // Aborts surface as DOMException (name: "AbortError") in browsers and as
+      // a generic Error with `name === "AbortError"` in jsdom. Either way we
+      // suppress the error UI: the next load() that triggered the abort will
+      // own the loading/error state.
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
+      if (ctrl.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea alertelor.");
     } finally {
-      setLoading(false);
+      if (listAbortRef.current === ctrl) {
+        setLoading(false);
+        listAbortRef.current = null;
+      }
     }
   }, [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, page, pageSize, severity, to]);
 
   useEffect(() => {
     load();
+    return () => {
+      listAbortRef.current?.abort();
+      listAbortRef.current = null;
+    };
   }, [load, streamVersion]);
 
   const markSeen = async (alert: MonitoringAlert) => {

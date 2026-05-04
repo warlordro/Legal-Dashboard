@@ -158,6 +158,42 @@ describe("POST /api/v1/monitoring/jobs", () => {
     expect(events).toHaveLength(1); // only the original
   });
 
+  it("client_request_id reused with different intent returns 409 idempotency_conflict + audits", async () => {
+    // Same client_request_id, but second POST changes the kind from
+    // dosar_soap to name_soap. Silently aliasing would mask a real
+    // programmer error or replay attack — must surface as 409.
+    const app = buildTestApp();
+    const body1 = { ...validDosarBody, client_request_id: "req-conflict-1" };
+    const first = await postJson(app, "/api/v1/monitoring/jobs", body1);
+    expect(first.status).toBe(201);
+    const firstJson = (await first.json()) as { data: { id: number } };
+
+    const body2 = {
+      kind: "name_soap" as const,
+      target: { name_normalized: "POPESCU ION" },
+      cadence_sec: 3600,
+      client_request_id: "req-conflict-1",
+    };
+    const second = await postJson(app, "/api/v1/monitoring/jobs", body2);
+    expect(second.status).toBe(409);
+    const secondJson = (await second.json()) as {
+      data: null;
+      error: { code: string; message: string; details: { existing_job_id: number } };
+    };
+    expect(secondJson.error.code).toBe("idempotency_conflict");
+    expect(secondJson.error.details.existing_job_id).toBe(firstJson.data.id);
+
+    // Original row was not mutated, no second `created` audit row.
+    const created = getAuditEvents({ ownerId: "local", action: "monitoring.job.created" });
+    expect(created).toHaveLength(1);
+    const conflicts = getAuditEvents({
+      ownerId: "local",
+      action: "monitoring.job.idempotency_conflict",
+    });
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0].target_id).toBe(String(firstJson.data.id));
+  });
+
   it("same target without client_request_id returns 200 (duplicate target_hash)", async () => {
     const app = buildTestApp();
     const first = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);

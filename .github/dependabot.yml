@@ -1,0 +1,56 @@
+version: 2
+updates:
+  # Pin GitHub Actions on commit SHAs (not version tags) so a compromised tag
+  # cannot silently swap in malicious code under us. Dependabot auto-opens a
+  # PR every Monday with the new SHA + the changelog of what moved, so we get
+  # the security benefit without manual SHA bookkeeping.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+
+  # npm root + workspaces: weekly security/version PRs grouped by ecosystem so
+  # the queue does not flood. Major versions still surface as separate PRs.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    groups:
+      backend-runtime:
+        patterns:
+          - "@anthropic-ai/sdk"
+          - "@google/generative-ai"
+          - "openai"
+          - "@hono/*"
+          - "hono"
+          - "zod"
+      backend-data:
+        patterns:
+          - "better-sqlite3"
+          - "exceljs"
+          - "csv-parse"
+      frontend-runtime:
+        patterns:
+          - "react"
+          - "react-dom"
+          - "react-router-dom"
+          - "recharts"
+      build-tooling:
+        patterns:
+          - "vite"
+          - "@vitejs/*"
+          - "typescript"
+          - "vitest"
+          - "esbuild"
+          - "electron"
+          - "electron-builder"
+    commit-message:
+      prefix: "chore"
+      include: "scope"

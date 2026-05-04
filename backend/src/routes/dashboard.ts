@@ -172,10 +172,12 @@ dashboardRouter.get("/summary", async (c) => {
 // JS — the bounded per-source limit means worst-case fetch is 3*N rows for
 // one page (cheap for N ≤ 100, indexed on each source).
 //
-// Cursor: opaque ISO timestamp; clients pass back nextCursor verbatim. The
-// strict `<` keeps the cursor stable when two events share a millisecond
-// (per-source id DESC tiebreak collapses ties inside a source; the merged
-// stream uses ts then source-id sort).
+// Cursor: opaque composite `<isoTs>|<eventId>` (e.g. `2026-05-04T...|alert:42`).
+// Clients pass back nextCursor verbatim. The compound key with `(ts, id)`
+// tie-breaker prevents events at a shared millisecond from disappearing across
+// page boundaries — without it, a strict `<` on `ts` only would skip every
+// event sharing the boundary's exact ts in another source. Legacy clients
+// passing a bare ISO timestamp still work (treated as ts-only strict `<`).
 //
 // Why merge in JS rather than UNION ALL: clearer code, easier to attach
 // source-specific projections (alert detail vs run error_code vs audit
@@ -299,41 +301,79 @@ function auditRowToEvent(row: TimelineAuditRow): TimelineEvent {
   };
 }
 
+// (a, b) → 1 if a should come AFTER b in DESC order, -1 if BEFORE, 0 equal.
+// Composite key: (ts DESC, id DESC). The same comparator is used for
+// post-merge filtering against the parsed cursor, so ordering and cursor
+// boundary semantics never diverge.
+function compareDesc(a: { ts: string; id: string }, b: { ts: string; id: string }): number {
+  if (a.ts !== b.ts) return a.ts < b.ts ? 1 : -1;
+  return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
+}
+
+interface ParsedTimelineCursor {
+  ts: string;
+  /** Composite event id (e.g. `alert:42`). null = legacy bare-ISO cursor. */
+  id: string | null;
+}
+
+function parseTimelineCursor(raw: string | undefined, fallbackTs: string): ParsedTimelineCursor {
+  if (!raw) return { ts: fallbackTs, id: null };
+  const sep = raw.indexOf("|");
+  if (sep < 0) return { ts: raw, id: null };
+  return { ts: raw.slice(0, sep), id: raw.slice(sep + 1) };
+}
+
 function mergeAndSliceTimeline(
   alerts: TimelineEvent[],
   runs: TimelineEvent[],
   audits: TimelineEvent[],
   limit: number,
+  cursor: ParsedTimelineCursor,
 ): TimelineEvent[] {
-  // Stable ordering: ts DESC, then id DESC as tiebreaker so two events at the
-  // same instant produce a deterministic order across pages (important — the
-  // cursor is `ts` only, so ordering ties are resolved here, then the
-  // exclusive `<` in the next query keeps progression monotonic).
-  const merged = [...alerts, ...runs, ...audits];
-  merged.sort((a, b) => {
-    if (a.ts === b.ts) return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
-    return a.ts < b.ts ? 1 : -1;
-  });
+  let merged: TimelineEvent[] = [...alerts, ...runs, ...audits];
+  // When the caller used the inclusive `<=` repo predicate (composite cursor
+  // present), boundary events at the cursor ts are pulled in too — drop those
+  // strictly less than (cursor.ts, cursor.id) so the same row never repeats
+  // across pages. With a legacy bare-ISO cursor the `<` predicate already
+  // filtered the boundary, so this filter is a no-op.
+  if (cursor.id !== null) {
+    const cursorEvent = { ts: cursor.ts, id: cursor.id };
+    merged = merged.filter((ev) => compareDesc(ev, cursorEvent) > 0);
+  }
+  merged.sort(compareDesc);
   return merged.slice(0, limit);
 }
 
 dashboardRouter.get("/timeline", async (c) => {
   const ownerId = getOwnerId(c);
   const now = new Date();
-  const cursor = c.req.query("cursor") ?? now.toISOString();
+  const rawCursor = c.req.query("cursor");
+  const parsedCursor = parseTimelineCursor(rawCursor, now.toISOString());
   const limit = clampLimit(c.req.query("limit"), TIMELINE_DEFAULT_LIMIT, TIMELINE_MAX_LIMIT);
 
   const payload: TimelinePayload = await withMaintenanceRead(async () => {
+    // Composite cursor → inclusive repo predicate (`<=`) so we pick up
+    // boundary events from sibling sources at the same ts; the merge filter
+    // above drops anything not strictly less than (cursor.ts, cursor.id).
+    // Fetch `limit + 1` per source on inclusive mode: at most one event per
+    // source can match the exact cursor (composite ids are unique), and that
+    // boundary event will be filtered out post-merge — so we over-fetch by
+    // one to keep the slice budget honest. Without the +1, the matching
+    // source loses one candidate to the boundary and a real follow-up event
+    // can fall off the next page.
+    const inclusive = parsedCursor.id !== null;
+    const fetchLimit = inclusive ? limit + 1 : limit;
     const [alerts, runs, audits] = [
-      listAlertsBefore({ ownerId, before: cursor, limit }).map(alertRowToEvent),
-      listFinalizedRunsBefore({ ownerId, before: cursor, limit }).map(runRowToEvent),
-      listCuratedAuditBefore({ ownerId, before: cursor, limit }).map(auditRowToEvent),
+      listAlertsBefore({ ownerId, before: parsedCursor.ts, limit: fetchLimit, inclusive }).map(alertRowToEvent),
+      listFinalizedRunsBefore({ ownerId, before: parsedCursor.ts, limit: fetchLimit, inclusive }).map(runRowToEvent),
+      listCuratedAuditBefore({ ownerId, before: parsedCursor.ts, limit: fetchLimit, inclusive }).map(auditRowToEvent),
     ];
-    const events = mergeAndSliceTimeline(alerts, runs, audits, limit);
-    // nextCursor = ts of the last event so the next page returns events
-    // strictly older (ts < nextCursor). null when the last page returned
-    // fewer than `limit` events (no more rows available).
-    const nextCursor = events.length === limit ? events[events.length - 1].ts : null;
+    const events = mergeAndSliceTimeline(alerts, runs, audits, limit, parsedCursor);
+    // nextCursor encodes the composite key of the last event so subsequent
+    // pages can use the (ts, id) tie-breaker. null when the page is short.
+    const nextCursor = events.length === limit
+      ? `${events[events.length - 1].ts}|${events[events.length - 1].id}`
+      : null;
     return { events, nextCursor, generatedAt: now.toISOString() };
   });
 
@@ -406,6 +446,68 @@ function buildDayGrid(since: Date, days: number): string[] {
   return out;
 }
 
+// Shared chart series builder used by both /charts and /report so the two
+// endpoints cannot drift on aggregation rules (status pivot, AI cost
+// conversion, zero-fill semantics). The route layer just hands ownership +
+// window + day grid; this function does every per-day projection.
+function buildChartsSeries(opts: {
+  ownerId: string;
+  since: string;
+  until: string;
+  sinceDate: Date;
+  days: number;
+  now: Date;
+}): {
+  alerts: ChartsAlertsPoint[];
+  runs: ChartsRunsPoint[];
+  aiCost: ChartsAiPoint[];
+} {
+  const { ownerId, since, until, sinceDate, days, now } = opts;
+  const grid = buildDayGrid(sinceDate, days);
+
+  // Alerts daily: backfill missing days with 0 so the chart shows a flat line
+  // instead of gaps where no alerts fired.
+  const alertRows = aggregateAlertsByDayInRange({ ownerId, since, until });
+  const alertsByDay = new Map(alertRows.map((r) => [r.day, r.count]));
+  const alerts: ChartsAlertsPoint[] = grid.map((day) => ({
+    day,
+    count: alertsByDay.get(day) ?? 0,
+  }));
+
+  // Runs daily: pivot per-day-per-status rows into one row per day with the
+  // four status columns. Same backfill as alerts.
+  const runRows = aggregateFinalizedRunsByDayAndStatusInRange({ ownerId, since, until });
+  const runsByDay = new Map<string, ChartsRunsPoint>();
+  for (const day of grid) {
+    runsByDay.set(day, { day, ok: 0, error: 0, timeout: 0, aborted: 0, total: 0 });
+  }
+  for (const row of runRows) {
+    const point = runsByDay.get(row.day);
+    if (!point) continue;
+    point.total += row.n;
+    if (row.status === "ok") point.ok += row.n;
+    else if (row.status === "error") point.error += row.n;
+    else if (row.status === "timeout") point.timeout += row.n;
+    else if (row.status === "aborted") point.aborted += row.n;
+  }
+
+  // AI cost daily: reuse listAiUsageLastDays with the matching `days` so the
+  // X-axis aligns with the alerts/runs grid above. Convert milli → USD here.
+  const aiResp = listAiUsageLastDays({ ownerId, days, now });
+  const aiByDay = new Map(aiResp.rows.map((r) => [r.day, r]));
+  const aiCost: ChartsAiPoint[] = grid.map((day) => {
+    const r = aiByDay.get(day);
+    return {
+      day,
+      costUsd: r ? Math.max(0, r.costUsdMilli) / 1_000 : 0,
+      calls: r ? r.calls : 0,
+      tokens: r ? r.inputTokens + r.outputTokens : 0,
+    };
+  });
+
+  return { alerts, runs: Array.from(runsByDay.values()), aiCost };
+}
+
 dashboardRouter.get("/charts", async (c) => {
   const parsed = rangeToDays(c.req.query("range"));
   if (!parsed) {
@@ -419,61 +521,12 @@ dashboardRouter.get("/charts", async (c) => {
   const until = now.toISOString();
 
   const payload: ChartsPayload = await withMaintenanceRead(async () => {
-    const grid = buildDayGrid(sinceDate, days);
-
-    // Alerts daily: backfill missing days with 0 so the chart shows a flat line
-    // instead of gaps where no alerts fired.
-    const alertRows = aggregateAlertsByDayInRange({ ownerId, since, until });
-    const alertsByDay = new Map(alertRows.map((r) => [r.day, r.count]));
-    const alerts: ChartsAlertsPoint[] = grid.map((day) => ({
-      day,
-      count: alertsByDay.get(day) ?? 0,
-    }));
-
-    // Runs daily: pivot per-day-per-status rows into one row per day with the
-    // four status columns. Same backfill as alerts.
-    const runRows = aggregateFinalizedRunsByDayAndStatusInRange({
-      ownerId,
-      since,
-      until,
-    });
-    const runsByDay = new Map<string, ChartsRunsPoint>();
-    for (const day of grid) {
-      runsByDay.set(day, { day, ok: 0, error: 0, timeout: 0, aborted: 0, total: 0 });
-    }
-    for (const row of runRows) {
-      const point = runsByDay.get(row.day);
-      if (!point) continue;
-      point.total += row.n;
-      if (row.status === "ok") point.ok += row.n;
-      else if (row.status === "error") point.error += row.n;
-      else if (row.status === "timeout") point.timeout += row.n;
-      else if (row.status === "aborted") point.aborted += row.n;
-    }
-
-    // AI cost daily: reuse listAiUsageLastDays with the matching `days` so the
-    // X-axis aligns with the alerts/runs grid above. Convert milli → USD here.
-    const aiResp = listAiUsageLastDays({ ownerId, days, now });
-    const aiByDay = new Map(aiResp.rows.map((r) => [r.day, r]));
-    const aiCost: ChartsAiPoint[] = grid.map((day) => {
-      const r = aiByDay.get(day);
-      return {
-        day,
-        costUsd: r ? Math.max(0, r.costUsdMilli) / 1_000 : 0,
-        calls: r ? r.calls : 0,
-        tokens: r ? r.inputTokens + r.outputTokens : 0,
-      };
-    });
-
+    const series = buildChartsSeries({ ownerId, since, until, sinceDate, days, now });
     return {
       range,
       since,
       until,
-      series: {
-        alerts,
-        runs: Array.from(runsByDay.values()),
-        aiCost,
-      },
+      series,
       generatedAt: until,
     };
   });
@@ -544,43 +597,11 @@ dashboardRouter.get("/report", async (c) => {
     };
 
     // Charts block (same as /charts; daily series anchored to UTC-midnight).
-    const grid = buildDayGrid(sinceDate, days);
-    const alertRows = aggregateAlertsByDayInRange({ ownerId, since, until });
-    const alertsByDay = new Map(alertRows.map((r) => [r.day, r.count]));
-    const alertsSeries: ChartsAlertsPoint[] = grid.map((day) => ({
-      day,
-      count: alertsByDay.get(day) ?? 0,
-    }));
-    const runRows = aggregateFinalizedRunsByDayAndStatusInRange({ ownerId, since, until });
-    const runsByDay = new Map<string, ChartsRunsPoint>();
-    for (const day of grid) {
-      runsByDay.set(day, { day, ok: 0, error: 0, timeout: 0, aborted: 0, total: 0 });
-    }
-    for (const row of runRows) {
-      const point = runsByDay.get(row.day);
-      if (!point) continue;
-      point.total += row.n;
-      if (row.status === "ok") point.ok += row.n;
-      else if (row.status === "error") point.error += row.n;
-      else if (row.status === "timeout") point.timeout += row.n;
-      else if (row.status === "aborted") point.aborted += row.n;
-    }
-    const aiResp = listAiUsageLastDays({ ownerId, days, now });
-    const aiByDay = new Map(aiResp.rows.map((r) => [r.day, r]));
-    const aiCost: ChartsAiPoint[] = grid.map((day) => {
-      const r = aiByDay.get(day);
-      return {
-        day,
-        costUsd: r ? Math.max(0, r.costUsdMilli) / 1_000 : 0,
-        calls: r ? r.calls : 0,
-        tokens: r ? r.inputTokens + r.outputTokens : 0,
-      };
-    });
     const charts: ChartsPayload = {
       range,
       since,
       until,
-      series: { alerts: alertsSeries, runs: Array.from(runsByDay.values()), aiCost },
+      series: buildChartsSeries({ ownerId, since, until, sinceDate, days, now }),
       generatedAt: until,
     };
 
@@ -602,10 +623,7 @@ dashboardRouter.get("/report", async (c) => {
       ...runsRows.map(runRowToEvent),
       ...auditRows.map(auditRowToEvent),
     ];
-    merged.sort((a, b) => {
-      if (a.ts === b.ts) return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
-      return a.ts < b.ts ? 1 : -1;
-    });
+    merged.sort(compareDesc);
 
     return {
       range,

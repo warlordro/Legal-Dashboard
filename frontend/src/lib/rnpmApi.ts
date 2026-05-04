@@ -1,3 +1,4 @@
+﻿import { apiFetch } from "@/lib/api";
 import type {
   RnpmSearchType,
   RnpmSearchParams,
@@ -48,7 +49,7 @@ export async function rnpmSearch(
   opts: RnpmSearchOptions = {},
   signal?: AbortSignal
 ): Promise<RnpmSearchResponse> {
-  const res = await fetch(`${BASE}/search`, {
+  const res = await apiFetch(`${BASE}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ type, params, captchaKey, ...opts }),
@@ -78,7 +79,7 @@ export async function rnpmGetSaved(opts: {
   if (opts.dataStop) qs.set("dataStop", opts.dataStop);
   if (opts.sortKey) qs.set("sortKey", opts.sortKey);
   if (opts.sortDir) qs.set("sortDir", opts.sortDir);
-  const res = await fetch(`${BASE}/saved?${qs.toString()}`);
+  const res = await apiFetch(`${BASE}/saved?${qs.toString()}`);
   return jsonOrThrow<RnpmOffsetPage<RnpmAvizRecord>>(res);
 }
 
@@ -91,33 +92,33 @@ const avizDetailCache = new Map<number, { data: RnpmAvizFull; at: number }>();
 export async function rnpmGetAvizDetail(id: number): Promise<RnpmAvizFull> {
   const hit = avizDetailCache.get(id);
   if (hit && Date.now() - hit.at < AVIZ_DETAIL_TTL_MS) return hit.data;
-  const res = await fetch(`${BASE}/saved/${id}`);
+  const res = await apiFetch(`${BASE}/saved/${id}`);
   const data = await jsonOrThrow<RnpmAvizFull>(res);
   avizDetailCache.set(id, { data, at: Date.now() });
   return data;
 }
 
 export async function rnpmDeleteAviz(id: number): Promise<boolean> {
-  const res = await fetch(`${BASE}/saved/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE}/saved/${id}`, { method: "DELETE" });
   const data = await jsonOrThrow<{ deleted: boolean }>(res);
   avizDetailCache.delete(id);
   return data.deleted;
 }
 
 export async function rnpmDeleteAllSaved(): Promise<number> {
-  const res = await fetch(`${BASE}/saved/all`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE}/saved/all`, { method: "DELETE" });
   const data = await jsonOrThrow<{ deleted: number }>(res);
   avizDetailCache.clear();
   return data.deleted;
 }
 
 export async function rnpmGetStats(): Promise<RnpmStats> {
-  const res = await fetch(`${BASE}/stats`);
+  const res = await apiFetch(`${BASE}/stats`);
   return jsonOrThrow<RnpmStats>(res);
 }
 
 export async function rnpmDeleteAvizeBatch(ids: number[]): Promise<number> {
-  const res = await fetch(`${BASE}/saved/delete-batch`, {
+  const res = await apiFetch(`${BASE}/saved/delete-batch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
@@ -128,12 +129,12 @@ export async function rnpmDeleteAvizeBatch(ids: number[]): Promise<number> {
 }
 
 export async function rnpmOpenDbFolder(): Promise<void> {
-  const res = await fetch(`${BASE}/open-db-folder`, { method: "POST" });
+  const res = await apiFetch(`${BASE}/open-db-folder`, { method: "POST" });
   await jsonOrThrow<{ ok: true }>(res);
 }
 
 export async function rnpmOpenBackupsFolder(): Promise<void> {
-  const res = await fetch(`${BASE}/open-backups-folder`, { method: "POST" });
+  const res = await apiFetch(`${BASE}/open-backups-folder`, { method: "POST" });
   await jsonOrThrow<{ ok: true }>(res);
 }
 
@@ -144,12 +145,12 @@ export interface RnpmCompactResult {
 }
 
 export async function rnpmCompactDb(): Promise<RnpmCompactResult> {
-  const res = await fetch(`${BASE}/compact`, { method: "POST" });
+  const res = await apiFetch(`${BASE}/compact`, { method: "POST" });
   return jsonOrThrow<RnpmCompactResult>(res);
 }
 
 export async function rnpmDeleteBackups(): Promise<number> {
-  const res = await fetch(`${BASE}/backups`, { method: "DELETE" });
+  const res = await apiFetch(`${BASE}/backups`, { method: "DELETE" });
   const data = await jsonOrThrow<{ deleted: number }>(res);
   return data.deleted;
 }
@@ -161,13 +162,13 @@ export interface RnpmBackupEntry {
 }
 
 export async function rnpmListBackups(): Promise<RnpmBackupEntry[]> {
-  const res = await fetch(`${BASE}/backups`);
+  const res = await apiFetch(`${BASE}/backups`);
   const data = await jsonOrThrow<{ backups: RnpmBackupEntry[] }>(res);
   return data.backups;
 }
 
 export async function rnpmRestoreBackup(name: string): Promise<{ preRestoreName: string }> {
-  const res = await fetch(`${BASE}/backups/restore`, {
+  const res = await apiFetch(`${BASE}/backups/restore`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name }),
@@ -176,7 +177,7 @@ export async function rnpmRestoreBackup(name: string): Promise<{ preRestoreName:
 }
 
 export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[] }> {
-  const res = await fetch(`${BASE}/saved/export`, {
+  const res = await apiFetch(`${BASE}/saved/export`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
@@ -185,7 +186,7 @@ export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[]
 }
 
 export async function rnpmCaptchaBalance(captchaKey: string, captchaProvider?: CaptchaProvider): Promise<number> {
-  const res = await fetch(`${BASE}/captcha/balance`, {
+  const res = await apiFetch(`${BASE}/captcha/balance`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ captchaKey, captchaProvider }),
@@ -203,7 +204,7 @@ export async function rnpmBulkSearch(
   fallback2CaptchaKey?: string,
   captchaMode?: CaptchaMode,
 ): Promise<void> {
-  const res = await fetch(`${BASE}/bulk`, {
+  const res = await apiFetch(`${BASE}/bulk`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode }),
@@ -246,3 +247,4 @@ export async function rnpmBulkSearch(
     try { await reader.cancel(); } catch { /* already closed */ }
   }
 }
+

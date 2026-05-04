@@ -43,6 +43,7 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
     setSubmitting(true);
     try {
       let job: MonitoringJob;
+      let created: boolean;
       if (formKind === "dosar") {
         const trimmed = numarDosar.trim();
         if (!NUMAR_DOSAR_RE.test(trimmed)) {
@@ -50,11 +51,13 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
           setSubmitting(false);
           return;
         }
-        job = await monitoring.createDosar({
+        const result = await monitoring.createDosarWithResult({
           numar_dosar: trimmed,
           cadence_sec: cadenceSec,
           notes: notes.trim() || undefined,
         });
+        job = result.job;
+        created = result.created;
         setNumarDosar("");
       } else {
         // Regula import (2026-05-03): numele de monitorizare sunt mereu UPPERCASE.
@@ -64,16 +67,25 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
           setSubmitting(false);
           return;
         }
-        job = await monitoring.createName({
+        const result = await monitoring.createNameWithResult({
           name_normalized: trimmedName,
           institutie: institutie.length > 0 ? institutie : undefined,
           cadence_sec: cadenceSec,
           notes: notes.trim() || undefined,
         });
+        job = result.job;
+        created = result.created;
         setNameValue("");
         setInstitutie([]);
       }
-      setFormSuccess(`Adaugat: ${formatMonitoringTarget(job)} (id ${job.id})`);
+      // Backend returns 201 on fresh insert, 200 on idempotent replay (target_hash
+      // collision). The UX previously showed "Adaugat" for both, which made users
+      // think they had double-added the same target.
+      setFormSuccess(
+        created
+          ? `Adaugat: ${formatMonitoringTarget(job)} (id ${job.id})`
+          : `Exista deja: ${formatMonitoringTarget(job)} (id ${job.id})`,
+      );
       setNotes("");
       await onJobAdded();
     } catch (err) {

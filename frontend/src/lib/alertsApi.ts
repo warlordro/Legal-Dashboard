@@ -1,4 +1,4 @@
-import { MonitoringApiError, alertsSeenBulkRequest } from "@/lib/api";
+import { MonitoringApiError, alertsSeenBulkRequest, apiFetch } from "@/lib/api";
 
 export type AlertKind =
   | "dosar_new"
@@ -92,19 +92,22 @@ export const severityLabels: Record<AlertSeverity, string> = {
   critical: "Critic",
 };
 
+export interface AlertsListParams {
+  page?: number;
+  pageSize?: number;
+  kind?: AlertKind | "all";
+  jobKind?: AlertJobKind | "all";
+  q?: string;
+  severity?: AlertSeverity | "all";
+  onlyUnread?: boolean;
+  includeDismissed?: boolean;
+  from?: string;
+  to?: string;
+  signal?: AbortSignal;
+}
+
 export const alertsApi = {
-  list: async (params: {
-    page?: number;
-    pageSize?: number;
-    kind?: AlertKind | "all";
-    jobKind?: AlertJobKind | "all";
-    q?: string;
-    severity?: AlertSeverity | "all";
-    onlyUnread?: boolean;
-    includeDismissed?: boolean;
-    from?: string;
-    to?: string;
-  } = {}): Promise<AlertsListResult> => {
+  list: async (params: AlertsListParams = {}): Promise<AlertsListResult> => {
     const search = new URLSearchParams();
     if (params.page !== undefined) search.set("page", String(params.page));
     if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
@@ -117,12 +120,12 @@ export const alertsApi = {
     if (params.from) search.set("from", params.from);
     if (params.to) search.set("to", params.to);
     const qs = search.toString();
-    const res = await fetch(`/api/v1/alerts${qs ? `?${qs}` : ""}`);
+    const res = await apiFetch(`/api/v1/alerts${qs ? `?${qs}` : ""}`, { signal: params.signal });
     return unwrapAlerts<AlertsListResult>(res);
   },
 
   markSeen: async (id: number): Promise<MonitoringAlert> => {
-    const res = await fetch(`/api/v1/alerts/${id}/seen`, { method: "PATCH" });
+    const res = await apiFetch(`/api/v1/alerts/${id}/seen`, { method: "PATCH" });
     return unwrapAlerts<MonitoringAlert>(res);
   },
 
@@ -132,7 +135,7 @@ export const alertsApi = {
   },
 
   dismiss: async (id: number): Promise<MonitoringAlert> => {
-    const res = await fetch(`/api/v1/alerts/${id}/dismissed`, { method: "PATCH" });
+    const res = await apiFetch(`/api/v1/alerts/${id}/dismissed`, { method: "PATCH" });
     return unwrapAlerts<MonitoringAlert>(res);
   },
 };

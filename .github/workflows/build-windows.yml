@@ -59,15 +59,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --win --x64 --publish never --config.npmRebuild=false
 
+      # Branch names like `feature/foo` contain `/`, which is rejected by
+      # actions/upload-artifact since v4 (treated as path separator). Replace
+      # `/` with `-` so workflow_dispatch on feature branches still produces
+      # a usable artifact instead of silently failing the upload.
+      - name: Sanitize ref name for artifact
+        shell: bash
+        run: echo "SAFE_REF=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       - name: Upload installer artifact
         uses: actions/upload-artifact@v6
-        continue-on-error: true
         with:
-          # Artifact name includes ref (tag like v2.10.7 or branch name on
-          # workflow_dispatch) + run_id to keep concurrent / re-run uploads
-          # distinguishable. Avoids the legacy fixed `legal-dashboard-windows`
-          # which silently overwrote prior runs in the same retention window.
-          name: legal-dashboard-windows-${{ github.ref_name }}-run${{ github.run_id }}
+          # SAFE_REF (slash-sanitized ref) + run_id keep concurrent / re-run
+          # uploads distinguishable. Avoids the legacy fixed
+          # `legal-dashboard-windows` which silently overwrote prior runs.
+          # No `continue-on-error: true` — if upload fails the workflow MUST
+          # fail loudly rather than publish a green build with no artifact.
+          name: legal-dashboard-windows-${{ env.SAFE_REF }}-run${{ github.run_id }}
           path: |
             release/*.exe
             release/*.exe.blockmap

@@ -4,6 +4,61 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.12.0] - 2026-05-04
+
+### Code health — MIN-VIABLE seam refactors + dashboard pagination fix
+
+Release minor peste v2.11.0 care absoarbe lotul al doilea din `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md` (sectiunea "MIN-VIABLE seams"). Patru cuturi mici, low-risk, fiecare cu boundary clar si test in zona schimbata; **fara migrari, fara schimbari de API observabile**. In plus, un fix de paginare la dashboard timeline care a iesit la suprafata cand testul a evidentiat boundary loss prin per-source `LIMIT`.
+
+### Backend - AlertEventService seam (split persistence/fanout)
+
+- **`services/alerts/alertEventService.ts`** (nou, ~50 linii): wrapper `recordAndDispatchAlert(input)` care apeleaza `insertAlert` (repo pur) si, **doar la insert real (`result.inserted === true`)**, dispecerizeaza email-ul prin `queueMicrotask` ca fanout-ul sa nu blocheze tranzactia SQLite. Returneaza acelasi shape `InsertAlertResult` ca `insertAlert`, deci toti callerii pot face swap fara schimbare de API.
+- **`db/monitoringAlertsRepository.ts`**: scos `import dispatchAlertEmail` + blocul `queueMicrotask(() => { void dispatchAlertEmail(row); })` din `insertAlert`. SSE listener `notifyNewAlert(row)` ramane in repo (e infrastructura locala, nu fanout extern). Comentariu nou indica caller-ii spre `services/alerts/alertEventService.ts` pentru email.
+- **Caller migration**: `services/monitoring/dosarSoapRunner.ts`, `services/monitoring/nameSoapRunner.ts`, `services/monitoring/scheduler.ts` folosesc `import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts"` (alias pe acelasi nume local pentru a minimiza diff-ul). Cele 16 puncte de apel din teste continua sa foloseasca `insertAlert` direct din repo (testele nu vor side-effect SMTP).
+- **De ce conteaza**: granularitate clara `inserted=true` vs `inserted=false` (dedup_key duplicat). Inainte, dispatch-ul email era inline in `insertAlert` si se executa pentru orice apel, chiar pe duplicate; acum se pot adauga webhook-uri / Slack / push fara sa atinga repo-ul, fiecare in propriul wrapper.
+- **`services/alerts/alertEventService.test.ts`** (nou, 3 teste): persists row + returneaza shape; dispatch o singura data pe insert real; zero dispatch pe dedup hit. `vi.mock("../email/mailer.ts", ...)` izoleaza SMTP; `drainEmailDispatches(2_000)` in `afterEach` previne leak intre teste.
+
+### Backend - command service extras din `routes/monitoring.ts`
+
+- **`services/monitoring/commands/createMonitoringJob.ts`** (nou, ~95 linii): functie pura framework-free `executeCreateMonitoringJob(input)` care primeste input deja parsat (Zod la boundary) + un callback `writeAudit(event)` ce decoupleaza accesul la Hono `Context`. Detine tranzactia `getDb().transaction(() => { createJob + audit })`, traduce `IdempotencyConflictError` in outcome `idempotency_conflict` cu rândul existent, si rejecta `aviz_rnpm` cu outcome `kind_not_implemented`.
+- **Outcome union explicit**: `{ status: "ok" | "kind_not_implemented" | "idempotency_conflict", ... }`. Service-ul **nu cunoaste HTTP**; route-ul mapeaza outcome-urile in 200 / 201 / 409 / 422 + envelope error code.
+- **`routes/monitoring.ts`**: handler-ul `POST /jobs` se rezuma la (1) Zod parse, (2) `getOwnerId(c)`, (3) chemarea service-ului cu `writeAudit: (event) => recordAudit(c, event.action, ...)`, (4) switch pe `outcome.status`. Toti `recordAudit(c, ...)` din service-ul vechi (route handler) primesc acum doar payload-ul (`{ action, actorId, ownerId, ... }`); request-id-ul / IP-ul / framework-ul raman la boundary.
+- **Test impact**: 53 teste in `routes/monitoring.test.ts` raman verzi; service-ul e implicit testat via integration tests existente. Refactorul nu adauga teste noi — comportamentul end-to-end este identic.
+
+### Frontend - hook extragere `useMonitoringJobs`
+
+- **`frontend/src/hooks/useMonitoringJobs.ts`** (nou, ~130 linii): owns abort controller, debounce 300ms cu `useDebouncedValue([value, flush])`, page-empty recovery effect (cand pagina curenta devine goala dupa delete, pageNum `--`), `refresh()` pentru re-fetch idempotent.
+- **API hook**: returneaza `{ jobs, total, totalPages, loading, error, page, pageSize, kindFilter, searchInput, debouncedQuery, setPage, setPageSize, setKindFilter, setSearchInput, flushQuery, refresh, setError, setJobs }`. Page-ul `Monitorizare.tsx` mai detine doar selection (`selectedIds: Set<number>`), modale (Detalii instante), bulk delete state si handlers de mutatii.
+- **`frontend/src/pages/Monitorizare.tsx`**: scos `useCallback` import, `useDebouncedValue` import, `JobKindFilter` type import. ~60 linii de state + refresh + effect inlocuite cu un singur `useMonitoringJobs()` destructure. `handleBulkDelete` / `handleDelete` / `handleToggleActive` / `handleCadenceChange` apeleaza acum `refresh()` din hook in loc sa-si gestioneze propriul fetch.
+- **De ce conteaza**: page-ul face acum un singur lucru (UI compunere); hook-ul e re-utilizabil si testabil in izolare. Tests existente (73/73 frontend) raman verzi.
+
+### Electron - extragere modul `notifications.js` din `electron/main.js`
+
+- **`electron/notifications.js`** (nou, 186 linii): exports `getNotificationStatus()`, `showNativeNotification(payload)`, `registerNotificationIpc(ipcMain)`. Detine `MAX_NOTIFICATION_*` constants, `WINDOWS_NOTIFICATION_ACCEPTS` / `MACOS_NOTIFICATION_ACCEPTS` sentinels, `notificationsByTag` Map (LRU by insertion order), `normalizeNotificationCapability(...)`, capability detection prin `windows-notification-state` / `macos-notification-state`.
+- **`electron/main.js`** (727 → 533 linii): scos `Notification` din destructure-ul electron, scos cele 5 constants inline + cele 2 sentinel sets + tag-dedup Map + capability helpers. Adaugat `const { getNotificationStatus, showNativeNotification, registerNotificationIpc } = require(path.join(__dirname, "notifications.js"))`. Cele 3 inline `ipcMain.handle("notification:*", ...)` blocuri inlocuite cu un singur `registerNotificationIpc(ipcMain)`.
+- **De ce conteaza**: `main.js` mai detine doar lifecycle (single-instance lock, window manage, AUMID, safeStorage IPC, crash handlers). Notificarile sunt o capabilitate izolata cu un boundary IPC clar.
+- Comportament IPC neschimbat (`notification:show`, `notification:status`, `notification:get-all-tags`).
+
+### Backend - bug fix dashboard timeline pagination
+
+- **`routes/dashboard.ts`**: cand cursor-ul de paginare e composite (`<ts>|<eventId>`, deci `inclusive=true` pe predicat repo `<=`), per-source fetch foloseste acum `limit + 1` in loc de `limit`. **Cauza**: cursorul include event-ul boundary in fetch, iar post-merge filter-ul `compareDesc(ev, cursor) > 0` il scoate; fara `+1`, sursa care contine boundary-ul pierde un candidat real, iar urmatorul eveniment legitim "cade" intr-o pagina urmatoare. Cu composite ID-uri unice, cel mult un eveniment per sursa egaleaza cursor-ul, deci `+1` este suficient.
+- **Impact**: testul `paginates via cursor (events strictly older than the cursor)` din `dashboard.test.ts` (modificat in v2.11.0 sa foloseasca composite cursor) trece acum determinist.
+
+### Tests
+
+- **744 teste backend** (de la 728 in v2.11.0: +3 in `services/alerts/alertEventService.test.ts` (nou) + +13 distribuite intre `routes/rnpm.owner-isolation.test.ts` (nou, 11 owner-isolation pe rute RNPM care lucreaza pe DB partajata) si `routes/dashboard.test.ts` (compound cursor disambiguation absorbit din v2.11.0 deep-review). 73/73 frontend neschimbate. tsc backend + frontend verde, biome verde.
+
+### Documentatie
+
+- `CHANGELOG.md` (acest fisier), `CLAUDE.md`, `STATUS.md`, `SESSION-HANDOFF.md` actualizate pentru v2.12.0.
+- `frontend/src/data/changelog-entries.tsx`: entry nou v2.12.0 in changelog-ul din aplicatie.
+
+### Versionare
+
+- Bump la `2.12.0` in `package.json`, `backend/package.json`, `frontend/package.json` si `package-lock.json` (root + workspace pkgs). Minor (nu patch) pentru a marca refactorul de seam-uri vizibile la diff de cod chiar daca nu se modifica contractele HTTP/IPC.
+
+---
+
 ## [2.11.0] - 2026-05-04
 
 ### Web-readiness closure + dependency CVE remediation + PII cleanup

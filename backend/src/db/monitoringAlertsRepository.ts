@@ -5,7 +5,6 @@
 // cleanup; reintroduce them when an alerts UI lands (PR-5/PR-6 timeline).
 
 import { getDb } from "./schema.ts";
-import { dispatchAlertEmail } from "../services/email/alertEmailDispatcher.ts";
 import { buildRnpmLikePattern } from "../util/textNormalize.ts";
 
 export type AlertKind =
@@ -259,10 +258,11 @@ export function insertAlert(input: InsertAlertInput): InsertAlertResult {
     // write lock. queueMicrotask runs before the next macro-task so the
     // observable ordering remains "transaction commits then listeners see
     // the row", just on a fresh tick.
+    //
+    // External fanout (email today, webhooks tomorrow) lives in
+    // `services/alerts/alertEventService.ts` — runners call
+    // `recordAndDispatchAlert` instead of `insertAlert` to opt into it.
     queueMicrotask(() => notifyNewAlert(row));
-    queueMicrotask(() => {
-      void dispatchAlertEmail(row);
-    });
   }
   return { row, inserted };
 }

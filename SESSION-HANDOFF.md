@@ -1,6 +1,131 @@
-# Session Handoff - v2.11.0 (deep-review remediation — PII/CVE + web-readiness closure)
+# Session Handoff - v2.12.0 (MIN-VIABLE seam refactors + dashboard pagination fix)
 
 **Data**: 2026-05-04
+
+## v2.12.0 - MIN-VIABLE seam refactors + dashboard pagination fix
+
+Sweep peste v2.11.0 care absoarbe sectiunea "MIN-VIABLE seams" din
+`DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md` plus un fix de paginare la
+dashboard timeline care a iesit la suprafata cand testul a evidentiat boundary
+loss prin per-source `LIMIT`. Patru cuturi mici, low-risk, fiecare cu boundary
+clar si test in zona schimbata; **fara migrari, fara schimbari de API
+observabile**.
+
+**Backend — AlertEventService (split persistence/fanout)**:
+- `services/alerts/alertEventService.ts` (nou, ~50 linii):
+  `recordAndDispatchAlert(input)` apeleaza `insertAlert` (repo pur) si, doar
+  la insert real (`result.inserted === true`), face
+  `queueMicrotask(() => { void dispatchAlertEmail(result.row); })`. Returneaza
+  acelasi shape `InsertAlertResult` ca `insertAlert`, deci callerii pot face
+  swap fara schimbare de API.
+- `db/monitoringAlertsRepository.ts`: scos `import dispatchAlertEmail` + blocul
+  `queueMicrotask`. SSE listener `notifyNewAlert(row)` ramane in repo (e
+  infrastructura locala, nu fanout extern). Comentariu nou indica callerii
+  spre `services/alerts/alertEventService.ts`.
+- `services/monitoring/dosarSoapRunner.ts`, `nameSoapRunner.ts`, `scheduler.ts`:
+  alias `import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts"`
+  (alias pe acelasi nume local pentru a minimiza diff-ul).
+- 16 puncte de apel din teste folosesc `insertAlert` direct din repo (testele
+  nu vor side-effect SMTP).
+- 3 teste noi in `services/alerts/alertEventService.test.ts`: persists row +
+  returneaza shape; dispatch o singura data pe insert real; zero dispatch pe
+  dedup hit. `vi.mock("../email/mailer.ts", ...)` izoleaza SMTP;
+  `drainEmailDispatches(2_000)` in `afterEach` previne leak intre teste.
+
+**Backend — command service framework-free**:
+- `services/monitoring/commands/createMonitoringJob.ts` (nou, ~95 linii):
+  functie pura `executeCreateMonitoringJob(input)` care primeste input deja
+  parsat (Zod la boundary) + un callback `writeAudit(event)` ce decoupleaza
+  accesul la Hono `Context`. Detine tranzactia
+  `getDb().transaction(() => { createJob + audit })`, traduce
+  `IdempotencyConflictError` in outcome `idempotency_conflict` cu rândul
+  existent, si rejecta `aviz_rnpm` cu outcome `kind_not_implemented`.
+- Outcome union explicit:
+  `{ status: "ok" | "kind_not_implemented" | "idempotency_conflict", ... }`.
+  Service-ul **nu cunoaste HTTP**; route-ul mapeaza outcome-urile in
+  200 / 201 / 409 / 422 + envelope error code.
+- `routes/monitoring.ts`: handler-ul `POST /jobs` se rezuma la (1) Zod parse,
+  (2) `getOwnerId(c)`, (3) chemarea service-ului cu adapter
+  `writeAudit: (event) => recordAudit(c, event.action, ...)`,
+  (4) switch pe `outcome.status`.
+- 53 teste in `routes/monitoring.test.ts` raman verzi; service-ul e implicit
+  testat via integration tests existente.
+
+**Frontend — hook extragere `useMonitoringJobs`**:
+- `frontend/src/hooks/useMonitoringJobs.ts` (nou, ~130 linii): owns abort
+  controller, debounce 300ms cu `useDebouncedValue([value, flush])`, page-empty
+  recovery effect (cand pagina curenta devine goala dupa delete, pageNum `--`),
+  `refresh()` pentru re-fetch idempotent.
+- API hook expune
+  `{ jobs, total, totalPages, loading, error, page, pageSize, kindFilter,
+  searchInput, debouncedQuery, setPage, setPageSize, setKindFilter,
+  setSearchInput, flushQuery, refresh, setError, setJobs }`.
+- `frontend/src/pages/Monitorizare.tsx`: scos `useCallback` import,
+  `useDebouncedValue` import, `JobKindFilter` type import; ~60 linii de
+  state + refresh + effect inlocuite cu un singur `useMonitoringJobs()`
+  destructure. Page-ul mai detine doar selection (`selectedIds: Set<number>`),
+  modale (Detalii instante), bulk delete state si handlers de mutatii care
+  cheama `refresh()` din hook.
+
+**Electron — modul `notifications.js`**:
+- `electron/notifications.js` (nou, 186 linii): exports
+  `getNotificationStatus()`, `showNativeNotification(payload)`,
+  `registerNotificationIpc(ipcMain)`. Detine `MAX_NOTIFICATION_*` constants,
+  `WINDOWS_NOTIFICATION_ACCEPTS` / `MACOS_NOTIFICATION_ACCEPTS` sentinels,
+  `notificationsByTag` Map (LRU by insertion order),
+  `normalizeNotificationCapability(...)`, capability detection prin
+  `windows-notification-state` / `macos-notification-state`.
+- `electron/main.js` (727 → 533 linii): scos `Notification` din
+  destructure-ul electron, scos cele 5 constants inline + cele 2 sentinel
+  sets + tag-dedup Map + capability helpers. Adaugat
+  `const { getNotificationStatus, showNativeNotification, registerNotificationIpc }
+  = require(path.join(__dirname, "notifications.js"))`. Cele 3 inline
+  `ipcMain.handle("notification:*", ...)` blocuri inlocuite cu un singur
+  `registerNotificationIpc(ipcMain)`.
+- Comportament IPC neschimbat (`notification:show`, `notification:status`,
+  `notification:get-all-tags`).
+
+**Backend — bug fix dashboard timeline pagination**:
+- `routes/dashboard.ts`: cand cursor-ul de paginare e composite
+  (`<ts>|<eventId>`, deci `inclusive=true` pe predicat repo `<=`), per-source
+  fetch foloseste acum `limit + 1` in loc de `limit`. **Cauza**: cursorul
+  include event-ul boundary in fetch, iar post-merge filter-ul
+  `compareDesc(ev, cursor) > 0` il scoate; fara `+1`, sursa care contine
+  boundary-ul pierde un candidat real. Cu composite ID-uri unice, cel mult
+  un eveniment per sursa egaleaza cursor-ul, deci `+1` e suficient.
+- Testul `paginates via cursor (events strictly older than the cursor)` din
+  `dashboard.test.ts` (modificat in v2.11.0 sa foloseasca composite cursor)
+  trece acum determinist.
+
+**Tests — 744 backend (de la 728)**:
+- +3 in `services/alerts/alertEventService.test.ts` (nou).
+- +11 in `routes/rnpm.owner-isolation.test.ts` (nou): owner-isolation pe rute
+  RNPM care lucreaza pe DB partajata (verifica ca user A nu vede salvarile
+  user-ului B in lista, search-ul, bulk-ul, etc.).
+- +1 in `dashboard.test.ts` (compound cursor disambiguation absorbit din
+  v2.11.0 deep-review) si +1 absorbit din v2.11.0.
+- 73/73 frontend neschimbate.
+
+**Validare**:
+- `npx tsc --noEmit -p backend/tsconfig.json` verde local.
+- `cd frontend && npx tsc --noEmit` verde local.
+- `npm test --workspace=backend` 744/744 verde.
+- `cd frontend && npm test -- --run` 73/73 verde.
+- `npx biome check` verde.
+
+**Docs / versiune**:
+- `package.json`, `backend/package.json`, `frontend/package.json` si
+  `package-lock.json` sincronizate la `2.12.0`. Bump minor pentru a marca
+  refactorul de seam-uri vizibile la diff de cod chiar daca nu se modifica
+  contractele HTTP/IPC.
+- `CHANGELOG.md`, `STATUS.md`, `SESSION-HANDOFF.md`, `CLAUDE.md`, `README.md`,
+  `frontend/src/data/changelog-entries.tsx` actualizate.
+
+**Reminder**: `npm rebuild better-sqlite3` necesar dupa testele Node ca
+Electron sa porneasca cu ABI corect la urmatorul `electron:dev` (testele lasa
+ABI 145 pentru Node 24, Electron 41 cere ABI 137).
+
+---
 
 ## v2.11.0 - Deep-review remediation (PR A operational + Web-Readiness Closure)
 

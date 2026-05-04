@@ -18,6 +18,52 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.12.0",
+    date: "4 Mai 2026",
+    subtitle:
+      "Release minor peste v2.11.0. Patru seam-uri MIN-VIABLE pentru a separa boundary-urile (HTTP / persistenta / fanout extern) fara sa introducem outbox tables sau DI containers, plus un fix de paginare la timeline-ul Dashboard cand cursorul cade pe boundary intre surse. Comportament observabil neschimbat, dar contract-ul intern al API-ului este mai usor de migrat catre web (per-source over-fetch + composite cursor).",
+    icon: <Layers className="h-5 w-5" />,
+    borderColor: "border-l-indigo-500",
+    badgeClass: "bg-indigo-100 text-indigo-800 dark:bg-indigo-900/30 dark:text-indigo-400",
+    sections: [
+      {
+        title: "AlertEventService - seam pentru fanout email + SSE",
+        content:
+          "Toate insert-urile de monitoring alerts merg acum prin services/alerts/alertEventService.ts. Service-ul scrie alerta in DB, apoi defera fanout-ul (email dispatcher + SSE broadcast) prin queueMicrotask asa ca SQLite write lock-ul nu se mai tine peste IO extern. La shutdown, drainEmailDispatches(2_000) blocheaza pana queue-ul SMTP e gol. Test boundary nou cu vi.mock pe ../email/mailer.ts.",
+      },
+      {
+        title: "Command service - executeCreateMonitoringJob framework-free",
+        content:
+          "POST /api/v1/monitoring/jobs deleaga acum la services/monitoring/createMonitoringJobService.ts. Service-ul primeste input-ul deja parsat de Zod la boundary-ul HTTP plus un callback writeAudit, returneaza un union de outcomes (created / duplicate / invalid). Hono ramane doar la nivel de route; logica de business e decuplata si mock-abila.",
+      },
+      {
+        title: "useMonitoringJobs - hook React cu abort + debounce",
+        content:
+          "Pagina Monitorizare delegeaza acum la hooks/useMonitoringJobs.ts pentru fetch-uri (cu AbortController pe unmount + flush sincron pe debounce search). Reduce footprint-ul componentei principale fara sa schimbe contract-ul UI.",
+      },
+      {
+        title: "Module notifications - SSE + native notifications izolate",
+        content:
+          "Logica de notificari (subscriber set, broadcast, native Electron toast) extrasa intr-un modul dedicat. Pus in spatele unui port simplu ca sa permita un swap server-side push (SSE / WebSocket) cand mutam backend-ul pe web.",
+      },
+      {
+        title: "Dashboard timeline - fix paginare composite cursor",
+        content:
+          "GET /api/v1/dashboard/activity/timeline pierdea un eveniment per pagina cand cursorul cadea exact pe ts-ul partajat intre surse (alerts/runs/audit). Cauza: per-source LIMIT nu compensa boundary-ul filtrat post-merge. Fix: fetchLimit = inclusive ? limit + 1 : limit. Compozite-ID-urile fiind unice, +1 e suficient sa pastram bugetul de slice.",
+      },
+      {
+        title: "Tests - 744 backend (+16 noi) / 73 frontend",
+        content:
+          "+3 in services/alerts/alertEventService.test.ts (nou — fanout via queueMicrotask, mock SMTP, drain in afterEach). +13 distribuite intre routes/rnpm.owner-isolation.test.ts (nou, 11 owner-isolation pe rute RNPM care lucreaza pe DB partajata) si routes/dashboard.test.ts (compound cursor disambiguation absorbit din v2.11.0 deep-review). tsc backend + frontend clean, biome clean.",
+      },
+      {
+        title: "Versionare + Docs",
+        content:
+          "Bump 2.11.0 → 2.12.0 in 3 manifests + package-lock.json. CHANGELOG.md, README.md, STATUS.md, SESSION-HANDOFF.md, CLAUDE.md, EXECUTION-ROADMAP.md actualizate.",
+      },
+    ],
+  },
+  {
     version: "v2.11.0",
     date: "4 Mai 2026",
     subtitle:

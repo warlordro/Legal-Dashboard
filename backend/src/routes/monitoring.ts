@@ -16,9 +16,9 @@ import type { Context } from "hono";
 import { getOwnerId } from "../middleware/owner.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import {
-  createJob,
   deleteJob,
   getJobById,
+  IdempotencyConflictError,
   jobExistsForAnyOwner,
   listJobs,
   updateJob,
@@ -31,6 +31,7 @@ import {
   JobUpdateBodySchema,
 } from "../schemas/monitoring.ts";
 import { fail, ok } from "../util/envelope.ts";
+import { executeCreateMonitoringJob } from "../services/monitoring/commands/createMonitoringJob.ts";
 
 const MONITORING_BODY_LIMIT = 16 * 1024;
 
@@ -155,50 +156,53 @@ monitoringRouter.post("/jobs", limitMonitoringBody, async (c) => {
     return c.json(fail("invalid_payload", "Payload invalid", c, parsed.error.issues), 422);
   }
 
-  // PR-5 ships dosar_soap + name_soap runners. aviz_rnpm remains schema-ready
-  // but not dispatchable yet; reject it rather than creating a job with no
-  // runner behind it.
-  if (parsed.data.kind === "aviz_rnpm") {
-    return c.json(
-      fail(
-        "kind_not_implemented",
-        "Monitorizarea RNPM nu are runner activ in aceasta versiune.",
-        c,
-      ),
-      422,
-    );
-  }
-
-  // Wrap the insert + audit write in a single transaction so a partial
-  // failure can't produce a job without a corresponding audit row (or vice
-  // versa). better-sqlite3 transactions are synchronous; the route handler is
-  // async only on c.req.json() above, which is already resolved here.
-  let result: ReturnType<typeof createJob>;
+  let outcome: ReturnType<typeof executeCreateMonitoringJob>;
   try {
-    result = getDb().transaction(() => {
-      const r = createJob({ ownerId, body: parsed.data });
-      // Audit only on actual mutation. An idempotent replay (same
-      // client_request_id) or a target_hash collision both return the
-      // existing row — they're not new events worth a row in audit_log.
-      if (!r.duplicate) {
-        recordAudit(c, "monitoring.job.created", {
-          targetKind: "monitoring_job",
-          targetId: String(r.job.id),
-          detail: { kind: r.job.kind, target_hash: r.job.target_hash },
+    outcome = executeCreateMonitoringJob({
+      ownerId,
+      body: parsed.data,
+      // Adapter — the service is framework-free; we plumb Hono Context into
+      // recordAudit here so audit rows still carry actor/request metadata.
+      writeAudit: (event) => {
+        recordAudit(c, event.action, {
+          targetKind: event.targetKind,
+          targetId: event.targetId,
+          detail: event.detail,
         });
-      }
-      return r;
-    })();
+      },
+    });
   } catch (err) {
-    // Body is already Zod-validated above, so any throw from here is an
-    // unexpected DB / runtime fault — treat as 500.
+    // The service rethrows any non-IdempotencyConflict error — body is
+    // already Zod-validated above, so this is an unexpected DB / runtime
+    // fault. Treat as 500 with no internal-detail leak.
     console.error("[monitoring] createJob failed:", err);
     return c.json(fail("internal_error", "Eroare la salvarea jobului", c), 500);
   }
 
-  // 201 on fresh insert, 200 on idempotent replay (REST convention).
-  const status = result.duplicate ? 200 : 201;
-  return c.json(ok(result.job, c), status);
+  switch (outcome.status) {
+    case "kind_not_implemented":
+      return c.json(
+        fail(
+          "kind_not_implemented",
+          "Monitorizarea RNPM nu are runner activ in aceasta versiune.",
+          c,
+        ),
+        422,
+      );
+    case "idempotency_conflict":
+      return c.json(
+        fail(
+          "idempotency_conflict",
+          "client_request_id refolosit pentru un alt job. Foloseste un id nou sau aceleasi target+kind ca prima cerere.",
+          c,
+          { existing_job_id: outcome.existing.id },
+        ),
+        409,
+      );
+    case "ok":
+      // 201 on fresh insert, 200 on idempotent replay (REST convention).
+      return c.json(ok(outcome.job, c), outcome.duplicate ? 200 : 201);
+  }
 });
 
 // Best-effort JSON parse for audit detail capture; never throws out of an

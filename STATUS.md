@@ -1,10 +1,28 @@
 # Legal Dashboard — Status Implementare
 
-**Data curenta:** 2026-05-04 (v2.11.0: deep-review remediation — PII/CVE + web-readiness closure)
-**Versiune curenta reala:** v2.11.0
-**Status global curent:** Sprint monitoring + web mode livrat pana la PR-11 si patch-uri UX v2.10.x. v2.11.0 absoarbe `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md` (PR A operational + Web-Readiness Closure) cu exceptia trecerii frontend xlsx → exceljs (deferata, nu este pe path-ul de input user). PR-10 si PR-12 sunt eliminate prin decizia #11 din `EXECUTION-ROADMAP.md`; web cutover ramane reevaluabil separat.
+**Data curenta:** 2026-05-04 (v2.12.0: MIN-VIABLE seam refactors + dashboard pagination fix)
+**Versiune curenta reala:** v2.12.0
+**Status global curent:** Sprint monitoring + web mode livrat pana la PR-11 si patch-uri UX v2.10.x. v2.12.0 absoarbe sectiunea "MIN-VIABLE seams" din `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md` (4 cuturi mici cu boundary clar) plus un fix la paginare timeline care se manifesta cand cursor-ul composite cade pe boundary. PR-10 si PR-12 sunt eliminate prin decizia #11 din `EXECUTION-ROADMAP.md`; web cutover ramane reevaluabil separat.
 
-**Livrat recent (v2.11.0):** Deep-review remediation peste v2.10.8 — sweep PR A (operational) + PR Web-Readiness Closure.
+**Livrat recent (v2.12.0):** MIN-VIABLE seam refactors peste v2.11.0 — patru cuturi mici cu test in zona schimbata. Fara migrari, fara schimbari de API observabile.
+
+**Backend - AlertEventService seam:** nou `services/alerts/alertEventService.ts` cu `recordAndDispatchAlert(input)` care apeleaza `insertAlert` (repo pur) si dispecerizeaza email-ul prin `queueMicrotask` doar la insert real (`result.inserted === true`). `monitoringAlertsRepository.insertAlert` curatat de `dispatchAlertEmail` import + microtask block (SSE listener `notifyNewAlert(row)` ramane local). Caller-ii `dosarSoapRunner`/`nameSoapRunner`/`scheduler` au alias `recordAndDispatchAlert as insertAlert`. 3 teste noi in `alertEventService.test.ts` (persistence + dispatch o data + zero pe dedup hit) cu `vi.mock("../email/mailer.ts", ...)` si `drainEmailDispatches(2_000)` in `afterEach`.
+
+**Backend - command service framework-free:** nou `services/monitoring/commands/createMonitoringJob.ts` (~95 linii) cu functie pura `executeCreateMonitoringJob(input)` ce primeste input deja parsat (Zod la boundary) + callback `writeAudit(event)`. Outcome union `{ status: "ok" | "kind_not_implemented" | "idempotency_conflict", ... }`; service-ul nu cunoaste HTTP. `routes/monitoring.ts` POST /jobs ramane (1) Zod parse → (2) `getOwnerId` → (3) chemarea service-ului cu adapter `writeAudit: (event) => recordAudit(c, event.action, ...)` → (4) switch outcome → 201/200/409/422. 53 teste `monitoring.test.ts` raman verzi.
+
+**Frontend - hook extragere:** nou `frontend/src/hooks/useMonitoringJobs.ts` (~130 linii) cu abort controller, debounce 300ms via `useDebouncedValue([value, flush])`, page-empty recovery effect, `refresh()` pentru re-fetch idempotent. `Monitorizare.tsx` mai detine doar selection (`Set<number>`), modale, bulk delete state si handlers de mutatii — ~60 linii inlocuite cu un singur destructure.
+
+**Electron - modul `notifications.js`:** nou `electron/notifications.js` (186 linii) cu `getNotificationStatus()`, `showNativeNotification(payload)`, `registerNotificationIpc(ipcMain)`, `MAX_NOTIFICATION_*` constants, sentinels `WINDOWS/MACOS_NOTIFICATION_ACCEPTS`, `notificationsByTag` Map (LRU by insertion order), capability detection prin `windows-notification-state` / `macos-notification-state`. `electron/main.js` redus 727 → 533 linii; cele 3 inline `ipcMain.handle("notification:*", ...)` blocuri inlocuite cu `registerNotificationIpc(ipcMain)`. Contract IPC neschimbat.
+
+**Backend - bug fix dashboard timeline:** `routes/dashboard.ts` `/timeline` endpoint folosea `LIMIT n` per-source si pierdea un eveniment legitim cand cursor-ul composite `<ts>|<eventId>` cadea pe boundary (post-merge filter scotea event-ul boundary). Fix: `fetchLimit = inclusive ? limit + 1 : limit`. Cu composite ID-uri unice, cel mult un event per sursa egaleaza cursor-ul, deci `+1` e suficient. Testul `paginates via cursor (events strictly older than the cursor)` din `dashboard.test.ts` (modificat in v2.11.0) trece acum determinist.
+
+**Tests:** **744 teste backend** (de la 728 in v2.11.0: +3 in `services/alerts/alertEventService.test.ts` (nou), +11 in `routes/rnpm.owner-isolation.test.ts` (nou), +1 in `dashboard.test.ts` "compound cursor", +1 absorbit din v2.11.0). 73/73 frontend neschimbate. tsc backend + frontend verde, biome verde.
+
+**Documentatie:** `CHANGELOG.md`, `frontend/src/data/changelog-entries.tsx`, `README.md`, `STATUS.md`, `SESSION-HANDOFF.md`, `CLAUDE.md` actualizate.
+
+**Versionare:** Manifest root + workspaces backend/frontend bumpate `2.11.0` → `2.12.0`.
+
+**Livrat anterior (v2.11.0):** Deep-review remediation peste v2.10.8 — sweep PR A (operational) + PR Web-Readiness Closure.
 
 **Securitate (PII + CVE):** `backend/rnpm-dumps/` adaugat in `.gitignore` (PII real RNPM — CUI, denumire, identificator nu mai pot fi commit-ate accidental); `nodemailer` `^6.9.13` → `^7.0.13` (HIGH DoS GHSA-rcmh-qjqh-p98v / CVSS 7.5 patched 7.0.11+); `@anthropic-ai/sdk` `^0.90.0` → `^0.92.0` (moderate file-perms GHSA-p7fg-763f-g4gf). `npm audit` redus de la 6 → 4 high/moderate; remaining: `xlsx@0.18.5` HIGH (no upstream fix, mutat in devDependencies in v2.6.4 — nu mai e pe path de parsare user input), `uuid <14.0.0` moderate (transitiv), 2 nodemailer SMTP injection (require crafted `transport.name`/`envelope.size`, threat realistic foarte scazut).
 

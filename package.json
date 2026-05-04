@@ -1,6 +1,6 @@
 {
   "name": "legal-dashboard",
-  "version": "2.11.0",
+  "version": "2.12.0",
   "private": true,
   "main": "electron/main.js",
   "workspaces": [
@@ -23,7 +23,15 @@
     "dist": "npm run build && electron-builder --win",
     "dist:mac": "npm run build && electron-builder --mac",
     "dist:all": "npm run build && electron-builder --win --mac",
-    "dist:server": "node --experimental-strip-types scripts/build-server.js"
+    "dist:server": "node --experimental-strip-types scripts/build-server.js",
+    "typecheck:backend": "tsc --noEmit -p backend/tsconfig.json",
+    "typecheck:frontend": "tsc --noEmit -p frontend/tsconfig.json",
+    "typecheck": "npm run typecheck:backend && npm run typecheck:frontend",
+    "test:backend": "npm test --workspace=backend -- --run",
+    "test:frontend": "npm test --workspace=frontend -- --run",
+    "test": "npm run test:backend && npm run test:frontend",
+    "lint": "biome check",
+    "check": "npm run lint && npm run typecheck && npm run test"
   },
   "build": {
     "appId": "ro.legaldashboard.app",
@@ -110,6 +118,7 @@
     "dompurify": "^3.4.1"
   },
   "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
     "electron": "^41.0.4",
     "electron-builder": "^26.8.1",
     "esbuild": "^0.27.4",

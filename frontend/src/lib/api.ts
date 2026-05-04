@@ -22,7 +22,7 @@ async function get<T>(url: string, params: Record<string, string | string[] | un
       search.set(k, v);
     }
   }
-  const res = await fetch(`${BASE}${url}?${search.toString()}`);
+  const res = await apiFetch(`${BASE}${url}?${search.toString()}`);
   const text = await res.text();
   let json: any;
   try {
@@ -77,7 +77,7 @@ async function loadMoreSSE<T>(
     }
   }
 
-  const res = await fetch(`${BASE}${url}?${search.toString()}`, {
+  const res = await apiFetch(`${BASE}${url}?${search.toString()}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ existing: existingNumere ?? [] }),
@@ -193,7 +193,7 @@ export const api = {
   },
   ai: {
     analyze: async (dosar: Dosar, model: string = "claude-sonnet", apiKeys?: { anthropic?: string; openai?: string; google?: string }): Promise<{ analysis: string }> => {
-      const res = await fetch(`${BASE}/ai/analyze`, {
+      const res = await apiFetch(`${BASE}/ai/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ dosar, model, apiKeys }),
@@ -214,7 +214,7 @@ export const api = {
       judge: { model: string; text: string };
       final: string;
     }> => {
-      const res = await fetch(`${BASE}/ai/analyze-multi`, {
+      const res = await apiFetch(`${BASE}/ai/analyze-multi`, {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({ dosar, analysts, judge, apiKeys }),
@@ -311,7 +311,7 @@ export async function unwrapMonitoring<T>(res: Response): Promise<T> {
 // Bulk mark-seen for alerts. Lives here so the renderer-fetch hook stays happy.
 // Coordinated with backend agent: POST /api/v1/alerts/seen-bulk { ids } -> { data: MonitoringAlert[] }.
 export async function alertsSeenBulkRequest(ids: number[]): Promise<Response> {
-  return fetch(`/api/v1/alerts/seen-bulk`, {
+  return apiFetch(`/api/v1/alerts/seen-bulk`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),

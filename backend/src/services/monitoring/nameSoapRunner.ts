@@ -13,7 +13,7 @@ import {
   getLatestSnapshot,
   insertSnapshot,
 } from "../../db/monitoringSnapshotsRepository.ts";
-import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 

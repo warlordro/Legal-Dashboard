@@ -1,0 +1,61 @@
+## docker-compose.web.example.yml — annotated WEB MODE override.
+##
+## This file is NOT applied automatically. Copy it to `docker-compose.web.yml`,
+## fill in real secrets, and run with:
+##
+##   docker compose -f docker-compose.yml -f docker-compose.web.yml up -d
+##
+## Web mode is multi-tenant and auth-gated:
+##   - JWT_SECRET (>=32 chars), JWT_ISSUER, JWT_AUDIENCE are mandatory; the
+##     backend refuses to boot without them.
+##   - HOST=0.0.0.0 + LEGAL_DASHBOARD_ALLOW_REMOTE=1 + LEGAL_DASHBOARD_ACK_NO_AUTH
+##     unlock the non-loopback bind safety guard. The ack literal is intentional
+##     so a stray HOST=0.0.0.0 in a shell session can never accidentally expose
+##     the API.
+##   - LEGAL_DASHBOARD_DB_PATH is mounted on a persistent volume so the SQLite
+##     file survives `docker compose down` (otherwise tenant data evaporates).
+##
+## Reverse proxy expectation: this container does NOT terminate TLS or perform
+## extra rate limiting beyond the in-process middleware. Put nginx/Caddy/Traefik
+## in front of it (HTTPS, HSTS, optional WAF, IP allowlists for admin paths).
+##
+## After `docker compose ... up -d`, validate from the host:
+##   bash scripts/smoke-deploy.sh
+##   pwsh scripts/smoke-deploy.ps1
+## Both probe http://127.0.0.1:3002/health from outside the container — the
+## container healthcheck only proves intra-container reachability and will pass
+## even if the host port-forward is misconfigured.
+
+services:
+  portaljust:
+    # Replace the loopback bind from the base compose file with a host-wide bind.
+    # If you put a reverse proxy in front of the container on the same host,
+    # keep the loopback bind in the base file (override `ports` here only when
+    # the docker host itself must accept LAN clients directly).
+    ports:
+      - "0.0.0.0:3002:3002"
+    environment:
+      # Bind on all interfaces inside the container so docker port forwarding
+      # actually reaches the Hono process. The base compose maps host:3002 → container:3002,
+      # and the container process binds to whatever HOST is set to (default 127.0.0.1).
+      HOST: "0.0.0.0"
+      LEGAL_DASHBOARD_ALLOW_REMOTE: "1"
+      LEGAL_DASHBOARD_ACK_NO_AUTH: "i-understand-no-auth-yet"
+      LEGAL_DASHBOARD_AUTH_MODE: "web"
+      # Persisted DB lives on a named volume so a restart doesn't lose tenant data.
+      LEGAL_DASHBOARD_DB_PATH: "/data/legal-dashboard.db"
+      # MUST replace these placeholders with real secrets BEFORE bringing the
+      # stack up. The backend refuses to boot otherwise. JWT_SECRET min length
+      # is 32 chars (enforced by backend/src/auth/config.ts:requireJwtSecret).
+      LEGAL_DASHBOARD_JWT_SECRET: "REPLACE_WITH_32_PLUS_CHAR_SECRET_FROM_SECRET_MGR"
+      LEGAL_DASHBOARD_JWT_ISSUER: "https://idp.example.com/"
+      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard"
+      LEGAL_DASHBOARD_JWT_TTL_SECONDS: "3600"
+      # Default cookie posture is Secure; only flip for purely-local HTTP testing
+      # (the backend hard-fails on AUTH_COOKIE_SECURE=0 with NODE_ENV=production).
+      # LEGAL_DASHBOARD_AUTH_COOKIE_SECURE: "1"
+    volumes:
+      - legal_dashboard_data:/data
+
+volumes:
+  legal_dashboard_data:

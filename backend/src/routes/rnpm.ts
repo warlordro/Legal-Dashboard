@@ -276,6 +276,7 @@ rnpmRouter.get("/saved", (c) => {
   const sortDirRaw = c.req.query("sortDir");
 
   const result = getAvize({
+    ownerId: getOwnerId(c),
     page: Number.isFinite(pageRaw) ? pageRaw : 0,
     pageSize: Number.isFinite(pageSizeRaw) ? pageSizeRaw : 25,
     searchType,
@@ -292,13 +293,13 @@ rnpmRouter.get("/saved", (c) => {
 rnpmRouter.get("/saved/:id", (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
-  const aviz = getAvizById(id);
+  const aviz = getAvizById(id, getOwnerId(c));
   if (!aviz) return c.json({ error: "Aviz inexistent" }, 404);
   return c.json(aviz);
 });
 
 rnpmRouter.delete("/saved/all", requireRole("admin"), (c) => {
-  const count = deleteAllAvize();
+  const count = deleteAllAvize(getOwnerId(c));
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
   try { compactDb(); } catch (e) { console.warn("[rnpm] compact after delete-all failed:", e); }
@@ -318,7 +319,7 @@ rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
   if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per batch" }, 400);
-  const deleted = deleteAvizeByIds(numIds);
+  const deleted = deleteAvizeByIds(numIds, getOwnerId(c));
   recordAudit(c, "aviz.delete_batch", {
     targetKind: "aviz",
     detail: { requested: numIds.length, deleted },
@@ -327,7 +328,7 @@ rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
 });
 
 rnpmRouter.get("/stats", async (c) => {
-  const stats = getAvizStats();
+  const stats = getAvizStats(getOwnerId(c));
   const dbPath = getDbPath();
   // CP-B4: async fs so handler does not block the event loop under concurrency (web mode).
   const sizeOf = async (p: string): Promise<number> => {
@@ -453,7 +454,7 @@ rnpmRouter.post("/open-backups-folder", requireRole("admin"), async (c) => {
 rnpmRouter.delete("/saved/:id", (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
-  const ok = deleteAviz(id);
+  const ok = deleteAviz(id, getOwnerId(c));
   recordAudit(c, "aviz.delete", {
     targetKind: "aviz",
     targetId: String(id),
@@ -471,7 +472,7 @@ rnpmRouter.post("/saved/export", limitExport, async (c) => {
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
   if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per export" }, 400);
-  return c.json({ items: getAvizeByIds(numIds) });
+  return c.json({ items: getAvizeByIds(numIds, getOwnerId(c)) });
 });
 
 // Cursor pagination is intentional here — deliberate deviation from the
@@ -488,6 +489,7 @@ rnpmRouter.get("/searches", (c) => {
   const cursorStr = c.req.query("cursor");
   const cursor = cursorStr ? Number(cursorStr) : null;
   return c.json(getSearches({
+    ownerId: getOwnerId(c),
     limit: Number.isFinite(limit) ? limit : 50,
     cursor: Number.isFinite(cursor as number) ? (cursor as number) : null,
   }));
@@ -496,7 +498,7 @@ rnpmRouter.get("/searches", (c) => {
 rnpmRouter.delete("/searches/:id", (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
-  const deleted = deleteSearch(id);
+  const deleted = deleteSearch(id, getOwnerId(c));
   recordAudit(c, "search.delete", {
     targetKind: "search",
     targetId: String(id),

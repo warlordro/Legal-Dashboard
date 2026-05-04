@@ -1,10 +1,38 @@
+## Default profile: DESKTOP-ON-DOCKER smoke / single-tenant lab.
+##
+## What this file gives you:
+##   - Image build + healthcheck + restart policy.
+##   - Host port forward 127.0.0.1:3002 → container 3002 (loopback only).
+##   - .env passthrough (SMTP_*, MONITORING_*, etc.).
+##
+## What it does NOT give you (intentional):
+##   - Web auth (JWT, multi-tenant). The default seeded user is "local" and any
+##     request without a token is treated as that user. Do not expose this
+##     compose to the LAN/internet without overriding env to web mode and adding
+##     a TLS-terminating reverse proxy.
+##   - Backups off-host: only /app inside the container is persisted by Docker
+##     volumes you mount yourself (none below).
+##
+## To make this deployable as web mode (multi-tenant, JWT auth):
+##   1. Mount a persistent SQLite volume (LEGAL_DASHBOARD_DB_PATH) so DB survives
+##      `docker compose down`.
+##   2. Use docker-compose.web.example.yml as an override (see that file's
+##      header for the env contract: HOST=0.0.0.0, LEGAL_DASHBOARD_ALLOW_REMOTE=1,
+##      LEGAL_DASHBOARD_AUTH_MODE=web, JWT secret/issuer/audience).
+##   3. Run scripts/smoke-deploy.sh (Linux/macOS) or scripts/smoke-deploy.ps1
+##      (Windows) from the host AFTER bringing the stack up — the container
+##      healthcheck only proves intra-container reachability; it does not
+##      confirm the host port-forward actually wires through.
+##
+## SECURITY: do not flip the host port to 0.0.0.0:3002 in this file. If you need
+## LAN/internet exposure, terminate TLS + auth at a reverse proxy (nginx, Caddy,
+## Traefik) and have it forward to this container; the override file documents
+## the env-side requirements for that scenario.
 services:
   portaljust:
     build: .
-    # SECURITY: bind only to loopback by default. Exposing 0.0.0.0:3002 puts an
-    # auth-less SOAP/AI gateway on the LAN. To expose the service publicly,
-    # terminate TLS + auth at a reverse proxy (nginx, Caddy, Traefik) and have
-    # it forward to this container; do not flip the bind to 0.0.0.0 in place.
+    # Loopback-only host bind. Override via docker-compose.web.example.yml when
+    # deploying behind a reverse proxy.
     ports:
       - "127.0.0.1:3002:3002"
     env_file:

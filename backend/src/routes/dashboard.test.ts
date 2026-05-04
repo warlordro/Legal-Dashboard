@@ -473,9 +473,11 @@ describe("GET /api/v1/dashboard/timeline", () => {
     expect(page1.data.events).toHaveLength(2);
     expect(page1.data.events[0].title).toBe("Alert 4");
     expect(page1.data.events[1].title).toBe("Alert 3");
-    expect(page1.data.nextCursor).toBe("2026-04-25T13:00:00.000Z");
+    // Composite cursor: `<ts>|<eventId>` so page boundaries with shared ts
+    // resolve deterministically via the (ts, id) tie-breaker.
+    expect(page1.data.nextCursor).toMatch(/^2026-04-25T13:00:00\.000Z\|alert:\d+$/);
 
-    // Second page: cursor = nextCursor → returns events with ts < 13:00.
+    // Second page: cursor = nextCursor → returns events strictly older.
     const page2Res = await app.request(
       `/api/v1/dashboard/timeline?limit=2&cursor=${encodeURIComponent(page1.data.nextCursor!)}`,
       { headers: { "x-test-owner": "alice" } },
@@ -485,6 +487,60 @@ describe("GET /api/v1/dashboard/timeline", () => {
     const titles2 = page2.data.events.map((e) => e.title);
     expect(titles2[0]).toBe("Alert 2");
     expect(titles2[1]).toBe("Alert 1");
+  });
+
+  it("compound cursor disambiguates events sharing the boundary ts across sources", async () => {
+    // Seed alert + finalized run + curated audit row at the EXACT same ts so
+    // the page-1/page-2 boundary lands on three events sharing the same
+    // millisecond. Without a compound (ts, id) cursor, two of them disappear.
+    const sharedTs = "2026-04-25T12:00:00.000Z";
+    const jobId = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "boundary" });
+    const runId = seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
+    backdateRun(runId, sharedTs);
+    const alert = insertAlert({
+      ownerId: "alice",
+      jobId,
+      runId,
+      kind: "termen_new",
+      title: "Boundary alert",
+      detail: {},
+      dedupKey: "tl-boundary-1",
+    });
+    backdateAlert(alert.row.id, sharedTs);
+    recordAudit(null, "monitoring.job.deleted", { ownerId: "alice" });
+    backdateAudit(lastAuditId(), sharedTs);
+
+    const app = buildTestApp();
+    // Page size 1 so the first page returns the lex-largest event id at the
+    // shared ts and the cursor must use the tie-breaker to skip past it.
+    const page1Res = await app.request("/api/v1/dashboard/timeline?limit=1", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const page1 = (await page1Res.json()) as TimelineResponse;
+    expect(page1.data.events).toHaveLength(1);
+    expect(page1.data.nextCursor).not.toBeNull();
+    expect(page1.data.nextCursor).toMatch(/^2026-04-25T12:00:00\.000Z\|/);
+
+    const page2Res = await app.request(
+      `/api/v1/dashboard/timeline?limit=1&cursor=${encodeURIComponent(page1.data.nextCursor!)}`,
+      { headers: { "x-test-owner": "alice" } },
+    );
+    const page2 = (await page2Res.json()) as TimelineResponse;
+    expect(page2.data.events).toHaveLength(1);
+    // The page-2 event must be a different one from page-1, even though both
+    // share the boundary ts. With a ts-only cursor this assertion would fail
+    // because page-2 would either repeat page-1 or skip directly past the ts.
+    expect(page2.data.events[0].id).not.toBe(page1.data.events[0].id);
+
+    // Third page: completes the trio.
+    const page3Res = await app.request(
+      `/api/v1/dashboard/timeline?limit=1&cursor=${encodeURIComponent(page2.data.nextCursor!)}`,
+      { headers: { "x-test-owner": "alice" } },
+    );
+    const page3 = (await page3Res.json()) as TimelineResponse;
+    expect(page3.data.events).toHaveLength(1);
+    const seenIds = new Set([page1.data.events[0].id, page2.data.events[0].id, page3.data.events[0].id]);
+    expect(seenIds.size).toBe(3); // all three boundary events surfaced exactly once
   });
 
   it("audit curation: surfaces curated actions; ignores chatty actions; surfaces non-ok outcomes", async () => {

@@ -30,7 +30,7 @@ import {
   recoverOrphanRuns,
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
-import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
 import { purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";

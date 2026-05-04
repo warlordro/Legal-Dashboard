@@ -66,6 +66,18 @@ export interface CreateJobResult {
   idempotentReplay: boolean;
 }
 
+// Thrown when client_request_id matches an existing row but the new request's
+// kind or target hash differ from what was originally stored. This means the
+// caller is reusing the same idempotency key for a different intent — silently
+// returning the original row would mask a programmer error or a malicious
+// replay. The route layer surfaces this as 409 idempotency_conflict.
+export class IdempotencyConflictError extends Error {
+  constructor(public readonly existing: MonitoringJobRow) {
+    super("client_request_id conflicts with existing job");
+    this.name = "IdempotencyConflictError";
+  }
+}
+
 export function createJob(input: CreateJobInput): CreateJobResult {
   const db = getDb();
   const { ownerId, body } = input;
@@ -81,7 +93,10 @@ export function createJob(input: CreateJobInput): CreateJobResult {
   // holds — only the FIRST tick is accelerated.
   const nextRunAt = new Date().toISOString();
 
-  // 1) client_request_id replay path — return existing row unchanged.
+  // 1) client_request_id replay path — return existing row unchanged when the
+  // new request matches the original in BOTH kind and target_hash. If only the
+  // client id matches but kind/target diverge, raise IdempotencyConflictError
+  // so the caller surfaces 409 instead of silently aliasing the old row.
   if (body.client_request_id) {
     const existing = db
       .prepare(
@@ -90,6 +105,9 @@ export function createJob(input: CreateJobInput): CreateJobResult {
       )
       .get(ownerId, body.client_request_id) as MonitoringJobRow | undefined;
     if (existing) {
+      if (existing.kind !== body.kind || existing.target_hash !== targetHash) {
+        throw new IdempotencyConflictError(existing);
+      }
       return { job: existing, duplicate: true, idempotentReplay: true };
     }
   }

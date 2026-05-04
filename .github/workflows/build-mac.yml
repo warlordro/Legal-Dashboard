@@ -52,16 +52,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npx electron-builder --mac --x64 --arm64 --publish never
 
+      # Branch names like `feature/foo` contain `/`, which is rejected by
+      # actions/upload-artifact since v4 (treated as path separator). Replace
+      # `/` with `-` so workflow_dispatch on feature branches still produces
+      # a usable artifact instead of silently failing the upload.
+      - name: Sanitize ref name for artifact
+        shell: bash
+        run: echo "SAFE_REF=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       - name: Upload DMG artifacts
         uses: actions/upload-artifact@v6
-        continue-on-error: true
         with:
-          # Artifact name includes ref (tag like v2.10.7 or branch name on
-          # workflow_dispatch) + run_id to keep concurrent / re-run uploads
-          # distinguishable. Avoids the legacy fixed `legal-dashboard-mac`
-          # which silently overwrote prior runs and bundled both x64 + arm64
-          # DMGs under the same indistinct name.
-          name: legal-dashboard-mac-${{ github.ref_name }}-run${{ github.run_id }}
+          # SAFE_REF (slash-sanitized ref) + run_id keep concurrent / re-run
+          # uploads distinguishable. Avoids the legacy fixed
+          # `legal-dashboard-mac` which silently overwrote prior runs.
+          # No `continue-on-error: true` — if upload fails the workflow MUST
+          # fail loudly rather than publish a green build with no artifact.
+          name: legal-dashboard-mac-${{ env.SAFE_REF }}-run${{ github.run_id }}
           path: |
             release/*.dmg
             release/*.dmg.blockmap

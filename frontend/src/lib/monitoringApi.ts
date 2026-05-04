@@ -76,6 +76,7 @@ export const monitoring = {
     kind?: MonitoringJobKind;
     active?: boolean;
     q?: string;
+    signal?: AbortSignal;
   } = {}): Promise<MonitoringListResult> => {
     const search = new URLSearchParams();
     if (params.page !== undefined) search.set("page", String(params.page));
@@ -84,7 +85,7 @@ export const monitoring = {
     if (params.active !== undefined) search.set("active", String(params.active));
     if (params.q && params.q.trim()) search.set("q", params.q.trim());
     const qs = search.toString();
-    const res = await apiFetch(`/api/v1/monitoring/jobs${qs ? "?" + qs : ""}`);
+    const res = await apiFetch(`/api/v1/monitoring/jobs${qs ? "?" + qs : ""}`, { signal: params.signal });
     return unwrapMonitoring<MonitoringListResult>(res);
   },
 
@@ -111,6 +112,11 @@ export const monitoring = {
   },
 
   createName: async (input: CreateNameMonitoringInput): Promise<MonitoringJob> => {
+    const result = await monitoring.createNameWithResult(input);
+    return result.job;
+  },
+
+  createNameWithResult: async (input: CreateNameMonitoringInput): Promise<MonitoringCreateResult> => {
     const target: Record<string, string | string[]> = {
       name_normalized: input.name_normalized,
     };
@@ -128,7 +134,9 @@ export const monitoring = {
         client_request_id: input.client_request_id,
       }),
     });
-    return unwrapMonitoring<MonitoringJob>(res);
+    const created = res.status === 201;
+    const job = await unwrapMonitoring<MonitoringJob>(res);
+    return { job, created };
   },
 
   patch: async (

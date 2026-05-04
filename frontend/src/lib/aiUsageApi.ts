@@ -1,4 +1,4 @@
-import { MonitoringApiError } from "@/lib/api";
+import { MonitoringApiError, apiFetch } from "@/lib/api";
 
 export interface AiUsageSummaryWindow {
   costUsd: number;
@@ -52,7 +52,7 @@ async function unwrapAiUsage<T>(res: Response): Promise<T> {
 
 export const aiUsageApi = {
   summary: async (signal?: AbortSignal): Promise<AiUsageSummaryResult> => {
-    const res = await fetch("/api/v1/ai-usage/summary", { signal });
+    const res = await apiFetch("/api/v1/ai-usage/summary", { signal });
     return unwrapAiUsage<AiUsageSummaryResult>(res);
   },
 };

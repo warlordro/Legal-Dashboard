@@ -105,18 +105,26 @@ export interface TimelineAuditRow {
 // route layer merge + slice. Worst case the route loads 3*limit rows for one
 // page, which is acceptable for limit ≤ 100 (the route clamps it).
 
+// `before` is exclusive by default (`ts < ?`). Pass `inclusive: true` when the
+// caller plans to apply a per-source-id tie-breaker post-merge — that pulls
+// rows at and below the cursor ts so the merge step can deterministically
+// drop the boundary events using a composite (ts, id) cursor. Without the
+// inclusive switch a row sharing the boundary ts in another source would be
+// permanently lost between pages.
 export function listAlertsBefore(opts: {
   ownerId: string;
   before: string;
   limit: number;
+  inclusive?: boolean;
 }): TimelineAlertRow[] {
+  const cmp = opts.inclusive ? "<=" : "<";
   return getDb()
     .prepare(
       `SELECT a.id, a.created_at AS ts, a.kind, a.severity, a.title, a.detail_json,
               a.job_id, j.kind AS job_kind, j.target_json AS job_target_json
        FROM monitoring_alerts a
        LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id
-       WHERE a.owner_id = ? AND a.created_at < ?
+       WHERE a.owner_id = ? AND a.created_at ${cmp} ?
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT ?`,
     )
@@ -127,7 +135,9 @@ export function listFinalizedRunsBefore(opts: {
   ownerId: string;
   before: string;
   limit: number;
+  inclusive?: boolean;
 }): TimelineRunRow[] {
+  const cmp = opts.inclusive ? "<=" : "<";
   return getDb()
     .prepare(
       `SELECT r.id, r.ended_at AS ts, r.status, r.job_id, r.duration_ms,
@@ -137,7 +147,7 @@ export function listFinalizedRunsBefore(opts: {
        LEFT JOIN monitoring_jobs j ON j.id = r.job_id AND j.owner_id = r.owner_id
        WHERE r.owner_id = ?
          AND r.ended_at IS NOT NULL
-         AND r.ended_at < ?
+         AND r.ended_at ${cmp} ?
        ORDER BY r.ended_at DESC, r.id DESC
        LIMIT ?`,
     )
@@ -148,17 +158,19 @@ export function listCuratedAuditBefore(opts: {
   ownerId: string;
   before: string;
   limit: number;
+  inclusive?: boolean;
 }): TimelineAuditRow[] {
   // Curated set is small (≤ 20 actions) so an inline IN(...) keeps the planner
   // happy without needing a temp table. The OR `outcome != 'ok'` catches
   // denied/error events that fall outside the explicit list (defense in depth).
   const placeholders = CURATED_AUDIT_ACTIONS.map(() => "?").join(",");
+  const cmp = opts.inclusive ? "<=" : "<";
   return getDb()
     .prepare(
       `SELECT id, ts, action, target_kind, target_id, outcome, detail_json, actor_id
        FROM audit_log
        WHERE owner_id = ?
-         AND ts < ?
+         AND ts ${cmp} ?
          AND (action IN (${placeholders}) OR outcome != 'ok')
        ORDER BY ts DESC, id DESC
        LIMIT ?`,

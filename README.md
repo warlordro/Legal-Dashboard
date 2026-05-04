@@ -7,10 +7,23 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.11.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.12.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release este **v2.11.0** - deep-review remediation peste v2.10.8.
+Ultimul release este **v2.12.0** - MIN-VIABLE seam refactors peste v2.11.0.
+Sweep care absoarbe sectiunea "MIN-VIABLE seams" din `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md`
+plus un fix de paginare la dashboard timeline. Patru cuturi mici cu boundary
+clar, fara migrari, fara schimbari de API observabile: (1) `services/alerts/alertEventService.ts`
+care imparte persistenta de fanout (email pe `queueMicrotask` doar la insert real);
+(2) `services/monitoring/commands/createMonitoringJob.ts` framework-free cu
+outcome union; (3) `frontend/src/hooks/useMonitoringJobs.ts` cu abort controller +
+debounce + page-empty recovery; (4) `electron/notifications.js` (capability
+detection + tag dedup) cu `electron/main.js` redus 727 → 533 linii. Bug fix
+`/dashboard/timeline`: per-source `LIMIT n` pierdea un eveniment cand cursor-ul
+composite cadea pe boundary; fix = `+1` overfetch pe inclusive cursor. Tests:
+744/744 backend, 73/73 frontend.
+
+Predecesor **v2.11.0** - deep-review remediation peste v2.10.8.
 Absoarbe `DEEP-REVIEW-LEGAL-DASHBOARD-2026-05-04.md` (PR A operational + PR
 Web-Readiness Closure) cu exceptia trecerii frontend `xlsx` → `exceljs` (deferata
 ca scope separat). Securitate: directorul `backend/rnpm-dumps/` cu PII real

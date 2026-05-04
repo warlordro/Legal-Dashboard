@@ -18,8 +18,31 @@ import {
 import { getOwnerId } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import type { AiUsageTrackingContext } from "../services/aiUsage.ts";
+import { getAuthMode } from "../auth/config.ts";
 
 export const aiRouter = new Hono();
+
+// In AUTH_MODE=web, BYOK via request body is refused: secrets transiting the
+// server contradict the server-side config direction (decizia #4 in roadmap —
+// AI keys centralizate in `.env` server). Operators must set ANTHROPIC_API_KEY
+// / OPENAI_API_KEY / GOOGLE_AI_KEY in env. Desktop loopback keeps BYOK via
+// safeStorage IPC. Returns 501 (not 403) because the body shape is valid but
+// not implemented in this auth mode.
+function rejectApiKeysFromBodyInWebMode(body: { apiKeys?: unknown }): Response | null {
+  if (getAuthMode() !== "web") return null;
+  if (!body.apiKeys || typeof body.apiKeys !== "object") return null;
+  const hasSetKey = Object.values(body.apiKeys as Record<string, unknown>).some(
+    (v) => typeof v === "string" && v.length > 0,
+  );
+  if (!hasSetKey) return null;
+  return Response.json(
+    {
+      error:
+        "Cheile AI nu pot fi trimise in body in modul web. Configurati ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_KEY in env-ul serverului.",
+    },
+    { status: 501 },
+  );
+}
 
 // Shared body parser for AI POST endpoints. Enforces MAX_AI_BODY_SIZE on both
 // the Content-Length header and the actual body, then parses JSON. Returns a
@@ -52,6 +75,9 @@ aiRouter.post("/analyze", async (c) => {
     if (parsed.kind === "error") return c.json({ error: parsed.message }, parsed.status);
     // NOTE: typed `any` here is validated below by validateAiBody before any field access.
     const body: any = parsed.body;
+
+    const webGate = rejectApiKeysFromBodyInWebMode(body);
+    if (webGate) return webGate;
 
     // Schema validation
     const validationError = validateAiBody(body);
@@ -103,6 +129,9 @@ aiRouter.post("/analyze-multi", async (c) => {
     if (parsed.kind === "error") return c.json({ error: parsed.message }, parsed.status);
     // NOTE: typed `any` here is validated below by validateAiBody and per-field checks.
     const body: any = parsed.body;
+
+    const webGate = rejectApiKeysFromBodyInWebMode(body);
+    if (webGate) return webGate;
 
     // Validate structure (reuse dosar validation from single-agent endpoint)
     if (!body || typeof body !== "object") return c.json({ error: "Body invalid." }, 400);
