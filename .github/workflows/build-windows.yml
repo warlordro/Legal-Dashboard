@@ -68,7 +68,7 @@ jobs:
         run: echo "SAFE_REF=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
 
       - name: Upload installer artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           # SAFE_REF (slash-sanitized ref) + run_id keep concurrent / re-run
           # uploads distinguishable. Avoids the legacy fixed
