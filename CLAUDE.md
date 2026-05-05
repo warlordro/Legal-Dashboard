@@ -9,6 +9,13 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
+## Reguli pentru CLAUDE.md (strict)
+
+- **NU** scrie niciodata version history, changelog sau release notes in acest fisier.
+- Istoricul versiunilor merge **EXCLUSIV** in [CHANGELOG.md](CHANGELOG.md) — el exista deja si e single source of truth.
+- Actualizeaza CLAUDE.md **doar** daca se schimba o conventie activa de cod sau arhitectura.
+- La bump de versiune: update doar campul scurt `**vX.Y.Z** - <data>` din "Versiune Curenta" (1-2 linii). Fara paragraf detaliat, fara blocuri "Predecesor", fara tabel sprint.
+
 ## Structura Proiect
 ```
 legal-dashboard/
