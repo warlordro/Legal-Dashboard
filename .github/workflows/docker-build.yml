@@ -1,34 +1,20 @@
 name: Docker Build
 
-# Verifies the Dockerfile keeps building after changes to Dockerfile, build
-# scripts, lockfile or backend code. The image is built fresh on every run
-# (no registry push) and smoke-tested by invoking node inside the runtime
-# stage to confirm that the image is at least bootable.
+# Aligned with Build Windows / Build macOS triggers: only fires on tag push
+# (release event) or manual workflow_dispatch. The image is built fresh on
+# every run (no registry push) and smoke-tested by invoking node inside the
+# runtime stage to confirm that the image is at least bootable.
+#
+# Why removed `push: branches: [main]` + `pull_request:`: every Dependabot
+# merge / regular dev commit on backend/** + frontend/** + lockfile fired
+# Docker Build, producing 4-5 noisy runs per release. We trade that off for
+# a clean "release event = 3 builds" mental model: Windows + macOS + Docker.
 
 on:
   workflow_dispatch:
   push:
-    branches: [main]
-    paths:
-      - 'Dockerfile'
-      - '.dockerignore'
-      - 'docker-compose.yml'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'backend/**'
-      - 'frontend/**'
-      - 'scripts/build.js'
-      - '.github/workflows/docker-build.yml'
-  pull_request:
-    paths:
-      - 'Dockerfile'
-      - '.dockerignore'
-      - 'docker-compose.yml'
-      - 'package.json'
-      - 'package-lock.json'
-      - 'backend/**'
-      - 'frontend/**'
-      - 'scripts/build.js'
+    tags:
+      - 'v*'
 
 jobs:
   docker-build:
