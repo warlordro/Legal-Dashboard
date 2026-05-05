@@ -30,6 +30,7 @@ import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
 import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
 import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
+import { readMailerConfig } from "./services/email/mailer.ts";
 import {
   startDailyReportScheduler,
   stopDailyReportScheduler,
@@ -117,10 +118,47 @@ function fatalBoot(reason: string, err: unknown): never {
   process.exit(1);
 }
 
+// v2.17.0 — fail-fast on unhandled rejections. Before this, an unhandled
+// promise rejection (forgotten await on insertAlert, mailer crash inside
+// queueMicrotask, etc.) silently logged a Node deprecation warning and the
+// process kept running with broken invariants. In Electron we throw so the
+// crash dialog shows; in server mode we exit so the supervisor restarts.
+// `process.on("unhandledRejection")` is registered once per process.
+process.on("unhandledRejection", (reason: unknown) => {
+  console.error("[boot] unhandled rejection:", reason);
+  if (IS_ELECTRON_INPROC) {
+    throw reason instanceof Error ? reason : new Error(String(reason));
+  }
+  process.exit(1);
+});
+
 try {
   validateAuthConfig();
 } catch (e) {
   fatalBoot("auth config invalid", e);
+}
+
+// v2.17.0 — surface SMTP partial-config at boot. The mailer's `readMailerConfig`
+// returns null silently when ANY required field is missing (host/port/user/
+// pass/from). Pre-fix, an operator who set 4 of 5 SMTP_* vars would see
+// "[email] disabled" only on the first dispatch attempt — invisible until an
+// alert actually fires. Now we eagerly probe at boot and warn-list which
+// pieces are missing so the misconfig is caught before any user impact.
+{
+  const smtpVars = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"];
+  const presentVars = smtpVars.filter((v) => (process.env[v] ?? "").trim().length > 0);
+  if (presentVars.length > 0 && readMailerConfig() === null) {
+    const missing = smtpVars.filter((v) => !((process.env[v] ?? "").trim().length > 0));
+    const port = process.env.SMTP_PORT?.trim();
+    const portInvalid =
+      missing.length === 0 && port !== undefined &&
+      !(Number.isFinite(Number(port)) && Number(port) >= 1 && Number(port) <= 65535);
+    console.warn(
+      `[email] SMTP partial config detected — mailer disabled. Set: ${presentVars.join(", ")}` +
+        (missing.length > 0 ? `; missing: ${missing.join(", ")}` : "") +
+        (portInvalid ? `; SMTP_PORT="${port}" out of range 1..65535` : ""),
+    );
+  }
 }
 
 // PR-9 fix B3: requestId trebuie sa existe inainte ca ownerContext sa returneze

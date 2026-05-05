@@ -1,8 +1,25 @@
 -- 0016_termen_dupa_solutie_kind.down.sql - restore pre-v2.15.0 alert-kind CHECK.
--- Daca exista randuri cu kind='termen_dupa_solutie' in DB, CHECK-ul vechi le
--- respinge si tranzactia esueaza. Operatorul trebuie sa decida explicit:
--- (1) sterge alertele compozite, sau (2) le converteste manual in
--- (solutie_aparuta + termen_new) inainte de rollback.
+--
+-- INTENTIONALLY FAIL-LOUD. Daca exista randuri cu kind='termen_dupa_solutie'
+-- in DB, INSERT SELECT-ul de mai jos esueaza pe CHECK constraint, transactia
+-- migration runner-ului face ROLLBACK, iar DB-ul ramane pe v0016 — nimic nu
+-- se sterge tacit.
+--
+-- Pentru a face downgrade-ul efectiv, operatorul trebuie EXPLICIT, INAINTE de
+-- a porni rollback-ul, sa decida ce face cu alertele compozite:
+--
+--   (1) Stergere completa (cazul "user-ul nu are nevoie de istoric"):
+--       DELETE FROM monitoring_alerts WHERE kind = 'termen_dupa_solutie';
+--
+--   (2) Conversie back-to-pair (cazul "vrem sa pastram istoricul vizibil pe
+--       UI-ul vechi"): scriem doua INSERT-uri manuale (solutie_aparuta +
+--       termen_new) extragand from.* / to.* din detail_json al fiecarui
+--       compozit, apoi DELETE pe cel original. NU exista script automat
+--       pentru asta — runner-ul nostru nu re-scrie alertele istorice.
+--
+-- Daca un downgrade fortat e necesar fara decizia operatorului, pune un
+-- DELETE FROM monitoring_alerts WHERE kind='termen_dupa_solutie'; deasupra
+-- DROP INDEX-urilor de mai jos. Asta NU e default — calea sigura e fail-loud.
 
 DROP INDEX IF EXISTS idx_alerts_owner_unread;
 DROP INDEX IF EXISTS idx_alerts_run;

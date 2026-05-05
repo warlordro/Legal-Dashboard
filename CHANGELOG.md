@@ -4,6 +4,118 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.17.0] - 2026-05-06
+
+### Multi-review hardening peste v2.16.1 — atomicitate audit, fail-loud boot, partial-success monitorizare nume, drift detector
+
+Sesiune de hardening operational care absoarbe 28 findings din `/full-review` rulat dupa v2.16.1, grupate
+in 5 prioritati (P1 critical → P5 nice-to-have). Zero schimbari in shape-ul UI; o singura schimbare
+observabila in afara codului — eticheta corecta in subiectul email-ului per alerta noua pentru kind-ul
+`termen_dupa_solutie` (era randat ca text raw inainte). Toate celelalte fix-uri sunt strict interne — un zid
+de aparare in plus pentru deploy-ul web cu multi-user / multi-worker.
+
+### Backend (`db/schema.ts`) — P1.1 + P3.3 + P5.1
+
+- **`hasPendingSchemaMigrations` rescris fail-closed** (P1.1, BLOCKER): catch-ul generic returna `false`
+  pre-fix (fail-open), exact scenariul cu cel mai mare risc — un DB corupt sau cu permisii rupte deschis
+  fara backup prealabil. Post-fix, orice esec la probe-ul read-only (corupt, permission, lock) returneaza
+  `true` pentru a forta backup-ul defensiv. Costul unui backup in plus e neglijabil; costul unui backup
+  ratat la un DB corupt e ireversibil.
+- **`preMigrationBackup` extins WAL/SHM** (P3.3, HIGH): copia includea pana acum doar `.db`. In WAL mode,
+  tranzactii recente pot sta in fisierele `-wal` / `-shm` care raman ne-backupuite. Acum `fs.copyFileSync`
+  copiaza si sidecars cand exista — backup-ul e o oglinda completa a starii la momentul rularii.
+- **`busy_timeout = 5000` pragma** (P5.1, defense-in-depth): toate conexiunile DB asteapta acum pana la
+  5 secunde la SQLITE_BUSY. Pe desktop single-user impactul e teoretic; pentru web multi-worker / multi-tab,
+  mark seen / dismiss nu mai pica sub locking aleator de la procesul de backup zilnic.
+
+### Backend (`routes/alerts.ts`) — P1.2
+
+- **Atomicitate audit + mutation pe PATCH alerts** (CRITICAL): cele 3 handlers (`/seen`, `/unseen`,
+  `/dismissed`) wrap acum repo call + `recordAudit` intr-o `getDb().transaction(() => { ... })()` atomica.
+  Pre-fix, audit log putea ramane incomplet daca a doua scriere esua (disc plin, lock); UI-ul putea arata
+  o alerta inchisa fara urma in audit. Better-sqlite3 nested transactions devin SAVEPOINT-uri, deci
+  wrap-ul exterior e safe peste tranzactiile interne ale repo-urilor.
+
+### Backend (`services/alerts/alertEventService.ts`) — P1.3
+
+- **Audit `monitoring.alert.emitted` la insert real** (HIGH): `recordAndDispatchAlert` scrie acum
+  eveniment audit la fiecare insert real (nu la dedup hit), cu `targetKind: "monitoring_alert"`,
+  `targetId: row.id`, detail `{ kind, severity, jobId, runId, dedupKey }`. Pre-fix, generarea unei alerte
+  noi nu lasa nicio urma in audit log — pentru deploy web cu multi-user, asta facea reconstructia "cand
+  a fost vazuta o schimbare" imposibila fara sa te bazezi doar pe `created_at` din tabel. Audit failure
+  logged la stderr fara sa crash-uieze runner-ul (best-effort, nu blocking — runner-ul de monitorizare nu
+  trebuie sa esueze pentru un audit failure).
+
+### Backend (`index.ts`) — P1.4 + P1.5
+
+- **`process.on("unhandledRejection")` handler** (P1.4, HIGH): log + exit (sau throw cand
+  `IS_ELECTRON_INPROC=true` ca Electron sa restart-uieze procesul). Pre-fix, un reject unhandled din
+  scheduler / background promise putea lasa procesul intr-o stare inconsistenta fara sa apara in logs.
+- **SMTP partial-config probe la boot** (P1.5, HIGH): daca cateva `SMTP_*` env vars sunt setate dar altele
+  lipsesc, log warn cu lista celor lipsa + verificare `SMTP_PORT` in range valid. Pre-fix, configurarea
+  partiala duce la `Mailer not configured` silent run-time fail; acum operatorul afla la boot exact ce
+  variabile lipsesc / sunt invalide.
+
+### Backend (`services/monitoring/nameSoapRunner.ts`) — P2.1
+
+- **Partial-success multi-institutie** (HIGH): `fetchForTarget` rescris cu colectie `failedInstitutii` —
+  bucla peste institutii continua la esec (signal aborts re-thrown), accumula erori, si arunca doar daca
+  **toate** institutiile au esuat. Pre-fix, un singur tribunal jos in scope-ul de monitorizare facea sa
+  esueze tot job-ul cu SOAP_FAIL desi alte institutii raspundeau corect. Mesajul de eroare la all-fail
+  enumera explicit institutiile care au esuat, ca debugging-ul sa nu necesite log scraping.
+
+### Backend (`services/monitoring/diff/dosarSoap.ts`) — P3.4
+
+- **Breadcrumb log la multi-pending bucket** (LOW): `console.warn` cand un bucket `(stadiu, complet)` are
+  multiple solutii pending si multiple termene neconsumate (drift in business logic — nu ar trebui sa
+  apara in fluxul normal). Pre-fix, picking the first un-consumed era silent.
+
+### Backend (`db/migrations/0016_termen_dupa_solutie_kind.down.sql`) — P2.2
+
+- **Sharpened fail-loud comment** (HIGH docs): comentariul rescris ca multi-line block care explica
+  explicit design-ul fail-loud + cele doua optiuni operator (delete sau back-to-pair conversion) cand un
+  downgrade fortat e necesar. Pre-fix, comentariul era ambiguu pe ce inseamna "fail loud" — operatorul
+  trebuia sa ghiceasca ce strategie sa adopte.
+
+### Backend (`services/email/mailer.ts` + `services/email/dailyReportTemplate.ts`) — P3.2
+
+- **`KIND_LABELS` / `SEVERITY_LABELS` tipizate strict** (HIGH + bug fix): hartile tipizate
+  `Record<AlertKind, string>` / `Record<AlertSeverity, string>` (in loc de `Record<string, string>` care
+  permitea labels lipsa silent). **Bug real fix:** `mailer.ts` lipsea label-ul `termen_dupa_solutie`
+  (introdus in v2.15.0) — pe email-urile per-alerta, subiectul randa textul tehnic raw
+  (`termen_dupa_solutie`) in loc de `Termen nou dupa solutie`. Type tightening surfaced via tsc + entry
+  adaugata. `dailyReportTemplate.ts` ajustat sa pasaze `AlertSeverity` typed in helpers.
+
+### Frontend (`pages/Alerts.tsx`) — P3.5
+
+- **Toast la `markSeen` failure** (LOW UX): `handleOpen` `markSeen` fire-and-forget capata `setError(...)`
+  la esec cu mesaj romanesc humanizat ("Marcarea alertei ca citita a esuat: ..."). Navigarea ramane
+  non-blocking (preserva v2.16.0 fire-and-forget design — nu blocheaza user-ul daca network-ul e lent).
+
+### Tests — P3.1 + P4
+
+- **819 teste backend** (de la 811 in v2.16.1, +8):
+  - +4 in `db/alertKindDrift.test.ts` (nou) — drift detector backend `ALERT_KINDS` / `ALERT_SEVERITIES` /
+    `ALERT_JOB_KINDS` vs frontend `alertsApi.ts` union via regex extraction; daca cineva adauga un kind
+    doar pe o parte, testul cade in CI inainte de release. Acopera si `alertKindLabels` keys vs union
+    members (label completeness).
+  - +2 in `services/alerts/alertEventService.test.ts` — audit row scris la insert real (`inserted=true`)
+    si NU la dedup hit (`inserted=false`). Verifica `target_kind`, `target_id`, `detail_json` shape.
+  - +2 in `services/monitoring/nameSoapRunner.test.ts` describe "partial-success on multi-institution
+    failures" — partial 2/3 success returns ok cu survivors; all-fail returns SOAP_FAIL cu mesaj enumerat.
+- **86 teste frontend** neschimbate (drift detector ruleaza pe backend cu fs read pe frontend source —
+  light-weight, fara file partajat de tipuri).
+- tsc backend + frontend verde, biome verde pentru cod nou (project baseline pentru
+  CRLF/template-literal/non-null pre-existing).
+
+### Versionare
+
+- Bump manifest/lockfile la `2.17.0` (minor — schimbarea observabila in afara codului e shape-ul email-ului
+  per-alerta pentru `termen_dupa_solutie`; rest strict intern, fara migrari, fara breaking changes pe rute
+  existente, fara DDL nou).
+
+---
+
 ## [2.16.1] - 2026-05-05
 
 ### Multi-review remediation post v2.16.0 — drift Zod, ORDER BY, transaction wrap, pre-migration backup

@@ -36,6 +36,67 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.17.0",
+    date: "6 Mai 2026",
+    subtitle:
+      "Sesiune de hardening operational dupa multi-review-ul facut peste v2.16.1, care absoarbe 28 de findings grupate in 5 prioritati (P1 critical → P5 nice-to-have). Zero schimbari vizibile in UI; toate fix-urile sunt strict interne sau pe shape-ul email-urilor (un kind de alerta lipsea din mapa de label-uri pe email-urile per-alerta — aparea ca text raw 'termen_dupa_solutie' in subiect). Robustete crescuta pe atomicitate audit / migratii cu sidecar / partial success in multi-institutie / boot fail-loud / drift detector kind-uri.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Eticheta corecta in subiectul email-ului per alerta noua",
+        content:
+          "Cand v2.15.0 a adaugat kind-ul Termen nou dupa solutie, mapa cu denumirile prietenoase din modulul de email per-alerta nu a fost actualizata. Pana acum, alertele de tip amanare ajungeau in subiectul email-ului cu textul tehnic 'termen_dupa_solutie' in loc de 'Termen nou dupa solutie'. Acum mapa este tipizata strict pe lista oficiala a kind-urilor — daca cineva mai uita sa adauge un label nou la introducerea unui kind, compilatorul refuza sa porneasca.",
+      },
+      {
+        title: "Audit log si actiunea de business sunt acum atomic legate",
+        content:
+          "Operatiile de marcat alerta ca citita / necitita / inchisa scriau in DB intai randul actualizat si apoi audit log-ul (in tranzactii separate). Daca a doua scriere esua (de exemplu disc plin), audit-ul ramanea incomplet desi alerta era deja modificata. Acum ambele se fac in aceeasi tranzactie: ori se intampla amandoua, ori niciuna. Nu poti ramane cu o stare in care UI-ul arata o alerta inchisa fara o urma in audit log.",
+      },
+      {
+        title: "Eveniment audit nou: monitoring.alert.emitted",
+        content:
+          "Pana acum, cand o monitorizare detecta o schimbare si genera o alerta noua, inserarea in DB nu lasa nicio urma in audit log. Acum, fiecare alerta proaspata (insert real, nu dedup hit) scrie un audit cu kind-ul, severitatea, jobId, runId si dedupKey. Pentru deploy-ul web cu mai multi utilizatori, asta inseamna ca poti reconstitui exact cand a fost vazuta o schimbare, fara sa te bazezi doar pe coloana created_at din tabelul de alerte.",
+      },
+      {
+        title: "Backup la migratii include si fisierele WAL/SHM",
+        content:
+          "Cand se face backup automat inainte de o migratie de schema, copia includea pana acum doar fisierul .db principal. Daca aplicatia ruleaza in mod WAL (write-ahead log), tranzactii recente puteau fi in fisierele -wal si -shm care nu erau backupuite. Acum copia include si aceste sidecars (cand exista) — backup-ul e o oglinda completa a starii la momentul rularii.",
+      },
+      {
+        title: "Monitorizare nume — succes partial cand cateva instante esueaza",
+        content:
+          "Cand monitorizarea unui nume e scopata pe mai multe instante (ex: tribunale specifice in loc de toate), pana acum un singur esec SOAP la una din instante facea sa esueze tot job-ul cu eroare. Acum, daca cel putin o instanta raspunde cu succes, job-ul continua cu rezultatele acelora; doar cand TOATE esueaza alerta de eroare e generata. Practic: un downtime izolat la un tribunal nu mai impiedica detectarea schimbarilor la altele.",
+      },
+      {
+        title: "Boot fail-loud cand fisierul DB e corupt sau inaccesibil",
+        content:
+          "La pornirea aplicatiei, daca probe-ul read-only de detectie migratii pendinte arunca o eroare, pana acum se considera ca nu sunt migratii noi (fail-open) si se sarea backup-ul automat. Asta era exact scenariul cu cel mai mare risc: un DB corupt deschis fara backup prealabil. Acum, orice esec la probe e considerat ca exista migratii pendinte (fail-closed) — backup-ul se face oricum, chiar daca e potential inutil. Costul unui backup in plus e neglijabil; costul unui backup ratat la un DB corupt e ireversibil.",
+      },
+      {
+        title: "Robustete crescuta la concurenta SQLite (busy_timeout)",
+        content:
+          "Toate conexiunile DB asteapta acum pana la 5 secunde cand intalnesc un alt scriitor (in loc sa esueze imediat cu SQLITE_BUSY). Pe desktop single-user impactul e teoretic; pentru deploy-ul web cu multiple workers / mai multe tab-uri / mai multe device-uri, garantia e ca operatiile scurte (mark seen, dismiss) nu mai pica sub locking aleator de la procesul de backup.",
+      },
+      {
+        title: "Toast la esec marcare automata ca citita",
+        content:
+          "Cand apesi pe Dosare dintr-o alerta, marcarea ca citita ruleaza in fundal (fara sa intarzie navigarea — comportament v2.16.0). Daca request-ul esua silent, alerta ramanea in inboxul de necitite. Acum, in caz de esec, apare un toast in romana ('Marcarea alertei ca citita a esuat: ...') ca sa stii ca trebuie sa o marchezi manual. Navigarea ramane fire-and-forget — nu blochezi user-ul daca network-ul e lent.",
+      },
+      {
+        title: "Detector automat pentru drift intre kind-uri backend si frontend",
+        content:
+          "Backend-ul si frontend-ul declara separat lista cu kind-urile de alerte (12 kind-uri valide). Daca cineva adauga un kind doar intr-o parte, ambele tsc trec (fiecare verifica pe propria definitie), dar la runtime kind-ul nou nu apare in dropdown sau nu primeste label. Un test backend nou citeste fisierul frontend ca text, extrage union-ul cu regex si compara seturile — daca apare un kind doar pe o parte, testul cade in CI inainte de release.",
+      },
+      {
+        title: "Acoperire suplimentara pe regression tests",
+        content:
+          "+8 teste backend total (4 pentru drift detector kind-uri, 2 pentru audit row scris la insert real / nu la dedup hit, 2 pentru partial success multi-institutie in monitorizarea nume). Total: 819 teste backend (de la 811 in v2.16.1), 86 teste frontend.",
+      },
+    ],
+  },
+  {
     version: "v2.16.1",
     date: "5 Mai 2026",
     subtitle:

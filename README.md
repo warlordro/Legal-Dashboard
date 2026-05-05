@@ -7,10 +7,23 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.16.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.17.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.16.1** - Multi-review remediation post v2.16.0, hardening intern
+Ultimul release **v2.17.0** - Multi-review hardening peste v2.16.1, 28 findings absorbite
+din `/full-review` (P1 critical → P5 nice-to-have). Atomicitate audit + mutation pe
+PATCH alerts (`db.transaction` wrap pe `/seen` / `/unseen` / `/dismissed`), audit nou
+`monitoring.alert.emitted` la insert real, `hasPendingSchemaMigrations` rescris fail-closed,
+`preMigrationBackup` extins WAL/SHM sidecars, `busy_timeout=5000` pragma, `unhandledRejection`
+handler, SMTP partial-config probe la boot, partial-success multi-institutie in
+`nameSoapRunner` (esec single tribunal nu mai esueaza tot job-ul), `mailer.ts` `KIND_LABELS`
+tipizat `Record<AlertKind>` + entry `termen_dupa_solutie` lipsa adaugata (bug real fix —
+subiectul email-ului per alerta randa acum `Termen nou dupa solutie` in loc de text raw),
+toast romanesc la `markSeen` failure (preserva fire-and-forget). **819 teste backend**
+(+8: 4 drift detector kind/severity/jobKind backend↔frontend, 2 audit row scris/nu scris,
+2 partial-success multi-institutie), **86 teste frontend**.
+
+Predecesor **v2.16.1** - Multi-review remediation post v2.16.0, hardening intern
 fara schimbari de contract HTTP / shape UI / DDL: single source of truth pentru
 `ALERT_KINDS` / `ALERT_SEVERITIES` / `ALERT_JOB_KINDS` (CRITICAL drift fix — schemele
 Zod nu mai duplica enumerarile), `selectAlertIdsByFilters` ORDER BY DESC pentru
@@ -384,7 +397,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (811 teste dupa v2.16.1) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (819 teste dupa v2.17.0) |
 | `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (86 teste dupa v2.14.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |

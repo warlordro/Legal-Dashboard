@@ -21,6 +21,26 @@ function preMigrationBackup(src: string, label: string): void {
     const dest = path.join(dir, `legal-dashboard.pre-${label}-${stamp}.db`);
     // Plain file copy — DB is not yet opened when this runs (called from getDb before new Database(...)).
     fs.copyFileSync(src, dest);
+    // v2.17.0 — also copy WAL (-wal) and SHM (-shm) sidecars when they exist.
+    // SQLite serializes a checkpointed copy of the latest committed pages in
+    // the WAL; without it, restoring the .db alone could lose in-flight writes
+    // that hadn't been checkpointed back into the main file at shutdown. The
+    // -shm file is regenerated from -wal on open, but copying both keeps the
+    // backup self-consistent without requiring SQLite tooling on the recovery
+    // host. Sidecars-missing is fine (DB was checkpointed clean).
+    for (const suffix of ["-wal", "-shm"] as const) {
+      const sidecarSrc = src + suffix;
+      if (fs.existsSync(sidecarSrc)) {
+        try {
+          fs.copyFileSync(sidecarSrc, dest + suffix);
+        } catch (e) {
+          console.warn(
+            `[schema] pre-migration backup sidecar ${suffix} failed (continuing):`,
+            e instanceof Error ? e.message : e,
+          );
+        }
+      }
+    }
     console.log(`[schema] pre-migration backup -> ${dest}`);
   } catch (e) {
     console.warn(`[schema] pre-migration backup failed (continuing):`, e instanceof Error ? e.message : e);
@@ -71,6 +91,13 @@ export function getDb(): Database.Database {
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // v2.17.0 — busy_timeout 5s. better-sqlite3 returns SQLITE_BUSY immediately
+  // when a writer holds the lock; with WAL + a single writer (this process)
+  // contention is rare, but daily backup, manual restore, and the maintenance
+  // RWLock briefly block the connection. busy_timeout makes SQLite spin-wait
+  // up to 5s before returning SQLITE_BUSY rather than failing the request
+  // outright when a transient overlap happens.
+  db.pragma("busy_timeout = 5000");
 
   // Truncate oversized WAL on boot. VACUUM + massive UPDATE sequences leave the -wal file
   // bloated (SQLite only auto-checkpoints, doesn't truncate). One-shot check: if WAL >
@@ -97,9 +124,12 @@ export function getDb(): Database.Database {
 
 // v2.16.1 — pre-open probe: pe un readonly connection citim _schema_versions
 // si comparam cu fisierele de pe disk. Returneaza true daca exista vreo
-// migration version necunoscuta la stored set (= pending). Eroarea pe probe e
-// interpretata defensiv ca "fara pending" — boot-ul continua, runner-ul
-// propriu-zis arunca daca e drift real.
+// migration version necunoscuta la stored set (= pending).
+// v2.17.0 — fail-closed: cand probe-ul nu poate citi `_schema_versions` (DB
+// blocat de alt proces, eroare I/O tranzitorie, glitch de permisiuni), tratam
+// ca "ar putea avea pending" si trigger-uim backup-ul. Un backup inutil e
+// ieftin (copy de fisier); un backup ratat inainte de ALTER destructiv
+// inseamna pierdere de date.
 function hasPendingSchemaMigrations(dbPath: string): boolean {
   try {
     const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
@@ -125,7 +155,7 @@ function hasPendingSchemaMigrations(dbPath: string): boolean {
       probe.close();
     }
   } catch {
-    return false;
+    return true;
   }
 }
 

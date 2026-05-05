@@ -173,14 +173,44 @@ async function fetchForTarget(
 ): Promise<Dosar[]> {
   const institutii = target.institutie?.length ? target.institutie : [undefined];
   const byNumar = new Map<string, Dosar>();
+  // v2.17.0 — partial-success on multi-institution targets. Pre-fix, a single
+  // SOAP failure on iteration N (e.g. PortalJust 504 for Curtea de Apel Cluj)
+  // would throw and lose the rows already collected from iterations 0..N-1.
+  // For a 5-institution target with one flaky court, the user got a
+  // SOAP_FAIL/source_error alert instead of 4 courts' worth of legitimate
+  // diff. Now: try each institution, log the failures, and only re-throw if
+  // every single institution failed (= upstream-down, the right time to alert
+  // SOAP_FAIL). If `signal.aborted` fires mid-loop we stop early — the run
+  // outcome path in the caller maps that to status="aborted".
+  const failedInstitutii: Array<{ institutie: string | undefined; error: string }> = [];
   for (const institutie of institutii) {
-    const rows = await searchDosare(
-      { numeParte: target.name_normalized, institutie },
-      { signal },
-    );
-    for (const dosar of rows) {
-      if (dosar.numar) byNumar.set(dosar.numar, dosar);
+    if (signal.aborted) throw new Error("aborted");
+    try {
+      const rows = await searchDosare(
+        { numeParte: target.name_normalized, institutie },
+        { signal },
+      );
+      for (const dosar of rows) {
+        if (dosar.numar) byNumar.set(dosar.numar, dosar);
+      }
+    } catch (err) {
+      // Abort/timeout semantics belong to the caller (composed signal in run()):
+      // re-throw so they get mapped to aborted/timeout outcomes, not a partial
+      // success with failedInstitutii. Only swallow per-institution upstream
+      // errors (network blip, 5xx, parse fail).
+      if (signal.aborted) throw err;
+      const msg = err instanceof Error ? err.message : String(err);
+      failedInstitutii.push({ institutie, error: msg });
+      console.warn(
+        `[nameSoapRunner] partial: institutie=${institutie ?? "<all>"} failed: ${msg}`,
+      );
     }
+  }
+  if (failedInstitutii.length === institutii.length) {
+    const summary = failedInstitutii
+      .map((f) => `${f.institutie ?? "<all>"}: ${f.error}`)
+      .join("; ");
+    throw new Error(`all institutions failed — ${summary}`);
   }
   // Strict-word filter (2026-05-03): PortalJust returneaza dosare unde oricare
   // dintre cuvintele numele subiectului apare ca substring intr-una dintre

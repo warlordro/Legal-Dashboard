@@ -23,6 +23,7 @@ import {
   subscribeToNewAlerts,
   type MonitoringAlertRow,
 } from "../db/monitoringAlertsRepository.ts";
+import { getDb } from "../db/schema.ts";
 import { deriveAlertDigestRow } from "../services/email/dailyReportTemplate.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { fail, ok } from "../util/envelope.ts";
@@ -155,17 +156,26 @@ alertsRouter.patch("/:id/seen", limitAlertPatchBody, (c) => {
     return c.json(fail("invalid_id", "ID invalid", c), 400);
   }
 
-  const row = markAlertSeen(ownerId, id);
+  // v2.17.0 — wrap mutation + audit in a single transaction so an audit
+  // failure rolls back the seen flip. better-sqlite3 nests via SAVEPOINTs:
+  // markAlertSeen's inner transaction becomes a savepoint inside this one,
+  // so the lock is acquired once at the outer boundary.
+  const row = getDb().transaction(() => {
+    const updated = markAlertSeen(ownerId, id);
+    if (!updated) return null;
+    recordAudit(c, "alert_seen", {
+      targetKind: "monitoring_alert",
+      targetId: String(id),
+      detail: { jobId: updated.job_id, kind: updated.kind },
+    });
+    return updated;
+  })();
+
   if (!row) {
     // Audit only on the success path. Auditing the 404 would let a foreign
     // tenant probe ID existence by reading their own audit_log later.
     return c.json(fail("not_found", "Alerta inexistenta", c), 404);
   }
-  recordAudit(c, "alert_seen", {
-    targetKind: "monitoring_alert",
-    targetId: String(id),
-    detail: { jobId: row.job_id, kind: row.kind },
-  });
   return c.json(ok(row, c));
 });
 
@@ -176,15 +186,20 @@ alertsRouter.patch("/:id/unseen", limitAlertPatchBody, (c) => {
     return c.json(fail("invalid_id", "ID invalid", c), 400);
   }
 
-  const row = markAlertUnseen(ownerId, id);
+  const row = getDb().transaction(() => {
+    const updated = markAlertUnseen(ownerId, id);
+    if (!updated) return null;
+    recordAudit(c, "alert_unseen", {
+      targetKind: "monitoring_alert",
+      targetId: String(id),
+      detail: { jobId: updated.job_id, kind: updated.kind },
+    });
+    return updated;
+  })();
+
   if (!row) {
     return c.json(fail("not_found", "Alerta inexistenta", c), 404);
   }
-  recordAudit(c, "alert_unseen", {
-    targetKind: "monitoring_alert",
-    targetId: String(id),
-    detail: { jobId: row.job_id, kind: row.kind },
-  });
   return c.json(ok(row, c));
 });
 
@@ -195,15 +210,20 @@ alertsRouter.patch("/:id/dismissed", limitAlertPatchBody, (c) => {
     return c.json(fail("invalid_id", "ID invalid", c), 400);
   }
 
-  const row = dismissAlert(ownerId, id);
+  const row = getDb().transaction(() => {
+    const updated = dismissAlert(ownerId, id);
+    if (!updated) return null;
+    recordAudit(c, "alert_dismissed", {
+      targetKind: "monitoring_alert",
+      targetId: String(id),
+      detail: { jobId: updated.job_id, kind: updated.kind },
+    });
+    return updated;
+  })();
+
   if (!row) {
     return c.json(fail("not_found", "Alerta inexistenta", c), 404);
   }
-  recordAudit(c, "alert_dismissed", {
-    targetKind: "monitoring_alert",
-    targetId: String(id),
-    detail: { jobId: row.job_id, kind: row.kind },
-  });
   return c.json(ok(row, c));
 });
 

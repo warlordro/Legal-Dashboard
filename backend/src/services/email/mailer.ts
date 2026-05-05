@@ -1,5 +1,9 @@
 import type { Transporter } from "nodemailer";
-import type { MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
+import type {
+  AlertKind,
+  AlertSeverity,
+  MonitoringAlertRow,
+} from "../../db/monitoringAlertsRepository.ts";
 import type { EmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
 
 interface MailerConfig {
@@ -80,16 +84,23 @@ export function resetMailerForTests(): void {
   mailerStatusLogged = false;
 }
 
-const SEVERITY_LABELS: Record<string, string> = {
+// v2.17.0 — typed as `Record<AlertSeverity|AlertKind, string>` (was
+// `Record<string, string>`) so the canonical tuples in monitoringAlertsRepository
+// stay the single source of truth. Pre-fix this map was missing
+// `termen_dupa_solutie` (added in v2.15.0) entirely, so the kind composite
+// alerts surfaced in the per-alert email subject as the raw `termen_dupa_solutie`
+// token instead of the human label. tsc would now refuse the missing entry.
+const SEVERITY_LABELS: Record<AlertSeverity, string> = {
   info: "Info",
   warning: "Avertisment",
   critical: "Critic",
 };
 
-const KIND_LABELS: Record<string, string> = {
+const KIND_LABELS: Record<AlertKind, string> = {
   dosar_new: "Dosar nou",
   termen_new: "Termen nou",
   termen_changed: "Termen modificat",
+  termen_dupa_solutie: "Termen nou dupa solutie",
   solutie_aparuta: "Solutie aparuta",
   dosar_disappeared: "Dosar disparut",
   stadiu_changed: "Stadiu modificat",

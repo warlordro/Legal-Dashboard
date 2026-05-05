@@ -375,6 +375,21 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
       }
       // No 1:1 reschedule. Try merging with a pending solutie on same bucket.
       const pendingArr = pendingSolutiiByBucket.get(bucket);
+      // v2.17.0 — visibility log when more than one solutie is pending on the
+      // same (stadiu, complet) bucket. The merge picks the first un-consumed
+      // candidate; in normal traffic that's the only one. Multiple = same
+      // panel issued ≥2 rulings on the same complet within one diff window,
+      // which is unusual enough that we want a breadcrumb in stderr to
+      // confirm the chosen merge target was the intended one.
+      if (pendingArr && pendingArr.length > 1) {
+        const unconsumed = pendingArr.filter((p) => !consumedPendingSolutii.has(p));
+        if (unconsumed.length > 1) {
+          console.warn(
+            `[dosarSoap] multiple pending solutii in bucket ${bucket}; ` +
+              `picking first un-consumed (count=${unconsumed.length})`,
+          );
+        }
+      }
       const pending = pendingArr?.find((p) => !consumedPendingSolutii.has(p));
       if (pending) {
         consumedPendingSolutii.add(pending);

@@ -680,7 +680,17 @@ export default function Alerts({
                   .markSeen(alert.id)
                   .then(() => onAlertsChanged?.())
                   .catch((err) => {
+                    // v2.17.0 — surface marcarea esuata in banner-ul de eroare al
+                    // paginii. Pre-fix doar `console.warn` — daca markSeen cadea
+                    // (rate-limit, retea), user-ul revenea la pagina si vedea
+                    // alerta in continuare ca necitita fara explicatie. Pastram
+                    // semantica fire-and-forget (nu blocheaza navigarea).
                     console.warn("[alerts] mark seen on open failed", err);
+                    setError(
+                      err instanceof Error
+                        ? `Marcarea alertei ca citita a esuat: ${err.message}`
+                        : "Marcarea alertei ca citita a esuat.",
+                    );
                   });
               }
               onOpenDosar(ctx.numarDosar);

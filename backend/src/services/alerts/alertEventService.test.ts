@@ -114,6 +114,91 @@ describe("recordAndDispatchAlert", () => {
     expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
   });
 
+  it("writes a monitoring.alert.emitted audit row on fresh insert", () => {
+    const jobId = seedJob("local");
+    const runId = seedRun("local", jobId);
+    const before = getDb()
+      .prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'monitoring.alert.emitted'`)
+      .get() as { n: number };
+    const { row, inserted } = recordAndDispatchAlert({
+      ownerId: "local",
+      jobId,
+      runId,
+      kind: "termen_new",
+      severity: "info",
+      title: "Termen nou",
+      detail: {},
+      dedupKey: "evt-audit-1",
+    });
+    expect(inserted).toBe(true);
+    const after = getDb()
+      .prepare(
+        `SELECT owner_id, target_kind, target_id, action, detail_json
+           FROM audit_log
+          WHERE action = 'monitoring.alert.emitted'
+          ORDER BY id DESC
+          LIMIT 1`,
+      )
+      .get() as {
+      owner_id: string;
+      target_kind: string;
+      target_id: string;
+      action: string;
+      detail_json: string;
+    };
+    const total = getDb()
+      .prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'monitoring.alert.emitted'`)
+      .get() as { n: number };
+    expect(total.n).toBe(before.n + 1);
+    expect(after.owner_id).toBe("local");
+    expect(after.target_kind).toBe("monitoring_alert");
+    expect(after.target_id).toBe(String(row.id));
+    const detail = JSON.parse(after.detail_json) as {
+      kind: string;
+      severity: string;
+      jobId: number;
+      runId: number;
+      dedupKey: string;
+    };
+    expect(detail.kind).toBe("termen_new");
+    expect(detail.severity).toBe("info");
+    expect(detail.jobId).toBe(jobId);
+    expect(detail.runId).toBe(runId);
+    expect(detail.dedupKey).toBe("evt-audit-1");
+  });
+
+  it("does not write an audit row on a dedup hit (inserted=false)", () => {
+    const jobId = seedJob("local");
+    const runId = seedRun("local", jobId);
+    recordAndDispatchAlert({
+      ownerId: "local",
+      jobId,
+      runId,
+      kind: "termen_new",
+      severity: "info",
+      title: "Termen nou",
+      detail: {},
+      dedupKey: "evt-audit-dup",
+    });
+    const after1 = getDb()
+      .prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'monitoring.alert.emitted'`)
+      .get() as { n: number };
+    recordAndDispatchAlert({
+      ownerId: "local",
+      jobId,
+      runId,
+      kind: "termen_new",
+      severity: "info",
+      title: "Termen nou (dup)",
+      detail: {},
+      dedupKey: "evt-audit-dup",
+    });
+    const after2 = getDb()
+      .prepare(`SELECT COUNT(*) AS n FROM audit_log WHERE action = 'monitoring.alert.emitted'`)
+      .get() as { n: number };
+    expect(after2.n).toBe(after1.n);
+  });
+
   it("does not dispatch email on a dedup hit (inserted=false)", async () => {
     upsertEmailSettings("local", {
       enabled: true,

@@ -1,11 +1,19 @@
-import type { MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
+import type {
+  AlertKind,
+  AlertSeverity,
+  MonitoringAlertRow,
+} from "../../db/monitoringAlertsRepository.ts";
 
 // v2.13.0: HTML + text template pentru daily digest email. Genereaza un singur
 // email per owner cu toate alertele din ziua precedenta, grupate vizual pe
 // severitate (critical → warning → info). Numerele de dosar sunt link-uri
 // catre portal.just.ro/SitePages/cautare.aspx?k=<numar> (URL public).
 
-const SEVERITY_LABELS: Record<string, string> = {
+// v2.17.0 — typed as `Record<AlertSeverity, string>` / `Record<AlertKind, string>`
+// (was `Record<string, string>`) so adding a new alert kind to the canonical
+// `ALERT_KINDS` tuple in monitoringAlertsRepository surfaces here as a tsc
+// error instead of a silent fall-through to a raw kind string in the email.
+const SEVERITY_LABELS: Record<AlertSeverity, string> = {
   info: "Info",
   warning: "Avertisment",
   critical: "Critic",
@@ -13,7 +21,7 @@ const SEVERITY_LABELS: Record<string, string> = {
 
 const SEVERITY_ORDER = ["critical", "warning", "info"] as const;
 
-const KIND_LABELS: Record<string, string> = {
+const KIND_LABELS: Record<AlertKind, string> = {
   dosar_new: "Dosar nou",
   termen_new: "Termen nou",
   termen_changed: "Termen modificat",
@@ -133,7 +141,7 @@ export interface RenderedDailyReport {
   rowCount: number;
 }
 
-function renderHtmlSeverityBlock(severity: string, rows: AlertDigestRow[]): string {
+function renderHtmlSeverityBlock(severity: AlertSeverity, rows: AlertDigestRow[]): string {
   if (rows.length === 0) return "";
   const label = SEVERITY_LABELS[severity] ?? severity;
   const accent = severity === "critical" ? "#dc2626" : severity === "warning" ? "#d97706" : "#0284c7";
@@ -170,7 +178,7 @@ function renderHtmlSeverityBlock(severity: string, rows: AlertDigestRow[]): stri
   ].join("");
 }
 
-function renderTextSeverityBlock(severity: string, rows: AlertDigestRow[]): string {
+function renderTextSeverityBlock(severity: AlertSeverity, rows: AlertDigestRow[]): string {
   if (rows.length === 0) return "";
   const label = SEVERITY_LABELS[severity] ?? severity;
   const lines: string[] = [`### ${label} (${rows.length})`, ""];

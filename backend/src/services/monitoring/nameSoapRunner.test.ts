@@ -391,3 +391,68 @@ describe("nameSoapRunner - strict word filter", () => {
     expect(payload.dosare.map((d) => d.numar)).toEqual(["1/1/2024"]);
   });
 });
+
+// v2.17.0 — partial-success on multi-institution targets. Pre-fix one flaky
+// court (e.g. PortalJust 504 for Curtea de Apel Cluj) wiped the entire run
+// even when 4 other courts returned legitimate diff-eligible data.
+describe("nameSoapRunner - partial-success on multi-institution failures", () => {
+  it("partial: one of three institutii fails; runner returns ok with the survivors", async () => {
+    const job = seedJob({
+      targetJson: JSON.stringify({
+        name_normalized: "ION POPESCU",
+        institutie: ["Judecatoria A", "Judecatoria B", "Judecatoria C"],
+      }),
+    });
+    const runner = createNameSoapRunner({
+      searchDosare: async (params) => {
+        if (params.institutie === "Judecatoria B") {
+          throw new Error("upstream 504");
+        }
+        const inst = params.institutie ?? "unknown";
+        return [makeDosar(`1/${inst}/2024`, "fond", "civil", inst)];
+      },
+    });
+
+    const out = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    const snap = getLatestSnapshot(job.owner_id, job.id);
+    const payload = JSON.parse(snap!.payload_json) as {
+      dosare: Array<{ numar: string }>;
+    };
+    expect(payload.dosare.map((d) => d.numar).sort()).toEqual([
+      "1/Judecatoria A/2024",
+      "1/Judecatoria C/2024",
+    ]);
+  });
+
+  it("all institutii fail -> runner returns SOAP_FAIL", async () => {
+    const job = seedJob({
+      targetJson: JSON.stringify({
+        name_normalized: "ION POPESCU",
+        institutie: ["Judecatoria A", "Judecatoria B"],
+      }),
+    });
+    const runner = createNameSoapRunner({
+      searchDosare: async () => {
+        throw new Error("upstream 504");
+      },
+    });
+
+    const out = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("error");
+    expect(out.errorCode).toBe("SOAP_FAIL");
+    expect(String(out.errorMessage)).toContain("all institutions failed");
+  });
+});
