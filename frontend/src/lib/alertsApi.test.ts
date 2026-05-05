@@ -157,3 +157,55 @@ describe("alertsApi.exportAlerts", () => {
     });
   });
 });
+
+describe("alertsApi.dismissBulk", () => {
+  let lastInit: RequestInit | undefined;
+
+  beforeEach(() => {
+    lastInit = undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init?: RequestInit) => {
+        lastCalledUrl = url;
+        lastInit = init;
+        return new Response(
+          JSON.stringify({
+            data: { dismissedCount: 0, alreadyDismissedCount: 0, totalMatched: 0 },
+            requestId: "req",
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } }
+        );
+      })
+    );
+  });
+
+  it("POSTs ids payload as JSON to /dismiss-bulk", async () => {
+    await alertsApi.dismissBulk({ mode: "ids", ids: [10, 11, 12] });
+    expect(lastCalledUrl).toBe("/api/v1/alerts/dismiss-bulk");
+    expect(lastInit?.method).toBe("POST");
+    expect(JSON.parse(lastInit?.body as string)).toEqual({
+      mode: "ids",
+      ids: [10, 11, 12],
+    });
+  });
+
+  it("POSTs filters payload mirroring the list filter shape", async () => {
+    await alertsApi.dismissBulk({
+      mode: "filters",
+      filters: { severity: "warning", q: "abc", onlyUnread: true },
+    });
+    const body = JSON.parse(lastInit?.body as string) as {
+      mode: string;
+      filters: { severity: string; q: string; onlyUnread: boolean };
+    };
+    expect(body.mode).toBe("filters");
+    expect(body.filters.severity).toBe("warning");
+    expect(body.filters.q).toBe("abc");
+    expect(body.filters.onlyUnread).toBe(true);
+  });
+
+  it("supports empty filters payload (close every visible alert under no extra filter)", async () => {
+    await alertsApi.dismissBulk({ mode: "filters" });
+    expect(JSON.parse(lastInit?.body as string)).toEqual({ mode: "filters" });
+  });
+});

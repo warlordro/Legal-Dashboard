@@ -17,6 +17,7 @@ const KIND_LABELS: Record<string, string> = {
   dosar_new: "Dosar nou",
   termen_new: "Termen nou",
   termen_changed: "Termen modificat",
+  termen_dupa_solutie: "Termen nou dupa solutie",
   solutie_aparuta: "Solutie aparuta",
   dosar_disappeared: "Dosar disparut",
   stadiu_changed: "Stadiu modificat",
@@ -86,8 +87,7 @@ export function deriveAlertDigestRow(alert: MonitoringAlertRow): AlertDigestRow 
     asString(target.numar_dosar) ??
     asString(target.numar) ??
     null;
-  const nameMonitored =
-    asString(detail.name_normalized) ?? asString(target.name_normalized) ?? null;
+  const nameMonitored = asString(detail.name_normalized) ?? asString(target.name_normalized) ?? null;
   return {
     id: alert.id,
     createdAt: alert.created_at,
@@ -133,18 +133,10 @@ export interface RenderedDailyReport {
   rowCount: number;
 }
 
-function renderHtmlSeverityBlock(
-  severity: string,
-  rows: AlertDigestRow[],
-): string {
+function renderHtmlSeverityBlock(severity: string, rows: AlertDigestRow[]): string {
   if (rows.length === 0) return "";
   const label = SEVERITY_LABELS[severity] ?? severity;
-  const accent =
-    severity === "critical"
-      ? "#dc2626"
-      : severity === "warning"
-        ? "#d97706"
-        : "#0284c7";
+  const accent = severity === "critical" ? "#dc2626" : severity === "warning" ? "#d97706" : "#0284c7";
   const tableRows = rows
     .map((row) => {
       const dosarCell = row.dosarLink
@@ -178,10 +170,7 @@ function renderHtmlSeverityBlock(
   ].join("");
 }
 
-function renderTextSeverityBlock(
-  severity: string,
-  rows: AlertDigestRow[],
-): string {
+function renderTextSeverityBlock(severity: string, rows: AlertDigestRow[]): string {
   if (rows.length === 0) return "";
   const label = SEVERITY_LABELS[severity] ?? severity;
   const lines: string[] = [`### ${label} (${rows.length})`, ""];
@@ -191,7 +180,7 @@ function renderTextSeverityBlock(
       `- [${formatTime(row.createdAt)}] ${row.kindLabel}: ${row.title}`,
       `  Dosar: ${dosar}`,
       `  Nume monitorizat: ${row.nameMonitored ?? "—"}`,
-      "",
+      ""
     );
   }
   return lines.join("\n");
@@ -213,8 +202,7 @@ export function renderDailyReport(input: DailyReportTemplateInput): RenderedDail
     rows.length === 1 ? "alerta" : "alerte"
   }`;
 
-  const htmlSections = SEVERITY_ORDER
-    .map((sev) => renderHtmlSeverityBlock(sev, grouped.get(sev) ?? []))
+  const htmlSections = SEVERITY_ORDER.map((sev) => renderHtmlSeverityBlock(sev, grouped.get(sev) ?? []))
     .filter((s) => s.length > 0)
     .join("");
   const html = [
@@ -228,8 +216,7 @@ export function renderDailyReport(input: DailyReportTemplateInput): RenderedDail
     "</div>",
   ].join("");
 
-  const textSections = SEVERITY_ORDER
-    .map((sev) => renderTextSeverityBlock(sev, grouped.get(sev) ?? []))
+  const textSections = SEVERITY_ORDER.map((sev) => renderTextSeverityBlock(sev, grouped.get(sev) ?? []))
     .filter((s) => s.length > 0)
     .join("\n");
   const text = [

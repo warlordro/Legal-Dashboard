@@ -156,6 +156,28 @@ describe("GET /api/v1/alerts", () => {
     expect(json.error.code).toBe("invalid_query");
   });
 
+  // v2.16.1 — regression: pre-fix, the inline kind enum on GET / dropped
+  // `termen_dupa_solutie` (added in v2.15.0), so any client filtering on the
+  // composite kind got 400 even though the alert is in the DB. Once the route
+  // consumes ALERT_KINDS, future kinds must keep this green.
+  it("accepts kind=termen_dupa_solutie filter (v2.15.0 composite)", async () => {
+    const app = buildTestApp();
+    const composite = seedAlert(OWNER_A, {
+      kind: "termen_dupa_solutie",
+      title: "Termen dupa solutie",
+      dedupKey: "tds-1",
+    });
+    seedAlert(OWNER_A, { kind: "termen_new", dedupKey: "tds-2" });
+
+    const res = await app.request("/api/v1/alerts?kind=termen_dupa_solutie", {
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertListResponse;
+    expect(json.data.total).toBe(1);
+    expect(json.data.rows[0].id).toBe(composite.id);
+  });
+
   it("filters alerts by source job kind", async () => {
     const app = buildTestApp();
     const dosarJob = seedJob(OWNER_A, "dosar-kind", {
@@ -378,6 +400,54 @@ describe("PATCH /api/v1/alerts/:id/seen and /dismissed", () => {
       headers: { "x-test-owner": OWNER_B },
     });
     expect(dismissed.status).toBe(404);
+  });
+
+  it("PATCH /:id/unseen toggles read_at back to null on owned alerts", async () => {
+    const app = buildTestApp();
+    const alert = seedAlert(OWNER_A);
+
+    const seen = await app.request(`/api/v1/alerts/${alert.id}/seen`, {
+      method: "PATCH",
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(seen.status).toBe(200);
+    const seenJson = (await seen.json()) as { data: MonitoringAlertRow };
+    expect(seenJson.data.read_at).toBeTruthy();
+
+    const unseen = await app.request(`/api/v1/alerts/${alert.id}/unseen`, {
+      method: "PATCH",
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(unseen.status).toBe(200);
+    const unseenJson = (await unseen.json()) as { data: MonitoringAlertRow };
+    expect(unseenJson.data.read_at).toBeNull();
+    // is_new stays 0 — we already broadcast the SSE "new alert" event on insert,
+    // toggling unread shouldn't re-fire it.
+    expect(unseenJson.data.is_new).toBe(0);
+  });
+
+  it("PATCH /:id/unseen is idempotent on already-unread alerts", async () => {
+    const app = buildTestApp();
+    const alert = seedAlert(OWNER_A);
+
+    const unseen = await app.request(`/api/v1/alerts/${alert.id}/unseen`, {
+      method: "PATCH",
+      headers: { "x-test-owner": OWNER_A },
+    });
+    expect(unseen.status).toBe(200);
+    const json = (await unseen.json()) as { data: MonitoringAlertRow };
+    expect(json.data.read_at).toBeNull();
+  });
+
+  it("PATCH /:id/unseen returns 404 for cross-owner ids", async () => {
+    const app = buildTestApp();
+    const alert = seedAlert(OWNER_A);
+
+    const unseen = await app.request(`/api/v1/alerts/${alert.id}/unseen`, {
+      method: "PATCH",
+      headers: { "x-test-owner": OWNER_B },
+    });
+    expect(unseen.status).toBe(404);
   });
 });
 
@@ -620,5 +690,215 @@ describe("POST /api/v1/alerts/export", () => {
       body: JSON.stringify({ mode: "ids", ids: [] }),
     });
     expect(res.status).toBe(400);
+  });
+});
+
+interface AlertDismissBulkResponse {
+  data: { dismissedCount: number; alreadyDismissedCount: number; totalMatched: number };
+  requestId: string;
+}
+
+describe("POST /api/v1/alerts/dismiss-bulk", () => {
+  it("dismisses owned alerts requested by ids and ignores foreign ids", async () => {
+    const app = buildTestApp();
+    const a = seedAlert(OWNER_A, { title: "first", dedupKey: "db-1" });
+    const b = seedAlert(OWNER_A, { title: "second", dedupKey: "db-2" });
+    const foreign = seedAlert(OWNER_B, { title: "foreign", dedupKey: "db-3" });
+
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ mode: "ids", ids: [a.id, b.id, foreign.id] }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertDismissBulkResponse;
+    expect(json.data.totalMatched).toBe(2);
+    expect(json.data.dismissedCount).toBe(2);
+    expect(json.data.alreadyDismissedCount).toBe(0);
+
+    // Owner A's rows are now dismissed; owner B's row is untouched.
+    const dbRows = getDb()
+      .prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`)
+      .all() as { id: number; dismissed_at: string | null }[];
+    const aRow = dbRows.find((r) => r.id === a.id);
+    const bRow = dbRows.find((r) => r.id === b.id);
+    const foreignRow = dbRows.find((r) => r.id === foreign.id);
+    expect(aRow?.dismissed_at).toBeTruthy();
+    expect(bRow?.dismissed_at).toBeTruthy();
+    expect(foreignRow?.dismissed_at).toBeNull();
+  });
+
+  it("is idempotent — re-dismissing already-closed alerts reports them as already dismissed", async () => {
+    const app = buildTestApp();
+    const alert = seedAlert(OWNER_A, { dedupKey: "db-idem" });
+
+    const first = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "ids", ids: [alert.id] }),
+    });
+    expect(first.status).toBe(200);
+
+    const second = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "ids", ids: [alert.id] }),
+    });
+    expect(second.status).toBe(200);
+    const json = (await second.json()) as AlertDismissBulkResponse;
+    expect(json.data.totalMatched).toBe(1);
+    expect(json.data.dismissedCount).toBe(0);
+    expect(json.data.alreadyDismissedCount).toBe(1);
+  });
+
+  it("dismisses all alerts matching filters (filters mode)", async () => {
+    const app = buildTestApp();
+    const dosarJob = seedJob(OWNER_A, "db-filt-dosar", {
+      kind: "dosar_soap",
+      target: { numar_dosar: "1234/3/2024" },
+    });
+    const nameJob = seedJob(OWNER_A, "db-filt-name", {
+      kind: "name_soap",
+      target: { name_normalized: "ACME SRL" },
+    });
+    const dosarAlert = seedAlert(OWNER_A, {
+      jobId: dosarJob,
+      runId: seedRun(OWNER_A, dosarJob),
+      title: "dosar",
+      dedupKey: "db-f1",
+    });
+    const nameAlert = seedAlert(OWNER_A, {
+      jobId: nameJob,
+      runId: seedRun(OWNER_A, nameJob),
+      title: "name",
+      dedupKey: "db-f2",
+    });
+
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "filters",
+        filters: { jobKind: "dosar_soap" },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertDismissBulkResponse;
+    expect(json.data.totalMatched).toBe(1);
+    expect(json.data.dismissedCount).toBe(1);
+
+    const rows = getDb()
+      .prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`)
+      .all() as { id: number; dismissed_at: string | null }[];
+    const dosarRow = rows.find((r) => r.id === dosarAlert.id);
+    const nameRow = rows.find((r) => r.id === nameAlert.id);
+    expect(dosarRow?.dismissed_at).toBeTruthy();
+    expect(nameRow?.dismissed_at).toBeNull();
+  });
+
+  it("returns 200 with zero rows when no alerts match the filter", async () => {
+    const app = buildTestApp();
+    seedAlert(OWNER_A, { kind: "dosar_new", dedupKey: "db-z1" });
+
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "filters",
+        filters: { kind: "source_error" },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertDismissBulkResponse;
+    expect(json.data.totalMatched).toBe(0);
+    expect(json.data.dismissedCount).toBe(0);
+  });
+
+  it("does not leak cross-owner alerts in filters mode", async () => {
+    const app = buildTestApp();
+    const own = seedAlert(OWNER_A, { dedupKey: "db-iso-own" });
+    const foreign = seedAlert(OWNER_B, { dedupKey: "db-iso-foreign" });
+
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "filters", filters: {} }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertDismissBulkResponse;
+    expect(json.data.totalMatched).toBe(1);
+    expect(json.data.dismissedCount).toBe(1);
+
+    const ownDb = getDb()
+      .prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`)
+      .get(own.id) as { dismissed_at: string | null };
+    const foreignDb = getDb()
+      .prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`)
+      .get(foreign.id) as { dismissed_at: string | null };
+    expect(ownDb.dismissed_at).toBeTruthy();
+    expect(foreignDb.dismissed_at).toBeNull();
+  });
+
+  it("rejects ids mode with empty array (Zod 400)", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "ids", ids: [] }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: { code: string } };
+    expect(json.error.code).toBe("invalid_body");
+  });
+
+  it("rejects unrecognised mode (Zod 400)", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "garbage" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("rejects filters mode with includeDismissed (extra key Zod 400)", async () => {
+    // Our schema is .strict() so an unknown key surfaces as 400 — defends the
+    // `Inchide toate` UX promise that already-dismissed rows are never touched.
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "filters",
+        filters: { includeDismissed: true },
+      }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  // v2.16.1 — regression: pre-fix, dismiss-bulk's inline kind enum dropped
+  // `termen_dupa_solutie`, so filtering by the v2.15.0 composite kind returned
+  // 400 invalid_body. Once the route consumes the shared ALERT_KINDS constant,
+  // any future kind addition must keep this test green.
+  it("accepts kind=termen_dupa_solutie in filters mode (v2.15.0 composite)", async () => {
+    const app = buildTestApp();
+    seedAlert(OWNER_A, { kind: "termen_dupa_solutie", dedupKey: "db-tds-1" });
+    seedAlert(OWNER_A, { kind: "termen_new", dedupKey: "db-tds-2" });
+
+    const res = await app.request("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        mode: "filters",
+        filters: { kind: "termen_dupa_solutie" },
+      }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as AlertDismissBulkResponse;
+    expect(json.data.totalMatched).toBe(1);
+    expect(json.data.dismissedCount).toBe(1);
   });
 });

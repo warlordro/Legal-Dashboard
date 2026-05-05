@@ -28,6 +28,18 @@ function asString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : undefined;
 }
 
+// Display-time humanizer for alert titles. v2.16.0 backend emits already-clean
+// titles (e.g. "Termen nou dupa solutie: 04.05.2026 → 19.05.2026"), but pre-
+// v2.16.0 alerts persisted with raw PortalJust dates ("2026-05-04T00:00:00",
+// "2026-05-19"). Rather than backfill via migration, we format at render time:
+//   - "yyyy-mm-ddT…"  → "dd.mm.yyyy"
+//   - "yyyy-mm-dd"    → "dd.mm.yyyy"
+// Idempotent on already-humanized titles (the regex requires the ISO prefix
+// shape, so "04.05.2026" is left untouched).
+export function humanizeAlertTitleDates(title: string): string {
+  return title.replace(/(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}:\d{2})?/g, "$3.$2.$1");
+}
+
 function formatSedintaDate(value: unknown): string | undefined {
   const raw = asString(value);
   if (!raw) return undefined;
@@ -130,9 +142,22 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
   };
 
   // termen_changed: detail = { from: {data,ora,complet}, to: {data,ora,complet} }
+  // termen_dupa_solutie (v2.15.0): detail = {
+  //   from: { data, ora, complet, solutie, solutie_sumar, numar_document, data_pronuntare },
+  //   to:   { data, ora, complet, stadiu }
+  // }
+  // Render with explicit "Solutie pe …" / "Termen nou pe …" labels for the
+  // composite kind so the user sees what was decided + what was rescheduled.
   const fromData = formatSedintaDate(getNested(detail, ["from", "data"]));
   const toData = formatSedintaDate(getNested(detail, ["to", "data"]));
-  if (fromData || toData) {
+  if (alert.kind === "termen_dupa_solutie") {
+    const fromOra = asString(getNested(detail, ["from", "ora"]));
+    const toOra = asString(getNested(detail, ["to", "ora"]));
+    push("Solutie pe", [fromData, fromOra].filter(Boolean).join(" · "));
+    push("Termen nou", [toData, toOra].filter(Boolean).join(" · "));
+    push("Complet", asString(getNested(detail, ["to", "complet"])) ?? asString(getNested(detail, ["from", "complet"])));
+    push("Solutie", asString(getNested(detail, ["from", "solutie"])));
+  } else if (fromData || toData) {
     const fromOra = asString(getNested(detail, ["from", "ora"]));
     const toOra = asString(getNested(detail, ["to", "ora"]));
     push("De la", [fromData, fromOra].filter(Boolean).join(" · "));
@@ -176,9 +201,15 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
   // data_pronuntare / solutie_sumar out of the regular facts grid into a
   // dedicated callout block; cramming the multi-sentence ruling into a
   // 2-column key:value grid alongside Data/Ora/Complet was visually awkward.
-  const numarDoc = asString(detail.numar_document);
-  const dataPronuntare = formatSedintaDate(detail.data_pronuntare);
-  const sumar = asString(detail.solutie_sumar);
+  // termen_dupa_solutie carries the ruling under from.*; for the standalone
+  // solutie_aparuta kind it's at the top level of detail.
+  const numarDoc =
+    asString(detail.numar_document) ?? asString(getNested(detail, ["from", "numar_document"]));
+  const dataPronuntare =
+    formatSedintaDate(detail.data_pronuntare) ??
+    formatSedintaDate(getNested(detail, ["from", "data_pronuntare"]));
+  const sumar =
+    asString(detail.solutie_sumar) ?? asString(getNested(detail, ["from", "solutie_sumar"]));
   const hotarare = numarDoc || dataPronuntare || sumar
     ? { numarDoc, dataPronuntare, sumar }
     : undefined;

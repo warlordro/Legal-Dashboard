@@ -3,7 +3,7 @@ import path from "path";
 import fs from "fs";
 import { fileURLToPath } from "url";
 import { stripDiacritics } from "../util/textNormalize.ts";
-import { runMigrations } from "./migrations/runner.ts";
+import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
 
 // Resolve migrations dir for both dev (Node --experimental-strip-types, ESM)
 // and prod (esbuild CJS bundle). In CJS __dirname is `dist-backend/`; in dev
@@ -57,6 +57,17 @@ export function getDb(): Database.Database {
     preMigrationBackup(dbPath, "descriere-dedup");
   }
 
+  // v2.16.1 — generic pre-migration backup: orice migration noua (de la 0016
+  // incolo, de exemplu rebuild-uri CHECK enum) face o copie a DB-ului inainte
+  // de exec. Daca migrarea esueaza (CHECK reject pe randuri pre-existente,
+  // INSERT SELECT cu coloane lipsa, etc.), operatorul are o copie identica
+  // pre-mutatie de care sa pornesca recovery-ul. Cap deduplicarii cu legacy
+  // descriere-dedup: doua backup-uri pe acelasi boot e acceptabil (se intampla
+  // o singura data per upgrade major).
+  if (fs.existsSync(dbPath) && hasPendingSchemaMigrations(dbPath)) {
+    preMigrationBackup(dbPath, "schema-upgrade");
+  }
+
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
@@ -82,6 +93,40 @@ export function getDb(): Database.Database {
 
   initSchema(db);
   return db;
+}
+
+// v2.16.1 — pre-open probe: pe un readonly connection citim _schema_versions
+// si comparam cu fisierele de pe disk. Returneaza true daca exista vreo
+// migration version necunoscuta la stored set (= pending). Backfill-ul legacy
+// (sentinel) nu conteaza ca "pending" pentru ca runner-ul oricum sare peste
+// fisierul corespondent. Eroarea pe probe e interpretata defensiv ca "fara
+// pending" — boot-ul continua, runner-ul propriu-zis arunca daca e drift real.
+function hasPendingSchemaMigrations(dbPath: string): boolean {
+  try {
+    const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
+    try {
+      const hasVersionsTable = probe
+        .prepare(
+          `SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'`,
+        )
+        .get();
+      // Legacy DB fara _schema_versions: backfill-ul ruleaza la primul boot
+      // PR-0+ si nu modifica schema utilizator, deci backup-ul nu e necesar.
+      // Backup-ul descriere-dedup separat acopera scenariul concret de risc.
+      if (!hasVersionsTable) return false;
+      const stored = new Set<number>(
+        (probe
+          .prepare(`SELECT version FROM _schema_versions`)
+          .all() as { version: number }[]).map((r) => r.version),
+      );
+      const files = discoverMigrations(MIGRATIONS_DIR);
+      return files.some((f) => !stored.has(f.version));
+    } finally {
+      probe.close();
+    }
+  } catch {
+    return false;
+  }
 }
 
 // Fast pre-open check: opens a temporary read-only connection to inspect columns.

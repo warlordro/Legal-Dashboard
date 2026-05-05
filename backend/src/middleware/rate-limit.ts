@@ -13,7 +13,14 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
   // would let a single misbehaving caller starve every other client.
   const ip = getConnInfo(c).remote.address;
   if (!ip) {
-    return c.json({ error: "Origine indisponibila." }, 503);
+    return c.json(
+      {
+        data: null,
+        error: { code: "origin_unavailable", message: "Origine indisponibila." },
+        requestId: c.get("requestId") ?? "",
+      },
+      503,
+    );
   }
   const now = Date.now();
   // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit
@@ -40,7 +47,17 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
   } else {
     entry.count += weight;
     if (entry.count > RATE_LIMIT) {
-      return c.json({ error: "Prea multe cereri. Incercati din nou in cateva momente." }, 429);
+      return c.json(
+        {
+          data: null,
+          error: {
+            code: "rate_limited",
+            message: "Prea multe cereri. Incercati din nou in cateva momente.",
+          },
+          requestId: c.get("requestId") ?? "",
+        },
+        429,
+      );
     }
   }
 

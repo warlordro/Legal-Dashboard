@@ -8,12 +8,18 @@ import { z } from "zod";
 import { recordAudit } from "../db/auditRepository.ts";
 import {
   addAlertEnrichmentListener,
+  ALERT_JOB_KINDS,
+  ALERT_KINDS,
+  ALERT_SEVERITIES,
   type AlertEnrichmentPayload,
   dismissAlert,
+  dismissAlertsByIds,
   listAlerts,
   listAlertsByIds,
   markAlertSeen,
+  markAlertUnseen,
   markAlertsSeen,
+  selectAlertIdsByFilters,
   subscribeToNewAlerts,
   type MonitoringAlertRow,
 } from "../db/monitoringAlertsRepository.ts";
@@ -62,24 +68,10 @@ const limitAlertExportBody = bodyLimit({
 
 const AlertExportFiltersSchema = z
   .object({
-    jobKind: z.enum(["dosar_soap", "name_soap", "aviz_rnpm"]).optional(),
+    jobKind: z.enum(ALERT_JOB_KINDS).optional(),
     q: z.string().trim().min(1).max(100).optional(),
-    kind: z
-      .enum([
-        "dosar_new",
-        "termen_new",
-        "termen_changed",
-        "solutie_aparuta",
-        "dosar_disappeared",
-        "stadiu_changed",
-        "categorie_changed",
-        "dosar_relevant_now",
-        "dosar_no_longer_relevant",
-        "aviz_changed",
-        "source_error",
-      ])
-      .optional(),
-    severity: z.enum(["info", "warning", "critical"]).optional(),
+    kind: z.enum(ALERT_KINDS).optional(),
+    severity: z.enum(ALERT_SEVERITIES).optional(),
     onlyUnread: z.boolean().optional(),
     includeDismissed: z.boolean().optional(),
     from: z.string().datetime().optional(),
@@ -114,24 +106,10 @@ const AlertListQuerySchema = z
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
     jobId: z.coerce.number().int().min(1).optional(),
-    jobKind: z.enum(["dosar_soap", "name_soap", "aviz_rnpm"]).optional(),
+    jobKind: z.enum(ALERT_JOB_KINDS).optional(),
     q: z.string().trim().min(1).max(100).optional(),
-    kind: z
-      .enum([
-        "dosar_new",
-        "termen_new",
-        "termen_changed",
-        "solutie_aparuta",
-        "dosar_disappeared",
-        "stadiu_changed",
-        "categorie_changed",
-        "dosar_relevant_now",
-        "dosar_no_longer_relevant",
-        "aviz_changed",
-        "source_error",
-      ])
-      .optional(),
-    severity: z.enum(["info", "warning", "critical"]).optional(),
+    kind: z.enum(ALERT_KINDS).optional(),
+    severity: z.enum(ALERT_SEVERITIES).optional(),
     isNew: z
       .enum(["true", "false"])
       .transform((v) => v === "true")
@@ -191,6 +169,25 @@ alertsRouter.patch("/:id/seen", limitAlertPatchBody, (c) => {
   return c.json(ok(row, c));
 });
 
+alertsRouter.patch("/:id/unseen", limitAlertPatchBody, (c) => {
+  const ownerId = getOwnerId(c);
+  const id = Number(c.req.param("id"));
+  if (!Number.isInteger(id) || id <= 0) {
+    return c.json(fail("invalid_id", "ID invalid", c), 400);
+  }
+
+  const row = markAlertUnseen(ownerId, id);
+  if (!row) {
+    return c.json(fail("not_found", "Alerta inexistenta", c), 404);
+  }
+  recordAudit(c, "alert_unseen", {
+    targetKind: "monitoring_alert",
+    targetId: String(id),
+    detail: { jobId: row.job_id, kind: row.kind },
+  });
+  return c.json(ok(row, c));
+});
+
 alertsRouter.patch("/:id/dismissed", limitAlertPatchBody, (c) => {
   const ownerId = getOwnerId(c);
   const id = Number(c.req.param("id"));
@@ -234,6 +231,130 @@ alertsRouter.post("/seen-bulk", limitAlertBulkBody, async (c) => {
     });
   }
   return c.json(ok(rows, c));
+});
+
+// v2.14.0 — bulk dismiss (Inchide selectia / Inchide toate cele filtrate).
+//
+// Doua moduri exclusive (mirror al /export):
+//   - mode "ids":     selectia explicita (max 10k id-uri).
+//   - mode "filters": filtrele active din toolbar — exact aceleasi keys ca
+//                     GET /. `includeDismissed` e respins server-side: a-l
+//                     accepta ar transforma "Inchide toate" intr-un no-op
+//                     pe alerte deja inchise si ar leaks o operatie
+//                     fara semantica utila. UI-ul dezactiveaza butonul cand
+//                     filtrul e activ.
+// Cap fix la 10k randuri. Daca filtrul matche peste, returnam 413 cu total-ul
+// real ca user-ul sa restranga filtrele inainte sa apese din nou.
+const ALERT_DISMISS_BULK_MAX_ROWS = 10_000;
+const ALERT_DISMISS_BULK_BODY_LIMIT = 256 * 1024;
+const limitAlertDismissBulkBody = bodyLimit({
+  maxSize: ALERT_DISMISS_BULK_BODY_LIMIT,
+  onError: (c) => c.json(fail("payload_too_large", "Payload prea mare", c), 413),
+});
+
+const AlertDismissBulkFiltersSchema = z
+  .object({
+    jobKind: z.enum(ALERT_JOB_KINDS).optional(),
+    q: z.string().trim().min(1).max(100).optional(),
+    kind: z.enum(ALERT_KINDS).optional(),
+    severity: z.enum(ALERT_SEVERITIES).optional(),
+    onlyUnread: z.boolean().optional(),
+    from: z.string().datetime().optional(),
+    to: z.string().datetime().optional(),
+  })
+  .strict();
+
+const AlertDismissBulkBodySchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      mode: z.literal("ids"),
+      ids: z.array(z.number().int().min(1)).min(1).max(ALERT_DISMISS_BULK_MAX_ROWS),
+    })
+    .strict(),
+  z
+    .object({
+      mode: z.literal("filters"),
+      filters: AlertDismissBulkFiltersSchema.optional().default({}),
+    })
+    .strict(),
+]);
+
+alertsRouter.post("/dismiss-bulk", limitAlertDismissBulkBody, async (c) => {
+  const ownerId = getOwnerId(c);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(fail("invalid_body", "Body invalid", c), 400);
+  }
+  const parsed = AlertDismissBulkBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+
+  let result: { dismissedCount: number; alreadyDismissedCount: number; totalMatched: number };
+  if (parsed.data.mode === "ids") {
+    result = dismissAlertsByIds(ownerId, parsed.data.ids);
+  } else {
+    const f = parsed.data.filters;
+    // Probe count first via listAlerts (consistent with /export shape) and
+    // refuse early if matched > cap. listAlerts excludes dismissed by default,
+    // which is what we want — already-dismissed alerts must not inflate the
+    // count or trigger 413.
+    const probe = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: 1,
+      jobKind: f.jobKind,
+      q: f.q,
+      kind: f.kind,
+      severity: f.severity,
+      onlyUnread: f.onlyUnread,
+      from: f.from,
+      to: f.to,
+    });
+    if (probe.total > ALERT_DISMISS_BULK_MAX_ROWS) {
+      return c.json(
+        fail(
+          "too_many_rows",
+          `Operatia depaseste limita de ${ALERT_DISMISS_BULK_MAX_ROWS} alerte (matched: ${probe.total}). Restrange filtrele.`,
+          c,
+          { total: probe.total, max: ALERT_DISMISS_BULK_MAX_ROWS },
+        ),
+        413,
+      );
+    }
+    const ids = selectAlertIdsByFilters(
+      {
+        ownerId,
+        jobKind: f.jobKind,
+        q: f.q,
+        kind: f.kind,
+        severity: f.severity,
+        onlyUnread: f.onlyUnread,
+        from: f.from,
+        to: f.to,
+      },
+      ALERT_DISMISS_BULK_MAX_ROWS,
+    );
+    result = dismissAlertsByIds(ownerId, ids);
+  }
+
+  // Audit aggregate cu mode + count, NU id-urile. Pentru bulk-uri de mii de
+  // randuri, scrierea id-urilor in audit_log inflate-aza tabela fara beneficiu
+  // — randurile in sine raman recuperabile prin (owner_id, dismissed_at).
+  recordAudit(c, "alerts.dismiss_bulk", {
+    targetKind: "monitoring_alert",
+    targetId: String(result.totalMatched),
+    detail: {
+      mode: parsed.data.mode,
+      dismissed: result.dismissedCount,
+      alreadyDismissed: result.alreadyDismissedCount,
+      totalMatched: result.totalMatched,
+    },
+  });
+
+  return c.json(ok(result, c));
 });
 
 alertsRouter.post("/export", limitAlertExportBody, async (c) => {

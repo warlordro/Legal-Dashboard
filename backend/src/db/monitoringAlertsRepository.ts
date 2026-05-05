@@ -7,20 +7,32 @@
 import { getDb } from "./schema.ts";
 import { buildRnpmLikePattern } from "../util/textNormalize.ts";
 
-export type AlertKind =
-  | "dosar_new"
-  | "termen_new"
-  | "termen_changed"
-  | "solutie_aparuta"
-  | "dosar_disappeared"
-  | "stadiu_changed"
-  | "categorie_changed"
-  | "dosar_relevant_now"
-  | "dosar_no_longer_relevant"
-  | "aviz_changed"
-  | "source_error";
+// Single source of truth for alert kinds. Routes consume this via z.enum so a
+// new kind (e.g. v2.15.0 termen_dupa_solutie) added here automatically becomes
+// filterable / exportable / bulk-dismissable. Prior to v2.16.x the routes had
+// their own inline enum lists which silently drifted on every kind addition.
+export const ALERT_KINDS = [
+  "dosar_new",
+  "termen_new",
+  "termen_changed",
+  "termen_dupa_solutie",
+  "solutie_aparuta",
+  "dosar_disappeared",
+  "stadiu_changed",
+  "categorie_changed",
+  "dosar_relevant_now",
+  "dosar_no_longer_relevant",
+  "aviz_changed",
+  "source_error",
+] as const;
 
-export type AlertSeverity = "info" | "warning" | "critical";
+export type AlertKind = (typeof ALERT_KINDS)[number];
+
+export const ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
+export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
+
+export const ALERT_JOB_KINDS = ["dosar_soap", "name_soap", "aviz_rnpm"] as const;
+export type AlertJobKind = (typeof ALERT_JOB_KINDS)[number];
 
 export interface MonitoringAlertRow {
   id: number;
@@ -100,17 +112,12 @@ export const MAX_ALERT_SUBSCRIBERS_PER_OWNER = 5;
 export class TooManyAlertSubscribersError extends Error {
   readonly code = "too_many_streams" as const;
   constructor(ownerId: string) {
-    super(
-      `Owner ${ownerId} has reached the alert subscriber cap of ${MAX_ALERT_SUBSCRIBERS_PER_OWNER}.`,
-    );
+    super(`Owner ${ownerId} has reached the alert subscriber cap of ${MAX_ALERT_SUBSCRIBERS_PER_OWNER}.`);
     this.name = "TooManyAlertSubscribersError";
   }
 }
 
-export function subscribeToNewAlerts(
-  ownerId: string,
-  listener: AlertListener,
-): () => void {
+export function subscribeToNewAlerts(ownerId: string, listener: AlertListener): () => void {
   let listeners = alertListenersByOwner.get(ownerId);
   if (!listeners) {
     listeners = new Set();
@@ -204,9 +211,7 @@ export function insertAlert(input: InsertAlertInput): InsertAlertResult {
       .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
       .get(input.jobId, input.ownerId);
     if (!jobOwner) {
-      throw new Error(
-        `insertAlert: job ${input.jobId} not found for owner ${input.ownerId}`,
-      );
+      throw new Error(`insertAlert: job ${input.jobId} not found for owner ${input.ownerId}`);
     }
 
     const info = db
@@ -214,7 +219,7 @@ export function insertAlert(input: InsertAlertInput): InsertAlertResult {
         `INSERT INTO monitoring_alerts
            (owner_id, job_id, run_id, kind, severity, title, detail_json, dedup_key)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT(job_id, dedup_key) DO NOTHING`,
+         ON CONFLICT(job_id, dedup_key) DO NOTHING`
       )
       .run(
         input.ownerId,
@@ -224,17 +229,15 @@ export function insertAlert(input: InsertAlertInput): InsertAlertResult {
         input.severity ?? "info",
         input.title,
         detailJson,
-        input.dedupKey,
+        input.dedupKey
       );
 
     const row = db
       .prepare(
         `SELECT * FROM monitoring_alerts
-         WHERE job_id = ? AND dedup_key = ? AND owner_id = ?`,
+         WHERE job_id = ? AND dedup_key = ? AND owner_id = ?`
       )
-      .get(input.jobId, input.dedupKey, input.ownerId) as
-        | MonitoringAlertRow
-        | undefined;
+      .get(input.jobId, input.dedupKey, input.ownerId) as MonitoringAlertRow | undefined;
 
     // ON CONFLICT DO NOTHING guarantees the row exists post-INSERT — either
     // we inserted it or the conflicting row is already there. A missing row
@@ -243,9 +246,7 @@ export function insertAlert(input: InsertAlertInput): InsertAlertResult {
     // filter excludes). Surface loudly rather than letting `undefined`
     // propagate as a "cannot read property X of undefined" downstream.
     if (!row) {
-      throw new Error(
-        `insertAlert: row missing after upsert (job_id=${input.jobId}, dedup_key=${input.dedupKey})`,
-      );
+      throw new Error(`insertAlert: row missing after upsert (job_id=${input.jobId}, dedup_key=${input.dedupKey})`);
     }
     return { row, inserted: info.changes > 0 };
   });
@@ -334,13 +335,11 @@ export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
 
   const whereSql = `WHERE ${where.join(" AND ")}`;
   const needsJobJoin = opts.jobKind !== undefined || opts.q !== undefined;
-  const countJoinSql = needsJobJoin
-    ? "LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id"
-    : "";
+  const countJoinSql = needsJobJoin ? "LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id" : "";
   const total = (
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts a ${countJoinSql} ${whereSql}`)
-      .get(...params) as { n: number }
+    db.prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts a ${countJoinSql} ${whereSql}`).get(...params) as {
+      n: number;
+    }
   ).n;
 
   const offset = (opts.page - 1) * opts.pageSize;
@@ -358,7 +357,7 @@ export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
          ON j.id = a.job_id AND j.owner_id = a.owner_id
        ${whereSql}
        ORDER BY a.created_at DESC, a.id DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT ? OFFSET ?`
     )
     .all(...params, opts.pageSize, offset) as MonitoringAlertRow[];
 
@@ -379,7 +378,7 @@ export function countUnreadAlerts(ownerId: string): number {
          FROM monitoring_alerts
          WHERE owner_id = ?
            AND read_at IS NULL
-           AND dismissed_at IS NULL`,
+           AND dismissed_at IS NULL`
       )
       .get(ownerId) as { n: number }
   ).n;
@@ -394,43 +393,59 @@ export function countAlertsCreatedSince(ownerId: string, since: string): number 
       .prepare(
         `SELECT COUNT(*) AS n
          FROM monitoring_alerts
-         WHERE owner_id = ? AND created_at >= ?`,
+         WHERE owner_id = ? AND created_at >= ?`
       )
       .get(ownerId, since) as { n: number }
   ).n;
 }
 
-export function getAlertById(
-  ownerId: string,
-  id: number,
-): MonitoringAlertRow | null {
-  const row = getDb()
-    .prepare(`SELECT * FROM monitoring_alerts WHERE id = ? AND owner_id = ?`)
-    .get(id, ownerId) as MonitoringAlertRow | undefined;
+export function getAlertById(ownerId: string, id: number): MonitoringAlertRow | null {
+  const row = getDb().prepare(`SELECT * FROM monitoring_alerts WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+    | MonitoringAlertRow
+    | undefined;
   return row ?? null;
 }
 
-export function markAlertSeen(
-  ownerId: string,
-  id: number,
-): MonitoringAlertRow | null {
+export function markAlertSeen(ownerId: string, id: number): MonitoringAlertRow | null {
   const db = getDb();
   const info = db
     .prepare(
       `UPDATE monitoring_alerts
        SET is_new = 0,
            read_at = COALESCE(read_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-       WHERE id = ? AND owner_id = ?`,
+       WHERE id = ? AND owner_id = ?`
     )
     .run(id, ownerId);
   if (info.changes === 0) return null;
   return getAlertById(ownerId, id);
 }
 
-export function dismissAlert(
-  ownerId: string,
-  id: number,
-): MonitoringAlertRow | null {
+// v2.16.0 — toggle: revert "seen" by clearing read_at. is_new stays 0 because
+// the SSE broadcast already happened on insert; flipping is_new=1 here would
+// erroneously re-trigger "new alert" notifications. dismissed_at is left intact
+// (a dismissed alert can be marked unread but stays in the closed bucket).
+// Returns null only when the row doesn't exist for this owner; idempotent on
+// already-unread rows (returns the existing row unchanged).
+//
+// v2.16.1 — wrapped in a transaction so the SELECT existence probe, the
+// conditional UPDATE, and the readback see a consistent snapshot. Without it,
+// two concurrent toggles could race: client A reads `read_at != NULL`, client
+// B does the same, both issue UPDATE, both readbacks return identical rows but
+// the audit log claims two unseen toggles when only one was meaningful.
+export function markAlertUnseen(ownerId: string, id: number): MonitoringAlertRow | null {
+  const db = getDb();
+  const tx = db.transaction((): MonitoringAlertRow | null => {
+    const existing = getAlertById(ownerId, id);
+    if (!existing) return null;
+    if (existing.read_at === null) return existing;
+    db.prepare(`UPDATE monitoring_alerts SET read_at = NULL WHERE id = ? AND owner_id = ?`)
+      .run(id, ownerId);
+    return getAlertById(ownerId, id);
+  });
+  return tx();
+}
+
+export function dismissAlert(ownerId: string, id: number): MonitoringAlertRow | null {
   const db = getDb();
   const info = db
     .prepare(
@@ -438,7 +453,7 @@ export function dismissAlert(
        SET is_new = 0,
            read_at = COALESCE(read_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
            dismissed_at = COALESCE(dismissed_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-       WHERE id = ? AND owner_id = ?`,
+       WHERE id = ? AND owner_id = ?`
     )
     .run(id, ownerId);
   if (info.changes === 0) return null;
@@ -454,38 +469,29 @@ export function dismissAlert(
 //     surface another tenant's row even if a foreign id is present.
 // Wrapped in a transaction so the UPDATE + readback see a consistent
 // snapshot under concurrent writes.
-export function markAlertsSeen(
-  ownerId: string,
-  ids: number[],
-): MonitoringAlertRow[] {
+export function markAlertsSeen(ownerId: string, ids: number[]): MonitoringAlertRow[] {
   if (ids.length === 0) return [];
   // Defensive de-dup + integer coerce — a buggy caller passing the same id
   // twice would otherwise inflate the placeholder list and the IN clause.
-  const uniqueIds = Array.from(
-    new Set(
-      ids.filter((id) => Number.isInteger(id) && id > 0),
-    ),
-  );
+  const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
   if (uniqueIds.length === 0) return [];
 
   const db = getDb();
   const placeholders = uniqueIds.map(() => "?").join(",");
 
   const tx = db.transaction((): MonitoringAlertRow[] => {
-    db
-      .prepare(
-        `UPDATE monitoring_alerts
+    db.prepare(
+      `UPDATE monitoring_alerts
          SET is_new = 0,
              read_at = COALESCE(read_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
-         WHERE owner_id = ? AND id IN (${placeholders})`,
-      )
-      .run(ownerId, ...uniqueIds);
+         WHERE owner_id = ? AND id IN (${placeholders})`
+    ).run(ownerId, ...uniqueIds);
 
     return db
       .prepare(
         `SELECT * FROM monitoring_alerts
          WHERE owner_id = ? AND id IN (${placeholders})
-         ORDER BY id ASC`,
+         ORDER BY id ASC`
       )
       .all(ownerId, ...uniqueIds) as MonitoringAlertRow[];
   });
@@ -500,14 +506,9 @@ export function markAlertsSeen(
 // better-sqlite3 are bind variabile mai mare dar 500 ramane confortabil.
 const ALERT_BY_IDS_CHUNK = 500;
 
-export function listAlertsByIds(
-  ownerId: string,
-  ids: number[],
-): MonitoringAlertRow[] {
+export function listAlertsByIds(ownerId: string, ids: number[]): MonitoringAlertRow[] {
   if (ids.length === 0) return [];
-  const uniqueIds = Array.from(
-    new Set(ids.filter((id) => Number.isInteger(id) && id > 0)),
-  );
+  const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
   if (uniqueIds.length === 0) return [];
   const db = getDb();
   const out: MonitoringAlertRow[] = [];
@@ -523,12 +524,157 @@ export function listAlertsByIds(
          LEFT JOIN monitoring_jobs j
            ON j.id = a.job_id AND j.owner_id = a.owner_id
          WHERE a.owner_id = ? AND a.id IN (${placeholders})
-         ORDER BY a.created_at DESC, a.id DESC`,
+         ORDER BY a.created_at DESC, a.id DESC`
       )
       .all(ownerId, ...chunk) as MonitoringAlertRow[];
     out.push(...rows);
   }
   return out;
+}
+
+// v2.14.0 — bulk dismiss helpers.
+//
+// `dismissAlertsByIds` mirrors `markAlertsSeen`: idempotent UPDATE filtered by
+// (owner_id, id IN (...)), wrapped in a transaction with the readback so the
+// caller sees a consistent snapshot. COALESCE on `dismissed_at` keeps the
+// operation idempotent — a row already dismissed retains its original
+// timestamp instead of being bumped on every retry. Chunked at 500 to stay
+// well below SQLite's bind-variable ceiling.
+//
+// `dismissFilteredAlerts` reuses the exact `listAlerts` filter shape so the
+// "Inchide toate cele filtrate" button matches what the user sees in the
+// inbox. Pre-counted via `listAlerts(pageSize=1)` so the route can fail-fast
+// at 413 before issuing any UPDATE.
+export interface DismissBulkResult {
+  dismissedCount: number;
+  alreadyDismissedCount: number;
+  totalMatched: number;
+}
+
+const ALERT_DISMISS_BULK_CHUNK = 500;
+
+export function dismissAlertsByIds(ownerId: string, ids: number[]): DismissBulkResult {
+  if (ids.length === 0) {
+    return { dismissedCount: 0, alreadyDismissedCount: 0, totalMatched: 0 };
+  }
+  const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
+  if (uniqueIds.length === 0) {
+    return { dismissedCount: 0, alreadyDismissedCount: 0, totalMatched: 0 };
+  }
+  const db = getDb();
+
+  const tx = db.transaction((): DismissBulkResult => {
+    let totalMatched = 0;
+    let alreadyDismissed = 0;
+    for (let i = 0; i < uniqueIds.length; i += ALERT_DISMISS_BULK_CHUNK) {
+      const chunk = uniqueIds.slice(i, i + ALERT_DISMISS_BULK_CHUNK);
+      const placeholders = chunk.map(() => "?").join(",");
+      // v2.16.1 — combine the two COUNTs into a single scan. SQLite happily
+      // computes both totals in one pass (`SUM(CASE WHEN ...)` over the same
+      // filtered rowset), shaving one prepared statement + one index walk per
+      // chunk. Net: 2 statements per chunk instead of 3 (count + update).
+      const counts = db
+        .prepare(
+          `SELECT COUNT(*) AS total,
+                  COALESCE(SUM(CASE WHEN dismissed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS already
+             FROM monitoring_alerts
+            WHERE owner_id = ? AND id IN (${placeholders})`,
+        )
+        .get(ownerId, ...chunk) as { total: number; already: number };
+      totalMatched += counts.total;
+      alreadyDismissed += counts.already;
+      db.prepare(
+        `UPDATE monitoring_alerts
+           SET is_new = 0,
+               read_at = COALESCE(read_at, strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+               dismissed_at = COALESCE(dismissed_at, strftime('%Y-%m-%dT%H:%M:%fZ','now'))
+           WHERE owner_id = ? AND id IN (${placeholders})`
+      ).run(ownerId, ...chunk);
+    }
+    return {
+      dismissedCount: totalMatched - alreadyDismissed,
+      alreadyDismissedCount: alreadyDismissed,
+      totalMatched,
+    };
+  });
+
+  return tx();
+}
+
+export interface DismissByFiltersOptions {
+  ownerId: string;
+  jobKind?: "dosar_soap" | "name_soap" | "aviz_rnpm";
+  q?: string;
+  kind?: AlertKind;
+  severity?: AlertSeverity;
+  onlyUnread?: boolean;
+  // includeDismissed e respins la nivel de route — `dismiss-bulk` cu
+  // includeDismissed=true ar deveni un no-op zgomotos. Argumentul nu e
+  // expus deliberate.
+  from?: string;
+  to?: string;
+}
+
+// Selecteaza id-urile care satisfac filtrele (excluzand alertele deja
+// inchise — `dismissed_at IS NULL`), apoi delega catre `dismissAlertsByIds`.
+// Cap-ul de 10k randuri se aplica la nivel de route: aici returnam exact ce a
+// fost matched in ferestra deja-pre-validata. Reutilizeaza acelasi WHERE-
+// builder ca `listAlerts` pentru consistenta semantica.
+export function selectAlertIdsByFilters(opts: DismissByFiltersOptions, limit: number): number[] {
+  const where: string[] = ["a.owner_id = ?", "a.dismissed_at IS NULL"];
+  const params: (string | number | null)[] = [opts.ownerId];
+
+  if (opts.jobKind) {
+    where.push("j.kind = ?");
+    params.push(opts.jobKind);
+  }
+  if (opts.q?.trim()) {
+    where.push(`(
+      rnpm_norm(json_extract(j.target_json, '$.numar_dosar')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(json_extract(j.target_json, '$.name_normalized')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(json_extract(a.detail_json, '$.numar_dosar')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(json_extract(a.detail_json, '$.name_normalized')) LIKE ? ESCAPE '\\'
+      OR rnpm_norm(a.title) LIKE ? ESCAPE '\\'
+    )`);
+    const like = buildRnpmLikePattern(opts.q.trim());
+    params.push(like, like, like, like, like);
+  }
+  if (opts.kind) {
+    where.push("a.kind = ?");
+    params.push(opts.kind);
+  }
+  if (opts.severity) {
+    where.push("a.severity = ?");
+    params.push(opts.severity);
+  }
+  if (opts.onlyUnread) {
+    where.push("a.read_at IS NULL");
+  }
+  if (opts.from) {
+    where.push("a.created_at >= ?");
+    params.push(opts.from);
+  }
+  if (opts.to) {
+    where.push("a.created_at <= ?");
+    params.push(opts.to);
+  }
+
+  const needsJobJoin = opts.jobKind !== undefined || opts.q !== undefined;
+  const joinSql = needsJobJoin ? "LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id" : "";
+  const whereSql = `WHERE ${where.join(" AND ")}`;
+
+  // ORDER BY este obligatoriu inainte de LIMIT — fara el SQLite nu garanteaza
+  // ordinea (in practica returneaza ordinea de scan a indexului), deci la 10k+
+  // randuri capate user-ul ar inchide un subset arbitrar in loc de cele mai
+  // recente. `created_at DESC, id DESC` reproduce exact ordinea din `listAlerts`
+  // ca "Inchide toate" sa actioneze pe acelasi top-down feed pe care il vede
+  // user-ul in inbox (cele mai noi prima → cele mai vechi taiate la cap).
+  const rows = getDb()
+    .prepare(
+      `SELECT a.id AS id FROM monitoring_alerts a ${joinSql} ${whereSql} ORDER BY a.created_at DESC, a.id DESC LIMIT ?`,
+    )
+    .all(...params, limit) as { id: number }[];
+  return rows.map((r) => r.id);
 }
 
 // Cross-owner existence probe. Mirrors the helper in the jobs repo: lets the
@@ -537,11 +683,7 @@ export function listAlertsByIds(
 // be audited as denied access in web mode). Returns only a boolean so it
 // can never leak the foreign owner_id back to the caller.
 export function alertExistsForAnyOwner(id: number): boolean {
-  return (
-    getDb()
-      .prepare(`SELECT 1 FROM monitoring_alerts WHERE id = ? LIMIT 1`)
-      .get(id) !== undefined
-  );
+  return getDb().prepare(`SELECT 1 FROM monitoring_alerts WHERE id = ? LIMIT 1`).get(id) !== undefined;
 }
 
 // Stage 10 — enrichment subsystem split into its own module. Re-exported

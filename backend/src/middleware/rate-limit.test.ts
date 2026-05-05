@@ -50,8 +50,18 @@ describe("rateLimit — fail-closed semantics", () => {
     const res = await app.request("/api/ping");
 
     expect(res.status).toBe(503);
-    const body = await res.json();
-    expect(body).toMatchObject({ error: expect.stringMatching(/indisponibil/i) });
+    const body = (await res.json()) as {
+      data: null;
+      error: { code: string; message: string };
+      requestId: string;
+    };
+    // v2.14.0: rate-limit responses use the standard `{ data, error: { code,
+    // message }, requestId }` envelope — same shape every other v1 route
+    // emits. Pre-v2.14.0 the body was `{ error: "<string>" }`, which the
+    // frontend's unwrapAlerts couldn't parse and surfaced as "Eroare
+    // necunoscuta" on rapid clicks.
+    expect(body.error.code).toBe("origin_unavailable");
+    expect(body.error.message).toMatch(/indisponibil/i);
   });
 
   it("rejects with 503 on empty-string IP (treated as missing)", async () => {
@@ -164,6 +174,42 @@ describe("rateLimit — per-owner isolation", () => {
 
     const r = await app.request("/api/ping");
     expect(r.status).toBe(200);
+  });
+});
+
+// v2.14.0 — 429 envelope shape regression. Pre-fix the body was a bare
+// `{ error: "Prea multe cereri..." }`, which the Alerts page's unwrapAlerts
+// could not parse and surfaced as the generic "Eroare necunoscuta" toast on
+// rapid-click dismiss. Locking the standard `{ data, error: { code, message },
+// requestId }` envelope here so any future regression is caught in CI.
+describe("rateLimit — 429 response envelope", () => {
+  it("emits the standard {data, error:{code,message}, requestId} envelope on 429", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.42" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithOwner();
+
+    // Burn the 30-request budget for one (ip, owner) bucket.
+    for (let i = 0; i < 30; i++) {
+      const r = await app.request("/api/ping", {
+        headers: { "x-test-owner": "alice" },
+      });
+      expect(r.status).toBe(200);
+    }
+
+    const limited = await app.request("/api/ping", {
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(limited.status).toBe(429);
+    const body = (await limited.json()) as {
+      data: null;
+      error: { code: string; message: string };
+      requestId: string;
+    };
+    expect(body.data).toBeNull();
+    expect(body.error.code).toBe("rate_limited");
+    expect(body.error.message).toMatch(/prea multe cereri/i);
+    expect(typeof body.requestId).toBe("string");
   });
 });
 

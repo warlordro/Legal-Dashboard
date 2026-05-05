@@ -4,6 +4,7 @@ export type AlertKind =
   | "dosar_new"
   | "termen_new"
   | "termen_changed"
+  | "termen_dupa_solutie"
   | "solutie_aparuta"
   | "dosar_disappeared"
   | "stadiu_changed"
@@ -46,7 +47,11 @@ export interface AlertsListResult {
   unread: number;
 }
 
-interface EnvelopeOk<T> { data: T; requestId: string; error?: undefined }
+interface EnvelopeOk<T> {
+  data: T;
+  requestId: string;
+  error?: undefined;
+}
 interface EnvelopeError {
   data: null;
   error: { code: string; message: string; details?: unknown };
@@ -66,7 +71,7 @@ async function unwrapAlerts<T>(res: Response): Promise<T> {
       err?.code ?? "unknown_error",
       err?.message ?? "Eroare necunoscuta",
       res.status,
-      err?.details,
+      err?.details
     );
   }
   return (body as EnvelopeOk<T>).data;
@@ -76,6 +81,7 @@ export const alertKindLabels: Record<AlertKind, string> = {
   dosar_new: "Dosar nou",
   termen_new: "Termen nou",
   termen_changed: "Termen modificat",
+  termen_dupa_solutie: "Termen nou dupa solutie",
   solutie_aparuta: "Solutie aparuta",
   dosar_disappeared: "Dosar disparut",
   stadiu_changed: "Stadiu modificat",
@@ -129,6 +135,11 @@ export const alertsApi = {
     return unwrapAlerts<MonitoringAlert>(res);
   },
 
+  markUnseen: async (id: number): Promise<MonitoringAlert> => {
+    const res = await apiFetch(`/api/v1/alerts/${id}/unseen`, { method: "PATCH" });
+    return unwrapAlerts<MonitoringAlert>(res);
+  },
+
   markAlertsSeen: async (ids: number[]): Promise<MonitoringAlert[]> => {
     const res = await alertsSeenBulkRequest(ids);
     return unwrapAlerts<MonitoringAlert[]>(res);
@@ -139,10 +150,7 @@ export const alertsApi = {
     return unwrapAlerts<MonitoringAlert>(res);
   },
 
-  exportAlerts: async (
-    payload: AlertExportRequest,
-    signal?: AbortSignal,
-  ): Promise<AlertExportResult> => {
+  exportAlerts: async (payload: AlertExportRequest, signal?: AbortSignal): Promise<AlertExportResult> => {
     const res = await apiFetch("/api/v1/alerts/export", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -151,7 +159,42 @@ export const alertsApi = {
     });
     return unwrapAlerts<AlertExportResult>(res);
   },
+
+  dismissBulk: async (payload: AlertDismissBulkRequest, signal?: AbortSignal): Promise<AlertDismissBulkResult> => {
+    const res = await apiFetch("/api/v1/alerts/dismiss-bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal,
+    });
+    return unwrapAlerts<AlertDismissBulkResult>(res);
+  },
 };
+
+// v2.14.0 — bulk dismiss discriminated union mirrors AlertDismissBulkBodySchema
+// in backend/src/routes/alerts.ts. "ids" pentru selectia explicita; "filters"
+// pentru aceleasi query params ca lista (fara `includeDismissed` — backend-ul
+// l-ar respinge si oricum n-ar avea efect).
+export type AlertDismissBulkRequest =
+  | { mode: "ids"; ids: number[] }
+  | {
+      mode: "filters";
+      filters?: {
+        jobKind?: AlertJobKind;
+        q?: string;
+        kind?: AlertKind;
+        severity?: AlertSeverity;
+        onlyUnread?: boolean;
+        from?: string;
+        to?: string;
+      };
+    };
+
+export interface AlertDismissBulkResult {
+  dismissedCount: number;
+  alreadyDismissedCount: number;
+  totalMatched: number;
+}
 
 // v2.13.0 — export discriminated union mirrors AlertExportBodySchema in
 // backend/src/routes/alerts.ts. "ids" pentru selectia explicita, "filters"

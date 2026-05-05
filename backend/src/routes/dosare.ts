@@ -9,11 +9,7 @@ import {
   SSE_TIMEOUT_MS,
   validateParams,
 } from "../util/validation.ts";
-import {
-  batchFetchDosare,
-  parseExistingFromBody,
-  sseEvent,
-} from "../services/batch-dosare.ts";
+import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
 
 export const dosareRouter = new Hono();
 
@@ -23,10 +19,7 @@ dosareRouter.get("/", async (c) => {
   const institutii = c.req.queries("institutie") ?? [];
 
   if (!numarDosar && !obiectDosar && !numeParte) {
-    return c.json(
-      { error: "Cel putin un parametru este necesar: numarDosar, obiectDosar sau numeParte" },
-      400
-    );
+    return c.json({ error: "Cel putin un parametru este necesar: numarDosar, obiectDosar sau numeParte" }, 400);
   }
 
   // SECURITY: Cap institutii array to prevent request amplification
@@ -39,7 +32,10 @@ dosareRouter.get("/", async (c) => {
   // shifts in the future this keeps a hard upper bound on upstream SOAP calls.
   const fanout = Math.max(institutii.length, 1);
   if (fanout > MAX_SOAP_FANOUT) {
-    return c.json({ error: `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.` }, 400);
+    return c.json(
+      { error: `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.` },
+      400
+    );
   }
 
   // Validate all institutie values (not just the first)
@@ -56,20 +52,28 @@ dosareRouter.get("/", async (c) => {
   }
 
   // Client disconnect cancels in-flight SOAP — without this the request looks
-  // cancelled at the client but the upstream call still consumes its 45s
+  // cancelled at the client but the upstream call still consumes its 60s
   // timeout server-side.
   const signal = c.req.raw.signal;
 
   try {
-    let dosare;
+    let dosare: Awaited<ReturnType<typeof cautareDosare>>;
     if (institutii.length <= 1) {
-      dosare = await cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop }, { signal });
+      dosare = await cautareDosare(
+        { numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop },
+        { signal }
+      );
     } else {
       // Parallel SOAP calls for multiple institutions
       const results = await Promise.all(
         institutii.map((inst) =>
-          cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop }, { signal })
-            .catch((err) => { console.error(`Eroare cautare ${inst}:`, err); return []; })
+          cautareDosare(
+            { numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop },
+            { signal }
+          ).catch((err) => {
+            console.error(`Eroare cautare ${inst}:`, err);
+            return [];
+          })
         )
       );
       dosare = results.flat();
@@ -79,7 +83,12 @@ dosareRouter.get("/", async (c) => {
     // memory and stalls the event loop on serialization. Reject loudly with
     // 413 so the client narrows filters rather than silently truncating.
     if (dosare.length > MAX_DOSARE_RESPONSE) {
-      return c.json({ error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).` }, 413);
+      return c.json(
+        {
+          error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).`,
+        },
+        413
+      );
     }
     return c.json({ data: dosare, total: dosare.length });
   } catch (err) {
@@ -114,9 +123,7 @@ dosareRouter.post("/load-more", async (c) => {
   }
 
   // Determine date range
-  const range = (dataStart && dataStop)
-    ? { dataStart, dataStop }
-    : defaultDateRange();
+  const range = dataStart && dataStop ? { dataStart, dataStop } : defaultDateRange();
 
   // SECURITY: Parse and validate existing dosare numbers from POST body
   const { set: existingNumere, error: bodyError } = await parseExistingFromBody(c);
@@ -127,7 +134,10 @@ dosareRouter.post("/load-more", async (c) => {
   // SECURITY: Limit number of intervals to prevent resource exhaustion
   const intervals = generateMonthlyIntervals(range.dataStart, range.dataStop);
   if (intervals.length > MAX_SSE_INTERVALS) {
-    return c.json({ error: `Intervalul de date este prea mare (${intervals.length} luni). Maximum ${MAX_SSE_INTERVALS} luni.` }, 400);
+    return c.json(
+      { error: `Intervalul de date este prea mare (${intervals.length} luni). Maximum ${MAX_SSE_INTERVALS} luni.` },
+      400
+    );
   }
 
   // Iterate per institutie so the search uses the SAME set the user picked, not just the first.
@@ -136,7 +146,12 @@ dosareRouter.post("/load-more", async (c) => {
   const totalUnits = institutionList.length * intervals.length;
   // SECURITY: bound upstream SOAP load per request so a single client cannot flood portal.just.ro
   if (totalUnits > MAX_SOAP_FANOUT) {
-    return c.json({ error: `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.` }, 400);
+    return c.json(
+      {
+        error: `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.`,
+      },
+      400
+    );
   }
 
   const stream = new ReadableStream({
@@ -167,7 +182,9 @@ dosareRouter.post("/load-more", async (c) => {
           const params = { numarDosar, obiectDosar, numeParte, institutie: inst };
           const labelPrefix = inst ? `[${inst}] ` : "";
 
-          const result = await batchFetchDosare(params, range,
+          const result = await batchFetchDosare(
+            params,
+            range,
             (processed, _total, foundInThisInst, currentInterval) => {
               sseEvent(controller, "progress", {
                 processed: processedOffset + processed,
@@ -186,7 +203,7 @@ dosareRouter.post("/load-more", async (c) => {
               for (const item of newItems) existingNumere.add(item.numar);
             },
             existingNumere,
-            abortController.signal,
+            abortController.signal
           );
 
           allWarnings.push(...result.warnings);
@@ -210,7 +227,11 @@ dosareRouter.post("/load-more", async (c) => {
       } finally {
         clearTimeout(timeout);
         c.req.raw.signal?.removeEventListener?.("abort", onAbort);
-        try { controller.close(); } catch { /* already closed */ }
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       }
     },
   });

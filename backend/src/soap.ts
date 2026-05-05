@@ -17,22 +17,26 @@ export interface SearchParams {
 // Convert modern → legacy so the SOAP search matches.
 export function toLegacyDiacritics(s: string): string {
   return s
-    .replace(/\u0218/g, "\u015E")  // Ș → Ş
-    .replace(/\u0219/g, "\u015F")  // ș → ş
-    .replace(/\u021A/g, "\u0162")  // Ț → Ţ
+    .replace(/\u0218/g, "\u015E") // Ș → Ş
+    .replace(/\u0219/g, "\u015F") // ș → ş
+    .replace(/\u021A/g, "\u0162") // Ț → Ţ
     .replace(/\u021B/g, "\u0163"); // ț → ţ
 }
 
 // XML helpers
 function esc(s: string): string {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&apos;")
-    // Strip control characters that could confuse XML parsers
-    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "");
+  return (
+    s
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&apos;")
+      // Strip control characters that could confuse XML parsers (XML 1.0 disallows
+      // U+0000..U+0008, U+000B, U+000C, U+000E..U+001F outside character references).
+      // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional XML 1.0 invalid-character stripping
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, "")
+  );
 }
 
 // For nillable typed elements (enum, dateTime) - send xsi:nil when empty
@@ -61,7 +65,13 @@ function buildEnvelope(action: string, body: string): string {
 // caller-supplied signal with this timeout via `AbortSignal.any` so neither
 // side starves — caller abort cancels the in-flight fetch immediately, and
 // the timeout still fires if the caller is unbounded.
-const SOAP_TIMEOUT_MS = 45000;
+//
+// v2.14.1: bumped from 45s → 60s. Empirical evidence on prod DB job 1215
+// (BANCA COMERCIALA ROMANA SA, ~50% failure rate at 45s with all failures
+// timing out at exactly 45s while successful runs landed at 40-44s — fix at
+// the threshold). 60s gives the upstream a 33% margin without inflating the
+// scheduler-level budget (still 10min/run via DEFAULT_BUDGET_MS).
+const SOAP_TIMEOUT_MS = 60000;
 
 function combineSignals(external?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(SOAP_TIMEOUT_MS);
@@ -98,7 +108,7 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
 // double-decode sequences like "&amp;lt;" → "<".
 export function decodeXmlEntities(s: string): string {
   return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(parseInt(hex, 16)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
@@ -123,12 +133,7 @@ export function extractAll(xml: string, tag: string): string[] {
     `<(?:[^:>]+:)?${tag}(?=[\\s>])(?!(?:[^>]*\\/>))[^>]*>([\\s\\S]*?)<\\/(?:[^:>]+:)?${tag}\\s*>`,
     "gi"
   );
-  const results: string[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(xml)) !== null) {
-    results.push(m[1].trim());
-  }
-  return results;
+  return Array.from(xml.matchAll(re), (match) => match[1].trim());
 }
 
 export type Dosar = ReturnType<typeof parseDosar>;
@@ -164,7 +169,9 @@ export function parseDosar(xml: string) {
     institutie: decodeXmlEntities(extractFirst(flat, "institutie")),
     departament: decodeXmlEntities(extractFirst(flat, "departament")),
     categorieCaz: decodeXmlEntities(extractFirst(flat, "categorieCazNume") || extractFirst(flat, "categorieCaz")),
-    stadiuProcesual: decodeXmlEntities(extractFirst(flat, "stadiuProcesualNume") || extractFirst(flat, "stadiuProcesual")),
+    stadiuProcesual: decodeXmlEntities(
+      extractFirst(flat, "stadiuProcesualNume") || extractFirst(flat, "stadiuProcesual")
+    ),
     obiect: decodeXmlEntities(extractFirst(flat, "obiect")),
     parti,
     sedinte,
@@ -174,8 +181,8 @@ export function parseDosar(xml: string) {
 export interface CautareDosareOptions {
   // External AbortSignal — typically the SSE controller's signal in
   // /load-more, or `c.req.raw.signal` for plain GET handlers. Combined with
-  // the internal 45s SOAP timeout so caller cancellation propagates the
-  // moment a client disconnects, not 45s later.
+  // the internal 60s SOAP timeout so caller cancellation propagates the
+  // moment a client disconnects, not 60s later.
   signal?: AbortSignal;
 }
 

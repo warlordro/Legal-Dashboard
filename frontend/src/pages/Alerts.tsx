@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, Download, ExternalLink, Eye, FileText, Filter, RefreshCw, Trash2, X } from "lucide-react";
+import { Bell, CheckCheck, Download, ExternalLink, Eye, EyeOff, FileText, Filter, Loader2, RefreshCw, Trash2, X } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -9,11 +9,12 @@ import {
   alertsApi,
   alertKindLabels,
   severityLabels,
+  type AlertDismissBulkRequest,
   type AlertKind,
   type AlertSeverity,
   type MonitoringAlert,
 } from "@/lib/alertsApi";
-import { buildAlertContext } from "@/lib/alert-context";
+import { buildAlertContext, humanizeAlertTitleDates } from "@/lib/alert-context";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
@@ -120,6 +121,15 @@ export default function Alerts({
   // toggle si select-all, si pentru ca ordinea nu conteaza la backend.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  // v2.14.0 — confirmare bulk dismiss. `pending` tine modul + count-ul afisat in
+  // modal; cand devine null, modalul se inchide. Busy-ul ramane true pe tot
+  // timpul cererii ca user-ul sa nu poata sa apese de doua ori inchide.
+  const [bulkDismissPending, setBulkDismissPending] = useState<
+    | { mode: "ids"; count: number }
+    | { mode: "filters"; count: number }
+    | null
+  >(null);
+  const [bulkDismissBusy, setBulkDismissBusy] = useState(false);
 
   // Each alert card renders one step smaller than the user's font slider.
   // Constant 2px delta keeps the visual feel "always slightly smaller" across
@@ -199,6 +209,20 @@ export default function Alerts({
     }
   };
 
+  const markUnseen = async (alert: MonitoringAlert) => {
+    setBusyId(alert.id);
+    setError(null);
+    try {
+      await alertsApi.markUnseen(alert.id);
+      await load();
+      onAlertsChanged?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la marcarea alertei ca necitita.");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
   const dismiss = async (alert: MonitoringAlert) => {
     setBusyId(alert.id);
     setError(null);
@@ -245,6 +269,90 @@ export default function Alerts({
       setError(err instanceof Error ? err.message : "Eroare la marcarea alertelor.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  // v2.14.0 — bulk dismiss flow.
+  //
+  // Doua intrari distincte la nivel UI:
+  //   - "Inchide selectia" (cand selectedIds.size > 0) → mode "ids"
+  //   - "Inchide toate cele filtrate" (fara selectie) → mode "filters"
+  // Ambele caz trec prin acelasi handler `confirmBulkDismiss` ca sa nu
+  // dublam logica. Confirmarea modala arata count-ul real (selectedIds.size
+  // sau filteredTotal) ca user-ul sa stie ce sterge inainte sa apese.
+  //
+  // `Inchide toate` ramane DEZACTIVAT cand `includeDismissed=true` — nu inchidem
+  // alerte deja inchise. Aceeasi regula in backend (selectAlertIdsByFilters
+  // exclude `dismissed_at IS NOT NULL`), dar UI-ul previne click-ul ca user-ul
+  // sa nu se mire ca apare 0 randuri inchise.
+  const performBulkDismiss = async (payload: AlertDismissBulkRequest) => {
+    setBulkDismissBusy(true);
+    setError(null);
+    try {
+      const result = await alertsApi.dismissBulk(payload);
+      // Daca user-ul a inchis alerte din selectie, golim selectia ca sa nu
+      // ramana checkbox-uri orfane in pagina urmatoare.
+      if (payload.mode === "ids") {
+        setSelectedIds(new Set());
+      }
+      setBulkDismissPending(null);
+      await load();
+      onAlertsChanged?.();
+      return result;
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : "Eroare la inchiderea alertelor.",
+      );
+      throw err;
+    } finally {
+      setBulkDismissBusy(false);
+    }
+  };
+
+  const requestBulkDismissSelected = () => {
+    if (selectedIds.size === 0) return;
+    setBulkDismissPending({ mode: "ids", count: selectedIds.size });
+  };
+
+  const requestBulkDismissFiltered = () => {
+    if (includeDismissed) return; // guard UI-side; backend nu accepta oricum.
+    if (total === 0) return;
+    setBulkDismissPending({ mode: "filters", count: total });
+  };
+
+  const confirmBulkDismiss = async () => {
+    const pending = bulkDismissPending;
+    if (!pending) return;
+    if (pending.mode === "ids") {
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0) {
+        setBulkDismissPending(null);
+        return;
+      }
+      try {
+        await performBulkDismiss({ mode: "ids", ids });
+      } catch {
+        // Eroarea e deja in setError; lasam modalul deschis ca user-ul
+        // sa vada mesajul. Inchiderea modala se poate face manual.
+      }
+      return;
+    }
+    // mode === "filters"
+    try {
+      await performBulkDismiss({
+        mode: "filters",
+        filters: {
+          jobKind: jobKind === "all" ? undefined : jobKind,
+          q: debouncedQuery || undefined,
+          kind: kind === "all" ? undefined : kind,
+          severity: severity === "all" ? undefined : severity,
+          onlyUnread: onlyUnread || undefined,
+          from: localDateInputToIso(from, false),
+          to: localDateInputToIso(to, true),
+        },
+      });
+    } catch {
+      // idem.
     }
   };
 
@@ -499,6 +607,36 @@ export default function Alerts({
               <CheckCheck className="h-4 w-4" />
               Marcheaza pagina
             </Button>
+            {selectedIds.size > 0 ? (
+              <Button
+                size="sm"
+                onClick={requestBulkDismissSelected}
+                disabled={bulkDismissBusy || loading}
+                title={`Inchide cele ${selectedIds.size} alerte selectate`}
+              >
+                <Trash2 className="h-4 w-4" />
+                Inchide selectia
+                <span className="ml-1 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-semibold">
+                  {selectedIds.size}
+                </span>
+              </Button>
+            ) : (
+              <Button
+                size="sm"
+                onClick={requestBulkDismissFiltered}
+                disabled={
+                  bulkDismissBusy || loading || total === 0 || includeDismissed
+                }
+                title={
+                  includeDismissed
+                    ? "Dezactiveaza filtrul 'Inchise' pentru a folosi aceasta optiune"
+                    : `Inchide toate cele ${total} alerte care satisfac filtrele active`
+                }
+              >
+                <Trash2 className="h-4 w-4" />
+                Inchide toate
+              </Button>
+            )}
           </div>
         </div>
 
@@ -534,6 +672,17 @@ export default function Alerts({
             const ctx = buildAlertContext(alert);
             const handleOpen = () => {
               if (!ctx.numarDosar || !onOpenDosar) return;
+              // Optimistically mark as read when the user opens the dossier — the
+              // act of opening is implicit acknowledgement. Fire-and-forget; SSE
+              // re-fetches the list on return so we don't await load() here.
+              if (!alert.read_at && !alert.dismissed_at) {
+                alertsApi
+                  .markSeen(alert.id)
+                  .then(() => onAlertsChanged?.())
+                  .catch((err) => {
+                    console.warn("[alerts] mark seen on open failed", err);
+                  });
+              }
               onOpenDosar(ctx.numarDosar);
               navigate("/dosare");
             };
@@ -563,7 +712,7 @@ export default function Alerts({
                         {alert.dismissed_at && <Badge variant="secondary">Inchisa</Badge>}
                         <span className="text-xs text-muted-foreground">{formatIsoDateTime(alert.created_at)}</span>
                       </div>
-                      <h2 className="mt-2 text-base font-semibold text-foreground">{alert.title}</h2>
+                      <h2 className="mt-2 text-base font-semibold text-foreground">{humanizeAlertTitleDates(alert.title)}</h2>
                       {ctx.numarDosar && (
                         <div className="mt-1 text-sm">
                           <span className="text-muted-foreground">Dosar: </span>
@@ -636,12 +785,13 @@ export default function Alerts({
                       <Button
                         variant="outline"
                         size="sm"
-                        onClick={() => markSeen(alert)}
-                        disabled={busyId === alert.id || !!alert.read_at}
+                        onClick={() => (alert.read_at ? markUnseen(alert) : markSeen(alert))}
+                        disabled={busyId === alert.id}
+                        title={alert.read_at ? "Marcheaza din nou ca necitita" : "Marcheaza ca citita"}
                         className="text-[12.5px]"
                       >
-                        <Eye className="h-4 w-4" />
-                        Citit
+                        {alert.read_at ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                        {alert.read_at ? "Necitit" : "Citit"}
                       </Button>
                       <Button
                         variant="ghost"
@@ -681,6 +831,78 @@ export default function Alerts({
         currentFilters={exportFilters}
         filteredTotal={total}
       />
+      {bulkDismissPending && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+          onClick={() => {
+            if (!bulkDismissBusy) setBulkDismissPending(null);
+          }}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="bulk-dismiss-title"
+            className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-5 pt-5">
+              <h3 id="bulk-dismiss-title" className="text-base font-semibold text-foreground">
+                {bulkDismissPending.mode === "ids"
+                  ? "Inchide alertele selectate?"
+                  : "Inchide toate alertele filtrate?"}
+              </h3>
+              <p className="mt-2 text-sm text-muted-foreground">
+                {bulkDismissPending.mode === "ids" ? (
+                  <>
+                    Confirma inchiderea pentru{" "}
+                    <span className="font-semibold text-foreground">
+                      {bulkDismissPending.count}
+                    </span>{" "}
+                    {bulkDismissPending.count === 1 ? "alerta selectata" : "alerte selectate"}.
+                    Operatia este definitiva — alertele inchise nu mai pot fi redeschise.
+                  </>
+                ) : (
+                  <>
+                    Confirma inchiderea pentru toate cele{" "}
+                    <span className="font-semibold text-foreground">
+                      {bulkDismissPending.count}
+                    </span>{" "}
+                    alerte care satisfac filtrele active. Operatia este definitiva — alertele
+                    inchise nu mai pot fi redeschise.
+                  </>
+                )}
+              </p>
+            </div>
+            <div className="flex justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3 mt-4">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setBulkDismissPending(null)}
+                disabled={bulkDismissBusy}
+              >
+                Anuleaza
+              </Button>
+              <Button
+                size="sm"
+                onClick={confirmBulkDismiss}
+                disabled={bulkDismissBusy}
+              >
+                {bulkDismissBusy ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Inchide...
+                  </>
+                ) : (
+                  <>
+                    <Trash2 className="h-4 w-4" />
+                    Inchide
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

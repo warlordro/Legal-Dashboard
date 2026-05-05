@@ -10,11 +10,7 @@
 import { describe, expect, it } from "vitest";
 import type { AlertConfig } from "../../../schemas/monitoring.ts";
 import type { Dosar } from "../../../soap.ts";
-import {
-  computeFilterFingerprint,
-  diffDosarSoap,
-  type DiffSnapshotPayload,
-} from "./dosarSoap.ts";
+import { computeFilterFingerprint, diffDosarSoap, type DiffSnapshotPayload } from "./dosarSoap.ts";
 import { buildSedintaKey, buildSedintaKeyWithoutSolutie } from "../sedintaKey.ts";
 
 // --- fixture helpers ------------------------------------------------------
@@ -58,10 +54,7 @@ function makeSedinta(overrides: Partial<Dosar["sedinte"][number]> = {}): Dosar["
 // Build a "post-baseline" snapshot — what diff would have written after a
 // clean first observation of `dosar`. Lets later tests skip an explicit
 // first-tick step.
-function baselineSnapshot(
-  dosar: Dosar | null,
-  alertConfig: AlertConfig = DEFAULT_ALERT_CONFIG,
-): DiffSnapshotPayload {
+function baselineSnapshot(dosar: Dosar | null, alertConfig: AlertConfig = DEFAULT_ALERT_CONFIG): DiffSnapshotPayload {
   const out = diffDosarSoap({
     prevSnapshot: null,
     currentDosar: dosar,
@@ -117,10 +110,7 @@ describe("diffDosarSoap — first run / baseline", () => {
 describe("diffDosarSoap — stable observation", () => {
   it("same sedinte, same solutii: zero alerts", () => {
     const dosar = makeDosar({
-      sedinte: [
-        makeSedinta({ data: "2026-04-19", complet: "C5" }),
-        makeSedinta({ data: "2026-05-12", complet: "C7" }),
-      ],
+      sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5" }), makeSedinta({ data: "2026-05-12", complet: "C7" })],
     });
     const prev = baselineSnapshot(dosar);
     const out = diffDosarSoap({
@@ -157,10 +147,7 @@ describe("diffDosarSoap — termen_new", () => {
       sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5" })],
     });
     const after = makeDosar({
-      sedinte: [
-        makeSedinta({ data: "2026-04-19", complet: "C5" }),
-        makeSedinta({ data: "2026-05-12", complet: "C7" }),
-      ],
+      sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5" }), makeSedinta({ data: "2026-05-12", complet: "C7" })],
     });
     const prev = baselineSnapshot(before);
     const out = diffDosarSoap({
@@ -241,16 +228,10 @@ describe("diffDosarSoap — termen_changed", () => {
 
   it("ambiguous pairing (multiple same-complet sedinte change): falls back to termen_new", () => {
     const before = makeDosar({
-      sedinte: [
-        makeSedinta({ data: "2026-04-19", complet: "C5" }),
-        makeSedinta({ data: "2026-04-26", complet: "C5" }),
-      ],
+      sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5" }), makeSedinta({ data: "2026-04-26", complet: "C5" })],
     });
     const after = makeDosar({
-      sedinte: [
-        makeSedinta({ data: "2026-05-12", complet: "C5" }),
-        makeSedinta({ data: "2026-05-19", complet: "C5" }),
-      ],
+      sedinte: [makeSedinta({ data: "2026-05-12", complet: "C5" }), makeSedinta({ data: "2026-05-19", complet: "C5" })],
     });
     const prev = baselineSnapshot(before);
     const out = diffDosarSoap({
@@ -273,9 +254,7 @@ describe("diffDosarSoap — solutie_aparuta", () => {
       sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5", solutie: "" })],
     });
     const after = makeDosar({
-      sedinte: [
-        makeSedinta({ data: "2026-04-19", complet: "C5", solutie: "Admite apelul" }),
-      ],
+      sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5", solutie: "Admite apelul" })],
     });
     const prev = baselineSnapshot(before);
     const out = diffDosarSoap({
@@ -332,6 +311,217 @@ describe("diffDosarSoap — solutie_aparuta", () => {
   });
 });
 
+// --- termen_dupa_solutie (postponement merge) -----------------------------
+
+// v2.15.0 — cazul "amanare" la PortalJust: o sedinta primeste solutie
+// ("amana", "amana cauza", "amana pronuntarea") iar in acelasi tick apare
+// si o noua sedinta pe acelasi (stadiu, complet). Pre-v2.15.0 emiteam doua
+// alerte separate (solutie_aparuta + termen_new) ceea ce dubla intrarile
+// din inbox. Acum se contopesc intr-o singura alerta `termen_dupa_solutie`
+// cu detaliile ambelor evenimente in `from`/`to`.
+describe("diffDosarSoap — termen_dupa_solutie (postponement merge)", () => {
+  it("solutie + new termen on same complet: 1 termen_dupa_solutie (NOT 2 alerts)", () => {
+    const before = makeDosar({
+      sedinte: [makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "" })],
+    });
+    const after = makeDosar({
+      sedinte: [
+        makeSedinta({
+          data: "2026-05-04",
+          complet: "C5",
+          solutie: "Amana cauza",
+          solutieSumar: "Se amana judecarea",
+          numarDocument: "DOC-123",
+          dataPronuntare: "2026-05-04",
+        }),
+        makeSedinta({ data: "2026-05-19", complet: "C5", solutie: "" }),
+      ],
+    });
+    const prev = baselineSnapshot(before);
+    const out = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    expect(out.alerts).toHaveLength(1);
+    expect(out.alerts[0]?.kind).toBe("termen_dupa_solutie");
+    expect(out.alerts[0]?.severity).toBe("info");
+    expect(out.alerts[0]?.title).toContain("04.05.2026");
+    expect(out.alerts[0]?.title).toContain("19.05.2026");
+    expect(out.alerts[0]?.detail).toMatchObject({
+      from: {
+        data: "2026-05-04",
+        complet: "C5",
+        solutie: "Amana cauza",
+        solutie_sumar: "Se amana judecarea",
+        numar_document: "DOC-123",
+        data_pronuntare: "2026-05-04",
+      },
+      to: {
+        data: "2026-05-19",
+        complet: "C5",
+      },
+    });
+  });
+
+  it("dedup_key is deterministic across re-runs against the same prev_snapshot", () => {
+    const before = makeDosar({
+      sedinte: [makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "" })],
+    });
+    const after = makeDosar({
+      sedinte: [
+        makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "Amana" }),
+        makeSedinta({ data: "2026-05-19", complet: "C5", solutie: "" }),
+      ],
+    });
+    const prev = baselineSnapshot(before);
+    const a = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    const b = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: "2099-01-01T00:00:00.000Z",
+      prevSnapshotId: 100,
+    });
+    expect(a.alerts[0]?.kind).toBe("termen_dupa_solutie");
+    expect(a.alerts[0]?.dedupKey).toBe(b.alerts[0]?.dedupKey);
+    expect(a.alerts[0]?.dedupKey).toContain("termen_dupa_solutie|");
+  });
+
+  it("solutie + new termen on DIFFERENT complet: stays as 2 separate alerts (no merge)", () => {
+    const before = makeDosar({
+      sedinte: [makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "" })],
+    });
+    const after = makeDosar({
+      sedinte: [
+        makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "Admite" }),
+        makeSedinta({ data: "2026-05-19", complet: "C7", solutie: "" }),
+      ],
+    });
+    const prev = baselineSnapshot(before);
+    const out = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    const kinds = out.alerts.map((a) => a.kind).sort();
+    expect(kinds).toEqual(["solutie_aparuta", "termen_new"]);
+  });
+
+  it("notify_on_new_termen=false: emits standalone solutie_aparuta only (no merge)", () => {
+    const before = makeDosar({
+      sedinte: [makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "" })],
+    });
+    const after = makeDosar({
+      sedinte: [
+        makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "Amana" }),
+        makeSedinta({ data: "2026-05-19", complet: "C5", solutie: "" }),
+      ],
+    });
+    const prev = baselineSnapshot(before);
+    const out = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: { ...DEFAULT_ALERT_CONFIG, notify_on_new_termen: false },
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    expect(out.alerts.map((a) => a.kind)).toEqual(["solutie_aparuta"]);
+  });
+
+  it("notify_on_solution=false: emits termen_new only (no merge, no solutie alert)", () => {
+    const before = makeDosar({
+      sedinte: [makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "" })],
+    });
+    const after = makeDosar({
+      sedinte: [
+        makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "Amana" }),
+        makeSedinta({ data: "2026-05-19", complet: "C5", solutie: "" }),
+      ],
+    });
+    const prev = baselineSnapshot(before);
+    const out = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: { ...DEFAULT_ALERT_CONFIG, notify_on_solution: false },
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    expect(out.alerts.map((a) => a.kind)).toEqual(["termen_new"]);
+  });
+
+  it("termen_changed pairing wins over termen_dupa_solutie when prev sedinta exists", () => {
+    // Pre-tick: 04.05 (no solutie) + 12.05 (no solutie). Post-tick: 04.05
+    // (solutie) + 19.05 (no solutie). The 12.05 sedinta is missing — it
+    // should pair 1:1 with 19.05 as termen_changed (pure reschedule). The
+    // solutie on 04.05 emits a separate solutie_aparuta (no remaining new
+    // termen on the same bucket to merge with).
+    const before = makeDosar({
+      sedinte: [
+        makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "" }),
+        makeSedinta({ data: "2026-05-12", complet: "C5", solutie: "" }),
+      ],
+    });
+    const after = makeDosar({
+      sedinte: [
+        makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "Amana" }),
+        makeSedinta({ data: "2026-05-19", complet: "C5", solutie: "" }),
+      ],
+    });
+    const prev = baselineSnapshot(before);
+    const out = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    const kinds = out.alerts.map((a) => a.kind).sort();
+    expect(kinds).toEqual(["solutie_aparuta", "termen_changed"]);
+  });
+
+  it("idempotent re-tick: prev=post-merge snapshot, same dosar → 0 alerts", () => {
+    const before = makeDosar({
+      sedinte: [makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "" })],
+    });
+    const after = makeDosar({
+      sedinte: [
+        makeSedinta({ data: "2026-05-04", complet: "C5", solutie: "Amana" }),
+        makeSedinta({ data: "2026-05-19", complet: "C5", solutie: "" }),
+      ],
+    });
+    const prev = baselineSnapshot(before);
+    const tick1 = diffDosarSoap({
+      prevSnapshot: prev,
+      currentDosar: after,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      prevSnapshotId: 100,
+    });
+    expect(tick1.alerts).toHaveLength(1);
+    // Next tick observes the same Dosar — diff against tick1's snapshot must
+    // be silent. Without it, scheduler retries / cron replays would re-emit.
+    const tick2 = diffDosarSoap({
+      prevSnapshot: tick1.newSnapshot,
+      currentDosar: after,
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: "2026-05-05T10:00:00.000Z",
+      prevSnapshotId: 200,
+    });
+    expect(tick2.alerts).toEqual([]);
+  });
+});
+
 // --- dosar_disappeared / dosar_new (re-appearance) ------------------------
 
 describe("diffDosarSoap — dosar_disappeared + reappearance", () => {
@@ -374,10 +564,7 @@ describe("diffDosarSoap — dosar_disappeared + reappearance", () => {
 
   it("reappearance: prev.lastDosarPresent=false → present fires dosar_new only (no termen_new flood)", () => {
     const dosar = makeDosar({
-      sedinte: [
-        makeSedinta({ data: "2026-04-19", complet: "C5" }),
-        makeSedinta({ data: "2026-05-12", complet: "C7" }),
-      ],
+      sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5" }), makeSedinta({ data: "2026-05-12", complet: "C7" })],
     });
     // After dosar_disappeared, lastDosarPresent=false but we still have prior sedintaKeys.
     const disappeared: DiffSnapshotPayload = {
@@ -475,10 +662,7 @@ describe("diffDosarSoap — filter changed reset", () => {
     });
     const prev = baselineSnapshot(dosar);
     const after = makeDosar({
-      sedinte: [
-        makeSedinta({ data: "2026-04-19", complet: "C5" }),
-        makeSedinta({ data: "2026-05-12", complet: "C7" }),
-      ],
+      sedinte: [makeSedinta({ data: "2026-04-19", complet: "C5" }), makeSedinta({ data: "2026-05-12", complet: "C7" })],
     });
     const out = diffDosarSoap({
       prevSnapshot: prev,

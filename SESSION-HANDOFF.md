@@ -1,6 +1,141 @@
-# Session Handoff - v2.13.0 (Export alerte + raport zilnic email)
+# Session Handoff - v2.16.1 (Multi-review remediation post v2.16.0)
 
 **Data**: 2026-05-05
+
+## v2.16.1 - Multi-review remediation (drift Zod + ORDER BY + transaction wrap + pre-migration backup)
+
+Patch hardening peste v2.16.0 care absoarbe integral findings-urile `/multi-review` rulat
+imediat dupa livrarea v2.16.0. Scope: 1 CRITICAL drift de validare, 2 BLOCKERs operationale,
+4 HIGH defense-in-depth. Zero schimbari in contractul HTTP / shape-ul UI; toate fix-urile sunt
+strict interne.
+
+**Backend - Single source of truth pentru kind/severity/jobKind** (CRITICAL):
+- `db/monitoringAlertsRepository.ts` exporta acum trei `as const` tuple-uri:
+  - `ALERT_KINDS = ["dosar_new", "termen_new", "termen_changed", "termen_dupa_solutie",
+    "solutie_aparuta", "dosar_disappeared", "stadiu_changed", "categorie_changed",
+    "dosar_relevant_now", "dosar_no_longer_relevant", "aviz_changed", "source_error"] as const;`
+  - `ALERT_SEVERITIES = ["info", "warning", "critical"] as const;`
+  - `ALERT_JOB_KINDS = ["dosar_soap", "name_soap", "aviz_rnpm"] as const;`
+- Tipurile `AlertKind`, `AlertSeverity`, `AlertJobKind` derivate prin `(typeof X)[number]`.
+- `routes/alerts.ts` importa constantele si schemele Zod folosesc acum
+  `z.enum(ALERT_KINDS)`, `z.enum(ALERT_SEVERITIES)`, `z.enum(ALERT_JOB_KINDS)` in loc de
+  trei liste hardcodate inlinite (`AlertExportFiltersSchema`, `AlertListQuerySchema`,
+  `AlertDismissBulkFiltersSchema`).
+- **Why**: in v2.15.0 cand s-a adaugat `termen_dupa_solutie`, trei locuri trebuiau
+  sincronizate manual (`monitoringAlertsRepository.AlertKind`, frontend
+  `alertsApi.AlertKind` si `dailyReportTemplate.KIND_LABELS`). Schemele Zod inlinite din
+  `routes/alerts.ts` ar fi fost al patrulea loc — daca scapa, kind-ul nou era refuzat
+  de filtru. Post-fix, adaugarea unui kind nou se face intr-un singur loc.
+
+**Backend - `selectAlertIdsByFilters` ORDER BY** (HIGH):
+- `db/monitoringAlertsRepository.ts`: adaugat `ORDER BY a.created_at DESC, a.id DESC`
+  inainte de `LIMIT ?`.
+- **Why**: cand cap-ul de 10k era atins (50k alerte deschise, dismiss-bulk filters mode),
+  query-ul intorcea un subset arbitrar (functie de storage layout SQLite); user-ul
+  `Inchide toate` nu stia ce 10k din 50k erau afectate.
+- **Post-fix**: ordinea match-uieste `listAlerts` (cele mai recente alerte primele) —
+  contractul devine "Inchide toate cele mai recente 10k cand sunt mai mult de 10k".
+
+**Backend - `markAlertUnseen` transaction wrap** (HIGH):
+- `db/monitoringAlertsRepository.ts`: SELECT existence probe + UPDATE + readback rulate
+  acum in `db.transaction((): MonitoringAlertRow | null => {...})`.
+- **Why**: defense-in-depth pentru web mode multi-tab. Pe desktop single-user e improbabil,
+  dar fereastra dintre SELECT si UPDATE permite teoretic un dismiss concurent.
+
+**Backend - `dismissAlertsByIds` COUNT optimization** (LOW perf):
+- `db/monitoringAlertsRepository.ts`: doua `COUNT(*)` separate per chunk inlocuite cu un
+  singur `SELECT COUNT(*) AS total, COALESCE(SUM(CASE WHEN dismissed_at IS NOT NULL
+  THEN 1 ELSE 0 END), 0) AS already`.
+- **Impact**: per-chunk SQLite roundtrip redus la jumate; relevant pentru bulk dismiss
+  la 10k randuri (20 chunk-uri).
+
+**Backend - Pre-migration backup probe generic** (BLOCKER):
+- `db/schema.ts`: helper nou `hasPendingSchemaMigrations(dbPath)` deschide DB read-only,
+  citeste `_schema_versions`, compara cu `discoverMigrations(MIGRATIONS_DIR)`. Returneaza
+  `true` daca exista vreo migration fisier care nu e in setul stocat. Pe orice eroare
+  returneaza `false` (boot continua — defensiv: un fisier corupt nu blocheaza pornirea).
+- `initDb()`: inainte de a deschide DB-ul in WAL mode pentru `runMigrations`, cheama
+  `preMigrationBackup(dbPath, "schema-upgrade")` daca probe-ul gaseste pending migrations.
+- **Why**: pre-fix, doar migration 0008 avea backup explicit in handler-ul ei (rebuild CHECK
+  enum); 0016 (analog rebuild pentru `termen_dupa_solutie`) nu il avea, deci o rulare
+  partiala lasa DB intr-o stare in care un rollback manual cere `.bak` care lipseste.
+- **Post-fix**: orice migration rebuild face backup automat fara modificari per-handler.
+
+**Tests** (+2 backend):
+- `routes/alerts.test.ts` GET `/api/v1/alerts` describe: `accepts kind=termen_dupa_solutie
+  filter (v2.15.0 composite)` — insereaza alerta `termen_dupa_solutie`, verifica filtrul
+  Zod o accepta + count corect.
+- `routes/alerts.test.ts` POST `/api/v1/alerts/dismiss-bulk` describe: `accepts
+  kind=termen_dupa_solutie in filters mode (v2.15.0 composite)` — analog pentru dismiss-bulk.
+- **Total**: 811 teste backend (de la 809 in v2.16.0). 86/86 frontend neschimbate.
+- **Type-check**: tsc backend + frontend verde. Biome verde pentru cod nou (project baseline
+  pentru CRLF/template-literal/non-null pre-existing).
+
+**Versionare**: bump manifest/lockfile la `2.16.1` (patch — strict interne, fara schimbare
+in contract HTTP / shape UI / DDL / migration noua).
+
+---
+
+## v2.16.0 - UX polish post v2.15.0
+
+Patch peste v2.15.0 declansat de feedback live in fereastra Electron pe primele alerte
+`termen_dupa_solutie`. Patru ajustari:
+1. eticheta KPI Monitorizare (`Joburi active` -> `Monitorizari active`);
+2. butonul Citit toggleable (afiseaza `Citit` pentru necitite, `Necitit` pentru citite);
+3. titlul `Termen nou dupa solutie` umanizat (`04.05.2026 -> 19.05.2026` in loc de
+   `2026-05-04T00:00:00 -> 2026-05-19`);
+4. detail dedicat `termen_dupa_solutie` in `lib/alert-context.tsx` (Solutie pe / Termen
+   nou / Complet / Solutie + hotarare callout din `from.*`).
+
+Migration: niciuna. `markAlertUnseen` foloseste schema existenta (`read_at` nullable in v2.0.x).
+Backend: ruta noua `PATCH /api/v1/alerts/:id/unseen` cu audit `alert_unseen`. +3 teste backend.
+
+---
+
+## v2.15.0 - Fix duplicare alerte amanare (kind nou `termen_dupa_solutie`)
+
+Sweep peste v2.14.1. Cand PortalJust publica o solutie SI programeaza un termen nou pentru
+acelasi complet (cazul tipic de **amanare**), inboxul emitea pana acum doua alerte
+separate (`solutie_aparuta` + `termen_new`). v2.15.0 introduce kind compus
+`termen_dupa_solutie` care contopeste evenimentele intr-o singura alerta.
+
+Migration: `0016_termen_dupa_solutie_kind` (up + down) rebuild `monitoring_alerts` cu CHECK
+enum extins. +7 teste backend.
+
+---
+
+## v2.14.1 - SOAP timeout 45s -> 60s (BCR root cause)
+
+Patch peste v2.14.0 care creste hard cap-ul intern al timeout-ului SOAP. Driver: pattern
+empiric pe job 1215 BCR (~1000 dosare, ~50% rata de esec, toate la fix 45000ms duration).
+Migration: niciuna. Tests neschimbate.
+
+---
+
+## v2.14.0 - Bulk dismiss alerte + fix envelope rate-limit
+
+Sweep peste v2.13.1. Livreaza Task D (bulk dismiss pe pagina Alerte) si fix-ul de root cause
+pentru toast-ul "Eroare necunoscuta" la rapid-click pe Inchide.
+- `POST /api/v1/alerts/dismiss-bulk` cu Zod `discriminatedUnion("mode", [ids|filters])`,
+  cap 10k randuri, audit `alerts.dismiss_bulk`.
+- `middleware/rate-limit.ts` 503/429 emit acum envelope-ul standard
+  `{ data, error: { code, message }, requestId }`.
+
+Migration: niciuna. +12 teste backend, +3 teste frontend.
+
+---
+
+## v2.13.1 - UX polish post-export (kind-uri ascunse, link-uri PDF, Monitorizare export all-pages)
+
+Patch peste v2.13.0 care strange capetele libere semnalate dupa lansarea export-ului.
+- `HIDDEN_KIND_FILTERS` ascunde 4 kind-uri inerte din dropdown.
+- `getPortalJustUrl` strip `/aN` suffix.
+- PDF hyperlinks pe coloana "Numar Dosar"/"Tinta" in 3 builder-e PDF.
+- Monitorizare export pagineaza prin toate paginile cand nu exista selectie.
+
+Migration: niciuna. Tests neschimbate.
+
+---
 
 ## v2.13.0 - Export alerte (Excel/PDF) + raport zilnic email
 

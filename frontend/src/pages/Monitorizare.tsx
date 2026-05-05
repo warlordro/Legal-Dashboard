@@ -285,7 +285,7 @@ export default function Monitorizare({
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-base">
-              Joburi active{total > 0 ? ` (${total})` : ""}
+              Monitorizari active{total > 0 ? ` (${total})` : ""}
               {selectedIds.size > 0 && (
                 <span className="ml-2 text-sm font-normal text-muted-foreground">
                   · {selectedIds.size} selectate

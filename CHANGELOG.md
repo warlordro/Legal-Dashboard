@@ -4,6 +4,307 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.16.1] - 2026-05-05
+
+### Multi-review remediation post v2.16.0 — drift Zod, ORDER BY, transaction wrap, pre-migration backup
+
+Patch hardening peste v2.16.0 care absoarbe integral findings-urile `/multi-review` rulat dupa
+livrarea v2.16.0 (1 CRITICAL drift validation, 2 BLOCKERs operational, 4 HIGH defense-in-depth).
+Zero schimbari in contractul HTTP / shape-ul UI; toate fix-urile sunt strict interne — zid de aparare
+in plus, fara feature nou.
+
+### Backend (`db/monitoringAlertsRepository.ts`)
+
+- **Single source of truth pentru kind/severity/jobKind** (CRITICAL): `ALERT_KINDS`, `ALERT_SEVERITIES`,
+  `ALERT_JOB_KINDS` exportate ca `as const` tuple-uri din repo. Tipurile `AlertKind`, `AlertSeverity`,
+  `AlertJobKind` derivate prin `(typeof X)[number]`. Pre-fix, fiecare schema Zod din `routes/alerts.ts`
+  avea propriul `z.enum([...])` inlinit cu lista hardcodata — drift-ul era inevitabil (dovada: in v2.15.0
+  trei locuri trebuiau sincronizate manual cand s-a adaugat `termen_dupa_solutie`, una a scapat). Acum
+  adaugarea unui nou kind se face **intr-un singur loc** (constanta) si toate locurile se actualizeaza
+  automat la compile-time.
+- **`selectAlertIdsByFilters` ORDER BY** (HIGH): adaugat `ORDER BY a.created_at DESC, a.id DESC` inainte
+  de `LIMIT ?`. Pre-fix, cand cap-ul de 10k era atins, query-ul intorcea un subset arbitrar (functie de
+  storage layout SQLite); user-ul `Inchide toate` nu stia ce 10k din 50k sunt afectate. Post-fix, ordinea
+  e deterministica si match-uieste `listAlerts` (cele mai recente alerte primele) — contract clar.
+- **`markAlertUnseen` wrap in transaction** (HIGH): `db.transaction((): MonitoringAlertRow | null => {...})`
+  pentru ca SELECT existence probe + UPDATE + readback sa vada un snapshot consistent. Pre-fix, intre
+  SELECT-ul de existenta si UPDATE putea sa se inserteze un dismiss concurent (extrem de improbabil pe
+  desktop single-user, dar expune defense-in-depth pentru web mode multi-tab).
+- **`dismissAlertsByIds` COUNT optimization** (LOW perf): doua `COUNT(*)` separate (total + already
+  dismissed) -> un singur `SELECT COUNT(*) AS total, SUM(CASE WHEN dismissed_at IS NOT NULL THEN 1 ELSE 0 END) AS already`.
+  Per-chunk SQLite roundtrip redus la jumate; relevant pentru bulk dismiss la 10k randuri (20 chunk-uri).
+
+### Backend (`db/schema.ts`)
+
+- **Pre-migration backup probe generic** (BLOCKER): inainte de a deschide DB-ul in WAL mode pentru
+  `runMigrations`, deschidem read-only un probe ca sa citim `_schema_versions` si comparam cu
+  `discoverMigrations(MIGRATIONS_DIR)`. Daca exista vreo migration fisier care nu e in setul stocat,
+  apelam `preMigrationBackup(dbPath, "schema-upgrade")`. Pre-fix, doar migration 0008 avea backup explicit
+  in handler-ul ei (rebuild CHECK enum); 0016 (analog rebuild) nu il avea, deci o rulare partiala lasa
+  DB intr-o stare in care un rollback manual cere `.bak` care lipseste. Post-fix, **orice** migration
+  rebuild face backup automat. Probe-ul e defensiv: pe orice eroare returneaza `false` (boot continua),
+  ca un fisier corupt sa nu blocheze pornirea aplicatiei.
+
+### Backend (`routes/alerts.ts`)
+
+- **Schemele Zod refactorate** (CRITICAL): `AlertExportFiltersSchema`, `AlertListQuerySchema`,
+  `AlertDismissBulkFiltersSchema` folosesc acum `z.enum(ALERT_KINDS)`, `z.enum(ALERT_SEVERITIES)`,
+  `z.enum(ALERT_JOB_KINDS)` importate din repo. Eliminate trei liste hardcodate care duplicau aceeasi
+  enumerare — drift-ul (cum a fost in v2.15.0 cu `termen_dupa_solutie`) devine imposibil structural.
+
+### Tests
+
+- **+2 backend regression** in `routes/alerts.test.ts`:
+  1. `GET /api/v1/alerts` — `accepts kind=termen_dupa_solutie filter (v2.15.0 composite)`;
+  2. `POST /api/v1/alerts/dismiss-bulk` — `accepts kind=termen_dupa_solutie in filters mode (v2.15.0 composite)`.
+  Ambele insereaza o alerta `termen_dupa_solutie` si verifica ca filtrul Zod o accepta + matcheaza
+  contul corect. Daca cineva sterge intamplator un kind din `ALERT_KINDS`, testul cade in CI.
+- **811 teste backend** (de la 809 in v2.16.0). 86/86 frontend neschimbate.
+
+### Migrations
+
+- Niciuna. Patch-ul e strict cod aplicativ + reorganizare interna (constante exportate, transaction wrap,
+  ORDER BY, COUNT optimization, pre-migration backup hook). Schema DB neschimbata.
+
+---
+
+## [2.16.0] - 2026-05-05
+
+### UX polish post v2.15.0 — eticheta KPI, citita togglable, data umanizata, solutie reapare in alerta amanare
+
+Patru ajustari in continuare a sweep-ului v2.15.0, declansate de feedback live in ferestra Electron:
+1. eticheta KPI Monitorizare ramasese "Joburi active" desi pe Dashboard se chema deja "Monitorizari active";
+2. butonul Citit nu putea fi anulat (o data marcata, alerta ramanea citita pentru totdeauna);
+3. titlul `Termen nou dupa solutie` afisa data RAW PortalJust (`2026-05-04T00:00:00 -> 2026-05-19`);
+4. dupa merge-ul amanarii, textul solutiei nu mai era vizibil in detail-ul alertei (era prezent doar in cea
+   veche `solutie_aparuta` care acum nu se mai emite separat).
+
+### Frontend (`pages/Monitorizare.tsx`, `pages/Alerts.tsx`, `lib/alertsApi.ts`, `lib/alert-context.tsx`)
+
+- **Eticheta KPI Monitorizare**: `Joburi active` -> `Monitorizari active` in `Monitorizare.tsx:288` ca sa
+  match-uiasca KPI-ul din `KpiStrip.tsx` (single label across the app).
+- **Butonul Dosare marcheaza alerta ca citita**: `handleOpen` in `Alerts.tsx` cheama
+  `alertsApi.markSeen(alert.id)` fire-and-forget cand alerta e necitita inainte de
+  `onOpenDosar(numarDosar)` + `navigate("/dosare")`. SSE re-fetch la return updateaza UI-ul; nu mai
+  asteptam round-trip-ul. Dosare se considera implicit acknowledgement.
+- **Toggle Citit/Necitit**: butonul afiseaza `Citit` (Eye icon) cand alerta e necitita si `Necitit`
+  (EyeOff icon) cand e citita. La click cheama `markSeen` sau `markUnseen` corespunzator. Tooltip-ul
+  schimba in functie de starea curenta. Disabled doar pe `busyId === alert.id` (nu mai e disabled
+  pe `alert.read_at`).
+- **Lib API**: `alertsApi.markUnseen(id)` (PATCH `/api/v1/alerts/:id/unseen`).
+- **Detail rendering pentru `termen_dupa_solutie`**: branch dedicat in `buildAlertContext` care
+  randeaza explicit "Solutie pe <data> · <ora>" + "Termen nou <data> · <ora>" + "Complet" + "Solutie"
+  (textul deciziei) in loc de pattern-ul generic `De la / La` (care suprapune semantici de
+  reschedule pe semantici de amanare). Hotararea (numar_document / data_pronuntare / solutie_sumar)
+  se extrage acum si din `from.*` (nu doar top-level), ca sa apara callout-ul cu sumar pe alertele
+  compuse.
+
+### Backend (`services/monitoring/diff/dosarSoap.ts`, `db/monitoringAlertsRepository.ts`, `routes/alerts.ts`)
+
+- **Helper `formatTitleDate(raw)`** in `dosarSoap.ts` — strip-uie sufixul `T00:00:00` (sedintele de
+  solutie sunt serializate de PortalJust ca ISO datetime, dar ora reala e in `ora`) si converteste
+  `yyyy-mm-dd -> dd.mm.yyyy`. Aplicat in titlul `termen_dupa_solutie` care devine
+  `Termen nou dupa solutie: 04.05.2026 -> 19.05.2026` (clean) in loc de `... 2026-05-04T00:00:00 -> 2026-05-19`.
+  Fall-back la raw daca prefix-ul nu matchuieste pattern-ul ISO (forward-compatible).
+- **`markAlertUnseen(ownerId, id)`** in repo — clear `read_at = NULL` cu owner check + idempotent
+  pe alertele deja necitite. `is_new` ramane 0 (SSE broadcast-ul s-a intamplat la insert; flipping
+  is_new=1 ar re-trigger eronat notificarea "alerta noua"). `dismissed_at` ramane intact.
+- **`PATCH /api/v1/alerts/:id/unseen`** — endpoint nou cu acelasi pattern ca `/seen` (body limit 4 KiB,
+  audit `alert_unseen`, 404 cross-owner, 200 cu envelope `MonitoringAlertRow`).
+
+### Tests
+
+- **+3 backend** in `routes/alerts.test.ts` describe `PATCH /api/v1/alerts/:id/seen and /dismissed` —
+  toggle round-trip seen->unseen, idempotent unseen pe alerta deja necitita, 404 cross-owner.
+- **Test ajustat** in `services/monitoring/diff/dosarSoap.test.ts` "termen_dupa_solutie (postponement
+  merge)" — titlul contine acum `04.05.2026` / `19.05.2026` (in loc de `2026-05-04` / `2026-05-19`).
+- **809 teste backend** (de la 806 in v2.15.0). 86 frontend neschimbate (changes sunt strict
+  type+label sau toggle UI, fara test coverage nou).
+
+### Migrations
+
+- Niciuna. Toate schimbarile sunt cod aplicativ — `markAlertUnseen` foloseste schema existenta
+  (`read_at` deja nullable in v2.0.x).
+
+---
+
+## [2.15.0] - 2026-05-05
+
+### Fix duplicare alerte cand un dosar primeste solutie + termen nou (amanare)
+
+Sweep peste v2.14.1 care rezolva Issue #4 din raportul utilizatorului: cand PortalJust publica o
+solutie SI programeaza un termen nou pentru acelasi complet (cazul tipic de **amanare**), inboxul
+emitea **doua** alerte separate (`solutie_aparuta` + `termen_new`) care confundau cititorul ("este
+acelasi dosar in care s-a primit un nou termen si o solutie, fiind doua devine destul de
+confuza treaba"). v2.15.0 introduce un kind compus nou `termen_dupa_solutie` care contopeste cele
+doua evenimente intr-o singura alerta cu detail combinat (from = solutia, to = noul termen).
+
+### Backend — diff engine (`services/monitoring/diff/dosarSoap.ts`)
+
+- **`DiffAlertKind` union** adauga `"termen_dupa_solutie"`. Tipul e propagat in
+  `db/monitoringAlertsRepository.ts` (`AlertKind`), `frontend/src/lib/alertsApi.ts` si
+  `services/email/dailyReportTemplate.ts` (`KIND_LABELS`).
+- **Pass 1 (`solutie_aparuta` detection) refactorizat**: in loc sa emita imediat alerta, depune
+  fiecare candidat in `pendingSolutiiByBucket: Map<string, PendingSolutie[]>` cheiat pe
+  `(normalizeStadiu(stadiuProcesual), complet.trim())`. Ordinea originala e tracked separat in
+  `pendingSolutiiOrdered` ca Pass 3 sa pastreze sortarea sedintelor.
+- **Pass 2 (termen pairing) extins** cu trei prioritati: (a) `termen_changed` cand exact o sedinta
+  prev "missing" matchuieste pe (stadiu, complet) — pure reschedule; (b) `termen_dupa_solutie` cand
+  exista o solutie pending in acelasi bucket — consuma pending-ul si emite alerta compusa cu
+  severitate `info` si detail `{ from: { ...solutia + sumar + numar_document + data_pronuntare }, to: { data, ora, complet } }`;
+  (c) altfel `termen_new` standalone.
+- **Pass 3 (nou)**: emite solutiile pending neconsumate ca `solutie_aparuta` standalone, in ordinea
+  sedintelor (`pendingSolutiiOrdered`). Ordinea finala in `alerts[]` e: solutii standalone primele,
+  termene/merges ultimele — preserva ordinea testelor existente pe `solutie_aparuta`.
+- **Dedup key determinism**: `termen_dupa_solutie|<sub_of_solutie>|<key_of_new_termen>` —
+  re-tick-uri pe acelasi snapshot post-merge produc 0 alerte noi (idempotent), iar selectia nu
+  depinde de timing-ul rularii.
+
+### Backend — schema
+
+- **Migration `0016_termen_dupa_solutie_kind`** (up + down): rebuild `monitoring_alerts` cu
+  CHECK enum extins (mirror al pattern-ului din 0008). `INSERT SELECT` preserva toate randurile
+  existente; index-urile `idx_alerts_owner_unread` si `idx_alerts_run` sunt re-create.
+
+### Frontend
+
+- **`frontend/src/lib/alertsApi.ts`**: `AlertKind` capata `"termen_dupa_solutie"` + label
+  `"Termen nou dupa solutie"` in `alertKindLabels`. Kind-ul **NU** apare in `HIDDEN_KIND_FILTERS`,
+  deci e vizibil in dropdown-ul de filtre + filtrabil + apare in inbox.
+- **Email digest** (`backend/src/services/email/dailyReportTemplate.ts`): `KIND_LABELS.termen_dupa_solutie = "Termen nou dupa solutie"`
+  ca raportul zilnic sa randeze label-ul curat.
+
+### Tests
+
+- **806 teste backend** (de la 799 in v2.14.1: +7 in `services/monitoring/diff/dosarSoap.test.ts`
+  describe "termen_dupa_solutie (postponement merge)" — basic merge, dedup determinism,
+  complet-different-no-merge, notify_on_new_termen=false fallback, notify_on_solution=false
+  fallback, termen_changed wins peste merge cand prev sedinta exista, idempotent re-tick).
+- **86 teste frontend** neschimbate (frontend changes sunt strict type + label additions).
+- `tsc --noEmit` backend + frontend verde, biome verde pentru cod nou (project baseline pentru
+  CRLF/template-literal/non-null pre-existing; nu introduc erori noi).
+
+### Versionare
+
+- bump manifest/lockfile la `2.15.0` (minor — schimba contractul observabil cu un kind nou de alerta
+  in API + email digest, plus migration noua in DB).
+
+---
+
+## [2.14.1] - 2026-05-05
+
+### Fix timeout SOAP PortalJust pentru joburi cu rezultate mari (BCR root cause)
+
+Patch peste v2.14.0 care creste hard cap-ul intern al timeout-ului SOAP de la 45s la 60s, ca
+raspuns direct la pattern-ul empiric observat pe job 1215 in productie (BANCA COMERCIALA ROMANA SA,
+~1000 dosare in PortalJust).
+
+### Backend
+
+- **`backend/src/soap.ts`**: `SOAP_TIMEOUT_MS` bumpat **45000 → 60000** (constanta interna folosita
+  de `combineSignals(external)` care compune `AbortSignal.any([external, AbortSignal.timeout(...)])`).
+  Comentariile inline din `soap.ts` si `routes/dosare.ts` actualizate sa reflecte noua valoare.
+- **Evidenta empirica** care a justificat schimbarea (extrasa via `scripts/diag-bcr.cjs` din DB-ul
+  productie la `%APPDATA%/legal-dashboard/legal-dashboard.db`):
+  - Job 1215 BCR `name_soap`: ~50% rata de esec; **toate** esecurile cu `error_code: SOAP_FAIL` si
+    `error_message: "operation was aborted due to timeout"` la **fix 45000ms duration**, in timp ce
+    rularile reusite au aterizat la 40-44s — fix la prag, fara margine.
+  - Snapshot ultimele 10 runs: 2575/40s ok, 1956/44s ok, 1955/45s err, 1948/45s err, 1933/45s err,
+    1303/13s ok, 1285/45s err, etc.
+  - Concluzie: PortalJust serializeaza payload-uri mari (sute de `Dosar` elements per `numeParte`)
+    aproape de pragul de 45s; nu e PortalJust jos, e un quirk al volumului.
+- **De ce 60s si nu mai mult**: 33% margine peste cele mai lente raspunsuri stabile reusite,
+  fara sa inflame budget-ul scheduler-ului (`DEFAULT_BUDGET_MS = 600_000` ramane neschimbat,
+  deci la 6 cereri/run cap-ul total per job ramane >> per-call timeout).
+
+### Tests
+
+- **799 teste backend** + **86 teste frontend** neschimbate (no behavioral test depinde de valoarea
+  exacta a `SOAP_TIMEOUT_MS`; testele de runner si de error-mapping folosesc fake clock + mock
+  fetch reject).
+
+### Versionare
+
+- bump manifest/lockfile la `2.14.1` (patch — schimba doar o constanta numerica fara migrari /
+  schema / contract break / API observabil).
+
+---
+
+## [2.14.0] - 2026-05-05
+
+### Bulk dismiss alerte + fix envelope rate-limit (root cause "Eroare necunoscuta")
+
+Sweep peste v2.13.1 care livreaza Task D din backlog (bulk dismiss pe pagina Alerte) si rezolva
+in acelasi commit fix-ul de root cause pentru toast-ul "Eroare necunoscuta" care aparea cand
+user-ul apasa rapid butonul Inchide pe alerte (rate-limit envelope malformed).
+
+### Backend — fix envelope rate-limit (root cause Issue #1)
+
+- **`backend/src/middleware/rate-limit.ts`**: ramurile 503 (origine indisponibila) si 429 (rate limit
+  depasit) emiteau pana la v2.13.1 un body de forma `{ error: "<string>" }`, care **NU** matchuieste
+  envelope-ul standard `{ data, error: { code, message }, requestId }` pe care frontend-ul il
+  asteapta. `unwrapAlerts` (`frontend/src/lib/alertsApi.ts:67`) face fallback la
+  `err?.message ?? "Eroare necunoscuta"` cand `body.error` nu are field `message`, deci la fiecare
+  HTTP 429 user-ul vedea generic "Eroare necunoscuta" in loc de mesaj util.
+- Fix: ambele ramuri (cu `preAuthRateLimit` la fel) emit acum `{ data: null, error: { code, message },
+  requestId }` cu `code: "origin_unavailable"` (503) / `code: "rate_limited"` (429) si mesaj
+  romanesc clar ("Origine indisponibila." / "Prea multe cereri. Incercati din nou in cateva
+  momente.").
+- **Test regresiune** in `rate-limit.test.ts` — 2 noi (503 envelope shape + 429 envelope shape)
+  asigura ca fix-ul nu regreseaza intr-o iteratie viitoare.
+
+### Backend — bulk dismiss
+
+- **Migration**: niciuna (foloseste schema existenta `monitoring_alerts.dismissed_at`).
+- **`backend/src/db/monitoringAlertsRepository.ts`**: doua helper-e noi —
+  - `dismissAlertsByIds(ownerId, ids[])` — UPDATE `dismissed_at = COALESCE(dismissed_at, ?)`
+    intr-o tranzactie, chunked la 500 ID-uri (sub limita SQLite de 999 bind variables); intoarce
+    `{ dismissedCount, alreadyDismissedCount, totalMatched }` cu separare clara intre randuri
+    nou-inchise si randuri deja inchise (idempotent).
+  - `selectAlertIdsByFilters(opts, limit)` — reuseaza WHERE-ul lui `listAlerts` cu exclusion
+    explicit pentru `dismissed_at IS NOT NULL`, suporta jobKind/q/kind/severity/onlyUnread/from/to
+    (NU `includeDismissed` — ramane intentionat exclus pentru ca un dismiss bulk peste alerte deja
+    inchise nu are efect util si ar deruta user-ul).
+- **`backend/src/routes/alerts.ts`**: ruta noua `POST /api/v1/alerts/dismiss-bulk` cu Zod
+  `discriminatedUnion("mode", [ids|filters])` (mirror al `/export`):
+  - `mode: "ids"` — selectie explicita din UI; cap 10k randuri (413 cu `details.maxRows: 10000`).
+  - `mode: "filters"` — filtrele active din UI (jobKind/q/kind/severity/onlyUnread/from/to);
+    probe count via `listAlerts({ pageSize: 1 })` inainte sa execute, intoarce 413 daca
+    `total > 10000` cu `details.totalMatched: <total>`.
+  - Body limit `256 KB` (suficient pentru 10k integer ID-uri serializati).
+  - Audit `alerts.dismiss_bulk` cu `mode + dismissed + alreadyDismissed + totalMatched`.
+
+### Frontend — bulk dismiss UI
+
+- **`frontend/src/lib/alertsApi.ts`**: metoda noua `dismissBulk(payload)` + tipuri
+  `AlertDismissBulkRequest` (discriminated union mirror al backend-ului) si
+  `AlertDismissBulkResult`.
+- **`frontend/src/pages/Alerts.tsx`**: doua butoane noi in toolbar (variant destructive):
+  - **"Inchide selectia"** — apare cand `selectedIds.size > 0`; trimite `mode: "ids"` cu ID-urile
+    selectate.
+  - **"Inchide toate"** — apare cand nu e nimic selectat; trimite `mode: "filters"` cu filtrele
+    active (jobKind/q/kind/severity/onlyUnread/from/to). Disabled cand `includeDismissed=true`
+    (operatie care nu ar avea efect) sau cand `total === 0`.
+  - Confirmation modal inline (role="dialog", aria-modal, click-outside dismiss) cu busy state
+    si spinner. Mesaj romanesc explicit ("Vor fi inchise X alerte. Operatia este idempotenta...").
+
+### Tests
+
+- **799 teste backend** (de la 789 in v2.13.1: +9 in `routes/alerts.test.ts` "POST /dismiss-bulk"
+  + 1 in `middleware/rate-limit.test.ts` 429 envelope shape regression — testul existent 503 a
+  fost rescris pe noul envelope, nu adaugat).
+- **86 teste frontend** (de la 83 in v2.13.1: +3 in `lib/alertsApi.test.ts` "dismissBulk").
+- tsc backend + frontend verde, biome verde pentru testele noi (project baseline pentru
+  CRLF/import-protocol/non-null/a11y modal pre-existing).
+
+### Versionare
+
+Bump manifest/lockfile la `2.14.0` (minor — schimba contractul HTTP cu ruta noua `/dismiss-bulk`
+si schimba shape-ul body-ului 503/429 in middleware-ul de rate-limit, dar fara breaking changes
+pe rute existente).
+
+---
+
 ## [2.13.1] - 2026-05-05
 
 ### UX polish post-export — kind-uri ascunse, link-uri PDF, Monitorizare export all-pages

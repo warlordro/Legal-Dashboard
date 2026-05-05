@@ -1,16 +1,18 @@
 # Codex Backlog - Legal Dashboard
 
-> Status curent: redeschis 2026-05-05 cu un task nou (vezi mai jos).
+> Status curent: inchis 2026-05-05 — Task D livrat in v2.14.0.
 > Generat initial: 2026-05-03 (post v2.10.4).
 > Inchis (rundă 1): 2026-05-03 — Task B/C livrate in v2.10.5, Task A scos in v2.10.6.
-> Redeschis: 2026-05-05.
+> Redeschis: 2026-05-05; Inchis (rundă 2): 2026-05-05 — Task D livrat in v2.14.0.
 > Repo: `Legal Dashboard` (Electron + Hono + better-sqlite3).
 
 ## Task-uri active
 
+(niciunul activ)
+
 ### Task D - Alerte: bulk dismiss (selectie + toate existente)
 
-**Status:** propus 2026-05-05, post v2.13.1. Neimplementat.
+**Status:** livrat in v2.14.0.
 
 #### Context
 

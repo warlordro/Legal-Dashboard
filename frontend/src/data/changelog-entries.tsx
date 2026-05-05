@@ -1,4 +1,22 @@
-import { Sparkles, Palette, Rocket, Shield, Building2, BrainCircuit, ShieldCheck, MousePointerClick, Layers, CalendarSearch, FileSpreadsheet, Lock, Wrench, Activity, Bell, Mail, Users as UsersIcon } from "lucide-react";
+import {
+  Sparkles,
+  Palette,
+  Rocket,
+  Shield,
+  Building2,
+  BrainCircuit,
+  ShieldCheck,
+  MousePointerClick,
+  Layers,
+  CalendarSearch,
+  FileSpreadsheet,
+  Lock,
+  Wrench,
+  Activity,
+  Bell,
+  Mail,
+  Users as UsersIcon,
+} from "lucide-react";
 
 export interface ChangeSection {
   title: string;
@@ -18,10 +36,140 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.16.1",
+    date: "5 Mai 2026",
+    subtitle:
+      "Patch hardening intern post v2.16.0 — absoarbe integral findings-urile review-ului automat (1 critical drift de validare, 2 blockers operationale, 4 hardening-uri defense-in-depth). Zero schimbari vizibile in interfata: aplicatia se comporta exact la fel pentru utilizator. Imbunatatirile sunt strict interne — un zid de aparare in plus impotriva regresiilor pe drumul catre cutover-ul web.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Validarea filtrelor de alerte unificata pe o singura sursa",
+        content:
+          "Lista cu tipurile de alerte recunoscute (12 kind-uri, 3 severitati, 3 tipuri de monitorizare) era duplicata in patru locuri diferite din cod — fiecare loc o avea hardcodata separat. La adaugarea kind-ului Termen nou dupa solutie in v2.15.0, trei dintre cele patru au fost actualizate manual; al patrulea ar fi blocat silent filtrul cand kind-ul nou ar fi ajuns intr-un body al unui request. Acum toate locurile importa o singura constanta partajata: adaugarea unui kind nou se face intr-un singur fisier si toate validatorele se actualizeaza automat la compilare.",
+      },
+      {
+        title: "Inchide toate respecta acum o ordine deterministica",
+        content:
+          "Cand alegi sa inchizi toate alertele care match-uiesc filtrele active si numarul total depaseste 10.000 (cap intern de siguranta), aplicatia inchide acum cele mai recente 10.000 in primul rand (sortare descrescatoare dupa data crearii). Pana acum, in cazul rar in care depaseai cap-ul, alertele alese pentru inchidere erau intr-o ordine arbitrara dictata de stocarea interna SQLite — devenea greu de explicat ce 10.000 din 50.000 erau afectate. Comportamentul nou se aliniaza cu ordinea afisata in inboxul Alerte (cele mai noi sus).",
+      },
+      {
+        title: "Backup automat inainte de orice rebuild de schema DB",
+        content:
+          "La pornirea aplicatiei, daca exista o noua migratie de structura DB care urmeaza sa ruleze (de exemplu rebuild de tabel pentru schimbarea unei reguli CHECK), se face acum automat un backup SQLite numit schema-upgrade inainte de a aplica migratia. Pana acum, aceasta protectie era explicita doar in handler-ul vechi al unei migratii din 2026-04, iar migratia adaugata in v2.15.0 (pentru kind-ul Termen nou dupa solutie) nu avea backup explicit. Daca o rulare partiala lasa DB-ul intr-o stare nedorita, ai acum mereu un .bak la dispozitie pentru recuperare manuala — fara sa fii nevoit sa-ti reamintesti sa-l faci tu inainte de update.",
+      },
+      {
+        title: "Robustete impotriva curselor concurente la marcarea Necitit",
+        content:
+          "Operatia de re-marcare a unei alerte ca necitita (introdusa in v2.16.0 ca toggle pe butonul Citit) ruleaza acum intr-o tranzactie atomica. Pe desktop (single-user) impactul e teoretic, dar pentru deploy-ul web viitor (mai multe tab-uri / mai multe device-uri pe acelasi cont) garantia e ca nu vezi vreodata o stare partiala unde alerta apare in lista deschise dar nu inca actualizata in inbox.",
+      },
+      {
+        title: "Acoperire suplimentara pe regression tests",
+        content:
+          "Doua teste noi verifica explicit ca filtrul kind=termen_dupa_solutie e acceptat atat de listarea Alerte (GET) cat si de inchiderea in masa (POST dismiss-bulk). Daca cineva sterge accidental un kind din lista partajata, testele cad in CI inainte ca regresia sa ajunga in productie. Total: 811 teste backend (de la 809 in v2.16.0), 86 teste frontend.",
+      },
+    ],
+  },
+  {
+    version: "v2.16.0",
+    date: "5 Mai 2026",
+    subtitle:
+      'Patru ajustari de UX dupa primele alerte "Termen nou dupa solutie" vizualizate in fereastra Electron: eticheta KPI Monitorizare aliniata cu cea din Dashboard (Monitorizari active in loc de Joburi active), butonul Citita devine togglable (poti sa marchezi din nou ca necitita), butonul Dosare marcheaza implicit alerta ca citita (deschiderea dosarului = acknowledgement), data in titlul alertei amanare devine "04.05.2026" in loc de "2026-05-04T00:00:00", iar textul solutiei reapare in detail (era prezent doar pe vechea alerta separata).',
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
+    sections: [
+      {
+        title: "Alerte - butonul Citita acum e togglable",
+        content:
+          'In dreptul fiecarei alerte, butonul Citita afiseaza "Citit" cand alerta e necitita (icon ochi deschis). La click se marcheaza ca citita - acelasi comportament ca pana acum. Daca apesi din nou pe acelasi buton, eticheta se schimba in "Necitit" (icon ochi taiat) si alerta revine la starea de necitita. Folositor cand vrei sa o lasi vizibila in inboxul de necitite ca sa revii la ea mai tarziu.',
+      },
+      {
+        title: "Alerte - butonul Dosare marcheaza implicit alerta ca citita",
+        content:
+          'Cand apesi pe butonul Dosare dintr-o alerta, deschiderea dosarului in lista Dosare se considera implicit acknowledgement: alerta se marcheaza automat ca citita in fundal (fara sa intarzie navigarea). Daca vrei sa o lasi necitita dupa ce ai vazut dosarul, foloseste toggle-ul Citit/Necitit dupa intoarcere.',
+      },
+      {
+        title: "Alerte - Termen nou dupa solutie afiseaza acum data umanizata si textul solutiei",
+        content:
+          'Titlul alertei compuse "Termen nou dupa solutie" arata acum datele in format romanesc (04.05.2026 -> 19.05.2026) in loc de format ISO (2026-05-04T00:00:00 -> 2026-05-19). In detail apare explicit "Solutie pe <data>", "Termen nou <data>", "Complet" si "Solutie" (textul deciziei luate la termenul anterior), plus un callout cu numarul documentului, data pronuntarii si sumarul, daca PortalJust le returneaza. Inainte aceste date erau ascunse in JSON-ul alertei dar nu apareau in UI.',
+      },
+      {
+        title: "Monitorizare - KPI redenumit Monitorizari active",
+        content:
+          'Cardul de header din pagina Monitorizare afisa "Joburi active (N)" desi pe pagina Dashboard acelasi numar e etichetat "Monitorizari active". Acum ambele locuri folosesc aceeasi denumire (Monitorizari active), ca sa fie clar ca este vorba de aceleasi monitorizari pe care le configurezi din formularul de Adauga monitorizare.',
+      },
+    ],
+  },
+  {
+    version: "v2.15.0",
+    date: "5 Mai 2026",
+    subtitle:
+      'Sweep peste v2.14.1 care rezolva o problema raportata pe inboxul Alerte: cand un dosar primea o solutie SI un termen nou pe acelasi complet (cazul tipic de amanare), inboxul afisa doua alerte separate ("Solutie publicata" + "Termen nou") care confundau cititorul. Acum cele doua se contopesc intr-o singura alerta noua "Termen nou dupa solutie" cu detail combinat (de la solutia publicata, la noul termen), pastrand toate informatiile originale.',
+    icon: <Bell className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Alerte - kind nou Termen nou dupa solutie (amanare)",
+        content:
+          'Cand PortalJust publica o solutie pe un complet si in acelasi timp programeaza un termen nou pentru acelasi complet (cazul tipic de amanare), generam acum o singura alerta compusa cu severitate info: "Termen nou dupa solutie" cu detail "de la <solutia publicata, sumar, numar document, data pronuntare> la <data, ora, complet noul termen>". Inboxul devine mai usor de citit - un eveniment, o alerta. Filtrarea standard (severitate, search pe dosar, interval) functioneaza la fel. Re-tick-uri pe acelasi snapshot dupa merge nu produc alerte noi (idempotent prin dedup key stabil).',
+      },
+      {
+        title: "Cum se decide merge-ul",
+        content:
+          'Pentru fiecare sedinta noua aparuta in fereastra de tick, scheduler-ul cauta in pending solutiile detectate la inceputul aceluiasi tick care imparta acelasi (stadiu procesual, complet). Daca exista una si singur una, cele doua se contopesc. Daca termenul nou matchuieste o sedinta veche disparuta (pure reschedule), are prioritate alerta clasica "Termen modificat". Daca settings-ul tau dezactiveaza emiterea unora dintre alerte (notify_on_solution sau notify_on_new_termen), restul rezultatelor revin la comportamentul standard - solutie singulara sau termen singular.',
+      },
+    ],
+  },
+  {
+    version: "v2.14.1",
+    date: "5 Mai 2026",
+    subtitle:
+      'Patch peste v2.14.0 care creste hard cap-ul intern al timeout-ului SOAP de la 45s la 60s. Driver: pattern-ul empiric observat pe job 1215 in productie (BANCA COMERCIALA ROMANA SA, ~1000 dosare in PortalJust): ~50% rata de esec, toate esecurile la fix 45000ms duration cu "operation was aborted due to timeout", in timp ce rularile reusite aterizau la 40-44s. PortalJust serializeaza payload-uri mari (sute de Dosar elements per nume) aproape de pragul de 45s; nu e PortalJust jos, e quirk de volum. 60s da 33% margine fara sa schimbe budget-ul scheduler-ului (10min/run ramane).',
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "SOAP timeout PortalJust - 45s -> 60s",
+        content:
+          "Constanta SOAP_TIMEOUT_MS din backend/src/soap.ts crescuta de la 45000 la 60000 (singurul hard cap intern aplicat pe fetch-urile SOAP catre portalquery.just.ro). Joburile name_soap care matcheaza nume cu sute de dosare (BCR, banci mari, autoritati publice) ar trebui sa nu mai timeoutuiasca aproape sistematic. Daca tot mai apar timeouts dupa 60s, pattern-ul e diferit (PortalJust degraded vs. payload mare) si trebuie investigat separat.",
+      },
+      {
+        title: "Cum a fost diagnosticat (transparenta)",
+        content:
+          'Script ad-hoc scripts/diag-bcr.cjs a interogat DB-ul productie de la %APPDATA%/legal-dashboard/legal-dashboard.db pentru job 1215 si a dump-uit ultimele 10 runs. Snapshot: 2575/40s ok, 1956/44s ok, 1955/45s err, 1948/45s err, 1933/45s err, 1303/13s ok, 1285/45s err. Toate esecurile la fix 45000ms duration cu error_code: SOAP_FAIL si error_message: "operation was aborted due to timeout" - semnatura clara de timeout intern, nu de network failure.',
+      },
+    ],
+  },
+  {
+    version: "v2.14.0",
+    date: "5 Mai 2026",
+    subtitle:
+      'Release minor peste v2.13.1. Livreaza bulk dismiss pe pagina Alerte (Inchide selectia / Inchide toate, cap 10k) si rezolva root cause-ul toast-ului "Eroare necunoscuta" care aparea la rapid-click pe Inchide (rate-limit-ul intorcea body malformat care nu matchuia envelope-ul standard).',
+    icon: <Bell className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Alerte - bulk dismiss (Inchide selectia / Inchide toate)",
+        content:
+          'Pagina Alerte are acum doua butoane noi in toolbar: "Inchide selectia" cand exista randuri bifate, sau "Inchide toate" cand nu e nimic selectat. "Inchide toate" inchide toate alertele care matchuiesc filtrele active (jobKind/q/kind/severity/onlyUnread/from/to), cu cap 10k randuri (peste, primesti eroare cu numarul total). Operatia este idempotenta - alertele deja inchise nu sunt afectate. Modal de confirmare cu numarul exact de alerte care vor fi inchise inainte sa apesi.',
+      },
+      {
+        title: 'Fix "Eroare necunoscuta" la rapid-click Inchide',
+        content:
+          'Cand apasai rapid butonul Inchide pe alerte, toast-ul rosu spunea generic "Eroare necunoscuta" in loc de mesaj util. Cauza: rate-limit-ul (HTTP 429 "prea multe cereri intr-un interval scurt") intorcea pana la v2.13.1 un body malformat ("{ error: \'<string>\' }" in loc de envelope-ul standard "{ data, error: { code, message }, requestId }"), iar parser-ul de pe frontend nu reusea sa extraga mesajul si fall-back-uia la "Eroare necunoscuta". Acum primesti mesajul real: "Prea multe cereri. Incercati din nou in cateva momente."',
+      },
+    ],
+  },
+  {
     version: "v2.13.1",
     date: "5 Mai 2026",
     subtitle:
-      "Patch peste v2.13.0 care strange capetele libere semnalate dupa lansarea export-ului de alerte: 4 kind-uri ascunse din dropdown-ul Alerte (sunt inerte in starea curenta a UI-ului), strip al sufixului /aN pentru link-urile portal.just.ro (SharePoint indexer-ul nu retine asociatii), hyperlink clickabil pe coloana \"Numar Dosar\" / \"Tinta\" in PDF-urile Dosare/Termene/Monitorizare, si Monitorizare export care pagineaza prin toate paginile cand nu exista selectie.",
+      'Patch peste v2.13.0 care strange capetele libere semnalate dupa lansarea export-ului de alerte: 4 kind-uri ascunse din dropdown-ul Alerte (sunt inerte in starea curenta a UI-ului), strip al sufixului /aN pentru link-urile portal.just.ro (SharePoint indexer-ul nu retine asociatii), hyperlink clickabil pe coloana "Numar Dosar" / "Tinta" in PDF-urile Dosare/Termene/Monitorizare, si Monitorizare export care pagineaza prin toate paginile cand nu exista selectie.',
     icon: <Sparkles className="h-5 w-5" />,
     borderColor: "border-l-cyan-500",
     badgeClass: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
@@ -29,7 +177,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Alerte - 4 kind-uri ascunse din dropdown",
         content:
-          "Dropdown-ul \"Tip alerta\" exclude acum 4 tipuri inerte in starea curenta a UI-ului: \"Relevant acum\" si \"Nu mai este relevant\" (cer alert_config.stadii sau .categorii setate per job, dar formularul de Monitorizare nu le expune, deci tranzitia nu se declanseaza), \"Aviz modificat\" (rezervat pentru runner-ul RNPM neimplementat), si \"Dosar disparut\" (gated de notify_on_dosar_disappeared cu default false fara toggle in UI). Alertele istorice cu aceste kind-uri isi pastreaza label-ul in badge - doar dropdown-ul de filtrare le ascunde.",
+          'Dropdown-ul "Tip alerta" exclude acum 4 tipuri inerte in starea curenta a UI-ului: "Relevant acum" si "Nu mai este relevant" (cer alert_config.stadii sau .categorii setate per job, dar formularul de Monitorizare nu le expune, deci tranzitia nu se declanseaza), "Aviz modificat" (rezervat pentru runner-ul RNPM neimplementat), si "Dosar disparut" (gated de notify_on_dosar_disappeared cu default false fara toggle in UI). Alertele istorice cu aceste kind-uri isi pastreaza label-ul in badge - doar dropdown-ul de filtrare le ascunde.',
       },
       {
         title: "Link-uri portal.just.ro - strip /aN suffix",
@@ -44,7 +192,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Monitorizare export - toate paginile cand nu e selectie",
         content:
-          "Cand utilizatorul apasa Excel sau PDF fara nicio selectie pe pagina Monitorizare, exportul nu mai e limitat la randurile vizibile pe pagina curenta - pagineaza prin toate paginile (cu filtrele kind/q active aplicate) pana acopera totalul. Cand exista selectie, exportul ramane limitat la randurile bifate (ca inainte). Tooltip-urile s-au schimbat din \"vizibile\" in \"toate cele N joburi (toate paginile)\".",
+          'Cand utilizatorul apasa Excel sau PDF fara nicio selectie pe pagina Monitorizare, exportul nu mai e limitat la randurile vizibile pe pagina curenta - pagineaza prin toate paginile (cu filtrele kind/q active aplicate) pana acopera totalul. Cand exista selectie, exportul ramane limitat la randurile bifate (ca inainte). Tooltip-urile s-au schimbat din "vizibile" in "toate cele N joburi (toate paginile)".',
       },
     ],
   },
@@ -70,7 +218,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Raport zilnic email (web only) - flag in Setari",
         content:
-          "Setari -> Notificari email primeste checkbox nou \"Trimite raport zilnic la 09:00\" controlat de field nou dailyReportEnabled. Pe desktop, optiunea e vizibila dar fara efect (SMTP nu e configurabil); pe web, scheduler-ul ruleaza la fiecare 5 minute si fires email-ul la ora locala 09:00 (configurabila via DAILY_REPORT_HOUR env) pentru fiecare owner cu flag activ si address valida.",
+          'Setari -> Notificari email primeste checkbox nou "Trimite raport zilnic la 09:00" controlat de field nou dailyReportEnabled. Pe desktop, optiunea e vizibila dar fara efect (SMTP nu e configurabil); pe web, scheduler-ul ruleaza la fiecare 5 minute si fires email-ul la ora locala 09:00 (configurabila via DAILY_REPORT_HOUR env) pentru fiecare owner cu flag activ si address valida.',
       },
       {
         title: "Raport - fereastra ziua precedenta + dedup + retry",
@@ -101,7 +249,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Bulk import - control selectie rand cu rand",
         content:
-          "Coloana noua \"Actiune\" cu buton Exclude/Include per rand (icoana X / Plus). Randurile excluse afiseaza strikethrough + badge \"exclus\" si NU contribuie la commit. Linga dropdown-ul de filtru, checkbox \"Exclude warn-urile automat\" scoate in masa toate randurile cu validation === \"warn\" (badge \"auto-exclus\"). Counter-ul de commit reflecta numarul efectiv de joburi care vor fi create dupa toate filtrele.",
+          'Coloana noua "Actiune" cu buton Exclude/Include per rand (icoana X / Plus). Randurile excluse afiseaza strikethrough + badge "exclus" si NU contribuie la commit. Linga dropdown-ul de filtru, checkbox "Exclude warn-urile automat" scoate in masa toate randurile cu validation === "warn" (badge "auto-exclus"). Counter-ul de commit reflecta numarul efectiv de joburi care vor fi create dupa toate filtrele.',
       },
       {
         title: "Bulk import - legenda statusuri + nota dedup",
@@ -111,17 +259,17 @@ export const versions: VersionEntry[] = [
       {
         title: "Validare nume - mesaje humanizate cu motiv si actiune",
         content:
-          "classifyRawName din nameListParser rescris cu mesaje romanesti complete care explica motivul si actiunea recomandata. Exemple: \"Nume lipsa - completeaza coloana 'nume' sau cnp/cui pentru a putea cauta automat\" (vs. cod tehnic vechi); \"Duplicat - apare prima oara la randul X (NU se va crea job duplicat: deduplicare automata la import)\".",
+          'classifyRawName din nameListParser rescris cu mesaje romanesti complete care explica motivul si actiunea recomandata. Exemple: "Nume lipsa - completeaza coloana \'nume\' sau cnp/cui pentru a putea cauta automat" (vs. cod tehnic vechi); "Duplicat - apare prima oara la randul X (NU se va crea job duplicat: deduplicare automata la import)".',
       },
       {
         title: "Warn nou - nume prea lung pentru PortalJust",
         content:
-          "Regula noua nume_lung (warn) declansata cand numele normalizat depaseste 100 caractere SAU 12 cuvinte. Calibrata empiric pe limita PortalJust (~107 chars / ~13 cuvinte la nume multi-cuvant). Mesajul: \"Nume lung pentru PortalJust - depaseste limita empirica si poate produce esecuri repetate. Considera scurtarea numelui sau cauta dupa CUI/CNP.\" Apare la preview inainte de commit, deci utilizatorul poate decide sa excluda randul sau sa scurteze.",
+          'Regula noua nume_lung (warn) declansata cand numele normalizat depaseste 100 caractere SAU 12 cuvinte. Calibrata empiric pe limita PortalJust (~107 chars / ~13 cuvinte la nume multi-cuvant). Mesajul: "Nume lung pentru PortalJust - depaseste limita empirica si poate produce esecuri repetate. Considera scurtarea numelui sau cauta dupa CUI/CNP." Apare la preview inainte de commit, deci utilizatorul poate decide sa excluda randul sau sa scurteze.',
       },
       {
         title: "Alerta source_error contextualizata pentru nume lungi",
         content:
-          "Cand un job name_soap esueaza repetat cu SOAP_FAIL pe un nume care depaseste limitele empirice PortalJust, alerta source_error (5 esecuri consecutive) primeste probable_cause: nume_prea_lung_pentru_portaljust si titlu specific \"Nume prea lung pentru PortalJust\". Detail-ul JSON include nameNormalized, length, wordCount. Utilizatorul vede direct in inbox ca PortalJust nu e jos, ci numele monitorizat trebuie scurtat.",
+          'Cand un job name_soap esueaza repetat cu SOAP_FAIL pe un nume care depaseste limitele empirice PortalJust, alerta source_error (5 esecuri consecutive) primeste probable_cause: nume_prea_lung_pentru_portaljust si titlu specific "Nume prea lung pentru PortalJust". Detail-ul JSON include nameNormalized, length, wordCount. Utilizatorul vede direct in inbox ca PortalJust nu e jos, ci numele monitorizat trebuie scurtat.',
       },
     ],
   },
@@ -348,7 +496,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Frontend - tab-bar Toate / Dosare / Nume + search input",
         content:
-          "Pagina Monitorizare primeste deasupra tabelului un tab-bar de 3 butoane (Toate / Dosare / Nume) si un input de cautare cu icon X pentru clear. Filtrul de tip ascunde cealalta categorie (de ex. Dosare ascunde toate jobs name_soap), iar input-ul filtreaza dupa numar dosar sau dupa nume. Counter discret \"{total} rezultate\" afisat doar cand exista filtre active. Empty state contextualizat: cand filtrele aplicate nu au rezultat, se afiseaza un mesaj cu link \"Reseteaza filtrele\" in loc de mesajul vechi de \"niciun job activ\".",
+          'Pagina Monitorizare primeste deasupra tabelului un tab-bar de 3 butoane (Toate / Dosare / Nume) si un input de cautare cu icon X pentru clear. Filtrul de tip ascunde cealalta categorie (de ex. Dosare ascunde toate jobs name_soap), iar input-ul filtreaza dupa numar dosar sau dupa nume. Counter discret "{total} rezultate" afisat doar cand exista filtre active. Empty state contextualizat: cand filtrele aplicate nu au rezultat, se afiseaza un mesaj cu link "Reseteaza filtrele" in loc de mesajul vechi de "niciun job activ".',
       },
       {
         title: "Frontend - debounce 300ms + reset paginatie pe schimbare filtru",
@@ -358,12 +506,12 @@ export const versions: VersionEntry[] = [
       {
         title: "Backend - GET /api/v1/monitoring/jobs?q=...",
         content:
-          "JobListQuerySchema capata field q (trim + max 100 chars). listJobs adauga WHERE OR pe trei json_extract-uri: target_json.numar_dosar (dosar_soap), name_normalized (name_soap), identificator (placeholder aviz_rnpm). Match-ul foloseste rnpm_norm() pe coloane (strip diacritice + lowercase) si LIKE %...% cu meta-caractere %, _, \\ escapate cu \\ ESCAPE — input \"50%\" nu degenereaza in wildcard SQL. Comportamentul reproduce semantica Cautare Dosare: query cu diacritice matcheaza valori fara diacritice si invers.",
+          'JobListQuerySchema capata field q (trim + max 100 chars). listJobs adauga WHERE OR pe trei json_extract-uri: target_json.numar_dosar (dosar_soap), name_normalized (name_soap), identificator (placeholder aviz_rnpm). Match-ul foloseste rnpm_norm() pe coloane (strip diacritice + lowercase) si LIKE %...% cu meta-caractere %, _, \\ escapate cu \\ ESCAPE — input "50%" nu degenereaza in wildcard SQL. Comportamentul reproduce semantica Cautare Dosare: query cu diacritice matcheaza valori fara diacritice si invers.',
       },
       {
         title: "Backend - fail-closed pe target = doar sufix legal",
         content:
-          "dosarMatchesAllNameTokens(targetCore=[]) returneaza acum false (fail-closed) in loc de true: un target compus exclusiv din sufixe legale (\"SRL\", \"S.R.L.\", \"SRL LLC\") nu mai trece tot ce returneaza PortalJust ca pseudo-pozitiv. Cazul e marginal (input-ul UPPERCASE + min 2 chars il blocheaza la /commit), dar pasul ramane defense-in-depth.",
+          'dosarMatchesAllNameTokens(targetCore=[]) returneaza acum false (fail-closed) in loc de true: un target compus exclusiv din sufixe legale ("SRL", "S.R.L.", "SRL LLC") nu mai trece tot ce returneaza PortalJust ca pseudo-pozitiv. Cazul e marginal (input-ul UPPERCASE + min 2 chars il blocheaza la /commit), dar pasul ramane defense-in-depth.',
       },
       {
         title: "Tests",
@@ -384,7 +532,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Frontend - paginare server-side pe Monitorizare",
         content:
-          "Pagina Monitorizare afisa pana acum maxim 100 joburi cu un banner static \"Sunt cel putin 100 joburi vizibile (din 617 total)\". Acum tabelul are paginare standard cu state page/pageSize, TablePagination randat sub tabel, optiuni 10/25/50/100/pagina (cap-ul 100 matches limita backend JobListQuerySchema). Recovery automat la pagina goala dupa delete (decrement page daca jobs.length=0 si total>0 si page>0).",
+          'Pagina Monitorizare afisa pana acum maxim 100 joburi cu un banner static "Sunt cel putin 100 joburi vizibile (din 617 total)". Acum tabelul are paginare standard cu state page/pageSize, TablePagination randat sub tabel, optiuni 10/25/50/100/pagina (cap-ul 100 matches limita backend JobListQuerySchema). Recovery automat la pagina goala dupa delete (decrement page daca jobs.length=0 si total>0 si page>0).',
       },
       {
         title: "Frontend - buton Anuleaza pe import bulk",
@@ -394,17 +542,17 @@ export const versions: VersionEntry[] = [
       {
         title: "Frontend + backend - normalizare UPPERCASE pe import",
         content:
-          "Numele de monitorizare se stocheaza acum UNIFORM in UPPERCASE indiferent de calea de input. PortalJust SOAP CautareDosare e case-insensitive pe numeParte, deci match-ul nu se schimba; uniformitatea elimina vizual amestecul \"AMBKEVEN SRL\" + \"global learning logistics srl\" din tabel. nameListParser.normalizeName (backend) face .toUpperCase() — defense-in-depth pe orice path care intra prin validare. monitoringBulkTemplate.ts (parser XLSX/CSV) si MonitoringAddForm.tsx (form manual) uppercaseaza la sursa. Datele vechi raman lowercase (fara migratie destructiva); randurile noi importate sunt UPPERCASE.",
+          'Numele de monitorizare se stocheaza acum UNIFORM in UPPERCASE indiferent de calea de input. PortalJust SOAP CautareDosare e case-insensitive pe numeParte, deci match-ul nu se schimba; uniformitatea elimina vizual amestecul "AMBKEVEN SRL" + "global learning logistics srl" din tabel. nameListParser.normalizeName (backend) face .toUpperCase() — defense-in-depth pe orice path care intra prin validare. monitoringBulkTemplate.ts (parser XLSX/CSV) si MonitoringAddForm.tsx (form manual) uppercaseaza la sursa. Datele vechi raman lowercase (fara migratie destructiva); randurile noi importate sunt UPPERCASE.',
       },
       {
         title: "Backend - filtru strict word match name_soap",
         content:
-          "PortalJust SOAP CautareDosare returneaza dosare pe match substring pe oricare dintre cuvintele din numeParte (\"GLOBAL LEARNING LOGISTICS\" prinde si \"GLOBAL LOGISTICS SA\"). nameSoapRunner aplica acum un filtru post-fetch: un dosar e pastrat doar daca exista o parte (dosar.parti[i].nume) ai carei tokeni contin TOATE tokenii numelui monitorizat. Match-ul e strict pe egalitate de tokeni (nu substring), case-insensitive, fara diacritice. Caracterul & e promovat ca token de sine statator: \"ABC&XYZ\" si \"ABC & XYZ\" se echivaleaza la nivel de token.",
+          'PortalJust SOAP CautareDosare returneaza dosare pe match substring pe oricare dintre cuvintele din numeParte ("GLOBAL LEARNING LOGISTICS" prinde si "GLOBAL LOGISTICS SA"). nameSoapRunner aplica acum un filtru post-fetch: un dosar e pastrat doar daca exista o parte (dosar.parti[i].nume) ai carei tokeni contin TOATE tokenii numelui monitorizat. Match-ul e strict pe egalitate de tokeni (nu substring), case-insensitive, fara diacritice. Caracterul & e promovat ca token de sine statator: "ABC&XYZ" si "ABC & XYZ" se echivaleaza la nivel de token.',
       },
       {
         title: "Backend - exceptie suffix legal",
         content:
-          "Suffix-urile legale (SRL, SA, SCA, SNC, SCS, PFA, IF pentru RO + LLC, LTD, INC pentru entitati intl) sunt eliminate de la coada listei de tokeni inainte de comparare, indiferent de forma (SRL, S.R.L., S.R.L, SRL.). Target \"GLOBAL LEARNING LOGISTICS\" matcheaza parte \"GLOBAL LEARNING LOGISTICS SRL\"; target \"X SRL\" matcheaza parte \"X\"; variatiile S.R.L. vs SRL nu mai produc false-negative.",
+          'Suffix-urile legale (SRL, SA, SCA, SNC, SCS, PFA, IF pentru RO + LLC, LTD, INC pentru entitati intl) sunt eliminate de la coada listei de tokeni inainte de comparare, indiferent de forma (SRL, S.R.L., S.R.L, SRL.). Target "GLOBAL LEARNING LOGISTICS" matcheaza parte "GLOBAL LEARNING LOGISTICS SRL"; target "X SRL" matcheaza parte "X"; variatiile S.R.L. vs SRL nu mai produc false-negative.',
       },
       {
         title: "Tests",
@@ -430,12 +578,11 @@ export const versions: VersionEntry[] = [
       {
         title: "Frontend - panourile AI inlocuite cu banner pana la prima cheie",
         content:
-          "DosareAiAnalysisPanel verifica ai.hasAnyKey la nivel de top: cand niciuna dintre cheile Anthropic / OpenAI / Google nu este configurata, in locul celor doua panouri colapsate (Analiza AI + Analiza AI Avansata) randeaza un banner discret cu border dashed, icon Bot si textul \"Analize AI (single + multi-agent) disponibile dupa configurarea unei chei API in Setari API\". Astfel, utilizatorii noi afla ca exista feature-ul si stiu unde sa configureze cheia, fara sa vada doua butoane colapsate inutile. Cand prima cheie este salvata, panourile reapar automat.",
+          'DosareAiAnalysisPanel verifica ai.hasAnyKey la nivel de top: cand niciuna dintre cheile Anthropic / OpenAI / Google nu este configurata, in locul celor doua panouri colapsate (Analiza AI + Analiza AI Avansata) randeaza un banner discret cu border dashed, icon Bot si textul "Analize AI (single + multi-agent) disponibile dupa configurarea unei chei API in Setari API". Astfel, utilizatorii noi afla ca exista feature-ul si stiu unde sa configureze cheia, fara sa vada doua butoane colapsate inutile. Cand prima cheie este salvata, panourile reapar automat.',
       },
       {
         title: "Backend",
-        content:
-          "Zero modificari backend. Patch frontend-only, zero schema, zero migration.",
+        content: "Zero modificari backend. Patch frontend-only, zero schema, zero migration.",
       },
     ],
   },
@@ -851,7 +998,8 @@ export const versions: VersionEntry[] = [
   {
     version: "v2.6.8",
     date: "1 Mai 2026",
-    subtitle: "Review-driven hardening peste v2.6.7 - fix HTML a11y pe cardul de bulk import, derivare CADENCE_COL_LETTER din HEADERS, eroare clara la header lipsa in parser, corectare claim stale despre xlsx in docs",
+    subtitle:
+      "Review-driven hardening peste v2.6.7 - fix HTML a11y pe cardul de bulk import, derivare CADENCE_COL_LETTER din HEADERS, eroare clara la header lipsa in parser, corectare claim stale despre xlsx in docs",
     icon: <ShieldCheck className="h-5 w-5" />,
     borderColor: "border-l-emerald-500",
     badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
@@ -891,7 +1039,8 @@ export const versions: VersionEntry[] = [
   {
     version: "v2.6.7",
     date: "1 Mai 2026",
-    subtitle: "Export Monitorizare Excel + PDF cu paritate Dosare/Termene - butoane in CardHeader, builderii noi reuseaza paleta de stiluri existenta, Web Worker dispatch",
+    subtitle:
+      "Export Monitorizare Excel + PDF cu paritate Dosare/Termene - butoane in CardHeader, builderii noi reuseaza paleta de stiluri existenta, Web Worker dispatch",
     icon: <FileSpreadsheet className="h-5 w-5" />,
     borderColor: "border-l-sky-500",
     badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
@@ -926,7 +1075,8 @@ export const versions: VersionEntry[] = [
   {
     version: "v2.6.6",
     date: "1 Mai 2026",
-    subtitle: "Patch UX Monitorizare - name_soap parity (buton Dosare + target bold + label 'Nume') + swap coloane Ultima rulare / Urmatoarea verif.",
+    subtitle:
+      "Patch UX Monitorizare - name_soap parity (buton Dosare + target bold + label 'Nume') + swap coloane Ultima rulare / Urmatoarea verif.",
     icon: <Sparkles className="h-5 w-5" />,
     borderColor: "border-l-sky-500",
     badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
@@ -956,7 +1106,8 @@ export const versions: VersionEntry[] = [
   {
     version: "v2.6.5",
     date: "1 Mai 2026",
-    subtitle: "Patch UX Monitorizare - TINTA bold, bulk import collapsible + descriere non-tehnica, template XLSX restilizat la nivelul exporturilor, nota inline italic sub TINTA",
+    subtitle:
+      "Patch UX Monitorizare - TINTA bold, bulk import collapsible + descriere non-tehnica, template XLSX restilizat la nivelul exporturilor, nota inline italic sub TINTA",
     icon: <Sparkles className="h-5 w-5" />,
     borderColor: "border-l-sky-500",
     badgeClass: "bg-sky-100 text-sky-800 dark:bg-sky-900/30 dark:text-sky-400",
@@ -991,7 +1142,8 @@ export const versions: VersionEntry[] = [
   {
     version: "v2.6.4",
     date: "1 Mai 2026",
-    subtitle: "Patch - audit hardening (multi-agent review) finalizat: DELETE in-flight, enrichment relaxed, SSE alert_enriched, bulk delete atomic, metrici precise, xlsx -> exceljs, fail-closed remote",
+    subtitle:
+      "Patch - audit hardening (multi-agent review) finalizat: DELETE in-flight, enrichment relaxed, SSE alert_enriched, bulk delete atomic, metrici precise, xlsx -> exceljs, fail-closed remote",
     icon: <ShieldCheck className="h-5 w-5" />,
     borderColor: "border-l-emerald-500",
     badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
@@ -1041,17 +1193,17 @@ export const versions: VersionEntry[] = [
         content:
           "In tabelul de joburi, numarul dosarului e acum link extern catre portal.just.ro plus un buton mic Search care declanseaza auto-search in lista Dosare (acelasi pattern ca in inbox-ul Alerte).",
         bullets: [
-          "<a target=\"_blank\"> catre portal.just.ro/SitePages/cautare.aspx?k=<numar> via getPortalJustUrl helper, cu icon ExternalLink 12px.",
-          "Buton 24x24 cu icon Search langa numar -> onOpenDosar(numar) -> handleHistoryClick(\"dosare\", { numarDosar }) -> pendingSearch -> tab Dosare cu auto-search.",
+          '<a target="_blank"> catre portal.just.ro/SitePages/cautare.aspx?k=<numar> via getPortalJustUrl helper, cu icon ExternalLink 12px.',
+          'Buton 24x24 cu icon Search langa numar -> onOpenDosar(numar) -> handleHistoryClick("dosare", { numarDosar }) -> pendingSearch -> tab Dosare cu auto-search.',
           "Aplicabil doar joburilor dosar_soap (numar canonic care intra in URL). name_soap / aviz_rnpm raman plain text.",
         ],
       },
       {
         title: "Monitorizare - dropdown cadenta onest pentru valori non-standard",
         content:
-          "Dropdown-ul nu mai minte: cand cadence_sec din DB nu e in {4h, 8h, 12h, 24h}, prepende un option \"<valoare> (custom)\" cu border amber, in loc sa afiseze fals \"4h\".",
+          'Dropdown-ul nu mai minte: cand cadence_sec din DB nu e in {4h, 8h, 12h, 24h}, prepende un option "<valoare> (custom)" cu border amber, in loc sa afiseze fals "4h".',
         bullets: [
-          "Bug investigat empiric: job 1234/180/2024 (smoke-hardening leftover) avea cadence_sec=600 (10min) in DB; UI afisa silent \"4h\" iar runner-ul folosea valoarea reala -> next_run = last_run + 10min, nu + 4h.",
+          'Bug investigat empiric: job 1234/180/2024 (smoke-hardening leftover) avea cadence_sec=600 (10min) in DB; UI afisa silent "4h" iar runner-ul folosea valoarea reala -> next_run = last_run + 10min, nu + 4h.',
           "Fix: cand !CADENCE_OPTIONS.some(o => o.sec === job.cadence_sec), prepende <option value={job.cadence_sec}>{formatCadence(job.cadence_sec)} (custom)</option> si seteaza select.value la valoarea reala.",
           "Border + text amber (border-amber-500 text-amber-700) ca avertisment vizual; tooltip explica cum sa normalizezi.",
           "Backend Zod accepta min(600).max(86400) deci dropdown-ul reflecta acum corect realitatea fara a constrange backend-ul.",
@@ -1070,8 +1222,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Alerte - card zoom -1px aditional pe scara",
-        content:
-          "Cardul de alerta scade cu inca un pixel pe toata scara slider-ului fata de v2.6.2.",
+        content: "Cardul de alerta scade cu inca un pixel pe toata scara slider-ului fata de v2.6.2.",
         bullets: [
           "alertCardZoom = (fontSize.value - 3) / fontSize.value (era - 2). La pozitiile slider (16/18/20/22) zoom-ul devine 81.3% / 83.3% / 85% / 86.4%.",
           "useFontSize ramane neschimbat - doar coeficientul cardului.",
@@ -1083,7 +1234,7 @@ export const versions: VersionEntry[] = [
           "Type-check curat, smoke desktop confirma comportamentul, 524 teste backend neschimbate (modificarile sunt strict frontend + prop-passing).",
         bullets: [
           "npx tsc --noEmit (frontend) clean.",
-          "Smoke: TINTA dosar_soap deschide portal.just.ro + butonul Search navigheaza in Dosare; dropdown afiseaza \"10min (custom)\" cu amber pe job-ul cu cadenta non-standard; selectia \"4h\" normalizeaza la 14400 dupa refresh; paginare Alerte identica vizual cu Cautare Dosare; zoom card reactiv la slider.",
+          'Smoke: TINTA dosar_soap deschide portal.just.ro + butonul Search navigheaza in Dosare; dropdown afiseaza "10min (custom)" cu amber pe job-ul cu cadenta non-standard; selectia "4h" normalizeaza la 14400 dupa refresh; paginare Alerte identica vizual cu Cautare Dosare; zoom card reactiv la slider.',
         ],
       },
     ],
@@ -1111,7 +1262,7 @@ export const versions: VersionEntry[] = [
         content:
           "Numarul dosarului din header e link extern catre PortalJust, iar butonul cauta in lista locala Dosare.",
         bullets: [
-          "<a target=\"_blank\"> catre portal.just.ro/SitePages/cautare.aspx?k=<numar> via getPortalJustUrl helper - whitelist .just.ro deja activ in setWindowOpenHandler + shell.openExternal.",
+          '<a target="_blank"> catre portal.just.ro/SitePages/cautare.aspx?k=<numar> via getPortalJustUrl helper - whitelist .just.ro deja activ in setWindowOpenHandler + shell.openExternal.',
           "Buton renamed Cauta in app cu icon Eye + title Deschide ... in lista Dosare; mecanismul pendingSearch din App.tsx ramane intact.",
           "Tooltip pe link-ul de dosar: Deschide <numar> pe portal.just.ro.",
         ],
@@ -1180,7 +1331,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Electron - identitate Windows",
         content:
-          "Apel app.setAppUserModelId(\"ro.legaldashboard.app\") inainte de orice fereastra, ca Windows sa asocieze procesul cu icon-ul real.",
+          'Apel app.setAppUserModelId("ro.legaldashboard.app") inainte de orice fereastra, ca Windows sa asocieze procesul cu icon-ul real.',
         bullets: [
           "Fix: taskbar-ul in dev nu mai arata icon-ul default Atom-Electron; native notifications nu mai sunt atribuite electron.app.Electron.",
           "appId din electron-builder e identic, deci pe install NSIS pictograma ramane consistenta cu pictograma dev.",
@@ -1214,8 +1365,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Backend - guardrails irreversibile",
-        content:
-          "Doua refuzuri 409 prevenirea blocarii adminului de a iesi singur din sistem.",
+        content: "Doua refuzuri 409 prevenirea blocarii adminului de a iesi singur din sistem.",
         bullets: [
           "last_admin: PATCH /admin/users/:id/role refuza self-demotion cand callerul ar ramane zero administratori activi; audit admin.users.demote_blocked pe esec.",
           "self_deactivation: PATCH /admin/users/:id/status refuza un caller care isi schimba propriul status in non-active; audit admin.users.update_status doar pe succes.",
@@ -1235,8 +1385,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Frontend - pagini admin",
-        content:
-          "Trei pagini noi sub /admin/*, fiecare wrapped in AdminGate.",
+        content: "Trei pagini noi sub /admin/*, fiecare wrapped in AdminGate.",
         bullets: [
           "/admin/users: tabel paginat cu inline select pentru rol si status, confirmari prin useConfirm, refresh /me automat dupa schimbare proprie de rol.",
           "/admin/audit: tabel cu rand expandabil per eveniment - timestamp, action, outcome, owner/actor/target, IP plus detail_json pretty-printed la expansiune.",
@@ -1260,8 +1409,7 @@ export const versions: VersionEntry[] = [
     sections: [
       {
         title: "Aliniere fereastra de timp + retention",
-        content:
-          "Fix corectitudine pe seria daily si totalurile 30 zile, plus retention automat pentru ai_usage.",
+        content: "Fix corectitudine pe seria daily si totalurile 30 zile, plus retention automat pentru ai_usage.",
         bullets: [
           "Toate query-urile pe fereastra de timp folosesc acum ts >= ? (closed lower bound) - fix off-by-one pentru randuri care aterizeaza exact la since.",
           "summary30d aliniat la aceeasi fereastra UTC-midnight ca seria daily (era now − 30×24h, mismatched cu bucket-urile zilnice).",
@@ -1271,8 +1419,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Cancellation + shutdown safety",
-        content:
-          "Multi-agent flow nu mai lasa siblings idle si DB-ul nu mai poate fi redeschis post-shutdown.",
+        content: "Multi-agent flow nu mai lasa siblings idle si DB-ul nu mai poate fi redeschis post-shutdown.",
         bullets: [
           "Multi-agent: analystsAbort AbortController shared - un analist esuat anuleaza sibling-ul, evita 180s timeout idle.",
           "signal? AbortSignal propagat in callAnthropic, callOpenAI, callGoogle si callModel; compus cu timeout intern via AbortSignal.any.",
@@ -1282,8 +1429,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Safety + observability",
-        content:
-          "Logging structurat + clamps defensive ca log-ul sa ramana curat la valori out-of-range.",
+        content: "Logging structurat + clamps defensive ca log-ul sa ramana curat la valori out-of-range.",
         bullets: [
           "httpStatus clamped la [100,599] sau null cand SDK-ul intoarce o valoare in afara intervalului HTTP standard.",
           "Price-table miss warn one-shot (JSON structurat) cu dedup pe provider+model - fara spam in log la modelele noi fara pret.",
@@ -1329,8 +1475,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Panou AI Usage",
-        content:
-          "Setari API include acum vizibilitate pe costul AI pentru userul curent.",
+        content: "Setari API include acum vizibilitate pe costul AI pentru userul curent.",
         bullets: [
           "GET /api/v1/ai-usage/summary returneaza cost 24h, cost 30 zile si serie daily last 30 days.",
           "Panoul afiseaza carduri de cost, grafic Recharts, tokeni input/output, cost mediu per apel si stari loading/error/empty.",
@@ -1366,10 +1511,9 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Frontend - bug-fixes vizibile",
-        content:
-          "Doua probleme observabile au fost reparate plus cateva sterse din lipsa de utilitate.",
+        content: "Doua probleme observabile au fost reparate plus cateva sterse din lipsa de utilitate.",
         bullets: [
-          "Fix bug timezone in filtrele de data: pentru un user UTC+3 selectarea zilei \"30 Apr\" rata 3 ore de alerte din ziua respectiva. Filtrele construiesc acum fereastra in local time corect.",
+          'Fix bug timezone in filtrele de data: pentru un user UTC+3 selectarea zilei "30 Apr" rata 3 ore de alerte din ziua respectiva. Filtrele construiesc acum fereastra in local time corect.',
           "markVisibleSeen pleaca prin endpoint-ul nou seen-bulk; fallback Promise.allSettled pe per-id daca bulk-ul esueaza, in loc de loop sequential abandonat la prima eroare.",
           "Notificarile native sunt suprimate cand fereastra e focused (focus + visibility) - elimina double-feedback cand user-ul deja se uita la app.",
           "Counter unread devine server-truth pe fiecare event: scos optimistic increment care racing cu refresh-ul.",
@@ -1418,8 +1562,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Notificari Electron",
-        content:
-          "Alertele noi trimit notificare nativa din Electron main process prin IPC ingust.",
+        content: "Alertele noi trimit notificare nativa din Electron main process prin IPC ingust.",
         bullets: [
           "Renderer-ul cheama desktopApi.showNotification, iar main process foloseste new Notification.",
           "Fallback Web Notification ramane doar pentru dev/web.",
@@ -1428,8 +1571,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Backend API",
-        content:
-          "Rute owner-scoped pentru inbox: GET /api/v1/alerts, PATCH seen/dismissed si stream SSE.",
+        content: "Rute owner-scoped pentru inbox: GET /api/v1/alerts, PATCH seen/dismissed si stream SSE.",
       },
     ],
   },
@@ -1463,8 +1605,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Post-review hardening",
-        content:
-          "Race-urile semnalate in review au fost inchise local, fara schimbare de arhitectura.",
+        content: "Race-urile semnalate in review au fost inchise local, fara schimbare de arhitectura.",
         bullets: [
           "createList muta duplicate-check-ul in tranzactie BEGIN IMMEDIATE.",
           "archiveList face blocking-jobs check si update-ul archived_at atomic.",
@@ -1494,7 +1635,7 @@ export const versions: VersionEntry[] = [
           "Backup zilnic recurent — pana acum singurul backup automat era cel de la pornirea aplicatiei. Acum un setInterval la 24h declanseaza backup-ul si pe sesiuni lungi de tinut deschis (firme care nu inchid Electron-ul peste noapte).",
           "Restore SQLite — pe restore, un PRAGMA integrity_check valideaza fisierul inainte sa-l promoveze; sidecar-urile WAL/SHM sunt sterse cu detection a erorilor non-ENOENT (nu mai trec in tacere peste un disk full).",
           "Graceful shutdown — la SIGTERM/SIGINT, serverul HTTP face drain explicit cu timeout 30s inainte de oprirea scheduler-ului si inchiderea DB-ului. Nu mai pierde request-uri in curs daca Electron e inchis cu Quit.",
-          "Finalize state-guarded + index unic — un singur run \"running\" simultan per job de monitoring, garantat la nivel de DB (idx_one_running_per_job, migration 0005). Daca scheduler-ul ar reseta in timpul unei executii, recovery-ul nu mai poate produce duplicate.",
+          'Finalize state-guarded + index unic — un singur run "running" simultan per job de monitoring, garantat la nivel de DB (idx_one_running_per_job, migration 0005). Daca scheduler-ul ar reseta in timpul unei executii, recovery-ul nu mai poate produce duplicate.',
         ],
       },
       {
@@ -1524,7 +1665,7 @@ export const versions: VersionEntry[] = [
         bullets: [
           "Build-ul XLSX (cu styling per cell + hyperlink-uri navigabile) si PDF (jsPDF + autotable) e tot pe acelasi cod, doar mutat in worker.",
           "ArrayBuffer transferat zero-copy intre worker si main thread.",
-          "Vite worker.format=\"es\" permite code-splitting (xlsx + jspdf chunk-uri lazy), pastrand bundle-ul principal sub 400 KB.",
+          'Vite worker.format="es" permite code-splitting (xlsx + jspdf chunk-uri lazy), pastrand bundle-ul principal sub 400 KB.',
         ],
       },
       {
@@ -1545,21 +1686,21 @@ export const versions: VersionEntry[] = [
       {
         title: "Scheduler activ — joburile incep sa se execute automat",
         content:
-          "PR-3 a livrat schema + UI-ul de monitorizare; PR-4 aduce inima sistemului: scheduler-ul. Tick la 60 secunde, claim_limit 25 joburi/tick, runner separat per kind — la momentul livrarii, kind-ul \"dosar_soap\" e implementat (interogheaza PortalJust prin SOAP). Adaugarea unui dosar la monitorizare cu cadenta 10 minute / 1 ora / 6 ore / 24 ore inseamna acum verificari reale, nu doar marcarea jobului.",
+          'PR-3 a livrat schema + UI-ul de monitorizare; PR-4 aduce inima sistemului: scheduler-ul. Tick la 60 secunde, claim_limit 25 joburi/tick, runner separat per kind — la momentul livrarii, kind-ul "dosar_soap" e implementat (interogheaza PortalJust prin SOAP). Adaugarea unui dosar la monitorizare cu cadenta 10 minute / 1 ora / 6 ore / 24 ore inseamna acum verificari reale, nu doar marcarea jobului.',
         bullets: [
           "Claim atomic via UPDATE...RETURNING cu WHERE next_run_at <= now() — doi scheduleri pe aceeasi DB (rare, dar posibil) nu pick-uiesc acelasi job de doua ori.",
           "Backoff exponential pe esecuri SOAP cu jitter — daca PortalJust e jos, retry-urile nu il bombardeaza din nou la fiecare tick.",
-          "Recovery la pornire — runs lasate in starea \"running\" la oprire brusca sunt finalizate cu status=\"aborted\" la primul boot, fara double-spending.",
+          'Recovery la pornire — runs lasate in starea "running" la oprire brusca sunt finalizate cu status="aborted" la primul boot, fara double-spending.',
           "Kill switch operational — MONITORING_DISABLED_KINDS=dosar_soap,name_soap exclude tipurile listate din claim, fara modificari in DB. Util cand un kind cauzeaza probleme si vrei sa il opresti instant.",
         ],
       },
       {
         title: "Detectie schimbari + alerte deduplicate",
         content:
-          "Snapshot-urile sunt salvate cu hash determinist si comparate cu ultimul snapshot \"verde\". Diff-ul detecteaza adaugari/stergeri/modificari de termene si genereaza alerte in monitoring_alerts cu dedup_key — daca un termen e schimbat de cinci ori la rand, primesti o alerta cumulativa, nu cinci.",
+          'Snapshot-urile sunt salvate cu hash determinist si comparate cu ultimul snapshot "verde". Diff-ul detecteaza adaugari/stergeri/modificari de termene si genereaza alerte in monitoring_alerts cu dedup_key — daca un termen e schimbat de cinci ori la rand, primesti o alerta cumulativa, nu cinci.',
         bullets: [
           "Sedinta key include stadiul (Apel/Fond/Recurs) — schimbarea instantei produce alerta separata, nu o suprascrie tacut.",
-          "Backfill snapshot la primul rul al jobului — al doilea run e prima ocazie de comparat, deci nu se trimite alerta \"Adaugat\" pentru toata starea initiala.",
+          'Backfill snapshot la primul rul al jobului — al doilea run e prima ocazie de comparat, deci nu se trimite alerta "Adaugat" pentru toata starea initiala.',
           "monitoring_runs purjate zilnic la 90 zile (history nu creste indefinit).",
         ],
       },
@@ -1583,11 +1724,11 @@ export const versions: VersionEntry[] = [
     badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
     sections: [
       {
-        title: "Tab nou \"Monitorizare\" — adauga dosare urmarite automat",
+        title: 'Tab nou "Monitorizare" — adauga dosare urmarite automat',
         content:
-          "Noua sectiune din sidebar permite adaugarea unui dosar pentru verificare recurenta. Selectezi cadenta (10 minute, 1 ora, 6 ore sau 24 ore) si dosarul intra in coada. La fel, in pagina Cautare Dosare, in panoul detaliat al fiecarui dosar gasesti acum butonul \"Monitorizeaza schimbari\" — un click si dosarul e in lista de monitorizare, fara sa duplici cautari.",
+          'Noua sectiune din sidebar permite adaugarea unui dosar pentru verificare recurenta. Selectezi cadenta (10 minute, 1 ora, 6 ore sau 24 ore) si dosarul intra in coada. La fel, in pagina Cautare Dosare, in panoul detaliat al fiecarui dosar gasesti acum butonul "Monitorizeaza schimbari" — un click si dosarul e in lista de monitorizare, fara sa duplici cautari.',
         bullets: [
-          "Idempotent la double-click: doua click-uri rapide pe acelasi dosar nu creeaza doua joburi — feedback inline iti spune \"Adaugat\" sau \"Deja monitorizat\".",
+          'Idempotent la double-click: doua click-uri rapide pe acelasi dosar nu creeaza doua joburi — feedback inline iti spune "Adaugat" sau "Deja monitorizat".',
           "Pauza / reia / sterge — fiecare job poate fi pus in pauza temporar fara a-l pierde, sau sters cu confirmare.",
           "Toate joburile sunt scope-uite per user — pregatit pentru modul web (PR-9) cand mai multi utilizatori vor folosi aceeasi instanta.",
         ],
@@ -1633,9 +1774,9 @@ export const versions: VersionEntry[] = [
     badgeClass: "bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400",
     sections: [
       {
-        title: "Tabele auth introduse ca \"schela\" (users / user_sessions)",
+        title: 'Tabele auth introduse ca "schela" (users / user_sessions)',
         content:
-          "Pregatim infrastructura pentru modul web (login Google Workspace, planificat in PR-9) fara sa schimbam comportamentul desktop. Pe instalare locala ramane un singur user sintetic — \"local\" — la fel ca pana acum.",
+          'Pregatim infrastructura pentru modul web (login Google Workspace, planificat in PR-9) fara sa schimbam comportamentul desktop. Pe instalare locala ramane un singur user sintetic — "local" — la fel ca pana acum.',
         bullets: [
           "Migrare 0002_users_sessions_audit.up.sql ruleaza la primul boot si insereaza un singur rand in users (id='local'). Niciun login, niciun ecran nou.",
           "user_sessions exista pentru viitorul modul web (refresh tokens server-side); pe desktop ramane gol.",
@@ -1669,7 +1810,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Seam pentru viitoarea autentificare web",
         content:
-          "Toate rutele citesc acum owner_id-ul curent printr-un singur helper (c.get(\"ownerId\")). Pe desktop e hardcoded \"local\"; in PR-9 va fi inlocuit cu id-ul user-ului din JWT — zero refactor pe rute, doar implementarea helper-ului se schimba.",
+          'Toate rutele citesc acum owner_id-ul curent printr-un singur helper (c.get("ownerId")). Pe desktop e hardcoded "local"; in PR-9 va fi inlocuit cu id-ul user-ului din JWT — zero refactor pe rute, doar implementarea helper-ului se schimba.',
       },
       {
         title: "Inchidere a 5 cai latente prin care un user ar fi putut vedea date altui user",
@@ -1679,7 +1820,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Test de regresie pentru izolare",
         content:
-          "Suite-ul nou repository-isolation.test.ts forjeaza copii cu owner_id mismatch (raw INSERT) si verifica ca nicio metoda din avizRepository nu-i returneaza. 8 teste noi → 85 in total. Pe desktop comportamentul e identic — singurul owner_id activ ramane \"local\".",
+          'Suite-ul nou repository-isolation.test.ts forjeaza copii cu owner_id mismatch (raw INSERT) si verifica ca nicio metoda din avizRepository nu-i returneaza. 8 teste noi → 85 in total. Pe desktop comportamentul e identic — singurul owner_id activ ramane "local".',
       },
     ],
   },
@@ -1721,7 +1862,7 @@ export const versions: VersionEntry[] = [
         content:
           "Log-ul JSON ai_call captureaza acum metadata fina pe fiecare apel catre Claude / GPT / Gemini. Permite cost tracking real (token counts) si rata de erori split pe HTTP status.",
         bullets: [
-          "Helper isTimeoutOrAbort(e) detecteaza timeout/abort inclusiv pe subclase SDK (Anthropic / OpenAI APIUserAbortError / APIConnectionTimeoutError) care nu seteaza e.name = TimeoutError. Inainte branch-ul errorType: \"timeout\" era practic dead pentru aceste cazuri.",
+          'Helper isTimeoutOrAbort(e) detecteaza timeout/abort inclusiv pe subclase SDK (Anthropic / OpenAI APIUserAbortError / APIConnectionTimeoutError) care nu seteaza e.name = TimeoutError. Inainte branch-ul errorType: "timeout" era practic dead pentru aceste cazuri.',
           "withAiLogging primeste { value, meta } din provider-ul interior; usageInput / usageOutput populate din message.usage (Anthropic), response.usage (OpenAI), result.response.usageMetadata (Google).",
           "Pe path-ul de eroare, e.status (cand exista — APIError SDK) e capturat ca httpStatus, ca dashboard-urile sa poata splita 4xx/5xx vs network/abort.",
         ],
@@ -1733,7 +1874,7 @@ export const versions: VersionEntry[] = [
         bullets: [
           "withMaintenanceLock (promise chain in-process) serializeaza restoreFromBackup cu runDailyBackup. Pe desktop fara concurenta in practica, dar scheduler-ul putea teoretic interleave-ui cu un restore care inchide DB-ul mid-db.backup() -> destinatie corupta. Web-mode va inlocui cu row-lock.",
           "Pre-restore snapshot face PRAGMA wal_checkpoint(TRUNCATE) inainte de closeDb(). Fara checkpoint, snapshot-ul prindea doar fisierul .db si pierdea frame-urile WAL necommitate -> rollback silent incomplete.",
-          "logBackupEvent (single-line JSON, ts auto) inlocuieste console.log ad-hoc; daily_backup_failed distinge stage: \"mkdir\" vs \"backup\"; sterge sidecar -wal/-shm cu logging non-ENOENT (EBUSY de la AV pe Windows nu mai e silentios).",
+          'logBackupEvent (single-line JSON, ts auto) inlocuieste console.log ad-hoc; daily_backup_failed distinge stage: "mkdir" vs "backup"; sterge sidecar -wal/-shm cu logging non-ENOENT (EBUSY de la AV pe Windows nu mai e silentios).',
         ],
       },
       {
@@ -1749,7 +1890,7 @@ export const versions: VersionEntry[] = [
         content:
           "Test empiric: RNPM respinge reuse-ul gcode-ului intre cautari cu parametri diferiti. Captcha-per-query ramane cost intrinsec la API-level.",
         bullets: [
-          "Spike in RnpmSearch.tsx care threading existingGcode din runSearch precedent a generat in backend phase: \"search_retry\" (gap 16.4s, captcha re-solve), nu phase: \"search\" direct.",
+          'Spike in RnpmSearch.tsx care threading existingGcode din runSearch precedent a generat in backend phase: "search_retry" (gap 16.4s, captcha re-solve), nu phase: "search" direct.',
           "Pagination intra-search (loadNextBatch) reuseaza gcode-ul corect; path-ul existent ramane valid.",
           "Mitigari posibile pe viitor: provider mai rapid (CapSolver vs 2Captcha - deja setting), race mode (deja suportat), pre-warm captcha speculativ (necesita API discovery).",
         ],
@@ -1783,8 +1924,8 @@ export const versions: VersionEntry[] = [
         content:
           "Apelurile catre Claude / GPT / Gemini emit acum un singur rand JSON cu provider, model, latenta si status. Util pentru ops, cost tracking grosier si debugging la spike-uri sau timeout-uri.",
         bullets: [
-          "Helper withAiLogging imbraca callAnthropic / callOpenAI / callGoogle si emite { action: \"ai_call\", provider, model, latencyMs, status, errorType?, ts }.",
-          "TimeoutError si AbortError sunt normalizate la errorType: \"timeout\" ca log scrapers sa nu trebuiasca sa special-case-uieze ambele.",
+          'Helper withAiLogging imbraca callAnthropic / callOpenAI / callGoogle si emite { action: "ai_call", provider, model, latencyMs, status, errorType?, ts }.',
+          'TimeoutError si AbortError sunt normalizate la errorType: "timeout" ca log scrapers sa nu trebuiasca sa special-case-uieze ambele.',
           "Tabela audit_log persistenta ramane scope Faza 5 (compliance).",
         ],
       },
@@ -1966,10 +2107,10 @@ export const versions: VersionEntry[] = [
       {
         title: "Changelog — export PDF",
         content:
-          "Butonul nou „Export PDF\" din pagina Changelog genereaza un document portrait A4 cu tot istoricul (versiune + data + subtitlu + sectiuni + bulleturi) pentru cine vrea sa-l citeasca in afara aplicatiei.",
+          'Butonul nou „Export PDF" din pagina Changelog genereaza un document portrait A4 cu tot istoricul (versiune + data + subtitlu + sectiuni + bulleturi) pentru cine vrea sa-l citeasca in afara aplicatiei.',
         bullets: [
           "frontend/src/lib/changelog-pdf.ts — jsPDF dynamic import, auto page-break, page numbering, strip diacritics pentru compatibilitate Helvetica",
-          "Button dedicat in Changelog.tsx (Download icon) cu stare „Se genereaza...\" pe durata randarii",
+          'Button dedicat in Changelog.tsx (Download icon) cu stare „Se genereaza..." pe durata randarii',
           "Fisier salvat ca legal-dashboard-changelog-v<VERSION>.pdf — VERSION injectat din __APP_VERSION__ (single source of truth din root package.json)",
         ],
       },
@@ -1985,12 +2126,12 @@ export const versions: VersionEntry[] = [
         ],
       },
       {
-        title: "RNPM — auto-loop „Incarca tot\" (pe modelul cautarii de dosare)",
+        title: 'RNPM — auto-loop „Incarca tot" (pe modelul cautarii de dosare)',
         content:
-          "Butonul „Incarca mai multe\" devenea tedios pentru cautari cu sute/mii de rezultate. Inlocuit cu buton unic „Incarca tot\" care face auto-loop pe batch-uri de 25 pana cand utilizatorul opreste sau se termina paginile RNPM.",
+          'Butonul „Incarca mai multe" devenea tedios pentru cautari cu sute/mii de rezultate. Inlocuit cu buton unic „Incarca tot" care face auto-loop pe batch-uri de 25 pana cand utilizatorul opreste sau se termina paginile RNPM.',
         bullets: [
           "useEffect re-declanseaza loadNextBatch() dupa fiecare batch completat, pana cand nextRnpmPage devine null",
-          "Buton single (Start / Opreste incarcarea) cu contor „X din TOTAL\" in text — paritate vizuala cu cautarea de dosare",
+          'Buton single (Start / Opreste incarcarea) cu contor „X din TOTAL" in text — paritate vizuala cu cautarea de dosare',
           "Bara de progres albastra langa buton — se umple procentual pe masura ce documents.length / total creste",
           "Stop duplicat suprimat in timpul auto-load-ului (prop nou suppressStop pe RnpmSearchForm) — o singura sursa de adevar pentru oprire",
           "Datele deja aduse raman accesibile in tabel in timpul auto-load-ului (scroll, filtru, click detaliu functioneaza neintrerupt)",
@@ -2001,7 +2142,7 @@ export const versions: VersionEntry[] = [
         content:
           "Modal-ul de detalii bloca ~800ms la primul click pe tabul Bunuri cand avizul avea mii de bunuri (test real: 1730). Fix cu 3 linii CSS, fara virtualization.",
         bullets: [
-          "style={{ contentVisibility: \"auto\", containIntrinsicSize: \"auto 150px\" }} pe fiecare card bun",
+          'style={{ contentVisibility: "auto", containIntrinsicSize: "auto 150px" }} pe fiecare card bun',
           "Chromium decide singur ce iese din viewport si skip-uieste rendering-ul — click-to-render din ~800ms → imperceptibil",
           "Zero dependente noi — regula confirmata ca default-ul pentru liste mari viitoare in renderer (preferat fata de virtualization libs)",
         ],
@@ -2009,7 +2150,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Sterge baza — acum elibereaza efectiv spatiul pe disc",
         content:
-          "Dupa „Sterge baza\" contoarele aratau 0 avize dar fisierul ramanea la ~112 MB. SQLite DELETE marcheaza doar pagini libere intern — nu returneaza spatiul pe disc fara VACUUM. Acum endpoint-ul ruleaza compact dupa stergere.",
+          'Dupa „Sterge baza" contoarele aratau 0 avize dar fisierul ramanea la ~112 MB. SQLite DELETE marcheaza doar pagini libere intern — nu returneaza spatiul pe disc fara VACUUM. Acum endpoint-ul ruleaza compact dupa stergere.',
         bullets: [
           "DELETE /api/rnpm/saved/all apeleaza compactDb() dupa deleteAllAvize — VACUUM + PRAGMA wal_checkpoint(TRUNCATE)",
           "Fisierul .db revine la dimensiunea schemei dupa click; panoul Info baza locala reflecta corect eliberarea",
@@ -2021,7 +2162,7 @@ export const versions: VersionEntry[] = [
         content:
           "Abortul clientului (buton Stop / Opreste incarcarea) rezulta anterior in log 500 pe backend — indistinct de erorile reale. Schimbat la 499 (Client Closed Request, conventia nginx) pentru triage curat.",
         bullets: [
-          "console.log „[rnpm/search] aborted by client\" ramane pentru observabilitate",
+          'console.log „[rnpm/search] aborted by client" ramane pentru observabilitate',
           "UI-ul nu vede 499: fetch-ul este aruncat cu AbortError inainte de primirea raspunsului (suprimat via ctl.signal.aborted)",
           "Statisticile 500 devin curate — reflecta doar esec real (captcha, upstream down, parse fail)",
         ],
@@ -2029,7 +2170,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Verificare",
         content:
-          "npx tsc --noEmit — clean pe ambele workspace-uri. Verificare manuala in Electron: auto-load pe cautari cu 200+ rezultate (Stop la mijloc + reluare), „Sterge baza\" cu observare dimensiune fisier .db inainte/dupa, abort in mijlocul batch-ului (backend scrie 499 in logs, UI ramane curat).",
+          'npx tsc --noEmit — clean pe ambele workspace-uri. Verificare manuala in Electron: auto-load pe cautari cu 200+ rezultate (Stop la mijloc + reluare), „Sterge baza" cu observare dimensiune fisier .db inainte/dupa, abort in mijlocul batch-ului (backend scrie 499 in logs, UI ramane curat).',
       },
     ],
   },
@@ -2125,8 +2266,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Info baza locala — management backups si relabel butoane",
-        content:
-          "Zona de actiuni din modalul 'Info baza locala' reorganizata:",
+        content: "Zona de actiuni din modalul 'Info baza locala' reorganizata:",
         bullets: [
           "Buton nou Backups (icon Archive) — deschide <userData>/backups/ in File Explorer",
           "Buton nou Sterge back-up (rosu) — sterge toate fisierele de backup; urmatorul se genereaza la urmatoarea pornire a app-ului",
@@ -2202,8 +2342,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Hardening Electron",
-        content:
-          "Cresterea defense-in-depth pe procesul principal:",
+        content: "Cresterea defense-in-depth pe procesul principal:",
         bullets: [
           "Single-instance lock (app.requestSingleInstanceLock) — previne doua Electron-uri simultane care se bat pe acelasi fisier SQLite si corup baza; a doua lansare focuseaza fereastra existenta",
           "webSecurity: true, sandbox: true, contextIsolation: true explicite in webPreferences — nu mai depindem de default-urile framework-ului",
@@ -2236,8 +2375,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Documentatie",
-        content:
-          "Threat model si configurare documentate la radacina repo-ului pentru operatori si cititori viitori:",
+        content: "Threat model si configurare documentate la radacina repo-ului pentru operatori si cititori viitori:",
         bullets: [
           "SECURITY.md — what's in scope (single-instance, safeStorage, CSP, real-IP rate limit, HOST whitelist, SOAP cap, formula escape), what's out of scope (malware pe acelasi user OS, supply-chain, binar nesemnat Windows, LAN-mode fara auth, SOAP upstream HTTP la portalquery.just.ro)",
           "backend/.env.example — documenteaza clar env-precedence-over-body pentru cheile AI, opt-in-ul LEGAL_DASHBOARD_ALLOW_REMOTE si nota corecta despre persistenta cheilor (safeStorage pe desktop, obfuscare pe web — NU in SQLite cum scria inainte eronat)",
@@ -2267,8 +2405,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Baza locala — filtru interval date + migratii",
-        content:
-          "Filtrele pe tab-ul Baza locala extinse cu interval de date; migrari idempotente pe SQLite:",
+        content: "Filtrele pe tab-ul Baza locala extinse cu interval de date; migrari idempotente pe SQLite:",
         bullets: [
           "Filtru data: doua <input type='date'> (de la / pana la) cu reset. Coloana data stocata 'dd.mm.yyyy' (format RNPM) → conversia in ISO se face in SQL via substr()",
           "rnpm_bunuri.referinte_json: coloana noua (ALTER TABLE idempotent). Stocheaza array JSON de referinte (constituitor / tert) — deblocheaza BunRefRow in modalul detaliu cu culori distincte (sky pentru constituitor, amber pentru tert)",
@@ -2278,8 +2415,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Rafinari UI modul RNPM",
-        content:
-          "Mici imbunatatiri de UX pe toate cele trei tab-uri:",
+        content: "Mici imbunatatiri de UX pe toate cele trei tab-uri:",
         bullets: [
           "RnpmDetailModal: 5 tab-uri navigabile (General / Creditori / Debitori / Bunuri / Istoric) cu count badge per tab si scroll smooth la tab-switch",
           "RnpmSavedData: badge verde/gri activ/inactiv + dubla confirmare la 'Sterge tot' (actiune ireversibila)",
@@ -2289,8 +2425,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Verificare",
-        content:
-          "Build curat si teste verzi:",
+        content: "Build curat si teste verzi:",
         bullets: [
           "npx tsc --noEmit (frontend + backend) — clean",
           "npx vitest run — 24/24 verde",
@@ -2334,8 +2469,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Hardening si parity RNPM (16 Aprilie)",
-        content:
-          "Trei valuri de fix-uri pe modulul RNPM imediat dupa lansare:",
+        content: "Trei valuri de fix-uri pe modulul RNPM imediat dupa lansare:",
         bullets: [
           "Form parity completa cu site-ul oficial mj.rnpm.ro (default checkboxes 'Numai active' + 'Nemodificate de alte inscrieri', dropdown destinatii, structuri per categorie)",
           "Eroare clara cand RNPM returneaza > 1500 rezultate (limita oficiala) + re-solve captcha automat pe 410/401/403 (gcode expirat) pentru paginile ulterioare",
@@ -2345,8 +2479,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Audit remediation — 12/12 findings",
-        content:
-          "Toate cele 12 findings din auditul intern aplicate; build OK, 24/24 teste verzi:",
+        content: "Toate cele 12 findings din auditul intern aplicate; build OK, 24/24 teste verzi:",
         bullets: [
           "Load-more suporta cautari multi-institutie (URLSearchParams.append + c.req.queries; loop serial cu dedup intre institutii)",
           "Butonul Stop opreste real backend-ul (AbortSignal propagat prin batchFetchDosare/subdivideInterval; single-timer abort, fara evenimente done/error la abort)",
@@ -2373,8 +2506,7 @@ export const versions: VersionEntry[] = [
     sections: [
       {
         title: "Export Excel Stilizat",
-        content:
-          "Formatare vizuala avansata pentru fisierele Excel exportate (similar cu stilul PDF):",
+        content: "Formatare vizuala avansata pentru fisierele Excel exportate (similar cu stilul PDF):",
         bullets: [
           "Titlu dark blue cu text alb, headere colorate albastru, randuri alternante gri/alb",
           "Sheet Sedinte grupat pe dosare cu sectiuni clare si separatori vizuali",
@@ -2384,8 +2516,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Hyperlinks Interne Excel (Bidirectionale)",
-        content:
-          "Navigare rapida intre sheet-urile Dosare si Sedinte direct din Excel:",
+        content: "Navigare rapida intre sheet-urile Dosare si Sedinte direct din Excel:",
         bullets: [
           "Dosare → Sedinte: click pe numarul dosarului sare direct la prima sa sedinta",
           "Sedinte → Dosare: headerul fiecarei sectiuni are link inapoi la randul dosarului (↑)",
@@ -2394,8 +2525,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Filenames Dinamice la Export",
-        content:
-          "Denumirile fisierelor exportate reflect continutul (Excel si PDF):",
+        content: "Denumirile fisierelor exportate reflect continutul (Excel si PDF):",
         bullets: [
           "1 dosar: dosar_NR-DOSAR.xlsx / dosar_NR-DOSAR.pdf",
           "Multiple dosare: dosare_DD.MM.YYYY.xlsx / dosare_DD.MM.YYYY.pdf",
@@ -2404,8 +2534,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Modele Claude Actualizate & Versiune Server",
-        content:
-          "Actualizari de infrastructura:",
+        content: "Actualizari de infrastructura:",
         bullets: [
           "Claude Sonnet 4.6, Opus 4.6 si Haiku 4.5 — versiunile curente ale modelelor",
           "Build server deployabil: npm run dist:server genereaza pachet ZIP complet",
@@ -2424,8 +2553,7 @@ export const versions: VersionEntry[] = [
     sections: [
       {
         title: "Modele Gemini 3.x",
-        content:
-          "Actualizare completa a modelelor Google Gemini la seria 3.x:",
+        content: "Actualizare completa a modelelor Google Gemini la seria 3.x:",
         bullets: [
           "Eliminare toate modelele deprecated din seria Gemini 2.5",
           "Modele noi: Gemini 3.1 Flash Lite (Rapid), Gemini 3 Flash (Echilibrat), Gemini 3.1 Pro (Premium)",
@@ -2445,8 +2573,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Timeout Multi-Agent & Dimensionare Dinamica",
-        content:
-          "Imbunatatiri de performanta si compatibilitate:",
+        content: "Imbunatatiri de performanta si compatibilitate:",
         bullets: [
           "Timeout multi-agent crescut la 180s (de la 120s) — analize complete pe dosare mari",
           "Fereastra Electron se adapteaza la rezolutia monitorului (85% latime, 90% inaltime)",
@@ -2465,19 +2592,17 @@ export const versions: VersionEntry[] = [
     sections: [
       {
         title: "Sectiuni AI Colapsabile",
-        content:
-          "Analiza AI si Analiza AI Avansata sunt acum sectiuni colapsabile independente, inchise by default:",
+        content: "Analiza AI si Analiza AI Avansata sunt acum sectiuni colapsabile independente, inchise by default:",
         bullets: [
           "Analiza AI — container propriu cu header, model selectors vizibili, buton si rezultat",
-          "Analiza AI Avansata — container separat, independent (redenumit din \"Analiza Avansata\")",
+          'Analiza AI Avansata — container separat, independent (redenumit din "Analiza Avansata")',
           "Design unificat: acelasi layout (header cu download + chevron, selectoare model, buton jos)",
           "Descrierea modelului selectat (Rapid/Echilibrat/Premium) afisata langa butoane in ambele sectiuni",
         ],
       },
       {
         title: "Marire Fonturi Globala",
-        content:
-          "Fonturi marite cu +1-1.5px in mai multe zone ale aplicatiei:",
+        content: "Fonturi marite cu +1-1.5px in mai multe zone ale aplicatiei:",
         bullets: [
           "Sidebar: label dimensiune text, badge Activ/Neconfigurat",
           "Istoric Cautari: header, nume cautare, rezultate + timp",
@@ -2486,8 +2611,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Consistenta Termene cu Dosare",
-        content:
-          "Toate imbunatatirile vizuale din Cautare Dosare aplicate si pe Termene:",
+        content: "Toate imbunatatirile vizuale din Cautare Dosare aplicate si pe Termene:",
         bullets: [
           "solutieSumar marit la 14.5px (aliniat cu DosareTable)",
           "Party badges marite la text-xs",
@@ -2517,8 +2641,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Indicator Vizualizat / Nevizualizat",
-        content:
-          "Dosarele si termenele au acum un indicator vizual care arata care au fost deschise si care nu:",
+        content: "Dosarele si termenele au acum un indicator vizual care arata care au fost deschise si care nu:",
         bullets: [
           "Punct albastru animat (ping) pentru dosarele nevizualizate",
           "Iconita ochi gri pentru cele deja vizualizate (expandate)",
@@ -2528,8 +2651,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Butoane Navigare Rapida (Scroll Sus/Jos)",
-        content:
-          "Doua butoane floating in coltul din dreapta-jos pentru navigare rapida in pagina:",
+        content: "Doua butoane floating in coltul din dreapta-jos pentru navigare rapida in pagina:",
         bullets: [
           "Sageata sus — apare cand ai scrollat in jos, duce la meniul de cautare",
           "Sageata jos — apare cand mai ai continut sub ecran",
@@ -2561,7 +2683,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Incarca Mai Multe (Load More) — Paginare Extinsa",
         content:
-          "API-ul SOAP PortalJust returneaza maxim 1000 rezultate per cerere. Noul buton \"Incarca mai multe\" scaneaza luna cu luna prin SSE (Server-Sent Events) si gaseste TOATE dosarele/termenele disponibile.",
+          'API-ul SOAP PortalJust returneaza maxim 1000 rezultate per cerere. Noul buton "Incarca mai multe" scaneaza luna cu luna prin SSE (Server-Sent Events) si gaseste TOATE dosarele/termenele disponibile.',
         bullets: [
           "Backend scaneaza intervale lunare cu subdivizare recursiva daca o luna depaseste 1000 rezultate",
           "Deduplicare server-side — backend-ul primeste dosarele/termenele existente via POST body si trimite doar cele NOI",
@@ -2584,12 +2706,11 @@ export const versions: VersionEntry[] = [
       {
         title: "Reset Complet",
         content:
-          "Butonul \"Reseteaza\" sterge acum atat campurile formularului cat si toate rezultatele cautarii anterioare (tabel, metrici, selectii).",
+          'Butonul "Reseteaza" sterge acum atat campurile formularului cat si toate rezultatele cautarii anterioare (tabel, metrici, selectii).',
       },
       {
         title: "Analiza Multi-Agent — Documentare Comportament Judecator",
-        content:
-          "Documentare completa a modului de functionare al analizei multi-agent cu AI:",
+        content: "Documentare completa a modului de functionare al analizei multi-agent cu AI:",
         bullets: [
           "Judecatorul primeste ambele analize in prompt cu delimitatori XML separati",
           "Rolul judecatorului: reconciliaza, sintetizeaza si ofera o analiza finala coerenta, prezentand explicit ce reconcilieri a facut intre cele doua analize",
@@ -2600,7 +2721,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Manual de Utilizare",
         content:
-          "Manual complet integrat in aplicatie cu 12 capitole care acopera toate functionalitatile. Accesibil din Dashboard (buton \"Manual\" langa \"Vezi Noutati\").",
+          'Manual complet integrat in aplicatie cu 12 capitole care acopera toate functionalitatile. Accesibil din Dashboard (buton "Manual" langa "Vezi Noutati").',
         bullets: [
           "Cuprins interactiv — click pe capitol navigheaza direct la sectiunea respectiva",
           "Export PDF — buton de descarcare disponibil atat in header cat si la finalul manualului",
@@ -2669,8 +2790,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Securitate (Audit v1.3.0-ai)",
-        content:
-          "Audit de securitate pe noile functionalitati multi-agent:",
+        content: "Audit de securitate pe noile functionalitati multi-agent:",
         bullets: [
           "Prompt injection defense — date dosar in delimitatori XML, truncare campuri (obiect 500, nume parte 100, solutie 200 caractere)",
           "Analize AI incapsulate in delimitatori separati in prompt-ul judecatorului — previne propagarea prompt injection",
@@ -2699,7 +2819,7 @@ export const versions: VersionEntry[] = [
           "Selector modal pentru filtrarea pe 246 instante din Romania, parsate din WSDL-ul SOAP al Ministerului Justitiei. Institutiile sunt grupate pe categorii: Curti de Apel (15), Tribunale (42), Tribunale Specializate (1), Tribunale Comerciale (3), Tribunale Militare (5), Curti Militare (1), Judecatorii (179).",
         bullets: [
           "Multi-select cu draft state — selectiile se aplica la inchiderea ferestrei, cu sortare alfabetica",
-          "Cautare diacritice-insensitiva (ex: \"brasov\" gaseste \"Brașov\")",
+          'Cautare diacritice-insensitiva (ex: "brasov" gaseste "Brașov")',
           "Chips vizuale pentru selectii, buton de reset, counter de rezultate",
           "Cautare paralela SOAP — cand sunt selectate mai multe institutii, backend-ul face cereri simultane",
         ],
@@ -2712,14 +2832,14 @@ export const versions: VersionEntry[] = [
       {
         title: "Normalizare Nume Institutii",
         content:
-          "Functia centralizeaza de normalizare transforma numele brute din SOAP (ex: \"TribunalulSATUMARE\") in forma corecta (\"Tribunalul Satu Mare\"). Aplicata in toate componentele: tabel dosare, tabel termene, metrici, calendar, modal detalii, export.",
+          'Functia centralizeaza de normalizare transforma numele brute din SOAP (ex: "TribunalulSATUMARE") in forma corecta ("Tribunalul Satu Mare"). Aplicata in toate componentele: tabel dosare, tabel termene, metrici, calendar, modal detalii, export.',
       },
       {
         title: "Compatibilitate Diacritice Romanesti",
         content:
           "API-ul SOAP PortalJust foloseste varianta veche a diacriticelor romanesti (ş cu sedila, nu ș cu virgula). Backend-ul converteste automat caracterele moderne in varianta legacy inainte de trimiterea catre SOAP.",
         bullets: [
-          "Cautarea cu \"Ioan Farcaș\", \"Ioan Farcaş\" sau \"Ioan Farcas\" returneaza aceleasi rezultate",
+          'Cautarea cu "Ioan Farcaș", "Ioan Farcaş" sau "Ioan Farcas" returneaza aceleasi rezultate',
           "Analiza rolurilor din MetricsPanel foloseste matching diacritice-insensitiv",
           "Highlight-ul de nume din tabel recunoaste toate variantele de diacritice",
           "Filtrul pe roluri compara diacritice-insensitiv",
@@ -2727,8 +2847,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Securitate (Audit v1.2.1-ai)",
-        content:
-          "Audit complet de securitate pe backend, frontend si Electron cu urmatoarele imbunatatiri:",
+        content: "Audit complet de securitate pe backend, frontend si Electron cu urmatoarele imbunatatiri:",
         bullets: [
           "Limita maxima de 50 institutii per cerere — previne amplificarea cererilor SOAP paralele",
           "Timeout de 60 secunde pe toate apelurile AI (Anthropic, OpenAI, Google) — previne blocarea conexiunilor",
@@ -2736,7 +2855,7 @@ export const versions: VersionEntry[] = [
           "Validare chei API — string-uri cu maxim 256 caractere, previne obiecte sau payload-uri mari",
           "encodeURIComponent() pe toate URL-urile portal.just.ro construite din numere de dosar — previne URL injection",
           "Verificare identitate backend la pornire Electron — health check confirma ca raspunsul vine de la PortalJust API, nu de la alt proces pe portul 3001",
-          "Validare URL stricta in Electron — shell.openExternal() foloseste new URL() parser si verifica hostname.endsWith(\".just.ro\")",
+          'Validare URL stricta in Electron — shell.openExternal() foloseste new URL() parser si verifica hostname.endsWith(".just.ro")',
           "CSP imbunatatit: object-src 'none' (blocheaza plugin-uri) si frame-ancestors 'none' (previne iframe embedding)",
         ],
       },
@@ -2792,8 +2911,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Securitate (Audit v1.2.0-ai)",
-        content:
-          "Aceasta versiune include un audit complet de securitate cu urmatoarele imbunatatiri:",
+        content: "Aceasta versiune include un audit complet de securitate cu urmatoarele imbunatatiri:",
         bullets: [
           "Protectie XSS: Toate zonele care afiseaza raspunsul AI folosesc DOMPurify pentru sanitizarea HTML-ului. Taguri permise strict limitate la <strong>, <em>, <b>, <i> — previne executia de cod malitios din raspunsuri AI",
           "Sanitizare erori API: Mesajele de eroare returnate clientului nu mai contin detalii interne (stack trace, chei API partiale, mesaje SDK). Erorile complete raman doar in log-urile serverului",
@@ -2901,8 +3019,7 @@ export const versions: VersionEntry[] = [
     sections: [
       {
         title: "Functionalitati Principale",
-        content:
-          "Conectare la API-ul SOAP PortalJust.ro al Ministerului Justitiei.",
+        content: "Conectare la API-ul SOAP PortalJust.ro al Ministerului Justitiei.",
         bullets: [
           "Cautare dosare dupa numar, nume parte, obiect",
           "Cautare termene cu interval de date",
@@ -2932,8 +3049,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Securitate (Masuri de Baza)",
-        content:
-          "Aplicatia a fost construita cu un set complet de masuri de securitate inca de la prima versiune:",
+        content: "Aplicatia a fost construita cu un set complet de masuri de securitate inca de la prima versiune:",
         bullets: [
           "Rate limiting (30 req/min pe endpoint) — previne flood-ul si abuzul API-ului",
           "Input validation — lungime maxima 200 caractere per parametru, validare format date YYYY-MM-DD",
