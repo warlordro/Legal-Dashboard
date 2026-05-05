@@ -20,11 +20,19 @@ Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELO
 
 La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 
+**Mereu (la orice release):**
+
 1. `package.json` (root + `backend/` + `frontend/`) + `package-lock.json`
 2. `frontend/src/data/changelog-entries.tsx` — in-app changelog (necesita restart Electron pentru `__APP_VERSION__`)
 3. `CHANGELOG.md` — sectiunea noua de release (single source of truth)
 4. `README.md` — campul "Versiune curenta" + brief description
 5. `SESSION-HANDOFF.md` — context sprint activ daca exista referinte la versiune / PR livrat
+
+**Conditional (doar daca releaseul touch-uieste subiectul):**
+
+6. `SECURITY.md` — daca releaseul aduce schimbari security-relevante (auth, secrets, network surface, CVE patches, threat model). Adauga entry in changelog table la baza fisierului.
+7. `HARDENING.md` — daca releaseul inchide o Faza de hardening sau adauga findings noi din `/multi-review`.
+8. `EXECUTION-ROADMAP.md` — daca releaseul livreaza un PR sau marcheaza un DoD checkbox.
 
 **Sanity check inainte de commit:** `Grep -i "<vechea_versiune>"` pe toate `.md` la radacina; fiecare hit care nu e parte din istoric (CHANGELOG entry vechi, etc.) trebuie actualizat.
 
