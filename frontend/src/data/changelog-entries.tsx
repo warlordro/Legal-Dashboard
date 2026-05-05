@@ -39,7 +39,7 @@ export const versions: VersionEntry[] = [
     version: "v2.16.1",
     date: "5 Mai 2026",
     subtitle:
-      "Patch hardening intern post v2.16.0 — absoarbe integral findings-urile review-ului automat (1 critical drift de validare, 2 blockers operationale, 4 hardening-uri defense-in-depth). Zero schimbari vizibile in interfata: aplicatia se comporta exact la fel pentru utilizator. Imbunatatirile sunt strict interne — un zid de aparare in plus impotriva regresiilor pe drumul catre cutover-ul web.",
+      "Sesiune de intarire interna dupa v2.16.0 care absoarbe integral observatiile facute de revizia automata a codului (un risc critic de validare, doua blocaje operationale si patru intariri defensive). Zero schimbari vizibile in interfata: aplicatia se comporta exact la fel pentru utilizator. Imbunatatirile sunt strict interne — un zid de aparare in plus impotriva regresiilor pe drumul catre lansarea variantei web.",
     icon: <ShieldCheck className="h-5 w-5" />,
     borderColor: "border-l-emerald-500",
     badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",

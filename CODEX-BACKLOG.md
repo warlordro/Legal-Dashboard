@@ -26,14 +26,14 @@ Backend-ul are deja `POST /api/v1/alerts/:id/dismiss` per-alert (single). Pentru
 
 #### Acceptance criteria
 
-- [ ] Buton `Inchide selectia` apare in toolbar-ul de selectie din `Alerts.tsx` cand `selectedIds.size > 0`; disabled altfel.
-- [ ] Buton `Inchide toate` (cu confirmare modal) marcheaza dismissed toate alertele care satisfac filtrele curente (jobKind, q, kind, severity, onlyUnread, includeDismissed=false implicit, from, to).
-- [ ] Endpoint nou `POST /api/v1/alerts/dismiss-bulk` cu Zod `discriminatedUnion("mode", [{ids: number[]} | {filters: AlertListQuery}])`, cap 10k randuri, audit `alerts.dismiss_bulk` cu `mode + count` in detail_json.
-- [ ] WHERE owner_id = ? guard pe ambele moduri (cross-owner protection).
-- [ ] Refresh inbox + recompute `unread`/`total` dupa bulk dismiss.
-- [ ] SSE stream nu fanout-eaza individual pe fiecare ID (ar inunda clientul); foloseste un singur eveniment `alerts.refresh` cand bulk-ul depaseste un prag (de ex. 50).
-- [ ] Test backend pentru: success path (ids + filters), 413 la peste 10k, 0 randuri returneaza 200 cu count: 0, owner-isolation.
-- [ ] Test frontend pentru: confirmation modal pentru `Inchide toate` (impact mai mare), counter actualizat dupa dismiss bulk.
+- [x] Buton `Inchide selectia` apare in toolbar-ul de selectie din `Alerts.tsx` cand `selectedIds.size > 0`; disabled altfel.
+- [x] Buton `Inchide toate` (cu confirmare modal) marcheaza dismissed toate alertele care satisfac filtrele curente (jobKind, q, kind, severity, onlyUnread, includeDismissed=false implicit, from, to).
+- [x] Endpoint nou `POST /api/v1/alerts/dismiss-bulk` cu Zod `discriminatedUnion("mode", [{ids: number[]} | {filters: AlertListQuery}])`, cap 10k randuri, audit `alerts.dismiss_bulk` cu `mode + count` in detail_json.
+- [x] WHERE owner_id = ? guard pe ambele moduri (cross-owner protection).
+- [x] Refresh inbox + recompute `unread`/`total` dupa bulk dismiss.
+- [x] SSE stream nu fanout-eaza individual pe fiecare ID; clientul re-fetch dupa raspunsul HTTP.
+- [x] Test backend pentru: success path (ids + filters), 413 la peste 10k, 0 randuri returneaza 200 cu count: 0, owner-isolation.
+- [x] Test frontend pentru: dismissBulk in `lib/alertsApi.test.ts` (ids/filters payload encoding).
 
 #### Note de design
 

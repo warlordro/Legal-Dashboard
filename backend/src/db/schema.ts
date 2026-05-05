@@ -97,10 +97,9 @@ export function getDb(): Database.Database {
 
 // v2.16.1 — pre-open probe: pe un readonly connection citim _schema_versions
 // si comparam cu fisierele de pe disk. Returneaza true daca exista vreo
-// migration version necunoscuta la stored set (= pending). Backfill-ul legacy
-// (sentinel) nu conteaza ca "pending" pentru ca runner-ul oricum sare peste
-// fisierul corespondent. Eroarea pe probe e interpretata defensiv ca "fara
-// pending" — boot-ul continua, runner-ul propriu-zis arunca daca e drift real.
+// migration version necunoscuta la stored set (= pending). Eroarea pe probe e
+// interpretata defensiv ca "fara pending" — boot-ul continua, runner-ul
+// propriu-zis arunca daca e drift real.
 function hasPendingSchemaMigrations(dbPath: string): boolean {
   try {
     const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
@@ -110,16 +109,17 @@ function hasPendingSchemaMigrations(dbPath: string): boolean {
           `SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'`,
         )
         .get();
-      // Legacy DB fara _schema_versions: backfill-ul ruleaza la primul boot
-      // PR-0+ si nu modifica schema utilizator, deci backup-ul nu e necesar.
-      // Backup-ul descriere-dedup separat acopera scenariul concret de risc.
-      if (!hasVersionsTable) return false;
+      const files = discoverMigrations(MIGRATIONS_DIR);
+      // Legacy DB fara _schema_versions (v2.0.10 si anterior): runMigrations
+      // backfill-uieste sentinel pentru baseline (version=1) si apoi aplica
+      // 0002+...0N pe schema utilizatorului. Daca avem fisiere non-baseline,
+      // backup inainte: o esuare pe oricare migration trebuie sa fie reversibila.
+      if (!hasVersionsTable) return files.some((f) => f.version > 1);
       const stored = new Set<number>(
         (probe
           .prepare(`SELECT version FROM _schema_versions`)
           .all() as { version: number }[]).map((r) => r.version),
       );
-      const files = discoverMigrations(MIGRATIONS_DIR);
       return files.some((f) => !stored.has(f.version));
     } finally {
       probe.close();
