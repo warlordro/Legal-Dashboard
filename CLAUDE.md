@@ -16,6 +16,18 @@ Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELO
 - Actualizeaza CLAUDE.md **doar** daca se schimba o conventie activa de cod sau arhitectura.
 - La bump de versiune: update doar campul scurt `**vX.Y.Z** - <data>` din "Versiune Curenta" (1-2 linii). Fara paragraf detaliat, fara blocuri "Predecesor", fara tabel sprint.
 
+## Checklist bump de versiune
+
+La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
+
+1. `package.json` (root + `backend/` + `frontend/`) + `package-lock.json`
+2. `frontend/src/data/changelog-entries.tsx` — in-app changelog (necesita restart Electron pentru `__APP_VERSION__`)
+3. `CHANGELOG.md` — sectiunea noua de release (single source of truth)
+4. `README.md` — campul "Versiune curenta" + brief description
+5. `SESSION-HANDOFF.md` — context sprint activ daca exista referinte la versiune / PR livrat
+
+**Sanity check inainte de commit:** `Grep -i "<vechea_versiune>"` pe toate `.md` la radacina; fiecare hit care nu e parte din istoric (CHANGELOG entry vechi, etc.) trebuie actualizat.
+
 ## Structura Proiect
 ```
 legal-dashboard/
