@@ -44,6 +44,13 @@ in plus, fara feature nou.
   DB intr-o stare in care un rollback manual cere `.bak` care lipseste. Post-fix, **orice** migration
   rebuild face backup automat. Probe-ul e defensiv: pe orice eroare returneaza `false` (boot continua),
   ca un fisier corupt sa nu blocheze pornirea aplicatiei.
+- **Legacy DB pre-migration backup completeness** (review post-commit): prima iteratie a probe-ului
+  returna `false` cand `_schema_versions` lipsea (DB-uri legacy v2.0.10 si anterior), pe motiv ca
+  backfill-ul sentinel pentru baseline nu modifica schema utilizator. **Insa** la primul boot post-upgrade,
+  exact migrarile 0002..0N se aplica pe schema; deci scenariul cu cel mai mare risc (rebuild de la zero
+  pentru o cabina veche) sarea peste backup. Fix: cand `_schema_versions` lipseste si exista fisiere
+  de migration cu `version > 1`, returnam `true` (backup ruleaza). Backfill-ul de baseline (`v=1`)
+  singur tot nu trigger-uieste backup-ul, ca pe DB-urile noi (post-PR-0) sa nu existe overhead inutil.
 
 ### Backend (`routes/alerts.ts`)
 

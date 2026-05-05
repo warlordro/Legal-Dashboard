@@ -57,7 +57,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Backup automat inainte de orice rebuild de schema DB",
         content:
-          "La pornirea aplicatiei, daca exista o noua migratie de structura DB care urmeaza sa ruleze (de exemplu rebuild de tabel pentru schimbarea unei reguli CHECK), se face acum automat un backup SQLite numit schema-upgrade inainte de a aplica migratia. Pana acum, aceasta protectie era explicita doar in handler-ul vechi al unei migratii din 2026-04, iar migratia adaugata in v2.15.0 (pentru kind-ul Termen nou dupa solutie) nu avea backup explicit. Daca o rulare partiala lasa DB-ul intr-o stare nedorita, ai acum mereu un .bak la dispozitie pentru recuperare manuala — fara sa fii nevoit sa-ti reamintesti sa-l faci tu inainte de update.",
+          "La pornirea aplicatiei, daca exista o noua migratie de structura DB care urmeaza sa ruleze (de exemplu rebuild de tabel pentru schimbarea unei reguli CHECK), se face acum automat un backup SQLite numit schema-upgrade inainte de a aplica migratia. Pana acum, aceasta protectie era explicita doar in handler-ul vechi al unei migratii din 2026-04, iar migratia adaugata in v2.15.0 (pentru kind-ul Termen nou dupa solutie) nu avea backup explicit. Daca o rulare partiala lasa DB-ul intr-o stare nedorita, ai acum mereu un .bak la dispozitie pentru recuperare manuala — fara sa fii nevoit sa-ti reamintesti sa-l faci tu inainte de update. Acoperirea include si DB-urile vechi (utilizatori care vin de pe versiuni v2.0.10 si anterioare): la primul boot post-upgrade, intregul lant de migrari ruleaza pe schema veche si scrie automat un backup la inceput.",
       },
       {
         title: "Robustete impotriva curselor concurente la marcarea Necitit",

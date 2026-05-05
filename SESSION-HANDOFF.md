@@ -60,6 +60,13 @@ strict interne.
   enum); 0016 (analog rebuild pentru `termen_dupa_solutie`) nu il avea, deci o rulare
   partiala lasa DB intr-o stare in care un rollback manual cere `.bak` care lipseste.
 - **Post-fix**: orice migration rebuild face backup automat fara modificari per-handler.
+- **Legacy DB completeness** (review post-commit): probe-ul returna initial `false` cand
+  `_schema_versions` lipsea (DB-uri legacy v2.0.10 si anterior), pe motiv ca backfill-ul
+  sentinel pentru baseline nu modifica schema. Insa la primul boot post-upgrade exact
+  migration-urile 0002..0N se aplica pe schema utilizator — exact scenariul cu cel mai
+  mare risc. Fix: cand `_schema_versions` lipseste si exista fisiere de migration cu
+  `version > 1`, returnam `true`. Backfill-ul singular pentru baseline (`v=1`) nu
+  trigger-uieste backup-ul, ca DB-urile noi (post-PR-0) sa nu sufere overhead inutil.
 
 **Tests** (+2 backend):
 - `routes/alerts.test.ts` GET `/api/v1/alerts` describe: `accepts kind=termen_dupa_solutie
