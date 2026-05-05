@@ -7,22 +7,51 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.13.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.16.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release este **v2.13.0** - Export alerte + raport zilnic email peste v2.12.1.
-Sweep care livreaza cele doua capabilitati cerute pe pagina Alerte: (1) export Excel/PDF
-cu link direct catre dosarele identificate (selectie / filtre curente / interval, cap
-10k randuri) — ruta noua `POST /api/v1/alerts/export` cu Zod `discriminatedUnion("mode")`
-si pagina Alerte cu checkbox per rand + buton "Exporta" + modal radio Excel/PDF; (2)
-raport zilnic pe email cu toate alertele din ziua precedenta — flag nou `dailyReportEnabled`
-in `owner_email_settings` (migration `0015`), scheduler ruleaza la ora locala configurabila
-(default 09:00, env `DAILY_REPORT_HOUR`), fereastra `[yesterday 00:00, today 00:00 local)`,
-dedup via `last_daily_report_sent_for` (zi marcata doar pe success), audit
-`email.daily_report.sent/failed`, format subiect `[Legal Dashboard] Raport zilnic
-dd.mm.yyyy — N alerte`. **789 teste backend** (de la 751: +17 template + 12 scheduler
-+ 7 export route + 2 me daily flag) si **81 teste frontend** (de la 73: +3 alertsApi
-exportAlerts + 3 export-alerts XLSX + 2 EmailSettingsPanel daily flag).
+Ultimul release **v2.16.1** - Multi-review remediation post v2.16.0, hardening intern
+fara schimbari de contract HTTP / shape UI / DDL: single source of truth pentru
+`ALERT_KINDS` / `ALERT_SEVERITIES` / `ALERT_JOB_KINDS` (CRITICAL drift fix — schemele
+Zod nu mai duplica enumerarile), `selectAlertIdsByFilters` ORDER BY DESC pentru
+determinism la cap 10k, `markAlertUnseen` wrap in `db.transaction(...)`,
+`dismissAlertsByIds` COUNT optimization (single SUM(CASE)), pre-migration backup
+**generic** in `db/schema.ts` (orice rebuild migration face acum backup automat,
+inclusiv pe DB-uri legacy v2.0.10 fara `_schema_versions`). **811 teste backend**
+(+2 regression `termen_dupa_solutie`), **86 teste frontend**.
+
+Predecesor **v2.16.0** - UX polish post v2.15.0: KPI Monitorizare `Joburi active` →
+`Monitorizari active`, butonul Dosare marcheaza alerta ca citita fire-and-forget,
+toggle Citit/Necitit pe buton (`alertsApi.markUnseen` + ruta `PATCH /:id/unseen` cu
+audit `alert_unseen`), titlul `termen_dupa_solutie` umanizat (`04.05.2026 → 19.05.2026`
+in loc de `2026-05-04T00:00:00`), detail dedicat in `lib/alert-context.tsx`.
+
+Predecesor **v2.15.0** - Fix duplicare alerte amanare. Cand PortalJust publica o
+solutie SI programeaza un termen nou pentru acelasi complet, inboxul emitea doua
+alerte separate; v2.15.0 introduce kind-ul nou `termen_dupa_solutie` care le
+contopeste intr-una singura cu detail combinat. Diff engine `dosarSoap.ts` cu Pass 1
+(defer) → Pass 2 (merge cu bucket `(stadiu, complet)`) → Pass 3 (emit pending
+standalone); migration `0016_termen_dupa_solutie_kind` rebuild CHECK enum.
+
+Predecesor **v2.14.1** - SOAP timeout PortalJust 45s → 60s (`SOAP_TIMEOUT_MS = 60000`).
+Driver: pattern empiric BCR (~1000 dosare, ~50% rata de esec, toate la fix 45000ms
+duration cu "operation was aborted due to timeout", rusitele aterizau la 40-44s).
+
+Predecesor **v2.14.0** - Bulk dismiss alerte (`POST /api/v1/alerts/dismiss-bulk` cu
+Zod `discriminatedUnion("mode", [ids|filters])`, cap 10k randuri, butoane "Inchide
+selectia" / "Inchide toate" cu confirmation modal in toolbar Alerte) + fix root cause
+"Eroare necunoscuta" — `middleware/rate-limit.ts` 503/429 emit acum envelope-ul
+standard `{ data, error: { code, message }, requestId }`.
+
+Predecesor **v2.13.1** - UX polish post-export — `HIDDEN_KIND_FILTERS` ascunde 4
+kind-uri inerte din dropdown-ul Alerte; `getPortalJustUrl` strip `/aN` suffix; PDF
+hyperlinks pe coloana Numar Dosar in Dosare/Termene/Monitorizare; Monitorizare export
+pagineaza prin toate paginile cand nu exista selectie.
+
+Predecesor **v2.13.0** - Export alerte (Excel/PDF, cap 10k, mod ids/filters/range) +
+raport zilnic email (`POST /api/v1/me/email-settings` field nou `dailyReportEnabled`,
+scheduler ruleaza la 09:00 local default, dedup via `last_daily_report_sent_for`,
+migration `0015_daily_report_settings`).
 
 Predecesor **v2.12.1** - UX bulk import + nume lungi PortalJust peste v2.12.0.
 Patch care raspunde la trei probleme operationale ridicate de utilizator pe import-ul
@@ -355,8 +384,8 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (721 teste dupa v2.10.6) |
-| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (73 teste dupa v2.10.6) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (811 teste dupa v2.16.1) |
+| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (86 teste dupa v2.14.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |
@@ -381,7 +410,7 @@ Tipul `aviz_rnpm` ramane rezervat pentru o etapa viitoare; `name_soap` este acti
 
 ## Server / Docker deploy
 
-`npm run dist:server` genereaza `server-release/portaljust-server-<version>.zip`.
+`npm run dist:server` genereaza `server-release/legal-dashboard-server-<version>.zip`.
 ZIP-ul include `package-lock.json` + manifestele workspace si scripturile
 `start.sh` / `start.bat` instaleaza runtime deps cu `npm ci` la prima pornire
 daca lipseste `node_modules/better-sqlite3`. Motiv: `better-sqlite3` este modul
