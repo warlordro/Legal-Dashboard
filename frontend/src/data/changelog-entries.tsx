@@ -16,6 +16,7 @@ import {
   Bell,
   Mail,
   Users as UsersIcon,
+  Split,
 } from "lucide-react";
 
 export interface ChangeSection {
@@ -36,10 +37,108 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.19.1",
+    date: "7 Mai 2026",
+    subtitle:
+      "Patch hardening si UX polish post v2.19.0. Patru fix-uri descoperite la rulare empirica imediat dupa lansarea split-ului tier-2: erori afisate ca [object Object] in modalul Info baza locala in loc de mesajul real, butonul de stop care nu aparea cand incarcarea era declansata din toolbar-ul tabelului, rute admin RNPM (Sterge baza, Backups, Compacteaza) blocate cu Insufficient role pentru utilizatorul desktop, si sectiunea Administrare din sidebar care nu mai apare pe desktop. Plus o documentare formala a limitei tehnice RNPM pentru debitori cu volum foarte mare. Zero schimbari functionale in motorul de split.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-slate-500",
+    badgeClass: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400",
+    sections: [
+      {
+        title: "Mesajele de eroare arata acum textul real, nu [object Object]",
+        content:
+          "Operatiile administrative pe baza RNPM (sterge tot, sterge backup, compacteaza, listare backup-uri) afisau pana acum eroarea ca [object Object] in modalul Info baza locala. Cauza: layer-ul de retea din frontend stia sa scoata mesajul de eroare doar in formatul vechi (string), nu si in cel nou introdus in v2.14.0 (obiect cu cod si mesaj). Acum acopera ambele forme — vezi mesajul real (de exemplu Insufficient role daca user-ul nu are permisiunea), nu un placeholder generic.",
+      },
+      {
+        title: "Utilizatorul desktop primeste automat rolul de admin la pornire",
+        content:
+          "Operatiile administrative pe RNPM (sterge baza, sterge backup, compacteaza) erau blocate cu Insufficient role pe instalarile desktop. Cauza: rolul implicit pentru utilizatorul local era user (default sigur pentru cazul web multi-tenant), iar protectiile de admin introduse in v2.11.0 il respingeau. Pe desktop exista un singur utilizator si nu are sens sa fie blocat sa-si administreze propria baza. Fix: la fiecare pornire in mod desktop, daca utilizatorul local exista cu rol diferit de admin, este promovat automat. Idempotent — daca e deja admin, nu face nimic.",
+      },
+      {
+        title: "Sectiunea Administrare din meniu se ascunde pe desktop",
+        content:
+          "Promovarea automata la admin (de mai sus) declansa side-effect vizibil: sectiunea Administrare (Utilizatori, Audit, Cote) — introdusa in v2.6.0 ca pregatire pentru deploy-ul web multi-tenant — devenea vizibila in sidebar pe desktop. Pentru o aplicatie cu un singur utilizator, e zgomot fara valoare. Acum sectiunea e ascunsa cand aplicatia ruleaza in mod desktop (Electron). Paginile raman accesibile prin URL direct daca e nevoie pentru depanare, dar nu mai sunt promovate in navigatie.",
+      },
+      {
+        title: "Butonul rosu de oprire apare si cand incarcarea e declansata din tabel",
+        content:
+          "Pana acum, cand apasai Incarca mai multe pe paginarea tabelului (in loc de butonul Incarca tot din toolbar-ul de sus), butonul nu se transforma in rosu cu Opreste incarcarea — ramanea albastru si nu putea fi oprit. Cauza: conditia de afisare astepta starea de auto-loading, dar incarcarea single-batch declansata din tabel folosea o stare distincta de loading. Fix: butonul devine rosu pentru ambele tipuri de incarcare in curs, deci poate fi oprit oricum a fost declansat.",
+      },
+      {
+        title: "Documentare formala a limitei tehnice RNPM pe debitori foarte mari",
+        content:
+          "Pe debitori cu volum foarte mare (peste 1500 inregistrari intr-o singura combinatie de filtre), recuperarea integrala via API public RNPM e imposibila. Site-ul oficial mj.rnpm.ro insusi cere utilizatorului sa modifice criteriile pentru a ajunge sub 1500. Un fisier nou la radacina proiectului (PROBLEM-rnpm-cap-1500.md) listeaza toate axele de split incercate (tip inscriere, destinatie, perioada, activ, nemodificat, etc.) si motivul pentru care fiecare e suficienta sau nu. v2.19.0 cu best-effort + disclosure UI ramane raspunsul corect: recuperam ce putem, raportam onest ce nu.",
+      },
+    ],
+  },
+  {
+    version: "v2.19.0",
+    date: "7 Mai 2026",
+    subtitle:
+      "Cautarile RNPM extinse cu un al doilea nivel de impartire automata cand un sub-tip individual depaseste tot capul de 1500 inregistrari. Pana in v2.18.0, daca un singur sub-tip continea peste 1500 records (caz empiric: pe categoria specifice, sub-tipul aviz initial avea singur 1823), aplicatia il marca respins si nu recupera nimic din el. v2.19.0 declanseaza in cazul acesta o a doua impartire pe destinatie (14 valori pentru specifice, 10 pentru ipoteci), recuperand records pe destinatie individuala. Recuperarea e best-effort: records fara destinatie atribuita raman neacoperite, iar gap-ul e listat explicit in banner-ul de rezultate.",
+    icon: <Split className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Recuperare in doi pasi cand un sub-tip individual depaseste 1500",
+        content:
+          "Pe categoriile specifice si ipoteci, daca o cautare cu split (introdusa in v2.18.0) intalneste un sub-tip care singur trece de 1500 records, aplicatia incearca acum un al doilea pas: ruleaza N cautari secventiale per destinatie (14 valori pentru specifice — aviz initial, modificator, rectificare, etc.; 10 pentru ipoteci). Toate rezultatele se agrega in acelasi entry de istoric ca tier-1. Daca tier-2 acopera complet sub-tipul, status-ul afisat este recuperat. Daca acopera doar partial (records fara destinatie atribuita raman in afara filtrelor), status-ul este partial si gap-ul e listat in banner.",
+      },
+      {
+        title: "Disclosure explicit al gap-ului in UI",
+        content:
+          "Dialogul de confirmare al cautarii cu split arata acum cost si timp ca interval (intre minim — daca toate sub-tipurile incap in 1500 — si maxim — daca toate declanseaza tier-2). Banner-ul de deasupra tabelei dupa rulare listeaza fiecare sub-tip cu status-ul individual (terminat, recuperat, partial, respins) si, in cazul partial, numarul exact de records care nu au putut fi recuperate. Cand suma gap-urilor depaseste zero, apare un callout amber explicit: X inregistrari fara destinatie atribuita nu au putut fi recuperate.",
+      },
+      {
+        title: "Categoriile fara destinatii enumerable raman fail-clean",
+        content:
+          "Pentru creante, obligatiuni si fiducii (care nu au lista finita de destinatii in formularul oficial RNPM), comportamentul ramane cel din v2.18.0: sub-tipurile peste 1500 sunt marcate respins si rularea continua. Dialogul de confirmare diferentiaza explicit cele doua scenarii — pentru categoriile cu tier-2 disponibil afiseaza pre-warning despre best-effort, pentru celelalte mesaj de fail-clean.",
+      },
+      {
+        title: "Timeout extins la 45 de minute pentru cazul worst-case",
+        content:
+          "Limita interna de timp a unei cautari cu split (SSE_SPLIT_TIMEOUT) creste de la 30 la 45 de minute pentru a acoperi cazul rar in care fan-out-ul total tier-1 + tier-2 atinge maximul (de exemplu pe ipoteci cu 18 sub-tipuri tier-1, dintre care unele declanseaza tier-2 cu 10 destinatii). Worst-case util e ~11 minute, restul e marja pentru retry captcha si jitter de retea.",
+      },
+      {
+        title: "Acoperire pe teste",
+        content:
+          "Trei teste noi in suita backend verifica: (1) dispatcher-ul itereaza EVERY sub-tip tier-1 chiar cand cel din mijloc declanseaza tier-2; (2) tier-2 itereaza EVERY destinatie din lista categoriei; (3) categoriile fara destinatii enumerable raman fail-clean fara incercare de tier-2. Total: 822 teste backend (de la 819 in v2.17.0), 86 teste frontend.",
+      },
+    ],
+  },
+  {
+    version: "v2.18.0",
+    date: "6 Mai 2026",
+    subtitle:
+      "Cautarile RNPM care depasesc limita oficiala de 1500 inregistrari (caz tipic: debitor PJ cu CUI cu multe ipoteci active) primesc acum o ramificare automata: cand serverul RNPM raspunde cu mai multe rezultate decat poate intoarce intr-un singur request, aplicatia te intreaba daca vrei sa rulezi N cautari separate (cate una pentru fiecare tip de inscriere disponibil la categoria curenta). Vezi costul estimat in captcha-uri si timpul aproximativ inainte sa confirmi. La accept, fiecare sub-cautare ruleaza secvential, rezultatele se agrega intr-un singur entry de istoric, iar daca un sub-tip individual ramane peste limita, e marcat respins fara a opri restul rularii.",
+    icon: <Split className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Cautare RNPM cu auto-split la depasirea limitei de 1500",
+        content:
+          "Pana acum, daca o cautare RNPM intorcea peste 1500 rezultate (limita oficiala a registrului), primeai eroarea opaca limita 1500 si nu aveai cum sa obtii inregistrarile. Acum aplicatia detecteaza situatia, iti arata un dialog cu numarul de sub-cautari care se vor rula (egal cu numarul tipurilor de inscriere disponibile la categoria curenta — de exemplu 18 pentru ipoteci, 9 pentru creante), costul estimat in captcha-uri (in functie de provider — 2Captcha sau CapSolver) si timpul aproximativ. La confirmare, fiecare sub-tip se ruleaza ca o cautare normala (cu propriul captcha), iar rezultatele se agrega intr-un singur entry in istoricul de cautari. Lista din dreapta sus iti arata progresul: ce sub-tip ruleaza acum, cate au fost completate, cate au fost respinse.",
+      },
+      {
+        title: "Fail-clean per sub-tip — niciun rezultat partial nu se pierde",
+        content:
+          "Daca un sub-tip individual depaseste tot limita de 1500 (cazul rar in care chiar si o singura categorie de inscriere are peste 1500 rezultate active), acel sub-tip e marcat respins iar restul cautarilor continua. Inregistrarile colectate de la sub-tipurile reusite sunt salvate normal in baza locala, iar deasupra tabelei rezultate apare un banner amber care iti arata explicit ce sub-tipuri au fost respinse. Pentru cazurile respinse, urmatorul pas manual este sa adaugi filtre suplimentare (de exemplu interval data) pentru a reduce numarul de rezultate.",
+      },
+      {
+        title: "Buton Incarca tot dezactivat in mod split",
+        content:
+          "Cand rezultatele provin dintr-o cautare cu split, butonul Incarca tot din pagina Cautare RNPM e dezactivat — toate documentele de la sub-tipurile reusite sunt deja incarcate in tabelul de pe ecran. Pagination ramane disponibila pentru navigarea normala pe primele 25/50/etc.",
+      },
+    ],
+  },
+  {
     version: "v2.17.0",
     date: "6 Mai 2026",
     subtitle:
-      "Sesiune de hardening operational dupa multi-review-ul facut peste v2.16.1, care absoarbe 28 de findings grupate in 5 prioritati (P1 critical → P5 nice-to-have). Zero schimbari vizibile in UI; toate fix-urile sunt strict interne sau pe shape-ul email-urilor (un kind de alerta lipsea din mapa de label-uri pe email-urile per-alerta — aparea ca text raw 'termen_dupa_solutie' in subiect). Robustete crescuta pe atomicitate audit / migratii cu sidecar / partial success in multi-institutie / boot fail-loud / drift detector kind-uri.",
+      "Sesiune de hardening operational dupa multi-review-ul facut peste v2.16.1, care absoarbe 28 de findings grupate in 5 prioritati (P1 critical -> P5 nice-to-have). Zero schimbari vizibile in UI; toate fix-urile sunt strict interne sau pe shape-ul email-urilor (un kind de alerta lipsea din mapa de label-uri pe email-urile per-alerta — aparea ca text raw 'termen_dupa_solutie' in subiect). Robustete crescuta pe atomicitate audit / migratii cu sidecar / partial success in multi-institutie / boot fail-loud / drift detector kind-uri.",
     icon: <ShieldCheck className="h-5 w-5" />,
     borderColor: "border-l-emerald-500",
     badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",

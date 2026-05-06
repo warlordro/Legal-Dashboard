@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TablePagination } from "@/components/table-pagination";
 import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
@@ -589,30 +590,36 @@ export default function Monitorizare({
                         {(() => {
                           const isStandard = CADENCE_OPTIONS.some((o) => o.sec === job.cadence_sec);
                           return (
-                            <select
-                              className={cn(
-                                "h-8 rounded-md border border-input bg-background px-2 text-xs shadow-sm hover:bg-accent/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                                !isStandard && "border-amber-500 text-amber-700 dark:text-amber-400",
-                              )}
-                              value={job.cadence_sec}
-                              onChange={(e) => handleCadenceChange(job, Number(e.target.value))}
-                              title={
-                                isStandard
-                                  ? "Modifica intervalul de verificare"
-                                  : `Cadenta non-standard (${formatCadence(job.cadence_sec)}). Alege o optiune din lista pentru a o normaliza.`
-                              }
+                            <Select
+                              value={String(job.cadence_sec)}
+                              onValueChange={(v) => handleCadenceChange(job, Number(v))}
                             >
-                              {!isStandard && (
-                                <option value={job.cadence_sec}>
-                                  {formatCadence(job.cadence_sec)} (custom)
-                                </option>
-                              )}
-                              {CADENCE_OPTIONS.map((opt) => (
-                                <option key={opt.sec} value={opt.sec}>
-                                  {opt.label}
-                                </option>
-                              ))}
-                            </select>
+                              <SelectTrigger
+                                className={cn(
+                                  "h-8 px-2 text-xs",
+                                  !isStandard && "border-amber-500 text-amber-700 dark:text-amber-400",
+                                )}
+                                title={
+                                  isStandard
+                                    ? "Modifica intervalul de verificare"
+                                    : `Cadenta non-standard (${formatCadence(job.cadence_sec)}). Alege o optiune din lista pentru a o normaliza.`
+                                }
+                              >
+                                <SelectValue placeholder="-" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {!isStandard && (
+                                  <SelectItem value={String(job.cadence_sec)}>
+                                    {formatCadence(job.cadence_sec)} (custom)
+                                  </SelectItem>
+                                )}
+                                {CADENCE_OPTIONS.map((opt) => (
+                                  <SelectItem key={opt.sec} value={String(opt.sec)}>
+                                    {opt.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           );
                         })()}
                       </td>

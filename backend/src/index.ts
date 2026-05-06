@@ -12,6 +12,7 @@ import { preAuthRateLimit, rateLimit } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
+import { getUserById, updateUserRole } from "./db/userRepository.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
 import {
   monitoringRouter,
@@ -138,12 +139,12 @@ try {
   fatalBoot("auth config invalid", e);
 }
 
-// v2.17.0 — surface SMTP partial-config at boot. The mailer's `readMailerConfig`
-// returns null silently when ANY required field is missing (host/port/user/
-// pass/from). Pre-fix, an operator who set 4 of 5 SMTP_* vars would see
-// "[email] disabled" only on the first dispatch attempt — invisible until an
-// alert actually fires. Now we eagerly probe at boot and warn-list which
-// pieces are missing so the misconfig is caught before any user impact.
+// v2.17.0 (origin) — surface SMTP partial-config at boot. The mailer's
+// `readMailerConfig` returns null silently when ANY required field is missing
+// (host/port/user/pass/from). Pre-fix, an operator who set 4 of 5 SMTP_* vars
+// would see "[email] disabled" only on the first dispatch attempt — invisible
+// until an alert actually fires. Now we eagerly probe at boot and warn-list
+// which pieces are missing so the misconfig is caught before any user impact.
 {
   const smtpVars = ["SMTP_HOST", "SMTP_PORT", "SMTP_USER", "SMTP_PASS", "SMTP_FROM"];
   const presentVars = smtpVars.filter((v) => (process.env[v] ?? "").trim().length > 0);
@@ -310,6 +311,27 @@ if (REMOTE_BIND_ACTIVE) {
   console.warn("Toate API-urile sunt accesibile oricarui client cu token valid.");
   console.warn(`Ack acceptat: LEGAL_DASHBOARD_ACK_NO_AUTH=${ack}`);
   console.warn("====================================================================");
+}
+
+// v2.19.1 — desktop admin auto-promote. Utilizatorul `local` e singurul user
+// in desktop mode. Migration 0002 il seed-uieste cu role=user (default sigur
+// pentru web mode multi-tenant), dar pe desktop e contraproductiv:
+// `requireRole("admin")` din PR-8 (v2.6.0) blocheaza chiar utilizatorul
+// aplicatiei sa-si stearga baza sau sa compacteze (rute admin RNPM /
+// monitoring). Promovam idempotent la admin daca rulam in desktop. Web mode
+// pastreaza role-urile asa cum sunt (multi-tenant cu provisioning real).
+// Pus dupa bind/auth validare ca scenariile de boot esuat sa nu lase scrieri
+// in DB (test EBUSY pe Windows in afterEach cleanup).
+if (getAuthMode() === "desktop") {
+  try {
+    const localUser = getUserById("local");
+    if (localUser && localUser.role !== "admin") {
+      updateUserRole("local", "admin");
+      console.log("[boot] desktop mode: promoted local user to admin");
+    }
+  } catch (e) {
+    console.error("[boot] failed to promote local user to admin", e);
+  }
 }
 
 // Run schema init + descriere migration + prewarm BEFORE binding the port. On

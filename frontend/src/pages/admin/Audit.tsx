@@ -3,6 +3,7 @@ import { ClipboardList, RefreshCw, Filter, ChevronDown, ChevronRight } from "luc
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { admin, type AuditEvent } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
@@ -170,15 +171,16 @@ export default function AdminAudit() {
                 placeholder="Tip tinta (ex: user)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
-              <select
-                value={outcome}
-                onChange={(e) => setOutcome(e.target.value as typeof outcome)}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                {OUTCOME_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <Select value={outcome} onValueChange={(v) => setOutcome(v as typeof outcome)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Rezultat" />
+                </SelectTrigger>
+                <SelectContent>
+                  {OUTCOME_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <input
                 type="date"
                 value={from}

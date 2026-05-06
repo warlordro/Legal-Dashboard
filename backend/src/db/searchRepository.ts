@@ -62,6 +62,14 @@ export function getSearches(opts: GetSearchesOptions = {}): CursorPage<SearchRec
   return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
 }
 
+export function updateSearchTotal(id: number, totalResults: number, ownerId = "local"): boolean {
+  const db = getDb();
+  const res = db
+    .prepare(`UPDATE rnpm_searches SET total_results = ? WHERE id = ? AND owner_id = ?`)
+    .run(totalResults, id, ownerId);
+  return res.changes > 0;
+}
+
 export function deleteSearch(id: number, ownerId = "local"): boolean {
   const db = getDb();
   const res = db.prepare(`DELETE FROM rnpm_searches WHERE id = ? AND owner_id = ?`).run(id, ownerId);

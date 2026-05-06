@@ -4,6 +4,201 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.19.1] - 2026-05-07
+
+### Patch hardening + UX polish post v2.19.0
+
+Trei bug-uri descoperite la rulare empirica imediat dupa v2.19.0, plus o documentare a limitei tehnice
+RNPM atinse pe debitori cu volum mare. Zero schimbari functionale in tier-1/tier-2 split engine.
+
+### Frontend (`lib/rnpmApi.ts`)
+
+- **`jsonOrThrow` accepta envelope-ul v2.14.0** `{ data, error: { code, message }, requestId }`. Pana
+  acum extragea doar `data.error` ca string, ceea ce pe envelope-ul nou (`error` = obiect) producea
+  `Error([object Object])` in UI. Fix: type-narrow pe `error` — string folosit direct, obiect cu
+  `.message` extras, fallback `Eroare (${status})`. Modalul "Info baza locala" + alte rute admin RNPM
+  arata acum mesajul real (ex. "Insufficient role" cand role-ul lipseste, in loc de `[object Object]`).
+
+### Backend (`index.ts`)
+
+- **Auto-promote `local` la `admin` in desktop mode** la boot, idempotent. Migration 0002 seed-uieste
+  user-ul `local` cu `role: "user"` (default sigur pentru web mode multi-tenant). In desktop mode
+  insa exista un singur user, iar `requireRole("admin")` din v2.11.0 (pe `DELETE /rnpm/saved/all`,
+  `POST /rnpm/compact`, backup management) bloca chiar utilizatorul aplicatiei. Fix: la boot, daca
+  `getAuthMode() === "desktop"` si `getUserById("local").role !== "admin"`, apel `updateUserRole`.
+  Log: `[boot] desktop mode: promoted local user to admin`.
+
+### Frontend (`components/Sidebar.tsx`)
+
+- **Sectiunea "Administrare" (Utilizatori/Audit/Cote) ascunsa in desktop mode**. Promovarea
+  automata la admin (de mai sus) declansa side-effect: sidebar-ul afisa sectiunea admin
+  introdusa in v2.6.0 (PR-8), care e relevanta doar pentru deploy-uri web multi-tenant.
+  Pe desktop solo, e zgomot vizual fara valoare. Detectie via `window.desktopApi !== undefined`
+  (pattern existent in `useApiKey.ts`, `useAlertsStream.ts`, `useTheme.ts`). Rutele `/admin/*`
+  raman accesibile prin URL direct dar nu mai sunt promovate in nav.
+
+### Frontend (`pages/RnpmSearch.tsx`)
+
+- **Stop button apare cand auto-loading e declansat din tabelul de paginare**. Pana acum conditia era
+  `autoLoading ? red-stop-button : blue-load-button`, care nu acoperea cazul cand butonul "Incarca mai
+  multe" din toolbar-ul tabelului declansa o singura batch (`loading=true`, `autoLoading=false`). UI-ul
+  ramanea cu butonul albastru imposibil de oprit. Fix: conditia devine `autoLoading || loading`.
+
+### Documentatie
+
+- **`PROBLEM-rnpm-cap-1500.md` (nou la root)**: documentare formala a limitei RNPM. Caz empiric: CUI
+  33317138, categorie `specifice`, tier-2 destinatie 5 ramane cu 1744 records peste cap. Lista de
+  axe de split incercate (tipInscriere ✅, destinatieInscriere ✅, perioada ❌, activ ❌, nemodificat ❌,
+  tipAct ❌, creditorPJ ❌). Captura RNPM oficial confirma: "Pentru a obtine o lista de inscrieri
+  care pot fi vizualizate, modificati criteriile de cautare astfel incat sa se obtina mai putin de
+  1500 de rezultate. S-au gasit 1825 inscrieri." Concluzie: pe debitori cu >1500 inregistrari intr-o
+  singura combinatie tier-1×tier-2, recuperarea integrala via API public RNPM e imposibila. v2.19.0
+  best-effort + disclosure UI ramane raspunsul corect arhitectural.
+- **`CODEX-BACKLOG.md` Task E**: backlog redeschis cu observability tasks (gap reason enum
+  `terminal_cap`/`silent_refusal`/`residual_unclassified`, status enum rename `rejected` -> `blocked`,
+  audit event `rnpm.cap_hit`). Refactor generic Splitter registry + probe-then-fetch + tier-3
+  creditor split respinse explicit (motivate in task).
+
+### Tests
+
+- 814 backend, 86 frontend (neschimbat fata de v2.19.0).
+
+---
+
+## [2.19.0] - 2026-05-07
+
+### RNPM tier-2 split — recuperare best-effort pe destinatieInscriere cand un sub-tip singur depaseste 1500
+
+Extensie a auto-split-ului v2.18.0. Scenariul empiric: pe `specifice` cu CUI 33317138 (debitor PJ),
+`tipInscriere=1 (aviz initial)` SINGUR are 1823 inregistrari, peste capul de 1500 al RNPM. v2.18.0 recupera
+doar 3 documente din celelalte sub-tipuri si marca "aviz initial" ca respins. v2.19.0 adauga un al doilea
+nivel de split pe `destinatieInscriere` (sub-axa enumerable doar pentru `specifice` si `ipoteci`),
+recuperand records pe destinatie individuala. Recuperarea e **best-effort**: inregistrarile fara
+destinatie atribuita raman neacoperite, iar gap-ul e disclose-uit explicit in UI.
+
+### Backend (`services/rnpmDestinations.ts` — fisier nou)
+
+- **`DESTINATII_BY_CATEGORY`** mirror al `frontend/src/components/rnpm/rnpm-form-constants.ts`. Numai
+  `ipoteci` (10 valori) si `specifice` (14 valori) au lista; `creante`/`obligatiuni`/`fiducii` raman
+  fail-clean ca in v2.18.0 (nu au destinatii enumerable in UI-ul oficial).
+- **`hasNestedDestinations(type)`** helper boolean.
+
+### Backend (`services/rnpmSearchService.ts`)
+
+- **`executeNestedDestinationSplit`** functie privata noua: itereaza `DESTINATII_BY_CATEGORY[type]`,
+  pentru fiecare destinatie ruleaza `executeSearch` cu `tipInscriere` (tier-1 valoare) +
+  `destinatieInscriere: { type: "1", value: <label> }`. RNPM stocheaza destinatieInscriere ca **literal
+  label string** (NU index 1-based ca tipInscriere), confirmat in `RnpmSearchForm.tsx:147`.
+- **`executeSplitSearch` extins**: catch-ul pe `RnpmError.code === "limit_exceeded"` la nivel tier-1
+  acum verifica `hasNestedDestinations(type)`. Daca da, declanseaza tier-2 split; daca nu, fail-clean
+  cu `status: "rejected"` ca inainte. Gap calculat la runtime: `gap = tier1SubTotal - SUM(tier2 subTotals)`.
+- **`SplitSubResult`** extins cu `status: "recovered" | "partial"`, `nested?: NestedSplitSubResult[]`,
+  `gap?: number`. `SplitSearchProgress.phase` extins cu `"nested_start" | "nested_progress" | "nested_done"`,
+  `nested?: { index, total, label, phase, ... }` per destinatie iterata.
+
+### Backend (`routes/rnpm.ts`)
+
+- **`SSE_SPLIT_TIMEOUT_MS`** bumped 30 -> **45 min**. Worst case: `ipoteci` cu 18 sub-tipuri × 17s +
+  1-2 sub-tipuri care declanseaza tier-2 cu 10 destinatii × 17s ≈ 11 min, dar adaugand latente captcha
+  + retry, 45 min ofera margin sigur.
+
+### Frontend (`types/rnpm.ts`, `lib/rnpmApi.ts`)
+
+- **`RnpmNestedSplitProgress`**, **`RnpmNestedSplitSubResult`** tipuri noi.
+- **`RnpmSplitProgress.phase`** extins (mirror backend); `nested?` field.
+- **`RnpmSplitSubResult`** extins cu `nested?`, `gap?`, status `"recovered" | "partial"`.
+- SSE consumer `rnpmSplitSearch` neschimbat — extensia e transparent type-extends; eveniment-ul
+  ramane `progress` cu shape extins.
+
+### Frontend (`components/rnpm/RnpmSplitDialog.tsx`)
+
+- **Pre-warning best-effort**: pentru `specifice`/`ipoteci`, dialogul afiseaza explicit ca tier-2 split
+  pe destinatie va fi rulat cand un sub-tip individual depaseste limita, iar costul/ETA arata interval
+  (min - max) in functie de cate sub-tipuri vor declansa tier-2.
+- Pentru `creante`/`obligatiuni`/`fiducii` mesajul ramane vechiul fail-clean.
+
+### Frontend (`pages/RnpmSearch.tsx`)
+
+- **Banner cu tier-2 breakdown**: deasupra tabelei, daca exista entries `recovered`/`partial`,
+  afiseaza cate destinatii au reusit per sub-tip + gap-ul individual.
+- **Gap disclosure**: daca `totalGap > 0`, callout amber explicit: "X inregistrari fara destinatie
+  atribuita nu au putut fi recuperate (limitarea API RNPM pentru records istorice fara destinatie)".
+
+### Tests
+
+- **`backend/src/services/rnpmSearchService.split.test.ts`** (nou, 3 teste):
+  1. Dispatcher iterates EVERY tier-1 sub-type chiar daca unul din mijloc declanseaza tier-2.
+  2. Tier-2 itereaza EVERY destinatie din `DESTINATII_BY_CATEGORY[type]` — guard contra omisiunii.
+  3. Categoriile fara destinatii enumerable (creante) raman fail-clean fara apel `destinatieInscriere`.
+- 814 backend tests, 86 frontend tests.
+
+---
+
+## [2.18.0] - 2026-05-06
+
+### RNPM auto-split la depasire limita 1500 — confirmare cu cost + fail-clean per sub-tip
+
+Feature nou pentru RNPM: cand o cautare returneaza peste limita oficiala de 1500 inregistrari (cazul empiric:
+debitor PJ cu CUI 33317138 -> 1826 rezultate), in loc de eroarea opaca `limita 1500`, frontend-ul afiseaza un
+dialog de confirmare cu costul estimat in captcha-uri si ETA, iar la accept ruleaza automat **N cautari
+secventiale** (cate una pentru fiecare `tipInscriere` din `TIP_AVIZ_BY_CATEGORY[type]`), agregand documentele
+intr-un singur search row. Fail-clean: daca un sub-tip individual depaseste tot 1500, e marcat `respins` si
+cautarea continua cu celelalte (zero recursie, zero blocare). Toate inregistrarile colectate pe parcurs sunt
+salvate normal in baza locala chiar daca cativa sub-tipi esueaza.
+
+### Backend (`services/rnpmSearchService.ts`)
+
+- **`RnpmError` cu `code: "limit_exceeded"`** pe ramura cand `total > MAX_TOTAL_RESULTS` sau
+  `documents.length === 0 && total === 0` cu indicator de cap. `details: { total, limit }` propaga numarul
+  exact pentru UI.
+- **`executeSplitSearch({ type, baseParams, subTypeLabels, ... })`**: itereaza secvential peste sub-tipuri,
+  apeleaza `executeSearch` cu `tipInscriere: { type: "1", value: String(i + 1) }` (1-based, match cu encoding-ul
+  din `RnpmSearchForm`). `existingSearchId: parentSearchId` reutilizeaza row-ul de search creat upfront, deci
+  history page primeste **un singur entry** in loc de N. `try`/`catch` per sub-tip prinde
+  `RnpmError.code === "limit_exceeded"` si marcheaza `status: "rejected"` fara a opri rularea. `finally` block
+  apeleaza `updateSearchTotal` cu numarul cumulat de documente, asa ca abort la mijloc lasa state coerent.
+- **`SplitSearchProgress`** stream type: `phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error"`,
+  emit dupa fiecare tranzitie a runner-ului per sub-tip.
+
+### Backend (`routes/rnpm.ts`)
+
+- **`POST /api/v1/rnpm/search` returneaza 400 structurat** la `RnpmError.code === "limit_exceeded"`:
+  `{ error, code: "limit_exceeded", total, limit, splittable: { type } }`. Frontend-ul detecteaza prin
+  `RnpmLimitExceededError` si declanseaza dialogul.
+- **`POST /api/v1/rnpm/search-split` SSE endpoint nou**: streamuieste `progress` events per sub-tip si un
+  `complete` final cu `RnpmSplitResult`. Validare Zod: `subTypeLabels` array cu max 50 elemente, fiecare
+  string `<=200` chars. Dedup `clientRequestId` (409 daca acelasi request e reluat). Tenant guard via `ownerId`.
+- **`SSE_SPLIT_TIMEOUT_MS = 1_800_000`** (30 min) constanta separata fata de `SSE_TIMEOUT_MS` (10 min al
+  bulk-ului). Worst case: `ipoteci` are 18 sub-tipuri × ~17s + latenta captcha; cap-ul de 10 min al
+  bulk-ului ar fi prematur pentru split. (Bumped la 45 min in v2.19.0.)
+
+### Frontend (`lib/rnpmApi.ts`, `types/rnpm.ts`)
+
+- **`RnpmLimitExceededError`** clasa cu `code = "limit_exceeded"`, `total`, `limit`, `splittableType` —
+  ridicata din `rnpmSearch` cand `res.status === 400 && body.code === "limit_exceeded"`. UI-ul intercepteaza
+  in `runSearch` si seteaza `pendingSplit` pentru dialog.
+- **`rnpmSplitSearch(type, baseParams, subTypeLabels, ...)`** consumer SSE care parseaza `event:` /
+  `data:` blocks, propaga progress callback per sub-tip si returneaza `RnpmSplitResult` din `complete`.
+  Suporta `AbortSignal` extern pentru cancel.
+- **Tipuri noi**: `RnpmSplitProgress`, `RnpmSplitSubResult`, `RnpmSplitResult` in `types/rnpm.ts`.
+
+### Frontend (`components/rnpm/RnpmSplitDialog.tsx`, `pages/RnpmSearch.tsx`)
+
+- **`RnpmSplitDialog`** modal de confirmare cu: numar sub-tipuri, cost estimat (`N × $0.003` pentru 2Captcha
+  sau `N × $0.0008` pentru CapSolver), ETA (`N × ~17s`), provider activ, explicatie fail-clean. Butoane
+  `Anuleaza` / `Continua cu split (N cautari)`. Reuseaza `useDialog` hook (focus trap + Escape).
+- **`RnpmSearchPage` integration**: state nou `pendingSplit` + `splitProgress`, banner amber deasupra tabelei
+  cand `result.splitMode === true` listand sub-tipurile respinse, toast progress in colt jos-dreapta in timpul
+  rularii, butonul "Incarca tot" dezactivat in mod split (deja avem rezultatele agregate complete).
+
+### Operational
+
+- **Empiric**: 1826 rezultate (CUI 33317138 debitor PJ category `ipoteci`) -> 18 sub-tipuri × ~17s captcha =
+  ~5 min ETA, ~$0.054 cost cu 2Captcha. Test live confirma agregarea fara depasire (fiecare sub-tip a returnat
+  sub 1500 individual).
+
+---
+
 ## [2.17.0] - 2026-05-06
 
 ### Multi-review hardening peste v2.16.1 — atomicitate audit, fail-loud boot, partial-success monitorizare nume, drift detector

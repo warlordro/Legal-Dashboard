@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Search, Loader2, RotateCcw, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { cn } from "@/lib/utils";
 import type { RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
@@ -449,16 +450,17 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
             {TIP_LABEL_BY_CATEGORY[activeType]}
           </label>
           <div className="flex gap-2">
-            <select
-              value={tipInscriere.value}
-              onChange={(e) => tipInscriere.setValue(e.target.value)}
-              className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-            >
-              <option value="">-- selecteaza --</option>
-              {TIP_AVIZ_BY_CATEGORY[activeType].map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
+            <Select value={tipInscriere.value} onValueChange={tipInscriere.setValue}>
+              <SelectTrigger>
+                <SelectValue placeholder="-- selecteaza --" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="">-- selecteaza --</SelectItem>
+                {TIP_AVIZ_BY_CATEGORY[activeType].map((t) => (
+                  <SelectItem key={t} value={t}>{t}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <SiSauToggle value={tipInscriere.op} onChange={tipInscriere.setOp} />
           </div>
         </div>
@@ -535,16 +537,17 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
                 <fieldset className="rounded-lg border border-border p-2">
                   <legend className="ml-[1.125rem] text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bun (alt tip)</legend>
                   <div className="grid gap-1.5">
-                    <select
-                      value={bunACategorie.value}
-                      onChange={(e) => bunACategorie.setValue(e.target.value)}
-                      className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                    >
-                      <option value="">-- selecteaza categorie --</option>
-                      {BUN_ALT_TIP_CATEGORII.map((label, i) => (
-                        <option key={label} value={String(i + 1)}>{label}</option>
-                      ))}
-                    </select>
+                    <Select value={bunACategorie.value} onValueChange={bunACategorie.setValue}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="-- selecteaza categorie --" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="">-- selecteaza categorie --</SelectItem>
+                        {BUN_ALT_TIP_CATEGORII.map((label, i) => (
+                          <SelectItem key={label} value={String(i + 1)}>{label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                     <SiSauInput placeholder="Identificare bun" value={bunAIdentificare.value} onChange={bunAIdentificare.setValue} op={bunAIdentificare.op} onOpChange={bunAIdentificare.setOp} />
                   </div>
                 </fieldset>

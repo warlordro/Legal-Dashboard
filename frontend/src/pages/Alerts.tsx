@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   alertsApi,
   alertKindLabels,
@@ -468,30 +469,38 @@ export default function Alerts({
               </div>
             </div>
             <div className="grid gap-3 md:grid-cols-6">
-              <select
+              <Select
                 value={kind}
-                onChange={(event) => {
-                  setKind(event.target.value as AlertKind | "all");
+                onValueChange={(v) => {
+                  setKind(v as AlertKind | "all");
                   setPage(0);
                 }}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
-                {kindOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              <select
+                <SelectTrigger>
+                  <SelectValue placeholder="Tip" />
+                </SelectTrigger>
+                <SelectContent>
+                  {kindOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select
                 value={severity}
-                onChange={(event) => {
-                  setSeverity(event.target.value as AlertSeverity | "all");
+                onValueChange={(v) => {
+                  setSeverity(v as AlertSeverity | "all");
                   setPage(0);
                 }}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               >
-                {severityOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
+                <SelectTrigger>
+                  <SelectValue placeholder="Severitate" />
+                </SelectTrigger>
+                <SelectContent>
+                  {severityOptions.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <input
                 type="date"
                 value={from}

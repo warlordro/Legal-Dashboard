@@ -11,7 +11,25 @@ import type {
   RnpmBulkProgress,
   RnpmBulkItem,
   RnpmStats,
+  RnpmSplitProgress,
+  RnpmSplitResult,
 } from "@/types/rnpm";
+
+// Aruncata cand backendul raspunde 400 cu code:"limit_exceeded" pe /search.
+// Frontendul foloseste `total` + `splittable.type` ca sa propuna split via tipInscriere.
+export class RnpmLimitExceededError extends Error {
+  readonly code = "limit_exceeded" as const;
+  readonly total: number | undefined;
+  readonly limit: number | undefined;
+  readonly splittableType: RnpmSearchType;
+  constructor(message: string, total: number | undefined, limit: number | undefined, splittableType: RnpmSearchType) {
+    super(message);
+    this.name = "RnpmLimitExceededError";
+    this.total = total;
+    this.limit = limit;
+    this.splittableType = splittableType;
+  }
+}
 
 const BASE = "/api/rnpm";
 
@@ -23,7 +41,13 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
     throw new Error(res.ok ? "Raspuns invalid" : `Eroare server (${res.status}): ${snippet || "(corp gol)"}`);
   }
   if (!res.ok) {
-    const err = (data as { error?: string })?.error ?? `Eroare (${res.status})`;
+    // v2.14.0 envelope: error e obiect { code, message }; legacy: string
+    const raw = (data as { error?: unknown })?.error;
+    let err: string;
+    if (typeof raw === "string") err = raw;
+    else if (raw && typeof raw === "object" && typeof (raw as { message?: unknown }).message === "string") {
+      err = (raw as { message: string }).message;
+    } else err = `Eroare (${res.status})`;
     throw new Error(err);
   }
   return data as T;
@@ -55,7 +79,81 @@ export async function rnpmSearch(
     body: JSON.stringify({ type, params, captchaKey, ...opts }),
     signal,
   });
+  // Special-case 400 + code:"limit_exceeded" — escape din jsonOrThrow inainte de a colapsa eroarea.
+  if (res.status === 400) {
+    const text = await res.text();
+    let parsed: unknown;
+    try { parsed = JSON.parse(text); } catch { parsed = null; }
+    if (parsed && typeof parsed === "object") {
+      const obj = parsed as { error?: string; code?: string; total?: number; limit?: number; splittable?: { type?: string } };
+      if (obj.code === "limit_exceeded") {
+        const splitType = (obj.splittable?.type as RnpmSearchType) ?? type;
+        throw new RnpmLimitExceededError(obj.error ?? "Cap rezultate depasit", obj.total, obj.limit, splitType);
+      }
+      throw new Error(obj.error ?? `Eroare (${res.status})`);
+    }
+    throw new Error(`Eroare server (${res.status})`);
+  }
   return jsonOrThrow<RnpmSearchResponse>(res);
+}
+
+export async function rnpmSplitSearch(
+  type: RnpmSearchType,
+  baseParams: RnpmSearchParams,
+  subTypeLabels: string[],
+  captchaKey: string,
+  onProgress: (p: RnpmSplitProgress) => void,
+  signal?: AbortSignal,
+  captchaProvider?: CaptchaProvider,
+  fallback2CaptchaKey?: string,
+  captchaMode?: CaptchaMode,
+): Promise<RnpmSplitResult> {
+  const res = await apiFetch(`${BASE}/search-split`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode }),
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Eroare split (${res.status})`);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = "";
+  let finalResult: RnpmSplitResult | null = null;
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+
+      let idx: number;
+      while ((idx = buf.indexOf("\n\n")) >= 0) {
+        const chunk = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const eventMatch = chunk.match(/^event: (\S+)/m);
+        const dataMatch = chunk.match(/^data: (.*)$/m);
+        if (!eventMatch || !dataMatch) continue;
+        const event = eventMatch[1];
+        try {
+          const data = JSON.parse(dataMatch[1]);
+          if (event === "progress") onProgress(data as RnpmSplitProgress);
+          else if (event === "complete") finalResult = data as RnpmSplitResult;
+          else if (event === "error") throw new Error((data as { error?: string }).error ?? "Eroare split");
+        } catch (e) {
+          if (e instanceof Error && e.message !== "Unexpected end of JSON input") throw e;
+        }
+      }
+    }
+  } finally {
+    try { await reader.cancel(); } catch { /* already closed */ }
+  }
+
+  if (!finalResult) throw new Error("Split incomplet — niciun rezultat final primit");
+  return finalResult;
 }
 
 export async function rnpmGetSaved(opts: {

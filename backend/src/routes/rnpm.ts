@@ -5,10 +5,12 @@ import { stat } from "node:fs/promises";
 import {
   executeSearch,
   executeBulkSearch,
+  executeSplitSearch,
   type BulkSearchItem,
   type BulkProgress,
+  type SplitSearchProgress,
 } from "../services/rnpmSearchService.ts";
-import { defaultRnpmClient, type RnpmSearchType } from "../services/rnpmClient.ts";
+import { defaultRnpmClient, RnpmError, type RnpmSearchType } from "../services/rnpmClient.ts";
 import { getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
 import { getDbPath, compactDb } from "../db/schema.ts";
 import { getBackupDir, deleteAllBackups, listBackupsWithMeta, restoreFromBackup } from "../db/backup.ts";
@@ -51,6 +53,11 @@ function validateParamsDepth(obj: unknown, depth = 0): string | null {
 }
 
 const SSE_TIMEOUT_MS = 600000; // 10 min hard cap per bulk stream
+// v2.18.0: bump 30 -> 45 min ca sa tolereze tier-2 split (destinatieInscriere).
+// Worst case: ipoteci cu 18 sub-tipuri × 17s (tier-1) + 1-2 sub-tipuri care
+// trigger nested cu 10 destinatii × 17s ≈ 18×17 + 2×10×17 = 646s. Plus latente
+// captcha si retry, 45 min e suficient cu margin.
+const SSE_SPLIT_TIMEOUT_MS = 2700000;
 import {
   getAvize,
   getAvizById,
@@ -180,6 +187,22 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
         headers: { "Content-Type": "application/json" },
       });
     }
+    // Structured "limit exceeded" — frontend foloseste `code` + `splittable` ca sa
+    // ofere split via tipInscriere. Restul erorilor RNPM/JSON ramane 500 generic.
+    if (e instanceof RnpmError && e.code === "limit_exceeded") {
+      const total = typeof e.details?.total === "number" ? e.details.total : undefined;
+      const limit = typeof e.details?.limit === "number" ? e.details.limit : undefined;
+      return c.json(
+        {
+          error: e.message,
+          code: "limit_exceeded",
+          total,
+          limit,
+          splittable: { type },
+        },
+        400,
+      );
+    }
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
     console.error("[rnpm/search]", msg);
     return c.json({ error: msg }, 500);
@@ -252,6 +275,94 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     try {
       await bulkRun;
       await stream.writeSSE({ event: "complete", data: "{}" });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      await stream.writeSSE({ event: "error", data: JSON.stringify({ error: msg }) });
+    } finally {
+      clearTimeout(timeoutHandle);
+      c.req.raw.signal?.removeEventListener?.("abort", onAbort);
+      if (dedupKey) inflightRequests.delete(dedupKey);
+    }
+  });
+});
+
+// Split search via tipInscriere — fallback la cautari care depasesc cap-ul RNPM
+// de 1500 rezultate. Frontend trimite `subTypeLabels` (ordonate, indexate 1-based)
+// dupa confirmare; backend ruleaza N executeSearch independente, fiecare cu
+// {tipInscriere: {type: "1", value: "<i+1>"}} si emite progress per sub-tip.
+// Sub-tipurile care singure depasesc cap-ul sunt marcate "rejected" si skipped
+// (no recursion); celelalte continua. Vezi rnpmSearchService.executeSplitSearch.
+rnpmRouter.post("/search-split", limitSearch, async (c) => {
+  const webGate = rejectCaptchaKeyInWebMode(c);
+  if (webGate) return webGate;
+  let body: unknown;
+  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
+  const { type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as {
+    type?: unknown; baseParams?: unknown; subTypeLabels?: unknown;
+    captchaKey?: unknown; captchaProvider?: unknown; fallback2CaptchaKey?: unknown; captchaMode?: unknown;
+  };
+
+  if (!isValidType(type)) return c.json({ error: "Tip cautare invalid" }, 400);
+  if (!baseParams || typeof baseParams !== "object") return c.json({ error: "Parametri cautare lipsa" }, 400);
+  const paramsErr = validateParamsDepth(baseParams);
+  if (paramsErr) return c.json({ error: paramsErr }, 400);
+  if (!Array.isArray(subTypeLabels) || subTypeLabels.length === 0) {
+    return c.json({ error: "Lista sub-tipuri goala" }, 400);
+  }
+  if (subTypeLabels.length > 50) {
+    return c.json({ error: "Maxim 50 sub-tipuri per split" }, 400);
+  }
+  for (const label of subTypeLabels) {
+    if (typeof label !== "string" || label.length === 0 || label.length > 200) {
+      return c.json({ error: "Sub-tip invalid in lista" }, 400);
+    }
+  }
+  if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
+    return c.json({ error: "Cheie captcha lipsa sau invalida" }, 400);
+  }
+  const provider = parseProvider(captchaProvider);
+
+  const ownerId = getOwnerId(c);
+  const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
+  const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
+  if (dedupKey && inflightRequests.has(dedupKey)) {
+    return c.json({ error: "Split deja in curs (dedup clientRequestId)" }, 409);
+  }
+
+  return streamSSE(c, async (stream) => {
+    const controller = new AbortController();
+    const onAbort = () => controller.abort();
+    c.req.raw.signal?.addEventListener?.("abort", onAbort);
+    const timeoutHandle = setTimeout(() => controller.abort(), SSE_SPLIT_TIMEOUT_MS);
+
+    const send = (p: SplitSearchProgress) => stream.writeSSE({
+      event: "progress",
+      data: JSON.stringify(p),
+    });
+
+    const splitRun = executeSplitSearch(
+      {
+        type,
+        baseParams: baseParams as Parameters<typeof executeSplitSearch>[0]["baseParams"],
+        subTypeLabels: subTypeLabels as string[],
+        captchaKey,
+        captchaProvider: provider,
+        fallback2CaptchaKey: typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
+        captchaMode: captchaMode === "race" ? "race" : "sequential",
+        ownerId,
+        signal: controller.signal,
+      },
+      (p) => { void send(p); },
+      defaultRnpmClient,
+    );
+    if (dedupKey) inflightRequests.set(dedupKey, splitRun);
+
+    try {
+      const result = await splitRun;
+      await stream.writeSSE({
+        event: "complete",
+        data: JSON.stringify(result),
+      });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       await stream.writeSSE({ event: "error", data: JSON.stringify({ error: msg }) });

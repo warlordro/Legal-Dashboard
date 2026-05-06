@@ -59,7 +59,14 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
   const popoverBtnRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
   const { user } = useCurrentUser();
-  const isAdmin = user?.role === "admin";
+  // v2.18.1: in desktop mode utilizatorul `local` e auto-promovat la admin la
+  // boot (vezi backend/src/index.ts), strict pentru a putea folosi rutele
+  // /api/v1/admin/* din modalul "Info baza locala" (sterge tot, compact, backups).
+  // Nu vrem sa expunem si UI-ul multi-tenant (Utilizatori/Audit/Cote) pentru
+  // single-user desktop — e zgomot vizual fara valoare. Ascundem sectiunea cand
+  // window.desktopApi e prezent (= rulam in Electron).
+  const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
+  const isAdmin = user?.role === "admin" && !isDesktop;
 
   const handleEntryClick = (entry: SearchHistoryEntry) => {
     setPopoverSection(null);

@@ -8,11 +8,12 @@ import {
   type RnpmDocument,
   type RnpmFullDetail,
 } from "./rnpmClient.ts";
-import { saveSearch, searchBelongsToOwner } from "../db/searchRepository.ts";
+import { saveSearch, searchBelongsToOwner, updateSearchTotal } from "../db/searchRepository.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { withMaintenanceRead } from "../db/backup.ts";
 import { buildSaveAvizInput } from "./rnpmAvizMapper.ts";
 import { stripDiacriticsDeep } from "../util/textNormalize.ts";
+import { DESTINATII_BY_CATEGORY, hasNestedDestinations } from "./rnpmDestinations.ts";
 
 export interface ExecuteSearchInput {
   type: RnpmSearchType;
@@ -51,6 +52,12 @@ export interface ExecuteSearchResult {
 
 const DEFAULT_DETAIL_CONCURRENCY = 7;
 const DEFAULT_BATCH_SIZE = 25;
+// Cap upstream RNPM, confirmat empiric 2026-05-06: la query cu total=1826,
+// API-ul intoarce 200 pe toate paginile DAR `documents: []` — refuz silentios.
+// Pastram 1500 ca early-exit guard (cu mesaj clar) ca sa nu mai pierdem timpul
+// + un captcha pe 74 de cereri goale. Pentru fetch peste cap, vezi planul
+// Optiunea B (auto-split pe tipInscriere) — nu inca implementat.
+const MAX_TOTAL_RESULTS = 1500;
 
 // Single-line JSON timing line on stdout. Same shape as other audit events
 // (ai_call, restore). Lets ops grep `"action":"rnpm_phase"` and pivot by
@@ -112,7 +119,11 @@ export async function executeSearch(
     captchaMs = Date.now() - tCaptcha;
   }
   throwIfAborted(signal);
-  // perioadaStart/perioadaFinal sunt filtre client-side (RNPM nu suporta interval pe majoritatea categoriilor)
+  // perioadaStart/perioadaFinal sunt filtre client-side. Verificat empiric
+  // 2026-05-06: pe `specifice` cu CUI 33317138 + perioadaStart=2030-01-01 +
+  // perioadaFinal=2030-12-31, RNPM a returnat tot total=1826 (ignora filtrul).
+  // Originalul "RNPM nu suporta interval pe majoritatea categoriilor" inseamna
+  // probabil "pe niciuna din cele 5 categorii expuse de UI".
   const { perioadaStart: _ps, perioadaFinal: _pf, ...restParams } = input.params;
   // RNPM backend nu gaseste nimic cu diacritice — folosim doar pentru request-ul efectiv.
   // input.params ramane neatins pentru ca `rnpm_searches.params_json` sa pastreze textul original al userului.
@@ -176,10 +187,13 @@ export async function executeSearch(
     }
   }
 
-  if (firstResult.total > 1500 || !Array.isArray(firstResult.documents)) {
+  if (firstResult.total > MAX_TOTAL_RESULTS || !Array.isArray(firstResult.documents)) {
     throw new RnpmError(
-      `RNPM a returnat ${firstResult.total} rezultate (limita 1500). Restrange criteriile de cautare.`,
-      400
+      `RNPM a returnat ${firstResult.total} rezultate (limita ${MAX_TOTAL_RESULTS}). Restrange criteriile de cautare.`,
+      400,
+      undefined,
+      "limit_exceeded",
+      { total: firstResult.total, limit: MAX_TOTAL_RESULTS },
     );
   }
   const pagesTotal = firstResult.pagesTotal;
@@ -379,10 +393,10 @@ export async function executeBulkSearch(
     onProgress({ index: i, total: items.length, label, phase: "captcha" });
     try {
       onProgress({ index: i, total: items.length, label, phase: "search" });
-      // Bulk items fetch toate paginile automat (limita RNPM = 1500). Single search foloseste batchSize=25
+      // Bulk items fetch toate paginile automat (cap intern MAX_TOTAL_RESULTS). Single search foloseste batchSize=25
       // plus butonul "Incarca mai multe"; bulk nu are echivalent, deci se comporta ca "fetch all".
       const result = await executeSearch(
-        { type: item.type, params: item.params, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, ownerId, batchSize: 1500, signal },
+        { type: item.type, params: item.params, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, ownerId, batchSize: MAX_TOTAL_RESULTS, signal },
         client
       );
       onProgress({
@@ -406,4 +420,445 @@ function describeItem(item: BulkSearchItem): string {
   if (p.debitorPF?.nume) return `Debitor PF ${p.debitorPF.nume}`;
   if (p.identificatorInscriere) return p.identificatorInscriere;
   return `${item.type} search`;
+}
+
+// =============================================================================
+// Split search — fallback cand RNPM refuza silentios un query peste limita lor
+// (vezi MAX_TOTAL_RESULTS). Ruleaza N sub-cautari secventiale, fiecare cu propriul
+// captcha + tipInscriere distinct, si concateneaza documentele. Frontend-ul
+// trimite lista de sub-tipuri (etichete) ca backend-ul sa nu duplice
+// TIP_AVIZ_BY_CATEGORY (sursa unica in rnpm-form-constants.ts).
+// =============================================================================
+
+export interface SplitSearchInput {
+  type: RnpmSearchType;
+  baseParams: Omit<RnpmSearchParams, "gcode">;
+  // Etichetele sub-tipurilor in ordinea exacta din TIP_AVIZ_BY_CATEGORY.
+  // RNPM stocheaza tipInscriere ca index 1-based in lista, deci pozitia conteaza.
+  subTypeLabels: string[];
+  captchaKey: string;
+  captchaProvider?: CaptchaProvider;
+  fallback2CaptchaKey?: string;
+  captchaMode?: CaptchaMode;
+  ownerId?: string;
+  signal?: AbortSignal;
+}
+
+export interface SplitSearchProgress {
+  index: number;
+  total: number;
+  label: string;
+  phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
+  message?: string;
+  resultCount?: number;
+  subTotal?: number;
+  // Doar pe phase = "nested_progress" / "nested_start" / "nested_done":
+  // sub-iteratorul curent (destinatie) in cadrul sub-tipului parinte.
+  nested?: {
+    index: number;          // 1-based index in lista destinatii (0 = inca nu a inceput)
+    total: number;          // numarul total de destinatii incercate
+    label: string;          // label-ul destinatiei curente
+    phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error";
+    resultCount?: number;
+    subTotal?: number;
+  };
+}
+
+export interface NestedSplitSubResult {
+  label: string;            // labelul destinatiei
+  status: "ok" | "rejected" | "empty" | "error";
+  count: number;            // documente efectiv obtinute pentru aceasta destinatie
+  subTotal: number;         // totalul raportat de RNPM pentru (tipInscriere + destinatie)
+  reason?: string;
+}
+
+export interface SplitSubResult {
+  label: string;
+  status: "ok" | "rejected" | "empty" | "error" | "recovered" | "partial";
+  count: number;            // documente efectiv obtinute (suma destinatiilor pentru recovered/partial)
+  subTotal: number;         // total raportat de RNPM la nivelul sub-tipului (tier-1)
+  reason?: string;
+  // Tier-2 (pe destinatieInscriere): prezent doar daca sub-tipul a triggered nested split.
+  nested?: NestedSplitSubResult[];
+  // gap = subTotal - SUM(nested[i].subTotal). Inregistrari fara destinatie atribuita
+  // (RNPM stocheaza o destinatie pe inscriere, dar campul poate fi gol istoric)
+  // raman neacoperite si nu pot fi recuperate via destinatieInscriere split.
+  // Disclosure explicit catre user via banner pe pagina de rezultate.
+  gap?: number;
+}
+
+export interface SplitSearchResult {
+  searchId: number;
+  documents: RnpmDocument[];
+  avizIds: (number | null)[];
+  total: number;          // documente efectiv obtinute
+  upstreamTotal: number;  // suma sub-totalurilor raportate de RNPM
+  criteriu: string;
+  pagesTotal: number;
+  pageSize: number;
+  currentPage: number;
+  detailsFailed: string[];
+  splitStats: SplitSubResult[];
+  captchasUsed: number;
+}
+
+export async function executeSplitSearch(
+  input: SplitSearchInput,
+  onProgress: (p: SplitSearchProgress) => void,
+  client: RnpmClient = defaultRnpmClient,
+): Promise<SplitSearchResult> {
+  const ownerId = input.ownerId ?? "local";
+  const subN = input.subTypeLabels.length;
+
+  // Pre-creare row parinte cu baseParams (fara tipInscriere). Sub-cautarile
+  // se ataseaza prin existingSearchId, deci istoricul afiseaza UN search
+  // logic, nu N. Total_results updatat la finalul iteratiilor.
+  const parentSearchId = saveSearch({
+    ownerId,
+    searchType: input.type,
+    paramsJson: JSON.stringify(input.baseParams),
+    totalResults: 0,
+    criteriu: null,
+  });
+
+  const allDocs: RnpmDocument[] = [];
+  const allAvizIds: (number | null)[] = [];
+  const allDetailsFailed: string[] = [];
+  const splitStats: SplitSubResult[] = [];
+  let upstreamTotal = 0;
+  let captchasUsed = 0;
+  let firstCriteriu = "";
+  let lastPagesTotal = 0;
+  let lastPageSize = 0;
+
+  try {
+    for (let i = 0; i < subN; i++) {
+      throwIfAborted(input.signal);
+      const label = input.subTypeLabels[i];
+      // tipInscriere ca index 1-based — match cu RnpmSearchForm.tsx:139.
+      const subParams: Omit<RnpmSearchParams, "gcode"> = {
+        ...input.baseParams,
+        tipInscriere: { type: "1", value: String(i + 1) },
+      };
+
+      onProgress({ index: i, total: subN, label, phase: "captcha" });
+
+      try {
+        onProgress({ index: i, total: subN, label, phase: "search" });
+        captchasUsed++;
+        const result = await executeSearch({
+          type: input.type,
+          params: subParams,
+          captchaKey: input.captchaKey,
+          captchaProvider: input.captchaProvider,
+          fallback2CaptchaKey: input.fallback2CaptchaKey,
+          captchaMode: input.captchaMode,
+          ownerId,
+          batchSize: MAX_TOTAL_RESULTS, // fetch toate paginile pentru sub-tip
+          existingSearchId: parentSearchId,
+          signal: input.signal,
+        }, client);
+
+        if (i === 0 || !firstCriteriu) firstCriteriu = result.criteriu;
+        lastPagesTotal = Math.max(lastPagesTotal, result.pagesTotal);
+        lastPageSize = result.pageSize || lastPageSize;
+        upstreamTotal += result.total;
+
+        if (result.total === 0) {
+          splitStats.push({ label, status: "empty", count: 0, subTotal: 0 });
+          onProgress({ index: i, total: subN, label, phase: "skipped", subTotal: 0 });
+          continue;
+        }
+
+        // Defensive: silent reject pentru un sub-tip individual (rar — limita
+        // > MAX_TOTAL_RESULTS deja arunca limit_exceeded mai sus).
+        if (result.documents.length === 0) {
+          splitStats.push({ label, status: "rejected", count: 0, subTotal: result.total, reason: "RNPM upstream silent reject" });
+          onProgress({ index: i, total: subN, label, phase: "rejected", subTotal: result.total });
+          continue;
+        }
+
+        allDocs.push(...result.documents);
+        allAvizIds.push(...result.avizIds);
+        allDetailsFailed.push(...result.detailsFailed);
+        splitStats.push({ label, status: "ok", count: result.documents.length, subTotal: result.total });
+        onProgress({ index: i, total: subN, label, phase: "done", resultCount: result.documents.length, subTotal: result.total });
+      } catch (e) {
+        if (e instanceof DOMException && e.name === "AbortError") throw e;
+        // Un sub-tip alone depaseste MAX_TOTAL_RESULTS. v2.18.0: daca categoria
+        // are lista enumerable de destinatii (specifice/ipoteci), incercam
+        // tier-2 split pe destinatieInscriere; altfel, fail-clean ca in v2.17.0.
+        if (e instanceof RnpmError && e.code === "limit_exceeded") {
+          const tier1SubTotal = (e.details?.total as number | undefined) ?? 0;
+          // Include subtotalul respins in upstream — altfel banner-ul afiseaza
+          // doar suma sub-tipurilor OK si user-ul nu vede ce volum ramane neacoperit.
+          // Captcha-ul tier-1 e deja contorizat in captchasUsed la inceputul try-ului.
+          upstreamTotal += tier1SubTotal;
+
+          if (hasNestedDestinations(input.type)) {
+            try {
+              const nestedRes = await executeNestedDestinationSplit({
+                type: input.type,
+                tier1Index: i,
+                tier1Total: subN,
+                tier1Label: label,
+                tier1SubTotal,
+                baseParams: input.baseParams,
+                tipInscriereValue: String(i + 1),
+                captchaKey: input.captchaKey,
+                captchaProvider: input.captchaProvider,
+                fallback2CaptchaKey: input.fallback2CaptchaKey,
+                captchaMode: input.captchaMode,
+                ownerId,
+                parentSearchId,
+                signal: input.signal,
+              }, onProgress, client);
+
+              allDocs.push(...nestedRes.documents);
+              allAvizIds.push(...nestedRes.avizIds);
+              allDetailsFailed.push(...nestedRes.detailsFailed);
+              captchasUsed += nestedRes.captchasUsed;
+              const recoveredCount = nestedRes.documents.length;
+              const tier2Sum = nestedRes.subResults.reduce((acc, r) => acc + r.subTotal, 0);
+              const gap = Math.max(0, tier1SubTotal - tier2Sum);
+              const status: SplitSubResult["status"] = gap === 0 && recoveredCount > 0 ? "recovered" : "partial";
+              splitStats.push({
+                label,
+                status,
+                count: recoveredCount,
+                subTotal: tier1SubTotal,
+                reason: gap > 0
+                  ? `Recuperat ${recoveredCount}/${tier1SubTotal} (${gap} inregistrari fara destinatie atribuita ramase neacoperite).`
+                  : undefined,
+                nested: nestedRes.subResults,
+                gap,
+              });
+              onProgress({
+                index: i, total: subN, label,
+                phase: "nested_done",
+                resultCount: recoveredCount,
+                subTotal: tier1SubTotal,
+              });
+              continue;
+            } catch (nestedErr) {
+              if (nestedErr instanceof DOMException && nestedErr.name === "AbortError") throw nestedErr;
+              const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
+              splitStats.push({
+                label, status: "error", count: 0, subTotal: tier1SubTotal,
+                reason: `Tier-2 split a esuat: ${msg}`,
+              });
+              onProgress({ index: i, total: subN, label, phase: "error", message: msg, subTotal: tier1SubTotal });
+              continue;
+            }
+          }
+
+          splitStats.push({
+            label,
+            status: "rejected",
+            count: 0,
+            subTotal: tier1SubTotal,
+            reason: `Sub-tipul "${label}" are ${tier1SubTotal} inregistrari (peste limita ${MAX_TOTAL_RESULTS}).`,
+          });
+          onProgress({ index: i, total: subN, label, phase: "rejected", subTotal: tier1SubTotal });
+          continue;
+        }
+        const msg = e instanceof Error ? e.message : String(e);
+        splitStats.push({ label, status: "error", count: 0, subTotal: 0, reason: msg });
+        onProgress({ index: i, total: subN, label, phase: "error", message: msg });
+      }
+    }
+  } finally {
+    // Update parent total cu cantitatea efectiv obtinuta — chiar si pe abort,
+    // istoricul reflecta partial state, nu 0.
+    updateSearchTotal(parentSearchId, allDocs.length, ownerId);
+  }
+
+  return {
+    searchId: parentSearchId,
+    documents: allDocs,
+    avizIds: allAvizIds,
+    total: allDocs.length,
+    upstreamTotal,
+    criteriu: firstCriteriu,
+    pagesTotal: lastPagesTotal || 1,
+    pageSize: lastPageSize || allDocs.length,
+    currentPage: 1,
+    detailsFailed: allDetailsFailed,
+    splitStats,
+    captchasUsed,
+  };
+}
+
+// =============================================================================
+// Tier-2 split — fallback de "best-effort" cand un singur sub-tip din
+// tipInscriere depaseste tot capul RNPM (1500). Itereaza
+// `DESTINATII_BY_CATEGORY[type]` (numai `specifice` si `ipoteci` au lista),
+// si pentru fiecare destinatie ruleaza un executeSearch cu
+// (tipInscriere=tier1, destinatieInscriere=label_destinatie). Documentele
+// fara destinatie atribuita raman neacoperite — surface-ul gap-ului catre UI
+// se face din executeSplitSearch (subTotal_tier1 - sum(subTotal_tier2)).
+// =============================================================================
+
+interface NestedSplitInput {
+  type: RnpmSearchType;
+  tier1Index: number;
+  tier1Total: number;
+  tier1Label: string;
+  tier1SubTotal: number;
+  baseParams: Omit<RnpmSearchParams, "gcode">;
+  tipInscriereValue: string; // 1-based index ca string, match cu tier-1
+  captchaKey: string;
+  captchaProvider?: CaptchaProvider;
+  fallback2CaptchaKey?: string;
+  captchaMode?: CaptchaMode;
+  ownerId: string;
+  parentSearchId: number;
+  signal?: AbortSignal;
+}
+
+interface NestedSplitOutcome {
+  documents: RnpmDocument[];
+  avizIds: (number | null)[];
+  detailsFailed: string[];
+  subResults: NestedSplitSubResult[];
+  captchasUsed: number;
+}
+
+async function executeNestedDestinationSplit(
+  input: NestedSplitInput,
+  onProgress: (p: SplitSearchProgress) => void,
+  client: RnpmClient,
+): Promise<NestedSplitOutcome> {
+  const destinations = DESTINATII_BY_CATEGORY[input.type];
+  if (!destinations) {
+    // Defensive: hasNestedDestinations a fost verificat in apelant; caz imposibil.
+    return { documents: [], avizIds: [], detailsFailed: [], subResults: [], captchasUsed: 0 };
+  }
+
+  const documents: RnpmDocument[] = [];
+  const avizIds: (number | null)[] = [];
+  const detailsFailed: string[] = [];
+  const subResults: NestedSplitSubResult[] = [];
+  let captchasUsed = 0;
+
+  onProgress({
+    index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+    phase: "nested_start", subTotal: input.tier1SubTotal,
+    nested: { index: 0, total: destinations.length, label: "", phase: "search" },
+  });
+
+  for (let j = 0; j < destinations.length; j++) {
+    throwIfAborted(input.signal);
+    const destLabel = destinations[j];
+
+    onProgress({
+      index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+      phase: "nested_progress",
+      nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "captcha" },
+    });
+
+    // RNPM asteapta destinatieInscriere.value ca **index 1-based** in lista
+    // DESTINATII_BY_CATEGORY a tipului curent, EXACT ca tipInscriere
+    // (vezi RnpmSearchForm.tsx:134-142 pentru pattern). Empiric verificat
+    // in 2026-05-07: trimiterea label-ului literal ("publicitatea clauzei...")
+    // returneaza total: 0 pe TOATE cele 14 destinatii pentru sub-tip cu 1822
+    // records. Frontend `RnpmSearchForm.tsx:147` trimite `dest.toParam()` direct
+    // (literal label), dar acel filtru e rar folosit de useri si bug-ul a ramas
+    // latent. Fix: convertesc la index 1-based la fel ca tipInscriere.
+    const subParams: Omit<RnpmSearchParams, "gcode"> = {
+      ...input.baseParams,
+      tipInscriere: { type: "1", value: input.tipInscriereValue },
+      destinatieInscriere: { type: "1", value: String(j + 1) },
+    };
+
+    try {
+      onProgress({
+        index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+        phase: "nested_progress",
+        nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "search" },
+      });
+      captchasUsed++;
+      const result = await executeSearch({
+        type: input.type,
+        params: subParams,
+        captchaKey: input.captchaKey,
+        captchaProvider: input.captchaProvider,
+        fallback2CaptchaKey: input.fallback2CaptchaKey,
+        captchaMode: input.captchaMode,
+        ownerId: input.ownerId,
+        batchSize: MAX_TOTAL_RESULTS,
+        existingSearchId: input.parentSearchId,
+        signal: input.signal,
+      }, client);
+
+      if (result.total === 0) {
+        subResults.push({ label: destLabel, status: "empty", count: 0, subTotal: 0 });
+        onProgress({
+          index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+          phase: "nested_progress",
+          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "skipped", subTotal: 0 },
+        });
+        continue;
+      }
+
+      // Defensive: silent reject la nivel tier-2 (rar — daca o destinatie individuala
+      // > 1500, raman neacoperite si emitem in subResult).
+      if (result.documents.length === 0) {
+        subResults.push({
+          label: destLabel, status: "rejected", count: 0, subTotal: result.total,
+          reason: "RNPM upstream silent reject la tier-2",
+        });
+        onProgress({
+          index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+          phase: "nested_progress",
+          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "rejected", subTotal: result.total },
+        });
+        continue;
+      }
+
+      documents.push(...result.documents);
+      avizIds.push(...result.avizIds);
+      detailsFailed.push(...result.detailsFailed);
+      subResults.push({
+        label: destLabel, status: "ok",
+        count: result.documents.length,
+        subTotal: result.total,
+      });
+      onProgress({
+        index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+        phase: "nested_progress",
+        nested: {
+          index: j + 1, total: destinations.length, label: destLabel,
+          phase: "done",
+          resultCount: result.documents.length,
+          subTotal: result.total,
+        },
+      });
+    } catch (e) {
+      if (e instanceof DOMException && e.name === "AbortError") throw e;
+      if (e instanceof RnpmError && e.code === "limit_exceeded") {
+        // Tier-2 destinatie singura > 1500 — fail-clean (fara recursie tier-3).
+        const subTotal = (e.details?.total as number | undefined) ?? 0;
+        subResults.push({
+          label: destLabel, status: "rejected", count: 0, subTotal,
+          reason: `Destinatia "${destLabel}" are ${subTotal} inregistrari (peste limita ${MAX_TOTAL_RESULTS}).`,
+        });
+        onProgress({
+          index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+          phase: "nested_progress",
+          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "rejected", subTotal },
+        });
+        continue;
+      }
+      const msg = e instanceof Error ? e.message : String(e);
+      subResults.push({ label: destLabel, status: "error", count: 0, subTotal: 0, reason: msg });
+      onProgress({
+        index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+        phase: "nested_progress",
+        nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "error" },
+      });
+    }
+  }
+
+  return { documents, avizIds, detailsFailed, subResults, captchasUsed };
 }

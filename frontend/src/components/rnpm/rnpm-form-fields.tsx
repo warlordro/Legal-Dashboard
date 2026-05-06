@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { PJField, PFField, SiSauField, TextField } from "./rnpm-form-hooks";
 
@@ -171,14 +172,15 @@ export function VehiculFieldset({ model, sasiu, imatr, cols = 1, compact = false
 export function DestinatieSelect({ field, values }: { field: SiSauField; values: string[] }) {
   return (
     <div className="flex gap-2">
-      <select
-        value={field.value}
-        onChange={(e) => field.setValue(e.target.value)}
-        className="flex h-9 w-full rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-      >
-        <option value="">-- selecteaza --</option>
-        {values.map((d) => <option key={d} value={d}>{d}</option>)}
-      </select>
+      <Select value={field.value} onValueChange={field.setValue}>
+        <SelectTrigger>
+          <SelectValue placeholder="-- selecteaza --" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="">-- selecteaza --</SelectItem>
+          {values.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+        </SelectContent>
+      </Select>
       <SiSauToggle value={field.op} onChange={field.setOp} />
     </div>
   );

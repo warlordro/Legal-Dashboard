@@ -3,6 +3,7 @@ import { Search, Trash2, Eye, Loader2, Download, ArrowUp, ArrowDown, ArrowUpDown
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { rnpmGetSaved, rnpmDeleteAviz, rnpmDeleteAvizeBatch } from "@/lib/rnpmApi";
 import { useConfirm } from "@/components/ui/confirm-dialog";
@@ -211,10 +212,16 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
             className="pl-8"
           />
         </div>
-        <select value={searchType} onChange={(e) => setSearchType(e.target.value as "" | RnpmSearchType)}
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm">
-          {TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
-        </select>
+        <div className="w-[200px]">
+          <Select value={searchType} onValueChange={(v) => setSearchType(v as "" | RnpmSearchType)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Tip" />
+            </SelectTrigger>
+            <SelectContent>
+              {TYPES.map((t) => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </div>
         <div className="flex items-center gap-1 text-xs text-muted-foreground">
           <span>De la</span>
           <Input

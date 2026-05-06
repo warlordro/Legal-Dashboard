@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { TablePagination } from "@/components/table-pagination";
 import {
@@ -440,19 +441,23 @@ export function MonitoringBulkImportCard({
                   disabled={bulkBusy}
                 />
               </label>
-              <label className="grid gap-1 text-sm">
+              <div className="grid gap-1 text-sm">
                 <span className="text-xs text-muted-foreground">Filtru preview</span>
-                <select
-                  className="h-9 rounded-md border border-input bg-background px-2 text-sm"
+                <Select
                   value={bulkFilter}
-                  onChange={(e) => setBulkFilter(e.target.value as NameListValidation | "all")}
+                  onValueChange={(v) => setBulkFilter(v as NameListValidation | "all")}
                 >
-                  <option value="all">toate</option>
-                  <option value="ok">ok</option>
-                  <option value="warn">warn</option>
-                  <option value="rejected">respinse</option>
-                </select>
-              </label>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Filtru" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">toate</SelectItem>
+                    <SelectItem value="ok">ok</SelectItem>
+                    <SelectItem value="warn">warn</SelectItem>
+                    <SelectItem value="rejected">respinse</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
               {bulkPreview && bulkPreview.totals.warn > 0 && (
                 <label className="flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-sm">
                   <input

@@ -9,8 +9,9 @@ import { RnpmBulkSearch } from "@/components/rnpm/RnpmBulkSearch";
 import { RnpmSavedData } from "@/components/rnpm/RnpmSavedData";
 import { RnpmSavedStats } from "@/components/rnpm/RnpmSavedStats";
 import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
-import { rnpmSearch } from "@/lib/rnpmApi";
-import type { RnpmSearchParams, RnpmSearchType, RnpmDocument } from "@/types/rnpm";
+import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
+import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
+import type { RnpmSearchParams, RnpmSearchType, RnpmDocument, RnpmSplitSubResult } from "@/types/rnpm";
 import type { CaptchaProvider, CaptchaMode } from "@/lib/rnpmApi";
 
 type Tab = "search" | "bulk" | "saved";
@@ -39,6 +40,18 @@ interface ResultState {
   detailsFailed: string[];
   gcode: string;
   nextRnpmPage: number | null;
+  // Marcat doar cand rezultatul vine din executeSplitSearch — dezactiveaza
+  // "Incarca tot" (split-ul agrega deja paginile) si activeaza badge-ul + warnings.
+  splitMode?: boolean;
+  splitStats?: RnpmSplitSubResult[];
+  upstreamTotal?: number;
+}
+
+interface PendingSplit {
+  type: RnpmSearchType;
+  params: RnpmSearchParams;
+  total: number | undefined;
+  limit: number | undefined;
 }
 
 export default function RnpmSearchPage({
@@ -65,6 +78,8 @@ export default function RnpmSearchPage({
   const [formResetKey, setFormResetKey] = useState(0);
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
+  const [pendingSplit, setPendingSplit] = useState<PendingSplit | null>(null);
+  const [splitProgress, setSplitProgress] = useState<{ index: number; total: number; label: string; phase: string } | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const isAbort = (e: unknown): boolean => e instanceof DOMException && e.name === "AbortError";
@@ -107,11 +122,81 @@ export default function RnpmSearchPage({
       setSavedRefreshKey((k) => k + 1);
       onSearchComplete(type, params, res.total);
     } catch (e) {
+      if (isAbort(e) || ctl.signal.aborted) {
+        // intentional cancel — ignore
+      } else if (e instanceof RnpmLimitExceededError) {
+        // Deschide dialog de confirmare; userul decide daca platim N captcha-uri.
+        setPendingSplit({ type, params, total: e.total, limit: e.limit });
+      } else {
+        setError(e instanceof Error ? e.message : "Eroare necunoscuta");
+      }
+    } finally {
+      if (abortRef.current === ctl) abortRef.current = null;
+      setLoading(false);
+      setPhase("");
+    }
+  };
+
+  const runSplit = async (subTypeLabels: string[]) => {
+    if (!pendingSplit) return;
+    if (!captchaKey) { onConfigureKey(); return; }
+    if (abortRef.current) return;
+    const { type, params } = pendingSplit;
+    setPendingSplit(null);
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+    stoppedRef.current = false;
+    setLoading(true);
+    setError(null);
+    setResult(null);
+    setElapsedMs(null);
+    setSplitProgress({ index: 0, total: subTypeLabels.length, label: subTypeLabels[0] ?? "", phase: "captcha" });
+    setPhase(`Split: 0/${subTypeLabels.length}...`);
+    setActiveSearchType(type);
+    setLastType(type);
+    setLastParams(params);
+    const startTs = performance.now();
+    try {
+      const res = await rnpmSplitSearch(
+        type,
+        params,
+        subTypeLabels,
+        captchaKey,
+        (p) => {
+          setSplitProgress({ index: p.index, total: p.total, label: p.label, phase: p.phase });
+          setPhase(`Split ${p.index}/${p.total} - ${p.label} (${p.phase})${p.message ? ": " + p.message : ""}`);
+        },
+        ctl.signal,
+        captchaProvider,
+        fallback2CaptchaKey,
+        captchaMode,
+      );
+      if (stoppedRef.current || ctl.signal.aborted) return;
+      setElapsedMs(Math.round(performance.now() - startTs));
+      setResult({
+        searchId: res.searchId,
+        total: res.total,
+        pagesTotal: res.pagesTotal,
+        pageSize: res.pageSize,
+        criteriu: res.criteriu,
+        documents: res.documents,
+        avizIds: res.avizIds,
+        detailsFailed: res.detailsFailed,
+        gcode: "",
+        nextRnpmPage: null,
+        splitMode: true,
+        splitStats: res.splitStats,
+        upstreamTotal: res.upstreamTotal,
+      });
+      setSavedRefreshKey((k) => k + 1);
+      onSearchComplete(type, params, res.total);
+    } catch (e) {
       if (!isAbort(e) && !ctl.signal.aborted) setError(e instanceof Error ? e.message : "Eroare necunoscuta");
     } finally {
       if (abortRef.current === ctl) abortRef.current = null;
       setLoading(false);
       setPhase("");
+      setSplitProgress(null);
     }
   };
 
@@ -265,15 +350,15 @@ export default function RnpmSearchPage({
             onReset={() => { setResult(null); setError(null); setLastParams({}); }}
             initialType={lastType}
             initialParams={lastParams}
-            suppressStop={visibleResult != null && visibleResult.nextRnpmPage != null}
-            extraActions={visibleResult && visibleResult.nextRnpmPage != null ? (
+            suppressStop={visibleResult != null && visibleResult.nextRnpmPage != null && !visibleResult.splitMode}
+            extraActions={visibleResult && visibleResult.nextRnpmPage != null && !visibleResult.splitMode ? (
               <div className="flex items-center gap-2">
-                {autoLoading ? (
+                {autoLoading || loading ? (
                   <Button type="button" variant="destructive" onClick={handleStop} className="font-normal h-8 px-3 text-xs">
                     Opreste incarcarea ({visibleResult.documents.length} din {visibleResult.total})
                   </Button>
                 ) : (
-                  <Button type="button" disabled={loading} onClick={() => setAutoLoading(true)} className="font-normal h-8 px-3 text-xs">
+                  <Button type="button" onClick={() => setAutoLoading(true)} className="font-normal h-8 px-3 text-xs">
                     Incarca tot ({visibleResult.documents.length} din {visibleResult.total})
                   </Button>
                 )}
@@ -291,6 +376,54 @@ export default function RnpmSearchPage({
           {visibleError && (
             <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
               {visibleError}
+            </div>
+          )}
+          {visibleResult?.splitMode && visibleResult.splitStats && (
+            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 space-y-1.5">
+              <div className="font-medium">
+                Cautare rulata in mod split — {visibleResult.documents.length} avize agregate din {visibleResult.splitStats.length} sub-tipuri
+                {visibleResult.upstreamTotal != null ? <> (total RNPM raportat: {visibleResult.upstreamTotal}, inclusiv sub-tipuri respinse)</> : null}
+              </div>
+              {(() => {
+                // v2.18.0: tier-2 breakdown — daca exista sub-tipuri "recovered"/"partial",
+                // afisam recap-ul (cate destinatii au reusit + gap-ul total).
+                const tier2Stats = visibleResult.splitStats.filter((s) => s.status === "recovered" || s.status === "partial");
+                if (tier2Stats.length === 0) return null;
+                const totalGap = tier2Stats.reduce((acc, s) => acc + (s.gap ?? 0), 0);
+                return (
+                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
+                    <div className="font-medium">
+                      Tier-2 split (pe destinatieInscriere) aplicat pe {tier2Stats.length} sub-tip(uri):
+                    </div>
+                    <ul className="mt-1 space-y-0.5">
+                      {tier2Stats.map((s) => (
+                        <li key={s.label} className="truncate">
+                          <b>{s.label}</b>: recuperat <b>{s.count}</b>/{s.subTotal}
+                          {s.nested ? <> ({s.nested.filter((n) => n.status === "ok").length} destinatii OK din {s.nested.length})</> : null}
+                          {s.gap != null && s.gap > 0 ? <> · gap <b>{s.gap}</b></> : null}
+                        </li>
+                      ))}
+                    </ul>
+                    {totalGap > 0 && (
+                      <div className="mt-1.5 rounded bg-amber-500/15 p-1.5 text-[11px]">
+                        <b>{totalGap}</b> inregistrari fara destinatie atribuita nu au putut fi recuperate
+                        (limitarea API RNPM pentru records istorice fara destinatie).
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+              {visibleResult.splitStats.some((s) => s.status === "rejected" || s.status === "error") && (
+                <ul className="mt-1 space-y-0.5">
+                  {visibleResult.splitStats
+                    .filter((s) => s.status === "rejected" || s.status === "error")
+                    .map((s) => (
+                      <li key={s.label} className="truncate">
+                        <b>{s.label}</b>: {s.status === "rejected" ? `respins (${s.subTotal} > limita)` : `eroare${s.reason ? ": " + s.reason : ""}`}
+                      </li>
+                    ))}
+                </ul>
+              )}
             </div>
           )}
           <RnpmResultsTable
@@ -326,6 +459,28 @@ export default function RnpmSearchPage({
       </div>
 
       <RnpmDetailModal avizId={detailAvizId} onClose={() => setDetailAvizId(null)} />
+
+      <RnpmSplitDialog
+        open={pendingSplit != null}
+        type={pendingSplit?.type ?? "ipoteci"}
+        total={pendingSplit?.total}
+        limit={pendingSplit?.limit}
+        captchaProvider={captchaProvider}
+        onCancel={() => setPendingSplit(null)}
+        onConfirm={(subTypeLabels) => { void runSplit(subTypeLabels); }}
+      />
+
+      {/* Split-mode progress overlay (lightweight; reuses `loading` for the rest of UI) */}
+      {splitProgress && (
+        <div className="fixed bottom-4 right-4 z-40 max-w-sm rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 shadow-lg">
+          <div className="font-medium">
+            Split RNPM {splitProgress.index}/{splitProgress.total}
+          </div>
+          <div className="truncate text-[11px]">
+            {splitProgress.label} - {splitProgress.phase}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

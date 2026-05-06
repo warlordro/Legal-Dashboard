@@ -3,6 +3,7 @@ import { Users as UsersIcon, RefreshCw, ShieldAlert, Search } from "lucide-react
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   admin,
@@ -216,26 +217,28 @@ export default function AdminUsers() {
                 placeholder="Cauta dupa email sau nume"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm md:col-span-2"
               />
-              <select
-                value={roleFilter}
-                onChange={(e) => setRoleFilter(e.target.value as UserRole | "all")}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="all">Toate rolurile</option>
-                {ROLE_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value as UserStatus | "all")}
-                className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-              >
-                <option value="all">Toate statusurile</option>
-                {STATUS_OPTIONS.map((o) => (
-                  <option key={o.value} value={o.value}>{o.label}</option>
-                ))}
-              </select>
+              <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as UserRole | "all")}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Rol" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toate rolurile</SelectItem>
+                  {ROLE_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as UserStatus | "all")}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Status" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">Toate statusurile</SelectItem>
+                  {STATUS_OPTIONS.map((o) => (
+                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
               <Button type="submit" variant="secondary" className="md:col-span-4 md:w-fit">
                 Aplica cautarea
               </Button>
@@ -293,31 +296,43 @@ export default function AdminUsers() {
                         <td className="px-4 py-2 align-top">
                           <div className="flex items-center gap-2">
                             <Badge variant={roleVariant(row.role)}>{roleLabel(row.role)}</Badge>
-                            <select
+                            <Select
                               value={row.role}
-                              onChange={(e) => handleRoleChange(row, e.target.value as UserRole)}
-                              disabled={busyId === row.id || loading}
-                              className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+                              onValueChange={(v) => handleRoleChange(row, v as UserRole)}
                             >
-                              {ROLE_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>{o.label}</option>
-                              ))}
-                            </select>
+                              <SelectTrigger
+                                className="h-7 px-2 text-xs w-auto min-w-[110px]"
+                                disabled={busyId === row.id || loading}
+                              >
+                                <SelectValue placeholder="Rol" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {ROLE_OPTIONS.map((o) => (
+                                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                         </td>
                         <td className="px-4 py-2 align-top">
                           <div className="flex items-center gap-2">
                             <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
-                            <select
+                            <Select
                               value={row.status}
-                              onChange={(e) => handleStatusChange(row, e.target.value as UserStatus)}
-                              disabled={busyId === row.id || loading}
-                              className="h-7 rounded-md border border-input bg-background px-2 text-xs"
+                              onValueChange={(v) => handleStatusChange(row, v as UserStatus)}
                             >
-                              {STATUS_OPTIONS.map((o) => (
-                                <option key={o.value} value={o.value}>{o.label}</option>
-                              ))}
-                            </select>
+                              <SelectTrigger
+                                className="h-7 px-2 text-xs w-auto min-w-[110px]"
+                                disabled={busyId === row.id || loading}
+                              >
+                                <SelectValue placeholder="Status" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {STATUS_OPTIONS.map((o) => (
+                                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                         </td>
                         <td className="px-4 py-2 align-top text-xs text-muted-foreground">{formatIsoDateTime(row.lastLoginAt)}</td>

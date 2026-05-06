@@ -205,3 +205,62 @@ export interface RnpmBulkItem {
   params: RnpmSearchParams;
   label?: string;
 }
+
+export interface RnpmNestedSplitProgress {
+  index: number;          // 1-based index curent in lista destinatii (0 = inca nu a inceput)
+  total: number;          // numarul total de destinatii incercate
+  label: string;          // labelul destinatiei
+  phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error";
+  resultCount?: number;
+  subTotal?: number;
+}
+
+export interface RnpmSplitProgress {
+  index: number;
+  total: number;
+  label: string;
+  phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
+  message?: string;
+  resultCount?: number;
+  subTotal?: number;
+  // Prezent doar pe phase = "nested_*": progresul iteratorului tier-2.
+  nested?: RnpmNestedSplitProgress;
+}
+
+export interface RnpmNestedSplitSubResult {
+  label: string;
+  status: "ok" | "rejected" | "empty" | "error";
+  count: number;
+  subTotal: number;
+  reason?: string;
+}
+
+export interface RnpmSplitSubResult {
+  label: string;
+  // v2.18.0: "recovered" = tier-2 a recuperat tot subtotalul tier-1 (gap=0).
+  // "partial" = tier-2 a rulat dar a ramas un gap (records fara destinatie atribuita).
+  status: "ok" | "rejected" | "empty" | "error" | "recovered" | "partial";
+  count: number;
+  subTotal: number;
+  reason?: string;
+  // Tier-2 breakdown — prezent doar daca sub-tipul a triggered nested split.
+  nested?: RnpmNestedSplitSubResult[];
+  // gap = subTotal - SUM(nested[i].subTotal). Inregistrari fara destinatie
+  // atribuita raman neacoperite chiar dupa tier-2 split.
+  gap?: number;
+}
+
+export interface RnpmSplitResult {
+  searchId: number;
+  documents: RnpmDocument[];
+  avizIds: (number | null)[];
+  total: number;
+  upstreamTotal: number;
+  criteriu: string;
+  pagesTotal: number;
+  pageSize: number;
+  currentPage: number;
+  detailsFailed: string[];
+  splitStats: RnpmSplitSubResult[];
+  captchasUsed: number;
+}

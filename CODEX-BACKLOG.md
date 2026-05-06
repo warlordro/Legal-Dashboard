@@ -1,14 +1,57 @@
 # Codex Backlog - Legal Dashboard
 
-> Status curent: inchis 2026-05-05 — Task D livrat in v2.14.0.
+> Status curent: redeschis 2026-05-07 — Task E (RNPM cap observability).
 > Generat initial: 2026-05-03 (post v2.10.4).
 > Inchis (rundă 1): 2026-05-03 — Task B/C livrate in v2.10.5, Task A scos in v2.10.6.
 > Redeschis: 2026-05-05; Inchis (rundă 2): 2026-05-05 — Task D livrat in v2.14.0.
+> Redeschis: 2026-05-07 — Task E (post analiza document tehnic RNPM cap 1500).
 > Repo: `Legal Dashboard` (Electron + Hono + better-sqlite3).
 
 ## Task-uri active
 
-(niciunul activ)
+### Task E - RNPM cap observability (gap audit + status enum rename)
+
+**Status:** activ, neasignat. Origine: analiza document tehnic extern (`solutie_tehnica_rnpm_cap_1500.md`) post v2.18.0.
+
+#### Context
+
+v2.18.0 livreaza tier-2 split pe `destinatieInscriere` cu best-effort + disclosure UI. Gap-ul e calculat la runtime ca `gap = tier1SubTotal - SUM(tier2 subTotals)` si afisat ca un singur numar in banner.
+
+Problema: gap-ul agregat ascunde **trei cauze distincte** care merita raportate separat pentru audit + observability:
+1. **Terminal cap exceeded**: bucket cu total > 1500 fara axa de split disponibila (ex. `creante` care n-are destinatii enumerabile, sau `specifice` tier-2 destinatie 5 cu 1744 records).
+2. **Silent refusal**: RNPM intoarce `total > 1500` dar `documents: []` pe toate paginile (vezi comentariu `rnpmSearchService.ts:55`).
+3. **Residual unclassified**: `SUM(tier-2 children) < tier-1 parent total` — diferenta = records nealocate la nicio destinatie enumerabila (probabil records cu `destinatieInscriere=null`).
+
+In plus, status-ul curent (`recovered`/`partial`/`rejected`) e ambiguu. `rejected` se mapeaza confuz cu HTTP rejection, nu cu "blocat de cap". Document tehnic propune `complete`/`partial`/`blocked_by_rnpm_cap`, mai expresiv.
+
+NOT in scope (analizat si respins explicit):
+- Refactor generic `Splitter[]` registry — overengineering pentru 2 splittere fara axa noua de adaugat.
+- Pattern `probeRnpm({ pageSize: 1 })` separat de fetch — regresie pe captcha cost (RNPM cere captcha per request, nu per page size).
+- Tier-3 "known creditor split" — partial doar la re-fetch, residualul ramane neaccesibil. Vezi PROBLEM-rnpm-cap-1500.md.
+
+#### Acceptance criteria
+
+- [ ] Tip nou `RnpmGapReason = "terminal_cap" | "silent_refusal" | "residual_unclassified"` exportat din `services/rnpmSearchService.ts`.
+- [ ] `SplitSubResult` extins cu `gapReason?: RnpmGapReason` cand `status: "partial"` sau `status: "rejected"`.
+- [ ] `executeNestedDestinationSplit` distinge intre `terminal_cap` (sub-tip fara destinatii enumerable + total > 1500), `silent_refusal` (response cu `total > MAX_TOTAL_RESULTS && documents.length === 0` la pagina 1), si `residual_unclassified` (calculat la `finally`: `tier1Total - SUM(tier2 subTotals)`).
+- [ ] Status enum rename: `rejected` -> `blocked` in `SplitSubResult.status` + propagat in `RnpmSplitProgress.phase` SSE + tipuri frontend (`types/rnpm.ts`, `lib/rnpmApi.ts`). Backwards-compatible: backend accepta vechiul label in tests dar emite cel nou.
+- [ ] Banner UI in `pages/RnpmSearch.tsx` arata cele 3 categorii separate cu count + reason humanizat (RO).
+- [ ] Audit event `rnpm.cap_hit` la finalul oricarei rulari split cu `status !== "complete"`. Detail JSON: `{ baseQuery, rnpmTotal, recovered, gaps: [{reason, totalReported, splitPath}], appVersion, requestId }`. Limita 16 KiB pe `detail_json` (preventie expansiune pentru cazuri patologice cu multe gaps).
+- [ ] Test backend pentru: terminal cap (creante > 1500), silent refusal (mock RNPM cu total>cap + docs=[]), residual unclassified (parent 1822, children sum 1820, gap 2).
+- [ ] Test frontend pentru: rendering banner cu 3 reason-uri distincte, status `blocked` afisat ca "Blocat de RNPM" nu "Respins".
+- [ ] Documentatie in CHANGELOG.md + in-app `frontend/src/data/changelog-entries.tsx` la version bump (v2.19.0).
+
+#### Note de design
+
+- Gap reason enum locked la 3 valori — daca RNPM lanseaza vreodata axa de split aditionala, ramane reason-ul `terminal_cap` ca fallback.
+- Audit-ul nu duplica `documents[]` (deja in `rnpm_avize`); doar metadata + counts.
+- `requireRole("admin")` NU e necesar pe audit read — pagina history e per-owner.
+- Status `complete` cand `gaps.length === 0` SI `recovered === rnpmTotal`. Status `partial` cand `gaps.length > 0` SI `recovered > 0`. Status `blocked` cand `recovered === 0`.
+- Compatibilitate UI: dropdown filtru status pe pagina history poate ramane simplu binar (success/blocked) — gap reason e detail in expand.
+
+#### Estimat
+
+3-4h dev + 1h test + 0.5h docs = ~half day. Fara captcha cost extra (gap se calculeaza din date deja fetched in tier-1/tier-2).
 
 ### Task D - Alerte: bulk dismiss (selectie + toate existente)
 

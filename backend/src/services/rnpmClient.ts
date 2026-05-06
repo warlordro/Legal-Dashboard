@@ -179,11 +179,18 @@ export interface RnpmFullDetail {
 export class RnpmError extends Error {
   readonly status?: number;
   readonly cause?: unknown;
-  constructor(message: string, status?: number, cause?: unknown) {
+  // Machine-readable code + details. Folosit de routes/rnpm.ts ca sa
+  // returneze {code, total, ...} cand limita upstream e atinsa, ca frontend-ul
+  // sa stie sa propuna split-ul fara sa parse-uiasca string-ul de eroare.
+  readonly code?: string;
+  readonly details?: Record<string, unknown>;
+  constructor(message: string, status?: number, cause?: unknown, code?: string, details?: Record<string, unknown>) {
     super(message);
     this.name = "RnpmError";
     this.status = status;
     this.cause = cause;
+    this.code = code;
+    this.details = details;
   }
 }
 

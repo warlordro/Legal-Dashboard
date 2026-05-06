@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { Play, Square, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { rnpmBulkSearch, type CaptchaProvider, type CaptchaMode } from "@/lib/rnpmApi";
 import type { RnpmBulkItem, RnpmBulkProgress, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
@@ -151,17 +152,25 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
       <div className="grid gap-4 md:grid-cols-2">
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">Categorie</label>
-          <select value={type} onChange={(e) => handleTypeChange(e.target.value as RnpmSearchType)} disabled={running}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm">
-            {CATEGORIES.map((c) => <option key={c.type} value={c.type}>{c.label}</option>)}
-          </select>
+          <Select value={type} onValueChange={(v) => handleTypeChange(v as RnpmSearchType)}>
+            <SelectTrigger disabled={running}>
+              <SelectValue placeholder="Categorie" />
+            </SelectTrigger>
+            <SelectContent>
+              {CATEGORIES.map((c) => <SelectItem key={c.type} value={c.type}>{c.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">Camp cautare</label>
-          <select value={activeField.key} onChange={(e) => setField(e.target.value)} disabled={running}
-            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm">
-            {fieldsForType.map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
-          </select>
+          <Select value={activeField.key} onValueChange={setField}>
+            <SelectTrigger disabled={running}>
+              <SelectValue placeholder="Camp cautare" />
+            </SelectTrigger>
+            <SelectContent>
+              {fieldsForType.map((f) => <SelectItem key={f.key} value={f.key}>{f.label}</SelectItem>)}
+            </SelectContent>
+          </Select>
         </div>
       </div>
 

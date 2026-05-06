@@ -3,6 +3,7 @@ import { Plus, FileText, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InstitutieSelect } from "@/components/InstitutieSelect";
 import {
   monitoring,
@@ -155,18 +156,16 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
               </div>
               <div>
                 <label className="text-xs font-medium mb-1 block">Cadenta</label>
-                <select
-                  className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                  value={cadenceSec}
-                  onChange={(e) => setCadenceSec(Number(e.target.value))}
-                  disabled={submitting}
-                >
-                  {CADENCE_OPTIONS.map((opt) => (
-                    <option key={opt.sec} value={opt.sec}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
+                <Select value={String(cadenceSec)} onValueChange={(v) => setCadenceSec(Number(v))}>
+                  <SelectTrigger disabled={submitting}>
+                    <SelectValue placeholder="Cadenta" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {CADENCE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.sec} value={String(opt.sec)}>{opt.label}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           ) : (
@@ -187,18 +186,16 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
                 </div>
                 <div>
                   <label className="text-xs font-medium mb-1 block">Cadenta</label>
-                  <select
-                    className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm"
-                    value={cadenceSec}
-                    onChange={(e) => setCadenceSec(Number(e.target.value))}
-                    disabled={submitting}
-                  >
-                    {CADENCE_OPTIONS.map((opt) => (
-                      <option key={opt.sec} value={opt.sec}>
-                        {opt.label}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={String(cadenceSec)} onValueChange={(v) => setCadenceSec(Number(v))}>
+                    <SelectTrigger disabled={submitting}>
+                      <SelectValue placeholder="Cadenta" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {CADENCE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.sec} value={String(opt.sec)}>{opt.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               </div>
               <div>
