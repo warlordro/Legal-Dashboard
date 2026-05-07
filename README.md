@@ -7,24 +7,27 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.19.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.19.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.19.1** - patch hardening + UX polish post v2.19.0. Trei bug-uri
-descoperite la rulare empirica imediat dupa v2.19.0, plus documentare a limitei tehnice
-RNPM. Frontend `lib/rnpmApi.ts`: `jsonOrThrow` accepta acum envelope-ul v2.14.0
-`{ data, error: { code, message }, requestId }` (pana acum extragea doar `data.error` ca
-string, ceea ce pe envelope-ul nou producea `Error([object Object])` in modalul "Info baza
-locala" si alte rute admin RNPM). Backend `index.ts`: auto-promote `local` -> `admin`
-in desktop mode la boot, idempotent (migration 0002 seed-uieste user-ul cu `role: "user"`
-ca default sigur pentru web mode multi-tenant, dar `requireRole("admin")` din v2.11.0
-bloca chiar utilizatorul aplicatiei pe `DELETE /rnpm/saved/all`, `POST /rnpm/compact`,
-backup management). Frontend `pages/RnpmSearch.tsx`: stop button apare cand auto-loading
-e declansat din tabelul de paginare (conditia `autoLoading || loading`). Documentatie:
-`PROBLEM-rnpm-cap-1500.md` (nou) - documentare formala a limitei RNPM cu lista de axe
-de split incercate si respinse + captura RNPM oficial; `CODEX-BACKLOG.md` Task E redeschis
-cu observability tasks (gap reason enum, status enum rename, audit event). Zero schimbari
-functionale in tier-1/tier-2 split engine. **822 teste backend, 86 teste frontend**.
+Ultimul release **v2.19.2** - bugfix highlight Cautare dosare. La cautarea unui nume
+cu mai multe cuvinte (ex. `COMPANIA DE DEMOLARI INDUSTRIALE SRL`), tokenul scurt `DE`
+matchuia ca prefix in `DEMOLARI` si lasa `MOLARI` fara fundal galben. Cauza in
+`components/dosare-table-highlight.tsx`: regex-ul testa alternativele in ordinea
+declarata si nu avea word boundaries Unicode-aware (`\b` standard JS exclude
+`Ă/Î/Ș/Ț`, deci nu putea delimita corect cuvinte cu diacritice). Fix: alternativele
+sunt sortate dupa lungime descrescator (matchul lung castiga peste cel scurt) si
+delimitate prin lookarounds Unicode-aware `(?<!\p{L})...(?!\p{L})` cu flag `u`. Acelasi
+fix in `components/termene-table-detail-row.tsx` (era bug duplicat). **86 teste frontend**.
+
+Predecesor **v2.19.1** - patch hardening + UX polish post v2.19.0. Trei bug-uri
+descoperite la rulare empirica imediat dupa v2.19.0. Frontend `lib/rnpmApi.ts`:
+`jsonOrThrow` accepta acum envelope-ul v2.14.0 `{ data, error: { code, message },
+requestId }` (pana acum extragea doar `data.error` ca string, ceea ce pe envelope-ul
+nou producea `Error([object Object])` in modalul "Info baza locala"). Backend
+`index.ts`: auto-promote `local` -> `admin` in desktop mode la boot, idempotent.
+Frontend `pages/RnpmSearch.tsx`: stop button apare cand auto-loading e declansat
+din tabelul de paginare. **822 teste backend, 86 teste frontend**.
 
 Predecesor **v2.19.0** - RNPM tier-2 split pe `destinatieInscriere`. Extinde v2.18.0
 (split tier-1 pe `tipInscriere`) cu un al doilea nivel cand un sub-tip individual
@@ -434,7 +437,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (822 teste in v2.19.1) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (822 teste in v2.19.2) |
 | `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (86 teste dupa v2.14.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |

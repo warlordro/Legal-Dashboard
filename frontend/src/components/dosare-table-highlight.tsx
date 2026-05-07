@@ -19,8 +19,12 @@ export function HighlightName({ text, search }: { text: string; search?: string 
   const searchWords = stripDiacritics(search.toLowerCase()).trim().split(/\s+/).filter(Boolean);
   if (searchWords.length === 0) return <>{text}</>;
 
-  const patterns = searchWords.map((w) => expandDiacritics(w));
-  const regex = new RegExp(`(${patterns.join("|")})`, "gi");
+  // Sort longest-first so "demolari" wins alternation over "de" inside "DEMOLARI".
+  // Unicode-aware lookarounds prevent short tokens (e.g. "de") from matching
+  // as prefix/suffix of longer words (DEPOZIT, DECIZIE, etc.).
+  const sortedWords = [...searchWords].sort((a, b) => b.length - a.length);
+  const patterns = sortedWords.map((w) => expandDiacritics(w));
+  const regex = new RegExp(`(?<!\\p{L})(${patterns.join("|")})(?!\\p{L})`, "giu");
   const parts = text.split(regex);
 
   return (

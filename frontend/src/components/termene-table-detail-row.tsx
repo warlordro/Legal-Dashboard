@@ -8,8 +8,12 @@ function HighlightName({ text, search }: { text: string; search?: string }) {
   if (!search || !text) return <>{text}</>;
   const searchWords = search.toLowerCase().trim().split(/\s+/).filter(Boolean);
   if (searchWords.length === 0) return <>{text}</>;
-  const escaped = searchWords.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-  const regex = new RegExp(`(${escaped.join("|")})`, "gi");
+  // Sort longest-first + unicode word boundaries so a short token ("de") doesn't
+  // chew the prefix of a longer word ("DEMOLARI"). Mirrors HighlightName in
+  // dosare-table-highlight.tsx.
+  const sortedWords = [...searchWords].sort((a, b) => b.length - a.length);
+  const escaped = sortedWords.map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const regex = new RegExp(`(?<!\\p{L})(${escaped.join("|")})(?!\\p{L})`, "giu");
   const parts = text.split(regex);
   return (
     <>

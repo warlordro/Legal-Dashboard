@@ -37,6 +37,22 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.19.2",
+    date: "7 Mai 2026",
+    subtitle:
+      "Bugfix highlight Cautare dosare. Tokenii scurti din numele cautat (de exemplu DE) erau evidentiati ca prefix in cuvintele mai lungi (DEMOLARI), lasand restul cuvantului fara highlight. Fix: alternation sortata dupa lungime descrescator si delimitatori Unicode-aware (recunosc litere romanesti precum a, i, S, T) — un cuvant cautat se evidentiaza acum doar cand apare ca cuvant intreg. Fix aplicat in tabela Cautare dosare si in randul de detalii Termene.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-slate-500",
+    badgeClass: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400",
+    sections: [
+      {
+        title: "Highlight-ul nu mai mananca prefixe din alte cuvinte",
+        content:
+          "La cautarea unui nume cu mai multe cuvinte (de exemplu COMPANIA DE DEMOLARI INDUSTRIALE SRL), tokenul scurt DE matchuia ca prefix in DEMOLARI si lasa MOLARI fara fundal galben. Cauza: regex-ul de highlight testa alternativele in ordinea declarata si nu avea delimitatori. Fix: alternativele sunt sortate dupa lungime descrescator (matchul lung castiga peste cel scurt) si delimitate prin lookarounds Unicode-aware (recunosc litere romanesti precum a, i, S, T), astfel ca un cuvant cautat se evidentiaza doar cand apare ca cuvant intreg, nu cand e prefix sau sufix.",
+      },
+    ],
+  },
+  {
     version: "v2.19.1",
     date: "7 Mai 2026",
     subtitle:

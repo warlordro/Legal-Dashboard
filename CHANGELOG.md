@@ -4,6 +4,35 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.19.2] - 2026-05-07
+
+### Bugfix highlight Cautare dosare — tokenii scurti nu mai mananca prefixe
+
+Cautarea unui nume cu mai multe cuvinte (ex. `COMPANIA DE DEMOLARI INDUSTRIALE SRL`) producea highlight
+partial: tokenul scurt `DE` matchuia ca prefix in `DEMOLARI`, lasand `MOLARI` fara fundal galben. Cauza
+in [frontend/src/components/dosare-table-highlight.tsx](frontend/src/components/dosare-table-highlight.tsx):
+regex-ul `(de|demolari|...)` cu flag `gi` testa alternativele in ordinea declarata si nu avea word
+boundaries Unicode-aware (`\b` standard JS exclude `Ă/Î/Ș/Ț`). Engine-ul matchuia `de` la pozitia 11
+in `DEMOLĂRI`, consuma 2 caractere, apoi continua de la `MOLĂRI` care nu mai matchuia nimic.
+
+### Frontend (`components/dosare-table-highlight.tsx`, `components/termene-table-detail-row.tsx`)
+
+- **Sortare alternativelor descrescator dupa lungime** inainte de a construi pattern-ul.
+  Tokenul lung (`demolari`) castiga matchul peste tokenul scurt (`de`) la inceputul `DEMOLĂRI`.
+- **Word boundaries Unicode-aware** prin lookarounds `(?<!\p{L})...(?!\p{L})` cu flag `u`.
+  `\p{L}` recunoaste tot setul Unicode Letter (inclusiv `Ă`, `Î`, `Ș`, `Ț`), deci `de` nu mai
+  matchuie ca prefix in `DEPOZIT`, `DECIZIE`, `DEMOLĂRI`, etc. — doar cand apare ca cuvant intreg.
+- Acelasi fix aplicat in tabela Cautare dosare si in randul de detalii Termene (era bug duplicat).
+
+### Validare
+
+- Frontend: 86/86 teste vitest verzi.
+- Type-check: `npx tsc --noEmit` clean pe ambele workspace-uri.
+- Test empiric reprodus pe `COMPANIA DE DEMOLĂRI INDUSTRIALE SRL` cu cautare `COMPANIA DE DEMOLARI
+  INDUSTRIALE SRL` — toate cuvintele highlightate integral.
+
+---
+
 ## [2.19.1] - 2026-05-07
 
 ### Patch hardening + UX polish post v2.19.0
