@@ -8,8 +8,10 @@
 // 3. The gap (= tier1SubTotal - SUM(tier2 subTotals)) is computed and surfaced
 //    in splitStats so the UI can disclose unrecovered records.
 // 4. Categories without enumerable destinations (creante/obligatiuni/fiducii)
-//    fall back to the v2.17.0 fail-clean behavior (status: "rejected", no
-//    nested split attempted).
+//    fall back to the v2.17.0 fail-clean behavior (status: "blocked",
+//    gapReason: "terminal_cap", no nested split attempted).
+// 5. v2.20.0: gapReason classifier — terminal_cap (no axis), silent_refusal
+//    (RNPM total>0 but documents:[]), residual_unclassified (tier-1 - SUM(tier-2) > 0).
 //
 // Captcha is stubbed via vi.mock at module boundary to avoid real network.
 
@@ -215,13 +217,15 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     expect(rejected!.nested!.length).toBe(DESTINATII_INSCRIERII.length);
     // Gap = tier1Total (1826) - SUM(tier2 subTotals) = 1826 - 1500 = 326
     expect(rejected!.gap).toBe(326);
+    // v2.20.0: gapReason populat pentru "partial" cu gap > 0.
+    expect(rejected!.gapReason).toBe("residual_unclassified");
 
     // Other tier-1 entries succeeded as "ok" — dispatcher did not abort.
     const okEntries = result.splitStats.filter((s) => s.status === "ok");
     expect(okEntries.length).toBe(ipotSubTypes.length - 1);
   });
 
-  it("falls back to fail-clean (rejected) when category has no enumerable destinations (creante)", async () => {
+  it("falls back to fail-clean (blocked + terminal_cap) when category has no enumerable destinations (creante)", async () => {
     const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.creante;
     const REJECT_IDX = "1";
     const stub = new StubClient(({ tipIdx, destinatie }) => {
@@ -239,11 +243,43 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
       stub,
     );
 
-    const rejected = result.splitStats.find((s) => s.label === subTypes[0]);
-    expect(rejected!.status).toBe("rejected");
-    expect(rejected!.subTotal).toBe(9999);
-    expect(rejected!.nested).toBeUndefined();
-    expect(rejected!.gap).toBeUndefined();
+    const blocked = result.splitStats.find((s) => s.label === subTypes[0]);
+    expect(blocked!.status).toBe("blocked");
+    expect(blocked!.subTotal).toBe(9999);
+    expect(blocked!.nested).toBeUndefined();
+    expect(blocked!.gap).toBeUndefined();
+    // v2.20.0: terminal_cap = nicio axa de split disponibila pentru aceasta categorie.
+    expect(blocked!.gapReason).toBe("terminal_cap");
+  });
+
+  it("classifies tier-1 silent reject as blocked + silent_refusal (specifice cu total>0 si documents:[])", async () => {
+    const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.specifice;
+    const REJECT_IDX = "1";
+    // Tier-1 idx 1 returneaza total=600 (sub cap) DAR documents:[] -> silent reject.
+    // Pentru ca total < MAX_TOTAL_RESULTS, executeSearch nu emite limit_exceeded;
+    // executeSplitSearch detecteaza scenariul direct si seteaza gapReason: silent_refusal.
+    const stub = new StubClient(({ tipIdx, destinatie }) => {
+      if (destinatie != null) return emptyResult();
+      if (tipIdx === REJECT_IDX) {
+        return { total: 600, pagesTotal: 24, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+      }
+      return emptyResult();
+    });
+
+    const result = await executeSplitSearch(
+      { type: "specifice", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => { /* ignored */ },
+      stub,
+    );
+
+    const blocked = result.splitStats.find((s) => s.label === subTypes[0]);
+    expect(blocked!.status).toBe("blocked");
+    expect(blocked!.subTotal).toBe(600);
+    expect(blocked!.count).toBe(0);
+    expect(blocked!.gapReason).toBe("silent_refusal");
+    // Nicio chemare tier-2 nu trebuie facuta pentru acest sub-tip — silent_refusal nu beneficiaza de split.
+    const tier2Calls = stub.searchCalls.filter((c) => c.destinatie != null && c.tipInscriere === REJECT_IDX);
+    expect(tier2Calls.length).toBe(0);
   });
 
   it("ipoteci tier-2 covers exactly DESTINATII_IPOTECI (10) entries", async () => {

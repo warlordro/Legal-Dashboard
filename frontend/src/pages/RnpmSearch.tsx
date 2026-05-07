@@ -11,6 +11,7 @@ import { RnpmSavedStats } from "@/components/rnpm/RnpmSavedStats";
 import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
 import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
 import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
+import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
 import type { RnpmSearchParams, RnpmSearchType, RnpmDocument, RnpmSplitSubResult } from "@/types/rnpm";
 import type { CaptchaProvider, CaptchaMode } from "@/lib/rnpmApi";
 
@@ -382,7 +383,7 @@ export default function RnpmSearchPage({
             <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 space-y-1.5">
               <div className="font-medium">
                 Cautare rulata in mod split — {visibleResult.documents.length} avize agregate din {visibleResult.splitStats.length} sub-tipuri
-                {visibleResult.upstreamTotal != null ? <> (total RNPM raportat: {visibleResult.upstreamTotal}, inclusiv sub-tipuri respinse)</> : null}
+                {visibleResult.upstreamTotal != null ? <> (total RNPM raportat: {visibleResult.upstreamTotal}, inclusiv sub-tipuri blocate)</> : null}
               </div>
               {(() => {
                 // v2.18.0: tier-2 breakdown — daca exista sub-tipuri "recovered"/"partial",
@@ -413,13 +414,13 @@ export default function RnpmSearchPage({
                   </div>
                 );
               })()}
-              {visibleResult.splitStats.some((s) => s.status === "rejected" || s.status === "error") && (
+              {visibleResult.splitStats.some((s) => s.status === "blocked" || s.status === "error") && (
                 <ul className="mt-1 space-y-0.5">
                   {visibleResult.splitStats
-                    .filter((s) => s.status === "rejected" || s.status === "error")
+                    .filter((s) => s.status === "blocked" || s.status === "error")
                     .map((s) => (
                       <li key={s.label} className="truncate">
-                        <b>{s.label}</b>: {s.status === "rejected" ? `respins (${s.subTotal} > limita)` : `eroare${s.reason ? ": " + s.reason : ""}`}
+                        <b>{s.label}</b>: {describeBlockedSubResult(s)}
                       </li>
                     ))}
                 </ul>

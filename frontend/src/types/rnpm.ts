@@ -206,11 +206,20 @@ export interface RnpmBulkItem {
   label?: string;
 }
 
+// v2.20.0: distingem cele 3 cauze de gap RNPM pentru observability + UI:
+//  - terminal_cap: sub-tip/destinatie singura > 1500, nu mai exista axa de split.
+//  - silent_refusal: RNPM raspunde cu total>0 dar documents:[] (rate-limit/captcha).
+//  - residual_unclassified: tier-1 - SUM(tier-2) > 0, records fara destinatie atribuita.
+export type RnpmGapReason =
+  | "terminal_cap"
+  | "silent_refusal"
+  | "residual_unclassified";
+
 export interface RnpmNestedSplitProgress {
   index: number;          // 1-based index curent in lista destinatii (0 = inca nu a inceput)
   total: number;          // numarul total de destinatii incercate
   label: string;          // labelul destinatiei
-  phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error";
+  phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error";
   resultCount?: number;
   subTotal?: number;
 }
@@ -219,7 +228,7 @@ export interface RnpmSplitProgress {
   index: number;
   total: number;
   label: string;
-  phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
+  phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
   message?: string;
   resultCount?: number;
   subTotal?: number;
@@ -229,17 +238,19 @@ export interface RnpmSplitProgress {
 
 export interface RnpmNestedSplitSubResult {
   label: string;
-  status: "ok" | "rejected" | "empty" | "error";
+  status: "ok" | "blocked" | "empty" | "error";
   count: number;
   subTotal: number;
   reason?: string;
+  gapReason?: RnpmGapReason;
 }
 
 export interface RnpmSplitSubResult {
   label: string;
   // v2.18.0: "recovered" = tier-2 a recuperat tot subtotalul tier-1 (gap=0).
   // "partial" = tier-2 a rulat dar a ramas un gap (records fara destinatie atribuita).
-  status: "ok" | "rejected" | "empty" | "error" | "recovered" | "partial";
+  // v2.20.0: "rejected" -> "blocked" (gapReason explica de ce).
+  status: "ok" | "blocked" | "empty" | "error" | "recovered" | "partial";
   count: number;
   subTotal: number;
   reason?: string;
@@ -248,6 +259,8 @@ export interface RnpmSplitSubResult {
   // gap = subTotal - SUM(nested[i].subTotal). Inregistrari fara destinatie
   // atribuita raman neacoperite chiar dupa tier-2 split.
   gap?: number;
+  // Populat cand status este "blocked" sau "partial".
+  gapReason?: RnpmGapReason;
 }
 
 export interface RnpmSplitResult {

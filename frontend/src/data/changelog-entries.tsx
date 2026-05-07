@@ -37,6 +37,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.0",
+    date: "8 Mai 2026",
+    subtitle:
+      "Observability pentru cap-ul RNPM de 1500 rezultate. Banner-ul de cautare split distinge acum trei cauze de gap: terminal_cap (sub-tip > 1500 fara axa de split), silent_refusal (RNPM raporteaza total > 0 dar livreaza 0 documente — rate-limit / captcha invalid) si residual_unclassified (records istorice fara destinatie atribuita ramase dupa tier-2). Fiecare sub-tip blocat afiseaza textul exact al cauzei in loc de respins (X > limita). In paralel, scriem un audit event rnpm.cap_hit la fiecare cautare split cu gap > 0 (detalii: type, criteriu, upstreamTotal, recovered, gap, gapByReason, blockedLabels), util pentru a urmari frecventa cazurilor pe productie. Status-ul intern rejected a fost redenumit blocked, mai semantic clar.",
+    icon: <Split className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Banner split — trei cauze de gap, nu una singura",
+        content:
+          "Pana acum, daca un sub-tip RNPM era exclus din rezultatele agregate, banner-ul afisa doar respins (X > limita), confundand trei situatii distincte: limita atinsa fara axa de split, rate-limit upstream cu raspuns silentios si records istorice fara destinatie atribuita. v2.20.0 separa aceste cauze in trei categorii cu mesaj explicit per categorie: terminal_cap (blocat de limita RNPM, fara axa de split), silent_refusal (blocat de RNPM, raport X dar nicio inregistrare livrata — rate-limit / captcha invalid) si residual_unclassified (blocat partial, ramas neacoperit dupa tier-2). Userul vede acum exact ce a esuat si de ce.",
+      },
+      {
+        title: "Audit event rnpm.cap_hit pentru observability lung-termen",
+        content:
+          "Orice cautare split care nu acopera 100% din total (gap > 0 sau sub-tipuri blocate) emite un audit event rnpm.cap_hit cu detalii: type, criteriu, upstreamTotal, recovered, gap, gapByReason (suma per cauza) si blockedLabels (lista sub-tipuri blocate). Util pentru analiza retroactiva a frecventei celor trei cauze de gap pe diferite criterii de cautare, fara a deranja userul cu mesaje diagnostice in UI.",
+      },
+      {
+        title: "Rename intern: rejected -> blocked",
+        content:
+          "Status-ul intern al sub-rezultatelor split a fost redenumit din rejected in blocked, mai semantic clar (RNPM nu respinge tehnic — pur si simplu nu mai poate livra rezultatele). Schimbare contract API SSE (phase si status). Fara impact pentru useri, dar relevant pentru integrari third-party care parsau evenimente split.",
+      },
+    ],
+  },
+  {
     version: "v2.19.2",
     date: "7 Mai 2026",
     subtitle:

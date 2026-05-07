@@ -444,11 +444,18 @@ export interface SplitSearchInput {
   signal?: AbortSignal;
 }
 
+// Cauze distincte pentru records nepre-luate dupa split, fiecare cu actiune
+// recomandabila diferita pentru user. Vezi banner UI pentru wording RO.
+export type RnpmGapReason =
+  | "terminal_cap"            // bucket cu total > MAX_TOTAL_RESULTS si fara axa de split (categorie fara destinatii sau dest individuala > 1500).
+  | "silent_refusal"          // RNPM a returnat total > 0 dar `documents: []` pe pagina 1 — refuz tacit upstream.
+  | "residual_unclassified";  // tier1 - SUM(tier2) > 0: records fara destinatie atribuita istoric.
+
 export interface SplitSearchProgress {
   index: number;
   total: number;
   label: string;
-  phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
+  phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
   message?: string;
   resultCount?: number;
   subTotal?: number;
@@ -458,7 +465,7 @@ export interface SplitSearchProgress {
     index: number;          // 1-based index in lista destinatii (0 = inca nu a inceput)
     total: number;          // numarul total de destinatii incercate
     label: string;          // label-ul destinatiei curente
-    phase: "captcha" | "search" | "done" | "rejected" | "skipped" | "error";
+    phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error";
     resultCount?: number;
     subTotal?: number;
   };
@@ -466,15 +473,16 @@ export interface SplitSearchProgress {
 
 export interface NestedSplitSubResult {
   label: string;            // labelul destinatiei
-  status: "ok" | "rejected" | "empty" | "error";
+  status: "ok" | "blocked" | "empty" | "error";
   count: number;            // documente efectiv obtinute pentru aceasta destinatie
   subTotal: number;         // totalul raportat de RNPM pentru (tipInscriere + destinatie)
   reason?: string;
+  gapReason?: RnpmGapReason; // populat cand status === "blocked"
 }
 
 export interface SplitSubResult {
   label: string;
-  status: "ok" | "rejected" | "empty" | "error" | "recovered" | "partial";
+  status: "ok" | "blocked" | "empty" | "error" | "recovered" | "partial";
   count: number;            // documente efectiv obtinute (suma destinatiilor pentru recovered/partial)
   subTotal: number;         // total raportat de RNPM la nivelul sub-tipului (tier-1)
   reason?: string;
@@ -485,6 +493,10 @@ export interface SplitSubResult {
   // raman neacoperite si nu pot fi recuperate via destinatieInscriere split.
   // Disclosure explicit catre user via banner pe pagina de rezultate.
   gap?: number;
+  // Populat cand status este "blocked" sau "partial" — distinge intre cele 3
+  // cauze de gap pentru observability + UI (terminal_cap / silent_refusal /
+  // residual_unclassified).
+  gapReason?: RnpmGapReason;
 }
 
 export interface SplitSearchResult {
@@ -573,8 +585,15 @@ export async function executeSplitSearch(
         // Defensive: silent reject pentru un sub-tip individual (rar — limita
         // > MAX_TOTAL_RESULTS deja arunca limit_exceeded mai sus).
         if (result.documents.length === 0) {
-          splitStats.push({ label, status: "rejected", count: 0, subTotal: result.total, reason: "RNPM upstream silent reject" });
-          onProgress({ index: i, total: subN, label, phase: "rejected", subTotal: result.total });
+          splitStats.push({
+            label,
+            status: "blocked",
+            count: 0,
+            subTotal: result.total,
+            reason: "RNPM upstream silent reject",
+            gapReason: "silent_refusal",
+          });
+          onProgress({ index: i, total: subN, label, phase: "blocked", subTotal: result.total });
           continue;
         }
 
@@ -632,6 +651,7 @@ export async function executeSplitSearch(
                   : undefined,
                 nested: nestedRes.subResults,
                 gap,
+                gapReason: gap > 0 ? "residual_unclassified" : undefined,
               });
               onProgress({
                 index: i, total: subN, label,
@@ -654,12 +674,13 @@ export async function executeSplitSearch(
 
           splitStats.push({
             label,
-            status: "rejected",
+            status: "blocked",
             count: 0,
             subTotal: tier1SubTotal,
             reason: `Sub-tipul "${label}" are ${tier1SubTotal} inregistrari (peste limita ${MAX_TOTAL_RESULTS}).`,
+            gapReason: "terminal_cap",
           });
-          onProgress({ index: i, total: subN, label, phase: "rejected", subTotal: tier1SubTotal });
+          onProgress({ index: i, total: subN, label, phase: "blocked", subTotal: tier1SubTotal });
           continue;
         }
         const msg = e instanceof Error ? e.message : String(e);
@@ -805,13 +826,14 @@ async function executeNestedDestinationSplit(
       // > 1500, raman neacoperite si emitem in subResult).
       if (result.documents.length === 0) {
         subResults.push({
-          label: destLabel, status: "rejected", count: 0, subTotal: result.total,
+          label: destLabel, status: "blocked", count: 0, subTotal: result.total,
           reason: "RNPM upstream silent reject la tier-2",
+          gapReason: "silent_refusal",
         });
         onProgress({
           index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
           phase: "nested_progress",
-          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "rejected", subTotal: result.total },
+          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "blocked", subTotal: result.total },
         });
         continue;
       }
@@ -840,13 +862,14 @@ async function executeNestedDestinationSplit(
         // Tier-2 destinatie singura > 1500 — fail-clean (fara recursie tier-3).
         const subTotal = (e.details?.total as number | undefined) ?? 0;
         subResults.push({
-          label: destLabel, status: "rejected", count: 0, subTotal,
+          label: destLabel, status: "blocked", count: 0, subTotal,
           reason: `Destinatia "${destLabel}" are ${subTotal} inregistrari (peste limita ${MAX_TOTAL_RESULTS}).`,
+          gapReason: "terminal_cap",
         });
         onProgress({
           index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
           phase: "nested_progress",
-          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "rejected", subTotal },
+          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "blocked", subTotal },
         });
         continue;
       }

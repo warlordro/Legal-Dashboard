@@ -7,18 +7,25 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.19.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.19.2** - bugfix highlight Cautare dosare. La cautarea unui nume
-cu mai multe cuvinte (ex. `COMPANIA DE DEMOLARI INDUSTRIALE SRL`), tokenul scurt `DE`
-matchuia ca prefix in `DEMOLARI` si lasa `MOLARI` fara fundal galben. Cauza in
-`components/dosare-table-highlight.tsx`: regex-ul testa alternativele in ordinea
-declarata si nu avea word boundaries Unicode-aware (`\b` standard JS exclude
-`Ă/Î/Ș/Ț`, deci nu putea delimita corect cuvinte cu diacritice). Fix: alternativele
-sunt sortate dupa lungime descrescator (matchul lung castiga peste cel scurt) si
-delimitate prin lookarounds Unicode-aware `(?<!\p{L})...(?!\p{L})` cu flag `u`. Acelasi
-fix in `components/termene-table-detail-row.tsx` (era bug duplicat). **86 teste frontend**.
+Ultimul release **v2.20.0** - observability pentru cap-ul RNPM de 1500 rezultate. Banner-ul
+pentru cautari rulate in mod split distinge acum **trei cauze de gap** in loc de generic
+`respins (X > limita)`: `terminal_cap` (sub-tip > 1500 fara axa de split), `silent_refusal`
+(RNPM raspunde cu `total > 0` dar `documents: []` — rate-limit upstream / captcha invalid)
+si `residual_unclassified` (records istorice fara destinatie atribuita ramase dupa tier-2).
+In paralel scriem un audit event `rnpm.cap_hit` la fiecare cautare split cu gap > 0
+(detalii: `type`, `criteriu`, `upstreamTotal`, `recovered`, `gap`, `gapByReason`,
+`blockedLabels`), util pentru analiza retroactiva a frecventei celor trei cauze pe productie.
+Status-ul intern `rejected` a fost redenumit `blocked`, mai semantic clar. **823 teste backend
++ 92 teste frontend**.
+
+Predecesor **v2.19.2** - bugfix highlight Cautare dosare: tokenii scurti din numele cautat
+(`DE`) erau evidentiati ca prefix in cuvintele mai lungi (`DEMOLARI`), lasand restul cuvantului
+fara highlight. Fix: alternation sortata dupa lungime descrescator si delimitatori Unicode-aware
+(recunosc litere romanesti precum `Ă`, `Î`, `Ș`, `Ț`) — un cuvant cautat se evidentiaza acum
+doar cand apare ca cuvant intreg.
 
 Predecesor **v2.19.1** - patch hardening + UX polish post v2.19.0. Trei bug-uri
 descoperite la rulare empirica imediat dupa v2.19.0. Frontend `lib/rnpmApi.ts`:
@@ -437,7 +444,7 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (822 teste in v2.19.2) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (823 teste in v2.20.0) |
 | `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (86 teste dupa v2.14.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |

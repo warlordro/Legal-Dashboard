@@ -290,8 +290,9 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
 // de 1500 rezultate. Frontend trimite `subTypeLabels` (ordonate, indexate 1-based)
 // dupa confirmare; backend ruleaza N executeSearch independente, fiecare cu
 // {tipInscriere: {type: "1", value: "<i+1>"}} si emite progress per sub-tip.
-// Sub-tipurile care singure depasesc cap-ul sunt marcate "rejected" si skipped
-// (no recursion); celelalte continua. Vezi rnpmSearchService.executeSplitSearch.
+// Sub-tipurile care singure depasesc cap-ul sunt marcate "blocked" cu gapReason
+// (terminal_cap / silent_refusal / residual_unclassified) si skipped; celelalte
+// continua. Vezi rnpmSearchService.executeSplitSearch.
 rnpmRouter.post("/search-split", limitSearch, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
@@ -359,6 +360,40 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
 
     try {
       const result = await splitRun;
+      // Audit observability: log gap-uri reziduale (rezultate care nu au putut fi
+      // recuperate via tier-1+tier-2). Util pentru a urmari frecventa cazurilor
+      // terminal_cap / silent_refusal / residual_unclassified pe productie.
+      const blockedStats = result.splitStats.filter(
+        (s) => s.status === "blocked" || s.status === "partial",
+      );
+      if (blockedStats.length > 0 || result.upstreamTotal !== result.total) {
+        const gapByReason: Record<string, number> = {};
+        for (const s of blockedStats) {
+          if (s.gapReason) {
+            const missing = (s.subTotal ?? 0) - (s.count ?? 0);
+            gapByReason[s.gapReason] = (gapByReason[s.gapReason] ?? 0) + missing;
+          }
+        }
+        recordAudit(c, "rnpm.cap_hit", {
+          targetKind: "search",
+          targetId: String(result.searchId),
+          detail: {
+            type,
+            criteriu: result.criteriu,
+            upstreamTotal: result.upstreamTotal,
+            recovered: result.total,
+            gap: result.upstreamTotal - result.total,
+            gapByReason,
+            blockedLabels: blockedStats.map((s) => ({
+              label: s.label,
+              status: s.status,
+              gapReason: s.gapReason,
+              subTotal: s.subTotal,
+              count: s.count,
+            })),
+          },
+        });
+      }
       await stream.writeSSE({
         event: "complete",
         data: JSON.stringify(result),

@@ -4,6 +4,91 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.0] - 2026-05-08
+
+### Observability pentru cap-ul RNPM de 1500 rezultate (Task E)
+
+Banner-ul pentru cautari rulate in mod split distinge acum **trei cauze de gap** in loc de o
+singura categorie generica `respins (X > limita)`. Fiecare cauza primeste un mesaj explicit in UI
+si este logata intr-un audit event `rnpm.cap_hit` pentru analiza retroactiva.
+
+#### Cele trei cauze de gap clasificate (`RnpmGapReason`)
+
+- **`terminal_cap`** — sub-tip / destinatie singura > 1500 inregistrari, RNPM nu mai poate livra
+  rezultatele si nu mai exista o axa de split (categorie fara `destinatieInscriere` enumerabil:
+  `creante`, `obligatiuni`, `fiducii`, sau destinatie individuala in tier-2 ipoteci/specifice
+  > 1500). UI: `blocat de limita RNPM (X > 1500, fara axa de split)`.
+- **`silent_refusal`** — RNPM raspunde cu `total > 0` dar `documents: []` (rate-limit upstream sau
+  captcha invalid). Detectat in tier-1 si tier-2 inainte de incercarea unui split inutil. UI:
+  `blocat de RNPM (raport X dar nicio inregistrare livrata — rate-limit / captcha invalid)`.
+- **`residual_unclassified`** — tier-2 a rulat dar a ramas un gap (records istorice fara
+  destinatie atribuita pe care RNPM nu le poate filtra dupa `destinatieInscriere`). UI:
+  `blocat partial (X raportat, ramas neacoperit dupa tier-2)`.
+
+#### Audit event `rnpm.cap_hit`
+
+[backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts) emite acum `recordAudit("rnpm.cap_hit", ...)`
+dupa fiecare `executeSplitSearch` cu `gap > 0` sau sub-tipuri blocate. `detail_json` contine:
+
+- `type` — categoria RNPM cautata
+- `criteriu` — string-ul de criteriu agregat
+- `upstreamTotal` — suma sub-totalurilor raportate de RNPM
+- `recovered` — documente efectiv livrate
+- `gap` — diferenta `upstreamTotal - recovered`
+- `gapByReason` — suma `subTotal - count` per `gapReason` (terminal_cap / silent_refusal /
+  residual_unclassified)
+- `blockedLabels` — lista sub-tipurilor blocate cu label, status, gapReason, subTotal, count
+
+Util pentru analiza retroactiva a frecventei celor trei cauze pe productie, fara a deranja userul
+cu mesaje diagnostice in UI.
+
+#### Rename intern `rejected` -> `blocked`
+
+Status-ul `RnpmSplitSubResult.status` si `RnpmSplitProgress.phase` au fost redenumite din
+`rejected` in `blocked`, mai semantic clar (RNPM nu respinge tehnic — pur si simplu nu mai poate
+livra rezultatele). Schimbare contract API SSE.
+
+### Backend
+
+- [backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts):
+  - Tipuri noi: `export type RnpmGapReason = "terminal_cap" | "silent_refusal" | "residual_unclassified"`
+  - `SplitSubResult.status`: `"rejected"` -> `"blocked"`; nou camp optional `gapReason?: RnpmGapReason`
+  - `NestedSplitSubResult.status`: idem
+  - `SplitSearchProgress.phase` + `nested.phase`: `"rejected"` -> `"blocked"`
+  - `executeSplitSearch`: 3 puncte de detectie (tier-1 silent reject, tier-1 fail-clean fara
+    nested destinations, tier-2 cu gap > 0)
+  - `executeNestedDestinationSplit`: 2 puncte de detectie (tier-2 silent reject, tier-2 destinatie
+    singura > 1500)
+- [backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts): hook nou `recordAudit("rnpm.cap_hit", ...)`
+  dupa `splitRun` cand `result.upstreamTotal !== result.total` sau exista sub-tipuri blocked/partial
+
+### Frontend
+
+- [frontend/src/types/rnpm.ts](frontend/src/types/rnpm.ts): tip nou `RnpmGapReason`, rename
+  status enum, camp optional `gapReason` pe `RnpmSplitSubResult` si `RnpmNestedSplitSubResult`
+- [frontend/src/lib/rnpmGapReason.ts](frontend/src/lib/rnpmGapReason.ts) (nou): pure helper
+  `describeBlockedSubResult(s)` care returneaza textul humanizat pentru fiecare cauza
+- [frontend/src/pages/RnpmSearch.tsx](frontend/src/pages/RnpmSearch.tsx): banner-ul foloseste
+  helper-ul nou; "respins" inlocuit cu "blocat" peste tot
+
+### Teste
+
+- Backend: 4 split tests in [backend/src/services/rnpmSearchService.split.test.ts](backend/src/services/rnpmSearchService.split.test.ts)
+  (era 3) — adaugat scenariu nou pentru `silent_refusal`, plus assertion `gapReason` pe testele
+  existente. Backend: 823 / 823 verzi (era 822).
+- Frontend: 6 unit tests in [frontend/src/lib/rnpmGapReason.test.ts](frontend/src/lib/rnpmGapReason.test.ts)
+  pentru `describeBlockedSubResult` (cele 3 gapReason + fallback + 2 cazuri error). Frontend:
+  92 / 92 verzi (era 86).
+
+### Compatibilitate
+
+- API SSE: clientii care parsau `phase: "rejected"` sau `status: "rejected"` din
+  `/api/v1/rnpm/search-split` trebuie actualizati la `"blocked"`. Nu exista clienti third-party
+  cunoscuti — desktop UI a fost actualizat in aceeasi versiune.
+- Audit log: tabel existent (`audit_log`), action noua `rnpm.cap_hit`. Fara migrare schema.
+
+---
+
 ## [2.19.2] - 2026-05-07
 
 ### Bugfix highlight Cautare dosare — tokenii scurti nu mai mananca prefixe
