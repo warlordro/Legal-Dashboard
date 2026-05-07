@@ -38,6 +38,17 @@ La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 
 **Sanity check inainte de commit:** `Grep -i "<vechea_versiune>"` pe toate `.md` la radacina; fiecare hit care nu e parte din istoric (CHANGELOG entry vechi, etc.) trebuie actualizat.
 
+## Markdown convention pentru README/CHANGELOG/SECURITY
+
+- Nu incepe linii cu `+`, `-`, `*` sau `1.` in interiorul unui paragraf — GitHub le randeaza ca bullet list si sparge bold/italic peste boundary. Foloseste virgula sau cuvant ("plus", "si").
+- Bold-ul `**...**` care contine newline e fragil — pastreaza-l pe o singura linie cand contine elemente critice (versiune, count teste, etc.).
+
+## Release flow GitHub Actions
+
+- Push pe tag `vX.Y.Z` declanseaza `build-windows.yml` (NSIS installer x64) si `build-mac.yml` (DMG x64+arm64); artefactele sunt atasate automat la GitHub Release.
+- Workflow-urile ruleaza `tsc --noEmit` + `vitest run` INAINTE de packaging — fail-ul lor blocheaza release-ul.
+- Build manual fara tag: `gh workflow run build-windows.yml` (publica la prerelease `dev-build`).
+
 ## Structura Proiect
 
 ```
@@ -114,6 +125,11 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - SOAP HTTP upstream (portalquery.just.ro nu ofera HTTPS) - date publice, fara autentificare
 - Unsigned Windows binary - SmartScreen warning la prima instalare (fara cert commercial)
 - LAN mode fara auth - user doar dupa opt-in explicit
+
+## Conventii cross-stack
+
+- **Phase/status enums backend → UI**: orice enum emis de backend (SSE phase, alert kind, run status, etc.) trebuie tradus prin `frontend/src/lib/<domain>Phase.ts` inainte de afisare. Pattern stabilit: `frontend/src/lib/rnpmGapReason.ts` (v2.20.0), `frontend/src/lib/rnpmProgressPhase.ts` (v2.20.1) — pure helpers + unit tests, fara raw token-uri in DOM.
+- **Index display**: internal counter poate fi 0-based, in UI afiseaza `${i + 1}/${total}` (ex. `Split 1/7`, nu `Split 0/7`).
 
 ## Web-readiness bridge (prep pentru deploy server)
 - Repository-only DB access - raw SQL doar in `backend/src/db/**`
