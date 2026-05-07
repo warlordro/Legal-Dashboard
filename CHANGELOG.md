@@ -4,6 +4,56 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.1] - 2026-05-08
+
+### UX polish — banner progres RNPM split humanizat
+
+Banner-ul de progres din `RnpmSearch` afisa direct token-ul tehnic emis de backend
+(`nested_progress`, `nested_start`, `nested_done`) si index-ul tier-1 era 0-based
+(`Split 0/7`). Patch-ul traduce toate fazele in romana, schimba index-ul la 1-based si
+afiseaza si sub-progresul tier-2 cand exista.
+
+#### Schimbari
+
+- **Helper nou** `frontend/src/lib/rnpmProgressPhase.ts` cu trei functii pure:
+  - `describeSplitPhase(phase)` — traduce cele 9 faze tier-1 (`captcha` -> "captcha",
+    `search` -> "cautare", `done` -> "finalizat", `blocked` -> "blocat",
+    `skipped` -> "fara rezultate", `error` -> "eroare", `nested_start` ->
+    "split secundar — start", `nested_progress` -> "split secundar", `nested_done` ->
+    "split secundar — finalizat").
+  - `describeNestedPhase(phase)` — traduce cele 6 faze tier-2 (`captcha`, `search`,
+    `done`, `blocked`, `skipped`, `error`).
+  - `formatSplitProgress(p)` — formateaza tot mesajul: `Split ${p.index + 1}/${p.total} - ${p.label} (${frazaTier1})` plus, daca exista `p.nested`,
+    sufix `-> ${nested.index}/${nested.total} ${nested.label} (${frazaTier2})` plus,
+    daca exista `p.message`, sufix `: ${message}`.
+- **Mesaj initial inainte de primul progres event** schimbat din `Split: 0/${N}...`
+  in `Pregatire split ${N} sub-tipuri...` (semantic mai clar — "0 din N done"
+  nu inseamna nimic util la pornire).
+- `frontend/src/pages/RnpmSearch.tsx` foloseste `formatSplitProgress(p)` in loc de
+  template literal inline cu `p.phase` brut.
+
+#### Exemple banner
+
+| Inainte | Dupa |
+|---|---|
+| `Split 0/7 - aviz initial (nested_progress)` | `Split 1/7 - aviz initial (split secundar) -> 3/14 publicitatea X (cautare)` |
+| `Split 6/7 - fara obiect (done)` | `Split 7/7 - fara obiect (finalizat)` |
+| `Split 1/7 - aviz initial (error): timeout SOAP` | `Split 2/7 - aviz initial (eroare): timeout SOAP` |
+
+#### Tests
+
+- **Frontend**: 100/100 (era 92, +8 noi in `lib/rnpmProgressPhase.test.ts` —
+  fiecare faza tier-1, fiecare faza tier-2, format index 1-based, format nested,
+  format mesaj append).
+- **Backend**: 823/823 (neschimbate — patch-ul e strict frontend).
+
+#### Versionare
+
+`2.20.0` -> `2.20.1` (patch — UX text-only, fara migrari, fara schimbari de
+contract HTTP / shape SSE / DDL).
+
+---
+
 ## [2.20.0] - 2026-05-08
 
 ### Observability pentru cap-ul RNPM de 1500 rezultate (Task E)

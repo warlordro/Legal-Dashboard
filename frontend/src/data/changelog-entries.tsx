@@ -37,6 +37,22 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.1",
+    date: "8 Mai 2026",
+    subtitle:
+      "UX polish pe banner-ul de progres RNPM split. Cele trei cauze leak-uite tehnic catre interfata (nested_progress, nested_start, nested_done) sunt acum traduse in romana (split secundar, split secundar — start, split secundar — finalizat). Index-ul tier-1 afisat 1-based (Split 1/7 in loc de 0/7 confuz). Cand split-ul intra in tier-2, sub-progresul (3/14 destinatii) e vizibil in banner. Fara schimbari de contract HTTP / DDL / shape SSE.",
+    icon: <Split className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Banner split — text humanizat, fara jargon tehnic",
+        content:
+          "Pana acum banner-ul afisa direct token-ul brut din backend (nested_progress, nested_start, nested_done). Acum exista helper-ul lib/rnpmProgressPhase.ts (formatSplitProgress + describeSplitPhase + describeNestedPhase) care traduce toate cele 9 valori posibile in romana. Index-ul afisat e 1-based pentru lectura naturala (Split 1/7 nu Split 0/7). Cand split-ul intra in tier-2 (sub-tip individual peste 1500), banner-ul afiseaza si sub-progresul: Split 1/7 - aviz initial (split secundar) -> 3/14 publicitatea X (cautare). +8 teste unit pe helper.",
+      },
+    ],
+  },
+  {
     version: "v2.20.0",
     date: "8 Mai 2026",
     subtitle:

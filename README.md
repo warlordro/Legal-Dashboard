@@ -7,10 +7,18 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.0** - observability pentru cap-ul RNPM de 1500 rezultate. Banner-ul
+Ultimul release **v2.20.1** - UX polish pe banner-ul de progres RNPM split.
+Token-ii tehnici leak-uiti in UI (`nested_progress`, `nested_start`, `nested_done`)
+sunt acum traduse in romana ("split secundar", "split secundar — start", "split secundar — finalizat").
+Index-ul tier-1 e afisat 1-based (`Split 1/7` in loc de `Split 0/7`). Cand split-ul intra
+in tier-2, sub-progresul (ex. `3/14 publicitatea X`) e vizibil in banner. Helper nou
+`lib/rnpmProgressPhase.ts` cu `formatSplitProgress` + `describeSplitPhase` + `describeNestedPhase`,
++8 teste unit. **823 teste backend, 100 teste frontend**.
+
+Predecesor **v2.20.0** - observability pentru cap-ul RNPM de 1500 rezultate. Banner-ul
 pentru cautari rulate in mod split distinge acum **trei cauze de gap** in loc de generic
 `respins (X > limita)`: `terminal_cap` (sub-tip > 1500 fara axa de split), `silent_refusal`
 (RNPM raspunde cu `total > 0` dar `documents: []` — rate-limit upstream / captcha invalid)
@@ -444,8 +452,8 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (823 teste in v2.20.0) |
-| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (86 teste dupa v2.14.0) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (823 teste in v2.20.1) |
+| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.1) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

@@ -12,6 +12,7 @@ import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
 import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
 import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
 import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
+import { formatSplitProgress } from "@/lib/rnpmProgressPhase";
 import type { RnpmSearchParams, RnpmSearchType, RnpmDocument, RnpmSplitSubResult } from "@/types/rnpm";
 import type { CaptchaProvider, CaptchaMode } from "@/lib/rnpmApi";
 
@@ -152,7 +153,7 @@ export default function RnpmSearchPage({
     setResult(null);
     setElapsedMs(null);
     setSplitProgress({ index: 0, total: subTypeLabels.length, label: subTypeLabels[0] ?? "", phase: "captcha" });
-    setPhase(`Split: 0/${subTypeLabels.length}...`);
+    setPhase(`Pregatire split ${subTypeLabels.length} sub-tipuri...`);
     setActiveSearchType(type);
     setLastType(type);
     setLastParams(params);
@@ -165,7 +166,7 @@ export default function RnpmSearchPage({
         captchaKey,
         (p) => {
           setSplitProgress({ index: p.index, total: p.total, label: p.label, phase: p.phase });
-          setPhase(`Split ${p.index}/${p.total} - ${p.label} (${p.phase})${p.message ? ": " + p.message : ""}`);
+          setPhase(formatSplitProgress(p));
         },
         ctl.signal,
         captchaProvider,
