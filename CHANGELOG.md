@@ -22,7 +22,10 @@ in `DEMOLĂRI`, consuma 2 caractere, apoi continua de la `MOLĂRI` care nu mai m
 - **Word boundaries Unicode-aware** prin lookarounds `(?<!\p{L})...(?!\p{L})` cu flag `u`.
   `\p{L}` recunoaste tot setul Unicode Letter (inclusiv `Ă`, `Î`, `Ș`, `Ț`), deci `de` nu mai
   matchuie ca prefix in `DEPOZIT`, `DECIZIE`, `DEMOLĂRI`, etc. — doar cand apare ca cuvant intreg.
-- Acelasi fix aplicat in tabela Cautare dosare si in randul de detalii Termene (era bug duplicat).
+- **Termene foloseste acum acelasi `HighlightName`** prin import din `dosare-table-highlight.tsx`
+  (in loc de o copie locala). Beneficiu suplimentar: highlight-ul pe Termene devine
+  diacritic-insensitive (cautarea `DEMOLARI` evidentiaza acum `DEMOLĂRI` in lista de parti),
+  comportament aliniat cu Cautare dosare.
 
 ### Validare
 
