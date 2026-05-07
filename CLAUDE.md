@@ -27,12 +27,14 @@ La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 3. `CHANGELOG.md` — sectiunea noua de release (single source of truth)
 4. `README.md` — campul "Versiune curenta" + brief description
 5. `SESSION-HANDOFF.md` — context sprint activ daca exista referinte la versiune / PR livrat
+6. `STATUS.md` — campul "Data curenta" + "Versiune curenta reala" la varful fisierului (doar header, restul ramane istoric)
+7. `DOCUMENTATIE.md` — campul "Versiune curenta" din sectiunea "Descriere Generala"
 
 **Conditional (doar daca releaseul touch-uieste subiectul):**
 
-6. `SECURITY.md` — daca releaseul aduce schimbari security-relevante (auth, secrets, network surface, CVE patches, threat model). Adauga entry in changelog table la baza fisierului.
-7. `HARDENING.md` — daca releaseul inchide o Faza de hardening sau adauga findings noi din `/multi-review`.
-8. `EXECUTION-ROADMAP.md` — daca releaseul livreaza un PR sau marcheaza un DoD checkbox.
+8. `SECURITY.md` — daca releaseul aduce schimbari security-relevante (auth, secrets, network surface, CVE patches, threat model). Adauga entry in changelog table la baza fisierului.
+9. `HARDENING.md` — daca releaseul inchide o Faza de hardening sau adauga findings noi din `/multi-review`.
+10. `EXECUTION-ROADMAP.md` — daca releaseul livreaza un PR sau marcheaza un DoD checkbox.
 
 **Sanity check inainte de commit:** `Grep -i "<vechea_versiune>"` pe toate `.md` la radacina; fiecare hit care nu e parte din istoric (CHANGELOG entry vechi, etc.) trebuie actualizat.
 
