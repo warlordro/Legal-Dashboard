@@ -18,8 +18,8 @@ si `residual_unclassified` (records istorice fara destinatie atribuita ramase du
 In paralel scriem un audit event `rnpm.cap_hit` la fiecare cautare split cu gap > 0
 (detalii: `type`, `criteriu`, `upstreamTotal`, `recovered`, `gap`, `gapByReason`,
 `blockedLabels`), util pentru analiza retroactiva a frecventei celor trei cauze pe productie.
-Status-ul intern `rejected` a fost redenumit `blocked`, mai semantic clar. **823 teste backend
-+ 92 teste frontend**.
+Status-ul intern `rejected` a fost redenumit `blocked`, mai semantic clar.
+**823 teste backend, 92 teste frontend**.
 
 Predecesor **v2.19.2** - bugfix highlight Cautare dosare: tokenii scurti din numele cautat
 (`DE`) erau evidentiati ca prefix in cuvintele mai lungi (`DEMOLARI`), lasand restul cuvantului
@@ -351,8 +351,8 @@ Baza ramane v2.6.4 - audit hardening dupa multi-agent review (finalizat):
 F1 `DELETE
 /monitoring/jobs/:id` returneaza 409 `job_in_flight` cand runner-ul are
 `AbortController` activ pe job (previne `RUNNER_THREW`); F2 `LEGAL_DASHBOARD_ALLOW_REMOTE=1`
-REFUZA pornirea fara ack `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`
-+ middleware nou `originGuard` pe `/api/*` blocheaza state-change cu Origin
+REFUZA pornirea fara ack `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet` plus
+middleware nou `originGuard` pe `/api/*` blocheaza state-change cu Origin
 mismatch (403 `csrf_origin_mismatch`); F3 `nameListParser.ts` migrat de pe
 `xlsx@0.18.5` (CVE Prototype Pollution + ReDoS) pe `exceljs@^4.4.0`,
 `parseNameList` async cu safety belt 30s, `xlsx` mutat in devDependencies;
@@ -367,8 +367,8 @@ fara refresh manual; F9 ruta noua `POST /monitoring/jobs/bulk-delete` atomica
 (migration `0012`) contorizeaza separat enrichment-urile in-place. 546/546
 teste backend (era 524 in v2.6.3, +22 noi).
 Baza ramane v2.6.3 - patch UX Monitorizare + Alerte: coloana TINTA in tabelul
-de joburi `dosar_soap` afiseaza numarul ca link extern catre `portal.just.ro`
-+ buton mic Search care declanseaza auto-search in lista Dosare,
+de joburi `dosar_soap` afiseaza numarul ca link extern catre `portal.just.ro` plus
+buton mic Search care declanseaza auto-search in lista Dosare,
 dropdown-ul de cadenta prepende option `"<valoare> (custom)"` cu border
 amber cand DB-ul are o valoare in afara optiunilor standard, paginarea
 inbox-ului de alerte adopta `TablePagination` partajata, zoom-ul cardului
