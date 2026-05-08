@@ -4,6 +4,41 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.2] - 2026-05-08
+
+### Patch correctness — audit safety, overlay humanizat, exhaustiveness TS
+
+Bug-uri descoperite la `/full-review` post v2.20.0/v2.20.1. Fara feature nou, fara migrare,
+fara schimbari de contract; doar fix-uri de regresie + observability hardening.
+
+#### Schimbari
+
+- **Audit `rnpm.cap_hit` izolat la failure** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). Inainte: `recordAudit(...)` arunca propagandu-se in
+  `try` si flip-uia event-ul SSE de success in error. Acum: wrap in `try/catch` local, failure → `console.warn` si SSE complete-ul tot ajunge la client. Audit observability != hard dependency.
+- **GDPR — sterge `criteriu` din audit detail** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). Campul `criteriu` (CUI/CNP/nume) era duplicat in
+  `audit_log.detail_json`, in plus fata de payload-ul de cautare deja stocat. In schimb se loga `searchType` (enum low-cardinality, RnpmSearchType).
+- **Audit `blockedLabels` flatten tier-1 + tier-2** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). Pana acum nested gap-urile (destinatii blocate
+  in tier-2 ipoteci) nu apareau in `blockedLabels`. Acum: prefix `tier1 > tier2`, cap la 20 entries, flag `blockedLabelsTruncated` cand depaseste.
+- **Audit `gapByReason` aritmetic corect** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). Pentru status="partial" foloseste `s.gap` (deja calculat in service) in loc de derivat `subTotal - count` care dubla numara recovered tier-2. Tier-2 nested se aduna separat (silent_refusal pe destinatie).
+- **Overlay split humanizat + 1-based** ([frontend/src/pages/RnpmSearch.tsx](frontend/src/pages/RnpmSearch.tsx)). v2.20.1 humanizase doar banner-ul; overlay-ul fix bottom-right
+  inca afisa `Split 0/7` (0-based) si `nested_progress` (raw token enum). Fix: state shape `RnpmSplitProgress | null` (in loc de subset cu `phase: string`), randam via `describeSplitPhase` + `describeNestedPhase`, index-ul afisat `splitProgress.index + 1`.
+- **TS exhaustiveness pe humanizers** ([frontend/src/lib/rnpmGapReason.ts](frontend/src/lib/rnpmGapReason.ts), [frontend/src/lib/rnpmProgressPhase.ts](frontend/src/lib/rnpmProgressPhase.ts)). `default:`-urile defeats TypeScript exhaustiveness pe `RnpmGapReason` / split phase / nested phase. Fix: handle `undefined` explicit (caz runtime real), apoi `_exhaustive: never` in default ca un enum nou neimplementat sa esueze build-ul.
+
+#### Tests
+
+- **Backend**: 827/827 (era 823, +4 noi in `routes/rnpm.split-route.test.ts`):
+  - E1 audit detail shape (gapByReason tier-1+tier-2 flatten, criteriu absent, searchType prezent).
+  - E2 recordAudit failure isolated (mock throws → SSE complete event still emits).
+  - E3 no-emit cand nu exista cap (upstreamTotal === total si zero blocked).
+  - E4 gapByReason for partial uses s.gap (not subTotal - count).
+- **Frontend**: 100/100 (neschimbate; teste rnpmGapReason + rnpmProgressPhase pass cu noua structura switch).
+
+#### Versionare
+
+`2.20.1` -> `2.20.2` (patch — bug fix, fara migrari, fara schimbari de contract HTTP / shape SSE / DDL).
+
+---
+
 ## [2.20.1] - 2026-05-08
 
 ### UX polish — banner progres RNPM split humanizat

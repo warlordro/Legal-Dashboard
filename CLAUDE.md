@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.20.1** - 8 Mai 2026
+**v2.20.2** - 8 Mai 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -79,8 +79,8 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - `npm run dist` - electron-builder pentru Windows NSIS
 - `npm run dist:mac` - electron-builder pentru macOS DMG (x64 + arm64; pe runner macOS)
 - `npm run dist:server` - ZIP server deployabil; Docker Build ruleaza in GitHub Actions la push pe `main`
-- `npm test --workspace=backend` - vitest backend (823 teste in v2.20.1)
-- `cd frontend && npm test -- --run` - vitest frontend (92 teste)
+- `npm test --workspace=backend` - vitest backend (827 teste in v2.20.2)
+- `cd frontend && npm test -- --run` - vitest frontend (100 teste)
 - `npx tsc --noEmit -p backend/tsconfig.json` - type-check backend
 - `cd frontend && npx tsc --noEmit` - type-check frontend
 - `npx biome check` - lint + format check

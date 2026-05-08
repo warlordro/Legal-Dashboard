@@ -7,10 +7,20 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.1** - UX polish pe banner-ul de progres RNPM split.
+Ultimul release **v2.20.2** - patch correctness: izoleaza failure-ul din audit
+`rnpm.cap_hit` (try/catch local in loc sa flip-uiasca SSE in error event), scoate
+`criteriu` (CUI/CNP/nume) din audit detail (GDPR), adauga tier-2 nested in
+`blockedLabels` cu prefix `tier1 > tier2`, corecteaza aritmetica `gapByReason` pe
+status="partial" (foloseste `s.gap` direct, evita dublu-numararea recovered tier-2).
+Overlay-ul split fix bottom-right e humanizat si 1-based (v2.20.1 humanizase doar
+banner-ul). Switch-urile humanizers folosesc `_exhaustive: never` ca un enum nou
+sa fail-uiasca build-ul TS. **827 teste backend (+4 noi pentru audit shape /
+recordAudit failure isolation / no-emit / s.gap), 100 teste frontend**.
+
+Predecesor **v2.20.1** - UX polish pe banner-ul de progres RNPM split.
 Token-ii tehnici leak-uiti in UI (`nested_progress`, `nested_start`, `nested_done`)
 sunt acum traduse in romana ("split secundar", "split secundar — start", "split secundar — finalizat").
 Index-ul tier-1 e afisat 1-based (`Split 1/7` in loc de `Split 0/7`). Cand split-ul intra
@@ -24,7 +34,7 @@ pentru cautari rulate in mod split distinge acum **trei cauze de gap** in loc de
 (RNPM raspunde cu `total > 0` dar `documents: []` — rate-limit upstream / captcha invalid)
 si `residual_unclassified` (records istorice fara destinatie atribuita ramase dupa tier-2).
 In paralel scriem un audit event `rnpm.cap_hit` la fiecare cautare split cu gap > 0
-(detalii: `type`, `criteriu`, `upstreamTotal`, `recovered`, `gap`, `gapByReason`,
+(detalii: `searchType`, `upstreamTotal`, `recovered`, `gap`, `gapByReason`,
 `blockedLabels`), util pentru analiza retroactiva a frecventei celor trei cauze pe productie.
 Status-ul intern `rejected` a fost redenumit `blocked`, mai semantic clar.
 **823 teste backend, 92 teste frontend**.
@@ -452,8 +462,8 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (823 teste in v2.20.1) |
-| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.1) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (827 teste in v2.20.2) |
+| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.2) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

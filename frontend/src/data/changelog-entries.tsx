@@ -37,6 +37,47 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.2",
+    date: "8 Mai 2026",
+    subtitle:
+      "Patch correctness post /full-review. Audit-ul rnpm.cap_hit nu mai converteste un succes in eroare daca insertul in audit_log esueaza (try/catch local, failure logat ca warn). Campul criteriu (CUI/CNP/nume cautat) a fost scos din audit detail (era duplicat al payload-ului de cautare si crea un risc GDPR inutil); am pastrat doar searchType. Sub-tipurile blocate in tier-2 apar acum in blockedLabels cu prefix tier1 > tier2 (pana acum nested gap-urile nu erau vizibile in audit). Aritmetica gapByReason corectata pentru status partial — folosim gap-ul deja calculat de service in loc de o derivare care dubla numara recovered tier-2. Overlay-ul split fix bottom-right e humanizat si 1-based (v2.20.1 rezolvase doar banner-ul). Switch-urile humanizers folosesc _exhaustive: never ca un enum nou neimplementat sa fail-uiasca build-ul TS. +4 teste unit pe shape audit / failure isolation / no-emit / s.gap.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-slate-500",
+    badgeClass: "bg-slate-100 text-slate-800 dark:bg-slate-900/30 dark:text-slate-400",
+    sections: [
+      {
+        title: "Audit rnpm.cap_hit nu mai poate flip-ui un succes in eroare",
+        content:
+          "Inainte: daca insertul in audit_log esua (de exemplu DB locked), recordAudit arunca, intra in catch-ul SSE si event-ul de complete devenea event de eroare — userul vedea cautare esuata cu mesaj generic, desi rezultatele erau deja salvate. Acum: wrap try/catch local pe recordAudit, failure scris ca console.warn cu searchId si motivul, SSE complete-ul ajunge la client. Audit observability nu este o dependenta hard a flow-ului user.",
+      },
+      {
+        title: "GDPR — criteriu de cautare scos din audit detail",
+        content:
+          "rnpm.cap_hit loga in detail criteriu (CUI / CNP / nume) duplicat fata de payload-ul de cautare. Acum scriem doar searchType (enum low-cardinality: ipoteci / specifice / creante / obligatiuni / fiducii). Cui / nume cautat raman in payload-ul cautarii originale, nu si in audit_log unde retentia poate fi diferita.",
+      },
+      {
+        title: "blockedLabels include si destinatiile blocate in tier-2",
+        content:
+          "Pana acum nested gap-urile (destinatii individuale blocate in tier-2 ipoteci) nu apareau in audit. Acum blockedLabels include si entries cu prefix tier1 > tier2 (de exemplu ASUPRA CREANTELOR > INDUSTRIE) cand destinatia e blocata. Lista cap la 20 entries cu flag blockedLabelsTruncated cand depaseste, ca audit_log sa nu creasca patologic la cautari pe debitori foarte mari.",
+      },
+      {
+        title: "gapByReason aritmetic corect pe status partial",
+        content:
+          "Cand un sub-tip era partial (tier-2 a recuperat parte din rezultate), aritmetica veche (subTotal - count) supraestima gap-ul pentru ca numara si rezultatele recovered. Acum folosim direct s.gap (deja calculat in service ca subTotal - SUM(nested.subTotal)) — exact partea ramasa neacoperita dupa tier-2.",
+      },
+      {
+        title: "Overlay split fix bottom-right humanizat si 1-based",
+        content:
+          "v2.20.1 humanizase doar banner-ul de progres din toolbar; overlay-ul fix din coltul dreapta-jos inca afisa Split 0/7 si nested_progress brut. Acum overlay-ul foloseste describeSplitPhase + describeNestedPhase si afiseaza Split 1/7 (1-based ca banner-ul). State-ul intern stocheaza obiectul RnpmSplitProgress complet (in loc de un subset cu phase: string), deci nu mai exista divergente.",
+      },
+      {
+        title: "TS exhaustiveness pe humanizers",
+        content:
+          "Switch-urile pe RnpmGapReason / split phase / nested phase aveau default: care defeats exhaustiveness — daca cineva adauga un enum nou si uita sa-l trateze, build-ul nu il prinde. Acum default: contine const _exhaustive: never = value, deci TS arunca eroare la compile. Cazul runtime undefined (gapReason optional) e tratat explicit inainte de switch.",
+      },
+    ],
+  },
+  {
     version: "v2.20.1",
     date: "8 Mai 2026",
     subtitle:
