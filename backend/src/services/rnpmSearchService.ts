@@ -30,6 +30,11 @@ export interface ExecuteSearchInput {
   fetchDetails?: boolean;
   detailConcurrency?: number;
   signal?: AbortSignal;
+  // v2.20.3 Grupul K — invoked exact o data, sincron, dupa ce search row e creat
+  // (saveSearch sau cand existingSearchId e prezent — fired imediat). Permite
+  // catch-ul AbortError din ruta /search sa includa searchId in 499 body pentru
+  // partial-state recovery via /saved.
+  onSearchCreated?: (searchId: number) => void;
 }
 
 function throwIfAborted(signal?: AbortSignal): void {
@@ -46,6 +51,11 @@ export interface ExecuteSearchResult {
   pageSize: number;
   currentPage: number;
   criteriu: string;
+  // v2.20.3 Grupul M — count efectiv de captcha consumate (initial + retries
+  // pe gcode expired pe prima cautare si pe paginare). Outer split caller-ii
+  // acumuleaza de aici in loc sa pre-incrementeze cu 1, ca sa reflecte costul
+  // real catre user (banner "X captcha utilizate" pe rezultate).
+  captchasUsed: number;
   gcode: string;
   nextRnpmPage: number | null;
 }
@@ -58,6 +68,14 @@ const DEFAULT_BATCH_SIZE = 25;
 // + un captcha pe 74 de cereri goale. Pentru fetch peste cap, vezi planul
 // Optiunea B (auto-split pe tipInscriere) — nu inca implementat.
 const MAX_TOTAL_RESULTS = 1500;
+
+// v2.20.3 Grupul I — fail-fast pe silent_refusal consecutiv. Daca primii K
+// sub-tipuri din tier-1 returneaza `total > 0 && documents: []` consecutiv,
+// upstream-ul e plauzibil throttling/captcha-invalidating wholesale: nu mai are
+// rost sa cheltuim K_total = 18 captcha-uri (~27s). Sarim restul si marcam ca
+// "error" cu reason fail-fast. K=3 e bias pe responsivitate; user-ul retry-eaza
+// daca era doar fluke.
+const K_SILENT_REFUSAL_FAIL_FAST = 3;
 
 // Single-line JSON timing line on stdout. Same shape as other audit events
 // (ai_call, restore). Lets ops grep `"action":"rnpm_phase"` and pivot by
@@ -104,6 +122,7 @@ export async function executeSearch(
   // ("captcha was 28s" vs "details fetched 14 docs in 22s").
   const tStart = Date.now();
   let captchaMs = 0;
+  let captchasUsed = 0;
   let searchMs = 0;
   let detailsMs = 0;
   let detailsOk = 0;
@@ -117,6 +136,7 @@ export async function executeSearch(
     const tCaptcha = Date.now();
     gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
     captchaMs = Date.now() - tCaptcha;
+    captchasUsed++;
   }
   throwIfAborted(signal);
   // perioadaStart/perioadaFinal sunt filtre client-side. Verificat empiric
@@ -168,6 +188,7 @@ export async function executeSearch(
       const tRetry = Date.now();
       gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
       captchaMs += Date.now() - tRetry;
+      captchasUsed++;
       searchParams.gcode = gcode;
       const tSearch2 = Date.now();
       firstResult = await client.search(input.type, searchParams, rnpmPage, signal);
@@ -208,6 +229,13 @@ export async function executeSearch(
     totalResults: total,
     criteriu: criteriu ?? null,
   });
+  // v2.20.3 Grupul K — surface searchId imediat dupa ce row-ul e creat. Try/catch
+  // defensive: callback-ul user-furnizat nu trebuie sa flip-uiasca search-ul.
+  try {
+    input.onSearchCreated?.(searchId);
+  } catch (e) {
+    console.warn("[executeSearch] onSearchCreated callback threw:", e);
+  }
 
   const allDocs: RnpmDocument[] = [];
   const avizIds: (number | null)[] = [];
@@ -297,6 +325,7 @@ export async function executeSearch(
         const tRetry = Date.now();
         gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
         captchaMs += Date.now() - tRetry;
+        captchasUsed++;
         searchParams.gcode = gcode;
         const tMore2 = Date.now();
         r = await client.search(input.type, searchParams, rnpmPage, signal);
@@ -324,6 +353,7 @@ export async function executeSearch(
     searchType: input.type,
     totalLatencyMs: Date.now() - tStart,
     captchaMs,
+    captchasUsed,
     searchMs,
     detailsMs,
     count: allDocs.length,
@@ -345,6 +375,7 @@ export async function executeSearch(
     criteriu,
     gcode,
     nextRnpmPage,
+    captchasUsed,
   };
 }
 
@@ -442,6 +473,10 @@ export interface SplitSearchInput {
   captchaMode?: CaptchaMode;
   ownerId?: string;
   signal?: AbortSignal;
+  // v2.20.3 Grupul K — invoked exact o data, sincron, dupa ce parent search row
+  // e creat (inainte de prima sub-cautare). Permite SSE handler-ului sa emita
+  // searchId imediat pentru a putea afisa partial results pe abort/timeout.
+  onSearchCreated?: (searchId: number) => void;
 }
 
 // Cauze distincte pentru records nepre-luate dupa split, fiecare cu actiune
@@ -532,6 +567,14 @@ export async function executeSplitSearch(
     totalResults: 0,
     criteriu: null,
   });
+  // v2.20.3 Grupul K — surface searchId imediat ca SSE-ul sa-l poata emite
+  // inainte de orice abort/timeout. Try/catch defensive: callback-ul user-furnizat
+  // nu trebuie sa flip-uiasca search-ul in error.
+  try {
+    input.onSearchCreated?.(parentSearchId);
+  } catch (e) {
+    console.warn("[executeSplitSearch] onSearchCreated callback threw:", e);
+  }
 
   const allDocs: RnpmDocument[] = [];
   const allAvizIds: (number | null)[] = [];
@@ -542,6 +585,11 @@ export async function executeSplitSearch(
   let firstCriteriu = "";
   let lastPagesTotal = 0;
   let lastPageSize = 0;
+  // v2.20.3 Grupul I — counter pentru fail-fast pe silent_refusal consecutiv.
+  // Reset doar pe semnale clare ca upstream raspunde corect (total=0 sau success
+  // cu documente). Erorile transient (network, captcha) nu reseteaza pentru ca
+  // nu probeaza ca upstream functioneaza, dar nici nu incrementeaza.
+  let consecutiveSilentRefusals = 0;
 
   try {
     for (let i = 0; i < subN; i++) {
@@ -557,7 +605,9 @@ export async function executeSplitSearch(
 
       try {
         onProgress({ index: i, total: subN, label, phase: "search" });
-        captchasUsed++;
+        // v2.20.3 Grupul M: acumuleaza din result.captchasUsed (include retries
+        // interne ale executeSearch — ex. search_retry pe gcode invalid). Pre-
+        // increment-ul vechi numara doar prima incercare si pierdea retry-urile.
         const result = await executeSearch({
           type: input.type,
           params: subParams,
@@ -570,6 +620,7 @@ export async function executeSplitSearch(
           existingSearchId: parentSearchId,
           signal: input.signal,
         }, client);
+        captchasUsed += result.captchasUsed;
 
         if (i === 0 || !firstCriteriu) firstCriteriu = result.criteriu;
         lastPagesTotal = Math.max(lastPagesTotal, result.pagesTotal);
@@ -577,6 +628,7 @@ export async function executeSplitSearch(
         upstreamTotal += result.total;
 
         if (result.total === 0) {
+          consecutiveSilentRefusals = 0;
           splitStats.push({ label, status: "empty", count: 0, subTotal: 0 });
           onProgress({ index: i, total: subN, label, phase: "skipped", subTotal: 0 });
           continue;
@@ -585,6 +637,7 @@ export async function executeSplitSearch(
         // Defensive: silent reject pentru un sub-tip individual (rar — limita
         // > MAX_TOTAL_RESULTS deja arunca limit_exceeded mai sus).
         if (result.documents.length === 0) {
+          consecutiveSilentRefusals++;
           splitStats.push({
             label,
             status: "blocked",
@@ -594,9 +647,33 @@ export async function executeSplitSearch(
             gapReason: "silent_refusal",
           });
           onProgress({ index: i, total: subN, label, phase: "blocked", subTotal: result.total });
+
+          if (consecutiveSilentRefusals >= K_SILENT_REFUSAL_FAIL_FAST) {
+            // Fail-fast: marcam restul sub-tipurilor ca skipped si iesim. Evita
+            // 18×1.5s=27s waste cand upstream pare sa throttle/invalidate captcha
+            // wholesale. User-ul retry-eaza explicit daca era doar fluke.
+            for (let j = i + 1; j < subN; j++) {
+              const skippedLabel = input.subTypeLabels[j];
+              const reasonMsg = `Sarit dupa ${K_SILENT_REFUSAL_FAIL_FAST} refuzuri tacite consecutive RNPM (fail-fast).`;
+              splitStats.push({
+                label: skippedLabel,
+                status: "error",
+                count: 0,
+                subTotal: 0,
+                reason: reasonMsg,
+              });
+              onProgress({
+                index: j, total: subN, label: skippedLabel,
+                phase: "error",
+                message: reasonMsg,
+              });
+            }
+            break;
+          }
           continue;
         }
 
+        consecutiveSilentRefusals = 0;
         allDocs.push(...result.documents);
         allAvizIds.push(...result.avizIds);
         allDetailsFailed.push(...result.detailsFailed);
@@ -604,14 +681,22 @@ export async function executeSplitSearch(
         onProgress({ index: i, total: subN, label, phase: "done", resultCount: result.documents.length, subTotal: result.total });
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") throw e;
+        // v2.20.3 Grupul M: conservative count — daca executeSearch a aruncat
+        // dupa ce a consumat captcha (ex. limit_exceeded vine dupa primul search
+        // care a consumat captcha-ul), masuram cel putin 1. Retry-urile nu sunt
+        // recuperabile aici (result nu e disponibil pe throw); acceptam under-
+        // count strict pe path-urile rare de eroare.
+        captchasUsed += 1;
         // Un sub-tip alone depaseste MAX_TOTAL_RESULTS. v2.18.0: daca categoria
         // are lista enumerable de destinatii (specifice/ipoteci), incercam
         // tier-2 split pe destinatieInscriere; altfel, fail-clean ca in v2.17.0.
         if (e instanceof RnpmError && e.code === "limit_exceeded") {
+          // limit_exceeded probeaza ca upstream raspunde corect cu un total real
+          // (doar peste cap-ul nostru); reseteaza counter-ul de silent_refusal.
+          consecutiveSilentRefusals = 0;
           const tier1SubTotal = (e.details?.total as number | undefined) ?? 0;
           // Include subtotalul respins in upstream — altfel banner-ul afiseaza
           // doar suma sub-tipurilor OK si user-ul nu vede ce volum ramane neacoperit.
-          // Captcha-ul tier-1 e deja contorizat in captchasUsed la inceputul try-ului.
           upstreamTotal += tier1SubTotal;
 
           if (hasNestedDestinations(input.type)) {
@@ -798,7 +883,8 @@ async function executeNestedDestinationSplit(
         phase: "nested_progress",
         nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "search" },
       });
-      captchasUsed++;
+      // v2.20.3 Grupul M: acumuleaza din result.captchasUsed (vezi comentariul
+      // identic din executeSplitSearch).
       const result = await executeSearch({
         type: input.type,
         params: subParams,
@@ -811,6 +897,7 @@ async function executeNestedDestinationSplit(
         existingSearchId: input.parentSearchId,
         signal: input.signal,
       }, client);
+      captchasUsed += result.captchasUsed;
 
       if (result.total === 0) {
         subResults.push({ label: destLabel, status: "empty", count: 0, subTotal: 0 });
@@ -858,6 +945,9 @@ async function executeNestedDestinationSplit(
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") throw e;
+      // v2.20.3 Grupul M: conservative count pe error path (vezi comentariul
+      // identic din executeSplitSearch).
+      captchasUsed += 1;
       if (e instanceof RnpmError && e.code === "limit_exceeded") {
         // Tier-2 destinatie singura > 1500 — fail-clean (fara recursie tier-3).
         const subTotal = (e.details?.total as number | undefined) ?? 0;

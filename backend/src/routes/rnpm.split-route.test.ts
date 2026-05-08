@@ -101,10 +101,13 @@ async function consumeSSE(res: Response): Promise<string> {
   return buf;
 }
 
+// v2.20.3 Grupul O: subTypeLabels trebuie sa fie prefix exact al listei canonice
+// din backend/src/services/rnpmSubTypes.ts. "aviz initial" e prima intrare din
+// TIP_AVIZ_BY_CATEGORY.ipoteci, deci un singleton cu acel label e valid.
 const POST_BODY = {
   type: "ipoteci",
   baseParams: { numeProprietar: "ACME" },
-  subTypeLabels: ["IPOTECA MOBILIARA"],
+  subTypeLabels: ["aviz initial"],
   captchaKey: "0123456789abcdef",
   captchaProvider: "2captcha",
 };
@@ -259,6 +262,50 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
     expect(getCapHitRow()).toBeUndefined();
   });
 
+  it("E5: dedup contract — two concurrent requests with same clientRequestId, second gets 409", async () => {
+    // Test contractual pentru rezervarea sincrona dedup. v2.20.3 a mutat
+    // `set()` din callback-ul streamSSE direct in handler-ul rutei (inainte de
+    // `return streamSSE(...)`), ca defensa in profunzime: chiar daca un viitor
+    // refactor adauga un await intre has() si set(), dedup-ul ramane corect.
+    // Pe codul vechi testul tot trecea, deoarece Hono invoca cb-ul streamSSE
+    // sincron — dar acum invariantul e explicit, nu derivat din semantica Hono.
+    let resolveFirst: ((value: SplitSearchResult) => void) | undefined;
+    executeSplitSearchMock.mockImplementationOnce(
+      () => new Promise<SplitSearchResult>((resolve) => {
+        resolveFirst = resolve;
+      }),
+    );
+
+    const app = buildApp();
+    const bodyWithDedup = JSON.stringify({ ...POST_BODY, clientRequestId: "toctou-test-uuid-1" });
+
+    // Cele doua cereri se lanseaza in paralel. Pe codul vechi (TOCTOU), ambele
+    // ar fi returnat 200 (streamSSE) deoarece set()-ul intervine ulterior.
+    const [res1, res2] = await Promise.all([
+      app.request("/api/v1/rnpm/search-split", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bodyWithDedup,
+      }),
+      app.request("/api/v1/rnpm/search-split", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: bodyWithDedup,
+      }),
+    ]);
+
+    expect(res1.status).toBe(200);
+    expect(res2.status).toBe(409);
+    const errBody = (await res2.json()) as { error: string };
+    expect(errBody.error).toMatch(/dedup/);
+
+    // Cleanup: deblocheaza prima cerere si consuma stream-ul, ca finally-ul
+    // sa stearga inflightRequests Map (altfel a treia cerere ar mai fi blocata
+    // intre teste — desi `vi.restoreAllMocks` din afterEach gestioneaza asta).
+    resolveFirst?.(buildSplitResult({ searchId: 1 }));
+    await consumeSSE(res1);
+  });
+
   it("E4: gapByReason for partial uses s.gap (not subTotal - count) to avoid double-count of tier-2 recovered rows", async () => {
     executeSplitSearchMock.mockImplementationOnce(
       async (): Promise<SplitSearchResult> =>
@@ -291,5 +338,46 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
     const detail = JSON.parse(row!.detail_json) as { gapByReason: Record<string, number> };
     // 100 = s.gap, NU 700 = (1500 - 800).
     expect(detail.gapByReason).toEqual({ residual_unclassified: 100 });
+  });
+
+  it("v2.20.3 Grupul O: rejects subTypeLabels not matching canonical prefix (400 invalid)", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/search-split", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ...POST_BODY,
+        // "BOGUS LABEL" nu e in TIP_AVIZ_BY_CATEGORY.ipoteci -> rejected.
+        subTypeLabels: ["BOGUS LABEL"],
+      }),
+    });
+    expect(res.status).toBe(400);
+    const json = (await res.json()) as { error: string };
+    expect(json.error).toMatch(/canonice/i);
+    // executeSplitSearch nu trebuie sa fi fost chemat — rejected before SSE.
+    expect(executeSplitSearchMock).not.toHaveBeenCalled();
+  });
+
+  it("v2.20.3 Grupul O: RNPM_AUDIT_CAP_HIT_DISABLED=1 sare INSERT-ul rnpm.cap_hit (kill switch operational)", async () => {
+    process.env.RNPM_AUDIT_CAP_HIT_DISABLED = "1";
+    try {
+      executeSplitSearchMock.mockImplementationOnce(
+        async (): Promise<SplitSearchResult> =>
+          buildSplitResult({
+            searchId: 555,
+            total: 0,
+            upstreamTotal: 1000,
+            splitStats: [
+              { label: "X", status: "blocked", count: 0, subTotal: 1000, gapReason: "terminal_cap" },
+            ],
+          }),
+      );
+
+      const { res } = await runSplit();
+      expect(res.status).toBe(200);
+      // Audit row NU trebuie scris cand kill switch e activ.
+      expect(getCapHitRow()).toBeUndefined();
+    } finally {
+      delete process.env.RNPM_AUDIT_CAP_HIT_DISABLED;
+    }
   });
 });

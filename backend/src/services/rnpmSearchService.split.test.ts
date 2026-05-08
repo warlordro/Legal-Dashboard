@@ -282,6 +282,268 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     expect(tier2Calls.length).toBe(0);
   });
 
+  it("v2.20.3 Grupul I: fail-fast dupa K=3 silent_refusal consecutive (skipped restul cu reason)", async () => {
+    const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.ipoteci; // 18 sub-tipuri
+    expect(subTypes.length).toBeGreaterThanOrEqual(6);
+
+    // Primii 3 tier-1 returneaza total>0 + documents:[] (silent_refusal).
+    // Al 4-lea trebuie sa NU fie chemat — fail-fast a sarit toata coada.
+    const stub = new StubClient(({ tipIdx }) => {
+      const idx = parseInt(tipIdx ?? "0", 10);
+      if (idx >= 1 && idx <= 3) {
+        return { total: 600, pagesTotal: 24, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+      }
+      // Idx >= 4 nu ar trebui sa primeasca call — daca primeste, testul cade pe assert.
+      return singleDocResult(tipIdx ?? "?");
+    });
+
+    const result = await executeSplitSearch(
+      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => { /* progress ignored */ },
+      stub,
+    );
+
+    // Verifica ca DOAR primii 3 tier-1 au fost cautati (nu si idx 4..18).
+    const tier1Calls = stub.searchCalls.filter((c) => c.destinatie == null);
+    const tier1Indices = new Set(tier1Calls.map((c) => c.tipInscriere));
+    expect(tier1Indices.has("1")).toBe(true);
+    expect(tier1Indices.has("2")).toBe(true);
+    expect(tier1Indices.has("3")).toBe(true);
+    expect(tier1Indices.has("4")).toBe(false);
+    expect(tier1Indices.has("5")).toBe(false);
+
+    // splitStats: 3 entries blocked + silent_refusal, restul "error" cu fail-fast reason.
+    expect(result.splitStats.length).toBe(subTypes.length);
+    for (let i = 0; i < 3; i++) {
+      expect(result.splitStats[i].status).toBe("blocked");
+      expect(result.splitStats[i].gapReason).toBe("silent_refusal");
+    }
+    for (let i = 3; i < subTypes.length; i++) {
+      expect(result.splitStats[i].status).toBe("error");
+      expect(result.splitStats[i].reason).toMatch(/fail-fast/i);
+    }
+  });
+
+  it("v2.20.3 Grupul I: 2 silent_refusal + 1 success NU declanseaza fail-fast (counter reset)", async () => {
+    const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.ipoteci;
+    // Primii 2 silent_refusal, idx=3 success cu 1 doc, idx=4 silent_refusal — counter
+    // a fost resetat la idx=3, deci la idx=4 contorul e 1, nu 3. Trebuie sa se cheme
+    // toti 18.
+    const stub = new StubClient(({ tipIdx }) => {
+      const idx = parseInt(tipIdx ?? "0", 10);
+      if (idx === 1 || idx === 2 || idx === 4) {
+        return { total: 500, pagesTotal: 20, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+      }
+      return singleDocResult(tipIdx ?? "?");
+    });
+
+    const result = await executeSplitSearch(
+      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => { /* progress ignored */ },
+      stub,
+    );
+
+    // Toate 18 tier-1 au fost cautate (counter a fost resetat de success la idx 3).
+    const tier1Indices = new Set(stub.searchCalls.filter((c) => c.destinatie == null).map((c) => c.tipInscriere));
+    for (let i = 1; i <= subTypes.length; i++) {
+      expect(tier1Indices.has(String(i))).toBe(true);
+    }
+
+    // Si splitStats are 18 entries, niciuna cu reason fail-fast.
+    expect(result.splitStats.length).toBe(subTypes.length);
+    const failFast = result.splitStats.filter((s) => s.reason?.match(/fail-fast/i));
+    expect(failFast.length).toBe(0);
+  });
+
+  // ===========================================================================
+  // v2.20.3 Grupul N — Edge case tests pentru robustness pe combinatii rare.
+  // Acopera: abort mid-tier-2, mixed gapReasons in acelasi result, single-sub-
+  // type, all-empty, tier-2 error path.
+  // ===========================================================================
+
+  it("v2.20.3 Grupul N: abort mid-tier-2 propagates AbortError, splitStats reflecta partial state", async () => {
+    const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.specifice;
+    const REJECT_TIER1_IDX = "1";
+    const ac = new AbortController();
+    let tier2CallCount = 0;
+
+    const stub = new StubClient(({ tipIdx, destinatie }) => {
+      if (destinatie != null) {
+        tier2CallCount++;
+        if (tier2CallCount === 2) {
+          // Aborteaza dupa al 2-lea call tier-2 — al 3-lea call va lovi
+          // throwIfAborted la inceputul iteratiei.
+          ac.abort();
+        }
+        return {
+          total: 100, pagesTotal: 1, pageSize: 100, currentPage: 1,
+          documents: Array.from({ length: 100 }, (_, k) => ({
+            no: k + 1,
+            identificator: { v: `t2-${destinatie}-${k}`, k: null },
+            utilizatorAutorizat: "", data: "", tip: "", needsActualizare: false,
+          })),
+          criteriu: "", eai: false,
+        };
+      }
+      if (tipIdx === REJECT_TIER1_IDX) {
+        return { total: 1700, pagesTotal: 68, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+      }
+      return emptyResult();
+    });
+
+    await expect(executeSplitSearch(
+      { type: "specifice", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key", signal: ac.signal },
+      () => { /* ignored */ },
+      stub,
+    )).rejects.toThrow(/Aborted/);
+
+    // Cel putin 2 destinatii au fost cautate inainte de abort (al treilea call
+    // ar fi fost blocat de throwIfAborted la inceputul buclei tier-2).
+    const tier2Calls = stub.searchCalls.filter((c) => c.destinatie != null);
+    expect(tier2Calls.length).toBeGreaterThanOrEqual(2);
+    expect(tier2Calls.length).toBeLessThan(DESTINATII_INSCRIERII.length);
+  });
+
+  it("v2.20.3 Grupul N: mixed gapReasons in acelasi result (terminal_cap + silent_refusal + residual_unclassified)", async () => {
+    // ipoteci: 18 sub-tipuri.
+    //   idx 1 = silent_refusal pur (total>0 sub-cap, docs=[]).
+    //   idx 2 = limit_exceeded -> tier-2 cu DEST 1 succes (400 docs), restul empty -> residual_unclassified (gap 1300).
+    //   idx 3 = limit_exceeded -> TOATE destinatiile tier-2 returneaza total>1500 -> nested.gapReason=terminal_cap pe fiecare.
+    //   idx 4..18 = ok cu 1 doc.
+    const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.ipoteci;
+    const stub = new StubClient(({ tipIdx, destinatie }) => {
+      if (destinatie != null) {
+        if (tipIdx === "3") {
+          // Toate destinatiile pentru tier-1 idx 3 -> tier-2 limit_exceeded -> terminal_cap pe nested.
+          return { total: 2000, pagesTotal: 80, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+        }
+        if (tipIdx === "2") {
+          if (destinatie === "1") {
+            return {
+              total: 400, pagesTotal: 1, pageSize: 400, currentPage: 1,
+              documents: Array.from({ length: 400 }, (_, k) => ({
+                no: k + 1, identificator: { v: `t2-2-${k}`, k: null },
+                utilizatorAutorizat: "", data: "", tip: "", needsActualizare: false,
+              })),
+              criteriu: "", eai: false,
+            };
+          }
+          return emptyResult();
+        }
+        return emptyResult();
+      }
+      const idx = parseInt(tipIdx ?? "0", 10);
+      if (idx === 1) {
+        // silent_refusal: total > 0 dar sub cap -> documents:[].
+        return { total: 600, pagesTotal: 24, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+      }
+      if (idx === 2 || idx === 3) {
+        // tier-1 over cap -> trigger limit_exceeded in executeSearch.
+        return { total: 1700, pagesTotal: 68, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+      }
+      return singleDocResult(tipIdx ?? "?");
+    });
+
+    const result = await executeSplitSearch(
+      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => { /* ignored */ },
+      stub,
+    );
+
+    const idx0 = result.splitStats[0]; // silent_refusal direct la tier-1
+    const idx1 = result.splitStats[1]; // residual_unclassified (tier-1 1700 - tier-2 400 = 1300)
+    const idx2 = result.splitStats[2]; // tier-1 partial cu nested entries terminal_cap
+
+    // idx 0: silent_refusal pur la tier-1.
+    expect(idx0.status).toBe("blocked");
+    expect(idx0.gapReason).toBe("silent_refusal");
+
+    // idx 1: residual_unclassified (tier-1 1700 minus tier-2 SUM 400 = gap 1300).
+    expect(idx1.status).toBe("partial");
+    expect(idx1.gapReason).toBe("residual_unclassified");
+    expect(idx1.gap).toBe(1300);
+
+    // idx 2: tier-1 a triggered nested split, dar TOATE destinatiile au returnat
+    // limit_exceeded la tier-2 -> nested status=blocked + gapReason=terminal_cap.
+    expect(idx2.nested).toBeDefined();
+    expect(idx2.nested!.every((n) => n.gapReason === "terminal_cap")).toBe(true);
+
+    // Restul = ok.
+    for (let i = 3; i < subTypes.length; i++) {
+      expect(result.splitStats[i].status).toBe("ok");
+    }
+  });
+
+  it("v2.20.3 Grupul N: single-sub-type input ruleaza fara split (subN=1)", async () => {
+    const stub = new StubClient(({ tipIdx }) => {
+      if (tipIdx === "1") return singleDocResult("1");
+      throw new Error("unexpected tipInscriere index");
+    });
+
+    const result = await executeSplitSearch(
+      { type: "creante", baseParams: {}, subTypeLabels: ["aviz initial"], captchaKey: "stub-key" },
+      () => { /* ignored */ },
+      stub,
+    );
+
+    expect(result.splitStats.length).toBe(1);
+    expect(result.splitStats[0].status).toBe("ok");
+    expect(result.documents.length).toBe(1);
+    // Captchasusage acumulat din result.captchasUsed (Grupul M).
+    expect(result.captchasUsed).toBeGreaterThanOrEqual(1);
+  });
+
+  it("v2.20.3 Grupul N: all-empty subtypes returneaza splitStats integral cu status=empty", async () => {
+    const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.creante;
+    const stub = new StubClient(() => emptyResult());
+
+    const result = await executeSplitSearch(
+      { type: "creante", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => { /* ignored */ },
+      stub,
+    );
+
+    expect(result.splitStats.length).toBe(subTypes.length);
+    expect(result.splitStats.every((s) => s.status === "empty")).toBe(true);
+    expect(result.documents.length).toBe(0);
+    expect(result.upstreamTotal).toBe(0);
+  });
+
+  it("v2.20.3 Grupul N: tier-2 generic error pe o destinatie -> nested status=error, restul continua", async () => {
+    const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.ipoteci;
+    const REJECT_TIER1_IDX = "1";
+    const stub = new StubClient(({ tipIdx, destinatie }) => {
+      if (destinatie != null) {
+        if (destinatie === "3") {
+          // Eroare generica (nu RnpmError limit_exceeded, nu AbortError) -> nested status=error.
+          throw new Error("Network blip pe destinatia 3");
+        }
+        return emptyResult();
+      }
+      if (tipIdx === REJECT_TIER1_IDX) {
+        // tier-1 over cap -> trigger limit_exceeded in executeSearch -> tier-2 starts.
+        return { total: 1700, pagesTotal: 68, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+      }
+      return emptyResult();
+    });
+
+    const result = await executeSplitSearch(
+      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => { /* ignored */ },
+      stub,
+    );
+
+    const tier1 = result.splitStats[0];
+    expect(tier1.nested).toBeDefined();
+    const errorDest = tier1.nested!.find((n) => n.status === "error");
+    expect(errorDest).toBeDefined();
+    expect(errorDest!.reason).toMatch(/Network blip/);
+
+    // Restul destinatiilor au continuat (status empty) — fara early-exit pe error.
+    const emptyDests = tier1.nested!.filter((n) => n.status === "empty");
+    expect(emptyDests.length).toBe(DESTINATII_IPOTECI.length - 1);
+  });
+
   it("ipoteci tier-2 covers exactly DESTINATII_IPOTECI (10) entries", async () => {
     const subTypes = TIP_AVIZ_BY_CATEGORY_BACKEND.ipoteci;
     const REJECT_IDX = "1";

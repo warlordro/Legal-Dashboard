@@ -7,18 +7,29 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.3**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.2** - patch correctness: izoleaza failure-ul din audit
+Ultimul release **v2.20.3** - hardening RNPM post-/full-review: audit `rnpm.cap_hit`
+acum carry-uieste `requestId` din envelope (corelare event log <-> client) si e purjat
+zilnic la 90 zile prin migration noua 0017 (`audit_log_created_at_idx`, `purgeOldAuditLog`).
+SSE-ul split diferentiaza intre `aborted` (signal client), `timeout` (server-side) si
+`error` (alt failure). Loop-ul tier-1/tier-2 are fail-fast la K=3 erori upstream
+consecutive (`upstream_throttled`). `captchasUsed` se acumuleaza din `result.captchasUsed`
+(include retry-urile interne) in loc sa se increment-uieze pre-call. Allow-list nou
+`validateSubTypeLabels` (helper service `rnpmSubTypes.ts`, mirror al frontend
+`TIP_AVIZ_BY_CATEGORY`) blocheaza payload-uri arbitrare in `subTypeLabels`. Kill switch
+operational `RNPM_AUDIT_CAP_HIT_DISABLED=1` pentru a sari INSERT-ul audit. **844 teste
+backend (era 827, +17 noi cumulativ pentru audit retention, fail-fast, abort/timeout SSE,
+acumulare captchasUsed, allow-list canonica + kill switch), 100 teste frontend**.
+
+Predecesor **v2.20.2** - patch correctness post-/full-review: izoleaza failure-ul din audit
 `rnpm.cap_hit` (try/catch local in loc sa flip-uiasca SSE in error event), scoate
 `criteriu` (CUI/CNP/nume) din audit detail (GDPR), adauga tier-2 nested in
 `blockedLabels` cu prefix `tier1 > tier2`, corecteaza aritmetica `gapByReason` pe
 status="partial" (foloseste `s.gap` direct, evita dublu-numararea recovered tier-2).
-Overlay-ul split fix bottom-right e humanizat si 1-based (v2.20.1 humanizase doar
-banner-ul). Switch-urile humanizers folosesc `_exhaustive: never` ca un enum nou
-sa fail-uiasca build-ul TS. **827 teste backend (+4 noi pentru audit shape /
-recordAudit failure isolation / no-emit / s.gap), 100 teste frontend**.
+Overlay-ul split fix bottom-right e humanizat si 1-based. Switch-urile humanizers
+folosesc `_exhaustive: never`. **827 teste backend, 100 teste frontend**.
 
 Predecesor **v2.20.1** - UX polish pe banner-ul de progres RNPM split.
 Token-ii tehnici leak-uiti in UI (`nested_progress`, `nested_start`, `nested_done`)
@@ -462,8 +473,8 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (827 teste in v2.20.2) |
-| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.2) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (844 teste in v2.20.3) |
+| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.3) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

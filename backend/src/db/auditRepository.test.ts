@@ -21,6 +21,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   getAuditEvents,
   listAuditEvents,
+  purgeOldAuditLog,
   recordAudit,
   type AuditOutcome,
 } from "./auditRepository.ts";
@@ -222,6 +223,54 @@ describe("recordAudit() — write paths", () => {
     expect(events[0].outcome).toBe("denied" satisfies AuditOutcome);
   });
 
+  it("v2.20.3 Grupul J: persists request_id from middleware context", async () => {
+    // requestIdContext middleware mints a UUID per request and surfaces it via
+    // getRequestId(c). recordAudit must capture this so admin Audit page can
+    // jump from envelope `{requestId}` to the matching audit row.
+    const { requestIdContext } = await import("../middleware/requestId.ts");
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("*", ownerContext);
+    app.post("/test", (c) => {
+      recordAudit(c, "rnpm.search", { targetKind: "rnpm_search", targetId: "1" });
+      return c.text("ok");
+    });
+
+    const inboundRid = "rid-abcdef-1234567890";
+    const res = await app.request("/test", {
+      method: "POST",
+      headers: { "x-request-id": inboundRid },
+    });
+    expect(res.status).toBe(200);
+
+    const events = listAuditEvents({ ownerId: "local" });
+    expect(events.rows).toHaveLength(1);
+    expect(events.rows[0].request_id).toBe(inboundRid);
+  });
+
+  it("v2.20.3 Grupul J: explicit options.requestId overrides context", async () => {
+    const { requestIdContext } = await import("../middleware/requestId.ts");
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("*", ownerContext);
+    app.post("/test", (c) => {
+      recordAudit(c, "system.bulk", { requestId: "explicit-rid-1234567" });
+      return c.text("ok");
+    });
+    await app.request("/test", {
+      method: "POST",
+      headers: { "x-request-id": "ctx-rid-7654321" },
+    });
+    const events = listAuditEvents({});
+    expect(events.rows[0].request_id).toBe("explicit-rid-1234567");
+  });
+
+  it("v2.20.3 Grupul J: requestId is null when no context + no override (system.boot)", () => {
+    recordAudit(null, "system.boot", { ownerId: null });
+    const events = listAuditEvents({ ownerId: null });
+    expect(events.rows[0].request_id).toBeNull();
+  });
+
   it("survives unserializable detail (BigInt / circular) via fallback", () => {
     const circular: Record<string, unknown> = { a: 1 };
     circular.self = circular;
@@ -377,5 +426,69 @@ describe("listAuditEvents() — admin filters + pagination", () => {
     expect(small.rows).toHaveLength(1);
     const big = listAuditEvents({ limit: 99999 });
     expect(big.rows.length).toBeLessThanOrEqual(500);
+  });
+
+  it("v2.20.3 Grupul J: filters by exact requestId", () => {
+    recordAudit(null, "rnpm.match", { ownerId: "alice", requestId: "rid-target-1234567" });
+    recordAudit(null, "rnpm.miss", { ownerId: "alice", requestId: "rid-other-7654321" });
+    recordAudit(null, "rnpm.miss", { ownerId: "alice" }); // request_id NULL
+
+    const r = listAuditEvents({ requestId: "rid-target-1234567" });
+    expect(r.total).toBe(1);
+    expect(r.rows[0].action).toBe("rnpm.match");
+  });
+});
+
+describe("v2.20.3 — purgeOldAuditLog retention", () => {
+  it("deletes rows older than retentionDays cutoff and keeps recent rows", () => {
+    const db = getDb();
+    // Insert 3 randuri cu ts manual: 100 zile (vechi), 30 zile (recent), now.
+    const insert = db.prepare(
+      `INSERT INTO audit_log (owner_id, action, ts, detail_json)
+       VALUES (?, ?, ?, '{}')`,
+    );
+    const oldTs = new Date(Date.now() - 100 * 86_400_000).toISOString();
+    const recentTs = new Date(Date.now() - 30 * 86_400_000).toISOString();
+    const nowTs = new Date().toISOString();
+    insert.run("local", "old.event", oldTs);
+    insert.run("local", "recent.event", recentTs);
+    insert.run("local", "now.event", nowTs);
+
+    const deleted = purgeOldAuditLog(90);
+    expect(deleted).toBe(1);
+
+    const remaining = db
+      .prepare(`SELECT action FROM audit_log ORDER BY ts ASC`)
+      .all() as { action: string }[];
+    const actions = remaining.map((r) => r.action);
+    expect(actions).toContain("recent.event");
+    expect(actions).toContain("now.event");
+    expect(actions).not.toContain("old.event");
+  });
+
+  it("returns 0 when nothing is past the retention window", () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO audit_log (owner_id, action, detail_json) VALUES ('local', 'fresh', '{}')`,
+    ).run();
+    const deleted = purgeOldAuditLog(90);
+    expect(deleted).toBe(0);
+  });
+
+  it("retentionDays = 0 deletes everything (escape hatch)", () => {
+    const db = getDb();
+    db.prepare(
+      `INSERT INTO audit_log (owner_id, action, detail_json) VALUES ('local', 'a', '{}')`,
+    ).run();
+    db.prepare(
+      `INSERT INTO audit_log (owner_id, action, detail_json) VALUES ('local', 'b', '{}')`,
+    ).run();
+    // Very small negative-equivalent: cutoff = now → ts < now true pentru
+    // randuri scrise inainte de apel (ts default datetime('now') deja propagat).
+    // Ne asiguram ca inserts sunt suficient de vechi: avansam o ms si purgam.
+    // (Edge: vitest fake timers nu activate aici; folosim await sau nu mai
+    // adaugam complexitate — 0 zile e suficient pentru contractul SQL.)
+    const deleted = purgeOldAuditLog(0);
+    expect(deleted).toBeGreaterThanOrEqual(2);
   });
 });

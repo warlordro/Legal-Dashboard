@@ -32,6 +32,7 @@ import {
 } from "../../db/monitoringRunsRepository.ts";
 import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
 import { purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
+import { purgeOldAuditLog } from "../../db/auditRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 import { isLikelyTooLongForPortalJust } from "../nameListParser.ts";
@@ -48,6 +49,13 @@ const RUN_PURGE_INTERVAL_MS = 86_400_000;
 // monotonically and the /summary card ranges (24h / 30d) are unaffected
 // while disk and SQLite scan time creep up indefinitely.
 const AI_USAGE_RETENTION_DAYS = 90;
+// audit_log retention. v2.20.3 inchide o buclă de crestere monotona: orice
+// request mutant scrie cel putin un row in audit_log (recordAudit), iar
+// rnpm.cap_hit + monitoring.* genereaza zeci de events/zi pe productie.
+// 90 zile pastreaza fereastra de observabilitate a Hardening §17 fara sa
+// permita tabela sa creasca indefinit. Pentru deploy web cu cerinte legale
+// mai stricte (audit trail >= 1 an), urca aici la 365.
+const AUDIT_LOG_RETENTION_DAYS = 90;
 
 export type ScheduledJob = MonitoringJobRow;
 
@@ -355,6 +363,26 @@ export class Scheduler {
         }
       } catch (err) {
         console.error("[scheduler] purgeOldAiUsage threw, continuing loop", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      }
+
+      // v2.20.3: audit_log retention purge — independent try/catch ca un fail
+      // in oricare branch sa nu blocheze ceilalti. audit_log e mai sensibil
+      // decat ai_usage (e log-ul de compliance), dar acelasi window de 90d.
+      try {
+        const deletedAudit = purgeOldAuditLog(AUDIT_LOG_RETENTION_DAYS);
+        if (deletedAudit > 0) {
+          console.log(JSON.stringify({
+            action: "audit_log.purged",
+            deleted_count: deletedAudit,
+            retention_days: AUDIT_LOG_RETENTION_DAYS,
+            ts: this.opts.clock.now().toISOString(),
+          }));
+        }
+      } catch (err) {
+        console.error("[scheduler] purgeOldAuditLog threw, continuing loop", {
           error: err instanceof Error ? err.message : String(err),
           stack: err instanceof Error ? err.stack : undefined,
         });

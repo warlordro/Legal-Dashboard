@@ -37,6 +37,47 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.3",
+    date: "8 Mai 2026",
+    subtitle:
+      "Hardening RNPM dupa /full-review v2.20.2. Audit_log-ul are acum retentie 90 zile (analog cu monitoring_runs si ai_usage), o coloana request_id noua corelata cu envelope-ul {data, error, requestId} (admin Audit page poate filtra exact pe requestId-ul afisat la front), si un kill switch operational (RNPM_AUDIT_CAP_HIT_DISABLED=1 sare INSERT-ul fara restart). Split-ul fail-fast-uieste dupa 3 refuzuri tacite consecutive RNPM (silent_refusal pe 3 sub-tipuri la rand inseamna ca upstream throttle-uieste wholesale — saritura restul cu reason RO in loc de waste 18 captcha). SSE-ul distinge acum aborted (client a inchis conexiunea) vs timeout (server a depasit 15min hardcap), fiecare cu searchId si timeoutMs explicit. captchasUsed acumuleaza si retry-urile interne (search_retry pe gcode invalid pe pagina). subTypeLabels validate la backend impotriva unei liste canonice (mirror al rnpm-form-constants.ts) ca nu se mai poate trimite drift.",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Audit retention 90 zile + corelare cu envelope requestId",
+        content:
+          "audit_log creste monoton pe productie cu ~1 INSERT per request mutant; v2.20.3 adauga purgeOldAuditLog(retentionDays = 90) apelat din scheduler-ul de monitoring (analog cu monitoring_runs si ai_usage). Migration 0017 adauga audit_log.request_id (TEXT, nullable pe randuri legacy) cu index partial; pagina admin Audit poate filtra acum exact pe requestId-ul afisat in toast-urile de eroare front, ca un user sa-i poata da unui admin un id si admin-ul sa gaseasca evenimentul exact in 1 click.",
+      },
+      {
+        title: "Fail-fast pe K=3 silent_refusal consecutive",
+        content:
+          "Cand RNPM intoarce total>0 dar documents:[] de 3 ori la rand pe acelasi split (refuz tacit upstream — semn de throttle wholesale), backend-ul saritura restul sub-tipurilor cu reason RO 'Sarit dupa 3 refuzuri tacite consecutive RNPM (fail-fast)' in loc de a astepta sa termine toate 18 sub-tipurile pentru categoria ipoteci. Counter reseteaza pe semnale clare ca upstream functioneaza (total=0 sau success cu docs sau limit_exceeded). Erorile transient (network, captcha) nici nu reseteaza nici nu incrementeaza, ca fluctuatii nu se confunde cu refuz upstream.",
+      },
+      {
+        title: "SSE differentiation client_aborted vs server_timeout",
+        content:
+          "Pana acum AbortError-ul nu distingea daca user-ul a inchis tab-ul (renderer abort) sau a expirat hardcap-ul intern de 15 minute. Acum c.req.raw.signal?.aborted === true distinge cazurile, SSE emite event 'aborted' (cu searchId, reason: 'client_aborted') sau 'timeout' (cu searchId, reason: 'server_timeout', timeoutMs: 900000). Frontend-ul stie sa afiseze toast 'cautare anulata' vs 'timeout server', si poate naviga catre searchId pentru partial state.",
+      },
+      {
+        title: "captchasUsed corect pe retry-uri",
+        content:
+          "Inainte counter-ul incrementa o singura data per executeSearch, ratand search_retry-urile pe gcode invalid. Acum executeSearch returneaza captchasUsed in result, iar executeSplitSearch / executeNestedDestinationSplit acumuleaza din result. Pe error path conservative +1 (cel putin captcha-ul initial a fost consumat). Util pentru UI care afiseaza count-ul de captcha consumate la sfarsit de cautare (cost real, nu count optimist).",
+      },
+      {
+        title: "Allow-list canonica pe subTypeLabels + kill switch RNPM_AUDIT_CAP_HIT_DISABLED",
+        content:
+          "Backend-ul are acum un mirror al frontend/components/rnpm/rnpm-form-constants.ts:TIP_AVIZ_BY_CATEGORY in services/rnpmSubTypes.ts; POST /search-split valideaza ca lista trimisa e prefix exact (ordine + casing). Drift accidental sau tampering pe indexarea 1-based pe care RNPM o asteapta in tipInscriere.value e respins cu 400 inainte de a porni SSE-ul. Plus: RNPM_AUDIT_CAP_HIT_DISABLED=1 in env opreste INSERT-ul rnpm.cap_hit fara restart, util operational daca audit_log creste prea repede sau in incident upstream.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Backend 844/844 (era 827, +17 noi cumulativ): 2 fail-fast happy path + counter reset, 5 edge cases (abort mid-tier-2, mixed gapReasons, single-sub-type, all-empty, tier-2 generic error), 4 audit requestId persist + override + NULL + filter, 2 allow-list reject + kill switch, plus auxiliare. Frontend 100/100 (neschimbate).",
+      },
+    ],
+  },
+  {
     version: "v2.20.2",
     date: "8 Mai 2026",
     subtitle:

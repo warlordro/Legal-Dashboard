@@ -80,6 +80,9 @@ const ListAuditQuerySchema = z
     outcome: z.enum(["ok", "denied", "error"]).optional(),
     since: z.string().datetime({ offset: true }).optional(),
     until: z.string().datetime({ offset: true }).optional(),
+    // v2.20.3 Grupul J: filtru exact pe request_id pentru jump direct de la
+    // envelope `{requestId}` la randul de audit. 8-128 chars per VALID_RID.
+    requestId: z.string().trim().regex(/^[A-Za-z0-9_\-]{8,128}$/).optional(),
   })
   .strict();
 
@@ -245,6 +248,7 @@ adminRouter.get("/audit", (c) => {
     outcome,
     since,
     until,
+    requestId,
   } = parsed.data;
   const result = listAuditEvents({
     ownerId,
@@ -256,6 +260,7 @@ adminRouter.get("/audit", (c) => {
     outcome,
     since,
     until,
+    requestId,
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
@@ -274,6 +279,7 @@ adminRouter.get("/audit", (c) => {
           ip: r.ip,
           userAgent: r.user_agent,
           detail: safeJsonParse(r.detail_json),
+          requestId: r.request_id,
         })),
         page,
         pageSize,

@@ -4,6 +4,43 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.3] - 2026-05-08
+
+### RNPM hardening — fail-fast, audit corelat cu envelope, allow-list canonica
+
+Hardening urmare a `/full-review` post v2.20.2. Adauga 1 migration noua (audit_log
++ request_id), un kill switch operational, si validare in plus la nivel de ruta.
+Fara modificari la contract HTTP la rezultat (split-stats shape neschimbat).
+
+#### Schimbari backend
+
+- **Audit retention 90 zile pe `audit_log`** ([backend/src/db/auditRepository.ts](backend/src/db/auditRepository.ts)). Adauga `purgeOldAuditLog(retentionDays = 90)` analog `purgeOldRuns` / `purgeOldAiUsage`. Apelat din scheduler-ul de monitoring; previne crestere monotona pe productie cu ~1 INSERT/request mutant.
+- **Fail-fast pe K=3 silent_refusal consecutive** ([backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts)). Daca RNPM intoarce `total>0, documents:[]` de 3 ori la rand pe acelasi split (refuz tacit upstream), saritura restul sub-tipurilor cu reason RO. Counter reset pe semnale clare ca upstream functioneaza (total=0 sau success cu docs sau limit_exceeded). Evita 18×1.5s waste pe categorii ipoteci cand throttle-ul e wholesale.
+- **`audit_log.request_id` (migration 0017)** ([backend/src/db/migrations/0017_audit_request_id.up.sql](backend/src/db/migrations/0017_audit_request_id.up.sql)). Coloana noua + index partial `WHERE request_id IS NOT NULL`. Permite jump direct de la envelope `{requestId}` la randul de audit corespunzator (admin Audit page filtru `requestId` exact). Migration are si fisier `.down.sql` cu `DROP COLUMN` (better-sqlite3 ≥3.35).
+- **`onSearchCreated` callback in `executeSplitSearch`** ([backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts)). Surface searchId-ul imediat ce parent-ul e creat in DB, inainte de prima sub-cautare. Permite SSE handler-ului sa emita `event: started` ca front-ul sa stie searchId-ul chiar daca user-ul aborteaza in primele secunde.
+- **SSE explicit timeout vs aborted differentiation** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). Catch-ul `AbortError` distinge `c.req.raw.signal?.aborted === true` (client a inchis conexiunea) vs intern (`SSE_SPLIT_TIMEOUT_MS` / `SSE_TIMEOUT_MS` au expirat). Front-ul stie sa afiseze toast "anulat de utilizator" vs "timeout server" si include `searchId` + `timeoutMs` in payload.
+- **`captchasUsed` corect cu retry-uri** ([backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts)). Adaugat `captchasUsed: number` la `ExecuteSearchResult`; pe success acumuleaza `result.captchasUsed` (include retries `search_retry`); pe error path conservative `+1` (cel putin captcha-ul initial a fost consumat).
+- **Allow-list canonica pe `subTypeLabels`** ([backend/src/services/rnpmSubTypes.ts](backend/src/services/rnpmSubTypes.ts), [backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). Fisier nou cu mirror al `frontend/src/components/rnpm/rnpm-form-constants.ts:TIP_AVIZ_BY_CATEGORY`. POST `/search-split` valideaza ca lista trimisa e prefix exact (ordine + casing) — previne drift / accidental re-ordering care ar fi schimbat indexarea 1-based pe care RNPM o asteapta in `tipInscriere.value`.
+- **Kill switch `RNPM_AUDIT_CAP_HIT_DISABLED`** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). Set la `1` opreste INSERT-ul `rnpm.cap_hit` fara restart; util operational daca audit_log creste prea repede sau in timpul unui incident upstream care produce zeci de events/minut.
+
+#### Tests
+
+- **Backend**: 844/844 (era 827 in v2.20.2, +17 noi):
+  - 2 in `rnpmSearchService.split.test.ts` Grupul I: K=3 fail-fast happy path + counter reset pe success intermediar.
+  - 5 in `rnpmSearchService.split.test.ts` Grupul N edge cases: abort mid-tier-2, mixed gapReasons (terminal_cap + silent_refusal + residual_unclassified), single-sub-type, all-empty, tier-2 generic error.
+  - 4 in `auditRepository.test.ts` Grupul J: requestId persist din middleware, override explicit, NULL pe system events, filter exact.
+  - 2 in `routes/rnpm.split-route.test.ts` Grupul O: allow-list reject, kill switch.
+  - 1 admin route Grupul J: filtru `requestId` in `/api/v1/admin/audit`.
+  - 3 alte teste auxiliare in suite-ul existing (cumulativ).
+- **Frontend**: 100/100 (neschimbate).
+
+#### Versionare
+
+`2.20.2` -> `2.20.3` (minor patch — adauga migration 0017 + helper service nou,
+fara breaking change la API public sau la shape-ul SSE).
+
+---
+
 ## [2.20.2] - 2026-05-08
 
 ### Patch correctness — audit safety, overlay humanizat, exhaustiveness TS

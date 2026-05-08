@@ -11,6 +11,7 @@ import {
   type SplitSearchProgress,
 } from "../services/rnpmSearchService.ts";
 import { defaultRnpmClient, RnpmError, type RnpmSearchType } from "../services/rnpmClient.ts";
+import { validateSubTypeLabels } from "../services/rnpmSubTypes.ts";
 import { getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
 import { getDbPath, compactDb } from "../db/schema.ts";
 import { getBackupDir, deleteAllBackups, listBackupsWithMeta, restoreFromBackup } from "../db/backup.ts";
@@ -146,6 +147,11 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     return c.json({ error: "Cerere deja in curs (dedup clientRequestId)" }, 409);
   }
 
+  // v2.20.3 Grupul K — capture searchId imediat dupa ce e creat ca abort-ul
+  // client mid-search sa-l poata include in 499 body (frontend foloseste asta
+  // pentru a afisa partial state din /saved).
+  let createdSearchId: number | null = existingSearchId ?? null;
+
   const run = executeSearch({
     type,
     params: params as Parameters<typeof executeSearch>[0]["params"],
@@ -159,6 +165,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     existingGcode,
     existingSearchId,
     signal: c.req.raw.signal,
+    onSearchCreated: (sid) => { createdSearchId = sid; },
   });
   if (dedupKey) inflightRequests.set(dedupKey, run);
 
@@ -182,10 +189,12 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
       console.log("[rnpm/search] aborted by client");
       // 499 = Client Closed Request (non-standard but widely used by nginx/others).
       // Hono's typed status codes exclude it, so emit via a plain Response.
-      return new Response(JSON.stringify({ error: "Cautare oprita" }), {
-        status: 499,
-        headers: { "Content-Type": "application/json" },
-      });
+      // v2.20.3 Grupul K: include searchId daca a fost creat (null daca abort
+      // s-a intamplat inainte de saveSearch).
+      return new Response(
+        JSON.stringify({ error: "Cautare oprita", searchId: createdSearchId }),
+        { status: 499, headers: { "Content-Type": "application/json" } },
+      );
     }
     // Structured "limit exceeded" — frontend foloseste `code` + `splittable` ca sa
     // ofere split via tipInscriere. Restul erorilor RNPM/JSON ramane 500 generic.
@@ -228,9 +237,6 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
   const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
-  if (dedupKey && inflightRequests.has(dedupKey)) {
-    return c.json({ error: "Bulk deja in curs (dedup clientRequestId)" }, 409);
-  }
 
   const validItems: BulkSearchItem[] = [];
   for (const it of items) {
@@ -244,6 +250,22 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
       params: item.params as BulkSearchItem["params"],
       label: typeof item.label === "string" ? item.label : undefined,
     });
+  }
+
+  // CP-B8 (v2.20.3): rezervare sincrona DUPA validare, INAINTE de streamSSE.
+  // Hono streamSSE invoca cb-ul sincron (cb-ul ruleaza pana la primul await
+  // inainte ca streamSSE sa returneze), deci varianta veche cu set() in
+  // interiorul cb-ului era de facto race-free. Forma actuala face contractul
+  // explicit: orice refactor care strecoara un await intre has() si set()
+  // (sau care schimba semantica streamSSE) nu mai poate sparge dedup-ul.
+  // Bonus: evita leak-ul potential pe early-return din loop-ul de validare
+  // si decupleaza dedup-ul de fluxul SSE. Sentinel `Promise.resolve()` —
+  // Map-ul e folosit doar pentru has(), valoarea e indiferenta.
+  if (dedupKey) {
+    if (inflightRequests.has(dedupKey)) {
+      return c.json({ error: "Bulk deja in curs (dedup clientRequestId)" }, 409);
+    }
+    inflightRequests.set(dedupKey, Promise.resolve());
   }
 
   return streamSSE(c, async (stream) => {
@@ -270,14 +292,28 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
       typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
       captchaMode === "race" ? "race" : "sequential"
     );
-    if (dedupKey) inflightRequests.set(dedupKey, bulkRun);
 
     try {
       await bulkRun;
       await stream.writeSSE({ event: "complete", data: "{}" });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await stream.writeSSE({ event: "error", data: JSON.stringify({ error: msg }) });
+      // v2.20.3 Grupul K + L — diferentiere abort/timeout vs error generic.
+      // Bulk emite searchId per-item via progress events, deci nu mai e nevoie
+      // sa-l surface din nou aici.
+      if (e instanceof DOMException && e.name === "AbortError") {
+        const clientAborted = c.req.raw.signal?.aborted === true;
+        const eventName = clientAborted ? "aborted" : "timeout";
+        await stream.writeSSE({
+          event: eventName,
+          data: JSON.stringify({
+            reason: clientAborted ? "client_aborted" : "server_timeout",
+            timeoutMs: clientAborted ? undefined : SSE_TIMEOUT_MS,
+          }),
+        });
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        await stream.writeSSE({ event: "error", data: JSON.stringify({ error: msg }) });
+      }
     } finally {
       clearTimeout(timeoutHandle);
       c.req.raw.signal?.removeEventListener?.("abort", onAbort);
@@ -318,6 +354,14 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
       return c.json({ error: "Sub-tip invalid in lista" }, 400);
     }
   }
+  // v2.20.3 Grupul O — allow-list canonica per categorie (mirror backend al
+  // frontend/src/components/rnpm/rnpm-form-constants.ts). Pana acum backend
+  // accepta orice string array, ceea ce permitea drift sau tampering pe
+  // indexarea 1-based pe care RNPM o asteapta in `tipInscriere.value`.
+  const canonicalErr = validateSubTypeLabels(type, subTypeLabels as string[]);
+  if (canonicalErr) {
+    return c.json({ error: canonicalErr }, 400);
+  }
   if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
     return c.json({ error: "Cheie captcha lipsa sau invalida" }, 400);
   }
@@ -326,8 +370,13 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
   const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
-  if (dedupKey && inflightRequests.has(dedupKey)) {
-    return c.json({ error: "Split deja in curs (dedup clientRequestId)" }, 409);
+  // CP-B8 (v2.20.3): vezi nota pe ruta /bulk — aceeasi rezervare sincrona
+  // inainte de streamSSE, ca contract explicit. Valoarea Map-ului e sentinel.
+  if (dedupKey) {
+    if (inflightRequests.has(dedupKey)) {
+      return c.json({ error: "Split deja in curs (dedup clientRequestId)" }, 409);
+    }
+    inflightRequests.set(dedupKey, Promise.resolve());
   }
 
   return streamSSE(c, async (stream) => {
@@ -341,6 +390,12 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
       data: JSON.stringify(p),
     });
 
+    // v2.20.3 Grupul K — capture parentSearchId imediat ce e creat, ca abort-ul
+    // sau timeout-ul mid-search sa poata emite SSE `aborted`/`timeout` cu
+    // searchId. Fara asta, frontend pierdea referinta si nu putea afisa
+    // partial state din istoric.
+    let parentSearchId: number | null = null;
+
     const splitRun = executeSplitSearch(
       {
         type,
@@ -352,21 +407,33 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
         captchaMode: captchaMode === "race" ? "race" : "sequential",
         ownerId,
         signal: controller.signal,
+        onSearchCreated: (sid) => {
+          parentSearchId = sid;
+          // Emite "started" SSE imediat ca front-ul sa stie searchId-ul chiar
+          // daca user-ul aborteaza inainte de prima sub-cautare.
+          void stream.writeSSE({
+            event: "started",
+            data: JSON.stringify({ searchId: sid }),
+          });
+        },
       },
       (p) => { void send(p); },
       defaultRnpmClient,
     );
-    if (dedupKey) inflightRequests.set(dedupKey, splitRun);
 
     try {
       const result = await splitRun;
       // Audit observability: log gap-uri reziduale (rezultate care nu au putut fi
       // recuperate via tier-1+tier-2). Util pentru a urmari frecventa cazurilor
       // terminal_cap / silent_refusal / residual_unclassified pe productie.
+      // v2.20.3 Grupul O — kill switch operational: daca audit_log creste prea
+      // repede sau daca un incident ne forteaza dezactivarea temporara, set
+      // RNPM_AUDIT_CAP_HIT_DISABLED=1 sare INSERT-ul rnpm.cap_hit fara restart.
+      const auditCapHitDisabled = process.env.RNPM_AUDIT_CAP_HIT_DISABLED === "1";
       const blockedStats = result.splitStats.filter(
         (s) => s.status === "blocked" || s.status === "partial",
       );
-      if (blockedStats.length > 0 || result.upstreamTotal !== result.total) {
+      if (!auditCapHitDisabled && (blockedStats.length > 0 || result.upstreamTotal !== result.total)) {
         const gapByReason: Record<string, number> = {};
         // Tier-1 contributors: foloseste s.gap (deja calculat in service) cand exista,
         // altfel cade la max(0, subTotal - count). Evita dublu-numararea pentru
@@ -452,8 +519,30 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
         data: JSON.stringify(result),
       });
     } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      await stream.writeSSE({ event: "error", data: JSON.stringify({ error: msg }) });
+      // v2.20.3 Grupul K + L — diferentiere abort/timeout vs error generic ca
+      // frontend-ul sa stie ce sa afiseze (toast "anulat" vs "eroare"), si sa
+      // includa searchId daca a fost creat (partial state recoverable din
+      // istoric, vezi /saved). Timeout-ul intern (SSE_SPLIT_TIMEOUT_MS)
+      // declanseaza tot AbortError pe controller, distinctia se face prin
+      // c.req.raw.signal.aborted (true = client a inchis) vs false (timeout intern).
+      if (e instanceof DOMException && e.name === "AbortError") {
+        const clientAborted = c.req.raw.signal?.aborted === true;
+        const eventName = clientAborted ? "aborted" : "timeout";
+        await stream.writeSSE({
+          event: eventName,
+          data: JSON.stringify({
+            searchId: parentSearchId,
+            reason: clientAborted ? "client_aborted" : "server_timeout",
+            timeoutMs: clientAborted ? undefined : SSE_SPLIT_TIMEOUT_MS,
+          }),
+        });
+      } else {
+        const msg = e instanceof Error ? e.message : String(e);
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({ error: msg, searchId: parentSearchId }),
+        });
+      }
     } finally {
       clearTimeout(timeoutHandle);
       c.req.raw.signal?.removeEventListener?.("abort", onAbort);

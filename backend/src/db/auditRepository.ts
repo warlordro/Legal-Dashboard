@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { getDb } from "./schema.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
+import { getRequestId } from "../middleware/requestId.ts";
 import { escapeLikeMeta } from "../util/textNormalize.ts";
 
 // Audit outcomes per PLAN-monitoring-webmode.md §2.4. Stored as TEXT with a
@@ -20,6 +21,9 @@ export interface AuditOptions {
   actorId?: string | null;
   ip?: string | null;
   userAgent?: string | null;
+  // v2.20.3 Grupul J — corelare audit_log <-> envelope `{data, error, requestId}`.
+  // Cand `c` e prezent, e populat automat din `getRequestId(c)`.
+  requestId?: string | null;
 }
 
 // Shape stored in detail_json. Routes/services that record audit events build
@@ -42,6 +46,7 @@ function readContext(c: Context): {
   actorId: string;
   ip: string | null;
   userAgent: string | null;
+  requestId: string | null;
 } {
   const ownerId = getOwnerId(c);
   const actorId = getActorId(c);
@@ -52,7 +57,12 @@ function readContext(c: Context): {
     ip = null;
   }
   const userAgent = c.req.header("user-agent") ?? null;
-  return { ownerId, actorId, ip, userAgent };
+  // requestId middleware ruleaza inainte de orice audit write; daca lipseste
+  // (de ex. tests care apeleaza recordAudit fara stack-ul middleware), normalizam
+  // la null in loc de string gol.
+  const ridRaw = getRequestId(c);
+  const requestId = ridRaw && ridRaw.length > 0 ? ridRaw : null;
+  return { ownerId, actorId, ip, userAgent, requestId };
 }
 
 // Primary write path. Two call shapes:
@@ -70,6 +80,7 @@ export function recordAudit(
   let actorId: string | null = options.actorId ?? null;
   let ip: string | null = options.ip ?? null;
   let userAgent: string | null = options.userAgent ?? null;
+  let requestId: string | null = options.requestId ?? null;
 
   if (c !== null) {
     const ctx = readContext(c);
@@ -77,13 +88,14 @@ export function recordAudit(
     if (actorId === null) actorId = ctx.actorId;
     if (ip === null) ip = ctx.ip;
     if (userAgent === null) userAgent = ctx.userAgent;
+    if (requestId === null) requestId = ctx.requestId;
   }
 
   getDb()
     .prepare(
       `INSERT INTO audit_log
-         (owner_id, actor_id, action, target_kind, target_id, outcome, ip, user_agent, detail_json)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         (owner_id, actor_id, action, target_kind, target_id, outcome, ip, user_agent, detail_json, request_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       ownerId,
@@ -95,6 +107,7 @@ export function recordAudit(
       ip,
       userAgent,
       serializeDetail(options.detail),
+      requestId,
     );
 }
 
@@ -113,6 +126,8 @@ export interface AuditRow {
   ip: string | null;
   user_agent: string | null;
   detail_json: string;
+  // v2.20.3: nullable pe randuri legacy (dinainte de migration 0017).
+  request_id: string | null;
 }
 
 export function getAuditEvents(opts: {
@@ -159,6 +174,9 @@ export interface ListAuditEventsOpts {
   until?: string;
   limit?: number;
   offset?: number;
+  // v2.20.3: filtru exact pe request_id (admin Audit page poate jumpui de la
+  // un envelope `{requestId}` la randul de audit corespunzator).
+  requestId?: string;
 }
 
 export interface ListAuditEventsResult {
@@ -231,10 +249,28 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
     where.push("ts < ?");
     params.push(opts.until);
   }
+  if (opts.requestId) {
+    where.push("request_id = ?");
+    params.push(opts.requestId);
+  }
   return {
     sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",
     params,
   };
+}
+
+// v2.20.3: retention purge — analog `purgeOldRuns` / `purgeOldAiUsage`.
+// `audit_log` creste monoton pe productie cu ~1 INSERT per request mutant.
+// Sterge randurile mai vechi de `retentionDays` (default 90, in scheduler).
+// Window-ul e generos: pentru desktop e suficient (audit util operational
+// ramane vizibil); pentru deploy web cu cerinte legale mai stricte, tuneaza
+// constanta din `services/monitoring/scheduler.ts:AUDIT_LOG_RETENTION_DAYS`.
+export function purgeOldAuditLog(retentionDays = 90): number {
+  const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+  const info = getDb()
+    .prepare(`DELETE FROM audit_log WHERE ts < ?`)
+    .run(cutoff);
+  return info.changes;
 }
 
 export function listAuditEvents(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {
