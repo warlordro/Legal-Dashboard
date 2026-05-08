@@ -20,6 +20,11 @@ export function describeSplitPhase(phase: RnpmSplitProgress["phase"]): string {
       return "split secundar";
     case "nested_done":
       return "split secundar — finalizat";
+    default: {
+      // Exhaustive guard — TS va eroa daca SplitProgress adauga o faza noua.
+      const _exhaustive: never = phase;
+      return String(_exhaustive);
+    }
   }
 }
 
@@ -37,6 +42,10 @@ export function describeNestedPhase(phase: RnpmNestedSplitProgress["phase"]): st
       return "fara rezultate";
     case "error":
       return "eroare";
+    default: {
+      const _exhaustive: never = phase;
+      return String(_exhaustive);
+    }
   }
 }
 

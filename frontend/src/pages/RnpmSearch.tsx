@@ -12,8 +12,8 @@ import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
 import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
 import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
 import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
-import { formatSplitProgress } from "@/lib/rnpmProgressPhase";
-import type { RnpmSearchParams, RnpmSearchType, RnpmDocument, RnpmSplitSubResult } from "@/types/rnpm";
+import { describeNestedPhase, describeSplitPhase, formatSplitProgress } from "@/lib/rnpmProgressPhase";
+import type { RnpmSearchParams, RnpmSearchType, RnpmDocument, RnpmSplitSubResult, RnpmSplitProgress } from "@/types/rnpm";
 import type { CaptchaProvider, CaptchaMode } from "@/lib/rnpmApi";
 
 type Tab = "search" | "bulk" | "saved";
@@ -81,7 +81,7 @@ export default function RnpmSearchPage({
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [autoLoading, setAutoLoading] = useState(false);
   const [pendingSplit, setPendingSplit] = useState<PendingSplit | null>(null);
-  const [splitProgress, setSplitProgress] = useState<{ index: number; total: number; label: string; phase: string } | null>(null);
+  const [splitProgress, setSplitProgress] = useState<RnpmSplitProgress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const isAbort = (e: unknown): boolean => e instanceof DOMException && e.name === "AbortError";
@@ -152,7 +152,7 @@ export default function RnpmSearchPage({
     setError(null);
     setResult(null);
     setElapsedMs(null);
-    setSplitProgress({ index: 0, total: subTypeLabels.length, label: subTypeLabels[0] ?? "", phase: "captcha" });
+    setSplitProgress({ index: 0, total: subTypeLabels.length, label: subTypeLabels[0] ?? "", phase: "captcha" } as RnpmSplitProgress);
     setPhase(`Pregatire split ${subTypeLabels.length} sub-tipuri...`);
     setActiveSearchType(type);
     setLastType(type);
@@ -165,7 +165,7 @@ export default function RnpmSearchPage({
         subTypeLabels,
         captchaKey,
         (p) => {
-          setSplitProgress({ index: p.index, total: p.total, label: p.label, phase: p.phase });
+          setSplitProgress(p);
           setPhase(formatSplitProgress(p));
         },
         ctl.signal,
@@ -476,10 +476,16 @@ export default function RnpmSearchPage({
       {splitProgress && (
         <div className="fixed bottom-4 right-4 z-40 max-w-sm rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 shadow-lg">
           <div className="font-medium">
-            Split RNPM {splitProgress.index}/{splitProgress.total}
+            Split RNPM {splitProgress.index + 1}/{splitProgress.total}
           </div>
           <div className="truncate text-[11px]">
-            {splitProgress.label} - {splitProgress.phase}
+            {splitProgress.label} - {describeSplitPhase(splitProgress.phase)}
+            {splitProgress.nested && (
+              <>
+                {" -> "}
+                {splitProgress.nested.index}/{splitProgress.nested.total} {splitProgress.nested.label} ({describeNestedPhase(splitProgress.nested.phase)})
+              </>
+            )}
           </div>
         </div>
       )}

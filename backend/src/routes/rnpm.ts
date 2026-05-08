@@ -368,31 +368,84 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
       );
       if (blockedStats.length > 0 || result.upstreamTotal !== result.total) {
         const gapByReason: Record<string, number> = {};
+        // Tier-1 contributors: foloseste s.gap (deja calculat in service) cand exista,
+        // altfel cade la max(0, subTotal - count). Evita dublu-numararea pentru
+        // status === "partial" unde s.gap = subTotal - SUM(nested.subTotal).
         for (const s of blockedStats) {
           if (s.gapReason) {
-            const missing = (s.subTotal ?? 0) - (s.count ?? 0);
+            const missing = s.gap ?? Math.max(0, (s.subTotal ?? 0) - (s.count ?? 0));
             gapByReason[s.gapReason] = (gapByReason[s.gapReason] ?? 0) + missing;
           }
+          // Tier-2 nested gaps (residual_unclassified pe tier-1 nu acopera asta —
+          // fiecare destinatie blocata individual emite propriul gapReason).
+          if (s.nested) {
+            for (const n of s.nested) {
+              if (n.gapReason) {
+                const missing = Math.max(0, (n.subTotal ?? 0) - (n.count ?? 0));
+                gapByReason[n.gapReason] = (gapByReason[n.gapReason] ?? 0) + missing;
+              }
+            }
+          }
         }
-        recordAudit(c, "rnpm.cap_hit", {
-          targetKind: "search",
-          targetId: String(result.searchId),
-          detail: {
-            type,
-            criteriu: result.criteriu,
-            upstreamTotal: result.upstreamTotal,
-            recovered: result.total,
-            gap: result.upstreamTotal - result.total,
-            gapByReason,
-            blockedLabels: blockedStats.map((s) => ({
-              label: s.label,
-              status: s.status,
-              gapReason: s.gapReason,
-              subTotal: s.subTotal,
-              count: s.count,
-            })),
-          },
-        });
+        // blockedLabels include atat tier-1 cat si tier-2 (cu prefix "tier1 > tier2"
+        // pentru destinatii). Cap la 20 ca sa nu poluam audit_log la search-uri patologice.
+        const blockedLabels: Array<{
+          label: string;
+          status: string;
+          gapReason?: string;
+          subTotal?: number;
+          count?: number;
+        }> = [];
+        for (const s of blockedStats) {
+          blockedLabels.push({
+            label: s.label,
+            status: s.status,
+            gapReason: s.gapReason,
+            subTotal: s.subTotal,
+            count: s.count,
+          });
+          if (s.nested) {
+            for (const n of s.nested) {
+              if (n.status === "blocked" || n.status === "error") {
+                blockedLabels.push({
+                  label: `${s.label} > ${n.label}`,
+                  status: n.status,
+                  gapReason: n.gapReason,
+                  subTotal: n.subTotal,
+                  count: n.count,
+                });
+              }
+            }
+          }
+        }
+        const cappedLabels = blockedLabels.slice(0, 20);
+        // recordAudit propaga erori (cf. auditRepository.ts header). Un INSERT
+        // esuat in audit_log NU trebuie sa flip-uiasca success-ul SSE in error,
+        // asa ca izolam local — observability != hard dependency.
+        try {
+          recordAudit(c, "rnpm.cap_hit", {
+            targetKind: "search",
+            targetId: String(result.searchId),
+            detail: {
+              // searchType e enum low-cardinality (RnpmSearchType), nu PII.
+              // criteriu (CUI/CNP/nume) NU se loga in detail — duplicat al
+              // payload-ului de cautare; gdpr-friendly daca audit_log e exportat.
+              searchType: type,
+              upstreamTotal: result.upstreamTotal,
+              recovered: result.total,
+              gap: result.upstreamTotal - result.total,
+              gapByReason,
+              blockedLabels: cappedLabels,
+              blockedLabelsTruncated: blockedLabels.length > cappedLabels.length,
+            },
+          });
+        } catch (auditErr) {
+          console.warn(
+            `[rnpm.cap_hit] audit insert failed for searchId=${result.searchId}: ${
+              auditErr instanceof Error ? auditErr.message : String(auditErr)
+            }`,
+          );
+        }
       }
       await stream.writeSSE({
         event: "complete",
