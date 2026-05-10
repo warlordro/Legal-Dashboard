@@ -60,49 +60,54 @@ export function useAlertsStream(): UseAlertsStreamResult {
     }
   }, []);
 
-  const showDesktopNotification = useCallback(async (alert: MonitoringAlert) => {
-    // Per-user opt-out (Setari → Notificari sistem). In-app badge / Alerts page
-    // raman intacte; doar popup-urile OS sunt suprimate.
-    if (!getAlertsNotificationsEnabled()) return;
-    // Suppress when the user is already looking at the app — the in-app badge
-    // and Alerts page are sufficient. Covers both Electron and browser modes.
-    if (typeof document !== "undefined"
-      && document.visibilityState === "visible"
-      && document.hasFocus()) {
-      return;
-    }
-    const payload = buildAlertNotificationPayload(alert);
-    if (window.desktopApi?.showNotification) {
-      const status = await getDesktopNotificationStatus();
-      if (!notificationStatusAllowsNative(status)) {
-        console.warn("[alerts] native notification blocked", status?.reason || status?.state);
+  const showDesktopNotification = useCallback(
+    async (alert: MonitoringAlert) => {
+      // Per-user opt-out (Setari → Notificari sistem). In-app badge / Alerts page
+      // raman intacte; doar popup-urile OS sunt suprimate.
+      if (!getAlertsNotificationsEnabled()) return;
+      // Suppress when the user is already looking at the app — the in-app badge
+      // and Alerts page are sufficient. Covers both Electron and browser modes.
+      if (typeof document !== "undefined" && document.visibilityState === "visible" && document.hasFocus()) {
         return;
       }
-      window.desktopApi.showNotification(payload).catch((err) => console.warn("[alerts] native notification failed", err));
-      return;
-    }
-    if (!("Notification" in window)) return;
-    const notify = () => {
-      try {
-        new Notification(payload.title, {
-          body: payload.body,
-          tag: payload.tag,
-          silent: payload.silent,
-        });
-      } catch (err) {
-        console.warn("[alerts] desktop notification failed", err);
+      const payload = buildAlertNotificationPayload(alert);
+      if (window.desktopApi?.showNotification) {
+        const status = await getDesktopNotificationStatus();
+        if (!notificationStatusAllowsNative(status)) {
+          console.warn("[alerts] native notification blocked", status?.reason || status?.state);
+          return;
+        }
+        window.desktopApi
+          .showNotification(payload)
+          .catch((err) => console.warn("[alerts] native notification failed", err));
+        return;
       }
-    };
-    if (Notification.permission === "granted") {
-      notify();
-      return;
-    }
-    if (Notification.permission === "default") {
-      Notification.requestPermission().then((permission) => {
-        if (permission === "granted") notify();
-      }).catch((err) => console.warn("[alerts] notification permission failed", err));
-    }
-  }, [getDesktopNotificationStatus]);
+      if (!("Notification" in window)) return;
+      const notify = () => {
+        try {
+          new Notification(payload.title, {
+            body: payload.body,
+            tag: payload.tag,
+            silent: payload.silent,
+          });
+        } catch (err) {
+          console.warn("[alerts] desktop notification failed", err);
+        }
+      };
+      if (Notification.permission === "granted") {
+        notify();
+        return;
+      }
+      if (Notification.permission === "default") {
+        Notification.requestPermission()
+          .then((permission) => {
+            if (permission === "granted") notify();
+          })
+          .catch((err) => console.warn("[alerts] notification permission failed", err));
+      }
+    },
+    [getDesktopNotificationStatus]
+  );
 
   useEffect(() => {
     let stopped = false;

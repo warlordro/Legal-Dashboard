@@ -16,9 +16,7 @@ export function setAlertsNotificationsEnabled(next: boolean): void {
   for (const listener of listeners) listener(next);
 }
 
-export function subscribeAlertsNotificationsPref(
-  listener: (value: boolean) => void,
-): () => void {
+export function subscribeAlertsNotificationsPref(listener: (value: boolean) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }

@@ -90,11 +90,12 @@ export function NotificationStatusPanel() {
 
   const tone = statusTone(status);
   const Icon = tone === "ok" ? CheckCircle2 : AlertCircle;
-  const toneClass = tone === "ok"
-    ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
-    : tone === "blocked"
-      ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
-      : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300";
+  const toneClass =
+    tone === "ok"
+      ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
+      : tone === "blocked"
+        ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
+        : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-300";
 
   return (
     <section className="mb-3 rounded-lg border border-border bg-background/40 p-3">
@@ -166,9 +167,8 @@ export function NotificationStatusPanel() {
         <span className="min-w-0">
           <span className="font-medium">Trimite notificari sistem pentru alerte noi</span>
           <span className="mt-0.5 block text-[11px] text-muted-foreground">
-            Cand e oprit, popup-urile Windows/macOS sunt suprimate; bulina cu numar si pagina
-            Alerts raman intacte. Cele suprimate nu se stocheaza — la reactivare nu primesti
-            flood. Setarea revine la activ la urmatorul start.
+            Cand e oprit, popup-urile Windows/macOS sunt suprimate; bulina cu numar si pagina Alerts raman intacte. Cele
+            suprimate nu se stocheaza — la reactivare nu primesti flood. Setarea revine la activ la urmatorul start.
           </span>
         </span>
       </label>
