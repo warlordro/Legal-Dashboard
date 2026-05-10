@@ -23,36 +23,33 @@
 
 ---
 
-## Batch 0 — Docs & .env hygiene (LOW risk, 30min)
+## Batch 0 — Docs & .env hygiene (LOW risk, 30min) ✅ DONE in v2.20.6
 
-Target release: **v2.20.4**.
+Target release: **v2.20.6** (LIVRAT).
 
-- [ ] **`.env.example`** — adauga `RNPM_AUDIT_CAP_HIT_DISABLED=` (OPTIONAL — disable cap-hit audit for legacy ingestion). Cod-ul foloseste deja flagul, doar documentatia lipseste.
-- [ ] **`.env.example`** — adauga `DAILY_REPORT_HOUR=` (OPTIONAL — hour 0-23 pentru raportul de monitoring; default 8).
-- [ ] **`.env.example`** — adauga `MIGRATIONS_STRICT=` (OPTIONAL — `1` = abort la sha mismatch fara self-heal).
-- [ ] **`.env.example`** — comentariu pentru `RNPM_SITEKEY=` ca e public hCaptcha sitekey, NU secret.
-- [ ] **`CLAUDE.md`** — actualizeaza "Migrations in `backend/src/db/migrations/` (latest 0016)" -> `0017`.
-- [ ] **`README.md`** — sanity-check ca lista env vars din setup este sincronizata cu `.env.example` final.
+- [x] **`.env.example`** — recreat de la zero cu toate cele ~25 env vars folosite in cod (nu doar incremental — fisierul nu exista). Include `RNPM_AUDIT_CAP_HIT_DISABLED`, `DAILY_REPORT_HOUR`, `MIGRATIONS_STRICT`, plus comentariul ca `RNPM_SITEKEY` este public hCaptcha sitekey, NU secret.
+- [x] **`CLAUDE.md`** — actualizat "Migrations in `backend/src/db/migrations/` (latest 0016)" -> `0017`.
+- [x] **`README.md`** — env vars sectiune sincronizata cu `.env.example` final.
 
-**Risc modificare:** zero — doar docs. **Mitigare:** review prin `Grep -i "process.env"` sa confirm 1:1 cu `.env.example`.
+**Risc modificare:** zero — doar docs. **Status:** LIVRAT v2.20.6.
 
 ---
 
-## Batch 1 — API envelope consistency (MED risk, 2-3h)
+## Batch 1 — API envelope consistency (MED risk, 2-3h) — partially DONE
 
-Target release: **v2.20.4**.
+Target release: **v2.20.6 (1.1 only)** + **PR-6** (rest deferred).
 
 Standard envelope (din v2.14.0): `{ data: T | null, error: { code, message } | null, requestId }`. Mai multe rute returneaza inca shape-uri legacy.
 
-- [ ] **`backend/src/middleware/requireRole.ts:35-60`** — 401/403 returneaza `{ error: { code, message } }` fara `data: null` si fara `requestId`. Foloseste `fail()` din `util/envelope.ts`.
-- [ ] **`backend/src/routes/rnpm.ts:108-117`** — web-mode 501 returneaza raw `{ error: "..." }`. Migreaza la `fail("WEB_MODE_NOT_SUPPORTED", "...")`.
-- [ ] **`backend/src/routes/ai.ts`** — verifica raspunsurile error pentru aceeasi inconsecventa (toate caile 4xx/5xx).
-- [ ] **`backend/src/middleware/bodyTooLarge.ts`** (sau echivalent) — 413 raspunde cu envelope-ul standard.
-- [ ] **Pagination 400 vs 422** — `page=0` raspunde 400 cu cod `INVALID_PAGE`; alinieaza-l cu envelope.
-- [ ] **Captcha balance** — `400 INSUFFICIENT_FUNDS` ar trebui sa fie `503 SERVICE_UNAVAILABLE` cu envelope (nu e fault de input).
-- [ ] **Zod 422 -> 400** — schimba `422` pe validation errors la `400 VALIDATION_ERROR` ca sa eliminam doua coduri pentru acelasi caz.
+- [x] **`backend/src/middleware/requireRole.ts:35-60`** — 401/403 returneaza acum `fail()` cu `data: null` + `requestId`. ✅ LIVRAT v2.20.6 (Batch 1.1).
+- [ ] **DEFER PR-6** — **`backend/src/routes/rnpm.ts:108-117`** — web-mode 501 returneaza raw `{ error: "..." }`. Migrare blocata de `rnpm.contract.test.ts` care asertea `expect(typeof body.error).toBe("string")` ca guard de migrare; `util/envelope.ts` cere migrare one-shot odata cu `@hono/zod-openapi`.
+- [ ] **DEFER PR-6** — **`backend/src/routes/ai.ts`** — toate caile 4xx/5xx legacy.
+- [ ] **DEFER PR-6** — **`bodyTooLarge` 413** in `rnpm.ts` + `termene.ts` — raw `{ error: "Payload prea mare" }`.
+- [ ] **DEFER PR-6** — **Pagination 400 vs 422** — `page=0` raspunde 400 cu cod `INVALID_PAGE`; alinieaza-l cu envelope.
+- [ ] **DEFER PR-6** — **Captcha balance** — `400 INSUFFICIENT_FUNDS` ar trebui `503 SERVICE_UNAVAILABLE` cu envelope.
+- [ ] **DEFER PR-6** — **Zod 422 -> 400** — alineaza la `400 VALIDATION_ERROR`.
 
-**Risc modificare:** MEDIU — schimba shape-ul de eroare consumat de UI. **Mitigare:** (a) frontend deja are helper care citeste `error.message` cu fallback; (b) adauga test integration per ruta care verifica `data: null` + `requestId` prezente; (c) deploy in v2.20.4 cu rollback rapid pe localStorage daca apar regressii UX.
+**Risc modificare:** MEDIU — schimba shape-ul de eroare consumat de UI. **Decizie 2026-05-10 (v2.20.6):** singura migrare facuta in afara PR-6 e `requireRole.ts` (admin guard) pentru ca pre-migration shape-ul era deja `{ error: { code, message } }` raw — schimbarea la `fail()` e strict aditiva (`data: null` + `requestId` adaugate). Migrarea pe rute care emit raw `{ error: "..." }` (string) ar sparge `rnpm.contract.test.ts` si frontend client (`api.ts` fallback dual-shape NU e o invitatie la migrare incrementala — e doar safety net pentru PR-6). Restul Batch-ului 1 ramane in PR-6 (`@hono/zod-openapi`).
 
 ---
 

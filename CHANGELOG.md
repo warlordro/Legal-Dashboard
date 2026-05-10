@@ -4,6 +4,68 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.6] - 2026-05-10
+
+### Hygiene release: documentatie env vars + microfix envelope pe rute admin
+
+Doua interventii narrow-scope alese ca sa nu rupa contractul: (a) repo-ul nu avea
+`.env.example` desi codul referea ~25 env vars (CP-2 din root `CLAUDE.md` era
+violat); (b) `requireRole.ts` (admin guard) emitea raw `{ error: { code, message } }`
+in loc de envelope-ul standard, ceea ce facea ca admin tooling sa nu poata corela
+401/403 cu `requestId`-ul HTTP. Migrarea envelope pe celelalte rute legacy
+(rnpm/dosare/termene/ai) a fost EXPLICIT amanata pentru PR-6 — vezi sectiunea
+"Defer la PR-6" mai jos.
+
+#### `.env.example` reconstruit (CP-2 closure)
+
+- Fisier nou la root cu ~25 variabile grupate in 7 sectiuni: `Mod si bind`,
+  `Auth (web mode)`, `Storage si migrations`, `Monitoring`, `Email (SMTP)`,
+  `AI providers`, `RNPM operational kill switches`. Fiecare variabila adnotata
+  cu `REQUIRED-WEB | OPTIONAL` plus descriere concreta (ce face, default-ul,
+  unde se obtine valoarea).
+- Listate la final si constantele hardcodate (`RNPM_SITEKEY`, `RNPM_USER_AGENT`)
+  ca pointer in cod — daca migreaza candva la env vars, intrarile exista deja
+  in template ca referinta.
+
+#### `requireRole` envelope (Batch 1.1 din `FIXES-TODO`)
+
+- [backend/src/middleware/requireRole.ts](backend/src/middleware/requireRole.ts):
+  cele 3 cai de denial (`user_not_found` 401, `user_inactive` 403,
+  `role_mismatch` 403) returneaza acum `c.json(fail(code, message, c), status)`
+  in loc de raw `{ error: { code, message } }`.
+- Schimbarea pe wire e strict aditiva: pre-migration shape avea `{ error: { code, message } }`,
+  post-migration adauga `data: null` + `requestId` (din `requestId` middleware).
+  Toate testele existente (8 in `requireRole.test.ts`) raman verde — asertiile
+  erau pe `body.error.code` + `body.error.message`, nu pe shape-ul intregului
+  payload.
+- Beneficiul real: admin tooling (audit log review) poate corela 401/403 cu
+  request-ul HTTP exact prin `requestId`; pana acum erau orfane.
+
+#### Defer la PR-6: rnpm/dosare/termene/ai envelope
+
+Restul rutelor legacy NU au fost migrate. Doua semnale in repo o cer explicit:
+
+1. [backend/src/util/envelope.ts](backend/src/util/envelope.ts) are policy-ul
+   ca migrarea sa fie one-shot odata cu `@hono/zod-openapi` (PR-6), nu
+   incrementala — pentru ca shape-ul wire trebuie tinut sincron cu OpenAPI
+   schema generata.
+2. [backend/src/routes/rnpm.contract.test.ts](backend/src/routes/rnpm.contract.test.ts)
+   are docstring explicit care marcheaza testele ca guard de migrare. Trei
+   teste asertea `expect(typeof body.error).toBe("string")` pentru web-mode
+   501 — schimbarea shape-ului fara PR-6 ar sparge contract tests.
+
+Batch-urile 1.2 (rnpm web-mode 501), 1.3 (`bodyTooLarge` 413), 1.4 (ai.ts error
+paths) raman deschise in `FIXES-TODO.md` cu nota "DEFER la PR-6".
+
+#### Tests
+
+- **Backend**: 844/844, type-check curat. Schimbarea functionala e doar in
+  `requireRole.ts` — testele asertea pe campuri (`error.code`, `error.message`),
+  nu pe shape-ul outer, deci raman compatibile.
+- **Frontend**: 100/100, type-check curat.
+
+---
+
 ## [2.20.5] - 2026-05-10
 
 ### Hotfix release pipeline + SSE timeout aliniat la cap-ul real de 200 CUI

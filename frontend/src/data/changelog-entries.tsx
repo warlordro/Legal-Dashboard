@@ -37,6 +37,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.6",
+    date: "10 Mai 2026",
+    subtitle:
+      "Hygiene release: documentatie env vars + microfix envelope pe rute admin. .env.example creat de la zero (toate cele ~25 env vars folosite in cod, grupate in 7 sectiuni: mod & bind, auth web mode, storage, monitoring, email SMTP, AI providers, RNPM kill switches), cu adnotari REQUIRED-WEB / OPTIONAL si descrieri concrete — inchide CP-2 din root CLAUDE.md. requireRole.ts (admin guard) migreaza cele 3 retururi 401/403 la envelope-ul standard `{ data, error: { code, message }, requestId }` via `fail()` ca admin tooling sa traceze respins-urile prin `requestId`. Migrarea envelope pe celelalte rute legacy (rnpm/dosare/termene/ai) ramane amanata pentru PR-6 (`@hono/zod-openapi`) per policy-ul explicit din `util/envelope.ts` si guardul din `rnpm.contract.test.ts` — nu fac migrare incrementala manual ca sa nu sparg contractul.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: ".env.example reconstruit (CP-2 closure)",
+        content:
+          "Pana acum repo-ul nu avea `.env.example`, desi codul referea ~25 env vars (LEGAL_DASHBOARD_*, MONITORING_*, SMTP_*, ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_AI_KEY, RNPM_AUDIT_CAP_HIT_DISABLED, etc.). Fisierul nou grupeaza variabilele in 7 sectiuni cu comentarii explicite: ce e default-uit, ce e REQUIRED-WEB (web mode refuza pornirea fara), ce e kill switch operational. Listate la final si constantele hardcodate (RNPM_SITEKEY, RNPM_USER_AGENT) ca referinta — daca migreaza candva la env vars, pointer-ul exista deja.",
+      },
+      {
+        title: "requireRole envelope (Batch 1.1)",
+        content:
+          "`backend/src/middleware/requireRole.ts` retureaza acum `fail('unauthorized'|'forbidden', message, c)` pe cele 3 cai de denial (user_not_found, user_inactive, role_mismatch) in loc de raw `{ error: { code, message } }`. Comportamentul pe wire schimba aditiv: adauga `data: null` + `requestId` (din requestId middleware) pe acelasi obiect — toate testele existente raman verde pentru ca asertarea era pe `body.error.code` si `body.error.message`, nu pe shape-ul intregului payload. Beneficiul real: admin tooling poate corela 401/403 din audit log cu request-ul HTTP exact prin `requestId`.",
+      },
+      {
+        title: "Restul rutelor legacy — DEFER la PR-6",
+        content:
+          "Migrarea rnpm.ts (bodyTooLarge 413 + web-mode 501) si a dosare/termene/ai la envelope a fost EXPLICIT amanata. Doua semnale in repo o cer: (1) `backend/src/util/envelope.ts` are comentariu explicit ca migrarea sa fie one-shot odata cu `@hono/zod-openapi` (PR-6), nu incrementala; (2) `backend/src/routes/rnpm.contract.test.ts` are docstring care marcheaza testele ca guard de migrare — schimbarea shape-ului fara PR-6 sparge contract tests. Batch-urile 1.2/1.3/1.4 din FIXES-TODO ramant deschise pentru PR-6.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Backend 844/844, frontend 100/100. Type-check curat pe ambele. Singurele schimbari functionale sunt cele 3 retururi din requireRole — asertiile testelor erau pe `body.error.code/message`, deci raman compatibile cu shape-ul aditiv.",
+      },
+    ],
+  },
+  {
     version: "v2.20.5",
     date: "10 Mai 2026",
     subtitle:

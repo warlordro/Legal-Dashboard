@@ -2,6 +2,7 @@ import type { Context, Next } from "hono";
 import { getUserById, type UserRole } from "../db/userRepository.ts";
 import { getOwnerId } from "./owner.ts";
 import { recordAudit } from "../db/auditRepository.ts";
+import { fail } from "../util/envelope.ts";
 
 // Type-augment Hono so c.get("role") is typed UserRole instead of unknown.
 declare module "hono" {
@@ -32,10 +33,7 @@ export function requireRole(...allowed: UserRole[]) {
         outcome: "denied",
         detail: { reason: "user_not_found", userId, required: allowed },
       });
-      return c.json(
-        { error: { code: "unauthorized", message: "User not found" } },
-        401,
-      );
+      return c.json(fail("unauthorized", "User not found", c), 401);
     }
 
     if (user.status !== "active") {
@@ -43,10 +41,7 @@ export function requireRole(...allowed: UserRole[]) {
         outcome: "denied",
         detail: { reason: "user_inactive", userId, status: user.status, required: allowed },
       });
-      return c.json(
-        { error: { code: "forbidden", message: "Account is not active" } },
-        403,
-      );
+      return c.json(fail("forbidden", "Account is not active", c), 403);
     }
 
     if (!allowed.includes(user.role)) {
@@ -54,10 +49,7 @@ export function requireRole(...allowed: UserRole[]) {
         outcome: "denied",
         detail: { reason: "role_mismatch", userId, role: user.role, required: allowed },
       });
-      return c.json(
-        { error: { code: "forbidden", message: "Insufficient role" } },
-        403,
-      );
+      return c.json(fail("forbidden", "Insufficient role", c), 403);
     }
 
     c.set("role", user.role);
