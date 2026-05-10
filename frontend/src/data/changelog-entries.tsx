@@ -37,18 +37,49 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.5",
+    date: "10 Mai 2026",
+    subtitle:
+      "Hotfix release pipeline + SSE timeout aliniat la cap-ul real de 200 CUI. v2.20.4 a fost taggat dar build-ul GitHub Actions a esuat (Docker + macOS) pentru ca commit-ul de release a stripuit accidental blocurile scripts, build si devDependencies din root package.json — NSIS/DMG-ul nu a fost generat. v2.20.5 restaureaza root package.json integral si rezolva 2 findings CodeRabbit pe v2.20.4: (1) timeout SSE bumped 60 min -> 90 min ca sa acopere worst-case-ul real de 200 CUI in 1 stream ipoteci (~83 min), nu doar use case-ul cu taburi paralele × 100 CUI; (2) wording corectat in changelog ca sa nu mai contrazica el insusi estimarea de 83 min in aceeasi propozitie cu afirmatia 'acopera 200 CUI in 1 stream'.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Restore tooling root package.json",
+        content:
+          "Restaurate scripturile dev:backend, dev:frontend, build, dist, dist:mac, dist:server, electron:dev, rebuild:electron, typecheck*, test*, lint, check (fara ele 'npm run build' returneaza 'Missing script' si workflows-urile fail-eaza). Restaurat blocul electron-builder (appId, files, NSIS, mac DMG, asarUnpack). Restaurate devDependencies: @biomejs/biome, electron@41, electron-builder@26, esbuild, png-to-ico, sharp.",
+      },
+      {
+        title: "SSE timeout 60 min -> 90 min (CodeRabbit fix)",
+        content:
+          "v2.20.4 a ridicat cap-ul UI la 200 CUI dar a setat SSE_TIMEOUT_MS la 60 min, sub worst-case-ul real de ~83 min (200 items × 25s ipoteci) — taia stream-ul pe la item ~144. v2.20.5: SSE_TIMEOUT_MS = 5400000 (90 min) acopera batch-uri reale de 200 CUI in 1 stream singur pe categoria ipoteci (cea mai lenta), plus margin pentru retries captcha si latenta upstream variabila. Ramane cap finit ca taburile orfane sa nu hang-uiasca indefinit.",
+      },
+      {
+        title: "Changelog v2.20.4 — wording corectat",
+        content:
+          "CodeRabbit a flag-uit ca v2.20.4 anunta 'acopera 200 CUI in 1 stream singur' si in aceeasi propozitie mentiona 'worst-case ipoteci ~83 min' (auto-contradictoriu). v2.20.5 reformuleaza onest: 60 min era acoperea use case-ul cu 2-6 taburi paralele × 100 CUI; abia 90 min (v2.20.5) acopera worst-case-ul de 200 CUI / 1 stream ipoteci. v2.20.4 entry primeste un CORRIGENDUM marcat explicit.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Backend 844/844, frontend 100/100. Type-check curat pe ambele. Singura schimbare functionala e constanta SSE_TIMEOUT_MS — niciun test backend nu hardcoda valoarea, deci suite-ul ramane neschimbat.",
+      },
+    ],
+  },
+  {
     version: "v2.20.4",
     date: "10 Mai 2026",
     subtitle:
-      "UX hardening pentru bulk RNPM la batch-uri mari + rate-limit ridicat. Bulk SSE timeout extins de la 10 min la 60 min ca sa tolereze 200 CUI per batch in 1 stream singur si splitting in 2-6 taburi paralele fara taburi orfane. UI MAX_BATCH crescut la 200 (egaleaza cap-ul server) cu hint vizibil pentru >150 CUI ca recomanda splitting paralel. Rate-limit-ul global per (ip, ownerId) ridicat de la 30 la 120 req/min — pragul anterior era prea conservator pentru UX desktop (Refresh + Inchide toate + paginare burst-uia usor 30/min si producea 429 in flow normal pe pagina Alerts).",
+      "(Versiune fara installer — build CI a esuat din cauza unui regress in root package.json; vezi v2.20.5 pentru hotfix.) UX hardening pentru bulk RNPM la batch-uri mari + rate-limit ridicat. Bulk SSE timeout extins de la 10 min la 60 min ca sa acopere use case-ul cu 2-6 taburi paralele × 100 CUI fiecare in ~20-40 min. UI MAX_BATCH crescut la 200 (egaleaza cap-ul server) cu hint vizibil pentru >150 CUI ca recomanda splitting paralel. Rate-limit-ul global per (ip, ownerId) ridicat de la 30 la 120 req/min — pragul anterior era prea conservator pentru UX desktop (Refresh + Inchide toate + paginare burst-uia usor 30/min si producea 429 in flow normal pe pagina Alerts).",
     icon: <Rocket className="h-5 w-5" />,
     borderColor: "border-l-blue-500",
     badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
     sections: [
       {
-        title: "Bulk SSE timeout 10 min -> 60 min",
+        title: "Bulk SSE timeout 10 min -> 60 min (CORRIGENDUM v2.20.5)",
         content:
-          "Pana acum SSE_TIMEOUT_MS = 600000 ucidea orice bulk peste ~24 items la 25s/item — practic peste cap-ul de 100 CUI din UI. v2.20.4 ridica timeout-ul la 3600000 (60 min) ca sa acopere si batch-uri de 200 CUI in 1 stream singur (worst-case ipoteci ~83 min, mai mic pe specifice/fiducii) si sa tolereze use case-ul real cu 2-6 taburi paralele × 100 CUI fiecare in ~20-40 min. Functioneaza identic pe toate cele 5 categorii (ipoteci, specifice, fiducii, creante, obligatiuni).",
+          "Pana acum SSE_TIMEOUT_MS = 600000 ucidea orice bulk peste ~24 items la 25s/item — practic peste cap-ul de 100 CUI din UI. v2.20.4 ridica timeout-ul la 3600000 (60 min) pentru use case-ul real cu 2-6 taburi paralele × 100 CUI fiecare in ~20-40 min. CORRIGENDUM v2.20.5: 60 min NU acopera worst-case-ul de 200 CUI / 1 stream ipoteci (~83 min) — v2.20.5 re-bump la 90 min ca sa-l acopere si pe acela. Functioneaza identic pe toate cele 5 categorii (ipoteci, specifice, fiducii, creante, obligatiuni).",
       },
       {
         title: "UI MAX_BATCH 100 -> 200 + hint pentru splitting paralel",

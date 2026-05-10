@@ -53,12 +53,13 @@ function validateParamsDepth(obj: unknown, depth = 0): string | null {
   return null;
 }
 
-// v2.20.4: bump 10 min -> 60 min ca sa tolereze batch-uri de 200 CUI (server cap).
-// Estimare: 200 items × ~25s (worst-case ipoteci, mai mic pe specifice) = ~83 min
-// pentru 1 stream singur — dar use case-ul real e 2-6 taburi paralele × 100 CUI,
-// fiecare in ~20-40 min. 60 min acopera lejer toate categoriile fara sa lase
-// taburile orfane sa hang-uiasca indefinit.
-const SSE_TIMEOUT_MS = 3600000;
+// v2.20.5: bump 60 min -> 90 min ca sa acopere worst-case-ul real al server cap-ului
+// de 200 CUI in 1 stream singur. Estimare: 200 items × ~25s (worst-case ipoteci, mai
+// mic pe specifice/fiducii) = ~83 min, plus margin pentru retries captcha si latenta
+// upstream variabila. 60 min era sub estimare (taie stream-ul pe la item ~144) si
+// auto-contradictoriu cu cap-ul ridicat in UI. 90 min ramane cap finit (taburile
+// orfane nu hang-uiesc indefinit) dar acopera real flow-ul de "1 tab × 200 CUI".
+const SSE_TIMEOUT_MS = 5400000;
 // v2.18.0: bump 30 -> 45 min ca sa tolereze tier-2 split (destinatieInscriere).
 // Worst case: ipoteci cu 18 sub-tipuri × 17s (tier-1) + 1-2 sub-tipuri care
 // trigger nested cu 10 destinatii × 17s ≈ 18×17 + 2×10×17 = 646s. Plus latente

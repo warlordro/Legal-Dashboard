@@ -1,18 +1,129 @@
 {
   "name": "legal-dashboard",
-  "version": "2.20.4",
+  "version": "2.20.5",
   "private": true,
   "main": "electron/main.js",
   "workspaces": [
     "backend",
     "frontend"
   ],
+  "scripts": {
+    "dev:backend": "npm run dev --workspace=backend",
+    "dev:frontend": "npm run dev --workspace=frontend",
+    "install:all": "npm install",
+    "rebuild:electron": "node scripts/rebuild-electron.cjs",
+    "check:worktree": "node scripts/check-worktree.mjs",
+    "prebuild": "node scripts/check-worktree.mjs",
+    "build": "node --experimental-strip-types scripts/build.js",
+    "electron:dev": "node scripts/launch-electron-dev.cjs",
+    "clean:release": "node -e \"require('fs').rmSync('release', {recursive:true, force:true})\"",
+    "predist": "npm run clean:release",
+    "predist:mac": "npm run clean:release",
+    "predist:all": "npm run clean:release",
+    "dist": "npm run build && electron-builder --win",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "dist:all": "npm run build && electron-builder --win --mac",
+    "dist:server": "node --experimental-strip-types scripts/build-server.js",
+    "typecheck:backend": "tsc --noEmit -p backend/tsconfig.json",
+    "typecheck:frontend": "tsc --noEmit -p frontend/tsconfig.json",
+    "typecheck": "npm run typecheck:backend && npm run typecheck:frontend",
+    "test:backend": "npm test --workspace=backend -- --run",
+    "test:frontend": "npm test --workspace=frontend -- --run",
+    "test": "npm run test:backend && npm run test:frontend",
+    "lint": "biome check",
+    "check": "npm run lint && npm run typecheck && npm run test"
+  },
+  "build": {
+    "appId": "ro.legaldashboard.app",
+    "productName": "Legal Dashboard",
+    "icon": "build/icon.ico",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "dist-backend/**/*",
+      "dist-frontend/**/*",
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/bindings/**/*",
+      "node_modules/file-uri-to-path/**/*",
+      "node_modules/windows-notification-state/**/*",
+      "node_modules/macos-notification-state/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "dist-frontend/**/*",
+      "node_modules/better-sqlite3/**/*",
+      "node_modules/windows-notification-state/**/*",
+      "node_modules/macos-notification-state/**/*"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Legal Dashboard",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico"
+    },
+    "mac": {
+      "icon": "build/icon-1024.png",
+      "category": "public.app-category.business",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "x64",
+            "arm64"
+          ]
+        }
+      ]
+    },
+    "dmg": {
+      "title": "Legal Dashboard",
+      "icon": "build/icon-1024.png",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  },
   "dependencies": {
     "better-sqlite3": "^12.9.0"
   },
   "overrides": {
     "jspdf": "^4.2.1",
     "dompurify": "^3.4.1"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "electron": "^41.5.0",
+    "electron-builder": "^26.8.1",
+    "esbuild": "^0.28.0",
+    "png-to-ico": "^3.0.1",
+    "sharp": "^0.34.5"
   },
   "optionalDependencies": {
     "macos-notification-state": "^3.0.0",

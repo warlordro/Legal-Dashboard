@@ -7,20 +7,23 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.4**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.5**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.4** - UX hardening pentru bulk RNPM la batch-uri mari +
-rate-limit ridicat. SSE timeout pe `/api/rnpm/bulk` extins de la 10 min la 60 min,
-ca sa tolereze batch-uri de 200 CUI in 1 stream singur si splitting in 2-6 taburi
-paralele fara sa lase taburi orfane sa hang-uiasca pana la cap. UI `MAX_BATCH`
-ridicat de la 100 la 200 (egaleaza cap-ul server) cu hint vizibil pentru >150 CUI
-care recomanda splitting in 2-3 taburi paralele. Rate-limit global ridicat de la
-30 la 120 req/min per `(ip, ownerId)` (era prea conservator pentru UX desktop —
-Refresh + Inchide toate + paginare burst-uia 30/min si producea 429). Universal
-valabil pe toate cele 5 categorii RNPM (ipoteci, specifice, fiducii, creante,
-obligatiuni). Zero schimbari de contract HTTP, zero migration. **844 teste backend,
-100 teste frontend**.
+Ultimul release **v2.20.5** - Hotfix release pipeline + SSE timeout aliniat la
+cap-ul real de 200 CUI. v2.20.4 a fost taggat dar build-ul GitHub Actions a
+esuat (Docker + macOS au returnat "Missing script: build") pentru ca commit-ul
+de release a stripuit accidental blocurile `scripts`, `build` si `devDependencies`
+din root `package.json` — NSIS/DMG-ul nu a fost generat. v2.20.5 restaureaza
+root `package.json` integral si rezolva 2 findings CodeRabbit pe v2.20.4: SSE
+timeout bumped 60 min -> 90 min ca sa acopere worst-case-ul real de 200 CUI in 1
+stream ipoteci (~83 min, nu doar use case-ul cu 2-6 taburi paralele × 100 CUI),
+plus wording corectat in changelog ca sa nu mai contrazica el insusi estimarea
+de 83 min in aceeasi propozitie cu afirmatia "acopera 200 CUI in 1 stream".
+Restul UX hardening v2.20.4 ramane (UI MAX_BATCH 200, rate-limit 120 req/min per
+`(ip, ownerId)`). Universal valabil pe toate cele 5 categorii RNPM (ipoteci,
+specifice, fiducii, creante, obligatiuni). Zero schimbari de contract HTTP, zero
+migration. **844 teste backend, 100 teste frontend**.
 
 Predecesor **v2.20.3** - hardening RNPM post-/full-review: audit `rnpm.cap_hit`
 acum carry-uieste `requestId` din envelope (corelare event log <-> client) si e purjat

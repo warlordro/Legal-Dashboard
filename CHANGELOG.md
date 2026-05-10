@@ -4,7 +4,59 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.5] - 2026-05-10
+
+### Hotfix release pipeline + SSE timeout aliniat la cap-ul real de 200 CUI
+
+v2.20.4 a fost taggat dar build-ul GitHub Actions a esuat pe Docker + macOS
+(Build Windows in progress in momentul descoperirii) pentru ca commit-ul de
+release a stripuit accidental blocurile `scripts`, `build` si `devDependencies`
+din root `package.json`. NSIS/DMG-ul nu a fost generat — practic v2.20.4 nu are
+artefacte. v2.20.5 restaureaza root `package.json` integral si rezolva 2
+findings CodeRabbit pe v2.20.4.
+
+#### Restore tooling root `package.json`
+
+- Restaurate scripturile `dev:backend`, `dev:frontend`, `build`, `dist`,
+  `dist:mac`, `dist:server`, `electron:dev`, `rebuild:electron`, `typecheck*`,
+  `test*`, `lint`, `check`. Fara ele `npm run build` returneaza
+  "Missing script" si workflows-urile fail-eaza la pasul "Build app".
+- Restaurat blocul `build` (electron-builder config: appId, files, NSIS, mac
+  DMG, asarUnpack). Fara el `electron-builder` nu stie ce sa packageze.
+- Restaurate `devDependencies`: `@biomejs/biome`, `electron@41`, `electron-builder@26`,
+  `esbuild`, `png-to-ico`, `sharp`. Fara ele `npm ci` la runner nu instaleaza
+  toolchain-ul de packaging.
+
+#### CodeRabbit finding 1 — SSE timeout sub worst-case-ul cap-ului UI
+
+- **Bulk SSE timeout 60 min -> 90 min** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). `SSE_TIMEOUT_MS = 3600000` -> `5400000`. v2.20.4 a ridicat cap-ul UI la 200 CUI dar a setat timeout-ul la 60 min, sub worst-case-ul real de ~83 min (200 items × 25s ipoteci) — taia stream-ul pe la item ~144. 90 min acopera batch-uri reale de 200 CUI in 1 stream singur (worst-case ipoteci), plus margin pentru retries captcha si latenta upstream variabila. Ramane cap finit (taburile orfane nu hang-uiesc indefinit).
+
+#### CodeRabbit finding 2 — Wording auto-contradictoriu in changelog v2.20.4
+
+- Re-formulata sectiunea "Bulk SSE timeout" din [frontend/src/data/changelog-entries.tsx](frontend/src/data/changelog-entries.tsx) si CHANGELOG.md. v2.20.4 anunta ca 60 min "acopera 200 CUI in 1 stream singur" si in aceeasi propozitie mentiona "worst-case ipoteci ~83 min" — auto-contradictoriu. v2.20.5 afirma corect: 90 min e budget-ul pentru worst-case 200 CUI / 1 stream (ipoteci); use case-ul real ramane 2-6 taburi paralele × 100 CUI in ~20-40 min fiecare.
+
+#### Tests
+
+- **Backend**: 844/844 (neschimbate; doar constanta SSE_TIMEOUT_MS hardcodata diferit).
+- **Frontend**: 100/100 (neschimbate).
+- **Type-check**: curat pe ambele.
+
+#### Versionare
+
+- Root: `2.20.4` -> `2.20.5`
+- Backend: `2.20.4` -> `2.20.5`
+- Frontend: `2.20.4` -> `2.20.5`
+- `package-lock.json` sincronizat
+- Changelog in-app: VersionEntry v2.20.5 prepended la `versions[]`
+
+---
+
 ## [2.20.4] - 2026-05-10
+
+> **Notă (post-mortem)**: build-ul GitHub Actions a esuat pe v2.20.4 (Docker
+> + macOS au returnat "Missing script: build" pentru ca root `package.json`
+> a pierdut accidental scripts/build/devDependencies). Fix-ul a iesit ca
+> hotfix v2.20.5; v2.20.4 nu are installer NSIS sau DMG.
 
 ### UX hardening pentru bulk RNPM la batch-uri mari + rate-limit ridicat
 
@@ -14,7 +66,7 @@ zero modificari pe SSE event payload. Doar constante.
 
 #### Schimbari backend
 
-- **Bulk SSE timeout 10 min -> 60 min** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). `SSE_TIMEOUT_MS = 600000` -> `3600000`. Cap-ul anterior ucidea orice batch peste ~24 items (la 25s/item worst-case ipoteci) — practic peste cap-ul de 100 CUI din UI. 60 min acopera batch-uri de 200 CUI in 1 stream singur si tolereaza use case-ul real cu 2-6 taburi paralele × 100 CUI fiecare. Functioneaza identic pe toate cele 5 categorii.
+- **Bulk SSE timeout 10 min -> 60 min** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). `SSE_TIMEOUT_MS = 600000` -> `3600000`. Cap-ul anterior ucidea orice batch peste ~24 items (la 25s/item worst-case ipoteci) — practic peste cap-ul de 100 CUI din UI. 60 min acopera use case-ul real cu 2-6 taburi paralele × 100 CUI fiecare in ~20-40 min. (CORRIGENDUM v2.20.5: 60 min nu acopera worst-case-ul de 200 CUI / 1 stream ipoteci ~83 min — re-bumped la 90 min in v2.20.5.)
 - **Rate-limit global 30 -> 120 req/min per `(ip, ownerId)`** ([backend/src/middleware/rate-limit.ts](backend/src/middleware/rate-limit.ts)). `RATE_LIMIT` exportata acum (era constanta locala) ca testele sa nu duplice magic number-ul. Pragul anterior era prea conservator pentru UX desktop — pagina Alerts cu Refresh + Inchide toate + paginare burst-uia usor 30/min si producea 429 in flow normal. 120 acopera bursturi realiste, pastreaza protectia impotriva runaway loops (un infinite useEffect ar fi blocat tot dupa ~1 min) si ramane izolare per `(ip, ownerId)` in web mode.
 
 #### Schimbari frontend
