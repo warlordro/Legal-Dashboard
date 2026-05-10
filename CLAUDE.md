@@ -38,6 +38,8 @@ La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 
 **Sanity check inainte de commit:** `Grep -i "<vechea_versiune>"` pe toate `.md` la radacina; fiecare hit care nu e parte din istoric (CHANGELOG entry vechi, etc.) trebuie actualizat.
 
+**OBLIGATORIU inainte de commit + push:** ruleaza `npx biome check --write <fisiere modificate>` (sau `npx biome check --write .` pentru tot repo-ul). NU lasa formatare/lint pe utilizator. Aplica biome pe TOATE fisierele atinse in release-ul curent inainte de `git commit` — nu trimite pe GitHub commits care nu trec biome check. Daca biome reformateaza, ruleaza din nou `tsc --noEmit` + `npm run build` ca sa verifici ca nimic nu s-a rupt, apoi commit.
+
 ## Markdown convention pentru README/CHANGELOG/SECURITY
 
 - Nu incepe linii cu `+`, `-`, `*` sau `1.` in interiorul unui paragraf — GitHub le randeaza ca bullet list si sparge bold/italic peste boundary. Foloseste virgula sau cuvant ("plus", "si").
@@ -48,6 +50,18 @@ La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 - Push pe tag `vX.Y.Z` declanseaza `build-windows.yml` (NSIS installer x64) si `build-mac.yml` (DMG x64+arm64); artefactele sunt atasate automat la GitHub Release.
 - Workflow-urile ruleaza `tsc --noEmit` + `vitest run` INAINTE de packaging — fail-ul lor blocheaza release-ul.
 - Build manual fara tag: `gh workflow run build-windows.yml` (publica la prerelease `dev-build`).
+
+## Workflow obligatoriu pentru push pe GitHub
+
+Inainte de ORICE `git push origin main` (release sau commit normal), in aceasta ordine:
+
+1. **Biome** — `npx biome check --write` pe fisierele atinse (sau `.` daca scope-ul e larg). Re-stage fisierele modificate de biome.
+2. **Type-check** — `npx tsc --noEmit -p backend/tsconfig.json` si `cd frontend && npx tsc --noEmit`. Daca pica, fix-ul nu se opreste.
+3. **Build** — `npm run build` ca sa confirmi ca bundle-ul iese curat (Vite + esbuild).
+4. **Tests** — `npm test --workspace=backend` + `cd frontend && npm test -- --run` daca scope-ul touch-uieste backend/frontend logic.
+5. **Commit + push** — abia dupa ce primele 4 trec curat.
+
+Aceasta regula este non-negotiable: niciun push pe GitHub fara biome verificat. Daca biome reformateaza dupa commit-ul de release, fa un commit follow-up `style: biome format pass` si push imediat.
 
 ## Structura Proiect
 
