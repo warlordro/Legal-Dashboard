@@ -97,7 +97,10 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
   const details = new Map<string, RnpmAvizFull>(payload.detailsEntries);
 
   const isSpecifice = searchType === "specifice";
-  const partyLabel2 = isSpecifice ? "Parti" : "Debitori";
+  // Sheet-ul "Debitori" istoric mostenea numele bucket-ului RNPM (part3.debitoriF/J),
+  // dar in practica contine parti cu rol/calitate (Cesionar, Cedent, Debitor cedat,
+  // Garant, etc.) — nu doar literalmente debitorii. Folosim "Parti" pentru claritate.
+  const partyLabel2 = "Parti";
 
   const dateStr = todayRo();
 
@@ -140,7 +143,7 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
 
   const statsLine = isSpecifice
     ? `Generat: ${dateStr}  |  ${docs.length} avize  |  ${totalDeb} parti  |  ${totalBun} bunuri`
-    : `Generat: ${dateStr}  |  ${docs.length} avize  |  ${totalCred} creditori  |  ${totalDeb} debitori  |  ${totalBun} bunuri`;
+    : `Generat: ${dateStr}  |  ${docs.length} avize  |  ${totalCred} creditori  |  ${totalDeb} parti  |  ${totalBun} bunuri`;
 
   const avizeAoA: (string | number | null)[][] = [
     [`LEGAL DASHBOARD - RNPM${searchType ? ` / ${searchType.toUpperCase()}` : ""}`, ...Array(A_COLS - 1).fill(null)],
@@ -375,7 +378,7 @@ export async function buildRnpmPdf(payload: RnpmExportPayload): Promise<RnpmExpo
   const { docs, searchType } = payload;
   const details = new Map<string, RnpmAvizFull>(payload.detailsEntries);
   const isSpecifice = searchType === "specifice";
-  const partyLabel2 = isSpecifice ? "Parti" : "Debitori";
+  const partyLabel2 = "Parti";
 
   const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
   doc.setFontSize(14);

@@ -3,6 +3,11 @@ import { AlertCircle, Bell, CheckCircle2, RefreshCw, Send } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DesktopNotificationStatus } from "@/types/desktop-api";
 import { cn } from "@/lib/utils";
+import {
+  getAlertsNotificationsEnabled,
+  setAlertsNotificationsEnabled,
+  subscribeAlertsNotificationsPref,
+} from "@/lib/alertsNotificationPref";
 
 type LoadState = "idle" | "loading" | "ready" | "error";
 
@@ -36,7 +41,17 @@ export function NotificationStatusPanel() {
   const [state, setState] = useState<LoadState>("idle");
   const [error, setError] = useState<string | null>(null);
   const [testState, setTestState] = useState<"idle" | "sending" | "sent" | "failed">("idle");
+  const [alertsEnabled, setAlertsEnabled] = useState<boolean>(() => getAlertsNotificationsEnabled());
   const desktopAvailable = Boolean(window.desktopApi?.getNotificationStatus);
+
+  useEffect(() => {
+    return subscribeAlertsNotificationsPref(setAlertsEnabled);
+  }, []);
+
+  const toggleAlerts = useCallback((next: boolean) => {
+    setAlertsEnabled(next);
+    setAlertsNotificationsEnabled(next);
+  }, []);
 
   const load = useCallback(async () => {
     if (!window.desktopApi?.getNotificationStatus) {
@@ -110,8 +125,9 @@ export function NotificationStatusPanel() {
             variant="outline"
             size="sm"
             onClick={sendTest}
-            disabled={!desktopAvailable || testState === "sending" || status?.canNotify === false}
+            disabled={!desktopAvailable || testState === "sending" || status?.canNotify === false || !alertsEnabled}
             className="h-8"
+            title={!alertsEnabled ? "Activeaza notificarile pentru a putea testa." : undefined}
           >
             <Send className="h-3.5 w-3.5" />
             Test
@@ -139,6 +155,23 @@ export function NotificationStatusPanel() {
           </div>
         </div>
       </div>
+
+      <label className="mt-3 flex items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm">
+        <input
+          type="checkbox"
+          checked={alertsEnabled}
+          onChange={(e) => toggleAlerts(e.target.checked)}
+          className="mt-0.5 h-4 w-4"
+        />
+        <span className="min-w-0">
+          <span className="font-medium">Trimite notificari sistem pentru alerte noi</span>
+          <span className="mt-0.5 block text-[11px] text-muted-foreground">
+            Cand e oprit, popup-urile Windows/macOS sunt suprimate; bulina cu numar si pagina
+            Alerts raman intacte. Cele suprimate nu se stocheaza — la reactivare nu primesti
+            flood. Setarea revine la activ la urmatorul start.
+          </span>
+        </span>
+      </label>
     </section>
   );
 }

@@ -4,6 +4,81 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.7] - 2026-05-11
+
+### UX RNPM Baza locala + toggle notificari sistem + retentie tab Bulk
+
+Release de polish dupa v2.20.6, cu trei interventii independente, toate scope-narrow:
+(a) export "toate avizele filtrate", nu doar pagina vizibila, in panoul Baza locala
+RNPM, plus redenumirea sheet-ului "Debitori" in "Parti" pentru a reflecta continutul
+real; (b) toggle pentru a opri popup-urile Windows/macOS legate de alerte fara a
+afecta bulina cu count sau pagina Alerts; (c) micro-fix UX care opreste anularea
+unei cautari Bulk RNPM cand userul comuta tabul.
+
+#### Export Baza locala — toate avizele filtrate, nu doar pagina
+
+- [frontend/src/components/rnpm/RnpmSavedData.tsx](frontend/src/components/rnpm/RnpmSavedData.tsx):
+  cand nu exista selectie explicita, `handleExport` cheama acum `rnpmGetAllSaved`
+  cu filtrul activ (`searchType`, `activ`, `q`, `dataStart`, `dataStop`, `sortKey`,
+  `sortDir`) si exporta intregul set, nu doar pagina afisata. Butoanele "Excel" si
+  "PDF" arata `total` cand nu e selectie si `selectedIds.size` cand este.
+- [frontend/src/lib/rnpmApi.ts](frontend/src/lib/rnpmApi.ts): batching transparent
+  pe cele doua cap-uri backend — `/saved` GET pe pagini de 200 ca sa adune toate
+  inregistrarile filtrate, apoi `/saved/export` POST in batch-uri de 500 IDs.
+  Niciun cap backend nu a fost modificat.
+
+#### Sheet "Debitori" redenumit in "Parti"
+
+- [frontend/src/lib/rnpmExport.ts](frontend/src/lib/rnpmExport.ts): sheet-ul al
+  doilea (xlsx) si sectiunea PDF echivalenta au acum titlul "Parti". Sheet-ul
+  istoric mostenea numele bucket-ului RNPM (`part3.debitoriF/J` upstream), dar in
+  practica contine entitati cu rol/calitate (Cesionar, Cedent, Debitor cedat,
+  Garant, etc.), nu doar literal debitorii — verificat empiric pe baza locala:
+  TELECREDIT IFN (CUI 33317138) apare de 106 ori ca Cesionar, 1 data Cedent, 0
+  ori in tabela `rnpm_creditori`. DB schema (`rnpm_creditori` / `rnpm_debitori`)
+  ramane neatinsa — schimbarea e doar la presentation layer.
+- Linia stats-uri din export afiseaza `... parti ...` in loc de `... debitori ...`.
+
+#### Toggle notificari sistem pentru alerte (in-memory, session-scoped)
+
+- [frontend/src/lib/alertsNotificationPref.ts](frontend/src/lib/alertsNotificationPref.ts):
+  modul nou, preferinta in-memory cu listeners pentru sync intre componenta UI
+  si stream-ul de alerte. Nu persista — la restart Electron revine ON. Cand e
+  OFF, alertele NU se queue-uiesc, deci la reactivare nu vine un flood.
+- [frontend/src/components/NotificationStatusPanel.tsx](frontend/src/components/NotificationStatusPanel.tsx):
+  checkbox nou "Trimite notificari sistem pentru alerte noi". Butonul "Test" se
+  dezactiveaza cand preferinta e OFF (cu tooltip), ca sa nu se trimita test
+  imediat dupa ce userul a debifat.
+- [frontend/src/hooks/useAlertsStream.ts](frontend/src/hooks/useAlertsStream.ts):
+  early-return la inceputul `showDesktopNotification` cand preferinta e OFF.
+  Restul fluxului (refresh unread badge, bump streamVersion, lista in pagina
+  Alerts) ramane neatins.
+
+#### Bulk RNPM ramane montat la schimbare de tab
+
+- [frontend/src/pages/RnpmSearch.tsx](frontend/src/pages/RnpmSearch.tsx): tabul
+  "Bulk" e acum tinut montat prin `className` `hidden` cand userul comuta la
+  "Search" sau "Saved", in loc sa fie unmount-uit prin guard `{tab === "bulk" && ...}`.
+  Anterior, comutarea de tab in timpul unei cautari Bulk in progres declansa
+  cleanup-ul useEffect, care anula `AbortController`-ul si pierdea progresul.
+  Acum, doar navigarea efectiva afara din pagina RnpmSearch (route change) mai
+  aborteaza cautarea.
+
+#### CHANGELOG.md markdown style fix
+
+- [CHANGELOG.md](CHANGELOG.md) (sectiunea v2.20.4): o linie din interiorul unui
+  paragraf incepea cu `+ ` care era randat de GitHub ca bullet list si spargea
+  bold-ul peste boundary. Reformat la `plus` text (conform conventiei din
+  `CLAUDE.md`).
+
+#### Tests
+
+- Frontend: 100/100 trec (`cd frontend && npm test -- --run`).
+- Backend: nicio modificare in backend, suite ramane 844/844.
+- Type-check (`tsc --noEmit` pe ambele workspace-uri): clean.
+
+---
+
 ## [2.20.6] - 2026-05-10
 
 ### Hygiene release: documentatie env vars + microfix envelope pe rute admin
@@ -152,8 +227,8 @@ zero modificari pe SSE event payload. Doar constante.
 
 ### RNPM hardening — fail-fast, audit corelat cu envelope, allow-list canonica
 
-Hardening urmare a `/full-review` post v2.20.2. Adauga 1 migration noua (audit_log
-+ request_id), un kill switch operational, si validare in plus la nivel de ruta.
+Hardening urmare a `/full-review` post v2.20.2. Adauga 1 migration noua
+(audit_log plus request_id), un kill switch operational, si validare in plus la nivel de ruta.
 Fara modificari la contract HTTP la rezultat (split-stats shape neschimbat).
 
 #### Schimbari backend

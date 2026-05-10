@@ -7,23 +7,24 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.6**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.6** - Hygiene release: documentatie env vars
-plus microfix envelope pe rute admin. `.env.example` creat de la zero, cu toate
-cele ~25 env vars folosite in cod grupate in 7 sectiuni (mod si bind, auth web
-mode, storage, monitoring, email SMTP, AI providers, RNPM kill switches),
-adnotate `REQUIRED-WEB | OPTIONAL` plus descrieri concrete — inchide CP-2 din
-root `CLAUDE.md`. `requireRole.ts` (admin guard) migreaza cele 3 retururi
-401/403 la envelope-ul standard `{ data, error: { code, message }, requestId }`
-via `fail()` ca admin tooling sa traceze respins-urile prin `requestId`.
-Migrarea envelope pe celelalte rute legacy (rnpm/dosare/termene/ai) ramane
-amanata pentru PR-6 (`@hono/zod-openapi`) per policy-ul explicit din
-`util/envelope.ts` si guardul din `rnpm.contract.test.ts`. Schimbari aditive
-(testele asertea pe `body.error.code/message`, deci raman compatibile). Zero
-schimbari de contract HTTP pe rutele non-admin, zero migration noua. **844 teste
-backend, 100 teste frontend**.
+Ultimul release **v2.20.7** - polish release dupa v2.20.6, trei interventii
+narrow-scope independente. Baza locala RNPM exporta acum toate avizele
+filtrate (Excel/PDF), nu doar pagina vizibila — client-side batching pe
+`/saved` + `/saved/export`, backend neatins. Sheet-ul "Debitori" din export
+redenumit "Parti" pentru ca in practica contine entitati cu rol Cesionar /
+Cedent / Garant / Debitor cedat, nu doar literal debitori (verificat empiric:
+TELECREDIT IFN are 106 inregistrari ca Cesionar, una ca Cedent, zero in
+tabela `rnpm_creditori`); DB schema ramane neatinsa, schimbarea e doar la
+presentation layer. Toggle in-memory in Setari pentru a opri popup-urile
+Windows/macOS legate de alerte fara a afecta bulina cu numar de unread sau
+pagina Alerts; preferinta nu persista intre restart-uri (default ON) si nu
+queue-uieste nimic, deci la reactivare nu vine flood. Micro-fix UX: tabul
+Bulk RNPM ramane montat la schimbare de tab in interiorul pagini RnpmSearch,
+deci o cautare Bulk in progres nu mai e anulata la peek pe "Search" sau
+"Saved". **844 teste backend, 100 teste frontend**.
 
 Predecesor **v2.20.3** - hardening RNPM post-/full-review: audit `rnpm.cap_hit`
 acum carry-uieste `requestId` din envelope (corelare event log <-> client) si e purjat

@@ -274,13 +274,42 @@ export async function rnpmRestoreBackup(name: string): Promise<{ preRestoreName:
   return jsonOrThrow<{ ok: true; preRestoreName: string }>(res);
 }
 
+// Backend `/saved/export` cap = 500 ids per request (rnpm.ts). Splitam in chunks
+// transparente la nivel de API client ca apelantul sa nu trebuiasca sa stie.
+const EXPORT_BATCH_SIZE = 500;
+
 export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[] }> {
-  const res = await apiFetch(`${BASE}/saved/export`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-  return jsonOrThrow<{ items: RnpmAvizFull[] }>(res);
+  if (ids.length === 0) return { items: [] };
+  const all: RnpmAvizFull[] = [];
+  for (let i = 0; i < ids.length; i += EXPORT_BATCH_SIZE) {
+    const chunk = ids.slice(i, i + EXPORT_BATCH_SIZE);
+    const res = await apiFetch(`${BASE}/saved/export`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: chunk }),
+    });
+    const { items } = await jsonOrThrow<{ items: RnpmAvizFull[] }>(res);
+    all.push(...items);
+  }
+  return { items: all };
+}
+
+// Backend `/saved` cap = 200 items per page (avizRepository.ts). Folosit de
+// export "exporta tot" — loop paginat pana acoperim `total`.
+const SAVED_ENUM_PAGE_SIZE = 200;
+
+export async function rnpmGetAllSaved(
+  opts: Omit<Parameters<typeof rnpmGetSaved>[0], "page" | "pageSize">,
+): Promise<RnpmAvizRecord[]> {
+  const all: RnpmAvizRecord[] = [];
+  let page = 0;
+  while (true) {
+    const result = await rnpmGetSaved({ ...opts, page, pageSize: SAVED_ENUM_PAGE_SIZE });
+    all.push(...result.items);
+    if (result.items.length === 0 || all.length >= result.total) break;
+    page++;
+  }
+  return all;
 }
 
 export async function rnpmCaptchaBalance(captchaKey: string, captchaProvider?: CaptchaProvider): Promise<number> {

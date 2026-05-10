@@ -440,7 +440,10 @@ export default function RnpmSearchPage({
           />
         </div>
 
-      {tab === "bulk" && (
+      {/* Keep BulkSearch mounted across tab switches so an in-flight bulk doesn't abort
+          when the user peeks at "saved" or "search". useEffect cleanup at unmount still
+          aborts ctl on real navigation away from RnpmSearch. */}
+      <div className={tab === "bulk" ? "" : "hidden"}>
         <RnpmBulkSearch
           captchaKey={captchaKey}
           captchaProvider={captchaProvider}
@@ -449,7 +452,7 @@ export default function RnpmSearchPage({
           onConfigureKey={onConfigureKey}
           onItemSaved={() => setSavedRefreshKey((k) => k + 1)}
         />
-      )}
+      </div>
 
       {/* A: keep RnpmSavedData mounted across tab switches so re-entering "saved" is instant */}
       <div className={tab === "saved" ? "" : "hidden"}>

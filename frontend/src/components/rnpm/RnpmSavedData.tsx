@@ -5,7 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { rnpmGetSaved, rnpmDeleteAviz, rnpmDeleteAvizeBatch } from "@/lib/rnpmApi";
+import { rnpmGetSaved, rnpmGetAllSaved, rnpmDeleteAviz, rnpmDeleteAvizeBatch } from "@/lib/rnpmApi";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { exportRnpmExcel, exportRnpmPDF } from "@/lib/rnpmExport";
 import { TablePagination } from "@/components/table-pagination";
@@ -154,16 +154,27 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
   };
 
   const handleExport = async (format: "xlsx" | "pdf") => {
-    const target = selectedIds.size > 0
-      ? items.filter((a) => selectedIds.has(a.id))
-      : items;
-    if (target.length === 0) return;
-    const { docs, avizIds } = toDocs(target);
-    const types = new Set(target.map((a) => a.search_type));
-    const suffix = types.size === 1 ? (searchType || [...types][0]) : "local";
     setExporting(format);
     setLoading(true);
     try {
+      let target: RnpmAvizRecord[];
+      if (selectedIds.size > 0) {
+        target = items.filter((a) => selectedIds.has(a.id));
+      } else {
+        target = await rnpmGetAllSaved({
+          searchType: searchType || undefined,
+          activ: activOnly ? true : undefined,
+          q: q.trim() || undefined,
+          dataStart: dataStart || undefined,
+          dataStop: dataStop || undefined,
+          sortKey,
+          sortDir,
+        });
+      }
+      if (target.length === 0) return;
+      const { docs, avizIds } = toDocs(target);
+      const types = new Set(target.map((a) => a.search_type));
+      const suffix = types.size === 1 ? (searchType || [...types][0]) : "local";
       if (format === "xlsx") await exportRnpmExcel(docs, avizIds, suffix);
       else await exportRnpmPDF(docs, avizIds, suffix);
     } catch (err) {
@@ -286,11 +297,11 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
             )}
             <Button type="button" variant="outline" size="sm" onClick={() => handleExport("xlsx")} disabled={loading}>
               {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {" "}Excel {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+              {" "}Excel ({selectedIds.size > 0 ? selectedIds.size : total})
             </Button>
             <Button type="button" variant="outline" size="sm" onClick={() => handleExport("pdf")} disabled={loading}>
               {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-              {" "}PDF {selectedIds.size > 0 ? `(${selectedIds.size})` : ""}
+              {" "}PDF ({selectedIds.size > 0 ? selectedIds.size : total})
             </Button>
           </div>
         </div>

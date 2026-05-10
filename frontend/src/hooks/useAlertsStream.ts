@@ -7,6 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { alertsApi, type MonitoringAlert } from "@/lib/alertsApi";
+import { getAlertsNotificationsEnabled } from "@/lib/alertsNotificationPref";
 import type { DesktopNotificationStatus } from "@/types/desktop-api";
 
 export interface UseAlertsStreamResult {
@@ -60,6 +61,9 @@ export function useAlertsStream(): UseAlertsStreamResult {
   }, []);
 
   const showDesktopNotification = useCallback(async (alert: MonitoringAlert) => {
+    // Per-user opt-out (Setari → Notificari sistem). In-app badge / Alerts page
+    // raman intacte; doar popup-urile OS sunt suprimate.
+    if (!getAlertsNotificationsEnabled()) return;
     // Suppress when the user is already looking at the app — the in-app badge
     // and Alerts page are sufficient. Covers both Electron and browser modes.
     if (typeof document !== "undefined"

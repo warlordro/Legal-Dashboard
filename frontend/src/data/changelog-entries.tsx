@@ -37,6 +37,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.7",
+    date: "11 Mai 2026",
+    subtitle:
+      "Polish release dupa v2.20.6, trei interventii independente narrow-scope: (a) export 'toate avizele filtrate' in Baza locala RNPM, nu doar pagina vizibila (client-side batching pe /saved + /saved/export, fara modificari backend); (b) sheet-ul 'Debitori' redenumit 'Parti' pentru ca in practica contine entitati cu rol Cesionar/Cedent/Garant/etc., nu doar literalmente debitori — verificat empiric (TELECREDIT IFN: 106 ori Cesionar, 1 Cedent); (c) toggle in-memory in Setari pentru a opri popup-urile Windows/macOS legate de alerte, fara a afecta bulina cu count sau pagina Alerts, fara queue (la reactivare nu vine flood). Plus micro-fix: tabul Bulk RNPM ramane montat la schimbare de tab ca sa nu se anuleze cautarile in progres.",
+    icon: <Sparkles className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "Export toate avizele filtrate din Baza locala",
+        content:
+          "Anterior, butoanele 'Excel' si 'PDF' din panoul Baza locala RNPM exportau doar pagina vizibila (max 25 inregistrari). Acum, cand nu exista selectie explicita, exporta intregul set filtrat — `rnpmGetAllSaved` aduce toate inregistrarile pe pagini de 200 (cap-ul backend `/saved`), iar `rnpmExport` trimite IDs in batch-uri de 500 (cap-ul backend `/saved/export`). Butoanele afiseaza count-ul corect: `total` cand nu e selectie, `selectedIds.size` cand este. Backend neatins.",
+      },
+      {
+        title: "Sheet 'Debitori' -> 'Parti'",
+        content:
+          "Numele sheet-ului mostenea bucket-ul RNPM upstream (`part3.debitoriF/J`), dar in practica contine entitati cu rol/calitate variata: Cesionar, Cedent, Debitor cedat, Garant, etc. Verificare empirica pe baza locala: TELECREDIT IFN (CUI 33317138) apare de 106 ori ca Cesionar, 1 data Cedent, 0 ori in tabela `rnpm_creditori`. DB schema (`rnpm_creditori` / `rnpm_debitori`) ramane neatinsa — schimbarea e doar la presentation layer (xlsx + PDF + linia de stats).",
+      },
+      {
+        title: "Toggle notificari sistem pentru alerte",
+        content:
+          "Checkbox nou in Setari -> Notificari sistem: 'Trimite notificari sistem pentru alerte noi'. Cand e debifat, `useAlertsStream.showDesktopNotification` face early-return inainte de orice apel `desktopApi.showNotification`. Bulina cu numar de unread si pagina Alerts raman neatinse. Preferinta e in-memory (session-scoped), default ON la fiecare restart Electron — nu se persista in localStorage. Cand e off, nimic nu se queue-uieste, deci la reactivare nu primesti un flood de alerte missed. Butonul Test se dezactiveaza odata cu toggle-ul.",
+      },
+      {
+        title: "Bulk RNPM ramane montat la schimbare de tab",
+        content:
+          "Tabul 'Bulk' din `RnpmSearch` e acum tinut montat prin `className` `hidden` cand userul comuta la 'Search' sau 'Saved', in loc sa fie unmount-uit. Anterior, schimbarea tabului in timpul unei cautari Bulk in progres declansa cleanup-ul useEffect care anula `AbortController`-ul si pierdea progresul. Acum, doar navigarea afara din pagina RnpmSearch mai aborteaza cautarea.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Frontend 100/100, backend neatins (844/844 ramane). Type-check curat pe ambele workspace-uri.",
+      },
+    ],
+  },
+  {
     version: "v2.20.6",
     date: "10 Mai 2026",
     subtitle:
