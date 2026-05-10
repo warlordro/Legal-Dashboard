@@ -67,9 +67,9 @@ unei cautari Bulk RNPM cand userul comuta tabul.
 #### CHANGELOG.md markdown style fix
 
 - [CHANGELOG.md](CHANGELOG.md) (sectiunea v2.20.4): o linie din interiorul unui
-  paragraf incepea cu `+ ` care era randat de GitHub ca bullet list si spargea
-  bold-ul peste boundary. Reformat la `plus` text (conform conventiei din
-  `CLAUDE.md`).
+  paragraf incepea cu `+` urmat de spatiu, care era randat de GitHub ca bullet
+  list si spargea bold-ul peste boundary. Reformat la `plus` text (conform
+  conventiei din `CLAUDE.md`).
 
 #### Tests
 
