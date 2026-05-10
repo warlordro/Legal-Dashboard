@@ -85,7 +85,10 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
   const fieldsForType = FIELDS_BY_CATEGORY[type];
   const activeField = fieldsForType.find((f) => f.key === field) ?? fieldsForType[0];
 
-  const MAX_BATCH = 100;
+  // v2.20.4: bump 100 -> 200 ca sa egaleze cap-ul server (rnpm.ts:231).
+  // Pentru batch-uri >150 CUI recomandam splitting in 2-3 taburi paralele
+  // — vezi hint UI mai jos. Cap server ramane 200 ca fail-safe.
+  const MAX_BATCH = 200;
   const allValues = valuesText.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
   const values = allValues.slice(0, MAX_BATCH);
   const overLimit = allValues.length > MAX_BATCH;
@@ -187,6 +190,11 @@ export function RnpmBulkSearch({ captchaKey, captchaProvider, fallback2CaptchaKe
           placeholder={"14399840\n123456789\n..."}
           className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-sm"
         />
+        {values.length > 150 && (
+          <p className="mt-1.5 text-xs text-amber-600 dark:text-amber-400">
+            · Pentru &gt;150 CUI recomandam splitting in 2-3 taburi paralele (fiecare cu ~100 CUI). Fiecare bulk are propriul stream SSE si nu se influenteaza reciproc — wall time scade liniar cu numarul de taburi.
+          </p>
+        )}
       </div>
 
       <div className="flex items-center gap-4 text-sm">

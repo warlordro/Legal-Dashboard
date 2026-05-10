@@ -53,7 +53,12 @@ function validateParamsDepth(obj: unknown, depth = 0): string | null {
   return null;
 }
 
-const SSE_TIMEOUT_MS = 600000; // 10 min hard cap per bulk stream
+// v2.20.4: bump 10 min -> 60 min ca sa tolereze batch-uri de 200 CUI (server cap).
+// Estimare: 200 items × ~25s (worst-case ipoteci, mai mic pe specifice) = ~83 min
+// pentru 1 stream singur — dar use case-ul real e 2-6 taburi paralele × 100 CUI,
+// fiecare in ~20-40 min. 60 min acopera lejer toate categoriile fara sa lase
+// taburile orfane sa hang-uiasca indefinit.
+const SSE_TIMEOUT_MS = 3600000;
 // v2.18.0: bump 30 -> 45 min ca sa tolereze tier-2 split (destinatieInscriere).
 // Worst case: ipoteci cu 18 sub-tipuri × 17s (tier-1) + 1-2 sub-tipuri care
 // trigger nested cu 10 destinatii × 17s ≈ 18×17 + 2×10×17 = 646s. Plus latente

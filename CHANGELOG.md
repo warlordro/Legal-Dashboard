@@ -4,6 +4,36 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.4] - 2026-05-10
+
+### UX hardening pentru bulk RNPM la batch-uri mari + rate-limit ridicat
+
+Patch UX universal valabil pe toate cele 5 categorii RNPM (ipoteci, specifice,
+fiducii, creante, obligatiuni). Zero schimbari de contract HTTP, zero migration,
+zero modificari pe SSE event payload. Doar constante.
+
+#### Schimbari backend
+
+- **Bulk SSE timeout 10 min -> 60 min** ([backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts)). `SSE_TIMEOUT_MS = 600000` -> `3600000`. Cap-ul anterior ucidea orice batch peste ~24 items (la 25s/item worst-case ipoteci) — practic peste cap-ul de 100 CUI din UI. 60 min acopera batch-uri de 200 CUI in 1 stream singur si tolereaza use case-ul real cu 2-6 taburi paralele × 100 CUI fiecare. Functioneaza identic pe toate cele 5 categorii.
+- **Rate-limit global 30 -> 120 req/min per `(ip, ownerId)`** ([backend/src/middleware/rate-limit.ts](backend/src/middleware/rate-limit.ts)). `RATE_LIMIT` exportata acum (era constanta locala) ca testele sa nu duplice magic number-ul. Pragul anterior era prea conservator pentru UX desktop — pagina Alerts cu Refresh + Inchide toate + paginare burst-uia usor 30/min si producea 429 in flow normal. 120 acopera bursturi realiste, pastreaza protectia impotriva runaway loops (un infinite useEffect ar fi blocat tot dupa ~1 min) si ramane izolare per `(ip, ownerId)` in web mode.
+
+#### Schimbari frontend
+
+- **UI `MAX_BATCH` 100 -> 200** ([frontend/src/components/rnpm/RnpmBulkSearch.tsx](frontend/src/components/rnpm/RnpmBulkSearch.tsx)). Egaleaza cap-ul server (`rnpm.ts:231` "Maxim 200 cautari per bulk"). Permite paste direct de batch-uri mari fara warning de overlimit + nici o trunchiere silentioasa.
+- **Hint UI pentru >150 CUI**. Sub textarea apare automat un mesaj amber: "Pentru >150 CUI recomandam splitting in 2-3 taburi paralele (fiecare cu ~100 CUI). Fiecare bulk are propriul stream SSE si nu se influenteaza reciproc — wall time scade liniar cu numarul de taburi." Educational, sa nu se bata in cap-ul SSE pe stream-uri orfane si sa profite de paralelismul natural al taburilor.
+
+#### Tests
+
+- **Backend**: 844/844 (neschimbate; testele de rate-limit folosesc acum constanta `RATE_LIMIT` exportata in loc de magic 30).
+- **Frontend**: 100/100 (neschimbate).
+- **Type-check**: curat pe ambele.
+
+#### Versionare
+
+`2.20.3` -> `2.20.4` (patch UX — fara breaking change, fara migration).
+
+---
+
 ## [2.20.3] - 2026-05-08
 
 ### RNPM hardening — fail-fast, audit corelat cu envelope, allow-list canonica

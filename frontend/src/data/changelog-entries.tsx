@@ -37,6 +37,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.4",
+    date: "10 Mai 2026",
+    subtitle:
+      "UX hardening pentru bulk RNPM la batch-uri mari + rate-limit ridicat. Bulk SSE timeout extins de la 10 min la 60 min ca sa tolereze 200 CUI per batch in 1 stream singur si splitting in 2-6 taburi paralele fara taburi orfane. UI MAX_BATCH crescut la 200 (egaleaza cap-ul server) cu hint vizibil pentru >150 CUI ca recomanda splitting paralel. Rate-limit-ul global per (ip, ownerId) ridicat de la 30 la 120 req/min — pragul anterior era prea conservator pentru UX desktop (Refresh + Inchide toate + paginare burst-uia usor 30/min si producea 429 in flow normal pe pagina Alerts).",
+    icon: <Rocket className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "Bulk SSE timeout 10 min -> 60 min",
+        content:
+          "Pana acum SSE_TIMEOUT_MS = 600000 ucidea orice bulk peste ~24 items la 25s/item — practic peste cap-ul de 100 CUI din UI. v2.20.4 ridica timeout-ul la 3600000 (60 min) ca sa acopere si batch-uri de 200 CUI in 1 stream singur (worst-case ipoteci ~83 min, mai mic pe specifice/fiducii) si sa tolereze use case-ul real cu 2-6 taburi paralele × 100 CUI fiecare in ~20-40 min. Functioneaza identic pe toate cele 5 categorii (ipoteci, specifice, fiducii, creante, obligatiuni).",
+      },
+      {
+        title: "UI MAX_BATCH 100 -> 200 + hint pentru splitting paralel",
+        content:
+          "Cap-ul UI a fost ridicat sa egaleze cap-ul server (200), cu un hint vizibil amber sub textarea cand utilizatorul lipeste >150 CUI: recomanda splitting in 2-3 taburi paralele cu nota explicita ca fiecare bulk are propriul stream SSE si nu se influenteaza reciproc — wall time scade liniar cu numarul de taburi.",
+      },
+      {
+        title: "Rate-limit 30 -> 120 req/min per (ip, ownerId)",
+        content:
+          "Constanta RATE_LIMIT exportata acum din rate-limit.ts pentru a evita duplicarea magic number-ului in teste. 120 acopera bursturi UX realiste (Alerts page Refresh + Inchide toate + paginare), pastreaza protectia impotriva runaway loops (un infinite useEffect ar fi blocat tot dupa ~1 min) si ramane izolare per (ip, ownerId) in web mode. Pe desktop ownerId e tot 'local' deci behavior-ul e simplu un budget mai larg pentru flow-urile normale ale unui singur user.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Backend 844/844 (neschimbate, dar testele de rate-limit folosesc acum constanta exportata in loc de magic 30). Frontend 100/100 (neschimbate). Type-check curat pe ambele.",
+      },
+    ],
+  },
+  {
     version: "v2.20.3",
     date: "8 Mai 2026",
     subtitle:

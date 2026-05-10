@@ -7,10 +7,22 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.3**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.4**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.3** - hardening RNPM post-/full-review: audit `rnpm.cap_hit`
+Ultimul release **v2.20.4** - UX hardening pentru bulk RNPM la batch-uri mari +
+rate-limit ridicat. SSE timeout pe `/api/rnpm/bulk` extins de la 10 min la 60 min,
+ca sa tolereze batch-uri de 200 CUI in 1 stream singur si splitting in 2-6 taburi
+paralele fara sa lase taburi orfane sa hang-uiasca pana la cap. UI `MAX_BATCH`
+ridicat de la 100 la 200 (egaleaza cap-ul server) cu hint vizibil pentru >150 CUI
+care recomanda splitting in 2-3 taburi paralele. Rate-limit global ridicat de la
+30 la 120 req/min per `(ip, ownerId)` (era prea conservator pentru UX desktop —
+Refresh + Inchide toate + paginare burst-uia 30/min si producea 429). Universal
+valabil pe toate cele 5 categorii RNPM (ipoteci, specifice, fiducii, creante,
+obligatiuni). Zero schimbari de contract HTTP, zero migration. **844 teste backend,
+100 teste frontend**.
+
+Predecesor **v2.20.3** - hardening RNPM post-/full-review: audit `rnpm.cap_hit`
 acum carry-uieste `requestId` din envelope (corelare event log <-> client) si e purjat
 zilnic la 90 zile prin migration noua 0017 (`audit_log_created_at_idx`, `purgeOldAuditLog`).
 SSE-ul split diferentiaza intre `aborted` (signal client), `timeout` (server-side) si
@@ -473,8 +485,8 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (844 teste in v2.20.3) |
-| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.3) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (844 teste in v2.20.4) |
+| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.4) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

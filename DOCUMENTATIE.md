@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.20.3** (8 Mai 2026, hardening RNPM post-/full-review — audit `rnpm.cap_hit` corelat cu `requestId` din envelope si purjat 90z prin migration 0017, SSE diferentiaza `aborted`/`timeout`/`error`, fail-fast K=3 pe upstream throttling, `captchasUsed` acumulat din retries, allow-list canonica `subTypeLabels` cu helper `rnpmSubTypes.ts`, kill switch `RNPM_AUDIT_CAP_HIT_DISABLED=1`). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.20.4** (10 Mai 2026, UX hardening pentru bulk RNPM la batch-uri mari + rate-limit ridicat — SSE timeout pe `/api/rnpm/bulk` extins 10 min -> 60 min ca sa tolereze 200 CUI in 1 stream singur si splitting in 2-6 taburi paralele; UI `MAX_BATCH` ridicat 100 -> 200 cu hint vizibil pentru >150 CUI; rate-limit global 30 -> 120 req/min per `(ip, ownerId)` pentru a acoperi bursturile UX desktop fara 429-uri pe Refresh + Inchide toate + paginare; universal valabil pe toate cele 5 categorii RNPM). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)

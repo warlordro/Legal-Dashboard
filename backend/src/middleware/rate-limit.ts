@@ -1,7 +1,13 @@
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Next } from "hono";
 
-const RATE_LIMIT = 30;
+// v2.20.4 fix: pragul anterior (30 req/min) era prea conservator pentru UX
+// pe desktop — pagina Alerts cu Refresh + Inchide toate + paginare burst-uia
+// usor 30/min si producea 429 in flow normal. 120 acopera bursturi realiste,
+// pastreaza protectia impotriva runaway loops (un infinite useEffect tot ar
+// fi blocat dupa ~1 min) si ramane izolare per (ip, ownerId) in web mode.
+// Exportat ca testele sa nu duplice magic number-ul.
+export const RATE_LIMIT = 120;
 const RATE_WINDOW = 60000;
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();

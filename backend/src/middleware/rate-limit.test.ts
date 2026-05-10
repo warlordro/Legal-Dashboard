@@ -5,6 +5,7 @@ import {
   preAuthRateLimit,
   resetPreAuthRateLimit,
   _resetRateLimitForTest,
+  RATE_LIMIT,
 } from "./rate-limit.ts";
 import { requestIdContext } from "./requestId.ts";
 
@@ -83,7 +84,7 @@ describe("rateLimit — fail-closed semantics", () => {
   });
 
   it("does not bucket two distinct callers into a shared 'unknown' slot", async () => {
-    // Without fail-closed, two anon callers would share a 30-req bucket; with
+    // Without fail-closed, two anon callers would share one bucket; with
     // fail-closed both get 503 separately and never converge into one bucket.
     mockedGetConnInfo.mockReturnValue({ remote: { address: undefined } } as ReturnType<typeof getConnInfo>);
     const app = buildApp();
@@ -109,8 +110,8 @@ describe("rateLimit — per-owner isolation", () => {
     } as ReturnType<typeof getConnInfo>);
     const app = buildAppWithOwner();
 
-    // Drain owner alice. RATE_LIMIT is 30; the 30 should pass, the 31st 429.
-    for (let i = 0; i < 30; i++) {
+    // Drain owner alice up to RATE_LIMIT requests; the next one must 429.
+    for (let i = 0; i < RATE_LIMIT; i++) {
       const r = await app.request("/api/ping", {
         headers: { "x-test-owner": "alice" },
       });
@@ -131,7 +132,7 @@ describe("rateLimit — per-owner isolation", () => {
   });
 
   it("owner A and owner B share the same rate budget when on different IPs (sanity)", async () => {
-    // Owner alice from IP_A burns 30; owner alice from IP_B is independent
+    // Owner alice from IP_A burns RATE_LIMIT; owner alice from IP_B is independent
     // because the IP component still scopes the bucket.
     mockedGetConnInfo.mockReturnValueOnce({
       remote: { address: "10.0.0.10" },
@@ -189,8 +190,8 @@ describe("rateLimit — 429 response envelope", () => {
     } as ReturnType<typeof getConnInfo>);
     const app = buildAppWithOwner();
 
-    // Burn the 30-request budget for one (ip, owner) bucket.
-    for (let i = 0; i < 30; i++) {
+    // Burn the RATE_LIMIT budget for one (ip, owner) bucket.
+    for (let i = 0; i < RATE_LIMIT; i++) {
       const r = await app.request("/api/ping", {
         headers: { "x-test-owner": "alice" },
       });
