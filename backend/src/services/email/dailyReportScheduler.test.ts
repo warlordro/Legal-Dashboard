@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
 import { markDailyReportSent, upsertEmailSettings, type EmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "../../db/schema.ts";
-import { runDailyReportTick } from "./dailyReportScheduler.ts";
+import { _resetDailyReportRetryStateForTest, runDailyReportTick } from "./dailyReportScheduler.ts";
 
 let tmpRoot: string;
 
@@ -58,6 +58,7 @@ beforeEach(async () => {
   const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
   seed.close();
   getDb();
+  _resetDailyReportRetryStateForTest();
 });
 
 afterEach(async () => {
@@ -65,6 +66,7 @@ afterEach(async () => {
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   delete process.env.DAILY_REPORT_HOUR;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+  _resetDailyReportRetryStateForTest();
 });
 
 const MAY_3_AT_9 = new Date(2026, 4, 3, 9, 30, 0); // local 09:30 May 3 2026
@@ -337,6 +339,154 @@ describe("runDailyReportTick — send outcomes", () => {
     const detail = JSON.parse(audit.detail_json) as { reason: string; message: string };
     expect(detail.reason).toBe("exception");
     expect(detail.message).toBe("SMTP down");
+  });
+});
+
+describe("runDailyReportTick — retry backoff (Batch 4.4)", () => {
+  it("does NOT mark day sent after a single failure (within backoff window)", async () => {
+    upsertEmailSettings("alice", {
+      enabled: true,
+      toAddress: "alice@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("alice", YESTERDAY_NOON_UTC, "alice-1");
+
+    const send = vi.fn().mockResolvedValue({ ok: false, reason: "send_failed" });
+    const result = await runDailyReportTick({
+      now: () => MAY_3_AT_9,
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    expect(result.emailsFailed).toBe(1);
+    const row = getDb()
+      .prepare("SELECT last_daily_report_sent_for FROM owner_email_settings WHERE owner_id = ?")
+      .get("alice") as { last_daily_report_sent_for: string | null };
+    expect(row.last_daily_report_sent_for).toBeNull();
+  });
+
+  it("skips owner during active backoff window after a failure", async () => {
+    upsertEmailSettings("alice", {
+      enabled: true,
+      toAddress: "alice@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("alice", YESTERDAY_NOON_UTC, "alice-1");
+
+    const send = vi.fn().mockResolvedValue({ ok: false, reason: "send_failed" });
+    // First tick at 09:30 -> failure -> sets nextAttemptAt = 09:30 + 5min.
+    await runDailyReportTick({
+      now: () => MAY_3_AT_9,
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Second tick at 09:32 (still within 5min backoff) -> should skip.
+    const result = await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 32, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(result.emailsFailed).toBe(0);
+  });
+
+  it("retries after backoff window elapses", async () => {
+    upsertEmailSettings("alice", {
+      enabled: true,
+      toAddress: "alice@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("alice", YESTERDAY_NOON_UTC, "alice-1");
+
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: "send_failed" })
+      .mockResolvedValueOnce({ ok: true });
+    // First tick at 09:30 -> failure -> nextAttemptAt = 09:35.
+    await runDailyReportTick({
+      now: () => MAY_3_AT_9,
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Second tick at 09:36 (past backoff) -> retry, this time succeed.
+    const result = await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 36, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(result.emailsSent).toBe(1);
+    const row = getDb()
+      .prepare("SELECT last_daily_report_sent_for FROM owner_email_settings WHERE owner_id = ?")
+      .get("alice") as { last_daily_report_sent_for: string };
+    expect(row.last_daily_report_sent_for).toBe("2026-05-03");
+  });
+
+  it("marks day sent with retry_exhausted audit after 3 failures", async () => {
+    upsertEmailSettings("alice", {
+      enabled: true,
+      toAddress: "alice@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("alice", YESTERDAY_NOON_UTC, "alice-1");
+
+    const send = vi.fn().mockResolvedValue({ ok: false, reason: "send_failed" });
+
+    // Tick 1 @ 09:30 → fail #1, nextAttemptAt = 09:35.
+    await runDailyReportTick({
+      now: () => MAY_3_AT_9,
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Tick 2 @ 09:36 → fail #2, nextAttemptAt = 09:51.
+    await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 36, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Tick 3 @ 09:52 → fail #3, attempts = MAX(3).
+    await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 52, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Tick 4 @ 09:57 — still in reportHour=9 window. attempts>=MAX
+    // is checked before nextAttemptAt, so exhausted branch fires here.
+    const finalResult = await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 57, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(finalResult.emailsFailed).toBe(0);
+    expect(finalResult.emailsSent).toBe(0);
+
+    const row = getDb()
+      .prepare("SELECT last_daily_report_sent_for FROM owner_email_settings WHERE owner_id = ?")
+      .get("alice") as { last_daily_report_sent_for: string };
+    expect(row.last_daily_report_sent_for).toBe("2026-05-03");
+
+    const audit = getDb()
+      .prepare(
+        "SELECT action, outcome, detail_json FROM audit_log WHERE owner_id = ? AND action = 'email.daily_report.failed' ORDER BY id DESC LIMIT 1"
+      )
+      .get("alice") as { action: string; outcome: string; detail_json: string };
+    const detail = JSON.parse(audit.detail_json) as { reason?: string; attempts?: number };
+    expect(detail.reason).toBe("retry_exhausted");
+    expect(detail.attempts).toBe(3);
   });
 });
 

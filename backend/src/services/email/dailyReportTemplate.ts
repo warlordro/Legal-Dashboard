@@ -1,8 +1,4 @@
-import type {
-  AlertKind,
-  AlertSeverity,
-  MonitoringAlertRow,
-} from "../../db/monitoringAlertsRepository.ts";
+import type { AlertKind, AlertSeverity, MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
 
 // v2.13.0: HTML + text template pentru daily digest email. Genereaza un singur
 // email per owner cu toate alertele din ziua precedenta, grupate vizual pe
@@ -34,6 +30,7 @@ const KIND_LABELS: Record<AlertKind, string> = {
   dosar_no_longer_relevant: "Dosar nerelevant",
   aviz_changed: "Aviz modificat",
   source_error: "Eroare sursa",
+  source_partial: "Sursa incompleta",
 };
 
 function escapeHtml(value: string): string {

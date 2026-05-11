@@ -33,6 +33,43 @@ const TICK_INTERVAL_MS = 5 * 60 * 1000;
 // inutilizabil ca format email oricum si user-ul ar folosi exportul XLSX/PDF.
 const ALERT_FETCH_PAGE_SIZE = 1000;
 
+// v2.20.8 — Batch 4.4: explicit retry backoff. Inainte era retry implicit (tick
+// la 5min in toata fereastra de 1h = ~12 attempts), care spam-ueste SMTP-ul daca
+// host-ul e jos toata dimineata. Acum 3 incercari maximum la 5/15/45 min, dupa
+// care marcam ziua "sent" (ca evita re-fire la urmatorul tick) si auditul
+// `email.daily_report.failed.exhausted` arata operatorului ca am renuntat.
+// State-ul e in-memory (Map per owner+zi); pierderea la restart e OK — daca
+// procesul a fost restartat, e probabil ca SMTP-ul a fost si el reparat.
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_BACKOFF_MS = [5 * 60_000, 15 * 60_000, 45 * 60_000];
+
+interface RetryState {
+  date: string;
+  attempts: number;
+  nextAttemptAt: number;
+}
+
+const retryByOwner = new Map<string, RetryState>();
+
+// Exportat pentru teste: reseteaza state-ul de retry intre teste.
+export function _resetDailyReportRetryStateForTest(): void {
+  retryByOwner.clear();
+}
+
+// Inregistreaza un esec si calculeaza fereastra de backoff pentru urmatorul tick.
+// Daca attempts atinge MAX_RETRY_ATTEMPTS, urmatorul tick va executa ramura
+// "exhausted" (markDailyReportSent + audit) si va sterge entry-ul.
+function recordRetryFailure(ownerId: string, dateLocal: string, nowMs: number): void {
+  const prev = retryByOwner.get(ownerId);
+  const attempts = (prev && prev.date === dateLocal ? prev.attempts : 0) + 1;
+  const backoffIdx = Math.min(attempts - 1, RETRY_BACKOFF_MS.length - 1);
+  retryByOwner.set(ownerId, {
+    date: dateLocal,
+    attempts,
+    nextAttemptAt: nowMs + RETRY_BACKOFF_MS[backoffIdx],
+  });
+}
+
 interface SchedulerDeps {
   /** Returns the moment used for "is it the configured hour now?" decisions. */
   now: () => Date;
@@ -45,7 +82,7 @@ interface SchedulerDeps {
   /** Override for tests — replaces SMTP send. */
   send?: (
     to: string,
-    composed: { subject: string; html: string; text: string },
+    composed: { subject: string; html: string; text: string }
   ) => Promise<{ ok: boolean; reason?: string }>;
 }
 
@@ -66,9 +103,7 @@ function defaultReportHour(): number {
   return n;
 }
 
-function localDayBoundsToUtcIso(
-  dateLocal: string,
-): { startIso: string; endIso: string } {
+function localDayBoundsToUtcIso(dateLocal: string): { startIso: string; endIso: string } {
   // dateLocal is YYYY-MM-DD in server local timezone. Build the start/end
   // boundaries from local-component constructor so the UTC instants returned
   // match the actual local-day window.
@@ -98,9 +133,7 @@ export interface DailyReportTickResult {
 
 // One scheduler tick. Exported for tests so they can advance virtual time and
 // assert on the result without spinning the real setInterval.
-export async function runDailyReportTick(
-  deps: SchedulerDeps,
-): Promise<DailyReportTickResult> {
+export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyReportTickResult> {
   const formatLocalDate = deps.formatLocalDate ?? defaultFormatLocalDate;
   const getHour = deps.reportHour ?? defaultReportHour;
   const mailerCheck = deps.mailerConfigured ?? isMailerConfigured;
@@ -139,8 +172,50 @@ export async function runDailyReportTick(
   let sent = 0;
   let skippedNoAlerts = 0;
   let failed = 0;
+  const nowMs = now.getTime();
   for (const owner of candidates) {
     if (!owner.enabled || !owner.toAddress) continue;
+
+    // v2.20.8 — Batch 4.4: respecta backoff-ul. Daca state-ul curent indica
+    // urmatoarea incercare in viitor, sarim — urmatorul tick (5min) va re-evalua.
+    // Daca state-ul e pentru o zi anterioara, e stale → cleanup si continuam ca
+    // attempt nou.
+    const retry = retryByOwner.get(owner.ownerId);
+    if (retry) {
+      if (retry.date !== todayLocal) {
+        retryByOwner.delete(owner.ownerId);
+      } else if (retry.attempts >= MAX_RETRY_ATTEMPTS) {
+        // Exhausted: marcheaza ziua sent pentru cleanup linistit (vezi markDailyReportSent
+        // mai jos in zero-alerts path pentru rationament identic). Audit indica
+        // explicit motivul ca operatorul sa nu se intrebe.
+        try {
+          markDailyReportSent(owner.ownerId, todayLocal);
+        } catch (err) {
+          console.error(`[daily-report] markDailyReportSent (retry-exhausted) failed for ${owner.ownerId}`, err);
+        }
+        try {
+          recordAudit(null, "email.daily_report.failed", {
+            outcome: "error",
+            ownerId: owner.ownerId,
+            targetKind: "owner_email_settings",
+            targetId: owner.ownerId,
+            detail: {
+              reason: "retry_exhausted",
+              attempts: retry.attempts,
+              date: yesterdayLocal,
+            },
+          });
+        } catch {
+          /* audit best-effort */
+        }
+        retryByOwner.delete(owner.ownerId);
+        continue;
+      } else if (nowMs < retry.nextAttemptAt) {
+        // Inca in fereastra de backoff — nu incerca acum.
+        continue;
+      }
+    }
+
     let alerts;
     try {
       const list = listAlerts({
@@ -153,11 +228,9 @@ export async function runDailyReportTick(
       });
       alerts = list.rows;
     } catch (err) {
-      console.error(
-        `[daily-report] listAlerts failed for owner ${owner.ownerId}`,
-        err,
-      );
+      console.error(`[daily-report] listAlerts failed for owner ${owner.ownerId}`, err);
       failed++;
+      recordRetryFailure(owner.ownerId, todayLocal, nowMs);
       try {
         recordAudit(null, "email.daily_report.failed", {
           outcome: "error",
@@ -177,13 +250,11 @@ export async function runDailyReportTick(
       // the day as "sent" so the next tick (e.g. 09:05) doesn't re-evaluate
       // and so a late inserted alert at 09:30 doesn't suddenly trigger a
       // partial send for yesterday.
+      retryByOwner.delete(owner.ownerId);
       try {
         markDailyReportSent(owner.ownerId, todayLocal);
       } catch (err) {
-        console.error(
-          `[daily-report] markDailyReportSent (zero-alert path) failed for ${owner.ownerId}`,
-          err,
-        );
+        console.error(`[daily-report] markDailyReportSent (zero-alert path) failed for ${owner.ownerId}`, err);
       }
       skippedNoAlerts++;
       continue;
@@ -202,13 +273,11 @@ export async function runDailyReportTick(
       });
       if (result.ok) {
         sent++;
+        retryByOwner.delete(owner.ownerId);
         try {
           markDailyReportSent(owner.ownerId, todayLocal);
         } catch (err) {
-          console.error(
-            `[daily-report] markDailyReportSent failed for ${owner.ownerId}`,
-            err,
-          );
+          console.error(`[daily-report] markDailyReportSent failed for ${owner.ownerId}`, err);
         }
         try {
           recordAudit(null, "email.daily_report.sent", {
@@ -226,6 +295,7 @@ export async function runDailyReportTick(
         }
       } else {
         failed++;
+        recordRetryFailure(owner.ownerId, todayLocal, nowMs);
         try {
           recordAudit(null, "email.daily_report.failed", {
             outcome: "error",
@@ -240,10 +310,8 @@ export async function runDailyReportTick(
       }
     } catch (err) {
       failed++;
-      console.error(
-        `[daily-report] send threw for owner ${owner.ownerId}`,
-        err,
-      );
+      recordRetryFailure(owner.ownerId, todayLocal, nowMs);
+      console.error(`[daily-report] send threw for owner ${owner.ownerId}`, err);
       try {
         recordAudit(null, "email.daily_report.failed", {
           outcome: "error",

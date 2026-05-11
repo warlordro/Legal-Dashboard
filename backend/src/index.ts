@@ -8,17 +8,13 @@ import { rnpmRouter } from "./routes/rnpm.ts";
 import { dosareRouter } from "./routes/dosare.ts";
 import { termeneRouter } from "./routes/termene.ts";
 import { aiRouter } from "./routes/ai.ts";
-import { preAuthRateLimit, rateLimit } from "./middleware/rate-limit.ts";
+import { preAuthRateLimit, rateLimit, startRateLimitSweeper, stopRateLimitSweeper } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
 import { getUserById, updateUserRole } from "./db/userRepository.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
-import {
-  monitoringRouter,
-  setMonitoringScheduler,
-  getMonitoringSchedulerStatus,
-} from "./routes/monitoring.ts";
+import { monitoringRouter, setMonitoringScheduler, getMonitoringSchedulerStatus } from "./routes/monitoring.ts";
 import { nameListsRouter } from "./routes/nameLists.ts";
 import { alertsRouter } from "./routes/alerts.ts";
 import { aiUsageRouter } from "./routes/aiUsage.ts";
@@ -31,18 +27,16 @@ import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
 import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
 import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
-import { readMailerConfig } from "./services/email/mailer.ts";
-import {
-  startDailyReportScheduler,
-  stopDailyReportScheduler,
-} from "./services/email/dailyReportScheduler.ts";
+import { isMailerConfigured, readMailerConfig } from "./services/email/mailer.ts";
+import { startDailyReportScheduler, stopDailyReportScheduler } from "./services/email/dailyReportScheduler.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
-import { markShuttingDown } from "./db/schema.ts";
+import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { fileURLToPath } from "url";
 import path from "path";
+import fs from "fs";
 import dotenv from "dotenv";
 
 // __dirname is provided by:
@@ -52,9 +46,7 @@ import dotenv from "dotenv";
 // passes --define:import.meta.url="\"\"" so esbuild replaces the token at compile
 // time — no empty-import-meta warning, and the branch is dead anyway (__dirname is
 // defined) so the empty string is never used.
-const __curdir = typeof __dirname !== "undefined"
-  ? __dirname
-  : path.dirname(fileURLToPath(import.meta.url));
+const __curdir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 // Audit 2026-04-29 R3: in productie nu suprascriem env-ul oferit de orchestrator
 // (Docker / systemd / Kubernetes secrets). `.env` din imagine ramane fallback,
 // dar nu poate sterge un secret injectat la runtime.
@@ -113,6 +105,27 @@ const IS_ELECTRON_INPROC = typeof process.versions.electron === "string";
 function fatalBoot(reason: string, err: unknown): never {
   const msg = err instanceof Error ? err.message : String(err);
   console.error(`[boot] ${reason}:`, msg);
+
+  // v2.20.8 — Batch 2.2: timestamped backup inainte de exit/throw, ca
+  // operatorul sa aiba copia DB-ului in starea exacta in care boot-ul a esuat.
+  // Cazul tipic: schema/prewarm failure dupa o migrare partiala; fara backup
+  // aici, prima incercare de fix din partea operatorului poate suprascrie WAL-ul
+  // si pierde evidenta pentru post-mortem. Best-effort — daca backup-ul esueaza
+  // (disk full, permisiuni), log si continuam la exit ca sa nu mascam reason-ul
+  // original. Label "schema-upgrade" pastreaza convenția pre-existenta in dir-ul
+  // backups/, asa ca cleanup-ul/grouping-ul existent continua sa functioneze.
+  try {
+    const dbPath = getDbPath();
+    if (fs.existsSync(dbPath)) {
+      preMigrationBackup(dbPath, "schema-upgrade");
+    }
+  } catch (backupErr) {
+    console.warn(
+      "[boot] fatalBoot backup failed (continuing):",
+      backupErr instanceof Error ? backupErr.message : backupErr
+    );
+  }
+
   if (IS_ELECTRON_INPROC) {
     throw err instanceof Error ? err : new Error(`${reason}: ${msg}`);
   }
@@ -152,12 +165,13 @@ try {
     const missing = smtpVars.filter((v) => !((process.env[v] ?? "").trim().length > 0));
     const port = process.env.SMTP_PORT?.trim();
     const portInvalid =
-      missing.length === 0 && port !== undefined &&
+      missing.length === 0 &&
+      port !== undefined &&
       !(Number.isFinite(Number(port)) && Number(port) >= 1 && Number(port) <= 65535);
     console.warn(
       `[email] SMTP partial config detected — mailer disabled. Set: ${presentVars.join(", ")}` +
         (missing.length > 0 ? `; missing: ${missing.join(", ")}` : "") +
-        (portInvalid ? `; SMTP_PORT="${port}" out of range 1..65535` : ""),
+        (portInvalid ? `; SMTP_PORT="${port}" out of range 1..65535` : "")
     );
   }
 }
@@ -211,10 +225,17 @@ function healthHandler(c: Context): Response {
         inflight: status?.inflight ?? 0,
       }
     : { enabled: false, running: false, inflight: 0 };
+  // v2.20.8: expune `emailConfigured` la /health ca operatorii sa stie din
+  // probe-uri externe (curl /health, Electron splash, monitoring extern) daca
+  // canalul SMTP e activ. Deriva din readMailerConfig() — true daca toate
+  // SMTP_* sunt setate si SMTP_PORT e in range; false in rest. Matchuieste
+  // exact ce vede dispatcher-ul real (isMailerConfigured re-evalueaza la fel).
+  const emailConfigured = isMailerConfigured();
   return c.json({
     status: "ok",
     service: "Legal Dashboard API",
     monitoring,
+    emailConfigured,
   });
 }
 
@@ -273,8 +294,7 @@ if (!loopback.has(rawHost) && process.env.LEGAL_DASHBOARD_ALLOW_REMOTE !== "1") 
 // inteles ca toate API-urile sunt expuse fara auth pana la PR-9. "WARNING in
 // log" e prea usor de scrolled-past — un crash la boot, in schimb, forteaza o
 // decizie. Cand ack-ul e prezent, banner-ul ramane (audit trail).
-const REMOTE_BIND_ACTIVE =
-  process.env.LEGAL_DASHBOARD_ALLOW_REMOTE === "1" || !loopback.has(hostname);
+const REMOTE_BIND_ACTIVE = process.env.LEGAL_DASHBOARD_ALLOW_REMOTE === "1" || !loopback.has(hostname);
 if (REMOTE_BIND_ACTIVE) {
   // PR-9 fix B1: remote bind FARA auth web e refuz pentru ca toti clientii LAN
   // ar aparea ca shared `local` (audit trail inutil, ownership leak). Singurul
@@ -287,8 +307,8 @@ if (REMOTE_BIND_ACTIVE) {
         "LEGAL_DASHBOARD_ALLOW_REMOTE=1 (or non-loopback HOST) este setat dar " +
           `LEGAL_DASHBOARD_AUTH_MODE='${authMode}'. Remote bind cere ` +
           "LEGAL_DASHBOARD_AUTH_MODE=web + LEGAL_DASHBOARD_JWT_SECRET valid. " +
-          "Pentru desktop local, lasa hostname pe loopback (127.0.0.1).",
-      ),
+          "Pentru desktop local, lasa hostname pe loopback (127.0.0.1)."
+      )
     );
   }
 
@@ -301,8 +321,8 @@ if (REMOTE_BIND_ACTIVE) {
           "LEGAL_DASHBOARD_ACK_NO_AUTH != 'i-understand-no-auth-yet'. " +
           "Remote bind ramane opt-in explicit pana la SSO/deploy final; setati " +
           "LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet ca sa " +
-          "confirmati ca intelegeti riscul, sau lasati hostname pe loopback.",
-      ),
+          "confirmati ca intelegeti riscul, sau lasati hostname pe loopback."
+      )
     );
   }
   console.warn("====================================================================");
@@ -401,6 +421,12 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   // Independent of MONITORING_ENABLED: a user might disable monitoring jobs but
   // still want digests of historical alerts (highly unusual but cheap to allow).
   startDailyReportScheduler();
+
+  // v2.20.8: sweep periodic pe rate-limit buckets. Inline cleanup-ul (size>1000)
+  // tot ramane ca safety; tick-ul de 5min ataca buckets idle care altfel ar
+  // ramane pana la urmatorul spike. .unref() in startup ca timer-ul sa nu tina
+  // procesul viu peste graceful shutdown.
+  startRateLimitSweeper();
 });
 httpServer.on("error", (err: Error) => {
   // Async event: under Electron this becomes uncaughtException → main.js
@@ -451,6 +477,10 @@ async function gracefulShutdown(reason: string): Promise<void> {
     backupInterval = null;
   }
 
+  // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca
+  // sweeper-ul nu a pornit, ex. boot failure inainte de listen).
+  stopRateLimitSweeper();
+
   await Promise.race([Promise.all([closePromise, schedulerStop]), drainTimeout]);
 
   // v2.10.1 #7: flush queued email dispatches before closing the DB. The
@@ -476,7 +506,9 @@ async function gracefulShutdown(reason: string): Promise<void> {
   // microtask-deferred ai_usage write that lost the race against drain
   // throws instead of silently reopening a fresh handle on its way out.
   // Plain closeDb() is fine for tests; production drain wants the latch.
-  try { markShuttingDown(); } catch (e) {
+  try {
+    markShuttingDown();
+  } catch (e) {
     console.error("[shutdown] markShuttingDown failed:", e);
   }
 }
@@ -492,8 +524,8 @@ process.on("beforeExit", () => {
 
 // Expose shutdown hook so Electron's `before-quit` can flush WAL without killing the process.
 // Uses a globalThis key to survive esbuild's CJS bundle boundary.
-(globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> }).__legalDashboardShutdown =
-  () => gracefulShutdown("before-quit");
+(globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> }).__legalDashboardShutdown = () =>
+  gracefulShutdown("before-quit");
 
 const APP_VERSION: string = (() => {
   try {

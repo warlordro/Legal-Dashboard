@@ -53,17 +53,17 @@ Standard envelope (din v2.14.0): `{ data: T | null, error: { code, message } | n
 
 ---
 
-## Batch 2 — Operator visibility (MED risk, 2h)
+## Batch 2 — Operator visibility (MED risk, 2h) ✅ DONE in v2.20.8
 
-Target release: **v2.20.4**.
+Target release: **v2.20.8** (LIVRAT).
 
-- [ ] **`backend/src/services/monitoring/nameSoapRunner.ts:185-209`** — `failedInstitutii` doar `console.warn`. Emite alert kind `source_partial` (sau extinde unul existent) ca operatorul sa vada partial-success in UI Alerts.
-- [ ] **`backend/src/db/migrate.ts` (fatalBoot path)** — adauga `preMigrationBackup("schema-upgrade")` inainte de `process.exit(1)` ca operatorul sa aiba timestamped DB la troubleshoot.
-- [ ] **`/health` endpoint** — expune `emailConfigured: boolean` (deriv din `SMTP_HOST` prezent) ca admin sa vada explicit daca alertele email sunt active.
-- [ ] **`backend/src/db/backup.ts:326-345`** — auto-revert face copyFile doar pe `.db`, lasa `-wal`/`-shm` orfane. Adauga cleanup explicit + comment.
-- [ ] **VACUUM splash UX** — operatiunea blocheaza UI; afiseaza splash/progress in renderer cand ruleaza compactare.
+- [x] **`backend/src/services/monitoring/nameSoapRunner.ts`** — emis alert `source_partial` cu severity `warning` cand cel putin o institutie esueaza dar restul reusesc, in spate de feature flag `MONITORING_PARTIAL_ALERTS_ENABLED=1` (default OFF, 24-48h observatie). ✅ LIVRAT v2.20.8.
+- [x] **`backend/src/db/migrate.ts` (fatalBoot path)** — adaugat `preMigrationBackup("schema-upgrade")` inainte de `process.exit(1)`. ✅ LIVRAT v2.20.8.
+- [x] **`/health` endpoint** — expune acum `emailConfigured: boolean` derivat din `SMTP_HOST`. ✅ LIVRAT v2.20.8.
+- [x] **`backend/src/db/backup.ts`** — auto-revert face acum cleanup explicit pe `-wal`/`-shm` orfane. ✅ LIVRAT v2.20.8.
+- [x] **VACUUM splash UX** — splash full-screen blocking (`role="alertdialog"`, `aria-busy`) peste Baza locala RNPM in timpul `POST /compact`; ESC/backdrop/X-button blocate. ✅ LIVRAT v2.20.8.
 
-**Risc modificare:** SCAZUT-MEDIU. Schimbarea pe `nameSoapRunner` poate genera spam de alerte la prima rulare daca multe institutii sunt down — debounce per `(jobId, institutie)` sau rate-limit la X/zi. **Mitigare:** feature flag `MONITORING_PARTIAL_ALERTS_ENABLED=1` la rollout, monitorizat 24-48h.
+**Risc modificare:** SCAZUT-MEDIU. **Status:** LIVRAT v2.20.8. Feature flag `MONITORING_PARTIAL_ALERTS_ENABLED=1` ramane OFF default; flip dupa 24-48h observatie.
 
 ---
 
@@ -86,17 +86,17 @@ Target release: **v2.21.0** (eject din v2.20.4 ca sa testam izolat).
 
 ---
 
-## Batch 4 — Scheduler & captcha reliability (MED risk, 3h)
+## Batch 4 — Scheduler & captcha reliability (MED risk, 3h) ✅ DONE in v2.20.8
 
-Target release: **v2.20.4**.
+Target release: **v2.20.8** (LIVRAT).
 
-- [ ] **`backend/src/services/monitoring/scheduler.ts:302`** — `void this.runOne(job, runId, nowIso)` fire-and-forget fara `.catch`. Inlocuieste cu `.catch((err) => { auditLog(...); markRunFailed(runId) })` ca erorile uncaught sa nu lase run-uri "stuck".
-- [ ] **`backend/src/services/captchaSolver.ts:220-229`** — `getBalance()` helpers nu au timeout/AbortSignal. Adauga `AbortSignal.timeout(15_000)` sa nu bloce admin requests indefinit.
-- [ ] **`backend/src/services/captchaSolver.ts:106-107`** — race mode: sleep loop are `signal.aborted` check DUPA sleep. Foloseste `Promise.race([sleep, signalPromise])` ca abort-ul sa fie imediat.
-- [ ] **Daily report scheduler** — daca emailul esueaza, retry cu exponential backoff (3 incercari, 5min/15min/45min) inainte sa picteze run-ul ca `failed`.
-- [ ] **`backend/src/middleware/rate-limit.ts:65`** — cleanup ruleaza doar la threshold; adauga periodic sweep (`setInterval` 5min) pentru caz bursty + idle.
+- [x] **`backend/src/services/monitoring/scheduler.ts`** — fire-and-forget `void this.runOne(...)` are acum `.catch` care logheaza jobId + runId + `error.message` (fara stack). ✅ LIVRAT v2.20.8.
+- [x] **`backend/src/services/captchaSolver.ts` getBalance** — adaugat `AbortSignal.timeout(15_000)` pe ambele helpere (2Captcha + CapSolver). ✅ LIVRAT v2.20.8.
+- [x] **`backend/src/services/captchaSolver.ts` race-mode sleep** — sleep-ul din poll-ul `getResult` foloseste acum `Promise.race([sleep, signalPromise])`. ✅ LIVRAT v2.20.8.
+- [x] **Daily report scheduler retry cu backoff** — pana la 3 incercari cu backoff `[5min, 15min, 45min]`, audit `retry_exhausted` dupa epuizare. State `Map<ownerId, retryState>` in-memory. ✅ LIVRAT v2.20.8.
+- [x] **`backend/src/middleware/rate-limit.ts`** — adaugat `setInterval(5min)` periodic sweep pe langa cleanup-ul threshold-based existent. ✅ LIVRAT v2.20.8.
 
-**Risc modificare:** SCAZUT-MEDIU. **Mitigare:** scheduler `.catch` audit logging trebuie sa includa `jobId` + `runId` + `error.message` (nu stack complet) pentru ca tabela `monitoring_runs` sa nu se umple cu zgomot.
+**Risc modificare:** SCAZUT-MEDIU. **Status:** LIVRAT v2.20.8. Scheduler `.catch` logging include `jobId` + `runId` + `error.message` (fara stack), ca tabela `monitoring_runs` sa nu se umple cu zgomot.
 
 ---
 

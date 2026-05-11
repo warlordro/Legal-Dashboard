@@ -52,7 +52,8 @@ async function solveWith2Captcha(apiKey: string, signal?: AbortSignal): Promise<
     if (e instanceof CaptchaError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
     if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaError("Balanta 2Captcha insuficienta.", e);
-    if (/ERROR_WRONG_USER_KEY|ERROR_KEY_DOES_NOT_EXIST/i.test(msg)) throw new CaptchaError("Cheia 2Captcha este invalida.", e);
+    if (/ERROR_WRONG_USER_KEY|ERROR_KEY_DOES_NOT_EXIST/i.test(msg))
+      throw new CaptchaError("Cheia 2Captcha este invalida.", e);
     throw new CaptchaError(`Eroare 2Captcha: ${msg}`, e);
   } finally {
     if (signal && onAbort) signal.removeEventListener("abort", onAbort);
@@ -62,6 +63,34 @@ async function solveWith2Captcha(apiKey: string, signal?: AbortSignal): Promise<
 const CAPSOLVER_BASE = "https://api.capsolver.com";
 const CAPSOLVER_POLL_INTERVAL_MS = 2000;
 const CAPSOLVER_MAX_POLLS = 60;
+const BALANCE_TIMEOUT_MS = 15_000;
+
+// Sleep care reactioneaza imediat la abort signal. Cu vechiul cod (setTimeout
+// neutralizat doar la sfarsitul tick-ului), un abort venit la inceputul unui
+// poll putea astepta inca pana la CAPSOLVER_POLL_INTERVAL_MS (2s) inainte sa
+// fie observat. Acum signal-ul rejecteaza imediat si timer-ul e curatat ca
+// timeout-ul sa nu tina event loop-ul viu.
+function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (signal && onAbort) signal.removeEventListener("abort", onAbort);
+      resolve();
+    }, ms);
+    let onAbort: (() => void) | undefined;
+    if (signal) {
+      onAbort = () => {
+        clearTimeout(timer);
+        signal.removeEventListener("abort", onAbort!);
+        reject(new DOMException("Aborted", "AbortError"));
+      };
+      signal.addEventListener("abort", onAbort);
+    }
+  });
+}
 
 async function capsolverPost<T>(path: string, body: unknown, signal?: AbortSignal): Promise<T> {
   const res = await fetch(`${CAPSOLVER_BASE}${path}`, {
@@ -76,14 +105,18 @@ async function capsolverPost<T>(path: string, body: unknown, signal?: AbortSigna
 
 async function solveWithCapSolver(apiKey: string, signal?: AbortSignal): Promise<string> {
   type CreateRes = { errorId: number; errorCode?: string; errorDescription?: string; taskId?: string };
-  const create = await capsolverPost<CreateRes>("/createTask", {
-    clientKey: apiKey,
-    task: {
-      type: "ReCaptchaV2TaskProxyLess",
-      websiteURL: RNPM_PAGEURL,
-      websiteKey: RNPM_SITEKEY,
+  const create = await capsolverPost<CreateRes>(
+    "/createTask",
+    {
+      clientKey: apiKey,
+      task: {
+        type: "ReCaptchaV2TaskProxyLess",
+        websiteURL: RNPM_PAGEURL,
+        websiteKey: RNPM_SITEKEY,
+      },
     },
-  }, signal);
+    signal
+  );
   if (create.errorId !== 0 || !create.taskId) {
     const code = create.errorCode ?? "";
     if (/ERROR_KEY_DENIED_ACCESS|ERROR_INVALID_TASK_DATA|ERROR_KEY/i.test(code)) {
@@ -103,12 +136,15 @@ async function solveWithCapSolver(apiKey: string, signal?: AbortSignal): Promise
     solution?: { gRecaptchaResponse?: string };
   };
   for (let i = 0; i < CAPSOLVER_MAX_POLLS; i++) {
-    await new Promise((r) => setTimeout(r, CAPSOLVER_POLL_INTERVAL_MS));
-    if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-    const poll = await capsolverPost<TaskRes>("/getTaskResult", {
-      clientKey: apiKey,
-      taskId: create.taskId,
-    }, signal);
+    await sleepAbortable(CAPSOLVER_POLL_INTERVAL_MS, signal);
+    const poll = await capsolverPost<TaskRes>(
+      "/getTaskResult",
+      {
+        clientKey: apiKey,
+        taskId: create.taskId,
+      },
+      signal
+    );
     if (poll.errorId !== 0) {
       throw new CaptchaError(`Eroare CapSolver: ${poll.errorDescription ?? poll.errorCode ?? "necunoscuta"}`);
     }
@@ -135,34 +171,38 @@ async function solveRace(
   primary: { key: string; provider: CaptchaProvider },
   other: { key: string; provider: CaptchaProvider },
   signal: AbortSignal | undefined,
-  t0: number,
+  t0: number
 ): Promise<string> {
   const ctrlA = new AbortController();
   const ctrlB = new AbortController();
-  const onOuterAbort = () => { ctrlA.abort(); ctrlB.abort(); };
+  const onOuterAbort = () => {
+    ctrlA.abort();
+    ctrlB.abort();
+  };
   if (signal) signal.addEventListener("abort", onOuterAbort, { once: true });
 
   const wrap = (slot: "A" | "B", p: { key: string; provider: CaptchaProvider }, ctrl: AbortController) =>
     solveWith(p.provider, p.key, ctrl.signal).then(
       (tok) => ({ ok: true as const, slot, provider: p.provider, tok }),
-      (err) => { throw { slot, provider: p.provider, err }; },
+      (err) => {
+        throw { slot, provider: p.provider, err };
+      }
     );
 
   try {
-    const winner = await Promise.any([
-      wrap("A", primary, ctrlA),
-      wrap("B", other, ctrlB),
-    ]);
+    const winner = await Promise.any([wrap("A", primary, ctrlA), wrap("B", other, ctrlB)]);
     console.log(`[captcha] race done winner=${winner.provider} ${Date.now() - t0}ms`);
     (winner.slot === "A" ? ctrlB : ctrlA).abort();
     return winner.tok;
   } catch (e) {
     if (e instanceof AggregateError) {
-      const errs = e.errors.map((x) => {
-        const info = x as { provider?: string; err?: unknown };
-        const msg = info.err instanceof Error ? info.err.message : String(info.err);
-        return `${info.provider}: ${msg}`;
-      }).join(" | ");
+      const errs = e.errors
+        .map((x) => {
+          const info = x as { provider?: string; err?: unknown };
+          const msg = info.err instanceof Error ? info.err.message : String(info.err);
+          return `${info.provider}: ${msg}`;
+        })
+        .join(" | ");
       console.log(`[captcha] race FAIL (both) ${Date.now() - t0}ms ${errs}`);
       throw new CaptchaError(`Ambele provider-uri de captcha au esuat: ${errs}`);
     }
@@ -177,7 +217,7 @@ export async function solveRnpmCaptcha(
   provider: CaptchaProvider = "2captcha",
   fallbackKey?: string,
   signal?: AbortSignal,
-  mode: CaptchaMode = "sequential",
+  mode: CaptchaMode = "sequential"
 ): Promise<string> {
   const key = validateKey(apiKey, provider);
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -198,7 +238,9 @@ export async function solveRnpmCaptcha(
     return token;
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
-    console.log(`[captcha] solve FAIL provider=${provider} ${Date.now() - t0}ms err=${e instanceof Error ? e.message : e}`);
+    console.log(
+      `[captcha] solve FAIL provider=${provider} ${Date.now() - t0}ms err=${e instanceof Error ? e.message : e}`
+    );
     if (haveOther) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       const t1 = Date.now();
@@ -209,7 +251,9 @@ export async function solveRnpmCaptcha(
         console.log(`[captcha] fallback done provider=${otherProvider} ${Date.now() - t1}ms`);
         return token;
       } catch (e2) {
-        console.log(`[captcha] fallback FAIL provider=${otherProvider} ${Date.now() - t1}ms err=${e2 instanceof Error ? e2.message : e2}`);
+        console.log(
+          `[captcha] fallback FAIL provider=${otherProvider} ${Date.now() - t1}ms err=${e2 instanceof Error ? e2.message : e2}`
+        );
         throw e2;
       }
     }
@@ -217,15 +261,28 @@ export async function solveRnpmCaptcha(
   }
 }
 
-async function balance2Captcha(apiKey: string): Promise<number> {
+async function balance2Captcha(apiKey: string, signal: AbortSignal): Promise<number> {
+  // SDK-ul @2captcha/captcha-solver nu suporta AbortSignal direct. Folosim
+  // race: dupa BALANCE_TIMEOUT_MS, rejectam. Promisiunea originala continua
+  // in background (HTTP-ul SDK-ului are propriul timeout intern); important
+  // e ca handler-ul nostru sa nu blocheze UI/CLI mai mult decat trebuie.
   const solver = new Solver(apiKey);
-  const balance = await solver.balance();
-  return typeof balance === "number" ? balance : Number(balance);
+  let onAbort: (() => void) | undefined;
+  const abortPromise = new Promise<never>((_, reject) => {
+    onAbort = () => reject(new DOMException("Aborted", "AbortError"));
+    signal.addEventListener("abort", onAbort);
+  });
+  try {
+    const balance = await Promise.race([solver.balance(), abortPromise]);
+    return typeof balance === "number" ? balance : Number(balance);
+  } finally {
+    if (onAbort) signal.removeEventListener("abort", onAbort);
+  }
 }
 
-async function balanceCapSolver(apiKey: string): Promise<number> {
+async function balanceCapSolver(apiKey: string, signal: AbortSignal): Promise<number> {
   type BalRes = { errorId: number; errorDescription?: string; balance?: number };
-  const res = await capsolverPost<BalRes>("/getBalance", { clientKey: apiKey });
+  const res = await capsolverPost<BalRes>("/getBalance", { clientKey: apiKey }, signal);
   if (res.errorId !== 0 || typeof res.balance !== "number") {
     throw new CaptchaError(`Eroare CapSolver: ${res.errorDescription ?? "balanta indisponibila"}`);
   }
@@ -234,10 +291,18 @@ async function balanceCapSolver(apiKey: string): Promise<number> {
 
 export async function getCaptchaBalance(apiKey: string, provider: CaptchaProvider = "2captcha"): Promise<number> {
   const key = validateKey(apiKey, provider);
+  // v2.20.8: timeout 15s ca apelul "Verifica" din UI sa nu agate Settings la
+  // infinit cand provider-ul nu raspunde (DNS lent, retea blocata, etc.).
+  // AbortSignal.timeout disponibil din Node 17.3 / Electron 22+.
+  const signal = AbortSignal.timeout(BALANCE_TIMEOUT_MS);
   try {
-    return provider === "capsolver" ? await balanceCapSolver(key) : await balance2Captcha(key);
+    return provider === "capsolver" ? await balanceCapSolver(key, signal) : await balance2Captcha(key, signal);
   } catch (e) {
     if (e instanceof CaptchaError) throw e;
+    // AbortSignal.timeout rejecteaza cu DOMException name=TimeoutError.
+    if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
+      throw new CaptchaError(`Timeout ${providerLabel(provider)} (>${Math.round(BALANCE_TIMEOUT_MS / 1000)}s).`, e);
+    }
     const msg = e instanceof Error ? e.message : String(e);
     throw new CaptchaError(`Eroare ${providerLabel(provider)}: ${msg}`, e);
   }

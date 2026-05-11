@@ -12,7 +12,8 @@ export type AlertKind =
   | "dosar_relevant_now"
   | "dosar_no_longer_relevant"
   | "aviz_changed"
-  | "source_error";
+  | "source_error"
+  | "source_partial";
 
 export type AlertSeverity = "info" | "warning" | "critical";
 export type AlertJobKind = "dosar_soap" | "name_soap" | "aviz_rnpm";
@@ -90,6 +91,7 @@ export const alertKindLabels: Record<AlertKind, string> = {
   dosar_no_longer_relevant: "Nu mai este relevant",
   aviz_changed: "Aviz modificat",
   source_error: "Eroare sursa",
+  source_partial: "Sursa incompleta",
 };
 
 export const severityLabels: Record<AlertSeverity, string> = {

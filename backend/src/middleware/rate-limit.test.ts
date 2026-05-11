@@ -5,6 +5,7 @@ import {
   preAuthRateLimit,
   resetPreAuthRateLimit,
   _resetRateLimitForTest,
+  _sweepRateLimitNowForTest,
   RATE_LIMIT,
 } from "./rate-limit.ts";
 import { requestIdContext } from "./requestId.ts";
@@ -146,7 +147,7 @@ describe("rateLimit — per-owner isolation", () => {
       () =>
         ({
           remote: { address: ips[i++ % ips.length] },
-        }) as ReturnType<typeof getConnInfo>,
+        }) as ReturnType<typeof getConnInfo>
     );
 
     // Two requests, same owner, different IPs — both pass and seed two buckets.
@@ -214,6 +215,59 @@ describe("rateLimit — 429 response envelope", () => {
   });
 });
 
+// v2.20.8 — Batch 4.5: sweep periodic ca sa nu acumulam entries pe long-running.
+describe("rateLimit — periodic sweep (Batch 4.5)", () => {
+  it("sweep removes entries whose resetTime is in the past", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.60" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithOwner();
+
+    // Seed bucket cu o cerere.
+    const r1 = await app.request("/api/ping", {
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(r1.status).toBe(200);
+
+    // Force-sweep cu un now mult in viitor (peste fereastra de 60s).
+    _sweepRateLimitNowForTest(Date.now() + 5 * 60_000);
+
+    // Drain pana la RATE_LIMIT noi cereri trebuie sa treaca — daca sweep-ul a
+    // sters entry-ul, bucket-ul reincepe de la 0; daca nu, contorul precedent
+    // ar fi tras peste limita mai devreme.
+    for (let i = 0; i < RATE_LIMIT; i++) {
+      const r = await app.request("/api/ping", {
+        headers: { "x-test-owner": "alice" },
+      });
+      expect(r.status).toBe(200);
+    }
+  });
+
+  it("sweep keeps entries whose resetTime is still in the future", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.61" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithOwner();
+
+    // Burn the bucket up to limit.
+    for (let i = 0; i < RATE_LIMIT; i++) {
+      const r = await app.request("/api/ping", {
+        headers: { "x-test-owner": "bob" },
+      });
+      expect(r.status).toBe(200);
+    }
+
+    // Sweep cu now = acum (entry inca valid → nu trebuie sters).
+    _sweepRateLimitNowForTest(Date.now());
+
+    // Urmatoarea cerere trebuie sa fie 429 — sweep-ul nu a sters bucket-ul.
+    const limited = await app.request("/api/ping", {
+      headers: { "x-test-owner": "bob" },
+    });
+    expect(limited.status).toBe(429);
+  });
+});
+
 describe("PR-9 fix B2 - pre-auth rate limit", () => {
   it("returns 429 on the 61st failed unauthenticated request from the same IP", async () => {
     mockedGetConnInfo.mockReturnValue({
@@ -230,8 +284,8 @@ describe("PR-9 fix B2 - pre-auth rate limit", () => {
           error: { code: "unauthorized", message: "Authentication token is required." },
           requestId: c.get("requestId"),
         },
-        401,
-      ),
+        401
+      )
     );
 
     for (let i = 0; i < 60; i++) {
@@ -300,8 +354,8 @@ describe("PR-9 fix B2 - pre-auth rate limit", () => {
           error: { code: "forbidden", message: "Acces interzis." },
           requestId: c.get("requestId"),
         },
-        403,
-      ),
+        403
+      )
     );
 
     for (let i = 0; i < 60; i++) {

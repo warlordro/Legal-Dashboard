@@ -3,27 +3,33 @@ import type { JobRunner, RunOutcome, ScheduledJob } from "./scheduler.ts";
 import { AlertConfigSchema } from "../../schemas/monitoring.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
 import { stripDiacritics } from "../../util/textNormalize.ts";
-import {
-  buildNameSoapSnapshot,
-  diffNameSoap,
-  type NameSoapSnapshotPayload,
-} from "./diff/nameSoap.ts";
+import { buildNameSoapSnapshot, diffNameSoap, type NameSoapSnapshotPayload } from "./diff/nameSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
-import {
-  getLatestSnapshot,
-  insertSnapshot,
-} from "../../db/monitoringSnapshotsRepository.ts";
+import { getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 
 const DEFAULT_BUDGET_MS = 10 * 60 * 1000;
 
+// v2.20.8 — Batch 2.1: source_partial alert e opt-in la rollout ca sa nu spam-am
+// inboxul daca la primul tick post-upgrade exista multe institutii flaky. Cu
+// flag=1 emitem alerta; fara flag (default) doar log la console.warn la fel ca
+// inainte. Dupa 24-48h de productie linistita, default-ul poate fi flipped la
+// "on" intr-un release ulterior (sau prin un al doilea kill switch DISABLED=1).
+// Lazy read prin functie (in loc de constanta module-top) ca testele sa poata
+// flip-ui flag-ul dupa importarea modulului.
+function partialAlertsEnabled(): boolean {
+  return process.env.MONITORING_PARTIAL_ALERTS_ENABLED === "1";
+}
+
+interface PartialInstitutie {
+  institutie: string | undefined;
+  error: string;
+}
+
 export interface NameSoapRunnerDeps {
-  searchDosare: (
-    params: SearchParams,
-    opts?: { signal?: AbortSignal },
-  ) => Promise<Dosar[]>;
+  searchDosare: (params: SearchParams, opts?: { signal?: AbortSignal }) => Promise<Dosar[]>;
   budgetMs?: number;
 }
 
@@ -41,13 +47,14 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
       const composed = AbortSignal.any([signal, budgetSignal]);
 
       const target = JSON.parse(job.target_json) as NameSoapTarget;
-      const alertConfig = AlertConfigSchema.parse(
-        JSON.parse(job.alert_config_json),
-      );
+      const alertConfig = AlertConfigSchema.parse(JSON.parse(job.alert_config_json));
 
       let dosare: Dosar[];
+      let partialInstitutii: PartialInstitutie[] = [];
       try {
-        dosare = await fetchForTarget(deps.searchDosare, target, composed);
+        const result = await fetchForTarget(deps.searchDosare, target, composed);
+        dosare = result.dosare;
+        partialInstitutii = result.failedInstitutii;
       } catch (err) {
         if (signal.aborted) {
           return {
@@ -76,9 +83,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
       let oversizeOutcome: RunOutcome | null = null;
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
-        const prevSnapshot = prevRow
-          ? (JSON.parse(prevRow.payload_json) as NameSoapSnapshotPayload)
-          : null;
+        const prevSnapshot = prevRow ? (JSON.parse(prevRow.payload_json) as NameSoapSnapshotPayload) : null;
 
         const { newSnapshot, alerts } = diffNameSoap({
           prevSnapshot,
@@ -156,6 +161,37 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
       });
 
       if (oversizeOutcome) return oversizeOutcome;
+
+      // v2.20.8 — Batch 2.1: emit source_partial daca cel putin o institutie a
+      // esuat dar nu toate (cazul "all failed" e tratat de fetchForTarget care
+      // arunca si cade pe SOAP_FAIL). Dedup_key per run ca alerta sa nu se
+      // duplice daca runner-ul ruleaza in retry chain. Gated de flag pentru
+      // rollout treptat (vezi comentariu la PARTIAL_ALERTS_ENABLED).
+      if (partialAlertsEnabled() && partialInstitutii.length > 0) {
+        await withMaintenanceRead(async () => {
+          const partialResult = insertAlert({
+            ownerId: job.owner_id,
+            jobId: job.id,
+            runId,
+            kind: "source_partial",
+            severity: "warning",
+            title: `Monitorizare incompleta (${partialInstitutii.length} institutii indisponibile)`,
+            detail: {
+              name_normalized: target.name_normalized,
+              failed_institutii: partialInstitutii.map((f) => ({
+                institutie: f.institutie ?? null,
+                error: f.error,
+              })),
+              recommendation: "Diff-ul reflecta doar institutiile reusite. Retry la urmatorul tick.",
+            },
+            // run-scoped dedup_key: orice retry pe acelasi run produce same key,
+            // dar runuri diferite emit alerta noua (operatorul vede recurenta).
+            dedupKey: `source_partial|${runId}`,
+          });
+          if (partialResult.inserted) alertsCreated += 1;
+        });
+      }
+
       // F10 asymmetry note: name_soap does not call enrichSolutieAlertsForJob
       // (the sedinta-level backfill is anchored to numar_dosar identity, which
       // a name watch lacks). alertsPatched is intentionally omitted -> finalize
@@ -169,8 +205,8 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
 async function fetchForTarget(
   searchDosare: NameSoapRunnerDeps["searchDosare"],
   target: NameSoapTarget,
-  signal: AbortSignal,
-): Promise<Dosar[]> {
+  signal: AbortSignal
+): Promise<{ dosare: Dosar[]; failedInstitutii: PartialInstitutie[] }> {
   const institutii = target.institutie?.length ? target.institutie : [undefined];
   const byNumar = new Map<string, Dosar>();
   // v2.17.0 — partial-success on multi-institution targets. Pre-fix, a single
@@ -182,14 +218,11 @@ async function fetchForTarget(
   // every single institution failed (= upstream-down, the right time to alert
   // SOAP_FAIL). If `signal.aborted` fires mid-loop we stop early — the run
   // outcome path in the caller maps that to status="aborted".
-  const failedInstitutii: Array<{ institutie: string | undefined; error: string }> = [];
+  const failedInstitutii: PartialInstitutie[] = [];
   for (const institutie of institutii) {
     if (signal.aborted) throw new Error("aborted");
     try {
-      const rows = await searchDosare(
-        { numeParte: target.name_normalized, institutie },
-        { signal },
-      );
+      const rows = await searchDosare({ numeParte: target.name_normalized, institutie }, { signal });
       for (const dosar of rows) {
         if (dosar.numar) byNumar.set(dosar.numar, dosar);
       }
@@ -201,15 +234,11 @@ async function fetchForTarget(
       if (signal.aborted) throw err;
       const msg = err instanceof Error ? err.message : String(err);
       failedInstitutii.push({ institutie, error: msg });
-      console.warn(
-        `[nameSoapRunner] partial: institutie=${institutie ?? "<all>"} failed: ${msg}`,
-      );
+      console.warn(`[nameSoapRunner] partial: institutie=${institutie ?? "<all>"} failed: ${msg}`);
     }
   }
   if (failedInstitutii.length === institutii.length) {
-    const summary = failedInstitutii
-      .map((f) => `${f.institutie ?? "<all>"}: ${f.error}`)
-      .join("; ");
+    const summary = failedInstitutii.map((f) => `${f.institutie ?? "<all>"}: ${f.error}`).join("; ");
     throw new Error(`all institutions failed — ${summary}`);
   }
   // Strict-word filter (2026-05-03): PortalJust returneaza dosare unde oricare
@@ -225,7 +254,7 @@ async function fetchForTarget(
       matching.push(dosar);
     }
   }
-  return matching;
+  return { dosare: matching, failedInstitutii };
 }
 
 // Tokenizare comuna pentru target + parti: diacritice strip + UPPERCASE +
@@ -245,12 +274,12 @@ export function tokenizeNameForMatch(s: string): string[] {
 // (S.R.L. → SRL la lookup).
 const LEGAL_SUFFIX_TOKENS = new Set([
   "SRL", // Societate cu Raspundere Limitata
-  "SA",  // Societate pe Actiuni
+  "SA", // Societate pe Actiuni
   "SCA", // Societate Civila de Avocati / in Comandita pe Actiuni
   "SNC", // Societate in Nume Colectiv
   "SCS", // Societate in Comandita Simpla
   "PFA", // Persoana Fizica Autorizata
-  "IF",  // Intreprindere Familiala
+  "IF", // Intreprindere Familiala
   "LLC", // Limited Liability Company (entitati internationale uzuale)
   "LTD", // Limited
   "INC", // Incorporated
@@ -282,10 +311,7 @@ export function stripLegalSuffix(tokens: string[]): string[] {
 // Cazul targetCore gol (target = doar sufixe legale, ex. "SRL") = false: nu
 // avem cu ce sa facem match strict; fail-closed ca sa nu inundam inbox-ul cu
 // pseudo-pozitive (orice dosar cu o parte SRL ar trece).
-export function dosarMatchesAllNameTokens(
-  dosar: Dosar,
-  targetName: string,
-): boolean {
+export function dosarMatchesAllNameTokens(dosar: Dosar, targetName: string): boolean {
   const targetCore = stripLegalSuffix(tokenizeNameForMatch(targetName));
   if (targetCore.length === 0) return false;
   if (!dosar.parti || dosar.parti.length === 0) return false;

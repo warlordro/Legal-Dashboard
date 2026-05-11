@@ -8,12 +8,10 @@ import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
 // Resolve migrations dir for both dev (Node --experimental-strip-types, ESM)
 // and prod (esbuild CJS bundle). In CJS __dirname is `dist-backend/`; in dev
 // it's `backend/src/db/`. Either way, sibling `migrations/` is the target.
-const __schemaDir = typeof __dirname !== "undefined"
-  ? __dirname
-  : path.dirname(fileURLToPath(import.meta.url));
+const __schemaDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(__schemaDir, "migrations");
 
-function preMigrationBackup(src: string, label: string): void {
+export function preMigrationBackup(src: string, label: string): void {
   try {
     const dir = path.join(path.dirname(src), "backups");
     fs.mkdirSync(dir, { recursive: true });
@@ -36,7 +34,7 @@ function preMigrationBackup(src: string, label: string): void {
         } catch (e) {
           console.warn(
             `[schema] pre-migration backup sidecar ${suffix} failed (continuing):`,
-            e instanceof Error ? e.message : e,
+            e instanceof Error ? e.message : e
           );
         }
       }
@@ -56,8 +54,7 @@ let db: Database.Database | null = null;
 let shuttingDown = false;
 
 export function getDbPath(): string {
-  return process.env.LEGAL_DASHBOARD_DB_PATH
-    ?? path.join(process.cwd(), "legal-dashboard.db");
+  return process.env.LEGAL_DASHBOARD_DB_PATH ?? path.join(process.cwd(), "legal-dashboard.db");
 }
 
 export function getDb(): Database.Database {
@@ -110,13 +107,13 @@ export function getDb(): Database.Database {
       db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
       console.log(`[schema] WAL was ${(walSize / 1024 / 1024).toFixed(1)}MB; truncated in ${Date.now() - t0}ms`);
     }
-  } catch { /* -wal absent is fine */ }
+  } catch {
+    /* -wal absent is fine */
+  }
 
   // Custom scalar used by the "Baza locala" filter so "Stefan" matches "Ștefan".
   // Registered per-connection; SQLite has no built-in diacritic folding.
-  db.function("rnpm_norm", { deterministic: true }, (s) =>
-    s == null ? "" : stripDiacritics(String(s)).toLowerCase()
-  );
+  db.function("rnpm_norm", { deterministic: true }, (s) => (s == null ? "" : stripDiacritics(String(s)).toLowerCase()));
 
   initSchema(db);
   return db;
@@ -135,9 +132,7 @@ function hasPendingSchemaMigrations(dbPath: string): boolean {
     const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
       const hasVersionsTable = probe
-        .prepare(
-          `SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'`,
-        )
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'`)
         .get();
       const files = discoverMigrations(MIGRATIONS_DIR);
       // Legacy DB fara _schema_versions (v2.0.10 si anterior): runMigrations
@@ -146,9 +141,7 @@ function hasPendingSchemaMigrations(dbPath: string): boolean {
       // backup inainte: o esuare pe oricare migration trebuie sa fie reversibila.
       if (!hasVersionsTable) return files.some((f) => f.version > 1);
       const stored = new Set<number>(
-        (probe
-          .prepare(`SELECT version FROM _schema_versions`)
-          .all() as { version: number }[]).map((r) => r.version),
+        (probe.prepare(`SELECT version FROM _schema_versions`).all() as { version: number }[]).map((r) => r.version)
       );
       return files.some((f) => !stored.has(f.version));
     } finally {
@@ -165,9 +158,9 @@ function needsDescriereMigration(dbPath: string): boolean {
   try {
     const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
     try {
-      const bunuriExists = probe.prepare(
-        `SELECT name FROM sqlite_master WHERE type='table' AND name='rnpm_bunuri'`
-      ).get();
+      const bunuriExists = probe
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='rnpm_bunuri'`)
+        .get();
       if (!bunuriExists) return false;
       const cols = probe.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
       const hasOld = cols.some((c) => c.name === "descriere");
@@ -419,7 +412,10 @@ function initSchema(d: Database.Database): void {
 }
 
 export function closeDb(): void {
-  if (db) { db.close(); db = null; }
+  if (db) {
+    db.close();
+    db = null;
+  }
 }
 
 // Production shutdown sets this AFTER awaiting in-flight drains so any late
@@ -428,7 +424,10 @@ export function closeDb(): void {
 // latch — they only need the handle reset, not the one-way shutdown lock.
 export function markShuttingDown(): void {
   shuttingDown = true;
-  if (db) { db.close(); db = null; }
+  if (db) {
+    db.close();
+    db = null;
+  }
 }
 
 // SQLite DELETE-urile acumuleaza in WAL pana la checkpoint automat, iar modalul "Info baza locala"
@@ -446,7 +445,11 @@ export function compactDb(): { beforeBytes: number; afterBytes: number; duration
   const d = getDb();
   const dbPath = getDbPath();
   const sizeOf = (p: string): number => {
-    try { return fs.statSync(p).size; } catch { return 0; }
+    try {
+      return fs.statSync(p).size;
+    } catch {
+      return 0;
+    }
   };
   const before = sizeOf(dbPath) + sizeOf(dbPath + "-wal") + sizeOf(dbPath + "-shm");
   const t0 = Date.now();

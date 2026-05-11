@@ -7,24 +7,22 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.7**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.20.8**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.7** - polish release dupa v2.20.6, trei interventii
-narrow-scope independente. Baza locala RNPM exporta acum toate avizele
-filtrate (Excel/PDF), nu doar pagina vizibila — client-side batching pe
-`/saved` + `/saved/export`, backend neatins. Sheet-ul "Debitori" din export
-redenumit "Parti" pentru ca in practica contine entitati cu rol Cesionar /
-Cedent / Garant / Debitor cedat, nu doar literal debitori (verificat empiric:
-TELECREDIT IFN are 106 inregistrari ca Cesionar, una ca Cedent, zero in
-tabela `rnpm_creditori`); DB schema ramane neatinsa, schimbarea e doar la
-presentation layer. Toggle in-memory in Setari pentru a opri popup-urile
-Windows/macOS legate de alerte fara a afecta bulina cu numar de unread sau
-pagina Alerts; preferinta nu persista intre restart-uri (default ON) si nu
-queue-uieste nimic, deci la reactivare nu vine flood. Micro-fix UX: tabul
-Bulk RNPM ramane montat la schimbare de tab in interiorul pagini RnpmSearch,
-deci o cautare Bulk in progres nu mai e anulata la peek pe "Search" sau
-"Saved". **844 teste backend, 100 teste frontend**.
+Ultimul release **v2.20.8** - hardening operational ce inchide Batch 2 (Operator
+visibility) si Batch 4 (Scheduler & captcha reliability) din `FIXES-TODO.md`.
+Operatorul primeste vizibilitate explicita: alert nou `source_partial` (in spate
+de `MONITORING_PARTIAL_ALERTS_ENABLED=1`) emis cand una sau mai multe institutii
+SOAP esueaza dar restul reusesc; `/health` expune `emailConfigured`; pre-exit
+backup pe fatalBoot; cleanup `-wal`/`-shm` pe auto-revert; splash blocking peste
+VACUUM (Baza locala RNPM) ca DB-ul sa nu fie inchis midstream. Scheduler &
+captcha: `.catch` handler pe `runOne` fire-and-forget (elimina runs `running`
+stuck); `AbortSignal.timeout(15s)` pe `getBalance`; race-mode sleep signal-aware
+prin `Promise.race`; retry exponential pe daily report email scheduler ([5/15/45]
+min, audit `retry_exhausted` dupa 3 esecuri); periodic sweep 5min in rate-limit
+middleware. Zero schimbari de schema, zero schimbari de contract API.
+**854 teste backend (+10), 100 teste frontend**.
 
 Predecesor **v2.20.3** - hardening RNPM post-/full-review: audit `rnpm.cap_hit`
 acum carry-uieste `requestId` din envelope (corelare event log <-> client) si e purjat

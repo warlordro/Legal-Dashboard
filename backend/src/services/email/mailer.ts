@@ -1,9 +1,5 @@
 import type { Transporter } from "nodemailer";
-import type {
-  AlertKind,
-  AlertSeverity,
-  MonitoringAlertRow,
-} from "../../db/monitoringAlertsRepository.ts";
+import type { AlertKind, AlertSeverity, MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
 import type { EmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
 
 interface MailerConfig {
@@ -15,9 +11,7 @@ interface MailerConfig {
   secure: boolean;
 }
 
-export type EmailSendResult =
-  | { ok: true }
-  | { ok: false; reason: "mailer_disabled" | "no_recipient" | "send_failed" };
+export type EmailSendResult = { ok: true } | { ok: false; reason: "mailer_disabled" | "no_recipient" | "send_failed" };
 
 // v2.10.1 #8: cache the in-flight Promise rather than the resolved Transporter
 // so concurrent first calls don't double-build the transport (each
@@ -109,6 +103,7 @@ const KIND_LABELS: Record<AlertKind, string> = {
   dosar_no_longer_relevant: "Dosar nerelevant",
   aviz_changed: "Aviz modificat",
   source_error: "Eroare sursa",
+  source_partial: "Sursa incompleta",
 };
 
 function escapeHtml(value: string): string {
@@ -138,7 +133,7 @@ function prettyDetail(alert: MonitoringAlertRow): string {
       detail: safeJson(alert.detail_json),
     },
     null,
-    2,
+    2
   );
 }
 
@@ -170,10 +165,7 @@ export function buildTextBody(alert: MonitoringAlertRow): string {
   ].join("\n");
 }
 
-export async function sendAlertEmail(
-  alert: MonitoringAlertRow,
-  settings: EmailSettings,
-): Promise<EmailSendResult> {
+export async function sendAlertEmail(alert: MonitoringAlertRow, settings: EmailSettings): Promise<EmailSendResult> {
   const transport = await getTransport();
   if (!transport) return { ok: false, reason: "mailer_disabled" };
   if (!settings.toAddress) return { ok: false, reason: "no_recipient" };
@@ -199,7 +191,7 @@ export async function sendAlertEmail(
 // dailyReportTemplate, mailer-ul nu are nimic de stiut despre alerte.
 export async function sendComposedEmail(
   toAddress: string,
-  composed: { subject: string; html: string; text: string },
+  composed: { subject: string; html: string; text: string }
 ): Promise<EmailSendResult> {
   const transport = await getTransport();
   if (!transport) return { ok: false, reason: "mailer_disabled" };

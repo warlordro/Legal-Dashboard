@@ -18,11 +18,7 @@
 import { computeNextRunAt } from "./backoff.ts";
 import type { Clock, TimerHandle } from "./clock.ts";
 import type { JobKind } from "../../schemas/monitoring.ts";
-import {
-  claimDueJobs,
-  markJobOutcome,
-  type MonitoringJobRow,
-} from "../../db/monitoringJobsRepository.ts";
+import { claimDueJobs, markJobOutcome, type MonitoringJobRow } from "../../db/monitoringJobsRepository.ts";
 import {
   finalize,
   insertRunning,
@@ -63,18 +59,12 @@ export type ScheduledJob = MonitoringJobRow;
 // Pentru name_soap cu SOAP_FAIL pe un nume normalizat care depaseste limitele
 // empirice PortalJust → flag pentru UI ca utilizatorul sa stie ca trebuie sa
 // scurteze numele, nu ca PortalJust e jos efectiv.
-function computeProbableCause(
-  job: MonitoringJobRow,
-  outcome: RunOutcome,
-): string | null {
+function computeProbableCause(job: MonitoringJobRow, outcome: RunOutcome): string | null {
   if (job.kind !== "name_soap") return null;
   if (outcome.errorCode !== "SOAP_FAIL") return null;
   try {
     const target = JSON.parse(job.target_json) as { name_normalized?: string };
-    if (
-      target?.name_normalized &&
-      isLikelyTooLongForPortalJust(target.name_normalized)
-    ) {
+    if (target?.name_normalized && isLikelyTooLongForPortalJust(target.name_normalized)) {
       return "nume_prea_lung_pentru_portaljust";
     }
   } catch {
@@ -161,7 +151,7 @@ export class Scheduler {
           action: "monitoring.crash_recovery",
           recovered_count: recovered,
           ts: new Date().toISOString(),
-        }),
+        })
       );
     }
     this.running = true;
@@ -204,9 +194,7 @@ export class Scheduler {
       // Each claimed job runs concurrently; the SOAP runner in C3 adds
       // its own PARALLEL_BATCH_SIZE=3 cap. runOne is responsible for taking
       // its own withMaintenanceRead for the run duration.
-      const promises = claimed.map(({ job, runId }) =>
-        this.runOne(job, runId, now),
-      );
+      const promises = claimed.map(({ job, runId }) => this.runOne(job, runId, now));
       await Promise.all(promises);
     } finally {
       this.tickInProgress = false;
@@ -299,7 +287,45 @@ export class Scheduler {
     // caller can poll. Synchronous portion of runOne (inflight.set) executes
     // before this function returns, so a duplicate runJobNow on the same job
     // sees the in_flight entry and 409s.
-    void this.runOne(job, runId, nowIso);
+    //
+    // v2.20.8 — Batch 4.1: runOne are deja try/catch intern in jurul runner.run(),
+    // dar un throw sincron inainte de IIFE-ul de work (ex. clock.now() throws,
+    // AbortController constructor throws sub presiune) ar produce un
+    // unhandledRejection care, sub `process.on("unhandledRejection")` din
+    // index.ts, omoara procesul. Catch-ul aici inchide runId-ul rezervat ca
+    // run terminal de error in loc sa-l lase 'running' pana la urmatorul
+    // recoverOrphanRuns la boot, si curata inflight in caz ca s-a setat.
+    this.runOne(job, runId, nowIso).catch((err) => {
+      console.error("[scheduler] runJobNow runOne rejected", {
+        jobId: job.id,
+        kind: job.kind,
+        runId,
+        error: err instanceof Error ? err.message : String(err),
+        stack: err instanceof Error ? err.stack : undefined,
+      });
+      this.inflight.delete(job.id);
+      try {
+        const endIso = this.opts.clock.now().toISOString();
+        finalize(runId, {
+          status: "error",
+          endedAt: endIso,
+          durationMs: 0,
+          errorCode: "RUNONE_THREW",
+          errorMessage: err instanceof Error ? err.message : String(err),
+          alertsCreated: 0,
+          alertsPatched: 0,
+        });
+      } catch (finalizeErr) {
+        // Daca finalize esueaza (DB inchis, lock spart), nu mai putem face
+        // nimic util — recoverOrphanRuns la urmatorul boot va prinde runId-ul
+        // ca 'running' si il va converti la 'aborted'/'crash_recovery'.
+        console.error("[scheduler] runJobNow finalize after throw failed", {
+          jobId: job.id,
+          runId,
+          error: finalizeErr instanceof Error ? finalizeErr.message : String(finalizeErr),
+        });
+      }
+    });
     return { runId };
   }
 
@@ -333,12 +359,14 @@ export class Scheduler {
       try {
         const deleted = purgeOldRuns(RUN_RETENTION_DAYS);
         if (deleted > 0) {
-          console.log(JSON.stringify({
-            action: "monitoring.runs_purged",
-            deleted_count: deleted,
-            retention_days: RUN_RETENTION_DAYS,
-            ts: this.opts.clock.now().toISOString(),
-          }));
+          console.log(
+            JSON.stringify({
+              action: "monitoring.runs_purged",
+              deleted_count: deleted,
+              retention_days: RUN_RETENTION_DAYS,
+              ts: this.opts.clock.now().toISOString(),
+            })
+          );
         }
       } catch (err) {
         console.error("[scheduler] purgeOldRuns threw, continuing loop", {
@@ -354,12 +382,14 @@ export class Scheduler {
       try {
         const deletedUsage = purgeOldAiUsage(AI_USAGE_RETENTION_DAYS);
         if (deletedUsage > 0) {
-          console.log(JSON.stringify({
-            action: "ai_usage.purged",
-            deleted_count: deletedUsage,
-            retention_days: AI_USAGE_RETENTION_DAYS,
-            ts: this.opts.clock.now().toISOString(),
-          }));
+          console.log(
+            JSON.stringify({
+              action: "ai_usage.purged",
+              deleted_count: deletedUsage,
+              retention_days: AI_USAGE_RETENTION_DAYS,
+              ts: this.opts.clock.now().toISOString(),
+            })
+          );
         }
       } catch (err) {
         console.error("[scheduler] purgeOldAiUsage threw, continuing loop", {
@@ -374,12 +404,14 @@ export class Scheduler {
       try {
         const deletedAudit = purgeOldAuditLog(AUDIT_LOG_RETENTION_DAYS);
         if (deletedAudit > 0) {
-          console.log(JSON.stringify({
-            action: "audit_log.purged",
-            deleted_count: deletedAudit,
-            retention_days: AUDIT_LOG_RETENTION_DAYS,
-            ts: this.opts.clock.now().toISOString(),
-          }));
+          console.log(
+            JSON.stringify({
+              action: "audit_log.purged",
+              deleted_count: deletedAudit,
+              retention_days: AUDIT_LOG_RETENTION_DAYS,
+              ts: this.opts.clock.now().toISOString(),
+            })
+          );
         }
       } catch (err) {
         console.error("[scheduler] purgeOldAuditLog threw, continuing loop", {
@@ -393,11 +425,7 @@ export class Scheduler {
     }, RUN_PURGE_INTERVAL_MS);
   }
 
-  private async runOne(
-    job: ScheduledJob,
-    runId: number,
-    nowIso: string,
-  ): Promise<void> {
+  private async runOne(job: ScheduledJob, runId: number, nowIso: string): Promise<void> {
     const controller = new AbortController();
     // Tier 4 #18: anchor startMs to clock.now() so duration math is
     // deterministic against the same time source as endIso below. Mixing
@@ -497,12 +525,7 @@ export class Scheduler {
     return Object.keys(this.opts.runners) as JobKind[];
   }
 
-  private applyJobOutcome(
-    job: ScheduledJob,
-    runId: number,
-    outcome: RunOutcome,
-    nowIso: string,
-  ): void {
+  private applyJobOutcome(job: ScheduledJob, runId: number, outcome: RunOutcome, nowIso: string): void {
     const success = outcome.status === "ok";
     const failStreak = success ? 0 : job.fail_streak + 1;
     const lastStatus: "ok" | "error" = success ? "ok" : "error";
@@ -512,13 +535,9 @@ export class Scheduler {
       // Force +1h regardless of standard backoff. At failStreak=5 this is
       // a meaningful override (standard would be 1920s); at failStreak>=6
       // standard backoff caps at 3600s so the values converge.
-      nextRunAt = new Date(
-        new Date(nowIso).getTime() + SOURCE_ERROR_BACKOFF_SEC * 1000,
-      );
+      nextRunAt = new Date(new Date(nowIso).getTime() + SOURCE_ERROR_BACKOFF_SEC * 1000);
     } else {
-      const jitterSec = this.opts.jitterSecMax === 0
-        ? 0
-        : Math.floor(Math.random() * (this.opts.jitterSecMax + 1));
+      const jitterSec = this.opts.jitterSecMax === 0 ? 0 : Math.floor(Math.random() * (this.opts.jitterSecMax + 1));
       nextRunAt = computeNextRunAt({
         now: new Date(nowIso),
         cadenceSec: job.cadence_sec,
@@ -575,14 +594,16 @@ export class Scheduler {
       // "no alert because nothing's wrong" from "no alert because we
       // already alerted once". This log gives that visibility without
       // re-tripping the alert dedup.
-      console.log(JSON.stringify({
-        action: "monitoring.source_error_suppressed",
-        job_id: job.id,
-        run_id: runId,
-        fail_streak: failStreak,
-        last_error_code: outcome.errorCode ?? null,
-        ts: nowIso,
-      }));
+      console.log(
+        JSON.stringify({
+          action: "monitoring.source_error_suppressed",
+          job_id: job.id,
+          run_id: runId,
+          fail_streak: failStreak,
+          last_error_code: outcome.errorCode ?? null,
+          ts: nowIso,
+        })
+      );
     }
   }
 }

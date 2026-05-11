@@ -10,8 +10,7 @@ let tmpRoots: string[] = [];
 let originalEnv: NodeJS.ProcessEnv;
 
 afterEach(async () => {
-  await (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> })
-    .__legalDashboardShutdown?.();
+  await (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> }).__legalDashboardShutdown?.();
   vi.restoreAllMocks();
   vi.resetModules();
   process.env = originalEnv;
@@ -82,9 +81,51 @@ describe("PR-9 index boot/auth boundaries", () => {
       },
     });
 
-    expect(preflight.headers.get("access-control-allow-headers")?.toLowerCase()).toContain(
-      "authorization",
-    );
+    expect(preflight.headers.get("access-control-allow-headers")?.toLowerCase()).toContain("authorization");
+  });
+
+  it("/health exposes emailConfigured=false when SMTP_* env vars are missing (Batch 2.3)", async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "web",
+      LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+      SMTP_HOST: "",
+      SMTP_PORT: "",
+      SMTP_USER: "",
+      SMTP_PASS: "",
+      SMTP_FROM: "",
+    });
+
+    const health = await waitForHealth(port);
+    expect(health.status).toBe(200);
+    const body = (await health.json()) as { emailConfigured: boolean };
+    expect(body.emailConfigured).toBe(false);
+  });
+
+  it("/health exposes emailConfigured=true with full SMTP_* config (Batch 2.3)", async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "web",
+      LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+      SMTP_HOST: "smtp.example.test",
+      SMTP_PORT: "587",
+      SMTP_USER: "user",
+      SMTP_PASS: "pass",
+      SMTP_FROM: "alerts@example.test",
+    });
+
+    const health = await waitForHealth(port);
+    expect(health.status).toBe(200);
+    const body = (await health.json()) as { emailConfigured: boolean };
+    expect(body.emailConfigured).toBe(true);
   });
 
   it("fails boot when remote bind is enabled in desktop auth mode", async () => {
@@ -99,7 +140,7 @@ describe("PR-9 index boot/auth boundaries", () => {
         LEGAL_DASHBOARD_ALLOW_REMOTE: "1",
         LEGAL_DASHBOARD_AUTH_MODE: "desktop",
         LEGAL_DASHBOARD_ACK_NO_AUTH: "i-understand-no-auth-yet",
-      }),
+      })
     ).rejects.toThrow("process.exit called");
 
     expect(exitSpy).toHaveBeenCalledWith(1);

@@ -37,6 +37,71 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.20.8",
+    date: "12 Mai 2026",
+    subtitle:
+      "Hardening operational ce inchide Batch 2 (Operator visibility) si Batch 4 (Scheduler & captcha reliability) din FIXES-TODO.md. Operatorul primeste vizibilitate noua: alert `source_partial` (feature flag `MONITORING_PARTIAL_ALERTS_ENABLED=1`) la failure partial pe institutii SOAP, `/health` expune `emailConfigured`, pre-exit backup pe fatalBoot, cleanup `-wal`/`-shm` pe auto-revert si splash blocking peste VACUUM. Scheduler & captcha: `.catch` pe runOne fire-and-forget (elimina runs `running` stuck), `AbortSignal.timeout(15s)` pe `getBalance()`, race-mode sleep signal-aware prin `Promise.race`, retry exponential pe daily report email scheduler ([5/15/45] min cu `retry_exhausted` audit), periodic sweep 5min pe rate-limit middleware. Zero schimbari schema, zero schimbari contract API. +10 teste backend (854/854) + 100/100 frontend.",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "Batch 2.1 — Alert `source_partial` (feature flag)",
+        content:
+          "Cand `MONITORING_PARTIAL_ALERTS_ENABLED=1`, `nameSoapRunner` emite un alert cu kind `source_partial` + severity `warning` daca cel putin o institutie esueaza dar restul reusesc. Anterior, failure-ul partial era doar `console.warn`, operatorul nu vedea nimic in UI Alerts. Detaliile alertului includ lista institutiilor cazute si pe a celor reusite, pentru triage rapid. Flag-ul ramane OFF default 24-48h dupa rollout — refactor: constanta top-level inlocuita cu functie lazy `partialAlertsEnabled()` ca flag-ul sa fie testabil.",
+      },
+      {
+        title: "Batch 2.2 — Pre-exit backup pe fatalBoot",
+        content:
+          "`fatalBoot` din `migrate.ts` cheama acum `preMigrationBackup('schema-upgrade')` inainte de `process.exit(1)`, ca operatorul sa aiba un snapshot timestamped al DB-ului cand troubleshoot-uieste o migrare esuata.",
+      },
+      {
+        title: "Batch 2.3 — `/health` expune `emailConfigured`",
+        content:
+          "Endpoint-ul `/health` returneaza acum si `emailConfigured: boolean` (derivat din prezenta `SMTP_HOST`), ca admin-ul sa vada direct daca canalul email de alerte e configurat in env.",
+      },
+      {
+        title: "Batch 2.4 — Cleanup `-wal`/`-shm` pe auto-revert",
+        content:
+          "Pe revert automat al unei migrari esuate, cleanup-ul include explicit fisierele `-wal`/`-shm` ale snapshotului, nu doar `.db`. Anterior puteau ramane orfane si confunda boot-ul urmator.",
+      },
+      {
+        title: "Batch 2.5 — VACUUM splash UX",
+        content:
+          "Peste modalul de stats din Baza locala RNPM apare in timpul `POST /compact` un splash full-screen blocking (`role='alertdialog'`, `aria-busy`) care interzice inchidere prin ESC, click-pe-backdrop sau X-button. Mesaj clar 'Compactez baza locala...' + warning 'Nu inchide aplicatia'. Previne corupere DB la close midstream.",
+      },
+      {
+        title: "Batch 4.1 — `runOne` `.catch` handler",
+        content:
+          "Fire-and-forget `void this.runOne(...)` din scheduler are acum `.catch` care logheaza jobId + runId + `error.message` (fara stack), eliminand riscul de run-uri 'stuck' la `running` pe orice exceptie uncaught din runner.",
+      },
+      {
+        title: "Batch 4.2 — `getBalance()` cu `AbortSignal.timeout(15s)`",
+        content:
+          "Ambele helpere `getBalance()` (2Captcha + CapSolver) au acum `AbortSignal.timeout(15_000)` ca admin GET `/captcha/balance` sa nu blocheze indefinit cand upstream-ul e degradat.",
+      },
+      {
+        title: "Batch 4.3 — Race-mode sleep signal-aware",
+        content:
+          "In race-mode, sleep-ul din poll-ul `getResult` foloseste acum `Promise.race([sleep, signalPromise])` ca abort-ul sa fie imediat, nu doar dupa expirarea intervalului (anterior `signal.aborted` era verificat DUPA sleep, latentand cancelarea cu pana la 1s).",
+      },
+      {
+        title: "Batch 4.4 — Daily report retry cu backoff",
+        content:
+          "Cand emailul zilnic esueaza (listAlerts throw, send result !ok sau send catch), scheduler-ul retry-uieste pana la 3 incercari cu backoff [5min, 15min, 45min]. Dupa epuizare, audit log `retry_exhausted` + zi marcata sent (best-effort). State `Map<ownerId, retryState>` in-memory; pierderea la restart e acceptabila pentru scheduler best-effort.",
+      },
+      {
+        title: "Batch 4.5 — Rate-limit periodic sweep",
+        content:
+          "Pe langa cleanup-ul existent la `MAX_BUCKETS` threshold, adaugat `setInterval(5min)` care purga bucketurile expirate, prevenind crestere bursty-then-idle care nu mai atinge threshold-ul.",
+      },
+      {
+        title: "Tests",
+        content: "+10 teste backend (854/854), frontend 100/100. Type-check + biome + build curat.",
+      },
+    ],
+  },
+  {
     version: "v2.20.7",
     date: "11 Mai 2026",
     subtitle:
@@ -67,8 +132,7 @@ export const versions: VersionEntry[] = [
       },
       {
         title: "Tests",
-        content:
-          "Frontend 100/100, backend neatins (844/844 ramane). Type-check curat pe ambele workspace-uri.",
+        content: "Frontend 100/100, backend neatins (844/844 ramane). Type-check curat pe ambele workspace-uri.",
       },
     ],
   },
@@ -517,7 +581,7 @@ export const versions: VersionEntry[] = [
       {
         title: "Alerte - butonul Dosare marcheaza implicit alerta ca citita",
         content:
-          'Cand apesi pe butonul Dosare dintr-o alerta, deschiderea dosarului in lista Dosare se considera implicit acknowledgement: alerta se marcheaza automat ca citita in fundal (fara sa intarzie navigarea). Daca vrei sa o lasi necitita dupa ce ai vazut dosarul, foloseste toggle-ul Citit/Necitit dupa intoarcere.',
+          "Cand apesi pe butonul Dosare dintr-o alerta, deschiderea dosarului in lista Dosare se considera implicit acknowledgement: alerta se marcheaza automat ca citita in fundal (fara sa intarzie navigarea). Daca vrei sa o lasi necitita dupa ce ai vazut dosarul, foloseste toggle-ul Citit/Necitit dupa intoarcere.",
       },
       {
         title: "Alerte - Termen nou dupa solutie afiseaza acum data umanizata si textul solutiei",

@@ -24,6 +24,11 @@ export const ALERT_KINDS = [
   "dosar_no_longer_relevant",
   "aviz_changed",
   "source_error",
+  // v2.20.8 — source_partial: subset of multi-institution name watches succeeded.
+  // source_error ramane pentru "all institutions failed". Operatorul vede in UI
+  // ca diff-ul rulat e incomplet si poate retry pentru institutiile listate in
+  // detail.failed_institutii.
+  "source_partial",
 ] as const;
 
 export type AlertKind = (typeof ALERT_KINDS)[number];
@@ -438,8 +443,7 @@ export function markAlertUnseen(ownerId: string, id: number): MonitoringAlertRow
     const existing = getAlertById(ownerId, id);
     if (!existing) return null;
     if (existing.read_at === null) return existing;
-    db.prepare(`UPDATE monitoring_alerts SET read_at = NULL WHERE id = ? AND owner_id = ?`)
-      .run(id, ownerId);
+    db.prepare(`UPDATE monitoring_alerts SET read_at = NULL WHERE id = ? AND owner_id = ?`).run(id, ownerId);
     return getAlertById(ownerId, id);
   });
   return tx();
@@ -578,7 +582,7 @@ export function dismissAlertsByIds(ownerId: string, ids: number[]): DismissBulkR
           `SELECT COUNT(*) AS total,
                   COALESCE(SUM(CASE WHEN dismissed_at IS NOT NULL THEN 1 ELSE 0 END), 0) AS already
              FROM monitoring_alerts
-            WHERE owner_id = ? AND id IN (${placeholders})`,
+            WHERE owner_id = ? AND id IN (${placeholders})`
         )
         .get(ownerId, ...chunk) as { total: number; already: number };
       totalMatched += counts.total;
@@ -671,7 +675,7 @@ export function selectAlertIdsByFilters(opts: DismissByFiltersOptions, limit: nu
   // user-ul in inbox (cele mai noi prima → cele mai vechi taiate la cap).
   const rows = getDb()
     .prepare(
-      `SELECT a.id AS id FROM monitoring_alerts a ${joinSql} ${whereSql} ORDER BY a.created_at DESC, a.id DESC LIMIT ?`,
+      `SELECT a.id AS id FROM monitoring_alerts a ${joinSql} ${whereSql} ORDER BY a.created_at DESC, a.id DESC LIMIT ?`
     )
     .all(...params, limit) as { id: number }[];
   return rows.map((r) => r.id);

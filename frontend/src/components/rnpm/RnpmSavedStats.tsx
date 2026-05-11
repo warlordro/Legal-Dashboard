@@ -1,5 +1,17 @@
 import { useEffect, useState, useCallback } from "react";
-import { Database, Copy, Check, RefreshCw, Info, FolderOpen, Archive, X, Trash2, History, Minimize2 } from "lucide-react";
+import {
+  Database,
+  Copy,
+  Check,
+  RefreshCw,
+  Info,
+  FolderOpen,
+  Archive,
+  X,
+  Trash2,
+  History,
+  Minimize2,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -39,12 +51,18 @@ export function RnpmSavedStats({ refreshKey, onAfterDeleteAll }: RnpmSavedStatsP
       <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
         <Info className="h-4 w-4" /> Info baza locala
       </Button>
-      {open && <StatsModal onClose={() => setOpen(false)} refreshKey={refreshKey} onAfterDeleteAll={onAfterDeleteAll} />}
+      {open && (
+        <StatsModal onClose={() => setOpen(false)} refreshKey={refreshKey} onAfterDeleteAll={onAfterDeleteAll} />
+      )}
     </>
   );
 }
 
-function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => void; refreshKey?: number; onAfterDeleteAll?: () => void }) {
+function StatsModal({
+  onClose,
+  refreshKey,
+  onAfterDeleteAll,
+}: { onClose: () => void; refreshKey?: number; onAfterDeleteAll?: () => void }) {
   const confirm = useConfirm();
   const [stats, setStats] = useState<RnpmStats | null>(null);
   const [loading, setLoading] = useState(false);
@@ -79,13 +97,20 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
     }
   }, []);
 
-  useEffect(() => { void load(); void loadBackups(); }, [load, loadBackups, refreshKey]);
+  useEffect(() => {
+    void load();
+    void loadBackups();
+  }, [load, loadBackups, refreshKey]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    // v2.20.8 — Batch 2.5: cat timp VACUUM-ul ruleaza, blocheaza si ESC ca user-ul
+    // sa nu inchida modalul si sa creada ca s-a terminat. Splash-ul ramane vizibil.
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !compacting) onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [onClose, compacting]);
 
   const handleCopyPath = async () => {
     if (!stats?.db.path) return;
@@ -117,11 +142,15 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
   };
 
   const handleDeleteBackups = async () => {
-    if (!(await confirm({
-      message: "Stergi toate backup-urile bazei locale?\n\nUrmatorul backup se va genera la urmatoarea pornire a aplicatiei.",
-      confirmLabel: "Sterge backups",
-      destructive: true,
-    }))) return;
+    if (
+      !(await confirm({
+        message:
+          "Stergi toate backup-urile bazei locale?\n\nUrmatorul backup se va genera la urmatoarea pornire a aplicatiei.",
+        confirmLabel: "Sterge backups",
+        destructive: true,
+      }))
+    )
+      return;
     setFolderError(null);
     try {
       await rnpmDeleteBackups();
@@ -133,10 +162,14 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
 
   const handleCompact = async () => {
     if (compacting) return;
-    if (!(await confirm({
-      message: "Compactezi baza locala? Operatia rescrie fisierul pentru a elibera spatiul lasat liber de stergeri si poate dura cateva secunde.",
-      confirmLabel: "Compacteaza",
-    }))) return;
+    if (
+      !(await confirm({
+        message:
+          "Compactezi baza locala? Operatia rescrie fisierul pentru a elibera spatiul lasat liber de stergeri si poate dura cateva secunde.",
+        confirmLabel: "Compacteaza",
+      }))
+    )
+      return;
     setCompacting(true);
     setCompactMsg(null);
     setFolderError(null);
@@ -158,11 +191,14 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
 
   const handleDeleteAll = async () => {
     if (!stats || stats.total === 0) return;
-    if (!(await confirm({
-      message: `Stergi TOATE cele ${formatNumber(stats.total)} avize din baza locala?\n\nActiunea nu poate fi anulata.`,
-      confirmLabel: "Sterge tot",
-      destructive: true,
-    }))) return;
+    if (
+      !(await confirm({
+        message: `Stergi TOATE cele ${formatNumber(stats.total)} avize din baza locala?\n\nActiunea nu poate fi anulata.`,
+        confirmLabel: "Sterge tot",
+        destructive: true,
+      }))
+    )
+      return;
     setDeleting(true);
     try {
       await rnpmDeleteAllSaved();
@@ -178,7 +214,9 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-      onClick={onClose}
+      onClick={() => {
+        if (!compacting) onClose();
+      }}
     >
       <div
         className="flex w-full max-w-xl flex-col rounded-xl border border-border bg-card shadow-2xl"
@@ -189,7 +227,12 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
             <Info className="h-4 w-4 text-muted-foreground" />
             Info baza locala
           </h3>
-          <button onClick={onClose} className="rounded-lg p-1 hover:bg-muted" title="Inchide">
+          <button
+            onClick={onClose}
+            disabled={compacting}
+            className="rounded-lg p-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
+            title={compacting ? "Asteapta finalul compactarii" : "Inchide"}
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -205,9 +248,7 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
           )}
 
           {!error && !stats && (
-            <div className="text-sm text-muted-foreground">
-              {loading ? "Se incarca statistici..." : "—"}
-            </div>
+            <div className="text-sm text-muted-foreground">{loading ? "Se incarca statistici..." : "—"}</div>
           )}
 
           {stats && (
@@ -236,16 +277,12 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
 
               <div className="space-y-1 text-xs text-muted-foreground">
                 <div>
-                  Dimensiune:{" "}
-                  <span className="font-mono text-foreground">{formatBytes(stats.db.sizeBytes)}</span>{" "}
+                  Dimensiune: <span className="font-mono text-foreground">{formatBytes(stats.db.sizeBytes)}</span>{" "}
                   <span className="opacity-70">(date + jurnal)</span>
                 </div>
                 <div className="leading-5">
                   <span>Cale: </span>
-                  <span
-                    className="font-mono text-foreground break-all"
-                    title={stats.db.path}
-                  >
+                  <span className="font-mono text-foreground break-all" title={stats.db.path}>
                     {stats.db.path}
                   </span>
                   <button
@@ -306,12 +343,8 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
                   Sterge baza
                 </Button>
               </div>
-              {folderError && (
-                <div className="text-xs text-red-600 dark:text-red-400">{folderError}</div>
-              )}
-              {compactMsg && (
-                <div className="text-xs text-muted-foreground">{compactMsg}</div>
-              )}
+              {folderError && <div className="text-xs text-red-600 dark:text-red-400">{folderError}</div>}
+              {compactMsg && <div className="text-xs text-muted-foreground">{compactMsg}</div>}
             </>
           )}
         </div>
@@ -326,6 +359,36 @@ function StatsModal({ onClose, refreshKey, onAfterDeleteAll }: { onClose: () => 
           }}
         />
       )}
+      {compacting && <CompactSplash />}
+    </div>
+  );
+}
+
+// v2.20.8 — Batch 2.5: splash full-screen pe durata VACUUM. Operatia poate dura
+// zeci de secunde pe baze mari (100MB+) si blocheaza event loop-ul backend-ului
+// (vezi compactDb in db/schema.ts). Fara splash, butonul cu spinner pe el e prea
+// discret — userii inchideau aplicatia crezand ca s-a blocat. Splash-ul:
+//  - cover total z-[60] (peste modalul de stats z-50)
+//  - mesaj clar "NU INCHIDE APLICATIA"
+//  - blocheaza pointer events si scroll
+//  - nu primeste onClick handlers (nu se poate inchide accidental)
+function CompactSplash() {
+  return (
+    <div
+      role="alertdialog"
+      aria-live="assertive"
+      aria-busy="true"
+      className="fixed inset-0 z-[60] flex items-center justify-center bg-black/75 p-4"
+    >
+      <div className="flex max-w-md flex-col items-center gap-3 rounded-xl border border-border bg-card px-6 py-5 text-center shadow-2xl">
+        <RefreshCw className="h-8 w-8 animate-spin text-blue-500" />
+        <div className="text-sm font-semibold">Compactez baza locala...</div>
+        <div className="text-xs text-muted-foreground">
+          Operatia rescrie fisierul DB si poate dura cateva zeci de secunde pe baze mari.
+          <br />
+          <strong className="text-foreground">Nu inchide aplicatia</strong> pana cand acest mesaj dispare.
+        </div>
+      </div>
     </div>
   );
 }

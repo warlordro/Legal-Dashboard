@@ -4,6 +4,104 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.20.8] - 2026-05-12
+
+### Batch 2 (Operator visibility) + Batch 4 (Scheduler & captcha reliability)
+
+Release de hardening operational ce inchide doua batch-uri din `FIXES-TODO.md`:
+(a) operatorul primeste vizibilitate explicita pe partial-success, fatalBoot,
+configurare email si autorevert; (b) scheduler-ul si captcha solver-ul nu mai
+au cai fire-and-forget orfane, blocante sau bursty. Zero schimbari de schema,
+zero schimbari de contract API. 10 teste noi (+10 fata de v2.20.7).
+
+#### Batch 2.1 — `source_partial` alert (feature flag)
+
+- [backend/src/services/monitoring/nameSoapRunner.ts](backend/src/services/monitoring/nameSoapRunner.ts):
+  cand `MONITORING_PARTIAL_ALERTS_ENABLED=1`, runner-ul emite un alert nou cu
+  `kind="source_partial"` + `severity="warning"` cand cel putin o `institutie`
+  esueaza dar restul reusesc. Detaliile alertului contin lista institutiilor
+  cazute si pe cea a institutiilor reusite, pentru triage rapid in UI Alerts.
+  Implicit OFF (24-48h observatie inainte de default-flip).
+- Refactor: `PARTIAL_ALERTS_ENABLED` constant top-level inlocuit cu functie
+  lazy `partialAlertsEnabled()` ca flag-ul sa fie testabil per-test fara
+  reimport.
+
+#### Batch 2.2 — `preMigrationBackup("schema-upgrade")` inainte de `process.exit(1)`
+
+- [backend/src/db/migrate.ts](backend/src/db/migrate.ts): `fatalBoot` cheama
+  acum `preMigrationBackup("schema-upgrade")` inainte sa terminam procesul cu
+  exit code 1, ca operatorul sa aiba un snapshot timestamped al DB-ului cand
+  troubleshoot-uieste o migrare esuata.
+
+#### Batch 2.3 — `/health` expune `emailConfigured`
+
+- [backend/src/index.ts](backend/src/index.ts): endpoint-ul `/health` returneaza
+  acum si `emailConfigured: boolean` (derivat din prezenta `SMTP_HOST`), ca
+  admin-ul sa vada direct daca canalul email de alerte e configurat in env.
+
+#### Batch 2.4 — auto-revert backup cleanup `-wal`/`-shm`
+
+- [backend/src/db/backup.ts](backend/src/db/backup.ts): pe revert automat
+  al unei migrari esuate, cleanup-ul include explicit fisierele
+  `-wal`/`-shm` ale snapshotului, nu doar `.db`. Anterior puteau ramane
+  orfane si confunda boot-ul urmator.
+
+#### Batch 2.5 — VACUUM splash UX (Baza locala RNPM)
+
+- [frontend/src/components/rnpm/RnpmSavedStats.tsx](frontend/src/components/rnpm/RnpmSavedStats.tsx):
+  in timpul `POST /compact`, peste modalul de stats apare un splash full-screen
+  blocking (`role="alertdialog"`, `aria-busy`) care interzice inchidere prin
+  ESC, click-pe-backdrop sau X-button. Mesaj clar "Compactez baza locala..."
+  + warning "Nu inchide aplicatia". Previne corupere DB la close midstream.
+
+#### Batch 4.1 — scheduler `runOne(...)` `.catch` handler
+
+- [backend/src/services/monitoring/scheduler.ts](backend/src/services/monitoring/scheduler.ts):
+  fire-and-forget `void this.runOne(...)` are acum `.catch` care logheaza
+  jobId + runId + `error.message` (fara stack), eliminand riscul de run-uri
+  "stuck" la `running` pe orice exceptie uncaught din runner.
+
+#### Batch 4.2 — `getBalance()` cu `AbortSignal.timeout(15_000)`
+
+- [backend/src/services/captchaSolver.ts](backend/src/services/captchaSolver.ts):
+  ambele helpere `getBalance()` (2Captcha + CapSolver) au acum `AbortSignal.timeout(15_000)`
+  ca admin GET `/captcha/balance` sa nu blocheze indefinit cand upstream-ul
+  e degradat.
+
+#### Batch 4.3 — captcha race-mode sleep signal-aware
+
+- [backend/src/services/captchaSolver.ts](backend/src/services/captchaSolver.ts):
+  in race-mode, sleep-ul din poll-ul `getResult` foloseste acum
+  `Promise.race([sleep, signalPromise])` ca abort sa fie imediat, nu doar
+  dupa expirarea intervalului (anterior `signal.aborted` era verificat DUPA
+  sleep, latentand cancelarea cu pana la 1s).
+
+#### Batch 4.4 — daily report scheduler retry cu backoff exponential
+
+- [backend/src/services/email/dailyReportScheduler.ts](backend/src/services/email/dailyReportScheduler.ts):
+  cand emailul zilnic esueaza (listAlerts throw, send result !ok sau send catch),
+  scheduler-ul retry-uieste pana la 3 incercari cu backoff [5min, 15min, 45min].
+  Dupa epuizare, audit log `retry_exhausted` + zi marcata sent (best-effort).
+  State `Map<ownerId, {date, attempts, nextAttemptAt}>` in-memory; pierderea
+  la restart e acceptabila pentru scheduler best-effort.
+
+#### Batch 4.5 — rate-limit periodic sweep
+
+- [backend/src/middleware/rate-limit.ts](backend/src/middleware/rate-limit.ts):
+  pe langa cleanup-ul existent la `MAX_BUCKETS` threshold, adaugat
+  `setInterval(5min)` care purga bucketurile expirate, prevenind crestere
+  bursty-then-idle care nu mai atinge threshold-ul.
+
+#### Tests
+
+- Backend: 854/854 trec (+10 fata de v2.20.7).
+- Frontend: 100/100 trec.
+- Type-check (`tsc --noEmit` pe ambele workspace-uri): clean.
+- Biome: clean (formatare aplicata la fisierele modificate).
+- Build: clean (bundle backend + frontend OK).
+
+---
+
 ## [2.20.7] - 2026-05-11
 
 ### UX RNPM Baza locala + toggle notificari sistem + retentie tab Bulk

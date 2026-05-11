@@ -25,7 +25,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
         error: { code: "origin_unavailable", message: "Origine indisponibila." },
         requestId: c.get("requestId") ?? "",
       },
-      503,
+      503
     );
   }
   const now = Date.now();
@@ -62,7 +62,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
           },
           requestId: c.get("requestId") ?? "",
         },
-        429,
+        429
       );
     }
   }
@@ -82,6 +82,38 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
 // flags it as "do not call from production code".
 export function _resetRateLimitForTest(): void {
   rateLimitMap.clear();
+}
+
+// v2.20.8: periodic sweep ca sa nu acumulam entries pe procese long-running
+// chiar daca nu se atinge plafonul de 1000. Inline cleanup ramane (catches
+// growth spikes intre tick-uri); intervalul curata buckets idle linistit.
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000;
+let sweepTimer: ReturnType<typeof setInterval> | null = null;
+
+function sweepExpiredEntries(now: number): void {
+  for (const [k, v] of rateLimitMap) {
+    if (now > v.resetTime) rateLimitMap.delete(k);
+  }
+  for (const [k, v] of preAuthMap) {
+    if (now > v.resetTime) preAuthMap.delete(k);
+  }
+}
+
+export function startRateLimitSweeper(): void {
+  if (sweepTimer) return;
+  sweepTimer = setInterval(() => sweepExpiredEntries(Date.now()), SWEEP_INTERVAL_MS);
+  if (typeof sweepTimer.unref === "function") sweepTimer.unref();
+}
+
+export function stopRateLimitSweeper(): void {
+  if (!sweepTimer) return;
+  clearInterval(sweepTimer);
+  sweepTimer = null;
+}
+
+// Test helper: drive sweep deterministic fara real timers.
+export function _sweepRateLimitNowForTest(now = Date.now()): void {
+  sweepExpiredEntries(now);
 }
 
 // PR-9 fix B2: limiter pre-auth, IP-only, montat inainte de ownerContext.
@@ -110,7 +142,7 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
         error: { code: "origin_unavailable", message: "Origine indisponibila." },
         requestId: c.get("requestId") ?? "",
       },
-      503,
+      503
     );
   }
 
@@ -129,7 +161,7 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
           error: { code: "rate_limited", message: "Prea multe cereri neautentificate." },
           requestId: c.get("requestId") ?? "",
         },
-        429,
+        429
       );
     }
   }

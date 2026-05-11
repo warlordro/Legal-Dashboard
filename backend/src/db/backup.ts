@@ -41,7 +41,7 @@ function logBackupEvent(entry: Record<string, unknown>): void {
     JSON.stringify({
       ...entry,
       ts: new Date().toISOString(),
-    }),
+    })
   );
 }
 
@@ -99,10 +99,14 @@ async function cleanupOrphanTmp(dir: string): Promise<void> {
     const entries = await fsPromises.readdir(dir);
     for (const f of entries) {
       if (f.startsWith(BACKUP_PREFIX) && f.endsWith(`${BACKUP_SUFFIX}.tmp`)) {
-        await fsPromises.unlink(path.join(dir, f)).catch(() => { /* best-effort */ });
+        await fsPromises.unlink(path.join(dir, f)).catch(() => {
+          /* best-effort */
+        });
       }
     }
-  } catch { /* dir missing — runDailyBackup will mkdir before us */ }
+  } catch {
+    /* dir missing — runDailyBackup will mkdir before us */
+  }
 }
 
 async function latestBackupMtime(dir: string): Promise<number | null> {
@@ -116,7 +120,9 @@ async function latestBackupMtime(dir: string): Promise<number | null> {
     try {
       const stat = await fsPromises.stat(path.join(dir, f));
       if (stat.mtimeMs > max) max = stat.mtimeMs;
-    } catch { /* file vanished between readdir and stat */ }
+    } catch {
+      /* file vanished between readdir and stat */
+    }
   }
   return max || null;
 }
@@ -125,16 +131,27 @@ async function pruneOld(dir: string): Promise<number> {
   const all = await listBackups(dir);
   // Three disjoint pools so the retention cap of one cannot starve the others.
   // Pre-* filenames embed an ISO timestamp; lex sort = chronological.
-  const dated = all.filter((f) => DATED_BACKUP_RE.test(f)).sort().reverse();
-  const preRestore = all.filter((f) => PRE_RESTORE_RE.test(f)).sort().reverse();
-  const preMigration = all.filter((f) => PRE_MIGRATION_RE.test(f)).sort().reverse();
+  const dated = all
+    .filter((f) => DATED_BACKUP_RE.test(f))
+    .sort()
+    .reverse();
+  const preRestore = all
+    .filter((f) => PRE_RESTORE_RE.test(f))
+    .sort()
+    .reverse();
+  const preMigration = all
+    .filter((f) => PRE_MIGRATION_RE.test(f))
+    .sort()
+    .reverse();
   const toDelete = [
     ...dated.slice(BACKUP_RETAIN_COUNT),
     ...preRestore.slice(PRE_RESTORE_RETAIN),
     ...preMigration.slice(PRE_MIGRATION_RETAIN),
   ];
   for (const f of toDelete) {
-    await fsPromises.unlink(path.join(dir, f)).catch(() => { /* best-effort */ });
+    await fsPromises.unlink(path.join(dir, f)).catch(() => {
+      /* best-effort */
+    });
   }
   return toDelete.length;
 }
@@ -153,7 +170,9 @@ export async function listBackupsWithMeta(): Promise<BackupEntry[]> {
     try {
       const s = await fsPromises.stat(path.join(dir, name));
       entries.push({ name, sizeBytes: s.size, mtime: s.mtimeMs });
-    } catch { /* vanished between readdir and stat */ }
+    } catch {
+      /* vanished between readdir and stat */
+    }
   }
   // Newest first (mtime desc).
   entries.sort((a, b) => b.mtime - a.mtime);
@@ -227,9 +246,7 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
         stage: "pre_restore_snapshot",
         reason: e instanceof Error ? e.message : String(e),
       });
-      throw new Error(
-        `Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      throw new Error(`Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -262,7 +279,7 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
           reason: e instanceof Error ? e.message : String(e),
         });
         throw new Error(
-          `Nu am putut sterge sidecar-ul ${suffix} (${code}). Inchide programele care tin DB-ul deschis si reincearca.`,
+          `Nu am putut sterge sidecar-ul ${suffix} (${code}). Inchide programele care tin DB-ul deschis si reincearca.`
         );
       }
     }
@@ -280,16 +297,16 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
   } catch (e) {
     // Stale tmp may remain if the copy failed midway — best-effort cleanup so the
     // next restore attempt does not race a half-written sibling.
-    await fsPromises.unlink(tmpPath).catch(() => { /* missing is fine */ });
+    await fsPromises.unlink(tmpPath).catch(() => {
+      /* missing is fine */
+    });
     logBackupEvent({
       action: "restore_failed",
       source: name,
       stage: "rename",
       reason: e instanceof Error ? e.message : String(e),
     });
-    throw new Error(
-      `Restore esuat: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    throw new Error(`Restore esuat: ${e instanceof Error ? e.message : String(e)}`);
   }
 
   // Audit 2026-04-29 #2: confirma integritatea fisierului restaurat inainte
@@ -300,9 +317,7 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
   try {
     const verifyDb = new Database(dbPath, { readonly: true });
     try {
-      const rows = verifyDb
-        .prepare("PRAGMA integrity_check")
-        .all() as Array<{ integrity_check: string }>;
+      const rows = verifyDb.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
       const allOk = rows.length === 1 && rows[0]?.integrity_check === "ok";
       if (!allOk) {
         const summary = rows
@@ -316,9 +331,7 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
           rows: rows.length,
           summary,
         });
-        throw new Error(
-          `integrity_check pe DB-ul restaurat a esuat: ${summary}`,
-        );
+        throw new Error(`integrity_check pe DB-ul restaurat a esuat: ${summary}`);
       }
     } finally {
       verifyDb.close();
@@ -330,19 +343,40 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
     if (dbExists) {
       try {
         await fsPromises.copyFile(preRestorePath, dbPath);
+        // v2.20.8: dupa auto-revert trebuie sa stergem -wal/-shm pentru ca
+        // sidecar-urile create de integrity_check (sau de scrierea/rename-ul
+        // anterior) apartin DB-ului corupt. Daca le lasam, urmatorul open pe
+        // dbPath ar putea merge frames stale → silent corruption pe DB-ul
+        // care tocmai a fost revert-uit. Best-effort: ENOENT e benign;
+        // orice alta eroare e logata dar nu blocheaza eroarea originala
+        // (userul stie deja ca restore-ul a esuat).
+        for (const suffix of ["-wal", "-shm"]) {
+          try {
+            await fsPromises.unlink(dbPath + suffix);
+          } catch (sidecarErr) {
+            const code = (sidecarErr as NodeJS.ErrnoException)?.code;
+            if (code !== "ENOENT") {
+              logBackupEvent({
+                action: "restore_failed",
+                source: name,
+                stage: "auto_revert_sidecar_unlink",
+                sidecar: suffix,
+                errnoCode: code,
+                reason: sidecarErr instanceof Error ? sidecarErr.message : String(sidecarErr),
+              });
+            }
+          }
+        }
       } catch (revertErr) {
         logBackupEvent({
           action: "restore_failed",
           source: name,
           stage: "auto_revert",
-          reason:
-            revertErr instanceof Error ? revertErr.message : String(revertErr),
+          reason: revertErr instanceof Error ? revertErr.message : String(revertErr),
         });
       }
     }
-    throw new Error(
-      e instanceof Error ? e.message : String(e),
-    );
+    throw new Error(e instanceof Error ? e.message : String(e));
   }
 
   logBackupEvent({
@@ -363,7 +397,9 @@ export async function deleteAllBackups(): Promise<number> {
     try {
       await fsPromises.unlink(path.join(dir, f));
       deleted++;
-    } catch { /* best-effort */ }
+    } catch {
+      /* best-effort */
+    }
   }
   // Audit line: mass-delete is a destructive op the user can trigger from the
   // UI. Logging count + total lets ops correlate "all backups gone" reports
@@ -414,7 +450,9 @@ async function runDailyBackupImpl(): Promise<void> {
   try {
     // Defensive: an extra orphan can survive cleanupOrphanTmp if mkdirSync above
     // raced with another writer; ensure tmp slot is empty before db.backup.
-    await fsPromises.unlink(tmp).catch(() => { /* missing is fine */ });
+    await fsPromises.unlink(tmp).catch(() => {
+      /* missing is fine */
+    });
     await getDb().backup(tmp);
     await fsPromises.rename(tmp, dest);
     const pruned = await pruneOld(dir);
@@ -425,7 +463,9 @@ async function runDailyBackupImpl(): Promise<void> {
     });
   } catch (e) {
     // Best-effort cleanup so the next attempt does not race a half-written sibling.
-    await fsPromises.unlink(tmp).catch(() => { /* missing is fine */ });
+    await fsPromises.unlink(tmp).catch(() => {
+      /* missing is fine */
+    });
     logBackupEvent({
       action: "daily_backup_failed",
       stage: "backup",
