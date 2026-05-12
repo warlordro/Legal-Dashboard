@@ -1,0 +1,10 @@
+# Commits in care biome a reformatat cosmetic codul (line breaks, trailing
+# commas, splituri multi-statement). git blame le ignora automat daca acest
+# fisier e configurat:
+#
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+#
+# GitHub onoreaza fisierul automat in UI-ul de blame (fara setup local).
+
+# v2.21.0 — biome check --write . pe tot repo-ul (176 fisiere)
+3a663de37b14f30581c0c09495de192aea5768ad
