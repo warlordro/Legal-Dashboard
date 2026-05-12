@@ -75,6 +75,7 @@ import {
   getAvizStats,
 } from "../db/avizRepository.ts";
 import { getSearches, deleteSearch } from "../db/searchRepository.ts";
+import { buildRnpmPdf } from "../services/rnpmExportPdf.ts";
 import { buildRnpmXlsx } from "../services/rnpmExportXlsx.ts";
 
 const VALID_TYPES: readonly RnpmSearchType[] = ["ipoteci", "fiducii", "specifice", "creante", "obligatiuni"];
@@ -875,6 +876,47 @@ rnpmRouter.post("/saved/export.xlsx", limitExport, async (c) => {
 
   // Content-Disposition: include both filename= (legacy fallback) and filename*=UTF-8 (RFC 5987)
   // so the frontend can read the name without round-tripping a separate metadata call.
+  const safeAscii = result.filename.replace(/[^A-Za-z0-9._-]+/g, "_");
+  c.header("Content-Type", result.mime);
+  c.header("Content-Length", String(result.byteLength));
+  c.header(
+    "Content-Disposition",
+    `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`
+  );
+  c.header("Cache-Control", "no-store");
+  return c.body(Readable.toWeb(fileStream) as unknown as ReadableStream);
+});
+
+rnpmRouter.post("/saved/export.pdf", limitExport, async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
+  const { ids, searchType } = (body ?? {}) as { ids?: unknown; searchType?: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "Lista id-uri goala" }, 400);
+  const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
+  if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per export" }, 400);
+  const searchTypeStr =
+    typeof searchType === "string" && searchType.length > 0 && searchType.length <= 64 ? searchType : undefined;
+
+  const items = getAvizeByIds(numIds, getOwnerId(c));
+  if (items.length === 0) return c.json({ error: "Nicio inregistrare gasita" }, 404);
+
+  const result = await buildRnpmPdf(items, searchTypeStr);
+  const [{ createReadStream }, { unlink }, { Readable }] = await Promise.all([
+    import("node:fs"),
+    import("node:fs/promises"),
+    import("node:stream"),
+  ]);
+  const fileStream = createReadStream(result.filepath);
+  // Cleanup waits for stream close; a route-level finally would delete before the response is consumed.
+  fileStream.once("close", () => {
+    void unlink(result.filepath).catch(() => {});
+  });
+
   const safeAscii = result.filename.replace(/[^A-Za-z0-9._-]+/g, "_");
   c.header("Content-Type", result.mime);
   c.header("Content-Length", String(result.byteLength));

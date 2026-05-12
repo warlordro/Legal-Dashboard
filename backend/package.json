@@ -20,6 +20,7 @@
     "hono": "^4.12.17",
     "nodemailer": "^8.0.7",
     "openai": "^6.36.0",
+    "pdfkit": "^0.18.0",
     "zod": "4.4.3"
   },
   "engines": {
@@ -28,6 +29,7 @@
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",
     "@types/nodemailer": "^8.0.0",
+    "@types/pdfkit": "^0.17.6",
     "vitest": "^4.1.4",
     "xlsx": "^0.18.5"
   }

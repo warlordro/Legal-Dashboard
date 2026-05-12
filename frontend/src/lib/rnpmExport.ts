@@ -1,5 +1,5 @@
-import type { RnpmDocument, RnpmAvizFull, RnpmParty, RnpmBun, RnpmBunPartyRef, RnpmIstoricEntry } from "@/types/rnpm";
-import { rnpmExport as fetchRnpmExport } from "@/lib/rnpmApi";
+import type { RnpmDocument, RnpmAvizFull, RnpmBunPartyRef } from "@/types/rnpm";
+import { rnpmExportPdfBlob, rnpmExportXlsxBlob } from "@/lib/rnpmApi";
 import { formatRnpmAvizStatus } from "@/lib/rnpmAvizStatus";
 import {
   cellAddr,
@@ -19,27 +19,10 @@ import {
 
 // ─── Helpers (pure, no DOM) ───────────────────────────────────────────────────
 
-function stripDiacritics(s: string): string {
-  return (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "");
-}
-
-function partyLabel(p: RnpmParty): string {
-  if (p.tip_persoana === "PF") return [p.denumire, p.prenume].filter(Boolean).join(" ");
-  return p.denumire ?? "";
-}
-
-function partyId(p: RnpmParty): string {
-  return p.cnp ?? p.cod ?? p.nr_identificare ?? "";
-}
-
 function subscriptorLabel(v: number | null): string {
   if (v === 1) return "Da";
   if (v === 0) return "Nu";
   return "";
-}
-
-function bunLabel(b: RnpmBun): string {
-  return [b.model, b.identificare, b.descriere, b.serie_sasiu, b.nr_inmatriculare].filter(Boolean).join(" · ");
 }
 
 function refLabel(r: RnpmBunPartyRef): string {
@@ -86,7 +69,6 @@ export interface RnpmExportResult {
 }
 
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-const MIME_PDF = "application/pdf";
 
 // ─── Builder XLSX (pure, runs in worker or main) ──────────────────────────────
 
@@ -515,163 +497,9 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
   return { buffer, filename: `${fileBase}.xlsx`, mime: MIME_XLSX };
 }
 
-// ─── Builder PDF (pure, runs in worker or main) ───────────────────────────────
-
-export async function buildRnpmPdf(payload: RnpmExportPayload): Promise<RnpmExportResult> {
-  const { default: jsPDF } = await import("jspdf");
-  const autoTable = (await import("jspdf-autotable")).default;
-  const { docs, searchType } = payload;
-  const details = new Map<string, RnpmAvizFull>(payload.detailsEntries);
-  const isSpecifice = searchType === "specifice";
-  const partyLabel2 = "Parti";
-
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-  doc.setFontSize(14);
-  doc.text(stripDiacritics(`Legal Dashboard - RNPM${searchType ? ` (${searchType})` : ""}`), 14, 15);
-  doc.setFontSize(10);
-  doc.text(stripDiacritics(`Data export: ${todayRo()} · ${docs.length} inregistrari`), 14, 21);
-
-  autoTable(doc, {
-    startY: 26,
-    head: [["Nr", "Identificator", "Data", "Tip", "Utilizator autorizat", "Actualizare"]],
-    body: docs.map((d) => [
-      d.no,
-      stripDiacritics(d.identificator.v),
-      stripDiacritics(d.data ?? ""),
-      stripDiacritics(d.tip ?? ""),
-      stripDiacritics(d.utilizatorAutorizat ?? ""),
-      d.needsActualizare ? "Da" : "Nu",
-    ]),
-    styles: { fontSize: 8 },
-    headStyles: { fillColor: [37, 99, 235] },
-  });
-
-  for (const d of docs) {
-    const full = details.get(d.identificator.v);
-    if (!full) continue;
-    doc.addPage();
-    doc.setFontSize(12);
-    doc.text(stripDiacritics(`Aviz ${d.identificator.v} · ${d.tip} · ${d.data}`), 14, 15);
-    const a = full.aviz;
-    const meta: [string, string][] = [
-      ["Activ", formatRnpmAvizStatus(a.activ === 1 ? true : a.activ === 0 ? false : null)],
-      ["Destinatie", a.destinatie ?? ""],
-      ["Tip act", a.tip_act ?? ""],
-      ["Numar act", a.numar_act ?? ""],
-      ["Data inregistrare", a.data_inreg ?? ""],
-      ["Data expirare", a.data_expirare ?? ""],
-      ["Inscriere initiala", a.inscriere_initiala_id ?? ""],
-      ["Inscriere modificata", a.inscriere_modificata_id ?? ""],
-      ["Alte mentiuni", a.alte_mentiuni ?? ""],
-    ];
-    autoTable(doc, {
-      startY: 20,
-      body: meta.filter(([, v]) => v !== "").map(([k, v]) => [k, stripDiacritics(v)]),
-      styles: { fontSize: 8 },
-      columnStyles: { 0: { fontStyle: "bold", cellWidth: 40 } },
-    });
-
-    const section = (title: string, head: string[], rows: string[][]) => {
-      if (rows.length === 0) return;
-      const y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 20;
-      doc.setFontSize(10);
-      doc.text(stripDiacritics(title), 14, y + 8);
-      autoTable(doc, {
-        startY: y + 11,
-        head: [head],
-        body: rows,
-        styles: { fontSize: 7 },
-        headStyles: { fillColor: [37, 99, 235] },
-      });
-    };
-
-    if (!isSpecifice) {
-      section(
-        "Creditori",
-        ["Nr", "Tip", "Subscr.", "Denumire", "Tip ent.", "Identificator", "Sediu", "Cod postal"],
-        full.creditori.map((p) => [
-          p.nr_ordine != null ? String(p.nr_ordine) : "",
-          p.tip_persoana,
-          subscriptorLabel(p.subscriptor),
-          stripDiacritics(partyLabel(p)),
-          stripDiacritics(p.tip_entitate ?? ""),
-          partyId(p),
-          stripDiacritics(p.sediu ?? ""),
-          p.cod_postal ?? "",
-        ])
-      );
-    }
-    section(
-      partyLabel2,
-      ["Nr", "Tip", "Calitate", "Subscr.", "Denumire", "Tip ent.", "Identificator", "Sediu", "Cod postal"],
-      full.debitori.map((p) => [
-        p.nr_ordine != null ? String(p.nr_ordine) : "",
-        p.tip_persoana,
-        stripDiacritics(p.calitate ?? ""),
-        subscriptorLabel(p.subscriptor),
-        stripDiacritics(partyLabel(p)),
-        stripDiacritics(p.tip_entitate ?? ""),
-        partyId(p),
-        stripDiacritics(p.sediu ?? ""),
-        p.cod_postal ?? "",
-      ])
-    );
-
-    if (a.detalii_comune) {
-      const y = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 20;
-      doc.setFontSize(10);
-      doc.text(stripDiacritics("Detalii comune"), 14, y + 8);
-      autoTable(doc, {
-        startY: y + 11,
-        body: [[stripDiacritics(a.detalii_comune)]],
-        styles: { fontSize: 8, cellPadding: 2 },
-        theme: "plain",
-      });
-    }
-
-    section(
-      "Bunuri",
-      ["Tip", "Categorie", "Detalii", "Referinte"],
-      full.bunuri.map((b) => [
-        b.tip_bun,
-        b.categorie ?? "",
-        stripDiacritics(bunLabel(b)),
-        stripDiacritics(b.referinte.map(refLabel).join(" | ")),
-      ])
-    );
-    section(
-      "Istoric",
-      ["Identificator", "Data", "Tip"],
-      full.istoric.map((h: RnpmIstoricEntry) => [h.identificator, h.data, stripDiacritics(h.tip)])
-    );
-  }
-
-  const fileBase =
-    docs.length === 1
-      ? sanitizeFilename(docs[0].identificator.v)
-      : `rnpm${searchType ? `_${searchType}` : ""}_${todayRo()}`;
-
-  const buffer = doc.output("arraybuffer") as ArrayBuffer;
-  return { buffer, filename: `${fileBase}.pdf`, mime: MIME_PDF };
-}
-
 // ─── Orchestratori publici (DOM-safe doar in main thread) ─────────────────────
 
-async function fetchDetails(docs: RnpmDocument[], avizIds: (number | null)[]): Promise<Map<string, RnpmAvizFull>> {
-  const ids: number[] = [];
-  for (let i = 0; i < docs.length; i++) {
-    const id = avizIds[i];
-    if (id != null) ids.push(id);
-  }
-  if (ids.length === 0) return new Map();
-  const { items } = await fetchRnpmExport(ids);
-  const byIdentificator = new Map<string, RnpmAvizFull>();
-  for (const item of items) byIdentificator.set(item.aviz.identificator, item);
-  return byIdentificator;
-}
-
-function triggerDownload(buffer: ArrayBuffer, filename: string, mime: string): void {
-  const blob = new Blob([buffer], { type: mime });
+function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -683,42 +511,25 @@ function triggerDownload(buffer: ArrayBuffer, filename: string, mime: string): v
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-async function runInWorker(payload: RnpmExportPayload): Promise<RnpmExportResult> {
-  const ExportWorker = (await import("./rnpmExport.worker.ts?worker")).default;
-  return new Promise<RnpmExportResult>((resolve, reject) => {
-    const worker = new ExportWorker();
-    worker.onmessage = (
-      e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>
-    ) => {
-      worker.terminate();
-      if (!e.data.ok) {
-        reject(new Error(e.data.error));
-        return;
-      }
-      resolve({ buffer: e.data.buffer, filename: e.data.filename, mime: e.data.mime });
-    };
-    worker.onerror = (err: ErrorEvent) => {
-      worker.terminate();
-      reject(err.error ?? new Error(err.message || "Worker export error"));
-    };
-    worker.postMessage(payload);
-  });
-}
-
+// XLSX export ruleaza server-side (POST /api/rnpm/saved/export.xlsx). Pana in
+// v2.22.0 era construit in Web Worker pe renderer; pe ~150 avizi heap-ul atingea
+// ~2.7GB si renderer-ul Electron primea OOM kill (ecran negru). Backend Node
+// V8 nu sufera presiunea DOM/render thread, deci genereaza + stream-uieste
+// workbook-ul fara sa puna in pericol UI-ul. Frontend doar trigger-uieste
+// download-ul cu blob-ul primit.
 export async function exportRnpmExcel(
   docs: RnpmDocument[],
   avizIds: (number | null)[],
   searchType?: string
 ): Promise<void> {
-  const details = await fetchDetails(docs, avizIds);
-  const payload: RnpmExportPayload = {
-    format: "xlsx",
-    docs,
-    detailsEntries: [...details.entries()],
-    searchType,
-  };
-  const result = await runInWorker(payload);
-  triggerDownload(result.buffer, result.filename, result.mime);
+  const ids: number[] = [];
+  for (let i = 0; i < docs.length; i++) {
+    const id = avizIds[i];
+    if (id != null) ids.push(id);
+  }
+  if (ids.length === 0) throw new Error("Nu exista avize salvate pentru export");
+  const { blob, filename } = await rnpmExportXlsxBlob(ids, searchType);
+  triggerBlobDownload(blob, filename);
 }
 
 export async function exportRnpmPDF(
@@ -726,13 +537,12 @@ export async function exportRnpmPDF(
   avizIds: (number | null)[],
   searchType?: string
 ): Promise<void> {
-  const details = await fetchDetails(docs, avizIds);
-  const payload: RnpmExportPayload = {
-    format: "pdf",
-    docs,
-    detailsEntries: [...details.entries()],
-    searchType,
-  };
-  const result = await runInWorker(payload);
-  triggerDownload(result.buffer, result.filename, result.mime);
+  const ids: number[] = [];
+  for (let i = 0; i < docs.length; i++) {
+    const id = avizIds[i];
+    if (id != null) ids.push(id);
+  }
+  if (ids.length === 0) throw new Error("Nu exista avize salvate pentru export");
+  const { blob, filename } = await rnpmExportPdfBlob(ids, searchType);
+  triggerBlobDownload(blob, filename);
 }

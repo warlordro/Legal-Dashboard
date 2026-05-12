@@ -151,7 +151,9 @@ export async function rnpmSplitSearch(
       buf += decoder.decode(value, { stream: true });
 
       let idx: number;
-      while ((idx = buf.indexOf("\n\n")) >= 0) {
+      while (true) {
+        idx = buf.indexOf("\n\n");
+        if (idx < 0) break;
         const chunk = buf.slice(0, idx);
         buf = buf.slice(idx + 2);
         const eventMatch = chunk.match(/^event: (\S+)/m);
@@ -320,6 +322,96 @@ export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[]
   return { items: all };
 }
 
+// Server-side XLSX generation — backend builds the workbook from DB and streams
+// the file back. Replaces the frontend Web Worker build which OOM'd the renderer
+// at ~150 avizi. Caller passes the same id list and optional searchType (controls
+// layout). Backend caps at EXPORT_BATCH_SIZE per request (matches /saved/export).
+function parseFilenameFromContentDisposition(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      // fall through to ascii branch
+    }
+  }
+  const ascii = /filename="([^"]+)"/i.exec(header) ?? /filename=([^;]+)/i.exec(header);
+  if (ascii) return ascii[1].trim();
+  return fallback;
+}
+
+export async function rnpmExportXlsxBlob(
+  ids: number[],
+  searchType?: string
+): Promise<{ blob: Blob; filename: string }> {
+  if (ids.length === 0) throw new Error("Lista id-uri goala");
+  if (ids.length > EXPORT_BATCH_SIZE) {
+    throw new Error(`Maxim ${EXPORT_BATCH_SIZE} avize per export`);
+  }
+  const res = await apiFetch(`${BASE}/saved/export.xlsx`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, searchType }),
+  });
+  if (!res.ok) {
+    let msg = `Eroare server (${res.status})`;
+    try {
+      const data = (await res.json()) as { error?: unknown };
+      if (data && typeof data.error === "string") msg = data.error;
+      else if (
+        data &&
+        typeof data.error === "object" &&
+        data.error &&
+        "message" in data.error &&
+        typeof (data.error as { message?: unknown }).message === "string"
+      ) {
+        msg = (data.error as { message: string }).message;
+      }
+    } catch {
+      // server didn't return JSON (e.g. binary error page); fall back to status code
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const filename = parseFilenameFromContentDisposition(res.headers.get("Content-Disposition"), "rnpm_export.xlsx");
+  return { blob, filename };
+}
+
+export async function rnpmExportPdfBlob(ids: number[], searchType?: string): Promise<{ blob: Blob; filename: string }> {
+  if (ids.length === 0) throw new Error("Lista id-uri goala");
+  if (ids.length > EXPORT_BATCH_SIZE) {
+    throw new Error(`Maxim ${EXPORT_BATCH_SIZE} avize per export`);
+  }
+  const res = await apiFetch(`${BASE}/saved/export.pdf`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids, searchType }),
+  });
+  if (!res.ok) {
+    let msg = `Eroare server (${res.status})`;
+    try {
+      const data = (await res.json()) as { error?: unknown };
+      if (data && typeof data.error === "string") msg = data.error;
+      else if (
+        data &&
+        typeof data.error === "object" &&
+        data.error &&
+        "message" in data.error &&
+        typeof (data.error as { message?: unknown }).message === "string"
+      ) {
+        msg = (data.error as { message: string }).message;
+      }
+    } catch {
+      // server didn't return JSON (e.g. binary error page); fall back to status code
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const filename = parseFilenameFromContentDisposition(res.headers.get("Content-Disposition"), "rnpm_export.pdf");
+  return { blob, filename };
+}
+
 // Backend `/saved` cap = 200 items per page (avizRepository.ts). Folosit de
 // export "exporta tot" — loop paginat pana acoperim `total`.
 const SAVED_ENUM_PAGE_SIZE = 200;
@@ -379,7 +471,9 @@ export async function rnpmBulkSearch(
       buf += decoder.decode(value, { stream: true });
 
       let idx: number;
-      while ((idx = buf.indexOf("\n\n")) >= 0) {
+      while (true) {
+        idx = buf.indexOf("\n\n");
+        if (idx < 0) break;
         const chunk = buf.slice(0, idx);
         buf = buf.slice(idx + 2);
         const eventMatch = chunk.match(/^event: (\S+)/m);
