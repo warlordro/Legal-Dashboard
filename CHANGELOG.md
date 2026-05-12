@@ -4,6 +4,88 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.21.0] - 2026-05-12
+
+### RNPM trust + DB migrations & retention safety
+
+Release-ul finalizeaza Batch 3 (partea RNPM trust aprobata pentru acum) si
+Batch 5 din `FIXES-TODO.md`: validare runtime RNPM in rollout soft, status
+`activ` onest cand upstream-ul nu trimite valoare, purge chunked pentru
+`monitoring_runs`, index nou pe `started_at` si sentinel explicit pentru
+rollback-ul baseline. Include si hardening-ul v2.20.9, livrat ca entry separat
+mai jos in istoric.
+
+#### RNPM runtime validation Stage 1
+
+- [backend/src/services/rnpmClient.ts](backend/src/services/rnpmClient.ts):
+  `RnpmClient.search()` valideaza payload-ul cu schema Zod minima
+  (`documents`, `total`, `pagesTotal`, `pageSize`, `criteriu`) si
+  `.passthrough()`. In v2.21.0 foloseste `safeParse`: payload-urile invalide
+  emit warning si raman compatibile. Flag-ul
+  `RNPM_RUNTIME_VALIDATION_ENFORCED=1` activeaza throw cu `schema_violation`
+  pentru pregatirea Stage 2.
+
+#### `activ: null` pentru status necunoscut
+
+- [backend/src/services/rnpmAvizMapper.ts](backend/src/services/rnpmAvizMapper.ts)
+  si [backend/src/db/avizRepository.ts](backend/src/db/avizRepository.ts):
+  cand nici `part1.activ` nici `doc.activ` nu sunt boolean, valoarea salvata
+  ramane `NULL`, nu default `true`.
+- [frontend/src/lib/rnpmAvizStatus.ts](frontend/src/lib/rnpmAvizStatus.ts)
+  centralizeaza etichetele `Activ`, `Stins`, `Necunoscut`; tabelele RNPM,
+  modalul de detalii si exporturile XLSX/PDF folosesc aceeasi prezentare.
+
+#### Chunked purge + migration 0019
+
+- [backend/src/db/monitoringRunsRepository.ts](backend/src/db/monitoringRunsRepository.ts):
+  `purgeOldRuns()` sterge in batch-uri de 1000 randuri si se opreste la
+  safety cap 1M randuri per rulare, ca sa evite lock-uri lungi pe DB-uri mari.
+- [backend/src/db/migrations/0019_idx_monitoring_runs_started_at.up.sql](backend/src/db/migrations/0019_idx_monitoring_runs_started_at.up.sql):
+  adauga index `idx_monitoring_runs_started_at` pentru retention purge.
+- [backend/src/db/migrations/0001_baseline.down.sql](backend/src/db/migrations/0001_baseline.down.sql):
+  sentinel explicit care refuza rollback-ul baseline si trimite operatorul la
+  restore din backup.
+
+#### Tests
+
+Backend: 870/871 pass, 1 skipped dupa adaugarea cazurilor pentru Zod Stage 1,
+`activ: null`, chunked purge, migration sentinels, RNPM guard si SOAP cap.
+Frontend: 103/103 pass dupa status badges RNPM si XLSX formula sentinel.
+
+## [2.20.9] - 2026-05-12
+
+### Safety hardening RNPM + SOAP + XLSX
+
+Release de hardening fara schimbare de comportament observabil pentru user:
+type-guard pe payload RNPM, cap defensiv pe raspunsul SOAP si sentinel test
+pentru exporturile XLSX.
+
+#### RNPM first result type guard
+
+- [backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts):
+  guardul `MAX_TOTAL_RESULTS` verifica acum explicit
+  `typeof firstResult.total === "number"` inainte de comparatie. Payload-urile
+  corupte cu `total` lipsa sau `null` arunca `limit_exceeded` cu `total: null`
+  in details.
+
+#### SOAP response cap 8MB
+
+- [backend/src/soap.ts](backend/src/soap.ts): `callSoap()` refuza raspunsuri
+  cu `Content-Length` peste 8MB si verifica din nou `text.length` dupa citire.
+  Mesajul aruncat catre client ramane generic; detaliile de marime merg doar
+  in `console.error`.
+
+#### XLSX formula sentinel
+
+- [frontend/src/lib/xlsx-formula-audit.test.ts](frontend/src/lib/xlsx-formula-audit.test.ts):
+  test static care esueaza daca apare un nou writer XLSX in `frontend/src/lib`
+  fara apel `sanitizeFormulaCells`.
+
+#### Tests
+
+Backend: cazuri noi pentru `total` lipsa/null si SOAP response cap.
+Frontend: sentinel XLSX nou.
+
 ## [2.20.8] - 2026-05-12
 
 ### Batch 2 (Operator visibility) + Batch 4 (Scheduler & captcha reliability)

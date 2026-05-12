@@ -1,0 +1,23 @@
+-- 0001_baseline.down.sql - baseline NU poate fi rolled back direct.
+--
+-- Migration 0001 captureaza schema-ul initial v2.0.10 in shape final post-ALTER.
+-- Rollback inseamna DROP la toate tabelele (dosare, sedinte, rnpm_*, monitoring_*, etc.).
+-- In productie asta = data loss complet; restore de la backup e singura cale safe.
+--
+-- Pre-migration backup deja exista (v2.16.1) si scrie la
+-- {userData}/backups/legal-dashboard.pre-schema-upgrade-{timestamp}.db
+-- inainte de orice rebuild trigger-uit de migration.
+--
+-- Daca chiar ai nevoie de rollback la zero:
+--   1. Opreste backend-ul.
+--   2. Copiaza backup-ul pre-schema-upgrade peste fisierul .db curent.
+--   3. Reinstaleaza versiunea de aplicatie compatibila cu schema target.
+--
+-- Acest fisier exista doar pentru consistency cu pattern-ul migration framework
+-- (toate migration-urile au pereche .up + .down). Runner-ul ignora .down.sql la
+-- boot; nu se auto-executa. Daca apelezi manual aceasta secventa, intentia ta
+-- nu e clara si SQL-ul de mai jos te opreste.
+
+-- SQLite nu are RAISE() in afara unui trigger, deci folosim un trick: SELECT pe
+-- o functie inexistenta produce runtime error si lasa tabelele intacte.
+SELECT json_throw('Baseline migration cannot be rolled back. Restore from backup. See file header.');

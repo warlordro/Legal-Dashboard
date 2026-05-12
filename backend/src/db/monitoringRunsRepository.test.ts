@@ -9,10 +9,10 @@
 // shared with the rest of the repos. Pure SQLite; no scheduler glue here.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   insertRunning,
@@ -36,10 +36,25 @@ function seedJob(): number {
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at)
-       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', ?)`,
+       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', ?)`
     )
     .run(OWNER, `hash-${Math.random()}`, NOW);
   return info.lastInsertRowid as number;
+}
+
+function seedTerminalRuns(jobId: number, count: number, startedAt: string): void {
+  const db = getDb();
+  const insert = db.prepare(
+    `INSERT INTO monitoring_runs
+       (owner_id, job_id, started_at, ended_at, status, duration_ms)
+     VALUES (?, ?, ?, ?, 'ok', 100)`
+  );
+  const run = db.transaction(() => {
+    for (let i = 0; i < count; i++) {
+      insert.run(OWNER, jobId, startedAt, startedAt);
+    }
+  });
+  run();
 }
 
 beforeEach(async () => {
@@ -53,7 +68,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
-  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  process.env.LEGAL_DASHBOARD_DB_PATH = undefined;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -63,9 +78,7 @@ describe("insertRunning", () => {
     const runId = insertRunning({ ownerId: OWNER, jobId, startedAt: NOW });
     expect(runId).toBeGreaterThan(0);
 
-    const row = getDb()
-      .prepare(`SELECT * FROM monitoring_runs WHERE id = ?`)
-      .get(runId) as MonitoringRunRow;
+    const row = getDb().prepare("SELECT * FROM monitoring_runs WHERE id = ?").get(runId) as MonitoringRunRow;
     expect(row.status).toBe("running");
     expect(row.owner_id).toBe(OWNER);
     expect(row.job_id).toBe(jobId);
@@ -86,7 +99,7 @@ describe("insertRunning", () => {
         `INSERT INTO monitoring_jobs
            (owner_id, kind, target_json, target_hash, cadence_sec,
             alert_config_json, next_run_at)
-         VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', ?)`,
+         VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', ?)`
       )
       .run(ownerA, "hA", NOW).lastInsertRowid as number;
 
@@ -95,14 +108,10 @@ describe("insertRunning", () => {
         ownerId: ownerB, // wrong owner for jobIdA
         jobId: jobIdA,
         startedAt: NOW,
-      }),
+      })
     ).toThrow(/not found for owner/);
 
-    const count = (
-      getDb()
-        .prepare(`SELECT COUNT(*) AS n FROM monitoring_runs`)
-        .get() as { n: number }
-    ).n;
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_runs").get() as { n: number }).n;
     expect(count).toBe(0);
   });
 
@@ -112,7 +121,7 @@ describe("insertRunning", () => {
         ownerId: OWNER,
         jobId: 99999,
         startedAt: NOW,
-      }),
+      })
     ).toThrow(/not found for owner/);
   });
 });
@@ -130,9 +139,7 @@ describe("finalize", () => {
     });
     expect(ok).toBe(true);
 
-    const row = getDb()
-      .prepare(`SELECT * FROM monitoring_runs WHERE id = ?`)
-      .get(runId) as MonitoringRunRow;
+    const row = getDb().prepare("SELECT * FROM monitoring_runs WHERE id = ?").get(runId) as MonitoringRunRow;
     expect(row.status).toBe("ok");
     expect(row.ended_at).toBe("2026-04-28T10:00:05.000Z");
     expect(row.duration_ms).toBe(5000);
@@ -158,9 +165,7 @@ describe("finalize", () => {
     });
     expect(ok).toBe(true);
 
-    const row = getDb()
-      .prepare(`SELECT * FROM monitoring_runs WHERE id = ?`)
-      .get(runId) as MonitoringRunRow;
+    const row = getDb().prepare("SELECT * FROM monitoring_runs WHERE id = ?").get(runId) as MonitoringRunRow;
     expect(row.alerts_created).toBe(0);
     expect(row.alerts_patched).toBe(3);
   });
@@ -178,9 +183,7 @@ describe("finalize", () => {
       httpStatus: 504,
     });
 
-    const row = getDb()
-      .prepare(`SELECT * FROM monitoring_runs WHERE id = ?`)
-      .get(runId) as MonitoringRunRow;
+    const row = getDb().prepare("SELECT * FROM monitoring_runs WHERE id = ?").get(runId) as MonitoringRunRow;
     expect(row.status).toBe("error");
     expect(row.error_code).toBe("SOAP_TIMEOUT");
     expect(row.error_message).toBe("PortalJust did not respond within 45s");
@@ -197,9 +200,7 @@ describe("finalize", () => {
       durationMs: 600_000,
     });
 
-    const row = getDb()
-      .prepare(`SELECT status FROM monitoring_runs WHERE id = ?`)
-      .get(runId) as { status: string };
+    const row = getDb().prepare("SELECT status FROM monitoring_runs WHERE id = ?").get(runId) as { status: string };
     expect(row.status).toBe("timeout");
   });
 
@@ -222,7 +223,7 @@ describe("finalize", () => {
         status: "bogus",
         endedAt: NOW,
         durationMs: 0,
-      }),
+      })
     ).toThrow();
   });
 });
@@ -244,9 +245,7 @@ describe("recoverOrphanRuns", () => {
     expect(recovered).toBe(2);
 
     const rows = getDb()
-      .prepare(
-        `SELECT id, status, ended_at FROM monitoring_runs WHERE id IN (?, ?, ?) ORDER BY id`,
-      )
+      .prepare("SELECT id, status, ended_at FROM monitoring_runs WHERE id IN (?, ?, ?) ORDER BY id")
       .all(r1, r2, r3) as { id: number; status: string; ended_at: string | null }[];
 
     expect(rows.find((r) => r.id === r1)?.status).toBe("aborted");
@@ -276,9 +275,37 @@ describe("purgeOldRuns", () => {
     const deleted = purgeOldRuns(90);
     expect(deleted).toBe(1);
 
-    const rows = getDb()
-      .prepare(`SELECT id FROM monitoring_runs ORDER BY id`)
-      .all() as { id: number }[];
+    const rows = getDb().prepare("SELECT id FROM monitoring_runs ORDER BY id").all() as { id: number }[];
     expect(rows.map((r) => r.id)).toEqual([freshRun]);
+  });
+
+  it("deletes old runs in chunks and leaves fresh rows intact", () => {
+    const jobId = seedJob();
+    const oldStartedAt = new Date(Date.now() - 91 * 86_400_000).toISOString();
+    const freshStartedAt = new Date(Date.now() - 1 * 86_400_000).toISOString();
+    seedTerminalRuns(jobId, 2500, oldStartedAt);
+    seedTerminalRuns(jobId, 100, freshStartedAt);
+
+    const deleted = purgeOldRuns(90, 500);
+    expect(deleted).toBe(2500);
+
+    const remaining = (getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_runs").get() as { n: number }).n;
+    expect(remaining).toBe(100);
+  });
+
+  it("returns 0 without crashing when the table is empty", () => {
+    expect(purgeOldRuns(0, 500)).toBe(0);
+  });
+
+  it.skipIf(process.env.RUN_SLOW_PURGE_TESTS !== "1")("stops at the 1M safety cap", () => {
+    const jobId = seedJob();
+    const oldStartedAt = new Date(Date.now() - 91 * 86_400_000).toISOString();
+    seedTerminalRuns(jobId, 1_000_001, oldStartedAt);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const deleted = purgeOldRuns(90, 100_000);
+
+    expect(deleted).toBe(1_000_000);
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("safety cap 1M"));
   });
 });

@@ -1,5 +1,9 @@
-import { describe, it, expect } from "vitest";
-import { decodeXmlEntities, extractFirst, extractAll, parseDosar, toLegacyDiacritics } from "./soap.ts";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cautareDosare, decodeXmlEntities, extractAll, extractFirst, parseDosar, toLegacyDiacritics } from "./soap.ts";
+
+afterEach(() => {
+  vi.restoreAllMocks();
+});
 
 describe("toLegacyDiacritics", () => {
   it("converts modern Romanian comma-below to cedilla", () => {
@@ -9,6 +13,37 @@ describe("toLegacyDiacritics", () => {
 
   it("leaves ASCII and other characters untouched", () => {
     expect(toLegacyDiacritics("Popescu Ion 2024")).toBe("Popescu Ion 2024");
+  });
+});
+
+describe("SOAP response cap", () => {
+  it("arunca eroare generica si logheaza cand Content-Length depaseste 8MB", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<soap:Envelope/>", {
+        status: 200,
+        headers: { "content-length": String(10 * 1024 * 1024) },
+      })
+    );
+
+    await expect(cautareDosare({ numarDosar: "1/1/2024" })).rejects.toThrow(
+      "Eroare la comunicarea cu serviciul PortalJust."
+    );
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("SOAP response prea mare"));
+  });
+
+  it("arunca eroare generica si logheaza cand body-ul real depaseste 8MB fara Content-Length", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("x".repeat(9 * 1024 * 1024), {
+        status: 200,
+      })
+    );
+
+    await expect(cautareDosare({ numeParte: "POPESCU" })).rejects.toThrow(
+      "Eroare la comunicarea cu serviciul PortalJust."
+    );
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("SOAP response prea mare (post-read)"));
   });
 });
 
@@ -107,12 +142,12 @@ describe("parseDosar", () => {
   });
 
   it("falls back to legacy categorieCaz when categorieCazNume is missing", () => {
-    const legacy = `<Dosar><categorieCaz>Penal</categorieCaz></Dosar>`;
+    const legacy = "<Dosar><categorieCaz>Penal</categorieCaz></Dosar>";
     expect(parseDosar(legacy).categorieCaz).toBe("Penal");
   });
 
   it("returns empty arrays when parti / sedinte sections are missing", () => {
-    const minimal = `<Dosar><numar>X</numar></Dosar>`;
+    const minimal = "<Dosar><numar>X</numar></Dosar>";
     const d = parseDosar(minimal);
     expect(d.parti).toEqual([]);
     expect(d.sedinte).toEqual([]);

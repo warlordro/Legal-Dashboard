@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import path from "path";
-import os from "os";
-import fs from "fs";
-import fsPromises from "fs/promises";
-import { createHash } from "crypto";
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
+import { createHash } from "node:crypto";
 import Database from "better-sqlite3";
 import { runMigrations, discoverMigrations, BACKFILL_SENTINEL } from "./runner.ts";
 
@@ -56,12 +56,19 @@ describe("runMigrations - fresh DB path", () => {
     expect(result.backfilled).toBe(false);
     expect(result.totalKnown).toBe(2);
 
-    const rows = db.prepare("SELECT version, sha256_up FROM _schema_versions ORDER BY version").all() as { version: number; sha256_up: string }[];
+    const rows = db.prepare("SELECT version, sha256_up FROM _schema_versions ORDER BY version").all() as {
+      version: number;
+      sha256_up: string;
+    }[];
     expect(rows).toHaveLength(2);
     expect(rows[0]).toEqual({ version: 1, sha256_up: sha256(sql1) });
     expect(rows[1]).toEqual({ version: 2, sha256_up: sha256(sql2) });
 
-    const tables = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_schema_versions' ORDER BY name").all();
+    const tables = db
+      .prepare(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' AND name != '_schema_versions' ORDER BY name"
+      )
+      .all();
     expect(tables).toEqual([{ name: "t1" }, { name: "t2" }]);
   });
 
@@ -225,7 +232,7 @@ describe("runMigrations - drift detection", () => {
     try {
       expect(() => runMigrations(db, migrationsDir)).toThrow(/MIGRATIONS_STRICT=1/);
     } finally {
-      if (previous === undefined) delete process.env.MIGRATIONS_STRICT;
+      if (previous === undefined) process.env.MIGRATIONS_STRICT = undefined;
       else process.env.MIGRATIONS_STRICT = previous;
     }
   });
@@ -234,8 +241,9 @@ describe("runMigrations - drift detection", () => {
     writeMigration("0001", "first", "CREATE TABLE t1 (id INTEGER)");
     runMigrations(db, migrationsDir);
 
-    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1")
-      .run("0000000000000000000000000000000000000000000000000000000000000000");
+    db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = 1").run(
+      "0000000000000000000000000000000000000000000000000000000000000000"
+    );
 
     expect(() => runMigrations(db, migrationsDir)).toThrow(/hash mismatch for 0001_first.up.sql/);
   });
@@ -263,7 +271,10 @@ describe("runMigrations - legacy backfill path", () => {
     expect(result.applied).toEqual([]);
     expect(result.skipped).toEqual([1]);
 
-    const row = db.prepare("SELECT version, sha256_up FROM _schema_versions").get() as { version: number; sha256_up: string };
+    const row = db.prepare("SELECT version, sha256_up FROM _schema_versions").get() as {
+      version: number;
+      sha256_up: string;
+    };
     expect(row).toEqual({ version: 1, sha256_up: BACKFILL_SENTINEL });
 
     const data = db.prepare("SELECT label FROM preexisting").get() as { label: string };
@@ -304,6 +315,11 @@ describe("runMigrations - legacy backfill path", () => {
 });
 
 describe("discoverMigrations - file validation", () => {
+  it("0001_baseline.down.sql exists in the real repo migrations directory", () => {
+    const baselineDown = path.join(__dirname, "0001_baseline.down.sql");
+    expect(fs.existsSync(baselineDown)).toBe(true);
+  });
+
   it("ignores non-migration files in the directory", () => {
     writeMigration("0001", "first", "CREATE TABLE t1 (id INTEGER)");
     fs.writeFileSync(path.join(migrationsDir, "README.md"), "notes");
@@ -311,6 +327,12 @@ describe("discoverMigrations - file validation", () => {
 
     const files = discoverMigrations(migrationsDir);
     expect(files.map((f) => f.name)).toEqual(["0001_first.up.sql"]);
+  });
+
+  it("ignores real repo .down.sql files at boot discovery", () => {
+    const files = discoverMigrations(__dirname);
+    expect(files.some((f) => f.name.endsWith(".down.sql"))).toBe(false);
+    expect(files.some((f) => f.name === "0019_idx_monitoring_runs_started_at.up.sql")).toBe(true);
   });
 
   it("throws on duplicate version numbers", () => {
@@ -348,11 +370,24 @@ describe("runMigrations - real repo migrations integration", () => {
     expect(result.applied.length).toBeGreaterThanOrEqual(1);
     expect(result.backfilled).toBe(false);
 
-    const row = db.prepare("SELECT version, sha256_up FROM _schema_versions WHERE version=1").get() as { version: number; sha256_up: string };
+    const row = db.prepare("SELECT version, sha256_up FROM _schema_versions WHERE version=1").get() as {
+      version: number;
+      sha256_up: string;
+    };
     expect(row.sha256_up).toBe(sha256(baselineSql));
 
-    const tableNames = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]).map((r) => r.name);
-    for (const expected of ["rnpm_avize", "rnpm_bunuri", "rnpm_bunuri_descrieri", "rnpm_creditori", "rnpm_debitori", "rnpm_istoric", "rnpm_searches"]) {
+    const tableNames = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all() as { name: string }[]
+    ).map((r) => r.name);
+    for (const expected of [
+      "rnpm_avize",
+      "rnpm_bunuri",
+      "rnpm_bunuri_descrieri",
+      "rnpm_creditori",
+      "rnpm_debitori",
+      "rnpm_istoric",
+      "rnpm_searches",
+    ]) {
       expect(tableNames).toContain(expected);
     }
   });

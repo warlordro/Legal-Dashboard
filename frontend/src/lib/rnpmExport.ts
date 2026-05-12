@@ -1,5 +1,6 @@
 import type { RnpmDocument, RnpmAvizFull, RnpmParty, RnpmBun, RnpmBunPartyRef, RnpmIstoricEntry } from "@/types/rnpm";
 import { rnpmExport as fetchRnpmExport } from "@/lib/rnpmApi";
+import { formatRnpmAvizStatus } from "@/lib/rnpmAvizStatus";
 import {
   cellAddr,
   ensureCell,
@@ -19,7 +20,7 @@ import {
 // ─── Helpers (pure, no DOM) ───────────────────────────────────────────────────
 
 function stripDiacritics(s: string): string {
-  return (s ?? "").normalize("NFD").replace(/[̀-ͯ]/g, "");
+  return (s ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "");
 }
 
 function partyLabel(p: RnpmParty): string {
@@ -42,9 +43,7 @@ function bunLabel(b: RnpmBun): string {
 }
 
 function refLabel(r: RnpmBunPartyRef): string {
-  const name = r.tip_persoana === "PF"
-    ? [r.denumire, r.prenume].filter(Boolean).join(" ")
-    : (r.denumire ?? "");
+  const name = r.tip_persoana === "PF" ? [r.denumire, r.prenume].filter(Boolean).join(" ") : (r.denumire ?? "");
   return `${r.rol}:${r.tip_persoana}:${name}`;
 }
 
@@ -109,17 +108,39 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
   const CHILD_DATA_START = 4;
   const counts = new Map<string, { creditori: number; debitori: number; bunuri: number; istoric: number }>();
   const firstRow = new Map<string, { creditori?: number; debitori?: number; bunuri?: number; istoric?: number }>();
-  let credRow = CHILD_DATA_START - 1, debRow = CHILD_DATA_START - 1, bunRow = CHILD_DATA_START - 1, istRow = CHILD_DATA_START - 1;
+  let credRow = CHILD_DATA_START - 1;
+  let debRow = CHILD_DATA_START - 1;
+  let bunRow = CHILD_DATA_START - 1;
+  let istRow = CHILD_DATA_START - 1;
   for (const d of docs) {
     const full = details.get(d.identificator.v);
     if (!full) continue;
-    const c = full.creditori.length, db = full.debitori.length, b = full.bunuri.length, i = full.istoric.length;
+    const c = full.creditori.length;
+    const db = full.debitori.length;
+    const b = full.bunuri.length;
+    const i = full.istoric.length;
     counts.set(d.identificator.v, { creditori: c, debitori: db, bunuri: b, istoric: i });
     const fr: { creditori?: number; debitori?: number; bunuri?: number; istoric?: number } = {};
-    if (c) { credRow += 1; fr.creditori = credRow; credRow += c - 1; }
-    if (db) { debRow += 1; fr.debitori = debRow; debRow += db - 1; }
-    if (b) { bunRow += 1; fr.bunuri = bunRow; bunRow += b - 1; }
-    if (i) { istRow += 1; fr.istoric = istRow; istRow += i - 1; }
+    if (c) {
+      credRow += 1;
+      fr.creditori = credRow;
+      credRow += c - 1;
+    }
+    if (db) {
+      debRow += 1;
+      fr.debitori = debRow;
+      debRow += db - 1;
+    }
+    if (b) {
+      bunRow += 1;
+      fr.bunuri = bunRow;
+      bunRow += b - 1;
+    }
+    if (i) {
+      istRow += 1;
+      fr.istoric = istRow;
+      istRow += i - 1;
+    }
     firstRow.set(d.identificator.v, fr);
   }
 
@@ -129,16 +150,47 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
 
   // ─── Avize sheet ─────────────────────────────────────────────────────────
   const A_HEADERS = [
-    "#", "Identificator", "Data", "Tip", "Utilizator autorizat", "Necesita act.", "Activ",
-    "Destinatie", "Tip act", "Numar act", "Data inregistrare", "Data expirare",
-    "Inscriere initiala", "Inscriere modificata",
+    "#",
+    "Identificator",
+    "Data",
+    "Tip",
+    "Utilizator autorizat",
+    "Necesita act.",
+    "Activ",
+    "Destinatie",
+    "Tip act",
+    "Numar act",
+    "Data inregistrare",
+    "Data expirare",
+    "Inscriere initiala",
+    "Inscriere modificata",
     ...(isSpecifice ? [partyLabel2] : ["Creditori", partyLabel2]),
-    "Bunuri", "Istoric",
-    "Alte mentiuni", "Detalii comune",
+    "Bunuri",
+    "Istoric",
+    "Alte mentiuni",
+    "Detalii comune",
   ];
-  const A_WIDTHS = [5, 30, 11, 30, 32, 10, 6, 22, 14, 16, 14, 14, 26, 26,
+  const A_WIDTHS = [
+    5,
+    30,
+    11,
+    30,
+    32,
+    10,
+    6,
+    22,
+    14,
+    16,
+    14,
+    14,
+    26,
+    26,
     ...(isSpecifice ? [9] : [10, 9]),
-    8, 8, 40, 60];
+    8,
+    8,
+    40,
+    60,
+  ];
   const A_COLS = A_HEADERS.length;
 
   const statsLine = isSpecifice
@@ -161,7 +213,7 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
         d.tip ?? "",
         d.utilizatorAutorizat ?? "",
         d.needsActualizare ? "Da" : "Nu",
-        a ? (a.activ ? "Da" : "Nu") : "",
+        a ? formatRnpmAvizStatus(a.activ === 1 ? true : a.activ === 0 ? false : null) : "",
         a?.destinatie ?? "",
         a?.tip_act ?? "",
         a?.numar_act ?? "",
@@ -201,7 +253,8 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
     for (let c = 0; c < A_COLS; c++) {
       const isIdent = c === 1;
       const isNav = c >= navStart && c <= NAV_COLS.istoric;
-      const isLink = (isIdent && hasChildren) ||
+      const isLink =
+        (isIdent && hasChildren) ||
         (NAV_COLS.creditori != null && c === NAV_COLS.creditori && fr?.creditori) ||
         (c === NAV_COLS.debitori && fr?.debitori) ||
         (c === NAV_COLS.bunuri && fr?.bunuri) ||
@@ -215,17 +268,19 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
     if (isNullish(fr)) return;
     const primary = fr.bunuri ?? fr.debitori ?? fr.creditori ?? fr.istoric;
     if (primary != null) {
-      const sheet = fr.bunuri
-        ? "Bunuri"
-        : fr.debitori
-        ? partyLabel2
-        : fr.creditori
-        ? "Creditori"
-        : "Istoric";
+      const sheet = fr.bunuri ? "Bunuri" : fr.debitori ? partyLabel2 : fr.creditori ? "Creditori" : "Istoric";
       setLink(wsAvize, r, 1, `#${sheet}!A${primary + 1}`, "Deschide detaliile avizului");
     }
-    if (NAV_COLS.creditori != null && fr.creditori != null) setLink(wsAvize, r, NAV_COLS.creditori, `#Creditori!A${fr.creditori + 1}`, "Vezi creditori");
-    if (fr.debitori != null) setLink(wsAvize, r, NAV_COLS.debitori, `#${partyLabel2}!A${fr.debitori + 1}`, `Vezi ${partyLabel2.toLowerCase()}`);
+    if (NAV_COLS.creditori != null && fr.creditori != null)
+      setLink(wsAvize, r, NAV_COLS.creditori, `#Creditori!A${fr.creditori + 1}`, "Vezi creditori");
+    if (fr.debitori != null)
+      setLink(
+        wsAvize,
+        r,
+        NAV_COLS.debitori,
+        `#${partyLabel2}!A${fr.debitori + 1}`,
+        `Vezi ${partyLabel2.toLowerCase()}`
+      );
     if (fr.bunuri != null) setLink(wsAvize, r, NAV_COLS.bunuri, `#Bunuri!A${fr.bunuri + 1}`, "Vezi bunuri");
     if (fr.istoric != null) setLink(wsAvize, r, NAV_COLS.istoric, `#Istoric!A${fr.istoric + 1}`, "Vezi istoric");
   });
@@ -236,7 +291,7 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
     headers: string[],
     widths: number[],
     rows: ChildRow[],
-    avizSummary: Map<string, number>,
+    avizSummary: Map<string, number>
   ) => {
     if (rows.length === 0) return null;
     const cols = headers.length;
@@ -284,63 +339,151 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
     const idv = d.identificator.v;
     const dc = full.aviz.detalii_comune ?? "";
     for (const p of full.creditori) {
-      creditoriRows.push({ aviz: idv, values: [
-        idv, p.tip_persoana, p.nr_ordine ?? "", subscriptorLabel(p.subscriptor),
-        p.denumire ?? "", p.prenume ?? "", p.tip_entitate ?? "",
-        p.cnp ?? "", p.cod ?? "", p.nr_identificare ?? "",
-        p.sediu ?? "", p.localitate ?? "", p.judet ?? "", p.cod_postal ?? "", p.tara ?? "",
-        p.alte_date ?? "",
-      ] });
+      creditoriRows.push({
+        aviz: idv,
+        values: [
+          idv,
+          p.tip_persoana,
+          p.nr_ordine ?? "",
+          subscriptorLabel(p.subscriptor),
+          p.denumire ?? "",
+          p.prenume ?? "",
+          p.tip_entitate ?? "",
+          p.cnp ?? "",
+          p.cod ?? "",
+          p.nr_identificare ?? "",
+          p.sediu ?? "",
+          p.localitate ?? "",
+          p.judet ?? "",
+          p.cod_postal ?? "",
+          p.tara ?? "",
+          p.alte_date ?? "",
+        ],
+      });
     }
     for (const p of full.debitori) {
-      debitoriRows.push({ aviz: idv, values: [
-        idv, p.calitate ?? "", p.tip_persoana, p.nr_ordine ?? "", subscriptorLabel(p.subscriptor),
-        p.denumire ?? "", p.prenume ?? "", p.tip_entitate ?? "",
-        p.cnp ?? "", p.cod ?? "", p.nr_identificare ?? "",
-        p.sediu ?? "", p.localitate ?? "", p.judet ?? "", p.cod_postal ?? "", p.tara ?? "",
-        p.alte_date ?? "",
-      ] });
+      debitoriRows.push({
+        aviz: idv,
+        values: [
+          idv,
+          p.calitate ?? "",
+          p.tip_persoana,
+          p.nr_ordine ?? "",
+          subscriptorLabel(p.subscriptor),
+          p.denumire ?? "",
+          p.prenume ?? "",
+          p.tip_entitate ?? "",
+          p.cnp ?? "",
+          p.cod ?? "",
+          p.nr_identificare ?? "",
+          p.sediu ?? "",
+          p.localitate ?? "",
+          p.judet ?? "",
+          p.cod_postal ?? "",
+          p.tara ?? "",
+          p.alte_date ?? "",
+        ],
+      });
     }
     for (const b of full.bunuri) {
-      bunuriRows.push({ aviz: idv, values: [
-        idv, b.tip_bun, b.categorie ?? "", b.identificare ?? "",
-        b.descriere ?? "", b.model ?? "", b.serie_sasiu ?? "", b.serie_motor ?? "",
-        b.nr_inmatriculare ?? "", b.referinte.map(refLabel).join(" | "), dc,
-      ] });
+      bunuriRows.push({
+        aviz: idv,
+        values: [
+          idv,
+          b.tip_bun,
+          b.categorie ?? "",
+          b.identificare ?? "",
+          b.descriere ?? "",
+          b.model ?? "",
+          b.serie_sasiu ?? "",
+          b.serie_motor ?? "",
+          b.nr_inmatriculare ?? "",
+          b.referinte.map(refLabel).join(" | "),
+          dc,
+        ],
+      });
     }
     for (const h of full.istoric) {
-      istoricRows.push({ aviz: idv, values: [
-        idv, h.identificator, h.data, h.tip, h.inscriere_m_v ?? "",
-      ] });
+      istoricRows.push({ aviz: idv, values: [idv, h.identificator, h.data, h.tip, h.inscriere_m_v ?? ""] });
     }
   }
 
-  const wsCred = isSpecifice ? null : buildChildSheet(
-    "Creditori",
-    ["Aviz", "Tip", "Nr ordine", "Subscriptor", "Denumire", "Prenume", "Tip entitate",
-      "CNP", "Cod fiscal", "Nr identificare", "Sediu", "Localitate", "Judet", "Cod postal", "Tara", "Alte date"],
-    [30, 5, 9, 11, 34, 18, 16, 16, 16, 18, 36, 18, 14, 10, 10, 30],
-    creditoriRows, avizRowOf,
-  );
+  const wsCred = isSpecifice
+    ? null
+    : buildChildSheet(
+        "Creditori",
+        [
+          "Aviz",
+          "Tip",
+          "Nr ordine",
+          "Subscriptor",
+          "Denumire",
+          "Prenume",
+          "Tip entitate",
+          "CNP",
+          "Cod fiscal",
+          "Nr identificare",
+          "Sediu",
+          "Localitate",
+          "Judet",
+          "Cod postal",
+          "Tara",
+          "Alte date",
+        ],
+        [30, 5, 9, 11, 34, 18, 16, 16, 16, 18, 36, 18, 14, 10, 10, 30],
+        creditoriRows,
+        avizRowOf
+      );
   const wsDeb = buildChildSheet(
     partyLabel2,
-    ["Aviz", "Calitate", "Tip", "Nr ordine", "Subscriptor", "Denumire", "Prenume", "Tip entitate",
-      "CNP", "Cod fiscal", "Nr identificare", "Sediu", "Localitate", "Judet", "Cod postal", "Tara", "Alte date"],
+    [
+      "Aviz",
+      "Calitate",
+      "Tip",
+      "Nr ordine",
+      "Subscriptor",
+      "Denumire",
+      "Prenume",
+      "Tip entitate",
+      "CNP",
+      "Cod fiscal",
+      "Nr identificare",
+      "Sediu",
+      "Localitate",
+      "Judet",
+      "Cod postal",
+      "Tara",
+      "Alte date",
+    ],
     [30, 16, 5, 9, 11, 34, 18, 16, 16, 16, 18, 36, 18, 14, 10, 10, 30],
-    debitoriRows, avizRowOf,
+    debitoriRows,
+    avizRowOf
   );
   const wsBun = buildChildSheet(
     "Bunuri",
-    ["Aviz", "Tip bun", "Categorie", "Identificare", "Descriere", "Model",
-      "Serie sasiu", "Serie motor", "Nr inmatriculare", "Referinte", "Detalii comune"],
+    [
+      "Aviz",
+      "Tip bun",
+      "Categorie",
+      "Identificare",
+      "Descriere",
+      "Model",
+      "Serie sasiu",
+      "Serie motor",
+      "Nr inmatriculare",
+      "Referinte",
+      "Detalii comune",
+    ],
     [30, 16, 18, 30, 40, 20, 22, 18, 16, 30, 60],
-    bunuriRows, avizRowOf,
+    bunuriRows,
+    avizRowOf
   );
   const wsIst = buildChildSheet(
     "Istoric",
     ["Aviz", "Identificator", "Data", "Tip", "Inscriere modificatoare"],
     [30, 30, 11, 28, 30],
-    istoricRows, avizRowOf,
+    istoricRows,
+    avizRowOf
   );
 
   sanitizeFormulaCells(wsAvize);
@@ -356,17 +499,19 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
   if (wsBun) XLSX.utils.book_append_sheet(wb, wsBun as import("xlsx").WorkSheet, "Bunuri");
   if (wsIst) XLSX.utils.book_append_sheet(wb, wsIst as import("xlsx").WorkSheet, "Istoric");
 
-  const fileBase = docs.length === 1
-    ? sanitizeFilename(docs[0].identificator.v)
-    : `rnpm${searchType ? `_${searchType}` : ""}_${dateStr}`;
+  const fileBase =
+    docs.length === 1
+      ? sanitizeFilename(docs[0].identificator.v)
+      : `rnpm${searchType ? `_${searchType}` : ""}_${dateStr}`;
 
   // xlsx-js-style@1.2.0 returneaza ArrayBuffer pentru type:"array" (nu Uint8Array
   // ca documenteaza SheetJS upstream); Uint8Array.set(ArrayBuffer) era no-op si
   // emitea fisier plin de zerouri. Acceptam ambele forme si transferam buffer-ul.
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
-  const buffer: ArrayBuffer = out instanceof ArrayBuffer
-    ? out
-    : (out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer);
+  const buffer: ArrayBuffer =
+    out instanceof ArrayBuffer
+      ? out
+      : (out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer);
   return { buffer, filename: `${fileBase}.xlsx`, mime: MIME_XLSX };
 }
 
@@ -409,7 +554,7 @@ export async function buildRnpmPdf(payload: RnpmExportPayload): Promise<RnpmExpo
     doc.text(stripDiacritics(`Aviz ${d.identificator.v} · ${d.tip} · ${d.data}`), 14, 15);
     const a = full.aviz;
     const meta: [string, string][] = [
-      ["Activ", a.activ ? "Da" : "Nu"],
+      ["Activ", formatRnpmAvizStatus(a.activ === 1 ? true : a.activ === 0 ? false : null)],
       ["Destinatie", a.destinatie ?? ""],
       ["Tip act", a.tip_act ?? ""],
       ["Numar act", a.numar_act ?? ""],
@@ -501,9 +646,10 @@ export async function buildRnpmPdf(payload: RnpmExportPayload): Promise<RnpmExpo
     );
   }
 
-  const fileBase = docs.length === 1
-    ? sanitizeFilename(docs[0].identificator.v)
-    : `rnpm${searchType ? `_${searchType}` : ""}_${todayRo()}`;
+  const fileBase =
+    docs.length === 1
+      ? sanitizeFilename(docs[0].identificator.v)
+      : `rnpm${searchType ? `_${searchType}` : ""}_${todayRo()}`;
 
   const buffer = doc.output("arraybuffer") as ArrayBuffer;
   return { buffer, filename: `${fileBase}.pdf`, mime: MIME_PDF };
@@ -541,7 +687,9 @@ async function runInWorker(payload: RnpmExportPayload): Promise<RnpmExportResult
   const ExportWorker = (await import("./rnpmExport.worker.ts?worker")).default;
   return new Promise<RnpmExportResult>((resolve, reject) => {
     const worker = new ExportWorker();
-    worker.onmessage = (e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>) => {
+    worker.onmessage = (
+      e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>
+    ) => {
       worker.terminate();
       if (!e.data.ok) {
         reject(new Error(e.data.error));
@@ -560,7 +708,7 @@ async function runInWorker(payload: RnpmExportPayload): Promise<RnpmExportResult
 export async function exportRnpmExcel(
   docs: RnpmDocument[],
   avizIds: (number | null)[],
-  searchType?: string,
+  searchType?: string
 ): Promise<void> {
   const details = await fetchDetails(docs, avizIds);
   const payload: RnpmExportPayload = {
@@ -576,7 +724,7 @@ export async function exportRnpmExcel(
 export async function exportRnpmPDF(
   docs: RnpmDocument[],
   avizIds: (number | null)[],
-  searchType?: string,
+  searchType?: string
 ): Promise<void> {
   const details = await fetchDetails(docs, avizIds);
   const payload: RnpmExportPayload = {

@@ -67,25 +67,24 @@ Target release: **v2.20.8** (LIVRAT).
 
 ---
 
-## Batch 3 — RNPM trust hardening (MED-HIGH risk, 4-6h)
+## Batch 3 - RNPM trust hardening (MED-HIGH risk, 4-6h) - partially DONE in v2.21.0
 
 Target release: **v2.21.0** (eject din v2.20.4 ca sa testam izolat).
 
-- [ ] **`backend/src/services/rnpmClient.ts:232`** — `return await res.json() as RnpmSearchResult` e doar TypeScript cast, fara validare runtime. Adauga `RnpmSearchResultSchema = z.object({...}).passthrough()` + `safeParse` cu warning log la rollout, apoi `parse` (throw) dupa 1 release stabil.
-- [ ] **`backend/src/services/rnpmSearchService.ts:211`** — `firstResult.total > MAX_TOTAL_RESULTS` (1500) — daca `total` e `undefined`, comparatia e `false` si bypass-eaza guardul. Adauga `typeof firstResult.total === "number"` type-guard explicit.
-- [ ] **`backend/src/services/rnpmAvizMapper.ts:237`** — `activ: typeof part1.activ === "boolean" ? part1.activ : (doc.activ ?? true)`. Default `true` pe necunoscut e dezinformant. Decizie de luat: (a) `null` cu UI "necunoscut" sau (b) `false` (mai conservator). **Recomandare:** `null` + tag UI, ca nu pierdem signal.
-- [ ] **`backend/src/routes/rnpm.ts:91-94`** — `parseClientRequestId` accepta `:` ca separator dar standardul (alte module) folosesc doar alfanumerice + `-`/`_`. Decide: scrub `:` sau aliniaza toate modulele la acelasi regex.
-- [ ] **Captcha charset validation** — input fields permit caractere nestandard. Adauga whitelist alfanumeric + `-_` + length cap (la max ce serviciul accepta).
-- [ ] **SOAP response cap** — adauga `Content-Length` check inainte de `await res.text()` (cap la 8MB) pentru a preveni DoS la upstream raw.
-- [ ] **XLSX export formula prefix** — verifica ca toate cele 5-7 caractere vulnerabile (`=+-@\t\r`) sunt prefixate cu `'`; audit prin Grep.
+- [x] **`backend/src/services/rnpmClient.ts:232`** - `return await res.json() as RnpmSearchResult` era doar TypeScript cast, fara validare runtime. Adaugat `RnpmSearchResultSchema` Zod cu `safeParse` + warning si fail-loud optional prin `RNPM_RUNTIME_VALIDATION_ENFORCED=1`. DONE v2.21.0.
+- [x] **`backend/src/services/rnpmSearchService.ts:211`** - `firstResult.total > MAX_TOTAL_RESULTS` (1500) bypass-a guardul cand `total` era `undefined`. Adaugat `typeof firstResult.total === "number"` type-guard explicit. DONE v2.20.9.
+- [x] **`backend/src/services/rnpmAvizMapper.ts:237`** - default `activ: true` pe necunoscut era dezinformant. Implementat `activ: null`, UI/export "Necunoscut" si persistenta DB fara coercitie la `1`. DONE v2.21.0.
+- [ ] **`backend/src/routes/rnpm.ts:91-94`** - `parseClientRequestId` accepta `:` ca separator dar standardul (alte module) folosesc doar alfanumerice + `-`/`_`. Decide: scrub `:` sau aliniaza toate modulele la acelasi regex.
+- [ ] **Captcha charset validation** - input fields permit caractere nestandard. Adauga whitelist alfanumeric + `-_` + length cap (la max ce serviciul accepta).
+- [x] **SOAP response cap** - adaugat `Content-Length` check inainte de `await res.text()` (cap la 8MB) pentru a preveni DoS la upstream raw. DONE v2.20.9.
+- [x] **XLSX export formula prefix** - verificat prin sentinel test ca toate caracterele vulnerabile (`=+-@\t\r`) sunt prefixate cu `'`. DONE v2.20.9.
 
-**Risc modificare:** MEDIU-RIDICAT — schimba comportament observabil (default `activ`, validare runtime poate respinge raspunsuri valide nevazute inainte). **Mitigare:**
+**Risc modificare:** MEDIU-RIDICAT - schimba comportament observabil (default `activ`, validare runtime poate respinge raspunsuri valide nevazute inainte). **Mitigare:**
 - 2-stage rollout pentru Zod schema: (1) `safeParse` + log warning fara block, (2) `parse` cu fail loud dupa 1 sprint observat.
-- Default `activ: null` rendere UI "necunoscut" — adauga test snapshot pentru ambele cazuri (cunoscut, necunoscut).
+- Default `activ: null` rendere UI "necunoscut" - adauga test snapshot pentru ambele cazuri (cunoscut, necunoscut).
 - Feature flag `RNPM_RUNTIME_VALIDATION_ENFORCED=1` pentru transition phase.
 
 ---
-
 ## Batch 4 — Scheduler & captcha reliability (MED risk, 3h) ✅ DONE in v2.20.8
 
 Target release: **v2.20.8** (LIVRAT).
@@ -100,21 +99,20 @@ Target release: **v2.20.8** (LIVRAT).
 
 ---
 
-## Batch 5 — DB migrations & retention (MED risk, 2-3h)
+## Batch 5 - DB migrations & retention (MED risk, 2-3h) DONE in v2.21.0
 
 Target release: **v2.21.0** (impreuna cu Batch 3).
 
-- [ ] **`backend/src/db/monitoringRunsRepository.ts:147-153`** — `DELETE FROM monitoring_runs WHERE started_at < ?` ruleaza unbounded zilnic la 90 zile retention. Pe DB-uri mari (100k+ runs) blocheaza. **Decizie:** (a) split in migration noua + chunked purge (`LIMIT 1000` in loop) sau (b) doar adauga index. **Recomandare:** combinat — Migration 0018 cu `CREATE INDEX IF NOT EXISTS idx_monitoring_runs_started_at` + chunked purge in repository.
-- [ ] **9 migrations fara `.down.sql`** — Migrations 0002..0017 cu exceptia 0001_baseline; adauga macar stub `DELETE FROM _schema_versions WHERE version = N;` daca rollback adevarat e prea complex.
-- [ ] **`0001_baseline.down.sql`** — adauga macar stub care arunca eroare explicita "baseline cannot be rolled back, restore from backup".
+- [x] **`backend/src/db/monitoringRunsRepository.ts:147-153`** - `DELETE FROM monitoring_runs WHERE started_at < ?` ruleaza acum chunked (`LIMIT 1000` default) cu safety cap 1M randuri per apel. Adaugata migration 0019 `idx_monitoring_runs_started_at` pentru cursorul de retention. DONE v2.21.0.
+- [x] **Migration down consistency** - 0002..0018 au perechi `.down.sql` existente; testul runner-ului acopera prezenta perechilor. VALIDAT v2.21.0.
+- [x] **`0001_baseline.down.sql`** - adaugat sentinel explicit care arunca eroare "baseline cannot be rolled back, restore from backup". DONE v2.21.0.
 
-**Risc modificare:** MEDIU — orice schimbare in migrations atinge boot-ul. **Mitigare:**
+**Risc modificare:** MEDIU - orice schimbare in migrations atinge boot-ul. **Mitigare:**
 - Pre-migration backup deja exista (v2.16.1) pentru rebuild-uri.
-- Testeaza Migration 0018 pe DB-ul de productie copy local cu 100k+ runs sintetice.
-- Adauga test E2E care ruleaza migrations + rollback in `vitest`.
+- Testeaza Migration 0019 pe DB-ul de productie copy local cu 100k+ runs sintetice.
+- Testeaza migration runner + down-file consistency in `vitest`.
 
 ---
-
 ## Batch 6 — Web cutover prerequisites (out of scope acum)
 
 Tracked in **`EXECUTION-ROADMAP.md`** sub PR-9 si PR-11. Nu duplicam aici.
@@ -160,7 +158,7 @@ Aceste 4 alegeri trebuie facute inainte de v2.21.0; pana atunci pot ramane TBD:
 
 1. **`activ` default** — `null` cu UI "necunoscut" (recomandare review) vs `false` (conservator). Impact: snapshot tests + UI legends.
 2. **Zod schema RNPM** — 2-stage rollout (safeParse+warn -> throw) vs immediate throw. Impact: risc de a respinge raspunsuri valide nevazute.
-3. **Migration 0018** — combined (index + chunked purge) vs split (doar index acum, purge in 0019). Impact: durata 1 release.
+3. **Migration 0019** - resolved in v2.21.0: index + chunked purge in acelasi release.
 4. **`source_partial` alert kind** — include in v2.20.4 batch 2 sau decuplat? Impact: UI Alerts schema + traduceri.
 
 ---

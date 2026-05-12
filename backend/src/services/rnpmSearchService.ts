@@ -1,8 +1,9 @@
 import { solveRnpmCaptcha, type CaptchaProvider, type CaptchaMode } from "./captchaSolver.ts";
 import {
-  RnpmClient,
+  type RnpmClient,
   defaultRnpmClient,
   RnpmError,
+  type RnpmSearchResult,
   type RnpmSearchType,
   type RnpmSearchParams,
   type RnpmDocument,
@@ -86,13 +87,8 @@ function logRnpmEvent(entry: Record<string, unknown>): void {
     JSON.stringify({
       ...entry,
       ts: new Date().toISOString(),
-    }),
+    })
   );
-}
-
-function toRnpmDate(s: string): string {
-  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  return m ? `${m[3]}.${m[2]}.${m[1]}` : s;
 }
 
 export async function executeSearch(
@@ -104,10 +100,7 @@ export async function executeSearch(
   // Tenant guard: refuza continuarile pe `existingSearchId` care nu apartin
   // owner-ului curent (audit 2026-04-29 #11). Fara aceasta, un client local
   // ar putea atasa avize la istoricul altui tenant in mod web mode.
-  if (
-    input.existingSearchId != null &&
-    !searchBelongsToOwner(input.existingSearchId, ownerId)
-  ) {
+  if (input.existingSearchId != null && !searchBelongsToOwner(input.existingSearchId, ownerId)) {
     throw new RnpmError("searchId nu apartine owner-ului curent", 403);
   }
 
@@ -134,7 +127,13 @@ export async function executeSearch(
     gcode = input.existingGcode;
   } else {
     const tCaptcha = Date.now();
-    gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
+    gcode = await solveRnpmCaptcha(
+      input.captchaKey,
+      input.captchaProvider,
+      input.fallback2CaptchaKey,
+      signal,
+      input.captchaMode
+    );
     captchaMs = Date.now() - tCaptcha;
     captchasUsed++;
   }
@@ -148,9 +147,10 @@ export async function executeSearch(
   // RNPM backend nu gaseste nimic cu diacritice — folosim doar pentru request-ul efectiv.
   // input.params ramane neatins pentru ca `rnpm_searches.params_json` sa pastreze textul original al userului.
   const searchParams: RnpmSearchParams = { ...stripDiacriticsDeep(restParams), gcode };
-  void _ps; void _pf;
+  void _ps;
+  void _pf;
 
-  let firstResult;
+  let firstResult: RnpmSearchResult;
   // PRIVACY: do NOT log parameter values (CUI, CNP, nume, sedii). Log only
   // the shape of the request so we can correlate issues without leaking PII.
   const { gcode: _g, ...logParams } = searchParams;
@@ -186,7 +186,13 @@ export async function executeSearch(
     if ((input.existingGcode && e instanceof RnpmError) || isExpired) {
       throwIfAborted(signal);
       const tRetry = Date.now();
-      gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
+      gcode = await solveRnpmCaptcha(
+        input.captchaKey,
+        input.captchaProvider,
+        input.fallback2CaptchaKey,
+        signal,
+        input.captchaMode
+      );
       captchaMs += Date.now() - tRetry;
       captchasUsed++;
       searchParams.gcode = gcode;
@@ -208,13 +214,17 @@ export async function executeSearch(
     }
   }
 
-  if (firstResult.total > MAX_TOTAL_RESULTS || !Array.isArray(firstResult.documents)) {
+  if (
+    typeof firstResult.total !== "number" ||
+    firstResult.total > MAX_TOTAL_RESULTS ||
+    !Array.isArray(firstResult.documents)
+  ) {
     throw new RnpmError(
-      `RNPM a returnat ${firstResult.total} rezultate (limita ${MAX_TOTAL_RESULTS}). Restrange criteriile de cautare.`,
+      `RNPM a returnat raspuns invalid sau ${firstResult.total} rezultate (limita ${MAX_TOTAL_RESULTS}). Restrange criteriile de cautare.`,
       400,
       undefined,
       "limit_exceeded",
-      { total: firstResult.total, limit: MAX_TOTAL_RESULTS },
+      { total: firstResult.total ?? null, limit: MAX_TOTAL_RESULTS }
     );
   }
   const pagesTotal = firstResult.pagesTotal;
@@ -222,13 +232,15 @@ export async function executeSearch(
   const pageSize = firstResult.pageSize;
   const criteriu = firstResult.criteriu;
 
-  const searchId = input.existingSearchId ?? saveSearch({
-    ownerId,
-    searchType: input.type,
-    paramsJson: JSON.stringify(input.params),
-    totalResults: total,
-    criteriu: criteriu ?? null,
-  });
+  const searchId =
+    input.existingSearchId ??
+    saveSearch({
+      ownerId,
+      searchType: input.type,
+      paramsJson: JSON.stringify(input.params),
+      totalResults: total,
+      criteriu: criteriu ?? null,
+    });
   // v2.20.3 Grupul K — surface searchId imediat dupa ce row-ul e creat. Try/catch
   // defensive: callback-ul user-furnizat nu trebuie sa flip-uiasca search-ul.
   try {
@@ -249,30 +261,32 @@ export async function executeSearch(
     for (let i = 0; i < docs.length; i += concurrency) {
       throwIfAborted(signal);
       const tBatch = Date.now();
-      const batchResults = await Promise.all(docs.slice(i, i + concurrency).map(async (doc, batchIdx) => {
-        const localIdx = i + batchIdx;
-        if (!doc.identificator.k) return { localIdx, doc, ok: false as const };
-        try {
-          const detail = await client.fetchFullDetail(doc.identificator.k, signal);
-          // Fetch-ul poate sa se fi intors inainte ca abort-ul sa-l ajunga.
-          // Verificam explicit ca sa nu scriem in SQLite dupa ce user-ul a oprit cautarea.
-          if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-          if (typeof detail.part1?.activ === "boolean") doc.activ = detail.part1.activ;
-          // Audit 2026-04-29 #8: scrierea SQLite trebuie sa fie bracketata de
-          // maintenance lock pentru a coopera cu restoreFromBackup. Wrap-ul e
-          // sub-ms (saveAvizFull e sync better-sqlite3); fetch-ul HTTP de mai
-          // sus ramane intentionat in afara, ca un user care opreste sa nu
-          // ramana prins in lock-ul reader pe latenta upstream.
-          const avizId = await withMaintenanceRead(async () =>
-            persistAvizWithDetail(doc, detail, input.type, ownerId, searchId),
-          );
-          return { localIdx, doc, ok: true as const, avizId };
-        } catch (e) {
-          if (e instanceof DOMException && e.name === "AbortError") throw e;
-          console.error(`[rnpm detail fail] ${doc.identificator.v}:`, e instanceof Error ? e.message : e);
-          return { localIdx, doc, ok: false as const };
-        }
-      }));
+      const batchResults = await Promise.all(
+        docs.slice(i, i + concurrency).map(async (doc, batchIdx) => {
+          const localIdx = i + batchIdx;
+          if (!doc.identificator.k) return { localIdx, doc, ok: false as const };
+          try {
+            const detail = await client.fetchFullDetail(doc.identificator.k, signal);
+            // Fetch-ul poate sa se fi intors inainte ca abort-ul sa-l ajunga.
+            // Verificam explicit ca sa nu scriem in SQLite dupa ce user-ul a oprit cautarea.
+            if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+            if (typeof detail.part1?.activ === "boolean") doc.activ = detail.part1.activ;
+            // Audit 2026-04-29 #8: scrierea SQLite trebuie sa fie bracketata de
+            // maintenance lock pentru a coopera cu restoreFromBackup. Wrap-ul e
+            // sub-ms (saveAvizFull e sync better-sqlite3); fetch-ul HTTP de mai
+            // sus ramane intentionat in afara, ca un user care opreste sa nu
+            // ramana prins in lock-ul reader pe latenta upstream.
+            const avizId = await withMaintenanceRead(async () =>
+              persistAvizWithDetail(doc, detail, input.type, ownerId, searchId)
+            );
+            return { localIdx, doc, ok: true as const, avizId };
+          } catch (e) {
+            if (e instanceof DOMException && e.name === "AbortError") throw e;
+            console.error(`[rnpm detail fail] ${doc.identificator.v}:`, e instanceof Error ? e.message : e);
+            return { localIdx, doc, ok: false as const };
+          }
+        })
+      );
       const dt = Date.now() - tBatch;
       detailsMs += dt;
       let okCount = 0;
@@ -305,7 +319,7 @@ export async function executeSearch(
 
   while (allDocs.length < batchSize && rnpmPage <= pagesTotal) {
     throwIfAborted(signal);
-    let r;
+    let r: RnpmSearchResult;
     try {
       const tMore = Date.now();
       r = await client.search(input.type, searchParams, rnpmPage, signal);
@@ -323,7 +337,13 @@ export async function executeSearch(
       if (e instanceof RnpmError && (e.status === 410 || e.status === 401 || e.status === 403)) {
         throwIfAborted(signal);
         const tRetry = Date.now();
-        gcode = await solveRnpmCaptcha(input.captchaKey, input.captchaProvider, input.fallback2CaptchaKey, signal, input.captchaMode);
+        gcode = await solveRnpmCaptcha(
+          input.captchaKey,
+          input.captchaProvider,
+          input.fallback2CaptchaKey,
+          signal,
+          input.captchaMode
+        );
         captchaMs += Date.now() - tRetry;
         captchasUsed++;
         searchParams.gcode = gcode;
@@ -384,7 +404,7 @@ function persistAvizWithDetail(
   detail: RnpmFullDetail,
   searchType: string,
   ownerId: string,
-  searchId: number,
+  searchId: number
 ): number {
   return saveAvizFull(buildSaveAvizInput(doc, detail, searchType, ownerId, searchId));
 }
@@ -415,7 +435,7 @@ export async function executeBulkSearch(
   signal?: AbortSignal,
   captchaProvider?: CaptchaProvider,
   fallback2CaptchaKey?: string,
-  captchaMode?: CaptchaMode,
+  captchaMode?: CaptchaMode
 ): Promise<void> {
   for (let i = 0; i < items.length; i++) {
     if (signal?.aborted) return;
@@ -427,11 +447,24 @@ export async function executeBulkSearch(
       // Bulk items fetch toate paginile automat (cap intern MAX_TOTAL_RESULTS). Single search foloseste batchSize=25
       // plus butonul "Incarca mai multe"; bulk nu are echivalent, deci se comporta ca "fetch all".
       const result = await executeSearch(
-        { type: item.type, params: item.params, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, ownerId, batchSize: MAX_TOTAL_RESULTS, signal },
+        {
+          type: item.type,
+          params: item.params,
+          captchaKey,
+          captchaProvider,
+          fallback2CaptchaKey,
+          captchaMode,
+          ownerId,
+          batchSize: MAX_TOTAL_RESULTS,
+          signal,
+        },
         client
       );
       onProgress({
-        index: i, total: items.length, label, phase: "done",
+        index: i,
+        total: items.length,
+        label,
+        phase: "done",
         resultCount: result.documents.length,
         searchId: result.searchId,
       });
@@ -482,24 +515,33 @@ export interface SplitSearchInput {
 // Cauze distincte pentru records nepre-luate dupa split, fiecare cu actiune
 // recomandabila diferita pentru user. Vezi banner UI pentru wording RO.
 export type RnpmGapReason =
-  | "terminal_cap"            // bucket cu total > MAX_TOTAL_RESULTS si fara axa de split (categorie fara destinatii sau dest individuala > 1500).
-  | "silent_refusal"          // RNPM a returnat total > 0 dar `documents: []` pe pagina 1 — refuz tacit upstream.
-  | "residual_unclassified";  // tier1 - SUM(tier2) > 0: records fara destinatie atribuita istoric.
+  | "terminal_cap" // bucket cu total > MAX_TOTAL_RESULTS si fara axa de split (categorie fara destinatii sau dest individuala > 1500).
+  | "silent_refusal" // RNPM a returnat total > 0 dar `documents: []` pe pagina 1 — refuz tacit upstream.
+  | "residual_unclassified"; // tier1 - SUM(tier2) > 0: records fara destinatie atribuita istoric.
 
 export interface SplitSearchProgress {
   index: number;
   total: number;
   label: string;
-  phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
+  phase:
+    | "captcha"
+    | "search"
+    | "done"
+    | "blocked"
+    | "skipped"
+    | "error"
+    | "nested_start"
+    | "nested_progress"
+    | "nested_done";
   message?: string;
   resultCount?: number;
   subTotal?: number;
   // Doar pe phase = "nested_progress" / "nested_start" / "nested_done":
   // sub-iteratorul curent (destinatie) in cadrul sub-tipului parinte.
   nested?: {
-    index: number;          // 1-based index in lista destinatii (0 = inca nu a inceput)
-    total: number;          // numarul total de destinatii incercate
-    label: string;          // label-ul destinatiei curente
+    index: number; // 1-based index in lista destinatii (0 = inca nu a inceput)
+    total: number; // numarul total de destinatii incercate
+    label: string; // label-ul destinatiei curente
     phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error";
     resultCount?: number;
     subTotal?: number;
@@ -507,10 +549,10 @@ export interface SplitSearchProgress {
 }
 
 export interface NestedSplitSubResult {
-  label: string;            // labelul destinatiei
+  label: string; // labelul destinatiei
   status: "ok" | "blocked" | "empty" | "error";
-  count: number;            // documente efectiv obtinute pentru aceasta destinatie
-  subTotal: number;         // totalul raportat de RNPM pentru (tipInscriere + destinatie)
+  count: number; // documente efectiv obtinute pentru aceasta destinatie
+  subTotal: number; // totalul raportat de RNPM pentru (tipInscriere + destinatie)
   reason?: string;
   gapReason?: RnpmGapReason; // populat cand status === "blocked"
 }
@@ -518,8 +560,8 @@ export interface NestedSplitSubResult {
 export interface SplitSubResult {
   label: string;
   status: "ok" | "blocked" | "empty" | "error" | "recovered" | "partial";
-  count: number;            // documente efectiv obtinute (suma destinatiilor pentru recovered/partial)
-  subTotal: number;         // total raportat de RNPM la nivelul sub-tipului (tier-1)
+  count: number; // documente efectiv obtinute (suma destinatiilor pentru recovered/partial)
+  subTotal: number; // total raportat de RNPM la nivelul sub-tipului (tier-1)
   reason?: string;
   // Tier-2 (pe destinatieInscriere): prezent doar daca sub-tipul a triggered nested split.
   nested?: NestedSplitSubResult[];
@@ -538,8 +580,8 @@ export interface SplitSearchResult {
   searchId: number;
   documents: RnpmDocument[];
   avizIds: (number | null)[];
-  total: number;          // documente efectiv obtinute
-  upstreamTotal: number;  // suma sub-totalurilor raportate de RNPM
+  total: number; // documente efectiv obtinute
+  upstreamTotal: number; // suma sub-totalurilor raportate de RNPM
   criteriu: string;
   pagesTotal: number;
   pageSize: number;
@@ -552,7 +594,7 @@ export interface SplitSearchResult {
 export async function executeSplitSearch(
   input: SplitSearchInput,
   onProgress: (p: SplitSearchProgress) => void,
-  client: RnpmClient = defaultRnpmClient,
+  client: RnpmClient = defaultRnpmClient
 ): Promise<SplitSearchResult> {
   const ownerId = input.ownerId ?? "local";
   const subN = input.subTypeLabels.length;
@@ -608,18 +650,21 @@ export async function executeSplitSearch(
         // v2.20.3 Grupul M: acumuleaza din result.captchasUsed (include retries
         // interne ale executeSearch — ex. search_retry pe gcode invalid). Pre-
         // increment-ul vechi numara doar prima incercare si pierdea retry-urile.
-        const result = await executeSearch({
-          type: input.type,
-          params: subParams,
-          captchaKey: input.captchaKey,
-          captchaProvider: input.captchaProvider,
-          fallback2CaptchaKey: input.fallback2CaptchaKey,
-          captchaMode: input.captchaMode,
-          ownerId,
-          batchSize: MAX_TOTAL_RESULTS, // fetch toate paginile pentru sub-tip
-          existingSearchId: parentSearchId,
-          signal: input.signal,
-        }, client);
+        const result = await executeSearch(
+          {
+            type: input.type,
+            params: subParams,
+            captchaKey: input.captchaKey,
+            captchaProvider: input.captchaProvider,
+            fallback2CaptchaKey: input.fallback2CaptchaKey,
+            captchaMode: input.captchaMode,
+            ownerId,
+            batchSize: MAX_TOTAL_RESULTS, // fetch toate paginile pentru sub-tip
+            existingSearchId: parentSearchId,
+            signal: input.signal,
+          },
+          client
+        );
         captchasUsed += result.captchasUsed;
 
         if (i === 0 || !firstCriteriu) firstCriteriu = result.criteriu;
@@ -663,7 +708,9 @@ export async function executeSplitSearch(
                 reason: reasonMsg,
               });
               onProgress({
-                index: j, total: subN, label: skippedLabel,
+                index: j,
+                total: subN,
+                label: skippedLabel,
                 phase: "error",
                 message: reasonMsg,
               });
@@ -678,7 +725,14 @@ export async function executeSplitSearch(
         allAvizIds.push(...result.avizIds);
         allDetailsFailed.push(...result.detailsFailed);
         splitStats.push({ label, status: "ok", count: result.documents.length, subTotal: result.total });
-        onProgress({ index: i, total: subN, label, phase: "done", resultCount: result.documents.length, subTotal: result.total });
+        onProgress({
+          index: i,
+          total: subN,
+          label,
+          phase: "done",
+          resultCount: result.documents.length,
+          subTotal: result.total,
+        });
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") throw e;
         // v2.20.3 Grupul M: conservative count — daca executeSearch a aruncat
@@ -701,22 +755,26 @@ export async function executeSplitSearch(
 
           if (hasNestedDestinations(input.type)) {
             try {
-              const nestedRes = await executeNestedDestinationSplit({
-                type: input.type,
-                tier1Index: i,
-                tier1Total: subN,
-                tier1Label: label,
-                tier1SubTotal,
-                baseParams: input.baseParams,
-                tipInscriereValue: String(i + 1),
-                captchaKey: input.captchaKey,
-                captchaProvider: input.captchaProvider,
-                fallback2CaptchaKey: input.fallback2CaptchaKey,
-                captchaMode: input.captchaMode,
-                ownerId,
-                parentSearchId,
-                signal: input.signal,
-              }, onProgress, client);
+              const nestedRes = await executeNestedDestinationSplit(
+                {
+                  type: input.type,
+                  tier1Index: i,
+                  tier1Total: subN,
+                  tier1Label: label,
+                  tier1SubTotal,
+                  baseParams: input.baseParams,
+                  tipInscriereValue: String(i + 1),
+                  captchaKey: input.captchaKey,
+                  captchaProvider: input.captchaProvider,
+                  fallback2CaptchaKey: input.fallback2CaptchaKey,
+                  captchaMode: input.captchaMode,
+                  ownerId,
+                  parentSearchId,
+                  signal: input.signal,
+                },
+                onProgress,
+                client
+              );
 
               allDocs.push(...nestedRes.documents);
               allAvizIds.push(...nestedRes.avizIds);
@@ -731,15 +789,18 @@ export async function executeSplitSearch(
                 status,
                 count: recoveredCount,
                 subTotal: tier1SubTotal,
-                reason: gap > 0
-                  ? `Recuperat ${recoveredCount}/${tier1SubTotal} (${gap} inregistrari fara destinatie atribuita ramase neacoperite).`
-                  : undefined,
+                reason:
+                  gap > 0
+                    ? `Recuperat ${recoveredCount}/${tier1SubTotal} (${gap} inregistrari fara destinatie atribuita ramase neacoperite).`
+                    : undefined,
                 nested: nestedRes.subResults,
                 gap,
                 gapReason: gap > 0 ? "residual_unclassified" : undefined,
               });
               onProgress({
-                index: i, total: subN, label,
+                index: i,
+                total: subN,
+                label,
                 phase: "nested_done",
                 resultCount: recoveredCount,
                 subTotal: tier1SubTotal,
@@ -749,7 +810,10 @@ export async function executeSplitSearch(
               if (nestedErr instanceof DOMException && nestedErr.name === "AbortError") throw nestedErr;
               const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
               splitStats.push({
-                label, status: "error", count: 0, subTotal: tier1SubTotal,
+                label,
+                status: "error",
+                count: 0,
+                subTotal: tier1SubTotal,
                 reason: `Tier-2 split a esuat: ${msg}`,
               });
               onProgress({ index: i, total: subN, label, phase: "error", message: msg, subTotal: tier1SubTotal });
@@ -833,7 +897,7 @@ interface NestedSplitOutcome {
 async function executeNestedDestinationSplit(
   input: NestedSplitInput,
   onProgress: (p: SplitSearchProgress) => void,
-  client: RnpmClient,
+  client: RnpmClient
 ): Promise<NestedSplitOutcome> {
   const destinations = DESTINATII_BY_CATEGORY[input.type];
   if (!destinations) {
@@ -848,8 +912,11 @@ async function executeNestedDestinationSplit(
   let captchasUsed = 0;
 
   onProgress({
-    index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
-    phase: "nested_start", subTotal: input.tier1SubTotal,
+    index: input.tier1Index,
+    total: input.tier1Total,
+    label: input.tier1Label,
+    phase: "nested_start",
+    subTotal: input.tier1SubTotal,
     nested: { index: 0, total: destinations.length, label: "", phase: "search" },
   });
 
@@ -858,7 +925,9 @@ async function executeNestedDestinationSplit(
     const destLabel = destinations[j];
 
     onProgress({
-      index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+      index: input.tier1Index,
+      total: input.tier1Total,
+      label: input.tier1Label,
       phase: "nested_progress",
       nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "captcha" },
     });
@@ -879,30 +948,37 @@ async function executeNestedDestinationSplit(
 
     try {
       onProgress({
-        index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+        index: input.tier1Index,
+        total: input.tier1Total,
+        label: input.tier1Label,
         phase: "nested_progress",
         nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "search" },
       });
       // v2.20.3 Grupul M: acumuleaza din result.captchasUsed (vezi comentariul
       // identic din executeSplitSearch).
-      const result = await executeSearch({
-        type: input.type,
-        params: subParams,
-        captchaKey: input.captchaKey,
-        captchaProvider: input.captchaProvider,
-        fallback2CaptchaKey: input.fallback2CaptchaKey,
-        captchaMode: input.captchaMode,
-        ownerId: input.ownerId,
-        batchSize: MAX_TOTAL_RESULTS,
-        existingSearchId: input.parentSearchId,
-        signal: input.signal,
-      }, client);
+      const result = await executeSearch(
+        {
+          type: input.type,
+          params: subParams,
+          captchaKey: input.captchaKey,
+          captchaProvider: input.captchaProvider,
+          fallback2CaptchaKey: input.fallback2CaptchaKey,
+          captchaMode: input.captchaMode,
+          ownerId: input.ownerId,
+          batchSize: MAX_TOTAL_RESULTS,
+          existingSearchId: input.parentSearchId,
+          signal: input.signal,
+        },
+        client
+      );
       captchasUsed += result.captchasUsed;
 
       if (result.total === 0) {
         subResults.push({ label: destLabel, status: "empty", count: 0, subTotal: 0 });
         onProgress({
-          index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+          index: input.tier1Index,
+          total: input.tier1Total,
+          label: input.tier1Label,
           phase: "nested_progress",
           nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "skipped", subTotal: 0 },
         });
@@ -913,14 +989,25 @@ async function executeNestedDestinationSplit(
       // > 1500, raman neacoperite si emitem in subResult).
       if (result.documents.length === 0) {
         subResults.push({
-          label: destLabel, status: "blocked", count: 0, subTotal: result.total,
+          label: destLabel,
+          status: "blocked",
+          count: 0,
+          subTotal: result.total,
           reason: "RNPM upstream silent reject la tier-2",
           gapReason: "silent_refusal",
         });
         onProgress({
-          index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+          index: input.tier1Index,
+          total: input.tier1Total,
+          label: input.tier1Label,
           phase: "nested_progress",
-          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "blocked", subTotal: result.total },
+          nested: {
+            index: j + 1,
+            total: destinations.length,
+            label: destLabel,
+            phase: "blocked",
+            subTotal: result.total,
+          },
         });
         continue;
       }
@@ -929,15 +1016,20 @@ async function executeNestedDestinationSplit(
       avizIds.push(...result.avizIds);
       detailsFailed.push(...result.detailsFailed);
       subResults.push({
-        label: destLabel, status: "ok",
+        label: destLabel,
+        status: "ok",
         count: result.documents.length,
         subTotal: result.total,
       });
       onProgress({
-        index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+        index: input.tier1Index,
+        total: input.tier1Total,
+        label: input.tier1Label,
         phase: "nested_progress",
         nested: {
-          index: j + 1, total: destinations.length, label: destLabel,
+          index: j + 1,
+          total: destinations.length,
+          label: destLabel,
           phase: "done",
           resultCount: result.documents.length,
           subTotal: result.total,
@@ -952,12 +1044,17 @@ async function executeNestedDestinationSplit(
         // Tier-2 destinatie singura > 1500 — fail-clean (fara recursie tier-3).
         const subTotal = (e.details?.total as number | undefined) ?? 0;
         subResults.push({
-          label: destLabel, status: "blocked", count: 0, subTotal,
+          label: destLabel,
+          status: "blocked",
+          count: 0,
+          subTotal,
           reason: `Destinatia "${destLabel}" are ${subTotal} inregistrari (peste limita ${MAX_TOTAL_RESULTS}).`,
           gapReason: "terminal_cap",
         });
         onProgress({
-          index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+          index: input.tier1Index,
+          total: input.tier1Total,
+          label: input.tier1Label,
           phase: "nested_progress",
           nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "blocked", subTotal },
         });
@@ -966,7 +1063,9 @@ async function executeNestedDestinationSplit(
       const msg = e instanceof Error ? e.message : String(e);
       subResults.push({ label: destLabel, status: "error", count: 0, subTotal: 0, reason: msg });
       onProgress({
-        index: input.tier1Index, total: input.tier1Total, label: input.tier1Label,
+        index: input.tier1Index,
+        total: input.tier1Total,
+        label: input.tier1Label,
         phase: "nested_progress",
         nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "error" },
       });

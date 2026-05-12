@@ -21,9 +21,9 @@
 //     the response shape is predictable.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -56,7 +56,7 @@ function seedAviz(opts: {
   searchType?: string;
   tip?: string;
   data?: string;
-  activ?: boolean;
+  activ?: boolean | null;
 }): number {
   return saveAvizFull({
     uuid: `uuid-${opts.identificator}`,
@@ -64,7 +64,7 @@ function seedAviz(opts: {
     searchType: opts.searchType ?? "ipoteci",
     tip: opts.tip ?? "Aviz initial",
     data: opts.data ?? "01.04.2026",
-    activ: opts.activ,
+    activ: opts.activ === undefined ? true : opts.activ,
   });
 }
 
@@ -84,7 +84,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
-  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -124,6 +124,17 @@ describe("GET /api/v1/rnpm/saved", () => {
     ]) {
       expect(row).toHaveProperty(key);
     }
+  });
+
+  it("preserves activ null for RNPM rows with unknown status", async () => {
+    seedAviz({ identificator: "AV-UNKNOWN", activ: null });
+
+    const res = await buildApp().request("/api/v1/rnpm/saved");
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ items: Array<Record<string, unknown>>; total: number }>(res);
+
+    expect(body.total).toBe(1);
+    expect(body.items[0].activ).toBeNull();
   });
 });
 
@@ -480,7 +491,7 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
   });
   afterEach(() => {
-    if (savedAuthMode === undefined) delete process.env.LEGAL_DASHBOARD_AUTH_MODE;
+    if (savedAuthMode === undefined) Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_AUTH_MODE");
     else process.env.LEGAL_DASHBOARD_AUTH_MODE = savedAuthMode;
   });
 

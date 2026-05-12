@@ -23,9 +23,9 @@
 //   - GET /stats — counts are per-owner
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -64,7 +64,7 @@ function seedAvizFor(ownerId: string, identificator: string, opts?: { searchType
     searchType: opts?.searchType ?? "ipoteci",
     tip: "Aviz initial",
     data: "01.04.2026",
-    activ: opts?.activ,
+    activ: opts?.activ ?? true,
   });
 }
 
@@ -91,7 +91,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
-  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  process.env.LEGAL_DASHBOARD_DB_PATH = undefined;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -105,7 +105,9 @@ describe("RNPM owner isolation — Alice vs Bob", () => {
       const aliceRes = await buildApp().request("/api/v1/rnpm/saved", {
         headers: { "x-test-owner": "alice" },
       });
-      const aliceBody = await jsonOf<{ items: Array<{ identificator: string; owner_id: string }>; total: number }>(aliceRes);
+      const aliceBody = await jsonOf<{ items: Array<{ identificator: string; owner_id: string }>; total: number }>(
+        aliceRes
+      );
       expect(aliceBody.total).toBe(2);
       for (const r of aliceBody.items) expect(r.owner_id).toBe("alice");
       expect(aliceBody.items.map((r) => r.identificator).sort()).toEqual(["AV-ALICE-1", "AV-ALICE-2"]);
@@ -113,7 +115,9 @@ describe("RNPM owner isolation — Alice vs Bob", () => {
       const bobRes = await buildApp().request("/api/v1/rnpm/saved", {
         headers: { "x-test-owner": "bob" },
       });
-      const bobBody = await jsonOf<{ items: Array<{ identificator: string; owner_id: string }>; total: number }>(bobRes);
+      const bobBody = await jsonOf<{ items: Array<{ identificator: string; owner_id: string }>; total: number }>(
+        bobRes
+      );
       expect(bobBody.total).toBe(1);
       expect(bobBody.items[0].owner_id).toBe("bob");
       expect(bobBody.items[0].identificator).toBe("AV-BOB-1");
@@ -296,7 +300,9 @@ describe("RNPM owner isolation — Alice vs Bob", () => {
       const aliceRes = await buildApp().request("/api/v1/rnpm/stats", {
         headers: { "x-test-owner": "alice" },
       });
-      const aliceBody = await jsonOf<{ total: number; activ: number; inactiv: number; byType: Record<string, number> }>(aliceRes);
+      const aliceBody = await jsonOf<{ total: number; activ: number; inactiv: number; byType: Record<string, number> }>(
+        aliceRes
+      );
       expect(aliceBody.total).toBe(2);
       expect(aliceBody.activ).toBe(1);
       expect(aliceBody.inactiv).toBe(1);

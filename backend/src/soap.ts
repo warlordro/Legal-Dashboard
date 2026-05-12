@@ -72,6 +72,7 @@ function buildEnvelope(action: string, body: string): string {
 // the threshold). 60s gives the upstream a 33% margin without inflating the
 // scheduler-level budget (still 10min/run via DEFAULT_BUDGET_MS).
 const SOAP_TIMEOUT_MS = 60000;
+const SOAP_MAX_RESPONSE_BYTES = 8 * 1024 * 1024; // 8MB
 
 function combineSignals(external?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(SOAP_TIMEOUT_MS);
@@ -91,7 +92,20 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
     signal: combineSignals(signal),
   });
 
+  const contentLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(contentLength) && contentLength > SOAP_MAX_RESPONSE_BYTES) {
+    // SECURITY: previne OOM/DoS pasiv din upstream PortalJust.
+    console.error(`SOAP response prea mare: ${contentLength} bytes (cap ${SOAP_MAX_RESPONSE_BYTES})`);
+    throw new Error("Eroare la comunicarea cu serviciul PortalJust.");
+  }
+
   const text = await response.text();
+  if (text.length > SOAP_MAX_RESPONSE_BYTES) {
+    // Content-Length poate lipsi sau minti pe chunked encoding.
+    console.error(`SOAP response prea mare (post-read): ${text.length} bytes`);
+    throw new Error("Eroare la comunicarea cu serviciul PortalJust.");
+  }
+
   if (!response.ok || text.includes("soap:Fault")) {
     const fault = text.match(/<faultstring>([\s\S]*?)<\/faultstring>/)?.[1] ?? "necunoscut";
     // SECURITY: Log full fault server-side, throw generic message to client

@@ -10,7 +10,7 @@ export interface AvizRecord {
   tip: string;
   data: string;
   utilizator_autorizat: string | null;
-  activ: number;
+  activ: number | null;
   needs_actualizare: number;
   destinatie: string | null;
   tip_act: string | null;
@@ -112,7 +112,7 @@ export interface UpsertAvizInput {
   tip: string;
   data: string;
   utilizatorAutorizat?: string | null;
-  activ?: boolean;
+  activ?: boolean | null;
   needsActualizare?: boolean;
   destinatie?: string | null;
   tipAct?: string | null;
@@ -139,14 +139,20 @@ export interface SaveAvizInput extends UpsertAvizInput {
   istoric?: IstoricInput[];
 }
 
+function serializeActiv(activ: boolean | null | undefined): 0 | 1 | null {
+  if (activ === true) return 1;
+  if (activ === false) return 0;
+  return null;
+}
+
 export function saveAvizFull(input: SaveAvizInput): number {
   const db = getDb();
   const ownerId = input.ownerId ?? "local";
 
   const run = db.transaction((): number => {
-    const existing = db.prepare(
-      `SELECT id FROM rnpm_avize WHERE owner_id = ? AND identificator = ?`
-    ).get(ownerId, input.identificator) as { id: number } | undefined;
+    const existing = db
+      .prepare("SELECT id FROM rnpm_avize WHERE owner_id = ? AND identificator = ?")
+      .get(ownerId, input.identificator) as { id: number } | undefined;
 
     let avizId: number;
     if (existing) {
@@ -161,22 +167,35 @@ export function saveAvizFull(input: SaveAvizInput): number {
           detail_fetched = ?, search_id = COALESCE(?, search_id), updated_at = datetime('now')
         WHERE id = ?
       `).run(
-        input.uuid, input.searchType, input.tip, input.data, input.utilizatorAutorizat ?? null,
-        input.activ === false ? 0 : 1, input.needsActualizare ? 1 : 0,
-        input.destinatie ?? null, input.tipAct ?? null, input.numarAct ?? null,
-        input.dataInreg ?? null, input.dataExpirare ?? null, input.alteMentiuni ?? null,
+        input.uuid,
+        input.searchType,
+        input.tip,
+        input.data,
+        input.utilizatorAutorizat ?? null,
+        serializeActiv(input.activ),
+        input.needsActualizare ? 1 : 0,
+        input.destinatie ?? null,
+        input.tipAct ?? null,
+        input.numarAct ?? null,
+        input.dataInreg ?? null,
+        input.dataExpirare ?? null,
+        input.alteMentiuni ?? null,
         input.detaliiComune ?? null,
-        input.inscriereInitialaId ?? null, input.inscriereInitialaUuid ?? null,
-        input.inscriereModificataId ?? null, input.inscriereModificataUuid ?? null,
+        input.inscriereInitialaId ?? null,
+        input.inscriereInitialaUuid ?? null,
+        input.inscriereModificataId ?? null,
+        input.inscriereModificataUuid ?? null,
         input.detailFetched ? 1 : 0,
-        input.searchId ?? null, avizId
+        input.searchId ?? null,
+        avizId
       );
-      db.prepare(`DELETE FROM rnpm_creditori WHERE aviz_id = ?`).run(avizId);
-      db.prepare(`DELETE FROM rnpm_debitori WHERE aviz_id = ?`).run(avizId);
-      db.prepare(`DELETE FROM rnpm_bunuri WHERE aviz_id = ?`).run(avizId);
-      db.prepare(`DELETE FROM rnpm_istoric WHERE aviz_id = ?`).run(avizId);
+      db.prepare("DELETE FROM rnpm_creditori WHERE aviz_id = ?").run(avizId);
+      db.prepare("DELETE FROM rnpm_debitori WHERE aviz_id = ?").run(avizId);
+      db.prepare("DELETE FROM rnpm_bunuri WHERE aviz_id = ?").run(avizId);
+      db.prepare("DELETE FROM rnpm_istoric WHERE aviz_id = ?").run(avizId);
     } else {
-      const res = db.prepare(`
+      const res = db
+        .prepare(`
         INSERT INTO rnpm_avize (
           owner_id, uuid, identificator, search_type, tip, data, utilizator_autorizat,
           activ, needs_actualizare, destinatie, tip_act, numar_act, data_inreg, data_expirare,
@@ -184,18 +203,31 @@ export function saveAvizFull(input: SaveAvizInput): number {
           inscriere_modificata_id, inscriere_modificata_uuid,
           detail_fetched, search_id
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        ownerId, input.uuid, input.identificator, input.searchType, input.tip, input.data,
-        input.utilizatorAutorizat ?? null,
-        input.activ === false ? 0 : 1, input.needsActualizare ? 1 : 0,
-        input.destinatie ?? null, input.tipAct ?? null, input.numarAct ?? null,
-        input.dataInreg ?? null, input.dataExpirare ?? null, input.alteMentiuni ?? null,
-        input.detaliiComune ?? null,
-        input.inscriereInitialaId ?? null, input.inscriereInitialaUuid ?? null,
-        input.inscriereModificataId ?? null, input.inscriereModificataUuid ?? null,
-        input.detailFetched ? 1 : 0,
-        input.searchId ?? null
-      );
+      `)
+        .run(
+          ownerId,
+          input.uuid,
+          input.identificator,
+          input.searchType,
+          input.tip,
+          input.data,
+          input.utilizatorAutorizat ?? null,
+          serializeActiv(input.activ),
+          input.needsActualizare ? 1 : 0,
+          input.destinatie ?? null,
+          input.tipAct ?? null,
+          input.numarAct ?? null,
+          input.dataInreg ?? null,
+          input.dataExpirare ?? null,
+          input.alteMentiuni ?? null,
+          input.detaliiComune ?? null,
+          input.inscriereInitialaId ?? null,
+          input.inscriereInitialaUuid ?? null,
+          input.inscriereModificataId ?? null,
+          input.inscriereModificataUuid ?? null,
+          input.detailFetched ? 1 : 0,
+          input.searchId ?? null
+        );
       avizId = Number(res.lastInsertRowid);
     }
 
@@ -204,7 +236,25 @@ export function saveAvizFull(input: SaveAvizInput): number {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const c of input.creditori ?? []) {
-      insertCreditor.run(ownerId, avizId, c.tip_persoana, c.denumire, c.prenume, c.tip_entitate, c.sediu, c.nr_identificare, c.cod, c.cnp, c.tara, c.localitate, c.judet, c.cod_postal, c.alte_date, c.subscriptor, c.nr_ordine);
+      insertCreditor.run(
+        ownerId,
+        avizId,
+        c.tip_persoana,
+        c.denumire,
+        c.prenume,
+        c.tip_entitate,
+        c.sediu,
+        c.nr_identificare,
+        c.cod,
+        c.cnp,
+        c.tara,
+        c.localitate,
+        c.judet,
+        c.cod_postal,
+        c.alte_date,
+        c.subscriptor,
+        c.nr_ordine
+      );
     }
 
     const insertDebitor = db.prepare(`
@@ -212,12 +262,31 @@ export function saveAvizFull(input: SaveAvizInput): number {
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const d of input.debitori ?? []) {
-      insertDebitor.run(ownerId, avizId, d.tip_persoana, d.calitate ?? null, d.denumire, d.prenume, d.tip_entitate, d.sediu, d.nr_identificare, d.cod, d.cnp, d.tara, d.localitate, d.judet, d.cod_postal, d.alte_date, d.subscriptor, d.nr_ordine);
+      insertDebitor.run(
+        ownerId,
+        avizId,
+        d.tip_persoana,
+        d.calitate ?? null,
+        d.denumire,
+        d.prenume,
+        d.tip_entitate,
+        d.sediu,
+        d.nr_identificare,
+        d.cod,
+        d.cnp,
+        d.tara,
+        d.localitate,
+        d.judet,
+        d.cod_postal,
+        d.alte_date,
+        d.subscriptor,
+        d.nr_ordine
+      );
     }
 
     // Dedup descriere via rnpm_bunuri_descrieri — same text across bunuri is stored once.
-    const insertDescr = db.prepare(`INSERT OR IGNORE INTO rnpm_bunuri_descrieri (text) VALUES (?)`);
-    const selectDescr = db.prepare(`SELECT id FROM rnpm_bunuri_descrieri WHERE text = ?`);
+    const insertDescr = db.prepare("INSERT OR IGNORE INTO rnpm_bunuri_descrieri (text) VALUES (?)");
+    const selectDescr = db.prepare("SELECT id FROM rnpm_bunuri_descrieri WHERE text = ?");
     const descrIdCache = new Map<string, number>();
     const getDescrId = (text: string | null): number | null => {
       if (text == null || text === "") return null;
@@ -236,7 +305,19 @@ export function saveAvizFull(input: SaveAvizInput): number {
     `);
     for (const b of input.bunuri ?? []) {
       const refsJson = b.referinte && b.referinte.length > 0 ? JSON.stringify(b.referinte) : null;
-      insertBun.run(ownerId, avizId, b.tip_bun, b.categorie, b.identificare, getDescrId(b.descriere), b.model, b.serie_sasiu, b.serie_motor, b.nr_inmatriculare, refsJson);
+      insertBun.run(
+        ownerId,
+        avizId,
+        b.tip_bun,
+        b.categorie,
+        b.identificare,
+        getDescrId(b.descriere),
+        b.model,
+        b.serie_sasiu,
+        b.serie_motor,
+        b.nr_inmatriculare,
+        refsJson
+      );
     }
 
     const insertIstoric = db.prepare(`
@@ -255,14 +336,18 @@ export function saveAvizFull(input: SaveAvizInput): number {
 
 export function getAvizById(id: number, ownerId = "local"): AvizFull | null {
   const db = getDb();
-  const aviz = db.prepare(`SELECT * FROM rnpm_avize WHERE id = ? AND owner_id = ?`).get(id, ownerId) as AvizRecord | undefined;
+  const aviz = db.prepare("SELECT * FROM rnpm_avize WHERE id = ? AND owner_id = ?").get(id, ownerId) as
+    | AvizRecord
+    | undefined;
   if (!aviz) return null;
   return loadAvizChildren(aviz);
 }
 
 export function getAvizByIdentificator(identificator: string, ownerId = "local"): AvizFull | null {
   const db = getDb();
-  const aviz = db.prepare(`SELECT * FROM rnpm_avize WHERE identificator = ? AND owner_id = ?`).get(identificator, ownerId) as AvizRecord | undefined;
+  const aviz = db
+    .prepare("SELECT * FROM rnpm_avize WHERE identificator = ? AND owner_id = ?")
+    .get(identificator, ownerId) as AvizRecord | undefined;
   if (!aviz) return null;
   return loadAvizChildren(aviz);
 }
@@ -273,29 +358,41 @@ function loadAvizChildren(aviz: AvizRecord): AvizFull {
   // point, but child queries must repeat the constraint so that a stale FK
   // (bug-introduced or partial restore) cannot leak rows from a different
   // owner. Pass aviz.owner_id rather than re-deriving it.
-  const creditori = db.prepare(`SELECT * FROM rnpm_creditori WHERE aviz_id = ? AND owner_id = ? ORDER BY id`).all(aviz.id, aviz.owner_id) as PartyRecord[];
-  const debitori = db.prepare(`SELECT * FROM rnpm_debitori WHERE aviz_id = ? AND owner_id = ? ORDER BY id`).all(aviz.id, aviz.owner_id) as PartyRecord[];
+  const creditori = db
+    .prepare("SELECT * FROM rnpm_creditori WHERE aviz_id = ? AND owner_id = ? ORDER BY id")
+    .all(aviz.id, aviz.owner_id) as PartyRecord[];
+  const debitori = db
+    .prepare("SELECT * FROM rnpm_debitori WHERE aviz_id = ? AND owner_id = ? ORDER BY id")
+    .all(aviz.id, aviz.owner_id) as PartyRecord[];
   // JOIN on lookup table so `descriere` arrives populated with the full text,
   // exactly as if it were still a column. API shape is unchanged for callers.
   // rnpm_bunuri_descrieri is an owner-agnostic dedup pool (no owner_id) — only
   // reachable via b.descriere_id which is itself owner-scoped here.
-  const bunuriRows = db.prepare(`
+  const bunuriRows = db
+    .prepare(`
     SELECT b.id, b.owner_id, b.aviz_id, b.tip_bun, b.categorie, b.identificare,
            bd.text AS descriere,
            b.model, b.serie_sasiu, b.serie_motor, b.nr_inmatriculare, b.referinte_json
     FROM rnpm_bunuri b
     LEFT JOIN rnpm_bunuri_descrieri bd ON bd.id = b.descriere_id
     WHERE b.aviz_id = ? AND b.owner_id = ? ORDER BY b.id
-  `).all(aviz.id, aviz.owner_id) as (Omit<BunRecord, "referinte"> & { referinte_json: string | null })[];
+  `)
+    .all(aviz.id, aviz.owner_id) as (Omit<BunRecord, "referinte"> & { referinte_json: string | null })[];
   const bunuri: BunRecord[] = bunuriRows.map((r) => {
     const { referinte_json, ...rest } = r;
     let referinte: BunPartyRef[] = [];
     if (referinte_json) {
-      try { referinte = JSON.parse(referinte_json) as BunPartyRef[]; } catch { referinte = []; }
+      try {
+        referinte = JSON.parse(referinte_json) as BunPartyRef[];
+      } catch {
+        referinte = [];
+      }
     }
     return { ...rest, referinte };
   });
-  const istoric = db.prepare(`SELECT * FROM rnpm_istoric WHERE aviz_id = ? AND owner_id = ? ORDER BY id`).all(aviz.id, aviz.owner_id) as IstoricRecord[];
+  const istoric = db
+    .prepare("SELECT * FROM rnpm_istoric WHERE aviz_id = ? AND owner_id = ? ORDER BY id")
+    .all(aviz.id, aviz.owner_id) as IstoricRecord[];
   return { aviz, creditori, debitori, bunuri, istoric };
 }
 
@@ -331,8 +428,14 @@ export function getAvize(opts: GetAvizeOptions = {}): OffsetPage<AvizRecord> {
   const where: string[] = ["a.owner_id = ?"];
   const params: (string | number)[] = [ownerId];
 
-  if (opts.searchType) { where.push("a.search_type = ?"); params.push(opts.searchType); }
-  if (opts.activ != null) { where.push("a.activ = ?"); params.push(opts.activ ? 1 : 0); }
+  if (opts.searchType) {
+    where.push("a.search_type = ?");
+    params.push(opts.searchType);
+  }
+  if (opts.activ != null) {
+    where.push("a.activ = ?");
+    params.push(opts.activ ? 1 : 0);
+  }
   // `data` este stocat ca "dd.mm.yyyy" (format RNPM). Convertim in ISO (yyyy-mm-dd) in SQL
   // pentru comparatie corecta; caller pasa ISO (din <input type="date">).
   if (opts.dataStart) {
@@ -373,12 +476,24 @@ export function getAvize(opts: GetAvizeOptions = {}): OffsetPage<AvizRecord> {
   // `data` is stored as "dd.mm.yyyy" so convert to ISO in the expression for correct ordering.
   let orderExpr: string;
   switch (opts.sortKey) {
-    case "identificator": orderExpr = "a.identificator"; break;
-    case "search_type":   orderExpr = "a.search_type"; break;
-    case "data":          orderExpr = "substr(a.data,7,4)||'-'||substr(a.data,4,2)||'-'||substr(a.data,1,2)"; break;
-    case "tip":           orderExpr = "a.tip"; break;
-    case "activ":         orderExpr = "a.activ"; break;
-    default:              orderExpr = "a.id"; break;
+    case "identificator":
+      orderExpr = "a.identificator";
+      break;
+    case "search_type":
+      orderExpr = "a.search_type";
+      break;
+    case "data":
+      orderExpr = "substr(a.data,7,4)||'-'||substr(a.data,4,2)||'-'||substr(a.data,1,2)";
+      break;
+    case "tip":
+      orderExpr = "a.tip";
+      break;
+    case "activ":
+      orderExpr = "a.activ";
+      break;
+    default:
+      orderExpr = "a.id";
+      break;
   }
   const dir = opts.sortDir === "asc" ? "ASC" : "DESC";
   // Tie-break by id so pagination is deterministic when the primary sort has ties.
@@ -394,19 +509,21 @@ export function getAvize(opts: GetAvizeOptions = {}): OffsetPage<AvizRecord> {
 // deci CASCADE nu il atinge cand stergem avize. Aici stergem randurile fara referinte
 // din rnpm_bunuri. Index pe rnpm_bunuri(descriere_id) face NOT EXISTS eficient chiar si pe zeci de mii de randuri.
 function cleanupOrphanDescrieri(db: ReturnType<typeof getDb>): number {
-  const res = db.prepare(`
+  const res = db
+    .prepare(`
     DELETE FROM rnpm_bunuri_descrieri
     WHERE NOT EXISTS (
       SELECT 1 FROM rnpm_bunuri WHERE rnpm_bunuri.descriere_id = rnpm_bunuri_descrieri.id
     )
-  `).run();
+  `)
+    .run();
   return res.changes;
 }
 
 export function deleteAviz(id: number, ownerId = "local"): boolean {
   const db = getDb();
   const deleted = db.transaction(() => {
-    const res = db.prepare(`DELETE FROM rnpm_avize WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+    const res = db.prepare("DELETE FROM rnpm_avize WHERE id = ? AND owner_id = ?").run(id, ownerId);
     if (res.changes > 0) cleanupOrphanDescrieri(db);
     return res.changes > 0;
   })();
@@ -420,8 +537,8 @@ export function deleteAllAvize(ownerId = "local"): number {
   // Sterge avizele (CASCADE curata creditori/debitori/bunuri/istoric) si metadata din rnpm_searches.
   // search_id din rnpm_avize are ON DELETE SET NULL, deci searches nu cad in cascada — le stergem explicit.
   const changes = db.transaction(() => {
-    const res = db.prepare(`DELETE FROM rnpm_avize WHERE owner_id = ?`).run(ownerId);
-    db.prepare(`DELETE FROM rnpm_searches WHERE owner_id = ?`).run(ownerId);
+    const res = db.prepare("DELETE FROM rnpm_avize WHERE owner_id = ?").run(ownerId);
+    db.prepare("DELETE FROM rnpm_searches WHERE owner_id = ?").run(ownerId);
     if (res.changes > 0) cleanupOrphanDescrieri(db);
     return res.changes;
   })();
@@ -436,9 +553,9 @@ export function deleteAvizeByIds(ids: number[], ownerId = "local"): number {
   // CASCADE pe creditori/debitori/bunuri/istoric; rnpm_searches nu se sterge aici
   // (pot ramane cu search_id = NULL pe randuri pastrate din aceeasi cautare).
   const changes = db.transaction(() => {
-    const res = db.prepare(
-      `DELETE FROM rnpm_avize WHERE owner_id = ? AND id IN (${placeholders})`
-    ).run(ownerId, ...ids);
+    const res = db
+      .prepare(`DELETE FROM rnpm_avize WHERE owner_id = ? AND id IN (${placeholders})`)
+      .run(ownerId, ...ids);
     if (res.changes > 0) cleanupOrphanDescrieri(db);
     return res.changes;
   })();
@@ -455,17 +572,19 @@ export interface AvizStats {
 
 export function getAvizStats(ownerId = "local"): AvizStats {
   const db = getDb();
-  const totals = db.prepare(`
+  const totals = db
+    .prepare(`
     SELECT
       COUNT(*) AS total,
       COALESCE(SUM(CASE WHEN activ = 1 THEN 1 ELSE 0 END), 0) AS activ,
       COALESCE(SUM(CASE WHEN activ = 0 THEN 1 ELSE 0 END), 0) AS inactiv
     FROM rnpm_avize WHERE owner_id = ?
-  `).get(ownerId) as { total: number; activ: number; inactiv: number };
+  `)
+    .get(ownerId) as { total: number; activ: number; inactiv: number };
 
-  const rows = db.prepare(
-    `SELECT search_type, COUNT(*) AS n FROM rnpm_avize WHERE owner_id = ? GROUP BY search_type`
-  ).all(ownerId) as { search_type: string; n: number }[];
+  const rows = db
+    .prepare("SELECT search_type, COUNT(*) AS n FROM rnpm_avize WHERE owner_id = ? GROUP BY search_type")
+    .all(ownerId) as { search_type: string; n: number }[];
 
   const byType: Record<string, number> = {};
   for (const r of rows) byType[r.search_type] = r.n;
@@ -477,8 +596,8 @@ export function getAvizeByIds(ids: number[], ownerId = "local"): AvizFull[] {
   if (ids.length === 0) return [];
   const db = getDb();
   const placeholders = ids.map(() => "?").join(",");
-  const rows = db.prepare(
-    `SELECT * FROM rnpm_avize WHERE owner_id = ? AND id IN (${placeholders}) ORDER BY id DESC`
-  ).all(ownerId, ...ids) as AvizRecord[];
+  const rows = db
+    .prepare(`SELECT * FROM rnpm_avize WHERE owner_id = ? AND id IN (${placeholders}) ORDER BY id DESC`)
+    .all(ownerId, ...ids) as AvizRecord[];
   return rows.map(loadAvizChildren);
 }

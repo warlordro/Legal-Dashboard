@@ -48,18 +48,16 @@ export interface InsertRunningInput {
 export function insertRunning(input: InsertRunningInput): number {
   const db = getDb();
   const jobOwner = db
-    .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+    .prepare("SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?")
     .get(input.jobId, input.ownerId);
   if (!jobOwner) {
-    throw new Error(
-      `insertRunning: job ${input.jobId} not found for owner ${input.ownerId}`,
-    );
+    throw new Error(`insertRunning: job ${input.jobId} not found for owner ${input.ownerId}`);
   }
   const info = db
     .prepare(
       `INSERT INTO monitoring_runs
          (owner_id, job_id, started_at, status)
-       VALUES (?, ?, ?, 'running')`,
+       VALUES (?, ?, ?, 'running')`
     )
     .run(input.ownerId, input.jobId, input.startedAt);
   return info.lastInsertRowid as number;
@@ -100,7 +98,7 @@ export function finalize(runId: number, input: FinalizeInput): boolean {
              error_message = ?,
              alerts_created = COALESCE(?, alerts_created),
              alerts_patched = COALESCE(?, alerts_patched)
-       WHERE id = ? AND status = 'running'`,
+       WHERE id = ? AND status = 'running'`
     )
     .run(
       input.status,
@@ -111,7 +109,7 @@ export function finalize(runId: number, input: FinalizeInput): boolean {
       input.errorMessage ?? null,
       input.alertsCreated ?? null,
       input.alertsPatched ?? null,
-      runId,
+      runId
     );
   return info.changes > 0;
 }
@@ -138,18 +136,32 @@ export function recoverOrphanRuns(): number {
              ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now'),
              error_code = COALESCE(error_code, 'CRASH_RECOVERY'),
              error_message = COALESCE(error_message, 'Recovered orphan running row at boot')
-       WHERE status = 'running'`,
+       WHERE status = 'running'`
     )
     .run();
   return info.changes;
 }
 
-export function purgeOldRuns(retentionDays = 90): number {
+export function purgeOldRuns(retentionDays = 90, chunkSize = 1000): number {
   const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
-  const info = getDb()
-    .prepare(`DELETE FROM monitoring_runs WHERE started_at < ?`)
-    .run(cutoff);
-  return info.changes;
+  const db = getDb();
+  const stmt = db.prepare(
+    `DELETE FROM monitoring_runs
+     WHERE rowid IN (
+       SELECT rowid FROM monitoring_runs WHERE started_at < ? LIMIT ?
+     )`
+  );
+  let total = 0;
+  while (true) {
+    const info = stmt.run(cutoff, chunkSize);
+    if (info.changes === 0) break;
+    total += info.changes;
+    if (total >= 1_000_000) {
+      console.warn("[purgeOldRuns] safety cap 1M rows atins; restul vor fi purjat la urmatorul tick");
+      break;
+    }
+  }
+  return total;
 }
 
 // PR-A v2.7.0: aggregare pentru /api/v1/dashboard/summary (runs block).
@@ -162,10 +174,7 @@ export interface RunsByStatusRow {
   n: number;
 }
 
-export function aggregateFinalizedRunsByStatusSince(
-  ownerId: string,
-  since: string,
-): RunsByStatusRow[] {
+export function aggregateFinalizedRunsByStatusSince(ownerId: string, since: string): RunsByStatusRow[] {
   return getDb()
     .prepare(
       `SELECT status, COUNT(*) AS n
@@ -173,7 +182,7 @@ export function aggregateFinalizedRunsByStatusSince(
        WHERE owner_id = ?
          AND ended_at IS NOT NULL
          AND ended_at >= ?
-       GROUP BY status`,
+       GROUP BY status`
     )
     .all(ownerId, since) as RunsByStatusRow[];
 }

@@ -1,8 +1,13 @@
+import { z } from "zod";
+
 export const RNPM_BASE_URL = "https://mj.rnpm.ro";
 
 export type RnpmSearchType = "ipoteci" | "fiducii" | "specifice" | "creante" | "obligatiuni";
 
-export interface SiSau { type: "1" | "2"; value: string }
+export interface SiSau {
+  type: "1" | "2";
+  value: string;
+}
 
 export interface RnpmSearchParams {
   gcode: string;
@@ -43,7 +48,10 @@ export interface RnpmSearchParams {
   bunGarantie?: { descriere?: string };
 }
 
-export interface RnpmIdentificator { v: string; k: string | null }
+export interface RnpmIdentificator {
+  v: string;
+  k: string | null;
+}
 
 export interface RnpmDocument {
   no: number;
@@ -52,7 +60,7 @@ export interface RnpmDocument {
   data: string;
   tip: string;
   needsActualizare: boolean;
-  activ?: boolean;
+  activ?: boolean | null;
 }
 
 export interface RnpmSearchResult {
@@ -74,7 +82,7 @@ export interface RnpmDetailPart1 {
   inscriereInitiala?: RnpmIdentificator;
   inscriereModificatoare?: RnpmIdentificator;
   inscriereModificata?: RnpmIdentificator;
-  activ?: boolean;
+  activ?: boolean | null;
   alteMentiuni?: string;
   [key: string]: unknown;
 }
@@ -114,8 +122,12 @@ export interface RnpmDetailPartyPF {
   [key: string]: unknown;
 }
 
-export interface RnpmDetailPartyPFDebitor extends RnpmDetailPartyPF { calitate?: string }
-export interface RnpmDetailPartyPJDebitor extends RnpmDetailPartyPJ { calitate?: string }
+export interface RnpmDetailPartyPFDebitor extends RnpmDetailPartyPF {
+  calitate?: string;
+}
+export interface RnpmDetailPartyPJDebitor extends RnpmDetailPartyPJ {
+  calitate?: string;
+}
 
 export interface RnpmDetailPart2 {
   creditoriF?: RnpmDetailPartyPF[];
@@ -149,7 +161,10 @@ export interface RnpmDetailBun {
   [key: string]: unknown;
 }
 
-export interface RnpmDetailBunGroup { count?: number; bunuri?: RnpmDetailBun[] }
+export interface RnpmDetailBunGroup {
+  count?: number;
+  bunuri?: RnpmDetailBun[];
+}
 export type RnpmDetailBunBucket = RnpmDetailBun[] | Record<string, RnpmDetailBunGroup>;
 
 export interface RnpmDetailPart4 {
@@ -194,13 +209,24 @@ export class RnpmError extends Error {
   }
 }
 
+const RnpmSearchResultSchema = z
+  .object({
+    documents: z.array(z.unknown()),
+    total: z.number().int().nonnegative(),
+    pagesTotal: z.number().int().nonnegative(),
+    pageSize: z.number().int().positive(),
+    criteriu: z.string().nullish(),
+  })
+  .passthrough();
+
 const DEFAULT_HEADERS: Record<string, string> = {
   "Content-Type": "application/json",
-  "Accept": "application/json, text/plain, */*",
+  Accept: "application/json, text/plain, */*",
   "Accept-Language": "ro-RO,ro;q=0.9,en;q=0.8",
-  "Origin": RNPM_BASE_URL,
-  "Referer": `${RNPM_BASE_URL}/`,
-  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
+  Origin: RNPM_BASE_URL,
+  Referer: `${RNPM_BASE_URL}/`,
+  "User-Agent":
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
 };
 
 export interface RnpmClientOptions {
@@ -217,7 +243,12 @@ export class RnpmClient {
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
 
-  async search(type: RnpmSearchType, params: RnpmSearchParams, page = 1, signal?: AbortSignal): Promise<RnpmSearchResult> {
+  async search(
+    type: RnpmSearchType,
+    params: RnpmSearchParams,
+    page = 1,
+    signal?: AbortSignal
+  ): Promise<RnpmSearchResult> {
     const url = `${RNPM_BASE_URL}/api/search/${type}/${page}`;
     const res = await this.fetchImpl(url, {
       method: "POST",
@@ -229,7 +260,19 @@ export class RnpmClient {
       const body = await res.text().catch(() => "");
       throw new RnpmError(`Eroare RNPM search (${res.status}): ${body.slice(0, 200)}`, res.status);
     }
-    return await res.json() as RnpmSearchResult;
+    const raw = await res.json();
+    const parsed = RnpmSearchResultSchema.safeParse(raw);
+    if (!parsed.success) {
+      console.warn(
+        "[rnpm] runtime validation failed pe payload search:",
+        JSON.stringify(parsed.error.flatten().fieldErrors).slice(0, 500)
+      );
+      if (process.env.RNPM_RUNTIME_VALIDATION_ENFORCED === "1") {
+        throw new RnpmError("Raspunsul RNPM nu respecta schema asteptata.", 502, undefined, "schema_violation");
+      }
+      return raw as RnpmSearchResult;
+    }
+    return parsed.data as unknown as RnpmSearchResult;
   }
 
   async fetchPart(uuid: string, part: 1 | 2 | 3 | 4, signal?: AbortSignal): Promise<unknown> {

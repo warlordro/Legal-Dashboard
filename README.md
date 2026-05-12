@@ -7,22 +7,25 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.20.8**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.21.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.20.8** - hardening operational ce inchide Batch 2 (Operator
+Ultimul release **v2.21.0** - RNPM trust + DB migrations safety. `RnpmClient.search`
+are validare runtime Stage 1 cu Zod (`safeParse` + warning, throw pregatit prin
+`RNPM_RUNTIME_VALIDATION_ENFORCED=1`), statusul RNPM necunoscut ramane `NULL` in
+baza locala si se afiseaza ca `Necunoscut`, iar `monitoring_runs` se purge-uieste
+chunked cu index nou `idx_monitoring_runs_started_at`. Include si safety hardening
+v2.20.9: type-guard total pe `firstResult.total`, SOAP response cap 8MB si sentinel
+XLSX pentru `sanitizeFormulaCells`. **871 teste backend, 103 teste frontend**.
+
+Predecesor **v2.20.8** - hardening operational ce inchide Batch 2 (Operator
 visibility) si Batch 4 (Scheduler & captcha reliability) din `FIXES-TODO.md`.
-Operatorul primeste vizibilitate explicita: alert nou `source_partial` (in spate
-de `MONITORING_PARTIAL_ALERTS_ENABLED=1`) emis cand una sau mai multe institutii
-SOAP esueaza dar restul reusesc; `/health` expune `emailConfigured`; pre-exit
-backup pe fatalBoot; cleanup `-wal`/`-shm` pe auto-revert; splash blocking peste
-VACUUM (Baza locala RNPM) ca DB-ul sa nu fie inchis midstream. Scheduler &
-captcha: `.catch` handler pe `runOne` fire-and-forget (elimina runs `running`
-stuck); `AbortSignal.timeout(15s)` pe `getBalance`; race-mode sleep signal-aware
-prin `Promise.race`; retry exponential pe daily report email scheduler ([5/15/45]
-min, audit `retry_exhausted` dupa 3 esecuri); periodic sweep 5min in rate-limit
-middleware. Zero schimbari de schema, zero schimbari de contract API.
-**854 teste backend (+10), 100 teste frontend**.
+Operatorul primeste vizibilitate explicita: alert nou `source_partial`, `/health`
+expune `emailConfigured`, pre-exit backup pe fatalBoot, cleanup `-wal`/`-shm` pe
+auto-revert si splash blocking peste VACUUM (Baza locala RNPM). Scheduler & captcha
+au `.catch` pe `runOne`, timeout pe `getBalance`, sleep signal-aware, retry daily
+report si periodic sweep in rate-limit middleware. **854 teste backend, 100 teste
+frontend**.
 
 Predecesor **v2.20.3** - hardening RNPM post-/full-review: audit `rnpm.cap_hit`
 acum carry-uieste `requestId` din envelope (corelare event log <-> client) si e purjat
@@ -487,8 +490,8 @@ Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
 | `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
 | `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
 | `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (844 teste in v2.20.4) |
-| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (100 teste in v2.20.4) |
+| `npm test --workspace=backend` | Ruleaza vitest pe backend (871 teste in v2.21.0) |
+| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (103 teste in v2.21.0) |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
 | `cd frontend && npx tsc --noEmit` | Type-check frontend |
 | `npx biome check` | Lint + format check (warnings non-bloquant) |

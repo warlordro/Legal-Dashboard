@@ -1,6 +1,9 @@
 export type RnpmSearchType = "ipoteci" | "fiducii" | "specifice" | "creante" | "obligatiuni";
 
-export interface RnpmSiSau { type: "1" | "2"; value: string }
+export interface RnpmSiSau {
+  type: "1" | "2";
+  value: string;
+}
 
 export interface RnpmSearchParams {
   identificatorInscriere?: string;
@@ -17,7 +20,13 @@ export interface RnpmSearchParams {
   CreditorPF?: { nume?: string; prenume?: RnpmSiSau; CNP?: RnpmSiSau };
   debitorPJ?: { denumire?: string; RegCom?: RnpmSiSau; CUI?: RnpmSiSau };
   debitorPF?: { nume?: string; prenume?: RnpmSiSau; CNP?: RnpmSiSau };
-  bunV?: { model?: string; serieSasiu?: RnpmSiSau; serieMotor?: RnpmSiSau; nrImatriculare?: RnpmSiSau; descriere?: RnpmSiSau };
+  bunV?: {
+    model?: string;
+    serieSasiu?: RnpmSiSau;
+    serieMotor?: RnpmSiSau;
+    nrImatriculare?: RnpmSiSau;
+    descriere?: RnpmSiSau;
+  };
   bunA?: { categorie?: string; identificare?: RnpmSiSau; descriere?: string };
   parteJ?: { denumire?: string; RegCom?: RnpmSiSau; CUI?: RnpmSiSau };
   parteF?: { nume?: string; prenume?: RnpmSiSau; CNP?: RnpmSiSau };
@@ -40,7 +49,10 @@ export interface RnpmSearchParams {
   bunGarantie?: { descriere?: string };
 }
 
-export interface RnpmIdentificator { v: string; k: string | null }
+export interface RnpmIdentificator {
+  v: string;
+  k: string | null;
+}
 
 export interface RnpmDocument {
   no: number;
@@ -49,7 +61,7 @@ export interface RnpmDocument {
   data: string;
   tip: string;
   needsActualizare: boolean;
-  activ?: boolean;
+  activ?: boolean | null;
 }
 
 export interface RnpmSearchResponse {
@@ -75,7 +87,7 @@ export interface RnpmAvizRecord {
   tip: string;
   data: string;
   utilizator_autorizat: string | null;
-  activ: number;
+  activ: number | null;
   needs_actualizare: number;
   destinatie: string | null;
   tip_act: string | null;
@@ -210,15 +222,12 @@ export interface RnpmBulkItem {
 //  - terminal_cap: sub-tip/destinatie singura > 1500, nu mai exista axa de split.
 //  - silent_refusal: RNPM raspunde cu total>0 dar documents:[] (rate-limit/captcha).
 //  - residual_unclassified: tier-1 - SUM(tier-2) > 0, records fara destinatie atribuita.
-export type RnpmGapReason =
-  | "terminal_cap"
-  | "silent_refusal"
-  | "residual_unclassified";
+export type RnpmGapReason = "terminal_cap" | "silent_refusal" | "residual_unclassified";
 
 export interface RnpmNestedSplitProgress {
-  index: number;          // 1-based index curent in lista destinatii (0 = inca nu a inceput)
-  total: number;          // numarul total de destinatii incercate
-  label: string;          // labelul destinatiei
+  index: number; // 1-based index curent in lista destinatii (0 = inca nu a inceput)
+  total: number; // numarul total de destinatii incercate
+  label: string; // labelul destinatiei
   phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error";
   resultCount?: number;
   subTotal?: number;
@@ -228,7 +237,16 @@ export interface RnpmSplitProgress {
   index: number;
   total: number;
   label: string;
-  phase: "captcha" | "search" | "done" | "blocked" | "skipped" | "error" | "nested_start" | "nested_progress" | "nested_done";
+  phase:
+    | "captcha"
+    | "search"
+    | "done"
+    | "blocked"
+    | "skipped"
+    | "error"
+    | "nested_start"
+    | "nested_progress"
+    | "nested_done";
   message?: string;
   resultCount?: number;
   subTotal?: number;

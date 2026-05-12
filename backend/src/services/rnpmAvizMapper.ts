@@ -14,23 +14,14 @@ import type {
   RnpmDetailBun,
   RnpmDetailBunBucket,
 } from "./rnpmClient.ts";
-import type {
-  PartyInput,
-  BunInput,
-  BunPartyRef,
-  IstoricInput,
-  SaveAvizInput,
-} from "../db/avizRepository.ts";
+import type { PartyInput, BunInput, BunPartyRef, IstoricInput, SaveAvizInput } from "../db/avizRepository.ts";
 
-const arr = <T,>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
+const arr = <T>(v: unknown): T[] => (Array.isArray(v) ? (v as T[]) : []);
 
 // Specifice: calitate generica ("Alta calitate") + altaCalitate (textul specific).
 // Le combinam intr-un singur string pentru afisarea in tab-ul Debitori, unde
 // specifice-ul isi mapeaza partile.
-function formatCalitate(
-  calitate: string | null | undefined,
-  altaCalitate: string | null | undefined,
-): string | null {
+function formatCalitate(calitate: string | null | undefined, altaCalitate: string | null | undefined): string | null {
   if (altaCalitate) return calitate ? `${calitate}: ${altaCalitate}` : altaCalitate;
   return calitate ?? null;
 }
@@ -50,7 +41,7 @@ function mapPartyPF(p: RnpmDetailPartyPF): PartyInput {
     judet: p.judet ?? null,
     cod_postal: p.codPostal ?? null,
     alte_date: p.alteDate ?? null,
-    subscriptor: p.subscriptor == null ? null : (p.subscriptor ? 1 : 0),
+    subscriptor: p.subscriptor == null ? null : p.subscriptor ? 1 : 0,
     nr_ordine: p.no ?? null,
   };
 }
@@ -70,7 +61,7 @@ function mapPartyPJ(p: RnpmDetailPartyPJ): PartyInput {
     judet: p.judet ?? null,
     cod_postal: p.codPostal ?? null,
     alte_date: p.alteDate ?? null,
-    subscriptor: p.subscriptor == null ? null : (p.subscriptor ? 1 : 0),
+    subscriptor: p.subscriptor == null ? null : p.subscriptor ? 1 : 0,
     nr_ordine: p.no ?? null,
   };
 }
@@ -112,7 +103,7 @@ function mapBun(
   b: RnpmDetailBun,
   tip: "vehicul" | "mobil" | "alt",
   debitoriF: RnpmDetailPartyPF[] = [],
-  debitoriJ: RnpmDetailPartyPJ[] = [],
+  debitoriJ: RnpmDetailPartyPJ[] = []
 ): BunInput {
   const refs: BunPartyRef[] = [];
   for (const idx of b.constituitoriF ?? []) {
@@ -149,7 +140,7 @@ export function buildSaveAvizInput(
   detail: RnpmFullDetail,
   searchType: string,
   ownerId: string,
-  searchId: number,
+  searchId: number
 ): SaveAvizInput {
   const part1 = detail.part1 ?? {};
   const part2 = detail.part2 ?? {};
@@ -234,7 +225,7 @@ export function buildSaveAvizInput(
     tip: doc.tip,
     data: doc.data,
     utilizatorAutorizat: doc.utilizatorAutorizat ?? null,
-    activ: typeof part1.activ === "boolean" ? part1.activ : (doc.activ ?? true),
+    activ: typeof part1.activ === "boolean" ? part1.activ : typeof doc.activ === "boolean" ? doc.activ : null,
     needsActualizare: doc.needsActualizare === true,
     destinatie: part1.destinatie ?? null,
     tipAct: part1.tipAct ?? null,

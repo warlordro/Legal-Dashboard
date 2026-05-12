@@ -37,6 +37,63 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.21.0",
+    date: "12 Mai 2026",
+    subtitle:
+      "RNPM trust + DB migrations safety: validare runtime Stage 1 cu Zod (`safeParse` + warning, throw pregatit prin `RNPM_RUNTIME_VALIDATION_ENFORCED=1`), status RNPM `activ` pastrat ca `null` cand upstream-ul nu il trimite si afisat ca `Necunoscut`, purge chunked pentru `monitoring_runs`, index nou `idx_monitoring_runs_started_at` si sentinel explicit `0001_baseline.down.sql`.",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "RNPM runtime validation Stage 1",
+        content:
+          "`RnpmClient.search()` valideaza payload-ul cu o schema Zod minima si `.passthrough()`. In acest release payload-urile invalide logheaza warning si raman compatibile; flag-ul `RNPM_RUNTIME_VALIDATION_ENFORCED=1` pregateste tranzitia la fail-loud.",
+      },
+      {
+        title: "`activ: null` + badge Necunoscut",
+        content:
+          "Cand RNPM nu trimite status activ/inactiv, baza locala pastreaza `NULL`, iar UI-ul si exporturile afiseaza `Necunoscut` cu stil amber subtil in loc sa presupuna gresit ca avizul este activ.",
+      },
+      {
+        title: "Retention safety pentru monitoring_runs",
+        content:
+          "`purgeOldRuns()` sterge in batch-uri de 1000 cu safety cap 1M randuri per rulare. Migration 0019 adauga index pe `started_at`, iar `0001_baseline.down.sql` refuza explicit rollback-ul baseline.",
+      },
+      {
+        title: "Tests",
+        content:
+          "Teste noi pentru Zod Stage 1, `activ: null`, chunked purge, migration sentinels si status badges RNPM.",
+      },
+    ],
+  },
+  {
+    version: "v2.20.9",
+    date: "12 Mai 2026",
+    subtitle:
+      "Safety hardening fara schimbare vizibila: type-guard total pe payload RNPM, cap 8MB pe raspunsul SOAP PortalJust si sentinel pentru exporturile XLSX care scriu fara `sanitizeFormulaCells`.",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400",
+    sections: [
+      {
+        title: "RNPM first result guard",
+        content:
+          "`executeSearch()` refuza acum payload-uri RNPM corupte in care `total` lipseste sau este `null`; guardul nu mai poate fi bypass-uit prin `undefined > 1500`.",
+      },
+      {
+        title: "SOAP response cap 8MB",
+        content:
+          "`callSoap()` verifica `Content-Length` inainte de citire si `text.length` dupa citire. Clientul primeste mesaj generic, iar detaliile de marime raman in log.",
+      },
+      {
+        title: "XLSX formula sentinel",
+        content:
+          "Test nou in `frontend/src/lib/xlsx-formula-audit.test.ts` care esueaza daca apare un writer XLSX fara apel `sanitizeFormulaCells`.",
+      },
+    ],
+  },
+  {
     version: "v2.20.8",
     date: "12 Mai 2026",
     subtitle:
