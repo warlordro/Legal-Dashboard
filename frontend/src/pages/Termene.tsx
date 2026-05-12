@@ -83,7 +83,13 @@ function filterByMetrics(termene: Termen[], filters: MetricFilter[]): Termen[] {
   });
 }
 
-export default function Termene({ state, onStateChange, onSearchComplete, pendingSearch, consumePendingSearch }: TermeneProps) {
+export default function Termene({
+  state,
+  onStateChange,
+  onSearchComplete,
+  pendingSearch,
+  consumePendingSearch,
+}: TermeneProps) {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreProgress, setLoadMoreProgress] = useState<LoadMoreProgress | null>(null);
@@ -104,9 +110,7 @@ export default function Termene({ state, onStateChange, onSearchComplete, pendin
   const termene = filterByMetrics(filteredByCatStadiu, metricFilters);
 
   const toggleMetricFilter = (filter: MetricFilter) => {
-    setMetricFilters((prev) =>
-      prev.includes(filter) ? prev.filter((f) => f !== filter) : [...prev, filter]
-    );
+    setMetricFilters((prev) => (prev.includes(filter) ? prev.filter((f) => f !== filter) : [...prev, filter]));
   };
 
   const handleSearch = async (params: SearchParams) => {
@@ -164,18 +168,17 @@ export default function Termene({ state, onStateChange, onSearchComplete, pendin
     const existingDosareNr = [...new Set(state.allTermene.map((t) => t.numarDosar))];
     // Track new termene incrementally
     const allTermene = [...state.allTermene];
-    const knownKeys = new Set(
-      state.allTermene.map((t) => `${t.numarDosar}|${t.data}|${t.ora}|${t.complet}`),
-    );
+    const knownKeys = new Set(state.allTermene.map((t) => `${t.numarDosar}|${t.data}|${t.ora}|${t.complet}`));
     let newCount = 0;
 
     try {
       const result = await api.termene.loadMore(
         lastSearchParams.current,
-        (progress) => setLoadMoreProgress({
-          ...progress,
-          found: newCount,
-        }),
+        (progress) =>
+          setLoadMoreProgress({
+            ...progress,
+            found: newCount,
+          }),
         abort.signal,
         (batch) => {
           for (const t of batch) {
@@ -192,7 +195,7 @@ export default function Termene({ state, onStateChange, onSearchComplete, pendin
             allTermene: [...allTermene],
           }));
         },
-        existingDosareNr,
+        existingDosareNr
       );
       // Final pass
       for (const t of result.data) {
@@ -251,7 +254,11 @@ export default function Termene({ state, onStateChange, onSearchComplete, pendin
             <Button variant={viewMode === "table" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("table")}>
               Tabel
             </Button>
-            <Button variant={viewMode === "calendar" ? "default" : "ghost"} size="sm" onClick={() => setViewMode("calendar")}>
+            <Button
+              variant={viewMode === "calendar" ? "default" : "ghost"}
+              size="sm"
+              onClick={() => setViewMode("calendar")}
+            >
               Calendar
             </Button>
           </div>
@@ -271,9 +278,11 @@ export default function Termene({ state, onStateChange, onSearchComplete, pendin
         onStopLoadMore={handleStopLoadMore}
         loadMoreProgress={loadMoreProgress}
         loadMoreLabel="termene"
-        loadMoreMessage={!loading && !loadingMore && state.searched && !state.error && initialDosareCount >= 1000 && !loadMoreDone
-          ? `Cautarea a gasit dosare la limita de 1.000 — termenele afisate pot fi incomplete. Apasati "Incarca mai multe" pentru a aduce toate termenele.`
-          : undefined}
+        loadMoreMessage={
+          !loading && !loadingMore && state.searched && !state.error && initialDosareCount >= 1000 && !loadMoreDone
+            ? `Cautarea a gasit dosare la limita de 1.000 — termenele afisate pot fi incomplete. Apasati "Incarca mai multe" pentru a aduce toate termenele.`
+            : undefined
+        }
         loadMoreDone={loadMoreDone}
         loadMoreTotal={loadMoreDone ? state.allTermene.length : undefined}
         loadMoreWarnings={loadMoreWarnings}
@@ -322,7 +331,9 @@ export default function Termene({ state, onStateChange, onSearchComplete, pendin
       )}
 
       {!loading && state.allTermene.length > 0 && (
-        <Suspense fallback={<div className="py-6 text-center text-xs text-muted-foreground">Se incarca graficele...</div>}>
+        <Suspense
+          fallback={<div className="py-6 text-center text-xs text-muted-foreground">Se incarca graficele...</div>}
+        >
           <TermeneMetrics
             termene={filteredByCatStadiu}
             activeFilters={metricFilters}
@@ -332,11 +343,18 @@ export default function Termene({ state, onStateChange, onSearchComplete, pendin
         </Suspense>
       )}
 
-      {!loading && state.allTermene.length > 0 && (
-        viewMode === "table"
-          ? <TermeneTable termene={termene} onExportExcel={(sel) => exportTermeneExcel(sel || termene)} onExportPDF={(sel) => exportTermenePDF(sel || termene)} searchedName={state.searchedName} />
-          : <CalendarView termene={termene} />
-      )}
+      {!loading &&
+        state.allTermene.length > 0 &&
+        (viewMode === "table" ? (
+          <TermeneTable
+            termene={termene}
+            onExportExcel={(sel) => exportTermeneExcel(sel || termene)}
+            onExportPDF={(sel) => exportTermenePDF(sel || termene)}
+            searchedName={state.searchedName}
+          />
+        ) : (
+          <CalendarView termene={termene} />
+        ))}
 
       {!state.searched && !loading && (
         <div className="flex flex-col items-center gap-2 py-16 text-center">

@@ -77,7 +77,7 @@ function assertNoPipe(field: string, value: string): void {
     throw new Error(
       `buildSedintaKey: '${field}' segment contains '|' (value=${JSON.stringify(value)}). ` +
         `This would corrupt parseSedintaKey boundaries and trigger false alerts. ` +
-        `Either escape '|' in the upstream payload or extend the key separator.`,
+        `Either escape '|' in the upstream payload or extend the key separator.`
     );
   }
 }

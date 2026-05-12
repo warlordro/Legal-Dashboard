@@ -27,10 +27,7 @@ function toDraft(settings: EmailSettings): EmailSettingsDraft {
   };
 }
 
-export function canSaveEmailSettings(
-  draft: EmailSettingsDraft,
-  original: EmailSettingsDraft | null,
-): boolean {
+export function canSaveEmailSettings(draft: EmailSettingsDraft, original: EmailSettingsDraft | null): boolean {
   // Trimite mail = nevoie de adresa, indiferent ce flag e activat.
   if ((draft.enabled || draft.dailyReportEnabled) && draft.toAddress.trim().length === 0) {
     return false;
@@ -38,9 +35,9 @@ export function canSaveEmailSettings(
   if (draft.toAddress.trim().length > 320) return false;
   if (!original) return true;
   return (
-    draft.enabled !== original.enabled
-    || draft.dailyReportEnabled !== original.dailyReportEnabled
-    || draft.toAddress.trim() !== original.toAddress.trim()
+    draft.enabled !== original.enabled ||
+    draft.dailyReportEnabled !== original.dailyReportEnabled ||
+    draft.toAddress.trim() !== original.toAddress.trim()
   );
 }
 
@@ -142,7 +139,9 @@ export function EmailSettingsPanel() {
           type="button"
           variant="outline"
           size="sm"
-          onClick={() => { void load(); }}
+          onClick={() => {
+            void load();
+          }}
           disabled={state === "loading" || action !== "idle"}
           className="h-8"
         >
@@ -171,9 +170,7 @@ export function EmailSettingsPanel() {
             )}
             <span className="font-medium">{smtpText}</span>
           </div>
-          <p className="mt-1 text-muted-foreground">
-            Configurarea SMTP se face in fisierul `.env` al backend-ului.
-          </p>
+          <p className="mt-1 text-muted-foreground">Configurarea SMTP se face in fisierul `.env` al backend-ului.</p>
         </div>
       </div>
 
@@ -194,18 +191,15 @@ export function EmailSettingsPanel() {
             <input
               type="checkbox"
               checked={draft.dailyReportEnabled}
-              onChange={(e) =>
-                setDraft((prev) => ({ ...prev, dailyReportEnabled: e.target.checked }))
-              }
+              onChange={(e) => setDraft((prev) => ({ ...prev, dailyReportEnabled: e.target.checked }))}
               className="mt-0.5 h-4 w-4"
             />
             <span>
               <span className="font-medium">Trimite raport zilnic la 09:00</span>
               <span className="mt-0.5 block text-[11px] text-muted-foreground">
-                Un singur email cu toate alertele din ziua precedenta. Pe desktop
-                aplicatia trebuie sa fie deschisa la ora 09:00 — daca este inchisa,
-                ziua respectiva nu este recuperata. Pe web, raportul ruleaza
-                automat la ora server-ului.
+                Un singur email cu toate alertele din ziua precedenta. Pe desktop aplicatia trebuie sa fie deschisa la
+                ora 09:00 — daca este inchisa, ziua respectiva nu este recuperata. Pe web, raportul ruleaza automat la
+                ora server-ului.
               </span>
             </span>
           </label>
@@ -220,7 +214,7 @@ export function EmailSettingsPanel() {
               ? "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300"
               : message.tone === "error"
                 ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300"
-                : "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300",
+                : "border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-900/60 dark:bg-sky-950/30 dark:text-sky-300"
           )}
         >
           {message.text}
@@ -240,13 +234,7 @@ export function EmailSettingsPanel() {
           {action === "testing" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Send className="h-3.5 w-3.5" />}
           Trimite test
         </Button>
-        <Button
-          type="button"
-          size="sm"
-          onClick={save}
-          disabled={!canSave || action !== "idle"}
-          className="h-8"
-        >
+        <Button type="button" size="sm" onClick={save} disabled={!canSave || action !== "idle"} className="h-8">
           {action === "saving" ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
           Salveaza
         </Button>

@@ -39,7 +39,7 @@ function seedJob(ownerId: string): number {
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at)
-       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
+       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`
     )
     .run(ownerId, `seed-${ownerId}-${Date.now()}`);
   return info.lastInsertRowid as number;
@@ -49,7 +49,7 @@ function seedRun(ownerId: string, jobId: number): number {
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-       VALUES (?, ?, ?, 'running')`,
+       VALUES (?, ?, ?, 'running')`
     )
     .run(ownerId, jobId, "2026-04-28T10:00:00.000Z");
   return info.lastInsertRowid as number;
@@ -137,7 +137,7 @@ describe("recordAndDispatchAlert", () => {
            FROM audit_log
           WHERE action = 'monitoring.alert.emitted'
           ORDER BY id DESC
-          LIMIT 1`,
+          LIMIT 1`
       )
       .get() as {
       owner_id: string;

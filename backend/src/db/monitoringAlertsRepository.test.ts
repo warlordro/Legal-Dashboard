@@ -46,7 +46,7 @@ function seedJob(ownerId: string, hashSeed: string): number {
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at)
-       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
+       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`
     )
     .run(ownerId, hashSeed);
   return info.lastInsertRowid as number;
@@ -56,7 +56,7 @@ function seedRun(ownerId: string, jobId: number): number {
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-       VALUES (?, ?, ?, 'running')`,
+       VALUES (?, ?, ?, 'running')`
     )
     .run(ownerId, jobId, "2026-04-28T10:00:00.000Z");
   return info.lastInsertRowid as number;
@@ -64,10 +64,7 @@ function seedRun(ownerId: string, jobId: number): number {
 
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-alerts-"));
-  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(
-    tmpRoot,
-    "legal-dashboard.db",
-  );
+  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
   const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
   seed.close();
   getDb();
@@ -128,11 +125,7 @@ describe("insertAlert", () => {
     expect(second.id).toBe(first.id);
     expect(second.title).toBe("first");
 
-    const count = (
-      getDb()
-        .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts`)
-        .get() as { n: number }
-    ).n;
+    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts`).get() as { n: number }).n;
     expect(count).toBe(1);
   });
 
@@ -147,15 +140,11 @@ describe("insertAlert", () => {
         kind: "dosar_new",
         title: "cross-tenant attempt",
         dedupKey: "k1",
-      }),
+      })
     ).toThrow(/not found for owner/);
 
     // Nothing was written.
-    const count = (
-      getDb()
-        .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts`)
-        .get() as { n: number }
-    ).n;
+    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts`).get() as { n: number }).n;
     expect(count).toBe(0);
   });
 
@@ -168,7 +157,7 @@ describe("insertAlert", () => {
         kind: "dosar_new",
         title: "ghost job",
         dedupKey: "k1",
-      }),
+      })
     ).toThrow(/not found for owner/);
   });
 
@@ -187,7 +176,7 @@ describe("insertAlert", () => {
       .prepare(
         `INSERT INTO monitoring_alerts
            (owner_id, job_id, run_id, kind, severity, title, detail_json, dedup_key)
-         VALUES (?, ?, ?, 'dosar_new', 'info', 'foreign', '{}', 'collide')`,
+         VALUES (?, ?, ?, 'dosar_new', 'info', 'foreign', '{}', 'collide')`
       )
       .run(OWNER_B, jobIdA, runIdA);
 
@@ -203,7 +192,7 @@ describe("insertAlert", () => {
         kind: "dosar_new",
         title: "owner-A attempt",
         dedupKey: "collide",
-      }),
+      })
     ).toThrow(/row missing after upsert/);
   });
 });
@@ -374,9 +363,7 @@ describe("new alert subscribers", () => {
     const runIdA = seedRun(OWNER_A, jobIdA);
     const seenSecond: number[] = [];
 
-    const errSpy = vi
-      .spyOn(console, "error")
-      .mockImplementation(() => undefined);
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
 
     const unsubFirst = subscribeToNewAlerts(OWNER_A, () => {
       throw new Error("boom");
@@ -421,7 +408,7 @@ describe("enrichSolutieAlertsForJob", () => {
     jobId: number,
     runId: number,
     detail: Record<string, unknown>,
-    dedupKey = `solutie-${crypto.randomUUID()}`,
+    dedupKey = `solutie-${crypto.randomUUID()}`
   ): number {
     const { row } = insertAlert({
       ownerId,
@@ -459,9 +446,7 @@ describe("enrichSolutieAlertsForJob", () => {
 
     expect(patched).toBe(1);
     const detailJson = (
-      getDb()
-        .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
-        .get(alertId) as { detail_json: string }
+      getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as { detail_json: string }
     ).detail_json;
     const detail = JSON.parse(detailJson);
     expect(detail.solutie_sumar).toBe("Admite cererea reclamantului.");
@@ -526,18 +511,12 @@ describe("enrichSolutieAlertsForJob", () => {
     expect(patched).toBe(1);
 
     const detailA = JSON.parse(
-      (
-        getDb()
-          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
-          .get(aId) as { detail_json: string }
-      ).detail_json,
+      (getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(aId) as { detail_json: string })
+        .detail_json
     );
     const detailB = JSON.parse(
-      (
-        getDb()
-          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
-          .get(bId) as { detail_json: string }
-    ).detail_json,
+      (getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(bId) as { detail_json: string })
+        .detail_json
     );
     expect(detailA.solutie_sumar).toBe("Owner A only");
     expect(detailB.solutie_sumar).toBeUndefined();
@@ -566,10 +545,10 @@ describe("enrichSolutieAlertsForJob", () => {
     expect(patched).toBe(1);
     const detail = JSON.parse(
       (
-        getDb()
-          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
-          .get(alertId) as { detail_json: string }
-      ).detail_json,
+        getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as {
+          detail_json: string;
+        }
+      ).detail_json
     );
     expect(detail.solutie_sumar).toBe("Hotarare definitiva.");
   });
@@ -585,11 +564,7 @@ describe("enrichSolutieAlertsForJob", () => {
     });
 
     // Manually backdate the alert past the 7-day window.
-    getDb()
-      .prepare(
-        `UPDATE monitoring_alerts SET created_at = datetime('now', '-30 days') WHERE id = ?`,
-      )
-      .run(alertId);
+    getDb().prepare(`UPDATE monitoring_alerts SET created_at = datetime('now', '-30 days') WHERE id = ?`).run(alertId);
 
     const patched = enrichSolutieAlertsForJob(
       OWNER_A,
@@ -603,15 +578,15 @@ describe("enrichSolutieAlertsForJob", () => {
           solutieSumar: "Should not patch.",
         },
       ],
-      { instanta: "Curtea de Apel SUCEAVA", stadiu: "Apel" },
+      { instanta: "Curtea de Apel SUCEAVA", stadiu: "Apel" }
     );
     expect(patched).toBe(0);
     const detail = JSON.parse(
       (
-        getDb()
-          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
-          .get(alertId) as { detail_json: string }
-      ).detail_json,
+        getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as {
+          detail_json: string;
+        }
+      ).detail_json
     );
     expect(detail.solutie_sumar).toBeUndefined();
     expect(detail.instanta).toBeUndefined();
@@ -632,12 +607,10 @@ describe("enrichSolutieAlertsForJob", () => {
       jobId,
       runId,
       { data: "2026-04-02", ora: "11:00", complet: "C2", solutie: "Respinge" },
-      "corrupt",
+      "corrupt"
     );
     // Corrupt the detail_json on one row directly.
-    getDb()
-      .prepare(`UPDATE monitoring_alerts SET detail_json = '{not json' WHERE id = ?`)
-      .run(corruptId);
+    getDb().prepare(`UPDATE monitoring_alerts SET detail_json = '{not json' WHERE id = ?`).run(corruptId);
 
     const patched = enrichSolutieAlertsForJob(OWNER_A, jobId, [
       {
@@ -657,11 +630,8 @@ describe("enrichSolutieAlertsForJob", () => {
     ]);
     expect(patched).toBe(1);
     const goodDetail = JSON.parse(
-      (
-        getDb()
-          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
-          .get(goodId) as { detail_json: string }
-      ).detail_json,
+      (getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(goodId) as { detail_json: string })
+        .detail_json
     );
     expect(goodDetail.solutie_sumar).toBe("OK");
   });
@@ -677,19 +647,17 @@ describe("enrichSolutieAlertsForJob", () => {
     });
 
     // No sedinta candidates — only dosar context.
-    const patched = enrichSolutieAlertsForJob(
-      OWNER_A,
-      jobId,
-      [],
-      { instanta: "Curtea de Apel SUCEAVA", stadiu: "Apel" },
-    );
+    const patched = enrichSolutieAlertsForJob(OWNER_A, jobId, [], {
+      instanta: "Curtea de Apel SUCEAVA",
+      stadiu: "Apel",
+    });
     expect(patched).toBe(1);
     const detail = JSON.parse(
       (
-        getDb()
-          .prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`)
-          .get(alertId) as { detail_json: string }
-      ).detail_json,
+        getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as {
+          detail_json: string;
+        }
+      ).detail_json
     );
     expect(detail.instanta).toBe("Curtea de Apel SUCEAVA");
     expect(detail.stadiu).toBe("Apel");
@@ -714,7 +682,7 @@ describe("enrichSolutieAlertsForJob", () => {
           complet: "C1",
           solutie: "Admite",
         },
-      ]),
+      ])
     ).toBe(0);
   });
 

@@ -23,16 +23,10 @@ export interface HistoryEntryRowProps {
 export function HistoryEntryRow({ icon, label, resultCount, timestamp, onClick, onRemove }: HistoryEntryRowProps) {
   return (
     <div className="group relative flex items-start rounded-md transition-colors hover:bg-accent">
-      <button
-        type="button"
-        onClick={onClick}
-        className="flex w-full items-start gap-2 px-2 py-1.5 text-left"
-      >
+      <button type="button" onClick={onClick} className="flex w-full items-start gap-2 px-2 py-1.5 text-left">
         <div className="mt-0.5 shrink-0">{icon}</div>
         <div className="min-w-0 flex-1">
-          <p className="truncate text-[13px] font-medium text-foreground group-hover:text-primary">
-            {label}
-          </p>
+          <p className="truncate text-[13px] font-medium text-foreground group-hover:text-primary">{label}</p>
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <span>{resultCount} rez.</span>
             <span>·</span>
@@ -43,7 +37,10 @@ export function HistoryEntryRow({ icon, label, resultCount, timestamp, onClick, 
       </button>
       <button
         type="button"
-        onClick={(e) => { e.stopPropagation(); onRemove(); }}
+        onClick={(e) => {
+          e.stopPropagation();
+          onRemove();
+        }}
         title="Sterge"
         className="absolute right-1 top-1 hidden rounded p-0.5 text-muted-foreground/40 transition-colors hover:text-red-500 group-hover:block"
       >

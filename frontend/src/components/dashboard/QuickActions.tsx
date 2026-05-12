@@ -26,9 +26,21 @@ export function QuickActions() {
 
   const actions: QuickAction[] = [
     { to: "/dosare", icon: FileSearch, label: "Cauta dosar", iconColor: "text-blue-500", iconBg: "bg-blue-500/10" },
-    { to: "/termene", icon: CalendarDays, label: "Vezi termene", iconColor: "text-purple-500", iconBg: "bg-purple-500/10" },
+    {
+      to: "/termene",
+      icon: CalendarDays,
+      label: "Vezi termene",
+      iconColor: "text-purple-500",
+      iconBg: "bg-purple-500/10",
+    },
     { to: "/rnpm", icon: Search, label: "Cauta RNPM", iconColor: "text-emerald-500", iconBg: "bg-emerald-500/10" },
-    { to: "/monitorizare", icon: ListChecks, label: "Monitorizare", iconColor: "text-blue-600", iconBg: "bg-blue-600/10" },
+    {
+      to: "/monitorizare",
+      icon: ListChecks,
+      label: "Monitorizare",
+      iconColor: "text-blue-600",
+      iconBg: "bg-blue-600/10",
+    },
     { to: "/alerte", icon: Bell, label: "Vezi alerte", iconColor: "text-amber-500", iconBg: "bg-amber-500/10" },
     {
       icon: FileDown,
@@ -46,9 +58,7 @@ export function QuickActions() {
           <CardTitle className="text-sm font-semibold uppercase tracking-wider text-muted-foreground">
             Actiuni rapide
           </CardTitle>
-          <CardDescription className="text-xs">
-            Acces direct la fluxurile principale ale aplicatiei.
-          </CardDescription>
+          <CardDescription className="text-xs">Acces direct la fluxurile principale ale aplicatiei.</CardDescription>
         </CardHeader>
         <CardContent>
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-6">
@@ -64,12 +74,7 @@ export function QuickActions() {
               );
               if (action.onClick) {
                 return (
-                  <button
-                    key={action.label}
-                    type="button"
-                    onClick={action.onClick}
-                    className="block w-full text-left"
-                  >
+                  <button key={action.label} type="button" onClick={action.onClick} className="block w-full text-left">
                     {inner}
                   </button>
                 );

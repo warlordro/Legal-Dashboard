@@ -45,8 +45,13 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     if (!state) return;
     confirmBtnRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); close(false); }
-      else if (e.key === "Enter") { e.preventDefault(); close(true); }
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close(false);
+      } else if (e.key === "Enter") {
+        e.preventDefault();
+        close(true);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -76,9 +81,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
                 <h3 className="text-sm font-semibold text-foreground">
                   {state.title ?? (state.destructive ? "Confirmare stergere" : "Confirmare")}
                 </h3>
-                <p className={cn("mt-1 whitespace-pre-line text-sm text-muted-foreground")}>
-                  {state.message}
-                </p>
+                <p className={cn("mt-1 whitespace-pre-line text-sm text-muted-foreground")}>{state.message}</p>
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">

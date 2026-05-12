@@ -36,36 +36,71 @@ import {
   type RnpmSearchType,
   type RnpmFullDetail,
 } from "./rnpmClient.ts";
-import {
-  DESTINATII_INSCRIERII,
-  DESTINATII_IPOTECI,
-} from "./rnpmDestinations.ts";
+import { DESTINATII_INSCRIERII, DESTINATII_IPOTECI } from "./rnpmDestinations.ts";
 
 // Mirror al frontend/src/components/rnpm/rnpm-form-constants.ts pentru fixtures
 // in test. Sub-tipurile reale sunt sursa de adevar pe frontend; aici avem nevoie
 // doar de liste lungimea-corecta ca executeSplitSearch sa itereze realist.
 const TIP_AVIZ_BY_CATEGORY_BACKEND: Record<RnpmSearchType, string[]> = {
   ipoteci: [
-    "aviz initial", "cesiune a creantei", "extindere", "intentie", "modificator",
-    "nulitate", "prelungire", "reducere", "stingere", "transformare", "executare",
-    "preluare", "schimbarea rangului", "mentinere", "cesiunea rangului ipotecii",
-    "reactivare", "actualizare", "indreptare a erorii materiale",
+    "aviz initial",
+    "cesiune a creantei",
+    "extindere",
+    "intentie",
+    "modificator",
+    "nulitate",
+    "prelungire",
+    "reducere",
+    "stingere",
+    "transformare",
+    "executare",
+    "preluare",
+    "schimbarea rangului",
+    "mentinere",
+    "cesiunea rangului ipotecii",
+    "reactivare",
+    "actualizare",
+    "indreptare a erorii materiale",
   ],
   specifice: [
-    "aviz initial", "modificare", "stingere", "nulitate", "prelungire",
-    "reactivare", "indreptare a erorii materiale",
+    "aviz initial",
+    "modificare",
+    "stingere",
+    "nulitate",
+    "prelungire",
+    "reactivare",
+    "indreptare a erorii materiale",
   ],
   fiducii: [
-    "aviz initial", "acceptare", "modificare", "nulitate", "stingere",
-    "reactivare", "indreptare a erorii materiale",
+    "aviz initial",
+    "acceptare",
+    "modificare",
+    "nulitate",
+    "stingere",
+    "reactivare",
+    "indreptare a erorii materiale",
   ],
   creante: [
-    "aviz initial", "modificare", "extindere", "reducere", "stingere",
-    "nulitate", "prelungire", "reactivare", "indreptare a erorii materiale",
+    "aviz initial",
+    "modificare",
+    "extindere",
+    "reducere",
+    "stingere",
+    "nulitate",
+    "prelungire",
+    "reactivare",
+    "indreptare a erorii materiale",
   ],
   obligatiuni: [
-    "aviz initial", "modificare", "extindere", "reducere", "stingere",
-    "nulitate", "prelungire", "reactivare", "indreptare a erorii materiale",
+    "aviz initial",
+    "modificare",
+    "extindere",
+    "reducere",
+    "stingere",
+    "nulitate",
+    "prelungire",
+    "reactivare",
+    "indreptare a erorii materiale",
   ],
 };
 
@@ -92,7 +127,14 @@ afterEach(async () => {
 class StubClient extends RnpmClient {
   searchCalls: { type: RnpmSearchType; tipInscriere?: string; destinatie?: string; page: number }[] = [];
 
-  constructor(private readonly handler: (params: { type: RnpmSearchType; tipIdx: string | undefined; destinatie: string | undefined; page: number }) => RnpmSearchResult | RnpmError) {
+  constructor(
+    private readonly handler: (params: {
+      type: RnpmSearchType;
+      tipIdx: string | undefined;
+      destinatie: string | undefined;
+      page: number;
+    }) => RnpmSearchResult | RnpmError
+  ) {
     super({ requestDelayMs: 0 });
   }
 
@@ -126,7 +168,14 @@ function singleDocResult(idx: string): RnpmSearchResult {
     pageSize: 25,
     currentPage: 1,
     documents: [
-      { no: 1, identificator: { v: `aviz-${idx}`, k: `uuid-${idx}` }, utilizatorAutorizat: "", data: "", tip: "", needsActualizare: false },
+      {
+        no: 1,
+        identificator: { v: `aviz-${idx}`, k: `uuid-${idx}` },
+        utilizatorAutorizat: "",
+        data: "",
+        tip: "",
+        needsActualizare: false,
+      },
     ],
     criteriu: "",
     eai: false,
@@ -146,7 +195,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     const stub = new StubClient(({ tipIdx, destinatie }) => {
       if (destinatie != null) {
         // v2.18.0 fix: destinatieInscriere e index 1-based (la fel ca tipInscriere).
-        const destIdx = parseInt(destinatie, 10) - 1;
+        const destIdx = Number.parseInt(destinatie, 10) - 1;
         if (destIdx >= 0 && destIdx < 3) {
           return {
             total: tier2Docs,
@@ -185,13 +234,11 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
         captchaKey: "stub-key",
       },
       (p) => progress.push({ phase: p.phase, label: p.label, nestedPhase: p.nested?.phase }),
-      stub,
+      stub
     );
 
     // Dispatcher iteration: every tier-1 sub-type must have been searched at least once.
-    const tier1Indices = new Set(
-      stub.searchCalls.filter((c) => c.destinatie == null).map((c) => c.tipInscriere),
-    );
+    const tier1Indices = new Set(stub.searchCalls.filter((c) => c.destinatie == null).map((c) => c.tipInscriere));
     for (let i = 1; i <= ipotSubTypes.length; i++) {
       expect(tier1Indices.has(String(i))).toBe(true);
     }
@@ -200,7 +247,9 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     // for the rejected tier-1 sub-type. (Advisor flag 2c — guard against missing some.)
     // v2.18.0 fix: destinatie e trimis ca index 1-based, NU label.
     const tier2Destinations = new Set(
-      stub.searchCalls.filter((c) => c.destinatie != null && c.tipInscriere === REJECT_TIER1_IDX).map((c) => c.destinatie),
+      stub.searchCalls
+        .filter((c) => c.destinatie != null && c.tipInscriere === REJECT_TIER1_IDX)
+        .map((c) => c.destinatie)
     );
     for (let i = 1; i <= DESTINATII_INSCRIERII.length; i++) {
       expect(tier2Destinations.has(String(i))).toBe(true);
@@ -239,8 +288,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "creante", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* progress ignored */ },
-      stub,
+      () => {
+        /* progress ignored */
+      },
+      stub
     );
 
     const blocked = result.splitStats.find((s) => s.label === subTypes[0]);
@@ -268,8 +319,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "specifice", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* ignored */ },
-      stub,
+      () => {
+        /* ignored */
+      },
+      stub
     );
 
     const blocked = result.splitStats.find((s) => s.label === subTypes[0]);
@@ -289,7 +342,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     // Primii 3 tier-1 returneaza total>0 + documents:[] (silent_refusal).
     // Al 4-lea trebuie sa NU fie chemat — fail-fast a sarit toata coada.
     const stub = new StubClient(({ tipIdx }) => {
-      const idx = parseInt(tipIdx ?? "0", 10);
+      const idx = Number.parseInt(tipIdx ?? "0", 10);
       if (idx >= 1 && idx <= 3) {
         return { total: 600, pagesTotal: 24, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
       }
@@ -299,8 +352,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* progress ignored */ },
-      stub,
+      () => {
+        /* progress ignored */
+      },
+      stub
     );
 
     // Verifica ca DOAR primii 3 tier-1 au fost cautati (nu si idx 4..18).
@@ -330,7 +385,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     // a fost resetat la idx=3, deci la idx=4 contorul e 1, nu 3. Trebuie sa se cheme
     // toti 18.
     const stub = new StubClient(({ tipIdx }) => {
-      const idx = parseInt(tipIdx ?? "0", 10);
+      const idx = Number.parseInt(tipIdx ?? "0", 10);
       if (idx === 1 || idx === 2 || idx === 4) {
         return { total: 500, pagesTotal: 20, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
       }
@@ -339,8 +394,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* progress ignored */ },
-      stub,
+      () => {
+        /* progress ignored */
+      },
+      stub
     );
 
     // Toate 18 tier-1 au fost cautate (counter a fost resetat de success la idx 3).
@@ -376,13 +433,20 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
           ac.abort();
         }
         return {
-          total: 100, pagesTotal: 1, pageSize: 100, currentPage: 1,
+          total: 100,
+          pagesTotal: 1,
+          pageSize: 100,
+          currentPage: 1,
           documents: Array.from({ length: 100 }, (_, k) => ({
             no: k + 1,
             identificator: { v: `t2-${destinatie}-${k}`, k: null },
-            utilizatorAutorizat: "", data: "", tip: "", needsActualizare: false,
+            utilizatorAutorizat: "",
+            data: "",
+            tip: "",
+            needsActualizare: false,
           })),
-          criteriu: "", eai: false,
+          criteriu: "",
+          eai: false,
         };
       }
       if (tipIdx === REJECT_TIER1_IDX) {
@@ -391,11 +455,15 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
       return emptyResult();
     });
 
-    await expect(executeSplitSearch(
-      { type: "specifice", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key", signal: ac.signal },
-      () => { /* ignored */ },
-      stub,
-    )).rejects.toThrow(/Aborted/);
+    await expect(
+      executeSplitSearch(
+        { type: "specifice", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key", signal: ac.signal },
+        () => {
+          /* ignored */
+        },
+        stub
+      )
+    ).rejects.toThrow(/Aborted/);
 
     // Cel putin 2 destinatii au fost cautate inainte de abort (al treilea call
     // ar fi fost blocat de throwIfAborted la inceputul buclei tier-2).
@@ -420,19 +488,27 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
         if (tipIdx === "2") {
           if (destinatie === "1") {
             return {
-              total: 400, pagesTotal: 1, pageSize: 400, currentPage: 1,
+              total: 400,
+              pagesTotal: 1,
+              pageSize: 400,
+              currentPage: 1,
               documents: Array.from({ length: 400 }, (_, k) => ({
-                no: k + 1, identificator: { v: `t2-2-${k}`, k: null },
-                utilizatorAutorizat: "", data: "", tip: "", needsActualizare: false,
+                no: k + 1,
+                identificator: { v: `t2-2-${k}`, k: null },
+                utilizatorAutorizat: "",
+                data: "",
+                tip: "",
+                needsActualizare: false,
               })),
-              criteriu: "", eai: false,
+              criteriu: "",
+              eai: false,
             };
           }
           return emptyResult();
         }
         return emptyResult();
       }
-      const idx = parseInt(tipIdx ?? "0", 10);
+      const idx = Number.parseInt(tipIdx ?? "0", 10);
       if (idx === 1) {
         // silent_refusal: total > 0 dar sub cap -> documents:[].
         return { total: 600, pagesTotal: 24, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
@@ -446,8 +522,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* ignored */ },
-      stub,
+      () => {
+        /* ignored */
+      },
+      stub
     );
 
     const idx0 = result.splitStats[0]; // silent_refusal direct la tier-1
@@ -482,8 +560,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "creante", baseParams: {}, subTypeLabels: ["aviz initial"], captchaKey: "stub-key" },
-      () => { /* ignored */ },
-      stub,
+      () => {
+        /* ignored */
+      },
+      stub
     );
 
     expect(result.splitStats.length).toBe(1);
@@ -499,8 +579,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "creante", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* ignored */ },
-      stub,
+      () => {
+        /* ignored */
+      },
+      stub
     );
 
     expect(result.splitStats.length).toBe(subTypes.length);
@@ -529,8 +611,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     const result = await executeSplitSearch(
       { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* ignored */ },
-      stub,
+      () => {
+        /* ignored */
+      },
+      stub
     );
 
     const tier1 = result.splitStats[0];
@@ -557,8 +641,10 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     await executeSplitSearch(
       { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
-      () => { /* ignored */ },
-      stub,
+      () => {
+        /* ignored */
+      },
+      stub
     );
 
     const tier2 = stub.searchCalls.filter((c) => c.tipInscriere === REJECT_IDX && c.destinatie != null);

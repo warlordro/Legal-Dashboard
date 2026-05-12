@@ -4,10 +4,14 @@ export function stripDiacritics(s: string): string {
 
 // Expand a plain character to a regex class matching all Romanian diacritic variants
 const DIAC_MAP: Record<string, string> = {
-  a: "[aăâ]", A: "[AĂÂ]",
-  i: "[iî]", I: "[IÎ]",
-  s: "[sșş]", S: "[SȘŞ]",
-  t: "[tțţ]", T: "[TȚŢ]",
+  a: "[aăâ]",
+  A: "[AĂÂ]",
+  i: "[iî]",
+  I: "[IÎ]",
+  s: "[sșş]",
+  S: "[SȘŞ]",
+  t: "[tțţ]",
+  T: "[TȚŢ]",
 };
 
 function expandDiacritics(word: string): string {
@@ -32,7 +36,10 @@ export function HighlightName({ text, search }: { text: string; search?: string 
       {parts.map((part, i) => {
         const isMatch = searchWords.some((w) => stripDiacritics(part.toLowerCase()) === w);
         return isMatch ? (
-          <span key={i} className="rounded bg-yellow-200 px-0.5 font-semibold text-yellow-900 dark:bg-yellow-500/30 dark:text-yellow-200">
+          <span
+            key={i}
+            className="rounded bg-yellow-200 px-0.5 font-semibold text-yellow-900 dark:bg-yellow-500/30 dark:text-yellow-200"
+          >
             {part}
           </span>
         ) : (

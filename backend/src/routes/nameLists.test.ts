@@ -52,7 +52,7 @@ async function postPreviewCsv(
   app: ReturnType<typeof buildTestApp>,
   csv: string,
   filename = "lista.csv",
-  owner = "local",
+  owner = "local"
 ): Promise<Response> {
   const fd = new FormData();
   fd.append("file", new Blob([csv], { type: "text/csv" }), filename);
@@ -66,7 +66,7 @@ async function postPreviewCsv(
 async function postCommit(
   app: ReturnType<typeof buildTestApp>,
   body: unknown,
-  opts: { owner?: string; rawBody?: string; path?: string } = {},
+  opts: { owner?: string; rawBody?: string; path?: string } = {}
 ): Promise<Response> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.owner) headers["x-test-owner"] = opts.owner;
@@ -95,10 +95,7 @@ afterEach(async () => {
 describe("POST /api/v1/name-lists/preview", () => {
   it("parseaza CSV minimal si returneaza envelope ok", async () => {
     const app = buildTestApp();
-    const res = await postPreviewCsv(
-      app,
-      "nume,tip\nIon Popescu,fizic\nAcme SRL,juridic\n",
-    );
+    const res = await postPreviewCsv(app, "nume,tip\nIon Popescu,fizic\nAcme SRL,juridic\n");
     expect(res.status).toBe(200);
     const json = (await res.json()) as {
       data: {
@@ -148,11 +145,7 @@ describe("POST /api/v1/name-lists/preview", () => {
   it("nu persista nimic in DB la /preview", async () => {
     const app = buildTestApp();
     await postPreviewCsv(app, "nume\nIon\n");
-    const count = (
-      getDb()
-        .prepare(`SELECT COUNT(*) AS n FROM name_lists`)
-        .get() as { n: number }
-    ).n;
+    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM name_lists`).get() as { n: number }).n;
     expect(count).toBe(0);
   });
 });
@@ -168,10 +161,7 @@ describe("POST /api/v1/name-lists (commit)", () => {
     title: "Lista test 1",
     sourceFilename: "lista.csv",
     sourceSha256: SHA1,
-    items: [
-      { nameRaw: "Ion Popescu" },
-      { nameRaw: "Acme SRL" },
-    ],
+    items: [{ nameRaw: "Ion Popescu" }, { nameRaw: "Acme SRL" }],
   };
 
   it("creeaza lista si returneaza 201 + envelope", async () => {
@@ -328,13 +318,13 @@ describe("POST /api/v1/name-lists (commit)", () => {
     const jobs = getDb()
       .prepare(
         `SELECT id, kind, name_list_id FROM monitoring_jobs
-         WHERE owner_id = 'local' AND name_list_id = ?`,
+         WHERE owner_id = 'local' AND name_list_id = ?`
       )
       .all(json.data.list.id) as Array<{
-        id: number;
-        kind: string;
-        name_list_id: number;
-      }>;
+      id: number;
+      kind: string;
+      name_list_id: number;
+    }>;
     expect(jobs).toHaveLength(2);
     expect(jobs.every((j) => j.kind === "name_soap")).toBe(true);
 
@@ -425,7 +415,7 @@ describe("POST /api/v1/name-lists (commit)", () => {
       getDb()
         .prepare(
           `SELECT COUNT(*) AS n FROM monitoring_jobs
-           WHERE owner_id = 'local' AND name_list_id IS NOT NULL`,
+           WHERE owner_id = 'local' AND name_list_id IS NOT NULL`
         )
         .get() as { n: number }
     ).n;
@@ -484,18 +474,26 @@ describe("POST /api/v1/name-lists (commit)", () => {
 describe("GET /api/v1/name-lists", () => {
   it("listeaza listele owner-scoped", async () => {
     const app = buildTestApp();
-    await postCommit(app, {
-      title: "Lista Alice",
-      sourceFilename: "a.csv",
-      sourceSha256: "e".repeat(64),
-      items: [{ nameRaw: "Alice Test" }],
-    }, { owner: "alice" });
-    await postCommit(app, {
-      title: "Lista Bob",
-      sourceFilename: "b.csv",
-      sourceSha256: "f".repeat(64),
-      items: [{ nameRaw: "Bob Test" }],
-    }, { owner: "bob" });
+    await postCommit(
+      app,
+      {
+        title: "Lista Alice",
+        sourceFilename: "a.csv",
+        sourceSha256: "e".repeat(64),
+        items: [{ nameRaw: "Alice Test" }],
+      },
+      { owner: "alice" }
+    );
+    await postCommit(
+      app,
+      {
+        title: "Lista Bob",
+        sourceFilename: "b.csv",
+        sourceSha256: "f".repeat(64),
+        items: [{ nameRaw: "Bob Test" }],
+      },
+      { owner: "bob" }
+    );
 
     const res = await app.request("/api/v1/name-lists?page=1&pageSize=10", {
       headers: { "x-test-owner": "alice" },

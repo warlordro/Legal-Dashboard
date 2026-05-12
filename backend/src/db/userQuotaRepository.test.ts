@@ -6,12 +6,7 @@ import os from "os";
 import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  deleteOverride,
-  getOverride,
-  listOverridesForUser,
-  upsertOverride,
-} from "./userQuotaRepository.ts";
+import { deleteOverride, getOverride, listOverridesForUser, upsertOverride } from "./userQuotaRepository.ts";
 import { insertUser } from "./userRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
@@ -103,21 +98,19 @@ describe("userQuotaRepository — write paths", () => {
   });
 
   it("upsertOverride rejects negative limits", () => {
-    expect(() =>
-      upsertOverride({ userId: "u-1", feature: "ai.single", dailyLimitUsdMilli: -1 }),
-    ).toThrow(/invalid daily_limit_usd_milli/);
+    expect(() => upsertOverride({ userId: "u-1", feature: "ai.single", dailyLimitUsdMilli: -1 })).toThrow(
+      /invalid daily_limit_usd_milli/
+    );
   });
 
   it("upsertOverride rejects non-integer limits", () => {
-    expect(() =>
-      upsertOverride({ userId: "u-1", feature: "ai.single", dailyLimitUsdMilli: 1.5 }),
-    ).toThrow(/invalid daily_limit_usd_milli/);
+    expect(() => upsertOverride({ userId: "u-1", feature: "ai.single", dailyLimitUsdMilli: 1.5 })).toThrow(
+      /invalid daily_limit_usd_milli/
+    );
   });
 
   it("upsertOverride rejects empty feature", () => {
-    expect(() =>
-      upsertOverride({ userId: "u-1", feature: "", dailyLimitUsdMilli: 1000 }),
-    ).toThrow(/invalid feature/);
+    expect(() => upsertOverride({ userId: "u-1", feature: "", dailyLimitUsdMilli: 1000 })).toThrow(/invalid feature/);
   });
 
   it("deleteOverride returns true when deleting existing row", () => {

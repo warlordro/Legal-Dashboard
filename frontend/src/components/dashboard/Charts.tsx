@@ -79,7 +79,11 @@ function isEmpty(payload: ChartsPayload | null): boolean {
   return totalAlerts === 0 && totalRuns === 0 && totalCost === 0;
 }
 
-function AlertsTooltip({ active, payload, label }: {
+function AlertsTooltip({
+  active,
+  payload,
+  label,
+}: {
   active?: boolean;
   payload?: Array<{ payload: ChartsAlertsPoint }>;
   label?: string;
@@ -94,7 +98,11 @@ function AlertsTooltip({ active, payload, label }: {
   );
 }
 
-function RunsTooltip({ active, payload, label }: {
+function RunsTooltip({
+  active,
+  payload,
+  label,
+}: {
   active?: boolean;
   payload?: Array<{ payload: ChartsRunsPoint }>;
   label?: string;
@@ -112,7 +120,11 @@ function RunsTooltip({ active, payload, label }: {
   );
 }
 
-function CostTooltip({ active, payload, label }: {
+function CostTooltip({
+  active,
+  payload,
+  label,
+}: {
   active?: boolean;
   payload?: Array<{ payload: ChartsAiPoint }>;
   label?: string;
@@ -172,9 +184,7 @@ export function Charts() {
             <BarChart3 className="h-3.5 w-3.5" />
             Tendinte
           </CardTitle>
-          <CardDescription className="text-xs">
-            Alerte, rulari si cost AI agregate pe zile.
-          </CardDescription>
+          <CardDescription className="text-xs">Alerte, rulari si cost AI agregate pe zile.</CardDescription>
         </div>
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-md border border-border bg-card p-0.5">
@@ -185,9 +195,7 @@ export function Charts() {
                 onClick={() => setRange(opt.value)}
                 className={cn(
                   "rounded px-2 py-1 text-xs font-medium transition-colors",
-                  range === opt.value
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-muted/40",
+                  range === opt.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted/40"
                 )}
               >
                 {opt.label}
@@ -252,10 +260,7 @@ export function Charts() {
               </ResponsiveContainer>
             </ChartCard>
 
-            <ChartCard
-              title="Rulari / zi"
-              subtitle={`${data.series.runs.reduce((s, p) => s + p.total, 0)} total`}
-            >
+            <ChartCard title="Rulari / zi" subtitle={`${data.series.runs.reduce((s, p) => s + p.total, 0)} total`}>
               <ResponsiveContainer width="100%" height={160}>
                 <BarChart data={data.series.runs} margin={{ top: 5, right: 6, bottom: 0, left: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" className="stroke-border" />
@@ -275,11 +280,7 @@ export function Charts() {
                     width={28}
                   />
                   <Tooltip content={<RunsTooltip />} />
-                  <Legend
-                    wrapperStyle={{ fontSize: 10 }}
-                    iconType="square"
-                    iconSize={8}
-                  />
+                  <Legend wrapperStyle={{ fontSize: 10 }} iconType="square" iconSize={8} />
                   <Bar dataKey="ok" stackId="r" name="ok" fill={CHART_FILLS.runOk} />
                   <Bar dataKey="error" stackId="r" name="erori" fill={CHART_FILLS.runError} />
                   <Bar dataKey="timeout" stackId="r" name="timeout" fill={CHART_FILLS.runTimeout} />
@@ -288,10 +289,7 @@ export function Charts() {
               </ResponsiveContainer>
             </ChartCard>
 
-            <ChartCard
-              title="Cost AI / zi"
-              subtitle={formatUsd(data.series.aiCost.reduce((s, p) => s + p.costUsd, 0))}
-            >
+            <ChartCard title="Cost AI / zi" subtitle={formatUsd(data.series.aiCost.reduce((s, p) => s + p.costUsd, 0))}>
               <ResponsiveContainer width="100%" height={160}>
                 <AreaChart data={data.series.aiCost} margin={{ top: 5, right: 6, bottom: 0, left: 0 }}>
                   <defs>

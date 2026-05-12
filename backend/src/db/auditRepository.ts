@@ -71,11 +71,7 @@ function readContext(c: Context): {
 // Synchronous because audit_log writes are infrequent (one per mutation, not
 // per query) and we want callers to be able to record from any context without
 // awaiting. Errors propagate — caller decides whether to swallow or surface.
-export function recordAudit(
-  c: Context | null,
-  action: string,
-  options: AuditOptions = {},
-): void {
+export function recordAudit(c: Context | null, action: string, options: AuditOptions = {}): void {
   let ownerId: string | null = options.ownerId ?? null;
   let actorId: string | null = options.actorId ?? null;
   let ip: string | null = options.ip ?? null;
@@ -95,7 +91,7 @@ export function recordAudit(
     .prepare(
       `INSERT INTO audit_log
          (owner_id, actor_id, action, target_kind, target_id, outcome, ip, user_agent, detail_json, request_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       ownerId,
@@ -107,7 +103,7 @@ export function recordAudit(
       ip,
       userAgent,
       serializeDetail(options.detail),
-      requestId,
+      requestId
     );
 }
 
@@ -130,11 +126,13 @@ export interface AuditRow {
   request_id: string | null;
 }
 
-export function getAuditEvents(opts: {
-  ownerId?: string | null;
-  action?: string;
-  limit?: number;
-} = {}): AuditRow[] {
+export function getAuditEvents(
+  opts: {
+    ownerId?: string | null;
+    action?: string;
+    limit?: number;
+  } = {}
+): AuditRow[] {
   const db = getDb();
   const where: string[] = [];
   const params: (string | number | null)[] = [];
@@ -267,9 +265,7 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
 // constanta din `services/monitoring/scheduler.ts:AUDIT_LOG_RETENTION_DAYS`.
 export function purgeOldAuditLog(retentionDays = 90): number {
   const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
-  const info = getDb()
-    .prepare(`DELETE FROM audit_log WHERE ts < ?`)
-    .run(cutoff);
+  const info = getDb().prepare(`DELETE FROM audit_log WHERE ts < ?`).run(cutoff);
   return info.changes;
 }
 
@@ -283,13 +279,11 @@ export function listAuditEvents(opts: ListAuditEventsOpts = {}): ListAuditEvents
     .prepare(
       `SELECT * FROM audit_log ${whereSql}
        ORDER BY ts DESC, id DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT ? OFFSET ?`
     )
     .all(...params, limit, offset) as AuditRow[];
 
-  const totalRow = db
-    .prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`)
-    .get(...params) as { n: number };
+  const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`).get(...params) as { n: number };
 
   return { rows, total: totalRow.n };
 }

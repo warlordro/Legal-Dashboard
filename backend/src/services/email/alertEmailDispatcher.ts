@@ -53,9 +53,7 @@ export async function drainEmailDispatches(timeoutMs = 10_000): Promise<void> {
   });
   const result = await Promise.race([all, timeout]);
   if (result === "timeout") {
-    console.warn(
-      `[email] drainEmailDispatches timeout after ${timeoutMs}ms (pending=${pending.size})`,
-    );
+    console.warn(`[email] drainEmailDispatches timeout after ${timeoutMs}ms (pending=${pending.size})`);
   }
 }
 

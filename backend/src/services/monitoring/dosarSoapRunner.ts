@@ -22,10 +22,7 @@ import { AlertConfigSchema } from "../../schemas/monitoring.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
 import { diffDosarSoap, type DiffSnapshotPayload } from "./diff/dosarSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
-import {
-  getLatestSnapshot,
-  insertSnapshot,
-} from "../../db/monitoringSnapshotsRepository.ts";
+import { getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { enrichSolutieAlertsForJob } from "../../db/monitoringAlertsRepository.ts";
 import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
@@ -34,10 +31,7 @@ import { getDb } from "../../db/schema.ts";
 const DEFAULT_BUDGET_MS = 10 * 60 * 1000; // 10 min
 
 export interface DosarSoapRunnerDeps {
-  searchDosare: (
-    params: SearchParams,
-    opts?: { signal?: AbortSignal },
-  ) => Promise<Dosar[]>;
+  searchDosare: (params: SearchParams, opts?: { signal?: AbortSignal }) => Promise<Dosar[]>;
   // Testing seam — overrides the 10-min wallclock budget.
   budgetMs?: number;
 }
@@ -54,16 +48,11 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
       const composed = AbortSignal.any([signal, budgetSignal]);
 
       const target = JSON.parse(job.target_json) as { numar_dosar: string };
-      const alertConfig = AlertConfigSchema.parse(
-        JSON.parse(job.alert_config_json),
-      );
+      const alertConfig = AlertConfigSchema.parse(JSON.parse(job.alert_config_json));
 
       let dosare: Dosar[];
       try {
-        dosare = await deps.searchDosare(
-          { numarDosar: target.numar_dosar },
-          { signal: composed },
-        );
+        dosare = await deps.searchDosare({ numarDosar: target.numar_dosar }, { signal: composed });
       } catch (err) {
         // Order matters: external signal takes precedence over budget so a
         // graceful drain is attributed to "aborted" not "timeout".
@@ -106,9 +95,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
       let oversizeOutcome: RunOutcome | null = null;
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
-        const prevSnapshot = prevRow
-          ? (JSON.parse(prevRow.payload_json) as DiffSnapshotPayload)
-          : null;
+        const prevSnapshot = prevRow ? (JSON.parse(prevRow.payload_json) as DiffSnapshotPayload) : null;
 
         const { newSnapshot, alerts } = diffDosarSoap({
           prevSnapshot,
@@ -231,7 +218,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
               {
                 instanta: currentDosar.institutie,
                 stadiu: currentDosar.stadiuProcesual,
-              },
+              }
             );
           }
         })();

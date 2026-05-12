@@ -139,10 +139,7 @@ alertsRouter.get("/", (c) => {
   const ownerId = getOwnerId(c);
   const queryResult = AlertListQuerySchema.safeParse(c.req.query());
   if (!queryResult.success) {
-    return c.json(
-      fail("invalid_query", "Parametri de cautare invalizi", c, queryResult.error.issues),
-      400,
-    );
+    return c.json(fail("invalid_query", "Parametri de cautare invalizi", c, queryResult.error.issues), 400);
   }
 
   const list = listAlerts({ ownerId, ...queryResult.data });
@@ -339,9 +336,9 @@ alertsRouter.post("/dismiss-bulk", limitAlertDismissBulkBody, async (c) => {
           "too_many_rows",
           `Operatia depaseste limita de ${ALERT_DISMISS_BULK_MAX_ROWS} alerte (matched: ${probe.total}). Restrange filtrele.`,
           c,
-          { total: probe.total, max: ALERT_DISMISS_BULK_MAX_ROWS },
+          { total: probe.total, max: ALERT_DISMISS_BULK_MAX_ROWS }
         ),
-        413,
+        413
       );
     }
     const ids = selectAlertIdsByFilters(
@@ -355,7 +352,7 @@ alertsRouter.post("/dismiss-bulk", limitAlertDismissBulkBody, async (c) => {
         from: f.from,
         to: f.to,
       },
-      ALERT_DISMISS_BULK_MAX_ROWS,
+      ALERT_DISMISS_BULK_MAX_ROWS
     );
     result = dismissAlertsByIds(ownerId, ids);
   }
@@ -417,9 +414,9 @@ alertsRouter.post("/export", limitAlertExportBody, async (c) => {
           "too_many_rows",
           `Exportul depaseste limita de ${ALERT_EXPORT_MAX_ROWS} randuri (rezultat: ${probe.total}). Restrange filtrele.`,
           c,
-          { total: probe.total, max: ALERT_EXPORT_MAX_ROWS },
+          { total: probe.total, max: ALERT_EXPORT_MAX_ROWS }
         ),
-        413,
+        413
       );
     }
     const full = listAlerts({
@@ -452,9 +449,9 @@ alertsRouter.post("/export", limitAlertExportBody, async (c) => {
           "too_many_rows",
           `Exportul depaseste limita de ${ALERT_EXPORT_MAX_ROWS} randuri (rezultat: ${probe.total}). Restrange intervalul.`,
           c,
-          { total: probe.total, max: ALERT_EXPORT_MAX_ROWS },
+          { total: probe.total, max: ALERT_EXPORT_MAX_ROWS }
         ),
-        413,
+        413
       );
     }
     const full = listAlerts({
@@ -560,9 +557,7 @@ alertsRouter.get("/stream", (c) => {
       // client what happened and bail without setting up the heartbeat or
       // wiring further state.
       console.warn("[alerts] subscribe rejected, closing stream", err);
-      await stream
-        .writeSSE({ event: "error", data: '{"code":"too_many_streams"}' })
-        .catch(() => undefined);
+      await stream.writeSSE({ event: "error", data: '{"code":"too_many_streams"}' }).catch(() => undefined);
       return;
     }
 
@@ -575,30 +570,24 @@ alertsRouter.get("/stream", (c) => {
     // tenants. No subscriber cap on this channel — it shares the same
     // EventSource handle as the new-alert subscription, so it's already
     // bounded by the per-owner SSE-stream cap (5).
-    unsubscribeEnriched = addAlertEnrichmentListener(
-      ownerId,
-      (payload: AlertEnrichmentPayload) => {
-        if (payload.ownerId !== ownerId) return;
-        stream
-          .writeSSE({
-            event: "alert_enriched",
-            id: String(payload.id),
-            data: JSON.stringify({
-              id: payload.id,
-              jobId: payload.jobId,
-              detail: payload.detail,
-            }),
-          })
-          .catch((err) => {
-            console.error(
-              "[alerts] enrichment writeSSE failed, dropping subscriber",
-              err,
-            );
-            stopHeartbeat();
-            cleanupSubscriptions();
-          });
-      },
-    );
+    unsubscribeEnriched = addAlertEnrichmentListener(ownerId, (payload: AlertEnrichmentPayload) => {
+      if (payload.ownerId !== ownerId) return;
+      stream
+        .writeSSE({
+          event: "alert_enriched",
+          id: String(payload.id),
+          data: JSON.stringify({
+            id: payload.id,
+            jobId: payload.jobId,
+            detail: payload.detail,
+          }),
+        })
+        .catch((err) => {
+          console.error("[alerts] enrichment writeSSE failed, dropping subscriber", err);
+          stopHeartbeat();
+          cleanupSubscriptions();
+        });
+    });
 
     // First event carries `retry: 3000` so EventSource clients reconnect
     // after 3s on disconnect (browser default is unspecified by the spec —

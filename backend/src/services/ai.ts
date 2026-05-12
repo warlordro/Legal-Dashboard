@@ -69,11 +69,16 @@ function safeField(value: unknown, fallback: string): string {
 
 export function buildPrompt(dosar: Record<string, unknown>): string {
   const partiText = ((dosar.parti as Array<{ calitateParte: string; nume: string }>) || [])
-    .map((p) => `  - ${safeTruncate(p.calitateParte, TRUNCATE_PARTY_NAME)}: ${safeTruncate(p.nume, TRUNCATE_PARTY_NAME)}`)
+    .map(
+      (p) => `  - ${safeTruncate(p.calitateParte, TRUNCATE_PARTY_NAME)}: ${safeTruncate(p.nume, TRUNCATE_PARTY_NAME)}`
+    )
     .join("\n");
 
   const sedinteText = ((dosar.sedinte as Array<{ data: string; solutie?: string; solutieSumar?: string }>) || [])
-    .map((s) => `  - ${safeField(s.data, "fara data")}: ${safeTruncate(s.solutie || "fara solutie", TRUNCATE_SOLUTIE)}${s.solutieSumar ? ` — ${safeTruncate(s.solutieSumar, TRUNCATE_SOLUTIE)}` : ""}`)
+    .map(
+      (s) =>
+        `  - ${safeField(s.data, "fara data")}: ${safeTruncate(s.solutie || "fara solutie", TRUNCATE_SOLUTIE)}${s.solutieSumar ? ` — ${safeTruncate(s.solutieSumar, TRUNCATE_SOLUTIE)}` : ""}`
+    )
     .join("\n");
 
   return `Esti un asistent juridic specializat pe dreptul romanesc. Analizeaza urmatorul dosar de pe portalul instantelor de judecata din Romania si ofera o interpretare clara, pe intelesul unui non-specialist.
@@ -107,13 +112,24 @@ Te rog sa oferi:
 Raspunde in romana, clar si concis. Foloseste un limbaj accesibil dar precis juridic.`;
 }
 
-export function buildJudgePrompt(dosar: Record<string, unknown>, analysisA: string, modelA: string, analysisB: string, modelB: string): string {
+export function buildJudgePrompt(
+  dosar: Record<string, unknown>,
+  analysisA: string,
+  modelA: string,
+  analysisB: string,
+  modelB: string
+): string {
   const partiText = ((dosar.parti as Array<{ calitateParte: string; nume: string }>) || [])
-    .map((p) => `  - ${safeTruncate(p.calitateParte, TRUNCATE_PARTY_NAME)}: ${safeTruncate(p.nume, TRUNCATE_PARTY_NAME)}`)
+    .map(
+      (p) => `  - ${safeTruncate(p.calitateParte, TRUNCATE_PARTY_NAME)}: ${safeTruncate(p.nume, TRUNCATE_PARTY_NAME)}`
+    )
     .join("\n");
 
   const sedinteText = ((dosar.sedinte as Array<{ data: string; solutie?: string; solutieSumar?: string }>) || [])
-    .map((s) => `  - ${safeField(s.data, "fara data")}: ${safeTruncate(s.solutie || "fara solutie", TRUNCATE_SOLUTIE)}${s.solutieSumar ? ` — ${safeTruncate(s.solutieSumar, TRUNCATE_SOLUTIE)}` : ""}`)
+    .map(
+      (s) =>
+        `  - ${safeField(s.data, "fara data")}: ${safeTruncate(s.solutie || "fara solutie", TRUNCATE_SOLUTIE)}${s.solutieSumar ? ` — ${safeTruncate(s.solutieSumar, TRUNCATE_SOLUTIE)}` : ""}`
+    )
     .join("\n");
 
   return `Esti un expert juridic senior cu experienta in dreptul romanesc. Rolul tau este sa reconciliezi doua analize independente ale aceluiasi dosar judiciar.
@@ -165,19 +181,21 @@ Raspunde in romana, clar si concis. Foloseste un limbaj accesibil dar precis jur
 // Persistent `audit_log` table is deferred to Faza 5 (compliance).
 type AiCallMeta = AiUsageCallMeta;
 
-function logAiCall(entry: {
-  provider: string;
-  model: string;
-  latencyMs: number;
-  status: "ok" | "error";
-  errorType?: string;
-} & AiCallMeta): void {
+function logAiCall(
+  entry: {
+    provider: string;
+    model: string;
+    latencyMs: number;
+    status: "ok" | "error";
+    errorType?: string;
+  } & AiCallMeta
+): void {
   console.log(
     JSON.stringify({
       action: "ai_call",
       ...entry,
       ts: new Date().toISOString(),
-    }),
+    })
   );
 }
 
@@ -198,7 +216,7 @@ export async function withAiLogging<T>(
   provider: AiUsageProvider,
   model: string,
   fn: () => Promise<{ value: T; meta?: AiCallMeta }>,
-  tracking?: AiUsageTrackingContext,
+  tracking?: AiUsageTrackingContext
 ): Promise<T> {
   const start = Date.now();
   try {
@@ -216,7 +234,9 @@ export async function withAiLogging<T>(
     const errorType = isTimeoutOrAbort(e)
       ? "timeout"
       : e instanceof Error
-        ? e.name === "Error" ? e.constructor.name : e.name
+        ? e.name === "Error"
+          ? e.constructor.name
+          : e.name
         : "Unknown";
     // SDK errors (Anthropic / OpenAI APIError) expose `.status` with the HTTP
     // status code. Capture it so dashboards can split 4xx/5xx vs network/abort.
@@ -226,17 +246,28 @@ export async function withAiLogging<T>(
     // connection, or an Anthropic 429 with an attached usage block). Forward
     // it best-effort so a partially-consumed call still shows up on the cost
     // card; safeTokenCount in recordAiUsageSafely defends against junk shapes.
-    const errUsage = (e as { usage?: { input_tokens?: unknown; output_tokens?: unknown; promptTokenCount?: unknown; candidatesTokenCount?: unknown } })?.usage;
-    const usageInput = typeof errUsage?.input_tokens === "number"
-      ? errUsage.input_tokens
-      : typeof errUsage?.promptTokenCount === "number"
-        ? errUsage.promptTokenCount
-        : undefined;
-    const usageOutput = typeof errUsage?.output_tokens === "number"
-      ? errUsage.output_tokens
-      : typeof errUsage?.candidatesTokenCount === "number"
-        ? errUsage.candidatesTokenCount
-        : undefined;
+    const errUsage = (
+      e as {
+        usage?: {
+          input_tokens?: unknown;
+          output_tokens?: unknown;
+          promptTokenCount?: unknown;
+          candidatesTokenCount?: unknown;
+        };
+      }
+    )?.usage;
+    const usageInput =
+      typeof errUsage?.input_tokens === "number"
+        ? errUsage.input_tokens
+        : typeof errUsage?.promptTokenCount === "number"
+          ? errUsage.promptTokenCount
+          : undefined;
+    const usageOutput =
+      typeof errUsage?.output_tokens === "number"
+        ? errUsage.output_tokens
+        : typeof errUsage?.candidatesTokenCount === "number"
+          ? errUsage.candidatesTokenCount
+          : undefined;
     logAiCall({
       provider,
       model,
@@ -279,26 +310,32 @@ async function callAnthropic(
   prompt: string,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<string> {
-  return withAiLogging("anthropic", modelId, async () => {
-    const client = new Anthropic({ apiKey });
-    const message = await client.messages.create({
-      model: modelId,
-      max_tokens: AI_MAX_TOKENS,
-      messages: [{ role: "user", content: prompt }],
-    }, { signal: composeSignal(timeout, signal) });
-    const value = message.content
-      .flatMap((block) => (block.type === "text" ? [block.text] : []))
-      .join("");
-    return {
-      value,
-      meta: {
-        usageInput: message.usage?.input_tokens,
-        usageOutput: message.usage?.output_tokens,
-      },
-    };
-  }, tracking);
+  return withAiLogging(
+    "anthropic",
+    modelId,
+    async () => {
+      const client = new Anthropic({ apiKey });
+      const message = await client.messages.create(
+        {
+          model: modelId,
+          max_tokens: AI_MAX_TOKENS,
+          messages: [{ role: "user", content: prompt }],
+        },
+        { signal: composeSignal(timeout, signal) }
+      );
+      const value = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+      return {
+        value,
+        meta: {
+          usageInput: message.usage?.input_tokens,
+          usageOutput: message.usage?.output_tokens,
+        },
+      };
+    },
+    tracking
+  );
 }
 
 async function callOpenAI(
@@ -307,25 +344,33 @@ async function callOpenAI(
   prompt: string,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<string> {
-  return withAiLogging("openai", modelId, async () => {
-    const { default: OpenAI } = await import("openai");
-    const client = new OpenAI({ apiKey });
-    const response = await client.responses.create({
-      model: modelId,
-      input: prompt,
-      max_output_tokens: AI_MAX_TOKENS,
-    }, { signal: composeSignal(timeout, signal) });
-    const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
-    return {
-      value: response.output_text || "",
-      meta: {
-        usageInput: usage?.input_tokens,
-        usageOutput: usage?.output_tokens,
-      },
-    };
-  }, tracking);
+  return withAiLogging(
+    "openai",
+    modelId,
+    async () => {
+      const { default: OpenAI } = await import("openai");
+      const client = new OpenAI({ apiKey });
+      const response = await client.responses.create(
+        {
+          model: modelId,
+          input: prompt,
+          max_output_tokens: AI_MAX_TOKENS,
+        },
+        { signal: composeSignal(timeout, signal) }
+      );
+      const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+      return {
+        value: response.output_text || "",
+        meta: {
+          usageInput: usage?.input_tokens,
+          usageOutput: usage?.output_tokens,
+        },
+      };
+    },
+    tracking
+  );
 }
 
 async function callGoogle(
@@ -334,26 +379,33 @@ async function callGoogle(
   prompt: string,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<string> {
-  return withAiLogging("google", modelId, async () => {
-    const { GoogleGenerativeAI } = await import("@google/generative-ai");
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: modelId, generationConfig: { maxOutputTokens: AI_MAX_TOKENS } });
-    const composed = composeSignal(timeout, signal);
-    const result = await model.generateContent(
-      { contents: [{ role: "user", parts: [{ text: prompt }] }] },
-      { signal: composed as AbortSignal },
-    );
-    const usage = (result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }).usageMetadata;
-    return {
-      value: result.response.text(),
-      meta: {
-        usageInput: usage?.promptTokenCount,
-        usageOutput: usage?.candidatesTokenCount,
-      },
-    };
-  }, tracking);
+  return withAiLogging(
+    "google",
+    modelId,
+    async () => {
+      const { GoogleGenerativeAI } = await import("@google/generative-ai");
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: modelId, generationConfig: { maxOutputTokens: AI_MAX_TOKENS } });
+      const composed = composeSignal(timeout, signal);
+      const result = await model.generateContent(
+        { contents: [{ role: "user", parts: [{ text: prompt }] }] },
+        { signal: composed as AbortSignal }
+      );
+      const usage = (
+        result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
+      ).usageMetadata;
+      return {
+        value: result.response.text(),
+        meta: {
+          usageInput: usage?.promptTokenCount,
+          usageOutput: usage?.candidatesTokenCount,
+        },
+      };
+    },
+    tracking
+  );
 }
 
 export { callAnthropic, callOpenAI, callGoogle };
@@ -364,7 +416,7 @@ export function validateAiBody(body: unknown): string | null {
   const b = body as Record<string, unknown>;
   if (!b.dosar || typeof b.dosar !== "object") return "Lipsesc datele dosarului.";
   if (b.model && typeof b.model !== "string") return "Model invalid.";
-  if (b.model && !(b.model as string in AI_MODELS)) return "Model necunoscut.";
+  if (b.model && !((b.model as string) in AI_MODELS)) return "Model necunoscut.";
   if (b.apiKeys && typeof b.apiKeys !== "object") return "Format apiKeys invalid.";
   // SECURITY: Validate apiKeys values are strings with reasonable length
   if (b.apiKeys && typeof b.apiKeys === "object") {
@@ -403,7 +455,7 @@ export async function callModel(
   apiKeys: Record<string, string>,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<string> {
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");

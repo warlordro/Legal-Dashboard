@@ -54,12 +54,23 @@ export function TablePagination({
   return (
     <div className="flex flex-col items-center gap-2 border-t border-border px-4 py-3">
       <div className="flex items-center gap-2">
-        <Button variant="outline" size="sm" onClick={() => onPageChange(0)} disabled={page === 0 || disabled}>«</Button>
-        <Button variant="outline" size="sm" onClick={() => onPageChange(Math.max(0, page - 1))} disabled={page === 0 || disabled}>‹ Inapoi</Button>
+        <Button variant="outline" size="sm" onClick={() => onPageChange(0)} disabled={page === 0 || disabled}>
+          «
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(Math.max(0, page - 1))}
+          disabled={page === 0 || disabled}
+        >
+          ‹ Inapoi
+        </Button>
         <div className="flex items-center gap-1">
           {getPageNumbers(page, totalPages).map((p, i) =>
             p === "..." ? (
-              <span key={`dots-${i}`} className="px-1 text-sm text-muted-foreground">...</span>
+              <span key={`dots-${i}`} className="px-1 text-sm text-muted-foreground">
+                ...
+              </span>
             ) : (
               <Button
                 key={p}
@@ -74,8 +85,22 @@ export function TablePagination({
             )
           )}
         </div>
-        <Button variant="outline" size="sm" onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))} disabled={page === totalPages - 1 || disabled}>Inainte ›</Button>
-        <Button variant="outline" size="sm" onClick={() => onPageChange(totalPages - 1)} disabled={page === totalPages - 1 || disabled}>»</Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(Math.min(totalPages - 1, page + 1))}
+          disabled={page === totalPages - 1 || disabled}
+        >
+          Inainte ›
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => onPageChange(totalPages - 1)}
+          disabled={page === totalPages - 1 || disabled}
+        >
+          »
+        </Button>
         {hasMore && onNeedMore && (
           <Button variant="outline" size="sm" disabled={loadMoreLoading} onClick={onNeedMore} className="ml-2">
             {loadMoreLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
@@ -90,7 +115,7 @@ export function TablePagination({
             max={totalPages}
             value={page + 1}
             onChange={(e) => {
-              const val = parseInt(e.target.value, 10);
+              const val = Number.parseInt(e.target.value, 10);
               if (val >= 1 && val <= totalPages) onPageChange(val - 1);
             }}
             className="w-14 rounded border border-border bg-background px-2 py-1 text-center text-sm"
@@ -99,7 +124,9 @@ export function TablePagination({
         {disabled && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground ml-1" />}
       </div>
       <div className="flex items-center gap-3">
-        <span className="text-xs text-muted-foreground">Pagina {page + 1} din {totalPages}</span>
+        <span className="text-xs text-muted-foreground">
+          Pagina {page + 1} din {totalPages}
+        </span>
         <span className="text-xs text-muted-foreground">|</span>
         <div className="flex items-center gap-1.5">
           <span className="text-xs text-muted-foreground">Rezultate pe pagina:</span>

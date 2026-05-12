@@ -4,10 +4,7 @@ import os from "os";
 import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  getEmailSettings,
-  upsertEmailSettings,
-} from "./ownerEmailSettingsRepository.ts";
+import { getEmailSettings, upsertEmailSettings } from "./ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 let tmpRoot: string;
@@ -106,7 +103,7 @@ describe("ownerEmailSettingsRepository", () => {
         toAddress: `${"a".repeat(312)}@firma.ro`,
         minSeverity: "warning",
         dailyReportEnabled: false,
-      }),
+      })
     ).toThrow(/max 320/);
   });
 
@@ -117,7 +114,7 @@ describe("ownerEmailSettingsRepository", () => {
         toAddress: "alerts@firma.ro",
         minSeverity: "debug" as never,
         dailyReportEnabled: false,
-      }),
+      })
     ).toThrow();
   });
 
@@ -140,9 +137,7 @@ describe("ownerEmailSettingsRepository", () => {
   });
 
   it("listDailyReportCandidates filters by enabled flag and excludes already-sent today", async () => {
-    const { listDailyReportCandidates, markDailyReportSent } = await import(
-      "./ownerEmailSettingsRepository.ts"
-    );
+    const { listDailyReportCandidates, markDailyReportSent } = await import("./ownerEmailSettingsRepository.ts");
     upsertEmailSettings("local", {
       enabled: true,
       toAddress: "a@firma.ro",

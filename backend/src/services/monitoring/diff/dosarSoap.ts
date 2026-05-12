@@ -386,7 +386,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
         if (unconsumed.length > 1) {
           console.warn(
             `[dosarSoap] multiple pending solutii in bucket ${bucket}; ` +
-              `picking first un-consumed (count=${unconsumed.length})`,
+              `picking first un-consumed (count=${unconsumed.length})`
           );
         }
       }

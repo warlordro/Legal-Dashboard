@@ -27,12 +27,7 @@ import { TablePagination } from "@/components/table-pagination";
 import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
-import {
-  monitoring,
-  formatMonitoringTarget,
-  getNameSoapInstitutie,
-  type MonitoringJob,
-} from "@/lib/api";
+import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "@/lib/api";
 import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
@@ -166,7 +161,9 @@ export default function Monitorizare({
         parts.push(`${result.inflight_ids.length} in rulare`);
       }
       if (result.not_found_ids.length > 0) {
-        parts.push(`${result.not_found_ids.length} ${result.not_found_ids.length === 1 ? "inexistent" : "inexistente"}`);
+        parts.push(
+          `${result.not_found_ids.length} ${result.not_found_ids.length === 1 ? "inexistent" : "inexistente"}`
+        );
       }
       if (result.inflight_ids.length > 0 || result.not_found_ids.length > 0) {
         setError(parts.join(", ") + ".");
@@ -222,10 +219,7 @@ export default function Monitorizare({
     setExporting(kind);
     setError(null);
     try {
-      const data =
-        selectedIds.size > 0
-          ? jobs.filter((j) => selectedIds.has(j.id))
-          : await fetchAllJobsForExport();
+      const data = selectedIds.size > 0 ? jobs.filter((j) => selectedIds.has(j.id)) : await fetchAllJobsForExport();
       if (data.length === 0) return;
       if (kind === "xlsx") await exportMonitoringExcel(data);
       else await exportMonitoringPDF(data);
@@ -248,9 +242,7 @@ export default function Monitorizare({
   const handleCadenceChange = async (job: MonitoringJob, newSec: number) => {
     if (newSec === job.cadence_sec) return;
     // Optimistic update — patch row in place so the UI feels instant.
-    setJobs((prev) =>
-      prev.map((j) => (j.id === job.id ? { ...j, cadence_sec: newSec } : j)),
-    );
+    setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, cadence_sec: newSec } : j)));
     try {
       await monitoring.patch(job.id, { cadence_sec: newSec });
       await refresh();
@@ -268,7 +260,8 @@ export default function Monitorizare({
           <div>
             <h1 className="text-2xl font-bold">Monitorizare</h1>
             <p className="text-sm text-muted-foreground">
-              Joburi recurente — verificare automata pe PortalJust pentru dosare existente sau subiecti (alerta dosare noi).
+              Joburi recurente — verificare automata pe PortalJust pentru dosare existente sau subiecti (alerta dosare
+              noi).
             </p>
           </div>
         </div>
@@ -288,9 +281,7 @@ export default function Monitorizare({
             <CardTitle className="text-base">
               Monitorizari active{total > 0 ? ` (${total})` : ""}
               {selectedIds.size > 0 && (
-                <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  · {selectedIds.size} selectate
-                </span>
+                <span className="ml-2 text-sm font-normal text-muted-foreground">· {selectedIds.size} selectate</span>
               )}
             </CardTitle>
             <div className="flex items-center gap-2">
@@ -403,9 +394,7 @@ export default function Monitorizare({
               Selectia opereaza doar pe pagina vizibila ({jobs.length} din {total}).
             </div>
           )}
-          {loading && jobs.length === 0 && (
-            <div className="text-sm text-muted-foreground">Se incarca...</div>
-          )}
+          {loading && jobs.length === 0 && <div className="text-sm text-muted-foreground">Se incarca...</div>}
           {!loading && jobs.length === 0 && !error && (kindFilter !== "all" || debouncedQuery) && (
             <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
               <span>Niciun rezultat pentru filtrele aplicate.</span>
@@ -425,261 +414,252 @@ export default function Monitorizare({
           )}
           {!loading && jobs.length === 0 && !error && kindFilter === "all" && !debouncedQuery && (
             <div className="text-sm text-muted-foreground">
-              Niciun job activ. Adauga primul dosar sau subiect mai sus, incarca un fisier bulk,
-              sau marcheaza un dosar din pagina <strong>Cautare Dosare</strong>.
+              Niciun job activ. Adauga primul dosar sau subiect mai sus, incarca un fisier bulk, sau marcheaza un dosar
+              din pagina <strong>Cautare Dosare</strong>.
             </div>
           )}
-          {jobs.length > 0 && (() => {
-            // Show "Detalii" column only when at least one job has scoped instances
-            // to surface (Info modal). Otherwise the column header occupies horizontal
-            // space without ever rendering content for any row.
-            const showDetailsColumn = jobs.some(
-              (job) => job.kind === "name_soap" && (getNameSoapInstitutie(job)?.length ?? 0) > 0,
-            );
-            return (
-            <div className="overflow-x-auto">
-              <table className="w-full text-[13px]">
-                <thead>
-                  <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
-                    <th className="w-8 px-3 py-2">
-                      <input
-                        type="checkbox"
-                        className="h-4 w-4 cursor-pointer accent-primary"
-                        checked={allSelected}
-                        ref={(el) => {
-                          if (el) el.indeterminate = someSelected;
-                        }}
-                        onChange={toggleAll}
-                        aria-label={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
-                        title={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
-                      />
-                    </th>
-                    <th className="px-3 py-2">Tinta</th>
-                    {showDetailsColumn && (
-                      <th className="px-3 py-2 text-center">Detalii</th>
-                    )}
-                    <th className="px-3 py-2">Cadenta</th>
-                    <th className="px-3 py-2">Ultima rulare</th>
-                    <th className="px-3 py-2">Urmatoarea verif.</th>
-                    <th className="px-3 py-2">Status</th>
-                    <th className="px-3 py-2 text-right">Actiuni</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {jobs.map((job) => {
-                    const target = formatMonitoringTarget(job);
-                    const isDosar = job.kind === "dosar_soap";
-                    return (
-                    <tr
-                      key={job.id}
-                      className={cn(
-                        "border-b hover:bg-accent/30",
-                        selectedIds.has(job.id) && "bg-accent/40",
-                      )}
-                    >
-                      <td className="px-3 py-2">
-                        <input
-                          type="checkbox"
-                          className="h-4 w-4 cursor-pointer accent-primary"
-                          checked={selectedIds.has(job.id)}
-                          onChange={() => toggleOne(job.id)}
-                          aria-label={`Selecteaza ${formatMonitoringTarget(job)}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2 font-mono">
-                        {isDosar ? (
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="inline-flex min-w-[180px] flex-1 items-center">
-                              <a
-                                href={getPortalJustUrl(target)}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                title={`Deschide ${target} pe portal.just.ro`}
-                                className="inline-flex items-center gap-1 font-bold text-primary hover:text-primary/80 hover:underline"
-                              >
-                                {target}
-                                <ExternalLink className="h-3 w-3 shrink-0" />
-                              </a>
-                            </span>
-                            {onOpenDosar && (
-                              <Button
-                                variant="default"
-                                size="sm"
-                                onClick={() => {
-                                  onOpenDosar(target);
-                                  navigate("/dosare");
-                                }}
-                                title={`Deschide ${target} in lista Dosare`}
-                                // Match the visual size of the same button in
-                                // Alerts cards. There the parent has CSS
-                                // `zoom: ~0.833` (font Normal), so an
-                                // unscaled `size="sm" + text-[12.5px]` button
-                                // here looks bigger than the equivalent in
-                                // Alerts. Compensating with h-7 / px-2.5 /
-                                // text-[10.5px] / icon 3.5 keeps the two
-                                // pages visually consistent.
-                                className="h-7 gap-1.5 px-2.5 text-[10.5px]"
-                              >
-                                <Eye className="h-3.5 w-3.5" />
-                                Dosare
-                              </Button>
+          {jobs.length > 0 &&
+            (() => {
+              // Show "Detalii" column only when at least one job has scoped instances
+              // to surface (Info modal). Otherwise the column header occupies horizontal
+              // space without ever rendering content for any row.
+              const showDetailsColumn = jobs.some(
+                (job) => job.kind === "name_soap" && (getNameSoapInstitutie(job)?.length ?? 0) > 0
+              );
+              return (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-[13px]">
+                    <thead>
+                      <tr className="border-b text-left text-xs uppercase tracking-wider text-muted-foreground">
+                        <th className="w-8 px-3 py-2">
+                          <input
+                            type="checkbox"
+                            className="h-4 w-4 cursor-pointer accent-primary"
+                            checked={allSelected}
+                            ref={(el) => {
+                              if (el) el.indeterminate = someSelected;
+                            }}
+                            onChange={toggleAll}
+                            aria-label={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
+                            title={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
+                          />
+                        </th>
+                        <th className="px-3 py-2">Tinta</th>
+                        {showDetailsColumn && <th className="px-3 py-2 text-center">Detalii</th>}
+                        <th className="px-3 py-2">Cadenta</th>
+                        <th className="px-3 py-2">Ultima rulare</th>
+                        <th className="px-3 py-2">Urmatoarea verif.</th>
+                        <th className="px-3 py-2">Status</th>
+                        <th className="px-3 py-2 text-right">Actiuni</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {jobs.map((job) => {
+                        const target = formatMonitoringTarget(job);
+                        const isDosar = job.kind === "dosar_soap";
+                        return (
+                          <tr
+                            key={job.id}
+                            className={cn("border-b hover:bg-accent/30", selectedIds.has(job.id) && "bg-accent/40")}
+                          >
+                            <td className="px-3 py-2">
+                              <input
+                                type="checkbox"
+                                className="h-4 w-4 cursor-pointer accent-primary"
+                                checked={selectedIds.has(job.id)}
+                                onChange={() => toggleOne(job.id)}
+                                aria-label={`Selecteaza ${formatMonitoringTarget(job)}`}
+                              />
+                            </td>
+                            <td className="px-3 py-2 font-mono">
+                              {isDosar ? (
+                                <div className="flex items-center justify-between gap-2">
+                                  <span className="inline-flex min-w-[180px] flex-1 items-center">
+                                    <a
+                                      href={getPortalJustUrl(target)}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      title={`Deschide ${target} pe portal.just.ro`}
+                                      className="inline-flex items-center gap-1 font-bold text-primary hover:text-primary/80 hover:underline"
+                                    >
+                                      {target}
+                                      <ExternalLink className="h-3 w-3 shrink-0" />
+                                    </a>
+                                  </span>
+                                  {onOpenDosar && (
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      onClick={() => {
+                                        onOpenDosar(target);
+                                        navigate("/dosare");
+                                      }}
+                                      title={`Deschide ${target} in lista Dosare`}
+                                      // Match the visual size of the same button in
+                                      // Alerts cards. There the parent has CSS
+                                      // `zoom: ~0.833` (font Normal), so an
+                                      // unscaled `size="sm" + text-[12.5px]` button
+                                      // here looks bigger than the equivalent in
+                                      // Alerts. Compensating with h-7 / px-2.5 /
+                                      // text-[10.5px] / icon 3.5 keeps the two
+                                      // pages visually consistent.
+                                      className="h-7 gap-1.5 px-2.5 text-[10.5px]"
+                                    >
+                                      <Eye className="h-3.5 w-3.5" />
+                                      Dosare
+                                    </Button>
+                                  )}
+                                </div>
+                              ) : job.kind === "name_soap" ? (
+                                (() => {
+                                  const scope = getNameSoapInstitutie(job) ?? [];
+                                  const labels = scope.map(getInstitutieLabel);
+                                  return (
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="block min-w-[180px] flex-1 break-words font-bold leading-tight">
+                                        {target}
+                                      </span>
+                                      {onOpenName && (
+                                        <Button
+                                          variant="default"
+                                          size="sm"
+                                          onClick={() => {
+                                            onOpenName(target);
+                                            navigate("/dosare");
+                                          }}
+                                          title={`Cauta dosare pentru ${target}`}
+                                          className="h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
+                                        >
+                                          <Eye className="h-3.5 w-3.5" />
+                                          Dosare
+                                        </Button>
+                                      )}
+                                    </div>
+                                  );
+                                })()
+                              ) : (
+                                target
+                              )}
+                              {job.notes && (
+                                <div
+                                  className="mt-1 max-w-[420px] truncate text-xs italic text-muted-foreground font-sans"
+                                  title={job.notes}
+                                >
+                                  {job.notes}
+                                </div>
+                              )}
+                            </td>
+                            {showDetailsColumn && (
+                              <td className="px-3 py-2 text-center">
+                                {job.kind === "name_soap" &&
+                                  (() => {
+                                    const scope = getNameSoapInstitutie(job) ?? [];
+                                    if (scope.length === 0) return null;
+                                    return (
+                                      <button
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          setOpenInstantePopover(job.id);
+                                        }}
+                                        className="inline-flex h-5 w-5 items-center justify-center rounded-full text-yellow-500 hover:bg-yellow-100 hover:text-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-950 dark:hover:text-yellow-300"
+                                        title={`${scope.length} ${scope.length === 1 ? "instanta monitorizata" : "instante monitorizate"} — click pentru detalii`}
+                                        aria-label={`Vezi ${scope.length} ${scope.length === 1 ? "instanta" : "instante"}`}
+                                      >
+                                        <Info className="h-4 w-4" />
+                                      </button>
+                                    );
+                                  })()}
+                              </td>
                             )}
-                          </div>
-                        ) : job.kind === "name_soap" ? (
-                          (() => {
-                            const scope = getNameSoapInstitutie(job) ?? [];
-                            const labels = scope.map(getInstitutieLabel);
-                            return (
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="block min-w-[180px] flex-1 break-words font-bold leading-tight">
-                                  {target}
-                                </span>
-                                {onOpenName && (
-                                  <Button
-                                    variant="default"
-                                    size="sm"
-                                    onClick={() => {
-                                      onOpenName(target);
-                                      navigate("/dosare");
-                                    }}
-                                    title={`Cauta dosare pentru ${target}`}
-                                    className="h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
+                            <td className="px-3 py-2">
+                              {(() => {
+                                const isStandard = CADENCE_OPTIONS.some((o) => o.sec === job.cadence_sec);
+                                return (
+                                  <Select
+                                    value={String(job.cadence_sec)}
+                                    onValueChange={(v) => handleCadenceChange(job, Number(v))}
                                   >
-                                    <Eye className="h-3.5 w-3.5" />
-                                    Dosare
-                                  </Button>
-                                )}
+                                    <SelectTrigger
+                                      className={cn(
+                                        "h-8 px-2 text-xs",
+                                        !isStandard && "border-amber-500 text-amber-700 dark:text-amber-400"
+                                      )}
+                                      title={
+                                        isStandard
+                                          ? "Modifica intervalul de verificare"
+                                          : `Cadenta non-standard (${formatCadence(job.cadence_sec)}). Alege o optiune din lista pentru a o normaliza.`
+                                      }
+                                    >
+                                      <SelectValue placeholder="-" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      {!isStandard && (
+                                        <SelectItem value={String(job.cadence_sec)}>
+                                          {formatCadence(job.cadence_sec)} (custom)
+                                        </SelectItem>
+                                      )}
+                                      {CADENCE_OPTIONS.map((opt) => (
+                                        <SelectItem key={opt.sec} value={String(opt.sec)}>
+                                          {opt.label}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                );
+                              })()}
+                            </td>
+                            <td className="px-3 py-2">{formatIsoDateTime(job.last_run_at)}</td>
+                            <td className="px-3 py-2">{formatIsoDateTime(job.next_run_at)}</td>
+                            <td className="px-3 py-2">
+                              {job.active ? (
+                                <span className="text-xs rounded-md bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                                  activ
+                                </span>
+                              ) : (
+                                <span className="text-xs rounded-md bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
+                                  pauza
+                                </span>
+                              )}
+                              {job.last_status && (
+                                <span
+                                  className={cn(
+                                    "ml-1 text-xs rounded-md px-2 py-0.5",
+                                    job.last_status === "ok" &&
+                                      "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                                    job.last_status === "error" &&
+                                      "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                                    (job.last_status === "partial" || job.last_status === "skipped") &&
+                                      "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+                                  )}
+                                >
+                                  {job.last_status}
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-3 py-2 text-right">
+                              <div className="inline-flex gap-1">
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  title={job.active ? "Pauza" : "Reia"}
+                                  onClick={() => handleToggleActive(job)}
+                                >
+                                  {job.active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+                                </Button>
+                                <Button variant="ghost" size="icon" title="Sterge" onClick={() => handleDelete(job)}>
+                                  <Trash2 className="h-4 w-4 text-red-600" />
+                                </Button>
                               </div>
-                            );
-                          })()
-                        ) : (
-                          target
-                        )}
-                        {job.notes && (
-                          <div
-                            className="mt-1 max-w-[420px] truncate text-xs italic text-muted-foreground font-sans"
-                            title={job.notes}
-                          >
-                            {job.notes}
-                          </div>
-                        )}
-                      </td>
-                      {showDetailsColumn && (
-                        <td className="px-3 py-2 text-center">
-                          {job.kind === "name_soap" && (() => {
-                            const scope = getNameSoapInstitutie(job) ?? [];
-                            if (scope.length === 0) return null;
-                            return (
-                              <button
-                                type="button"
-                                onClick={(e) => {
-                                  e.stopPropagation();
-                                  setOpenInstantePopover(job.id);
-                                }}
-                                className="inline-flex h-5 w-5 items-center justify-center rounded-full text-yellow-500 hover:bg-yellow-100 hover:text-yellow-600 dark:text-yellow-400 dark:hover:bg-yellow-950 dark:hover:text-yellow-300"
-                                title={`${scope.length} ${scope.length === 1 ? "instanta monitorizata" : "instante monitorizate"} — click pentru detalii`}
-                                aria-label={`Vezi ${scope.length} ${scope.length === 1 ? "instanta" : "instante"}`}
-                              >
-                                <Info className="h-4 w-4" />
-                              </button>
-                            );
-                          })()}
-                        </td>
-                      )}
-                      <td className="px-3 py-2">
-                        {(() => {
-                          const isStandard = CADENCE_OPTIONS.some((o) => o.sec === job.cadence_sec);
-                          return (
-                            <Select
-                              value={String(job.cadence_sec)}
-                              onValueChange={(v) => handleCadenceChange(job, Number(v))}
-                            >
-                              <SelectTrigger
-                                className={cn(
-                                  "h-8 px-2 text-xs",
-                                  !isStandard && "border-amber-500 text-amber-700 dark:text-amber-400",
-                                )}
-                                title={
-                                  isStandard
-                                    ? "Modifica intervalul de verificare"
-                                    : `Cadenta non-standard (${formatCadence(job.cadence_sec)}). Alege o optiune din lista pentru a o normaliza.`
-                                }
-                              >
-                                <SelectValue placeholder="-" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {!isStandard && (
-                                  <SelectItem value={String(job.cadence_sec)}>
-                                    {formatCadence(job.cadence_sec)} (custom)
-                                  </SelectItem>
-                                )}
-                                {CADENCE_OPTIONS.map((opt) => (
-                                  <SelectItem key={opt.sec} value={String(opt.sec)}>
-                                    {opt.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          );
-                        })()}
-                      </td>
-                      <td className="px-3 py-2">
-                        {formatIsoDateTime(job.last_run_at)}
-                      </td>
-                      <td className="px-3 py-2">
-                        {formatIsoDateTime(job.next_run_at)}
-                      </td>
-                      <td className="px-3 py-2">
-                        {job.active ? (
-                          <span className="text-xs rounded-md bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                            activ
-                          </span>
-                        ) : (
-                          <span className="text-xs rounded-md bg-gray-100 px-2 py-0.5 text-gray-600 dark:bg-gray-800 dark:text-gray-300">
-                            pauza
-                          </span>
-                        )}
-                        {job.last_status && (
-                          <span
-                            className={cn(
-                              "ml-1 text-xs rounded-md px-2 py-0.5",
-                              job.last_status === "ok" && "bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-                              job.last_status === "error" && "bg-red-50 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-                              (job.last_status === "partial" || job.last_status === "skipped") && "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400",
-                            )}
-                          >
-                            {job.last_status}
-                          </span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right">
-                        <div className="inline-flex gap-1">
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title={job.active ? "Pauza" : "Reia"}
-                            onClick={() => handleToggleActive(job)}
-                          >
-                            {job.active ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
-                          </Button>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            title="Sterge"
-                            onClick={() => handleDelete(job)}
-                          >
-                            <Trash2 className="h-4 w-4 text-red-600" />
-                          </Button>
-                        </div>
-                      </td>
-                    </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-            );
-          })()}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
           {total > 0 && (
             <TablePagination
               page={page}
@@ -696,56 +676,57 @@ export default function Monitorizare({
           )}
         </CardContent>
       </Card>
-      {openInstantePopover !== null && (() => {
-        const job = jobs.find((j) => j.id === openInstantePopover);
-        if (!job || job.kind !== "name_soap") return null;
-        const scope = getNameSoapInstitutie(job) ?? [];
-        const labels = scope.map(getInstitutieLabel);
-        if (labels.length === 0) return null;
-        return (
-          <div
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-            onClick={() => setOpenInstantePopover(null)}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="instante-modal-title"
-          >
+      {openInstantePopover !== null &&
+        (() => {
+          const job = jobs.find((j) => j.id === openInstantePopover);
+          if (!job || job.kind !== "name_soap") return null;
+          const scope = getNameSoapInstitutie(job) ?? [];
+          const labels = scope.map(getInstitutieLabel);
+          if (labels.length === 0) return null;
+          return (
             <div
-              className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl"
-              onClick={(e) => e.stopPropagation()}
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+              onClick={() => setOpenInstantePopover(null)}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="instante-modal-title"
             >
-              <div className="mb-3 flex items-start justify-between gap-3 border-b border-border pb-2">
-                <div className="min-w-0">
-                  <h3 id="instante-modal-title" className="text-[15px] font-semibold text-foreground">
-                    Instante monitorizate ({labels.length})
-                  </h3>
-                  <p className="mt-0.5 truncate text-[13px] font-medium text-foreground/80">
-                    {formatMonitoringTarget(job)}
-                  </p>
+              <div
+                className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="mb-3 flex items-start justify-between gap-3 border-b border-border pb-2">
+                  <div className="min-w-0">
+                    <h3 id="instante-modal-title" className="text-[15px] font-semibold text-foreground">
+                      Instante monitorizate ({labels.length})
+                    </h3>
+                    <p className="mt-0.5 truncate text-[13px] font-medium text-foreground/80">
+                      {formatMonitoringTarget(job)}
+                    </p>
+                  </div>
+                  <button
+                    ref={modalCloseRef}
+                    type="button"
+                    onClick={() => setOpenInstantePopover(null)}
+                    className="rounded p-1 text-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
+                    title="Inchide"
+                    aria-label="Inchide"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
                 </div>
-                <button
-                  ref={modalCloseRef}
-                  type="button"
-                  onClick={() => setOpenInstantePopover(null)}
-                  className="rounded p-1 text-foreground hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-amber-500"
-                  title="Inchide"
-                  aria-label="Inchide"
-                >
-                  <X className="h-4 w-4" />
-                </button>
+                <ul className="max-h-[60vh] space-y-1 overflow-y-auto text-[13px] text-foreground">
+                  {labels.map((label) => (
+                    <li key={label} className="flex items-start gap-2 py-1">
+                      <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+                      <span>{label}</span>
+                    </li>
+                  ))}
+                </ul>
               </div>
-              <ul className="max-h-[60vh] space-y-1 overflow-y-auto text-[13px] text-foreground">
-                {labels.map((label) => (
-                  <li key={label} className="flex items-start gap-2 py-1">
-                    <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
-                    <span>{label}</span>
-                  </li>
-                ))}
-              </ul>
             </div>
-          </div>
-        );
-      })()}
+          );
+        })()}
     </div>
   );
 }

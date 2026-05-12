@@ -7,7 +7,11 @@ import type { PJField, PFField, SiSauField, TextField } from "./rnpm-form-hooks"
 
 // Container pliabil cu legenda-buton. Starea e locala (collapse = doar UI, nu afecteaza submit-ul).
 export function CollapsibleFieldset({
-  legend, defaultOpen = false, compact = false, colSpan2 = false, children,
+  legend,
+  defaultOpen = false,
+  compact = false,
+  colSpan2 = false,
+  children,
 }: { legend: string; defaultOpen?: boolean; compact?: boolean; colSpan2?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(defaultOpen);
   return (
@@ -25,7 +29,13 @@ export function CollapsibleFieldset({
   );
 }
 
-export function SiSauInput({ placeholder, value, onChange, op, onOpChange }: {
+export function SiSauInput({
+  placeholder,
+  value,
+  onChange,
+  op,
+  onOpChange,
+}: {
   placeholder: string;
   value: string;
   onChange: (v: string) => void;
@@ -80,23 +90,46 @@ export function PJPFToggle({ value, onChange }: { value: "PJ" | "PF"; onChange: 
   );
 }
 
-export function PJBlock({ field, showReg = false, compact = false }: { field: PJField; showReg?: boolean; compact?: boolean }) {
+export function PJBlock({
+  field,
+  showReg = false,
+  compact = false,
+}: { field: PJField; showReg?: boolean; compact?: boolean }) {
   // Compact: layout orizontal (2 sau 3 coloane in functie de showReg) pe ecrane >=md.
-  const wrapCls = compact
-    ? cn("grid gap-1.5", showReg ? "md:grid-cols-3" : "md:grid-cols-2")
-    : "space-y-2";
+  const wrapCls = compact ? cn("grid gap-1.5", showReg ? "md:grid-cols-3" : "md:grid-cols-2") : "space-y-2";
   return (
     <div className={wrapCls}>
-      <Input placeholder="Denumire" value={field.denumire.value} onChange={(e) => field.denumire.setValue(e.target.value)} />
+      <Input
+        placeholder="Denumire"
+        value={field.denumire.value}
+        onChange={(e) => field.denumire.setValue(e.target.value)}
+      />
       {showReg && (
-        <SiSauInput placeholder="Nr. Reg. Comertului" value={field.reg.value} onChange={field.reg.setValue} op={field.reg.op} onOpChange={field.reg.setOp} />
+        <SiSauInput
+          placeholder="Nr. Reg. Comertului"
+          value={field.reg.value}
+          onChange={field.reg.setValue}
+          op={field.reg.op}
+          onOpChange={field.reg.setOp}
+        />
       )}
-      <SiSauInput placeholder="CUI" value={field.cui.value} onChange={field.cui.setValue} op={field.cui.op} onOpChange={field.cui.setOp} />
+      <SiSauInput
+        placeholder="CUI"
+        value={field.cui.value}
+        onChange={field.cui.setValue}
+        op={field.cui.op}
+        onOpChange={field.cui.setOp}
+      />
     </div>
   );
 }
 
-export function PFBlock({ field, showPrenume = false, numePlaceholder = "Nume", compact = false }: { field: PFField; showPrenume?: boolean; numePlaceholder?: string; compact?: boolean }) {
+export function PFBlock({
+  field,
+  showPrenume = false,
+  numePlaceholder = "Nume",
+  compact = false,
+}: { field: PFField; showPrenume?: boolean; numePlaceholder?: string; compact?: boolean }) {
   // Compact cu Prenume: CNP merge pe rand propriu ca sa aiba loc pentru toate 13 cifrele chiar
   // si cand fieldset-ul sta pe jumatate de container (Debitor + Creditor lipite). Nume + Prenume
   // impart primul rand 50/50. Restul cazurilor (non-compact, sau compact fara Prenume) raman inline.
@@ -106,8 +139,16 @@ export function PFBlock({ field, showPrenume = false, numePlaceholder = "Nume", 
     // iar Nume si Prenume au latime input identica (fara spacer artificial).
     return (
       <div className="grid gap-1.5 md:grid-cols-[1fr_1fr_auto]">
-        <Input placeholder={numePlaceholder} value={field.nume.value} onChange={(e) => field.nume.setValue(e.target.value)} />
-        <Input placeholder="Prenume" value={field.prenume.value} onChange={(e) => field.prenume.setValue(e.target.value)} />
+        <Input
+          placeholder={numePlaceholder}
+          value={field.nume.value}
+          onChange={(e) => field.nume.setValue(e.target.value)}
+        />
+        <Input
+          placeholder="Prenume"
+          value={field.prenume.value}
+          onChange={(e) => field.prenume.setValue(e.target.value)}
+        />
         <SiSauToggle value={field.prenume.op} onChange={field.prenume.setOp} />
         <Input placeholder="CNP" value={field.cnp.value} onChange={(e) => field.cnp.setValue(e.target.value)} />
         <div aria-hidden />
@@ -118,15 +159,32 @@ export function PFBlock({ field, showPrenume = false, numePlaceholder = "Nume", 
   const wrapCls = compact ? "grid gap-1.5 md:grid-cols-[1fr_minmax(210px,1.4fr)]" : "space-y-2";
   return (
     <div className={wrapCls}>
-      <Input placeholder={numePlaceholder} value={field.nume.value} onChange={(e) => field.nume.setValue(e.target.value)} />
-      <SiSauInput placeholder="CNP" value={field.cnp.value} onChange={field.cnp.setValue} op={field.cnp.op} onOpChange={field.cnp.setOp} />
+      <Input
+        placeholder={numePlaceholder}
+        value={field.nume.value}
+        onChange={(e) => field.nume.setValue(e.target.value)}
+      />
+      <SiSauInput
+        placeholder="CNP"
+        value={field.cnp.value}
+        onChange={field.cnp.setValue}
+        op={field.cnp.op}
+        onOpChange={field.cnp.setOp}
+      />
     </div>
   );
 }
 
 export function PartyFieldset({
-  legend, tip, onTipChange, pj, pf,
-  pjShowReg = false, pfShowPrenume = false, pfNumePlaceholder = "Nume", compact = false,
+  legend,
+  tip,
+  onTipChange,
+  pj,
+  pf,
+  pjShowReg = false,
+  pfShowPrenume = false,
+  pfNumePlaceholder = "Nume",
+  compact = false,
 }: {
   legend: string;
   tip: "PJ" | "PF";
@@ -142,28 +200,55 @@ export function PartyFieldset({
     <fieldset className={cn("rounded-lg border border-border", compact ? "p-2" : "p-3")}>
       <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{legend}</legend>
       <PJPFToggle value={tip} onChange={onTipChange} />
-      {tip === "PJ"
-        ? <PJBlock field={pj} showReg={pjShowReg} compact={compact} />
-        : <PFBlock field={pf} showPrenume={pfShowPrenume} numePlaceholder={pfNumePlaceholder} compact={compact} />}
+      {tip === "PJ" ? (
+        <PJBlock field={pj} showReg={pjShowReg} compact={compact} />
+      ) : (
+        <PFBlock field={pf} showPrenume={pfShowPrenume} numePlaceholder={pfNumePlaceholder} compact={compact} />
+      )}
     </fieldset>
   );
 }
 
-export function VehiculFieldset({ model, sasiu, imatr, cols = 1, compact = false, collapsible = false }: { model: TextField; sasiu: SiSauField; imatr: SiSauField; cols?: 1 | 3; compact?: boolean; collapsible?: boolean }) {
+export function VehiculFieldset({
+  model,
+  sasiu,
+  imatr,
+  cols = 1,
+  compact = false,
+  collapsible = false,
+}: { model: TextField; sasiu: SiSauField; imatr: SiSauField; cols?: 1 | 3; compact?: boolean; collapsible?: boolean }) {
   const gridCls = cols === 3 ? "grid gap-2 md:grid-cols-3" : "space-y-2";
   const body = (
     <div className={gridCls}>
       <Input placeholder="Model" value={model.value} onChange={(e) => model.setValue(e.target.value)} />
-      <SiSauInput placeholder="Serie sasiu" value={sasiu.value} onChange={sasiu.setValue} op={sasiu.op} onOpChange={sasiu.setOp} />
-      <SiSauInput placeholder="Nr. inmatriculare" value={imatr.value} onChange={imatr.setValue} op={imatr.op} onOpChange={imatr.setOp} />
+      <SiSauInput
+        placeholder="Serie sasiu"
+        value={sasiu.value}
+        onChange={sasiu.setValue}
+        op={sasiu.op}
+        onOpChange={sasiu.setOp}
+      />
+      <SiSauInput
+        placeholder="Nr. inmatriculare"
+        value={imatr.value}
+        onChange={imatr.setValue}
+        op={imatr.op}
+        onOpChange={imatr.setOp}
+      />
     </div>
   );
   if (collapsible) {
-    return <CollapsibleFieldset legend="Vehicul (bun garantat)" compact={compact} colSpan2={cols === 3}>{body}</CollapsibleFieldset>;
+    return (
+      <CollapsibleFieldset legend="Vehicul (bun garantat)" compact={compact} colSpan2={cols === 3}>
+        {body}
+      </CollapsibleFieldset>
+    );
   }
   return (
     <fieldset className={cn("rounded-lg border border-border", compact ? "p-2" : "p-3", cols === 3 && "md:col-span-2")}>
-      <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vehicul (bun garantat)</legend>
+      <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        Vehicul (bun garantat)
+      </legend>
       {body}
     </fieldset>
   );
@@ -178,7 +263,11 @@ export function DestinatieSelect({ field, values }: { field: SiSauField; values:
         </SelectTrigger>
         <SelectContent>
           <SelectItem value="">-- selecteaza --</SelectItem>
-          {values.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+          {values.map((d) => (
+            <SelectItem key={d} value={d}>
+              {d}
+            </SelectItem>
+          ))}
         </SelectContent>
       </Select>
       <SiSauToggle value={field.op} onChange={field.setOp} />

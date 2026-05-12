@@ -90,27 +90,20 @@ export function discoverMigrations(migrationsDir: string): MigrationFile[] {
 
   for (let i = 1; i < files.length; i++) {
     if (files[i].version === files[i - 1].version) {
-      throw new Error(
-        `[migrations] duplicate version ${files[i].version}: ${files[i - 1].name} vs ${files[i].name}`,
-      );
+      throw new Error(`[migrations] duplicate version ${files[i].version}: ${files[i - 1].name} vs ${files[i].name}`);
     }
   }
   // Versions must be contiguous starting at 1. A gap means a file was deleted or
   // a future PR was merged out of order - refuse to boot rather than guess.
   files.forEach((f, idx) => {
     if (f.version !== idx + 1) {
-      throw new Error(
-        `[migrations] non-contiguous: expected version ${idx + 1}, got ${f.version} (${f.name})`,
-      );
+      throw new Error(`[migrations] non-contiguous: expected version ${idx + 1}, got ${f.version} (${f.name})`);
     }
   });
   return files;
 }
 
-export function runMigrations(
-  db: Database.Database,
-  migrationsDir: string,
-): RunMigrationsResult {
+export function runMigrations(db: Database.Database, migrationsDir: string): RunMigrationsResult {
   db.exec(`
     CREATE TABLE IF NOT EXISTS _schema_versions (
       version    INTEGER PRIMARY KEY,
@@ -120,9 +113,10 @@ export function runMigrations(
   `);
 
   const files = discoverMigrations(migrationsDir);
-  const appliedRows = db
-    .prepare("SELECT version, sha256_up FROM _schema_versions ORDER BY version")
-    .all() as { version: number; sha256_up: string }[];
+  const appliedRows = db.prepare("SELECT version, sha256_up FROM _schema_versions ORDER BY version").all() as {
+    version: number;
+    sha256_up: string;
+  }[];
   const applied = new Map<number, string>(appliedRows.map((r) => [r.version, r.sha256_up]));
 
   // Backfill: legacy install with full schema but empty _schema_versions.
@@ -134,14 +128,12 @@ export function runMigrations(
       db
         .prepare(
           `SELECT COUNT(*) AS n FROM sqlite_master
-           WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' AND name != '_schema_versions'`,
+           WHERE type IN ('table','view') AND name NOT LIKE 'sqlite_%' AND name != '_schema_versions'`
         )
         .get() as { n: number }
     ).n;
     if (userTables > 0) {
-      db
-        .prepare("INSERT INTO _schema_versions(version, sha256_up) VALUES (1, ?)")
-        .run(BACKFILL_SENTINEL);
+      db.prepare("INSERT INTO _schema_versions(version, sha256_up) VALUES (1, ?)").run(BACKFILL_SENTINEL);
       applied.set(1, BACKFILL_SENTINEL);
       backfilled = true;
     }
@@ -154,7 +146,7 @@ export function runMigrations(
     if (v > maxFileVersion) {
       throw new Error(
         `[migrations] DB has version ${v} but no migration file matches (max on disk: ${maxFileVersion}). ` +
-          `Did you check out an older commit against a newer DB?`,
+          `Did you check out an older commit against a newer DB?`
       );
     }
   }
@@ -191,27 +183,21 @@ export function runMigrations(
         // Daca *oricare* dintre cele doua hash-uri match, continutul nu s-a
         // schimbat - rescriem stored la varianta normalizata si continuam.
         // Daca nici unul nu match, e drift real si abortam.
-        const healMatch = stored === file.sha256Raw
-          ? "raw"
-          : stored === file.sha256Crlf
-            ? "crlf"
-            : null;
+        const healMatch = stored === file.sha256Raw ? "raw" : stored === file.sha256Crlf ? "crlf" : null;
         if (healMatch !== null) {
           if (strictMode) {
             throw new Error(
-              `[migrations] hash mismatch for ${file.name} (would self-heal via ${healMatch}, but MIGRATIONS_STRICT=1)`,
+              `[migrations] hash mismatch for ${file.name} (would self-heal via ${healMatch}, but MIGRATIONS_STRICT=1)`
             );
           }
-          db
-            .prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = ?")
-            .run(file.sha256, file.version);
+          db.prepare("UPDATE _schema_versions SET sha256_up = ? WHERE version = ?").run(file.sha256, file.version);
           applied.set(file.version, file.sha256);
           result.selfHealed.push(file.version);
           continue;
         }
         throw new Error(
           `[migrations] hash mismatch for ${file.name}: stored=${stored} computed=${file.sha256}. ` +
-            `Migration files are immutable once applied - create a new ${String(file.version + 1).padStart(4, "0")}_*.up.sql to evolve the schema.`,
+            `Migration files are immutable once applied - create a new ${String(file.version + 1).padStart(4, "0")}_*.up.sql to evolve the schema.`
         );
       }
       result.skipped.push(file.version);
@@ -221,9 +207,7 @@ export function runMigrations(
     // New migration -> execute SQL + record version atomically.
     const apply = db.transaction(() => {
       db.exec(file.sql);
-      db
-        .prepare("INSERT INTO _schema_versions(version, sha256_up) VALUES (?, ?)")
-        .run(file.version, file.sha256);
+      db.prepare("INSERT INTO _schema_versions(version, sha256_up) VALUES (?, ?)").run(file.version, file.sha256);
     });
     apply();
     result.applied.push(file.version);

@@ -65,13 +65,13 @@ export function mergeRow(ws: Record<string, unknown>, r: number, numCols: number
 
 // ─── Style palette + base styles ──────────────────────────────────────────────
 
-export const BLUE_DARK  = "1E40AF"; // title background
-export const BLUE_MAIN  = "2563EB"; // header row
+export const BLUE_DARK = "1E40AF"; // title background
+export const BLUE_MAIN = "2563EB"; // header row
 export const BLUE_LIGHT = "DBEAFE"; // section group header
-export const ROW_ALT    = "EFF6FF"; // alternating data row tint
-export const WHITE      = "FFFFFF";
-export const TEXT_DARK  = "111827";
-export const TEXT_MID   = "374151";
+export const ROW_ALT = "EFF6FF"; // alternating data row tint
+export const WHITE = "FFFFFF";
+export const TEXT_DARK = "111827";
+export const TEXT_MID = "374151";
 
 export const styleTitle = {
   font: { bold: true, sz: 13, color: { rgb: WHITE } },

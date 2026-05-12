@@ -1,14 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlertCircle, BarChart3, Bot, Clock3, RefreshCw, Zap } from "lucide-react";
-import {
-  Area,
-  AreaChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
+import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { aiUsageApi, type AiUsageDailyPoint, type AiUsageSummaryResult } from "@/lib/aiUsageApi";
@@ -52,13 +44,11 @@ function totalTokens(point: Pick<AiUsageDailyPoint, "inputTokens" | "outputToken
 function isUsageEmpty(data: AiUsageSummaryResult | null): boolean {
   if (!data) return true;
   const totalSummary =
-    data.summary30d.costUsd +
-    data.summary30d.calls +
-    data.summary30d.inputTokens +
-    data.summary30d.outputTokens;
-  const totalDaily = data.daily.reduce((sum, point) => (
-    sum + point.costUsd + point.calls + point.inputTokens + point.outputTokens
-  ), 0);
+    data.summary30d.costUsd + data.summary30d.calls + data.summary30d.inputTokens + data.summary30d.outputTokens;
+  const totalDaily = data.daily.reduce(
+    (sum, point) => sum + point.costUsd + point.calls + point.inputTokens + point.outputTokens,
+    0
+  );
   return totalSummary === 0 && totalDaily === 0;
 }
 
@@ -309,9 +299,10 @@ function MetricTile({
   detail: string;
   tone: "sky" | "emerald";
 }) {
-  const toneClass = tone === "sky"
-    ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
-    : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+  const toneClass =
+    tone === "sky"
+      ? "bg-sky-500/10 text-sky-600 dark:text-sky-400"
+      : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
   return (
     <div className="flex items-center gap-3 rounded-lg border border-border bg-card p-3">
       <div className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg", toneClass)}>

@@ -33,12 +33,7 @@ function assertFeature(feature: string): void {
 }
 
 function assertLimit(milli: number): void {
-  if (
-    typeof milli !== "number"
-    || !Number.isFinite(milli)
-    || !Number.isInteger(milli)
-    || milli < 0
-  ) {
+  if (typeof milli !== "number" || !Number.isFinite(milli) || !Number.isInteger(milli) || milli < 0) {
     throw new Error("invalid daily_limit_usd_milli: must be non-negative integer");
   }
 }
@@ -48,7 +43,7 @@ export function listOverridesForUser(userId: string): QuotaOverrideRow[] {
     .prepare(
       `SELECT ${COLUMNS} FROM user_quota_overrides
        WHERE user_id = ?
-       ORDER BY feature ASC`,
+       ORDER BY feature ASC`
     )
     .all(userId) as QuotaOverrideRow[];
 }
@@ -57,7 +52,7 @@ export function getOverride(userId: string, feature: string): QuotaOverrideRow |
   const row = getDb()
     .prepare(
       `SELECT ${COLUMNS} FROM user_quota_overrides
-       WHERE user_id = ? AND feature = ?`,
+       WHERE user_id = ? AND feature = ?`
     )
     .get(userId, feature) as QuotaOverrideRow | undefined;
   return row ?? null;
@@ -79,7 +74,7 @@ export function upsertOverride(input: UpsertOverrideInput): QuotaOverrideRow {
      ON CONFLICT(user_id, feature) DO UPDATE SET
        daily_limit_usd_milli = excluded.daily_limit_usd_milli,
        updated_at = excluded.updated_at,
-       updated_by = excluded.updated_by`,
+       updated_by = excluded.updated_by`
   ).run(input.userId, input.feature, input.dailyLimitUsdMilli, input.updatedBy ?? null);
 
   return getOverride(input.userId, input.feature) as QuotaOverrideRow;

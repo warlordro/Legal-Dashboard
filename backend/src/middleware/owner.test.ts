@@ -51,7 +51,7 @@ function buildApp() {
     c.json({
       ownerId: getOwnerId(c),
       actorId: getActorId(c),
-    }),
+    })
   );
   app.get("/health", (c) => c.json({ ok: true }));
   return app;

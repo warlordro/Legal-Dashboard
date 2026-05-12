@@ -34,7 +34,7 @@ describe("estimateAiCostUsdMilli", () => {
         model: "claude-sonnet-4-6",
         inputTokens: 1_000_000,
         outputTokens: 1_000_000,
-      }),
+      })
     ).toBe(18_000);
   });
 
@@ -45,13 +45,13 @@ describe("estimateAiCostUsdMilli", () => {
         model: "unknown-model",
         inputTokens: 1_000_000,
         outputTokens: 1_000_000,
-      }),
+      })
     ).toBe(0);
     expect(
       estimateAiCostUsdMilli({
         provider: "openai",
         model: "gpt-5.4-mini",
-      }),
+      })
     ).toBe(0);
   });
 });
@@ -82,9 +82,7 @@ describe("AI service usage tracking", () => {
       "openai",
       "gpt-5.4-mini",
       async () => {
-        rowsBeforeResolve = (
-          getDb().prepare(`SELECT COUNT(*) AS n FROM ai_usage`).get() as { n: number }
-        ).n;
+        rowsBeforeResolve = (getDb().prepare(`SELECT COUNT(*) AS n FROM ai_usage`).get() as { n: number }).n;
         return {
           value: "analysis text",
           meta: { usageInput: 1_000_000, usageOutput: 1_000_000, httpStatus: 200 },
@@ -94,24 +92,22 @@ describe("AI service usage tracking", () => {
         ownerId: "alice",
         feature: "dosar_summary",
         requestId: "req-write-after-call",
-      },
+      }
     );
 
     expect(result).toBe("analysis text");
     expect(rowsBeforeResolve).toBe(0);
 
-    const row = getDb()
-      .prepare(`SELECT * FROM ai_usage`)
-      .get() as {
-        owner_id: string;
-        provider: string;
-        model: string;
-        input_tokens: number;
-        output_tokens: number;
-        cost_usd_milli: number;
-        request_id: string;
-        feature: string;
-      };
+    const row = getDb().prepare(`SELECT * FROM ai_usage`).get() as {
+      owner_id: string;
+      provider: string;
+      model: string;
+      input_tokens: number;
+      output_tokens: number;
+      cost_usd_milli: number;
+      request_id: string;
+      feature: string;
+    };
 
     expect(row.owner_id).toBe("alice");
     expect(row.provider).toBe("openai");
@@ -137,8 +133,8 @@ describe("AI service usage tracking", () => {
         async () => {
           throw sdkError;
         },
-        { ownerId: "alice", feature: "dosar_summary", requestId: "req-error" },
-      ),
+        { ownerId: "alice", feature: "dosar_summary", requestId: "req-error" }
+      )
     ).rejects.toBe(sdkError);
 
     // Microtask defer in recordAiUsageSafely lands the row after the rejection
@@ -146,15 +142,13 @@ describe("AI service usage tracking", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const row = getDb()
-      .prepare(`SELECT * FROM ai_usage`)
-      .get() as {
-        owner_id: string;
-        http_status: number | null;
-        was_aborted: number;
-        input_tokens: number;
-        request_id: string;
-      };
+    const row = getDb().prepare(`SELECT * FROM ai_usage`).get() as {
+      owner_id: string;
+      http_status: number | null;
+      was_aborted: number;
+      input_tokens: number;
+      request_id: string;
+    };
     expect(row.owner_id).toBe("alice");
     expect(row.http_status).toBe(429);
     expect(row.was_aborted).toBe(0);
@@ -171,15 +165,13 @@ describe("AI service usage tracking", () => {
         async () => {
           throw sdkError;
         },
-        { ownerId: "alice", feature: "dosar_summary" },
-      ),
+        { ownerId: "alice", feature: "dosar_summary" }
+      )
     ).rejects.toBe(sdkError);
     await Promise.resolve();
     await Promise.resolve();
 
-    const row = getDb()
-      .prepare(`SELECT http_status FROM ai_usage`)
-      .get() as { http_status: number | null };
+    const row = getDb().prepare(`SELECT http_status FROM ai_usage`).get() as { http_status: number | null };
     expect(row.http_status).toBeNull();
   });
 
@@ -187,7 +179,7 @@ describe("AI service usage tracking", () => {
     const value = await withAiLogging(
       "openai",
       "gpt-5.4-mini",
-      async () => ({ value: "x", meta: { usageInput: 5, usageOutput: 0, httpStatus: 200 } }),
+      async () => ({ value: "x", meta: { usageInput: 5, usageOutput: 0, httpStatus: 200 } })
       // tracking deliberately undefined
     );
     expect(value).toBe("x");

@@ -37,7 +37,9 @@ export function ChangelogDialog({
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
             <ScrollText className="h-5 w-5 text-violet-500" />
-            <h2 id="changelog-title" className="text-lg font-bold">Noutati</h2>
+            <h2 id="changelog-title" className="text-lg font-bold">
+              Noutati
+            </h2>
             <Badge className="bg-violet-100 text-violet-800 dark:bg-violet-900/30 dark:text-violet-400 text-xs font-bold">
               {appVersion}
             </Badge>
@@ -83,10 +85,10 @@ export function ManualDialog({
         <div className="flex items-center justify-between border-b border-border px-6 py-4">
           <div className="flex items-center gap-3">
             <BookOpen className="h-5 w-5 text-primary" />
-            <h2 id="manual-title" className="text-lg font-bold">Manual de Utilizare</h2>
-            <Badge className="bg-primary/10 text-primary text-xs font-bold">
-              {appVersion}
-            </Badge>
+            <h2 id="manual-title" className="text-lg font-bold">
+              Manual de Utilizare
+            </h2>
+            <Badge className="bg-primary/10 text-primary text-xs font-bold">{appVersion}</Badge>
           </div>
           <Button variant="ghost" size="sm" onClick={onClose} aria-label="Inchide manual">
             <X className="h-4 w-4" />

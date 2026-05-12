@@ -101,7 +101,7 @@ export function createJob(input: CreateJobInput): CreateJobResult {
     const existing = db
       .prepare(
         `SELECT * FROM monitoring_jobs
-         WHERE owner_id = ? AND client_request_id = ?`,
+         WHERE owner_id = ? AND client_request_id = ?`
       )
       .get(ownerId, body.client_request_id) as MonitoringJobRow | undefined;
     if (existing) {
@@ -117,7 +117,7 @@ export function createJob(input: CreateJobInput): CreateJobResult {
   const existingByTarget = db
     .prepare(
       `SELECT * FROM monitoring_jobs
-       WHERE owner_id = ? AND target_hash = ? AND kind = ?`,
+       WHERE owner_id = ? AND target_hash = ? AND kind = ?`
     )
     .get(ownerId, targetHash, body.kind) as MonitoringJobRow | undefined;
   if (existingByTarget) {
@@ -131,7 +131,7 @@ export function createJob(input: CreateJobInput): CreateJobResult {
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at, notes, client_request_id,
           name_list_id)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       ownerId,
@@ -143,20 +143,18 @@ export function createJob(input: CreateJobInput): CreateJobResult {
       nextRunAt,
       body.notes ?? null,
       body.client_request_id ?? null,
-      input.nameListId ?? null,
+      input.nameListId ?? null
     );
 
-  const job = db
-    .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
-    .get(result.lastInsertRowid) as MonitoringJobRow;
+  const job = db.prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(result.lastInsertRowid) as MonitoringJobRow;
 
   return { job, duplicate: false, idempotentReplay: false };
 }
 
 export function getJobById(ownerId: string, id: number): MonitoringJobRow | null {
-  const row = getDb()
-    .prepare(`SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
-    .get(id, ownerId) as MonitoringJobRow | undefined;
+  const row = getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+    | MonitoringJobRow
+    | undefined;
   return row ?? null;
 }
 
@@ -165,11 +163,7 @@ export function getJobById(ownerId: string, id: number): MonitoringJobRow | null
 // distinge "row inexistent" (nu se auditeaza) de "row exista la alt owner"
 // (denied access — trebuie auditat pentru reconstruct antifraud in web mode).
 export function jobExistsForAnyOwner(id: number): boolean {
-  return (
-    getDb()
-      .prepare(`SELECT 1 AS one FROM monitoring_jobs WHERE id = ? LIMIT 1`)
-      .get(id) !== undefined
-  );
+  return getDb().prepare(`SELECT 1 AS one FROM monitoring_jobs WHERE id = ? LIMIT 1`).get(id) !== undefined;
 }
 
 export interface ListJobsOptions {
@@ -212,18 +206,14 @@ export function listJobs(opts: ListJobsOptions): ListJobsResult {
         rnpm_norm(json_extract(target_json, '$.numar_dosar')) LIKE ? ESCAPE '\\'
         OR rnpm_norm(json_extract(target_json, '$.name_normalized')) LIKE ? ESCAPE '\\'
         OR rnpm_norm(json_extract(target_json, '$.identificator')) LIKE ? ESCAPE '\\'
-      )`,
+      )`
     );
     const like = buildRnpmLikePattern(opts.q.trim());
     params.push(like, like, like);
   }
   const whereSql = `WHERE ${where.join(" AND ")}`;
 
-  const total = (
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM monitoring_jobs ${whereSql}`)
-      .get(...params) as { n: number }
-  ).n;
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM monitoring_jobs ${whereSql}`).get(...params) as { n: number }).n;
 
   const offset = (opts.page - 1) * opts.pageSize;
   const rows = db
@@ -231,7 +221,7 @@ export function listJobs(opts: ListJobsOptions): ListJobsResult {
       `SELECT * FROM monitoring_jobs
        ${whereSql}
        ORDER BY created_at DESC, id DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT ? OFFSET ?`
     )
     .all(...params, opts.pageSize, offset) as MonitoringJobRow[];
 
@@ -249,11 +239,7 @@ export function listJobs(opts: ListJobsOptions): ListJobsResult {
 // far in the past) and the scheduler would fire it back-to-back ignoring the
 // new cadence. Same for cadence shrink. We recompute it inside the same
 // transaction so the row is internally consistent before audit reads it.
-export function updateJob(
-  ownerId: string,
-  id: number,
-  patch: JobUpdateBody,
-): MonitoringJobRow | null {
+export function updateJob(ownerId: string, id: number, patch: JobUpdateBody): MonitoringJobRow | null {
   const db = getDb();
 
   const tx = db.transaction((): MonitoringJobRow | null => {
@@ -282,7 +268,7 @@ export function updateJob(
       const current = db
         .prepare(
           `SELECT alert_config_json FROM monitoring_jobs
-           WHERE id = ? AND owner_id = ?`,
+           WHERE id = ? AND owner_id = ?`
         )
         .get(id, ownerId) as { alert_config_json: string } | undefined;
       if (!current) return null;
@@ -292,23 +278,23 @@ export function updateJob(
     }
 
     if (sets.length === 0) {
-      return db
-        .prepare(`SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
-        .get(id, ownerId) as MonitoringJobRow | null ?? null;
+      return (
+        (db
+          .prepare(`SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+          .get(id, ownerId) as MonitoringJobRow | null) ?? null
+      );
     }
 
     // Recompute next_run_at when scheduling-relevant fields change.
     const reschedule =
-      patch.cadence_sec !== undefined ||
-      patch.active !== undefined ||
-      patch.paused_until !== undefined;
+      patch.cadence_sec !== undefined || patch.active !== undefined || patch.paused_until !== undefined;
     if (reschedule) {
       const cadence =
         patch.cadence_sec ??
         (
-          db
-            .prepare(`SELECT cadence_sec FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
-            .get(id, ownerId) as { cadence_sec: number } | undefined
+          db.prepare(`SELECT cadence_sec FROM monitoring_jobs WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+            | { cadence_sec: number }
+            | undefined
         )?.cadence_sec;
       if (cadence === undefined) return null;
       sets.push("next_run_at = ?");
@@ -334,9 +320,7 @@ export function updateJob(
 // DELETE cascades to snapshots/alerts/runs via FK ON DELETE CASCADE in DDL.
 // Returns true when a row was actually deleted (false = not found OR not owned).
 export function deleteJob(ownerId: string, id: number): boolean {
-  const info = getDb()
-    .prepare(`DELETE FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
-    .run(id, ownerId);
+  const info = getDb().prepare(`DELETE FROM monitoring_jobs WHERE id = ? AND owner_id = ?`).run(id, ownerId);
   return info.changes > 0;
 }
 
@@ -384,8 +368,8 @@ function getDisabledMonitoringKinds(): string[] {
       (process.env.MONITORING_DISABLED_KINDS ?? "")
         .split(",")
         .map((s) => s.trim())
-        .filter(Boolean),
-    ),
+        .filter(Boolean)
+    )
   );
 }
 
@@ -420,16 +404,9 @@ export function markJobOutcome(input: MarkJobOutcomeInput): boolean {
              fail_streak = ?,
              next_run_at = ?,
              updated_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-       WHERE id = ? AND owner_id = ?`,
+       WHERE id = ? AND owner_id = ?`
     )
-    .run(
-      input.lastRunAt,
-      input.lastStatus,
-      input.failStreak,
-      input.nextRunAt,
-      input.jobId,
-      input.ownerId,
-    );
+    .run(input.lastRunAt, input.lastStatus, input.failStreak, input.nextRunAt, input.jobId, input.ownerId);
   return info.changes > 0;
 }
 
@@ -473,13 +450,13 @@ export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
                AND monitoring_runs.status = 'running'
            )
          ORDER BY next_run_at ASC, id ASC
-         LIMIT ?`,
+         LIMIT ?`
       )
       .all(...selectParams) as MonitoringJobRow[];
 
     const insertRun = db.prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-       VALUES (?, ?, ?, 'running')`,
+       VALUES (?, ?, ?, 'running')`
     );
 
     const claimed: ClaimedJob[] = [];
@@ -508,7 +485,7 @@ export function aggregateActiveJobsByKindForOwner(ownerId: string): JobsByKindRo
       `SELECT kind, COUNT(*) AS n
        FROM monitoring_jobs
        WHERE owner_id = ? AND active = 1
-       GROUP BY kind`,
+       GROUP BY kind`
     )
     .all(ownerId) as JobsByKindRow[];
 }

@@ -37,10 +37,10 @@ const sample = worktreeDeletions
 
 console.error("");
 console.error(
-  `[check-worktree] HALT: ${worktreeDeletions.length} fisiere deletate din working tree (threshold ${THRESHOLD}).`,
+  `[check-worktree] HALT: ${worktreeDeletions.length} fisiere deletate din working tree (threshold ${THRESHOLD}).`
 );
 console.error(
-  "[check-worktree] Foarte probabil un wipe extern (antivirus / sync cloud / IDE bulk action), nu o operatie git.",
+  "[check-worktree] Foarte probabil un wipe extern (antivirus / sync cloud / IDE bulk action), nu o operatie git."
 );
 console.error("");
 console.error("Mostra:");

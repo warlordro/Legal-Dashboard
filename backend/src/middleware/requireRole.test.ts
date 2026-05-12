@@ -99,9 +99,7 @@ describe("requireRole — gate behavior", () => {
       c.set("ownerId", "supp");
       await next();
     });
-    app.get("/admin", requireRole("admin", "support"), (c) =>
-      c.json({ ok: true, role: c.get("role") }),
-    );
+    app.get("/admin", requireRole("admin", "support"), (c) => c.json({ ok: true, role: c.get("role") }));
     const res = await app.request("/admin");
     expect(res.status).toBe(200);
     const body = await jsonOf<OkBody>(res);

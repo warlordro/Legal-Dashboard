@@ -87,7 +87,7 @@ export function createList(input: CreateListInput): CreateListResult {
     const existing = db
       .prepare(
         `SELECT * FROM name_lists
-         WHERE owner_id = ? AND source_sha256 = ?`,
+         WHERE owner_id = ? AND source_sha256 = ?`
       )
       .get(input.ownerId, input.sourceSha256) as NameListRow | undefined;
     if (existing) {
@@ -98,25 +98,16 @@ export function createList(input: CreateListInput): CreateListResult {
     // = rindurile care VOR deveni joburi pe commit (ok + warn). UI-ul afiseaza
     // ambele ca sa fie clar cati userii au fost respinsi.
     const totalRows = input.items.length;
-    const validRows = input.items.filter(
-      (it) => it.validation !== "rejected",
-    ).length;
+    const validRows = input.items.filter((it) => it.validation !== "rejected").length;
 
     const listInfo = db
       .prepare(
         `INSERT INTO name_lists
            (owner_id, title, source_filename, source_sha256,
             total_rows, valid_rows)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(
-        input.ownerId,
-        input.title,
-        input.sourceFilename,
-        input.sourceSha256,
-        totalRows,
-        validRows,
-      );
+      .run(input.ownerId, input.title, input.sourceFilename, input.sourceSha256, totalRows, validRows);
     const listId = listInfo.lastInsertRowid as number;
 
     if (input.items.length > 0) {
@@ -124,7 +115,7 @@ export function createList(input: CreateListInput): CreateListResult {
         `INSERT INTO name_list_items
            (owner_id, list_id, name_raw, name_normalized,
             cnp, cui, cadence_sec, notes, validation, validation_msg)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       );
       for (const item of input.items) {
         insertItem.run(
@@ -137,14 +128,12 @@ export function createList(input: CreateListInput): CreateListResult {
           item.cadenceSec ?? null,
           item.notes ?? null,
           item.validation,
-          item.validationMsg ?? null,
+          item.validationMsg ?? null
         );
       }
     }
 
-    const list = db
-      .prepare(`SELECT * FROM name_lists WHERE id = ?`)
-      .get(listId) as NameListRow;
+    const list = db.prepare(`SELECT * FROM name_lists WHERE id = ?`).get(listId) as NameListRow;
     return { list, duplicate: false };
   });
 
@@ -154,13 +143,10 @@ export function createList(input: CreateListInput): CreateListResult {
   return tx.immediate();
 }
 
-export function getListById(
-  ownerId: string,
-  id: number,
-): NameListRow | null {
-  const row = getDb()
-    .prepare(`SELECT * FROM name_lists WHERE id = ? AND owner_id = ?`)
-    .get(id, ownerId) as NameListRow | undefined;
+export function getListById(ownerId: string, id: number): NameListRow | null {
+  const row = getDb().prepare(`SELECT * FROM name_lists WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+    | NameListRow
+    | undefined;
   return row ?? null;
 }
 
@@ -188,11 +174,7 @@ export function listLists(opts: ListListsOptions): ListListsResult {
   }
   const whereSql = `WHERE ${where.join(" AND ")}`;
 
-  const total = (
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM name_lists ${whereSql}`)
-      .get(...params) as { n: number }
-  ).n;
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM name_lists ${whereSql}`).get(...params) as { n: number }).n;
 
   const offset = (opts.page - 1) * opts.pageSize;
   const rows = db
@@ -200,7 +182,7 @@ export function listLists(opts: ListListsOptions): ListListsResult {
       `SELECT * FROM name_lists
        ${whereSql}
        ORDER BY created_at DESC, id DESC
-       LIMIT ? OFFSET ?`,
+       LIMIT ? OFFSET ?`
     )
     .all(...params, opts.pageSize, offset) as NameListRow[];
 
@@ -232,11 +214,7 @@ export function listItems(opts: ListItemsOptions): ListItemsResult {
   }
   const whereSql = `WHERE ${where.join(" AND ")}`;
 
-  const total = (
-    db
-      .prepare(`SELECT COUNT(*) AS n FROM name_list_items ${whereSql}`)
-      .get(...params) as { n: number }
-  ).n;
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM name_list_items ${whereSql}`).get(...params) as { n: number }).n;
 
   const offset = (opts.page - 1) * opts.pageSize;
   const rows = db
@@ -244,7 +222,7 @@ export function listItems(opts: ListItemsOptions): ListItemsResult {
       `SELECT * FROM name_list_items
        ${whereSql}
        ORDER BY id ASC
-       LIMIT ? OFFSET ?`,
+       LIMIT ? OFFSET ?`
     )
     .all(...params, opts.pageSize, offset) as NameListItemRow[];
 
@@ -253,17 +231,14 @@ export function listItems(opts: ListItemsOptions): ListItemsResult {
 
 // Returneaza items eligibile pentru commit (ok + warn). Folosit de routa
 // /commit dupa ce userul confirma preview-ul.
-export function getCommittableItems(
-  ownerId: string,
-  listId: number,
-): NameListItemRow[] {
+export function getCommittableItems(ownerId: string, listId: number): NameListItemRow[] {
   return getDb()
     .prepare(
       `SELECT * FROM name_list_items
        WHERE owner_id = ? AND list_id = ?
          AND validation IN ('ok','warn')
          AND monitoring_job_id IS NULL
-       ORDER BY id ASC`,
+       ORDER BY id ASC`
     )
     .all(ownerId, listId) as NameListItemRow[];
 }
@@ -272,16 +247,12 @@ export function getCommittableItems(
 // createJob ca sa mentinem lineage-ul invers (UI: "items pentru job X" / "job
 // pentru item X"). Idempotent: daca item-ul are deja monitoring_job_id setat,
 // nu suprascriem (un retry pe /commit nu ar trebui sa schimbe legaturile).
-export function linkItemToJob(
-  ownerId: string,
-  itemId: number,
-  jobId: number,
-): boolean {
+export function linkItemToJob(ownerId: string, itemId: number, jobId: number): boolean {
   const info = getDb()
     .prepare(
       `UPDATE name_list_items
          SET monitoring_job_id = ?
-       WHERE id = ? AND owner_id = ? AND monitoring_job_id IS NULL`,
+       WHERE id = ? AND owner_id = ? AND monitoring_job_id IS NULL`
     )
     .run(jobId, itemId, ownerId);
   return info.changes > 0;
@@ -300,10 +271,7 @@ export interface ArchiveListResult {
   blockingJobs: number;
 }
 
-export function archiveList(
-  ownerId: string,
-  listId: number,
-): ArchiveListResult {
+export function archiveList(ownerId: string, listId: number): ArchiveListResult {
   const db = getDb();
 
   const tx = db.transaction((): ArchiveListResult => {
@@ -313,7 +281,7 @@ export function archiveList(
       db
         .prepare(
           `SELECT COUNT(*) AS n FROM monitoring_jobs
-           WHERE owner_id = ? AND name_list_id = ?`,
+           WHERE owner_id = ? AND name_list_id = ?`
         )
         .get(ownerId, listId) as { n: number }
     ).n;
@@ -326,7 +294,7 @@ export function archiveList(
       .prepare(
         `UPDATE name_lists
            SET archived_at = datetime('now')
-         WHERE id = ? AND owner_id = ? AND archived_at IS NULL`,
+         WHERE id = ? AND owner_id = ? AND archived_at IS NULL`
       )
       .run(listId, ownerId);
 

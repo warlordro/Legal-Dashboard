@@ -45,15 +45,9 @@ export interface AlertEnrichmentPayload {
 
 export type AlertEnrichmentListener = (payload: AlertEnrichmentPayload) => void;
 
-const alertEnrichmentListenersByOwner = new Map<
-  string,
-  Set<AlertEnrichmentListener>
->();
+const alertEnrichmentListenersByOwner = new Map<string, Set<AlertEnrichmentListener>>();
 
-export function addAlertEnrichmentListener(
-  ownerId: string,
-  listener: AlertEnrichmentListener,
-): () => void {
+export function addAlertEnrichmentListener(ownerId: string, listener: AlertEnrichmentListener): () => void {
   let listeners = alertEnrichmentListenersByOwner.get(ownerId);
   if (!listeners) {
     listeners = new Set();
@@ -63,10 +57,7 @@ export function addAlertEnrichmentListener(
   return () => removeAlertEnrichmentListener(ownerId, listener);
 }
 
-export function removeAlertEnrichmentListener(
-  ownerId: string,
-  listener: AlertEnrichmentListener,
-): void {
+export function removeAlertEnrichmentListener(ownerId: string, listener: AlertEnrichmentListener): void {
   const listeners = alertEnrichmentListenersByOwner.get(ownerId);
   if (!listeners) return;
   listeners.delete(listener);
@@ -100,18 +91,17 @@ export function enrichSolutieAlertsForJob(
   ownerId: string,
   jobId: number,
   sedinte: SolutieEnrichmentInput[],
-  dosarContext: SolutieEnrichmentDosarContext = {},
+  dosarContext: SolutieEnrichmentDosarContext = {}
 ): number {
   const sedintaCandidates = sedinte.filter(
     (s) =>
       (s.solutieSumar?.trim().length ?? 0) > 0 ||
       (s.numarDocument?.trim().length ?? 0) > 0 ||
-      (s.dataPronuntare?.trim().length ?? 0) > 0,
+      (s.dataPronuntare?.trim().length ?? 0) > 0
   );
   const dosarInstanta = dosarContext.instanta?.trim();
   const dosarStadiu = dosarContext.stadiu?.trim();
-  const haveDosarFields =
-    (dosarInstanta?.length ?? 0) > 0 || (dosarStadiu?.length ?? 0) > 0;
+  const haveDosarFields = (dosarInstanta?.length ?? 0) > 0 || (dosarStadiu?.length ?? 0) > 0;
   if (sedintaCandidates.length === 0 && !haveDosarFields) return 0;
 
   const db = getDb();
@@ -128,14 +118,14 @@ export function enrichSolutieAlertsForJob(
        WHERE owner_id = ? AND job_id = ? AND kind = 'solutie_aparuta'
          AND created_at >= datetime('now', '-7 days')
        ORDER BY id DESC
-       LIMIT 200`,
+       LIMIT 200`
     )
     .all(ownerId, jobId) as Array<{ id: number; detail_json: string }>;
   if (rows.length === 0) return 0;
 
   const update = db.prepare(
     `UPDATE monitoring_alerts SET detail_json = ?
-     WHERE id = ? AND owner_id = ?`,
+     WHERE id = ? AND owner_id = ?`
   );
 
   let patched = 0;
@@ -168,15 +158,12 @@ export function enrichSolutieAlertsForJob(
                 s.data === dData &&
                 (s.ora ?? "") === (dOra ?? "") &&
                 (s.complet ?? "") === (dComplet ?? "") &&
-                s.solutie.trim() === dSolutieTrim,
+                s.solutie.trim() === dSolutieTrim
             )
           : undefined;
         if (!match) {
           match = sedintaCandidates.find(
-            (s) =>
-              s.data === dData &&
-              (s.ora ?? "") === (dOra ?? "") &&
-              (s.complet ?? "") === (dComplet ?? ""),
+            (s) => s.data === dData && (s.ora ?? "") === (dOra ?? "") && (s.complet ?? "") === (dComplet ?? "")
           );
         }
         if (match) {
@@ -213,17 +200,11 @@ export function enrichSolutieAlertsForJob(
       // F4 guard: query-ul de mai sus filtreaza deja alertele >7 zile, deci
       // contextul istoric mai vechi nu mai poate fi suprascris cu valoarea
       // curenta dupa o tranzitie fond->apel.
-      if (
-        dosarInstanta &&
-        (typeof detail.instanta !== "string" || detail.instanta.trim().length === 0)
-      ) {
+      if (dosarInstanta && (typeof detail.instanta !== "string" || detail.instanta.trim().length === 0)) {
         detail.instanta = dosarInstanta;
         mutated = true;
       }
-      if (
-        dosarStadiu &&
-        (typeof detail.stadiu !== "string" || detail.stadiu.trim().length === 0)
-      ) {
+      if (dosarStadiu && (typeof detail.stadiu !== "string" || detail.stadiu.trim().length === 0)) {
         detail.stadiu = dosarStadiu;
         mutated = true;
       }

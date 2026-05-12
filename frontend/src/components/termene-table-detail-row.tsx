@@ -27,17 +27,21 @@ export function TermeneExpandedDetail({ termen, searchedName, monitorState, onMo
             variant={isAdded || isExists ? "secondary" : "outline"}
             size="sm"
             disabled={isPending || isAdded || isExists}
-            onClick={(e) => { e.stopPropagation(); onMonitor(termen.numarDosar); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMonitor(termen.numarDosar);
+            }}
           >
             <Activity className="h-4 w-4" />
-            {isPending ? "Se adauga..." :
-             isAdded ? "Adaugat la monitorizare" :
-             isExists ? "Deja monitorizat" :
-             "Monitorizeaza schimbari"}
+            {isPending
+              ? "Se adauga..."
+              : isAdded
+                ? "Adaugat la monitorizare"
+                : isExists
+                  ? "Deja monitorizat"
+                  : "Monitorizeaza schimbari"}
           </Button>
-          {errorMsg && (
-            <span className="text-xs text-red-600">{errorMsg}</span>
-          )}
+          {errorMsg && <span className="text-xs text-red-600">{errorMsg}</span>}
         </div>
       )}
 
@@ -47,14 +51,18 @@ export function TermeneExpandedDetail({ termen, searchedName, monitorState, onMo
           <div className="flex items-center gap-1.5 text-xs">
             <Scale className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-muted-foreground">Categorie:</span>
-            <Badge variant="outline" className="text-[11px]">{termen.categorieCaz}</Badge>
+            <Badge variant="outline" className="text-[11px]">
+              {termen.categorieCaz}
+            </Badge>
           </div>
         )}
         {termen.stadiuProcesual && (
           <div className="flex items-center gap-1.5 text-xs">
             <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
             <span className="text-muted-foreground">Stadiu:</span>
-            <Badge variant="outline" className="text-[11px]">{termen.stadiuProcesual}</Badge>
+            <Badge variant="outline" className="text-[11px]">
+              {termen.stadiuProcesual}
+            </Badge>
           </div>
         )}
         {termen.obiect && (
@@ -78,7 +86,9 @@ export function TermeneExpandedDetail({ termen, searchedName, monitorState, onMo
             )}
             {termen.solutieSumar && (
               <div className="rounded bg-muted/30 p-2">
-                <p className="leading-relaxed text-foreground" style={{ fontSize: "14.5px" }}>{termen.solutieSumar}</p>
+                <p className="leading-relaxed text-foreground" style={{ fontSize: "14.5px" }}>
+                  {termen.solutieSumar}
+                </p>
               </div>
             )}
           </div>

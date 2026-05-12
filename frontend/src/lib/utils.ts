@@ -15,7 +15,7 @@ export function cn(...inputs: ClassValue[]) {
 //
 // Returns NaN-Date for unparseable input — callers can guard with isNaN.
 export function parseSqliteUtc(ts: string | null | undefined): Date {
-  if (!ts) return new Date(NaN);
+  if (!ts) return new Date(Number.NaN);
   // Already ISO with timezone (Z or +HH:MM)? Pass through.
   if (/T.*(Z|[+-]\d{2}:?\d{2})$/.test(ts)) return new Date(ts);
   // Naive "YYYY-MM-DD HH:MM:SS[.fff]" — coerce to UTC.
@@ -63,41 +63,106 @@ export function formatRoNumber(n: number): string {
 // NOTE: avoid short words (1-2 chars) — they cause false splits in longer words
 const LEGAL_WORDS = [
   // Documente
-  "INCHEIERE", "HOTARARE", "SENTINTA", "DECIZIE", "MINUTA",
-  "PROCES", "VERBAL", "REZOLUTIE", "ORDONANTA",
+  "INCHEIERE",
+  "HOTARARE",
+  "SENTINTA",
+  "DECIZIE",
+  "MINUTA",
+  "PROCES",
+  "VERBAL",
+  "REZOLUTIE",
+  "ORDONANTA",
   // Acțiuni / stări — longer variants first
-  "PRONUNTARII", "PRONUNTAREA", "PRONUNTARE",
-  "DEZINVESTIRE", "REINVESTIRE", "INVESTIRE",
-  "INDREPTARE", "INDREPT",
-  "AMANARE", "SUSPENDARE", "REPUNERE", "REDESCHIDERE",
-  "REJUDECARE", "JUDECARE", "JUDECATA",
-  "ADMITERE", "RESPINGERE", "ANULARE", "CASARE",
-  "CONEXARE", "DISJUNGERE", "DECLINARE",
-  "STRAMUTARE", "RECUZARE", "ABTINERE",
-  "REEXAMINARE", "EXAMINARE",
+  "PRONUNTARII",
+  "PRONUNTAREA",
+  "PRONUNTARE",
+  "DEZINVESTIRE",
+  "REINVESTIRE",
+  "INVESTIRE",
+  "INDREPTARE",
+  "INDREPT",
+  "AMANARE",
+  "SUSPENDARE",
+  "REPUNERE",
+  "REDESCHIDERE",
+  "REJUDECARE",
+  "JUDECARE",
+  "JUDECATA",
+  "ADMITERE",
+  "RESPINGERE",
+  "ANULARE",
+  "CASARE",
+  "CONEXARE",
+  "DISJUNGERE",
+  "DECLINARE",
+  "STRAMUTARE",
+  "RECUZARE",
+  "ABTINERE",
+  "REEXAMINARE",
+  "EXAMINARE",
   // Erori / rectificări
-  "EROARE", "MATERIALA", "RECTIFICARE", "LAMURIRE",
+  "EROARE",
+  "MATERIALA",
+  "RECTIFICARE",
+  "LAMURIRE",
   // Calificative
-  "INTERMEDIARA", "ULTERIOARA", "INITIALA",
-  "FINALA", "PARTIALA", "TOTALA",
-  "PRELIMINARA", "DEFINITIVA", "PROVIZORIE",
-  "COMERCIALA", "ADMINISTRATIVA",
-  "PENALA", "CIVILA", "CONTRAVENTIONALA",
+  "INTERMEDIARA",
+  "ULTERIOARA",
+  "INITIALA",
+  "FINALA",
+  "PARTIALA",
+  "TOTALA",
+  "PRELIMINARA",
+  "DEFINITIVA",
+  "PROVIZORIE",
+  "COMERCIALA",
+  "ADMINISTRATIVA",
+  "PENALA",
+  "CIVILA",
+  "CONTRAVENTIONALA",
   // Locuri / contexte
-  "SEDINTA", "CAMERA", "SALA", "COMPLET",
-  "INSTANTA", "TRIBUNAL", "CURTEA", "JUDECATORIE",
-  "PARCHET", "MINISTER",
+  "SEDINTA",
+  "CAMERA",
+  "SALA",
+  "COMPLET",
+  "INSTANTA",
+  "TRIBUNAL",
+  "CURTEA",
+  "JUDECATORIE",
+  "PARCHET",
+  "MINISTER",
   // Participanți
-  "RECLAMANT", "PARAT", "INTERVENIENT", "MARTOR",
-  "EXPERT", "AVOCAT", "PROCUROR", "JUDECATOR",
+  "RECLAMANT",
+  "PARAT",
+  "INTERVENIENT",
+  "MARTOR",
+  "EXPERT",
+  "AVOCAT",
+  "PROCUROR",
+  "JUDECATOR",
   // Alte cuvinte juridice
-  "APEL", "RECURS", "CONTESTATIE", "CERERE",
-  "FOND", "CAUZA", "DOSAR", "PROBE",
-  "TERMEN", "CITARE", "COMUNICARE",
-  "EXECUTARE", "SILITA",
+  "APEL",
+  "RECURS",
+  "CONTESTATIE",
+  "CERERE",
+  "FOND",
+  "CAUZA",
+  "DOSAR",
+  "PROBE",
+  "TERMEN",
+  "CITARE",
+  "COMUNICARE",
+  "EXECUTARE",
+  "SILITA",
   // Prepoziții / conjuncții — minimum 3 chars to avoid false splits
-  "PENTRU", "PRIN", "SPRE", "DUPA", "FARA",
-  "DIN", "NR", "ART",
+  "PENTRU",
+  "PRIN",
+  "SPRE",
+  "DUPA",
+  "FARA",
+  "DIN",
+  "NR",
+  "ART",
 ].sort((a, b) => b.length - a.length);
 
 // 1-2 char connectors deliberately excluded from LEGAL_WORDS (would cause false
@@ -114,7 +179,10 @@ export function splitConcatenatedWords(text: string): string {
   while (pos < upper.length) {
     let matched: string | null = null;
     for (const word of LEGAL_WORDS) {
-      if (upper.startsWith(word, pos)) { matched = word; break; }
+      if (upper.startsWith(word, pos)) {
+        matched = word;
+        break;
+      }
     }
     if (matched) {
       result.push(matched);
@@ -144,6 +212,5 @@ export function splitConcatenatedWords(text: string): string {
 
 export function formatDocumentSedinta(raw: string): string {
   if (!raw) return "";
-  return raw.split(" ").map(splitConcatenatedWords).join(" ")
-    .replace(/\s+/g, " ").trim();
+  return raw.split(" ").map(splitConcatenatedWords).join(" ").replace(/\s+/g, " ").trim();
 }

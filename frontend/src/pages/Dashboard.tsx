@@ -185,11 +185,16 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
             <div className="space-y-2 text-xs text-muted-foreground">
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-green-500" />
-                <span>Web Service SOAP: <code className="text-foreground">http://portalquery.just.ro/query.asmx</code></span>
+                <span>
+                  Web Service SOAP: <code className="text-foreground">http://portalquery.just.ro/query.asmx</code>
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-blue-500" />
-                <span>Metode disponibile: <code className="text-foreground">CautareDosare</code>, <code className="text-foreground">CautareTermene</code></span>
+                <span>
+                  Metode disponibile: <code className="text-foreground">CautareDosare</code>,{" "}
+                  <code className="text-foreground">CautareTermene</code>
+                </span>
               </div>
               <div className="flex items-center gap-2">
                 <div className="h-2 w-2 rounded-full bg-purple-500" />
@@ -214,24 +219,16 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
                 <span className="text-xs text-muted-foreground">AI Enabled</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude 4.6 / Gemini 3.x / GPT-5.4) si audit de securitate — cheile API pastrate in OS keystore, backend legat pe loopback si protectie formula injection la export.
+                Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude 4.6 /
+                Gemini 3.x / GPT-5.4) si audit de securitate — cheile API pastrate in OS keystore, backend legat pe
+                loopback si protectie formula injection la export.
               </p>
               <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => setShowChangelog(true)}
-                >
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowChangelog(true)}>
                   <ScrollText className="h-4 w-4" />
                   Vezi Noutati
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="gap-2"
-                  onClick={() => setShowManual(true)}
-                >
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowManual(true)}>
                   <BookOpen className="h-4 w-4" />
                   Manual
                 </Button>
@@ -241,9 +238,7 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
         </Card>
       </div>
 
-      {showChangelog && (
-        <ChangelogDialog dialogRef={changelogRef} appVersion={APP_VERSION} onClose={closeChangelog} />
-      )}
+      {showChangelog && <ChangelogDialog dialogRef={changelogRef} appVersion={APP_VERSION} onClose={closeChangelog} />}
       {showManual && (
         <ManualDialog
           dialogRef={manualRef}

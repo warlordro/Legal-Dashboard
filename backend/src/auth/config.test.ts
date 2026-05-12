@@ -15,13 +15,11 @@ afterEach(() => {
 
 describe("PR-9 auth config validation", () => {
   it("fails closed for invalid auth mode and web mode without a JWT secret", () => {
-    expect(() =>
-      validateAuthConfig({ LEGAL_DASHBOARD_AUTH_MODE: "invalid" } as NodeJS.ProcessEnv),
-    ).toThrow(/desktop.*web/i);
+    expect(() => validateAuthConfig({ LEGAL_DASHBOARD_AUTH_MODE: "invalid" } as NodeJS.ProcessEnv)).toThrow(
+      /desktop.*web/i
+    );
 
-    expect(() =>
-      validateAuthConfig({ LEGAL_DASHBOARD_AUTH_MODE: "web" } as NodeJS.ProcessEnv),
-    ).toThrow(/JWT_SECRET/i);
+    expect(() => validateAuthConfig({ LEGAL_DASHBOARD_AUTH_MODE: "web" } as NodeJS.ProcessEnv)).toThrow(/JWT_SECRET/i);
   });
 
   it("rejects JWT TTL values above 86400 seconds", () => {
@@ -29,7 +27,7 @@ describe("PR-9 auth config validation", () => {
       validateAuthConfig({
         ...WEB_ENV,
         LEGAL_DASHBOARD_JWT_TTL_SECONDS: "86401",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).toThrow(/86400/);
   });
 
@@ -39,7 +37,7 @@ describe("PR-9 auth config validation", () => {
         LEGAL_DASHBOARD_AUTH_MODE: "web",
         LEGAL_DASHBOARD_JWT_SECRET: SECRET,
         LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).toThrow(/JWT_ISSUER/);
 
     expect(() =>
@@ -47,7 +45,7 @@ describe("PR-9 auth config validation", () => {
         LEGAL_DASHBOARD_AUTH_MODE: "web",
         LEGAL_DASHBOARD_JWT_SECRET: SECRET,
         LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).toThrow(/JWT_AUDIENCE/);
   });
 
@@ -58,7 +56,7 @@ describe("PR-9 auth config validation", () => {
         JWT_SECRET: SECRET,
         JWT_ISSUER: "legal-dashboard.test",
         JWT_AUDIENCE: "legal-dashboard-api",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).not.toThrow();
   });
 
@@ -72,7 +70,7 @@ describe("PR-9 auth config validation", () => {
         JWT_SECRET: SECRET,
         JWT_ISSUER: "legal-dashboard.test",
         JWT_AUDIENCE: "legal-dashboard-api",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).not.toThrow();
   });
 
@@ -82,7 +80,7 @@ describe("PR-9 auth config validation", () => {
         ...WEB_ENV,
         NODE_ENV: "production",
         AUTH_COOKIE_SECURE: "0",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).toThrow(/AUTH_COOKIE_SECURE=0/);
   });
 
@@ -94,14 +92,12 @@ describe("PR-9 auth config validation", () => {
         ...WEB_ENV,
         NODE_ENV: "development",
         AUTH_COOKIE_SECURE: "0",
-      } as NodeJS.ProcessEnv),
+      } as NodeJS.ProcessEnv)
     ).not.toThrow();
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("AUTH_COOKIE_SECURE=0"));
   });
 
   it("accepts desktop mode without a JWT secret", () => {
-    expect(() =>
-      validateAuthConfig({ LEGAL_DASHBOARD_AUTH_MODE: "desktop" } as NodeJS.ProcessEnv),
-    ).not.toThrow();
+    expect(() => validateAuthConfig({ LEGAL_DASHBOARD_AUTH_MODE: "desktop" } as NodeJS.ProcessEnv)).not.toThrow();
   });
 });

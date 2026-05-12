@@ -40,10 +40,7 @@ import { parse as parseCsv } from "csv-parse/sync";
 import ExcelJS from "exceljs";
 
 import { stripDiacritics } from "../util/textNormalize.ts";
-import type {
-  CreateListItemInput,
-  NameListItemValidation,
-} from "../db/nameListsRepository.ts";
+import type { CreateListItemInput, NameListItemValidation } from "../db/nameListsRepository.ts";
 
 // 10 MB hard cap inainte de parse (audit plan #1). Multipart layer-ul aplica
 // si el limita la 10 MB; redundanta intentionata.
@@ -127,7 +124,9 @@ function isXlsxBuffer(buf: Buffer): boolean {
 // variante uzuale: "nume", "cnp", "cui". Rezultatul mapat pe cheile interne
 // ne permite sa dam liber userilor sa scrie "Nume Persoana" sau "NUME".
 function normalizeHeader(h: string): string {
-  return stripDiacritics(String(h ?? "")).toLowerCase().trim();
+  return stripDiacritics(String(h ?? ""))
+    .toLowerCase()
+    .trim();
 }
 
 interface HeaderMap {
@@ -163,22 +162,16 @@ function buildHeaderMap(headers: string[]): HeaderMap {
       cnp = i;
     } else if (cui === undefined && (h === "cui" || h === "cif")) {
       cui = i;
-    } else if (
-      cadenceSec === undefined &&
-      (h === "cadence_sec" || h === "cadenta" || h === "interval")
-    ) {
+    } else if (cadenceSec === undefined && (h === "cadence_sec" || h === "cadenta" || h === "interval")) {
       cadenceSec = i;
-    } else if (
-      notes === undefined &&
-      (h === "notes" || h === "note" || h === "observatii")
-    ) {
+    } else if (notes === undefined && (h === "notes" || h === "note" || h === "observatii")) {
       notes = i;
     }
   }
   if (nume === -1) {
     throw new ParseError(
       "MISSING_NAME_COLUMN",
-      "Coloana 'nume' lipseste din header. Acceptate: 'nume', 'name', 'denumire'.",
+      "Coloana 'nume' lipseste din header. Acceptate: 'nume', 'name', 'denumire'."
     );
   }
   return { nume, cnp, cui, cadenceSec, notes };
@@ -228,7 +221,7 @@ function classifyRawName(
   nameNormalized: string,
   seen: Map<string, number>,
   currentIdx: number,
-  formatDuplicateMsg: (prevIdx: number) => string,
+  formatDuplicateMsg: (prevIdx: number) => string
 ): { validation: NameListItemValidation; validationMsg: string | null } {
   if (!nameRaw || nameNormalized.length === 0) {
     return {
@@ -299,10 +292,7 @@ function rowsFromCsv(buf: Buffer): RawRow[] {
       to: MAX_ROWS,
     }) as string[][];
   } catch (e) {
-    throw new ParseError(
-      "PARSE_ERROR",
-      `Eroare parse CSV: ${e instanceof Error ? e.message : String(e)}`,
-    );
+    throw new ParseError("PARSE_ERROR", `Eroare parse CSV: ${e instanceof Error ? e.message : String(e)}`);
   }
   return parsed.map((cells, i) => ({ cells, rowIndex: i }));
 }
@@ -332,9 +322,7 @@ function cellToString(value: unknown): string {
     const obj = value as Record<string, unknown>;
     // CellRichTextValue: { richText: [{ text: ... }, ...] }
     if (Array.isArray(obj.richText)) {
-      return (obj.richText as Array<{ text?: unknown }>)
-        .map((part) => String(part?.text ?? ""))
-        .join("");
+      return (obj.richText as Array<{ text?: unknown }>).map((part) => String(part?.text ?? "")).join("");
     }
     // CellHyperlinkValue: { text, hyperlink }
     if (typeof obj.text === "string") return obj.text;
@@ -418,10 +406,7 @@ function rowsFromXlsx(buf: Buffer): Promise<RawRow[]> {
   return Promise.race([
     rowsFromXlsxAsync(buf).catch((e) => {
       if (e instanceof ParseError) throw e;
-      throw new ParseError(
-        "PARSE_ERROR",
-        `Eroare parse XLSX: ${e instanceof Error ? e.message : String(e)}`,
-      );
+      throw new ParseError("PARSE_ERROR", `Eroare parse XLSX: ${e instanceof Error ? e.message : String(e)}`);
     }),
     timeoutPromise,
   ]).finally(() => {
@@ -435,41 +420,27 @@ function rowsFromXlsx(buf: Buffer): Promise<RawRow[]> {
 // Async din cauza migrarii la exceljs (F3 audit): parser-ul XLSX e
 // streaming-async; CSV path-ul ramane sincron dar e wrap-uit in acelasi
 // promise pentru simetrie.
-export async function parseNameList(
-  buf: Buffer,
-  opts: ParseOptions = {},
-): Promise<ParseResult> {
+export async function parseNameList(buf: Buffer, opts: ParseOptions = {}): Promise<ParseResult> {
   if (buf.length === 0) {
     throw new ParseError("EMPTY_FILE", "Fisier gol.");
   }
   if (buf.length > MAX_FILE_BYTES) {
-    throw new ParseError(
-      "FILE_TOO_LARGE",
-      `Fisier prea mare (${buf.length} bytes, max ${MAX_FILE_BYTES}).`,
-    );
+    throw new ParseError("FILE_TOO_LARGE", `Fisier prea mare (${buf.length} bytes, max ${MAX_FILE_BYTES}).`);
   }
 
   const sha256 = crypto.createHash("sha256").update(buf).digest("hex");
 
-  const rawRows = isXlsxBuffer(buf)
-    ? await rowsFromXlsx(buf)
-    : rowsFromCsv(buf);
+  const rawRows = isXlsxBuffer(buf) ? await rowsFromXlsx(buf) : rowsFromCsv(buf);
   if (rawRows.length === 0) {
     throw new ParseError("EMPTY_FILE", "Fisierul nu contine niciun rand.");
   }
   if (rawRows.length > MAX_ROWS) {
-    throw new ParseError(
-      "TOO_MANY_ROWS",
-      `Fisier are ${rawRows.length} randuri, maxim ${MAX_ROWS}.`,
-    );
+    throw new ParseError("TOO_MANY_ROWS", `Fisier are ${rawRows.length} randuri, maxim ${MAX_ROWS}.`);
   }
 
   const headerCells = rawRows[0]?.cells ?? [];
   if (headerCells.length > MAX_COLS) {
-    throw new ParseError(
-      "TOO_MANY_COLS",
-      `Fisier are ${headerCells.length} coloane, maxim ${MAX_COLS}.`,
-    );
+    throw new ParseError("TOO_MANY_COLS", `Fisier are ${headerCells.length} coloane, maxim ${MAX_COLS}.`);
   }
 
   const headerMap = buildHeaderMap(headerCells);
@@ -488,18 +459,10 @@ export async function parseNameList(
   for (let i = 1; i < rawRows.length; i++) {
     const cells = rawRows[i]!.cells;
     const nameRaw = String(cells[headerMap.nume] ?? "").trim();
-    const cnpRaw = headerMap.cnp !== undefined
-      ? String(cells[headerMap.cnp] ?? "").trim() || null
-      : null;
-    const cuiRaw = headerMap.cui !== undefined
-      ? String(cells[headerMap.cui] ?? "").trim() || null
-      : null;
-    const cadenceSec = headerMap.cadenceSec !== undefined
-      ? parseCadence(cells[headerMap.cadenceSec])
-      : null;
-    const notes = headerMap.notes !== undefined
-      ? String(cells[headerMap.notes] ?? "").trim() || null
-      : null;
+    const cnpRaw = headerMap.cnp !== undefined ? String(cells[headerMap.cnp] ?? "").trim() || null : null;
+    const cuiRaw = headerMap.cui !== undefined ? String(cells[headerMap.cui] ?? "").trim() || null : null;
+    const cadenceSec = headerMap.cadenceSec !== undefined ? parseCadence(cells[headerMap.cadenceSec]) : null;
+    const notes = headerMap.notes !== undefined ? String(cells[headerMap.notes] ?? "").trim() || null : null;
 
     const nameNormalized = normalizeName(nameRaw);
 
@@ -508,7 +471,8 @@ export async function parseNameList(
       nameNormalized,
       seen,
       i,
-      (prev) => `Duplicat — apare prima oara la randul ${prev + 1} (NU se va crea job duplicat: deduplicare automata la import)`,
+      (prev) =>
+        `Duplicat — apare prima oara la randul ${prev + 1} (NU se va crea job duplicat: deduplicare automata la import)`
     );
 
     if (validation === "ok") okCount++;
@@ -587,7 +551,8 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
       nameNormalized,
       seen,
       i,
-      (prev) => `Duplicat — apare prima oara la index ${prev} (NU se va crea job duplicat: deduplicare automata la import)`,
+      (prev) =>
+        `Duplicat — apare prima oara la index ${prev} (NU se va crea job duplicat: deduplicare automata la import)`
     );
 
     if (validation === "ok") okCount++;

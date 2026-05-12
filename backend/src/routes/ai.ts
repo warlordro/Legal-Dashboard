@@ -32,7 +32,7 @@ function rejectApiKeysFromBodyInWebMode(body: { apiKeys?: unknown }): Response |
   if (getAuthMode() !== "web") return null;
   if (!body.apiKeys || typeof body.apiKeys !== "object") return null;
   const hasSetKey = Object.values(body.apiKeys as Record<string, unknown>).some(
-    (v) => typeof v === "string" && v.length > 0,
+    (v) => typeof v === "string" && v.length > 0
   );
   if (!hasSetKey) return null;
   return Response.json(
@@ -40,7 +40,7 @@ function rejectApiKeysFromBodyInWebMode(body: { apiKeys?: unknown }): Response |
       error:
         "Cheile AI nu pot fi trimise in body in modul web. Configurati ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_KEY in env-ul serverului.",
     },
-    { status: 501 },
+    { status: 501 }
   );
 }
 
@@ -48,12 +48,10 @@ function rejectApiKeysFromBodyInWebMode(body: { apiKeys?: unknown }): Response |
 // the Content-Length header and the actual body, then parses JSON. Returns a
 // discriminated result so the route can map the error to its own response
 // shape without losing the early-return ergonomics.
-type ParsedAiBody =
-  | { kind: "ok"; body: unknown }
-  | { kind: "error"; status: 400 | 413; message: string };
+type ParsedAiBody = { kind: "ok"; body: unknown } | { kind: "error"; status: 400 | 413; message: string };
 
 async function parseAiBody(c: Context): Promise<ParsedAiBody> {
-  const contentLength = parseInt(c.req.header("content-length") || "0", 10);
+  const contentLength = Number.parseInt(c.req.header("content-length") || "0", 10);
   if (contentLength > MAX_AI_BODY_SIZE) {
     return { kind: "error", status: 413, message: "Cererea depaseste dimensiunea maxima permisa." };
   }
@@ -106,7 +104,16 @@ aiRouter.post("/analyze", async (c) => {
       requestId: getRequestId(c),
       feature: "dosar_summary",
     };
-    const dispatch: Record<string, (key: string, modelId: string, prompt: string, timeout: number, tracking?: AiUsageTrackingContext) => Promise<string>> = {
+    const dispatch: Record<
+      string,
+      (
+        key: string,
+        modelId: string,
+        prompt: string,
+        timeout: number,
+        tracking?: AiUsageTrackingContext
+      ) => Promise<string>
+    > = {
       anthropic: callAnthropic,
       openai: callOpenAI,
       google: callGoogle,
@@ -143,12 +150,14 @@ aiRouter.post("/analyze-multi", async (c) => {
       return c.json({ error: dosarValidationError }, 400);
     }
 
-    if (!Array.isArray(body.analysts) || body.analysts.length !== 2) return c.json({ error: "Trebuie exact 2 modele analist." }, 400);
+    if (!Array.isArray(body.analysts) || body.analysts.length !== 2)
+      return c.json({ error: "Trebuie exact 2 modele analist." }, 400);
     for (const m of body.analysts) {
       if (typeof m !== "string" || !(m in AI_MODELS)) return c.json({ error: "Model analist necunoscut." }, 400);
     }
     if (!body.judge || typeof body.judge !== "string") return c.json({ error: "Lipseste modelul judecator." }, 400);
-    if (!JUDGE_MODELS.includes(body.judge)) return c.json({ error: "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4 si Gemini 3.1 Pro." }, 400);
+    if (!JUDGE_MODELS.includes(body.judge))
+      return c.json({ error: "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4 si Gemini 3.1 Pro." }, 400);
     if (!(body.judge in AI_MODELS)) return c.json({ error: "Model judecator necunoscut." }, 400);
 
     // Validate apiKeys
@@ -180,17 +189,31 @@ aiRouter.post("/analyze-multi", async (c) => {
       const analystsAbort = new AbortController();
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
-        const p1 = callModel(analysts[0], prompt, keys, AI_MULTI_TIMEOUT, {
-          ...trackingBase,
-          feature: "dosar_multi_analyst",
-        }, analystsAbort.signal).then(async (text) => {
+        const p1 = callModel(
+          analysts[0],
+          prompt,
+          keys,
+          AI_MULTI_TIMEOUT,
+          {
+            ...trackingBase,
+            feature: "dosar_multi_analyst",
+          },
+          analystsAbort.signal
+        ).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 1 }) });
           return text;
         });
-        const p2 = callModel(analysts[1], prompt, keys, AI_MULTI_TIMEOUT, {
-          ...trackingBase,
-          feature: "dosar_multi_analyst",
-        }, analystsAbort.signal).then(async (text) => {
+        const p2 = callModel(
+          analysts[1],
+          prompt,
+          keys,
+          AI_MULTI_TIMEOUT,
+          {
+            ...trackingBase,
+            feature: "dosar_multi_analyst",
+          },
+          analystsAbort.signal
+        ).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
         });

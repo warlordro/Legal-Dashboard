@@ -41,15 +41,20 @@ cpSync(resolve(root, "backend", "package.json"), join(outDir, "backend", "packag
 cpSync(resolve(root, "frontend", "package.json"), join(outDir, "frontend", "package.json"));
 
 // Write a minimal start script
-writeFileSync(join(outDir, "start.sh"), `#!/bin/sh
+writeFileSync(
+  join(outDir, "start.sh"),
+  `#!/bin/sh
 set -eu
 if [ ! -d node_modules/better-sqlite3 ]; then
   echo "Installing runtime dependencies from package-lock.json..."
   npm ci --omit=dev --workspace=backend --include-workspace-root=false
 fi
 NODE_ENV=production node dist-backend/index.cjs
-`);
-writeFileSync(join(outDir, "start.bat"), `@echo off
+`
+);
+writeFileSync(
+  join(outDir, "start.bat"),
+  `@echo off
 setlocal
 if not exist node_modules\\better-sqlite3 (
   echo Installing runtime dependencies from package-lock.json...
@@ -58,8 +63,11 @@ if not exist node_modules\\better-sqlite3 (
 )
 set NODE_ENV=production
 node dist-backend\\index.cjs
-`);
-writeFileSync(join(outDir, "README.txt"), `Legal Dashboard Server v${version}
+`
+);
+writeFileSync(
+  join(outDir, "README.txt"),
+  `Legal Dashboard Server v${version}
 ========================================
 
 Cerinte: Node.js v22+
@@ -79,7 +87,8 @@ Pornire cu Docker:
 Aplicatia va fi disponibila la: http://localhost:3002
 
 Cheile API (Claude/GPT/Gemini) pot fi configurate si din interfata aplicatiei.
-`);
+`
+);
 
 // 3. Create ZIP
 console.log("\n[3/4] Creating ZIP archive...");
@@ -89,10 +98,9 @@ mkdirSync(resolve(root, "server-release"), { recursive: true });
 // Using cross-platform approach with PowerShell (Windows) or zip (Unix)
 const isWin = process.platform === "win32";
 if (isWin) {
-  execSync(
-    `powershell -Command "Compress-Archive -Path '${outDir}' -DestinationPath '${zipPath}' -Force"`,
-    { stdio: "inherit" }
-  );
+  execSync(`powershell -Command "Compress-Archive -Path '${outDir}' -DestinationPath '${zipPath}' -Force"`, {
+    stdio: "inherit",
+  });
 } else {
   execSync(`cd "${resolve(root, "server-release")}" && zip -r "${zipPath}" "${outName}"`, {
     stdio: "inherit",

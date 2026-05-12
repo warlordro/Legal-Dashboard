@@ -2,16 +2,9 @@ import { Hono } from "hono";
 
 import { withMaintenanceRead } from "../db/backup.ts";
 import { aggregateActiveJobsByKindForOwner } from "../db/monitoringJobsRepository.ts";
-import {
-  countAlertsCreatedSince,
-  countUnreadAlerts,
-} from "../db/monitoringAlertsRepository.ts";
+import { countAlertsCreatedSince, countUnreadAlerts } from "../db/monitoringAlertsRepository.ts";
 import { aggregateFinalizedRunsByStatusSince } from "../db/monitoringRunsRepository.ts";
-import {
-  getAiUsageTotals,
-  listAiUsageLastDays,
-  utcDayStart,
-} from "../db/aiUsageRepository.ts";
+import { getAiUsageTotals, listAiUsageLastDays, utcDayStart } from "../db/aiUsageRepository.ts";
 import {
   aggregateAlertsByDayInRange,
   aggregateFinalizedRunsByDayAndStatusInRange,
@@ -216,9 +209,7 @@ function safeJsonParse(json: string | null | undefined): Record<string, unknown>
   if (!json) return {};
   try {
     const parsed = JSON.parse(json);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }
@@ -328,7 +319,7 @@ function mergeAndSliceTimeline(
   runs: TimelineEvent[],
   audits: TimelineEvent[],
   limit: number,
-  cursor: ParsedTimelineCursor,
+  cursor: ParsedTimelineCursor
 ): TimelineEvent[] {
   let merged: TimelineEvent[] = [...alerts, ...runs, ...audits];
   // When the caller used the inclusive `<=` repo predicate (composite cursor
@@ -371,9 +362,8 @@ dashboardRouter.get("/timeline", async (c) => {
     const events = mergeAndSliceTimeline(alerts, runs, audits, limit, parsedCursor);
     // nextCursor encodes the composite key of the last event so subsequent
     // pages can use the (ts, id) tie-breaker. null when the page is short.
-    const nextCursor = events.length === limit
-      ? `${events[events.length - 1].ts}|${events[events.length - 1].id}`
-      : null;
+    const nextCursor =
+      events.length === limit ? `${events[events.length - 1].ts}|${events[events.length - 1].id}` : null;
     return { events, nextCursor, generatedAt: now.toISOString() };
   });
 
@@ -614,10 +604,7 @@ dashboardRouter.get("/report", async (c) => {
     const alertsRows = listAlertsInRange({ ownerId, since, until, limit });
     const runsRows = listFinalizedRunsInRange({ ownerId, since, until, limit });
     const auditRows = listCuratedAuditInRange({ ownerId, since, until, limit });
-    const truncated =
-      alertsRows.length === limit ||
-      runsRows.length === limit ||
-      auditRows.length === limit;
+    const truncated = alertsRows.length === limit || runsRows.length === limit || auditRows.length === limit;
     const merged = [
       ...alertsRows.map(alertRowToEvent),
       ...runsRows.map(runRowToEvent),

@@ -131,8 +131,8 @@ describe("userRepository — write paths", () => {
   });
 
   it("insertUser rejects unknown role at the type boundary", () => {
-    expect(() =>
-      insertUser({ id: "u-2", email: "x@y", displayName: "X", role: "owner" as never }),
-    ).toThrow(/invalid role/);
+    expect(() => insertUser({ id: "u-2", email: "x@y", displayName: "X", role: "owner" as never })).toThrow(
+      /invalid role/
+    );
   });
 });

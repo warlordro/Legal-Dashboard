@@ -18,11 +18,7 @@
 // `recordAudit(c, ...)` so the existing audit semantics are unchanged.
 
 import { getDb } from "../../../db/schema.ts";
-import {
-  createJob,
-  IdempotencyConflictError,
-  type MonitoringJobRow,
-} from "../../../db/monitoringJobsRepository.ts";
+import { createJob, IdempotencyConflictError, type MonitoringJobRow } from "../../../db/monitoringJobsRepository.ts";
 import type { JobCreateBody } from "../../../schemas/monitoring.ts";
 
 export interface CreateMonitoringJobAuditEvent {
@@ -32,9 +28,7 @@ export interface CreateMonitoringJobAuditEvent {
   detail: Record<string, unknown>;
 }
 
-export type CreateMonitoringJobAuditWriter = (
-  event: CreateMonitoringJobAuditEvent,
-) => void;
+export type CreateMonitoringJobAuditWriter = (event: CreateMonitoringJobAuditEvent) => void;
 
 export interface CreateMonitoringJobInput {
   ownerId: string;
@@ -47,9 +41,7 @@ export type CreateMonitoringJobOutcome =
   | { status: "idempotency_conflict"; existing: MonitoringJobRow }
   | { status: "ok"; job: MonitoringJobRow; duplicate: boolean };
 
-export function executeCreateMonitoringJob(
-  input: CreateMonitoringJobInput,
-): CreateMonitoringJobOutcome {
+export function executeCreateMonitoringJob(input: CreateMonitoringJobInput): CreateMonitoringJobOutcome {
   // Domain-level rejection: aviz_rnpm has no runner wired through PR-5/PR-6.
   // Schema-valid but not dispatchable — refuse rather than create a row that
   // the scheduler will silently ignore.

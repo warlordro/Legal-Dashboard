@@ -33,7 +33,7 @@ export function useSearchHistory() {
       type: "dosare" | "termene",
       params: SearchParams,
       resultCount: number,
-      meta?: { categoriesCount: number; institutiiCount: number },
+      meta?: { categoriesCount: number; institutiiCount: number }
     ) => {
       const entry: SearchHistoryEntry = {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
@@ -47,9 +47,7 @@ export function useSearchHistory() {
 
       setHistory((prev) => {
         // Remove duplicates with same label+type
-        const filtered = prev.filter(
-          (e) => !(e.label === entry.label && e.type === entry.type)
-        );
+        const filtered = prev.filter((e) => !(e.label === entry.label && e.type === entry.type));
         const next = [entry, ...filtered].slice(0, MAX_ENTRIES);
         saveHistory(next);
         return next;

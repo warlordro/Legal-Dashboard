@@ -1,9 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  describeSplitPhase,
-  describeNestedPhase,
-  formatSplitProgress,
-} from "./rnpmProgressPhase";
+import { describeSplitPhase, describeNestedPhase, formatSplitProgress } from "./rnpmProgressPhase";
 import type { RnpmSplitProgress } from "@/types/rnpm";
 
 describe("describeSplitPhase", () => {
@@ -72,7 +68,7 @@ describe("formatSplitProgress", () => {
       },
     };
     expect(formatSplitProgress(p)).toBe(
-      "Split 1/7 - aviz initial (split secundar) -> 3/14 publicitatea clauzei de inalienabilitate (cautare)",
+      "Split 1/7 - aviz initial (split secundar) -> 3/14 publicitatea clauzei de inalienabilitate (cautare)"
     );
   });
 

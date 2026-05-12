@@ -1,5 +1,19 @@
 import { useState, useEffect, useRef, useCallback, Fragment } from "react";
-import { ChevronDown, ChevronUp, FileText, Download, ExternalLink, Users, Calendar, Building2, Scale, FileCheck, Eye, Activity, Loader2 } from "lucide-react";
+import {
+  ChevronDown,
+  ChevronUp,
+  FileText,
+  Download,
+  ExternalLink,
+  Users,
+  Calendar,
+  Building2,
+  Scale,
+  FileCheck,
+  Eye,
+  Activity,
+  Loader2,
+} from "lucide-react";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
@@ -43,7 +57,14 @@ function isNameMatch(partyName: string, searchedName: string): boolean {
 
 type SortKey = "numar" | "data" | "institutie";
 
-export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, apiKeys, onConfigureApiKey }: DosareTableProps) {
+export function DosareTable({
+  dosare,
+  onExportExcel,
+  onExportPDF,
+  searchedName,
+  apiKeys,
+  onConfigureApiKey,
+}: DosareTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("data");
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
@@ -64,37 +85,42 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
   const [monitorState, setMonitorState] = useState<Record<string, "pending" | "added" | "exists" | string>>({});
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
 
-  const handleMonitor = useCallback(async (numar: string) => {
-    if (!numar || monitorState[numar] === "pending") return;
-    setMonitorState((prev) => ({ ...prev, [numar]: "pending" }));
-    try {
-      // client_request_id makes a double-click idempotent: backend returns the
-      // existing row instead of erroring or creating a duplicate.
-      const reqId = `dosar-${numar}-${Date.now()}`;
-      const job = await monitoring.createDosar({
-        numar_dosar: numar,
-        client_request_id: reqId,
-      });
-      // The backend returns 201 on fresh insert and 200 on target_hash collision;
-      // both are exposed as the same shape here, so we infer "exists" when the
-      // job's created_at predates the request by more than a few seconds.
-      const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
-      setMonitorState((prev) => ({
-        ...prev,
-        [numar]: wasJustCreated ? "added" : "exists",
-      }));
-    } catch (err) {
-      const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : "Eroare";
-      setMonitorState((prev) => ({ ...prev, [numar]: msg }));
-    }
-  }, [monitorState]);
+  const handleMonitor = useCallback(
+    async (numar: string) => {
+      if (!numar || monitorState[numar] === "pending") return;
+      setMonitorState((prev) => ({ ...prev, [numar]: "pending" }));
+      try {
+        // client_request_id makes a double-click idempotent: backend returns the
+        // existing row instead of erroring or creating a duplicate.
+        const reqId = `dosar-${numar}-${Date.now()}`;
+        const job = await monitoring.createDosar({
+          numar_dosar: numar,
+          client_request_id: reqId,
+        });
+        // The backend returns 201 on fresh insert and 200 on target_hash collision;
+        // both are exposed as the same shape here, so we infer "exists" when the
+        // job's created_at predates the request by more than a few seconds.
+        const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
+        setMonitorState((prev) => ({
+          ...prev,
+          [numar]: wasJustCreated ? "added" : "exists",
+        }));
+      } catch (err) {
+        const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : "Eroare";
+        setMonitorState((prev) => ({ ...prev, [numar]: msg }));
+      }
+    },
+    [monitorState]
+  );
 
   // Track viewed (expanded) dosare — persist in sessionStorage
   const [viewedDosare, setViewedDosare] = useState<Set<string>>(() => {
     try {
       const saved = sessionStorage.getItem("viewedDosare");
       return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
+    } catch {
+      return new Set();
+    }
   });
 
   const markAsViewed = useCallback((numar: string) => {
@@ -102,7 +128,11 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
       if (prev.has(numar)) return prev;
       const next = new Set(prev);
       next.add(numar);
-      try { sessionStorage.setItem("viewedDosare", JSON.stringify([...next])); } catch { /* sessionStorage unavailable; visited-markers are best-effort */ }
+      try {
+        sessionStorage.setItem("viewedDosare", JSON.stringify([...next]));
+      } catch {
+        /* sessionStorage unavailable; visited-markers are best-effort */
+      }
       return next;
     });
   }, []);
@@ -118,10 +148,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
       let parent = el.parentElement as HTMLElement | null;
       while (parent) {
         const style = getComputedStyle(parent);
-        if (
-          (style.overflowY === "auto" || style.overflowY === "scroll") &&
-          parent.scrollHeight > parent.clientHeight
-        ) {
+        if ((style.overflowY === "auto" || style.overflowY === "scroll") && parent.scrollHeight > parent.clientHeight) {
           const elRect = el.getBoundingClientRect();
           const parentRect = parent.getBoundingClientRect();
           // Only scroll if the expanded detail is not fully visible
@@ -147,13 +174,20 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
   const [multiAnalysts, setMultiAnalysts] = useState<[string, string]>(["claude-sonnet", "gpt-5.4-mini"]);
   const [multiJudge, setMultiJudge] = useState<string>("claude-opus");
   const [multiLoading, setMultiLoading] = useState<string | null>(null);
-  const [multiResult, setMultiResult] = useState<Record<string, {
-    analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
-    judge: { model: string; text: string };
-    final: string;
-  }>>({});
+  const [multiResult, setMultiResult] = useState<
+    Record<
+      string,
+      {
+        analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
+        judge: { model: string; text: string };
+        final: string;
+      }
+    >
+  >({});
   const [multiError, setMultiError] = useState<string | null>(null);
-  const [multiPhase, setMultiPhase] = useState<Record<string, Set<"analyst1_done" | "analyst2_done" | "judge_started">>>({});
+  const [multiPhase, setMultiPhase] = useState<
+    Record<string, Set<"analyst1_done" | "analyst2_done" | "judge_started">>
+  >({});
   const [showIndividual, setShowIndividual] = useState<Set<string>>(new Set());
 
   const hasAnyKey = apiKeys && (apiKeys.anthropic || apiKeys.openai || apiKeys.google);
@@ -167,11 +201,14 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
   });
 
   // Group available models by provider
-  const providerGroups = availableModels.reduce((acc, m) => {
-    if (!acc[m.provider]) acc[m.provider] = [];
-    acc[m.provider].push(m);
-    return acc;
-  }, {} as Record<string, typeof AI_MODELS>);
+  const providerGroups = availableModels.reduce(
+    (acc, m) => {
+      if (!acc[m.provider]) acc[m.provider] = [];
+      acc[m.provider].push(m);
+      return acc;
+    },
+    {} as Record<string, typeof AI_MODELS>
+  );
 
   const handleAiAnalyze = async (dosar: Dosar) => {
     if (!hasAnyKey) {
@@ -206,9 +243,11 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
     }
   };
 
-
   const handleMultiAnalyze = async (dosar: Dosar) => {
-    if (!hasAnyKey) { setShowKeyPrompt(true); return; }
+    if (!hasAnyKey) {
+      setShowKeyPrompt(true);
+      return;
+    }
     // Check required provider keys
     const neededProviders = new Set<string>();
     for (const m of [...multiAnalysts, multiJudge]) {
@@ -216,9 +255,18 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
       if (modelDef) neededProviders.add(modelDef.provider);
     }
     for (const provider of neededProviders) {
-      if (provider === "anthropic" && !apiKeys?.anthropic) { setMultiError("Lipseste cheia API pentru Anthropic (Claude)"); return; }
-      if (provider === "openai" && !apiKeys?.openai) { setMultiError("Lipseste cheia API pentru OpenAI (GPT)"); return; }
-      if (provider === "google" && !apiKeys?.google) { setMultiError("Lipseste cheia API pentru Google (Gemini)"); return; }
+      if (provider === "anthropic" && !apiKeys?.anthropic) {
+        setMultiError("Lipseste cheia API pentru Anthropic (Claude)");
+        return;
+      }
+      if (provider === "openai" && !apiKeys?.openai) {
+        setMultiError("Lipseste cheia API pentru OpenAI (GPT)");
+        return;
+      }
+      if (provider === "google" && !apiKeys?.google) {
+        setMultiError("Lipseste cheia API pentru Google (Gemini)");
+        return;
+      }
     }
     setMultiLoading(dosar.numar);
     setMultiError(null);
@@ -245,7 +293,10 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
-    else { setSortKey(key); setSortDir("asc"); }
+    else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
     setPage(0);
   };
 
@@ -266,9 +317,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
   const paged = sorted.slice(page * pageSize, (page + 1) * pageSize);
 
   const SortIcon = ({ k }: { k: SortKey }) =>
-    sortKey === k ? (
-      sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />
-    ) : null;
+    sortKey === k ? sortDir === "asc" ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" /> : null;
 
   const colCount = 8;
 
@@ -306,14 +355,15 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
           <FileText className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">{dosare.length} dosare gasite</span>
           {selected.size > 0 && (
-            <span className="text-xs text-violet-600 font-medium ml-1">
-              ({selected.size} selectate)
-            </span>
+            <span className="text-xs text-violet-600 font-medium ml-1">({selected.size} selectate)</span>
           )}
         </div>
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
-            <button className="text-xs text-muted-foreground hover:text-foreground underline" onClick={() => setSelected(new Set())}>
+            <button
+              className="text-xs text-muted-foreground hover:text-foreground underline"
+              onClick={() => setSelected(new Set())}
+            >
               Deselecteaza tot
             </button>
           )}
@@ -332,8 +382,8 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
               }
             }}
           >
-            {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {" "}Excel {selected.size > 0 ? `(${selected.size})` : ""}
+            {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{" "}
+            Excel {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
           <Button
             variant="outline"
@@ -350,8 +400,8 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
               }
             }}
           >
-            {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {" "}PDF {selected.size > 0 ? `(${selected.size})` : ""}
+            {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF{" "}
+            {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
         </div>
       </div>
@@ -369,20 +419,20 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                   title="Selecteaza/deselecteaza pagina curenta"
                 />
               </th>
-              {(
-                [
-                  ["numar", "Numar Dosar"],
-                ] as [SortKey, string][]
-              ).map(([key, label]) => (
+              {([["numar", "Numar Dosar"]] as [SortKey, string][]).map(([key, label]) => (
                 <th
                   key={key}
                   className="cursor-pointer px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
                   onClick={() => toggleSort(key)}
                 >
-                  <span className="flex items-center gap-1">{label} <SortIcon k={key} /></span>
+                  <span className="flex items-center gap-1">
+                    {label} <SortIcon k={key} />
+                  </span>
                 </th>
               ))}
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Categorie</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Categorie
+              </th>
               {(
                 [
                   ["data", "Data"],
@@ -394,11 +444,17 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                   className="cursor-pointer px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
                   onClick={() => toggleSort(key)}
                 >
-                  <span className="flex items-center gap-1">{label} <SortIcon k={key} /></span>
+                  <span className="flex items-center gap-1">
+                    {label} <SortIcon k={key} />
+                  </span>
                 </th>
               ))}
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Parti</th>
-              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sedinte</th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Parti
+              </th>
+              <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Sedinte
+              </th>
               <th className="px-4 py-3" />
             </tr>
           </thead>
@@ -431,7 +487,9 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
                           </span>
                         ) : dosar.numar && viewedDosare.has(dosar.numar) ? (
-                          <span title="Vizualizat"><Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" /></span>
+                          <span title="Vizualizat">
+                            <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                          </span>
                         ) : null}
                         {dosar.numar ? (
                           <a
@@ -444,19 +502,34 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                             {dosar.numar}
                             <ExternalLink className="h-3 w-3 shrink-0" />
                           </a>
-                        ) : "-"}
+                        ) : (
+                          "-"
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex flex-col gap-1">
-                        {dosar.categorieCaz && <Badge variant="outline" className={`text-xs ${getCategorieBadgeColor(dosar.categorieCaz)}`}>{dosar.categorieCaz}</Badge>}
-                        {dosar.stadiuProcesual && <Badge variant="outline" className={`text-xs ${getStadiuBadgeColor(dosar.stadiuProcesual)}`}>{dosar.stadiuProcesual}</Badge>}
+                        {dosar.categorieCaz && (
+                          <Badge variant="outline" className={`text-xs ${getCategorieBadgeColor(dosar.categorieCaz)}`}>
+                            {dosar.categorieCaz}
+                          </Badge>
+                        )}
+                        {dosar.stadiuProcesual && (
+                          <Badge variant="outline" className={`text-xs ${getStadiuBadgeColor(dosar.stadiuProcesual)}`}>
+                            {dosar.stadiuProcesual}
+                          </Badge>
+                        )}
                       </div>
                     </td>
-                    <td className={`px-4 py-3 text-[13px] whitespace-nowrap ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : "text-foreground"}`}>
+                    <td
+                      className={`px-4 py-3 text-[13px] whitespace-nowrap ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : "text-foreground"}`}
+                    >
                       {formatDate(dosar.data)}
                     </td>
-                    <td className={`px-4 py-3 text-[13px] max-w-[220px] truncate ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : ""}`} title={formatInstitutie(dosar.institutie)}>
+                    <td
+                      className={`px-4 py-3 text-[13px] max-w-[220px] truncate ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : ""}`}
+                      title={formatInstitutie(dosar.institutie)}
+                    >
                       {formatInstitutie(dosar.institutie)}
                     </td>
                     <td className="px-4 py-3 text-[13px] max-w-[220px]">
@@ -471,10 +544,13 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                       )}
                     </td>
                     <td className="px-4 py-3 text-[13px] text-center">
-                      {dosar.sedinte.length > 0
-                        ? <Badge variant="secondary" className="text-[11px]">{dosar.sedinte.length}</Badge>
-                        : <span className="text-muted-foreground">0</span>
-                      }
+                      {dosar.sedinte.length > 0 ? (
+                        <Badge variant="secondary" className="text-[11px]">
+                          {dosar.sedinte.length}
+                        </Badge>
+                      ) : (
+                        <span className="text-muted-foreground">0</span>
+                      )}
                     </td>
                     <td className="px-4 py-3">
                       <Button variant="ghost" size="icon" title={isExpanded ? "Inchide" : "Detalii"}>
@@ -488,32 +564,37 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                       <td colSpan={colCount} className="bg-muted/20 px-6 py-5">
                         <div className="space-y-4">
                           {/* Action bar — Monitorizeaza adauga dosarul in /monitorizare */}
-                          {dosar.numar && (() => {
-                            const state = monitorState[dosar.numar];
-                            const isPending = state === "pending";
-                            const isAdded = state === "added";
-                            const isExists = state === "exists";
-                            const errorMsg = state && !["pending", "added", "exists"].includes(state) ? state : null;
-                            return (
-                              <div className="flex items-center gap-2">
-                                <Button
-                                  variant={isAdded || isExists ? "secondary" : "outline"}
-                                  size="sm"
-                                  disabled={isPending || isAdded || isExists}
-                                  onClick={(e) => { e.stopPropagation(); handleMonitor(dosar.numar); }}
-                                >
-                                  <Activity className="h-4 w-4" />
-                                  {isPending ? "Se adauga..." :
-                                   isAdded ? "Adaugat la monitorizare" :
-                                   isExists ? "Deja monitorizat" :
-                                   "Monitorizeaza schimbari"}
-                                </Button>
-                                {errorMsg && (
-                                  <span className="text-xs text-red-600">{errorMsg}</span>
-                                )}
-                              </div>
-                            );
-                          })()}
+                          {dosar.numar &&
+                            (() => {
+                              const state = monitorState[dosar.numar];
+                              const isPending = state === "pending";
+                              const isAdded = state === "added";
+                              const isExists = state === "exists";
+                              const errorMsg = state && !["pending", "added", "exists"].includes(state) ? state : null;
+                              return (
+                                <div className="flex items-center gap-2">
+                                  <Button
+                                    variant={isAdded || isExists ? "secondary" : "outline"}
+                                    size="sm"
+                                    disabled={isPending || isAdded || isExists}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleMonitor(dosar.numar);
+                                    }}
+                                  >
+                                    <Activity className="h-4 w-4" />
+                                    {isPending
+                                      ? "Se adauga..."
+                                      : isAdded
+                                        ? "Adaugat la monitorizare"
+                                        : isExists
+                                          ? "Deja monitorizat"
+                                          : "Monitorizeaza schimbari"}
+                                  </Button>
+                                  {errorMsg && <span className="text-xs text-red-600">{errorMsg}</span>}
+                                </div>
+                              );
+                            })()}
 
                           {/* Info grid */}
                           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
@@ -542,10 +623,7 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                                 {dosar.parti.map((p, j) => {
                                   return (
                                     <div key={j} className="flex items-center gap-1.5 text-xs">
-                                      <Badge
-                                        variant="outline"
-                                        className="shrink-0 text-xs"
-                                      >
+                                      <Badge variant="outline" className="shrink-0 text-xs">
                                         {p.calitateParte}
                                       </Badge>
                                       <span className="truncate" title={p.nume}>
@@ -575,7 +653,9 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                                         {formatDate(s.data)}
                                       </span>
                                       {s.ora && (
-                                        <span className="block font-mono text-[11px] text-muted-foreground">{s.ora}</span>
+                                        <span className="block font-mono text-[11px] text-muted-foreground">
+                                          {s.ora}
+                                        </span>
                                       )}
                                     </div>
                                     {/* Timeline dot */}
@@ -604,7 +684,12 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                                             </div>
                                           )}
                                           {s.solutieSumar && (
-                                            <p className="leading-relaxed text-foreground" style={{ fontSize: "14.5px" }}>{s.solutieSumar}</p>
+                                            <p
+                                              className="leading-relaxed text-foreground"
+                                              style={{ fontSize: "14.5px" }}
+                                            >
+                                              {s.solutieSumar}
+                                            </p>
                                           )}
                                         </div>
                                       )}
@@ -629,11 +714,13 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                               availableModels,
                               providerGroups,
                               collapsed: collapsedAiConfig,
-                              toggleCollapsed: (key: string) => setCollapsedAiConfig((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(key)) next.delete(key); else next.add(key);
-                                return next;
-                              }),
+                              toggleCollapsed: (key: string) =>
+                                setCollapsedAiConfig((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(key)) next.delete(key);
+                                  else next.add(key);
+                                  return next;
+                                }),
                               onAnalyze: handleAiAnalyze,
                             }}
                             multi={{
@@ -646,11 +733,13 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
                               result: multiResult,
                               error: multiError,
                               showIndividual,
-                              toggleIndividual: (numar: string) => setShowIndividual((prev) => {
-                                const next = new Set(prev);
-                                if (next.has(numar)) next.delete(numar); else next.add(numar);
-                                return next;
-                              }),
+                              toggleIndividual: (numar: string) =>
+                                setShowIndividual((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(numar)) next.delete(numar);
+                                  else next.add(numar);
+                                  return next;
+                                }),
                               onAnalyze: handleMultiAnalyze,
                             }}
                           />
@@ -671,7 +760,10 @@ export function DosareTable({ dosare, onExportExcel, onExportPDF, searchedName, 
           totalPages={totalPages}
           pageSize={pageSize}
           onPageChange={setPage}
-          onPageSizeChange={(size) => { setPageSize(size); setPage(0); }}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(0);
+          }}
         />
       )}
     </Card>
@@ -682,7 +774,8 @@ function InfoItem({ icon: Icon, label, value }: { icon?: React.ElementType; labe
   return (
     <div className="space-y-1">
       <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-        {Icon && <Icon className="h-3 w-3" />}{label}
+        {Icon && <Icon className="h-3 w-3" />}
+        {label}
       </p>
       <p className="text-sm font-medium">{value}</p>
     </div>

@@ -12,9 +12,7 @@ function firstNonEmpty(...values: Array<string | undefined>): string | null {
 function readMode(raw: string | undefined): AuthMode {
   const mode = (raw ?? "desktop").trim().toLowerCase();
   if (mode === "desktop" || mode === "web") return mode;
-  throw new Error(
-    `Invalid LEGAL_DASHBOARD_AUTH_MODE/APP_MODE: ${raw}. Expected "desktop" or "web".`,
-  );
+  throw new Error(`Invalid LEGAL_DASHBOARD_AUTH_MODE/APP_MODE: ${raw}. Expected "desktop" or "web".`);
 }
 
 export function getAuthMode(env: NodeJS.ProcessEnv = process.env): AuthMode {
@@ -38,14 +36,11 @@ export function isAuthCookieSecureDisabled(env: NodeJS.ProcessEnv = process.env)
 }
 
 export function getTokenTtlSeconds(env: NodeJS.ProcessEnv = process.env): number {
-  const raw =
-    env.LEGAL_DASHBOARD_JWT_TTL_SECONDS ?? env.LEGAL_DASHBOARD_AUTH_TOKEN_TTL_SECONDS;
+  const raw = env.LEGAL_DASHBOARD_JWT_TTL_SECONDS ?? env.LEGAL_DASHBOARD_AUTH_TOKEN_TTL_SECONDS;
   if (!raw) return 60 * 60;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 60 || parsed > 24 * 60 * 60) {
-    throw new Error(
-      "LEGAL_DASHBOARD_JWT_TTL_SECONDS must be between 60 and 86400 seconds.",
-    );
+    throw new Error("LEGAL_DASHBOARD_JWT_TTL_SECONDS must be between 60 and 86400 seconds.");
   }
   return Math.floor(parsed);
 }
@@ -54,7 +49,7 @@ export function requireJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
   const secret = getJwtSecret(env);
   if (!secret || secret.length < WEB_SECRET_MIN_LENGTH) {
     throw new Error(
-      `JWT_SECRET este obligatoriu in web mode si trebuie sa aiba cel putin ${WEB_SECRET_MIN_LENGTH} caractere.`,
+      `JWT_SECRET este obligatoriu in web mode si trebuie sa aiba cel putin ${WEB_SECRET_MIN_LENGTH} caractere.`
     );
   }
   return secret;
@@ -75,9 +70,7 @@ export function validateAuthConfig(env: NodeJS.ProcessEnv = process.env): void {
       if (env.NODE_ENV === "production") {
         throw new Error("AUTH_COOKIE_SECURE=0 nu este permis in productie web.");
       }
-      console.warn(
-        "[auth.config] AUTH_COOKIE_SECURE=0 permite cookie peste HTTP. Nu folosi in productie.",
-      );
+      console.warn("[auth.config] AUTH_COOKIE_SECURE=0 permite cookie peste HTTP. Nu folosi in productie.");
     }
   }
 }

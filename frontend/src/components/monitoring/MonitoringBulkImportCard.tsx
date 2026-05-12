@@ -1,14 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import {
-  Upload,
-  Download,
-  FileSpreadsheet,
-  ChevronDown,
-  ChevronRight,
-  X,
-  Trash2,
-  Undo2,
-} from "lucide-react";
+import { Upload, Download, FileSpreadsheet, ChevronDown, ChevronRight, X, Trash2, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -22,11 +13,7 @@ import {
   type NameListValidation,
   MonitoringApiError,
 } from "@/lib/api";
-import {
-  downloadBulkTemplate,
-  parseBulkFile,
-  type BulkRowDosar,
-} from "@/lib/monitoringBulkTemplate";
+import { downloadBulkTemplate, parseBulkFile, type BulkRowDosar } from "@/lib/monitoringBulkTemplate";
 
 // Stage 4 extract din pages/Monitorizare.tsx — toata starea + handlerele +
 // JSX pentru flow-ul "Adaugare bulk din fisier" traieste aici. Page-ul ramane
@@ -92,7 +79,9 @@ export function MonitoringBulkImportCard({
       setBulkDosarRows(dosarRows);
 
       if (parsedBulk.invalid.length > 0) {
-        setBulkError(`${parsedBulk.invalid.length} randuri din XLSX au fost ignorate: ${parsedBulk.invalid[0]?.message ?? "format invalid"}`);
+        setBulkError(
+          `${parsedBulk.invalid.length} randuri din XLSX au fost ignorate: ${parsedBulk.invalid[0]?.message ?? "format invalid"}`
+        );
       }
 
       if (nameRows.length > 0) {
@@ -103,7 +92,7 @@ export function MonitoringBulkImportCard({
               csvCell(row.name_normalized),
               row.cadence_sec ? String(row.cadence_sec) : "",
               csvCell(row.notes ?? ""),
-            ].join(","),
+            ].join(",")
           ),
         ].join("\n");
         const nameFile = new File([`${csv}\n`], file.name.replace(/\.[^.]+$/, "-nume.csv"), {
@@ -185,7 +174,7 @@ export function MonitoringBulkImportCard({
               }
               return { ok: false as const };
             }
-          }),
+          })
         );
         for (const r of results) {
           if (!r.ok) dosarErrors++;
@@ -217,7 +206,7 @@ export function MonitoringBulkImportCard({
         do {
           if (iteration >= MAX_ITERATIONS) {
             throw new Error(
-              `Import oprit dupa ${MAX_ITERATIONS} cereri partiale fara finalizare. Reincearca sau contacteaza suportul.`,
+              `Import oprit dupa ${MAX_ITERATIONS} cereri partiale fara finalizare. Reincearca sau contacteaza suportul.`
             );
           }
           iteration += 1;
@@ -236,7 +225,7 @@ export function MonitoringBulkImportCard({
           });
           if (last.partial && last.jobsCreated === 0) {
             throw new Error(
-              "Importul nu mai progreseaza (0 joburi noi intr-o cerere partiala). Reincearca mai tarziu.",
+              "Importul nu mai progreseaza (0 joburi noi intr-o cerere partiala). Reincearca mai tarziu."
             );
           }
         } while (last.partial);
@@ -275,13 +264,8 @@ export function MonitoringBulkImportCard({
   };
 
   const visiblePreviewRows = useMemo(
-    () =>
-      bulkPreview
-        ? bulkPreview.rows.filter(
-            (row) => bulkFilter === "all" || row.validation === bulkFilter,
-          )
-        : [],
-    [bulkPreview, bulkFilter],
+    () => (bulkPreview ? bulkPreview.rows.filter((row) => bulkFilter === "all" || row.validation === bulkFilter) : []),
+    [bulkPreview, bulkFilter]
   );
 
   // Reset paginare cand filtrul / lista se schimba — altfel utilizatorul
@@ -327,299 +311,293 @@ export function MonitoringBulkImportCard({
         className="cursor-pointer hover:bg-accent/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <CardTitle className="text-base flex items-center gap-2">
-          {bulkOpen ? (
-            <ChevronDown className="h-4 w-4" />
-          ) : (
-            <ChevronRight className="h-4 w-4" />
-          )}
+          {bulkOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
           <FileSpreadsheet className="h-4 w-4" />
           Adaugare bulk din fisier
         </CardTitle>
       </CardHeader>
       {bulkOpen && (
-      <CardContent id="bulk-import-content">
-        <p className="text-sm text-foreground mb-3">
-          Adauga in masa mai multe dosare sau nume dintr-un fisier Excel (XLSX) sau CSV.
-          Descarca mai intai template-ul ca sa vezi ce coloane trebuie completate, apoi
-          incarca-l inapoi cu randurile tale. Aplicatia adauga automat fiecare rand in
-          monitorizare cu cadenta pe care o pui in fisier.
-        </p>
-        <div className="flex flex-wrap items-center gap-3">
-          <Button variant="outline" size="sm" onClick={downloadBulkTemplate} disabled={bulkBusy}>
-            <Download className="h-4 w-4" /> Descarca template XLSX
-          </Button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls,.csv"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) handleBulkUpload(f);
-            }}
-          />
-          <Button
-            variant="default"
-            size="sm"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={bulkBusy}
-          >
-            <Upload className="h-4 w-4" />
-            {bulkBusy ? "Se proceseaza..." : "Incarca fisier"}
-          </Button>
-        </div>
-        {bulkError && (
-          <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
-            {bulkError}
+        <CardContent id="bulk-import-content">
+          <p className="text-sm text-foreground mb-3">
+            Adauga in masa mai multe dosare sau nume dintr-un fisier Excel (XLSX) sau CSV. Descarca mai intai
+            template-ul ca sa vezi ce coloane trebuie completate, apoi incarca-l inapoi cu randurile tale. Aplicatia
+            adauga automat fiecare rand in monitorizare cu cadenta pe care o pui in fisier.
+          </p>
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="outline" size="sm" onClick={downloadBulkTemplate} disabled={bulkBusy}>
+              <Download className="h-4 w-4" /> Descarca template XLSX
+            </Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".xlsx,.xls,.csv"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) handleBulkUpload(f);
+              }}
+            />
+            <Button variant="default" size="sm" onClick={() => fileInputRef.current?.click()} disabled={bulkBusy}>
+              <Upload className="h-4 w-4" />
+              {bulkBusy ? "Se proceseaza..." : "Incarca fisier"}
+            </Button>
           </div>
-        )}
-        {(bulkPreview || bulkDosarRows.length > 0) && (
-          <div className="mt-4 space-y-4">
-            {bulkPreview && (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center gap-2 text-sm">
-                  <span className="rounded-md bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                    {bulkPreview.totals.ok} nume ok
-                  </span>
-                  <span className="rounded-md bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
-                    {bulkPreview.totals.warn} warn
-                  </span>
-                  <span className="rounded-md bg-red-100 px-2 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">
-                    {bulkPreview.totals.rejected} respinse
-                  </span>
-                  <span className="text-muted-foreground">din {bulkPreview.totals.total} randuri nume</span>
-                  {(excludedRows.size > 0 || excludeWarnsAuto) && (
-                    <span className="rounded-md bg-blue-100 px-2 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                      {bulkPreview.totals.total - bulkPreview.totals.rejected - effectiveCommittableCount} excluse manual {effectiveCommittableCount} de importat
-                    </span>
-                  )}
-                </div>
-                <details className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
-                  <summary className="cursor-pointer text-foreground">Ce inseamna fiecare status?</summary>
-                  <ul className="mt-2 space-y-1.5 leading-relaxed">
-                    <li>
-                      <span className="rounded-md bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-400">ok</span>{" "}
-                      Numele e valid si va fi importat ca job de monitorizare.
-                    </li>
-                    <li>
-                      <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">warn</span>{" "}
-                      Numele e valid dar are o particularitate. Vezi coloana
-                      "Mesaj" pentru motiv. Cele doua tipuri de warn sunt:
-                      <ul className="mt-1 ml-4 list-disc space-y-0.5">
-                        <li>
-                          <strong>Duplicat in fisier</strong> — sigur de importat. Sistemul deduplica automat: NU se creeaza un job in plus.
-                        </li>
-                        <li>
-                          <strong>Nume lung pentru PortalJust</strong> — risc real ca PortalJust sa raspunda cu eroare la cautare. Considera sa-l excluzi sau sa scurtezi numele in fisier.
-                        </li>
-                      </ul>
-                    </li>
-                    <li>
-                      <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400">respinse</span>{" "}
-                      Numele e invalid (gol, sub 2 caractere, peste 200 caractere, doar cifre). NU se va importa, indiferent de selectia ta.
-                    </li>
-                    <li>
-                      Butonul <strong>Exclude</strong> de pe fiecare rand permite sa scoti manual orice rand inainte de import (util pentru nume lungi sau introduse din greseala).
-                    </li>
-                  </ul>
-                </details>
-              </div>
-            )}
-            {bulkDosarRows.length > 0 && (
-              <div className="text-sm text-muted-foreground">
-                {bulkDosarRows.length} randuri cu numar_dosar vor fi create ca joburi dosar_soap.
-              </div>
-            )}
-
-            <div className="flex flex-wrap items-end gap-3">
-              <label className="grid gap-1 text-sm">
-                <span className="text-xs text-muted-foreground">Titlu lista</span>
-                <input
-                  className="h-9 min-w-72 rounded-md border border-input bg-background px-3 text-sm"
-                  value={bulkTitle}
-                  onChange={(e) => setBulkTitle(e.target.value)}
-                  disabled={bulkBusy}
-                />
-              </label>
-              <div className="grid gap-1 text-sm">
-                <span className="text-xs text-muted-foreground">Filtru preview</span>
-                <Select
-                  value={bulkFilter}
-                  onValueChange={(v) => setBulkFilter(v as NameListValidation | "all")}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Filtru" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">toate</SelectItem>
-                    <SelectItem value="ok">ok</SelectItem>
-                    <SelectItem value="warn">warn</SelectItem>
-                    <SelectItem value="rejected">respinse</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {bulkPreview && bulkPreview.totals.warn > 0 && (
-                <label className="flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={excludeWarnsAuto}
-                    onChange={(e) => setExcludeWarnsAuto(e.target.checked)}
-                  />
-                  <span>Exclude warn-urile automat</span>
-                </label>
-              )}
-              <Button
-                size="sm"
-                onClick={handleBulkCommit}
-                disabled={
-                  bulkBusy ||
-                  ((bulkPreview?.totals.ok ?? 0) + (bulkPreview?.totals.warn ?? 0) === 0 &&
-                    bulkDosarRows.length === 0)
-                }
-              >
-                <Upload className="h-4 w-4" />
-                {bulkBusy
-                  ? `Import... ${bulkCommitProgress.created} create`
-                  : "Confirma import"}
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleBulkCancel}
-                disabled={bulkBusy}
-              >
-                <X className="h-4 w-4" />
-                Anuleaza
-              </Button>
+          {bulkError && (
+            <div className="mt-3 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/40 dark:bg-red-900/20 dark:text-red-400">
+              {bulkError}
             </div>
+          )}
+          {(bulkPreview || bulkDosarRows.length > 0) && (
+            <div className="mt-4 space-y-4">
+              {bulkPreview && (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="rounded-md bg-green-100 px-2 py-0.5 text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                      {bulkPreview.totals.ok} nume ok
+                    </span>
+                    <span className="rounded-md bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                      {bulkPreview.totals.warn} warn
+                    </span>
+                    <span className="rounded-md bg-red-100 px-2 py-0.5 text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                      {bulkPreview.totals.rejected} respinse
+                    </span>
+                    <span className="text-muted-foreground">din {bulkPreview.totals.total} randuri nume</span>
+                    {(excludedRows.size > 0 || excludeWarnsAuto) && (
+                      <span className="rounded-md bg-blue-100 px-2 py-0.5 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                        {bulkPreview.totals.total - bulkPreview.totals.rejected - effectiveCommittableCount} excluse
+                        manual {effectiveCommittableCount} de importat
+                      </span>
+                    )}
+                  </div>
+                  <details className="rounded-md border border-border bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                    <summary className="cursor-pointer text-foreground">Ce inseamna fiecare status?</summary>
+                    <ul className="mt-2 space-y-1.5 leading-relaxed">
+                      <li>
+                        <span className="rounded-md bg-green-100 px-1.5 py-0.5 text-[10px] font-semibold text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                          ok
+                        </span>{" "}
+                        Numele e valid si va fi importat ca job de monitorizare.
+                      </li>
+                      <li>
+                        <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800 dark:bg-amber-900/30 dark:text-amber-400">
+                          warn
+                        </span>{" "}
+                        Numele e valid dar are o particularitate. Vezi coloana "Mesaj" pentru motiv. Cele doua tipuri de
+                        warn sunt:
+                        <ul className="mt-1 ml-4 list-disc space-y-0.5">
+                          <li>
+                            <strong>Duplicat in fisier</strong> — sigur de importat. Sistemul deduplica automat: NU se
+                            creeaza un job in plus.
+                          </li>
+                          <li>
+                            <strong>Nume lung pentru PortalJust</strong> — risc real ca PortalJust sa raspunda cu eroare
+                            la cautare. Considera sa-l excluzi sau sa scurtezi numele in fisier.
+                          </li>
+                        </ul>
+                      </li>
+                      <li>
+                        <span className="rounded-md bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-900/30 dark:text-red-400">
+                          respinse
+                        </span>{" "}
+                        Numele e invalid (gol, sub 2 caractere, peste 200 caractere, doar cifre). NU se va importa,
+                        indiferent de selectia ta.
+                      </li>
+                      <li>
+                        Butonul <strong>Exclude</strong> de pe fiecare rand permite sa scoti manual orice rand inainte
+                        de import (util pentru nume lungi sau introduse din greseala).
+                      </li>
+                    </ul>
+                  </details>
+                </div>
+              )}
+              {bulkDosarRows.length > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  {bulkDosarRows.length} randuri cu numar_dosar vor fi create ca joburi dosar_soap.
+                </div>
+              )}
 
-            {bulkPreview && (
-            <div className="rounded-md border">
-              <div className="max-h-96 overflow-auto">
-                <table className="w-full text-sm">
-                  <thead className="sticky top-0 bg-background">
-                    <tr className="border-b text-left text-xs uppercase text-muted-foreground">
-                      <th className="px-3 py-2">Rand</th>
-                      <th className="px-3 py-2">Nume</th>
-                      <th className="px-3 py-2">Status</th>
-                      <th className="px-3 py-2">Mesaj</th>
-                      <th className="px-3 py-2 text-right">Actiune</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageRows.length === 0 ? (
-                      <tr>
-                        <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
-                          Niciun rand pentru filtrul curent.
-                        </td>
-                      </tr>
-                    ) : (
-                      pageRows.map((row) => {
-                        const isExcluded = excludedRows.has(row.rowIndex);
-                        const isAutoExcluded = excludeWarnsAuto && row.validation === "warn";
-                        const isRejected = row.validation === "rejected";
-                        const skipped = isExcluded || isAutoExcluded || isRejected;
-                        return (
-                          <tr
-                            key={row.rowIndex}
-                            className={cn(
-                              "border-b last:border-b-0",
-                              skipped && "bg-muted/30",
-                            )}
-                          >
-                            <td className={cn("px-3 py-2 text-muted-foreground", skipped && "line-through opacity-60")}>
-                              {row.rowIndex + 1}
-                            </td>
-                            <td className={cn("px-3 py-2 font-mono", skipped && "line-through opacity-60")}>
-                              {row.nameRaw || "(gol)"}
-                            </td>
-                            <td className="px-3 py-2">
-                              <span
-                                className={cn(
-                                  "rounded-md px-2 py-0.5 text-xs",
-                                  row.validation === "ok" && "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
-                                  row.validation === "warn" && "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
-                                  row.validation === "rejected" && "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
-                                )}
-                              >
-                                {row.validation}
-                              </span>
-                              {isExcluded && (
-                                <span className="ml-1 rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                  exclus
-                                </span>
-                              )}
-                              {isAutoExcluded && !isExcluded && (
-                                <span className="ml-1 rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
-                                  auto-exclus
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-3 py-2 text-muted-foreground">
-                              {row.validationMsg ?? "-"}
-                            </td>
-                            <td className="px-3 py-2 text-right">
-                              {row.validation === "rejected" ? (
-                                <span className="text-xs text-muted-foreground">-</span>
-                              ) : isExcluded ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => toggleRowExclusion(row.rowIndex)}
-                                  className="h-7 px-2 text-xs"
-                                >
-                                  <Undo2 className="h-3 w-3" /> Include
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => toggleRowExclusion(row.rowIndex)}
-                                  className="h-7 px-2 text-xs"
-                                  disabled={isAutoExcluded}
-                                  title={isAutoExcluded ? "Deja auto-exclus prin toggle-ul global" : undefined}
-                                >
-                                  <Trash2 className="h-3 w-3" /> Exclude
-                                </Button>
-                              )}
+              <div className="flex flex-wrap items-end gap-3">
+                <label className="grid gap-1 text-sm">
+                  <span className="text-xs text-muted-foreground">Titlu lista</span>
+                  <input
+                    className="h-9 min-w-72 rounded-md border border-input bg-background px-3 text-sm"
+                    value={bulkTitle}
+                    onChange={(e) => setBulkTitle(e.target.value)}
+                    disabled={bulkBusy}
+                  />
+                </label>
+                <div className="grid gap-1 text-sm">
+                  <span className="text-xs text-muted-foreground">Filtru preview</span>
+                  <Select value={bulkFilter} onValueChange={(v) => setBulkFilter(v as NameListValidation | "all")}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Filtru" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">toate</SelectItem>
+                      <SelectItem value="ok">ok</SelectItem>
+                      <SelectItem value="warn">warn</SelectItem>
+                      <SelectItem value="rejected">respinse</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                {bulkPreview && bulkPreview.totals.warn > 0 && (
+                  <label className="flex h-9 items-center gap-1.5 rounded-md border border-input bg-background px-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={excludeWarnsAuto}
+                      onChange={(e) => setExcludeWarnsAuto(e.target.checked)}
+                    />
+                    <span>Exclude warn-urile automat</span>
+                  </label>
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleBulkCommit}
+                  disabled={
+                    bulkBusy ||
+                    ((bulkPreview?.totals.ok ?? 0) + (bulkPreview?.totals.warn ?? 0) === 0 &&
+                      bulkDosarRows.length === 0)
+                  }
+                >
+                  <Upload className="h-4 w-4" />
+                  {bulkBusy ? `Import... ${bulkCommitProgress.created} create` : "Confirma import"}
+                </Button>
+                <Button variant="outline" size="sm" onClick={handleBulkCancel} disabled={bulkBusy}>
+                  <X className="h-4 w-4" />
+                  Anuleaza
+                </Button>
+              </div>
+
+              {bulkPreview && (
+                <div className="rounded-md border">
+                  <div className="max-h-96 overflow-auto">
+                    <table className="w-full text-sm">
+                      <thead className="sticky top-0 bg-background">
+                        <tr className="border-b text-left text-xs uppercase text-muted-foreground">
+                          <th className="px-3 py-2">Rand</th>
+                          <th className="px-3 py-2">Nume</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2">Mesaj</th>
+                          <th className="px-3 py-2 text-right">Actiune</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pageRows.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="px-3 py-6 text-center text-muted-foreground">
+                              Niciun rand pentru filtrul curent.
                             </td>
                           </tr>
-                        );
-                      })
-                    )}
-                  </tbody>
-                </table>
-              </div>
-              {visiblePreviewRows.length > 0 && (
-                <TablePagination
-                  page={safePage}
-                  totalPages={totalPages}
-                  pageSize={bulkPageSize}
-                  onPageChange={setBulkPage}
-                  onPageSizeChange={(size) => {
-                    setBulkPageSize(size);
-                    setBulkPage(0);
-                  }}
-                  pageSizes={[25, 50, 100, 250]}
-                />
+                        ) : (
+                          pageRows.map((row) => {
+                            const isExcluded = excludedRows.has(row.rowIndex);
+                            const isAutoExcluded = excludeWarnsAuto && row.validation === "warn";
+                            const isRejected = row.validation === "rejected";
+                            const skipped = isExcluded || isAutoExcluded || isRejected;
+                            return (
+                              <tr
+                                key={row.rowIndex}
+                                className={cn("border-b last:border-b-0", skipped && "bg-muted/30")}
+                              >
+                                <td
+                                  className={cn(
+                                    "px-3 py-2 text-muted-foreground",
+                                    skipped && "line-through opacity-60"
+                                  )}
+                                >
+                                  {row.rowIndex + 1}
+                                </td>
+                                <td className={cn("px-3 py-2 font-mono", skipped && "line-through opacity-60")}>
+                                  {row.nameRaw || "(gol)"}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <span
+                                    className={cn(
+                                      "rounded-md px-2 py-0.5 text-xs",
+                                      row.validation === "ok" &&
+                                        "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400",
+                                      row.validation === "warn" &&
+                                        "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+                                      row.validation === "rejected" &&
+                                        "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                                    )}
+                                  >
+                                    {row.validation}
+                                  </span>
+                                  {isExcluded && (
+                                    <span className="ml-1 rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                                      exclus
+                                    </span>
+                                  )}
+                                  {isAutoExcluded && !isExcluded && (
+                                    <span className="ml-1 rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700 dark:bg-blue-900/30 dark:text-blue-400">
+                                      auto-exclus
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 text-muted-foreground">{row.validationMsg ?? "-"}</td>
+                                <td className="px-3 py-2 text-right">
+                                  {row.validation === "rejected" ? (
+                                    <span className="text-xs text-muted-foreground">-</span>
+                                  ) : isExcluded ? (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => toggleRowExclusion(row.rowIndex)}
+                                      className="h-7 px-2 text-xs"
+                                    >
+                                      <Undo2 className="h-3 w-3" /> Include
+                                    </Button>
+                                  ) : (
+                                    <Button
+                                      size="sm"
+                                      variant="outline"
+                                      onClick={() => toggleRowExclusion(row.rowIndex)}
+                                      className="h-7 px-2 text-xs"
+                                      disabled={isAutoExcluded}
+                                      title={isAutoExcluded ? "Deja auto-exclus prin toggle-ul global" : undefined}
+                                    >
+                                      <Trash2 className="h-3 w-3" /> Exclude
+                                    </Button>
+                                  )}
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                  {visiblePreviewRows.length > 0 && (
+                    <TablePagination
+                      page={safePage}
+                      totalPages={totalPages}
+                      pageSize={bulkPageSize}
+                      onPageChange={setBulkPage}
+                      onPageSizeChange={(size) => {
+                        setBulkPageSize(size);
+                        setBulkPage(0);
+                      }}
+                      pageSizes={[25, 50, 100, 250]}
+                    />
+                  )}
+                </div>
+              )}
+              {bulkCommit && (
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-400">
+                  Lista #{bulkCommit.list.id} salvata. Joburi noi create: {bulkCommitProgress.created}. Duplicate:{" "}
+                  {bulkCommit.duplicate ? "da" : "nu"}.
+                </div>
+              )}
+              {bulkDosarResult && (
+                <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-400">
+                  Dosare bulk: {bulkDosarResult.added} adaugate, {bulkDosarResult.exists} deja existente,{" "}
+                  {bulkDosarResult.errors} erori.
+                </div>
               )}
             </div>
-            )}
-            {bulkCommit && (
-              <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-400">
-                Lista #{bulkCommit.list.id} salvata. Joburi noi create:{" "}
-                {bulkCommitProgress.created}. Duplicate: {bulkCommit.duplicate ? "da" : "nu"}.
-              </div>
-            )}
-            {bulkDosarResult && (
-              <div className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700 dark:border-green-900/40 dark:bg-green-900/20 dark:text-green-400">
-                Dosare bulk: {bulkDosarResult.added} adaugate, {bulkDosarResult.exists} deja existente,{" "}
-                {bulkDosarResult.errors} erori.
-              </div>
-            )}
-          </div>
-        )}
-      </CardContent>
+          )}
+        </CardContent>
       )}
     </Card>
   );

@@ -720,9 +720,10 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     expect(json.data.alreadyDismissedCount).toBe(0);
 
     // Owner A's rows are now dismissed; owner B's row is untouched.
-    const dbRows = getDb()
-      .prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`)
-      .all() as { id: number; dismissed_at: string | null }[];
+    const dbRows = getDb().prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`).all() as {
+      id: number;
+      dismissed_at: string | null;
+    }[];
     const aRow = dbRows.find((r) => r.id === a.id);
     const bRow = dbRows.find((r) => r.id === b.id);
     const foreignRow = dbRows.find((r) => r.id === foreign.id);
@@ -790,9 +791,10 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     expect(json.data.totalMatched).toBe(1);
     expect(json.data.dismissedCount).toBe(1);
 
-    const rows = getDb()
-      .prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`)
-      .all() as { id: number; dismissed_at: string | null }[];
+    const rows = getDb().prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`).all() as {
+      id: number;
+      dismissed_at: string | null;
+    }[];
     const dosarRow = rows.find((r) => r.id === dosarAlert.id);
     const nameRow = rows.find((r) => r.id === nameAlert.id);
     expect(dosarRow?.dismissed_at).toBeTruthy();
@@ -832,12 +834,12 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     expect(json.data.totalMatched).toBe(1);
     expect(json.data.dismissedCount).toBe(1);
 
-    const ownDb = getDb()
-      .prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`)
-      .get(own.id) as { dismissed_at: string | null };
-    const foreignDb = getDb()
-      .prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`)
-      .get(foreign.id) as { dismissed_at: string | null };
+    const ownDb = getDb().prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`).get(own.id) as {
+      dismissed_at: string | null;
+    };
+    const foreignDb = getDb().prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`).get(foreign.id) as {
+      dismissed_at: string | null;
+    };
     expect(ownDb.dismissed_at).toBeTruthy();
     expect(foreignDb.dismissed_at).toBeNull();
   });

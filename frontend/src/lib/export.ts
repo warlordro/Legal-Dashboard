@@ -62,7 +62,9 @@ async function runExportInWorker(job: ExportJob): Promise<ExportResult> {
   const ExportWorker = (await import("./export.worker.ts?worker")).default;
   return new Promise<ExportResult>((resolve, reject) => {
     const worker = new ExportWorker();
-    worker.onmessage = (e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>) => {
+    worker.onmessage = (
+      e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>
+    ) => {
       worker.terminate();
       if (!e.data.ok) {
         reject(new Error(e.data.error));
@@ -184,8 +186,18 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<ExportResult> {
 
   // ── Sheet 1: Dosare ────────────────────────────────────────────────────────
   const D_COLS = 9; // A–I
-  const D_HEADERS = ["#", "Numar Dosar", "Data", "Institutie", "Departament", "Categorie / Stadiu", "Obiect", "Parti", "Nr. Sedinte"];
-  const D_WIDTHS  = [5, 22, 14, 28, 20, 28, 32, 45, 12];
+  const D_HEADERS = [
+    "#",
+    "Numar Dosar",
+    "Data",
+    "Institutie",
+    "Departament",
+    "Categorie / Stadiu",
+    "Obiect",
+    "Parti",
+    "Nr. Sedinte",
+  ];
+  const D_WIDTHS = [5, 22, 14, 28, 20, 28, 32, 45, 12];
 
   const dosareAoA: (string | number | null)[][] = [
     ["PORTALJUST DASHBOARD — DOSARE", ...Array(D_COLS - 1).fill(null)],
@@ -221,13 +233,19 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<ExportResult> {
     for (let c = 0; c < D_COLS; c++) {
       const isNumar = c === 1;
       const hasSedinteLnk = isNumar && hasSedinte && sedinteRowMap.has(d.numar);
-      styleCell(wsDosare, r, c, hasSedinteLnk
-        ? { // Hyperlink style — albastru subliniat
-            font: { bold: true, sz: 9, color: { rgb: "1D4ED8" }, underline: true },
-            fill: { patternType: "solid", fgColor: { rgb: isAlt ? ROW_ALT : WHITE } },
-            alignment: { horizontal: "left", vertical: "top", wrapText: true },
-          }
-        : styleDataCell(i, isNumar));
+      styleCell(
+        wsDosare,
+        r,
+        c,
+        hasSedinteLnk
+          ? {
+              // Hyperlink style — albastru subliniat
+              font: { bold: true, sz: 9, color: { rgb: "1D4ED8" }, underline: true },
+              fill: { patternType: "solid", fgColor: { rgb: isAlt ? ROW_ALT : WHITE } },
+              alignment: { horizontal: "left", vertical: "top", wrapText: true },
+            }
+          : styleDataCell(i, isNumar)
+      );
       // Adaugă hyperlink spre secțiunea din Sedinte
       if (hasSedinteLnk) {
         const sedinteRow = sedinteRowMap.get(d.numar)!;
@@ -244,8 +262,19 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<ExportResult> {
 
   if (hasSedinte) {
     const S_COLS = 10; // A–J
-    const S_HEADERS = ["#", "Numar Dosar", "Data Sedinta", "Ora", "Complet", "Solutie", "Sumar Solutie", "Document", "Nr. Document", "Data Pronuntare"];
-    const S_WIDTHS  = [5, 22, 14, 8, 20, 32, 32, 22, 16, 14];
+    const S_HEADERS = [
+      "#",
+      "Numar Dosar",
+      "Data Sedinta",
+      "Ora",
+      "Complet",
+      "Solutie",
+      "Sumar Solutie",
+      "Document",
+      "Nr. Document",
+      "Data Pronuntare",
+    ];
+    const S_WIDTHS = [5, 22, 14, 8, 20, 32, 32, 22, 16, 14];
 
     const sedinteAoA: (string | number | null)[][] = [
       ["PORTALJUST DASHBOARD — SEDINTE", ...Array(S_COLS - 1).fill(null)],
@@ -333,7 +362,7 @@ export async function buildTermeneXlsx(termene: Termen[]): Promise<ExportResult>
   const dateStr = new Date().toLocaleDateString("ro-RO");
   const T_COLS = 8; // A–H
   const T_HEADERS = ["#", "Numar Dosar", "Data", "Ora", "Institutie", "Complet", "Solutie", "Sumar Solutie"];
-  const T_WIDTHS  = [5, 22, 14, 8, 30, 22, 35, 35];
+  const T_WIDTHS = [5, 22, 14, 8, 30, 22, 35, 35];
 
   const termeneAoA: (string | number | null)[][] = [
     ["PORTALJUST DASHBOARD — TERMENE", ...Array(T_COLS - 1).fill(null)],
@@ -383,7 +412,7 @@ export async function buildMonitoringXlsx(jobs: MonitoringJob[]): Promise<Export
   const dateStr = new Date().toLocaleDateString("ro-RO");
   const M_COLS = 8; // A–H
   const M_HEADERS = ["#", "Tinta", "Tip", "Cadenta", "Ultima rulare", "Urmatoarea verif.", "Status", "Note"];
-  const M_WIDTHS  = [5, 30, 12, 10, 18, 18, 16, 30];
+  const M_WIDTHS = [5, 30, 12, 10, 18, 18, 16, 30];
 
   const monitorAoA: (string | number | null)[][] = [
     ["PORTALJUST DASHBOARD — MONITORIZARE", ...Array(M_COLS - 1).fill(null)],
@@ -457,7 +486,11 @@ export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   const totalSedinte = dosare.reduce((sum, d) => sum + d.sedinte.length, 0);
-  doc.text(`Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${dosare.length} dosare, ${totalSedinte} sedinte`, 14, 22);
+  doc.text(
+    `Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${dosare.length} dosare, ${totalSedinte} sedinte`,
+    14,
+    22
+  );
 
   // Side-band: row index → portal.just.ro URL pentru coloana "Numar Dosar"
   // (autotable nu are acces la valoarea originala in didDrawCell, doar la
@@ -762,7 +795,7 @@ export async function exportAnalysisPDF(
   dosarObiect: string,
   analysisText: string,
   type: "simple" | "advanced" = "simple",
-  judgeModel?: string,
+  judgeModel?: string
 ): Promise<void> {
   const result = await runExportInWorker({
     kind: "analysisPdf",
@@ -778,16 +811,12 @@ export async function exportManualPDF(): Promise<void> {
 
 // ─── Orchestratori raport (PR-C v2.9.0) ──────────────────────────────────────
 
-export async function exportReportXlsx(
-  payload: import("./dashboardApi").DashboardReportPayload,
-): Promise<void> {
+export async function exportReportXlsx(payload: import("./dashboardApi").DashboardReportPayload): Promise<void> {
   const result = await runExportInWorker({ kind: "reportXlsx", data: payload });
   triggerDownload(result.buffer, result.filename, result.mime);
 }
 
-export async function exportReportPdf(
-  payload: import("./dashboardApi").DashboardReportPayload,
-): Promise<void> {
+export async function exportReportPdf(payload: import("./dashboardApi").DashboardReportPayload): Promise<void> {
   const result = await runExportInWorker({ kind: "reportPdf", data: payload });
   triggerDownload(result.buffer, result.filename, result.mime);
 }

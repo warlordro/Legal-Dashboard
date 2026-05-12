@@ -18,8 +18,18 @@ interface CalendarViewProps {
 }
 
 const MONTHS_RO = [
-  "Ianuarie", "Februarie", "Martie", "Aprilie", "Mai", "Iunie",
-  "Iulie", "August", "Septembrie", "Octombrie", "Noiembrie", "Decembrie",
+  "Ianuarie",
+  "Februarie",
+  "Martie",
+  "Aprilie",
+  "Mai",
+  "Iunie",
+  "Iulie",
+  "August",
+  "Septembrie",
+  "Octombrie",
+  "Noiembrie",
+  "Decembrie",
 ];
 const DAYS_RO = ["Lu", "Ma", "Mi", "Jo", "Vi", "Sa", "Du"];
 
@@ -46,14 +56,18 @@ export function CalendarView({ termene }: CalendarViewProps) {
   };
 
   const prevMonth = () => {
-    if (currentMonth === 0) { setCurrentMonth(11); setCurrentYear((y) => y - 1); }
-    else setCurrentMonth((m) => m - 1);
+    if (currentMonth === 0) {
+      setCurrentMonth(11);
+      setCurrentYear((y) => y - 1);
+    } else setCurrentMonth((m) => m - 1);
     setSelectedDay(null);
   };
 
   const nextMonth = () => {
-    if (currentMonth === 11) { setCurrentMonth(0); setCurrentYear((y) => y + 1); }
-    else setCurrentMonth((m) => m + 1);
+    if (currentMonth === 11) {
+      setCurrentMonth(0);
+      setCurrentYear((y) => y + 1);
+    } else setCurrentMonth((m) => m + 1);
     setSelectedDay(null);
   };
 
@@ -80,7 +94,7 @@ export function CalendarView({ termene }: CalendarViewProps) {
   ];
   while (cells.length % 7 !== 0) cells.push(null);
 
-  const selectedTermene = selectedDay ? termeneByDay[selectedDay.toString()] ?? [] : [];
+  const selectedTermene = selectedDay ? (termeneByDay[selectedDay.toString()] ?? []) : [];
 
   return (
     <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
@@ -111,9 +125,7 @@ export function CalendarView({ termene }: CalendarViewProps) {
         <div className="grid grid-cols-7">
           {cells.map((day, i) => {
             const isToday =
-              day === today.getDate() &&
-              currentMonth === today.getMonth() &&
-              currentYear === today.getFullYear();
+              day === today.getDate() && currentMonth === today.getMonth() && currentYear === today.getFullYear();
             const hasTermene = day !== null && !!termeneByDay[day.toString()];
             const count = day !== null ? (termeneByDay[day.toString()]?.length ?? 0) : 0;
             const isSelected = day === selectedDay;
@@ -161,16 +173,12 @@ export function CalendarView({ termene }: CalendarViewProps) {
         <div className="border-b border-border px-4 py-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <CalendarDays className="h-4 w-4 text-primary" />
-            {selectedDay
-              ? `${selectedDay} ${MONTHS_RO[currentMonth]} ${currentYear}`
-              : "Selectati o zi"}
+            {selectedDay ? `${selectedDay} ${MONTHS_RO[currentMonth]} ${currentYear}` : "Selectati o zi"}
           </h3>
         </div>
         <div className="max-h-[400px] overflow-y-auto scrollbar-thin p-3">
           {!selectedDay && (
-            <p className="py-8 text-center text-xs text-muted-foreground">
-              Click pe o zi cu termene pentru detalii
-            </p>
+            <p className="py-8 text-center text-xs text-muted-foreground">Click pe o zi cu termene pentru detalii</p>
           )}
           {selectedDay && selectedTermene.length === 0 && (
             <p className="py-8 text-center text-[13.5px] text-muted-foreground">Niciun termen in aceasta zi</p>
@@ -206,7 +214,9 @@ export function CalendarView({ termene }: CalendarViewProps) {
                       {t.complet && <p className="mt-0.5">Complet: {t.complet}</p>}
                       {t.solutie && !isExpanded && (
                         <div className="mt-1">
-                          <Badge variant="secondary" className="text-[11.5px]">{t.solutie}</Badge>
+                          <Badge variant="secondary" className="text-[11.5px]">
+                            {t.solutie}
+                          </Badge>
                         </div>
                       )}
                     </div>
@@ -222,12 +232,12 @@ export function CalendarView({ termene }: CalendarViewProps) {
                       {/* Solutie */}
                       {(t.solutie || t.solutieSumar) && (
                         <div>
-                          {t.solutie && (
-                            <p className="text-[13.5px] font-semibold text-foreground">{t.solutie}</p>
-                          )}
+                          {t.solutie && <p className="text-[13.5px] font-semibold text-foreground">{t.solutie}</p>}
                           {t.solutieSumar && (
                             <div className="mt-1 rounded bg-background p-2">
-                              <p className="leading-relaxed text-foreground" style={{ fontSize: "14.5px" }}>{t.solutieSumar}</p>
+                              <p className="leading-relaxed text-foreground" style={{ fontSize: "14.5px" }}>
+                                {t.solutieSumar}
+                              </p>
                             </div>
                           )}
                         </div>
@@ -245,7 +255,9 @@ export function CalendarView({ termene }: CalendarViewProps) {
                                 <Badge variant="outline" className="shrink-0 text-[10.5px] px-1 py-0">
                                   {p.calitateParte}
                                 </Badge>
-                                <span className="truncate" title={p.nume}>{p.nume}</span>
+                                <span className="truncate" title={p.nume}>
+                                  {p.nume}
+                                </span>
                               </div>
                             ))}
                           </div>

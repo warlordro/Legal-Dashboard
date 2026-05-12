@@ -30,11 +30,7 @@ import {
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
-import {
-  deleteOverride,
-  listOverridesForUser,
-  upsertOverride,
-} from "../db/userQuotaRepository.ts";
+import { deleteOverride, listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { fail, ok } from "../util/envelope.ts";
 
@@ -82,7 +78,11 @@ const ListAuditQuerySchema = z
     until: z.string().datetime({ offset: true }).optional(),
     // v2.20.3 Grupul J: filtru exact pe request_id pentru jump direct de la
     // envelope `{requestId}` la randul de audit. 8-128 chars per VALID_RID.
-    requestId: z.string().trim().regex(/^[A-Za-z0-9_\-]{8,128}$/).optional(),
+    requestId: z
+      .string()
+      .trim()
+      .regex(/^[A-Za-z0-9_\-]{8,128}$/)
+      .optional(),
   })
   .strict();
 
@@ -102,9 +102,7 @@ adminRouter.use("*", requireRole("admin"));
 // ---------- Users ----------
 
 adminRouter.get("/users", (c) => {
-  const parsed = ListUsersQuerySchema.safeParse(
-    Object.fromEntries(new URL(c.req.url).searchParams.entries()),
-  );
+  const parsed = ListUsersQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
   if (!parsed.success) {
     return c.json(fail("invalid_query", "Query invalid", c, parsed.error.issues), 400);
   }
@@ -124,9 +122,9 @@ adminRouter.get("/users", (c) => {
         pageSize,
         total: result.total,
       },
-      c,
+      c
     ),
-    200,
+    200
   );
 });
 
@@ -156,11 +154,7 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
   // the foot-gun where an admin demotes themselves and locks the org out of
   // admin surfaces. If multiple admins exist the demotion is allowed because
   // the org still has at least one admin.
-  if (
-    id === getOwnerId(c)
-    && before.role === "admin"
-    && parsed.data.role !== "admin"
-  ) {
+  if (id === getOwnerId(c) && before.role === "admin" && parsed.data.role !== "admin") {
     const otherAdmins = listUsers({ role: "admin" }).rows.filter((u) => u.id !== id);
     if (otherAdmins.length === 0) {
       recordAudit(c, "admin.users.demote_blocked", {
@@ -170,12 +164,8 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
         detail: { reason: "last_admin", from: before.role, to: parsed.data.role },
       });
       return c.json(
-        fail(
-          "last_admin",
-          "Nu te poti demota — esti singurul admin. Promoveaza un alt utilizator inainte.",
-          c,
-        ),
-        409,
+        fail("last_admin", "Nu te poti demota — esti singurul admin. Promoveaza un alt utilizator inainte.", c),
+        409
       );
     }
   }
@@ -212,10 +202,7 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
       targetId: id,
       detail: { reason: "self", from: before.status, to: parsed.data.status },
     });
-    return c.json(
-      fail("self_deactivation", "Nu iti poti dezactiva propriul cont", c),
-      409,
-    );
+    return c.json(fail("self_deactivation", "Nu iti poti dezactiva propriul cont", c), 409);
   }
 
   const updated = updateUserStatus(id, parsed.data.status);
@@ -230,9 +217,7 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
 // ---------- Audit ----------
 
 adminRouter.get("/audit", (c) => {
-  const parsed = ListAuditQuerySchema.safeParse(
-    Object.fromEntries(new URL(c.req.url).searchParams.entries()),
-  );
+  const parsed = ListAuditQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
   if (!parsed.success) {
     return c.json(fail("invalid_query", "Query invalid", c, parsed.error.issues), 400);
   }
@@ -285,9 +270,9 @@ adminRouter.get("/audit", (c) => {
         pageSize,
         total: result.total,
       },
-      c,
+      c
     ),
-    200,
+    200
   );
 });
 
@@ -342,9 +327,9 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
         updatedAt: row.updated_at,
         updatedBy: row.updated_by,
       },
-      c,
+      c
     ),
-    200,
+    200
   );
 });
 

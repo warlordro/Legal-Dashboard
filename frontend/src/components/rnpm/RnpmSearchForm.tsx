@@ -55,7 +55,18 @@ export interface RnpmSearchFormProps {
   suppressStop?: boolean;
 }
 
-export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, onStop, onReset, initialType, initialParams, extraActions, suppressStop }: RnpmSearchFormProps) {
+export function RnpmSearchForm({
+  loading,
+  loadingPhase,
+  onSubmit,
+  onTypeChange,
+  onStop,
+  onReset,
+  initialType,
+  initialParams,
+  extraActions,
+  suppressStop,
+}: RnpmSearchFormProps) {
   const confirm = useConfirm();
   const [activeType, setActiveType] = useState<RnpmSearchType>(initialType ?? "ipoteci");
   const identificator = useText(initialParams?.identificatorInscriere);
@@ -378,11 +389,14 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
     // CUI trebuie sa contina doar cifre (cf. spec RNPM). Warn non-blocking peste params-ul
     // construit deja — astfel nu validam CUI-uri din tab-uri inactive (state persista dupa switch).
     const badCui = findNonNumericCui(params);
-    if (badCui && !(await confirm({
-      title: "Atentie",
-      message: `CUI "${badCui}" contine caractere non-numerice. Continui cautarea?`,
-      confirmLabel: "Continua",
-    }))) {
+    if (
+      badCui &&
+      !(await confirm({
+        title: "Atentie",
+        message: `CUI "${badCui}" contine caractere non-numerice. Continui cautarea?`,
+        confirmLabel: "Continua",
+      }))
+    ) {
       return;
     }
 
@@ -397,22 +411,33 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
     setNemodificat(true);
     tipInscriere.reset();
     destinatie.reset();
-    debPJ.reset(); debPF.reset();
-    credPJ.reset(); credPF.reset();
-    constPJ.reset(); constPF.reset();
+    debPJ.reset();
+    debPF.reset();
+    credPJ.reset();
+    credPF.reset();
+    constPJ.reset();
+    constPF.reset();
     fiduc.reset();
-    benPJ.reset(); benPF.reset();
-    parteJ.reset(); parteF.reset();
+    benPJ.reset();
+    benPF.reset();
+    parteJ.reset();
+    parteF.reset();
     bunADescriere.reset();
     creanteCred.reset();
-    creanteDebJ.reset(); creanteDebF.reset();
+    creanteDebJ.reset();
+    creanteDebF.reset();
     creanteBunDescr.reset();
-    oblAgentJ.reset(); oblAgentF.reset();
+    oblAgentJ.reset();
+    oblAgentF.reset();
     oblEmitent.reset();
     oblBunDescr.reset();
-    bunACategorie.reset(); bunAIdentificare.reset();
-    tertJ.reset(); tertF.reset();
-    bunVModel.reset(); bunVSasiu.reset(); bunVImatr.reset();
+    bunACategorie.reset();
+    bunAIdentificare.reset();
+    tertJ.reset();
+    tertF.reset();
+    bunVModel.reset();
+    bunVSasiu.reset();
+    bunVImatr.reset();
     onReset?.();
   };
 
@@ -443,7 +468,11 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
       <div className="grid gap-4 md:grid-cols-4">
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">Identificator inscriere</label>
-          <Input value={identificator.value} onChange={(e) => identificator.setValue(e.target.value)} placeholder="2015-00038..." />
+          <Input
+            value={identificator.value}
+            onChange={(e) => identificator.setValue(e.target.value)}
+            placeholder="2015-00038..."
+          />
         </div>
         <div>
           <label className="mb-1 block text-xs font-medium text-muted-foreground">
@@ -457,7 +486,9 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
               <SelectContent>
                 <SelectItem value="">-- selecteaza --</SelectItem>
                 {TIP_AVIZ_BY_CATEGORY[activeType].map((t) => (
-                  <SelectItem key={t} value={t}>{t}</SelectItem>
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -477,56 +508,142 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
       {activeType === "specifice" ? (
         <div className="grid gap-3 md:grid-cols-2">
           <fieldset className="rounded-lg border border-border p-2">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Destinatia inscrierii</legend>
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Destinatia inscrierii
+            </legend>
             <DestinatieSelect field={destinatie} values={DESTINATIE_INSCRIERII} />
           </fieldset>
-          <PartyFieldset compact legend="Parte" tip={parteTip} onTipChange={setParteTip} pj={parteJ} pf={parteF} pfShowPrenume />
+          <PartyFieldset
+            compact
+            legend="Parte"
+            tip={parteTip}
+            onTipChange={setParteTip}
+            pj={parteJ}
+            pf={parteF}
+            pfShowPrenume
+          />
           <fieldset className="rounded-lg border border-border p-2 md:col-span-2">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bun (descriere)</legend>
-            <Input placeholder="Descriere" value={bunADescriere.value} onChange={(e) => bunADescriere.setValue(e.target.value)} />
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Bun (descriere)
+            </legend>
+            <Input
+              placeholder="Descriere"
+              value={bunADescriere.value}
+              onChange={(e) => bunADescriere.setValue(e.target.value)}
+            />
           </fieldset>
         </div>
       ) : activeType === "fiducii" ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <PartyFieldset compact legend="Constituitor" tip={constTip} onTipChange={setConstTip} pj={constPJ} pf={constPF} pfNumePlaceholder="Nume complet" />
+          <PartyFieldset
+            compact
+            legend="Constituitor"
+            tip={constTip}
+            onTipChange={setConstTip}
+            pj={constPJ}
+            pf={constPF}
+            pfNumePlaceholder="Nume complet"
+          />
           <fieldset className="rounded-lg border border-border p-2">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fiduciar (PJ)</legend>
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Fiduciar (PJ)
+            </legend>
             <PJBlock field={fiduc} compact />
           </fieldset>
-          <PartyFieldset compact legend="Beneficiar" tip={benTip} onTipChange={setBenTip} pj={benPJ} pf={benPF} pfNumePlaceholder="Nume complet" />
+          <PartyFieldset
+            compact
+            legend="Beneficiar"
+            tip={benTip}
+            onTipChange={setBenTip}
+            pj={benPJ}
+            pf={benPF}
+            pfNumePlaceholder="Nume complet"
+          />
           <VehiculFieldset compact model={bunVModel} sasiu={bunVSasiu} imatr={bunVImatr} />
         </div>
       ) : activeType === "creante" ? (
         <div className="grid gap-3 md:grid-cols-2">
           <fieldset className="rounded-lg border border-border p-2">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Reprezentant Creditor (PJ)</legend>
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Reprezentant Creditor (PJ)
+            </legend>
             <PJBlock field={creanteCred} showReg compact />
           </fieldset>
-          <PartyFieldset compact legend="Debitor" tip={creanteDebTip} onTipChange={setCreanteDebTip} pj={creanteDebJ} pf={creanteDebF} pjShowReg pfShowPrenume />
+          <PartyFieldset
+            compact
+            legend="Debitor"
+            tip={creanteDebTip}
+            onTipChange={setCreanteDebTip}
+            pj={creanteDebJ}
+            pf={creanteDebF}
+            pjShowReg
+            pfShowPrenume
+          />
           <fieldset className="rounded-lg border border-border p-2 md:col-span-2">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bun (descriere)</legend>
-            <Input placeholder="Descriere" value={creanteBunDescr.value} onChange={(e) => creanteBunDescr.setValue(e.target.value)} />
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Bun (descriere)
+            </legend>
+            <Input
+              placeholder="Descriere"
+              value={creanteBunDescr.value}
+              onChange={(e) => creanteBunDescr.setValue(e.target.value)}
+            />
           </fieldset>
         </div>
       ) : activeType === "obligatiuni" ? (
         <div className="grid gap-3 md:grid-cols-2">
-          <PartyFieldset compact legend="Agent" tip={oblAgentTip} onTipChange={setOblAgentTip} pj={oblAgentJ} pf={oblAgentF} pjShowReg pfShowPrenume />
+          <PartyFieldset
+            compact
+            legend="Agent"
+            tip={oblAgentTip}
+            onTipChange={setOblAgentTip}
+            pj={oblAgentJ}
+            pf={oblAgentF}
+            pjShowReg
+            pfShowPrenume
+          />
           <fieldset className="rounded-lg border border-border p-2">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Emitent (PJ)</legend>
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Emitent (PJ)
+            </legend>
             <PJBlock field={oblEmitent} showReg compact />
           </fieldset>
           <fieldset className="rounded-lg border border-border p-2 md:col-span-2">
-            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Creante (descriere)</legend>
-            <Input placeholder="Descriere" value={oblBunDescr.value} onChange={(e) => oblBunDescr.setValue(e.target.value)} />
+            <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              Creante (descriere)
+            </legend>
+            <Input
+              placeholder="Descriere"
+              value={oblBunDescr.value}
+              onChange={(e) => oblBunDescr.setValue(e.target.value)}
+            />
           </fieldset>
         </div>
       ) : (
         <div className="grid gap-3 md:grid-cols-2">
-          <PartyFieldset compact legend="Debitor" tip={debTip} onTipChange={setDebTip} pj={debPJ} pf={debPF} pfShowPrenume />
-          <PartyFieldset compact legend="Creditor" tip={credTip} onTipChange={setCredTip} pj={credPJ} pf={credPF} pfShowPrenume />
+          <PartyFieldset
+            compact
+            legend="Debitor"
+            tip={debTip}
+            onTipChange={setDebTip}
+            pj={debPJ}
+            pf={debPF}
+            pfShowPrenume
+          />
+          <PartyFieldset
+            compact
+            legend="Creditor"
+            tip={credTip}
+            onTipChange={setCredTip}
+            pj={credPJ}
+            pf={credPF}
+            pfShowPrenume
+          />
           {activeType === "ipoteci" && (
             <fieldset className="rounded-lg border border-border p-2 md:col-span-2">
-              <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Destinatia inscrierii</legend>
+              <legend className="px-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                Destinatia inscrierii
+              </legend>
               <DestinatieSelect field={destinatie} values={DESTINATIE_IPOTECI} />
             </fieldset>
           )}
@@ -535,7 +652,9 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
             <CollapsibleFieldset legend="Bun (alt tip) & Tert cedat" compact colSpan2>
               <div className="grid gap-3 md:grid-cols-2">
                 <fieldset className="rounded-lg border border-border p-2">
-                  <legend className="ml-[1.125rem] text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bun (alt tip)</legend>
+                  <legend className="ml-[1.125rem] text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                    Bun (alt tip)
+                  </legend>
                   <div className="grid gap-1.5">
                     <Select value={bunACategorie.value} onValueChange={bunACategorie.setValue}>
                       <SelectTrigger>
@@ -544,14 +663,31 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
                       <SelectContent>
                         <SelectItem value="">-- selecteaza categorie --</SelectItem>
                         {BUN_ALT_TIP_CATEGORII.map((label, i) => (
-                          <SelectItem key={label} value={String(i + 1)}>{label}</SelectItem>
+                          <SelectItem key={label} value={String(i + 1)}>
+                            {label}
+                          </SelectItem>
                         ))}
                       </SelectContent>
                     </Select>
-                    <SiSauInput placeholder="Identificare bun" value={bunAIdentificare.value} onChange={bunAIdentificare.setValue} op={bunAIdentificare.op} onOpChange={bunAIdentificare.setOp} />
+                    <SiSauInput
+                      placeholder="Identificare bun"
+                      value={bunAIdentificare.value}
+                      onChange={bunAIdentificare.setValue}
+                      op={bunAIdentificare.op}
+                      onOpChange={bunAIdentificare.setOp}
+                    />
                   </div>
                 </fieldset>
-                <PartyFieldset compact legend="Tert cedat" tip={tertTip} onTipChange={setTertTip} pj={tertJ} pf={tertF} pjShowReg pfShowPrenume />
+                <PartyFieldset
+                  compact
+                  legend="Tert cedat"
+                  tip={tertTip}
+                  onTipChange={setTertTip}
+                  pj={tertJ}
+                  pf={tertF}
+                  pjShowReg
+                  pfShowPrenume
+                />
               </div>
             </CollapsibleFieldset>
           )}
@@ -600,7 +736,13 @@ export function RnpmSearchForm({ loading, loadingPhase, onSubmit, onTypeChange, 
             </Button>
           )}
           {extraActions}
-          <Button type="button" variant="outline" onClick={handleReset} disabled={loading} className="font-normal h-8 px-3 text-xs">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={handleReset}
+            disabled={loading}
+            className="font-normal h-8 px-3 text-xs"
+          >
             <RotateCcw className="h-3.5 w-3.5" /> Reset
           </Button>
         </div>

@@ -37,9 +37,7 @@ const OTHER_OWNER = "alt";
 
 let tmpRoot: string;
 
-function mkItem(
-  overrides: Partial<CreateListItemInput> = {},
-): CreateListItemInput {
+function mkItem(overrides: Partial<CreateListItemInput> = {}): CreateListItemInput {
   return {
     nameRaw: "Ion Popescu",
     nameNormalized: "ion popescu",
@@ -63,7 +61,7 @@ function seedJob(ownerId: string, nameListId: number | null): number {
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at, name_list_id)
        VALUES (?, 'name_soap', '{}', ?, 14400, '{}',
-               '2026-04-30T12:00:00.000Z', ?)`,
+               '2026-04-30T12:00:00.000Z', ?)`
     )
     .run(ownerId, targetHash, nameListId);
   return info.lastInsertRowid as number;
@@ -71,10 +69,7 @@ function seedJob(ownerId: string, nameListId: number | null): number {
 
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-namelist-"));
-  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(
-    tmpRoot,
-    "legal-dashboard.db",
-  );
+  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
   // Touch + close so initSchema runs against a real file.
   const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
   seed.close();
@@ -232,9 +227,7 @@ describe("listLists", () => {
       pageSize: 10,
       includeArchived: true,
     });
-    expect(incl.rows.map((r) => r.id).sort()).toEqual(
-      [a.list.id, b.list.id].sort(),
-    );
+    expect(incl.rows.map((r) => r.id).sort()).toEqual([a.list.id, b.list.id].sort());
   });
 
   it("paginates", () => {
@@ -401,11 +394,7 @@ describe("FK ON DELETE RESTRICT", () => {
       items: [mkItem()],
     });
     const db = getDb();
-    expect(() =>
-      db
-        .prepare(`DELETE FROM name_lists WHERE id = ?`)
-        .run(created.list.id),
-    ).toThrow(/FOREIGN KEY/);
+    expect(() => db.prepare(`DELETE FROM name_lists WHERE id = ?`).run(created.list.id)).toThrow(/FOREIGN KEY/);
   });
 
   it("blocks DELETE on name_lists while monitoring_jobs reference it", () => {
@@ -418,10 +407,6 @@ describe("FK ON DELETE RESTRICT", () => {
     });
     seedJob(OWNER, created.list.id);
     const db = getDb();
-    expect(() =>
-      db
-        .prepare(`DELETE FROM name_lists WHERE id = ?`)
-        .run(created.list.id),
-    ).toThrow(/FOREIGN KEY/);
+    expect(() => db.prepare(`DELETE FROM name_lists WHERE id = ?`).run(created.list.id)).toThrow(/FOREIGN KEY/);
   });
 });

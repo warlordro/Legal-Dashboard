@@ -3,10 +3,7 @@ import { useEffect, useRef } from "react";
 // Minimal a11y modal hook: closes on Escape, prevents body scroll, returns the
 // container ref so the caller can focus the dialog on mount and restore focus
 // to the previously focused element on unmount.
-export function useDialog<T extends HTMLElement = HTMLDivElement>(
-  open: boolean,
-  onClose: () => void,
-) {
+export function useDialog<T extends HTMLElement = HTMLDivElement>(open: boolean, onClose: () => void) {
   const ref = useRef<T | null>(null);
 
   useEffect(() => {
@@ -19,7 +16,7 @@ export function useDialog<T extends HTMLElement = HTMLDivElement>(
       const node = ref.current;
       if (!node) return;
       const focusable = node.querySelector<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
       );
       (focusable ?? node).focus();
     });

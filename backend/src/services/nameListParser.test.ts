@@ -94,11 +94,7 @@ describe("parseNameList — CSV", () => {
 
 describe("parseNameList — XLSX", () => {
   it("parseaza un fisier XLSX cu header + 2 rinduri", async () => {
-    const buf = xlsx([
-      ["nume"],
-      ["Ion Popescu"],
-      ["Acme SRL"],
-    ]);
+    const buf = xlsx([["nume"], ["Ion Popescu"], ["Acme SRL"]]);
     const r = await parseNameList(buf, { filename: "lista.xlsx" });
     expect(r.totals.ok).toBe(2);
     expect(r.rows[0]?.nameRaw).toBe("Ion Popescu");
@@ -193,7 +189,7 @@ describe("validation — warn (nume lung pentru PortalJust)", () => {
   it("flag-uieste exemplul real GLOBALSAT (14 cuvinte / 114 chars dupa normalizare)", async () => {
     // Exemplul empiric care a declansat fix-ul; verifica integrarea pragurilor.
     const buf = csv(
-      "nume\nGLOBALSAT DISTRIBUTION OF MOBILE TELEPHONY AND OFFICE AUTOMATION PRODUCTS SOCIETE ANONYME PALLINI GRECIA SUCURSALA BUCURESTI\n",
+      "nume\nGLOBALSAT DISTRIBUTION OF MOBILE TELEPHONY AND OFFICE AUTOMATION PRODUCTS SOCIETE ANONYME PALLINI GRECIA SUCURSALA BUCURESTI\n"
     );
     const r = await parseNameList(buf);
     expect(r.totals.warn).toBe(1);
@@ -204,9 +200,7 @@ describe("validation — warn (nume lung pentru PortalJust)", () => {
 
 describe("capuri si erori", () => {
   it("EMPTY_FILE pe buffer gol", async () => {
-    await expect(parseNameList(Buffer.alloc(0))).rejects.toBeInstanceOf(
-      ParseError,
-    );
+    await expect(parseNameList(Buffer.alloc(0))).rejects.toBeInstanceOf(ParseError);
   });
 
   it("FILE_TOO_LARGE peste MAX_FILE_BYTES", async () => {
@@ -214,9 +208,7 @@ describe("capuri si erori", () => {
     // simplu repetat ca sa nu pierdem timp pe parse — capul e verificat
     // INAINTE de parse.
     const big = Buffer.alloc(MAX_FILE_BYTES + 1, 0x41);
-    await expect(parseNameList(big)).rejects.toThrow(
-      /FILE_TOO_LARGE|prea mare/,
-    );
+    await expect(parseNameList(big)).rejects.toThrow(/FILE_TOO_LARGE|prea mare/);
   });
 
   it("MISSING_NAME_COLUMN cand header-ul nu are coloana 'nume'", async () => {

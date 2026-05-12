@@ -31,14 +31,14 @@ export async function buildAnalysisPdf(args: AnalysisPdfArgs): Promise<ExportRes
   let y = 0;
 
   // Warm, eye-friendly color palette
-  const primary: [number, number, number] = [55, 65, 81];       // warm dark gray
+  const primary: [number, number, number] = [55, 65, 81]; // warm dark gray
   const primaryLight: [number, number, number] = [243, 244, 246]; // light warm gray
-  const primaryDark: [number, number, number] = [31, 41, 55];    // charcoal
-  const accent: [number, number, number] = [120, 113, 108];      // warm stone
-  const textDark: [number, number, number] = [41, 37, 36];       // warm black
-  const textMuted: [number, number, number] = [120, 113, 108];   // stone-500
+  const primaryDark: [number, number, number] = [31, 41, 55]; // charcoal
+  const accent: [number, number, number] = [120, 113, 108]; // warm stone
+  const textDark: [number, number, number] = [41, 37, 36]; // warm black
+  const textMuted: [number, number, number] = [120, 113, 108]; // stone-500
   const borderColor: [number, number, number] = [214, 211, 209]; // stone-300
-  const bgLight: [number, number, number] = [250, 250, 249];     // stone-50
+  const bgLight: [number, number, number] = [250, 250, 249]; // stone-50
   void primary; // declared for palette parity; unused below — keep to avoid silent diff
 
   // --- Helper: check page break ---
@@ -51,13 +51,17 @@ export async function buildAnalysisPdf(args: AnalysisPdfArgs): Promise<ExportRes
 
   // --- Helper: add text with word wrap ---
   const addText = (
-    text: string, fontSize: number, style: string = "normal",
-    color: [number, number, number] = textDark, xOffset = 0, maxW?: number
+    text: string,
+    fontSize: number,
+    style = "normal",
+    color: [number, number, number] = textDark,
+    xOffset = 0,
+    maxW?: number
   ) => {
     doc.setFontSize(fontSize);
     doc.setFont("helvetica", style);
     doc.setTextColor(...color);
-    const w = maxW || (contentWidth - xOffset);
+    const w = maxW || contentWidth - xOffset;
     const lines = doc.splitTextToSize(stripDiacritics(text), w);
     const lineHeight = fontSize * 0.42;
     for (const line of lines) {
@@ -183,23 +187,19 @@ export async function buildAnalysisPdf(args: AnalysisPdfArgs): Promise<ExportRes
           doc.text(stripDiacritics(headingText), contentLeft, y);
         }
         y += 6;
-
       } else if (line.match(/^\d+\.\s/)) {
         // Numbered item (not heading)
         checkPageBreak(6);
         addText(line.replace(/\*\*/g, ""), bodySize, "normal", bodyColor, 3);
         y += 1;
-
       } else if (line.startsWith("- ") || line.startsWith("* ")) {
         // Bullet point
         checkPageBreak(6);
         const bulletText = line.replace(/^[-*]\s/, "").replace(/\*\*/g, "");
         addText(`- ${bulletText}`, bodySize, "normal", bodyColor, 3);
         y += 1;
-
       } else if (line.trim() === "" || line.trim() === "---") {
         y += 2.5;
-
       } else {
         // Regular paragraph
         checkPageBreak(6);

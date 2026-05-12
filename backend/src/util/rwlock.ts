@@ -15,9 +15,7 @@
 // FIFO across mixed read/write requests; bursts of consecutive readers at
 // the queue head all release together so concurrent ticks remain parallel.
 
-type Waiter =
-  | { kind: "read"; resolve: () => void }
-  | { kind: "write"; resolve: () => void };
+type Waiter = { kind: "read"; resolve: () => void } | { kind: "write"; resolve: () => void };
 
 export class RWLock {
   private activeReaders = 0;

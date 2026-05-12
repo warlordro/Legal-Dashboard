@@ -48,9 +48,7 @@ describe("buildDosareXlsx — golden master structural", () => {
     const result = await buildDosareXlsx([makeDosar()]);
     expect(result.buffer).toBeInstanceOf(ArrayBuffer);
     expect(result.buffer.byteLength).toBeGreaterThan(1000); // ~minim pentru XLSX cu doua sheet-uri
-    expect(result.mime).toBe(
-      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    );
+    expect(result.mime).toBe("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   });
 
   it("filename single-dosar foloseste numarul sanitized cu / inlocuit cu -", async () => {
@@ -59,10 +57,7 @@ describe("buildDosareXlsx — golden master structural", () => {
   });
 
   it("filename multi-dosar foloseste data RO (timpul inghetat aici)", async () => {
-    const result = await buildDosareXlsx([
-      makeDosar({ numar: "1/1/2024" }),
-      makeDosar({ numar: "2/1/2024" }),
-    ]);
+    const result = await buildDosareXlsx([makeDosar({ numar: "1/1/2024" }), makeDosar({ numar: "2/1/2024" })]);
     // Localizarea ro-RO produce dd.mm.yyyy in Node 22.
     expect(result.filename).toMatch(/^dosare_\d{2}\.\d{2}\.\d{4}\.xlsx$/);
   });

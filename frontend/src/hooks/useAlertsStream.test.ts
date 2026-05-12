@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { MonitoringAlert } from "@/lib/alertsApi";
-import {
-  buildAlertNotificationPayload,
-  notificationStatusAllowsNative,
-} from "@/hooks/useAlertsStream";
+import { buildAlertNotificationPayload, notificationStatusAllowsNative } from "@/hooks/useAlertsStream";
 
 function alert(overrides: Partial<MonitoringAlert> = {}): MonitoringAlert {
   return {
@@ -46,19 +43,23 @@ describe("useAlertsStream notification helpers", () => {
 
   it("allows native notifications unless the OS status is explicitly blocked", () => {
     expect(notificationStatusAllowsNative(null)).toBe(true);
-    expect(notificationStatusAllowsNative({
-      platform: "win32",
-      supported: true,
-      state: "unknown",
-      canNotify: null,
-      reason: "status unknown",
-    })).toBe(true);
-    expect(notificationStatusAllowsNative({
-      platform: "darwin",
-      supported: true,
-      state: "DO_NOT_DISTURB",
-      canNotify: false,
-      reason: "do not disturb",
-    })).toBe(false);
+    expect(
+      notificationStatusAllowsNative({
+        platform: "win32",
+        supported: true,
+        state: "unknown",
+        canNotify: null,
+        reason: "status unknown",
+      })
+    ).toBe(true);
+    expect(
+      notificationStatusAllowsNative({
+        platform: "darwin",
+        supported: true,
+        state: "DO_NOT_DISTURB",
+        canNotify: false,
+        reason: "do not disturb",
+      })
+    ).toBe(false);
   });
 });

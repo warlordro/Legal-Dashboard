@@ -197,12 +197,13 @@ export async function buildReportXlsx(report: DashboardReportPayload): Promise<E
   ];
   for (const ev of report.timeline.events) {
     const detailKeys = Object.keys(ev.detail);
-    const detailStr = detailKeys.length === 0
-      ? "-"
-      : detailKeys
-          .map((k) => `${k}: ${formatDetailValue(ev.detail[k])}`)
-          .filter((s) => s.length > 0)
-          .join(" | ");
+    const detailStr =
+      detailKeys.length === 0
+        ? "-"
+        : detailKeys
+            .map((k) => `${k}: ${formatDetailValue(ev.detail[k])}`)
+            .filter((s) => s.length > 0)
+            .join(" | ");
     tlAoA.push([
       formatTs(ev.ts),
       kindLabel(ev.kind),
@@ -279,9 +280,11 @@ export async function buildReportPdf(report: DashboardReportPayload): Promise<Ex
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
   doc.text(
-    stripDiacritics(`Generat: ${dateStr}  |  Interval: ${rangeStr}  |  ${report.timeline.events.length} evenimente${report.timeline.truncated ? " (truncat)" : ""}`),
+    stripDiacritics(
+      `Generat: ${dateStr}  |  Interval: ${rangeStr}  |  ${report.timeline.events.length} evenimente${report.timeline.truncated ? " (truncat)" : ""}`
+    ),
     14,
-    22,
+    22
   );
 
   // ── Sumar table ─────────────────────────────────────────────────────────
@@ -330,7 +333,7 @@ export async function buildReportPdf(report: DashboardReportPayload): Promise<Ex
         `Pagina ${data.pageNumber}`,
         doc.internal.pageSize.getWidth() / 2,
         doc.internal.pageSize.getHeight() - 7,
-        { align: "center" },
+        { align: "center" }
       );
     },
   });
@@ -348,17 +351,7 @@ export async function buildReportPdf(report: DashboardReportPayload): Promise<Ex
   const aiByDay = new Map(report.charts.series.aiCost.map((p) => [p.day, p]));
   autoTable(doc, {
     startY: startY2 + 4,
-    head: [[
-      "Zi",
-      "Alerte",
-      "OK",
-      "Eroare",
-      "Timeout",
-      "Oprite",
-      "Cost USD",
-      "Apeluri AI",
-      "Tokens AI",
-    ]],
+    head: [["Zi", "Alerte", "OK", "Eroare", "Timeout", "Oprite", "Cost USD", "Apeluri AI", "Tokens AI"]],
     body: report.charts.series.runs.map((r) => {
       const ai = aiByDay.get(r.day);
       return [
@@ -406,7 +399,7 @@ export async function buildReportPdf(report: DashboardReportPayload): Promise<Ex
         `Pagina ${data.pageNumber}`,
         doc.internal.pageSize.getWidth() / 2,
         doc.internal.pageSize.getHeight() - 7,
-        { align: "center" },
+        { align: "center" }
       );
     },
   });
@@ -457,7 +450,7 @@ export async function buildReportPdf(report: DashboardReportPayload): Promise<Ex
         `Pagina ${data.pageNumber}`,
         doc.internal.pageSize.getWidth() / 2,
         doc.internal.pageSize.getHeight() - 7,
-        { align: "center" },
+        { align: "center" }
       );
     },
   });
@@ -467,9 +460,11 @@ export async function buildReportPdf(report: DashboardReportPayload): Promise<Ex
     doc.setFontSize(8);
     doc.setFont("helvetica", "italic");
     doc.text(
-      stripDiacritics(`Nota: lista a fost truncata la ${report.timeline.limitPerSource} evenimente per sursa. Vezi cronologia live pentru continuare.`),
+      stripDiacritics(
+        `Nota: lista a fost truncata la ${report.timeline.limitPerSource} evenimente per sursa. Vezi cronologia live pentru continuare.`
+      ),
       14,
-      lastY3 + 6,
+      lastY3 + 6
     );
   }
 

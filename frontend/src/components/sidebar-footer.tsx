@@ -31,9 +31,7 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
       ) : (
         <div className="flex items-center gap-1 rounded-lg px-1 py-0.5">
           <Type className="h-4 w-4 shrink-0 text-muted-foreground ml-2" />
-          <span className="text-[12px] font-medium text-muted-foreground ml-1 min-w-[38px]">
-            {fontSize.label}
-          </span>
+          <span className="text-[12px] font-medium text-muted-foreground ml-1 min-w-[38px]">{fontSize.label}</span>
           <div className="ml-auto flex items-center gap-0.5">
             <button
               type="button"
@@ -51,9 +49,7 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
                 onClick={() => fontSize.setStep(i)}
                 className={cn(
                   "h-1.5 w-1.5 rounded-full transition-all",
-                  i === fontSize.step
-                    ? "bg-primary scale-125"
-                    : "bg-muted-foreground/30 hover:bg-muted-foreground/50"
+                  i === fontSize.step ? "bg-primary scale-125" : "bg-muted-foreground/30 hover:bg-muted-foreground/50"
                 )}
                 title={`${s.label} (${s.value}px)`}
               />
@@ -76,19 +72,26 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         size="sm"
         onClick={onConfigureApiKey}
         title={collapsed ? "Setari API" : undefined}
-        className={cn(
-          "w-full text-muted-foreground",
-          collapsed ? "justify-center p-2 h-10" : "justify-start gap-3"
-        )}
+        className={cn("w-full text-muted-foreground", collapsed ? "justify-center p-2 h-10" : "justify-start gap-3")}
       >
-        <Bot className={cn("shrink-0", collapsed ? "h-[18px] w-[18px]" : "h-4 w-4", hasApiKey ? "text-green-500" : "text-muted-foreground")} />
+        <Bot
+          className={cn(
+            "shrink-0",
+            collapsed ? "h-[18px] w-[18px]" : "h-4 w-4",
+            hasApiKey ? "text-green-500" : "text-muted-foreground"
+          )}
+        />
         {!collapsed && (
           <span className="flex items-center gap-2">
             Setari API
             {hasApiKey ? (
-              <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">Activ</span>
+              <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                Activ
+              </span>
             ) : (
-              <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">Neconfigurat</span>
+              <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+                Neconfigurat
+              </span>
             )}
           </span>
         )}
@@ -99,12 +102,13 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         size="sm"
         onClick={toggle}
         title={collapsed ? (theme === "dark" ? "Mod Luminos" : "Mod Inchis") : undefined}
-        className={cn(
-          "w-full text-muted-foreground",
-          collapsed ? "justify-center p-2 h-10" : "justify-start gap-3"
-        )}
+        className={cn("w-full text-muted-foreground", collapsed ? "justify-center p-2 h-10" : "justify-start gap-3")}
       >
-        {theme === "dark" ? <Sun className={cn("shrink-0", collapsed ? "h-[18px] w-[18px]" : "h-4 w-4")} /> : <Moon className={cn("shrink-0", collapsed ? "h-[18px] w-[18px]" : "h-4 w-4")} />}
+        {theme === "dark" ? (
+          <Sun className={cn("shrink-0", collapsed ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+        ) : (
+          <Moon className={cn("shrink-0", collapsed ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+        )}
         {!collapsed && (theme === "dark" ? "Mod Luminos" : "Mod Inchis")}
       </Button>
 
@@ -115,13 +119,16 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         title={collapsed ? "Deschide meniu" : "Inchide meniu"}
         className={cn(
           "w-full",
-          collapsed ? "justify-center p-2 h-10 border-primary/30 text-primary hover:bg-primary/10" : "justify-start gap-3 text-muted-foreground"
+          collapsed
+            ? "justify-center p-2 h-10 border-primary/30 text-primary hover:bg-primary/10"
+            : "justify-start gap-3 text-muted-foreground"
         )}
       >
-        {collapsed
-          ? <PanelLeftOpen className="h-[18px] w-[18px] shrink-0" />
-          : <PanelLeftClose className="h-4 w-4 shrink-0" />
-        }
+        {collapsed ? (
+          <PanelLeftOpen className="h-[18px] w-[18px] shrink-0" />
+        ) : (
+          <PanelLeftClose className="h-4 w-4 shrink-0" />
+        )}
         {!collapsed && "Inchide meniu"}
       </Button>
     </div>

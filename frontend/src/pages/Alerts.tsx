@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Bell, CheckCheck, Download, ExternalLink, Eye, EyeOff, FileText, Filter, Loader2, RefreshCw, Trash2, X } from "lucide-react";
+import {
+  Bell,
+  CheckCheck,
+  Download,
+  ExternalLink,
+  Eye,
+  EyeOff,
+  FileText,
+  Filter,
+  Loader2,
+  RefreshCw,
+  Trash2,
+  X,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,9 +84,7 @@ function localDateInputToIso(value: string, endOfDay: boolean): string | undefin
   const month = Number(monthStr);
   const day = Number(dayStr);
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return undefined;
-  const d = endOfDay
-    ? new Date(year, month - 1, day, 23, 59, 59, 999)
-    : new Date(year, month - 1, day, 0, 0, 0, 0);
+  const d = endOfDay ? new Date(year, month - 1, day, 23, 59, 59, 999) : new Date(year, month - 1, day, 0, 0, 0, 0);
   if (Number.isNaN(d.getTime())) return undefined;
   return d.toISOString();
 }
@@ -126,9 +137,7 @@ export default function Alerts({
   // modal; cand devine null, modalul se inchide. Busy-ul ramane true pe tot
   // timpul cererii ca user-ul sa nu poata sa apese de doua ori inchide.
   const [bulkDismissPending, setBulkDismissPending] = useState<
-    | { mode: "ids"; count: number }
-    | { mode: "filters"; count: number }
-    | null
+    { mode: "ids"; count: number } | { mode: "filters"; count: number } | null
   >(null);
   const [bulkDismissBusy, setBulkDismissBusy] = useState(false);
 
@@ -255,9 +264,7 @@ export default function Alerts({
         console.warn("[alerts] bulk seen failed, falling back to per-id", bulkErr);
       }
       if (!usedBulk) {
-        const results = await Promise.allSettled(
-          ids.map((id) => alertsApi.markSeen(id)),
-        );
+        const results = await Promise.allSettled(ids.map((id) => alertsApi.markSeen(id)));
         for (const r of results) {
           if (r.status === "rejected") {
             console.warn("[alerts] mark seen failed for one alert", r.reason);
@@ -301,9 +308,7 @@ export default function Alerts({
       onAlertsChanged?.();
       return result;
     } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Eroare la inchiderea alertelor.",
-      );
+      setError(err instanceof Error ? err.message : "Eroare la inchiderea alertelor.");
       throw err;
     } finally {
       setBulkDismissBusy(false);
@@ -358,10 +363,8 @@ export default function Alerts({
   };
 
   const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);
-  const allVisibleSelected =
-    visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
-  const someVisibleSelected =
-    !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
+  const allVisibleSelected = visibleIds.length > 0 && visibleIds.every((id) => selectedIds.has(id));
+  const someVisibleSelected = !allVisibleSelected && visibleIds.some((id) => selectedIds.has(id));
 
   const toggleAlertSelected = useCallback((id: number) => {
     setSelectedIds((prev) => {
@@ -397,7 +400,7 @@ export default function Alerts({
       from: localDateInputToIso(from, false),
       to: localDateInputToIso(to, true),
     }),
-    [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, severity, to],
+    [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, severity, to]
   );
 
   const filteredSummary = useMemo(() => {
@@ -481,7 +484,9 @@ export default function Alerts({
                 </SelectTrigger>
                 <SelectContent>
                   {kindOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -497,7 +502,9 @@ export default function Alerts({
                 </SelectTrigger>
                 <SelectContent>
                   {severityOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -578,11 +585,7 @@ export default function Alerts({
                 <span className="text-foreground">
                   {selectedIds.size} {selectedIds.size === 1 ? "alerta selectata" : "alerte selectate"}
                 </span>
-                <button
-                  type="button"
-                  onClick={clearSelection}
-                  className="text-xs text-primary hover:underline"
-                >
+                <button type="button" onClick={clearSelection} className="text-xs text-primary hover:underline">
                   Deselecteaza tot
                 </button>
               </>
@@ -633,9 +636,7 @@ export default function Alerts({
               <Button
                 size="sm"
                 onClick={requestBulkDismissFiltered}
-                disabled={
-                  bulkDismissBusy || loading || total === 0 || includeDismissed
-                }
+                disabled={bulkDismissBusy || loading || total === 0 || includeDismissed}
                 title={
                   includeDismissed
                     ? "Dezactiveaza filtrul 'Inchise' pentru a folosi aceasta optiune"
@@ -698,7 +699,7 @@ export default function Alerts({
                     setError(
                       err instanceof Error
                         ? `Marcarea alertei ca citita a esuat: ${err.message}`
-                        : "Marcarea alertei ca citita a esuat.",
+                        : "Marcarea alertei ca citita a esuat."
                     );
                   });
               }
@@ -711,7 +712,7 @@ export default function Alerts({
                 className={cn(
                   "border-l-4",
                   unreadRow ? "border-l-primary" : "border-l-border",
-                  alert.dismissed_at && "opacity-65",
+                  alert.dismissed_at && "opacity-65"
                 )}
               >
                 <CardContent className="p-4" style={{ zoom: alertCardZoom }}>
@@ -731,7 +732,9 @@ export default function Alerts({
                         {alert.dismissed_at && <Badge variant="secondary">Inchisa</Badge>}
                         <span className="text-xs text-muted-foreground">{formatIsoDateTime(alert.created_at)}</span>
                       </div>
-                      <h2 className="mt-2 text-base font-semibold text-foreground">{humanizeAlertTitleDates(alert.title)}</h2>
+                      <h2 className="mt-2 text-base font-semibold text-foreground">
+                        {humanizeAlertTitleDates(alert.title)}
+                      </h2>
                       {ctx.numarDosar && (
                         <div className="mt-1 text-sm">
                           <span className="text-muted-foreground">Dosar: </span>
@@ -761,14 +764,10 @@ export default function Alerts({
                         <div className="mt-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5 rounded-md border border-border bg-muted/40 px-3 py-1.5 text-sm">
                           <span className="inline-flex items-center gap-1.5 font-semibold text-foreground">
                             <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                            {ctx.hotarare.numarDoc
-                              ? `HOTARARE NR. ${ctx.hotarare.numarDoc}`
-                              : "Hotarare"}
+                            {ctx.hotarare.numarDoc ? `HOTARARE NR. ${ctx.hotarare.numarDoc}` : "Hotarare"}
                           </span>
                           {ctx.hotarare.dataPronuntare && (
-                            <span className="text-xs text-muted-foreground">
-                              {ctx.hotarare.dataPronuntare}
-                            </span>
+                            <span className="text-xs text-muted-foreground">{ctx.hotarare.dataPronuntare}</span>
                           )}
                           {ctx.hotarare.sumar && (
                             <span className="basis-full break-words text-foreground/90">
@@ -837,7 +836,10 @@ export default function Alerts({
               totalPages={totalPages}
               pageSize={pageSize}
               onPageChange={setPage}
-              onPageSizeChange={(size) => { setPageSize(size); setPage(0); }}
+              onPageSizeChange={(size) => {
+                setPageSize(size);
+                setPage(0);
+              }}
               disabled={loading}
             />
           </Card>
@@ -866,28 +868,21 @@ export default function Alerts({
           >
             <div className="px-5 pt-5">
               <h3 id="bulk-dismiss-title" className="text-base font-semibold text-foreground">
-                {bulkDismissPending.mode === "ids"
-                  ? "Inchide alertele selectate?"
-                  : "Inchide toate alertele filtrate?"}
+                {bulkDismissPending.mode === "ids" ? "Inchide alertele selectate?" : "Inchide toate alertele filtrate?"}
               </h3>
               <p className="mt-2 text-sm text-muted-foreground">
                 {bulkDismissPending.mode === "ids" ? (
                   <>
                     Confirma inchiderea pentru{" "}
-                    <span className="font-semibold text-foreground">
-                      {bulkDismissPending.count}
-                    </span>{" "}
-                    {bulkDismissPending.count === 1 ? "alerta selectata" : "alerte selectate"}.
-                    Operatia este definitiva — alertele inchise nu mai pot fi redeschise.
+                    <span className="font-semibold text-foreground">{bulkDismissPending.count}</span>{" "}
+                    {bulkDismissPending.count === 1 ? "alerta selectata" : "alerte selectate"}. Operatia este definitiva
+                    — alertele inchise nu mai pot fi redeschise.
                   </>
                 ) : (
                   <>
                     Confirma inchiderea pentru toate cele{" "}
-                    <span className="font-semibold text-foreground">
-                      {bulkDismissPending.count}
-                    </span>{" "}
-                    alerte care satisfac filtrele active. Operatia este definitiva — alertele
-                    inchise nu mai pot fi redeschise.
+                    <span className="font-semibold text-foreground">{bulkDismissPending.count}</span> alerte care
+                    satisfac filtrele active. Operatia este definitiva — alertele inchise nu mai pot fi redeschise.
                   </>
                 )}
               </p>
@@ -901,11 +896,7 @@ export default function Alerts({
               >
                 Anuleaza
               </Button>
-              <Button
-                size="sm"
-                onClick={confirmBulkDismiss}
-                disabled={bulkDismissBusy}
-              >
+              <Button size="sm" onClick={confirmBulkDismiss} disabled={bulkDismissBusy}>
                 {bulkDismissBusy ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin" />

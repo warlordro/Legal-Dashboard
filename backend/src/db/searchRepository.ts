@@ -51,11 +51,14 @@ export function getSearches(opts: GetSearchesOptions = {}): CursorPage<SearchRec
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const cursor = opts.cursor ?? null;
 
-  const rows = cursor == null
-    ? db.prepare(`SELECT * FROM rnpm_searches WHERE owner_id = ? ORDER BY id DESC LIMIT ?`)
-        .all(ownerId, limit + 1) as SearchRecord[]
-    : db.prepare(`SELECT * FROM rnpm_searches WHERE owner_id = ? AND id < ? ORDER BY id DESC LIMIT ?`)
-        .all(ownerId, cursor, limit + 1) as SearchRecord[];
+  const rows =
+    cursor == null
+      ? (db
+          .prepare(`SELECT * FROM rnpm_searches WHERE owner_id = ? ORDER BY id DESC LIMIT ?`)
+          .all(ownerId, limit + 1) as SearchRecord[])
+      : (db
+          .prepare(`SELECT * FROM rnpm_searches WHERE owner_id = ? AND id < ? ORDER BY id DESC LIMIT ?`)
+          .all(ownerId, cursor, limit + 1) as SearchRecord[]);
 
   const hasMore = rows.length > limit;
   const items = hasMore ? rows.slice(0, limit) : rows;
@@ -81,8 +84,6 @@ export function deleteSearch(id: number, ownerId = "local"): boolean {
 // in continuare s-ar lega de istoricul altui owner. Vezi audit 2026-04-29 #11.
 export function searchBelongsToOwner(id: number, ownerId: string): boolean {
   const db = getDb();
-  const row = db
-    .prepare(`SELECT 1 FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1`)
-    .get(id, ownerId);
+  const row = db.prepare(`SELECT 1 FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1`).get(id, ownerId);
   return row !== undefined;
 }

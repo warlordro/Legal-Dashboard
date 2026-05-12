@@ -34,12 +34,8 @@ function writeSessionCookie(c: Context, token: string, maxAge: number): void {
 
 authRouter.post("/login", (c) => {
   return c.json(
-    fail(
-      "not_implemented",
-      "Login endpoint nu este disponibil in v2.7.x. Vezi PR-10 pentru SSO/IdP cutover.",
-      c,
-    ),
-    501,
+    fail("not_implemented", "Login endpoint nu este disponibil in v2.7.x. Vezi PR-10 pentru SSO/IdP cutover.", c),
+    501
   );
 });
 

@@ -4,12 +4,7 @@
 // to keep the page rendering, which would mask real shape drift.
 
 import { describe, expect, it } from "vitest";
-import {
-  AlertConfigSchema,
-  JobCreateBodySchema,
-  JobListQuerySchema,
-  JobUpdateBodySchema,
-} from "./monitoring.ts";
+import { AlertConfigSchema, JobCreateBodySchema, JobListQuerySchema, JobUpdateBodySchema } from "./monitoring.ts";
 
 describe("AlertConfigSchema", () => {
   it("applies defaults when empty", () => {
@@ -157,7 +152,9 @@ describe("JobCreateBodySchema — name_soap", () => {
       kind: "name_soap",
       target: {
         name_normalized: "popescu ion",
-        institutie: Array(21).fill("X").map((x, i) => `${x}${i}`),
+        institutie: Array(21)
+          .fill("X")
+          .map((x, i) => `${x}${i}`),
       },
     });
     expect(r.success).toBe(false);

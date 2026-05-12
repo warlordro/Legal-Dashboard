@@ -25,25 +25,20 @@ import {
   type MonitoringJobRow,
 } from "../db/monitoringJobsRepository.ts";
 import { getDb } from "../db/schema.ts";
-import {
-  JobCreateBodySchema,
-  JobListQuerySchema,
-  JobUpdateBodySchema,
-} from "../schemas/monitoring.ts";
+import { JobCreateBodySchema, JobListQuerySchema, JobUpdateBodySchema } from "../schemas/monitoring.ts";
 import { fail, ok } from "../util/envelope.ts";
 import { executeCreateMonitoringJob } from "../services/monitoring/commands/createMonitoringJob.ts";
 
 const MONITORING_BODY_LIMIT = 16 * 1024;
 
-const bodyTooLarge = (c: Context) =>
-  c.json(fail("payload_too_large", "Payload prea mare", c), 413);
+const bodyTooLarge = (c: Context) => c.json(fail("payload_too_large", "Payload prea mare", c), 413);
 const limitMonitoringBody = bodyLimit({
   maxSize: MONITORING_BODY_LIMIT,
   onError: bodyTooLarge,
 });
 
 async function readLimitedJsonBody(
-  c: Context,
+  c: Context
 ): Promise<{ ok: true; body: unknown } | { ok: false; response: Response }> {
   const contentLength = Number(c.req.header("content-length") ?? 0);
   if (Number.isFinite(contentLength) && contentLength > MONITORING_BODY_LIMIT) {
@@ -99,17 +94,13 @@ export interface MonitoringSchedulerHandle {
 
 let scheduler: MonitoringSchedulerHandle | null = null;
 
-export function setMonitoringScheduler(
-  s: MonitoringSchedulerHandle | null,
-): void {
+export function setMonitoringScheduler(s: MonitoringSchedulerHandle | null): void {
   scheduler = s;
 }
 
 // Tier 3 #12: read-only handle for the /health endpoint. Returns null when
 // monitoring is disabled or scheduler not yet wired (boot race window).
-export function getMonitoringSchedulerStatus():
-  | { running: boolean; inflight: number }
-  | null {
+export function getMonitoringSchedulerStatus(): { running: boolean; inflight: number } | null {
   if (!scheduler || typeof scheduler.getStatus !== "function") return null;
   return scheduler.getStatus();
 }
@@ -121,10 +112,7 @@ monitoringRouter.get("/jobs", (c) => {
   const ownerId = getOwnerId(c);
   const queryResult = JobListQuerySchema.safeParse(c.req.query());
   if (!queryResult.success) {
-    return c.json(
-      fail("invalid_query", "Parametri de cautare invalizi", c, queryResult.error.issues),
-      400,
-    );
+    return c.json(fail("invalid_query", "Parametri de cautare invalizi", c, queryResult.error.issues), 400);
   }
   const list = listJobs({ ownerId, ...queryResult.data });
   return c.json(ok(list, c));
@@ -182,12 +170,8 @@ monitoringRouter.post("/jobs", limitMonitoringBody, async (c) => {
   switch (outcome.status) {
     case "kind_not_implemented":
       return c.json(
-        fail(
-          "kind_not_implemented",
-          "Monitorizarea RNPM nu are runner activ in aceasta versiune.",
-          c,
-        ),
-        422,
+        fail("kind_not_implemented", "Monitorizarea RNPM nu are runner activ in aceasta versiune.", c),
+        422
       );
     case "idempotency_conflict":
       return c.json(
@@ -195,9 +179,9 @@ monitoringRouter.post("/jobs", limitMonitoringBody, async (c) => {
           "idempotency_conflict",
           "client_request_id refolosit pentru un alt job. Foloseste un id nou sau aceleasi target+kind ca prima cerere.",
           c,
-          { existing_job_id: outcome.existing.id },
+          { existing_job_id: outcome.existing.id }
         ),
-        409,
+        409
       );
     case "ok":
       // 201 on fresh insert, 200 on idempotent replay (REST convention).
@@ -238,10 +222,7 @@ monitoringRouter.patch("/jobs/:id", limitMonitoringBody, async (c) => {
   // updateJob already opens its own internal transaction; better-sqlite3
   // nests cleanly via SAVEPOINT, so the outer wrap scopes audit to the
   // same commit boundary.
-  type PatchResult =
-    | { kind: "ok"; updated: MonitoringJobRow }
-    | { kind: "denied" }
-    | { kind: "not_found" };
+  type PatchResult = { kind: "ok"; updated: MonitoringJobRow } | { kind: "denied" } | { kind: "not_found" };
   const result: PatchResult = getDb().transaction((): PatchResult => {
     const before = getJobById(ownerId, id);
     if (!before) {
@@ -312,14 +293,7 @@ monitoringRouter.delete("/jobs/:id", (c) => {
       targetId: String(id),
       outcome: "denied",
     });
-    return c.json(
-      fail(
-        "job_in_flight",
-        "Jobul are o rulare in curs. Reincearca dupa finalizare.",
-        c,
-      ),
-      409,
-    );
+    return c.json(fail("job_in_flight", "Jobul are o rulare in curs. Reincearca dupa finalizare.", c), 409);
   }
   type DeleteResult = "ok" | "denied" | "not_found";
   const result: DeleteResult = getDb().transaction((): DeleteResult => {
@@ -381,45 +355,20 @@ monitoringRouter.post("/jobs/bulk-delete", limitMonitoringBody, async (c) => {
   if (!bodyResult.ok) return bodyResult.response;
   const body = bodyResult.body;
 
-  if (
-    body === null ||
-    typeof body !== "object" ||
-    !Array.isArray((body as { ids?: unknown }).ids)
-  ) {
-    return c.json(
-      fail("invalid_payload", "Payload invalid: ids[] obligatoriu.", c),
-      422,
-    );
+  if (body === null || typeof body !== "object" || !Array.isArray((body as { ids?: unknown }).ids)) {
+    return c.json(fail("invalid_payload", "Payload invalid: ids[] obligatoriu.", c), 422);
   }
   const rawIds = (body as { ids: unknown[] }).ids;
   if (rawIds.length === 0) {
-    return c.json(
-      fail("invalid_payload", "Lista de ID-uri este goala.", c),
-      422,
-    );
+    return c.json(fail("invalid_payload", "Lista de ID-uri este goala.", c), 422);
   }
   if (rawIds.length > BULK_DELETE_MAX) {
-    return c.json(
-      fail("too_many", "Maxim 100 ID-uri per cerere.", c),
-      400,
-    );
+    return c.json(fail("too_many", "Maxim 100 ID-uri per cerere.", c), 400);
   }
   const ids: number[] = [];
   for (const raw of rawIds) {
-    if (
-      typeof raw !== "number" ||
-      !Number.isFinite(raw) ||
-      !Number.isInteger(raw) ||
-      raw <= 0
-    ) {
-      return c.json(
-        fail(
-          "invalid_payload",
-          "ID invalid in lista (necesita integer pozitiv).",
-          c,
-        ),
-        422,
-      );
+    if (typeof raw !== "number" || !Number.isFinite(raw) || !Number.isInteger(raw) || raw <= 0) {
+      return c.json(fail("invalid_payload", "ID invalid in lista (necesita integer pozitiv).", c), 422);
     }
     ids.push(raw);
   }
@@ -473,10 +422,7 @@ monitoringRouter.post("/jobs/bulk-delete", limitMonitoringBody, async (c) => {
     })();
   } catch (err) {
     console.error("[monitoring] bulk-delete failed:", err);
-    return c.json(
-      fail("internal_error", "Eroare la stergerea in masa.", c),
-      500,
-    );
+    return c.json(fail("internal_error", "Eroare la stergerea in masa.", c), 500);
   }
 
   return c.json(
@@ -487,8 +433,8 @@ monitoringRouter.post("/jobs/bulk-delete", limitMonitoringBody, async (c) => {
         not_found_ids,
         total_deleted: deleted_ids.length,
       },
-      c,
-    ),
+      c
+    )
   );
 });
 
@@ -508,10 +454,7 @@ monitoringRouter.post("/jobs/:id/run", limitMonitoringBody, async (c) => {
     return c.json(fail("invalid_id", "ID invalid", c), 400);
   }
   if (!scheduler) {
-    return c.json(
-      fail("scheduler_unavailable", "Scheduler indisponibil", c),
-      503,
-    );
+    return c.json(fail("scheduler_unavailable", "Scheduler indisponibil", c), 503);
   }
   const job = getJobById(ownerId, id);
   if (!job) {
@@ -539,10 +482,7 @@ monitoringRouter.post("/jobs/:id/run", limitMonitoringBody, async (c) => {
       return c.json(fail("in_flight", "Job deja in executie", c), 409);
     }
     if (code === "not_running") {
-      return c.json(
-        fail("scheduler_unavailable", "Scheduler indisponibil", c),
-        503,
-      );
+      return c.json(fail("scheduler_unavailable", "Scheduler indisponibil", c), 503);
     }
     console.error("[monitoring] runJobNow failed:", err);
     recordAudit(c, "monitoring.job.run_manual", {

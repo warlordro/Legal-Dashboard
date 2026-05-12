@@ -29,7 +29,11 @@ const EMPTY: ApiKeys = { anthropic: "", openai: "", google: "", twocaptcha: "", 
 // then the legacy entries are removed. No new writes ever use this path.
 function deobfuscate(text: string): string {
   if (!text) return "";
-  try { return atob(text).split("").reverse().join(""); } catch { return text; }
+  try {
+    return atob(text).split("").reverse().join("");
+  } catch {
+    return text;
+  }
 }
 
 function readLegacyForMigration(): ApiKeys | null {
@@ -52,8 +56,12 @@ function readLegacyForMigration(): ApiKeys | null {
 }
 
 function clearLegacyStorage() {
-  try { localStorage.removeItem(LEGACY_KEY); } catch {}
-  try { localStorage.removeItem(SINGLE_LEGACY_KEY); } catch {}
+  try {
+    localStorage.removeItem(LEGACY_KEY);
+  } catch {}
+  try {
+    localStorage.removeItem(SINGLE_LEGACY_KEY);
+  } catch {}
 }
 
 function hasAnyKey(k: ApiKeys): boolean {
@@ -129,7 +137,9 @@ export function useApiKey() {
       if (!cancelled && loaded) setKeysState(loaded);
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   const persist = (newKeys: ApiKeys) => {
@@ -138,15 +148,20 @@ export function useApiKey() {
       setEncryptionUnavailable(true);
       return;
     }
-    api.encryptKeys(JSON.stringify(newKeys)).then((cipher) => {
-      if (!cipher) {
+    api
+      .encryptKeys(JSON.stringify(newKeys))
+      .then((cipher) => {
+        if (!cipher) {
+          setEncryptionUnavailable(true);
+          return;
+        }
+        try {
+          localStorage.setItem(ENC_KEY, cipher);
+        } catch {}
+      })
+      .catch(() => {
         setEncryptionUnavailable(true);
-        return;
-      }
-      try { localStorage.setItem(ENC_KEY, cipher); } catch {}
-    }).catch(() => {
-      setEncryptionUnavailable(true);
-    });
+      });
   };
 
   const setKeys = (newKeys: ApiKeys) => {
@@ -169,12 +184,16 @@ export function useApiKey() {
 
   const setCaptchaProvider = (p: CaptchaProvider) => {
     setCaptchaProviderState(p);
-    try { localStorage.setItem(PROVIDER_KEY, p); } catch {}
+    try {
+      localStorage.setItem(PROVIDER_KEY, p);
+    } catch {}
   };
 
   const setCaptchaMode = (m: CaptchaMode) => {
     setCaptchaModeState(m);
-    try { localStorage.setItem(MODE_KEY, m); } catch {}
+    try {
+      localStorage.setItem(MODE_KEY, m);
+    } catch {}
   };
 
   const apiKey = keys.anthropic;

@@ -71,14 +71,14 @@ function seedJob(opts: {
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at, active)
-       VALUES (?, ?, '{}', ?, 14400, '{}', ?, ?)`,
+       VALUES (?, ?, '{}', ?, 14400, '{}', ?, ?)`
     )
     .run(
       opts.ownerId,
       opts.kind,
       `hash-${opts.ownerId}-${opts.kind}-${opts.hashSuffix ?? Math.random()}`,
       new Date().toISOString(),
-      opts.active ?? 1,
+      opts.active ?? 1
     ).lastInsertRowid;
   return Number(rowId);
 }
@@ -197,9 +197,7 @@ describe("GET /api/v1/dashboard/summary", () => {
       dedupKey: "k-old",
     });
     const oldCreated = new Date(Date.now() - 2 * 86_400_000).toISOString();
-    getDb()
-      .prepare(`UPDATE monitoring_alerts SET created_at = ? WHERE id = ?`)
-      .run(oldCreated, oldRow.row.id);
+    getDb().prepare(`UPDATE monitoring_alerts SET created_at = ? WHERE id = ?`).run(oldCreated, oldRow.row.id);
 
     const app = buildTestApp();
     const res = await app.request("/api/v1/dashboard/summary", {
@@ -241,7 +239,7 @@ describe("GET /api/v1/dashboard/summary", () => {
          WHERE owner_id = ?
            AND ended_at IS NOT NULL
            AND ended_at >= ?
-         GROUP BY status`,
+         GROUP BY status`
       )
       .all("alice", "2026-05-01T00:00:00.000Z") as Array<{ detail: string }>;
 
@@ -358,29 +356,19 @@ interface TimelineResponse {
 }
 
 function backdateAlert(alertId: number, ts: string): void {
-  getDb()
-    .prepare(`UPDATE monitoring_alerts SET created_at = ? WHERE id = ?`)
-    .run(ts, alertId);
+  getDb().prepare(`UPDATE monitoring_alerts SET created_at = ? WHERE id = ?`).run(ts, alertId);
 }
 
 function backdateRun(runId: number, endedAt: string): void {
-  getDb()
-    .prepare(`UPDATE monitoring_runs SET ended_at = ? WHERE id = ?`)
-    .run(endedAt, runId);
+  getDb().prepare(`UPDATE monitoring_runs SET ended_at = ? WHERE id = ?`).run(endedAt, runId);
 }
 
 function backdateAudit(auditId: number, ts: string): void {
-  getDb()
-    .prepare(`UPDATE audit_log SET ts = ? WHERE id = ?`)
-    .run(ts, auditId);
+  getDb().prepare(`UPDATE audit_log SET ts = ? WHERE id = ?`).run(ts, auditId);
 }
 
 function lastAuditId(): number {
-  return (
-    getDb()
-      .prepare(`SELECT MAX(id) AS id FROM audit_log`)
-      .get() as { id: number }
-  ).id;
+  return (getDb().prepare(`SELECT MAX(id) AS id FROM audit_log`).get() as { id: number }).id;
 }
 
 describe("GET /api/v1/dashboard/timeline", () => {
@@ -434,12 +422,7 @@ describe("GET /api/v1/dashboard/timeline", () => {
     const body = (await res.json()) as TimelineResponse;
     expect(body.data.events).toHaveLength(4);
     // DESC by ts: alert b (13:00) > audit (12:00) > alert a (11:00) > run (10:00)
-    expect(body.data.events.map((e) => e.kind)).toEqual([
-      "alert",
-      "audit",
-      "alert",
-      "run",
-    ]);
+    expect(body.data.events.map((e) => e.kind)).toEqual(["alert", "audit", "alert", "run"]);
     expect(body.data.nextCursor).toBeNull();
   });
 
@@ -480,7 +463,7 @@ describe("GET /api/v1/dashboard/timeline", () => {
     // Second page: cursor = nextCursor → returns events strictly older.
     const page2Res = await app.request(
       `/api/v1/dashboard/timeline?limit=2&cursor=${encodeURIComponent(page1.data.nextCursor!)}`,
-      { headers: { "x-test-owner": "alice" } },
+      { headers: { "x-test-owner": "alice" } }
     );
     const page2 = (await page2Res.json()) as TimelineResponse;
     // First event on page 2 is Alert 2 (12:00).
@@ -523,7 +506,7 @@ describe("GET /api/v1/dashboard/timeline", () => {
 
     const page2Res = await app.request(
       `/api/v1/dashboard/timeline?limit=1&cursor=${encodeURIComponent(page1.data.nextCursor!)}`,
-      { headers: { "x-test-owner": "alice" } },
+      { headers: { "x-test-owner": "alice" } }
     );
     const page2 = (await page2Res.json()) as TimelineResponse;
     expect(page2.data.events).toHaveLength(1);
@@ -535,7 +518,7 @@ describe("GET /api/v1/dashboard/timeline", () => {
     // Third page: completes the trio.
     const page3Res = await app.request(
       `/api/v1/dashboard/timeline?limit=1&cursor=${encodeURIComponent(page2.data.nextCursor!)}`,
-      { headers: { "x-test-owner": "alice" } },
+      { headers: { "x-test-owner": "alice" } }
     );
     const page3 = (await page3Res.json()) as TimelineResponse;
     expect(page3.data.events).toHaveLength(1);

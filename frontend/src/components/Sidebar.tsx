@@ -1,6 +1,23 @@
 import { useState, useRef, useEffect } from "react";
 import { NavLink, useNavigate } from "react-router-dom";
-import { Scale, Search, CalendarDays, BarChart3, History, Trash2, FileSearch, FileLock2, ChevronDown, ChevronRight, Activity, Bell, Users as UsersIcon, ClipboardList, Gauge, ShieldCheck } from "lucide-react";
+import {
+  Scale,
+  Search,
+  CalendarDays,
+  BarChart3,
+  History,
+  Trash2,
+  FileSearch,
+  FileLock2,
+  ChevronDown,
+  ChevronRight,
+  Activity,
+  Bell,
+  Users as UsersIcon,
+  ClipboardList,
+  Gauge,
+  ShieldCheck,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
@@ -38,14 +55,28 @@ interface SidebarProps {
 }
 
 function cautariIcon(type: SearchHistoryEntry["type"]) {
-  return type === "dosare"
-    ? <FileSearch className="h-3 w-3 text-blue-500" />
-    : <CalendarDays className="h-3 w-3 text-purple-500" />;
+  return type === "dosare" ? (
+    <FileSearch className="h-3 w-3 text-blue-500" />
+  ) : (
+    <CalendarDays className="h-3 w-3 text-purple-500" />
+  );
 }
 
 const rnpmIcon = <FileLock2 className="mt-0.5 h-3 w-3 shrink-0 text-amber-500" />;
 
-export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory, hasApiKey, onConfigureApiKey, rnpmHistory, onRnpmHistoryClick, onRnpmRemoveEntry, onRnpmClearHistory, unreadAlerts = 0 }: SidebarProps) {
+export function Sidebar({
+  history,
+  onHistoryClick,
+  onRemoveEntry,
+  onClearHistory,
+  hasApiKey,
+  onConfigureApiKey,
+  rnpmHistory,
+  onRnpmHistoryClick,
+  onRnpmRemoveEntry,
+  onRnpmClearHistory,
+  unreadAlerts = 0,
+}: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false);
   // Open the section whose most recent entry is newest — so reopening the app
   // lands on whichever category the user was last active in.
@@ -85,8 +116,10 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
     if (!popoverSection) return;
     const handler = (e: MouseEvent) => {
       if (
-        popoverRef.current && !popoverRef.current.contains(e.target as Node) &&
-        popoverBtnRef.current && !popoverBtnRef.current.contains(e.target as Node)
+        popoverRef.current &&
+        !popoverRef.current.contains(e.target as Node) &&
+        popoverBtnRef.current &&
+        !popoverBtnRef.current.contains(e.target as Node)
       ) {
         setPopoverSection(null);
       }
@@ -121,38 +154,38 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
           const showBadge = to === "/alerte" && unreadAlerts > 0;
           const badgeText = unreadAlerts > 99 ? "99+" : String(unreadAlerts);
           return (
-          <NavLink
-            key={to}
-            to={to}
-            end={end}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              cn(
-                "relative flex items-center rounded-lg text-sm font-medium transition-colors",
-                collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
-                isActive
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )
-            }
-          >
-            <Icon className="h-4 w-4 shrink-0" />
-            {!collapsed && (
-              <>
-                <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
-                {showBadge && (
-                  <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
-                    {badgeText}
-                  </span>
-                )}
-              </>
-            )}
-            {collapsed && showBadge && (
-              <span className="absolute right-0 top-0 inline-flex min-w-4 translate-x-0.5 -translate-y-0.5 items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
-                {badgeText}
-              </span>
-            )}
-          </NavLink>
+            <NavLink
+              key={to}
+              to={to}
+              end={end}
+              title={collapsed ? label : undefined}
+              className={({ isActive }) =>
+                cn(
+                  "relative flex items-center rounded-lg text-sm font-medium transition-colors",
+                  collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
+                  isActive
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )
+              }
+            >
+              <Icon className="h-4 w-4 shrink-0" />
+              {!collapsed && (
+                <>
+                  <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
+                  {showBadge && (
+                    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
+                      {badgeText}
+                    </span>
+                  )}
+                </>
+              )}
+              {collapsed && showBadge && (
+                <span className="absolute right-0 top-0 inline-flex min-w-4 translate-x-0.5 -translate-y-0.5 items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
+                  {badgeText}
+                </span>
+              )}
+            </NavLink>
           );
         })}
       </nav>
@@ -179,14 +212,12 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
                   collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
                   isActive
                     ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground",
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
                 )
               }
             >
               <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && (
-                <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
-              )}
+              {!collapsed && <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>}
             </NavLink>
           ))}
         </nav>
@@ -204,7 +235,11 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
                   onClick={() => setOpenHistory(openHistory === "cautari" ? null : "cautari")}
                   className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
                 >
-                  {openHistory === "cautari" ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
+                  {openHistory === "cautari" ? (
+                    <ChevronDown className="h-3 w-3" />
+                  ) : (
+                    <ChevronRight className="h-3 w-3" />
+                  )}
                   <History className="h-3 w-3" />
                   Istoric Cautari
                 </button>
@@ -239,7 +274,9 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
 
           {/* RNPM section */}
           {rnpmHistory.length > 0 && (
-            <div className={cn("flex flex-col overflow-hidden border-t border-border", openHistory === "rnpm" && "flex-1")}>
+            <div
+              className={cn("flex flex-col overflow-hidden border-t border-border", openHistory === "rnpm" && "flex-1")}
+            >
               <div className="flex items-center justify-between px-3 pt-3 pb-1">
                 <button
                   type="button"
@@ -330,7 +367,10 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
                 </span>
                 <button
                   type="button"
-                  onClick={() => { onClearHistory(); setPopoverSection(null); }}
+                  onClick={() => {
+                    onClearHistory();
+                    setPopoverSection(null);
+                  }}
                   title="Sterge istoricul"
                   className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
                 >
@@ -365,7 +405,10 @@ export function Sidebar({ history, onHistoryClick, onRemoveEntry, onClearHistory
                 </span>
                 <button
                   type="button"
-                  onClick={() => { onRnpmClearHistory(); setPopoverSection(null); }}
+                  onClick={() => {
+                    onRnpmClearHistory();
+                    setPopoverSection(null);
+                  }}
                   title="Sterge istoricul RNPM"
                   className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
                 >

@@ -118,14 +118,7 @@ describe("RWLock — writer preference", () => {
     await Promise.all([r1, w, r2]);
 
     // Order: r1 finishes → w runs (writer preference) → r2 runs after w.
-    expect(events).toEqual([
-      "r1-start",
-      "r1-end",
-      "w-start",
-      "w-end",
-      "r2-start",
-      "r2-end",
-    ]);
+    expect(events).toEqual(["r1-start", "r1-end", "w-start", "w-end", "r2-start", "r2-end"]);
   });
 });
 
@@ -202,19 +195,24 @@ describe("RWLock — drain mutates state before resolve (TOCTOU)", () => {
 
     let releaseR0!: () => void;
     const r0 = lock.withRead(
-      () => new Promise<void>((res) => { releaseR0 = res; }),
+      () =>
+        new Promise<void>((res) => {
+          releaseR0 = res;
+        })
     );
     await tick();
 
     let releaseW1!: () => void;
     const w1 = lock.withWrite(
-      () => new Promise<void>((res) => { releaseW1 = res; }),
+      () =>
+        new Promise<void>((res) => {
+          releaseW1 = res;
+        })
     );
     await tick();
     expect(internals.queue.length).toBe(1);
 
-    let stateAtResolve: { writerActive: boolean; activeReaders: number } | null =
-      null;
+    let stateAtResolve: { writerActive: boolean; activeReaders: number } | null = null;
     const writerWaiter = internals.queue[0]!;
     const original = writerWaiter.resolve;
     writerWaiter.resolve = () => {
@@ -249,7 +247,10 @@ describe("RWLock — drain mutates state before resolve (TOCTOU)", () => {
 
     let releaseW1!: () => void;
     const w1 = lock.withWrite(
-      () => new Promise<void>((res) => { releaseW1 = res; }),
+      () =>
+        new Promise<void>((res) => {
+          releaseW1 = res;
+        })
     );
     await tick();
 
@@ -292,7 +293,7 @@ describe("RWLock — error in body does not poison the lock", () => {
     await expect(
       lock.withRead(async () => {
         throw new Error("boom");
-      }),
+      })
     ).rejects.toThrow("boom");
 
     // If the lock leaked, this writer would deadlock waiting on phantom reader.
@@ -309,7 +310,7 @@ describe("RWLock — error in body does not poison the lock", () => {
     await expect(
       lock.withWrite(async () => {
         throw new Error("boom");
-      }),
+      })
     ).rejects.toThrow("boom");
 
     let ran = false;

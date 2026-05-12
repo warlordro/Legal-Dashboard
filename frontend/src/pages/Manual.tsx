@@ -19,9 +19,7 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
           </div>
           <div>
             <h1 className="text-2xl font-bold tracking-tight">Manual de Utilizare</h1>
-            <p className="text-sm text-foreground">
-              Ghid complet pentru toate functiile aplicatiei Legal Dashboard
-            </p>
+            <p className="text-sm text-foreground">Ghid complet pentru toate functiile aplicatiei Legal Dashboard</p>
           </div>
         </div>
         {onDownloadPdf && (
@@ -72,10 +70,16 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
                   let parent = el.parentElement;
                   while (parent) {
                     const style = getComputedStyle(parent);
-                    if ((style.overflowY === "auto" || style.overflowY === "scroll") && parent.scrollHeight > parent.clientHeight) {
+                    if (
+                      (style.overflowY === "auto" || style.overflowY === "scroll") &&
+                      parent.scrollHeight > parent.clientHeight
+                    ) {
                       const elRect = el.getBoundingClientRect();
                       const parentRect = parent.getBoundingClientRect();
-                      parent.scrollTo({ top: parent.scrollTop + (elRect.top - parentRect.top) - 16, behavior: "smooth" });
+                      parent.scrollTo({
+                        top: parent.scrollTop + (elRect.top - parentRect.top) - 16,
+                        behavior: "smooth",
+                      });
                       return;
                     }
                     parent = parent.parentElement;
@@ -95,19 +99,16 @@ export default function Manual({ onDownloadPdf, isDownloading }: ManualProps) {
       {/* Footer with second download button */}
       <div className="text-center text-xs text-foreground pt-4 pb-8 border-t border-border space-y-3">
         {onDownloadPdf && (
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={onDownloadPdf}
-            disabled={isDownloading}
-          >
+          <Button variant="outline" size="sm" className="gap-2" onClick={onDownloadPdf} disabled={isDownloading}>
             {isDownloading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
             {isDownloading ? "Se genereaza..." : "Descarca Manual PDF"}
           </Button>
         )}
         <p>Legal Dashboard — Manual de Utilizare v{__APP_VERSION__}</p>
-        <p>Datele sunt furnizate de API-ul public al Ministerului Justitiei (portalquery.just.ro) si Registrul National de Publicitate Mobiliara (mj.rnpm.ro)</p>
+        <p>
+          Datele sunt furnizate de API-ul public al Ministerului Justitiei (portalquery.just.ro) si Registrul National
+          de Publicitate Mobiliara (mj.rnpm.ro)
+        </p>
       </div>
     </div>
   );

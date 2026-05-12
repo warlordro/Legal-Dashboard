@@ -83,9 +83,7 @@ describe("buildSedintaKey — determinism across cosmetic drift", () => {
   });
 
   it("ISO date variant produces same key as date-only", () => {
-    expect(buildSedintaKey({ ...base, data: "2026-04-19T00:00:00" })).toBe(
-      buildSedintaKey(base),
-    );
+    expect(buildSedintaKey({ ...base, data: "2026-04-19T00:00:00" })).toBe(buildSedintaKey(base));
   });
 
   it("ora '10:0' produces same key as '10:00'", () => {
@@ -93,9 +91,7 @@ describe("buildSedintaKey — determinism across cosmetic drift", () => {
   });
 
   it("stadiu case + diacritics don't change key", () => {
-    expect(buildSedintaKey({ ...base, stadiuProcesual: "APEL" })).toBe(
-      buildSedintaKey(base),
-    );
+    expect(buildSedintaKey({ ...base, stadiuProcesual: "APEL" })).toBe(buildSedintaKey(base));
   });
 });
 
@@ -207,7 +203,7 @@ describe("buildSedintaKey — pipe-character defense (H4)", () => {
         ora: "10:00",
         complet: "Judecator A | B",
         solutie: "",
-      }),
+      })
     ).toThrow(/'complet' segment contains '\|'/);
   });
 
@@ -219,7 +215,7 @@ describe("buildSedintaKey — pipe-character defense (H4)", () => {
         ora: "10:00",
         complet: "C1",
         solutie: "",
-      }),
+      })
     ).toThrow(/'stadiu' segment contains '\|'/);
   });
 
@@ -242,7 +238,7 @@ describe("buildSedintaKey — pipe-character defense (H4)", () => {
         ora: "10:00",
         complet: "Judecator | Other",
         solutie: "",
-      }),
+      })
     ).toThrow(/'complet' segment contains '\|'/);
   });
 });

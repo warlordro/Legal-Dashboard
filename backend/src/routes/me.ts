@@ -77,9 +77,9 @@ meRouter.get("/", (c) => {
         createdAt: user.created_at,
         lastLoginAt: user.last_login_at,
       },
-      c,
+      c
     ),
-    200,
+    200
   );
 });
 
@@ -97,19 +97,14 @@ meRouter.put("/email-settings", limitMeBody, async (c) => {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
   }
   if (parsed.data.enabled && !parsed.data.toAddress) {
-    return c.json(
-      fail("missing_to_address", "Adresa email este obligatorie cand notificarile sunt active", c),
-      400,
-    );
+    return c.json(fail("missing_to_address", "Adresa email este obligatorie cand notificarile sunt active", c), 400);
   }
 
   const before = getEmailSettings(ownerId);
   // v2.10.1 #1: preserve stored minSeverity if the caller didn't send it.
-  const minSeverity =
-    parsed.data.minSeverity ?? before?.minSeverity ?? "info";
+  const minSeverity = parsed.data.minSeverity ?? before?.minSeverity ?? "info";
   // v2.13.0: same treatment for dailyReportEnabled — preserve when omitted.
-  const dailyReportEnabled =
-    parsed.data.dailyReportEnabled ?? before?.dailyReportEnabled ?? false;
+  const dailyReportEnabled = parsed.data.dailyReportEnabled ?? before?.dailyReportEnabled ?? false;
   const after = upsertEmailSettings(ownerId, {
     enabled: parsed.data.enabled,
     toAddress: parsed.data.toAddress,
@@ -171,13 +166,8 @@ meRouter.post("/email-settings/test", async (c) => {
     });
     c.header("Retry-After", String(retryAfterSec));
     return c.json(
-      fail(
-        "cooldown",
-        `Asteapta ${retryAfterSec}s inainte sa retrimiti email-ul de test`,
-        c,
-        { retryAfterSec },
-      ),
-      429,
+      fail("cooldown", `Asteapta ${retryAfterSec}s inainte sa retrimiti email-ul de test`, c, { retryAfterSec }),
+      429
     );
   }
   lastTestSendByOwner.set(ownerId, now);

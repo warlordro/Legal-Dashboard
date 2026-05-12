@@ -55,7 +55,9 @@ export function DosarModal({ dosar, onClose }: DosarModalProps) {
               <div className="space-y-1.5 rounded-lg border border-border bg-muted/30 p-3">
                 {dosar.parti.map((p, i) => (
                   <div key={i} className="flex items-center gap-2 text-sm">
-                    <Badge variant="outline" className="shrink-0 text-xs">{p.calitateParte}</Badge>
+                    <Badge variant="outline" className="shrink-0 text-xs">
+                      {p.calitateParte}
+                    </Badge>
                     <span>{p.nume}</span>
                   </div>
                 ))}
@@ -73,20 +75,14 @@ export function DosarModal({ dosar, onClose }: DosarModalProps) {
                 {dosar.sedinte.map((s, i) => (
                   <div key={i} className="rounded-lg border border-border bg-muted/30 p-3">
                     <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono text-xs font-semibold text-primary">
-                        {formatDate(s.data)}
-                      </span>
+                      <span className="font-mono text-xs font-semibold text-primary">{formatDate(s.data)}</span>
                       {s.ora && <span className="text-xs text-muted-foreground">{s.ora}</span>}
                     </div>
-                    {s.complet && (
-                      <p className="mt-1 text-xs text-muted-foreground">Complet: {s.complet}</p>
-                    )}
+                    {s.complet && <p className="mt-1 text-xs text-muted-foreground">Complet: {s.complet}</p>}
                     {s.solutie && (
                       <div className="mt-1.5 rounded bg-background p-2">
                         <p className="text-xs font-medium">Solutie: {s.solutie}</p>
-                        {s.solutieSumar && (
-                          <p className="mt-0.5 text-xs text-muted-foreground">{s.solutieSumar}</p>
-                        )}
+                        {s.solutieSumar && <p className="mt-0.5 text-xs text-muted-foreground">{s.solutieSumar}</p>}
                       </div>
                     )}
                   </div>
@@ -104,7 +100,8 @@ function InfoItem({ icon: Icon, label, value }: { icon: React.ElementType; label
   return (
     <div className="space-y-1">
       <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">
-        <Icon className="h-3 w-3" />{label}
+        <Icon className="h-3 w-3" />
+        {label}
       </p>
       <p className="text-sm font-medium">{value}</p>
     </div>

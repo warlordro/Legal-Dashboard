@@ -75,16 +75,13 @@ function toDomain(row: EmailSettingsRow): EmailSettings {
 }
 
 export function getEmailSettings(ownerId: string): EmailSettings | null {
-  const row = getDb()
-    .prepare(`SELECT ${COLUMNS} FROM owner_email_settings WHERE owner_id = ?`)
-    .get(ownerId) as EmailSettingsRow | undefined;
+  const row = getDb().prepare(`SELECT ${COLUMNS} FROM owner_email_settings WHERE owner_id = ?`).get(ownerId) as
+    | EmailSettingsRow
+    | undefined;
   return row ? toDomain(row) : null;
 }
 
-export function upsertEmailSettings(
-  ownerId: string,
-  input: UpsertEmailSettingsInput,
-): EmailSettings {
+export function upsertEmailSettings(ownerId: string, input: UpsertEmailSettingsInput): EmailSettings {
   const toAddress = normalizeToAddress(input.toAddress);
   getDb()
     .prepare(
@@ -96,15 +93,9 @@ export function upsertEmailSettings(
          to_address = excluded.to_address,
          min_severity = excluded.min_severity,
          daily_report_enabled = excluded.daily_report_enabled,
-         updated_at = datetime('now')`,
+         updated_at = datetime('now')`
     )
-    .run(
-      ownerId,
-      input.enabled ? 1 : 0,
-      toAddress,
-      input.minSeverity,
-      input.dailyReportEnabled === true ? 1 : 0,
-    );
+    .run(ownerId, input.enabled ? 1 : 0, toAddress, input.minSeverity, input.dailyReportEnabled === true ? 1 : 0);
   return getEmailSettings(ownerId) as EmailSettings;
 }
 
@@ -129,7 +120,7 @@ export function defaultEmailSettingsFor(ownerId: string): EmailSettings {
 export function markDailyReportSent(ownerId: string, dateLocal: string): void {
   getDb()
     .prepare(
-      "UPDATE owner_email_settings SET last_daily_report_sent_for = ?, updated_at = datetime('now') WHERE owner_id = ?",
+      "UPDATE owner_email_settings SET last_daily_report_sent_for = ?, updated_at = datetime('now') WHERE owner_id = ?"
     )
     .run(dateLocal, ownerId);
 }
@@ -144,7 +135,7 @@ export function listDailyReportCandidates(todayLocal: string): EmailSettings[] {
     .prepare(
       `SELECT ${COLUMNS} FROM owner_email_settings
        WHERE daily_report_enabled = 1
-         AND (last_daily_report_sent_for IS NULL OR last_daily_report_sent_for != ?)`,
+         AND (last_daily_report_sent_for IS NULL OR last_daily_report_sent_for != ?)`
     )
     .all(todayLocal) as EmailSettingsRow[];
   return rows.map(toDomain);

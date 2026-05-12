@@ -28,7 +28,9 @@ async function get<T>(url: string, params: Record<string, string | string[] | un
   try {
     json = JSON.parse(text);
   } catch {
-    throw new Error(res.ok ? "Raspuns invalid de la server." : "Eroare la comunicarea cu serviciul PortalJust. Incercati din nou.");
+    throw new Error(
+      res.ok ? "Raspuns invalid de la server." : "Eroare la comunicarea cu serviciul PortalJust. Incercati din nou."
+    );
   }
   if (!res.ok) throw new Error(json.error ?? "Eroare necunoscuta");
   return json;
@@ -65,7 +67,7 @@ async function loadMoreSSE<T>(
   onProgress?: (progress: LoadMoreProgress) => void,
   signal?: AbortSignal,
   onBatch?: (items: T[]) => void,
-  existingNumere?: string[],
+  existingNumere?: string[]
 ): Promise<LoadMoreResult<T>> {
   const search = new URLSearchParams();
   for (const [k, v] of Object.entries(params)) {
@@ -182,17 +184,47 @@ export const api = {
   dosare: {
     search: (params: SearchParams) =>
       get<{ data: Dosar[]; total: number }>("/dosare", params as Record<string, string | string[] | undefined>),
-    loadMore: (params: SearchParams, onProgress?: (p: LoadMoreProgress) => void, signal?: AbortSignal, onBatch?: (items: Dosar[]) => void, existingNumere?: string[]) =>
-      loadMoreSSE<Dosar>("/dosare/load-more", params as Record<string, string | string[] | undefined>, onProgress, signal, onBatch, existingNumere),
+    loadMore: (
+      params: SearchParams,
+      onProgress?: (p: LoadMoreProgress) => void,
+      signal?: AbortSignal,
+      onBatch?: (items: Dosar[]) => void,
+      existingNumere?: string[]
+    ) =>
+      loadMoreSSE<Dosar>(
+        "/dosare/load-more",
+        params as Record<string, string | string[] | undefined>,
+        onProgress,
+        signal,
+        onBatch,
+        existingNumere
+      ),
   },
   termene: {
     search: (params: SearchParams) =>
       get<{ data: Termen[]; total: number }>("/termene", params as Record<string, string | string[] | undefined>),
-    loadMore: (params: SearchParams, onProgress?: (p: LoadMoreProgress) => void, signal?: AbortSignal, onBatch?: (items: Termen[]) => void, existingNumere?: string[]) =>
-      loadMoreSSE<Termen>("/termene/load-more", params as Record<string, string | string[] | undefined>, onProgress, signal, onBatch, existingNumere),
+    loadMore: (
+      params: SearchParams,
+      onProgress?: (p: LoadMoreProgress) => void,
+      signal?: AbortSignal,
+      onBatch?: (items: Termen[]) => void,
+      existingNumere?: string[]
+    ) =>
+      loadMoreSSE<Termen>(
+        "/termene/load-more",
+        params as Record<string, string | string[] | undefined>,
+        onProgress,
+        signal,
+        onBatch,
+        existingNumere
+      ),
   },
   ai: {
-    analyze: async (dosar: Dosar, model: string = "claude-sonnet", apiKeys?: { anthropic?: string; openai?: string; google?: string }): Promise<{ analysis: string }> => {
+    analyze: async (
+      dosar: Dosar,
+      model = "claude-sonnet",
+      apiKeys?: { anthropic?: string; openai?: string; google?: string }
+    ): Promise<{ analysis: string }> => {
       const res = await apiFetch(`${BASE}/ai/analyze`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -208,7 +240,7 @@ export const api = {
       analysts: [string, string],
       judge: string,
       apiKeys?: { anthropic?: string; openai?: string; google?: string },
-      onPhase?: (phase: "analyst1_done" | "analyst2_done" | "judge_started") => void,
+      onPhase?: (phase: "analyst1_done" | "analyst2_done" | "judge_started") => void
     ): Promise<{
       analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
       judge: { model: string; text: string };
@@ -270,7 +302,11 @@ export const api = {
 // dashboardApi, aiUsageApi, alertsApi) can import them without each redefining
 // the envelope contract.
 
-interface MonitoringEnvelopeOk<T> { data: T; requestId: string; error?: undefined }
+interface MonitoringEnvelopeOk<T> {
+  data: T;
+  requestId: string;
+  error?: undefined;
+}
 interface MonitoringEnvelopeError {
   data: null;
   error: { code: string; message: string; details?: unknown };
@@ -302,7 +338,7 @@ export async function unwrapMonitoring<T>(res: Response): Promise<T> {
       e?.code ?? "unknown_error",
       e?.message ?? "Eroare necunoscuta",
       res.status,
-      e?.details,
+      e?.details
     );
   }
   return (body as MonitoringEnvelopeOk<T>).data;

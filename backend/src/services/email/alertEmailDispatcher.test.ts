@@ -6,11 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
 import { upsertEmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "../../db/schema.ts";
-import {
-  dispatchAlertEmail,
-  drainEmailDispatches,
-  pendingDispatchCountForTests,
-} from "./alertEmailDispatcher.ts";
+import { dispatchAlertEmail, drainEmailDispatches, pendingDispatchCountForTests } from "./alertEmailDispatcher.ts";
 import { isMailerConfigured, sendAlertEmail } from "./mailer.ts";
 
 vi.mock("./mailer.ts", () => ({
@@ -155,7 +151,7 @@ describe("dispatchAlertEmail", () => {
         `SELECT action, outcome, target_kind, target_id, detail_json
          FROM audit_log
          WHERE action = 'email.dispatch.failed'
-         ORDER BY id DESC LIMIT 1`,
+         ORDER BY id DESC LIMIT 1`
       )
       .get() as
       | {
@@ -187,7 +183,7 @@ describe("dispatchAlertEmail", () => {
       () =>
         new Promise((resolve) => {
           resolveSend = resolve;
-        }),
+        })
     );
     const dispatchPromise = dispatchAlertEmail(alert());
     // give the microtask a chance to enter the queue

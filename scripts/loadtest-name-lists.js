@@ -64,7 +64,7 @@ export default function () {
     {
       file: http.file(csv, `lista-${iteration}.csv`, "text/csv"),
     },
-    { headers: headers() },
+    { headers: headers() }
   );
   check(previewRes, {
     "preview 200": (r) => r.status === 200,
@@ -90,7 +90,7 @@ export default function () {
       autoCreateJobs: true,
       maxJobs: 100,
     }),
-    { headers: headers({ "Content-Type": "application/json" }) },
+    { headers: headers({ "Content-Type": "application/json" }) }
   );
   check(commitRes, {
     "commit 200/201": (r) => r.status === 200 || r.status === 201,
@@ -98,10 +98,7 @@ export default function () {
   });
 
   const page = randomIntBetween(1, 5);
-  const listRes = http.get(
-    `${BASE_URL}/api/v1/name-lists?page=${page}&pageSize=20`,
-    { headers: headers() },
-  );
+  const listRes = http.get(`${BASE_URL}/api/v1/name-lists?page=${page}&pageSize=20`, { headers: headers() });
   check(listRes, {
     "list 200": (r) => r.status === 200,
     "list rows array": (r) => Array.isArray(r.json("data.rows")),

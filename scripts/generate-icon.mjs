@@ -48,10 +48,7 @@ console.log("Generating app icons...\n");
 const pngBuffers = {};
 for (const size of sizes) {
   const svg = createIconSvg(size);
-  const png = await sharp(Buffer.from(svg))
-    .resize(size, size)
-    .png()
-    .toBuffer();
+  const png = await sharp(Buffer.from(svg)).resize(size, size).png().toBuffer();
 
   pngBuffers[size] = png;
 

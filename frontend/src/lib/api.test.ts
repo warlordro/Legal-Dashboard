@@ -56,7 +56,7 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
         '\nevent: batch\ndata: {"data":[{"numar":"1/1/2024"},{"numar":"2/1/2024"}]}\n',
         '\nevent: batch\ndata: {"data":[{"numar":"3/1/2024"}]}\n',
         '\nevent: done\ndata: {"total":3,"warnings":["interval X timeout"]}\n\n',
-      ]),
+      ])
     );
 
     const progress: number[] = [];
@@ -82,7 +82,7 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
       makeSseResponse([
         'event: batch\ndata: {"data":[{"nu',
         'mar":"1/1/2024"}]}\nevent: done\ndata: {"total":1,"warnings":[]}\n\n',
-      ]),
+      ])
     );
 
     const result = await api.dosare.loadMore({} as any);
@@ -98,57 +98,33 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
     // sa distinga erorile explicite de server de stream-end / abort. Mesajul
     // server-ului (parsed.error) ajunge as-is la caller in loc de "Conexiunea
     // a fost intrerupta inainte de finalizare." (vechiul comportament v2.7.0).
-    fetchSpy.mockResolvedValue(
-      makeSseResponse([
-        'event: error\ndata: {"error":"Upstream PortalJust 503"}\n\n',
-      ]),
-    );
+    fetchSpy.mockResolvedValue(makeSseResponse(['event: error\ndata: {"error":"Upstream PortalJust 503"}\n\n']));
 
-    await expect(api.dosare.loadMore({} as any)).rejects.toThrow(
-      "Upstream PortalJust 503",
-    );
+    await expect(api.dosare.loadMore({} as any)).rejects.toThrow("Upstream PortalJust 503");
   });
 
   it("propaga fallback generic cand event: error nu contine parsed.error", async () => {
     // Cand server-ul trimite event: error fara camp .error, marker-ul foloseste
     // mesajul fallback "Eroare la incarcarea extinsa." (nu "Conexiunea...").
-    fetchSpy.mockResolvedValue(
-      makeSseResponse([
-        'event: error\ndata: {"detail":"missing error field"}\n\n',
-      ]),
-    );
+    fetchSpy.mockResolvedValue(makeSseResponse(['event: error\ndata: {"detail":"missing error field"}\n\n']));
 
-    await expect(api.dosare.loadMore({} as any)).rejects.toThrow(
-      "Eroare la incarcarea extinsa.",
-    );
+    await expect(api.dosare.loadMore({} as any)).rejects.toThrow("Eroare la incarcarea extinsa.");
   });
 
   it("arunca generic message daca raspunsul HTTP nu e ok si body-ul nu e JSON", async () => {
-    fetchSpy.mockResolvedValue(
-      new Response("internal server error", { status: 500 }),
-    );
+    fetchSpy.mockResolvedValue(new Response("internal server error", { status: 500 }));
 
-    await expect(api.dosare.loadMore({} as any)).rejects.toThrow(
-      "Eroare la incarcarea extinsa.",
-    );
+    await expect(api.dosare.loadMore({} as any)).rejects.toThrow("Eroare la incarcarea extinsa.");
   });
 
   it("propaga error.message din JSON cand HTTP nu e ok", async () => {
-    fetchSpy.mockResolvedValue(
-      makeJsonErrorResponse(429, { error: "rate limit hit" }),
-    );
+    fetchSpy.mockResolvedValue(makeJsonErrorResponse(429, { error: "rate limit hit" }));
 
-    await expect(api.dosare.loadMore({} as any)).rejects.toThrow(
-      "rate limit hit",
-    );
+    await expect(api.dosare.loadMore({} as any)).rejects.toThrow("rate limit hit");
   });
 
   it("intoarce partial cu accumulated cand stream-ul se incheie fara done", async () => {
-    fetchSpy.mockResolvedValue(
-      makeSseResponse([
-        'event: batch\ndata: {"data":[{"numar":"1/1/2024"}]}\n\n',
-      ]),
-    );
+    fetchSpy.mockResolvedValue(makeSseResponse(['event: batch\ndata: {"data":[{"numar":"1/1/2024"}]}\n\n']));
 
     const result = await api.dosare.loadMore({} as any);
     expect(result.partial).toBe(true);
@@ -158,9 +134,7 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
   it("arunca generic error cand nu se livreaza nimic", async () => {
     fetchSpy.mockResolvedValue(makeSseResponse([]));
 
-    await expect(api.dosare.loadMore({} as any)).rejects.toThrow(
-      "Conexiunea a fost intrerupta inainte de finalizare.",
-    );
+    await expect(api.dosare.loadMore({} as any)).rejects.toThrow("Conexiunea a fost intrerupta inainte de finalizare.");
   });
 
   it("logheaza JSON malformed pe linia data: dar nu blocheaza stream-ul (Stage 2a)", async () => {
@@ -173,15 +147,12 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
         "event: batch\ndata: {bad json\n",
         '\nevent: batch\ndata: {"data":[{"numar":"1/1/2024"}]}\n',
         '\nevent: done\ndata: {"total":1,"warnings":[]}\n\n',
-      ]),
+      ])
     );
 
     const result = await api.dosare.loadMore({} as any);
     expect(result.data).toHaveLength(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      expect.stringContaining("[loadMoreSSE]"),
-      expect.any(Error),
-    );
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("[loadMoreSSE]"), expect.any(Error));
   });
 
   it("invoca onBatch pentru fiecare batch primit", async () => {
@@ -190,7 +161,7 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
         'event: batch\ndata: {"data":[{"numar":"1"}]}\n',
         '\nevent: batch\ndata: {"data":[{"numar":"2"},{"numar":"3"}]}\n',
         '\nevent: done\ndata: {"total":3,"warnings":[]}\n\n',
-      ]),
+      ])
     );
 
     const onBatch = vi.fn();

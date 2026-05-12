@@ -1,9 +1,6 @@
 import type { ReactNode } from "react";
 import { Badge } from "@/components/ui/badge";
-import {
-  formatInstitutie,
-  getStadiuBadgeColor,
-} from "@/components/dosare-table-helpers";
+import { formatInstitutie, getStadiuBadgeColor } from "@/components/dosare-table-helpers";
 import { cn } from "@/lib/utils";
 import type { MonitoringAlert } from "@/lib/alertsApi";
 
@@ -121,7 +118,9 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         target = parsed as Record<string, unknown>;
       }
-    } catch { /* invalid JSON in target_json — ignore */ }
+    } catch {
+      /* invalid JSON in target_json — ignore */
+    }
   }
 
   const numarDosar =
@@ -131,8 +130,7 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
     asString(target.numar_dosar) ??
     asString(target.numar);
   const instanta = asString(detail.instanta) ?? asString(target.instanta);
-  const nameNormalized =
-    asString(detail.name_normalized) ?? asString(target.name_normalized);
+  const nameNormalized = asString(detail.name_normalized) ?? asString(target.name_normalized);
 
   const facts: AlertFact[] = [];
   const push = (label: string, value: ReactNode | undefined) => {
@@ -184,7 +182,7 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
               <span className="text-muted-foreground">Ora</span> {sedintaOra}
             </>
           )}
-        </span>,
+        </span>
       );
     }
     push("Complet", asString(detail.complet));
@@ -203,16 +201,11 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
   // 2-column key:value grid alongside Data/Ora/Complet was visually awkward.
   // termen_dupa_solutie carries the ruling under from.*; for the standalone
   // solutie_aparuta kind it's at the top level of detail.
-  const numarDoc =
-    asString(detail.numar_document) ?? asString(getNested(detail, ["from", "numar_document"]));
+  const numarDoc = asString(detail.numar_document) ?? asString(getNested(detail, ["from", "numar_document"]));
   const dataPronuntare =
-    formatSedintaDate(detail.data_pronuntare) ??
-    formatSedintaDate(getNested(detail, ["from", "data_pronuntare"]));
-  const sumar =
-    asString(detail.solutie_sumar) ?? asString(getNested(detail, ["from", "solutie_sumar"]));
-  const hotarare = numarDoc || dataPronuntare || sumar
-    ? { numarDoc, dataPronuntare, sumar }
-    : undefined;
+    formatSedintaDate(detail.data_pronuntare) ?? formatSedintaDate(getNested(detail, ["from", "data_pronuntare"]));
+  const sumar = asString(detail.solutie_sumar) ?? asString(getNested(detail, ["from", "solutie_sumar"]));
+  const hotarare = numarDoc || dataPronuntare || sumar ? { numarDoc, dataPronuntare, sumar } : undefined;
 
   // Stadiu rendered as a colored Badge to match Cautare Dosare styling
   // (slate / sky / indigo / orange per stadiu kind).
@@ -222,7 +215,7 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
       "Stadiu",
       <Badge variant="outline" className={cn("text-xs", getStadiuBadgeColor(stadiuValue))}>
         {stadiuValue}
-      </Badge>,
+      </Badge>
     );
   }
   push("Categorie", asString(detail.categorie));
@@ -252,10 +245,27 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
   // (humanized label + JSON-stringified value), not just key names — the prior
   // "Detalii suplimentare: keyA · keyB" line dropped the actual data.
   const consumed = new Set([
-    "numar_dosar", "numar", "dosar", "instanta", "name_normalized",
-    "data", "ora", "complet", "solutie", "stadiu", "stadiu_procesual",
-    "categorie", "from", "to", "message", "error", "error_code", "observedAt",
-    "solutie_sumar", "numar_document", "data_pronuntare",
+    "numar_dosar",
+    "numar",
+    "dosar",
+    "instanta",
+    "name_normalized",
+    "data",
+    "ora",
+    "complet",
+    "solutie",
+    "stadiu",
+    "stadiu_procesual",
+    "categorie",
+    "from",
+    "to",
+    "message",
+    "error",
+    "error_code",
+    "observedAt",
+    "solutie_sumar",
+    "numar_document",
+    "data_pronuntare",
   ]);
   const fallback: Array<{ label: string; value: string }> = [];
   for (const key of Object.keys(detail)) {

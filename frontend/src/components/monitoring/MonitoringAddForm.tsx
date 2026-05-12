@@ -5,12 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { InstitutieSelect } from "@/components/InstitutieSelect";
-import {
-  monitoring,
-  formatMonitoringTarget,
-  MonitoringApiError,
-  type MonitoringJob,
-} from "@/lib/api";
+import { monitoring, formatMonitoringTarget, MonitoringApiError, type MonitoringJob } from "@/lib/api";
 
 const NUMAR_DOSAR_RE = /^\d{1,7}\/\d{1,5}\/\d{4}(?:\/[A-Za-z0-9]+)?$/;
 
@@ -85,7 +80,7 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
       setFormSuccess(
         created
           ? `Adaugat: ${formatMonitoringTarget(job)} (id ${job.id})`
-          : `Exista deja: ${formatMonitoringTarget(job)} (id ${job.id})`,
+          : `Exista deja: ${formatMonitoringTarget(job)} (id ${job.id})`
       );
       setNotes("");
       await onJobAdded();
@@ -115,7 +110,11 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
           <div className="flex gap-1 border-b border-border">
             <button
               type="button"
-              onClick={() => { setFormKind("dosar"); setFormError(null); setFormSuccess(null); }}
+              onClick={() => {
+                setFormKind("dosar");
+                setFormError(null);
+                setFormSuccess(null);
+              }}
               className={`flex items-center gap-2 rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
                 formKind === "dosar"
                   ? "bg-primary text-primary-foreground"
@@ -128,7 +127,11 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
             </button>
             <button
               type="button"
-              onClick={() => { setFormKind("nume"); setFormError(null); setFormSuccess(null); }}
+              onClick={() => {
+                setFormKind("nume");
+                setFormError(null);
+                setFormSuccess(null);
+              }}
               className={`flex items-center gap-2 rounded-t-lg px-4 py-2 text-sm font-medium transition-colors ${
                 formKind === "nume"
                   ? "bg-primary text-primary-foreground"
@@ -162,7 +165,9 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
                   </SelectTrigger>
                   <SelectContent>
                     {CADENCE_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.sec} value={String(opt.sec)}>{opt.label}</SelectItem>
+                      <SelectItem key={opt.sec} value={String(opt.sec)}>
+                        {opt.label}
+                      </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
@@ -192,7 +197,9 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
                     </SelectTrigger>
                     <SelectContent>
                       {CADENCE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.sec} value={String(opt.sec)}>{opt.label}</SelectItem>
+                        <SelectItem key={opt.sec} value={String(opt.sec)}>
+                          {opt.label}
+                        </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
@@ -201,9 +208,7 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
               <div>
                 <label className="text-xs font-medium mb-1 block">Institutii (optional)</label>
                 <InstitutieSelect value={institutie} onChange={setInstitutie} />
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Lasa gol pentru cautare in toate institutiile.
-                </p>
+                <p className="mt-1 text-[11px] text-muted-foreground">Lasa gol pentru cautare in toate institutiile.</p>
               </div>
             </>
           )}

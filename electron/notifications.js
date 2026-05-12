@@ -33,17 +33,19 @@ function normalizeNotificationCapability(state, platform) {
   if (platform === "win32") {
     return {
       canNotify: state === WINDOWS_NOTIFICATION_ACCEPTS,
-      reason: state === WINDOWS_NOTIFICATION_ACCEPTS
-        ? "Windows accepta notificari pentru sesiunea curenta."
-        : `Windows nu accepta notificari acum (${state}).`,
+      reason:
+        state === WINDOWS_NOTIFICATION_ACCEPTS
+          ? "Windows accepta notificari pentru sesiunea curenta."
+          : `Windows nu accepta notificari acum (${state}).`,
     };
   }
   if (platform === "darwin") {
     return {
       canNotify: state === MACOS_NOTIFICATION_ACCEPTS,
-      reason: state === MACOS_NOTIFICATION_ACCEPTS
-        ? "macOS accepta notificari pentru sesiunea curenta."
-        : `macOS nu accepta notificari acum (${state}).`,
+      reason:
+        state === MACOS_NOTIFICATION_ACCEPTS
+          ? "macOS accepta notificari pentru sesiunea curenta."
+          : `macOS nu accepta notificari acum (${state}).`,
     };
   }
   return {
@@ -87,7 +89,8 @@ function getNotificationStatus() {
           supported,
           state: "available",
           canNotify: true,
-          reason: "Notificarile native sunt disponibile prin Electron (status detaliat indisponibil in dev fara modulul nativ).",
+          reason:
+            "Notificarile native sunt disponibile prin Electron (status detaliat indisponibil in dev fara modulul nativ).",
         };
       }
       return {
@@ -117,7 +120,8 @@ function getNotificationStatus() {
           supported,
           state: "available",
           canNotify: true,
-          reason: "Notificarile native sunt disponibile prin Electron (status detaliat indisponibil in dev fara modulul nativ).",
+          reason:
+            "Notificarile native sunt disponibile prin Electron (status detaliat indisponibil in dev fara modulul nativ).",
         };
       }
       return {
@@ -162,7 +166,11 @@ function showNativeNotification(payload) {
     // a reconnect.
     if (tag && notificationsByTag.has(tag)) {
       const previous = notificationsByTag.get(tag);
-      try { previous.close(); } catch { /* already gone */ }
+      try {
+        previous.close();
+      } catch {
+        /* already gone */
+      }
       notificationsByTag.delete(tag);
     }
 
@@ -192,11 +200,13 @@ function showNativeNotification(payload) {
 function registerNotificationIpc(ipcMain) {
   ipcMain.handle("notification:getStatus", () => getNotificationStatus());
 
-  ipcMain.handle("notification:test", () => showNativeNotification({
-    title: "Legal Dashboard - notificari active",
-    body: "Aceasta este o notificare de test pentru alertele de monitorizare.",
-    tag: "legal-dashboard-notification-test",
-  }));
+  ipcMain.handle("notification:test", () =>
+    showNativeNotification({
+      title: "Legal Dashboard - notificari active",
+      body: "Aceasta este o notificare de test pentru alertele de monitorizare.",
+      tag: "legal-dashboard-notification-test",
+    })
+  );
 
   // notification:show is the renderer-driven path; identical contract to
   // showNativeNotification (same caps, same dedup, same status gate).

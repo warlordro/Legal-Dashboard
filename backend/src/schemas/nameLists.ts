@@ -12,10 +12,7 @@
 
 import { z } from "zod";
 
-import {
-  MAX_NAME_LEN,
-  MAX_ROWS,
-} from "../services/nameListParser.ts";
+import { MAX_NAME_LEN, MAX_ROWS } from "../services/nameListParser.ts";
 
 // Per-item cap pe nameRaw: 200 chars (acelasi ca parser). Chiar daca cap-ul
 // pe array e MAX_ROWS=50000, fara cap pe item-ul individual un payload de
@@ -66,12 +63,7 @@ export const CommitListBodySchema = z
     // re-trimite request-ul (idempotent prin sha256 → duplicate=true) cu
     // autoCreateJobs=true, sau separat printr-un endpoint dedicat (commit 5).
     autoCreateJobs: z.boolean().default(false),
-    maxJobs: z
-      .number()
-      .int()
-      .min(1)
-      .max(MAX_JOBS_PER_COMMIT)
-      .default(MAX_JOBS_PER_COMMIT),
+    maxJobs: z.number().int().min(1).max(MAX_JOBS_PER_COMMIT).default(MAX_JOBS_PER_COMMIT),
   })
   .strict();
 

@@ -62,14 +62,8 @@ export default function Changelog() {
             <CardContent className="space-y-5">
               {v.sections.map((section, idx) => (
                 <div key={idx}>
-                  <h3 className="mb-1.5 text-base font-semibold text-foreground">
-                    {section.title}
-                  </h3>
-                  {section.content && (
-                    <p className="text-sm leading-relaxed text-foreground">
-                      {section.content}
-                    </p>
-                  )}
+                  <h3 className="mb-1.5 text-base font-semibold text-foreground">{section.title}</h3>
+                  {section.content && <p className="text-sm leading-relaxed text-foreground">{section.content}</p>}
                   {section.bullets && (
                     <ul className="mt-2 space-y-1 pl-4">
                       {section.bullets.map((bullet, bIdx) => (

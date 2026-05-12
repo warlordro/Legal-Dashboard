@@ -5,13 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import {
-  admin,
-  MonitoringApiError,
-  type AdminUser,
-  type UserRole,
-  type UserStatus,
-} from "@/lib/api";
+import { admin, MonitoringApiError, type AdminUser, type UserRole, type UserStatus } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
@@ -31,10 +25,8 @@ const STATUS_OPTIONS: ReadonlyArray<{ value: UserStatus; label: string }> = [
   { value: "deleted", label: "Sters" },
 ];
 
-const roleLabel = (role: UserRole) =>
-  ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
-const statusLabel = (status: UserStatus) =>
-  STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
+const roleLabel = (role: UserRole) => ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
+const statusLabel = (status: UserStatus) => STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
 
 function statusVariant(status: UserStatus): "success" | "warning" | "destructive" {
   if (status === "active") return "success";
@@ -99,20 +91,14 @@ export default function AdminUsers() {
 
   // Server-side guards (last_admin, self_deactivation) are the source of truth;
   // the client just hides the change as a UX nicety so admins don't even try.
-  const blockSelfDemote = useCallback(
-    (target: AdminUser) => target.id === me?.id && target.role === "admin",
-    [me?.id],
-  );
-  const blockSelfDeactivate = useCallback(
-    (target: AdminUser) => target.id === me?.id,
-    [me?.id],
-  );
+  const blockSelfDemote = useCallback((target: AdminUser) => target.id === me?.id && target.role === "admin", [me?.id]);
+  const blockSelfDeactivate = useCallback((target: AdminUser) => target.id === me?.id, [me?.id]);
 
   const handleRoleChange = async (target: AdminUser, nextRole: UserRole) => {
     if (nextRole === target.role) return;
     if (blockSelfDemote(target) && nextRole !== "admin") {
       setError(
-        "Nu te poti retrograda pe tine: cere altui admin sa schimbe rolul, ca fail-safe impotriva blocarii contului unic de admin.",
+        "Nu te poti retrograda pe tine: cere altui admin sa schimbe rolul, ca fail-safe impotriva blocarii contului unic de admin."
       );
       return;
     }
@@ -224,7 +210,9 @@ export default function AdminUsers() {
                 <SelectContent>
                   <SelectItem value="all">Toate rolurile</SelectItem>
                   {ROLE_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -235,7 +223,9 @@ export default function AdminUsers() {
                 <SelectContent>
                   <SelectItem value="all">Toate statusurile</SelectItem>
                   {STATUS_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -289,17 +279,16 @@ export default function AdminUsers() {
                         <td className="px-4 py-2 align-top font-mono text-xs">
                           {row.email}
                           {isSelf && (
-                            <Badge variant="outline" className="ml-2">tu</Badge>
+                            <Badge variant="outline" className="ml-2">
+                              tu
+                            </Badge>
                           )}
                         </td>
                         <td className="px-4 py-2 align-top">{row.displayName || "-"}</td>
                         <td className="px-4 py-2 align-top">
                           <div className="flex items-center gap-2">
                             <Badge variant={roleVariant(row.role)}>{roleLabel(row.role)}</Badge>
-                            <Select
-                              value={row.role}
-                              onValueChange={(v) => handleRoleChange(row, v as UserRole)}
-                            >
+                            <Select value={row.role} onValueChange={(v) => handleRoleChange(row, v as UserRole)}>
                               <SelectTrigger
                                 className="h-7 px-2 text-xs w-auto min-w-[110px]"
                                 disabled={busyId === row.id || loading}
@@ -308,7 +297,9 @@ export default function AdminUsers() {
                               </SelectTrigger>
                               <SelectContent>
                                 {ROLE_OPTIONS.map((o) => (
-                                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                  <SelectItem key={o.value} value={o.value}>
+                                    {o.label}
+                                  </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
@@ -317,10 +308,7 @@ export default function AdminUsers() {
                         <td className="px-4 py-2 align-top">
                           <div className="flex items-center gap-2">
                             <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
-                            <Select
-                              value={row.status}
-                              onValueChange={(v) => handleStatusChange(row, v as UserStatus)}
-                            >
+                            <Select value={row.status} onValueChange={(v) => handleStatusChange(row, v as UserStatus)}>
                               <SelectTrigger
                                 className="h-7 px-2 text-xs w-auto min-w-[110px]"
                                 disabled={busyId === row.id || loading}
@@ -329,14 +317,20 @@ export default function AdminUsers() {
                               </SelectTrigger>
                               <SelectContent>
                                 {STATUS_OPTIONS.map((o) => (
-                                  <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                                  <SelectItem key={o.value} value={o.value}>
+                                    {o.label}
+                                  </SelectItem>
                                 ))}
                               </SelectContent>
                             </Select>
                           </div>
                         </td>
-                        <td className="px-4 py-2 align-top text-xs text-muted-foreground">{formatIsoDateTime(row.lastLoginAt)}</td>
-                        <td className="px-4 py-2 align-top text-xs text-muted-foreground">{formatIsoDateTime(row.createdAt)}</td>
+                        <td className="px-4 py-2 align-top text-xs text-muted-foreground">
+                          {formatIsoDateTime(row.lastLoginAt)}
+                        </td>
+                        <td className="px-4 py-2 align-top text-xs text-muted-foreground">
+                          {formatIsoDateTime(row.createdAt)}
+                        </td>
                       </tr>
                     );
                   })}
@@ -347,11 +341,7 @@ export default function AdminUsers() {
         </Card>
 
         <div className="flex items-center justify-between">
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || loading}
-          >
+          <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
             Inapoi
           </Button>
           <span className="text-sm text-muted-foreground">

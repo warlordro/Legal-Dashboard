@@ -2,13 +2,15 @@ import Database from "better-sqlite3";
 import { RnpmClient } from "./src/services/rnpmClient.ts";
 
 const DB_PATH = process.argv[2] ?? "../legal-dashboard-dev.db";
-const N_DOCS = parseInt(process.argv[3] ?? "25", 10);
+const N_DOCS = Number.parseInt(process.argv[3] ?? "25", 10);
 const LEVELS = [3, 5, 7, 10, 15];
 
 const db = new Database(DB_PATH, { readonly: true });
-const rows = db.prepare(
-  "SELECT uuid, identificator, created_at FROM rnpm_avize WHERE uuid IS NOT NULL AND uuid != '' ORDER BY created_at DESC LIMIT ?"
-).all(N_DOCS) as { uuid: string; identificator: string; created_at: string }[];
+const rows = db
+  .prepare(
+    "SELECT uuid, identificator, created_at FROM rnpm_avize WHERE uuid IS NOT NULL AND uuid != '' ORDER BY created_at DESC LIMIT ?"
+  )
+  .all(N_DOCS) as { uuid: string; identificator: string; created_at: string }[];
 db.close();
 
 console.log(`Newest aviz: ${rows[0]?.identificator} created_at=${rows[0]?.created_at}`);
@@ -37,10 +39,16 @@ async function runAt(concurrency: number): Promise<{ ms: number; errors: number 
   let errors = 0;
   for (let i = 0; i < rows.length; i += concurrency) {
     const slice = rows.slice(i, i + concurrency);
-    const results = await Promise.all(slice.map(async (r) => {
-      try { await client.fetchFullDetail(r.uuid); return true; }
-      catch { return false; }
-    }));
+    const results = await Promise.all(
+      slice.map(async (r) => {
+        try {
+          await client.fetchFullDetail(r.uuid);
+          return true;
+        } catch {
+          return false;
+        }
+      })
+    );
     errors += results.filter((r) => !r).length;
   }
   return { ms: Date.now() - start, errors };

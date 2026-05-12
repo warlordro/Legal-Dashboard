@@ -23,7 +23,10 @@ export function useSiSauField(init?: RnpmSiSau) {
     setValue,
     op,
     setOp,
-    reset: () => { setValue(""); setOp("1"); },
+    reset: () => {
+      setValue("");
+      setOp("1");
+    },
     toParam: (): RnpmSiSau | undefined => {
       const v = value.trim();
       return v ? { type: op, value: v } : undefined;
@@ -37,8 +40,14 @@ export function usePJField(init?: { denumire?: string; CUI?: RnpmSiSau; RegCom?:
   const cui = useSiSauField(init?.CUI);
   const reg = useSiSauField(init?.RegCom ?? init?.regCom);
   return {
-    denumire, cui, reg,
-    reset: () => { denumire.reset(); cui.reset(); reg.reset(); },
+    denumire,
+    cui,
+    reg,
+    reset: () => {
+      denumire.reset();
+      cui.reset();
+      reg.reset();
+    },
   };
 }
 export type PJField = ReturnType<typeof usePJField>;
@@ -48,8 +57,14 @@ export function usePFField(init?: { nume?: string; prenume?: RnpmSiSau; CNP?: Rn
   const prenume = useSiSauField(init?.prenume);
   const cnp = useSiSauField(init?.CNP);
   return {
-    nume, prenume, cnp,
-    reset: () => { nume.reset(); prenume.reset(); cnp.reset(); },
+    nume,
+    prenume,
+    cnp,
+    reset: () => {
+      nume.reset();
+      prenume.reset();
+      cnp.reset();
+    },
   };
 }
 export type PFField = ReturnType<typeof usePFField>;

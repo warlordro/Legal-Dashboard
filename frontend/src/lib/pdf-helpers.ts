@@ -21,9 +21,13 @@ export interface ExportResult {
 export function stripDiacritics(text: string): string {
   if (!text) return "";
   return text
-    .replace(/[ăâ]/g, "a").replace(/[ĂÂ]/g, "A")
-    .replace(/[îì]/g, "i").replace(/[ÎÌ]/g, "I")
-    .replace(/[șş]/g, "s").replace(/[ȘŞ]/g, "S")
-    .replace(/[țţ]/g, "t").replace(/[ȚŢ]/g, "T")
+    .replace(/[ăâ]/g, "a")
+    .replace(/[ĂÂ]/g, "A")
+    .replace(/[îì]/g, "i")
+    .replace(/[ÎÌ]/g, "I")
+    .replace(/[șş]/g, "s")
+    .replace(/[ȘŞ]/g, "S")
+    .replace(/[țţ]/g, "t")
+    .replace(/[ȚŢ]/g, "T")
     .replace(/&amp;/g, "&");
 }

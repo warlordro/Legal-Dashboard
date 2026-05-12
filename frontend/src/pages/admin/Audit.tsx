@@ -24,9 +24,7 @@ function localDateInputToIso(value: string, endOfDay: boolean): string | undefin
   if (!value) return undefined;
   const [y, m, d] = value.split("-").map(Number);
   if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return undefined;
-  const dt = endOfDay
-    ? new Date(y, m - 1, d, 23, 59, 59, 999)
-    : new Date(y, m - 1, d, 0, 0, 0, 0);
+  const dt = endOfDay ? new Date(y, m - 1, d, 23, 59, 59, 999) : new Date(y, m - 1, d, 0, 0, 0, 0);
   if (Number.isNaN(dt.getTime())) return undefined;
   return dt.toISOString();
 }
@@ -177,7 +175,9 @@ export default function AdminAudit() {
                 </SelectTrigger>
                 <SelectContent>
                   {OUTCOME_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+                    <SelectItem key={o.value} value={o.value}>
+                      {o.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -248,9 +248,7 @@ export default function AdminAudit() {
                     const isOpen = expanded.has(row.id);
                     return (
                       <Fragment key={row.id}>
-                        <tr
-                          className="border-b border-border last:border-b-0 hover:bg-muted/30"
-                        >
+                        <tr className="border-b border-border last:border-b-0 hover:bg-muted/30">
                           <td className="px-2 py-2 align-top">
                             <button
                               type="button"
@@ -280,14 +278,18 @@ export default function AdminAudit() {
                               <span className="text-muted-foreground">-</span>
                             )}
                           </td>
-                          <td className="px-3 py-2 align-top font-mono text-xs text-muted-foreground">{row.ip ?? "-"}</td>
+                          <td className="px-3 py-2 align-top font-mono text-xs text-muted-foreground">
+                            {row.ip ?? "-"}
+                          </td>
                         </tr>
                         {isOpen && (
                           <tr className="border-b border-border bg-muted/20">
                             <td colSpan={8} className="px-4 py-3">
                               <div className="grid gap-3 md:grid-cols-2">
                                 <div>
-                                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Detalii</p>
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                    Detalii
+                                  </p>
                                   <pre className="mt-1 max-h-72 overflow-auto rounded-md border border-border bg-background p-2 text-xs">
                                     {detailToString(row.detail)}
                                   </pre>
@@ -318,11 +320,7 @@ export default function AdminAudit() {
         </Card>
 
         <div className="flex items-center justify-between">
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
-            disabled={page <= 1 || loading}
-          >
+          <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
             Inapoi
           </Button>
           <span className="text-sm text-muted-foreground">

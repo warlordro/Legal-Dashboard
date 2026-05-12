@@ -1,7 +1,4 @@
-import {
-  insertAiUsage,
-  type AiUsageProvider,
-} from "../db/aiUsageRepository.ts";
+import { insertAiUsage, type AiUsageProvider } from "../db/aiUsageRepository.ts";
 
 export type { AiUsageProvider };
 
@@ -80,12 +77,14 @@ export function estimateAiCostUsdMilli(input: {
     const key = `${input.provider}|${input.model}`;
     if (!warnedMissingPrice.has(key)) {
       warnedMissingPrice.add(key);
-      console.warn(JSON.stringify({
-        action: "ai_usage.price_missing",
-        provider: input.provider,
-        model: input.model,
-        ts: new Date().toISOString(),
-      }));
+      console.warn(
+        JSON.stringify({
+          action: "ai_usage.price_missing",
+          provider: input.provider,
+          model: input.model,
+          ts: new Date().toISOString(),
+        })
+      );
     }
     return 0;
   }
@@ -95,8 +94,7 @@ export function estimateAiCostUsdMilli(input: {
   if (inputTokens === 0 && outputTokens === 0) return 0;
 
   const usd =
-    (inputTokens * price.inputUsdPerMillion) / 1_000_000 +
-    (outputTokens * price.outputUsdPerMillion) / 1_000_000;
+    (inputTokens * price.inputUsdPerMillion) / 1_000_000 + (outputTokens * price.outputUsdPerMillion) / 1_000_000;
   return Math.max(0, Math.round(usd * 1_000));
 }
 
@@ -146,16 +144,18 @@ export function recordAiUsageSafely(input: {
       // Structured single-line JSON so log scrapers can grep
       // `"action":"ai_usage.persist_failed"`. Mirrors the shape used by
       // backup/restore audit lines in `db/backup.ts`.
-      console.warn(JSON.stringify({
-        action: "ai_usage.persist_failed",
-        provider,
-        model,
-        feature: tracking.feature,
-        owner_id: tracking.ownerId,
-        request_id: tracking.requestId ?? null,
-        error: e instanceof Error ? e.message : String(e),
-        ts: new Date().toISOString(),
-      }));
+      console.warn(
+        JSON.stringify({
+          action: "ai_usage.persist_failed",
+          provider,
+          model,
+          feature: tracking.feature,
+          owner_id: tracking.ownerId,
+          request_id: tracking.requestId ?? null,
+          error: e instanceof Error ? e.message : String(e),
+          ts: new Date().toISOString(),
+        })
+      );
     }
   });
 }

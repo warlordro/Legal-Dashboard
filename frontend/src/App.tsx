@@ -44,16 +44,35 @@ interface TermeneState {
 
 // Inner shell — must be inside BrowserRouter so useLocation works
 function AppShell({
-  dosareState, setDosareState,
-  termeneState, setTermeneState,
-  history, addEntry, removeEntry, clearHistory,
-  keys, hasKey, handleOpenKeyDialog, activeCaptchaKey, captchaProvider, captchaMode,
-  pendingSearch, handleHistoryClick, consumePendingSearch,
-  rnpmHistory, addRnpmEntry, removeRnpmEntry, clearRnpmHistory,
-  rnpmPendingSearch, handleRnpmHistoryClick, consumeRnpmPendingSearch,
+  dosareState,
+  setDosareState,
+  termeneState,
+  setTermeneState,
+  history,
+  addEntry,
+  removeEntry,
+  clearHistory,
+  keys,
+  hasKey,
+  handleOpenKeyDialog,
+  activeCaptchaKey,
+  captchaProvider,
+  captchaMode,
+  pendingSearch,
+  handleHistoryClick,
+  consumePendingSearch,
+  rnpmHistory,
+  addRnpmEntry,
+  removeRnpmEntry,
+  clearRnpmHistory,
+  rnpmPendingSearch,
+  handleRnpmHistoryClick,
+  consumeRnpmPendingSearch,
 }: {
-  dosareState: DosareState; setDosareState: React.Dispatch<React.SetStateAction<DosareState>>;
-  termeneState: TermeneState; setTermeneState: React.Dispatch<React.SetStateAction<TermeneState>>;
+  dosareState: DosareState;
+  setDosareState: React.Dispatch<React.SetStateAction<DosareState>>;
+  termeneState: TermeneState;
+  setTermeneState: React.Dispatch<React.SetStateAction<TermeneState>>;
   history: ReturnType<typeof useSearchHistory>["history"];
   addEntry: ReturnType<typeof useSearchHistory>["addEntry"];
   removeEntry: ReturnType<typeof useSearchHistory>["removeEntry"];
@@ -94,7 +113,10 @@ function AppShell({
     // Re-check when content changes (e.g. search results load)
     const observer = new ResizeObserver(handleScroll);
     observer.observe(el);
-    return () => { el.removeEventListener("scroll", handleScroll); observer.disconnect(); };
+    return () => {
+      el.removeEventListener("scroll", handleScroll);
+      observer.disconnect();
+    };
   }, []);
 
   const scrollToTop = useCallback(() => {
@@ -175,19 +197,33 @@ function AppShell({
           />
         )}
         {pathname === "/admin/users" && (
-          <AdminGate><AdminUsers /></AdminGate>
+          <AdminGate>
+            <AdminUsers />
+          </AdminGate>
         )}
         {pathname === "/admin/audit" && (
-          <AdminGate><AdminAudit /></AdminGate>
+          <AdminGate>
+            <AdminAudit />
+          </AdminGate>
         )}
         {pathname === "/admin/quota" && (
-          <AdminGate><AdminQuota /></AdminGate>
+          <AdminGate>
+            <AdminQuota />
+          </AdminGate>
         )}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>
           <RnpmSearchPage
             captchaKey={activeCaptchaKey}
             captchaProvider={captchaProvider}
-            fallback2CaptchaKey={captchaMode === "race" ? (captchaProvider === "capsolver" ? keys.twocaptcha : keys.capsolver) : (captchaProvider === "capsolver" ? keys.twocaptcha : undefined)}
+            fallback2CaptchaKey={
+              captchaMode === "race"
+                ? captchaProvider === "capsolver"
+                  ? keys.twocaptcha
+                  : keys.capsolver
+                : captchaProvider === "capsolver"
+                  ? keys.twocaptcha
+                  : undefined
+            }
             captchaMode={captchaMode}
             onConfigureKey={handleOpenKeyDialog}
             onSearchComplete={addRnpmEntry}
@@ -243,8 +279,28 @@ export default function App() {
   });
 
   const { history, addEntry, removeEntry, clearHistory } = useSearchHistory();
-  const { history: rnpmHistory, addEntry: addRnpmEntry, removeEntry: removeRnpmEntry, clearHistory: clearRnpmHistory } = useRnpmHistory();
-  const { keys, setKey, clearKey, hasKey, hasAnthropic, hasOpenai, hasGoogle, hasTwoCaptcha, hasCapSolver, captchaProvider, setCaptchaProvider, captchaMode, setCaptchaMode, activeCaptchaKey } = useApiKey();
+  const {
+    history: rnpmHistory,
+    addEntry: addRnpmEntry,
+    removeEntry: removeRnpmEntry,
+    clearHistory: clearRnpmHistory,
+  } = useRnpmHistory();
+  const {
+    keys,
+    setKey,
+    clearKey,
+    hasKey,
+    hasAnthropic,
+    hasOpenai,
+    hasGoogle,
+    hasTwoCaptcha,
+    hasCapSolver,
+    captchaProvider,
+    setCaptchaProvider,
+    captchaMode,
+    setCaptchaMode,
+    activeCaptchaKey,
+  } = useApiKey();
   const [showKeyDialog, setShowKeyDialog] = useState(false);
   const handleOpenKeyDialog = useCallback(() => setShowKeyDialog(true), []);
   const closeKeyDialog = useCallback(() => setShowKeyDialog(false), []);
@@ -265,60 +321,64 @@ export default function App() {
     return search;
   };
 
-  const [rnpmPendingSearch, setRnpmPendingSearch] = useState<{ type: RnpmSearchType; params: RnpmSearchParams } | null>(null);
+  const [rnpmPendingSearch, setRnpmPendingSearch] = useState<{ type: RnpmSearchType; params: RnpmSearchParams } | null>(
+    null
+  );
   const handleRnpmHistoryClick = (type: RnpmSearchType, params: RnpmSearchParams) => {
     setRnpmPendingSearch({ type, params });
   };
-  const consumeRnpmPendingSearch = () => { setRnpmPendingSearch(null); };
+  const consumeRnpmPendingSearch = () => {
+    setRnpmPendingSearch(null);
+  };
 
   return (
     <BrowserRouter>
       <ConfirmProvider>
-      <AppShell
-        dosareState={dosareState}
-        setDosareState={setDosareState}
-        termeneState={termeneState}
-        setTermeneState={setTermeneState}
-        history={history}
-        addEntry={addEntry}
-        removeEntry={removeEntry}
-        clearHistory={clearHistory}
-        keys={keys}
-        hasKey={hasKey}
-        handleOpenKeyDialog={handleOpenKeyDialog}
-        activeCaptchaKey={activeCaptchaKey}
-        captchaProvider={captchaProvider}
-        captchaMode={captchaMode}
-        pendingSearch={pendingSearch}
-        handleHistoryClick={handleHistoryClick}
-        consumePendingSearch={consumePendingSearch}
-        rnpmHistory={rnpmHistory}
-        addRnpmEntry={addRnpmEntry}
-        removeRnpmEntry={removeRnpmEntry}
-        clearRnpmHistory={clearRnpmHistory}
-        rnpmPendingSearch={rnpmPendingSearch}
-        handleRnpmHistoryClick={handleRnpmHistoryClick}
-        consumeRnpmPendingSearch={consumeRnpmPendingSearch}
-      />
-      {showKeyDialog && (
-        <ApiKeyDialog
-          onClose={closeKeyDialog}
-          apiKey={{
-            setKey,
-            clearKey,
-            hasKey,
-            hasAnthropic,
-            hasOpenai,
-            hasGoogle,
-            hasTwoCaptcha,
-            hasCapSolver,
-            captchaProvider,
-            setCaptchaProvider,
-            captchaMode,
-            setCaptchaMode,
-          }}
+        <AppShell
+          dosareState={dosareState}
+          setDosareState={setDosareState}
+          termeneState={termeneState}
+          setTermeneState={setTermeneState}
+          history={history}
+          addEntry={addEntry}
+          removeEntry={removeEntry}
+          clearHistory={clearHistory}
+          keys={keys}
+          hasKey={hasKey}
+          handleOpenKeyDialog={handleOpenKeyDialog}
+          activeCaptchaKey={activeCaptchaKey}
+          captchaProvider={captchaProvider}
+          captchaMode={captchaMode}
+          pendingSearch={pendingSearch}
+          handleHistoryClick={handleHistoryClick}
+          consumePendingSearch={consumePendingSearch}
+          rnpmHistory={rnpmHistory}
+          addRnpmEntry={addRnpmEntry}
+          removeRnpmEntry={removeRnpmEntry}
+          clearRnpmHistory={clearRnpmHistory}
+          rnpmPendingSearch={rnpmPendingSearch}
+          handleRnpmHistoryClick={handleRnpmHistoryClick}
+          consumeRnpmPendingSearch={consumeRnpmPendingSearch}
         />
-      )}
+        {showKeyDialog && (
+          <ApiKeyDialog
+            onClose={closeKeyDialog}
+            apiKey={{
+              setKey,
+              clearKey,
+              hasKey,
+              hasAnthropic,
+              hasOpenai,
+              hasGoogle,
+              hasTwoCaptcha,
+              hasCapSolver,
+              captchaProvider,
+              setCaptchaProvider,
+              captchaMode,
+              setCaptchaMode,
+            }}
+          />
+        )}
       </ConfirmProvider>
     </BrowserRouter>
   );

@@ -57,9 +57,7 @@ function localDateInputToIso(value: string, endOfDay: boolean): string | undefin
   if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) {
     return undefined;
   }
-  const d = endOfDay
-    ? new Date(year, month - 1, day, 23, 59, 59, 999)
-    : new Date(year, month - 1, day, 0, 0, 0, 0);
+  const d = endOfDay ? new Date(year, month - 1, day, 23, 59, 59, 999) : new Date(year, month - 1, day, 0, 0, 0, 0);
   if (Number.isNaN(d.getTime())) return undefined;
   return d.toISOString();
 }
@@ -171,12 +169,7 @@ export function AlertsExportModal({
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
       if (err instanceof Error && err.name === "AbortError") return;
-      const msg =
-        err instanceof MonitoringApiError
-          ? err.message
-          : err instanceof Error
-            ? err.message
-            : String(err);
+      const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : String(err);
       setError(msg || "Eroare la export.");
     } finally {
       setBusy(false);
@@ -227,10 +220,8 @@ export function AlertsExportModal({
               <label
                 className={cn(
                   "flex items-start gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer",
-                  mode === "ids"
-                    ? "border-primary bg-primary/10"
-                    : "border-border hover:bg-muted/40",
-                  selectedIds.length === 0 && "opacity-50 cursor-not-allowed",
+                  mode === "ids" ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40",
+                  selectedIds.length === 0 && "opacity-50 cursor-not-allowed"
                 )}
               >
                 <input
@@ -249,9 +240,7 @@ export function AlertsExportModal({
               <label
                 className={cn(
                   "flex items-start gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer",
-                  mode === "filters"
-                    ? "border-primary bg-primary/10"
-                    : "border-border hover:bg-muted/40",
+                  mode === "filters" ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"
                 )}
               >
                 <input
@@ -275,9 +264,7 @@ export function AlertsExportModal({
               <label
                 className={cn(
                   "flex items-start gap-2 rounded-md border px-3 py-2 text-sm cursor-pointer",
-                  mode === "range"
-                    ? "border-primary bg-primary/10"
-                    : "border-border hover:bg-muted/40",
+                  mode === "range" ? "border-primary bg-primary/10" : "border-border hover:bg-muted/40"
                 )}
               >
                 <input
@@ -331,7 +318,7 @@ export function AlertsExportModal({
                   "flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
                   format === "xlsx"
                     ? "border-emerald-500 bg-emerald-500/10 text-foreground"
-                    : "border-border bg-card text-muted-foreground hover:bg-muted/40",
+                    : "border-border bg-card text-muted-foreground hover:bg-muted/40"
                 )}
               >
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
@@ -345,7 +332,7 @@ export function AlertsExportModal({
                   "flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
                   format === "pdf"
                     ? "border-red-500 bg-red-500/10 text-foreground"
-                    : "border-border bg-card text-muted-foreground hover:bg-muted/40",
+                    : "border-border bg-card text-muted-foreground hover:bg-muted/40"
                 )}
               >
                 <FileText className="h-4 w-4 text-red-600" />

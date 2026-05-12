@@ -12,18 +12,17 @@ export interface AuthJwtPayload {
 }
 
 export class AuthTokenError extends Error {
-  constructor(public readonly code: string, message: string) {
+  constructor(
+    public readonly code: string,
+    message: string
+  ) {
     super(message);
     this.name = "AuthTokenError";
   }
 }
 
 function base64UrlEncode(input: string | Buffer): string {
-  return Buffer.from(input)
-    .toString("base64")
-    .replace(/=/g, "")
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_");
+  return Buffer.from(input).toString("base64").replace(/=/g, "").replace(/\+/g, "-").replace(/\//g, "_");
 }
 
 function base64UrlDecode(input: string): Buffer {
@@ -65,7 +64,7 @@ export function verifyAuthToken(
     nowSeconds?: number;
     issuer?: string | null;
     audience?: string | null;
-  },
+  }
 ): AuthJwtPayload {
   const parts = token.split(".");
   if (parts.length !== 3 || parts.some((part) => part.length === 0)) {

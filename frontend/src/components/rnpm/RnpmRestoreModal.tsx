@@ -31,26 +31,35 @@ export function RnpmRestoreModal({ onClose, onRestored }: { onClose: () => void;
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape" && !restoring) onClose(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape" && !restoring) onClose();
+    };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, restoring]);
 
   const handleRestore = async (entry: RnpmBackupEntry) => {
     if (restoring) return;
-    if (!(await confirm({
-      message: `Restaurezi baza locala din ${entry.name}?\n\nBaza curenta va fi salvata automat ca legal-dashboard.pre-restore-*.db inainte de a fi suprascrisa. Dupa restore este recomandat sa reporniti aplicatia.`,
-      confirmLabel: "Restaureaza",
-      destructive: true,
-    }))) return;
+    if (
+      !(await confirm({
+        message: `Restaurezi baza locala din ${entry.name}?\n\nBaza curenta va fi salvata automat ca legal-dashboard.pre-restore-*.db inainte de a fi suprascrisa. Dupa restore este recomandat sa reporniti aplicatia.`,
+        confirmLabel: "Restaureaza",
+        destructive: true,
+      }))
+    )
+      return;
     setRestoring(entry.name);
     setError(null);
     try {
       const { preRestoreName } = await rnpmRestoreBackup(entry.name);
-      setSuccessMsg(`Restaurare completa. Snapshot pre-restore: ${preRestoreName}. Reporneste aplicatia pentru finalizare.`);
+      setSuccessMsg(
+        `Restaurare completa. Snapshot pre-restore: ${preRestoreName}. Reporneste aplicatia pentru finalizare.`
+      );
       setTimeout(onRestored, 2500);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Eroare restore");
@@ -118,7 +127,11 @@ export function RnpmRestoreModal({ onClose, onRestored }: { onClose: () => void;
                       disabled={!!restoring || !!successMsg}
                       onClick={() => void handleRestore(b)}
                     >
-                      {restoring === b.name ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <History className="h-3.5 w-3.5" />}
+                      {restoring === b.name ? (
+                        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <History className="h-3.5 w-3.5" />
+                      )}
                       Restaureaza
                     </Button>
                   </li>

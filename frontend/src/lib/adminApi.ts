@@ -133,10 +133,7 @@ export const me = {
       return unwrapMonitoring<EmailSettings>(res);
     },
 
-    put: async (
-      input: UpsertEmailSettingsInput,
-      signal?: AbortSignal,
-    ): Promise<EmailSettings> => {
+    put: async (input: UpsertEmailSettingsInput, signal?: AbortSignal): Promise<EmailSettings> => {
       const res = await apiFetch("/api/v1/me/email-settings", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -193,36 +190,23 @@ export const admin = {
   },
 
   listQuota: async (userId: string, signal?: AbortSignal): Promise<QuotaListResult> => {
-    const res = await apiFetch(
-      `/api/v1/admin/users/${encodeURIComponent(userId)}/quota`,
-      { signal },
-    );
+    const res = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(userId)}/quota`, { signal });
     return unwrapMonitoring<QuotaListResult>(res);
   },
 
-  upsertQuota: async (
-    userId: string,
-    feature: string,
-    dailyLimitUsdMilli: number,
-  ): Promise<QuotaOverride> => {
-    const res = await apiFetch(
-      `/api/v1/admin/users/${encodeURIComponent(userId)}/quota`,
-      {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ feature, dailyLimitUsdMilli }),
-      },
-    );
+  upsertQuota: async (userId: string, feature: string, dailyLimitUsdMilli: number): Promise<QuotaOverride> => {
+    const res = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(userId)}/quota`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ feature, dailyLimitUsdMilli }),
+    });
     return unwrapMonitoring<QuotaOverride>(res);
   },
 
-  deleteQuota: async (
-    userId: string,
-    feature: string,
-  ): Promise<{ feature: string; removed: boolean }> => {
+  deleteQuota: async (userId: string, feature: string): Promise<{ feature: string; removed: boolean }> => {
     const res = await apiFetch(
       `/api/v1/admin/users/${encodeURIComponent(userId)}/quota/${encodeURIComponent(feature)}`,
-      { method: "DELETE" },
+      { method: "DELETE" }
     );
     return unwrapMonitoring<{ feature: string; removed: boolean }>(res);
   },

@@ -9,13 +9,8 @@ const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 ctx.onmessage = async (e: MessageEvent<RnpmExportPayload>) => {
   try {
-    const result = e.data.format === "xlsx"
-      ? await buildRnpmXlsx(e.data)
-      : await buildRnpmPdf(e.data);
-    ctx.postMessage(
-      { ok: true, buffer: result.buffer, filename: result.filename, mime: result.mime },
-      [result.buffer],
-    );
+    const result = e.data.format === "xlsx" ? await buildRnpmXlsx(e.data) : await buildRnpmPdf(e.data);
+    ctx.postMessage({ ok: true, buffer: result.buffer, filename: result.filename, mime: result.mime }, [result.buffer]);
   } catch (err) {
     ctx.postMessage({
       ok: false,

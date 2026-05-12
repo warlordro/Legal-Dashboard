@@ -131,9 +131,7 @@ describe("restoreFromBackup — atomicity + safety", () => {
   });
 
   it("rejects a missing backup with a clear error", async () => {
-    await expect(restoreFromBackup("legal-dashboard.does-not-exist.db")).rejects.toThrow(
-      /inexistent/i,
-    );
+    await expect(restoreFromBackup("legal-dashboard.does-not-exist.db")).rejects.toThrow(/inexistent/i);
   });
 
   it("skips pre-restore snapshot when live DB does not exist (first-boot restore)", async () => {
@@ -161,9 +159,7 @@ describe("restoreFromBackup — atomicity + safety", () => {
 
     const { lines } = await captureConsoleLog(() => restoreFromBackup(backupName));
 
-    const restoreLine = lines.find(
-      (s) => s.includes('"action":"restore"') && !s.includes('"restore_failed"'),
-    );
+    const restoreLine = lines.find((s) => s.includes('"action":"restore"') && !s.includes('"restore_failed"'));
     expect(restoreLine).toBeDefined();
     const parsed = JSON.parse(restoreLine!);
     expect(parsed.action).toBe("restore");
@@ -253,11 +249,7 @@ describe("maintenance RWLock — backup vs scheduler integration", () => {
       inFlight--;
     };
 
-    await Promise.all([
-      withMaintenanceRead(enter),
-      withMaintenanceRead(enter),
-      withMaintenanceRead(enter),
-    ]);
+    await Promise.all([withMaintenanceRead(enter), withMaintenanceRead(enter), withMaintenanceRead(enter)]);
 
     expect(peakInFlight).toBe(3);
   });

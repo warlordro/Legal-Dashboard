@@ -24,11 +24,10 @@ export function AdminGate({ children }: { children: ReactNode }) {
           <ShieldAlert className="mx-auto mb-3 h-10 w-10 text-red-500" />
           <h2 className="text-lg font-semibold">403 — Acces interzis</h2>
           <p className="mt-2 text-sm text-muted-foreground">
-            Aceasta sectiune este disponibila doar administratorilor. Daca ai nevoie de acces, cere unui admin sa-ti schimbe rolul.
+            Aceasta sectiune este disponibila doar administratorilor. Daca ai nevoie de acces, cere unui admin sa-ti
+            schimbe rolul.
           </p>
-          {error && (
-            <p className="mt-3 text-xs text-muted-foreground">Detaliu: {error}</p>
-          )}
+          {error && <p className="mt-3 text-xs text-muted-foreground">Detaliu: {error}</p>}
         </div>
       </div>
     );

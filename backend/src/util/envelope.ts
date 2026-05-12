@@ -37,12 +37,7 @@ export function ok<T>(data: T, c: Context): EnvelopeOk<T> {
   return { data, requestId: getRequestId(c) };
 }
 
-export function fail(
-  code: string,
-  message: string,
-  c: Context,
-  details?: unknown,
-): EnvelopeError {
+export function fail(code: string, message: string, c: Context, details?: unknown): EnvelopeError {
   const error: EnvelopeError["error"] = { code, message };
   if (details !== undefined) error.details = details;
   return { data: null, error, requestId: getRequestId(c) };

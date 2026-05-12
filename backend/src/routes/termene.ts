@@ -9,11 +9,7 @@ import {
   SSE_TIMEOUT_MS,
   validateParams,
 } from "../util/validation.ts";
-import {
-  batchFetchDosare,
-  parseExistingFromBody,
-  sseEvent,
-} from "../services/batch-dosare.ts";
+import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
 
 export const termeneRouter = new Hono();
 
@@ -23,10 +19,7 @@ termeneRouter.get("/", async (c) => {
   const institutii = c.req.queries("institutie") ?? [];
 
   if (!numarDosar && !obiectDosar && !numeParte) {
-    return c.json(
-      { error: "Cel putin un parametru este necesar: numarDosar, obiectDosar sau numeParte" },
-      400
-    );
+    return c.json({ error: "Cel putin un parametru este necesar: numarDosar, obiectDosar sau numeParte" }, 400);
   }
 
   // SECURITY: Cap institutii array to prevent request amplification
@@ -37,7 +30,10 @@ termeneRouter.get("/", async (c) => {
   // SECURITY: defensive fanout cap mirrors the SSE /load-more guard.
   const fanout = Math.max(institutii.length, 1);
   if (fanout > MAX_SOAP_FANOUT) {
-    return c.json({ error: `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.` }, 400);
+    return c.json(
+      { error: `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.` },
+      400
+    );
   }
 
   for (const inst of institutii) {
@@ -58,12 +54,20 @@ termeneRouter.get("/", async (c) => {
   try {
     let dosare;
     if (institutii.length <= 1) {
-      dosare = await cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop }, { signal });
+      dosare = await cautareDosare(
+        { numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop },
+        { signal }
+      );
     } else {
       const results = await Promise.all(
         institutii.map((inst) =>
-          cautareDosare({ numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop }, { signal })
-            .catch((err) => { console.error(`Eroare cautare termene ${inst}:`, err); return []; })
+          cautareDosare(
+            { numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop },
+            { signal }
+          ).catch((err) => {
+            console.error(`Eroare cautare termene ${inst}:`, err);
+            return [];
+          })
         )
       );
       dosare = results.flat();
@@ -73,7 +77,12 @@ termeneRouter.get("/", async (c) => {
     // contain dozens of sedinte, so the termene array is even larger). Reject
     // before flatMap to avoid serializing tens of MB.
     if (dosare.length > MAX_DOSARE_RESPONSE) {
-      return c.json({ error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).` }, 413);
+      return c.json(
+        {
+          error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).`,
+        },
+        413
+      );
     }
 
     // Extrage toate sedintele din toate dosarele (inclusiv parti si categorii)
@@ -128,9 +137,7 @@ termeneRouter.post("/load-more", async (c) => {
     return c.json({ error: validationError }, 400);
   }
 
-  const range = (dataStart && dataStop)
-    ? { dataStart, dataStop }
-    : defaultDateRange();
+  const range = dataStart && dataStop ? { dataStart, dataStop } : defaultDateRange();
 
   // SECURITY: Parse and validate existing dosare numbers from POST body
   const { set: existingNumere, error: bodyError } = await parseExistingFromBody(c);
@@ -141,14 +148,22 @@ termeneRouter.post("/load-more", async (c) => {
   // SECURITY: Limit number of intervals to prevent resource exhaustion
   const intervals = generateMonthlyIntervals(range.dataStart, range.dataStop);
   if (intervals.length > MAX_SSE_INTERVALS) {
-    return c.json({ error: `Intervalul de date este prea mare (${intervals.length} luni). Maximum ${MAX_SSE_INTERVALS} luni.` }, 400);
+    return c.json(
+      { error: `Intervalul de date este prea mare (${intervals.length} luni). Maximum ${MAX_SSE_INTERVALS} luni.` },
+      400
+    );
   }
 
   const institutionList: (string | undefined)[] = institutii.length > 0 ? institutii : [undefined];
   const totalUnits = institutionList.length * intervals.length;
   // SECURITY: bound upstream SOAP load per request so a single client cannot flood portal.just.ro
   if (totalUnits > MAX_SOAP_FANOUT) {
-    return c.json({ error: `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.` }, 400);
+    return c.json(
+      {
+        error: `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.`,
+      },
+      400
+    );
   }
 
   const stream = new ReadableStream({
@@ -179,7 +194,9 @@ termeneRouter.post("/load-more", async (c) => {
           const params = { numarDosar, obiectDosar, numeParte, institutie: inst };
           const labelPrefix = inst ? `[${inst}] ` : "";
 
-          const result = await batchFetchDosare(params, range,
+          const result = await batchFetchDosare(
+            params,
+            range,
             (processed, _total, _dosareFound, currentInterval) => {
               sseEvent(controller, "progress", {
                 processed: processedOffset + processed,
@@ -215,7 +232,7 @@ termeneRouter.post("/load-more", async (c) => {
               }
             },
             existingNumere,
-            abortController.signal,
+            abortController.signal
           );
 
           allWarnings.push(...result.warnings);
@@ -238,7 +255,11 @@ termeneRouter.post("/load-more", async (c) => {
       } finally {
         clearTimeout(timeout);
         c.req.raw.signal?.removeEventListener?.("abort", onAbort);
-        try { controller.close(); } catch { /* already closed */ }
+        try {
+          controller.close();
+        } catch {
+          /* already closed */
+        }
       }
     },
   });

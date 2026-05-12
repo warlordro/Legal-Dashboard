@@ -12,12 +12,7 @@ import { meRouter } from "./me.ts";
 import { ownerContext } from "../middleware/owner.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
-import {
-  insertUser,
-  updateUserRole,
-  updateUserStatus,
-  getUserById,
-} from "../db/userRepository.ts";
+import { insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
 import { listOverridesForUser } from "../db/userQuotaRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
 
@@ -38,7 +33,7 @@ afterEach(async () => {
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
-function buildApp(actAs: string = "local") {
+function buildApp(actAs = "local") {
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("ownerId", actAs);
@@ -308,7 +303,7 @@ describe("/api/v1/admin/audit", () => {
     const db = getDb();
     const stmt = db.prepare(
       `INSERT INTO audit_log (owner_id, actor_id, action, target_kind, target_id, outcome, ts)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     stmt.run("alice", "alice", "user.login", null, null, "ok", "2026-04-01T10:00:00Z");
     stmt.run("bob", "bob", "user.login", null, null, "denied", "2026-04-22T10:00:00Z");
@@ -328,9 +323,7 @@ describe("/api/v1/admin/audit", () => {
 
   it("filters by since (closed lower bound)", async () => {
     const app = buildApp();
-    const res = await app.request(
-      "/api/v1/admin/audit?since=2026-04-22T10:00:00Z&pageSize=50",
-    );
+    const res = await app.request("/api/v1/admin/audit?since=2026-04-22T10:00:00Z&pageSize=50");
     const body = await jsonOf(res);
     const rows = (body.data as { rows: { action: string; ts: string }[] }).rows;
     // Includes the boundary row.

@@ -19,13 +19,8 @@ import os from "os";
 import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  closeDb,
-  getDb,
-} from "../../db/schema.ts";
-import {
-  getLatestSnapshot,
-} from "../../db/monitoringSnapshotsRepository.ts";
+import { closeDb, getDb } from "../../db/schema.ts";
+import { getLatestSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
 import { createDosarSoapRunner } from "./dosarSoapRunner.ts";
 import type { ScheduledJob } from "./scheduler.ts";
@@ -47,7 +42,7 @@ function seedJob(opts?: {
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at)
-       VALUES (?, 'dosar_soap', ?, ?, 14400, ?, '2026-04-28T12:00:00.000Z')`,
+       VALUES (?, 'dosar_soap', ?, ?, 14400, ?, '2026-04-28T12:00:00.000Z')`
     )
     .run(
       OWNER,
@@ -59,11 +54,9 @@ function seedJob(opts?: {
           notify_on_new_termen: true,
           notify_on_solution: true,
           notify_on_dosar_disappeared: true,
-        }),
+        })
     );
-  return db
-    .prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`)
-    .get(info.lastInsertRowid) as ScheduledJob;
+  return db.prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(info.lastInsertRowid) as ScheduledJob;
 }
 
 function seedRunningRow(jobId: number): number {
@@ -77,13 +70,13 @@ function seedRunningRow(jobId: number): number {
       `UPDATE monitoring_runs
          SET status = 'aborted',
              ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
-       WHERE job_id = ? AND status = 'running'`,
+       WHERE job_id = ? AND status = 'running'`
     )
     .run(jobId);
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-       VALUES (?, ?, ?, 'running')`,
+       VALUES (?, ?, ?, 'running')`
     )
     .run(OWNER, jobId, NOW_ISO);
   return info.lastInsertRowid as number;
@@ -91,10 +84,7 @@ function seedRunningRow(jobId: number): number {
 
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-runner-"));
-  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(
-    tmpRoot,
-    "legal-dashboard.db",
-  );
+  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
   const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
   seed.close();
   getDb();
@@ -146,9 +136,7 @@ describe("dosarSoapRunner — happy path baseline", () => {
     expect(Array.isArray(payload.sedintaKeys)).toBe(true);
 
     const alertCount = (
-      getDb()
-        .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`)
-        .get(job.id) as { n: number }
+      getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`).get(job.id) as { n: number }
     ).n;
     expect(alertCount).toBe(0);
   });
@@ -172,9 +160,7 @@ describe("dosarSoapRunner — diff emits alerts", () => {
     let returnSedinte = false;
     const runner = createDosarSoapRunner({
       searchDosare: async () =>
-        returnSedinte
-          ? [makeDosar("1234/180/2024", [sedinta])]
-          : [makeDosar("1234/180/2024")],
+        returnSedinte ? [makeDosar("1234/180/2024", [sedinta])] : [makeDosar("1234/180/2024")],
     });
 
     const job = seedJob();
@@ -198,11 +184,9 @@ describe("dosarSoapRunner — diff emits alerts", () => {
     expect(second.status).toBe("ok");
     expect(second.alertsCreated).toBeGreaterThanOrEqual(1);
 
-    const alerts = getDb()
-      .prepare(
-        `SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY id`,
-      )
-      .all(job.id) as { kind: string }[];
+    const alerts = getDb().prepare(`SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY id`).all(job.id) as {
+      kind: string;
+    }[];
     expect(alerts.some((a) => a.kind === "termen_new")).toBe(true);
   });
 });
@@ -242,9 +226,7 @@ describe("dosarSoapRunner — abort during SOAP", () => {
         // Wait until the test aborts the signal, then throw an AbortError.
         await new Promise<void>((_resolve, reject) => {
           opts!.signal!.addEventListener("abort", () => {
-            reject(
-              Object.assign(new Error("aborted"), { name: "AbortError" }),
-            );
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
           });
         });
         return [];
@@ -280,9 +262,7 @@ describe("dosarSoapRunner — wallclock budget", () => {
       searchDosare: async (_params, opts) => {
         await new Promise<void>((_resolve, reject) => {
           opts!.signal!.addEventListener("abort", () => {
-            reject(
-              Object.assign(new Error("timeout"), { name: "TimeoutError" }),
-            );
+            reject(Object.assign(new Error("timeout"), { name: "TimeoutError" }));
           });
         });
         return [];
@@ -302,7 +282,6 @@ describe("dosarSoapRunner — wallclock budget", () => {
     expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
 });
-
 
 describe("dosarSoapRunner — dosar disappeared", () => {
   it("empty SOAP result → snapshot lastDosarPresent=false", async () => {
@@ -353,9 +332,7 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
     let secondTick = false;
     const runner = createDosarSoapRunner({
       searchDosare: async () =>
-        secondTick
-          ? [makeDosar("1234/180/2024", [sedintaA, sedintaB])]
-          : [makeDosar("1234/180/2024")],
+        secondTick ? [makeDosar("1234/180/2024", [sedintaA, sedintaB])] : [makeDosar("1234/180/2024")],
     });
 
     const job = seedJob();
@@ -411,9 +388,7 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
     expect(snapAfter!.id).toBe(baselineId);
 
     const alertCount = (
-      getDb()
-        .prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`)
-        .get(job.id) as { n: number }
+      getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`).get(job.id) as { n: number }
     ).n;
     expect(alertCount).toBe(0);
   });
@@ -431,7 +406,7 @@ describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
     // 1 MiB chiar tinand cont de deduplicarea cheilor in sedinteWithSolution.
     const sedinte: Dosar["sedinte"] = Array.from({ length: count }, (_, i) => ({
       complet: `Complet${i}`,
-      data: `2026-${String(((i % 12) + 1)).padStart(2, "0")}-${String(((i % 28) + 1)).padStart(2, "0")}`,
+      data: `2026-${String((i % 12) + 1).padStart(2, "0")}-${String((i % 28) + 1).padStart(2, "0")}`,
       ora: `${String(i % 24).padStart(2, "0")}:00`,
       solutie: "x".repeat(250),
       solutieSumar: "",
@@ -469,7 +444,7 @@ describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
       .prepare(
         `SELECT kind, severity, detail_json, dedup_key
            FROM monitoring_alerts
-          WHERE job_id = ?`,
+          WHERE job_id = ?`
       )
       .all(job.id) as {
       kind: string;
@@ -541,9 +516,7 @@ describe("dosarSoapRunner — F8 enrichment integration", () => {
       dataPronuntare: "2026-04-16",
     };
     const runner = createDosarSoapRunner({
-      searchDosare: async () => [
-        makeDosar("1234/180/2024", [sedintaWithRuling]),
-      ],
+      searchDosare: async () => [makeDosar("1234/180/2024", [sedintaWithRuling])],
     });
 
     const runId = seedRunningRow(job.id);
@@ -566,7 +539,7 @@ describe("dosarSoapRunner — F8 enrichment integration", () => {
     const patchedRow = getDb()
       .prepare(
         `SELECT detail_json, is_new, read_at, dismissed_at
-           FROM monitoring_alerts WHERE id = ?`,
+           FROM monitoring_alerts WHERE id = ?`
       )
       .get(alertId) as {
       detail_json: string;
@@ -576,9 +549,7 @@ describe("dosarSoapRunner — F8 enrichment integration", () => {
     };
     const detail = JSON.parse(patchedRow.detail_json) as Record<string, unknown>;
 
-    expect(detail.solutie_sumar).toBe(
-      "Admite cererea reclamantului. Hotarare definitiva.",
-    );
+    expect(detail.solutie_sumar).toBe("Admite cererea reclamantului. Hotarare definitiva.");
     expect(detail.numar_document).toBe("DOC/123/2026");
     expect(detail.data_pronuntare).toBe("2026-04-16");
 

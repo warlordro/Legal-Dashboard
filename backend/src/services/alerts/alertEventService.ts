@@ -23,11 +23,7 @@
 // single-call indirection until web-mode webhooks land.
 
 import { recordAudit } from "../../db/auditRepository.ts";
-import {
-  insertAlert,
-  type InsertAlertInput,
-  type InsertAlertResult,
-} from "../../db/monitoringAlertsRepository.ts";
+import { insertAlert, type InsertAlertInput, type InsertAlertResult } from "../../db/monitoringAlertsRepository.ts";
 import { dispatchAlertEmail } from "../email/alertEmailDispatcher.ts";
 
 export type { InsertAlertInput, InsertAlertResult };
@@ -46,9 +42,7 @@ export type { InsertAlertInput, InsertAlertResult };
 // + the alert's dedup_key. The audit is best-effort: a SQLite error here
 // shouldn't bubble up and crash a runner mid-tick (the alert is already
 // committed), so we wrap in try/catch and log to stderr.
-export function recordAndDispatchAlert(
-  input: InsertAlertInput,
-): InsertAlertResult {
+export function recordAndDispatchAlert(input: InsertAlertInput): InsertAlertResult {
   const result = insertAlert(input);
   if (result.inserted) {
     try {

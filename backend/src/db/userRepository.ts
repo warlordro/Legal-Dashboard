@@ -87,28 +87,22 @@ export function listUsers(opts: ListUsersOpts = {}): ListUsersResult {
     .prepare(
       `SELECT ${COLUMNS} FROM users ${whereSql}
        ORDER BY created_at DESC, id ASC
-       LIMIT ? OFFSET ?`,
+       LIMIT ? OFFSET ?`
     )
     .all(...params, limit, offset) as UserRow[];
 
-  const totalRow = db
-    .prepare(`SELECT COUNT(*) AS n FROM users ${whereSql}`)
-    .get(...params) as { n: number };
+  const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM users ${whereSql}`).get(...params) as { n: number };
 
   return { rows, total: totalRow.n };
 }
 
 export function getUserById(id: string): UserRow | null {
-  const row = getDb()
-    .prepare(`SELECT ${COLUMNS} FROM users WHERE id = ?`)
-    .get(id) as UserRow | undefined;
+  const row = getDb().prepare(`SELECT ${COLUMNS} FROM users WHERE id = ?`).get(id) as UserRow | undefined;
   return row ?? null;
 }
 
 export function getUserByEmail(email: string): UserRow | null {
-  const row = getDb()
-    .prepare(`SELECT ${COLUMNS} FROM users WHERE email = ?`)
-    .get(email) as UserRow | undefined;
+  const row = getDb().prepare(`SELECT ${COLUMNS} FROM users WHERE email = ?`).get(email) as UserRow | undefined;
   return row ?? null;
 }
 
@@ -157,7 +151,7 @@ export function insertUser(input: InsertUserInput): UserRow {
   getDb()
     .prepare(
       `INSERT INTO users (id, email, password_hash, display_name, role, status)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
     .run(input.id, input.email, input.passwordHash ?? null, input.displayName, role, status);
   return getUserById(input.id) as UserRow;

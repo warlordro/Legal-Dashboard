@@ -65,7 +65,7 @@ export function JobKindTabs({
               "rounded px-3 py-1 text-xs font-medium transition-colors",
               active
                 ? "bg-primary text-primary-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
             )}
           >
             {label}

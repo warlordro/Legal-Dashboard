@@ -45,7 +45,7 @@ export function insertSnapshot(input: InsertSnapshotInput): number {
   const payloadBytes = Buffer.byteLength(input.payloadJson, "utf8");
   if (payloadBytes > SNAPSHOT_PAYLOAD_MAX_BYTES) {
     throw new Error(
-      `insertSnapshot: payload ${payloadBytes}B exceeds cap ${SNAPSHOT_PAYLOAD_MAX_BYTES}B (job_id=${input.jobId})`,
+      `insertSnapshot: payload ${payloadBytes}B exceeds cap ${SNAPSHOT_PAYLOAD_MAX_BYTES}B (job_id=${input.jobId})`
     );
   }
 
@@ -60,25 +60,16 @@ export function insertSnapshot(input: InsertSnapshotInput): number {
     .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
     .get(input.jobId, input.ownerId);
   if (!jobOwner) {
-    throw new Error(
-      `insertSnapshot: job ${input.jobId} not found for owner ${input.ownerId}`,
-    );
+    throw new Error(`insertSnapshot: job ${input.jobId} not found for owner ${input.ownerId}`);
   }
 
   const info = db
     .prepare(
       `INSERT INTO monitoring_snapshots
          (owner_id, job_id, run_id, observed_at, payload_hash, payload_json)
-       VALUES (?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(
-      input.ownerId,
-      input.jobId,
-      input.runId,
-      input.observedAt,
-      input.payloadHash,
-      input.payloadJson,
-    );
+    .run(input.ownerId, input.jobId, input.runId, input.observedAt, input.payloadHash, input.payloadJson);
   return info.lastInsertRowid as number;
 }
 
@@ -86,16 +77,13 @@ export function insertSnapshot(input: InsertSnapshotInput): number {
 // jobs that tick faster than the timestamp's millisecond resolution can
 // distinguish (PR-4 cadence is hours, but C5 manual-trigger lets a user fire
 // a second run in the same millisecond, so we need a deterministic order).
-export function getLatestSnapshot(
-  ownerId: string,
-  jobId: number,
-): MonitoringSnapshotRow | null {
+export function getLatestSnapshot(ownerId: string, jobId: number): MonitoringSnapshotRow | null {
   const row = getDb()
     .prepare(
       `SELECT * FROM monitoring_snapshots
        WHERE owner_id = ? AND job_id = ?
        ORDER BY observed_at DESC, id DESC
-       LIMIT 1`,
+       LIMIT 1`
     )
     .get(ownerId, jobId) as MonitoringSnapshotRow | undefined;
   return row ?? null;

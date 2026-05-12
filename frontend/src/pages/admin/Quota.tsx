@@ -4,11 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import {
-  admin,
-  type AdminUser,
-  type QuotaOverride,
-} from "@/lib/api";
+import { admin, type AdminUser, type QuotaOverride } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
@@ -189,7 +185,9 @@ export default function AdminQuota() {
                   <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
                     <div className="min-w-0 flex-1">
                       <p className="font-mono">{c.email}</p>
-                      <p className="text-xs text-muted-foreground">{c.displayName} · {c.role} · {c.status}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {c.displayName} · {c.role} · {c.status}
+                      </p>
                     </div>
                     <Button size="sm" variant="outline" onClick={() => onSelect(c)}>
                       Selecteaza
@@ -208,9 +206,7 @@ export default function AdminQuota() {
                 <span className="flex items-center gap-2">
                   <span className="font-mono text-sm">{selected.email}</span>
                   <Badge variant="outline">{selected.role}</Badge>
-                  <Badge variant={selected.status === "active" ? "success" : "warning"}>
-                    {selected.status}
-                  </Badge>
+                  <Badge variant={selected.status === "active" ? "success" : "warning"}>{selected.status}</Badge>
                 </span>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => loadOverrides(selected.id)} disabled={loading}>
@@ -272,11 +268,18 @@ export default function AdminQuota() {
                         <td className="px-3 py-2 align-top">
                           <span className="font-mono">${milliToUsd(row.dailyLimitUsdMilli)}</span>
                         </td>
-                        <td className="px-3 py-2 align-top text-xs text-muted-foreground">{formatIsoDateTime(row.updatedAt)}</td>
+                        <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                          {formatIsoDateTime(row.updatedAt)}
+                        </td>
                         <td className="px-3 py-2 align-top font-mono text-xs">{row.updatedBy ?? "-"}</td>
                         <td className="px-3 py-2 align-top text-right">
                           <div className="flex justify-end gap-1">
-                            <Button size="sm" variant="ghost" onClick={() => startEdit(row)} disabled={busyFeature === row.feature}>
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => startEdit(row)}
+                              disabled={busyFeature === row.feature}
+                            >
                               Editeaza
                             </Button>
                             <Button

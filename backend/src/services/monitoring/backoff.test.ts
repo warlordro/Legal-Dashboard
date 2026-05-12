@@ -106,20 +106,14 @@ describe("computeNextRunAt — error path (exponential backoff)", () => {
 
 describe("computeNextRunAt — input validation", () => {
   it("throws on negative failStreak", () => {
-    expect(() =>
-      computeNextRunAt({ now: NOW, cadenceSec: 600, failStreak: -1, jitterSec: 0 }),
-    ).toThrow();
+    expect(() => computeNextRunAt({ now: NOW, cadenceSec: 600, failStreak: -1, jitterSec: 0 })).toThrow();
   });
 
   it("throws on negative cadenceSec", () => {
-    expect(() =>
-      computeNextRunAt({ now: NOW, cadenceSec: -1, failStreak: 0, jitterSec: 0 }),
-    ).toThrow();
+    expect(() => computeNextRunAt({ now: NOW, cadenceSec: -1, failStreak: 0, jitterSec: 0 })).toThrow();
   });
 
   it("throws on negative jitter", () => {
-    expect(() =>
-      computeNextRunAt({ now: NOW, cadenceSec: 600, failStreak: 0, jitterSec: -1 }),
-    ).toThrow();
+    expect(() => computeNextRunAt({ now: NOW, cadenceSec: 600, failStreak: 0, jitterSec: -1 })).toThrow();
   });
 });

@@ -52,7 +52,7 @@ async function postJson(
   app: ReturnType<typeof buildTestApp>,
   url: string,
   body: unknown,
-  opts: { owner?: string; requestId?: string; rawBody?: string } = {},
+  opts: { owner?: string; requestId?: string; rawBody?: string } = {}
 ): Promise<Response> {
   const headers: Record<string, string> = { "content-type": "application/json" };
   if (opts.owner) headers["x-test-owner"] = opts.owner;
@@ -297,10 +297,7 @@ describe("POST /api/v1/monitoring/jobs", () => {
 });
 
 describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
-  async function createJobAs(
-    app: ReturnType<typeof buildTestApp>,
-    owner: string,
-  ): Promise<number> {
+  async function createJobAs(app: ReturnType<typeof buildTestApp>, owner: string): Promise<number> {
     const res = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody, { owner });
     expect(res.status).toBe(201);
     const json = (await res.json()) as { data: { id: number } };
@@ -398,7 +395,7 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
       app,
       "/api/v1/monitoring/jobs",
       { ...validDosarBody, target: { numar_dosar: "9999/180/2024" } },
-      { owner: "bob" },
+      { owner: "bob" }
     );
 
     const aliceList = await app.request("/api/v1/monitoring/jobs", {
@@ -728,10 +725,7 @@ describe("POST /api/v1/monitoring/jobs/:id/run", () => {
     const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
     const created = (await create.json()) as { data: { id: number } };
 
-    const res = await app.request(
-      `/api/v1/monitoring/jobs/${created.data.id}/run`,
-      { method: "POST" },
-    );
+    const res = await app.request(`/api/v1/monitoring/jobs/${created.data.id}/run`, { method: "POST" });
     expect(res.status).toBe(503);
     const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("scheduler_unavailable");
@@ -754,10 +748,10 @@ describe("POST /api/v1/monitoring/jobs/:id/run", () => {
     });
     const created = (await create.json()) as { data: { id: number } };
 
-    const res = await app.request(
-      `/api/v1/monitoring/jobs/${created.data.id}/run`,
-      { method: "POST", headers: { "x-test-owner": "bob" } },
-    );
+    const res = await app.request(`/api/v1/monitoring/jobs/${created.data.id}/run`, {
+      method: "POST",
+      headers: { "x-test-owner": "bob" },
+    });
     expect(res.status).toBe(404);
   });
 
@@ -769,10 +763,7 @@ describe("POST /api/v1/monitoring/jobs/:id/run", () => {
     const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
     const created = (await create.json()) as { data: { id: number } };
 
-    const res = await app.request(
-      `/api/v1/monitoring/jobs/${created.data.id}/run`,
-      { method: "POST" },
-    );
+    const res = await app.request(`/api/v1/monitoring/jobs/${created.data.id}/run`, { method: "POST" });
     expect(res.status).toBe(202);
     const json = (await res.json()) as { data: { runId: number } };
     expect(json.data.runId).toBe(777);
@@ -796,10 +787,7 @@ describe("POST /api/v1/monitoring/jobs/:id/run", () => {
     const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
     const created = (await create.json()) as { data: { id: number } };
 
-    const res = await app.request(
-      `/api/v1/monitoring/jobs/${created.data.id}/run`,
-      { method: "POST" },
-    );
+    const res = await app.request(`/api/v1/monitoring/jobs/${created.data.id}/run`, { method: "POST" });
     expect(res.status).toBe(409);
     const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("in_flight");
@@ -820,10 +808,7 @@ describe("POST /api/v1/monitoring/jobs/:id/run", () => {
     const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
     const created = (await create.json()) as { data: { id: number } };
 
-    const res = await app.request(
-      `/api/v1/monitoring/jobs/${created.data.id}/run`,
-      { method: "POST" },
-    );
+    const res = await app.request(`/api/v1/monitoring/jobs/${created.data.id}/run`, { method: "POST" });
     expect(res.status).toBe(503);
     const json = (await res.json()) as { error: { code: string } };
     expect(json.error.code).toBe("scheduler_unavailable");
@@ -914,17 +899,10 @@ describe("POST /jobs/:id/run + real Scheduler (#T6)", () => {
     setMonitoringScheduler(realScheduler);
 
     const app = buildTestApp();
-    const create = await postJson(
-      app,
-      "/api/v1/monitoring/jobs",
-      validDosarBody,
-    );
+    const create = await postJson(app, "/api/v1/monitoring/jobs", validDosarBody);
     const created = (await create.json()) as { data: { id: number } };
 
-    const res = await app.request(
-      `/api/v1/monitoring/jobs/${created.data.id}/run`,
-      { method: "POST" },
-    );
+    const res = await app.request(`/api/v1/monitoring/jobs/${created.data.id}/run`, { method: "POST" });
     expect(res.status).toBe(202);
     const json = (await res.json()) as { data: { runId: number } };
     expect(json.data.runId).toBeGreaterThan(0);
@@ -940,9 +918,10 @@ describe("POST /jobs/:id/run + real Scheduler (#T6)", () => {
 
     await realScheduler.stop();
 
-    const run = getDb()
-      .prepare(`SELECT id, status FROM monitoring_runs WHERE id = ?`)
-      .get(json.data.runId) as { id: number; status: string };
+    const run = getDb().prepare(`SELECT id, status FROM monitoring_runs WHERE id = ?`).get(json.data.runId) as {
+      id: number;
+      status: string;
+    };
     expect(run).toBeTruthy();
     expect(run.status).toBe("ok");
 
@@ -1053,7 +1032,7 @@ describe("POST /api/v1/monitoring/jobs/bulk-delete (Stage 1 caracterizare)", () 
         target: { numar_dosar: "2222/180/2024" },
         cadence_sec: 3600,
       },
-      { owner: "alice" },
+      { owner: "alice" }
     );
     const created = (await create.json()) as { data: { id: number } };
 
@@ -1061,7 +1040,7 @@ describe("POST /api/v1/monitoring/jobs/bulk-delete (Stage 1 caracterizare)", () 
       app,
       "/api/v1/monitoring/jobs/bulk-delete",
       { ids: [created.data.id] },
-      { owner: "bob" },
+      { owner: "bob" }
     );
     expect(res.status).toBe(200);
     const json = (await res.json()) as {

@@ -42,18 +42,14 @@ execSync(
 const MIGRATION_FILE = /\.(up|down)\.sql$/;
 console.log("\n[4/4] Copying migration files...");
 mkdirSync(resolve(root, "dist-backend", "migrations"), { recursive: true });
-cpSync(
-  resolve(root, "backend", "src", "db", "migrations"),
-  resolve(root, "dist-backend", "migrations"),
-  {
-    recursive: true,
-    filter: (src) => {
-      // Directories must pass through so cpSync can recurse into nested folders
-      // if a future migration ships sidecar resources (fixtures, etc).
-      if (statSync(src).isDirectory()) return true;
-      return MIGRATION_FILE.test(src);
-    },
+cpSync(resolve(root, "backend", "src", "db", "migrations"), resolve(root, "dist-backend", "migrations"), {
+  recursive: true,
+  filter: (src) => {
+    // Directories must pass through so cpSync can recurse into nested folders
+    // if a future migration ships sidecar resources (fixtures, etc).
+    if (statSync(src).isDirectory()) return true;
+    return MIGRATION_FILE.test(src);
   },
-);
+});
 
 console.log("\n=== Build complete! ===");

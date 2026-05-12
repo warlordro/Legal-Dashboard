@@ -68,7 +68,7 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
       `INSERT INTO ai_usage
          (owner_id, ts, provider, model, input_tokens, output_tokens,
           cost_usd_milli, http_status, was_aborted, request_id, feature)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.ownerId,
@@ -81,12 +81,10 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
       input.httpStatus ?? null,
       input.wasAborted ? 1 : 0,
       input.requestId || null,
-      input.feature,
+      input.feature
     );
 
-  return db
-    .prepare(`SELECT * FROM ai_usage WHERE id = ?`)
-    .get(info.lastInsertRowid) as AiUsageRow;
+  return db.prepare(`SELECT * FROM ai_usage WHERE id = ?`).get(info.lastInsertRowid) as AiUsageRow;
 }
 
 // Closed interval `[since, until]`. The previous version used a strict lower
@@ -111,7 +109,7 @@ export function getAiUsageTotals(input: AiUsageWindow): AiUsageTotals {
          COALESCE(SUM(output_tokens), 0) AS outputTokens,
          COALESCE(SUM(cost_usd_milli), 0) AS costUsdMilli
        FROM ai_usage
-       WHERE owner_id = ? AND ts >= ?${untilClause}`,
+       WHERE owner_id = ? AND ts >= ?${untilClause}`
     )
     .get(...params) as AiUsageTotals;
 
@@ -137,7 +135,7 @@ export function getAiUsageByProvider(input: AiUsageWindow): AiUsageBreakdownRow[
        FROM ai_usage
        WHERE owner_id = ? AND ts >= ?${untilClause}
        GROUP BY provider
-       ORDER BY costUsdMilli DESC, key ASC`,
+       ORDER BY costUsdMilli DESC, key ASC`
     )
     .all(...params) as AiUsageBreakdownRow[];
 }
@@ -161,7 +159,7 @@ export function getAiUsageByFeature(input: AiUsageWindow): AiUsageBreakdownRow[]
        FROM ai_usage
        WHERE owner_id = ? AND ts >= ?${untilClause}
        GROUP BY feature
-       ORDER BY costUsdMilli DESC, key ASC`,
+       ORDER BY costUsdMilli DESC, key ASC`
     )
     .all(...params) as AiUsageBreakdownRow[];
 }
@@ -198,7 +196,7 @@ export function listAiUsageLastDays(input: {
        FROM ai_usage
        WHERE owner_id = ? AND ts >= ? AND ts <= ?
        GROUP BY substr(ts, 1, 10)
-       ORDER BY day ASC`,
+       ORDER BY day ASC`
     )
     .all(input.ownerId, since, until) as AiUsageDailyRow[];
 
@@ -212,8 +210,6 @@ export function listAiUsageLastDays(input: {
 export function purgeOldAiUsage(retentionDays: number): number {
   const days = Math.max(1, Math.floor(retentionDays));
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-  const info = getDb()
-    .prepare(`DELETE FROM ai_usage WHERE ts < ?`)
-    .run(cutoff);
+  const info = getDb().prepare(`DELETE FROM ai_usage WHERE ts < ?`).run(cutoff);
   return info.changes;
 }

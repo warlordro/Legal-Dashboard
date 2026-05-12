@@ -36,7 +36,9 @@ const BASE = "/api/rnpm";
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   const text = await res.text();
   let data: unknown;
-  try { data = JSON.parse(text); } catch {
+  try {
+    data = JSON.parse(text);
+  } catch {
     const snippet = text.slice(0, 300).trim();
     throw new Error(res.ok ? "Raspuns invalid" : `Eroare server (${res.status}): ${snippet || "(corp gol)"}`);
   }
@@ -83,9 +85,19 @@ export async function rnpmSearch(
   if (res.status === 400) {
     const text = await res.text();
     let parsed: unknown;
-    try { parsed = JSON.parse(text); } catch { parsed = null; }
+    try {
+      parsed = JSON.parse(text);
+    } catch {
+      parsed = null;
+    }
     if (parsed && typeof parsed === "object") {
-      const obj = parsed as { error?: string; code?: string; total?: number; limit?: number; splittable?: { type?: string } };
+      const obj = parsed as {
+        error?: string;
+        code?: string;
+        total?: number;
+        limit?: number;
+        splittable?: { type?: string };
+      };
       if (obj.code === "limit_exceeded") {
         const splitType = (obj.splittable?.type as RnpmSearchType) ?? type;
         throw new RnpmLimitExceededError(obj.error ?? "Cap rezultate depasit", obj.total, obj.limit, splitType);
@@ -106,12 +118,20 @@ export async function rnpmSplitSearch(
   signal?: AbortSignal,
   captchaProvider?: CaptchaProvider,
   fallback2CaptchaKey?: string,
-  captchaMode?: CaptchaMode,
+  captchaMode?: CaptchaMode
 ): Promise<RnpmSplitResult> {
   const res = await apiFetch(`${BASE}/search-split`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode }),
+    body: JSON.stringify({
+      type,
+      baseParams,
+      subTypeLabels,
+      captchaKey,
+      captchaProvider,
+      fallback2CaptchaKey,
+      captchaMode,
+    }),
     signal,
   });
   if (!res.ok || !res.body) {
@@ -149,24 +169,30 @@ export async function rnpmSplitSearch(
       }
     }
   } finally {
-    try { await reader.cancel(); } catch { /* already closed */ }
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
   }
 
   if (!finalResult) throw new Error("Split incomplet — niciun rezultat final primit");
   return finalResult;
 }
 
-export async function rnpmGetSaved(opts: {
-  page?: number;
-  pageSize?: number;
-  searchType?: RnpmSearchType;
-  activ?: boolean;
-  q?: string;
-  dataStart?: string;
-  dataStop?: string;
-  sortKey?: RnpmSavedSortKey;
-  sortDir?: RnpmSavedSortDir;
-} = {}): Promise<RnpmOffsetPage<RnpmAvizRecord>> {
+export async function rnpmGetSaved(
+  opts: {
+    page?: number;
+    pageSize?: number;
+    searchType?: RnpmSearchType;
+    activ?: boolean;
+    q?: string;
+    dataStart?: string;
+    dataStop?: string;
+    sortKey?: RnpmSavedSortKey;
+    sortDir?: RnpmSavedSortDir;
+  } = {}
+): Promise<RnpmOffsetPage<RnpmAvizRecord>> {
   const qs = new URLSearchParams();
   if (opts.page != null) qs.set("page", String(opts.page));
   if (opts.pageSize != null) qs.set("pageSize", String(opts.pageSize));
@@ -299,7 +325,7 @@ export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[]
 const SAVED_ENUM_PAGE_SIZE = 200;
 
 export async function rnpmGetAllSaved(
-  opts: Omit<Parameters<typeof rnpmGetSaved>[0], "page" | "pageSize">,
+  opts: Omit<Parameters<typeof rnpmGetSaved>[0], "page" | "pageSize">
 ): Promise<RnpmAvizRecord[]> {
   const all: RnpmAvizRecord[] = [];
   let page = 0;
@@ -329,7 +355,7 @@ export async function rnpmBulkSearch(
   signal?: AbortSignal,
   captchaProvider?: CaptchaProvider,
   fallback2CaptchaKey?: string,
-  captchaMode?: CaptchaMode,
+  captchaMode?: CaptchaMode
 ): Promise<void> {
   const res = await apiFetch(`${BASE}/bulk`, {
     method: "POST",
@@ -371,7 +397,10 @@ export async function rnpmBulkSearch(
     }
   } finally {
     // Release stream on abort / error / normal close (prevents reader leak on abrupt disconnect)
-    try { await reader.cancel(); } catch { /* already closed */ }
+    try {
+      await reader.cancel();
+    } catch {
+      /* already closed */
+    }
   }
 }
-

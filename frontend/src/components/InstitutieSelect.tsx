@@ -71,9 +71,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
   }, [open, draft]);
 
   const handleToggle = (val: string) => {
-    setDraft((prev) =>
-      prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val]
-    );
+    setDraft((prev) => (prev.includes(val) ? prev.filter((v) => v !== val) : [...prev, val]));
   };
 
   const handleClose = () => {
@@ -115,10 +113,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
                 className="inline-flex items-center gap-1 rounded-md bg-primary/10 px-1.5 py-0.5 text-xs font-medium text-primary"
               >
                 {getLabel(v)}
-                <X
-                  className="h-3 w-3 cursor-pointer hover:text-primary/70"
-                  onClick={(e) => handleRemoveOne(e, v)}
-                />
+                <X className="h-3 w-3 cursor-pointer hover:text-primary/70" onClick={(e) => handleRemoveOne(e, v)} />
               </span>
             ))
           ) : (
@@ -131,12 +126,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
         </span>
         <span className="flex shrink-0 items-center gap-1 pl-2">
           {count > 0 && (
-            <span
-              role="button"
-              tabIndex={-1}
-              onClick={handleClear}
-              className="rounded p-0.5 hover:bg-muted"
-            >
+            <span role="button" tabIndex={-1} onClick={handleClear} className="rounded p-0.5 hover:bg-muted">
               <X className="h-3.5 w-3.5" />
             </span>
           )}
@@ -160,7 +150,9 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
             {/* Header */}
             <div className="flex items-center gap-3 border-b border-border px-4 py-3">
               <Building2 className="h-4 w-4 shrink-0 text-primary" />
-              <span id="institutie-select-title" className="text-sm font-semibold">Selectează Instituții</span>
+              <span id="institutie-select-title" className="text-sm font-semibold">
+                Selectează Instituții
+              </span>
               {draft.length > 0 && (
                 <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
                   {draft.length}
@@ -214,7 +206,11 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
                 className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
               />
               {search && (
-                <button type="button" onClick={() => setSearch("")} className="text-muted-foreground hover:text-foreground">
+                <button
+                  type="button"
+                  onClick={() => setSearch("")}
+                  className="text-muted-foreground hover:text-foreground"
+                >
                   <X className="h-3.5 w-3.5" />
                 </button>
               )}
@@ -248,16 +244,16 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
                           type="button"
                           onClick={() => handleToggle(inst.value)}
                           className={`flex w-full items-center gap-3 px-4 py-2 text-left text-sm transition-colors ${
-                            selected
-                              ? "bg-primary/10 font-medium text-primary"
-                              : "text-foreground hover:bg-accent"
+                            selected ? "bg-primary/10 font-medium text-primary" : "text-foreground hover:bg-accent"
                           }`}
                         >
-                          <span className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
-                            selected
-                              ? "border-primary bg-primary text-primary-foreground"
-                              : "border-muted-foreground/40"
-                          }`}>
+                          <span
+                            className={`flex h-4 w-4 shrink-0 items-center justify-center rounded border transition-colors ${
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "border-muted-foreground/40"
+                            }`}
+                          >
                             {selected && <Check className="h-3 w-3" />}
                           </span>
                           <span className="flex-1">{inst.label}</span>

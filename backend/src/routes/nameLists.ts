@@ -24,27 +24,12 @@ import type { Context } from "hono";
 
 import { getOwnerId } from "../middleware/owner.ts";
 import { recordAudit } from "../db/auditRepository.ts";
-import {
-  createList,
-  getCommittableItems,
-  listLists,
-  linkItemToJob,
-} from "../db/nameListsRepository.ts";
-import {
-  createJob,
-} from "../db/monitoringJobsRepository.ts";
+import { createList, getCommittableItems, listLists, linkItemToJob } from "../db/nameListsRepository.ts";
+import { createJob } from "../db/monitoringJobsRepository.ts";
 import { getDb } from "../db/schema.ts";
-import {
-  CommitListBodySchema,
-  MAX_JOBS_PER_COMMIT,
-} from "../schemas/nameLists.ts";
+import { CommitListBodySchema, MAX_JOBS_PER_COMMIT } from "../schemas/nameLists.ts";
 import { AlertConfigSchema } from "../schemas/monitoring.ts";
-import {
-  parseNameList,
-  validateRawItems,
-  ParseError,
-  MAX_FILE_BYTES,
-} from "../services/nameListParser.ts";
+import { parseNameList, validateRawItems, ParseError, MAX_FILE_BYTES } from "../services/nameListParser.ts";
 import { fail, ok } from "../util/envelope.ts";
 
 // Body limits — se mapeaza pe cap-urile parser-ului (10MB fisier brut) +
@@ -52,10 +37,8 @@ import { fail, ok } from "../util/envelope.ts";
 const PREVIEW_BODY_LIMIT = MAX_FILE_BYTES; // 10 MB hard
 const COMMIT_BODY_LIMIT = 15 * 1024 * 1024;
 
-const previewTooLarge = (c: Context) =>
-  c.json(fail("payload_too_large", "Fisier prea mare (max 10MB)", c), 413);
-const commitTooLarge = (c: Context) =>
-  c.json(fail("payload_too_large", "Payload prea mare (max 15MB)", c), 413);
+const previewTooLarge = (c: Context) => c.json(fail("payload_too_large", "Fisier prea mare (max 10MB)", c), 413);
+const commitTooLarge = (c: Context) => c.json(fail("payload_too_large", "Payload prea mare (max 15MB)", c), 413);
 
 const limitPreviewBody = bodyLimit({
   maxSize: PREVIEW_BODY_LIMIT,
@@ -91,7 +74,7 @@ function parseErrorStatus(code: ParseError["code"]): 400 | 413 | 422 {
 async function readLimitedJsonBody(
   c: Context,
   limit: number,
-  tooLargeFactory: (c: Context) => Response,
+  tooLargeFactory: (c: Context) => Response
 ): Promise<{ ok: true; body: unknown } | { ok: false; response: Response }> {
   const contentLength = Number(c.req.header("content-length") ?? 0);
   if (Number.isFinite(contentLength) && contentLength > limit) {
@@ -154,18 +137,12 @@ nameListsRouter.post("/preview", limitPreviewBody, async (c) => {
     if (name === "BodyLimitError") {
       return previewTooLarge(c);
     }
-    return c.json(
-      fail("invalid_multipart", "Multipart form-data invalid", c),
-      400,
-    );
+    return c.json(fail("invalid_multipart", "Multipart form-data invalid", c), 400);
   }
 
   const fileEntry = formData.get("file");
   if (!fileEntry || typeof fileEntry === "string") {
-    return c.json(
-      fail("missing_file", "Camp 'file' lipsa din form-data", c),
-      400,
-    );
+    return c.json(fail("missing_file", "Camp 'file' lipsa din form-data", c), 400);
   }
   // fileEntry este Blob/File. Vom citi arrayBuffer-ul si vom converti la
   // Buffer pentru parser. Numele fisierului vine din .name daca este File.
@@ -177,10 +154,7 @@ nameListsRouter.post("/preview", limitPreviewBody, async (c) => {
     buf = Buffer.from(arrayBuf);
   } catch (err) {
     console.error("[nameLists] failed to read uploaded file:", err);
-    return c.json(
-      fail("invalid_multipart", "Eroare la citirea fisierului", c),
-      400,
-    );
+    return c.json(fail("invalid_multipart", "Eroare la citirea fisierului", c), 400);
   }
 
   // Defense-in-depth: bodyLimit middleware ar fi trebuit sa ne taie deja, dar
@@ -195,10 +169,7 @@ nameListsRouter.post("/preview", limitPreviewBody, async (c) => {
     result = await parseNameList(buf, { filename: filename ?? undefined });
   } catch (err) {
     if (err instanceof ParseError) {
-      return c.json(
-        fail(err.code.toLowerCase(), err.message, c),
-        parseErrorStatus(err.code),
-      );
+      return c.json(fail(err.code.toLowerCase(), err.message, c), parseErrorStatus(err.code));
     }
     console.error("[nameLists] preview parse failed:", err);
     return c.json(fail("internal_error", "Eroare la parsarea fisierului", c), 500);
@@ -212,8 +183,8 @@ nameListsRouter.post("/preview", limitPreviewBody, async (c) => {
         sha256: result.sha256,
         sourceFilename: filename,
       },
-      c,
-    ),
+      c
+    )
   );
 });
 
@@ -228,10 +199,7 @@ async function commitNameList(c: Context): Promise<Response> {
 
   const parsed = CommitListBodySchema.safeParse(bodyResult.body);
   if (!parsed.success) {
-    return c.json(
-      fail("invalid_payload", "Payload invalid", c, parsed.error.issues),
-      422,
-    );
+    return c.json(fail("invalid_payload", "Payload invalid", c, parsed.error.issues), 422);
   }
   const body = parsed.data;
 
@@ -330,10 +298,7 @@ async function commitNameList(c: Context): Promise<Response> {
         })();
       } catch (err) {
         console.error("[nameLists] auto-create jobs failed:", err);
-        return c.json(
-          fail("internal_error", "Eroare la crearea joburilor", c),
-          500,
-        );
+        return c.json(fail("internal_error", "Eroare la crearea joburilor", c), 500);
       }
 
       // partial=true semnaleaza UI-ului ca exista items eligibile ramase
@@ -372,9 +337,9 @@ async function commitNameList(c: Context): Promise<Response> {
         jobsTotal,
         partial,
       },
-      c,
+      c
     ),
-    status,
+    status
   );
 }
 

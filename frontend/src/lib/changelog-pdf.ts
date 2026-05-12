@@ -19,7 +19,10 @@ const CHAR_MAP: Record<string, string> = {
   "\u2022": "-",
   "\u00B7": "-",
   "\u00A0": " ",
-  "\u0218": "S", "\u0219": "s", "\u021A": "T", "\u021B": "t",
+  "\u0218": "S",
+  "\u0219": "s",
+  "\u021A": "T",
+  "\u021B": "t",
 };
 
 function normalize(s: string): string {
@@ -32,15 +35,15 @@ type RGB = [number, number, number];
 
 // Tailwind-500 hues for version bars + accents.
 const PALETTE: Record<string, { strong: RGB; soft: RGB; ink: RGB }> = {
-  violet:  { strong: [139, 92, 246],  soft: [245, 243, 255], ink: [76, 29, 149] },
-  emerald: { strong: [16, 185, 129],  soft: [236, 253, 245], ink: [6, 95, 70] },
-  blue:    { strong: [59, 130, 246],  soft: [239, 246, 255], ink: [30, 64, 175] },
-  amber:   { strong: [245, 158, 11],  soft: [255, 251, 235], ink: [146, 64, 14] },
-  rose:    { strong: [244, 63, 94],   soft: [255, 241, 242], ink: [159, 18, 57] },
-  cyan:    { strong: [6, 182, 212],   soft: [236, 254, 255], ink: [14, 116, 144] },
-  sky:     { strong: [14, 165, 233],  soft: [240, 249, 255], ink: [7, 89, 133] },
-  teal:    { strong: [20, 184, 166],  soft: [240, 253, 250], ink: [17, 94, 89] },
-  slate:   { strong: [100, 116, 139], soft: [248, 250, 252], ink: [51, 65, 85] },
+  violet: { strong: [139, 92, 246], soft: [245, 243, 255], ink: [76, 29, 149] },
+  emerald: { strong: [16, 185, 129], soft: [236, 253, 245], ink: [6, 95, 70] },
+  blue: { strong: [59, 130, 246], soft: [239, 246, 255], ink: [30, 64, 175] },
+  amber: { strong: [245, 158, 11], soft: [255, 251, 235], ink: [146, 64, 14] },
+  rose: { strong: [244, 63, 94], soft: [255, 241, 242], ink: [159, 18, 57] },
+  cyan: { strong: [6, 182, 212], soft: [236, 254, 255], ink: [14, 116, 144] },
+  sky: { strong: [14, 165, 233], soft: [240, 249, 255], ink: [7, 89, 133] },
+  teal: { strong: [20, 184, 166], soft: [240, 253, 250], ink: [17, 94, 89] },
+  slate: { strong: [100, 116, 139], soft: [248, 250, 252], ink: [51, 65, 85] },
 };
 
 function paletteFor(v: { borderColor: string }): { strong: RGB; soft: RGB; ink: RGB } {

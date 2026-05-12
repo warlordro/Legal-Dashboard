@@ -75,10 +75,7 @@ describe("/api/v1/auth", () => {
   it("accepts cookie auth and refreshes it into a secure HttpOnly SameSite cookie", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice" });
     const app = buildApp();
-    const token = signAuthToken(
-      { sub: "alice", exp: 4_102_444_800 },
-      SECRET,
-    );
+    const token = signAuthToken({ sub: "alice", exp: 4_102_444_800 }, SECRET);
 
     const res = await app.request("/api/v1/auth/refresh", {
       method: "POST",

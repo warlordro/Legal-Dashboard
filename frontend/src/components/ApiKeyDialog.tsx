@@ -115,7 +115,12 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
               autoFocus
             />
             {hasAnthropic && (
-              <button className="mt-1.5 text-[11px] text-red-500 hover:underline" onClick={() => { clearKey("anthropic"); }}>
+              <button
+                className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                onClick={() => {
+                  clearKey("anthropic");
+                }}
+              >
                 Sterge cheia
               </button>
             )}
@@ -137,7 +142,12 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
             />
             {hasOpenai && (
-              <button className="mt-1.5 text-[11px] text-red-500 hover:underline" onClick={() => { clearKey("openai"); }}>
+              <button
+                className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                onClick={() => {
+                  clearKey("openai");
+                }}
+              >
                 Sterge cheia
               </button>
             )}
@@ -159,7 +169,12 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
             />
             {hasGoogle && (
-              <button className="mt-1.5 text-[11px] text-red-500 hover:underline" onClick={() => { clearKey("google"); }}>
+              <button
+                className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                onClick={() => {
+                  clearKey("google");
+                }}
+              >
                 Sterge cheia
               </button>
             )}
@@ -234,13 +249,16 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
             />
             {hasTwoCaptcha && (
-              <button className="mt-1.5 text-[11px] text-red-500 hover:underline" onClick={() => { clearKey("twocaptcha"); }}>
+              <button
+                className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                onClick={() => {
+                  clearKey("twocaptcha");
+                }}
+              >
                 Sterge cheia
               </button>
             )}
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              ~$0.003/captcha, fallback uman.
-            </p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">~$0.003/captcha, fallback uman.</p>
           </div>
 
           <div className="rounded-lg border border-border p-3">
@@ -259,13 +277,16 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
             />
             {hasCapSolver && (
-              <button className="mt-1.5 text-[11px] text-red-500 hover:underline" onClick={() => { clearKey("capsolver"); }}>
+              <button
+                className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                onClick={() => {
+                  clearKey("capsolver");
+                }}
+              >
                 Sterge cheia
               </button>
             )}
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              ~$0.0008/captcha, AI-based.
-            </p>
+            <p className="mt-1.5 text-[11px] text-muted-foreground">~$0.0008/captcha, AI-based.</p>
           </div>
         </div>
 

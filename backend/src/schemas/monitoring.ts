@@ -69,10 +69,7 @@ const TargetAvizRnpm = z
 // stored JSON always has explicit values; reader-side decode is robust.
 export const AlertConfigSchema = z
   .object({
-    notify_days_before: z
-      .array(z.number().int().min(0).max(365))
-      .max(10)
-      .default([14, 7, 3, 1]),
+    notify_days_before: z.array(z.number().int().min(0).max(365)).max(10).default([14, 7, 3, 1]),
     notify_on_new_termen: z.boolean().default(true),
     notify_on_solution: z.boolean().default(true),
     notify_on_dosar_disappeared: z.boolean().default(false),

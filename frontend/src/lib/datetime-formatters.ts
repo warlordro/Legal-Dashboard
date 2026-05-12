@@ -6,10 +6,7 @@
 // dar cu signatura diferita (combina date+time fragments) — nu-l atingem aici
 // ca sa nu introducem noise non-task in stage; cleanup-ul lui e separat.
 
-export function formatIsoDateTime(
-  iso: string | null | undefined,
-  opts?: { seconds?: boolean },
-): string {
+export function formatIsoDateTime(iso: string | null | undefined, opts?: { seconds?: boolean }): string {
   if (!iso) return "-";
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return iso;

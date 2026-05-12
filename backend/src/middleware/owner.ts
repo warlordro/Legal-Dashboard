@@ -1,10 +1,6 @@
 import type { Context, Next } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
-import {
-  AuthenticationError,
-  getAuthProvider,
-  type AuthenticatedContext,
-} from "../auth/authProvider.ts";
+import { AuthenticationError, getAuthProvider, type AuthenticatedContext } from "../auth/authProvider.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { fail } from "../util/envelope.ts";
@@ -35,7 +31,7 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
   // requestId si sa fie consistent cu /api/v1/* pe toate path-urile API.
   // Logam structurat fara token/cookie body.
   console.warn(
-    `[auth.denied] requestId=${requestId} path=${c.req.path} method=${c.req.method} code=${err.code} status=${err.status}`,
+    `[auth.denied] requestId=${requestId} path=${c.req.path} method=${c.req.method} code=${err.code} status=${err.status}`
   );
   try {
     recordAudit(null, "auth.denied", {
@@ -54,9 +50,7 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
       },
     });
   } catch (auditErr) {
-    console.error(
-      `[auth.audit_failed] ${auditErr instanceof Error ? auditErr.message : "unknown"}`,
-    );
+    console.error(`[auth.audit_failed] ${auditErr instanceof Error ? auditErr.message : "unknown"}`);
   }
   return c.json(fail(err.code, err.message, c), err.status);
 }

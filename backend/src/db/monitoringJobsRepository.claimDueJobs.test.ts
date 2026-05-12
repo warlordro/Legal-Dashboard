@@ -48,7 +48,7 @@ function seedJob(opts: {
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at, active, paused_until)
-       VALUES (?, ?, '{}', ?, 14400, '{}', ?, ?, ?)`,
+       VALUES (?, ?, '{}', ?, 14400, '{}', ?, ?, ?)`
     )
     .run(
       OWNER,
@@ -56,7 +56,7 @@ function seedJob(opts: {
       opts.hashSeed ?? `hash-${Math.random()}`,
       opts.nextRunAt,
       opts.active ?? 1,
-      opts.pausedUntil ?? null,
+      opts.pausedUntil ?? null
     );
   return info.lastInsertRowid as number;
 }
@@ -65,7 +65,7 @@ function seedRunning(jobId: number): void {
   getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-       VALUES (?, ?, '2026-04-28T09:00:00.000Z', 'running')`,
+       VALUES (?, ?, '2026-04-28T09:00:00.000Z', 'running')`
     )
     .run(OWNER, jobId);
 }
@@ -195,11 +195,9 @@ describe("claimDueJobs — enabledKinds filter", () => {
 
     // Niciun rand 'running' nu trebuie inserat in monitoring_runs — altfel
     // recoverOrphanRuns ar avea de curatat la urmatoarea pornire.
-    const running = getDb()
-      .prepare(
-        `SELECT COUNT(*) as c FROM monitoring_runs WHERE status = 'running'`,
-      )
-      .get() as { c: number };
+    const running = getDb().prepare(`SELECT COUNT(*) as c FROM monitoring_runs WHERE status = 'running'`).get() as {
+      c: number;
+    };
     expect(running.c).toBe(0);
   });
 
@@ -262,11 +260,11 @@ describe("claimDueJobs — atomic side effect", () => {
     const claimed = claimDueJobs({ now: NOW, limit: 10 });
     expect(claimed.length).toBe(1);
 
-    const runs = getDb()
-      .prepare(
-        `SELECT * FROM monitoring_runs WHERE job_id = ? AND status = 'running'`,
-      )
-      .all(id) as { id: number; status: string; started_at: string }[];
+    const runs = getDb().prepare(`SELECT * FROM monitoring_runs WHERE job_id = ? AND status = 'running'`).all(id) as {
+      id: number;
+      status: string;
+      started_at: string;
+    }[];
     expect(runs.length).toBe(1);
     expect(runs[0]!.id).toBe(claimed[0]!.runId);
     expect(runs[0]!.started_at).toBe(NOW);
@@ -301,9 +299,10 @@ describe("markJobOutcome — owner_id scoping", () => {
     });
     expect(updated).toBe(true);
 
-    const row = getDb()
-      .prepare("SELECT last_status, fail_streak FROM monitoring_jobs WHERE id = ?")
-      .get(id) as { last_status: string; fail_streak: number };
+    const row = getDb().prepare("SELECT last_status, fail_streak FROM monitoring_jobs WHERE id = ?").get(id) as {
+      last_status: string;
+      fail_streak: number;
+    };
     expect(row.last_status).toBe("ok");
     expect(row.fail_streak).toBe(0);
   });

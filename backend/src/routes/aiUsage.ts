@@ -76,16 +76,17 @@ aiUsageRouter.get("/summary", async (c) => {
   const payload = await withMaintenanceRead(async () => {
     const summary24h = toSummary(getAiUsageTotals({ ownerId, since: since24h, until }));
     const summary30d = toSummary(getAiUsageTotals({ ownerId, since: since30d, until }));
-    const daily = buildDailySeries(
-      listAiUsageLastDays({ ownerId, days: 30, now }).rows,
-      since30dStart,
-      30,
-    );
+    const daily = buildDailySeries(listAiUsageLastDays({ ownerId, days: 30, now }).rows, since30dStart, 30);
     return { summary24h, summary30d, daily };
   });
 
-  return c.json(ok({
-    ...payload,
-    generatedAt: until,
-  }, c));
+  return c.json(
+    ok(
+      {
+        ...payload,
+        generatedAt: until,
+      },
+      c
+    )
+  );
 });

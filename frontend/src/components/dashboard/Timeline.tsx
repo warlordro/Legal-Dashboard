@@ -14,14 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import {
-  AlertTriangle,
-  Bell,
-  Loader2,
-  PlayCircle,
-  RefreshCw,
-  Shield,
-} from "lucide-react";
+import { AlertTriangle, Bell, Loader2, PlayCircle, RefreshCw, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -101,9 +94,8 @@ function eventSubline(ev: TimelineEvent): string | null {
   if (ev.kind === "audit") {
     const d = ev.detail as Record<string, unknown>;
     const outcome = typeof d.outcome === "string" ? d.outcome : null;
-    const target = typeof d.target_kind === "string" && typeof d.target_id === "string"
-      ? `${d.target_kind}:${d.target_id}`
-      : null;
+    const target =
+      typeof d.target_kind === "string" && typeof d.target_id === "string" ? `${d.target_kind}:${d.target_id}` : null;
     const parts = [outcome ? `outcome=${outcome}` : null, target].filter((p): p is string => Boolean(p));
     return parts.length > 0 ? parts.join(" · ") : null;
   }
@@ -113,16 +105,15 @@ function eventSubline(ev: TimelineEvent): string | null {
 function TimelineRow({ event, now }: { event: TimelineEvent; now: number }) {
   const { icon: Icon, label } = KIND_META[event.kind];
   const subline = eventSubline(event);
-  const titleLine = (
-    <p className="truncate text-sm font-medium leading-tight">{event.title}</p>
-  );
-  const wrapped = event.kind === "alert" ? (
-    <Link to="/alerte" className="block min-w-0 flex-1 hover:underline">
-      {titleLine}
-    </Link>
-  ) : (
-    <div className="min-w-0 flex-1">{titleLine}</div>
-  );
+  const titleLine = <p className="truncate text-sm font-medium leading-tight">{event.title}</p>;
+  const wrapped =
+    event.kind === "alert" ? (
+      <Link to="/alerte" className="block min-w-0 flex-1 hover:underline">
+        {titleLine}
+      </Link>
+    ) : (
+      <div className="min-w-0 flex-1">{titleLine}</div>
+    );
 
   return (
     <li className="flex items-start gap-3 border-b border-border py-2 last:border-b-0">

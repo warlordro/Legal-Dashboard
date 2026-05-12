@@ -38,13 +38,12 @@ export interface NameSoapDiffOutput {
 }
 
 function normalizeFilterValue(value: string | null | undefined): string {
-  return String(value ?? "").trim().toLowerCase();
+  return String(value ?? "")
+    .trim()
+    .toLowerCase();
 }
 
-function dosarPassesFilter(
-  dosar: NameSoapSnapshotDosar,
-  alertConfig: AlertConfig,
-): boolean {
+function dosarPassesFilter(dosar: NameSoapSnapshotDosar, alertConfig: AlertConfig): boolean {
   if (alertConfig.stadii?.length) {
     const want = new Set(alertConfig.stadii.map(normalizeFilterValue));
     if (!want.has(normalizeFilterValue(dosar.stadiu))) return false;
@@ -56,9 +55,7 @@ function dosarPassesFilter(
   return true;
 }
 
-function byNumar(
-  snapshot: NameSoapSnapshotPayload,
-): Map<string, NameSoapSnapshotDosar> {
+function byNumar(snapshot: NameSoapSnapshotPayload): Map<string, NameSoapSnapshotDosar> {
   const m = new Map<string, NameSoapSnapshotDosar>();
   for (const dosar of snapshot.dosare) {
     if (dosar.numar) m.set(dosar.numar, dosar);
@@ -70,10 +67,7 @@ function dedupKey(numar: string, transition: NameSoapAlertKind): string {
   return `name_soap|${numar}|${transition}`;
 }
 
-export function buildNameSoapSnapshot(
-  dosare: Dosar[],
-  fetchedAt: string,
-): NameSoapSnapshotPayload {
+export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameSoapSnapshotPayload {
   const byNumber = new Map<string, NameSoapSnapshotDosar>();
   for (const dosar of dosare) {
     const numar = String(dosar.numar ?? "").trim();
@@ -88,9 +82,7 @@ export function buildNameSoapSnapshot(
   return {
     version: 1,
     fetched_at: fetchedAt,
-    dosare: Array.from(byNumber.values()).sort((a, b) =>
-      a.numar.localeCompare(b.numar),
-    ),
+    dosare: Array.from(byNumber.values()).sort((a, b) => a.numar.localeCompare(b.numar)),
   };
 }
 

@@ -47,7 +47,7 @@ export async function batchFetchDosare(
   onProgress?: (processed: number, total: number, found: number, currentInterval: string) => void,
   onBatch?: (newItems: Dosar[]) => void,
   existingNumere?: Set<string>,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<BatchResult<Dosar>> {
   const intervals = generateMonthlyIntervals(dateRange.dataStart, dateRange.dataStop);
   const allDosare = new Map<string, Dosar>(); // deduplicate by numar — only NEW dosare
@@ -71,7 +71,7 @@ export async function batchFetchDosare(
               dataStart: interval.dataStart,
               dataStop: interval.dataStop,
             },
-            { signal },
+            { signal }
           );
           if (results.length >= SOAP_RESULT_LIMIT) {
             const subResults = await subdivideInterval(params, interval, 1, signal);
@@ -112,17 +112,18 @@ async function subdivideInterval(
   params: { numarDosar?: string; obiectDosar?: string; numeParte?: string; institutie?: string },
   interval: { dataStart: string; dataStop: string },
   depth: number,
-  signal?: AbortSignal,
+  signal?: AbortSignal
 ): Promise<BatchResult<Dosar>> {
   if (depth > MAX_SPLIT_DEPTH) {
     // Max depth reached — fetch what we can and warn
     const results = await cautareDosare(
       { ...params, dataStart: interval.dataStart, dataStop: interval.dataStop },
-      { signal },
+      { signal }
     );
-    const warning = results.length >= SOAP_RESULT_LIMIT
-      ? `Intervalul ${interval.dataStart} → ${interval.dataStop} depaseste limita chiar si dupa subdivizare (${results.length} rezultate)`
-      : undefined;
+    const warning =
+      results.length >= SOAP_RESULT_LIMIT
+        ? `Intervalul ${interval.dataStart} → ${interval.dataStop} depaseste limita chiar si dupa subdivizare (${results.length} rezultate)`
+        : undefined;
     return { items: results, warnings: warning ? [warning] : [] };
   }
 
@@ -134,10 +135,7 @@ async function subdivideInterval(
     if (signal?.aborted) break;
     await delay(BATCH_DELAY_MS);
     try {
-      const results = await cautareDosare(
-        { ...params, dataStart: sub.dataStart, dataStop: sub.dataStop },
-        { signal },
-      );
+      const results = await cautareDosare({ ...params, dataStart: sub.dataStart, dataStop: sub.dataStop }, { signal });
       if (results.length >= SOAP_RESULT_LIMIT) {
         const deeper = await subdivideInterval(params, sub, depth + 1, signal);
         allItems.push(...deeper.items);
@@ -155,7 +153,10 @@ async function subdivideInterval(
 }
 
 // SECURITY: Parse and validate the "existing" array from load-more POST body
-export async function parseExistingFromBody(c: { req: { text: () => Promise<string> } }): Promise<{ set: Set<string>; error?: string }> {
+export async function parseExistingFromBody(c: { req: { text: () => Promise<string> } }): Promise<{
+  set: Set<string>;
+  error?: string;
+}> {
   let rawBody: string;
   try {
     rawBody = await c.req.text();

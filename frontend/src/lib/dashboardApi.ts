@@ -117,7 +117,7 @@ export const dashboardApi = {
     return unwrapMonitoring<DashboardSummary>(res);
   },
   timeline: async (
-    opts: { cursor?: string | null; limit?: number; signal?: AbortSignal } = {},
+    opts: { cursor?: string | null; limit?: number; signal?: AbortSignal } = {}
   ): Promise<TimelinePayload> => {
     const params = new URLSearchParams();
     if (opts.cursor) params.set("cursor", opts.cursor);
@@ -127,9 +127,7 @@ export const dashboardApi = {
     const res = await apiFetch(url, { signal: opts.signal });
     return unwrapMonitoring<TimelinePayload>(res);
   },
-  charts: async (
-    opts: { range?: ChartsRange; signal?: AbortSignal } = {},
-  ): Promise<ChartsPayload> => {
+  charts: async (opts: { range?: ChartsRange; signal?: AbortSignal } = {}): Promise<ChartsPayload> => {
     const params = new URLSearchParams();
     if (opts.range) params.set("range", opts.range);
     const qs = params.toString();
@@ -137,9 +135,7 @@ export const dashboardApi = {
     const res = await apiFetch(url, { signal: opts.signal });
     return unwrapMonitoring<ChartsPayload>(res);
   },
-  report: async (
-    opts: { range?: ChartsRange; signal?: AbortSignal } = {},
-  ): Promise<DashboardReportPayload> => {
+  report: async (opts: { range?: ChartsRange; signal?: AbortSignal } = {}): Promise<DashboardReportPayload> => {
     const params = new URLSearchParams();
     if (opts.range) params.set("range", opts.range);
     const qs = params.toString();

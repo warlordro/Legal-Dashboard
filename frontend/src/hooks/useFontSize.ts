@@ -15,7 +15,9 @@ function loadStep(): number {
       const n = Number(saved);
       if (n >= 0 && n < STEPS.length) return n;
     }
-  } catch { /* localStorage unavailable (private mode / quota); use default */ }
+  } catch {
+    /* localStorage unavailable (private mode / quota); use default */
+  }
   return 1; // Default: Normal (16px)
 }
 

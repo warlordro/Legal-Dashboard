@@ -126,7 +126,7 @@ export function listAlertsBefore(opts: {
        LEFT JOIN monitoring_jobs j ON j.id = a.job_id AND j.owner_id = a.owner_id
        WHERE a.owner_id = ? AND a.created_at ${cmp} ?
        ORDER BY a.created_at DESC, a.id DESC
-       LIMIT ?`,
+       LIMIT ?`
     )
     .all(opts.ownerId, opts.before, opts.limit) as TimelineAlertRow[];
 }
@@ -149,7 +149,7 @@ export function listFinalizedRunsBefore(opts: {
          AND r.ended_at IS NOT NULL
          AND r.ended_at ${cmp} ?
        ORDER BY r.ended_at DESC, r.id DESC
-       LIMIT ?`,
+       LIMIT ?`
     )
     .all(opts.ownerId, opts.before, opts.limit) as TimelineRunRow[];
 }
@@ -173,7 +173,7 @@ export function listCuratedAuditBefore(opts: {
          AND ts ${cmp} ?
          AND (action IN (${placeholders}) OR outcome != 'ok')
        ORDER BY ts DESC, id DESC
-       LIMIT ?`,
+       LIMIT ?`
     )
     .all(opts.ownerId, opts.before, ...CURATED_AUDIT_ACTIONS, opts.limit) as TimelineAuditRow[];
 }
@@ -207,7 +207,7 @@ export function listAlertsInRange(opts: {
          AND a.created_at >= ?
          AND a.created_at <= ?
        ORDER BY a.created_at DESC, a.id DESC
-       LIMIT ?`,
+       LIMIT ?`
     )
     .all(opts.ownerId, opts.since, opts.until, opts.limit) as TimelineAlertRow[];
 }
@@ -230,7 +230,7 @@ export function listFinalizedRunsInRange(opts: {
          AND r.ended_at >= ?
          AND r.ended_at <= ?
        ORDER BY r.ended_at DESC, r.id DESC
-       LIMIT ?`,
+       LIMIT ?`
     )
     .all(opts.ownerId, opts.since, opts.until, opts.limit) as TimelineRunRow[];
 }
@@ -251,7 +251,7 @@ export function listCuratedAuditInRange(opts: {
          AND ts <= ?
          AND (action IN (${placeholders}) OR outcome != 'ok')
        ORDER BY ts DESC, id DESC
-       LIMIT ?`,
+       LIMIT ?`
     )
     .all(opts.ownerId, opts.since, opts.until, ...CURATED_AUDIT_ACTIONS, opts.limit) as TimelineAuditRow[];
 }
@@ -279,7 +279,7 @@ export function aggregateAlertsByDayInRange(opts: {
        FROM monitoring_alerts
        WHERE owner_id = ? AND created_at >= ? AND created_at <= ?
        GROUP BY day
-       ORDER BY day ASC`,
+       ORDER BY day ASC`
     )
     .all(opts.ownerId, opts.since, opts.until) as AlertsDailyRow[];
 }
@@ -304,7 +304,7 @@ export function aggregateFinalizedRunsByDayAndStatusInRange(opts: {
          AND ended_at >= ?
          AND ended_at <= ?
        GROUP BY day, status
-       ORDER BY day ASC`,
+       ORDER BY day ASC`
     )
     .all(opts.ownerId, opts.since, opts.until) as RunsByDayStatusRow[];
 }

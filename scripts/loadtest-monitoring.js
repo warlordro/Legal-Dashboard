@@ -72,15 +72,9 @@ export function setup() {
       cadence_sec: 14400,
       client_request_id: `loadtest-seed-${i}`,
     };
-    const res = http.post(
-      `${BASE_URL}/api/v1/monitoring/jobs`,
-      JSON.stringify(body),
-      { headers: jsonHeaders() },
-    );
+    const res = http.post(`${BASE_URL}/api/v1/monitoring/jobs`, JSON.stringify(body), { headers: jsonHeaders() });
     if (res.status !== 201 && res.status !== 200) {
-      throw new Error(
-        `seed failed at i=${i}: status=${res.status} body=${res.body}`,
-      );
+      throw new Error(`seed failed at i=${i}: status=${res.status} body=${res.body}`);
     }
     const parsed = res.json();
     ids.push(parsed.data.id);
@@ -96,10 +90,9 @@ export default function (data) {
   if (r < 0.8) {
     // Listing — the most common dashboard call.
     const page = randomIntBetween(1, 20);
-    const res = http.get(
-      `${BASE_URL}/api/v1/monitoring/jobs?page=${page}&pageSize=50&active=true`,
-      { headers: jsonHeaders() },
-    );
+    const res = http.get(`${BASE_URL}/api/v1/monitoring/jobs?page=${page}&pageSize=50&active=true`, {
+      headers: jsonHeaders(),
+    });
     check(res, {
       "list 200": (r) => r.status === 200,
       "list has rows": (r) => Array.isArray(r.json("data.rows")),
@@ -117,14 +110,9 @@ export default function (data) {
     // and 409 alike. 503 (scheduler unavailable) is also acceptable in a
     // pure CRUD smoke run that didn't enable the scheduler.
     const id = ids[randomIntBetween(0, ids.length - 1)];
-    const res = http.post(
-      `${BASE_URL}/api/v1/monitoring/jobs/${id}/run`,
-      null,
-      { headers: jsonHeaders() },
-    );
+    const res = http.post(`${BASE_URL}/api/v1/monitoring/jobs/${id}/run`, null, { headers: jsonHeaders() });
     check(res, {
-      "run 202/409/503": (r) =>
-        r.status === 202 || r.status === 409 || r.status === 503,
+      "run 202/409/503": (r) => r.status === 202 || r.status === 409 || r.status === 503,
     });
   }
 

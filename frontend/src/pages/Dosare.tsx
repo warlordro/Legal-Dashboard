@@ -17,7 +17,14 @@ function stripDiacritics(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
-const KNOWN_CATEGORII = ["penal", "civil", "contencios administrativ", "litigii de munc", "faliment", "litigii cu profesioni"];
+const KNOWN_CATEGORII = [
+  "penal",
+  "civil",
+  "contencios administrativ",
+  "litigii de munc",
+  "faliment",
+  "litigii cu profesioni",
+];
 
 function filterByCategorii(dosare: Dosar[], categorii: string[]): Dosar[] {
   if (categorii.length === 0) return dosare;
@@ -44,7 +51,8 @@ function filterByRoles(dosare: Dosar[], roles: string[], searchedName?: string):
   const searchWords = stripDiacritics(searchedName.toLowerCase()).trim().split(/\s+/).filter(Boolean);
   return dosare.filter((d) =>
     d.parti.some(
-      (p) => searchWords.every((w) => stripDiacritics(p.nume.toLowerCase()).includes(w)) && roles.includes(p.calitateParte)
+      (p) =>
+        searchWords.every((w) => stripDiacritics(p.nume.toLowerCase()).includes(w)) && roles.includes(p.calitateParte)
     )
   );
 }
@@ -90,7 +98,7 @@ interface DosareProps {
   onSearchComplete?: (
     params: SearchParams,
     resultCount: number,
-    meta?: { categoriesCount: number; institutiiCount: number },
+    meta?: { categoriesCount: number; institutiiCount: number }
   ) => void;
   pendingSearch?: SearchParams | null;
   consumePendingSearch?: () => void;
@@ -98,7 +106,15 @@ interface DosareProps {
   onConfigureApiKey?: () => void;
 }
 
-export default function Dosare({ state, onStateChange, onSearchComplete, pendingSearch, consumePendingSearch, apiKeys, onConfigureApiKey }: DosareProps) {
+export default function Dosare({
+  state,
+  onStateChange,
+  onSearchComplete,
+  pendingSearch,
+  consumePendingSearch,
+  apiKeys,
+  onConfigureApiKey,
+}: DosareProps) {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [loadMoreProgress, setLoadMoreProgress] = useState<LoadMoreProgress | null>(null);
@@ -111,7 +127,10 @@ export default function Dosare({ state, onStateChange, onSearchComplete, pending
 
   const filteredByInst = filterByInstitutii(state.allDosare, state.institutii ?? []);
   const filteredByDate = filterByDate(filteredByInst, dateFilter.start, dateFilter.stop);
-  const filteredByCategAndStadiu = filterByStadii(filterByCategorii(filteredByDate, state.categorii), state.stadii ?? []);
+  const filteredByCategAndStadiu = filterByStadii(
+    filterByCategorii(filteredByDate, state.categorii),
+    state.stadii ?? []
+  );
   const dosare = filterByRoles(filteredByCategAndStadiu, selectedRoles, state.searchedName);
 
   const handleSearch = async (params: SearchParams) => {
@@ -178,10 +197,11 @@ export default function Dosare({ state, onStateChange, onSearchComplete, pending
     try {
       const result = await api.dosare.loadMore(
         lastSearchParams.current,
-        (progress) => setLoadMoreProgress({
-          ...progress,
-          found: newCount,
-        }),
+        (progress) =>
+          setLoadMoreProgress({
+            ...progress,
+            found: newCount,
+          }),
         abort.signal,
         (batch) => {
           // Backend already filters out existing — these are all new
@@ -199,7 +219,7 @@ export default function Dosare({ state, onStateChange, onSearchComplete, pending
             allDosare: [...allDosare],
           }));
         },
-        existingNumere,
+        existingNumere
       );
       // Final pass (in case any items weren't in batch events)
       for (const d of result.data) {
@@ -277,9 +297,11 @@ export default function Dosare({ state, onStateChange, onSearchComplete, pending
         onLoadMore={handleLoadMore}
         onStopLoadMore={handleStopLoadMore}
         loadMoreProgress={loadMoreProgress}
-        loadMoreMessage={!loading && !loadingMore && state.searched && !state.error && state.allDosare.length >= 1000 && !loadMoreDone
-          ? `Cautarea a returnat ${state.allDosare.length.toLocaleString("ro-RO")} rezultate — este posibil sa existe mai multe. Apasati "Incarca mai multe" pentru a aduce toate dosarele.`
-          : undefined}
+        loadMoreMessage={
+          !loading && !loadingMore && state.searched && !state.error && state.allDosare.length >= 1000 && !loadMoreDone
+            ? `Cautarea a returnat ${state.allDosare.length.toLocaleString("ro-RO")} rezultate — este posibil sa existe mai multe. Apasati "Incarca mai multe" pentru a aduce toate dosarele.`
+            : undefined
+        }
         loadMoreDone={loadMoreDone}
         loadMoreTotal={loadMoreDone ? state.allDosare.length : undefined}
         loadMoreWarnings={loadMoreWarnings}
@@ -328,12 +350,16 @@ export default function Dosare({ state, onStateChange, onSearchComplete, pending
       )}
 
       {!loading && filteredByCategAndStadiu.length > 0 && (
-        <Suspense fallback={<div className="py-6 text-center text-xs text-muted-foreground">Se incarca graficele...</div>}>
+        <Suspense
+          fallback={<div className="py-6 text-center text-xs text-muted-foreground">Se incarca graficele...</div>}
+        >
           <MetricsPanel
             dosare={filteredByCategAndStadiu}
             searchedName={state.searchedName}
             selectedRoles={selectedRoles}
-            onRoleFilter={(role) => setSelectedRoles((prev) => prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role])}
+            onRoleFilter={(role) =>
+              setSelectedRoles((prev) => (prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role]))
+            }
           />
         </Suspense>
       )}

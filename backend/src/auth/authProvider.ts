@@ -22,7 +22,7 @@ export class AuthenticationError extends Error {
   constructor(
     public readonly status: 401 | 403,
     public readonly code: string,
-    message: string,
+    message: string
   ) {
     super(message);
     this.name = "AuthenticationError";
@@ -70,11 +70,10 @@ export class WebJwtAuthProvider implements AuthProvider {
         audience: getJwtAudience(),
       });
     } catch (err) {
-      const internalCode = err instanceof Error && "code" in err
-        ? String((err as { code: unknown }).code)
-        : "invalid_token";
+      const internalCode =
+        err instanceof Error && "code" in err ? String((err as { code: unknown }).code) : "invalid_token";
       console.warn(
-        `[auth.jwt_invalid] internalCode=${internalCode} message=${err instanceof Error ? err.message : "unknown"}`,
+        `[auth.jwt_invalid] internalCode=${internalCode} message=${err instanceof Error ? err.message : "unknown"}`
       );
       throw new AuthenticationError(401, "unauthorized", "Token de autentificare invalid.");
     }

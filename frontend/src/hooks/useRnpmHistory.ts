@@ -32,28 +32,23 @@ function buildLabel(type: RnpmSearchType, params: RnpmSearchParams): string {
 export function useRnpmHistory() {
   const [history, setHistory] = useState<RnpmSearchHistoryEntry[]>(loadHistory);
 
-  const addEntry = useCallback(
-    (type: RnpmSearchType, params: RnpmSearchParams, resultCount: number) => {
-      const entry: RnpmSearchHistoryEntry = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        type,
-        params,
-        label: buildLabel(type, params),
-        resultCount,
-        timestamp: Date.now(),
-      };
+  const addEntry = useCallback((type: RnpmSearchType, params: RnpmSearchParams, resultCount: number) => {
+    const entry: RnpmSearchHistoryEntry = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      type,
+      params,
+      label: buildLabel(type, params),
+      resultCount,
+      timestamp: Date.now(),
+    };
 
-      setHistory((prev) => {
-        const filtered = prev.filter(
-          (e) => !(e.label === entry.label && e.type === entry.type)
-        );
-        const next = [entry, ...filtered].slice(0, MAX_ENTRIES);
-        saveHistory(next);
-        return next;
-      });
-    },
-    []
-  );
+    setHistory((prev) => {
+      const filtered = prev.filter((e) => !(e.label === entry.label && e.type === entry.type));
+      const next = [entry, ...filtered].slice(0, MAX_ENTRIES);
+      saveHistory(next);
+      return next;
+    });
+  }, []);
 
   const removeEntry = useCallback((id: string) => {
     setHistory((prev) => {

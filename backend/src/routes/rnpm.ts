@@ -26,10 +26,10 @@ function parseProvider(v: unknown): CaptchaProvider | undefined {
 }
 
 // Body size limits — prevent DoS via oversized POST payloads
-const SEARCH_BODY_LIMIT = 64 * 1024;    // 64KB: single search params
-const BULK_BODY_LIMIT = 512 * 1024;     // 512KB: up to 200 bulk items
-const EXPORT_BODY_LIMIT = 64 * 1024;    // 64KB: up to 500 numeric ids
-const SMALL_BODY_LIMIT = 4 * 1024;      // 4KB: captcha balance
+const SEARCH_BODY_LIMIT = 64 * 1024; // 64KB: single search params
+const BULK_BODY_LIMIT = 512 * 1024; // 512KB: up to 200 bulk items
+const EXPORT_BODY_LIMIT = 64 * 1024; // 64KB: up to 500 numeric ids
+const SMALL_BODY_LIMIT = 4 * 1024; // 4KB: captcha balance
 
 const bodyTooLarge = (c: import("hono").Context) => c.json({ error: "Payload prea mare" }, 413);
 const limitSearch = bodyLimit({ maxSize: SEARCH_BODY_LIMIT, onError: bodyTooLarge });
@@ -118,7 +118,7 @@ function rejectCaptchaKeyInWebMode(c: import("hono").Context): Response | null {
       error:
         "RNPM in web mode necesita stocare server-side a cheii captcha (neimplementat in v2.11.0). Folositi desktop sau asteptati per-user key storage.",
     },
-    501,
+    501
   );
 }
 
@@ -126,11 +126,33 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
-  const { type, params, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode, startRnpmPage, batchSize, gcode, searchId } = (body ?? {}) as {
-    type?: unknown; params?: unknown; captchaKey?: unknown; captchaProvider?: unknown; fallback2CaptchaKey?: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
+  const {
+    type,
+    params,
+    captchaKey,
+    captchaProvider,
+    fallback2CaptchaKey,
+    captchaMode,
+    startRnpmPage,
+    batchSize,
+    gcode,
+    searchId,
+  } = (body ?? {}) as {
+    type?: unknown;
+    params?: unknown;
+    captchaKey?: unknown;
+    captchaProvider?: unknown;
+    fallback2CaptchaKey?: unknown;
     captchaMode?: unknown;
-    startRnpmPage?: unknown; batchSize?: unknown; gcode?: unknown; searchId?: unknown;
+    startRnpmPage?: unknown;
+    batchSize?: unknown;
+    gcode?: unknown;
+    searchId?: unknown;
   };
 
   if (!isValidType(type)) return c.json({ error: "Tip cautare invalid" }, 400);
@@ -171,7 +193,9 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     existingGcode,
     existingSearchId,
     signal: c.req.raw.signal,
-    onSearchCreated: (sid) => { createdSearchId = sid; },
+    onSearchCreated: (sid) => {
+      createdSearchId = sid;
+    },
   });
   if (dedupKey) inflightRequests.set(dedupKey, run);
 
@@ -197,10 +221,10 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
       // Hono's typed status codes exclude it, so emit via a plain Response.
       // v2.20.3 Grupul K: include searchId daca a fost creat (null daca abort
       // s-a intamplat inainte de saveSearch).
-      return new Response(
-        JSON.stringify({ error: "Cautare oprita", searchId: createdSearchId }),
-        { status: 499, headers: { "Content-Type": "application/json" } },
-      );
+      return new Response(JSON.stringify({ error: "Cautare oprita", searchId: createdSearchId }), {
+        status: 499,
+        headers: { "Content-Type": "application/json" },
+      });
     }
     // Structured "limit exceeded" — frontend foloseste `code` + `splittable` ca sa
     // ofere split via tipInscriere. Restul erorilor RNPM/JSON ramane 500 generic.
@@ -215,7 +239,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
           limit,
           splittable: { type },
         },
-        400,
+        400
       );
     }
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
@@ -230,8 +254,18 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
-  const { items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as { items?: unknown; captchaKey?: unknown; captchaProvider?: unknown; fallback2CaptchaKey?: unknown; captchaMode?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
+  const { items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as {
+    items?: unknown;
+    captchaKey?: unknown;
+    captchaProvider?: unknown;
+    fallback2CaptchaKey?: unknown;
+    captchaMode?: unknown;
+  };
 
   if (!Array.isArray(items) || items.length === 0) return c.json({ error: "Lista cautari goala" }, 400);
   if (items.length > 200) return c.json({ error: "Maxim 200 cautari per bulk" }, 400);
@@ -282,16 +316,19 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     // SSE hard timeout — guarantee the stream never hangs indefinitely
     const timeoutHandle = setTimeout(() => controller.abort(), SSE_TIMEOUT_MS);
 
-    const send = (p: BulkProgress) => stream.writeSSE({
-      event: "progress",
-      data: JSON.stringify(p),
-    });
+    const send = (p: BulkProgress) =>
+      stream.writeSSE({
+        event: "progress",
+        data: JSON.stringify(p),
+      });
 
     const bulkRun = executeBulkSearch(
       validItems,
       captchaKey,
       ownerId,
-      (p) => { void send(p); },
+      (p) => {
+        void send(p);
+      },
       defaultRnpmClient,
       controller.signal,
       provider,
@@ -339,10 +376,20 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
-  const { type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as {
-    type?: unknown; baseParams?: unknown; subTypeLabels?: unknown;
-    captchaKey?: unknown; captchaProvider?: unknown; fallback2CaptchaKey?: unknown; captchaMode?: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
+  const { type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ??
+    {}) as {
+    type?: unknown;
+    baseParams?: unknown;
+    subTypeLabels?: unknown;
+    captchaKey?: unknown;
+    captchaProvider?: unknown;
+    fallback2CaptchaKey?: unknown;
+    captchaMode?: unknown;
   };
 
   if (!isValidType(type)) return c.json({ error: "Tip cautare invalid" }, 400);
@@ -391,10 +438,11 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
     c.req.raw.signal?.addEventListener?.("abort", onAbort);
     const timeoutHandle = setTimeout(() => controller.abort(), SSE_SPLIT_TIMEOUT_MS);
 
-    const send = (p: SplitSearchProgress) => stream.writeSSE({
-      event: "progress",
-      data: JSON.stringify(p),
-    });
+    const send = (p: SplitSearchProgress) =>
+      stream.writeSSE({
+        event: "progress",
+        data: JSON.stringify(p),
+      });
 
     // v2.20.3 Grupul K — capture parentSearchId imediat ce e creat, ca abort-ul
     // sau timeout-ul mid-search sa poata emite SSE `aborted`/`timeout` cu
@@ -423,8 +471,10 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
           });
         },
       },
-      (p) => { void send(p); },
-      defaultRnpmClient,
+      (p) => {
+        void send(p);
+      },
+      defaultRnpmClient
     );
 
     try {
@@ -436,9 +486,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
       // repede sau daca un incident ne forteaza dezactivarea temporara, set
       // RNPM_AUDIT_CAP_HIT_DISABLED=1 sare INSERT-ul rnpm.cap_hit fara restart.
       const auditCapHitDisabled = process.env.RNPM_AUDIT_CAP_HIT_DISABLED === "1";
-      const blockedStats = result.splitStats.filter(
-        (s) => s.status === "blocked" || s.status === "partial",
-      );
+      const blockedStats = result.splitStats.filter((s) => s.status === "blocked" || s.status === "partial");
       if (!auditCapHitDisabled && (blockedStats.length > 0 || result.upstreamTotal !== result.total)) {
         const gapByReason: Record<string, number> = {};
         // Tier-1 contributors: foloseste s.gap (deja calculat in service) cand exista,
@@ -516,7 +564,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
           console.warn(
             `[rnpm.cap_hit] audit insert failed for searchId=${result.searchId}: ${
               auditErr instanceof Error ? auditErr.message : String(auditErr)
-            }`,
+            }`
           );
         }
       }
@@ -578,7 +626,10 @@ rnpmRouter.get("/saved", (c) => {
     searchText,
     dataStart: c.req.query("dataStart") ?? undefined,
     dataStop: c.req.query("dataStop") ?? undefined,
-    sortKey: sortKeyRaw && SORT_KEYS.has(sortKeyRaw) ? (sortKeyRaw as "id" | "identificator" | "search_type" | "data" | "tip" | "activ") : undefined,
+    sortKey:
+      sortKeyRaw && SORT_KEYS.has(sortKeyRaw)
+        ? (sortKeyRaw as "id" | "identificator" | "search_type" | "data" | "tip" | "activ")
+        : undefined,
     sortDir: sortDirRaw === "asc" || sortDirRaw === "desc" ? sortDirRaw : undefined,
   });
   return c.json(result);
@@ -596,7 +647,11 @@ rnpmRouter.delete("/saved/all", requireRole("admin"), (c) => {
   const count = deleteAllAvize(getOwnerId(c));
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
-  try { compactDb(); } catch (e) { console.warn("[rnpm] compact after delete-all failed:", e); }
+  try {
+    compactDb();
+  } catch (e) {
+    console.warn("[rnpm] compact after delete-all failed:", e);
+  }
   // Audit 2026-04-29 #15: ops destructive masive trebuie reconstruibile.
   recordAudit(c, "aviz.delete_all", {
     targetKind: "aviz",
@@ -607,7 +662,11 @@ rnpmRouter.delete("/saved/all", requireRole("admin"), (c) => {
 
 rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
   const { ids } = (body ?? {}) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "Lista id-uri goala" }, 400);
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
@@ -626,13 +685,13 @@ rnpmRouter.get("/stats", async (c) => {
   const dbPath = getDbPath();
   // CP-B4: async fs so handler does not block the event loop under concurrency (web mode).
   const sizeOf = async (p: string): Promise<number> => {
-    try { return (await stat(p)).size; } catch { return 0; }
+    try {
+      return (await stat(p)).size;
+    } catch {
+      return 0;
+    }
   };
-  const [main, wal, shm] = await Promise.all([
-    sizeOf(dbPath),
-    sizeOf(`${dbPath}-wal`),
-    sizeOf(`${dbPath}-shm`),
-  ]);
+  const [main, wal, shm] = await Promise.all([sizeOf(dbPath), sizeOf(`${dbPath}-wal`), sizeOf(`${dbPath}-shm`)]);
   return c.json({ ...stats, db: { path: dbPath, sizeBytes: main + wal + shm } });
 });
 
@@ -703,7 +762,11 @@ rnpmRouter.get("/backups", requireRole("admin"), async (c) => {
 
 rnpmRouter.post("/backups/restore", requireRole("admin"), limitSmall, async (c) => {
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
   const name = (body as { name?: unknown })?.name;
   if (typeof name !== "string" || name.length === 0) {
     return c.json({ error: "Nume backup lipsa" }, 400);
@@ -760,7 +823,11 @@ rnpmRouter.delete("/saved/:id", (c) => {
 
 rnpmRouter.post("/saved/export", limitExport, async (c) => {
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
   const { ids } = (body ?? {}) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "Lista id-uri goala" }, 400);
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
@@ -782,11 +849,13 @@ rnpmRouter.get("/searches", (c) => {
   const limit = Number(c.req.query("limit") ?? 50);
   const cursorStr = c.req.query("cursor");
   const cursor = cursorStr ? Number(cursorStr) : null;
-  return c.json(getSearches({
-    ownerId: getOwnerId(c),
-    limit: Number.isFinite(limit) ? limit : 50,
-    cursor: Number.isFinite(cursor as number) ? (cursor as number) : null,
-  }));
+  return c.json(
+    getSearches({
+      ownerId: getOwnerId(c),
+      limit: Number.isFinite(limit) ? limit : 50,
+      cursor: Number.isFinite(cursor as number) ? (cursor as number) : null,
+    })
+  );
 });
 
 rnpmRouter.delete("/searches/:id", (c) => {
@@ -806,7 +875,11 @@ rnpmRouter.post("/captcha/balance", limitSmall, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
   let body: unknown;
-  try { body = await c.req.json(); } catch { return c.json({ error: "JSON invalid" }, 400); }
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
   const { captchaKey, captchaProvider } = (body ?? {}) as { captchaKey?: unknown; captchaProvider?: unknown };
   if (typeof captchaKey !== "string") return c.json({ error: "Cheie lipsa" }, 400);
   try {

@@ -94,21 +94,19 @@ export function KpiStrip({ data, loading, error }: KpiStripProps) {
   }
 
   const jobsByKind = `${data.jobs.byKind.dosar_soap} Dosare, ${data.jobs.byKind.name_soap} Nume`;
-  const alertsSubline = data.alerts.last24h === 0
-    ? "0 noi in ultimele 24h"
-    : `+${data.alerts.last24h} noi in ultimele 24h`;
-  const runsSubline = data.runs.total === 0
-    ? "Nicio rulare in ultimele 24h"
-    : `${data.runs.ok} ok / ${data.runs.error} erori / ${data.runs.timeout} timeout / ${data.runs.aborted} oprite`;
-  const aiSubline = data.ai.calls === 0
-    ? "Niciun call in ultimele 24h"
-    : `${data.ai.calls} call-uri, ${formatTokens(data.ai.tokens)} tokens`;
+  const alertsSubline =
+    data.alerts.last24h === 0 ? "0 noi in ultimele 24h" : `+${data.alerts.last24h} noi in ultimele 24h`;
+  const runsSubline =
+    data.runs.total === 0
+      ? "Nicio rulare in ultimele 24h"
+      : `${data.runs.ok} ok / ${data.runs.error} erori / ${data.runs.timeout} timeout / ${data.runs.aborted} oprite`;
+  const aiSubline =
+    data.ai.calls === 0
+      ? "Niciun call in ultimele 24h"
+      : `${data.ai.calls} call-uri, ${formatTokens(data.ai.tokens)} tokens`;
 
   return (
-    <div
-      aria-busy={loading || undefined}
-      className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
-    >
+    <div aria-busy={loading || undefined} className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
       <KpiCard
         icon={ListChecks}
         label="Monitorizari active"

@@ -22,7 +22,11 @@ export interface AiUsageSummaryResult {
   generatedAt?: string;
 }
 
-interface EnvelopeOk<T> { data: T; requestId: string; error?: undefined }
+interface EnvelopeOk<T> {
+  data: T;
+  requestId: string;
+  error?: undefined;
+}
 interface EnvelopeError {
   data: null;
   error: { code: string; message: string; details?: unknown };
@@ -43,7 +47,7 @@ async function unwrapAiUsage<T>(res: Response): Promise<T> {
       err?.code ?? "unknown_error",
       err?.message ?? "Eroare necunoscuta",
       res.status,
-      err?.details,
+      err?.details
     );
   }
 

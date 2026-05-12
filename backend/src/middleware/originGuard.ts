@@ -27,11 +27,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Next } from "hono";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const LOOPBACK_ADDRESSES = new Set([
-  "127.0.0.1",
-  "::1",
-  "::ffff:127.0.0.1",
-]);
+const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 function safeHost(input: string | undefined | null): string | null {
   if (!input) return null;
@@ -66,7 +62,7 @@ export async function originGuard(c: Context, next: Next): Promise<Response | vo
           message: "Cerere refuzata: Host header lipseste.",
         },
       },
-      403,
+      403
     );
   }
 
@@ -79,11 +75,10 @@ export async function originGuard(c: Context, next: Next): Promise<Response | vo
       {
         error: {
           code: "csrf_origin_mismatch",
-          message:
-            "Cerere refuzata: Origin/Referer lipseste pentru o ruta de modificare.",
+          message: "Cerere refuzata: Origin/Referer lipseste pentru o ruta de modificare.",
         },
       },
-      403,
+      403
     );
   }
 
@@ -95,7 +90,7 @@ export async function originGuard(c: Context, next: Next): Promise<Response | vo
           message: `Cerere refuzata: Origin ${claimedHost} nu corespunde Host ${hostHeader}.`,
         },
       },
-      403,
+      403
     );
   }
 

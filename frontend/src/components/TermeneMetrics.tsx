@@ -1,15 +1,7 @@
 import { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { CalendarDays, CalendarCheck, CalendarClock, BarChart3, ChevronDown, ChevronUp } from "lucide-react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  CartesianGrid,
-} from "recharts";
+import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import type { Termen } from "@/types";
 import { CHART_FILLS } from "@/lib/chart-colors";
 
@@ -22,12 +14,13 @@ interface TermeneMetricsProps {
   onClearFilters?: () => void;
 }
 
-const MONTH_NAMES = [
-  "Ian", "Feb", "Mar", "Apr", "Mai", "Iun",
-  "Iul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
+const MONTH_NAMES = ["Ian", "Feb", "Mar", "Apr", "Mai", "Iun", "Iul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
-function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
+function ChartTooltip({
+  active,
+  payload,
+  label,
+}: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
@@ -201,12 +194,8 @@ function CountCard({
 }) {
   return (
     <Card
-      className={`p-4 transition-all ${
-        onClick ? "cursor-pointer hover:shadow-md" : ""
-      } ${
-        active
-          ? "ring-2 ring-primary border-primary bg-primary/5 shadow-sm"
-          : ""
+      className={`p-4 transition-all ${onClick ? "cursor-pointer hover:shadow-md" : ""} ${
+        active ? "ring-2 ring-primary border-primary bg-primary/5 shadow-sm" : ""
       }`}
       onClick={onClick}
     >

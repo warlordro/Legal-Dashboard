@@ -103,7 +103,7 @@ describe("email builders", () => {
   it("builds Romanian subject from severity and kind", () => {
     expect(buildSubject(alert())).toBe("[Legal Dashboard] Critic: Solutie aparuta");
     expect(buildSubject(alert({ severity: "warning", kind: "termen_new" }))).toBe(
-      "[Legal Dashboard] Avertisment: Termen nou",
+      "[Legal Dashboard] Avertisment: Termen nou"
     );
   });
 
@@ -154,7 +154,7 @@ describe("send email", () => {
         from: "alerts@firma.ro",
         to: "user@firma.ro",
         subject: "[Legal Dashboard] Critic: Solutie aparuta",
-      }),
+      })
     );
   });
 
@@ -175,7 +175,7 @@ describe("send email", () => {
       expect.objectContaining({
         to: "test@firma.ro",
         subject: "[Legal Dashboard] Test notificari email",
-      }),
+      })
     );
   });
 });

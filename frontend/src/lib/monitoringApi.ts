@@ -70,14 +70,16 @@ export interface BulkDeleteResult {
 }
 
 export const monitoring = {
-  list: async (params: {
-    page?: number;
-    pageSize?: number;
-    kind?: MonitoringJobKind;
-    active?: boolean;
-    q?: string;
-    signal?: AbortSignal;
-  } = {}): Promise<MonitoringListResult> => {
+  list: async (
+    params: {
+      page?: number;
+      pageSize?: number;
+      kind?: MonitoringJobKind;
+      active?: boolean;
+      q?: string;
+      signal?: AbortSignal;
+    } = {}
+  ): Promise<MonitoringListResult> => {
     const search = new URLSearchParams();
     if (params.page !== undefined) search.set("page", String(params.page));
     if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
@@ -141,7 +143,7 @@ export const monitoring = {
 
   patch: async (
     id: number,
-    patch: { active?: boolean; cadence_sec?: number; notes?: string | null },
+    patch: { active?: boolean; cadence_sec?: number; notes?: string | null }
   ): Promise<MonitoringJob> => {
     const res = await apiFetch(`/api/v1/monitoring/jobs/${id}`, {
       method: "PATCH",

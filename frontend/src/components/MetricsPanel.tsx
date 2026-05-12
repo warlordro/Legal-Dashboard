@@ -1,15 +1,17 @@
 import { useMemo, useState } from "react";
-import { BarChart3, PieChart as PieChartIcon, Building2, FolderOpen, Scale, ChevronDown, ChevronUp } from "lucide-react";
+import {
+  BarChart3,
+  PieChart as PieChartIcon,
+  Building2,
+  FolderOpen,
+  Scale,
+  ChevronDown,
+  ChevronUp,
+} from "lucide-react";
 import type { Dosar } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
 import { CATEGORY_COLORS, CATEGORY_FALLBACK } from "@/lib/chart-colors";
-import {
-  SummaryCard,
-  PartyAnalysisCard,
-  CategoryChart,
-  StadiiChart,
-  InstitutiiChart,
-} from "./metrics-panel-parts";
+import { SummaryCard, PartyAnalysisCard, CategoryChart, StadiiChart, InstitutiiChart } from "./metrics-panel-parts";
 
 function stripDiacritics(s: string): string {
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -81,15 +83,9 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
       .sort((a, b) => b.value - a.value);
   }, [dosare]);
 
-  const institutiiCounts = useMemo(
-    () => countByField(dosare, (d) => d.institutie || "Necunoscut"),
-    [dosare],
-  );
+  const institutiiCounts = useMemo(() => countByField(dosare, (d) => d.institutie || "Necunoscut"), [dosare]);
 
-  const totalInstitutii = useMemo(
-    () => Object.keys(institutiiCounts).length,
-    [institutiiCounts],
-  );
+  const totalInstitutii = useMemo(() => Object.keys(institutiiCounts).length, [institutiiCounts]);
 
   const topInstitutii = useMemo(() => {
     return Object.entries(institutiiCounts)
@@ -160,7 +156,10 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
           value={categoryData.length}
           color="text-blue-500"
           bg="bg-blue-500/10"
-          detail={categoryData.slice(0, 3).map((c) => `${c.name}: ${c.value}`).join(", ")}
+          detail={categoryData
+            .slice(0, 3)
+            .map((c) => `${c.name}: ${c.value}`)
+            .join(", ")}
         />
         <SummaryCard
           icon={Scale}
@@ -168,7 +167,10 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
           value={stadiiData.length}
           color="text-purple-500"
           bg="bg-purple-500/10"
-          detail={stadiiData.slice(0, 3).map((s) => `${s.name}: ${s.value}`).join(", ")}
+          detail={stadiiData
+            .slice(0, 3)
+            .map((s) => `${s.name}: ${s.value}`)
+            .join(", ")}
         />
         <SummaryCard
           icon={Building2}
@@ -180,22 +182,24 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
         />
       </div>
 
-      {expanded && <>
-        {partyAnalysis && partyAnalysis.length > 0 && searchedName && (
-          <PartyAnalysisCard
-            searchedName={searchedName}
-            entries={partyAnalysis}
-            selectedRoles={selectedRoles}
-            onRoleFilter={onRoleFilter}
-          />
-        )}
+      {expanded && (
+        <>
+          {partyAnalysis && partyAnalysis.length > 0 && searchedName && (
+            <PartyAnalysisCard
+              searchedName={searchedName}
+              entries={partyAnalysis}
+              selectedRoles={selectedRoles}
+              onRoleFilter={onRoleFilter}
+            />
+          )}
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <CategoryChart data={categoryData} />
-          <StadiiChart data={stadiiData} />
-          <InstitutiiChart data={topInstitutii} />
-        </div>
-      </>}
+          <div className="grid gap-4 lg:grid-cols-3">
+            <CategoryChart data={categoryData} />
+            <StadiiChart data={stadiiData} />
+            <InstitutiiChart data={topInstitutii} />
+          </div>
+        </>
+      )}
     </div>
   );
 }

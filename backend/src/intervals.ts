@@ -6,7 +6,7 @@
 
 export interface DateInterval {
   dataStart: string; // YYYY-MM-DD
-  dataStop: string;  // YYYY-MM-DD
+  dataStop: string; // YYYY-MM-DD
 }
 
 /**

@@ -20,7 +20,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // exporturilor via importActual ca rnpmRouter sa primeasca tipurile corecte.
 vi.mock("../services/rnpmSearchService.ts", async () => {
   const actual = await vi.importActual<typeof import("../services/rnpmSearchService.ts")>(
-    "../services/rnpmSearchService.ts",
+    "../services/rnpmSearchService.ts"
   );
   return {
     ...actual,
@@ -33,11 +33,7 @@ import { executeSplitSearch } from "../services/rnpmSearchService.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { updateUserRole } from "../db/userRepository.ts";
 import * as auditRepository from "../db/auditRepository.ts";
-import type {
-  SplitSearchInput,
-  SplitSearchResult,
-  SplitSearchProgress,
-} from "../services/rnpmSearchService.ts";
+import type { SplitSearchInput, SplitSearchResult, SplitSearchProgress } from "../services/rnpmSearchService.ts";
 
 const executeSplitSearchMock = vi.mocked(executeSplitSearch);
 
@@ -125,7 +121,7 @@ async function runSplit(): Promise<{ res: Response; body: string }> {
 function getCapHitRow(): { detail_json: string; target_id: string | null; outcome: string } | undefined {
   return getDb()
     .prepare(
-      "SELECT detail_json, target_id, outcome FROM audit_log WHERE action = 'rnpm.cap_hit' ORDER BY id DESC LIMIT 1",
+      "SELECT detail_json, target_id, outcome FROM audit_log WHERE action = 'rnpm.cap_hit' ORDER BY id DESC LIMIT 1"
     )
     .get() as { detail_json: string; target_id: string | null; outcome: string } | undefined;
 }
@@ -133,10 +129,7 @@ function getCapHitRow(): { detail_json: string; target_id: string | null; outcom
 describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
   it("E1: emits canonical detail (no criteriu PII, searchType present, gapByReason populated, tier-1+tier-2 flatten)", async () => {
     executeSplitSearchMock.mockImplementationOnce(
-      async (
-        _input: SplitSearchInput,
-        _onProgress: (p: SplitSearchProgress) => void,
-      ): Promise<SplitSearchResult> =>
+      async (_input: SplitSearchInput, _onProgress: (p: SplitSearchProgress) => void): Promise<SplitSearchResult> =>
         buildSplitResult({
           searchId: 42,
           total: 100,
@@ -165,7 +158,7 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
               gapReason: "terminal_cap",
             },
           ],
-        }),
+        })
     );
 
     const { res } = await runSplit();
@@ -224,10 +217,14 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
           upstreamTotal: 100,
           splitStats: [
             {
-              label: "X", status: "blocked", count: 0, subTotal: 100, gapReason: "terminal_cap",
+              label: "X",
+              status: "blocked",
+              count: 0,
+              subTotal: 100,
+              gapReason: "terminal_cap",
             },
           ],
-        }),
+        })
     );
     const recordAuditSpy = vi.spyOn(auditRepository, "recordAudit").mockImplementation(() => {
       throw new Error("simulated audit_log INSERT failure");
@@ -254,7 +251,7 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
             { label: "A", status: "ok", count: 25, subTotal: 25 },
             { label: "B", status: "ok", count: 25, subTotal: 25 },
           ],
-        }),
+        })
     );
 
     const { res } = await runSplit();
@@ -271,9 +268,10 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
     // sincron — dar acum invariantul e explicit, nu derivat din semantica Hono.
     let resolveFirst: ((value: SplitSearchResult) => void) | undefined;
     executeSplitSearchMock.mockImplementationOnce(
-      () => new Promise<SplitSearchResult>((resolve) => {
-        resolveFirst = resolve;
-      }),
+      () =>
+        new Promise<SplitSearchResult>((resolve) => {
+          resolveFirst = resolve;
+        })
     );
 
     const app = buildApp();
@@ -323,12 +321,10 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
               subTotal: 1500,
               gap: 100,
               gapReason: "residual_unclassified",
-              nested: [
-                { label: "X", status: "ok", count: 800, subTotal: 1400 },
-              ],
+              nested: [{ label: "X", status: "ok", count: 800, subTotal: 1400 }],
             },
           ],
-        }),
+        })
     );
 
     const { res } = await runSplit();
@@ -366,10 +362,8 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
             searchId: 555,
             total: 0,
             upstreamTotal: 1000,
-            splitStats: [
-              { label: "X", status: "blocked", count: 0, subTotal: 1000, gapReason: "terminal_cap" },
-            ],
-          }),
+            splitStats: [{ label: "X", status: "blocked", count: 0, subTotal: 1000, gapReason: "terminal_cap" }],
+          })
       );
 
       const { res } = await runSplit();

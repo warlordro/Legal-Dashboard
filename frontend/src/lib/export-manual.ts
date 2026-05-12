@@ -30,11 +30,18 @@ export async function buildManualPdf(): Promise<ExportResult> {
     }
   };
 
-  const addWrappedText = (text: string, fontSize: number, style = "normal", color: [number, number, number] = textDark, xOffset = 0, maxW?: number) => {
+  const addWrappedText = (
+    text: string,
+    fontSize: number,
+    style = "normal",
+    color: [number, number, number] = textDark,
+    xOffset = 0,
+    maxW?: number
+  ) => {
     doc.setFontSize(fontSize);
     doc.setFont("helvetica", style);
     doc.setTextColor(...color);
-    const w = maxW || (contentWidth - xOffset);
+    const w = maxW || contentWidth - xOffset;
     const lines = doc.splitTextToSize(stripDiacritics(text), w);
     const lineHeight = fontSize * 0.42;
     for (const line of lines) {
@@ -151,7 +158,9 @@ export async function buildManualPdf(): Promise<ExportResult> {
   // ========== 1. PREZENTARE GENERALA ==========
   y += 4;
   addHeading("1. Prezentare Generala");
-  addParagraph("Legal Dashboard este o aplicatie desktop si web pentru cautarea si analiza dosarelor si termenelor din toate instantele romanesti. Datele sunt obtinute in timp real prin API-ul SOAP public al Ministerului Justitiei (portalquery.just.ro).");
+  addParagraph(
+    "Legal Dashboard este o aplicatie desktop si web pentru cautarea si analiza dosarelor si termenelor din toate instantele romanesti. Datele sunt obtinute in timp real prin API-ul SOAP public al Ministerului Justitiei (portalquery.just.ro)."
+  );
 
   addHeading("Ce poti face cu aceasta aplicatie:", 2);
   addBullet("Cautare dosare dupa numar, parti implicate, obiect sau institutie");
@@ -168,17 +177,23 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet("macOS — fisier DMG (Intel si Apple Silicon)");
   addBullet("Web — versiune standalone accesibila din browser");
 
-  addParagraph("Sursa datelor: Toate informatiile despre dosare si termene provin exclusiv din API-ul public al Ministerului Justitiei. Aplicatia nu stocheaza dosare pe server — fiecare cautare interogheaza in timp real baza de date publica.");
+  addParagraph(
+    "Sursa datelor: Toate informatiile despre dosare si termene provin exclusiv din API-ul public al Ministerului Justitiei. Aplicatia nu stocheaza dosare pe server — fiecare cautare interogheaza in timp real baza de date publica."
+  );
 
   // ========== 2. DASHBOARD ==========
   addHeading("2. Pagina Dashboard");
   addParagraph("Dashboard-ul este pagina principala a aplicatiei si ofera o vedere de ansamblu.");
   addHeading("Elemente afisate:", 2);
   addBullet("Carduri de navigare rapida catre Cautare Dosare si Termene & Calendar");
-  addBullet("Rezumatul ultimei cautari (numar dosare, categorii, institutii, parte cautata) — vizibil doar dupa o cautare");
-  addBullet("Tipuri de procese disponibile: Penal, Civil, Contencios administrativ si fiscal, Litigii de munca, Faliment, Litigii cu profesionistii, Altele");
+  addBullet(
+    "Rezumatul ultimei cautari (numar dosare, categorii, institutii, parte cautata) — vizibil doar dupa o cautare"
+  );
+  addBullet(
+    "Tipuri de procese disponibile: Penal, Civil, Contencios administrativ si fiscal, Litigii de munca, Faliment, Litigii cu profesionistii, Altele"
+  );
   addBullet("Informatii API — endpoint-ul SOAP, metodele disponibile, limita de 1000 rezultate per cerere");
-  addBullet("Versiunea aplicatiei cu buton \"Vezi Noutati\" (changelog) si \"Manual\" (acest document)");
+  addBullet('Versiunea aplicatiei cu buton "Vezi Noutati" (changelog) si "Manual" (acest document)');
 
   // ========== 3. CAUTARE DOSARE ==========
   addHeading("3. Cautare Dosare");
@@ -191,10 +206,12 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet("Data de la / Data pana la — interval de date pentru filtrarea rezultatelor");
 
   addHeading("Selector Institutii:", 2);
-  addParagraph("Apasand pe campul \"Institutie\" se deschide un dialog modal cu toate cele 246 instante grupate pe categorii:");
+  addParagraph(
+    'Apasand pe campul "Institutie" se deschide un dialog modal cu toate cele 246 instante grupate pe categorii:'
+  );
   addBullet("Curti de Apel (15), Tribunale (42), Tribunale Specializate (1)");
   addBullet("Tribunale Comerciale (3), Tribunale Militare (5), Curti Militare (1), Judecatorii (179)");
-  addBullet("Cautare rapida cu suport diacritice (\"brasov\" gaseste \"Brasov\")");
+  addBullet('Cautare rapida cu suport diacritice ("brasov" gaseste "Brasov")');
   addBullet("Selectie multipla — se pot alege mai multe institutii simultan");
   addBullet("Cautarea se trimite paralel catre toate institutiile selectate");
 
@@ -229,13 +246,17 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet("Analiza parti — roluri si numar aparitii per parte");
 
   addHeading("Butonul Reseteaza:", 2);
-  addParagraph("Apare in formularul de cautare cand cel putin un camp este completat. La apasare, sterge atat campurile formularului cat si toate rezultatele cautarii anterioare (tabel, metrici, filtre selectate).");
+  addParagraph(
+    "Apare in formularul de cautare cand cel putin un camp este completat. La apasare, sterge atat campurile formularului cat si toate rezultatele cautarii anterioare (tabel, metrici, filtre selectate)."
+  );
 
   // ========== 4. TERMENE & CALENDAR ==========
   addHeading("4. Termene & Calendar");
 
   addHeading("Cautare termene:", 2);
-  addParagraph("Formularul de cautare este similar cu cel de la Dosare. Rezultatele sunt termenele de judecata extrase din dosarele gasite.");
+  addParagraph(
+    "Formularul de cautare este similar cu cel de la Dosare. Rezultatele sunt termenele de judecata extrase din dosarele gasite."
+  );
 
   addHeading("Vizualizare duala:", 2);
   addBullet("Tabel — lista cu toate termenele, sortabila si paginata (10, 20, 50, 100 pe pagina)");
@@ -247,7 +268,9 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet("Termene viitoare (dupa data curenta)");
   addBullet("Termene trecute");
   addBullet("Cu solutie (termene care au o solutie inregistrata)");
-  addBullet("Filtrele functioneaza in logica OR — selectia multipla include orice termen care se potriveste cel putin unui filtru");
+  addBullet(
+    "Filtrele functioneaza in logica OR — selectia multipla include orice termen care se potriveste cel putin unui filtru"
+  );
 
   addHeading("Detalii termen (rand expandabil):", 2);
   addBullet("Categorie si Stadiu procesual");
@@ -263,17 +286,21 @@ export async function buildManualPdf(): Promise<ExportResult> {
 
   // ========== 5. LOAD MORE ==========
   addHeading("5. Incarca Mai Multe (Load More)");
-  addParagraph("API-ul Ministerului Justitiei returneaza maxim 1000 de rezultate per cerere. Daca cautarea ta are mai multe rezultate, butonul \"Incarca mai multe\" iti permite sa le obtii pe toate.");
+  addParagraph(
+    'API-ul Ministerului Justitiei returneaza maxim 1000 de rezultate per cerere. Daca cautarea ta are mai multe rezultate, butonul "Incarca mai multe" iti permite sa le obtii pe toate.'
+  );
 
   addHeading("Cum functioneaza:", 2);
-  addBullet("Dupa o cautare initiala care returneaza 1000 de rezultate, apare butonul \"Incarca mai multe\"");
+  addBullet('Dupa o cautare initiala care returneaza 1000 de rezultate, apare butonul "Incarca mai multe"');
   addBullet("La apasare, aplicatia scaneaza luna cu luna intregul interval de date");
   addBullet("Daca o luna are mai mult de 1000 rezultate, intervalul se subdivide automat in perioade mai mici");
   addBullet("Rezultatele noi apar in tabel in timp real (nu trebuie sa astepti sa se termine scanarea)");
   addBullet("Bara de progres arata cate dosare/termene NOI au fost gasite");
 
   addHeading("Deduplicare inteligenta:", 2);
-  addParagraph("Aplicatia trimite catre server lista dosarelor deja existente, iar serverul returneaza doar dosarele noi. Astfel, nu se descarca de doua ori aceleasi dosare, iar contorul de progres reflecta numarul real de dosare noi gasite.");
+  addParagraph(
+    "Aplicatia trimite catre server lista dosarelor deja existente, iar serverul returneaza doar dosarele noi. Astfel, nu se descarca de doua ori aceleasi dosare, iar contorul de progres reflecta numarul real de dosare noi gasite."
+  );
 
   addHeading("Oprire si continuare:", 2);
   addBullet("Butonul STOP opreste scanarea in orice moment");
@@ -289,7 +316,7 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addHeading("6. Export Excel si PDF");
 
   addHeading("Export Excel (.xlsx):", 2);
-  addBullet("Dosare: genereaza 2 foi (sheet-uri) — \"Dosare\" cu informatiile de baza si \"Sedinte\" cu toate sedintele");
+  addBullet('Dosare: genereaza 2 foi (sheet-uri) — "Dosare" cu informatiile de baza si "Sedinte" cu toate sedintele');
   addBullet("Termene: 1 foaie cu 7 coloane (numar dosar, data, ora, institutie, complet, solutie, sumar)");
   addBullet("Coloanele sunt auto-dimensionate pentru lizibilitate");
 
@@ -298,16 +325,20 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet("Analize AI: format Portrait A4 cu design profesional, formatare markdown, footer pe fiecare pagina");
 
   addHeading("Export selectiv:", 2);
-  addParagraph("Daca ai selectat dosare/termene cu checkbox, butoanele de export arata numarul selectat (ex: \"Excel (3)\") si exporta doar elementele selectate. Daca nu selectezi nimic, se exporta toate rezultatele.");
+  addParagraph(
+    'Daca ai selectat dosare/termene cu checkbox, butoanele de export arata numarul selectat (ex: "Excel (3)") si exporta doar elementele selectate. Daca nu selectezi nimic, se exporta toate rezultatele.'
+  );
 
   // ========== 7. AI ==========
   addHeading("7. Analiza AI");
-  addParagraph("Aplicatia ofera analiza inteligenta a dosarelor folosind modele AI de ultima generatie. Pentru a folosi aceasta functie, trebuie sa configurezi cel putin o cheie API (vezi sectiunea 9).");
+  addParagraph(
+    "Aplicatia ofera analiza inteligenta a dosarelor folosind modele AI de ultima generatie. Pentru a folosi aceasta functie, trebuie sa configurezi cel putin o cheie API (vezi sectiunea 9)."
+  );
 
   addHeading("Cum se foloseste:", 2);
   addBullet("Deschide detaliile unui dosar (click pe rand in tabel)");
   addBullet("Selecteaza modelul AI dorit din dropdown-ul de modele");
-  addBullet("Apasa butonul \"Analizeaza cu AI\"");
+  addBullet('Apasa butonul "Analizeaza cu AI"');
   addBullet("Analiza se genereaza in cateva secunde si apare sub detaliile dosarului");
   addBullet("Poti regenera analiza cu un alt model sau ascunde/arata rezultatul");
 
@@ -326,15 +357,17 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet("Legaturi cu alte dosare — daca exista conexiuni cu alte cauze");
 
   addHeading("Export analiza PDF:", 2);
-  addParagraph("Dupa generarea analizei, apare un buton de export PDF. Documentul generat include: header cu titlu, card cu informatiile dosarului, continutul analizei cu formatare profesionala si footer pe fiecare pagina.");
+  addParagraph(
+    "Dupa generarea analizei, apare un buton de export PDF. Documentul generat include: header cu titlu, card cu informatiile dosarului, continutul analizei cu formatare profesionala si footer pe fiecare pagina."
+  );
 
   // ========== 8. MULTI-AGENT ==========
   addHeading("8. Analiza AI Avansata (Multi-Agent)");
   addParagraph("Analiza avansata foloseste 3 modele AI simultan pentru o analiza mai completa si verificata.");
 
   addHeading("Cum functioneaza:", 2);
-  addBullet("Selecteaza 2 modele \"Analist\" — acestea analizeaza dosarul independent si in paralel");
-  addBullet("Selecteaza 1 model \"Judecator\" — acesta primeste ambele analize si le reconciliaza");
+  addBullet('Selecteaza 2 modele "Analist" — acestea analizeaza dosarul independent si in paralel');
+  addBullet('Selecteaza 1 model "Judecator" — acesta primeste ambele analize si le reconciliaza');
   addBullet("Nu se poate selecta acelasi model de doua ori");
   addBullet("Modelele judecator sunt restrictionate la modele premium: Claude Opus 4.6, GPT-5.4 sau Gemini 3.1 Pro");
 
@@ -348,20 +381,22 @@ export async function buildManualPdf(): Promise<ExportResult> {
 
   addHeading("Vizualizare rezultate:", 2);
   addBullet("Analiza finala a judecatorului este afisata principal");
-  addBullet("Toggle \"Vizualizare analize individuale\" — arata cele 2 analize side-by-side");
+  addBullet('Toggle "Vizualizare analize individuale" — arata cele 2 analize side-by-side');
   addBullet("Export PDF disponibil pentru analiza finala (include mentiunea modelului judecator)");
 
   // ========== 9. CHEI API ==========
   addHeading("9. Configurare Chei API");
-  addParagraph("Pentru a folosi analiza AI, trebuie sa configurezi cel putin o cheie API de la un furnizor AI. Cheile sunt gratuite la inregistrare pentru un volum limitat de cereri.");
+  addParagraph(
+    "Pentru a folosi analiza AI, trebuie sa configurezi cel putin o cheie API de la un furnizor AI. Cheile sunt gratuite la inregistrare pentru un volum limitat de cereri."
+  );
 
   addHeading("Cum se configureaza:", 2);
-  addBullet("Apasa pe \"Setari API\" din sidebar (iconita Bot)");
+  addBullet('Apasa pe "Setari API" din sidebar (iconita Bot)');
   addBullet("Introdu cheia API pentru furnizorul dorit (Anthropic, OpenAI sau Google)");
-  addBullet("Apasa \"Salveaza\" — cheia este stocata local pe calculatorul tau");
+  addBullet('Apasa "Salveaza" — cheia este stocata local pe calculatorul tau');
   addBullet("Indicatorul din sidebar devine verde cand cel putin o cheie este activa");
   addBullet("Poti configura cheile pentru mai multi furnizori simultan");
-  addBullet("Pentru a sterge o cheie, apasa \"Sterge cheia\" sub campul respectiv");
+  addBullet('Pentru a sterge o cheie, apasa "Sterge cheia" sub campul respectiv');
 
   addHeading("Securitatea cheilor:", 2);
   addBullet("Cheile sunt stocate doar local (in browser-ul aplicatiei), nu pe niciun server extern");
@@ -384,19 +419,25 @@ export async function buildManualPdf(): Promise<ExportResult> {
 
   addHeading("Istoric cautari:", 2);
   addBullet("Se salveaza automat ultimele 15 cautari efectuate");
-  addBullet("Fiecare intrare arata: tipul cautarii (dosare/termene), parametrii, numarul de rezultate, cat timp a trecut");
+  addBullet(
+    "Fiecare intrare arata: tipul cautarii (dosare/termene), parametrii, numarul de rezultate, cat timp a trecut"
+  );
   addBullet("Click pe o intrare navigheaza automat la pagina corespunzatoare si re-executa cautarea");
   addBullet("Stergere individuala (buton X la hover) sau stergere totala (iconita cos de gunoi)");
   addBullet("In modul sidebar colapsat, istoricul apare intr-un popover la click pe iconita");
 
   addHeading("Navigare persistenta:", 2);
-  addParagraph("Paginile Dosare si Termene raman active in fundal chiar daca navighezi pe alt tab. Aceasta inseamna ca:");
-  addBullet("O operatie \"Incarca mai multe\" in curs NU se opreste la navigare");
+  addParagraph(
+    "Paginile Dosare si Termene raman active in fundal chiar daca navighezi pe alt tab. Aceasta inseamna ca:"
+  );
+  addBullet('O operatie "Incarca mai multe" in curs NU se opreste la navigare');
   addBullet("Campurile completate in formularul de cautare se pastreaza");
   addBullet("Rezultatele cautarii sunt disponibile la revenire, fara a reface cautarea");
 
   addHeading("Colapsare sidebar:", 2);
-  addParagraph("Butonul \"Inchide meniu\" din partea de jos reduce sidebar-ul la 64px, lasand mai mult spatiu pentru continut. In modul colapsat, navigarea si setarile sunt accesibile prin iconite cu tooltip.");
+  addParagraph(
+    'Butonul "Inchide meniu" din partea de jos reduce sidebar-ul la 64px, lasand mai mult spatiu pentru continut. In modul colapsat, navigarea si setarile sunt accesibile prin iconite cu tooltip.'
+  );
 
   // ========== 11. PERSONALIZARE ==========
   addHeading("11. Personalizare (Tema & Font)");
@@ -438,7 +479,9 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet("Content Security Policy strict in aplicatia desktop");
 
   addHeading("Analiza AI si confidentialitatea:", 2);
-  addParagraph("Cand soliciti o analiza AI, datele dosarului (numar, obiect, parti, sedinte) sunt trimise catre furnizorul AI selectat (Anthropic, OpenAI sau Google). Aceste date sunt publice (provin din API-ul Ministerului Justitiei), dar este important sa stii ca sunt procesate de serverele furnizorului AI conform politicilor lor de confidentialitate.");
+  addParagraph(
+    "Cand soliciti o analiza AI, datele dosarului (numar, obiect, parti, sedinte) sunt trimise catre furnizorul AI selectat (Anthropic, OpenAI sau Google). Aceste date sunt publice (provin din API-ul Ministerului Justitiei), dar este important sa stii ca sunt procesate de serverele furnizorului AI conform politicilor lor de confidentialitate."
+  );
 
   // ========== FOOTER ON ALL PAGES ==========
   const totalPages = doc.getNumberOfPages();

@@ -55,10 +55,7 @@ ctx.onmessage = async (e: MessageEvent<ExportJob>) => {
         result = await buildReportPdf(e.data.data);
         break;
     }
-    ctx.postMessage(
-      { ok: true, buffer: result.buffer, filename: result.filename, mime: result.mime },
-      [result.buffer],
-    );
+    ctx.postMessage({ ok: true, buffer: result.buffer, filename: result.filename, mime: result.mime }, [result.buffer]);
   } catch (err) {
     ctx.postMessage({
       ok: false,

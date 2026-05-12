@@ -14,7 +14,15 @@ import {
 } from "recharts";
 import { CHART_FILLS } from "@/lib/chart-colors";
 
-function ChartTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number; name?: string; payload?: { name: string } }>; label?: string }) {
+function ChartTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ value: number; name?: string; payload?: { name: string } }>;
+  label?: string;
+}) {
   if (!active || !payload?.length) return null;
   return (
     <div className="rounded-lg border border-border bg-card px-3 py-2 text-xs shadow-md">
@@ -48,9 +56,7 @@ export function SummaryCard({
         <div className="min-w-0">
           <p className="text-xs text-muted-foreground">{label}</p>
           <p className="text-lg font-bold">{value}</p>
-          {detail && (
-            <p className="truncate text-[11px] text-muted-foreground">{detail}</p>
-          )}
+          {detail && <p className="truncate text-[11px] text-muted-foreground">{detail}</p>}
         </div>
       </div>
     </Card>
@@ -81,7 +87,8 @@ export function PartyAnalysisCard({
           Analiza Parte: &quot;{searchedName}&quot;
           {selectedRoles.length > 0 && (
             <span className="ml-1 text-[11px] font-normal text-muted-foreground">
-              ({selectedRoles.length} {selectedRoles.length === 1 ? "filtru activ" : "filtre active"} — click pentru a anula)
+              ({selectedRoles.length} {selectedRoles.length === 1 ? "filtru activ" : "filtre active"} — click pentru a
+              anula)
             </span>
           )}
         </CardTitle>
@@ -106,9 +113,7 @@ export function PartyAnalysisCard({
                 </span>
                 <span
                   className={`rounded-full px-2 py-0.5 text-xs font-bold ${
-                    isActive
-                      ? "bg-primary-foreground/20 text-primary-foreground"
-                      : "bg-primary/10 text-primary"
+                    isActive ? "bg-primary-foreground/20 text-primary-foreground" : "bg-primary/10 text-primary"
                   }`}
                 >
                   {count}
@@ -122,7 +127,11 @@ export function PartyAnalysisCard({
   );
 }
 
-export interface CategoryDatum { name: string; value: number; fill: string }
+export interface CategoryDatum {
+  name: string;
+  value: number;
+  fill: string;
+}
 
 export function CategoryChart({ data }: { data: CategoryDatum[] }) {
   return (
@@ -174,7 +183,10 @@ export function CategoryChart({ data }: { data: CategoryDatum[] }) {
   );
 }
 
-export interface NamedDatum { name: string; value: number }
+export interface NamedDatum {
+  name: string;
+  value: number;
+}
 
 export function StadiiChart({ data }: { data: NamedDatum[] }) {
   return (

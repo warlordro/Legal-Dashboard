@@ -52,19 +52,9 @@ function alertsFilename(ext: AlertExportFormat, count: number): string {
 
 // ─── XLSX builder ──────────────────────────────────────────────────────────
 
-const HEADERS = [
-  "Data",
-  "Severitate",
-  "Tip eveniment",
-  "Titlu",
-  "Dosar",
-  "Nume monitorizat",
-  "Status",
-];
+const HEADERS = ["Data", "Severitate", "Tip eveniment", "Titlu", "Dosar", "Nume monitorizat", "Status"];
 
-export async function buildAlertsXlsx(
-  input: BuildAlertsExportInput,
-): Promise<ExportResult> {
+export async function buildAlertsXlsx(input: BuildAlertsExportInput): Promise<ExportResult> {
   const XLSX = await import("xlsx-js-style");
   const { rows, contextLabel } = input;
 
@@ -103,11 +93,7 @@ export async function buildAlertsXlsx(
       font: { ...(dataStyle.font as Record<string, unknown>), color: { rgb: "1D4ED8" }, underline: true },
     } as Record<string, unknown>;
 
-    const status = row.alert.dismissed_at
-      ? "Dismissed"
-      : row.alert.read_at
-        ? "Citita"
-        : "Necitita";
+    const status = row.alert.dismissed_at ? "Dismissed" : row.alert.read_at ? "Citita" : "Necitita";
 
     const cells: Array<string | null> = [
       formatDateTime(row.alert.created_at),
@@ -164,9 +150,7 @@ export async function buildAlertsXlsx(
 
 const DOSAR_COLUMN_INDEX = 4;
 
-export async function buildAlertsPdf(
-  input: BuildAlertsExportInput,
-): Promise<ExportResult> {
+export async function buildAlertsPdf(input: BuildAlertsExportInput): Promise<ExportResult> {
   const { default: jsPDF } = await import("jspdf");
   const { default: autoTable } = await import("jspdf-autotable");
   const { rows, contextLabel } = input;
@@ -179,7 +163,7 @@ export async function buildAlertsPdf(
   doc.text("Legal Dashboard - Alerte", 14, 16);
 
   const headerLine = stripDiacritics(
-    `Generat: ${dateStr}  |  Total: ${rows.length}${contextLabel ? `  |  ${contextLabel}` : ""}`,
+    `Generat: ${dateStr}  |  Total: ${rows.length}${contextLabel ? `  |  ${contextLabel}` : ""}`
   );
   doc.setFontSize(9);
   doc.setFont("helvetica", "normal");
@@ -195,23 +179,9 @@ export async function buildAlertsPdf(
 
   autoTable(doc, {
     startY: 28,
-    head: [
-      [
-        "Data",
-        "Severitate",
-        "Tip",
-        "Titlu",
-        "Dosar",
-        "Nume monitorizat",
-        "Status",
-      ],
-    ],
+    head: [["Data", "Severitate", "Tip", "Titlu", "Dosar", "Nume monitorizat", "Status"]],
     body: rows.map((row) => {
-      const status = row.alert.dismissed_at
-        ? "Dismissed"
-        : row.alert.read_at
-          ? "Citita"
-          : "Necitita";
+      const status = row.alert.dismissed_at ? "Dismissed" : row.alert.read_at ? "Citita" : "Necitita";
       return [
         stripDiacritics(formatDateTime(row.alert.created_at)),
         stripDiacritics(row.severityLabel),
@@ -268,7 +238,7 @@ export async function buildAlertsPdf(
         `Pagina ${data.pageNumber}`,
         doc.internal.pageSize.getWidth() / 2,
         doc.internal.pageSize.getHeight() - 7,
-        { align: "center" },
+        { align: "center" }
       );
     },
   });
@@ -283,12 +253,8 @@ export async function buildAlertsPdf(
 
 // ─── Orchestrator + downloader ─────────────────────────────────────────────
 
-export async function exportAlertsToFile(
-  format: AlertExportFormat,
-  input: BuildAlertsExportInput,
-): Promise<void> {
-  const result =
-    format === "xlsx" ? await buildAlertsXlsx(input) : await buildAlertsPdf(input);
+export async function exportAlertsToFile(format: AlertExportFormat, input: BuildAlertsExportInput): Promise<void> {
+  const result = format === "xlsx" ? await buildAlertsXlsx(input) : await buildAlertsPdf(input);
   const blob = new Blob([result.buffer], { type: result.mime });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

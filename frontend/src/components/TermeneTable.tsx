@@ -50,39 +50,48 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
     try {
       const saved = sessionStorage.getItem("viewedTermene");
       return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch { return new Set(); }
+    } catch {
+      return new Set();
+    }
   });
 
   // Per-numarDosar monitor state. Keyed by numarDosar (not by row) so opening
   // multiple termene of the same dosar shares the "Deja monitorizat" feedback.
   const [monitorState, setMonitorState] = useState<Record<string, "pending" | "added" | "exists" | string>>({});
 
-  const handleMonitor = useCallback(async (numar: string) => {
-    if (!numar || monitorState[numar] === "pending") return;
-    setMonitorState((prev) => ({ ...prev, [numar]: "pending" }));
-    try {
-      const reqId = `termen-${numar}-${Date.now()}`;
-      const job = await monitoring.createDosar({
-        numar_dosar: numar,
-        client_request_id: reqId,
-      });
-      const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
-      setMonitorState((prev) => ({
-        ...prev,
-        [numar]: wasJustCreated ? "added" : "exists",
-      }));
-    } catch (err) {
-      const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : "Eroare";
-      setMonitorState((prev) => ({ ...prev, [numar]: msg }));
-    }
-  }, [monitorState]);
+  const handleMonitor = useCallback(
+    async (numar: string) => {
+      if (!numar || monitorState[numar] === "pending") return;
+      setMonitorState((prev) => ({ ...prev, [numar]: "pending" }));
+      try {
+        const reqId = `termen-${numar}-${Date.now()}`;
+        const job = await monitoring.createDosar({
+          numar_dosar: numar,
+          client_request_id: reqId,
+        });
+        const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
+        setMonitorState((prev) => ({
+          ...prev,
+          [numar]: wasJustCreated ? "added" : "exists",
+        }));
+      } catch (err) {
+        const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : "Eroare";
+        setMonitorState((prev) => ({ ...prev, [numar]: msg }));
+      }
+    },
+    [monitorState]
+  );
 
   const markAsViewed = useCallback((numarDosar: string) => {
     setViewedTermene((prev) => {
       if (prev.has(numarDosar)) return prev;
       const next = new Set(prev);
       next.add(numarDosar);
-      try { sessionStorage.setItem("viewedTermene", JSON.stringify([...next])); } catch { /* sessionStorage unavailable; visited-markers are best-effort */ }
+      try {
+        sessionStorage.setItem("viewedTermene", JSON.stringify([...next]));
+      } catch {
+        /* sessionStorage unavailable; visited-markers are best-effort */
+      }
       return next;
     });
   }, []);
@@ -109,10 +118,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
       let parent = el.parentElement as HTMLElement | null;
       while (parent) {
         const style = getComputedStyle(parent);
-        if (
-          (style.overflowY === "auto" || style.overflowY === "scroll") &&
-          parent.scrollHeight > parent.clientHeight
-        ) {
+        if ((style.overflowY === "auto" || style.overflowY === "scroll") && parent.scrollHeight > parent.clientHeight) {
           const elRect = el.getBoundingClientRect();
           const parentRect = parent.getBoundingClientRect();
           if (elRect.bottom > parentRect.bottom || elRect.top < parentRect.top) {
@@ -191,7 +197,12 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
           <CalendarDays className="h-4 w-4 text-primary" />
           <span className="text-sm font-medium">{termene.length} termene gasite</span>
           {selected.size > 0 && (
-            <Button variant="ghost" size="sm" className="text-xs text-muted-foreground" onClick={() => setSelected(new Set())}>
+            <Button
+              variant="ghost"
+              size="sm"
+              className="text-xs text-muted-foreground"
+              onClick={() => setSelected(new Set())}
+            >
               Deselecteaza tot
             </Button>
           )}
@@ -212,8 +223,8 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
               }
             }}
           >
-            {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {" "}Excel {selected.size > 0 ? `(${selected.size})` : ""}
+            {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{" "}
+            Excel {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
           <Button
             variant="outline"
@@ -230,8 +241,8 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
               }
             }}
           >
-            {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
-            {" "}PDF {selected.size > 0 ? `(${selected.size})` : ""}
+            {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF{" "}
+            {selected.size > 0 ? `(${selected.size})` : ""}
           </Button>
         </div>
       </div>
@@ -249,7 +260,10 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                 />
               </th>
               {["Numar Dosar", "Data", "Ora", "Institutie", "Complet", "Solutie"].map((h) => (
-                <th key={h} className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                <th
+                  key={h}
+                  className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground"
+                >
                   {h}
                 </th>
               ))}
@@ -262,7 +276,14 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
               const isExpanded = expandedRows.has(rowKey);
               const isSelected = selected.has(selectKey);
               const hasParts = t.parti && t.parti.length > 0;
-              const hasDetails = hasParts || t.categorieCaz || t.stadiuProcesual || t.obiect || t.solutie || t.solutieSumar || Boolean(t.numarDosar);
+              const hasDetails =
+                hasParts ||
+                t.categorieCaz ||
+                t.stadiuProcesual ||
+                t.obiect ||
+                t.solutie ||
+                t.solutieSumar ||
+                Boolean(t.numarDosar);
 
               return (
                 <>
@@ -292,7 +313,9 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                             <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-blue-500" />
                           </span>
                         ) : t.numarDosar && viewedTermene.has(t.numarDosar) ? (
-                          <span title="Vizualizat"><Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" /></span>
+                          <span title="Vizualizat">
+                            <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
+                          </span>
                         ) : null}
                         {t.numarDosar ? (
                           <a
@@ -305,31 +328,58 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                             {t.numarDosar}
                             <ExternalLink className="h-3 w-3 shrink-0" />
                           </a>
-                        ) : "-"}
+                        ) : (
+                          "-"
+                        )}
                       </div>
                     </td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <div className="flex items-center gap-1.5">
-                        <span className={`text-[13px] ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : "text-foreground"}`}>{formatDate(t.data)}</span>
-                        {isViitor(t.data) && <Badge variant="success" className="text-[11px]">Viitor</Badge>}
+                        <span
+                          className={`text-[13px] ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : "text-foreground"}`}
+                        >
+                          {formatDate(t.data)}
+                        </span>
+                        {isViitor(t.data) && (
+                          <Badge variant="success" className="text-[11px]">
+                            Viitor
+                          </Badge>
+                        )}
                       </div>
                     </td>
-                    <td className={`px-4 py-3 text-[13px] ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : "text-muted-foreground"}`}>{t.ora || "-"}</td>
-                    <td className={`px-4 py-3 text-[13px] max-w-[220px] truncate ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : ""}`} title={normalizeInstitutie(t.institutie)}>{formatInstitutie(t.institutie)}</td>
+                    <td
+                      className={`px-4 py-3 text-[13px] ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : "text-muted-foreground"}`}
+                    >
+                      {t.ora || "-"}
+                    </td>
+                    <td
+                      className={`px-4 py-3 text-[13px] max-w-[220px] truncate ${isExpanded ? "font-bold text-red-800 dark:text-red-400" : ""}`}
+                      title={normalizeInstitutie(t.institutie)}
+                    >
+                      {formatInstitutie(t.institutie)}
+                    </td>
                     <td className="px-4 py-3 text-[13px]">{t.complet || "-"}</td>
                     <td className="px-4 py-3 text-[13px] max-w-[250px]">
                       {t.solutie ? (
                         <div>
                           <p className="font-medium">{formatDocumentSedinta(t.solutie!)}</p>
                           {t.solutieSumar && (
-                            <p className="text-muted-foreground truncate" title={t.solutieSumar}>{t.solutieSumar}</p>
+                            <p className="text-muted-foreground truncate" title={t.solutieSumar}>
+                              {t.solutieSumar}
+                            </p>
                           )}
                         </div>
-                      ) : <span className="text-muted-foreground">-</span>}
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
                     </td>
                   </tr>
                   {isExpanded && hasDetails && (
-                    <tr key={`${rowKey}-detail`} ref={lastExpandedKey === rowKey ? expandedDetailRef : undefined} className="bg-muted/20">
+                    <tr
+                      key={`${rowKey}-detail`}
+                      ref={lastExpandedKey === rowKey ? expandedDetailRef : undefined}
+                      className="bg-muted/20"
+                    >
                       <td colSpan={7} className="px-4 py-4">
                         <TermeneExpandedDetail
                           termen={t}
@@ -353,7 +403,10 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
           totalPages={totalPages}
           pageSize={pageSize}
           onPageChange={setPage}
-          onPageSizeChange={(size) => { setPageSize(size); setPage(0); }}
+          onPageSizeChange={(size) => {
+            setPageSize(size);
+            setPage(0);
+          }}
           pageSizes={[10, 20, 50, 100]}
         />
       )}

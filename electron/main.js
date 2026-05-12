@@ -1,12 +1,21 @@
-const { app, BrowserWindow, session, Menu, screen, dialog, ipcMain, safeStorage, nativeTheme, shell } = require("electron");
+const {
+  app,
+  BrowserWindow,
+  session,
+  Menu,
+  screen,
+  dialog,
+  ipcMain,
+  safeStorage,
+  nativeTheme,
+  shell,
+} = require("electron");
 const path = require("path");
 const fs = require("fs");
 const pkg = require(path.join(__dirname, "..", "package.json"));
-const {
-  getNotificationStatus,
-  showNativeNotification,
-  registerNotificationIpc,
-} = require(path.join(__dirname, "notifications.js"));
+const { getNotificationStatus, showNativeNotification, registerNotificationIpc } = require(
+  path.join(__dirname, "notifications.js")
+);
 const APP_USER_MODEL_ID = app.isPackaged ? "ro.legaldashboard.app" : "ro.legaldashboard.dev";
 
 // Windows: setAppUserModelId must run before any window/notification is shown
@@ -41,7 +50,9 @@ process.on("uncaughtException", (err) => {
       "Eroare neasteptata Legal Dashboard",
       `Aplicatia a intampinat o eroare si se va inchide:\n\n${err && err.message ? err.message : err}`
     );
-  } catch { /* dialog may not be ready; log only */ }
+  } catch {
+    /* dialog may not be ready; log only */
+  }
   app.exit(1);
 });
 
@@ -75,7 +86,7 @@ app.on("before-quit", (event) => {
     setTimeout(() => {
       timedOut = true;
       resolve("timeout");
-    }, BACKEND_SHUTDOWN_TIMEOUT_MS),
+    }, BACKEND_SHUTDOWN_TIMEOUT_MS)
   );
 
   const drain = Promise.resolve()
@@ -88,9 +99,7 @@ app.on("before-quit", (event) => {
 
   Promise.race([drain, timeout]).finally(() => {
     if (timedOut) {
-      console.warn(
-        `[main] backend shutdown exceeded ${BACKEND_SHUTDOWN_TIMEOUT_MS}ms — forcing quit`,
-      );
+      console.warn(`[main] backend shutdown exceeded ${BACKEND_SHUTDOWN_TIMEOUT_MS}ms — forcing quit`);
     } else {
       console.log("[main] before-quit: backend drained, continuing quit");
     }
@@ -140,12 +149,7 @@ function buildAppMenu() {
         { role: "resetZoom", label: "Resetare zoom" },
         { type: "separator" },
         { role: "togglefullscreen", label: "Ecran complet" },
-        ...(isDev
-          ? [
-              { type: "separator" },
-              { role: "toggleDevTools", label: "Instrumente dezvoltator" },
-            ]
-          : []),
+        ...(isDev ? [{ type: "separator" }, { role: "toggleDevTools", label: "Instrumente dezvoltator" }] : []),
       ],
     },
     {
@@ -219,12 +223,16 @@ function startBackend() {
     const deadline = Date.now() + STARTUP_TIMEOUT_MS;
 
     const fail = (err) => {
-      reject(new Error(`Backend nu raspunde dupa ${STARTUP_TIMEOUT_MS / 1000}s. Ultima eroare: ${err && err.message ? err.message : err}`));
+      reject(
+        new Error(
+          `Backend nu raspunde dupa ${STARTUP_TIMEOUT_MS / 1000}s. Ultima eroare: ${err && err.message ? err.message : err}`
+        )
+      );
     };
 
     const check = () => {
       fetch(`http://localhost:${BACKEND_PORT}/health`)
-        .then((r) => r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`)))
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((body) => {
           // SECURITY: Verify response identity to prevent port hijacking
           if (body && body.service === "Legal Dashboard API") {
@@ -285,9 +293,10 @@ function registerSafeStorageIpc() {
     nativeTheme.themeSource = theme;
     const effective = theme === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : theme;
     // Match Tailwind `bg-background` tokens: hsl(222 47% 7%) dark / hsl(210 20% 98%) light.
-    const overlay = effective === "dark"
-      ? { color: "#090E1A", symbolColor: "#E5E7EB", height: 32 }
-      : { color: "#F8FAFC", symbolColor: "#1E293B", height: 32 };
+    const overlay =
+      effective === "dark"
+        ? { color: "#090E1A", symbolColor: "#E5E7EB", height: 32 }
+        : { color: "#F8FAFC", symbolColor: "#1E293B", height: 32 };
     try {
       mainWindow?.setTitleBarOverlay?.(overlay);
     } catch (e) {
@@ -385,7 +394,13 @@ function createWindow() {
   });
 
   // SECURITY: Block new window creation (popups)
-  const ALLOWED_EXTERNAL_DOMAINS = ["portal.just.ro", "www.just.ro", "portalquery.just.ro", "mj.rnpm.ro", "www.rnpm.ro"];
+  const ALLOWED_EXTERNAL_DOMAINS = [
+    "portal.just.ro",
+    "www.just.ro",
+    "portalquery.just.ro",
+    "mj.rnpm.ro",
+    "www.rnpm.ro",
+  ];
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // SECURITY: Strict URL validation — exact domain whitelist, not suffix matching
     try {
@@ -393,7 +408,9 @@ function createWindow() {
       if (parsed.protocol === "https:" && ALLOWED_EXTERNAL_DOMAINS.includes(parsed.hostname)) {
         require("electron").shell.openExternal(url);
       }
-    } catch { /* invalid URL, ignore */ }
+    } catch {
+      /* invalid URL, ignore */
+    }
     return { action: "deny" };
   });
 
@@ -452,13 +469,7 @@ function ensureDevTaskbarShortcut() {
   if (process.platform !== "win32") return;
   if (app.isPackaged) return;
   try {
-    const startMenu = path.join(
-      app.getPath("appData"),
-      "Microsoft",
-      "Windows",
-      "Start Menu",
-      "Programs",
-    );
+    const startMenu = path.join(app.getPath("appData"), "Microsoft", "Windows", "Start Menu", "Programs");
     const shortcutPath = path.join(startMenu, "Legal Dashboard (Dev).lnk");
     fs.mkdirSync(startMenu, { recursive: true });
     const projectRoot = path.join(__dirname, "..");
@@ -488,7 +499,7 @@ app.whenReady().then(async () => {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
-          `default-src 'self' http://localhost:${BACKEND_PORT}; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:${BACKEND_PORT}; img-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none';`
+          `default-src 'self' http://localhost:${BACKEND_PORT}; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:${BACKEND_PORT}; img-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none';`,
         ],
       },
     });

@@ -17,10 +17,7 @@ import os from "os";
 import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import {
-  getLatestSnapshot,
-  insertSnapshot,
-} from "./monitoringSnapshotsRepository.ts";
+import { getLatestSnapshot, insertSnapshot } from "./monitoringSnapshotsRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 let tmpRoot: string;
@@ -34,7 +31,7 @@ function seedJob(hashSeed: string): number {
       `INSERT INTO monitoring_jobs
          (owner_id, kind, target_json, target_hash, cadence_sec,
           alert_config_json, next_run_at)
-       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
+       VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`
     )
     .run(OWNER, hashSeed);
   return info.lastInsertRowid as number;
@@ -46,7 +43,7 @@ function seedRun(jobId: number): number {
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-       VALUES (?, ?, ?, 'running')`,
+       VALUES (?, ?, ?, 'running')`
     )
     .run(OWNER, jobId, "2026-04-28T10:00:00.000Z");
   return info.lastInsertRowid as number;
@@ -54,10 +51,7 @@ function seedRun(jobId: number): number {
 
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-snap-"));
-  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(
-    tmpRoot,
-    "legal-dashboard.db",
-  );
+  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
   const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
   seed.close();
   getDb();
@@ -83,16 +77,14 @@ describe("insertSnapshot", () => {
     });
     expect(id).toBeGreaterThan(0);
 
-    const row = getDb()
-      .prepare(`SELECT * FROM monitoring_snapshots WHERE id = ?`)
-      .get(id) as {
-        owner_id: string;
-        job_id: number;
-        run_id: number;
-        observed_at: string;
-        payload_hash: string;
-        payload_json: string;
-      };
+    const row = getDb().prepare(`SELECT * FROM monitoring_snapshots WHERE id = ?`).get(id) as {
+      owner_id: string;
+      job_id: number;
+      run_id: number;
+      observed_at: string;
+      payload_hash: string;
+      payload_json: string;
+    };
     expect(row.owner_id).toBe(OWNER);
     expect(row.job_id).toBe(jobId);
     expect(row.run_id).toBe(runId);
@@ -115,7 +107,7 @@ describe("insertSnapshot", () => {
         observedAt: "2026-04-28T10:00:00.000Z",
         payloadHash: "x",
         payloadJson: "{}",
-      }),
+      })
     ).toThrow(/FOREIGN KEY/i);
   });
 
@@ -131,9 +123,9 @@ describe("insertSnapshot", () => {
       payloadJson: "{}",
     });
     getDb().prepare("DELETE FROM monitoring_runs WHERE id = ?").run(runId);
-    const row = getDb()
-      .prepare("SELECT run_id FROM monitoring_snapshots WHERE id = ?")
-      .get(id) as { run_id: number | null };
+    const row = getDb().prepare("SELECT run_id FROM monitoring_snapshots WHERE id = ?").get(id) as {
+      run_id: number | null;
+    };
     expect(row.run_id).toBeNull();
   });
 
@@ -149,13 +141,13 @@ describe("insertSnapshot", () => {
         `INSERT INTO monitoring_jobs
            (owner_id, kind, target_json, target_hash, cadence_sec,
             alert_config_json, next_run_at)
-         VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`,
+         VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`
       )
       .run(ownerA, "hA").lastInsertRowid as number;
     const runIdA = getDb()
       .prepare(
         `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
-         VALUES (?, ?, ?, 'running')`,
+         VALUES (?, ?, ?, 'running')`
       )
       .run(ownerA, jobIdA, "2026-04-28T10:00:00.000Z").lastInsertRowid as number;
 
@@ -167,14 +159,10 @@ describe("insertSnapshot", () => {
         observedAt: "2026-04-28T10:00:00.000Z",
         payloadHash: "cross-tenant",
         payloadJson: "{}",
-      }),
+      })
     ).toThrow(/not found for owner/);
 
-    const count = (
-      getDb()
-        .prepare(`SELECT COUNT(*) AS n FROM monitoring_snapshots`)
-        .get() as { n: number }
-    ).n;
+    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_snapshots`).get() as { n: number }).n;
     expect(count).toBe(0);
   });
 
@@ -187,7 +175,7 @@ describe("insertSnapshot", () => {
         observedAt: "2026-04-28T10:00:00.000Z",
         payloadHash: "ghost",
         payloadJson: "{}",
-      }),
+      })
     ).toThrow(/not found for owner/);
   });
 });
@@ -292,16 +280,9 @@ describe("getLatestSnapshot", () => {
       .prepare(
         `INSERT INTO monitoring_snapshots
            (owner_id, job_id, run_id, observed_at, payload_hash, payload_json)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+         VALUES (?, ?, ?, ?, ?, ?)`
       )
-      .run(
-        "other-owner",
-        jobId,
-        runId,
-        "2026-04-28T11:00:00.000Z",
-        "foreign-owner-newer",
-        "{}",
-      );
+      .run("other-owner", jobId, runId, "2026-04-28T11:00:00.000Z", "foreign-owner-newer", "{}");
 
     expect(getLatestSnapshot(OWNER, jobId)!.payload_hash).toBe("owned");
   });

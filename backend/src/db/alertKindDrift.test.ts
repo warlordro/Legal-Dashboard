@@ -14,16 +14,9 @@ import fsPromises from "fs/promises";
 import path from "path";
 import { describe, expect, it } from "vitest";
 
-import {
-  ALERT_JOB_KINDS,
-  ALERT_KINDS,
-  ALERT_SEVERITIES,
-} from "./monitoringAlertsRepository.ts";
+import { ALERT_JOB_KINDS, ALERT_KINDS, ALERT_SEVERITIES } from "./monitoringAlertsRepository.ts";
 
-const FRONTEND_ALERTS_API = path.resolve(
-  __dirname,
-  "../../../frontend/src/lib/alertsApi.ts",
-);
+const FRONTEND_ALERTS_API = path.resolve(__dirname, "../../../frontend/src/lib/alertsApi.ts");
 
 async function readFrontendSource(): Promise<string> {
   return fsPromises.readFile(FRONTEND_ALERTS_API, "utf8");
@@ -74,13 +67,9 @@ describe("alert enum drift detector — backend tuples vs frontend unions", () =
     const frontendKinds = new Set(extractUnionMembers(src, "AlertKind"));
     // Pull keys from the labels object body. Pattern: `kind: "Label",`
     // tolerant to either single or double-quoted label values.
-    const labelsBlock = src.match(
-      /export const alertKindLabels[^=]*=\s*\{([\s\S]*?)\};/m,
-    );
+    const labelsBlock = src.match(/export const alertKindLabels[^=]*=\s*\{([\s\S]*?)\};/m);
     if (!labelsBlock) throw new Error("alertKindLabels block not found");
-    const keys = new Set(
-      [...labelsBlock[1].matchAll(/^\s*([a-z_]+)\s*:/gm)].map((m) => m[1]),
-    );
+    const keys = new Set([...labelsBlock[1].matchAll(/^\s*([a-z_]+)\s*:/gm)].map((m) => m[1]));
     expect(keys).toEqual(frontendKinds);
   });
 });

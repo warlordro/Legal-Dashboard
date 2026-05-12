@@ -223,9 +223,7 @@ export async function downloadBulkTemplate(): Promise<void> {
     ],
     Array(NUM_COLS).fill(null),
     [...HEADERS],
-    ...Array.from({ length: EMPTY_DATA_ROWS_COUNT }, () =>
-      Array(NUM_COLS).fill("") as (string | number | null)[],
-    ),
+    ...Array.from({ length: EMPTY_DATA_ROWS_COUNT }, () => Array(NUM_COLS).fill("") as (string | number | null)[]),
   ];
 
   const ws = StyledXLSX.utils.aoa_to_sheet(aoa) as Record<string, unknown>;
@@ -295,7 +293,9 @@ function findHeaderRow(rows: unknown[][]): number {
   for (let i = 0; i < Math.min(rows.length, 20); i++) {
     const row = rows[i] ?? [];
     for (const cell of row) {
-      const s = String(cell ?? "").trim().toLowerCase();
+      const s = String(cell ?? "")
+        .trim()
+        .toLowerCase();
       if (targets.has(s)) return i;
     }
   }
@@ -326,7 +326,9 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
   }
 
   const headerRow = (matrix[headerIdx] ?? []).map((c) =>
-    String(c ?? "").trim().toLowerCase(),
+    String(c ?? "")
+      .trim()
+      .toLowerCase()
   );
   const colNumarDosar = headerRow.indexOf("numar_dosar");
   // Acceptam sinonime pentru coloana de nume (template nostru = "nume", dar
@@ -343,16 +345,18 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
     // pentru ca user-ul sa il poata localiza in foaia originala.
     const rowNumber = i + 1;
 
-    const numarDosar =
-      colNumarDosar >= 0 ? String(row[colNumarDosar] ?? "").trim() : "";
+    const numarDosar = colNumarDosar >= 0 ? String(row[colNumarDosar] ?? "").trim() : "";
     // Regula import (2026-05-03): numele de monitorizare sunt mereu UPPERCASE.
     // PortalJust SOAP CautareDosare e case-insensitive pe numeParte, deci
     // schimbarea nu afecteaza match-ul; uniformitatea ajuta UI-ul si dedup-ul.
-    const nameNorm = colNume >= 0 ? String(row[colNume] ?? "").trim().toUpperCase() : "";
-    const cadenceFinal =
-      colCadence >= 0 ? parseCadence(row[colCadence]) : undefined;
-    const notes =
-      colNotes >= 0 ? String(row[colNotes] ?? "").trim() || undefined : undefined;
+    const nameNorm =
+      colNume >= 0
+        ? String(row[colNume] ?? "")
+            .trim()
+            .toUpperCase()
+        : "";
+    const cadenceFinal = colCadence >= 0 ? parseCadence(row[colCadence]) : undefined;
+    const notes = colNotes >= 0 ? String(row[colNotes] ?? "").trim() || undefined : undefined;
 
     if (!numarDosar && !nameNorm) {
       continue; // empty row — skip silently
@@ -362,8 +366,7 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
       invalid.push({
         rowNumber,
         display: `${numarDosar} / ${nameNorm}`,
-        message:
-          "Ambele coloane sunt populate. Un rand = un job: pune numar_dosar SAU nume, nu ambele.",
+        message: "Ambele coloane sunt populate. Un rand = un job: pune numar_dosar SAU nume, nu ambele.",
       });
       continue;
     }

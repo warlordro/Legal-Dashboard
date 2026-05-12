@@ -13,7 +13,13 @@ import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
 import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
 import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
 import { describeNestedPhase, describeSplitPhase, formatSplitProgress } from "@/lib/rnpmProgressPhase";
-import type { RnpmSearchParams, RnpmSearchType, RnpmDocument, RnpmSplitSubResult, RnpmSplitProgress } from "@/types/rnpm";
+import type {
+  RnpmSearchParams,
+  RnpmSearchType,
+  RnpmDocument,
+  RnpmSplitSubResult,
+  RnpmSplitProgress,
+} from "@/types/rnpm";
 import type { CaptchaProvider, CaptchaMode } from "@/lib/rnpmApi";
 
 type Tab = "search" | "bulk" | "saved";
@@ -89,7 +95,10 @@ export default function RnpmSearchPage({
   const stoppedRef = useRef(false);
 
   const runSearch = async (type: RnpmSearchType, params: RnpmSearchParams) => {
-    if (!captchaKey) { onConfigureKey(); return; }
+    if (!captchaKey) {
+      onConfigureKey();
+      return;
+    }
     if (abortRef.current) return;
     const ctl = new AbortController();
     abortRef.current = ctl;
@@ -105,7 +114,13 @@ export default function RnpmSearchPage({
     const startTs = performance.now();
     try {
       setPhase("Interogare RNPM...");
-      const res = await rnpmSearch(type, params, captchaKey, { batchSize: BATCH_SIZE, captchaProvider, fallback2CaptchaKey, captchaMode }, ctl.signal);
+      const res = await rnpmSearch(
+        type,
+        params,
+        captchaKey,
+        { batchSize: BATCH_SIZE, captchaProvider, fallback2CaptchaKey, captchaMode },
+        ctl.signal
+      );
       if (stoppedRef.current || ctl.signal.aborted) return;
       setElapsedMs(Math.round(performance.now() - startTs));
       setPhase("Salvare in baza locala...");
@@ -141,7 +156,10 @@ export default function RnpmSearchPage({
 
   const runSplit = async (subTypeLabels: string[]) => {
     if (!pendingSplit) return;
-    if (!captchaKey) { onConfigureKey(); return; }
+    if (!captchaKey) {
+      onConfigureKey();
+      return;
+    }
     if (abortRef.current) return;
     const { type, params } = pendingSplit;
     setPendingSplit(null);
@@ -152,7 +170,12 @@ export default function RnpmSearchPage({
     setError(null);
     setResult(null);
     setElapsedMs(null);
-    setSplitProgress({ index: 0, total: subTypeLabels.length, label: subTypeLabels[0] ?? "", phase: "captcha" } as RnpmSplitProgress);
+    setSplitProgress({
+      index: 0,
+      total: subTypeLabels.length,
+      label: subTypeLabels[0] ?? "",
+      phase: "captcha",
+    } as RnpmSplitProgress);
     setPhase(`Pregatire split ${subTypeLabels.length} sub-tipuri...`);
     setActiveSearchType(type);
     setLastType(type);
@@ -171,7 +194,7 @@ export default function RnpmSearchPage({
         ctl.signal,
         captchaProvider,
         fallback2CaptchaKey,
-        captchaMode,
+        captchaMode
       );
       if (stoppedRef.current || ctl.signal.aborted) return;
       setElapsedMs(Math.round(performance.now() - startTs));
@@ -213,25 +236,35 @@ export default function RnpmSearchPage({
     setPhase(`Incarca urmatoarele ${BATCH_SIZE} rezultate...`);
     const startTs = performance.now();
     try {
-      const res = await rnpmSearch(lastType, lastParams, captchaKey, {
-        startRnpmPage: result.nextRnpmPage,
-        batchSize: BATCH_SIZE,
-        gcode: result.gcode,
-        searchId: result.searchId,
-        captchaProvider,
-        fallback2CaptchaKey,
-        captchaMode,
-      }, ctl.signal);
+      const res = await rnpmSearch(
+        lastType,
+        lastParams,
+        captchaKey,
+        {
+          startRnpmPage: result.nextRnpmPage,
+          batchSize: BATCH_SIZE,
+          gcode: result.gcode,
+          searchId: result.searchId,
+          captchaProvider,
+          fallback2CaptchaKey,
+          captchaMode,
+        },
+        ctl.signal
+      );
       if (stoppedRef.current || ctl.signal.aborted) return;
       setElapsedMs((prev) => (prev ?? 0) + Math.round(performance.now() - startTs));
-      setResult((prev) => prev ? {
-        ...prev,
-        documents: [...prev.documents, ...res.documents],
-        avizIds: [...prev.avizIds, ...res.avizIds],
-        detailsFailed: [...prev.detailsFailed, ...res.detailsFailed],
-        gcode: res.gcode,
-        nextRnpmPage: res.nextRnpmPage,
-      } : null);
+      setResult((prev) =>
+        prev
+          ? {
+              ...prev,
+              documents: [...prev.documents, ...res.documents],
+              avizIds: [...prev.avizIds, ...res.avizIds],
+              detailsFailed: [...prev.detailsFailed, ...res.detailsFailed],
+              gcode: res.gcode,
+              nextRnpmPage: res.nextRnpmPage,
+            }
+          : null
+      );
       setSavedRefreshKey((k) => k + 1);
     } catch (e) {
       if (!isAbort(e) && !ctl.signal.aborted) {
@@ -254,7 +287,7 @@ export default function RnpmSearchPage({
       return;
     }
     void loadNextBatch();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoLoading, loading, result?.nextRnpmPage]);
 
   const handleStop = () => {
@@ -275,12 +308,15 @@ export default function RnpmSearchPage({
     setLastParams(params);
     setFormResetKey((k) => k + 1);
     void runSearch(type, params);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSearch]);
 
   const openDetailByAvizId = (id: number | null) => {
     if (id != null) setDetailAvizId(id);
-    else setError("Detaliile nu sunt disponibile pentru acest aviz (UUID expirat in timpul cautarii). Refa cautarea pentru a reincarca detaliile.");
+    else
+      setError(
+        "Detaliile nu sunt disponibile pentru acest aviz (UUID expirat in timpul cautarii). Refa cautarea pentru a reincarca detaliile."
+      );
   };
 
   const tabs: { id: Tab; label: string; icon: typeof FileLock2 }[] = [
@@ -342,21 +378,31 @@ export default function RnpmSearchPage({
       </div>
 
       <div className={tab === "search" ? "space-y-4" : "hidden"}>
-          <RnpmSearchForm
-            key={formResetKey}
-            loading={loading}
-            loadingPhase={phase}
-            onSubmit={(type, params) => runSearch(type, params)}
-            onTypeChange={setActiveSearchType}
-            onStop={handleStop}
-            onReset={() => { setResult(null); setError(null); setLastParams({}); }}
-            initialType={lastType}
-            initialParams={lastParams}
-            suppressStop={visibleResult != null && visibleResult.nextRnpmPage != null && !visibleResult.splitMode}
-            extraActions={visibleResult && visibleResult.nextRnpmPage != null && !visibleResult.splitMode ? (
+        <RnpmSearchForm
+          key={formResetKey}
+          loading={loading}
+          loadingPhase={phase}
+          onSubmit={(type, params) => runSearch(type, params)}
+          onTypeChange={setActiveSearchType}
+          onStop={handleStop}
+          onReset={() => {
+            setResult(null);
+            setError(null);
+            setLastParams({});
+          }}
+          initialType={lastType}
+          initialParams={lastParams}
+          suppressStop={visibleResult != null && visibleResult.nextRnpmPage != null && !visibleResult.splitMode}
+          extraActions={
+            visibleResult && visibleResult.nextRnpmPage != null && !visibleResult.splitMode ? (
               <div className="flex items-center gap-2">
                 {autoLoading || loading ? (
-                  <Button type="button" variant="destructive" onClick={handleStop} className="font-normal h-8 px-3 text-xs">
+                  <Button
+                    type="button"
+                    variant="destructive"
+                    onClick={handleStop}
+                    className="font-normal h-8 px-3 text-xs"
+                  >
                     Opreste incarcarea ({visibleResult.documents.length} din {visibleResult.total})
                   </Button>
                 ) : (
@@ -373,72 +419,88 @@ export default function RnpmSearchPage({
                   </div>
                 )}
               </div>
-            ) : null}
-          />
-          {visibleError && (
-            <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
-              {visibleError}
+            ) : null
+          }
+        />
+        {visibleError && (
+          <div className="rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm text-red-600 dark:text-red-400">
+            {visibleError}
+          </div>
+        )}
+        {visibleResult?.splitMode && visibleResult.splitStats && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 space-y-1.5">
+            <div className="font-medium">
+              Cautare rulata in mod split — {visibleResult.documents.length} avize agregate din{" "}
+              {visibleResult.splitStats.length} sub-tipuri
+              {visibleResult.upstreamTotal != null ? (
+                <> (total RNPM raportat: {visibleResult.upstreamTotal}, inclusiv sub-tipuri blocate)</>
+              ) : null}
             </div>
-          )}
-          {visibleResult?.splitMode && visibleResult.splitStats && (
-            <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300 space-y-1.5">
-              <div className="font-medium">
-                Cautare rulata in mod split — {visibleResult.documents.length} avize agregate din {visibleResult.splitStats.length} sub-tipuri
-                {visibleResult.upstreamTotal != null ? <> (total RNPM raportat: {visibleResult.upstreamTotal}, inclusiv sub-tipuri blocate)</> : null}
-              </div>
-              {(() => {
-                // v2.18.0: tier-2 breakdown — daca exista sub-tipuri "recovered"/"partial",
-                // afisam recap-ul (cate destinatii au reusit + gap-ul total).
-                const tier2Stats = visibleResult.splitStats.filter((s) => s.status === "recovered" || s.status === "partial");
-                if (tier2Stats.length === 0) return null;
-                const totalGap = tier2Stats.reduce((acc, s) => acc + (s.gap ?? 0), 0);
-                return (
-                  <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
-                    <div className="font-medium">
-                      Tier-2 split (pe destinatieInscriere) aplicat pe {tier2Stats.length} sub-tip(uri):
-                    </div>
-                    <ul className="mt-1 space-y-0.5">
-                      {tier2Stats.map((s) => (
-                        <li key={s.label} className="truncate">
-                          <b>{s.label}</b>: recuperat <b>{s.count}</b>/{s.subTotal}
-                          {s.nested ? <> ({s.nested.filter((n) => n.status === "ok").length} destinatii OK din {s.nested.length})</> : null}
-                          {s.gap != null && s.gap > 0 ? <> · gap <b>{s.gap}</b></> : null}
-                        </li>
-                      ))}
-                    </ul>
-                    {totalGap > 0 && (
-                      <div className="mt-1.5 rounded bg-amber-500/15 p-1.5 text-[11px]">
-                        <b>{totalGap}</b> inregistrari fara destinatie atribuita nu au putut fi recuperate
-                        (limitarea API RNPM pentru records istorice fara destinatie).
-                      </div>
-                    )}
+            {(() => {
+              // v2.18.0: tier-2 breakdown — daca exista sub-tipuri "recovered"/"partial",
+              // afisam recap-ul (cate destinatii au reusit + gap-ul total).
+              const tier2Stats = visibleResult.splitStats.filter(
+                (s) => s.status === "recovered" || s.status === "partial"
+              );
+              if (tier2Stats.length === 0) return null;
+              const totalGap = tier2Stats.reduce((acc, s) => acc + (s.gap ?? 0), 0);
+              return (
+                <div className="rounded-md border border-amber-500/30 bg-amber-500/5 p-2">
+                  <div className="font-medium">
+                    Tier-2 split (pe destinatieInscriere) aplicat pe {tier2Stats.length} sub-tip(uri):
                   </div>
-                );
-              })()}
-              {visibleResult.splitStats.some((s) => s.status === "blocked" || s.status === "error") && (
-                <ul className="mt-1 space-y-0.5">
-                  {visibleResult.splitStats
-                    .filter((s) => s.status === "blocked" || s.status === "error")
-                    .map((s) => (
+                  <ul className="mt-1 space-y-0.5">
+                    {tier2Stats.map((s) => (
                       <li key={s.label} className="truncate">
-                        <b>{s.label}</b>: {describeBlockedSubResult(s)}
+                        <b>{s.label}</b>: recuperat <b>{s.count}</b>/{s.subTotal}
+                        {s.nested ? (
+                          <>
+                            {" "}
+                            ({s.nested.filter((n) => n.status === "ok").length} destinatii OK din {s.nested.length})
+                          </>
+                        ) : null}
+                        {s.gap != null && s.gap > 0 ? (
+                          <>
+                            {" "}
+                            · gap <b>{s.gap}</b>
+                          </>
+                        ) : null}
                       </li>
                     ))}
-                </ul>
-              )}
-            </div>
-          )}
-          <RnpmResultsTable
-            result={visibleResult}
-            loading={loading}
-            onNeedMore={loadNextBatch}
-            onOpenDetail={(_doc, avizId) => openDetailByAvizId(avizId)}
-            searchType={lastType}
-            dateStart={lastParams.perioadaStart}
-            dateEnd={lastParams.perioadaFinal}
-            elapsedMs={elapsedMs}
-          />
-        </div>
+                  </ul>
+                  {totalGap > 0 && (
+                    <div className="mt-1.5 rounded bg-amber-500/15 p-1.5 text-[11px]">
+                      <b>{totalGap}</b> inregistrari fara destinatie atribuita nu au putut fi recuperate (limitarea API
+                      RNPM pentru records istorice fara destinatie).
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+            {visibleResult.splitStats.some((s) => s.status === "blocked" || s.status === "error") && (
+              <ul className="mt-1 space-y-0.5">
+                {visibleResult.splitStats
+                  .filter((s) => s.status === "blocked" || s.status === "error")
+                  .map((s) => (
+                    <li key={s.label} className="truncate">
+                      <b>{s.label}</b>: {describeBlockedSubResult(s)}
+                    </li>
+                  ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <RnpmResultsTable
+          result={visibleResult}
+          loading={loading}
+          onNeedMore={loadNextBatch}
+          onOpenDetail={(_doc, avizId) => openDetailByAvizId(avizId)}
+          searchType={lastType}
+          dateStart={lastParams.perioadaStart}
+          dateEnd={lastParams.perioadaFinal}
+          elapsedMs={elapsedMs}
+        />
+      </div>
 
       {/* Keep BulkSearch mounted across tab switches so an in-flight bulk doesn't abort
           when the user peeks at "saved" or "search". useEffect cleanup at unmount still
@@ -472,7 +534,9 @@ export default function RnpmSearchPage({
         limit={pendingSplit?.limit}
         captchaProvider={captchaProvider}
         onCancel={() => setPendingSplit(null)}
-        onConfirm={(subTypeLabels) => { void runSplit(subTypeLabels); }}
+        onConfirm={(subTypeLabels) => {
+          void runSplit(subTypeLabels);
+        }}
       />
 
       {/* Split-mode progress overlay (lightweight; reuses `loading` for the rest of UI) */}
@@ -486,7 +550,8 @@ export default function RnpmSearchPage({
             {splitProgress.nested && (
               <>
                 {" -> "}
-                {splitProgress.nested.index}/{splitProgress.nested.total} {splitProgress.nested.label} ({describeNestedPhase(splitProgress.nested.phase)})
+                {splitProgress.nested.index}/{splitProgress.nested.total} {splitProgress.nested.label} (
+                {describeNestedPhase(splitProgress.nested.phase)})
               </>
             )}
           </div>

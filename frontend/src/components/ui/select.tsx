@@ -61,7 +61,9 @@ export function Select({ value, onValueChange, children }: SelectProps) {
   }, [open, value]);
 
   return (
-    <Ctx.Provider value={{ value, onChange: onValueChange, open, setOpen, active, setActive, items, triggerRef, contentId }}>
+    <Ctx.Provider
+      value={{ value, onChange: onValueChange, open, setOpen, active, setActive, items, triggerRef, contentId }}
+    >
       {children}
     </Ctx.Provider>
   );
@@ -96,7 +98,7 @@ export const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerPr
         }}
         className={cn(
           "flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-background px-3 py-1 text-sm text-foreground shadow-sm transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50",
-          className,
+          className
         )}
         {...rest}
       >
@@ -104,7 +106,7 @@ export const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerPr
         <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
       </button>
     );
-  },
+  }
 );
 SelectTrigger.displayName = "SelectTrigger";
 
@@ -118,9 +120,7 @@ export function SelectValue({ placeholder, className }: SelectValueProps) {
   const found = items.find((it) => it.value === value);
   const text = found?.label ?? "";
   return (
-    <span className={cn("truncate text-left", !text && "text-muted-foreground", className)}>
-      {text || placeholder}
-    </span>
+    <span className={cn("truncate text-left", !text && "text-muted-foreground", className)}>{text || placeholder}</span>
   );
 }
 
@@ -132,7 +132,13 @@ export interface SelectContentProps {
 export function SelectContent({ children, className }: SelectContentProps) {
   const { open, setOpen, triggerRef, items, active, setActive, onChange, contentId } = useCtx();
   const ref = React.useRef<HTMLDivElement>(null);
-  const [pos, setPos] = React.useState<{ top: number; left: number; width: number; placeAbove: boolean; fontSize: string } | null>(null);
+  const [pos, setPos] = React.useState<{
+    top: number;
+    left: number;
+    width: number;
+    placeAbove: boolean;
+    fontSize: string;
+  } | null>(null);
 
   React.useLayoutEffect(() => {
     if (!open) {
@@ -224,12 +230,24 @@ export function SelectContent({ children, className }: SelectContentProps) {
       role="listbox"
       tabIndex={-1}
       onKeyDown={(e) => {
-        if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
-        else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
-        else if (e.key === "Home") { e.preventDefault(); setActive(0); }
-        else if (e.key === "End") { e.preventDefault(); setActive(items.length - 1); }
-        else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); commit(); }
-        else if (e.key === "Tab") { setOpen(false); }
+        if (e.key === "ArrowDown") {
+          e.preventDefault();
+          move(1);
+        } else if (e.key === "ArrowUp") {
+          e.preventDefault();
+          move(-1);
+        } else if (e.key === "Home") {
+          e.preventDefault();
+          setActive(0);
+        } else if (e.key === "End") {
+          e.preventDefault();
+          setActive(items.length - 1);
+        } else if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          commit();
+        } else if (e.key === "Tab") {
+          setOpen(false);
+        }
       }}
       style={{
         position: "fixed",
@@ -243,7 +261,7 @@ export function SelectContent({ children, className }: SelectContentProps) {
       }}
       className={cn(
         "z-[100] overflow-y-auto rounded-md border border-border bg-card py-1 text-card-foreground shadow-lg outline-none scrollbar-thin",
-        className,
+        className
       )}
     >
       {children}
@@ -284,7 +302,7 @@ export function SelectItem({ value, disabled, children, className }: SelectItemP
         "relative flex cursor-pointer select-none items-center px-3 py-1.5 outline-none",
         "data-[active]:bg-primary data-[active]:text-primary-foreground",
         "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-        className,
+        className
       )}
     >
       <span className="whitespace-nowrap">{children}</span>

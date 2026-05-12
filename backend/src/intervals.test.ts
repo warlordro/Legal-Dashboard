@@ -71,7 +71,7 @@ describe("defaultDateRange", () => {
     const { dataStart, dataStop } = defaultDateRange();
     const start = new Date(dataStart + "T00:00:00Z");
     const stop = new Date(dataStop + "T00:00:00Z");
-    const yearsApart = (stop.getUTCFullYear() - start.getUTCFullYear());
+    const yearsApart = stop.getUTCFullYear() - start.getUTCFullYear();
     expect(yearsApart).toBe(7);
     // Stop is today (UTC) — allow either today or yesterday for tz drift
     const today = new Date();

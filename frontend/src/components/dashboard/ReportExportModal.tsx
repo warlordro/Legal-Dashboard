@@ -84,11 +84,7 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
     } catch (err) {
       // Aborted = utilizatorul a inchis dialog-ul; nu il chinuim cu mesaje.
       if (err instanceof DOMException && err.name === "AbortError") return;
-      const msg = err instanceof MonitoringApiError
-        ? err.message
-        : err instanceof Error
-          ? err.message
-          : String(err);
+      const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : String(err);
       setError(msg || "Eroare la generarea raportului.");
     } finally {
       setBusy(false);
@@ -146,7 +142,7 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
                     "rounded-md border px-3 py-2 text-sm font-medium transition-colors",
                     range === r
                       ? "border-primary bg-primary/10 text-foreground"
-                      : "border-border bg-card text-muted-foreground hover:bg-muted/40",
+                      : "border-border bg-card text-muted-foreground hover:bg-muted/40"
                   )}
                 >
                   {r === "7d" ? "Ultimele 7 zile" : "Ultimele 30 zile"}
@@ -168,7 +164,7 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
                   "flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
                   format === "xlsx"
                     ? "border-emerald-500 bg-emerald-500/10 text-foreground"
-                    : "border-border bg-card text-muted-foreground hover:bg-muted/40",
+                    : "border-border bg-card text-muted-foreground hover:bg-muted/40"
                 )}
               >
                 <FileSpreadsheet className="h-4 w-4 text-emerald-600" />
@@ -182,7 +178,7 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
                   "flex items-center justify-center gap-2 rounded-md border px-3 py-2 text-sm font-medium transition-colors",
                   format === "pdf"
                     ? "border-red-500 bg-red-500/10 text-foreground"
-                    : "border-border bg-card text-muted-foreground hover:bg-muted/40",
+                    : "border-border bg-card text-muted-foreground hover:bg-muted/40"
                 )}
               >
                 <FileText className="h-4 w-4 text-red-600" />

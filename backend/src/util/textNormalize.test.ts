@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  buildRnpmLikePattern,
-  stripDiacritics,
-  stripDiacriticsDeep,
-} from "./textNormalize.js";
+import { buildRnpmLikePattern, stripDiacritics, stripDiacriticsDeep } from "./textNormalize.js";
 
 describe("stripDiacritics", () => {
   it("strips Romanian diacritics from common letters", () => {
