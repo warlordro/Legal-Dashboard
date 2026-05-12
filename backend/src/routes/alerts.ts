@@ -25,6 +25,8 @@ import {
 } from "../db/monitoringAlertsRepository.ts";
 import { getDb } from "../db/schema.ts";
 import { deriveAlertDigestRow } from "../services/email/dailyReportTemplate.ts";
+import { buildAlertsPdf } from "../services/alertsExportPdf.ts";
+import { buildAlertsXlsx, type AlertExportDecoratedRow } from "../services/alertsExportXlsx.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { fail, ok } from "../util/envelope.ts";
 
@@ -488,6 +490,163 @@ alertsRouter.post("/export", limitAlertExportBody, async (c) => {
   });
 
   return c.json(ok({ rows: decorated, count: decorated.length }, c));
+});
+
+function exportContextLabel(c: import("hono").Context): string | undefined {
+  const value = c.req.header("x-export-context-label")?.trim();
+  return value && value.length <= 120 ? value : undefined;
+}
+
+async function collectAlertExportRows(c: import("hono").Context) {
+  const ownerId = getOwnerId(c);
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return { error: c.json(fail("invalid_body", "Body invalid", c), 400) };
+  }
+  const parsed = AlertExportBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return { error: c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400) };
+  }
+
+  let rows: MonitoringAlertRow[] = [];
+  if (parsed.data.mode === "ids") {
+    rows = listAlertsByIds(ownerId, parsed.data.ids);
+  } else if (parsed.data.mode === "filters") {
+    const f = parsed.data.filters;
+    const probe = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: 1,
+      jobKind: f.jobKind,
+      q: f.q,
+      kind: f.kind,
+      severity: f.severity,
+      onlyUnread: f.onlyUnread,
+      includeDismissed: f.includeDismissed,
+      from: f.from,
+      to: f.to,
+    });
+    if (probe.total > ALERT_EXPORT_MAX_ROWS) {
+      return {
+        error: c.json(
+          fail(
+            "too_many_rows",
+            `Exportul depaseste limita de ${ALERT_EXPORT_MAX_ROWS} randuri (rezultat: ${probe.total}). Restrange filtrele.`,
+            c,
+            { total: probe.total, max: ALERT_EXPORT_MAX_ROWS }
+          ),
+          413
+        ),
+      };
+    }
+    rows = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: ALERT_EXPORT_MAX_ROWS,
+      jobKind: f.jobKind,
+      q: f.q,
+      kind: f.kind,
+      severity: f.severity,
+      onlyUnread: f.onlyUnread,
+      includeDismissed: f.includeDismissed,
+      from: f.from,
+      to: f.to,
+    }).rows;
+  } else {
+    const probe = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: 1,
+      from: parsed.data.from,
+      to: parsed.data.to,
+      includeDismissed: true,
+    });
+    if (probe.total > ALERT_EXPORT_MAX_ROWS) {
+      return {
+        error: c.json(
+          fail(
+            "too_many_rows",
+            `Exportul depaseste limita de ${ALERT_EXPORT_MAX_ROWS} randuri (rezultat: ${probe.total}). Restrange intervalul.`,
+            c,
+            { total: probe.total, max: ALERT_EXPORT_MAX_ROWS }
+          ),
+          413
+        ),
+      };
+    }
+    rows = listAlerts({
+      ownerId,
+      page: 1,
+      pageSize: ALERT_EXPORT_MAX_ROWS,
+      from: parsed.data.from,
+      to: parsed.data.to,
+      includeDismissed: true,
+    }).rows;
+  }
+
+  if (rows.length === 0) {
+    return { error: c.json(fail("not_found", "Nicio alerta de exportat pentru selectia/intervalul ales.", c), 404) };
+  }
+
+  const decorated: AlertExportDecoratedRow[] = rows.map((alert) => {
+    const derived = deriveAlertDigestRow(alert);
+    return {
+      alert,
+      numarDosar: derived.numarDosar,
+      dosarLink: derived.dosarLink,
+      kindLabel: derived.kindLabel,
+      severityLabel: derived.severityLabel,
+      nameMonitored: derived.nameMonitored,
+    };
+  });
+
+  recordAudit(c, "alerts.export", {
+    targetKind: "monitoring_alert",
+    targetId: String(rows.length),
+    detail: { mode: parsed.data.mode, count: rows.length },
+  });
+
+  return { rows: decorated };
+}
+
+async function streamExportResult(
+  c: import("hono").Context,
+  result: { filepath: string; filename: string; mime: string; byteLength: number }
+) {
+  const [{ createReadStream }, { unlink }, { Readable }] = await Promise.all([
+    import("node:fs"),
+    import("node:fs/promises"),
+    import("node:stream"),
+  ]);
+  const fileStream = createReadStream(result.filepath);
+  fileStream.once("close", () => {
+    void unlink(result.filepath).catch(() => {});
+  });
+  const safeAscii = result.filename.replace(/[^A-Za-z0-9._-]+/g, "_");
+  c.header("Content-Type", result.mime);
+  c.header("Content-Length", String(result.byteLength));
+  c.header(
+    "Content-Disposition",
+    `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`
+  );
+  c.header("Cache-Control", "no-store");
+  return c.body(Readable.toWeb(fileStream) as unknown as ReadableStream);
+}
+
+alertsRouter.post("/export.xlsx", limitAlertExportBody, async (c) => {
+  const collected = await collectAlertExportRows(c);
+  if ("error" in collected) return collected.error;
+  const result = await buildAlertsXlsx(collected.rows, exportContextLabel(c));
+  return streamExportResult(c, result);
+});
+
+alertsRouter.post("/export.pdf", limitAlertExportBody, async (c) => {
+  const collected = await collectAlertExportRows(c);
+  if ("error" in collected) return collected.error;
+  const result = await buildAlertsPdf(collected.rows, exportContextLabel(c));
+  return streamExportResult(c, result);
 });
 
 alertsRouter.get("/stream", (c) => {

@@ -7,8 +7,8 @@
 //   - "range":  doar interval custom (subset al "filters" cu includeDismissed
 //               implicit pentru ca user-ul cere explicit "totul din interval").
 //
-// Backend-ul intoarce randuri decorate cu numarDosar + dosarLink pentru
-// hyperlink in XLSX (`l.Target`) si jspdf-autotable `didDrawCell`.
+// Backend-ul construieste direct XLSX/PDF si intoarce blob cu hyperlink-uri
+// catre portal.just.ro pe coloana Dosar.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { FileSpreadsheet, FileText, Loader2, X } from "lucide-react";
@@ -22,8 +22,9 @@ import {
   type AlertKind,
   type AlertSeverity,
 } from "@/lib/alertsApi";
-import { exportAlertsToFile, type AlertExportFormat } from "@/lib/export-alerts";
 import { cn } from "@/lib/utils";
+
+type AlertExportFormat = "xlsx" | "pdf";
 
 type ExportMode = "ids" | "filters" | "range";
 
@@ -155,16 +156,12 @@ export function AlertsExportModal({
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const result = await alertsApi.exportAlerts(payload, controller.signal);
+      const result =
+        format === "xlsx"
+          ? await alertsApi.alertsExportXlsxBlob(payload, controller.signal, contextLabel)
+          : await alertsApi.alertsExportPdfBlob(payload, controller.signal, contextLabel);
       if (controller.signal.aborted) return;
-      if (result.rows.length === 0) {
-        setError("Nicio alerta de exportat pentru selectia/intervalul ales.");
-        return;
-      }
-      await exportAlertsToFile(format, {
-        rows: result.rows,
-        contextLabel,
-      });
+      triggerBlobDownload(result.blob, result.filename);
       onClose();
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") return;
@@ -180,10 +177,13 @@ export function AlertsExportModal({
   if (!open) return null;
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users close with Escape or the explicit close button.
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={handleClose}
     >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: this click only prevents backdrop bubbling. */}
+      {/* biome-ignore lint/a11y/useSemanticElements: app modal style relies on a div dialog wrapper. */}
       <div
         role="dialog"
         aria-modal="true"
@@ -366,4 +366,15 @@ export function AlertsExportModal({
       </div>
     </div>
   );
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

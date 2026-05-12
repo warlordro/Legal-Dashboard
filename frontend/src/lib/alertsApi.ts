@@ -78,6 +78,45 @@ async function unwrapAlerts<T>(res: Response): Promise<T> {
   return (body as EnvelopeOk<T>).data;
 }
 
+function parseFilenameFromContentDisposition(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      // fall through to ascii branch
+    }
+  }
+  const ascii = /filename="([^"]+)"/i.exec(header) ?? /filename=([^;]+)/i.exec(header);
+  if (ascii) return ascii[1].trim();
+  return fallback;
+}
+
+async function unwrapAlertBlob(res: Response, fallbackFilename: string): Promise<{ blob: Blob; filename: string }> {
+  if (!res.ok) {
+    try {
+      const body = (await res.json()) as EnvelopeError | { error?: string };
+      if ("error" in body && typeof body.error === "string") {
+        throw new MonitoringApiError("unknown_error", body.error, res.status);
+      }
+      const err = (body as EnvelopeError).error;
+      throw new MonitoringApiError(
+        err?.code ?? "unknown_error",
+        err?.message ?? "Eroare necunoscuta",
+        res.status,
+        err?.details
+      );
+    } catch (err) {
+      if (err instanceof MonitoringApiError) throw err;
+      throw new MonitoringApiError("invalid_response", `Eroare server (${res.status})`, res.status);
+    }
+  }
+  const blob = await res.blob();
+  const filename = parseFilenameFromContentDisposition(res.headers.get("Content-Disposition"), fallbackFilename);
+  return { blob, filename };
+}
+
 export const alertKindLabels: Record<AlertKind, string> = {
   dosar_new: "Dosar nou",
   termen_new: "Termen nou",
@@ -121,7 +160,7 @@ export const alertsApi = {
     if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
     if (params.kind && params.kind !== "all") search.set("kind", params.kind);
     if (params.jobKind && params.jobKind !== "all") search.set("jobKind", params.jobKind);
-    if (params.q && params.q.trim()) search.set("q", params.q.trim());
+    if (params.q?.trim()) search.set("q", params.q.trim());
     if (params.severity && params.severity !== "all") search.set("severity", params.severity);
     if (params.onlyUnread !== undefined) search.set("onlyUnread", String(params.onlyUnread));
     if (params.includeDismissed !== undefined) search.set("includeDismissed", String(params.includeDismissed));
@@ -160,6 +199,38 @@ export const alertsApi = {
       signal,
     });
     return unwrapAlerts<AlertExportResult>(res);
+  },
+
+  alertsExportXlsxBlob: async (
+    payload: AlertExportRequest,
+    signal?: AbortSignal,
+    contextLabel?: string
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (contextLabel) headers["x-export-context-label"] = contextLabel;
+    const res = await apiFetch("/api/v1/alerts/export.xlsx", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    });
+    return unwrapAlertBlob(res, "alerte.xlsx");
+  },
+
+  alertsExportPdfBlob: async (
+    payload: AlertExportRequest,
+    signal?: AbortSignal,
+    contextLabel?: string
+  ): Promise<{ blob: Blob; filename: string }> => {
+    const headers: Record<string, string> = { "Content-Type": "application/json" };
+    if (contextLabel) headers["x-export-context-label"] = contextLabel;
+    const res = await apiFetch("/api/v1/alerts/export.pdf", {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+      signal,
+    });
+    return unwrapAlertBlob(res, "alerte.pdf");
   },
 
   dismissBulk: async (payload: AlertDismissBulkRequest, signal?: AbortSignal): Promise<AlertDismissBulkResult> => {
