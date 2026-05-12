@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cautareDosare } from "../soap.ts";
 import { defaultDateRange, generateMonthlyIntervals } from "../intervals.ts";
 import {
@@ -10,8 +11,71 @@ import {
   validateParams,
 } from "../util/validation.ts";
 import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
+import { buildDosarePdf } from "../services/dosareExportPdf.ts";
+import { buildDosareXlsx } from "../services/dosareExportXlsx.ts";
 
 export const dosareRouter = new Hono();
+export const dosareExportRouter = new Hono();
+
+const EXPORT_BODY_LIMIT = 50 * 1024 * 1024;
+const limitExport = bodyLimit({
+  maxSize: EXPORT_BODY_LIMIT,
+  onError: (c) => c.json({ error: "Payload prea mare" }, 413),
+});
+
+async function readDosareExportBody(c: import("hono").Context) {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return { error: c.json({ error: "JSON invalid" }, 400) };
+  }
+  const { dosare } = (body ?? {}) as { dosare?: unknown };
+  if (!Array.isArray(dosare)) return { error: c.json({ error: "Lista dosare invalida" }, 400) };
+  if (dosare.length === 0) return { error: c.json({ error: "Lista dosare goala" }, 400) };
+  if (dosare.length > MAX_DOSARE_RESPONSE) {
+    return { error: c.json({ error: `Maxim ${MAX_DOSARE_RESPONSE} dosare per export` }, 400) };
+  }
+  return { dosare: dosare as Awaited<ReturnType<typeof cautareDosare>> };
+}
+
+async function streamExportResult(
+  c: import("hono").Context,
+  result: { filepath: string; filename: string; mime: string; byteLength: number }
+) {
+  const [{ createReadStream }, { unlink }, { Readable }] = await Promise.all([
+    import("node:fs"),
+    import("node:fs/promises"),
+    import("node:stream"),
+  ]);
+  const fileStream = createReadStream(result.filepath);
+  fileStream.once("close", () => {
+    void unlink(result.filepath).catch(() => {});
+  });
+  const safeAscii = result.filename.replace(/[^A-Za-z0-9._-]+/g, "_");
+  c.header("Content-Type", result.mime);
+  c.header("Content-Length", String(result.byteLength));
+  c.header(
+    "Content-Disposition",
+    `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`
+  );
+  c.header("Cache-Control", "no-store");
+  return c.body(Readable.toWeb(fileStream) as unknown as ReadableStream);
+}
+
+dosareExportRouter.post("/export.xlsx", limitExport, async (c) => {
+  const parsed = await readDosareExportBody(c);
+  if ("error" in parsed) return parsed.error;
+  const result = await buildDosareXlsx(parsed.dosare);
+  return streamExportResult(c, result);
+});
+
+dosareExportRouter.post("/export.pdf", limitExport, async (c) => {
+  const parsed = await readDosareExportBody(c);
+  if ("error" in parsed) return parsed.error;
+  const result = await buildDosarePdf(parsed.dosare);
+  return streamExportResult(c, result);
+});
 
 // Cautare dosare (cu sedinte incluse)
 dosareRouter.get("/", async (c) => {

@@ -36,6 +36,42 @@ async function get<T>(url: string, params: Record<string, string | string[] | un
   return json;
 }
 
+function parseFilenameFromContentDisposition(header: string | null, fallback: string): string {
+  if (!header) return fallback;
+  const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
+  if (utf8) {
+    try {
+      return decodeURIComponent(utf8[1]);
+    } catch {
+      // fall through to ascii branch
+    }
+  }
+  const ascii = /filename="([^"]+)"/i.exec(header) ?? /filename=([^;]+)/i.exec(header);
+  if (ascii) return ascii[1].trim();
+  return fallback;
+}
+
+async function postBlob<T>(url: string, body: T, fallbackFilename: string): Promise<{ blob: Blob; filename: string }> {
+  const res = await apiFetch(`${BASE}${url}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    let msg = `Eroare server (${res.status})`;
+    try {
+      const data = (await res.json()) as { error?: unknown };
+      if (typeof data.error === "string") msg = data.error;
+    } catch {
+      // Binary/non-JSON error body; keep status fallback.
+    }
+    throw new Error(msg);
+  }
+  const blob = await res.blob();
+  const filename = parseFilenameFromContentDisposition(res.headers.get("Content-Disposition"), fallbackFilename);
+  return { blob, filename };
+}
+
 // SSE load-more helper — streams progress events, returns final data
 export interface LoadMoreProgress {
   processed: number;
@@ -97,7 +133,8 @@ async function loadMoreSSE<T>(
     throw new Error(serverMessage ?? "Eroare la incarcarea extinsa.");
   }
 
-  const reader = res.body!.getReader();
+  if (!res.body) throw new Error("Conexiunea nu a returnat stream.");
+  const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
   const accumulated: T[] = []; // accumulate batch results progressively
@@ -184,6 +221,10 @@ export const api = {
   dosare: {
     search: (params: SearchParams) =>
       get<{ data: Dosar[]; total: number }>("/dosare", params as Record<string, string | string[] | undefined>),
+    exportXlsxBlob: (dosare: Dosar[]) =>
+      postBlob("/v1/dosare/export.xlsx", { dosare }, dosare.length === 1 ? "dosar.xlsx" : "dosare.xlsx"),
+    exportPdfBlob: (dosare: Dosar[]) =>
+      postBlob("/v1/dosare/export.pdf", { dosare }, dosare.length === 1 ? "dosar.pdf" : "dosare.pdf"),
     loadMore: (
       params: SearchParams,
       onProgress?: (p: LoadMoreProgress) => void,
@@ -203,6 +244,10 @@ export const api = {
   termene: {
     search: (params: SearchParams) =>
       get<{ data: Termen[]; total: number }>("/termene", params as Record<string, string | string[] | undefined>),
+    exportXlsxBlob: (termene: Termen[]) =>
+      postBlob("/v1/termene/export.xlsx", { termene }, termene.length === 1 ? "termen.xlsx" : "termene.xlsx"),
+    exportPdfBlob: (termene: Termen[]) =>
+      postBlob("/v1/termene/export.pdf", { termene }, termene.length === 1 ? "termen.pdf" : "termene.pdf"),
     loadMore: (
       params: SearchParams,
       onProgress?: (p: LoadMoreProgress) => void,
@@ -347,7 +392,7 @@ export async function unwrapMonitoring<T>(res: Response): Promise<T> {
 // Bulk mark-seen for alerts. Lives here so the renderer-fetch hook stays happy.
 // Coordinated with backend agent: POST /api/v1/alerts/seen-bulk { ids } -> { data: MonitoringAlert[] }.
 export async function alertsSeenBulkRequest(ids: number[]): Promise<Response> {
-  return apiFetch(`/api/v1/alerts/seen-bulk`, {
+  return apiFetch("/api/v1/alerts/seen-bulk", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),

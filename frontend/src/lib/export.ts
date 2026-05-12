@@ -1,10 +1,8 @@
 import type { Dosar, Termen } from "@/types";
-import { formatDate } from "./utils";
-import { normalizeInstitutie, getInstitutieLabel } from "./institutii";
+import { getInstitutieLabel } from "./institutii";
 import { formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "./api";
+import { api } from "./api";
 import {
-  BLUE_DARK,
-  BLUE_LIGHT,
   cellAddr,
   ensureCell,
   mergeRow,
@@ -35,10 +33,6 @@ export type { ExportResult, AnalysisPdfArgs };
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export type ExportJob =
-  | { kind: "dosareXlsx"; data: Dosar[] }
-  | { kind: "dosarePdf"; data: Dosar[] }
-  | { kind: "termeneXlsx"; data: Termen[] }
-  | { kind: "termenePdf"; data: Termen[] }
   | { kind: "monitoringXlsx"; data: MonitoringJob[] }
   | { kind: "monitoringPdf"; data: MonitoringJob[] }
   | { kind: "analysisPdf"; data: AnalysisPdfArgs }
@@ -48,6 +42,10 @@ export type ExportJob =
 
 function triggerDownload(buffer: ArrayBuffer, filename: string, mime: string): void {
   const blob = new Blob([buffer], { type: mime });
+  triggerBlobDownload(blob, filename);
+}
+
+function triggerBlobDownload(blob: Blob, filename: string): void {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
@@ -89,25 +87,10 @@ function toTransferableBuffer(out: ArrayBuffer | Uint8Array): ArrayBuffer {
   return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
 }
 
-function formatInstitutie(raw: string): string {
-  if (!raw) return "-";
-  return normalizeInstitutie(raw);
-}
-
 // ─── Filename helpers ─────────────────────────────────────────────────────────
 
 function sanitizeNr(nr: string): string {
   return (nr || "").replace(/[/\\:*?"<>|]/g, "-").trim() || "dosar";
-}
-
-function dosareFilename(dosare: Dosar[], ext: "xlsx" | "pdf"): string {
-  if (dosare.length === 1) return `dosar_${sanitizeNr(dosare[0].numar)}.${ext}`;
-  return `dosare_${todayRo()}.${ext}`;
-}
-
-function termeneFilename(termene: Termen[], ext: "xlsx" | "pdf"): string {
-  if (termene.length === 1) return `termen_${sanitizeNr(termene[0].numarDosar)}.${ext}`;
-  return `termene_${todayRo()}.${ext}`;
 }
 
 // Same as formatMonitoringTarget but for name_soap appends the institutie scope
@@ -158,254 +141,6 @@ function monitoringStatusLabel(job: MonitoringJob): string {
   return `${base} / ${job.last_status}`;
 }
 
-const styleSectionHeader = {
-  font: { bold: true, sz: 9, color: { rgb: BLUE_DARK } },
-  fill: { patternType: "solid", fgColor: { rgb: BLUE_LIGHT } },
-  alignment: { horizontal: "left", vertical: "center" },
-};
-
-export async function buildDosareXlsx(dosare: Dosar[]): Promise<ExportResult> {
-  const XLSX = await import("xlsx-js-style");
-
-  const totalSedinte = dosare.reduce((s, d) => s + d.sedinte.length, 0);
-  const dateStr = new Date().toLocaleDateString("ro-RO");
-  const hasSedinte = dosare.some((d) => d.sedinte.length > 0);
-
-  // ── Pre-calculare pozitii rânduri pentru hyperlink-uri bidirecționale ──────
-  // Dosare sheet: titlu(0), stats(1), gol(2), header(3), date de la 4
-  // Sedinte sheet: titlu(0), stats(1), gol(2), header(3), apoi grupe pe dosar
-  const sedinteRowMap = new Map<string, number>(); // numar → rând section header în Sedinte
-  if (hasSedinte) {
-    let row = 4; // după titlu+stats+gol+header
-    dosare.forEach((d) => {
-      if (d.sedinte.length === 0) return;
-      sedinteRowMap.set(d.numar, row);
-      row += 1 + d.sedinte.length; // 1 section header + N sedinte
-    });
-  }
-
-  // ── Sheet 1: Dosare ────────────────────────────────────────────────────────
-  const D_COLS = 9; // A–I
-  const D_HEADERS = [
-    "#",
-    "Numar Dosar",
-    "Data",
-    "Institutie",
-    "Departament",
-    "Categorie / Stadiu",
-    "Obiect",
-    "Parti",
-    "Nr. Sedinte",
-  ];
-  const D_WIDTHS = [5, 22, 14, 28, 20, 28, 32, 45, 12];
-
-  const dosareAoA: (string | number | null)[][] = [
-    ["PORTALJUST DASHBOARD — DOSARE", ...Array(D_COLS - 1).fill(null)],
-    [`Generat: ${dateStr}  |  ${dosare.length} dosare  |  ${totalSedinte} sedinte`, ...Array(D_COLS - 1).fill(null)],
-    Array(D_COLS).fill(null),
-    D_HEADERS,
-    ...dosare.map((d, i) => [
-      i + 1,
-      d.numar || "-",
-      formatDate(d.data),
-      formatInstitutie(d.institutie),
-      d.departament || "-",
-      [d.categorieCaz, d.stadiuProcesual].filter(Boolean).join(" / ") || "-",
-      d.obiect || "-",
-      d.parti.map((p) => `${p.calitateParte}: ${p.nume}`).join("\n") || "-",
-      d.sedinte.length,
-    ]),
-  ];
-
-  const wsDosare = XLSX.utils.aoa_to_sheet(dosareAoA) as Record<string, unknown>;
-  wsDosare["!cols"] = D_WIDTHS.map((w) => ({ wch: w }));
-  wsDosare["!rows"] = [{ hpt: 22 }, { hpt: 16 }, { hpt: 6 }, { hpt: 18 }];
-
-  mergeRow(wsDosare, 0, D_COLS);
-  mergeRow(wsDosare, 1, D_COLS);
-  styleRow(wsDosare, 0, D_COLS, styleTitle);
-  styleRow(wsDosare, 1, D_COLS, styleStats);
-  styleRow(wsDosare, 3, D_COLS, styleHeader);
-
-  dosare.forEach((d, i) => {
-    const r = 4 + i;
-    const isAlt = i % 2 === 1;
-    for (let c = 0; c < D_COLS; c++) {
-      const isNumar = c === 1;
-      const hasSedinteLnk = isNumar && hasSedinte && sedinteRowMap.has(d.numar);
-      styleCell(
-        wsDosare,
-        r,
-        c,
-        hasSedinteLnk
-          ? {
-              // Hyperlink style — albastru subliniat
-              font: { bold: true, sz: 9, color: { rgb: "1D4ED8" }, underline: true },
-              fill: { patternType: "solid", fgColor: { rgb: isAlt ? ROW_ALT : WHITE } },
-              alignment: { horizontal: "left", vertical: "top", wrapText: true },
-            }
-          : styleDataCell(i, isNumar)
-      );
-      // Adaugă hyperlink spre secțiunea din Sedinte
-      if (hasSedinteLnk) {
-        const sedinteRow = sedinteRowMap.get(d.numar)!;
-        (wsDosare[cellAddr(r, c)] as Record<string, unknown>).l = {
-          Target: `#Sedinte!A${sedinteRow + 1}`,
-          Tooltip: `Vezi sedintele dosarului ${d.numar}`,
-        };
-      }
-    }
-  });
-
-  // ── Sheet 2: Sedinte (grupate pe dosar) ────────────────────────────────────
-  let wsSedinte: Record<string, unknown> | null = null;
-
-  if (hasSedinte) {
-    const S_COLS = 10; // A–J
-    const S_HEADERS = [
-      "#",
-      "Numar Dosar",
-      "Data Sedinta",
-      "Ora",
-      "Complet",
-      "Solutie",
-      "Sumar Solutie",
-      "Document",
-      "Nr. Document",
-      "Data Pronuntare",
-    ];
-    const S_WIDTHS = [5, 22, 14, 8, 20, 32, 32, 22, 16, 14];
-
-    const sedinteAoA: (string | number | null)[][] = [
-      ["PORTALJUST DASHBOARD — SEDINTE", ...Array(S_COLS - 1).fill(null)],
-      [`Generat: ${dateStr}  |  ${totalSedinte} sedinte din ${dosare.length} dosare`, ...Array(S_COLS - 1).fill(null)],
-      Array(S_COLS).fill(null),
-      S_HEADERS,
-    ];
-
-    const sectionHeaderRows: { r: number; numar: string; dosarIdx: number }[] = [];
-    const dataRows: { r: number; alt: number }[] = [];
-    let sedintaIdx = 0;
-
-    dosare.forEach((d, dosarIdx) => {
-      if (d.sedinte.length === 0) return;
-      const secRow = sedinteAoA.length;
-      sedinteAoA.push([`Dosar: ${d.numar}  (${d.sedinte.length} sedinte)  ↑`, ...Array(S_COLS - 1).fill(null)]);
-      sectionHeaderRows.push({ r: secRow, numar: d.numar, dosarIdx });
-
-      d.sedinte.forEach((s) => {
-        const dataRow = sedinteAoA.length;
-        sedinteAoA.push([
-          sedintaIdx + 1,
-          d.numar,
-          formatDate(s.data),
-          s.ora || "-",
-          s.complet || "-",
-          s.solutie || "-",
-          s.solutieSumar || "-",
-          s.documentSedinta || "-",
-          s.numarDocument || "-",
-          formatDate(s.dataPronuntare),
-        ]);
-        dataRows.push({ r: dataRow, alt: sedintaIdx });
-        sedintaIdx++;
-      });
-    });
-
-    wsSedinte = XLSX.utils.aoa_to_sheet(sedinteAoA) as Record<string, unknown>;
-    wsSedinte["!cols"] = S_WIDTHS.map((w) => ({ wch: w }));
-    wsSedinte["!rows"] = [{ hpt: 22 }, { hpt: 16 }, { hpt: 6 }, { hpt: 18 }];
-
-    mergeRow(wsSedinte, 0, S_COLS);
-    mergeRow(wsSedinte, 1, S_COLS);
-    styleRow(wsSedinte, 0, S_COLS, styleTitle);
-    styleRow(wsSedinte, 1, S_COLS, styleStats);
-    styleRow(wsSedinte, 3, S_COLS, styleHeader);
-
-    sectionHeaderRows.forEach(({ r, numar, dosarIdx }) => {
-      mergeRow(wsSedinte!, r, S_COLS);
-      // Stil section header cu hint că e link înapoi (↑)
-      styleRow(wsSedinte!, r, S_COLS, {
-        ...styleSectionHeader,
-        font: { bold: true, sz: 9, color: { rgb: BLUE_DARK }, underline: true },
-      });
-      // Hyperlink înapoi la rândul dosarului din sheet-ul Dosare
-      const dosareRow = 4 + dosarIdx; // titlu(0)+stats(1)+gol(2)+header(3) + index
-      const addr = cellAddr(r, 0);
-      ensureCell(wsSedinte!, addr);
-      (wsSedinte![addr] as Record<string, unknown>).l = {
-        Target: `#Dosare!B${dosareRow + 1}`,
-        Tooltip: `Inapoi la dosarul ${numar} in tab Dosare`,
-      };
-    });
-
-    dataRows.forEach(({ r, alt }) => {
-      for (let c = 0; c < S_COLS; c++) {
-        styleCell(wsSedinte!, r, c, styleDataCell(alt, c === 1));
-      }
-    });
-  }
-
-  sanitizeFormulaCells(wsDosare);
-  if (wsSedinte) sanitizeFormulaCells(wsSedinte);
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wsDosare as import("xlsx").WorkSheet, "Dosare");
-  if (wsSedinte) XLSX.utils.book_append_sheet(wb, wsSedinte as import("xlsx").WorkSheet, "Sedinte");
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
-  return { buffer: toTransferableBuffer(out), filename: dosareFilename(dosare, "xlsx"), mime: MIME_XLSX };
-}
-
-export async function buildTermeneXlsx(termene: Termen[]): Promise<ExportResult> {
-  const XLSX = await import("xlsx-js-style");
-
-  const dateStr = new Date().toLocaleDateString("ro-RO");
-  const T_COLS = 8; // A–H
-  const T_HEADERS = ["#", "Numar Dosar", "Data", "Ora", "Institutie", "Complet", "Solutie", "Sumar Solutie"];
-  const T_WIDTHS = [5, 22, 14, 8, 30, 22, 35, 35];
-
-  const termeneAoA: (string | number | null)[][] = [
-    ["PORTALJUST DASHBOARD — TERMENE", ...Array(T_COLS - 1).fill(null)],
-    [`Generat: ${dateStr}  |  ${termene.length} termene`, ...Array(T_COLS - 1).fill(null)],
-    Array(T_COLS).fill(null),
-    T_HEADERS,
-    ...termene.map((t, i) => [
-      i + 1,
-      t.numarDosar || "-",
-      formatDate(t.data),
-      t.ora || "-",
-      formatInstitutie(t.institutie),
-      t.complet || "-",
-      t.solutie || "-",
-      t.solutieSumar || "-",
-    ]),
-  ];
-
-  const ws = XLSX.utils.aoa_to_sheet(termeneAoA) as Record<string, unknown>;
-  ws["!cols"] = T_WIDTHS.map((w) => ({ wch: w }));
-  ws["!rows"] = [{ hpt: 22 }, { hpt: 16 }, { hpt: 6 }, { hpt: 18 }];
-
-  mergeRow(ws, 0, T_COLS);
-  mergeRow(ws, 1, T_COLS);
-  styleRow(ws, 0, T_COLS, styleTitle);
-  styleRow(ws, 1, T_COLS, styleStats);
-  styleRow(ws, 3, T_COLS, styleHeader);
-
-  termene.forEach((_, i) => {
-    const r = 4 + i;
-    for (let c = 0; c < T_COLS; c++) {
-      styleCell(ws, r, c, styleDataCell(i, c === 1));
-    }
-  });
-
-  sanitizeFormulaCells(ws);
-
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Termene");
-  const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
-  return { buffer: toTransferableBuffer(out), filename: termeneFilename(termene, "xlsx"), mime: MIME_XLSX };
-}
-
 export async function buildMonitoringXlsx(jobs: MonitoringJob[]): Promise<ExportResult> {
   const XLSX = await import("xlsx-js-style");
 
@@ -454,211 +189,6 @@ export async function buildMonitoringXlsx(jobs: MonitoringJob[]): Promise<Export
   XLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Monitorizare");
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
   return { buffer: toTransferableBuffer(out), filename: monitoringFilename(jobs, "xlsx"), mime: MIME_XLSX };
-}
-
-function formatPartiPDF(parti: Dosar["parti"]): string {
-  if (parti.length === 0) return "-";
-  return parti.map((p) => `${stripDiacritics(p.calitateParte)}: ${stripDiacritics(p.nume)}`).join("\n");
-}
-
-function formatSedintePDF(sedinte: Dosar["sedinte"]): string {
-  if (sedinte.length === 0) return "-";
-  return sedinte
-    .map((s) => {
-      const parts = [formatDate(s.data)];
-      if (s.ora) parts.push(s.ora);
-      if (s.solutie) parts.push("- " + stripDiacritics(s.solutie));
-      if (s.solutieSumar) parts.push("(" + stripDiacritics(s.solutieSumar) + ")");
-      return parts.join(" ");
-    })
-    .join("\n");
-}
-
-export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
-  const { default: jsPDF } = await import("jspdf");
-  const { default: autoTable } = await import("jspdf-autotable");
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-
-  // Title
-  doc.setFontSize(16);
-  doc.setFont("helvetica", "bold");
-  doc.text("Legal Dashboard - Dosare", 14, 16);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  const totalSedinte = dosare.reduce((sum, d) => sum + d.sedinte.length, 0);
-  doc.text(
-    `Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${dosare.length} dosare, ${totalSedinte} sedinte`,
-    14,
-    22
-  );
-
-  // Side-band: row index → portal.just.ro URL pentru coloana "Numar Dosar"
-  // (autotable nu are acces la valoarea originala in didDrawCell, doar la
-  // textul rendat). Pattern preluat din export-alerts.ts.
-  const dosarLinks = new Map<number, string>();
-  dosare.forEach((d, i) => {
-    if (d.numar) dosarLinks.set(i, getPortalJustUrl(d.numar));
-  });
-
-  autoTable(doc, {
-    startY: 28,
-    head: [["#", "Numar Dosar", "Data", "Institutie", "Categorie / Stadiu", "Obiect", "Parti", "Sedinte"]],
-    body: dosare.map((d, i) => [
-      String(i + 1),
-      d.numar || "-",
-      formatDate(d.data),
-      stripDiacritics(formatInstitutie(d.institutie)),
-      stripDiacritics([d.categorieCaz, d.stadiuProcesual].filter(Boolean).join(" / ")),
-      stripDiacritics(d.obiect || "-"),
-      formatPartiPDF(d.parti),
-      formatSedintePDF(d.sedinte),
-    ]),
-    styles: {
-      fontSize: 7,
-      cellPadding: 2,
-      lineColor: [200, 200, 200],
-      lineWidth: 0.1,
-      overflow: "linebreak",
-      font: "helvetica",
-    },
-    headStyles: {
-      fillColor: [37, 99, 235],
-      textColor: 255,
-      fontSize: 7.5,
-      fontStyle: "bold",
-      halign: "left",
-    },
-    alternateRowStyles: { fillColor: [245, 247, 250] },
-    columnStyles: {
-      0: { cellWidth: 7, halign: "center" },
-      1: { cellWidth: 24, fontStyle: "bold", textColor: [29, 78, 216] },
-      2: { cellWidth: 16 },
-      3: { cellWidth: 28 },
-      4: { cellWidth: 24 },
-      5: { cellWidth: 32 },
-      6: { cellWidth: 50 },
-      7: { cellWidth: "auto" },
-    },
-    margin: { left: 10, right: 10 },
-    didDrawCell: (data: {
-      section: string;
-      column: { index: number };
-      row: { index: number };
-      cell: { x: number; y: number; width: number; height: number };
-    }) => {
-      if (data.section !== "body") return;
-      if (data.column.index !== 1) return;
-      const url = dosarLinks.get(data.row.index);
-      if (!url) return;
-      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
-        url,
-      });
-    },
-    didDrawPage: (data: { pageNumber: number }) => {
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      doc.text(
-        `Pagina ${data.pageNumber}`,
-        doc.internal.pageSize.getWidth() / 2,
-        doc.internal.pageSize.getHeight() - 7,
-        { align: "center" }
-      );
-    },
-  });
-  return {
-    buffer: doc.output("arraybuffer") as ArrayBuffer,
-    filename: dosareFilename(dosare, "pdf"),
-    mime: MIME_PDF,
-  };
-}
-
-export async function buildTermenePdf(termene: Termen[]): Promise<ExportResult> {
-  const { default: jsPDF } = await import("jspdf");
-  const { default: autoTable } = await import("jspdf-autotable");
-  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
-
-  doc.setFontSize(16);
-  doc.setFont("helvetica", "bold");
-  doc.text("Legal Dashboard - Termene", 14, 16);
-  doc.setFontSize(9);
-  doc.setFont("helvetica", "normal");
-  doc.text(`Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${termene.length} termene`, 14, 22);
-
-  const dosarLinks = new Map<number, string>();
-  termene.forEach((t, i) => {
-    if (t.numarDosar) dosarLinks.set(i, getPortalJustUrl(t.numarDosar));
-  });
-
-  autoTable(doc, {
-    startY: 28,
-    head: [["#", "Numar Dosar", "Data", "Ora", "Institutie", "Complet", "Solutie", "Sumar"]],
-    body: termene.map((t, i) => [
-      String(i + 1),
-      t.numarDosar || "-",
-      formatDate(t.data),
-      t.ora || "-",
-      stripDiacritics(formatInstitutie(t.institutie)),
-      stripDiacritics(t.complet || "-"),
-      stripDiacritics(t.solutie || "-"),
-      stripDiacritics(t.solutieSumar || "-"),
-    ]),
-    styles: {
-      fontSize: 7.5,
-      cellPadding: 2,
-      lineColor: [200, 200, 200],
-      lineWidth: 0.1,
-      overflow: "linebreak",
-      font: "helvetica",
-    },
-    headStyles: {
-      fillColor: [37, 99, 235],
-      textColor: 255,
-      fontSize: 8,
-      fontStyle: "bold",
-      halign: "left",
-    },
-    alternateRowStyles: { fillColor: [245, 247, 250] },
-    columnStyles: {
-      0: { cellWidth: 8, halign: "center" },
-      1: { cellWidth: 28, fontStyle: "bold", textColor: [29, 78, 216] },
-      2: { cellWidth: 18 },
-      3: { cellWidth: 12 },
-      4: { cellWidth: 32 },
-      5: { cellWidth: 25 },
-      6: { cellWidth: 30 },
-      7: { cellWidth: "auto" },
-    },
-    margin: { left: 14, right: 14 },
-    didDrawCell: (data: {
-      section: string;
-      column: { index: number };
-      row: { index: number };
-      cell: { x: number; y: number; width: number; height: number };
-    }) => {
-      if (data.section !== "body") return;
-      if (data.column.index !== 1) return;
-      const url = dosarLinks.get(data.row.index);
-      if (!url) return;
-      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, {
-        url,
-      });
-    },
-    didDrawPage: (data: { pageNumber: number }) => {
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      doc.text(
-        `Pagina ${data.pageNumber}`,
-        doc.internal.pageSize.getWidth() / 2,
-        doc.internal.pageSize.getHeight() - 7,
-        { align: "center" }
-      );
-    },
-  });
-  return {
-    buffer: doc.output("arraybuffer") as ArrayBuffer,
-    filename: termeneFilename(termene, "pdf"),
-    mime: MIME_PDF,
-  };
 }
 
 export async function buildMonitoringPdf(jobs: MonitoringJob[]): Promise<ExportResult> {
@@ -758,23 +288,23 @@ export async function buildMonitoringPdf(jobs: MonitoringJob[]): Promise<ExportR
 // ─── Orchestratori (DOM-bound, ruleaza in main thread) ────────────────────────
 
 export async function exportDosareExcel(dosare: Dosar[]): Promise<void> {
-  const result = await runExportInWorker({ kind: "dosareXlsx", data: dosare });
-  triggerDownload(result.buffer, result.filename, result.mime);
+  const { blob, filename } = await api.dosare.exportXlsxBlob(dosare);
+  triggerBlobDownload(blob, filename);
 }
 
 export async function exportTermeneExcel(termene: Termen[]): Promise<void> {
-  const result = await runExportInWorker({ kind: "termeneXlsx", data: termene });
-  triggerDownload(result.buffer, result.filename, result.mime);
+  const { blob, filename } = await api.termene.exportXlsxBlob(termene);
+  triggerBlobDownload(blob, filename);
 }
 
 export async function exportDosarePDF(dosare: Dosar[]): Promise<void> {
-  const result = await runExportInWorker({ kind: "dosarePdf", data: dosare });
-  triggerDownload(result.buffer, result.filename, result.mime);
+  const { blob, filename } = await api.dosare.exportPdfBlob(dosare);
+  triggerBlobDownload(blob, filename);
 }
 
 export async function exportTermenePDF(termene: Termen[]): Promise<void> {
-  const result = await runExportInWorker({ kind: "termenePdf", data: termene });
-  triggerDownload(result.buffer, result.filename, result.mime);
+  const { blob, filename } = await api.termene.exportPdfBlob(termene);
+  triggerBlobDownload(blob, filename);
 }
 
 export async function exportMonitoringExcel(jobs: MonitoringJob[]): Promise<void> {

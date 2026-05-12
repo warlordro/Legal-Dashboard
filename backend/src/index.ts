@@ -5,8 +5,8 @@ import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { rnpmRouter } from "./routes/rnpm.ts";
-import { dosareRouter } from "./routes/dosare.ts";
-import { termeneRouter } from "./routes/termene.ts";
+import { dosareExportRouter, dosareRouter } from "./routes/dosare.ts";
+import { termeneExportRouter, termeneRouter } from "./routes/termene.ts";
 import { aiRouter } from "./routes/ai.ts";
 import { preAuthRateLimit, rateLimit, startRateLimitSweeper, stopRateLimitSweeper } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
@@ -34,9 +34,9 @@ import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
-import { fileURLToPath } from "url";
-import path from "path";
-import fs from "fs";
+import { fileURLToPath } from "node:url";
+import path from "node:path";
+import fs from "node:fs";
 import dotenv from "dotenv";
 
 // __dirname is provided by:
@@ -242,6 +242,8 @@ function healthHandler(c: Context): Response {
 app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
 app.route("/api/termene", termeneRouter);
+app.route("/api/v1/dosare", dosareExportRouter);
+app.route("/api/v1/termene", termeneExportRouter);
 app.route("/api/ai", aiRouter);
 app.route("/api/v1/ai-usage", aiUsageRouter);
 app.route("/api/v1/auth", authRouter);

@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cautareDosare } from "../soap.ts";
 import { defaultDateRange, generateMonthlyIntervals } from "../intervals.ts";
 import {
@@ -10,8 +11,72 @@ import {
   validateParams,
 } from "../util/validation.ts";
 import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
+import { buildTermenePdf } from "../services/termeneExportPdf.ts";
+import { buildTermeneXlsx, type TermenExportRow } from "../services/termeneExportXlsx.ts";
 
 export const termeneRouter = new Hono();
+export const termeneExportRouter = new Hono();
+
+const EXPORT_BODY_LIMIT = 50 * 1024 * 1024;
+const MAX_TERMENE_EXPORT = 100_000;
+const limitExport = bodyLimit({
+  maxSize: EXPORT_BODY_LIMIT,
+  onError: (c) => c.json({ error: "Payload prea mare" }, 413),
+});
+
+async function readTermeneExportBody(c: import("hono").Context) {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return { error: c.json({ error: "JSON invalid" }, 400) };
+  }
+  const { termene } = (body ?? {}) as { termene?: unknown };
+  if (!Array.isArray(termene)) return { error: c.json({ error: "Lista termene invalida" }, 400) };
+  if (termene.length === 0) return { error: c.json({ error: "Lista termene goala" }, 400) };
+  if (termene.length > MAX_TERMENE_EXPORT) {
+    return { error: c.json({ error: `Maxim ${MAX_TERMENE_EXPORT} termene per export` }, 400) };
+  }
+  return { termene: termene as TermenExportRow[] };
+}
+
+async function streamExportResult(
+  c: import("hono").Context,
+  result: { filepath: string; filename: string; mime: string; byteLength: number }
+) {
+  const [{ createReadStream }, { unlink }, { Readable }] = await Promise.all([
+    import("node:fs"),
+    import("node:fs/promises"),
+    import("node:stream"),
+  ]);
+  const fileStream = createReadStream(result.filepath);
+  fileStream.once("close", () => {
+    void unlink(result.filepath).catch(() => {});
+  });
+  const safeAscii = result.filename.replace(/[^A-Za-z0-9._-]+/g, "_");
+  c.header("Content-Type", result.mime);
+  c.header("Content-Length", String(result.byteLength));
+  c.header(
+    "Content-Disposition",
+    `attachment; filename="${safeAscii}"; filename*=UTF-8''${encodeURIComponent(result.filename)}`
+  );
+  c.header("Cache-Control", "no-store");
+  return c.body(Readable.toWeb(fileStream) as unknown as ReadableStream);
+}
+
+termeneExportRouter.post("/export.xlsx", limitExport, async (c) => {
+  const parsed = await readTermeneExportBody(c);
+  if ("error" in parsed) return parsed.error;
+  const result = await buildTermeneXlsx(parsed.termene);
+  return streamExportResult(c, result);
+});
+
+termeneExportRouter.post("/export.pdf", limitExport, async (c) => {
+  const parsed = await readTermeneExportBody(c);
+  if ("error" in parsed) return parsed.error;
+  const result = await buildTermenePdf(parsed.termene);
+  return streamExportResult(c, result);
+});
 
 // Termene = extrage sedintele din dosare
 termeneRouter.get("/", async (c) => {
@@ -52,7 +117,7 @@ termeneRouter.get("/", async (c) => {
   const signal = c.req.raw.signal;
 
   try {
-    let dosare;
+    let dosare: Awaited<ReturnType<typeof cautareDosare>>;
     if (institutii.length <= 1) {
       dosare = await cautareDosare(
         { numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop },
