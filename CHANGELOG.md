@@ -4,6 +4,40 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.26.0] - 2026-05-13
+
+### PR-6 Envelope Migration
+
+Rutele HTTP legacy din RNPM, AI si Termene folosesc acum envelope-ul standard
+`{ data, error: { code, message }, requestId }` pentru raspunsurile 4xx/5xx,
+fara sa migreze payload-urile SSE sau path-ul RNPM 499 abort cu `searchId`.
+
+#### Backend
+
+- `rnpm.ts`, `ai.ts` si `termene.ts` nu mai emit `c.json({ error: ... })` pe
+  caile HTTP 4xx/5xx migrate.
+- `INSUFFICIENT_FUNDS` raspunde cu `402 Payment Required` si `Retry-After: 0`,
+  detectat tipizat prin `CaptchaInsufficientFundsError`.
+- `LIMIT_EXCEEDED` pastreaza `error.details` cu `total`, `limit` si
+  `splittable`, ca UI-ul RNPM sa pastreze split-search.
+- `FILTER_DISABLED` si `FILTER_TIMEOUT` se citesc acum din `body.error.code`.
+- Pagination ramane shape-only: nu s-a introdus `INVALID_PAGE` nou unde exista
+  coercitie silentioasa.
+
+#### Frontend
+
+- `frontend/src/lib/api.ts` foloseste `extractErrorMessage` dual-shape pentru
+  raspunsuri legacy `{ error: "..." }` si envelope `{ error: { message } }`.
+- Exporturile XLSX/PDF, load-more SSE si AI multi-model pastreaza mesajele
+  reale in loc sa cada pe fallback generic.
+
+#### Tests
+
+- Suite noi si actualizate pentru envelope helper, RNPM contract/filter,
+  captcha balance, AI 4xx/5xx, Termene 4 rute si parserul frontend dual-shape.
+
+---
+
 ## [2.25.0] - 2026-05-13
 
 ### Filtru RNPM multi-token, highlight si badge in detalii

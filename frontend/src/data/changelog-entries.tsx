@@ -38,6 +38,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.26.0",
+    date: "13 Mai 2026",
+    subtitle:
+      "PR-6 Envelope Migration: rutele HTTP legacy din RNPM, AI si Termene returneaza envelope standard pe 4xx/5xx, iar frontend-ul citeste dual-shape mesajele de eroare pentru exporturi si SSE AI judge.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Envelope standard pe erori HTTP",
+        content:
+          "RNPM, AI si Termene folosesc acum forma { data, error: { code, message }, requestId } pentru raspunsurile 4xx/5xx migrate, cu requestId propagat pentru diagnostic.",
+      },
+      {
+        title: "Semantica pastrata",
+        content:
+          "INSUFFICIENT_FUNDS raspunde 402 Payment Required cu Retry-After: 0, LIMIT_EXCEEDED pastreaza details pentru split-search, iar pagination ramane shape-only fara INVALID_PAGE nou.",
+      },
+      {
+        title: "Frontend dual-shape",
+        content:
+          "Clientul API extrage mesajul real atat din erorile legacy string, cat si din envelope, astfel exporturile XLSX/PDF si SSE AI judge nu mai cad pe fallback generic.",
+      },
+      {
+        title: "Scope controlat",
+        content:
+          "Payload-urile SSE, path-ul RNPM 499 abort cu searchId, raspunsurile OK 200/201 si audit events raman nemigrate intentionat.",
+      },
+    ],
+  },
+  {
     version: "v2.25.0",
     date: "13 Mai 2026",
     subtitle:
