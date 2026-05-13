@@ -38,6 +38,8 @@ export interface MonitoringAlert {
   // alerts and old API responses won't have it.
   job_target_json?: string | null;
   job_kind?: string | null;
+  // v2.27.0 - propagated from monitoring_jobs.notes by listAlerts.
+  job_notes?: string | null;
 }
 
 export interface AlertsListResult {
