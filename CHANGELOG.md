@@ -4,6 +4,43 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.25.0] - 2026-05-13
+
+### Filtru RNPM multi-token, highlight si badge in detalii
+
+Filtrul text peste rezultatele unei cautari RNPM suporta acum mai multe
+cuvinte cu logica AND. Fiecare token poate aparea in alt camp al aceluiasi
+aviz, iar rezultatul ramane evaluat in backend peste campurile normalizate
+existente. Frontend-ul foloseste acelasi tokenizer ca backend-ul pentru
+highlight si semnalizare vizuala coerenta.
+
+#### Backend
+
+- Helper `tokenizeFilterQuery` cu deduplicare case-insensitive si
+  diacritics-insensitive, limitat la `FILTER_TOKEN_MAX_COUNT = 8` tokeni.
+- `filterRnpmSearchResults` construieste cate o grupa OR de 24 LIKE-uri pentru
+  fiecare token si le combina cu AND, pastrand `owner_id`, `search_id`,
+  `buildRnpmLikePattern()` si indexul `idx_rnpm_avize_owner_search`.
+- Test EXPLAIN suplimentar confirma ca query-ul cu 3 tokeni pastreaza index
+  hit pe cautarea RNPM.
+
+#### Frontend
+
+- Tokenizer mirror in frontend si helper `highlightTokens` care marcheaza
+  potrivirile diacritics-insensitive fara sa piarda textul original.
+- `RnpmResultsTable` evidentiaza tokenii in Identificator, Tip si Utilizator.
+- Badge `match in detalii` apare sub Identificator cand potrivirea nu este in
+  randul colapsat, ci in continutul expandat.
+- Tab-urile expandate Creditori, Debitori, Bunuri si Istoric primesc aceiasi
+  tokeni si highlight-uiesc campurile cautabile.
+
+#### Tests
+
+- Suite noi pentru tokenizer backend/frontend, highlight helper, logica AND in
+  repository, EXPLAIN cu 3 tokeni si integrarea UI din tabel.
+
+---
+
 ## [2.24.0] - 2026-05-13
 
 ### Filtru text peste rezultatele cautarii RNPM
