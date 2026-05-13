@@ -31,6 +31,15 @@ export class CaptchaError extends Error {
   }
 }
 
+export class CaptchaInsufficientFundsError extends Error {
+  readonly cause?: unknown;
+  constructor(message: string, cause?: unknown) {
+    super(message);
+    this.name = "CaptchaInsufficientFundsError";
+    this.cause = cause;
+  }
+}
+
 function providerLabel(provider: CaptchaProvider): string {
   return provider === "capsolver" ? "CapSolver" : "2Captcha";
 }
@@ -68,7 +77,7 @@ async function solveWith2Captcha(apiKey: string, signal?: AbortSignal): Promise<
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     if (e instanceof CaptchaError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
-    if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaError("Balanta 2Captcha insuficienta.", e);
+    if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", e);
     if (/ERROR_WRONG_USER_KEY|ERROR_KEY_DOES_NOT_EXIST/i.test(msg))
       throw new CaptchaError("Cheia 2Captcha este invalida.", e);
     throw new CaptchaError(`Eroare 2Captcha: ${msg}`, e);
@@ -101,7 +110,7 @@ function sleepAbortable(ms: number, signal?: AbortSignal): Promise<void> {
     if (signal) {
       onAbort = () => {
         clearTimeout(timer);
-        signal.removeEventListener("abort", onAbort!);
+        if (onAbort) signal.removeEventListener("abort", onAbort);
         reject(new DOMException("Aborted", "AbortError"));
       };
       signal.addEventListener("abort", onAbort);
@@ -139,8 +148,8 @@ async function solveWithCapSolver(apiKey: string, signal?: AbortSignal): Promise
     if (/ERROR_KEY_DENIED_ACCESS|ERROR_INVALID_TASK_DATA|ERROR_KEY/i.test(code)) {
       throw new CaptchaError("Cheia CapSolver este invalida.");
     }
-    if (/ERROR_ZERO_BALANCE|ERROR_NO_BALANCE/i.test(code)) {
-      throw new CaptchaError("Balanta CapSolver insuficienta.");
+    if (/ERROR_ZERO_BALANCE|ERROR_NO_BALANCE|ERROR_NO_FUNDS/i.test(code)) {
+      throw new CaptchaInsufficientFundsError("Balanta CapSolver insuficienta.");
     }
     throw new CaptchaError(`Eroare CapSolver: ${create.errorDescription ?? code ?? "necunoscuta"}`);
   }
@@ -245,7 +254,7 @@ export async function solveRnpmCaptcha(
   console.log(`[captcha] solve start provider=${provider} mode=${mode} fallback=${haveOther ? otherProvider : "none"}`);
 
   if (mode === "race" && haveOther) {
-    return solveRace({ key, provider }, { key: other!, provider: otherProvider }, signal, t0);
+    return solveRace({ key, provider }, { key: other, provider: otherProvider }, signal, t0);
   }
 
   try {
@@ -263,7 +272,7 @@ export async function solveRnpmCaptcha(
       const t1 = Date.now();
       console.log(`[captcha] fallback -> ${otherProvider}`);
       try {
-        const token = await solveWith(otherProvider, other!, signal);
+        const token = await solveWith(otherProvider, other, signal);
         if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
         console.log(`[captcha] fallback done provider=${otherProvider} ${Date.now() - t1}ms`);
         return token;
@@ -292,15 +301,25 @@ async function balance2Captcha(apiKey: string, signal: AbortSignal): Promise<num
   try {
     const balance = await Promise.race([solver.balance(), abortPromise]);
     return typeof balance === "number" ? balance : Number(balance);
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") throw e;
+    const msg = e instanceof Error ? e.message : String(e);
+    if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", e);
+    throw e;
   } finally {
     if (onAbort) signal.removeEventListener("abort", onAbort);
   }
 }
 
 async function balanceCapSolver(apiKey: string, signal: AbortSignal): Promise<number> {
-  type BalRes = { errorId: number; errorDescription?: string; balance?: number };
+  type BalRes = { errorId: number; errorCode?: string; errorDescription?: string; balance?: number };
   const res = await capsolverPost<BalRes>("/getBalance", { clientKey: apiKey }, signal);
   if (res.errorId !== 0 || typeof res.balance !== "number") {
+    const code = res.errorCode ?? "";
+    const description = res.errorDescription ?? "";
+    if (/ERROR_ZERO_BALANCE|ERROR_NO_BALANCE|ERROR_NO_FUNDS/i.test(`${code} ${description}`)) {
+      throw new CaptchaInsufficientFundsError("Balanta CapSolver insuficienta.");
+    }
     throw new CaptchaError(`Eroare CapSolver: ${res.errorDescription ?? "balanta indisponibila"}`);
   }
   return res.balance;
@@ -315,6 +334,7 @@ export async function getCaptchaBalance(apiKey: string, provider: CaptchaProvide
   try {
     return provider === "capsolver" ? await balanceCapSolver(key, signal) : await balance2Captcha(key, signal);
   } catch (e) {
+    if (e instanceof CaptchaInsufficientFundsError) throw e;
     if (e instanceof CaptchaError) throw e;
     // AbortSignal.timeout rejecteaza cu DOMException name=TimeoutError.
     if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
