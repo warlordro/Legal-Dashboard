@@ -18,14 +18,15 @@
 // scattering owner_id assertions across feature suites.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
   deleteAviz,
   deleteAvizeByIds,
+  filterRnpmSearchResults,
   getAvize,
   getAvizById,
   getAvizByIdentificator,
@@ -53,12 +54,22 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
-  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
 const OWNER_A = "userA";
 const OWNER_B = "userB";
+
+function makeSearch(ownerId: string, type: string): number {
+  const info = getDb()
+    .prepare(
+      `INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
+       VALUES (?, ?, '{}', 0, '')`
+    )
+    .run(ownerId, type);
+  return Number(info.lastInsertRowid);
+}
 
 function makeAviz(ownerId: string, identificator: string, extra?: Partial<SaveAvizInput>): SaveAvizInput {
   return {
@@ -207,7 +218,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
 
     const full = getAvizById(idA, OWNER_A);
     expect(full).not.toBeNull();
-    const denumiri = full!.creditori.map((c) => c.denumire);
+    const denumiri = full?.creditori.map((c) => c.denumire);
     expect(denumiri).not.toContain("LEAKED-CRED");
     expect(denumiri).toEqual([`CRED-${OWNER_A}`]);
   });
@@ -224,7 +235,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
     });
 
     const full = getAvizById(idA, OWNER_A);
-    expect(full!.debitori.map((d) => d.denumire)).toEqual([`DEB-${OWNER_A}`]);
+    expect(full?.debitori.map((d) => d.denumire)).toEqual([`DEB-${OWNER_A}`]);
   });
 
   it("fix #3 — loadAvizChildren skips bunuri with mismatched owner_id", () => {
@@ -237,7 +248,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
     });
 
     const full = getAvizById(idA, OWNER_A);
-    expect(full!.bunuri.map((b) => b.identificare)).toEqual([`BUN-${OWNER_A}-AVA1`]);
+    expect(full?.bunuri.map((b) => b.identificare)).toEqual([`BUN-${OWNER_A}-AVA1`]);
   });
 
   it("fix #4 — loadAvizChildren skips istoric with mismatched owner_id", () => {
@@ -252,7 +263,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
     });
 
     const full = getAvizById(idA, OWNER_A);
-    expect(full!.istoric.map((h) => h.identificator)).toEqual([`IST-${OWNER_A}-AVA1`]);
+    expect(full?.istoric.map((h) => h.identificator)).toEqual([`IST-${OWNER_A}-AVA1`]);
   });
 
   it("fix #5 — getAvize EXISTS subqueries reject parties from a different owner", () => {
@@ -299,5 +310,91 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
     saveAvizFull(makeAviz(OWNER_A, "AVA1"));
     const result = getAvize({ ownerId: OWNER_A, searchText: "\\" });
     expect(result.total).toBe(0);
+  });
+
+  describe("filterRnpmSearchResults cross-tenant breach drill", () => {
+    it("nu returneaza avize ale altui owner chiar daca acelasi text apare in ambele", () => {
+      const sidA = makeSearch(OWNER_A, "ipoteci");
+      const sidB = makeSearch(OWNER_B, "ipoteci");
+      const aA1 = saveAvizFull(
+        makeAviz(OWNER_A, "A-1", {
+          searchId: sidA,
+          debitori: [
+            {
+              tip_persoana: "PJ",
+              calitate: null,
+              denumire: "Popescu Ion",
+              prenume: null,
+              tip_entitate: "SRL",
+              sediu: null,
+              nr_identificare: null,
+              cod: null,
+              cnp: null,
+              tara: null,
+              localitate: null,
+              judet: null,
+              cod_postal: null,
+              alte_date: null,
+              subscriptor: null,
+              nr_ordine: null,
+            },
+          ],
+        })
+      );
+      const aB1 = saveAvizFull(
+        makeAviz(OWNER_B, "B-1", {
+          searchId: sidB,
+          debitori: [
+            {
+              tip_persoana: "PJ",
+              calitate: null,
+              denumire: "Popescu Maria",
+              prenume: null,
+              tip_entitate: "SRL",
+              sediu: null,
+              nr_identificare: null,
+              cod: null,
+              cnp: null,
+              tara: null,
+              localitate: null,
+              judet: null,
+              cod_postal: null,
+              alte_date: null,
+              subscriptor: null,
+              nr_ordine: null,
+            },
+          ],
+        })
+      );
+
+      expect(() => filterRnpmSearchResults({ ownerId: OWNER_B, searchId: sidA, q: "popescu" })).toThrow(
+        /Search inexistent/
+      );
+
+      const resA = filterRnpmSearchResults({ ownerId: OWNER_A, searchId: sidA, q: "popescu" });
+      expect(resA.matchedAvizIds).toEqual([aA1]);
+      expect(resA.matchedAvizIds).not.toContain(aB1);
+    });
+
+    it("rnpm_bunuri_descrieri content-addressable: descriere comuna NU leak cross-tenant", () => {
+      const sidA = makeSearch(OWNER_A, "ipoteci");
+      const sidB = makeSearch(OWNER_B, "ipoteci");
+      const aA1 = saveAvizFull(makeAviz(OWNER_A, "A-DESC-1", { searchId: sidA, bunuri: [] }));
+      const aB1 = saveAvizFull(makeAviz(OWNER_B, "B-DESC-1", { searchId: sidB, bunuri: [] }));
+
+      const desc = getDb().prepare("INSERT INTO rnpm_bunuri_descrieri (text) VALUES (?)").run("tractor unic descriere");
+      const descId = Number(desc.lastInsertRowid);
+
+      getDb()
+        .prepare("INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)")
+        .run(aA1, OWNER_A, descId);
+      getDb()
+        .prepare("INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)")
+        .run(aB1, OWNER_B, descId);
+
+      const resA = filterRnpmSearchResults({ ownerId: OWNER_A, searchId: sidA, q: "tractor" });
+      expect(resA.matchedAvizIds).toEqual([aA1]);
+      expect(resA.matchedAvizIds).not.toContain(aB1);
+    });
   });
 });
