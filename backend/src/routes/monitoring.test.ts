@@ -1294,7 +1294,14 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
   // window. Daca apar 3 PUT-uri back-to-back cu enabled=false (operator
   // tripleaza click-ul), UPSERT-ul intern garanteaza ca DOAR primul muta
   // starea: cele 2 urmatoare ies cu changed=false si NU mai scriu audit_log.
-  it("rapid back-to-back PUTs with the same value are idempotent: 1 audit row, not N", async () => {
+  //
+  // Concurrency note: `Promise.all` lanseaza cele 3 cereri "in paralel" la
+  // nivel de event loop, dar handler-ul Hono intra in `getDb().transaction(...)`
+  // care e SINCRON pe better-sqlite3 — tranzactiile se serializeaza pe nivelul
+  // SQLite WAL, nu se interleaveaza. Asadar nu testam o race condition reala;
+  // testam "tripleaza-click" UI semantic: orice ordine de procesare ar fi,
+  // exactly-one trebuie sa raporteze changed=true.
+  it("rapid back-to-back PUTs with enabled=false are idempotent: 1 audit row, not N", async () => {
     const app = buildTestApp();
     const [r1, r2, r3] = await Promise.all([
       app.request("/api/v1/monitoring/master-switch", {
@@ -1321,10 +1328,6 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
     const responses = (await Promise.all([r1.json(), r2.json(), r3.json()])) as {
       data: { enabled: boolean; changed: boolean };
     }[];
-    // Exact unul dintre cele 3 raporteaza changed=true (cel care a scris randul);
-    // celelalte 2 vin pe path-ul idempotent. Care anume e nedeterminist pe
-    // ordinea de procesare in better-sqlite3, dar contractul "exactly one"
-    // tine indiferent de planificare.
     const changedCount = responses.filter((r) => r.data.changed === true).length;
     expect(changedCount).toBe(1);
     expect(responses.every((r) => r.data.enabled === false)).toBe(true);
@@ -1333,5 +1336,53 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
     const offEvents = getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" });
     expect(offEvents).toHaveLength(1);
     expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.on" })).toHaveLength(0);
+  });
+
+  // Faza D — plan L194 cere explicit acoperire si pe directia .on: dupa ce
+  // ownerul a oprit monitorizarea, daca apasa de 3 ori rapid pe "Reia",
+  // audit_log trebuie sa primeasca exact UN rand .on (UPSERT idempotent),
+  // nu N. Acelasi contract ca testul anterior, dar pentru re-enable.
+  it("rapid back-to-back PUTs with enabled=true after disable are idempotent: 1 .on audit row", async () => {
+    const app = buildTestApp();
+    // Pune ownerul in starea OFF inainte de a triplica click-ul pe Reia.
+    await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+
+    const [r1, r2, r3] = await Promise.all([
+      app.request("/api/v1/monitoring/master-switch", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      }),
+      app.request("/api/v1/monitoring/master-switch", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      }),
+      app.request("/api/v1/monitoring/master-switch", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: true }),
+      }),
+    ]);
+
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect(r3.status).toBe(200);
+
+    const responses = (await Promise.all([r1.json(), r2.json(), r3.json()])) as {
+      data: { enabled: boolean; changed: boolean };
+    }[];
+    const changedCount = responses.filter((r) => r.data.changed === true).length;
+    expect(changedCount).toBe(1);
+    expect(responses.every((r) => r.data.enabled === true)).toBe(true);
+
+    const onEvents = getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.on" });
+    expect(onEvents).toHaveLength(1);
+    // Setup-ul a scris un singur .off; nu trebuie sa apara altul nou.
+    expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" })).toHaveLength(1);
   });
 });
