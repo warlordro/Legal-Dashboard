@@ -213,6 +213,32 @@ describe("originGuard — F11-F1 edge case characterization", () => {
     expect(res.status).toBe(403);
   });
 
+  it("returns envelope-shaped error body (data: null, requestId)", async () => {
+    // F11-F1 Stage 1: aliniere cu envelope-ul PR-6 { data, error, requestId }
+    // peste tot in surface-ul de API. Verifica ca refuzul include cele 3
+    // chei standardizate.
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.5" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildApp();
+
+    const res = await app.request("/api/mutate", {
+      method: "POST",
+      headers: {
+        host: "dashboard.lan",
+        origin: "http://attacker.example",
+      },
+    });
+
+    expect(res.status).toBe(403);
+    const body = await res.json();
+    expect(body).toMatchObject({
+      data: null,
+      error: { code: "csrf_origin_mismatch", message: expect.any(String) },
+      requestId: expect.any(String),
+    });
+  });
+
   it("rejects Origin host with port mismatch on non-loopback", async () => {
     // safeHost include portul in `host` URL — `example.com:8080` !=
     // `example.com:3002`. Verifica ca politica nu lasa port-confusion sa

@@ -25,6 +25,7 @@
 
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Next } from "hono";
+import { fail } from "../util/envelope.ts";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
 const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
@@ -38,10 +39,11 @@ function safeHost(input: string | undefined | null): string | null {
   }
 }
 
-export async function originGuard(c: Context, next: Next): Promise<Response | void> {
+export async function originGuard(c: Context, next: Next): Promise<Response | undefined> {
   const method = c.req.method.toUpperCase();
   if (SAFE_METHODS.has(method)) {
-    return next();
+    await next();
+    return;
   }
 
   // Loopback bypass: Electron renderer + dev tools fire requests from the
@@ -50,20 +52,13 @@ export async function originGuard(c: Context, next: Next): Promise<Response | vo
   // app was loaded, but the socket reveals whether it came over the LAN.
   const remoteAddr = getConnInfo(c).remote.address ?? "";
   if (LOOPBACK_ADDRESSES.has(remoteAddr)) {
-    return next();
+    await next();
+    return;
   }
 
   const hostHeader = c.req.header("host") ?? "";
   if (!hostHeader) {
-    return c.json(
-      {
-        error: {
-          code: "csrf_origin_mismatch",
-          message: "Cerere refuzata: Host header lipseste.",
-        },
-      },
-      403
-    );
+    return c.json(fail("csrf_origin_mismatch", "Cerere refuzata: Host header lipseste.", c), 403);
   }
 
   const originHost = safeHost(c.req.header("origin"));
@@ -72,27 +67,18 @@ export async function originGuard(c: Context, next: Next): Promise<Response | vo
 
   if (!claimedHost) {
     return c.json(
-      {
-        error: {
-          code: "csrf_origin_mismatch",
-          message: "Cerere refuzata: Origin/Referer lipseste pentru o ruta de modificare.",
-        },
-      },
+      fail("csrf_origin_mismatch", "Cerere refuzata: Origin/Referer lipseste pentru o ruta de modificare.", c),
       403
     );
   }
 
   if (claimedHost !== hostHeader) {
     return c.json(
-      {
-        error: {
-          code: "csrf_origin_mismatch",
-          message: `Cerere refuzata: Origin ${claimedHost} nu corespunde Host ${hostHeader}.`,
-        },
-      },
+      fail("csrf_origin_mismatch", `Cerere refuzata: Origin ${claimedHost} nu corespunde Host ${hostHeader}.`, c),
       403
     );
   }
 
-  return next();
+  await next();
+  return;
 }
