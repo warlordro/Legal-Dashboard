@@ -37,7 +37,7 @@ Spec-ul vechi `PLAN-rnpm-results-filter.md` (commit `3208782`, branch `feat/rnpm
 
 `getAvize().searchText` acopera doar 6 coloane aviz + creditori + debitori (12 LIKE-uri). Filtrul nou trebuie sa acopere si:
 - `rnpm_avize.tip_act`, `alte_mentiuni`, `detalii_comune`
-- `rnpm_bunuri.descriere_proprie` + `rnpm_bunuri_descrieri.text` (JOIN content-addressable)
+- `rnpm_bunuri.tip_bun`, `categorie`, `identificare`, `model`, `serie_sasiu`, `serie_motor`, `nr_inmatriculare`, `referinte_json` (toate coloanele text relevante) + `rnpm_bunuri_descrieri.text` (JOIN content-addressable; tabelul nu are coloana `descriere_proprie`)
 
 Daca am extinde `getAvize()`, am regresa endpoint-ul `/api/rnpm/saved?q=` (care expune deja UI cu UX dedicat). Creem functie noua:
 
@@ -64,7 +64,7 @@ Functia returneaza **doar ID-uri** + counters. UI le foloseste pentru a filtra `
 
 **DECIZIE FERMA**: NU se atinge `getAvize()` (lines 422-506). Pentru `filterRnpmSearchResults()` se creeaza un helper PRIVAT NOU `buildResultsFilterClause()`, distinct de clauza din `getAvize().searchText`. Duplicare minima acceptata in favoarea zero-regresie pe ruta `/api/rnpm/saved?q=`.
 
-Continutul helperului apare in sectiunea 5.2. Scope: 17 LIKE-uri (9 coloane aviz + 3 creditori + 3 debitori + 2 bunuri).
+Continutul helperului apare in sectiunea 5.2. Scope: 24 LIKE-uri (9 coloane aviz + 3 creditori + 3 debitori + 9 bunuri: `tip_bun`, `categorie`, `identificare`, `model`, `serie_sasiu`, `serie_motor`, `nr_inmatriculare`, `referinte_json` + `rnpm_bunuri_descrieri.text` via LEFT JOIN).
 
 ### 3.3 Schema constraint si index
 
@@ -260,10 +260,17 @@ function buildResultsFilterClause(q: string): { whereSql: string; params: string
     OR EXISTS (SELECT 1 FROM rnpm_bunuri b
       LEFT JOIN rnpm_bunuri_descrieri bd ON bd.id = b.descriere_id
       WHERE b.aviz_id = a.id AND b.owner_id = a.owner_id
-      AND (rnpm_norm(b.descriere_proprie) LIKE ? ESCAPE '\\'
+      AND (rnpm_norm(b.tip_bun) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.categorie) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.identificare) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.model) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.serie_sasiu) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.serie_motor) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.nr_inmatriculare) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.referinte_json) LIKE ? ESCAPE '\\'
         OR rnpm_norm(bd.text) LIKE ? ESCAPE '\\'))
   )`;
-  const params: string[] = Array(17).fill(like);
+  const params: string[] = Array(24).fill(like);
   return { whereSql, params };
 }
 
@@ -677,7 +684,7 @@ In `frontend/src/components/rnpm/RnpmResultsTable.tsx`:
 |---|---|---|---|
 | 1 | Happy path — matchuieste pe debitor.denumire | 3 avize, 1 cu debitor "Popescu" | `matchedAvizIds.length === 1`, `matchedCount === 1`, `totalInSearch === 3` |
 | 2 | Diacritic-insensitive — `"stefan"` matchuieste "Ștefan" | aviz cu debitor "Ștefan SRL" | match positiv |
-| 3 | DISTINCT — un aviz cu 3 bunuri matchuind nu se duplica | aviz cu 3 bunuri, toate `descriere_proprie="combina"` | `matchedAvizIds.length === 1`, NU 3 |
+| 3 | DISTINCT — un aviz cu 3 bunuri matchuind nu se duplica | aviz cu 3 bunuri, toate `model="combina <marca>"` | `matchedAvizIds.length === 1`, NU 3 |
 | 4 | EXISTS pe bunuri_descrieri JOIN — text din `rnpm_bunuri_descrieri.text` | bun cu `descriere_id` -> text "tractor John Deere" | `q="john deere"` matchuieste |
 | 5 | Cross-tenant izolation pe avize | 2 owners, fiecare cu avize, search separat | filter pentru owner A NU vede avize owner B |
 | 6 | Cross-tenant izolation pe `rnpm_bunuri_descrieri` (content-addressable, NO owner_id) | acelasi text descriere folosit de 2 owners | filter owner A nu lista aviz owner B (verifica `b.owner_id` in EXISTS) |
@@ -863,7 +870,7 @@ git push origin feat/rnpm-results-filter
 | R6 | Codex modifica accidental `getAvize()` searchText (regresie pe `/saved?q=`) | Spec interzice explicit; PR review verifica diff pe `avizRepository.ts:422-506` |
 | R7 | Codex pune `q` in URL (GET) si scapa in log | Spec interzice; review verifica metoda POST |
 | R8 | Kill switch leak — env name in body 503 | Spec body fix (sec 4.4 row 503); test 30 enforce |
-| R9 | Codex uita `ESCAPE '\\'` pe vreun LIKE → injection pattern | Helper centralizat `buildResultsFilterClause` are 17 LIKE-uri cu ESCAPE uniform; review verifica |
+| R9 | Codex uita `ESCAPE '\\'` pe vreun LIKE → injection pattern | Helper centralizat `buildResultsFilterClause` are 24 LIKE-uri cu ESCAPE uniform; review verifica |
 | R10 | Frontend abort race condition | Cleanup AbortController in useEffect return; test 40 enforce |
 
 ---

@@ -4,7 +4,7 @@
 
 **Goal:** Adauga un filtru text incremental peste rezultatele unei cautari RNPM (`/api/rnpm/search/:searchId/filter`) cu owner isolation, anti-enumeration 404, AbortSignal timeout 5s, truncare 1500 ID-uri si counter `missingDetails` transparent. Zero regresii pe `getAvize()` si `/api/rnpm/saved?q=`.
 
-**Architecture:** Backend (Hono + better-sqlite3, sync repo) → ruta noua POST cu Zod validation + `withMaintenanceRead` → helper repository nou `filterRnpmSearchResults` cu 17 LIKE-uri (avize + creditori + debitori + bunuri + bunuri_descrieri) + index nou `idx_rnpm_avize_owner_search`. Frontend (React 18 + Vite) → hook `useRnpmResultsFilter` cu `useDebouncedValue` 300ms + AbortController, UI in `RnpmResultsTable.tsx` filtreaza local pe Set<id>. Kill switch operational `RNPM_RESULTS_FILTER_DISABLED=1`.
+**Architecture:** Backend (Hono + better-sqlite3, sync repo) → ruta noua POST cu Zod validation + `withMaintenanceRead` → helper repository nou `filterRnpmSearchResults` cu 24 LIKE-uri (9 avize + 3 creditori + 3 debitori + 9 bunuri inclusiv `rnpm_bunuri_descrieri.text` via JOIN) + index nou `idx_rnpm_avize_owner_search`. Frontend (React 18 + Vite) → hook `useRnpmResultsFilter` cu `useDebouncedValue` 300ms + AbortController, UI in `RnpmResultsTable.tsx` filtreaza local pe Set<id>. Kill switch operational `RNPM_RESULTS_FILTER_DISABLED=1`.
 
 **Tech Stack:** TypeScript strict, Hono, better-sqlite3, Vitest, React 18, Zod, biome. Target: v2.24.0, branch `feat/rnpm-results-filter`.
 
@@ -256,23 +256,51 @@ Create `backend/src/db/avizRepository.filterRnpmSearchResults.test.ts`:
 ```ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { setDbForTest, getDb } from "./schema.ts";
+import path from "path";
+import os from "os";
+import fsPromises from "fs/promises";
+import { closeDb, getDb } from "./schema.ts";
 import { filterRnpmSearchResults } from "./avizRepository.ts";
-import { runMigrations } from "./migrations/runner.ts";
 
-function setupTestDb(): Database.Database {
-  const db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  setDbForTest(db);
-  runMigrations(db);
-  return db;
-}
+// Bootstrap pattern: foloseste LEGAL_DASHBOARD_DB_PATH (acelasi pattern ca in
+// repository-isolation.test.ts). getDb() declanseaza initSchema -> runMigrations
+// automat — nu avem nevoie de setDbForTest (nu exista in schema.ts) sau
+// import direct la runner.
+//
+// NOTA factory-uri: coloanele reale din migration 0001 sunt:
+//   rnpm_searches: (owner_id, search_type, params_json, total_results, criteriu, created_at)
+//     — NU exista `status` sau `started_at`; total_results poate fi 0.
+//   rnpm_bunuri:   (aviz_id, owner_id, tip_bun NOT NULL, categorie, identificare,
+//                   model, serie_sasiu, serie_motor, nr_inmatriculare,
+//                   referinte_json, descriere_id)
+//     — NU exista `descriere_proprie`. Text-ul descrierii vine prin descriere_id
+//       -> rnpm_bunuri_descrieri.text (content-addressable, fara owner_id).
+
+let tmpRoot: string;
+let dbPath: string;
+let db: Database.Database;
+
+beforeEach(async () => {
+  tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-filter-"));
+  dbPath = path.join(tmpRoot, "legal-dashboard.db");
+  process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+  const seed = new Database(dbPath);
+  seed.close();
+  // getDb() ruleaza initSchema -> runMigrations + inregistreaza rnpm_norm.
+  db = getDb();
+});
+
+afterEach(async () => {
+  closeDb();
+  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+});
 
 function makeSearch(db: Database.Database, ownerId: string, type: string): number {
   const info = db
     .prepare(
-      `INSERT INTO rnpm_searches (owner_id, search_type, params_json, status, started_at)
-       VALUES (?, ?, '{}', 'completed', datetime('now'))`
+      `INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
+       VALUES (?, ?, '{}', 0, '')`
     )
     .run(ownerId, type);
   return Number(info.lastInsertRowid);
@@ -324,31 +352,52 @@ function makeCreditor(db: Database.Database, opts: { avizId: number; ownerId: st
   ).run(opts.avizId, opts.ownerId, opts.denumire, opts.cod ?? "", opts.cnp ?? "");
 }
 
-function makeBun(db: Database.Database, opts: { avizId: number; ownerId: string; descriereProprie?: string; descriereText?: string }): void {
+// makeBun acopera toate coloanele text relevante pentru filtru. `tipBun` e NOT NULL
+// in schema, asa ca are default "bun mobil". `descriereText` insereaza in
+// rnpm_bunuri_descrieri (content-addressable, fara owner_id) si leaga prin descriere_id.
+function makeBun(
+  db: Database.Database,
+  opts: {
+    avizId: number;
+    ownerId: string;
+    tipBun?: string;
+    categorie?: string;
+    identificare?: string;
+    model?: string;
+    serieSasiu?: string;
+    serieMotor?: string;
+    nrInmatriculare?: string;
+    referinteJson?: string;
+    descriereText?: string;
+  }
+): void {
   let descriereId: number | null = null;
-  if (opts.descriereText) {
+  if (opts.descriereText !== undefined) {
     const desc = db
       .prepare(`INSERT INTO rnpm_bunuri_descrieri (text) VALUES (?)`)
       .run(opts.descriereText);
     descriereId = Number(desc.lastInsertRowid);
   }
   db.prepare(
-    `INSERT INTO rnpm_bunuri (aviz_id, owner_id, descriere_proprie, descriere_id)
-     VALUES (?, ?, ?, ?)`
-  ).run(opts.avizId, opts.ownerId, opts.descriereProprie ?? "", descriereId);
+    `INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, categorie, identificare,
+       model, serie_sasiu, serie_motor, nr_inmatriculare, referinte_json, descriere_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    opts.avizId,
+    opts.ownerId,
+    opts.tipBun ?? "bun mobil",
+    opts.categorie ?? null,
+    opts.identificare ?? null,
+    opts.model ?? null,
+    opts.serieSasiu ?? null,
+    opts.serieMotor ?? null,
+    opts.nrInmatriculare ?? null,
+    opts.referinteJson ?? null,
+    descriereId
+  );
 }
 
 describe("filterRnpmSearchResults", () => {
-  let db: Database.Database;
-
-  beforeEach(() => {
-    db = setupTestDb();
-  });
-
-  afterEach(() => {
-    db.close();
-    setDbForTest(null);
-  });
 
   it("happy path - matchuieste pe debitor.denumire", () => {
     const sid = makeSearch(db, "local", "ipoteci");
@@ -390,8 +439,11 @@ Modify `backend/src/db/avizRepository.ts` — adauga la finalul fisierului (dupa
 // doar ID-uri matched + counters; UI filtreaza local pe Set<id>.
 // NU se foloseste in /api/rnpm/saved (acela merge prin getAvize). NU atinge
 // getAvize() — duplicare minima acceptata pentru zero-regresie.
-// Acopera 17 coloane: 9 din rnpm_avize + 3 creditori + 3 debitori + 2 bunuri
-// (descriere_proprie + JOIN cu rnpm_bunuri_descrieri.text).
+// Acopera 24 coloane: 9 din rnpm_avize + 3 creditori + 3 debitori + 9 bunuri
+// (tip_bun + categorie + identificare + model + serie_sasiu + serie_motor +
+//  nr_inmatriculare + referinte_json + JOIN cu rnpm_bunuri_descrieri.text).
+// NOTA: rnpm_bunuri nu are coloana `descriere_proprie`; textul descrierii vine
+// exclusiv via descriere_id -> rnpm_bunuri_descrieri.text.
 // ============================================================================
 
 function buildResultsFilterClause(q: string): { whereSql: string; params: string[] } {
@@ -419,10 +471,17 @@ function buildResultsFilterClause(q: string): { whereSql: string; params: string
     OR EXISTS (SELECT 1 FROM rnpm_bunuri b
       LEFT JOIN rnpm_bunuri_descrieri bd ON bd.id = b.descriere_id
       WHERE b.aviz_id = a.id AND b.owner_id = a.owner_id
-      AND (rnpm_norm(b.descriere_proprie) LIKE ? ESCAPE '\\'
+      AND (rnpm_norm(b.tip_bun) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.categorie) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.identificare) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.model) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.serie_sasiu) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.serie_motor) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.nr_inmatriculare) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.referinte_json) LIKE ? ESCAPE '\\'
         OR rnpm_norm(bd.text) LIKE ? ESCAPE '\\'))
   )`;
-  const params: string[] = Array(17).fill(like);
+  const params: string[] = Array(24).fill(like);
   return { whereSql, params };
 }
 
@@ -531,9 +590,10 @@ Append in `backend/src/db/avizRepository.filterRnpmSearchResults.test.ts` inaint
   it("DISTINCT - aviz cu 3 bunuri matching nu se duplica", () => {
     const sid = makeSearch(db, "local", "ipoteci");
     const a1 = makeAviz(db, { ownerId: "local", searchId: sid, identificator: "AV-200" });
-    makeBun(db, { avizId: a1, ownerId: "local", descriereProprie: "combina John Deere" });
-    makeBun(db, { avizId: a1, ownerId: "local", descriereProprie: "combina Claas" });
-    makeBun(db, { avizId: a1, ownerId: "local", descriereProprie: "combina New Holland" });
+    // 3 bunuri legate de acelasi aviz, toate cu "combina" in coloana `model`.
+    makeBun(db, { avizId: a1, ownerId: "local", model: "combina John Deere" });
+    makeBun(db, { avizId: a1, ownerId: "local", model: "combina Claas" });
+    makeBun(db, { avizId: a1, ownerId: "local", model: "combina New Holland" });
 
     const res = filterRnpmSearchResults({ ownerId: "local", searchId: sid, q: "combina" });
     expect(res.matchedAvizIds).toHaveLength(1);
@@ -709,22 +769,29 @@ Create `backend/src/db/avizRepository.filterRnpmSearchResults.explain.test.ts`:
 ```ts
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { getDb, setDbForTest } from "./schema.ts";
-import { runMigrations } from "./migrations/runner.ts";
+import path from "path";
+import os from "os";
+import fsPromises from "fs/promises";
+import { closeDb, getDb } from "./schema.ts";
 
 describe("filterRnpmSearchResults — EXPLAIN QUERY PLAN", () => {
+  let tmpRoot: string;
+  let dbPath: string;
   let db: Database.Database;
 
-  beforeEach(() => {
-    db = new Database(":memory:");
-    db.pragma("foreign_keys = ON");
-    setDbForTest(db);
-    runMigrations(db);
+  beforeEach(async () => {
+    tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-explain-"));
+    dbPath = path.join(tmpRoot, "legal-dashboard.db");
+    process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+    const seed = new Database(dbPath);
+    seed.close();
+    db = getDb();
   });
 
-  afterEach(() => {
-    db.close();
-    setDbForTest(null);
+  afterEach(async () => {
+    closeDb();
+    delete process.env.LEGAL_DASHBOARD_DB_PATH;
+    await fsPromises.rm(tmpRoot, { recursive: true, force: true });
   });
 
   it("query principal foloseste idx_rnpm_avize_owner_search", () => {
@@ -798,9 +865,10 @@ Modify `backend/src/db/repository-isolation.test.ts` — adauga la final inainte
         .run("tractor unic descriere");
       const descId = Number(desc.lastInsertRowid);
 
-      db.prepare(`INSERT INTO rnpm_bunuri (aviz_id, owner_id, descriere_id) VALUES (?, ?, ?)`)
+      // tip_bun e NOT NULL in rnpm_bunuri — trebuie inclus explicit in INSERT.
+      db.prepare(`INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)`)
         .run(aA1, "ownerA", descId);
-      db.prepare(`INSERT INTO rnpm_bunuri (aviz_id, owner_id, descriere_id) VALUES (?, ?, ?)`)
+      db.prepare(`INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)`)
         .run(aB1, "ownerB", descId);
 
       const resA = filterRnpmSearchResults({ ownerId: "ownerA", searchId: sidA, q: "tractor" });
@@ -914,33 +982,41 @@ Create `backend/src/routes/rnpm.filter.test.ts`:
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { Hono } from "hono";
 import Database from "better-sqlite3";
-import { setDbForTest } from "../db/schema.ts";
-import { runMigrations } from "../db/migrations/runner.ts";
+import path from "path";
+import os from "os";
+import fsPromises from "fs/promises";
+import { closeDb, getDb } from "../db/schema.ts";
 import { rnpmRouter } from "./rnpm.ts";
 
+let tmpRoot: string;
+let dbPath: string;
 let app: Hono;
 let db: Database.Database;
 
-beforeEach(() => {
-  db = new Database(":memory:");
-  db.pragma("foreign_keys = ON");
-  setDbForTest(db);
-  runMigrations(db);
+beforeEach(async () => {
+  tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-route-"));
+  dbPath = path.join(tmpRoot, "legal-dashboard.db");
+  process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+  const seed = new Database(dbPath);
+  seed.close();
+  db = getDb();
   app = new Hono();
   app.route("/api/rnpm", rnpmRouter);
 });
 
-afterEach(() => {
+afterEach(async () => {
   delete process.env.RNPM_RESULTS_FILTER_DISABLED;
-  db.close();
-  setDbForTest(null);
+  closeDb();
+  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
 function seedSearchWithAviz(): { searchId: number; avizId: number } {
+  // rnpm_searches reale: (owner_id, search_type, params_json, total_results, criteriu).
   const s = db
     .prepare(
-      `INSERT INTO rnpm_searches (owner_id, search_type, params_json, status, started_at)
-       VALUES ('local', 'ipoteci', '{}', 'completed', datetime('now'))`
+      `INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
+       VALUES ('local', 'ipoteci', '{}', 0, '')`
     )
     .run();
   const searchId = Number(s.lastInsertRowid);
@@ -1282,8 +1358,8 @@ Append in `rnpm.filter.test.ts` inainte de `});` final:
     // creeaza un search pentru un alt owner
     const other = db
       .prepare(
-        `INSERT INTO rnpm_searches (owner_id, search_type, params_json, status, started_at)
-         VALUES ('other-tenant', 'ipoteci', '{}', 'completed', datetime('now'))`
+        `INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
+         VALUES ('other-tenant', 'ipoteci', '{}', 0, '')`
       )
       .run();
     const otherSearchId = Number(other.lastInsertRowid);
@@ -1959,7 +2035,7 @@ Modify `SESSION-HANDOFF.md`:
 
 **Trigger**: search RNPM cu zeci-sute de avize face inutil scroll-ul fara filtru. Spec vechi (commit 3208782) STALE, codebase evoluase.
 
-**Solutie**: endpoint nou `POST /api/rnpm/search/:searchId/filter` cu helper repository dedicat (NU refactor `getAvize`), 17 LIKE-uri pe `rnpm_norm()` (avize + creditori + debitori + bunuri + bunuri_descrieri). UI filtreaza local pe `Set<id>`. Spec full: [`docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md`](docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md).
+**Solutie**: endpoint nou `POST /api/rnpm/search/:searchId/filter` cu helper repository dedicat (NU refactor `getAvize`), 24 LIKE-uri pe `rnpm_norm()` (9 avize + 3 creditori + 3 debitori + 9 bunuri incl. `rnpm_bunuri_descrieri.text` via JOIN). UI filtreaza local pe `Set<id>`. Spec full: [`docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md`](docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md).
 
 **Decizii arhitecturale cheie**:
 - POST (NU GET) — evita leak `q` in Hono `logger()` URL.
@@ -2106,7 +2182,7 @@ Adauga `POST /api/rnpm/search/:searchId/filter` — filtru text incremental pest
 ## Changes
 
 - Migration 0021 `idx_rnpm_avize_owner_search` (IF NOT EXISTS + boot-time probe).
-- Helper repository `filterRnpmSearchResults` (17 LIKE-uri pe `rnpm_norm()` + EXISTS pe creditori/debitori/bunuri).
+- Helper repository `filterRnpmSearchResults` (24 LIKE-uri pe `rnpm_norm()`: 9 avize + 3 creditori + 3 debitori + 9 bunuri inclusiv `rnpm_bunuri_descrieri.text` via JOIN).
 - Route handler cu Zod validation, kill switch `RNPM_RESULTS_FILTER_DISABLED`, structured logging (qLen NU raw q).
 - Frontend hook `useRnpmResultsFilter` cu `useDebouncedValue` 300ms + AbortController.
 - UI integration in `RnpmResultsTable.tsx` cu input + 3 banner-uri (truncate, missingDetails, disabled).
@@ -2151,7 +2227,7 @@ Expected: vezi PR-ul deschis + ultimele 10 commit-uri pe branch (Task 0-9).
 4. **Helper privat `buildResultsFilterClause`** — folosit DOAR de `filterRnpmSearchResults`. NU il exporta. NU il refoloseste in alta parte.
 5. **POST nu GET** — daca vezi handler-ul ca GET, e bug.
 6. **`/api/rnpm/...` nu `/api/v1/rnpm/...`** — productie e fara `v1`.
-7. **17 LIKE-uri cu ESCAPE `'\\'` uniforme** — verifica fiecare LIKE inainte de commit.
+7. **24 LIKE-uri cu ESCAPE `'\\'` uniforme** — verifica fiecare LIKE inainte de commit.
 8. **`new Response(null, { status: 499 })`** — NU `c.body` cu cast pentru 499; Response direct.
 9. **`logFilterEvent` local** — NU incerca import `logRnpmEvent` din service (e privat).
 10. **Commit la fiecare task** — nu batch multiple task-uri intr-un commit.
