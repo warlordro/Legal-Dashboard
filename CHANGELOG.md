@@ -4,6 +4,41 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.27.0] - 2026-05-14
+
+### Notite editabile per job de monitorizare
+
+Utilizatorul poate edita o notita scurta atasata unui job de monitorizare
+direct din pagina `/monitorizare`. Notita ramane owner-scoped, este salvata via
+`PATCH /api/v1/monitoring/jobs/:id` si este afisata live in cardurile din
+`/alerte` pentru alertele provenite din acel job.
+
+#### Adaugat
+
+- Editor inline pentru notite pe randurile din Monitorizare: click pe nota
+  existenta sau pe `+ Adauga notita`, textarea cu limita 200 chars, counter si
+  actiuni `Salveaza` / `Anuleaza`.
+- Cardurile din Alerte afiseaza blocul `Notita: ...` cand alerta provine dintr-un
+  job cu notita setata. Afisarea este live-read din `monitoring_jobs.notes`, fara
+  snapshot denormalizat.
+- Bulk import semnaleaza in preview randurile cu notite peste 200 caractere, ca
+  utilizatorul sa le corecteze inainte de commit.
+
+#### Modificat
+
+- Limita backend Zod pentru `monitoring_jobs.notes` scade de la 2000 la 200
+  caractere, cu mesaj romanesc clar: `Notita maxim 200 caractere`.
+- `MonitoringAddForm` foloseste `maxLength=200`, aliniat cu backend-ul.
+- Notitele lungi din lista de joburi fac wrap in coloana tintei si nu intra sub
+  butonul `Dosare`.
+
+#### Tests
+
+- Teste noi pentru limita Zod, propagarea `job_notes` prin `listAlerts`,
+  editorul inline `NoteEditor` si blocul `AlertNoteBlock`.
+
+---
+
 ## [2.26.0] - 2026-05-13
 
 ### PR-6 Envelope Migration

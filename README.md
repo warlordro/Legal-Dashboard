@@ -7,16 +7,15 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.26.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.27.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.26.0** - PR-6 Envelope Migration. Rutele HTTP legacy din
-RNPM, AI si Termene folosesc acum envelope-ul standard
-`{ data, error: { code, message }, requestId }` pentru raspunsurile 4xx/5xx.
-Migrarea pastreaza payload-urile structurate necesare UI-ului, inclusiv
-`LIMIT_EXCEEDED.details`, raspunsul `INSUFFICIENT_FUNDS` este `402 Payment
-Required` cu `Retry-After: 0`, iar frontend-ul citeste dual-shape mesajele de
-eroare ca exporturile si SSE AI judge sa afiseze mesajul real.
+Ultimul release **v2.27.0** - notite editabile per job de monitorizare si
+propagare in Alerte. Utilizatorul poate adauga, modifica sau sterge o notita
+scurta direct din pagina Monitorizare, limita este 200 caractere, iar cardurile
+din Alerte afiseaza blocul `Notita: ...` pentru joburile care au context salvat.
+Afisarea este live-read, fara snapshot, deci modificarile se vad si pe alertele
+deja emise.
 
 Predecesor - master switch monitoring per-owner. Buton global
 "Opreste/Reia monitorizarea" expus in pagina Monitorizare; cand owner-ul opreste

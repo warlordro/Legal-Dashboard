@@ -9,6 +9,7 @@ import {
   MousePointerClick,
   Layers,
   CalendarSearch,
+  FileText,
   FileSpreadsheet,
   Lock,
   Wrench,
@@ -37,6 +38,36 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.27.0",
+    date: "14 Mai 2026",
+    subtitle:
+      "Notite editabile per job de monitorizare, limita 200 caractere si propagare live in cardurile din Alerte.",
+    icon: <FileText className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
+    sections: [
+      {
+        title: "Notite editabile in Monitorizare",
+        content:
+          "Fiecare job de monitorizare poate avea o notita scurta editabila direct din rand: click pe nota existenta sau pe '+ Adauga notita', apoi Salveaza sau Anuleaza. Limita este 200 caractere.",
+      },
+      {
+        title: "Propagare in Alerte",
+        content:
+          "Cardurile din /alerte afiseaza blocul 'Notita: ...' cand alerta provine dintr-un job cu notita setata. Afisarea este live-read, deci editarea notitei se reflecta in alertele deja emise.",
+      },
+      {
+        title: "Validare si bulk import",
+        content:
+          "Backend-ul valideaza notitele la maximum 200 caractere, formularul de adaugare foloseste aceeasi limita, iar preview-ul de bulk import semnaleaza randurile cu notite prea lungi.",
+      },
+      {
+        title: "Polish vizual",
+        content: "Notitele lungi din lista de joburi fac wrap in coloana tintei si nu intra sub butonul Dosare.",
+      },
+    ],
+  },
   {
     version: "v2.26.0",
     date: "13 Mai 2026",
