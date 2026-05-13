@@ -273,6 +273,51 @@ Un finding (I1 — dublu `validateAiBody`) a fost verificat direct vs cod si **r
 
 **Total Faza 10: ~6h blockers + ~6h high + ~7h medium + ~3h low = ~22h** (3 zile dev efectiv distribuite). Blockers F10-C1/C2/C3 sunt obligatorii pre-tag v2.0.7.
 
+## Faza 11 — Audit intern 2026-05-14 (post v2.27.0)
+
+**De ce aici:** audit complet pe codul real post-merge v2.27.0 (notite editabile per job + propagare alerte) si v2.26.0 (envelope migration). Validat `tsc --noEmit` + tests (162 frontend / 1001 backend) + Electron smoke + `npm audit --omit=dev` curat. Scor global **8.2/10** — verdict "safe pentru desktop local, hardening recomandat inainte de web/remote exposure".
+
+**Status:** 5 findings noi, niciunul critic. F11-F1 e singura cu vector concret de abuz (CSRF pe rutele admin loopback); restul sunt release hygiene + clarificari documentare. Re-verificare 2026-05-14 confirma ca toate cele 5 sunt inca prezente in HEAD (main = `50f7ea3` Merge chore/remove-dead-xlsx-frontend).
+
+### Findings active
+
+- [ ] **F11-F1 — originGuard loopback bypass neconditionat (CSRF surface pe rutele admin desktop)** — Medium. [backend/src/middleware/originGuard.ts:47-54](backend/src/middleware/originGuard.ts#L47-L54) lasa orice request loopback sa treaca fara verificare Origin/Referer. Combinat cu [backend/src/index.ts:347-353](backend/src/index.ts#L347-L353) (promote `local → admin` la boot desktop) si rute admin POST fara body ([rnpm.ts:843,861,935](backend/src/routes/rnpm.ts) — `/open-db-folder`, `/compact`, `/open-backups-folder`): un site malitios deschis in browser-ul user-ului poate trigger fetch `POST http://127.0.0.1:3002/api/v1/rnpm/compact` cu `mode: "no-cors"` — POST simplu fara Content-Type nu declanseaza preflight, requestul reuseste. Impact real: DoS (compact lock DB) + annoyance (popup Explorer), nu data loss. Fix: in `originGuard`, daca Origin/Referer e prezent chiar si pe loopback, cere same-host cu Host header; pastreaza bypass pentru curl/Electron fara Origin. Opt-in: cere header custom `X-Legal-Dashboard-Desktop: 1` setat doar de renderer prin `apiFetch`. Adauga 4 teste in `originGuard.test.ts`: loopback+Origin same-host → next, loopback+Origin cross-host → 403, loopback fara Origin → next (curl), header custom prezent → next. **Effort:** ~45 min.
+
+- [ ] **F11-F2 — Biome lint rosu (654 errors + 25 warnings) si nu in CI** — Medium. `npx biome check` returneaza 654 errors + 25 warnings pe tot repo-ul. [`.github/workflows/build-windows.yml`](.github/workflows/build-windows.yml) + [`build-mac.yml`](.github/workflows/build-mac.yml) ruleaza `tsc` + tests + build, dar **nu** lint. `npm run check` (= lint + typecheck + test) e inutilizabil ca gate local complet. Practica curenta `biome check --write` pe fisierele atinse (CLAUDE.md regula non-negotiable) mentine codul nou curat, dar nu cleanup-eaza datoria istorica. Fix: PR dedicat de normalizare mecanica (`biome check --write` pe directoare in batches mici, fara schimbari functionale), apoi adauga step `npx biome check` in workflows dupa `npm ci`. Decide explicit daca `lineEnding: "lf"` ramane standard pe Windows; daca da, confirma `.gitattributes` + normalizeaza. **Effort:** ~3-4h normalizare + 30 min CI integration.
+
+- [ ] **F11-F3 — Static imports anuleaza code splitting pe `@/lib/export`** — Low-Medium. [frontend/src/components/dashboard/ReportExportModal.tsx:17](frontend/src/components/dashboard/ReportExportModal.tsx#L17), [dosare-ai-analysis-panel.tsx:6](frontend/src/components/dosare-ai-analysis-panel.tsx#L6), [DosareTable.tsx:23](frontend/src/components/DosareTable.tsx#L23), [Dosare.tsx:11](frontend/src/pages/Dosare.tsx#L11), [Monitorizare.tsx:33](frontend/src/pages/Monitorizare.tsx#L33), [Termene.tsx:8](frontend/src/pages/Termene.tsx#L8) — 6 fisiere import static din `@/lib/export`, anuland dynamic import-ul intentionat din [Dashboard.tsx:136](frontend/src/pages/Dashboard.tsx#L136). Vite avertizeaza ca `export.ts` e importat in ambele moduri, deci jspdf+xlsx ajung in chunk-ul initial. Chunk-uri peste 500kB: `charts` ~542kB, `xlsx` ~627kB. **Strans legat de planul `project_export_server_streaming`** (migrare la `exceljs.WorkbookWriter` streaming) — atac-le impreuna. Fix: split `@/lib/export` in module per domeniu (`export-monitoring.ts`, `export-report.ts`, `export-ai.ts`, `export-dosare.ts`, `export-termene.ts`) ca importurile statice sa nu traga tot pachetul; alternativ promote consumerii la dynamic imports lazy. **Effort:** ~3-4h.
+
+- [ ] **F11-F4 — Web mode = auth seam, `/login` ramane 501 cu mesaj stale (referinta PR-10 moarta)** — Low-Medium. [backend/src/routes/auth.ts:35-40](backend/src/routes/auth.ts#L35-L40) returneaza `501 not_implemented` cu mesaj `"Login endpoint nu este disponibil in v2.7.x. Vezi PR-10 pentru SSO/IdP cutover."` — referinta la PR-10 e moarta (PR-10 SSO eliminat din scope per decizia 2026-05-03, vezi memorie `project_pr10_pr12_eliminated`). Backend valideaza strict JWT secret/issuer/audience in web mode ([auth/config.ts:49-68](backend/src/auth/config.ts#L49-L68)), dar fara login first-party livrat. Operatorul care vede `AUTH_MODE=web` poate crede ca app-ul e deploy-ready. Fix: update mesaj 501 sa nu mai mentioneze PR-10 + mentioneaza ca tokens trebuie provisionate extern manual; expune `authMode` + `loginAvailable: false` in `/health`; nota explicita in SECURITY.md ca web mode e auth seam, nu produs web self-service. **Effort:** ~30 min.
+
+- [ ] **F11-F5 — `scripts/rebuild-electron.cjs` `shell: true` warning DEP0190** — Low. [scripts/rebuild-electron.cjs:29](scripts/rebuild-electron.cjs#L29) `shell: process.platform === "win32"` declanseaza DEP0190 la rulare. Args constante, exploit zero, dar zgomot in CI logs si potential risc daca scriptul preia vreodata input extern. Fix: elimina `shell: true` pe Windows si invoca direct `npx.cmd` cu calea absoluta din `node_modules/.bin/`, sau migreaza la `@electron/rebuild` ca dependency directa (call ca biblioteca, nu prin `spawnSync`). **Effort:** ~30 min.
+
+### Findings rezolvate intre audit si HEAD curent (post-merge)
+
+- [x] **F11-F6 — xlsx dead devDep in frontend (Dependabot Prototype Pollution + ReDoS)** (2026-05-14) — `xlsx ^0.18.5` era in [frontend/package.json](frontend/package.json) `devDependencies` dar nu era importat in `frontend/src/` (productie foloseste `xlsx-js-style`). Eliminat in commit `95140fa chore(frontend): elimina xlsx dead devDep`. Inchide alertele Dependabot #3 + #4 (High Prototype Pollution + High ReDoS) pe frontend. Backend `xlsx` ramane in `devDependencies` doar ca fixture-builder pentru `nameListParser.test.ts` (productie deja pe `exceljs`) — atac in F11-F3 sprint.
+
+### Validare la momentul auditului
+
+| Verificare | Rezultat |
+|---|---|
+| `npm run typecheck:backend` | PASS |
+| `npm run typecheck:frontend` | PASS |
+| `npm audit --omit=dev` | PASS (0 vulnerabilitati production deps) |
+| `npm test --workspace=frontend -- --run` | PASS (19 files, 149 teste; post-v2.27.0 = 162 teste) |
+| `npm test --workspace=backend -- --run` | PASS (78 files, 1001 passed, 1 skipped) — dupa `npm rebuild better-sqlite3` |
+| `npm run build` | PASS cu warning chunk size (charts ~542kB, xlsx ~627kB) |
+| Electron smoke | PASS — `/health` ok, monitoring enabled/running |
+| `npm run lint` | FAIL — 654 errors + 25 warnings |
+
+**Prioritate remediere:**
+
+1. **F11-F1** — singurul finding cu vector concret. PR mic separat (~45 min).
+2. **F11-F3** — atac impreuna cu migrarea xlsx → exceljs (planul `project_export_server_streaming`) ca sa nu se reduplice munca. Va inchide si ultimele 4 alerte Dependabot xlsx backend.
+3. **F11-F4** — fix imediat mesaj 501 + `/health` exposure (mic, valoare clarificare mare).
+4. **F11-F2** — sprint separat de lint cleanup + CI integration.
+5. **F11-F5** — quick win cosmetic.
+
+**Total Faza 11: ~5-6h** (excluzand F11-F2 normalizare care e un sprint separat de ~4h).
+
 ## Planned feature — Dashboard rework + Watched Dosare (viitor)
 
 > ## ❌ OBSOLETE — 2026-04-27
