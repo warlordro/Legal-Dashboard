@@ -13,6 +13,7 @@ import {
 import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
 import { buildTermenePdf } from "../services/termeneExportPdf.ts";
 import { buildTermeneXlsx, type TermenExportRow } from "../services/termeneExportXlsx.ts";
+import { ErrorCodes, fail } from "../util/envelope.ts";
 
 export const termeneRouter = new Hono();
 export const termeneExportRouter = new Hono();
@@ -23,8 +24,14 @@ const EXPORT_BODY_LIMIT = 25 * 1024 * 1024;
 const MAX_TERMENE_EXPORT = 100_000;
 const limitExport = bodyLimit({
   maxSize: EXPORT_BODY_LIMIT,
-  onError: (c) => c.json({ error: "Payload prea mare" }, 413),
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
 });
+
+const invalidJson = (c: import("hono").Context) => c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400);
+const invalidParams = (c: import("hono").Context, message: string) =>
+  c.json(fail(ErrorCodes.INVALID_PARAMS, message, c), 400);
+const internalError = (c: import("hono").Context, message: string) =>
+  c.json(fail(ErrorCodes.INTERNAL_ERROR, message, c), 500);
 
 function isTermenShape(value: unknown): value is TermenExportRow {
   if (!value || typeof value !== "object") return false;
@@ -42,17 +49,17 @@ async function readTermeneExportBody(c: import("hono").Context) {
   try {
     body = await c.req.json();
   } catch {
-    return { error: c.json({ error: "JSON invalid" }, 400) };
+    return { error: invalidJson(c) };
   }
   const { termene } = (body ?? {}) as { termene?: unknown };
-  if (!Array.isArray(termene)) return { error: c.json({ error: "Lista termene invalida" }, 400) };
-  if (termene.length === 0) return { error: c.json({ error: "Lista termene goala" }, 400) };
+  if (!Array.isArray(termene)) return { error: invalidParams(c, "Lista termene invalida") };
+  if (termene.length === 0) return { error: invalidParams(c, "Lista termene goala") };
   if (termene.length > MAX_TERMENE_EXPORT) {
-    return { error: c.json({ error: `Maxim ${MAX_TERMENE_EXPORT} termene per export` }, 400) };
+    return { error: invalidParams(c, `Maxim ${MAX_TERMENE_EXPORT} termene per export`) };
   }
   const badIndex = termene.findIndex((item) => !isTermenShape(item));
   if (badIndex !== -1) {
-    return { error: c.json({ error: `Format termen invalid la pozitia ${badIndex}` }, 400) };
+    return { error: invalidParams(c, `Format termen invalid la pozitia ${badIndex}`) };
   }
   return { termene: termene as TermenExportRow[] };
 }
@@ -101,33 +108,30 @@ termeneRouter.get("/", async (c) => {
   const institutii = c.req.queries("institutie") ?? [];
 
   if (!numarDosar && !obiectDosar && !numeParte) {
-    return c.json({ error: "Cel putin un parametru este necesar: numarDosar, obiectDosar sau numeParte" }, 400);
+    return invalidParams(c, "Cel putin un parametru este necesar: numarDosar, obiectDosar sau numeParte");
   }
 
   // SECURITY: Cap institutii array to prevent request amplification
   if (institutii.length > MAX_INSTITUTII) {
-    return c.json({ error: `Maxim ${MAX_INSTITUTII} institutii permise per cerere.` }, 400);
+    return invalidParams(c, `Maxim ${MAX_INSTITUTII} institutii permise per cerere.`);
   }
 
   // SECURITY: defensive fanout cap mirrors the SSE /load-more guard.
   const fanout = Math.max(institutii.length, 1);
   if (fanout > MAX_SOAP_FANOUT) {
-    return c.json(
-      { error: `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.` },
-      400
-    );
+    return invalidParams(c, `Cererea ar genera ${fanout} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}.`);
   }
 
   for (const inst of institutii) {
     const instError = validateParams({ institutie: inst });
     if (instError) {
-      return c.json({ error: instError }, 400);
+      return invalidParams(c, instError);
     }
   }
 
   const validationError = validateParams({ numarDosar, obiectDosar, numeParte, dataStart, dataStop });
   if (validationError) {
-    return c.json({ error: validationError }, 400);
+    return invalidParams(c, validationError);
   }
 
   // Client disconnect cancels in-flight SOAP — see routes/dosare.ts for rationale.
@@ -160,9 +164,11 @@ termeneRouter.get("/", async (c) => {
     // before flatMap to avoid serializing tens of MB.
     if (dosare.length > MAX_DOSARE_RESPONSE) {
       return c.json(
-        {
-          error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).`,
-        },
+        fail(
+          ErrorCodes.PAYLOAD_TOO_LARGE,
+          `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).`,
+          c
+        ),
         413
       );
     }
@@ -190,7 +196,7 @@ termeneRouter.get("/", async (c) => {
     return c.json({ data: termene, total: termene.length, dosareCount: dosare.length });
   } catch (err) {
     console.error("Eroare cautare termene:", err);
-    return c.json({ error: "Eroare la comunicarea cu serviciul PortalJust. Incercati din nou." }, 500);
+    return internalError(c, "Eroare la comunicarea cu serviciul PortalJust. Incercati din nou.");
   }
 });
 
@@ -200,23 +206,23 @@ termeneRouter.post("/load-more", async (c) => {
   const institutii = c.req.queries("institutie") ?? [];
 
   if (!numarDosar && !obiectDosar && !numeParte) {
-    return c.json({ error: "Cel putin un parametru este necesar." }, 400);
+    return invalidParams(c, "Cel putin un parametru este necesar.");
   }
 
   if (institutii.length > MAX_INSTITUTII) {
-    return c.json({ error: `Maxim ${MAX_INSTITUTII} institutii permise per cerere.` }, 400);
+    return invalidParams(c, `Maxim ${MAX_INSTITUTII} institutii permise per cerere.`);
   }
 
   for (const inst of institutii) {
     const instError = validateParams({ institutie: inst });
     if (instError) {
-      return c.json({ error: instError }, 400);
+      return invalidParams(c, instError);
     }
   }
 
   const validationError = validateParams({ numarDosar, obiectDosar, numeParte, dataStart, dataStop });
   if (validationError) {
-    return c.json({ error: validationError }, 400);
+    return invalidParams(c, validationError);
   }
 
   const range = dataStart && dataStop ? { dataStart, dataStop } : defaultDateRange();
@@ -224,15 +230,15 @@ termeneRouter.post("/load-more", async (c) => {
   // SECURITY: Parse and validate existing dosare numbers from POST body
   const { set: existingNumere, error: bodyError } = await parseExistingFromBody(c);
   if (bodyError) {
-    return c.json({ error: bodyError }, 400);
+    return invalidParams(c, bodyError);
   }
 
   // SECURITY: Limit number of intervals to prevent resource exhaustion
   const intervals = generateMonthlyIntervals(range.dataStart, range.dataStop);
   if (intervals.length > MAX_SSE_INTERVALS) {
-    return c.json(
-      { error: `Intervalul de date este prea mare (${intervals.length} luni). Maximum ${MAX_SSE_INTERVALS} luni.` },
-      400
+    return invalidParams(
+      c,
+      `Intervalul de date este prea mare (${intervals.length} luni). Maximum ${MAX_SSE_INTERVALS} luni.`
     );
   }
 
@@ -240,11 +246,9 @@ termeneRouter.post("/load-more", async (c) => {
   const totalUnits = institutionList.length * intervals.length;
   // SECURITY: bound upstream SOAP load per request so a single client cannot flood portal.just.ro
   if (totalUnits > MAX_SOAP_FANOUT) {
-    return c.json(
-      {
-        error: `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.`,
-      },
-      400
+    return invalidParams(
+      c,
+      `Cererea ar genera ${totalUnits} apeluri catre portal.just.ro. Maximum ${MAX_SOAP_FANOUT}. Restrange institutiile sau intervalul.`
     );
   }
 
