@@ -1,6 +1,6 @@
-import { createHash } from "crypto";
-import fs from "fs";
-import path from "path";
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
 import type Database from "better-sqlite3";
 
 // Sentinel hash recorded for legacy DBs (pre-PR-0) that already contain the schema
@@ -132,7 +132,15 @@ export function runMigrations(db: Database.Database, migrationsDir: string): Run
         )
         .get() as { n: number }
     ).n;
-    if (userTables > 0) {
+    const legacyAppTables = (
+      db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM sqlite_master
+           WHERE type='table' AND name IN ('rnpm_searches', 'rnpm_avize', 'dosare', 'termeni')`
+        )
+        .get() as { n: number }
+    ).n;
+    if (userTables > 0 && legacyAppTables > 0) {
       db.prepare("INSERT INTO _schema_versions(version, sha256_up) VALUES (1, ?)").run(BACKFILL_SENTINEL);
       applied.set(1, BACKFILL_SENTINEL);
       backfilled = true;
@@ -146,7 +154,7 @@ export function runMigrations(db: Database.Database, migrationsDir: string): Run
     if (v > maxFileVersion) {
       throw new Error(
         `[migrations] DB has version ${v} but no migration file matches (max on disk: ${maxFileVersion}). ` +
-          `Did you check out an older commit against a newer DB?`
+          "Did you check out an older commit against a newer DB?"
       );
     }
   }

@@ -260,10 +260,10 @@ describe("runMigrations - drift detection", () => {
 });
 
 describe("runMigrations - legacy backfill path", () => {
-  it("backfills version=1 with sentinel when DB has user tables but empty _schema_versions", () => {
-    runDdl(db, "CREATE TABLE preexisting (id INTEGER PRIMARY KEY, label TEXT)");
-    db.prepare("INSERT INTO preexisting(label) VALUES (?)").run("legacy-data");
-    writeMigration("0001", "baseline", "CREATE TABLE preexisting (id INTEGER PRIMARY KEY, label TEXT)");
+  it("backfills version=1 with sentinel when DB has legacy app tables but empty _schema_versions", () => {
+    runDdl(db, "CREATE TABLE rnpm_searches (id INTEGER PRIMARY KEY, label TEXT)");
+    db.prepare("INSERT INTO rnpm_searches(label) VALUES (?)").run("legacy-data");
+    writeMigration("0001", "baseline", "CREATE TABLE rnpm_searches (id INTEGER PRIMARY KEY, label TEXT)");
 
     const result = runMigrations(db, migrationsDir);
 
@@ -277,8 +277,19 @@ describe("runMigrations - legacy backfill path", () => {
     };
     expect(row).toEqual({ version: 1, sha256_up: BACKFILL_SENTINEL });
 
-    const data = db.prepare("SELECT label FROM preexisting").get() as { label: string };
+    const data = db.prepare("SELECT label FROM rnpm_searches").get() as { label: string };
     expect(data.label).toBe("legacy-data");
+  });
+
+  it("does not backfill an unrelated SQLite DB that only has non-app tables", () => {
+    runDdl(db, "CREATE TABLE preexisting (id INTEGER)");
+    writeMigration("0001", "baseline", "CREATE TABLE rnpm_searches (id INTEGER)");
+
+    const result = runMigrations(db, migrationsDir);
+
+    expect(result.backfilled).toBe(false);
+    expect(result.applied).toEqual([1]);
+    expect(result.skipped).toEqual([]);
   });
 
   it("does not backfill on a truly fresh DB (no user tables yet)", () => {
@@ -291,8 +302,8 @@ describe("runMigrations - legacy backfill path", () => {
   });
 
   it("backfilled DB skips hash check on version=1 even if file content differs later", () => {
-    runDdl(db, "CREATE TABLE preexisting (id INTEGER)");
-    writeMigration("0001", "baseline", "CREATE TABLE preexisting (id INTEGER)");
+    runDdl(db, "CREATE TABLE rnpm_searches (id INTEGER)");
+    writeMigration("0001", "baseline", "CREATE TABLE rnpm_searches (id INTEGER)");
     runMigrations(db, migrationsDir);
 
     fs.writeFileSync(path.join(migrationsDir, "0001_baseline.up.sql"), "CREATE TABLE different (id INTEGER)");
@@ -300,8 +311,8 @@ describe("runMigrations - legacy backfill path", () => {
   });
 
   it("backfilled DB still applies later migrations normally (PR-2+ flow)", () => {
-    runDdl(db, "CREATE TABLE preexisting (id INTEGER)");
-    writeMigration("0001", "baseline", "CREATE TABLE preexisting (id INTEGER)");
+    runDdl(db, "CREATE TABLE rnpm_searches (id INTEGER)");
+    writeMigration("0001", "baseline", "CREATE TABLE rnpm_searches (id INTEGER)");
     runMigrations(db, migrationsDir);
 
     writeMigration("0002", "users", "CREATE TABLE users (id TEXT PRIMARY KEY)");
