@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
 import { stat } from "node:fs/promises";
+import { z } from "zod";
 import {
   executeSearch,
   executeBulkSearch,
@@ -14,7 +15,13 @@ import { defaultRnpmClient, RnpmError, type RnpmSearchType } from "../services/r
 import { validateSubTypeLabels } from "../services/rnpmSubTypes.ts";
 import { getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
 import { getDbPath, compactDb } from "../db/schema.ts";
-import { getBackupDir, deleteAllBackups, listBackupsWithMeta, restoreFromBackup } from "../db/backup.ts";
+import {
+  getBackupDir,
+  deleteAllBackups,
+  listBackupsWithMeta,
+  restoreFromBackup,
+  withMaintenanceRead,
+} from "../db/backup.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
@@ -71,8 +78,10 @@ import {
   deleteAviz,
   deleteAllAvize,
   deleteAvizeByIds,
+  filterRnpmSearchResults,
   getAvizeByIds,
   getAvizStats,
+  RnpmSearchNotFoundError,
 } from "../db/avizRepository.ts";
 import { getSearches, deleteSearch } from "../db/searchRepository.ts";
 import { buildRnpmPdf } from "../services/rnpmExportPdf.ts";
@@ -249,6 +258,122 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     return c.json({ error: msg }, 500);
   } finally {
     if (dedupKey) inflightRequests.delete(dedupKey);
+  }
+});
+
+// ============================================================================
+// POST /search/:searchId/filter - v2.24.0 filtru text peste rezultate cautare RNPM.
+// Spec: docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md
+// ============================================================================
+
+const FILTER_CONTROL_CHARS_CLASS = "\\u0000-\\u001F\\u007F\\u200B-\\u200F\\uFEFF";
+const FILTER_CONTROL_CHARS_RE = new RegExp(`[${FILTER_CONTROL_CHARS_CLASS}]`, "g");
+
+const FilterBodySchema = z.object({
+  q: z
+    .string()
+    .max(200, "Termen prea lung (max 200 caractere)")
+    .transform((s) => s.trim())
+    .refine((s) => s.length >= 2, "Minim 2 caractere dupa trim")
+    .transform((s) => s.replace(FILTER_CONTROL_CHARS_RE, "")),
+});
+
+const SearchIdSchema = z.coerce.number().int().positive().max(Number.MAX_SAFE_INTEGER);
+
+function logFilterEvent(entry: Record<string, unknown>): void {
+  console.log(JSON.stringify({ ...entry, ts: new Date().toISOString() }));
+}
+
+rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
+  if (process.env.RNPM_RESULTS_FILTER_DISABLED === "1") {
+    return c.json({ error: "Filtrul de rezultate RNPM este dezactivat temporar.", code: "FILTER_DISABLED" }, 503);
+  }
+
+  const sidParsed = SearchIdSchema.safeParse(c.req.param("searchId"));
+  if (!sidParsed.success) {
+    return c.json({ error: "searchId invalid" }, 400);
+  }
+  const searchId = sidParsed.data;
+
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: "JSON invalid" }, 400);
+  }
+  const parsed = FilterBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json({ error: parsed.error.issues[0]?.message ?? "Body invalid" }, 400);
+  }
+  const { q } = parsed.data;
+
+  const ownerId = getOwnerId(c);
+  const t0 = Date.now();
+
+  const timeoutSignal = AbortSignal.timeout(5000);
+  const signal = AbortSignal.any([c.req.raw.signal, timeoutSignal]);
+
+  try {
+    const result = await withMaintenanceRead(async () => filterRnpmSearchResults({ ownerId, searchId, q, signal }));
+
+    logFilterEvent({
+      action: "rnpm.results.filter",
+      ownerId,
+      searchId,
+      qLen: q.length,
+      matchedCount: result.matchedCount,
+      truncated: result.truncated,
+      missingDetails: result.missingDetails,
+      latencyMs: Date.now() - t0,
+      status: "ok",
+    });
+
+    return c.json(result, 200);
+  } catch (err) {
+    const latencyMs = Date.now() - t0;
+    if (err instanceof RnpmSearchNotFoundError) {
+      logFilterEvent({
+        action: "rnpm.results.filter",
+        ownerId,
+        searchId,
+        qLen: q.length,
+        latencyMs,
+        status: "not_found",
+      });
+      return c.json({ error: "Search inexistent" }, 404);
+    }
+    if (err instanceof Error && err.name === "AbortError") {
+      if (timeoutSignal.aborted) {
+        logFilterEvent({
+          action: "rnpm.results.filter",
+          ownerId,
+          searchId,
+          qLen: q.length,
+          latencyMs,
+          status: "timeout",
+        });
+        return c.json({ error: "Timeout filtrare", code: "FILTER_TIMEOUT" }, 503);
+      }
+      logFilterEvent({
+        action: "rnpm.results.filter",
+        ownerId,
+        searchId,
+        qLen: q.length,
+        latencyMs,
+        status: "abort",
+      });
+      return new Response(null, { status: 499 });
+    }
+    logFilterEvent({
+      action: "rnpm.results.filter",
+      ownerId,
+      searchId,
+      qLen: q.length,
+      latencyMs,
+      status: "error",
+    });
+    console.error("[rnpm.filter] eroare neasteptata", err);
+    return c.json({ error: "Eroare interna filtrare" }, 500);
   }
 });
 
