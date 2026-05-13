@@ -4,10 +4,13 @@ import os from "node:os";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
+import { runMigrations } from "./runner";
 
 // Faza A — testeaza in izolare DDL-ul migrarii 0020_master_switch.
-// Nu folosim runner-ul: vrem sa verificam continutul fisierului asa cum sta pe
-// disk, sa nu depindem de eventuale rescrieri viitoare ale runner-ului.
+// Nu folosim runner-ul pentru a aplica 0020 (vrem sa verificam continutul
+// fisierului asa cum sta pe disk), dar il delegam pentru a crea schema
+// `_schema_versions`. Asa, daca runner-ul evolueaza tabelul, testele se
+// aliniaza automat fara DDL hand-rolled.
 
 const UP_FILE = path.join(__dirname, "0020_master_switch.up.sql");
 const DOWN_FILE = path.join(__dirname, "0020_master_switch.down.sql");
@@ -20,15 +23,11 @@ beforeEach(async () => {
   db = new Database(path.join(tmpRoot, "test.db"));
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
-  // Tabelul _schema_versions e creat de runner; aici il pre-cream ca down-ul
-  // (care face DELETE FROM _schema_versions) sa nu pice pe "no such table".
-  db.exec(`
-    CREATE TABLE _schema_versions (
-      version    INTEGER PRIMARY KEY,
-      applied_at TEXT NOT NULL DEFAULT (datetime('now')),
-      sha256_up  TEXT NOT NULL
-    )
-  `);
+  // Delegam crearea `_schema_versions` runner-ului prin pointing la un director
+  // gol de migrari: no-op pe migrari, dar emite tabelul cu shape-ul curent.
+  const emptyMigrationsDir = path.join(tmpRoot, "empty-migrations");
+  fs.mkdirSync(emptyMigrationsDir);
+  runMigrations(db, emptyMigrationsDir);
 });
 
 afterEach(async () => {
@@ -57,6 +56,16 @@ describe("migration 0020_master_switch", () => {
       .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_owner_monitoring_disabled'")
       .all() as { name: string }[];
     expect(indexes).toHaveLength(1);
+
+    // Pin contractul de partialitate: planul alege un index partial tocmai
+    // pentru ca majoritatea ownerilor au switch-ul ON, deci index-ul ramane
+    // minuscul. Daca un edit viitor sterge clauza WHERE, performance degradeaza
+    // dar testele tot ar trece — verificam explicit DDL-ul stocat.
+    const indexRow = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type='index' AND name='idx_owner_monitoring_disabled'")
+      .get() as { sql: string };
+    expect(indexRow.sql).toMatch(/owner_monitoring_settings\(owner_id\)/);
+    expect(indexRow.sql).toMatch(/WHERE\s+monitoring_enabled\s*=\s*0/i);
 
     const columns = db.prepare("PRAGMA table_info(owner_monitoring_settings)").all() as {
       name: string;
@@ -118,5 +127,16 @@ describe("migration 0020_master_switch", () => {
     expect(row.monitoring_enabled).toBe(1);
     expect(row.created_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
     expect(row.updated_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/);
+  });
+
+  it("CHECK constraint refuza valori monitoring_enabled in afara (0,1)", () => {
+    db.exec(readUp());
+
+    expect(() =>
+      db.prepare("INSERT INTO owner_monitoring_settings (owner_id, monitoring_enabled) VALUES (?, ?)").run("o", 2)
+    ).toThrow(/CHECK constraint/i);
+    expect(() =>
+      db.prepare("INSERT INTO owner_monitoring_settings (owner_id, monitoring_enabled) VALUES (?, ?)").run("o", -1)
+    ).toThrow(/CHECK constraint/i);
   });
 });
