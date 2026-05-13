@@ -8,9 +8,9 @@
 //       (subTotal - count) pentru ca tier-2 a recuperat parte din rezultate.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -58,7 +58,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
-  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  process.env.LEGAL_DASHBOARD_DB_PATH = undefined;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -166,10 +166,13 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
 
     const row = getCapHitRow();
     expect(row).toBeDefined();
-    expect(row!.target_id).toBe("42");
-    expect(row!.outcome).toBe("ok");
+    if (!row) {
+      throw new Error("Expected rnpm.cap_hit audit row");
+    }
+    expect(row.target_id).toBe("42");
+    expect(row.outcome).toBe("ok");
 
-    const detail = JSON.parse(row!.detail_json) as {
+    const detail = JSON.parse(row.detail_json) as {
       searchType: string;
       criteriu?: unknown;
       upstreamTotal: number;
@@ -294,8 +297,9 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
 
     expect(res1.status).toBe(200);
     expect(res2.status).toBe(409);
-    const errBody = (await res2.json()) as { error: string };
-    expect(errBody.error).toMatch(/dedup/);
+    const errBody = (await res2.json()) as { error: { code: string; message: string } };
+    expect(errBody.error.code).toBe("DUPLICATE_REQUEST");
+    expect(errBody.error.message).toMatch(/dedup/);
 
     // Cleanup: deblocheaza prima cerere si consuma stream-ul, ca finally-ul
     // sa stearga inflightRequests Map (altfel a treia cerere ar mai fi blocata
@@ -331,7 +335,10 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
     expect(res.status).toBe(200);
     const row = getCapHitRow();
     expect(row).toBeDefined();
-    const detail = JSON.parse(row!.detail_json) as { gapByReason: Record<string, number> };
+    if (!row) {
+      throw new Error("Expected rnpm.cap_hit audit row");
+    }
+    const detail = JSON.parse(row.detail_json) as { gapByReason: Record<string, number> };
     // 100 = s.gap, NU 700 = (1500 - 800).
     expect(detail.gapByReason).toEqual({ residual_unclassified: 100 });
   });
@@ -347,8 +354,9 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
       }),
     });
     expect(res.status).toBe(400);
-    const json = (await res.json()) as { error: string };
-    expect(json.error).toMatch(/canonice/i);
+    const json = (await res.json()) as { error: { code: string; message: string } };
+    expect(json.error.code).toBe("INVALID_PARAMS");
+    expect(json.error.message).toMatch(/canonice/i);
     // executeSplitSearch nu trebuie sa fi fost chemat — rejected before SSE.
     expect(executeSplitSearchMock).not.toHaveBeenCalled();
   });
@@ -371,7 +379,7 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
       // Audit row NU trebuie scris cand kill switch e activ.
       expect(getCapHitRow()).toBeUndefined();
     } finally {
-      delete process.env.RNPM_AUDIT_CAP_HIT_DISABLED;
+      process.env.RNPM_AUDIT_CAP_HIT_DISABLED = undefined;
     }
   });
 });
