@@ -27,6 +27,7 @@ import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { getAuthMode } from "../auth/config.ts";
+import { ErrorCodes, fail } from "../util/envelope.ts";
 
 function parseProvider(v: unknown): CaptchaProvider | undefined {
   return v === "capsolver" || v === "2captcha" ? v : undefined;
@@ -38,7 +39,8 @@ const BULK_BODY_LIMIT = 512 * 1024; // 512KB: up to 200 bulk items
 const EXPORT_BODY_LIMIT = 64 * 1024; // 64KB: up to 500 numeric ids
 const SMALL_BODY_LIMIT = 4 * 1024; // 4KB: captcha balance
 
-const bodyTooLarge = (c: import("hono").Context) => c.json({ error: "Payload prea mare" }, 413);
+const bodyTooLarge = (c: import("hono").Context) =>
+  c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413);
 const limitSearch = bodyLimit({ maxSize: SEARCH_BODY_LIMIT, onError: bodyTooLarge });
 const limitBulk = bodyLimit({ maxSize: BULK_BODY_LIMIT, onError: bodyTooLarge });
 const limitExport = bodyLimit({ maxSize: EXPORT_BODY_LIMIT, onError: bodyTooLarge });
@@ -125,10 +127,11 @@ function parseClientRequestId(body: Record<string, unknown> | null): string | nu
 function rejectCaptchaKeyInWebMode(c: import("hono").Context): Response | null {
   if (getAuthMode() !== "web") return null;
   return c.json(
-    {
-      error:
-        "RNPM in web mode necesita stocare server-side a cheii captcha (neimplementat in v2.11.0). Folositi desktop sau asteptati per-user key storage.",
-    },
+    fail(
+      ErrorCodes.WEB_MODE_NOT_IMPLEMENTED,
+      "RNPM in web mode necesita stocare server-side a cheii captcha. Folositi desktop sau asteptati per-user key storage.",
+      c
+    ),
     501
   );
 }

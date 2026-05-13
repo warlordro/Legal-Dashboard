@@ -32,6 +32,7 @@ import { closeDb, getDb } from "../db/schema.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
 import { updateUserRole } from "../db/userRepository.ts";
+import { requestIdContext } from "../middleware/requestId.ts";
 
 let tmpRoot: string;
 
@@ -43,12 +44,28 @@ function buildApp() {
   // ca guard-ul sa lase requestul prin. Restul rutelor (/saved, /searches,
   // /stats) raman fara guard si folosesc ownerId-ul fallback fara probleme.
   const app = new Hono();
+  app.use("*", requestIdContext);
   app.route("/api/v1/rnpm", rnpmRouter);
   return app;
 }
 
 async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
+}
+
+type EnvelopeErrorBody = {
+  data: null;
+  error: { code: string; message: string };
+  requestId: string;
+};
+
+function expectEnvelopeError(body: EnvelopeErrorBody, code: string) {
+  expect(body).toMatchObject({
+    data: null,
+    error: { code, message: expect.any(String) },
+    requestId: expect.any(String),
+  });
+  expect(body.requestId.length).toBeGreaterThan(0);
 }
 
 function seedAviz(opts: {
@@ -356,6 +373,17 @@ describe("POST /api/v1/rnpm/search input validation", () => {
   // and a captcha provider. Tests here cover only the input-validation branches
   // where the response shape is { error: string } and no network is touched.
 
+  it("returns 413 PAYLOAD_TOO_LARGE envelope when body exceeds search limit", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: "x".repeat(70_000) }),
+    });
+    expect(res.status).toBe(413);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "PAYLOAD_TOO_LARGE");
+  });
+
   it("returns 400 + { error } on malformed JSON", async () => {
     const res = await buildApp().request("/api/v1/rnpm/search", {
       method: "POST",
@@ -391,6 +419,17 @@ describe("POST /api/v1/rnpm/search input validation", () => {
 });
 
 describe("POST /api/v1/rnpm/bulk input validation", () => {
+  it("returns 413 PAYLOAD_TOO_LARGE envelope when body exceeds bulk limit", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/bulk", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: "x".repeat(530_000) }),
+    });
+    expect(res.status).toBe(413);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "PAYLOAD_TOO_LARGE");
+  });
+
   it("returns 400 + { error } on empty items list", async () => {
     const res = await buildApp().request("/api/v1/rnpm/bulk", {
       method: "POST",
@@ -502,9 +541,9 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
       body: JSON.stringify({ type: "ipoteci", params: {}, captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(501);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
-    expect(body.error).toMatch(/web mode|server-side|captcha/i);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
+    expect(body.error.message).toMatch(/web mode|server-side|captcha/i);
   });
 
   it("POST /bulk returns 501 in web mode", async () => {
@@ -517,6 +556,8 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
       }),
     });
     expect(res.status).toBe(501);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
   });
 
   it("POST /captcha/balance returns 501 in web mode", async () => {
@@ -526,6 +567,8 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
       body: JSON.stringify({ captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(501);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
   });
 });
 
