@@ -25,6 +25,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TablePagination } from "@/components/table-pagination";
 import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
+import { MasterSwitchBanner } from "@/components/monitoring/MasterSwitchBanner";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
 import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "@/lib/api";
@@ -33,6 +34,7 @@ import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";
+import { useMonitoringMasterSwitch } from "@/hooks/useMonitoringMasterSwitch";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
@@ -73,6 +75,7 @@ export default function Monitorizare({
     setError,
     setJobs,
   } = useMonitoringJobs();
+  const masterSwitch = useMonitoringMasterSwitch();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
@@ -265,10 +268,50 @@ export default function Monitorizare({
             </p>
           </div>
         </div>
-        <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
-          <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-          Reincarca
-        </Button>
+        <div className="flex items-center gap-2">
+          {masterSwitch.enabled === null ? (
+            <Button variant="outline" size="sm" disabled>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Se incarca...
+            </Button>
+          ) : masterSwitch.enabled ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await masterSwitch.toggle(false);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Eroare la oprirea monitorizarii.");
+                }
+              }}
+              disabled={masterSwitch.saving}
+            >
+              {masterSwitch.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
+              Opreste monitorizarea
+            </Button>
+          ) : (
+            <Button
+              variant="default"
+              size="sm"
+              onClick={async () => {
+                try {
+                  await masterSwitch.toggle(true);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Eroare la reluarea monitorizarii.");
+                }
+              }}
+              disabled={masterSwitch.saving}
+            >
+              {masterSwitch.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
+              Reia monitorizarea
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={refresh} disabled={loading}>
+            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+            Reincarca
+          </Button>
+        </div>
       </div>
 
       <MonitoringAddForm onJobAdded={refresh} />
@@ -341,6 +384,18 @@ export default function Monitorizare({
           </div>
         </CardHeader>
         <CardContent>
+          {masterSwitch.enabled === false && (
+            <MasterSwitchBanner
+              onResume={async () => {
+                try {
+                  await masterSwitch.toggle(true);
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Eroare la reluarea monitorizarii.");
+                }
+              }}
+              resuming={masterSwitch.saving}
+            />
+          )}
           <div className="mb-3 flex flex-wrap items-center gap-2">
             <JobKindTabs
               value={kindFilter}

@@ -427,6 +427,12 @@ export {
 } from "./monitoringApi";
 
 export {
+  monitoringMasterSwitch,
+  type MasterSwitchGetResult,
+  type MasterSwitchSetResult,
+} from "./monitoringMasterSwitchApi";
+
+export {
   me,
   admin,
   type UserRole,
