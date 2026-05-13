@@ -138,3 +138,98 @@ describe("originGuard — F2 CSRF defense", () => {
     expect(res.status).toBe(200);
   });
 });
+
+// F11-F1 caracterizare: edge cases identificate la review-ul de hardening
+// 2026-05-14. originGuard ramane cu loopback bypass intact — protectia
+// suplimentara pentru body-less admin POSTs e mutata pe requireDesktopHeader
+// (rute admin specifice). Aceste teste fixeaza comportamentul existent +
+// cazurile noi descoperite, ca regressie future-proof.
+describe("originGuard — F11-F1 edge case characterization", () => {
+  it("accepts Origin: 'null' (Electron file://) on loopback", async () => {
+    // Electron in prod incarca rendererul de pe file:// — browserul trimite
+    // Origin: "null" literal. Combinat cu loopback bypass, request-ul trece.
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "127.0.0.1" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildApp();
+
+    const res = await app.request("/api/mutate", {
+      method: "POST",
+      headers: { host: "127.0.0.1:3002", origin: "null" },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("accepts Referer: file://... on loopback", async () => {
+    // Variant Referer-only pentru Electron file://. Loopback bypass-ul nu
+    // examineaza Origin/Referer, deci trece.
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "127.0.0.1" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildApp();
+
+    const res = await app.request("/api/zap", {
+      method: "DELETE",
+      headers: {
+        host: "127.0.0.1:3002",
+        referer: "file:///C:/Users/dev/app/index.html",
+      },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("treats ::ffff:127.0.0.1 (IPv4-mapped IPv6 loopback) as loopback", async () => {
+    // Node poate raporta peer-ul IPv4 ca IPv4-mapped IPv6 cand socket-ul
+    // backend-ului asculta dual-stack. LOOPBACK_ADDRESSES include forma.
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "::ffff:127.0.0.1" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildApp();
+
+    const res = await app.request("/api/mutate", {
+      method: "POST",
+      headers: { host: "example.com" },
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects when remote.address is undefined (fail-closed on missing peer info)", async () => {
+    // Daca proxy/transport e mis-configurat si nu pune adresa peer-ului,
+    // `remoteAddr` devine "" — NU e in LOOPBACK_ADDRESSES, deci cade pe
+    // path-ul CSRF normal. Fara Origin/Referer, returneaza 403.
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: undefined as unknown as string },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildApp();
+
+    const res = await app.request("/api/mutate", {
+      method: "POST",
+      headers: { host: "dashboard.lan" },
+    });
+
+    expect(res.status).toBe(403);
+  });
+
+  it("rejects Origin host with port mismatch on non-loopback", async () => {
+    // safeHost include portul in `host` URL — `example.com:8080` !=
+    // `example.com:3002`. Verifica ca politica nu lasa port-confusion sa
+    // bypass-eze CSRF.
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.5" },
+    } as ReturnType<typeof getConnInfo>);
+    const app = buildApp();
+
+    const res = await app.request("/api/mutate", {
+      method: "POST",
+      headers: {
+        host: "dashboard.lan:3002",
+        origin: "http://dashboard.lan:8080",
+      },
+    });
+
+    expect(res.status).toBe(403);
+  });
+});
