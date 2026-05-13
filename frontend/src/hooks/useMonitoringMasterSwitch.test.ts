@@ -154,4 +154,29 @@ describe("useMonitoringMasterSwitch", () => {
     // still be the initial `null`, never the late GET payload.
     expect(h.capture.current?.enabled).toBe(null);
   });
+
+  // Faza D — banner-ul amber reapare daca alt client (mobil, alt tab) a oprit
+  // monitorizarea intre timp. Hook-ul nu ruleaza polling automat, dar expune
+  // `refresh()` ca pagina sa poata re-fetcha pe focus / pe buton manual; aici
+  // verificam ca un al doilea GET cu enabled=false rescrie state-ul.
+  it("refresh() picks up a server-side flip from true to false", async () => {
+    mockGet.mockResolvedValueOnce({ enabled: true });
+    const h = renderHook();
+    await h.flush();
+    expect(h.capture.current?.enabled).toBe(true);
+
+    // Backend a fost intors pe false intre cele 2 GET-uri (alt client / direct
+    // SQL). Refresh trebuie sa re-fetch-eze si sa expuna noua stare astfel
+    // incat consumer-ul (pagina Monitorizare) sa randeze banner-ul.
+    mockGet.mockResolvedValueOnce({ enabled: false });
+    const before = h.capture.current;
+    if (!before) throw new Error("hook not mounted");
+    await act(async () => {
+      await before.refresh();
+    });
+    expect(h.capture.current?.enabled).toBe(false);
+    expect(h.capture.current?.loading).toBe(false);
+    expect(mockGet).toHaveBeenCalledTimes(2);
+    h.unmount();
+  });
 });

@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
 import { withMaintenanceWrite } from "../../db/backup.ts";
+import { setMonitoringEnabled } from "../../db/ownerMonitoringSettingsRepository.ts";
 import { FakeClock } from "./clock.ts";
 import { Scheduler, type JobRunner, type RunOutcome, type ScheduledJob } from "./scheduler.ts";
 
@@ -1335,5 +1336,61 @@ describe("Scheduler — finalize lock window only (#T2)", () => {
     resolveRun!();
     await tickPromise;
     await sch.stop();
+  });
+});
+
+// Faza D — full tick honors per-owner master switch end-to-end.
+//
+// Repository-level coverage live in monitoringJobsRepository.claimDueJobs.test.ts;
+// here we verify the orchestration shell: when owner-B has master-switch off,
+// a single tickOnce() must dispatch ONLY owner-A's runner call, and owner-B's
+// job row stays untouched (next_run_at, last_status, last_run_at all stable).
+describe("Scheduler — per-owner master switch", () => {
+  it("tickOnce runs only the enabled owner's job; disabled owner's job stays untouched", async () => {
+    const aId = seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z", hashSeed: "owner-a" });
+
+    const bInfo = getDb()
+      .prepare(
+        `INSERT INTO monitoring_jobs
+           (owner_id, kind, target_json, target_hash, cadence_sec,
+            alert_config_json, next_run_at, fail_streak)
+         VALUES (?, 'dosar_soap', '{}', ?, 600, '{}', ?, 0)`
+      )
+      .run("owner-b", "owner-b-hash", "2026-04-28T09:00:00.000Z");
+    const bId = bInfo.lastInsertRowid as number;
+
+    setMonitoringEnabled("owner-b", false);
+
+    const runner = new NoopOkRunner();
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runners: { dosar_soap: runner },
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await sch.tickOnce();
+    await sch.stop();
+
+    // Runner saw exactly owner-A — owner-B was filtered out before claim.
+    expect(runner.calls.length).toBe(1);
+    expect(runner.calls[0]!.job.id).toBe(aId);
+
+    // Owner-B's job stays exactly as seeded: no last_run_at write, no status
+    // mutation, next_run_at unchanged. This is the contract that distinguishes
+    // master-switch from per-job `active=0` (which would still rewrite state).
+    const bJob = readJob(bId);
+    expect(bJob.last_run_at).toBeNull();
+    expect(bJob.last_status).toBeNull();
+    expect(bJob.fail_streak).toBe(0);
+    expect(bJob.next_run_at).toBe("2026-04-28T09:00:00.000Z");
+
+    // And no run row was inserted for owner-B.
+    const bRuns = getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_runs WHERE job_id = ?`).get(bId) as {
+      n: number;
+    };
+    expect(bRuns.n).toBe(0);
   });
 });

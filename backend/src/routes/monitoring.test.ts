@@ -1141,6 +1141,7 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
     const json = (await res.json()) as {
       data: { enabled: boolean; changed: boolean };
       error?: unknown;
+      requestId: string;
     };
     expect(json.error).toBeUndefined();
     expect(json.data).toEqual({ enabled: false, changed: true });
@@ -1150,6 +1151,11 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
     expect(offEvents[0].target_kind).toBe("owner_monitoring_settings");
     expect(offEvents[0].target_id).toBe("local");
     expect(JSON.parse(offEvents[0].detail_json)).toMatchObject({ enabled: false });
+    // Faza D: audit row capteaza `request_id` din contextul Hono, identic cu
+    // requestId-ul intors de envelope. Asta ne permite cross-reference intre
+    // log-ul HTTP si audit_log (pagina admin Audit jumpuieste pe el).
+    expect(offEvents[0].request_id).toBe(json.requestId);
+    expect(offEvents[0].actor_id).toBe("local");
 
     // GET must reflect the new state.
     const after = await app.request("/api/v1/monitoring/master-switch");
@@ -1282,5 +1288,50 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
     expect(aliceEvents).toHaveLength(1);
     const bobEvents = getAuditEvents({ ownerId: "bob", action: "monitoring.master_switch.off" });
     expect(bobEvents).toHaveLength(0);
+  });
+
+  // Faza D — UI butonul nu blocheaza repeated clicks during the PUT in-flight
+  // window. Daca apar 3 PUT-uri back-to-back cu enabled=false (operator
+  // tripleaza click-ul), UPSERT-ul intern garanteaza ca DOAR primul muta
+  // starea: cele 2 urmatoare ies cu changed=false si NU mai scriu audit_log.
+  it("rapid back-to-back PUTs with the same value are idempotent: 1 audit row, not N", async () => {
+    const app = buildTestApp();
+    const [r1, r2, r3] = await Promise.all([
+      app.request("/api/v1/monitoring/master-switch", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      }),
+      app.request("/api/v1/monitoring/master-switch", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      }),
+      app.request("/api/v1/monitoring/master-switch", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ enabled: false }),
+      }),
+    ]);
+
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect(r3.status).toBe(200);
+
+    const responses = (await Promise.all([r1.json(), r2.json(), r3.json()])) as {
+      data: { enabled: boolean; changed: boolean };
+    }[];
+    // Exact unul dintre cele 3 raporteaza changed=true (cel care a scris randul);
+    // celelalte 2 vin pe path-ul idempotent. Care anume e nedeterminist pe
+    // ordinea de procesare in better-sqlite3, dar contractul "exactly one"
+    // tine indiferent de planificare.
+    const changedCount = responses.filter((r) => r.data.changed === true).length;
+    expect(changedCount).toBe(1);
+    expect(responses.every((r) => r.data.enabled === false)).toBe(true);
+
+    // Cu o singura tranzitie de stare, audit_log are exact un rand.
+    const offEvents = getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" });
+    expect(offEvents).toHaveLength(1);
+    expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.on" })).toHaveLength(0);
   });
 });
