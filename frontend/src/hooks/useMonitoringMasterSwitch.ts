@@ -11,10 +11,19 @@
 //      the click feels instant, but if the PUT rejects we revert to the
 //      previous value AND rethrow so the page can surface the error via its
 //      own `setError`. Mirrors the cadence-patch pattern in Monitorizare.tsx.
+//      No internal `error` field is exposed: the page is the single read
+//      site for failure UX, and a hidden field invites silent failures if a
+//      maintainer ever drops the page-level try/catch.
 //   3. In-flight GET aborts on unmount AND on `refresh()` — same race-window
 //      reasoning as `useMonitoringJobs`: a stale GET landing after a fresh
 //      one would clobber the current state.
-//   4. `MonitoringApiError` is a subclass of `Error`, so the generic
+//   4. `refresh()` short-circuits while a `toggle()` PUT is in flight. A
+//      future focus-refetch or polling caller would otherwise rewind the
+//      optimistic flip before the PUT settles. Today only the mount effect
+//      calls refresh, but the guard is cheap insurance.
+//   5. `mountedRef` gates all post-await state writes so a late PUT response
+//      after unmount cannot trigger a React warning or leak state.
+//   6. `MonitoringApiError` is a subclass of `Error`, so the generic
 //      `e instanceof Error` narrowing covers both shapes cleanly.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -24,7 +33,6 @@ export interface UseMonitoringMasterSwitchResult {
   enabled: boolean | null;
   loading: boolean;
   saving: boolean;
-  error: string | null;
   toggle: (next: boolean) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -33,27 +41,35 @@ export function useMonitoringMasterSwitch(): UseMonitoringMasterSwitchResult {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   const getAbortRef = useRef<AbortController | null>(null);
+  const mountedRef = useRef(true);
+  const savingRef = useRef(false);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
+    if (savingRef.current) return;
     getAbortRef.current?.abort();
     const ctrl = new AbortController();
     getAbortRef.current = ctrl;
     setLoading(true);
-    setError(null);
     try {
       const result = await monitoringMasterSwitch.get({ signal: ctrl.signal });
-      if (ctrl.signal.aborted) return;
+      if (ctrl.signal.aborted || !mountedRef.current) return;
       setEnabled(result.enabled);
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (e instanceof Error && e.name === "AbortError") return;
-      if (ctrl.signal.aborted) return;
-      setError(e instanceof Error ? e.message : "Eroare la incarcarea master switch-ului.");
+      if (ctrl.signal.aborted || !mountedRef.current) return;
+      throw e;
     } finally {
-      if (getAbortRef.current === ctrl) {
+      if (mountedRef.current && getAbortRef.current === ctrl) {
         setLoading(false);
         getAbortRef.current = null;
       }
@@ -61,7 +77,10 @@ export function useMonitoringMasterSwitch(): UseMonitoringMasterSwitchResult {
   }, []);
 
   useEffect(() => {
-    refresh();
+    // Initial mount fetch — has no caller to rethrow to, so we swallow the
+    // error here. The page keeps the "Se incarca..." placeholder; user can
+    // retry via the Reincarca button which calls refresh() again.
+    refresh().catch(() => {});
     return () => {
       getAbortRef.current?.abort();
       getAbortRef.current = null;
@@ -76,23 +95,23 @@ export function useMonitoringMasterSwitch(): UseMonitoringMasterSwitchResult {
       const previous = enabled;
       setEnabled(next);
       setSaving(true);
-      setError(null);
+      savingRef.current = true;
       try {
         const result = await monitoringMasterSwitch.set(next);
+        if (!mountedRef.current) return;
         // Sync to server-reported value — defensive, in case backend rejects
         // a no-op or clamps in an unexpected way.
         setEnabled(result.enabled);
       } catch (e) {
-        setEnabled(previous);
-        const msg = e instanceof Error ? e.message : "Eroare la actualizarea master switch-ului.";
-        setError(msg);
+        if (mountedRef.current) setEnabled(previous);
         throw e;
       } finally {
-        setSaving(false);
+        savingRef.current = false;
+        if (mountedRef.current) setSaving(false);
       }
     },
     [enabled]
   );
 
-  return { enabled, loading, saving, error, toggle, refresh };
+  return { enabled, loading, saving, toggle, refresh };
 }

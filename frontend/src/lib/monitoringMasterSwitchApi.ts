@@ -9,11 +9,7 @@
 // per-file allowlist entry. Envelope unwrap + MonitoringApiError reused
 // from api.ts so the contract stays consistent across monitoring modules.
 
-import { apiFetch, MonitoringApiError, unwrapMonitoring } from "./api";
-
-// Re-export so consumers can import the error class alongside the namespace
-// from `@/lib/monitoringMasterSwitchApi` if they want symmetric imports.
-export { MonitoringApiError };
+import { apiFetch, unwrapMonitoring } from "./api";
 
 export interface MasterSwitchGetResult {
   enabled: boolean;

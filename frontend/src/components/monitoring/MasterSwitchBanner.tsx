@@ -21,7 +21,10 @@ export interface MasterSwitchBannerProps {
 
 export function MasterSwitchBanner({ onResume, resuming }: MasterSwitchBannerProps) {
   return (
-    <div className="mb-3 flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-200">
+    <output
+      aria-live="polite"
+      className="mb-3 flex items-center justify-between gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700/50 dark:bg-amber-900/20 dark:text-amber-200"
+    >
       <div className="flex items-center gap-2">
         <PauseCircle className="h-4 w-4 shrink-0" />
         <span>
@@ -32,6 +35,6 @@ export function MasterSwitchBanner({ onResume, resuming }: MasterSwitchBannerPro
         {resuming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
         Reia
       </Button>
-    </div>
+    </output>
   );
 }

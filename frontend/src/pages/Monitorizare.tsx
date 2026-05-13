@@ -286,6 +286,7 @@ export default function Monitorizare({
                 }
               }}
               disabled={masterSwitch.saving}
+              aria-busy={masterSwitch.saving}
             >
               {masterSwitch.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Pause className="h-4 w-4" />}
               Opreste monitorizarea
@@ -302,6 +303,7 @@ export default function Monitorizare({
                 }
               }}
               disabled={masterSwitch.saving}
+              aria-busy={masterSwitch.saving}
             >
               {masterSwitch.saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
               Reia monitorizarea
