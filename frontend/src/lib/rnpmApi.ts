@@ -31,7 +31,52 @@ export class RnpmLimitExceededError extends Error {
   }
 }
 
+// v2.24.0 - filtru text peste rezultatele unei cautari RNPM.
+// Spec: docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md
+export interface RnpmResultsFilterResponse {
+  matchedAvizIds: number[];
+  matchedCount: number;
+  totalInSearch: number;
+  missingDetails: number;
+  truncated: boolean;
+}
+
+export class RnpmFilterDisabledError extends Error {
+  readonly code = "FILTER_DISABLED" as const;
+  constructor(message: string) {
+    super(message);
+    this.name = "RnpmFilterDisabledError";
+  }
+}
+
 const BASE = "/api/rnpm";
+
+export async function filterRnpmResults(
+  searchId: number,
+  q: string,
+  signal?: AbortSignal
+): Promise<RnpmResultsFilterResponse> {
+  const res = await apiFetch(`${BASE}/search/${searchId}/filter`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ q }),
+    signal,
+  });
+  if (!res.ok) {
+    let data: { error?: string; code?: string } | null = null;
+    try {
+      data = (await res.json()) as { error?: string; code?: string };
+    } catch {
+      throw new Error(`Eroare server (${res.status})`);
+    }
+    const errorMsg = data?.error ?? "Eroare necunoscuta";
+    if (res.status === 503 && data?.code === "FILTER_DISABLED") {
+      throw new RnpmFilterDisabledError(errorMsg);
+    }
+    throw new Error(errorMsg);
+  }
+  return (await res.json()) as RnpmResultsFilterResponse;
+}
 
 async function jsonOrThrow<T>(res: Response): Promise<T> {
   const text = await res.text();
