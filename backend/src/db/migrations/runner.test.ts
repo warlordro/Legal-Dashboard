@@ -333,6 +333,7 @@ describe("discoverMigrations - file validation", () => {
     const files = discoverMigrations(__dirname);
     expect(files.some((f) => f.name.endsWith(".down.sql"))).toBe(false);
     expect(files.some((f) => f.name === "0019_idx_monitoring_runs_started_at.up.sql")).toBe(true);
+    expect(files.some((f) => f.name === "0020_master_switch.up.sql")).toBe(true);
   });
 
   it("throws on duplicate version numbers", () => {
