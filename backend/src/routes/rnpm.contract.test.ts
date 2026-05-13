@@ -61,6 +61,11 @@ async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
 }
 
+// F11-F1 Stage 2: requireDesktopHeader gateaza POST/DELETE-urile admin body-
+// less. Renderer-ul propriu seteaza header-ul prin apiFetch (Stage 3); aici
+// trimitem explicit pentru a simula sursa "desktop".
+const DESKTOP_HEADERS = { "x-legal-dashboard-desktop": "1" } as const;
+
 type EnvelopeErrorBody = {
   data: null;
   error: { code: string; message: string };
@@ -222,7 +227,10 @@ describe("DELETE /api/v1/rnpm/saved/all", () => {
   it("returns { deleted: <count> }", async () => {
     seedAviz({ identificator: "AV-A" });
     seedAviz({ identificator: "AV-B" });
-    const res = await buildApp().request("/api/v1/rnpm/saved/all", { method: "DELETE" });
+    const res = await buildApp().request("/api/v1/rnpm/saved/all", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(200);
     const body = await jsonOf<{ deleted: number }>(res);
     expect(body.deleted).toBe(2);
@@ -370,7 +378,10 @@ describe("DELETE /api/v1/rnpm/searches/:id", () => {
 describe("POST /api/v1/rnpm/compact", () => {
   it("returns { ok: true, ...vacuumStats }", async () => {
     seedAviz({ identificator: "AV-COMPACT" });
-    const res = await buildApp().request("/api/v1/rnpm/compact", { method: "POST" });
+    const res = await buildApp().request("/api/v1/rnpm/compact", {
+      method: "POST",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(200);
     const body = await jsonOf<{ ok: boolean }>(res);
     expect(body.ok).toBe(true);
@@ -626,12 +637,18 @@ describe("requireRole(admin) gate on global rnpm routes (closure #2)", () => {
   });
 
   it("DELETE /saved/all returns 403 for non-admin", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/saved/all", { method: "DELETE" });
+    const res = await buildApp().request("/api/v1/rnpm/saved/all", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(403);
   });
 
   it("POST /compact returns 403 for non-admin", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/compact", { method: "POST" });
+    const res = await buildApp().request("/api/v1/rnpm/compact", {
+      method: "POST",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(403);
   });
 
@@ -641,7 +658,10 @@ describe("requireRole(admin) gate on global rnpm routes (closure #2)", () => {
   });
 
   it("DELETE /backups returns 403 for non-admin", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/backups", { method: "DELETE" });
+    const res = await buildApp().request("/api/v1/rnpm/backups", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(403);
   });
 });
