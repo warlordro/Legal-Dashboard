@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import path from "path";
-import fs from "fs";
-import { fileURLToPath } from "url";
+import path from "node:path";
+import fs from "node:fs";
+import { fileURLToPath } from "node:url";
 import { stripDiacritics } from "../util/textNormalize.ts";
 import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
 
@@ -41,7 +41,7 @@ export function preMigrationBackup(src: string, label: string): void {
     }
     console.log(`[schema] pre-migration backup -> ${dest}`);
   } catch (e) {
-    console.warn(`[schema] pre-migration backup failed (continuing):`, e instanceof Error ? e.message : e);
+    console.warn("[schema] pre-migration backup failed (continuing):", e instanceof Error ? e.message : e);
   }
 }
 
@@ -124,6 +124,22 @@ export function getDb(): Database.Database {
   db.function("rnpm_norm", { deterministic: true }, (s) => (s == null ? "" : stripDiacritics(String(s)).toLowerCase()));
 
   initSchema(db);
+
+  // v2.24.0 - probe lightweight pentru index-ul filterRnpmSearchResults.
+  // NU fail-closed: doar warn pentru ops (migration 0021 ar trebui sa-l creeze).
+  try {
+    const exists = db
+      .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='idx_rnpm_avize_owner_search'")
+      .get();
+    if (!exists) {
+      console.warn(
+        "[schema] WARN: idx_rnpm_avize_owner_search lipseste; filtrul RNPM va fi mai lent. Ruleaza migration 0021."
+      );
+    }
+  } catch (e) {
+    console.warn(`[schema] index probe failed: ${e instanceof Error ? e.message : "unknown"}`);
+  }
+
   return db;
 }
 
@@ -149,7 +165,7 @@ function hasPendingSchemaMigrations(dbPath: string): boolean {
       // backup inainte: o esuare pe oricare migration trebuie sa fie reversibila.
       if (!hasVersionsTable) return files.some((f) => f.version > 1);
       const stored = new Set<number>(
-        (probe.prepare(`SELECT version FROM _schema_versions`).all() as { version: number }[]).map((r) => r.version)
+        (probe.prepare("SELECT version FROM _schema_versions").all() as { version: number }[]).map((r) => r.version)
       );
       return files.some((f) => !stored.has(f.version));
     } finally {
@@ -170,7 +186,7 @@ function needsDescriereMigration(dbPath: string): boolean {
         .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='rnpm_bunuri'`)
         .get();
       if (!bunuriExists) return false;
-      const cols = probe.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
+      const cols = probe.prepare("PRAGMA table_info(rnpm_bunuri)").all() as { name: string }[];
       const hasOld = cols.some((c) => c.name === "descriere");
       const hasNew = cols.some((c) => c.name === "descriere_id");
       // Migration runs only when old column still exists AND new one is missing.
@@ -196,7 +212,7 @@ function initSchema(d: Database.Database): void {
     console.log(`[schema] applied migrations: ${migrationResult.applied.join(", ")}`);
   }
   if (migrationResult.backfilled) {
-    console.log(`[schema] legacy DB — backfilled _schema_versions(1, sentinel)`);
+    console.log("[schema] legacy DB — backfilled _schema_versions(1, sentinel)");
   }
   if (migrationResult.selfHealed.length > 0) {
     // Operator-visible signal: self-heal a rescris stored hash-ul (raw/CRLF -> normalized)
@@ -332,25 +348,25 @@ function initSchema(d: Database.Database): void {
   `);
 
   // Migration: add referinte_json column to rnpm_bunuri (idempotent)
-  const cols = d.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
+  const cols = d.prepare("PRAGMA table_info(rnpm_bunuri)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "referinte_json")) {
-    d.exec(`ALTER TABLE rnpm_bunuri ADD COLUMN referinte_json TEXT`);
+    d.exec("ALTER TABLE rnpm_bunuri ADD COLUMN referinte_json TEXT");
   }
 
   // Migration: add inscriere_initiala_id + inscriere_initiala_uuid to rnpm_avize (idempotent).
   // Populated on avize modificatoare to preserve the link back to the parent aviz.
-  const avizeCols = d.prepare(`PRAGMA table_info(rnpm_avize)`).all() as { name: string }[];
+  const avizeCols = d.prepare("PRAGMA table_info(rnpm_avize)").all() as { name: string }[];
   if (!avizeCols.some((c) => c.name === "inscriere_initiala_id")) {
-    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_id TEXT`);
+    d.exec("ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_id TEXT");
   }
   if (!avizeCols.some((c) => c.name === "inscriere_initiala_uuid")) {
-    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_uuid TEXT`);
+    d.exec("ALTER TABLE rnpm_avize ADD COLUMN inscriere_initiala_uuid TEXT");
   }
   if (!avizeCols.some((c) => c.name === "inscriere_modificata_id")) {
-    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_id TEXT`);
+    d.exec("ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_id TEXT");
   }
   if (!avizeCols.some((c) => c.name === "inscriere_modificata_uuid")) {
-    d.exec(`ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_uuid TEXT`);
+    d.exec("ALTER TABLE rnpm_avize ADD COLUMN inscriere_modificata_uuid TEXT");
   }
 
   // Migration: add subscriptor + nr_ordine to rnpm_creditori / rnpm_debitori (idempotent).
@@ -376,16 +392,16 @@ function initSchema(d: Database.Database): void {
       text  TEXT NOT NULL UNIQUE
     );
   `);
-  const bunuriCols = d.prepare(`PRAGMA table_info(rnpm_bunuri)`).all() as { name: string }[];
+  const bunuriCols = d.prepare("PRAGMA table_info(rnpm_bunuri)").all() as { name: string }[];
   const hasDescrId = bunuriCols.some((c) => c.name === "descriere_id");
   const hasDescrText = bunuriCols.some((c) => c.name === "descriere");
   if (!hasDescrId) {
-    d.exec(`ALTER TABLE rnpm_bunuri ADD COLUMN descriere_id INTEGER REFERENCES rnpm_bunuri_descrieri(id)`);
+    d.exec("ALTER TABLE rnpm_bunuri ADD COLUMN descriere_id INTEGER REFERENCES rnpm_bunuri_descrieri(id)");
   }
   // Index on descriere_id speeds up orphan-descriere GC after aviz deletes.
-  d.exec(`CREATE INDEX IF NOT EXISTS idx_bunuri_descriere_id ON rnpm_bunuri(descriere_id)`);
+  d.exec("CREATE INDEX IF NOT EXISTS idx_bunuri_descriere_id ON rnpm_bunuri(descriere_id)");
   if (hasDescrText) {
-    console.log(`[schema] migrating rnpm_bunuri.descriere -> rnpm_bunuri_descrieri (may take 30-90s)`);
+    console.log("[schema] migrating rnpm_bunuri.descriere -> rnpm_bunuri_descrieri (may take 30-90s)");
     const t0 = Date.now();
     const migrate = d.transaction(() => {
       // Populate lookup with distinct non-empty texts. NULL stays NULL (no row inserted).
@@ -402,7 +418,7 @@ function initSchema(d: Database.Database): void {
         WHERE descriere IS NOT NULL AND descriere <> ''
       `);
       // Drop the now-redundant column. SQLite >= 3.35 supports DROP COLUMN inline.
-      d.exec(`ALTER TABLE rnpm_bunuri DROP COLUMN descriere`);
+      d.exec("ALTER TABLE rnpm_bunuri DROP COLUMN descriere");
     });
     migrate();
     console.log(`[schema] migration done in ${Date.now() - t0}ms; running VACUUM to reclaim disk space`);
