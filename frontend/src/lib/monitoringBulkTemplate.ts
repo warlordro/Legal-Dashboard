@@ -25,9 +25,14 @@
 // nu scriu dataValidations, deci post-procesam fisierul: unzip → injecteaza
 // <dataValidations> in xl/worksheets/sheet1.xml → rezip. Folosim `fflate`
 // (~8KB, tree-shakeable), deja prezent ca tranzitiv via xlsx-js-style.
+//
+// Read path (v2.22.0): migrat de pe `xlsx@0.18.5` (CVE Prototype Pollution +
+// ReDoS, no upstream fix) pe `xlsx-js-style@^1.2.0`. xlsx-js-style e un fork
+// mentinut al SheetJS 0.18.5 cu acelasi API `read()` + `utils.sheet_to_json()`;
+// elimina ultimul import runtime de `xlsx` din production bundle frontend.
 
 import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
-import * as XLSX from "xlsx";
+import * as XLSX from "xlsx-js-style";
 import {
   BLUE_DARK,
   BLUE_MAIN,

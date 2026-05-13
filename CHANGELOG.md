@@ -4,6 +4,145 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.22.0] - 2026-05-13
+
+### Supply chain hardening + polish + migrare exporturi la backend streaming
+
+Release dublu de igiena: pinning supply chain (GitHub Actions + Docker base
+image), migrare la `xlsx-js-style` pe path-ul de upload XLSX al userului (closes
+prototype-pollution si ReDoS din `xlsx@0.18.5`), `synchronous = NORMAL` pe
+SQLite si extragere in env a constantelor RNPM (sitekey, pageurl, User-Agent)
+pentru hot-swap fara rebuild. **Plus** migrare completa a exporturilor mari
+(RNPM, PortalJust dosare/termene, Alerte) de la build in renderer/main-process
+la `exceljs.stream.xlsx.WorkbookWriter` + `pdfkit` streaming server-side, cu
+cleanup temp-file dupa send — elimina OOM-ul Electron main process (4GB peak
+pe 148 avize, fix livrat in 4 commits secventiale: `3b69e4c` Faza 1 RNPM XLSX,
+`f9d11ec` Faza 2 RNPM PDF, `d600959` Faza 3a PortalJust dosare+termene XLSX+PDF,
+`9ece8ca` Faza 3b Alerte XLSX+PDF).
+
+#### Batch 7 - Supply chain pinning
+
+- [.github/workflows/build-windows.yml](.github/workflows/build-windows.yml)
+  si [.github/workflows/build-mac.yml](.github/workflows/build-mac.yml):
+  toate action-urile (`actions/checkout`, `actions/setup-node`,
+  `actions/upload-artifact`, `softprops/action-gh-release`) sunt pinned la
+  SHA-uri full git, nu la tag-uri mobile. Comentariu cu procedura de refresh
+  pe primul use din fiecare workflow.
+- [Dockerfile](Dockerfile): `node:22-alpine` pinned la digest
+  `sha256:8ea2348b...` pe ambele stage-uri (`deps` + runtime). Refresh
+  documentat prin Docker Registry API.
+- [frontend/src/lib/monitoringBulkTemplate.ts](frontend/src/lib/monitoringBulkTemplate.ts):
+  migrat de la `xlsx` la `xlsx-js-style` pe path-ul de parsare XLSX user
+  upload (`XLSX.read` + `sheet_to_json`). `xlsx@0.18.5` are CVE-uri active
+  (prototype pollution + ReDoS) fara fix upstream; `xlsx-js-style` e fork-ul
+  cu API identic dar fara vulnerabilitati.
+- [frontend/vite.config.ts](frontend/vite.config.ts): scos `xlsx` din
+  `optimizeDeps.include` + `manualChunks`. Bundle final nu mai include
+  `xlsx` ca runtime dep.
+- [frontend/package.json](frontend/package.json): `xlsx` mutat din
+  `dependencies` in `devDependencies` (ramane pentru `import("xlsx").WorkSheet`
+  type-only + test fixtures).
+- [backend/package.json](backend/package.json): hono `^4.12.17` →
+  `^4.12.18` ca sa inchida 3 CVE-uri moderate (CSS injection JSX SSR, JWT
+  NumericDate validation, Cache middleware Vary headers). `npm audit
+  --omit=dev` ramane 0 vulnerabilities.
+
+#### Batch 8 - Polish hygiene
+
+- [backend/src/db/schema.ts](backend/src/db/schema.ts): adaugat
+  `PRAGMA synchronous = NORMAL` dupa `journal_mode = WAL`. Cu WAL,
+  default-ul `FULL` e overkill (fsync la fiecare commit); `NORMAL` face
+  fsync doar la checkpoint fara risc de corruption pe crash. Reduce I/O
+  vizibil pe bulk inserts (monitoring runs, RNPM saves).
+- [backend/src/services/captchaSolver.ts](backend/src/services/captchaSolver.ts):
+  `RNPM_SITEKEY` + `RNPM_PAGEURL` mutate la getter-e lazy
+  (`getRnpmSitekey()`, `getRnpmPageUrl()`) care citesc `process.env` la apel.
+  Operatorul poate hot-swap-a valorile fara rebuild daca RNPM roteste
+  hCaptcha-ul. Const-urile vechi raman exportate ca fallback.
+- [backend/src/services/rnpmClient.ts](backend/src/services/rnpmClient.ts):
+  `DEFAULT_HEADERS` const → `defaultHeaders()` function care citeste
+  `process.env.RNPM_USER_AGENT` lazy. Toate 3 call-site-uri (`search`,
+  `fetchPart`, `fetchIstoric`) actualizate.
+- [.env.example](.env.example): documentate `RNPM_SITEKEY`, `RNPM_PAGEURL`
+  si `RNPM_USER_AGENT` ca env vars optionale (defaults safe in cod).
+- Verificate ca deja conforme (zero-touch): `dotenv.config` deja foloseste
+  `override: process.env.NODE_ENV !== "production"` (OS env wins in prod);
+  WAL/SHM sidecar cleanup in [backend/src/db/backup.ts](backend/src/db/backup.ts)
+  deja distinge ENOENT de alte erori; soap.ts fara CDATA TODO.
+
+#### Faza 1-3b - Export streaming server-side
+
+- [backend/src/services/rnpmExportXlsx.ts](backend/src/services/rnpmExportXlsx.ts)
+  + [rnpmExportPdf.ts](backend/src/services/rnpmExportPdf.ts): build XLSX/PDF
+  pentru avize RNPM cu `exceljs.stream.xlsx.WorkbookWriter` (row-by-row pe disk
+  temp) + `pdfkit` (A4 landscape, header + index + 1 pagina/aviz). Elimina
+  OOM-ul main process Electron pe export-uri mari (148 avize → 4GB peak).
+  Ruta `POST /api/v1/rnpm/saved/export.{xlsx,pdf}` stream-uieste fisierul temp
+  + unlink in `close` event.
+- [backend/src/services/dosareExportXlsx.ts](backend/src/services/dosareExportXlsx.ts)
+  + [dosareExportPdf.ts](backend/src/services/dosareExportPdf.ts) +
+  [termeneExportXlsx.ts](backend/src/services/termeneExportXlsx.ts) +
+  [termeneExportPdf.ts](backend/src/services/termeneExportPdf.ts): port PortalJust
+  dosare + termene la backend streaming. Rute noi `POST /api/v1/dosare/export.{xlsx,pdf}`
+  si `POST /api/v1/termene/export.{xlsx,pdf}`.
+- [backend/src/services/alertsExportXlsx.ts](backend/src/services/alertsExportXlsx.ts)
+  + [alertsExportPdf.ts](backend/src/services/alertsExportPdf.ts) +
+  [backend/src/routes/alerts.ts](backend/src/routes/alerts.ts): port export
+  alerte la backend streaming, cu helper `collectAlertExportRows` care reuseaza
+  `AlertExportBodySchema` (mode ids/filters/range) + `streamExportResult`
+  (Content-Disposition ASCII + UTF-8 + cleanup temp). Rute noi
+  `POST /api/v1/alerts/export.{xlsx,pdf}` (ruta veche `/export` JSON ramane
+  pentru compat).
+- [frontend/src/lib/api.ts](frontend/src/lib/api.ts) +
+  [alertsApi.ts](frontend/src/lib/alertsApi.ts) +
+  [rnpmApi.ts](frontend/src/lib/rnpmApi.ts): helpers `*ExportXlsxBlob` /
+  `*ExportPdfBlob` cu parsing `Content-Disposition` (ASCII + `filename*=UTF-8''`).
+- [frontend/src/lib/export.ts](frontend/src/lib/export.ts): slimit ~500 LOC
+  (builderii dosare/termene sterse, raman doar orchestratorii client-side care
+  apeleaza backend).
+- [frontend/src/lib/export-alerts.ts](frontend/src/lib/export-alerts.ts) +
+  [export-alerts.test.ts](frontend/src/lib/export-alerts.test.ts): **sterse**
+  (267 LOC); whole pipeline mutat backend.
+- [frontend/src/components/AlertsExportModal.tsx](frontend/src/components/AlertsExportModal.tsx):
+  simplificat la single call backend (XLSX sau PDF blob direct, fara round-trip
+  prin worker).
+- [scripts/build.js](scripts/build.js): copiaza `pdfkit/js/data/*.afm` (font
+  metrics Helvetica) in `dist-backend/data/` la build, ca pdfkit sa-si gaseasca
+  font-urile in CJS-bundle-ul Electron.
+- 8 fisiere de test noi (`*ExportXlsx.test.ts` / `*ExportPdf.test.ts`) acopera
+  build + filename + stilizare + cap-uri + edge cases (long fields ~50 pagini
+  PDF).
+
+#### Hardening export streaming
+
+- [backend/src/routes/dosare.ts](backend/src/routes/dosare.ts) +
+  [termene.ts](backend/src/routes/termene.ts): `EXPORT_BODY_LIMIT` scazut de la
+  50MB la 25MB (acopera plafonul de business `MAX_DOSARE_RESPONSE = 5000` cu
+  headroom, fara sa fie un default arbitrar deschis spre DoS). Plus type-guard
+  `isDosarShape` / `isTermenShape` care valideaza shape-ul fiecarui item
+  (`numar: string`, `parti: array`, `sedinte: array`) inainte de cast — fail
+  loud cu 400 in loc sa crape builderul cu 500 pe payload malformat.
+- [backend/src/util/pdfStream.ts](backend/src/util/pdfStream.ts): helper nou
+  `finishWriteStream(stream, tmpPath)` care raceaza `once("finish")` vs
+  `once("error")`. Pana acum daca stream-ul PDF emite `error` (disk full,
+  permisiuni, antivirus quarantine), `await once(stream, "finish")` atarna
+  pana la timeout HTTP. Replace in cele 4 PDF builders (RNPM, dosare, termene,
+  alerte) + cleanup automat al tmp file la fail.
+- [backend/src/util/dateFormat.ts](backend/src/util/dateFormat.ts): helper
+  `formatRoDate` (date-only via regex YYYY-MM-DD → DD.MM.YYYY, fara Date
+  object) si `formatRoDateTime` (ISO timestamp cu `Intl.DateTimeFormat` +
+  `timeZone: "Europe/Bucharest"` explicit). Replace `formatDate`/
+  `formatDateTime` locale in 6 fisiere de export — elimina shift-ul de date
+  cand TZ-ul masinii nu e Europa Centrala.
+
+#### Tests
+
+Backend: 900 passed | 1 skipped (67 test files; +29 teste fata de v2.21.0
+prin cele 8 fisiere noi de export plus `dateFormat.test.ts` (8 teste,
+TZ-safety) + `pdfStream.test.ts` (2 teste, write-stream error race)). Frontend:
+92 passed (decrease de la 103 pentru ca `export-alerts.test.ts` +
+`export.test.ts` au fost sterse cand logica a trecut backend).
+
 ## [2.21.0] - 2026-05-12
 
 ### RNPM trust + DB migrations & retention safety

@@ -4,9 +4,9 @@ import { createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { once } from "node:events";
 import type { AvizFull, BunPartyRef, BunRecord, PartyRecord } from "../db/avizRepository.ts";
 import { sanitizeFilename, todayRo } from "../util/xlsxHelpers.ts";
+import { finishWriteStream } from "../util/pdfStream.ts";
 
 export interface RnpmPdfResult {
   filepath: string;
@@ -298,7 +298,7 @@ export async function buildRnpmPdf(items: AvizFull[], searchType?: string): Prom
     }
 
     doc.end();
-    await once(output, "finish");
+    await finishWriteStream(output, tmpPath);
     const stat = await fs.stat(tmpPath);
     const fileBase =
       items.length === 1

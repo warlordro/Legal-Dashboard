@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MonitoringAlertRow } from "../db/monitoringAlertsRepository.ts";
 import { todayRo } from "../util/xlsxHelpers.ts";
+import { formatRoDateTime } from "../util/dateFormat.ts";
 
 export interface AlertExportDecoratedRow {
   alert: MonitoringAlertRow;
@@ -54,19 +55,6 @@ const headerStyle: CellStyle = {
 
 function alertsFilename(ext: "xlsx" | "pdf", count: number): string {
   return `alerte_${count}_${todayRo().replace(/\./g, "-")}.${ext}`;
-}
-
-function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("ro-RO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function statusLabel(row: MonitoringAlertRow): string {
@@ -148,7 +136,7 @@ export async function buildAlertsXlsx(
 
     rows.forEach((row, index) => {
       const values: ExcelJS.CellValue[] = [
-        formatDateTime(row.alert.created_at),
+        formatRoDateTime(row.alert.created_at),
         row.severityLabel,
         row.kindLabel,
         row.alert.title,

@@ -219,15 +219,23 @@ const RnpmSearchResultSchema = z
   })
   .passthrough();
 
-const DEFAULT_HEADERS: Record<string, string> = {
-  "Content-Type": "application/json",
-  Accept: "application/json, text/plain, */*",
-  "Accept-Language": "ro-RO,ro;q=0.9,en;q=0.8",
-  Origin: RNPM_BASE_URL,
-  Referer: `${RNPM_BASE_URL}/`,
-  "User-Agent":
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36",
-};
+// v2.22.0 — User-Agent citit lazy din env la fiecare apel. RNPM poate adauga
+// rate-limit pe UA-uri vechi (Chrome 125 e din 2024); operatorul rebumpeaza
+// `RNPM_USER_AGENT` fara rebuild. Functie, nu const, ca process.env sa fie
+// citit dupa ce dotenv.config() din index.ts a populat env-ul.
+const DEFAULT_RNPM_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36";
+
+function defaultHeaders(): Record<string, string> {
+  return {
+    "Content-Type": "application/json",
+    Accept: "application/json, text/plain, */*",
+    "Accept-Language": "ro-RO,ro;q=0.9,en;q=0.8",
+    Origin: RNPM_BASE_URL,
+    Referer: `${RNPM_BASE_URL}/`,
+    "User-Agent": process.env.RNPM_USER_AGENT?.trim() || DEFAULT_RNPM_USER_AGENT,
+  };
+}
 
 export interface RnpmClientOptions {
   requestDelayMs?: number;
@@ -252,7 +260,7 @@ export class RnpmClient {
     const url = `${RNPM_BASE_URL}/api/search/${type}/${page}`;
     const res = await this.fetchImpl(url, {
       method: "POST",
-      headers: DEFAULT_HEADERS,
+      headers: defaultHeaders(),
       body: JSON.stringify(params),
       signal,
     });
@@ -277,7 +285,7 @@ export class RnpmClient {
 
   async fetchPart(uuid: string, part: 1 | 2 | 3 | 4, signal?: AbortSignal): Promise<unknown> {
     const url = `${RNPM_BASE_URL}/api/view/inscriere/${uuid}?part=${part}`;
-    const res = await this.fetchImpl(url, { headers: DEFAULT_HEADERS, signal });
+    const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal });
     if (res.status === 400 || res.status === 404 || res.status === 410) return null;
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -291,7 +299,7 @@ export class RnpmClient {
     // The istoric endpoint is flaky — same URL occasionally returns 400 "command
     // execution error" then 200 with data a few seconds later. Retry once with a
     // short backoff before giving up.
-    const doFetch = () => this.fetchImpl(url, { headers: DEFAULT_HEADERS, signal });
+    const doFetch = () => this.fetchImpl(url, { headers: defaultHeaders(), signal });
     let res = await doFetch();
     if (res.status === 400) {
       await new Promise((r) => setTimeout(r, 1500));

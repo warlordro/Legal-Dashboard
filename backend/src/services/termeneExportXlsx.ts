@@ -4,6 +4,7 @@ import { promises as fs } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { todayRo } from "../util/xlsxHelpers.ts";
+import { formatRoDate } from "../util/dateFormat.ts";
 
 export interface TermenExportRow {
   numarDosar: string;
@@ -56,13 +57,6 @@ const headerStyle: CellStyle = {
 
 function sanitizeNr(nr: string): string {
   return (nr || "").replace(/[/\\:*?"<>|]/g, "-").trim() || "dosar";
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr) return "-";
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function safeCell<T>(value: T): T | string {
@@ -141,7 +135,7 @@ export async function buildTermeneXlsx(termene: TermenExportRow[]): Promise<Term
         safeValues([
           index + 1,
           termen.numarDosar || "-",
-          formatDate(termen.data),
+          formatRoDate(termen.data),
           termen.ora || "-",
           termen.institutie || "-",
           termen.complet || "-",

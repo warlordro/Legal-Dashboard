@@ -17,12 +17,25 @@ import { buildTermeneXlsx, type TermenExportRow } from "../services/termeneExpor
 export const termeneRouter = new Hono();
 export const termeneExportRouter = new Hono();
 
-const EXPORT_BODY_LIMIT = 50 * 1024 * 1024;
+// 25MB acopera MAX_TERMENE_EXPORT=100k termene (~200B/termen flat); hard cap inainte
+// sa incarcam payload in RAM. Vezi rationale identic in routes/dosare.ts.
+const EXPORT_BODY_LIMIT = 25 * 1024 * 1024;
 const MAX_TERMENE_EXPORT = 100_000;
 const limitExport = bodyLimit({
   maxSize: EXPORT_BODY_LIMIT,
   onError: (c) => c.json({ error: "Payload prea mare" }, 413),
 });
+
+function isTermenShape(value: unknown): value is TermenExportRow {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  // Builderii citesc numarDosar + data ca minim; parti e optional dar trebuie
+  // sa fie array daca exista. Restul (ora, complet, solutie, etc.) tolereaza
+  // null via fallback "-".
+  if (typeof v.numarDosar !== "string") return false;
+  if (v.parti !== undefined && !Array.isArray(v.parti)) return false;
+  return true;
+}
 
 async function readTermeneExportBody(c: import("hono").Context) {
   let body: unknown;
@@ -36,6 +49,10 @@ async function readTermeneExportBody(c: import("hono").Context) {
   if (termene.length === 0) return { error: c.json({ error: "Lista termene goala" }, 400) };
   if (termene.length > MAX_TERMENE_EXPORT) {
     return { error: c.json({ error: `Maxim ${MAX_TERMENE_EXPORT} termene per export` }, 400) };
+  }
+  const badIndex = termene.findIndex((item) => !isTermenShape(item));
+  if (badIndex !== -1) {
+    return { error: c.json({ error: `Format termen invalid la pozitia ${badIndex}` }, 400) };
   }
   return { termene: termene as TermenExportRow[] };
 }

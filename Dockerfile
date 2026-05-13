@@ -8,7 +8,11 @@
 # so we MUST ship the prebuilt native binding in the image — single-stage `COPY dist-*`
 # without node_modules crash-loops on first request.
 
-FROM node:22-alpine AS deps
+# SHA digest pin (supply chain hardening v2.22.0): resolved 2026-05-12 for
+# node:22-alpine. Moving tags can be repointed; pinned digest stops a
+# repository takeover from injecting a malicious base image.
+# Refresh: `TOKEN=$(curl -s "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/node:pull" | jq -r .token); curl -sI -H "Authorization: Bearer $TOKEN" -H "Accept: application/vnd.oci.image.index.v1+json" "https://registry-1.docker.io/v2/library/node/manifests/22-alpine" | grep -i docker-content-digest`
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f AS deps
 # Build deps for native compilation. Alpine ships musl; better-sqlite3's prebuilt
 # binaries are glibc-only, so we compile from source against musl.
 RUN apk add --no-cache python3 make g++
@@ -22,7 +26,7 @@ COPY backend/package.json ./backend/package.json
 COPY frontend/package.json ./frontend/package.json
 RUN npm ci --omit=dev --workspace=backend --include-workspace-root=false --build-from-source
 
-FROM node:22-alpine
+FROM node:22-alpine@sha256:8ea2348b068a9544dae7317b4f3aafcdc032df1647bb7d768a05a5cad1a7683f
 # SECURITY: drop root before copying anything. The app does not need privileged
 # operations at runtime; running as a non-root user limits container-escape blast
 # radius and is required by most compliant container platforms.

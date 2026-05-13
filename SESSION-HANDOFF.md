@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.21.0 (2026-05-12)
+**Versiune curenta**: v2.22.0 (2026-05-13)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -62,7 +62,35 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
 
-## Urmatoarea etapa
+## Sprint inchis 2026-05-13 — Migrare exporturi server-side streaming
+
+**Status**: livrat integral. 4 commits secventiale, fiecare cu smoke + biome + tsc verzi.
+
+**Trigger**: RNPM export pe 148 avizi a hang-uit Electron main process la 4GB peak (Codex telemetry 2026-05-12: PID 3960 1.6GB → 4.06GB → AppHangTransient → kill toate procesele; `/health` timeout = main process blocat). Cauza: `xlsx-js-style` build in-memory + backend in-process in Electron main = same V8 isolate ca UI thread.
+
+**Solutie**: rewrite la `exceljs.stream.xlsx.WorkbookWriter` (row-by-row pe disk temp) si `pdfkit` streaming pentru toate exporturile data-driven. Renderer cere blob, backend stream-uieste fisierul temp + `unlink` in `close` event.
+
+| Faza | Scope | Commit | Status |
+|---|---|---|---|
+| 1 | RNPM XLSX server-side (avize/parti/bunuri/istoric, hyperlinks cross-sheet workaround) | `3b69e4c` | Done |
+| 2 | RNPM PDF server-side (A4 landscape, index + 1 pagina/aviz, max 50 pagini la long fields) | `f9d11ec` | Done |
+| 3a | PortalJust dosare + termene XLSX+PDF | `d600959` | Done |
+| 3b | Alerte XLSX+PDF (refactor `collectAlertExportRows` + `streamExportResult`, `export-alerts.ts` sters) | `9ece8ca` | Done |
+
+**NU migrate** (scale fix mic, safe pe client): `export-analysis.ts`, `export-manual.ts`,
+`export-report.ts` raman in `export.worker.ts`; `changelog-pdf.ts` si
+`monitoringBulkTemplate.ts` sunt importate direct in `pages/Changelog.tsx` respectiv
+`MonitoringBulkImportCard.tsx`, fara worker (build sincron pe demand de user).
+
+**Regula generala stabilita**: server-side stream DACA scale-ul depinde de count user. Client-side OK doar pentru scale fix cunoscut.
+
+**Caveats tehnice consumate**:
+- `WorkbookWriter` NU permite revenire la sheet anterior dupa `.commit()` → row offsets cross-sheet pre-calculate.
+- ExcelJS hyperlinks cross-sheet au bug pe writer-ul streaming → workaround via HYPERLINK formula (`{ formula: \`HYPERLINK("#'Sheet'!A1","label")\`, result: "label" }`).
+- pdfkit Helvetica.afm trebuie copiata in `dist-backend/data/` la build → fix in `scripts/build.js`.
+- Stilizare ExcelJS per-celula: `cell.font` / `cell.fill` / `cell.alignment` / `cell.border` (API direct).
+
+## Urmatoarea etapa (background, fara timeline)
 
 Sprintul de monitorizare + email este incheiat. Roadmap-ul oficial
 (`EXECUTION-ROADMAP.md`) nu mai are PR-uri planificate dupa v2.10.1 — PR-10

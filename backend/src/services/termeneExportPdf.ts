@@ -2,11 +2,12 @@ import PDFDocument from "pdfkit";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
-import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { TermenExportRow } from "./termeneExportXlsx.ts";
 import { todayRo } from "../util/xlsxHelpers.ts";
+import { finishWriteStream } from "../util/pdfStream.ts";
+import { formatRoDate } from "../util/dateFormat.ts";
 
 export interface TermenePdfResult {
   filepath: string;
@@ -42,13 +43,6 @@ function text(value: unknown): string {
 
 function sanitizeNr(nr: string): string {
   return (nr || "").replace(/[/\\:*?"<>|]/g, "-").trim() || "dosar";
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr) return "-";
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function getPortalJustUrl(numar: string): string {
@@ -187,7 +181,7 @@ export async function buildTermenePdf(termene: TermenExportRow[]): Promise<Terme
     return [
       String(index + 1),
       termen.numarDosar || "-",
-      formatDate(termen.data),
+      formatRoDate(termen.data),
       termen.ora || "-",
       termen.institutie || "-",
       termen.complet || "-",
@@ -198,7 +192,7 @@ export async function buildTermenePdf(termene: TermenExportRow[]): Promise<Terme
 
   drawTable(doc, headers, rows, widths, links, 82, 1);
   doc.end();
-  await once(stream, "finish");
+  await finishWriteStream(stream, tmpPath);
 
   const stat = await fs.stat(tmpPath);
   const filename =

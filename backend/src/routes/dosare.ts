@@ -17,11 +17,24 @@ import { buildDosareXlsx } from "../services/dosareExportXlsx.ts";
 export const dosareRouter = new Hono();
 export const dosareExportRouter = new Hono();
 
-const EXPORT_BODY_LIMIT = 50 * 1024 * 1024;
+// 25MB acopera MAX_DOSARE_RESPONSE=5000 dosare cu parti+sedinte (~3-4KB/dosar avg + overhead JSON).
+// Hard cap inainte sa incarcam payload in RAM; valoarea reflecta plafonul de business, nu un default arbitrar.
+const EXPORT_BODY_LIMIT = 25 * 1024 * 1024;
 const limitExport = bodyLimit({
   maxSize: EXPORT_BODY_LIMIT,
   onError: (c) => c.json({ error: "Payload prea mare" }, 413),
 });
+
+type DosarExport = Awaited<ReturnType<typeof cautareDosare>>[number];
+
+function isDosarShape(value: unknown): value is DosarExport {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  // Validam doar campurile pe care le citesc builderii (XLSX + PDF). Restul
+  // tolereaza missing/string via fallback "-". Aici tinem fail-fast pe shape,
+  // nu pe continut.
+  return typeof v.numar === "string" && Array.isArray(v.parti) && Array.isArray(v.sedinte);
+}
 
 async function readDosareExportBody(c: import("hono").Context) {
   let body: unknown;
@@ -36,7 +49,11 @@ async function readDosareExportBody(c: import("hono").Context) {
   if (dosare.length > MAX_DOSARE_RESPONSE) {
     return { error: c.json({ error: `Maxim ${MAX_DOSARE_RESPONSE} dosare per export` }, 400) };
   }
-  return { dosare: dosare as Awaited<ReturnType<typeof cautareDosare>> };
+  const badIndex = dosare.findIndex((item) => !isDosarShape(item));
+  if (badIndex !== -1) {
+    return { error: c.json({ error: `Format dosar invalid la pozitia ${badIndex}` }, 400) };
+  }
+  return { dosare: dosare as DosarExport[] };
 }
 
 async function streamExportResult(

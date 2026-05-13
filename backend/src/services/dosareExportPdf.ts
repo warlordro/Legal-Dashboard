@@ -2,11 +2,12 @@ import PDFDocument from "pdfkit";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
-import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Dosar } from "../soap.ts";
 import { todayRo } from "../util/xlsxHelpers.ts";
+import { finishWriteStream } from "../util/pdfStream.ts";
+import { formatRoDate } from "../util/dateFormat.ts";
 
 export interface DosarePdfResult {
   filepath: string;
@@ -44,13 +45,6 @@ function sanitizeNr(nr: string): string {
   return (nr || "").replace(/[/\\:*?"<>|]/g, "-").trim() || "dosar";
 }
 
-function formatDate(dateStr: string): string {
-  if (!dateStr) return "-";
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
-
 function getPortalJustUrl(numar: string): string {
   const parent = numar.replace(/\/a\d*$/i, "");
   return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(parent)}`;
@@ -65,7 +59,7 @@ function formatSedinte(sedinte: Dosar["sedinte"]): string {
   if (sedinte.length === 0) return "-";
   return sedinte
     .map((sedinta) => {
-      const parts = [formatDate(sedinta.data)];
+      const parts = [formatRoDate(sedinta.data)];
       if (sedinta.ora) parts.push(sedinta.ora);
       if (sedinta.solutie) parts.push("- " + stripDiacritics(sedinta.solutie));
       if (sedinta.solutieSumar) parts.push("(" + stripDiacritics(sedinta.solutieSumar) + ")");
@@ -205,7 +199,7 @@ export async function buildDosarePdf(dosare: Dosar[]): Promise<DosarePdfResult> 
     return [
       String(index + 1),
       dosar.numar || "-",
-      formatDate(dosar.data),
+      formatRoDate(dosar.data),
       dosar.institutie || "-",
       [dosar.categorieCaz, dosar.stadiuProcesual].filter(Boolean).join(" / ") || "-",
       dosar.obiect || "-",
@@ -216,7 +210,7 @@ export async function buildDosarePdf(dosare: Dosar[]): Promise<DosarePdfResult> 
 
   drawTable(doc, headers, rows, widths, 1, (rowIndex) => links.get(rowIndex) ?? null, 82, 1);
   doc.end();
-  await once(stream, "finish");
+  await finishWriteStream(stream, tmpPath);
 
   const stat = await fs.stat(tmpPath);
   const filename = dosare.length === 1 ? `dosar_${sanitizeNr(dosare[0].numar)}.pdf` : `dosare_${todayRo()}.pdf`;

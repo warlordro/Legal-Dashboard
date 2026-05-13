@@ -127,28 +127,24 @@ Highlights din review (de mentionat in PR-uri cand le atingi):
 
 ## Batch 7 — Supply chain hardening (LOW risk, 1-2h)
 
-Target release: **v2.22.0**.
+Livrat in **v2.22.0** (12 Mai 2026).
 
-- [ ] **`.github/workflows/build-windows.yml` + `build-mac.yml`** — pin la SHA pentru `actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, `softprops/action-gh-release` (exemplu: `actions/checkout@<sha> # v6.0.0`). Mutable tags `@v6` pot fi mutate.
-- [ ] **`Dockerfile`** — pin base image la digest (`node:22-alpine@sha256:...`) in loc de tag.
-- [ ] **Migrare `xlsx` -> `xlsx-js-style`** — `xlsx` are CVE-uri vechi; `xlsx-js-style` e fork mentinut. Verifica daca usage actual e deja pe `xlsx-js-style` (din `CLAUDE.md` da, dar audit inca o data).
-- [ ] **`npm audit --omit=dev`** — ruleaza si fixeaza ce ramane HIGH/CRITICAL inainte de release.
-
-**Risc modificare:** SCAZUT. **Mitigare:** SHA pin nu schimba comportament; adauga in CHANGELOG nota despre cum se face refresh la SHA-uri (renovate/dependabot).
+- [x] **`.github/workflows/build-windows.yml` + `build-mac.yml`** — pinned la SHA full git pentru `actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, `softprops/action-gh-release` cu comentariu refresh.
+- [x] **`Dockerfile`** — pinned la digest `sha256:8ea2348b...` pentru `node:22-alpine` pe ambele stage-uri (deps + runtime) cu instructiuni refresh.
+- [x] **Migrare `xlsx` -> `xlsx-js-style`** — `frontend/src/lib/monitoringBulkTemplate.ts` migrat (user input path); `xlsx` mutat la devDependencies pentru type-only imports + test fixtures.
+- [x] **`npm audit --omit=dev`** — hono `^4.12.17` → `^4.12.18` inchide 3 CVE moderate; productie clean.
 
 ---
 
 ## Batch 8 — Polish (LOW risk, 2h)
 
-Target release: **v2.22.0**.
+Livrat in **v2.22.0** (12 Mai 2026).
 
-- [ ] **PRAGMA gate Phase 2** — verifica daca `journal_mode=WAL` + `synchronous=NORMAL` sunt aplicate consecvent la boot in toate code-paths (in-process electron, standalone backend, tests).
-- [ ] **`dotenv override:false`** — la `dotenv.config({ override: false })` ca sa nu suprascrie env-ul OS care e prioritar in prod.
-- [ ] **WAL cleanup ENOENT-only** — la shutdown, `fs.unlink` pe `-wal`/`-shm` ar trebui sa swallow doar ENOENT, nu orice eroare.
-- [ ] **Sitekey / UA env-ify** — hardcoded values pentru hCaptcha sitekey + User-Agent ar trebui in env (nu pentru secret, ci pentru tunnig fara rebuild).
-- [ ] **SOAP CDATA TODO** — verifica TODO-urile lasate in `soap.ts` pentru CDATA edge cases.
-
-**Risc modificare:** ZERO-SCAZUT. **Mitigare:** doar runs full vitest + smoke desktop.
+- [x] **PRAGMA gate Phase 2** — `synchronous = NORMAL` adaugat in `schema.ts:openDb()` dupa `journal_mode = WAL` + `foreign_keys = ON`. Read-only probes + test connections folosesc defaults SQLite (acceptabil).
+- [x] **`dotenv override:false`** — deja in place; `index.ts:53-55` foloseste `override: process.env.NODE_ENV !== "production"` (OS env wins in prod, .env wins in dev).
+- [x] **WAL cleanup ENOENT-only** — deja in place in `backend/src/db/backup.ts:259-286` si `:353-369`; ambele paths verifica `code !== "ENOENT"` inainte sa logheze/arunce. `closeDb`/`markShuttingDown` nu unlink-uiesc sidecars (SQLite gestioneaza singura la `db.close()`).
+- [x] **Sitekey / UA env-ify** — `RNPM_SITEKEY` + `RNPM_PAGEURL` mutate la lazy getters in `captchaSolver.ts`; `defaultHeaders()` in `rnpmClient.ts` citeste `RNPM_USER_AGENT` la apel. Documentate in `.env.example`.
+- [x] **SOAP CDATA TODO** — NOP, `backend/src/soap.ts` nu mai are TODO/FIXME/CDATA pendinte.
 
 ---
 

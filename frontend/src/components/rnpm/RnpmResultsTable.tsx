@@ -69,6 +69,7 @@ export function RnpmResultsTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
 
   useEffect(() => {
@@ -270,6 +271,7 @@ export function RnpmResultsTable({
             onClick={async () => {
               const pairs = getExportPairs();
               setExporting("xlsx");
+              setExportError(null);
               try {
                 await exportRnpmExcel(
                   pairs.map((p) => p.doc),
@@ -278,6 +280,7 @@ export function RnpmResultsTable({
                 );
               } catch (err) {
                 console.error("[rnpm] export xlsx failed:", err);
+                setExportError(`Export Excel esuat: ${err instanceof Error ? err.message : String(err)}`);
               } finally {
                 setExporting(null);
               }
@@ -293,6 +296,7 @@ export function RnpmResultsTable({
             onClick={async () => {
               const pairs = getExportPairs();
               setExporting("pdf");
+              setExportError(null);
               try {
                 await exportRnpmPDF(
                   pairs.map((p) => p.doc),
@@ -301,6 +305,7 @@ export function RnpmResultsTable({
                 );
               } catch (err) {
                 console.error("[rnpm] export pdf failed:", err);
+                setExportError(`Export PDF esuat: ${err instanceof Error ? err.message : String(err)}`);
               } finally {
                 setExporting(null);
               }
@@ -311,6 +316,20 @@ export function RnpmResultsTable({
           </Button>
         </div>
       </div>
+      {exportError && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+          <div className="flex items-start justify-between gap-2">
+            <p className="break-words">{exportError}</p>
+            <button
+              type="button"
+              className="shrink-0 text-red-700/70 hover:text-red-700 dark:text-red-300/70 dark:hover:text-red-300"
+              onClick={() => setExportError(null)}
+            >
+              Inchide
+            </button>
+          </div>
+        </div>
+      )}
       {result.criteriu && (
         <p className="truncate text-[11px] text-muted-foreground/70" title={result.criteriu}>
           {result.criteriu}

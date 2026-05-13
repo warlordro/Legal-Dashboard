@@ -37,6 +37,52 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.22.0",
+    date: "13 Mai 2026",
+    subtitle:
+      "Supply chain hardening + polish (Batch 7 + Batch 8 din FIXES-TODO.md) + migrare exporturi mari la backend streaming. GitHub Actions pinned la SHA-uri full, Dockerfile pinned la digest sha256, `xlsx-js-style` pe path-ul de upload XLSX user (closes 2 CVE active fara fix upstream), hono bump la 4.12.18 cu 3 CVE moderate inchise. Polish: `synchronous = NORMAL` pe SQLite WAL, `RNPM_SITEKEY` / `RNPM_PAGEURL` / `RNPM_USER_AGENT` extragate in env via lazy getters pentru hot-swap fara rebuild. Plus exporturi RNPM (avize), PortalJust (dosare + termene) si Alerte rescrise cu `exceljs.stream.xlsx.WorkbookWriter` + `pdfkit` streaming pe disk temp — elimina OOM-ul Electron main process pe 148+ avize.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-cyan-500",
+    badgeClass: "bg-cyan-100 text-cyan-800 dark:bg-cyan-900/30 dark:text-cyan-400",
+    sections: [
+      {
+        title: "Supply chain pinning",
+        content:
+          "Workflow-urile GitHub (build-windows.yml + build-mac.yml) folosesc SHA-uri full git pe toate action-urile (`actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, `softprops/action-gh-release`), nu tag-uri mobile. Dockerfile-ul folosea `node:22-alpine` (tag), acum pinned la digest sha256 pe ambele stage-uri.",
+      },
+      {
+        title: "Migrare XLSX pe path-ul de upload user",
+        content:
+          "`monitoringBulkTemplate.ts` (frontend) folosea `xlsx@0.18.5` pentru parsing user input, expunere la CVE de prototype pollution + ReDoS fara fix upstream. Migrat la `xlsx-js-style` (fork cu acelasi API, fara vulnerabilitati). `xlsx` scos din `optimizeDeps` + `manualChunks` in vite.config.ts si mutat la devDependencies.",
+      },
+      {
+        title: "hono 4.12.18 + npm audit clean",
+        content:
+          "Bumpat `hono` `^4.12.17` → `^4.12.18` ca sa inchidem 3 CVE moderate (CSS injection in JSX SSR, JWT NumericDate validation, Cache middleware Vary headers). `npm audit --omit=dev` ramane fara vulnerabilitati de productie.",
+      },
+      {
+        title: "SQLite synchronous = NORMAL",
+        content:
+          "Adaugat `PRAGMA synchronous = NORMAL` dupa `journal_mode = WAL`. Default-ul SQLite `FULL` e overkill cu WAL (fsync la fiecare commit); NORMAL face fsync doar la checkpoint, fara risc de corruption pe crash. Reduce I/O vizibil pe bulk inserts (monitoring runs, RNPM saves) si elimina pause-uri vizibile la fsync.",
+      },
+      {
+        title: "RNPM constants in env",
+        content:
+          "`RNPM_SITEKEY`, `RNPM_PAGEURL` si `RNPM_USER_AGENT` mutate la lazy getters care citesc `process.env` la apel. Operatorul poate hot-swap-a valorile fara rebuild daca RNPM roteste hCaptcha-ul sau rate-limita UA-ul vechi. Const-urile vechi raman exportate ca fallback.",
+      },
+      {
+        title: "Exporturi RNPM / PortalJust / Alerte la backend streaming",
+        content:
+          "Build-ul XLSX/PDF pentru avize RNPM (sute) si liste PortalJust / Alerte sufoca Electron main process la 4GB peak. Rescris cu `exceljs.stream.xlsx.WorkbookWriter` (row-by-row pe fisier temp) si `pdfkit` streaming. Rute noi `POST /api/v1/{rnpm/saved,dosare,termene,alerte}/export.{xlsx,pdf}`, raspunsul stream-uieste fisierul temp si face unlink pe close. Frontend cere blob direct, fara round-trip prin worker. 8 fisiere de test noi acopera build + filename + stilizare + cap-uri + edge cases.",
+      },
+      {
+        title: "Hardening post-streaming",
+        content:
+          "Patru fix-uri pe path-ul nou de export inainte de merge: (1) body cap 25MB pe `POST /dosare/export.*` + `POST /termene/export.*` (default Hono 8MB ar fi taiat exporturi >150 dosare cu istoric SOAP gros); (2) type-guard `isDosarShape` / `isTermenShape` care valideaza forma payload-ului inainte sa intre in builder, intoarce 400 cu pozitia elementului invalid; (3) helper shared `finishWriteStream(stream, tmpPath)` care face `Promise.race([once('finish'), once('error')])` si cleanup tmp file pe error — elimina race-ul vechi unde un error emis dupa `'open'` dar inainte de `'finish'` nu ar fi rejectat promise-ul; (4) helper shared `formatRoDate` / `formatRoDateTime` cu `timeZone: 'Europe/Bucharest'` explicit + parsare string-based pentru date-only — bug-ul vechi `new Date('2026-05-13').toLocaleDateString('ro-RO')` shift-uia data cu o zi inapoi pe masini in TZ-uri vestice (UTC-8+).",
+      },
+    ],
+  },
+  {
     version: "v2.21.0",
     date: "12 Mai 2026",
     subtitle:

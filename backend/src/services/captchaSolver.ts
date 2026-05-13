@@ -1,7 +1,24 @@
 import { Solver } from "@2captcha/captcha-solver";
 
-export const RNPM_SITEKEY = "6Lff9LsUAAAAAO1gN9y3YMSyX94MS4Yh5zPqePkT";
-export const RNPM_PAGEURL = "https://mj.rnpm.ro/";
+// v2.22.0 — sitekey + pageurl mutate la getter-e lazy ca operatorul sa poata
+// hot-swap-a valorile fara rebuild daca RNPM roteste hCaptcha-ul. Citirea
+// process.env la apel (nu la module load) evita ordinea de import: dotenv
+// se incarca in index.ts dupa ce modulul asta e deja evaluat, deci o
+// constanta `process.env.X` la top-level ar fi mereu undefined.
+const DEFAULT_RNPM_SITEKEY = "6Lff9LsUAAAAAO1gN9y3YMSyX94MS4Yh5zPqePkT";
+const DEFAULT_RNPM_PAGEURL = "https://mj.rnpm.ro/";
+
+export function getRnpmSitekey(): string {
+  return process.env.RNPM_SITEKEY?.trim() || DEFAULT_RNPM_SITEKEY;
+}
+export function getRnpmPageUrl(): string {
+  return process.env.RNPM_PAGEURL?.trim() || DEFAULT_RNPM_PAGEURL;
+}
+
+// Backwards-compat exports — module load reads default; orice consumator nou
+// trebuie sa foloseasca getter-ele de mai sus pentru a respecta override-ul.
+export const RNPM_SITEKEY = DEFAULT_RNPM_SITEKEY;
+export const RNPM_PAGEURL = DEFAULT_RNPM_PAGEURL;
 
 export type CaptchaProvider = "2captcha" | "capsolver";
 
@@ -40,8 +57,8 @@ async function solveWith2Captcha(apiKey: string, signal?: AbortSignal): Promise<
   });
   try {
     const solvePromise = solver.recaptcha({
-      googlekey: RNPM_SITEKEY,
-      pageurl: RNPM_PAGEURL,
+      googlekey: getRnpmSitekey(),
+      pageurl: getRnpmPageUrl(),
     });
     const res = signal ? await Promise.race([solvePromise, abortPromise]) : await solvePromise;
     const token = typeof res === "string" ? res : res?.data;
@@ -111,8 +128,8 @@ async function solveWithCapSolver(apiKey: string, signal?: AbortSignal): Promise
       clientKey: apiKey,
       task: {
         type: "ReCaptchaV2TaskProxyLess",
-        websiteURL: RNPM_PAGEURL,
-        websiteKey: RNPM_SITEKEY,
+        websiteURL: getRnpmPageUrl(),
+        websiteKey: getRnpmSitekey(),
       },
     },
     signal

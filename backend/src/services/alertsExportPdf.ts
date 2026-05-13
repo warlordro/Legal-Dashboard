@@ -2,11 +2,12 @@ import PDFDocument from "pdfkit";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
-import { once } from "node:events";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AlertExportDecoratedRow } from "./alertsExportXlsx.ts";
 import { todayRo } from "../util/xlsxHelpers.ts";
+import { finishWriteStream } from "../util/pdfStream.ts";
+import { formatRoDateTime } from "../util/dateFormat.ts";
 
 export interface AlertsPdfResult {
   filepath: string;
@@ -44,19 +45,6 @@ function stripDiacritics(value: string): string {
 function text(value: unknown): string {
   if (value == null) return "";
   return stripDiacritics(String(value));
-}
-
-function formatDateTime(iso: string | null | undefined): string {
-  if (!iso) return "-";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString("ro-RO", {
-    day: "2-digit",
-    month: "2-digit",
-    year: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
 }
 
 function statusLabel(row: AlertExportDecoratedRow["alert"]): string {
@@ -134,7 +122,7 @@ function drawTable(doc: PDFKit.PDFDocument, rows: AlertExportDecoratedRow[], y: 
   y = drawHeader(doc, y);
   rows.forEach((row, rowIndex) => {
     const values = [
-      formatDateTime(row.alert.created_at),
+      formatRoDateTime(row.alert.created_at),
       row.severityLabel,
       row.kindLabel,
       row.alert.title,
@@ -191,7 +179,7 @@ export async function buildAlertsPdf(rows: AlertExportDecoratedRow[], contextLab
 
   drawTable(doc, rows, 82, 1);
   doc.end();
-  await once(stream, "finish");
+  await finishWriteStream(stream, tmpPath);
 
   const stat = await fs.stat(tmpPath);
   return { filepath: tmpPath, filename: alertsFilename("pdf", rows.length), mime: MIME_PDF, byteLength: stat.size };

@@ -18,17 +18,19 @@ export default defineConfig({
     },
   },
   optimizeDeps: {
-    include: ["xlsx", "xlsx-js-style", "jspdf", "jspdf-autotable"],
+    include: ["xlsx-js-style", "jspdf", "jspdf-autotable"],
   },
   build: {
     rollupOptions: {
       output: {
         // Split heavy vendor libs into their own cache-stable chunks.
-        // xlsx/jspdf are already loaded via dynamic import() in lib/export.ts,
-        // so naming them here just stabilises the chunk filename.
+        // xlsx-js-style/jspdf are loaded via dynamic import() in lib/export.ts;
+        // naming them here just stabilises the chunk filename. v2.22.0 drop
+        // `xlsx` din chunk-uri (migrat de pe `xlsx` pe `xlsx-js-style` pe path-ul
+        // de parsare in `monitoringBulkTemplate.ts`).
         manualChunks: {
           charts: ["recharts"],
-          xlsx: ["xlsx", "xlsx-js-style"],
+          xlsx: ["xlsx-js-style"],
           pdf: ["jspdf", "jspdf-autotable"],
         },
       },

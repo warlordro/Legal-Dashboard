@@ -34,6 +34,16 @@ if (!app.requestSingleInstanceLock()) {
   process.exit(0);
 }
 
+// WORKAROUND v2.22.1: opt-in software rendering pentru cazurile in care driver-ul GPU
+// e instabil (de ex. dupa un Windows Update force-reboot care lasa driver-ul intr-o
+// stare proasta). Renderer-ul cade in software compositing — mai lent dar nu mai
+// pierde GPU process si ecranul nu mai devine negru. Activare prin env var:
+//   LEGAL_DASHBOARD_DISABLE_GPU=1
+// Lasat opt-in pentru a nu penaliza setup-urile sanatoase.
+if (process.env.LEGAL_DASHBOARD_DISABLE_GPU === "1") {
+  app.disableHardwareAcceleration();
+}
+
 // CP-E1: main process crash handlers. Log the failure; show a dialog + quit only for
 // truly unrecoverable errors. Benign IO errors (broken stdout pipe, closed stream) are
 // logged and ignored — showing a dialog + quitting on those would be a regression.
@@ -371,6 +381,23 @@ function createWindow() {
     }
   });
 
+  // DIAGNOSTIC v2.22.1: capturam console + crash events din renderer in stdout-ul main
+  // process. Cand renderer-ul moare (ecran negru), DOM-ul nu mai apuca sa afiseze banner-ul
+  // de eroare, dar log-urile lui ajung deja la main inainte de crash.
+  mainWindow.webContents.on("console-message", (_event, level, message, line, sourceId) => {
+    const tag = level === 3 ? "ERROR" : level === 2 ? "WARN" : "LOG";
+    console.log(`[renderer:${tag}] ${message} (${sourceId}:${line})`);
+  });
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    console.error(`[renderer] GONE reason=${details.reason} exitCode=${details.exitCode}`);
+  });
+  mainWindow.webContents.on("unresponsive", () => {
+    console.error("[renderer] UNRESPONSIVE");
+  });
+  mainWindow.webContents.on("responsive", () => {
+    console.log("[renderer] responsive again");
+  });
+
   // SECURITY: Prevent navigation to external URLs.
   // Use strict URL parsing (NOT startsWith) — userinfo prefix like
   // `http://localhost:3002@attacker.example/` would otherwise pass a naive
@@ -499,7 +526,7 @@ app.whenReady().then(async () => {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [
-          `default-src 'self' http://localhost:${BACKEND_PORT}; script-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:${BACKEND_PORT}; img-src 'self'; font-src 'self'; object-src 'none'; frame-ancestors 'none';`,
+          `default-src 'self' http://localhost:${BACKEND_PORT}; script-src 'self'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; connect-src 'self' http://localhost:${BACKEND_PORT}; img-src 'self' blob:; font-src 'self'; object-src 'none'; frame-ancestors 'none';`,
         ],
       },
     });

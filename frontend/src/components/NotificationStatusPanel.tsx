@@ -168,7 +168,7 @@ export function NotificationStatusPanel() {
           <span className="font-medium">Trimite notificari sistem pentru alerte noi</span>
           <span className="mt-0.5 block text-[11px] text-muted-foreground">
             Cand e oprit, popup-urile Windows/macOS sunt suprimate; bulina cu numar si pagina Alerts raman intacte. Cele
-            suprimate nu se stocheaza — la reactivare nu primesti flood. Setarea revine la activ la urmatorul start.
+            suprimate nu se stocheaza — la reactivare nu primesti flood. Setarea se pastreaza dupa restart.
           </span>
         </span>
       </label>

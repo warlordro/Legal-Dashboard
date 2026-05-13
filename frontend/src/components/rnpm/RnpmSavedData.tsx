@@ -49,6 +49,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
   const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
+  const [exportError, setExportError] = useState<string | null>(null);
   const [q, setQ] = useState("");
   const [searchType, setSearchType] = useState<"" | RnpmSearchType>("");
   const [activOnly, setActivOnly] = useState(false);
@@ -178,6 +179,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
   const handleExport = async (format: "xlsx" | "pdf") => {
     setExporting(format);
     setLoading(true);
+    setExportError(null);
     try {
       let target: RnpmAvizRecord[];
       if (selectedIds.size > 0) {
@@ -201,6 +203,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
       else await exportRnpmPDF(docs, avizIds, suffix);
     } catch (err) {
       console.error(`[rnpm] export ${format} failed:`, err);
+      setExportError(`Export ${format.toUpperCase()} esuat: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setLoading(false);
       setExporting(null);
@@ -351,6 +354,21 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
               {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{" "}
               PDF ({selectedIds.size > 0 ? selectedIds.size : total})
             </Button>
+          </div>
+        </div>
+      )}
+
+      {exportError && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+          <div className="flex items-start justify-between gap-2">
+            <p className="break-words">{exportError}</p>
+            <button
+              type="button"
+              className="shrink-0 text-red-700/70 hover:text-red-700 dark:text-red-300/70 dark:hover:text-red-300"
+              onClick={() => setExportError(null)}
+            >
+              Inchide
+            </button>
           </div>
         </div>
       )}

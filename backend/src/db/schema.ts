@@ -88,6 +88,14 @@ export function getDb(): Database.Database {
   db = new Database(dbPath);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // v2.22.0 — synchronous = NORMAL. SQLite default e FULL (fsync la fiecare
+  // commit), care e overkill cu WAL: WAL + NORMAL face fsync doar la
+  // checkpoint, fara risc de corruption pe crash (commit-urile ne-fsync-ate
+  // se pierd dar DB-ul ramane consistent). Trade-off: ultimul commit dintr-un
+  // crash brutal poate fi pierdut, ceea ce e acceptabil pentru un app desktop
+  // single-writer cu daily backup. Reduce I/O semnificativ pe bulk inserts
+  // (monitoring runs, RNPM saves) si elimina pause-uri vizibile la fsync.
+  db.pragma("synchronous = NORMAL");
   // v2.17.0 — busy_timeout 5s. better-sqlite3 returns SQLITE_BUSY immediately
   // when a writer holds the lock; with WAL + a single writer (this process)
   // contention is rare, but daily backup, manual restore, and the maintenance

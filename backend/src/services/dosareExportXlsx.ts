@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { Dosar } from "../soap.ts";
 import { todayRo } from "../util/xlsxHelpers.ts";
+import { formatRoDate } from "../util/dateFormat.ts";
 
 export interface DosareXlsxResult {
   filepath: string;
@@ -54,13 +55,6 @@ const sectionHeaderStyle: CellStyle = {
 
 function sanitizeNr(nr: string): string {
   return (nr || "").replace(/[/\\:*?"<>|]/g, "-").trim() || "dosar";
-}
-
-function formatDate(dateStr: string): string {
-  if (!dateStr) return "-";
-  const date = new Date(dateStr);
-  if (Number.isNaN(date.getTime())) return dateStr;
-  return date.toLocaleDateString("ro-RO", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
 function dataStyle(rowIdx: number, bold = false): CellStyle {
@@ -188,7 +182,7 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<DosareXlsxResult
         safeValues([
           index + 1,
           dosar.numar || "-",
-          formatDate(dosar.data),
+          formatRoDate(dosar.data),
           dosar.institutie || "-",
           dosar.departament || "-",
           [dosar.categorieCaz, dosar.stadiuProcesual].filter(Boolean).join(" / ") || "-",
@@ -249,14 +243,14 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<DosareXlsxResult
             safeValues([
               sedintaIndex + 1,
               dosar.numar,
-              formatDate(sedinta.data),
+              formatRoDate(sedinta.data),
               sedinta.ora || "-",
               sedinta.complet || "-",
               sedinta.solutie || "-",
               sedinta.solutieSumar || "-",
               sedinta.documentSedinta || "-",
               sedinta.numarDocument || "-",
-              formatDate(sedinta.dataPronuntare),
+              formatRoDate(sedinta.dataPronuntare),
             ])
           );
           for (let col = 1; col <= sedinteHeaders.length; col += 1)
