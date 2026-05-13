@@ -46,6 +46,19 @@ const limitBulk = bodyLimit({ maxSize: BULK_BODY_LIMIT, onError: bodyTooLarge })
 const limitExport = bodyLimit({ maxSize: EXPORT_BODY_LIMIT, onError: bodyTooLarge });
 const limitSmall = bodyLimit({ maxSize: SMALL_BODY_LIMIT, onError: bodyTooLarge });
 
+const invalidJson = (c: import("hono").Context) => c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400);
+const invalidParams = (c: import("hono").Context, message: string) =>
+  c.json(fail(ErrorCodes.INVALID_PARAMS, message, c), 400);
+const invalidCaptchaKey = (c: import("hono").Context, message = "Cheie captcha lipsa sau invalida") =>
+  c.json(fail(ErrorCodes.INVALID_CAPTCHA_KEY, message, c), 400);
+const notFound = (c: import("hono").Context, message: string) => c.json(fail(ErrorCodes.NOT_FOUND, message, c), 404);
+const internalError = (c: import("hono").Context, message: string) =>
+  c.json(fail(ErrorCodes.INTERNAL_ERROR, message, c), 500);
+const duplicateRequest = (c: import("hono").Context, message: string) =>
+  c.json(fail(ErrorCodes.DUPLICATE_REQUEST, message, c), 409);
+const desktopOnly = (c: import("hono").Context) =>
+  c.json(fail(ErrorCodes.DESKTOP_ONLY, "Functie disponibila doar in Electron", c), 501);
+
 // W-1: defense in depth — cap string fields in params tree (500 chars per field, max depth 4)
 const MAX_STRING_FIELD_LEN = 500;
 function validateParamsDepth(obj: unknown, depth = 0): string | null {
@@ -143,7 +156,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const {
     type,
@@ -169,12 +182,12 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     searchId?: unknown;
   };
 
-  if (!isValidType(type)) return c.json({ error: "Tip cautare invalid" }, 400);
-  if (!params || typeof params !== "object") return c.json({ error: "Parametri cautare lipsa" }, 400);
+  if (!isValidType(type)) return invalidParams(c, "Tip cautare invalid");
+  if (!params || typeof params !== "object") return invalidParams(c, "Parametri cautare lipsa");
   const paramsErr = validateParamsDepth(params);
-  if (paramsErr) return c.json({ error: paramsErr }, 400);
+  if (paramsErr) return invalidParams(c, paramsErr);
   if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
-    return c.json({ error: "Cheie captcha lipsa sau invalida" }, 400);
+    return invalidCaptchaKey(c);
   }
   const provider = parseProvider(captchaProvider);
   const startPage = typeof startRnpmPage === "number" && startRnpmPage >= 1 && startRnpmPage <= 500 ? startRnpmPage : 1;
@@ -186,7 +199,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
   const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
   if (dedupKey && inflightRequests.has(dedupKey)) {
-    return c.json({ error: "Cerere deja in curs (dedup clientRequestId)" }, 409);
+    return duplicateRequest(c, "Cerere deja in curs (dedup clientRequestId)");
   }
 
   // v2.20.3 Grupul K — capture searchId imediat dupa ce e creat ca abort-ul
@@ -246,19 +259,17 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
       const total = typeof e.details?.total === "number" ? e.details.total : undefined;
       const limit = typeof e.details?.limit === "number" ? e.details.limit : undefined;
       return c.json(
-        {
-          error: e.message,
-          code: "limit_exceeded",
+        fail(ErrorCodes.LIMIT_EXCEEDED, e.message, c, {
           total,
           limit,
           splittable: { type },
-        },
+        }),
         400
       );
     }
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
     console.error("[rnpm/search]", msg);
-    return c.json({ error: msg }, 500);
+    return internalError(c, msg);
   } finally {
     if (dedupKey) inflightRequests.delete(dedupKey);
   }
@@ -289,12 +300,12 @@ function logFilterEvent(entry: Record<string, unknown>): void {
 
 rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
   if (process.env.RNPM_RESULTS_FILTER_DISABLED === "1") {
-    return c.json({ error: "Filtrul de rezultate RNPM este dezactivat temporar.", code: "FILTER_DISABLED" }, 503);
+    return c.json(fail(ErrorCodes.FILTER_DISABLED, "Filtrul de rezultate RNPM este dezactivat temporar.", c), 503);
   }
 
   const sidParsed = SearchIdSchema.safeParse(c.req.param("searchId"));
   if (!sidParsed.success) {
-    return c.json({ error: "searchId invalid" }, 400);
+    return invalidParams(c, "searchId invalid");
   }
   const searchId = sidParsed.data;
 
@@ -302,11 +313,11 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const parsed = FilterBodySchema.safeParse(body);
   if (!parsed.success) {
-    return c.json({ error: parsed.error.issues[0]?.message ?? "Body invalid" }, 400);
+    return invalidParams(c, parsed.error.issues[0]?.message ?? "Body invalid");
   }
   const { q } = parsed.data;
 
@@ -343,7 +354,7 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
         latencyMs,
         status: "not_found",
       });
-      return c.json({ error: "Search inexistent" }, 404);
+      return notFound(c, "Search inexistent");
     }
     if (err instanceof Error && err.name === "AbortError") {
       if (timeoutSignal.aborted) {
@@ -355,7 +366,7 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
           latencyMs,
           status: "timeout",
         });
-        return c.json({ error: "Timeout filtrare", code: "FILTER_TIMEOUT" }, 503);
+        return c.json(fail(ErrorCodes.FILTER_TIMEOUT, "Timeout filtrare", c), 503);
       }
       logFilterEvent({
         action: "rnpm.results.filter",
@@ -376,7 +387,7 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
       status: "error",
     });
     console.error("[rnpm.filter] eroare neasteptata", err);
-    return c.json({ error: "Eroare interna filtrare" }, 500);
+    return internalError(c, "Eroare interna filtrare");
   }
 });
 
@@ -387,7 +398,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const { items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as {
     items?: unknown;
@@ -397,10 +408,10 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     captchaMode?: unknown;
   };
 
-  if (!Array.isArray(items) || items.length === 0) return c.json({ error: "Lista cautari goala" }, 400);
-  if (items.length > 200) return c.json({ error: "Maxim 200 cautari per bulk" }, 400);
+  if (!Array.isArray(items) || items.length === 0) return invalidParams(c, "Lista cautari goala");
+  if (items.length > 200) return invalidParams(c, "Maxim 200 cautari per bulk");
   if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
-    return c.json({ error: "Cheie captcha lipsa sau invalida" }, 400);
+    return invalidCaptchaKey(c);
   }
   const provider = parseProvider(captchaProvider);
 
@@ -411,10 +422,10 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   const validItems: BulkSearchItem[] = [];
   for (const it of items) {
     const item = it as { type?: unknown; params?: unknown; label?: unknown };
-    if (!isValidType(item.type)) return c.json({ error: "Tip cautare invalid in lista" }, 400);
-    if (!item.params || typeof item.params !== "object") return c.json({ error: "Parametri invalidi" }, 400);
+    if (!isValidType(item.type)) return invalidParams(c, "Tip cautare invalid in lista");
+    if (!item.params || typeof item.params !== "object") return invalidParams(c, "Parametri invalidi");
     const paramsErr = validateParamsDepth(item.params);
-    if (paramsErr) return c.json({ error: paramsErr }, 400);
+    if (paramsErr) return invalidParams(c, paramsErr);
     validItems.push({
       type: item.type,
       params: item.params as BulkSearchItem["params"],
@@ -433,7 +444,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   // Map-ul e folosit doar pentru has(), valoarea e indiferenta.
   if (dedupKey) {
     if (inflightRequests.has(dedupKey)) {
-      return c.json({ error: "Bulk deja in curs (dedup clientRequestId)" }, 409);
+      return duplicateRequest(c, "Bulk deja in curs (dedup clientRequestId)");
     }
     inflightRequests.set(dedupKey, Promise.resolve());
   }
@@ -509,7 +520,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const { type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ??
     {}) as {
@@ -522,19 +533,19 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
     captchaMode?: unknown;
   };
 
-  if (!isValidType(type)) return c.json({ error: "Tip cautare invalid" }, 400);
-  if (!baseParams || typeof baseParams !== "object") return c.json({ error: "Parametri cautare lipsa" }, 400);
+  if (!isValidType(type)) return invalidParams(c, "Tip cautare invalid");
+  if (!baseParams || typeof baseParams !== "object") return invalidParams(c, "Parametri cautare lipsa");
   const paramsErr = validateParamsDepth(baseParams);
-  if (paramsErr) return c.json({ error: paramsErr }, 400);
+  if (paramsErr) return invalidParams(c, paramsErr);
   if (!Array.isArray(subTypeLabels) || subTypeLabels.length === 0) {
-    return c.json({ error: "Lista sub-tipuri goala" }, 400);
+    return invalidParams(c, "Lista sub-tipuri goala");
   }
   if (subTypeLabels.length > 50) {
-    return c.json({ error: "Maxim 50 sub-tipuri per split" }, 400);
+    return invalidParams(c, "Maxim 50 sub-tipuri per split");
   }
   for (const label of subTypeLabels) {
     if (typeof label !== "string" || label.length === 0 || label.length > 200) {
-      return c.json({ error: "Sub-tip invalid in lista" }, 400);
+      return invalidParams(c, "Sub-tip invalid in lista");
     }
   }
   // v2.20.3 Grupul O — allow-list canonica per categorie (mirror backend al
@@ -543,10 +554,10 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   // indexarea 1-based pe care RNPM o asteapta in `tipInscriere.value`.
   const canonicalErr = validateSubTypeLabels(type, subTypeLabels as string[]);
   if (canonicalErr) {
-    return c.json({ error: canonicalErr }, 400);
+    return invalidParams(c, canonicalErr);
   }
   if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
-    return c.json({ error: "Cheie captcha lipsa sau invalida" }, 400);
+    return invalidCaptchaKey(c);
   }
   const provider = parseProvider(captchaProvider);
 
@@ -557,7 +568,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   // inainte de streamSSE, ca contract explicit. Valoarea Map-ului e sentinel.
   if (dedupKey) {
     if (inflightRequests.has(dedupKey)) {
-      return c.json({ error: "Split deja in curs (dedup clientRequestId)" }, 409);
+      return duplicateRequest(c, "Split deja in curs (dedup clientRequestId)");
     }
     inflightRequests.set(dedupKey, Promise.resolve());
   }
@@ -767,9 +778,9 @@ rnpmRouter.get("/saved", (c) => {
 
 rnpmRouter.get("/saved/:id", (c) => {
   const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
+  if (!Number.isFinite(id)) return invalidParams(c, "ID invalid");
   const aviz = getAvizById(id, getOwnerId(c));
-  if (!aviz) return c.json({ error: "Aviz inexistent" }, 404);
+  if (!aviz) return notFound(c, "Aviz inexistent");
   return c.json(aviz);
 });
 
@@ -795,13 +806,13 @@ rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const { ids } = (body ?? {}) as { ids?: unknown };
-  if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "Lista id-uri goala" }, 400);
+  if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-  if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
-  if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per batch" }, 400);
+  if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
+  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per batch");
   const deleted = deleteAvizeByIds(numIds, getOwnerId(c));
   recordAudit(c, "aviz.delete_batch", {
     targetKind: "aviz",
@@ -837,13 +848,13 @@ rnpmRouter.post("/open-db-folder", requireRole("admin"), (c) => {
     // main process the CJS loader resolves it; outside Electron it throws.
     const electron = require("electron") as { shell?: { showItemInFolder?: (p: string) => void } };
     if (!electron?.shell?.showItemInFolder) {
-      return c.json({ error: "Functie disponibila doar in Electron" }, 501);
+      return desktopOnly(c);
     }
     electron.shell.showItemInFolder(dbPath);
     return c.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare deschidere folder";
-    return c.json({ error: msg }, 500);
+    return internalError(c, msg);
   }
 });
 
@@ -853,7 +864,7 @@ rnpmRouter.post("/compact", requireRole("admin"), (c) => {
     return c.json({ ok: true, ...result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare compactare baza";
-    return c.json({ error: msg }, 500);
+    return internalError(c, msg);
   }
 });
 
@@ -876,7 +887,7 @@ rnpmRouter.delete("/backups", requireRole("admin"), async (c) => {
       outcome: "error",
       detail: { error: msg },
     });
-    return c.json({ error: msg }, 500);
+    return internalError(c, msg);
   }
 });
 
@@ -886,7 +897,7 @@ rnpmRouter.get("/backups", requireRole("admin"), async (c) => {
     return c.json({ backups });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare listare backups";
-    return c.json({ error: msg }, 500);
+    return internalError(c, msg);
   }
 });
 
@@ -895,11 +906,11 @@ rnpmRouter.post("/backups/restore", requireRole("admin"), limitSmall, async (c) 
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const name = (body as { name?: unknown })?.name;
   if (typeof name !== "string" || name.length === 0) {
-    return c.json({ error: "Nume backup lipsa" }, 400);
+    return invalidParams(c, "Nume backup lipsa");
   }
   try {
     const { preRestoreName } = await restoreFromBackup(name);
@@ -917,7 +928,7 @@ rnpmRouter.post("/backups/restore", requireRole("admin"), limitSmall, async (c) 
       outcome: "error",
       detail: { error: msg },
     });
-    return c.json({ error: msg }, 500);
+    return internalError(c, msg);
   }
 });
 
@@ -927,20 +938,20 @@ rnpmRouter.post("/open-backups-folder", requireRole("admin"), async (c) => {
     await mkdir(dir, { recursive: true });
     const electron = require("electron") as { shell?: { openPath?: (p: string) => Promise<string> } };
     if (!electron?.shell?.openPath) {
-      return c.json({ error: "Functie disponibila doar in Electron" }, 501);
+      return desktopOnly(c);
     }
     const err = await electron.shell.openPath(dir);
-    if (err) return c.json({ error: err }, 500);
+    if (err) return internalError(c, err);
     return c.json({ ok: true });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare deschidere folder backups";
-    return c.json({ error: msg }, 500);
+    return internalError(c, msg);
   }
 });
 
 rnpmRouter.delete("/saved/:id", (c) => {
   const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
+  if (!Number.isFinite(id)) return invalidParams(c, "ID invalid");
   const ok = deleteAviz(id, getOwnerId(c));
   recordAudit(c, "aviz.delete", {
     targetKind: "aviz",
@@ -956,13 +967,13 @@ rnpmRouter.post("/saved/export", limitExport, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const { ids } = (body ?? {}) as { ids?: unknown };
-  if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "Lista id-uri goala" }, 400);
+  if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-  if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
-  if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per export" }, 400);
+  if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
+  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per export");
   return c.json({ items: getAvizeByIds(numIds, getOwnerId(c)) });
 });
 
@@ -977,18 +988,18 @@ rnpmRouter.post("/saved/export.xlsx", limitExport, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const { ids, searchType } = (body ?? {}) as { ids?: unknown; searchType?: unknown };
-  if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "Lista id-uri goala" }, 400);
+  if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-  if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
-  if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per export" }, 400);
+  if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
+  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per export");
   const searchTypeStr =
     typeof searchType === "string" && searchType.length > 0 && searchType.length <= 64 ? searchType : undefined;
 
   const items = getAvizeByIds(numIds, getOwnerId(c));
-  if (items.length === 0) return c.json({ error: "Nicio inregistrare gasita" }, 404);
+  if (items.length === 0) return notFound(c, "Nicio inregistrare gasita");
 
   const result = await buildRnpmXlsx(items, searchTypeStr);
   const [{ createReadStream }, { unlink }, { Readable }] = await Promise.all([
@@ -1020,18 +1031,18 @@ rnpmRouter.post("/saved/export.pdf", limitExport, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return invalidJson(c);
   }
   const { ids, searchType } = (body ?? {}) as { ids?: unknown; searchType?: unknown };
-  if (!Array.isArray(ids) || ids.length === 0) return c.json({ error: "Lista id-uri goala" }, 400);
+  if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-  if (numIds.length === 0) return c.json({ error: "Lista id-uri invalida" }, 400);
-  if (numIds.length > 500) return c.json({ error: "Maxim 500 avize per export" }, 400);
+  if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
+  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per export");
   const searchTypeStr =
     typeof searchType === "string" && searchType.length > 0 && searchType.length <= 64 ? searchType : undefined;
 
   const items = getAvizeByIds(numIds, getOwnerId(c));
-  if (items.length === 0) return c.json({ error: "Nicio inregistrare gasita" }, 404);
+  if (items.length === 0) return notFound(c, "Nicio inregistrare gasita");
 
   const result = await buildRnpmPdf(items, searchTypeStr);
   const [{ createReadStream }, { unlink }, { Readable }] = await Promise.all([
@@ -1080,7 +1091,7 @@ rnpmRouter.get("/searches", (c) => {
 
 rnpmRouter.delete("/searches/:id", (c) => {
   const id = Number(c.req.param("id"));
-  if (!Number.isFinite(id)) return c.json({ error: "ID invalid" }, 400);
+  if (!Number.isFinite(id)) return invalidParams(c, "ID invalid");
   const deleted = deleteSearch(id, getOwnerId(c));
   recordAudit(c, "search.delete", {
     targetKind: "search",

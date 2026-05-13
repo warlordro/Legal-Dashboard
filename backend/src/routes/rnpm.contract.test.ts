@@ -168,15 +168,15 @@ describe("GET /api/v1/rnpm/saved/:id", () => {
   it("returns 404 + { error } when missing", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/9999");
     expect(res.status).toBe(404);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "NOT_FOUND");
   });
 
   it("returns 400 + { error } when id is non-numeric", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/notanumber");
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns AvizFull shape { aviz, creditori, debitori, bunuri, istoric } when found", async () => {
@@ -213,8 +213,8 @@ describe("DELETE /api/v1/rnpm/saved/:id", () => {
   it("returns 400 + { error } on non-numeric id", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/notanumber", { method: "DELETE" });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
@@ -250,8 +250,8 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
       body: JSON.stringify({ ids: [] }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } when JSON body is malformed", async () => {
@@ -261,8 +261,8 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
       body: "{not json",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
   });
 });
 
@@ -288,8 +288,8 @@ describe("POST /api/v1/rnpm/saved/export", () => {
       body: JSON.stringify({ ids: [] }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
@@ -362,8 +362,8 @@ describe("DELETE /api/v1/rnpm/searches/:id", () => {
   it("returns 400 + { error } on non-numeric id", async () => {
     const res = await buildApp().request("/api/v1/rnpm/searches/notanumber", { method: "DELETE" });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
@@ -400,8 +400,8 @@ describe("POST /api/v1/rnpm/search input validation", () => {
       body: "{not json",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
   });
 
   it("returns 400 + { error } on invalid type", async () => {
@@ -411,8 +411,8 @@ describe("POST /api/v1/rnpm/search input validation", () => {
       body: JSON.stringify({ type: "invalid_type", params: {}, captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on missing captcha key", async () => {
@@ -422,8 +422,8 @@ describe("POST /api/v1/rnpm/search input validation", () => {
       body: JSON.stringify({ type: "ipoteci", params: { foo: "bar" }, captchaKey: "" }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_CAPTCHA_KEY");
   });
 });
 
@@ -446,8 +446,8 @@ describe("POST /api/v1/rnpm/bulk input validation", () => {
       body: JSON.stringify({ items: [], captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on items > 200", async () => {
@@ -458,8 +458,8 @@ describe("POST /api/v1/rnpm/bulk input validation", () => {
       body: JSON.stringify({ items, captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on invalid type within items", async () => {
@@ -472,8 +472,8 @@ describe("POST /api/v1/rnpm/bulk input validation", () => {
       }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
@@ -545,8 +545,8 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on malformed JSON", async () => {
@@ -556,8 +556,8 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
       body: "{",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
   });
 });
 
