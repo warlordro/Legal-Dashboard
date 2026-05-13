@@ -11,7 +11,7 @@
 
 ### Task E - RNPM cap observability (gap audit + status enum rename)
 
-**Status:** activ, neasignat. Origine: analiza document tehnic extern (`solutie_tehnica_rnpm_cap_1500.md`) post v2.18.0.
+**Status:** livrat in v2.20.0 – v2.20.3 (verificat 2026-05-13). Tipul `RnpmGapReason` + `gapReason` populat in `executeNestedDestinationSplit` (rnpmSearchService.ts:517-520, 692, 798, 830, 997, 1052); rename `rejected`→`blocked` (types/rnpm.ts:270, v2.20.0); audit `rnpm.cap_hit` + kill switch `RNPM_AUDIT_CAP_HIT_DISABLED` (routes/rnpm.ts:674, v2.20.2); UI banner via `describeBlockedSubResult` (lib/rnpmGapReason.ts); tests `rnpm.split-route.test.ts`.
 
 #### Context
 
