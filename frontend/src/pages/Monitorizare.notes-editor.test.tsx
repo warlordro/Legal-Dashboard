@@ -114,6 +114,7 @@ describe("NoteEditor - inline editor pentru notita per job", () => {
     );
     const noteButton = getButton(/instant factoring/i);
 
+    expect(noteButton.className).toContain("max-w-[340px]");
     expect(noteButton.className).toContain("whitespace-normal");
     expect(noteButton.className).toContain("break-words");
     expect(noteButton.className).not.toContain("truncate");

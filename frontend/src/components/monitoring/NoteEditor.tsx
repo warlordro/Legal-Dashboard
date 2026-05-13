@@ -23,7 +23,7 @@ export function NoteEditor({ jobId, initialNote, onSaved }: NoteEditorProps) {
           setError(null);
           setEditing(true);
         }}
-        className="mt-1 block max-w-[420px] cursor-pointer whitespace-normal break-words text-left font-sans text-xs italic leading-relaxed text-muted-foreground hover:text-foreground"
+        className="mt-1 block max-w-[340px] cursor-pointer whitespace-normal break-words text-left font-sans text-xs italic leading-relaxed text-muted-foreground hover:text-foreground"
         title={initialNote}
       >
         {initialNote}
@@ -68,7 +68,7 @@ export function NoteEditor({ jobId, initialNote, onSaved }: NoteEditorProps) {
         onChange={(e) => setValue(e.target.value)}
         maxLength={200}
         rows={2}
-        className="w-full max-w-[420px] rounded border border-border bg-background px-2 py-1 text-xs"
+        className="w-full max-w-[340px] rounded border border-border bg-background px-2 py-1 text-xs"
         disabled={saving}
       />
       {isLegacyOverflow && (
