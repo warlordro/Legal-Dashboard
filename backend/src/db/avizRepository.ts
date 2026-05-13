@@ -601,3 +601,130 @@ export function getAvizeByIds(ids: number[], ownerId = "local"): AvizFull[] {
     .all(ownerId, ...ids) as AvizRecord[];
   return rows.map(loadAvizChildren);
 }
+
+// ============================================================================
+// filterRnpmSearchResults - v2.24.0
+// Filtru text incremental peste rezultatele unei cautari RNPM. Returneaza
+// doar ID-uri matched + counters; UI filtreaza local pe Set<id>.
+// NU se foloseste in /api/rnpm/saved (acela merge prin getAvize). NU atinge
+// getAvize() - duplicare minima acceptata pentru zero-regresie.
+// Acopera 24 coloane: 9 din rnpm_avize + 3 creditori + 3 debitori + 9 bunuri
+// (tip_bun + categorie + identificare + model + serie_sasiu + serie_motor +
+//  nr_inmatriculare + referinte_json + JOIN cu rnpm_bunuri_descrieri.text).
+// NOTA: rnpm_bunuri nu are coloana `descriere_proprie`; textul descrierii vine
+// exclusiv via descriere_id -> rnpm_bunuri_descrieri.text.
+// ============================================================================
+
+function buildResultsFilterClause(q: string): { whereSql: string; params: string[] } {
+  const like = buildRnpmLikePattern(q);
+  const whereSql = `(
+    rnpm_norm(a.identificator) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.utilizator_autorizat) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.numar_act) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.tip_act) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.alte_mentiuni) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.detalii_comune) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.inscriere_initiala_id) LIKE ? ESCAPE '\\'
+    OR rnpm_norm(a.inscriere_modificata_id) LIKE ? ESCAPE '\\'
+    OR EXISTS (SELECT 1 FROM rnpm_creditori c
+      WHERE c.aviz_id = a.id AND c.owner_id = a.owner_id
+      AND (rnpm_norm(c.denumire) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(c.cod) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(c.cnp) LIKE ? ESCAPE '\\'))
+    OR EXISTS (SELECT 1 FROM rnpm_debitori d
+      WHERE d.aviz_id = a.id AND d.owner_id = a.owner_id
+      AND (rnpm_norm(d.denumire) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(d.cod) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(d.cnp) LIKE ? ESCAPE '\\'))
+    OR EXISTS (SELECT 1 FROM rnpm_bunuri b
+      LEFT JOIN rnpm_bunuri_descrieri bd ON bd.id = b.descriere_id
+      WHERE b.aviz_id = a.id AND b.owner_id = a.owner_id
+      AND (rnpm_norm(b.tip_bun) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.categorie) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.identificare) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.model) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.serie_sasiu) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.serie_motor) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.nr_inmatriculare) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(b.referinte_json) LIKE ? ESCAPE '\\'
+        OR rnpm_norm(bd.text) LIKE ? ESCAPE '\\'))
+  )`;
+  const params: string[] = Array(24).fill(like);
+  return { whereSql, params };
+}
+
+export interface FilterRnpmResultsOptions {
+  ownerId: string;
+  searchId: number;
+  q: string;
+  limit?: number;
+  signal?: AbortSignal;
+}
+
+export interface FilterRnpmResultsOutcome {
+  matchedAvizIds: number[];
+  matchedCount: number;
+  totalInSearch: number;
+  missingDetails: number;
+  truncated: boolean;
+}
+
+export class RnpmSearchNotFoundError extends Error {
+  readonly code = "SEARCH_NOT_FOUND" as const;
+  constructor() {
+    super("Search inexistent");
+    this.name = "RnpmSearchNotFoundError";
+  }
+}
+
+export function filterRnpmSearchResults(opts: FilterRnpmResultsOptions): FilterRnpmResultsOutcome {
+  const HARD_LIMIT = 1500;
+  const db = getDb();
+  const { ownerId, searchId, q, signal } = opts;
+  const limit = Math.min(opts.limit ?? HARD_LIMIT, HARD_LIMIT);
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+  // Ownership precheck (anti-enumeration). Acelasi 404 pentru "nu exista"
+  // si "apartine altui owner" - vezi spec 4.4.
+  const owns = db.prepare("SELECT 1 AS ok FROM rnpm_searches WHERE id = ? AND owner_id = ?").get(searchId, ownerId) as
+    | { ok: number }
+    | undefined;
+  if (!owns) throw new RnpmSearchNotFoundError();
+
+  const totalRow = db
+    .prepare("SELECT COUNT(*) AS total FROM rnpm_avize WHERE owner_id = ? AND search_id = ?")
+    .get(ownerId, searchId) as { total: number };
+  const totalInSearch = totalRow.total;
+
+  const missRow = db
+    .prepare("SELECT COUNT(*) AS m FROM rnpm_avize WHERE owner_id = ? AND search_id = ? AND detail_fetched = 0")
+    .get(ownerId, searchId) as { m: number };
+  const missingDetails = missRow.m;
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+  const { whereSql, params } = buildResultsFilterClause(q);
+
+  const countSql = `SELECT COUNT(*) AS c FROM rnpm_avize a
+    WHERE a.owner_id = ? AND a.search_id = ? AND ${whereSql}`;
+  const countRow = db.prepare(countSql).get(ownerId, searchId, ...params) as { c: number };
+  const matchedCount = countRow.c;
+
+  if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+
+  const sql = `SELECT a.id FROM rnpm_avize a
+    WHERE a.owner_id = ? AND a.search_id = ? AND ${whereSql}
+    ORDER BY a.id ASC LIMIT ?`;
+  const rows = db.prepare(sql).all(ownerId, searchId, ...params, limit) as { id: number }[];
+  const matchedAvizIds = rows.map((r) => r.id);
+
+  return {
+    matchedAvizIds,
+    matchedCount,
+    totalInSearch,
+    missingDetails,
+    truncated: matchedCount > limit,
+  };
+}
