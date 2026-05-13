@@ -17,6 +17,7 @@ import {
   Mail,
   Users as UsersIcon,
   Split,
+  PauseCircle,
 } from "lucide-react";
 
 export interface ChangeSection {
@@ -36,6 +37,37 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.23.0",
+    date: "13 Mai 2026",
+    subtitle:
+      "Master switch monitoring — buton global de pauza/reluare per-owner expus in pagina Monitorizare. Cand monitorizarea e oprita, scheduler-ul nu mai claim-uieste joburile (anti-join via partial index pe owner_monitoring_settings), dar joburile raman in lista cu state-ul lor — reluarea reia exact de unde a ramas, fara reset, fara dublu-run. Audit complet pe ambele directii cu request_id + actor_id propagate.",
+    icon: <PauseCircle className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
+    sections: [
+      {
+        title: "Migration 0020 — owner_monitoring_settings",
+        content:
+          "Tabel nou `owner_monitoring_settings (owner_id PK, monitoring_enabled INTEGER DEFAULT 1, updated_at)` + partial index `idx_owner_monitoring_settings_disabled` pe `(owner_id) WHERE monitoring_enabled = 0` pentru anti-join O(log n) la scheduler claim. Default-ul 1 pastreaza compat: orice owner nou sau cu rand lipsa e considerat activ.",
+      },
+      {
+        title: "Backend — scheduler anti-join + audit",
+        content:
+          "`claimDueJobs` din scheduler filtreaza via anti-join cu partial index — joburile owner-ilor cu `monitoring_enabled = 0` nu mai apar in result set, deci scheduler-ul nu le mai atinge intre ticks. Rute `GET/PUT /api/v1/monitoring/master-switch` cu Zod `.strict()` validation (422 pe payload invalid), upsert idempotent, audit entry `monitoring.master_switch.on/.off` cu `actor_id` (owner-id) + `request_id` propagate, scris doar pe schimbare reala de state (no-op = no audit).",
+      },
+      {
+        title: "Frontend — hook + banner + toolbar button",
+        content:
+          "`useMonitoringMasterSwitch` hook cu `enabled / loading / saving / toggle(next) / refresh()`, `AbortController` pe GET (cleanup la unmount) si optimistic flip cu rollback pe esec. Buton `Opreste/Reia monitorizarea` in toolbar-ul paginii Monitorizare cu spinner pe saving. Banner amber persistent `MasterSwitchBanner` (`<output aria-live='polite'>`) randat sub header cand monitorizarea e oprita — buton stateless, parent owns the hook (no double subscription).",
+      },
+      {
+        title: "Tests",
+        content:
+          "926 teste backend (26 noi: migration + repository + scheduler anti-join + route GET/PUT/422 + audit propagation + idempotency cu rapid back-to-back PUTs pe ambele directii .on/.off) si 105 teste frontend (1 nou pentru `refresh()` care reflecta un flip server-side de la alt client).",
+      },
+    ],
+  },
   {
     version: "v2.22.0",
     date: "13 Mai 2026",

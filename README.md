@@ -7,10 +7,22 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.22.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.23.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.22.0** - supply chain hardening + polish (Batch 7 + Batch 8
+Ultimul release **v2.23.0** - master switch monitoring per-owner. Buton global
+"Opreste/Reia monitorizarea" expus in pagina Monitorizare; cand owner-ul opreste
+monitorizarea, scheduler-ul nu mai claim-uieste joburile (anti-join via partial
+index pe `owner_monitoring_settings.monitoring_enabled = 0`), dar joburile raman
+in lista cu state-ul lor neatins — reluarea reia exact de unde a ramas, fara
+reset, fara dublu-run. Audit complet pe ambele directii
+(`monitoring.master_switch.on/.off`) cu `request_id` + `actor_id` propagate.
+Migration noua 0020 (`owner_monitoring_settings` + partial index), endpoint-uri
+`GET/PUT /api/v1/monitoring/master-switch` cu Zod `.strict()` validation,
+frontend hook + banner amber persistent + buton in toolbar. **926 teste backend,
+105 teste frontend**.
+
+Predecesor **v2.22.0** - supply chain hardening + polish (Batch 7 + Batch 8
 din `FIXES-TODO.md`) + migrare exporturi mari la backend streaming. GitHub Actions
 pinned la SHA-uri full git, Dockerfile base image pinned la digest sha256, migrare
 la `xlsx-js-style` pe path-ul de upload XLSX user (closes prototype-pollution +

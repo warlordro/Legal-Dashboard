@@ -4,6 +4,77 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.23.0] - 2026-05-13
+
+### Master switch monitoring — pauza/reluare globala per-owner
+
+Buton "Reia/Opreste monitorizarea" expus in pagina Monitorizare. Cand
+owner-ul opreste monitorizarea, scheduler-ul nu mai claim-uieste joburile
+respective la urmatorul tick (anti-join via partial index pe
+`owner_monitoring_settings.monitoring_enabled = 0`), dar joburile raman
+in lista cu state-ul lor (`next_run_at` neatins), iar reluarea reia exact
+de unde a ramas — fara reset, fara dublu-run. Audit complet pe ambele
+directii (`monitoring.master_switch.on` / `.off`) cu `request_id` +
+`actor_id` propagate.
+
+#### Migration
+
+- [backend/src/db/migrations/0020_owner_monitoring_settings.ts](backend/src/db/migrations/0020_owner_monitoring_settings.ts):
+  tabel nou `owner_monitoring_settings (owner_id TEXT PRIMARY KEY,
+  monitoring_enabled INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT
+  NULL)` + partial index
+  `idx_owner_monitoring_settings_disabled ON (owner_id) WHERE
+  monitoring_enabled = 0`. Default-ul `1` pastreaza compat: orice owner
+  nou (sau cu rand lipsa) e considerat "monitorizare activa".
+
+#### Backend
+
+- [backend/src/db/ownerMonitoringSettingsRepository.ts](backend/src/db/ownerMonitoringSettingsRepository.ts):
+  helper `isMonitoringEnabled(owner)` (true daca rand lipseste sau e 1)
+  si `setMonitoringEnabled(owner, enabled)` care face upsert si returneaza
+  `{ enabled, changed }` (`changed=false` daca state-ul era deja cel cerut).
+- [backend/src/services/monitoring/scheduler.ts](backend/src/services/monitoring/scheduler.ts):
+  `claimDueJobs` filtrat prin anti-join cu partial index pe
+  `owner_monitoring_settings` — joburile owner-ilor cu
+  `monitoring_enabled = 0` nu mai apar in result set, deci scheduler-ul
+  nu le mai atinge intre ticks.
+- [backend/src/routes/monitoring.ts](backend/src/routes/monitoring.ts):
+  `GET /api/v1/monitoring/master-switch` returneaza `{ enabled }`;
+  `PUT /api/v1/monitoring/master-switch` cu body `{ enabled: boolean }`
+  (Zod `.strict()` + 422 pe payload invalid) face upsert si scrie audit
+  entry `monitoring.master_switch.on` / `.off` doar la `changed=true`
+  (no-op = no audit). `actor_id` + `request_id` propagate din context.
+
+#### Frontend
+
+- [frontend/src/lib/monitoringMasterSwitchApi.ts](frontend/src/lib/monitoringMasterSwitchApi.ts):
+  client API `monitoringMasterSwitch.get({signal})` + `.set(enabled)`
+  prin `apiFetch` + `unwrapMonitoring` (envelope consistent cu restul
+  monitoring API-ului).
+- [frontend/src/hooks/useMonitoringMasterSwitch.ts](frontend/src/hooks/useMonitoringMasterSwitch.ts):
+  hook cu `enabled / loading / saving / toggle(next) / refresh()`,
+  `AbortController` pe GET (cleanup la unmount), optimistic flip cu
+  rollback pe esec si rethrow ca caller-ul sa poata afisa toast.
+- [frontend/src/components/monitoring/MasterSwitchBanner.tsx](frontend/src/components/monitoring/MasterSwitchBanner.tsx):
+  banner amber persistent in capul card-ului de joburi cand
+  `enabled=false` (live region cu `<output aria-live="polite">`), buton
+  "Reia" stateless (parent owns the hook).
+- [frontend/src/pages/Monitorizare.tsx](frontend/src/pages/Monitorizare.tsx):
+  toolbar primeste buton "Opreste/Reia monitorizarea" cu spinner pe
+  `saving`, banner-ul randat sub header cand monitorizarea e oprita.
+
+#### Audit + tests
+
+- Audit entries `monitoring.master_switch.{on,off}` includ `actor_id`
+  (owner-id) + `request_id` (propagat din header `x-request-id`).
+- 25 teste backend noi (migration, repository, scheduler anti-join,
+  route GET/PUT/422, audit propagation, idempotency cu rapid back-to-back
+  PUTs pe ambele directii). 1 test frontend nou pentru `refresh()` care
+  re-fetcheaza si reflecta un flip server-side de la alt client.
+- **926 teste backend, 105 teste frontend** verde.
+
+---
+
 ## [2.22.0] - 2026-05-13
 
 ### Supply chain hardening + polish + migrare exporturi la backend streaming
