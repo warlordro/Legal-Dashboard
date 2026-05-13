@@ -34,4 +34,18 @@ describe("filterRnpmSearchResults - EXPLAIN QUERY PLAN", () => {
     expect(detail).toMatch(/USING (INDEX idx_rnpm_avize_owner_search|COVERING INDEX|INTEGER PRIMARY KEY)/);
     expect(detail).not.toMatch(/SCAN rnpm_avize\b(?!.*USING)/);
   });
+
+  it("query cu 3 tokens AND inca foloseste indexul", () => {
+    const sql = `SELECT a.id FROM rnpm_avize a WHERE a.owner_id = 'local' AND a.search_id = 1
+      AND ((rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\')
+        AND (rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\')
+        AND (rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\'))
+      ORDER BY a.id ASC LIMIT 1500`;
+    const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all("%x%", "%x%", "%y%", "%y%", "%z%", "%z%") as {
+      detail: string;
+    }[];
+    const detail = plan.map((p) => p.detail).join(" | ");
+    expect(detail).toMatch(/USING (INDEX idx_rnpm_avize_owner_search|COVERING INDEX|INTEGER PRIMARY KEY)/);
+    expect(detail).not.toMatch(/SCAN rnpm_avize\b(?!.*USING)/);
+  });
 });

@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.24.0 (2026-05-13)
+**Versiune curenta**: v2.25.0 (2026-05-13)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -63,7 +63,24 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
 
-## Sprint inchis 2026-05-13 - Filtru text rezultate RNPM
+## Sprint inchis 2026-05-13 - Filtru RNPM multi-token + highlight
+
+**Status**: livrat pe branch `feat/rnpm-filter-multitoken-highlight`, peste
+branch-ul `feat/rnpm-results-filter` fast-forwarded in `main`.
+
+**Solutie**: filtrul text RNPM tokenizes query-ul in backend si frontend,
+deduplica termenii case-insensitive/diacritics-insensitive si limiteaza
+evaluarea la `FILTER_TOKEN_MAX_COUNT = 8`. Backend-ul construieste o grupa OR
+de 24 LIKE-uri pentru fiecare token si combina grupele cu AND, pastrand owner
+isolation, `search_id`, `buildRnpmLikePattern()` si indexul
+`idx_rnpm_avize_owner_search`. Frontend-ul foloseste aceiasi tokeni pentru
+highlight in randul colapsat si in tab-urile Creditori/Debitori/Bunuri/Istoric.
+
+**UX**: cand avizul match-uieste doar in detaliile expandate, tabelul afiseaza
+badge-ul `match in detalii` sub Identificator. Highlight-ul galben pastreaza
+textul original si face potrivire diacritics-insensitive.
+
+## Sprint inchis anterior 2026-05-13 - Filtru text rezultate RNPM
 
 **Status**: livrat integral pe branch `feat/rnpm-results-filter`. 9 commit-uri TDD planificate pentru implementare + release, cu biome, tsc si 51 teste noi pe zonele schimbate.
 

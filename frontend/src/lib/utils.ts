@@ -154,6 +154,12 @@ const LEGAL_WORDS = [
   "COMUNICARE",
   "EXECUTARE",
   "SILITA",
+  // Masuri / faze penale (longest first)
+  "PREVENTIVE",
+  "PREVENTIV",
+  "MASURI",
+  "MASURA",
+  "FAZA",
   // Prepoziții / conjuncții — minimum 3 chars to avoid false splits
   "PENTRU",
   "PRIN",

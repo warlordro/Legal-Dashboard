@@ -1,5 +1,5 @@
 import { getDb, checkpointWal } from "./schema.ts";
-import { buildRnpmLikePattern } from "../util/textNormalize.ts";
+import { buildRnpmLikePattern, tokenizeFilterQuery } from "../util/textNormalize.ts";
 
 export interface AvizRecord {
   id: number;
@@ -615,9 +615,10 @@ export function getAvizeByIds(ids: number[], ownerId = "local"): AvizFull[] {
 // exclusiv via descriere_id -> rnpm_bunuri_descrieri.text.
 // ============================================================================
 
-function buildResultsFilterClause(q: string): { whereSql: string; params: string[] } {
-  const like = buildRnpmLikePattern(q);
-  const whereSql = `(
+function buildResultsFilterClause(tokens: string[]): { whereSql: string; params: string[] } {
+  if (tokens.length === 0) return { whereSql: "1=1", params: [] };
+
+  const perTokenSql = `(
     rnpm_norm(a.identificator) LIKE ? ESCAPE '\\'
     OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\'
     OR rnpm_norm(a.utilizator_autorizat) LIKE ? ESCAPE '\\'
@@ -650,8 +651,15 @@ function buildResultsFilterClause(q: string): { whereSql: string; params: string
         OR rnpm_norm(b.referinte_json) LIKE ? ESCAPE '\\'
         OR rnpm_norm(bd.text) LIKE ? ESCAPE '\\'))
   )`;
-  const params: string[] = Array(24).fill(like);
-  return { whereSql, params };
+
+  const groups: string[] = [];
+  const params: string[] = [];
+  for (const token of tokens) {
+    const like = buildRnpmLikePattern(token);
+    groups.push(perTokenSql);
+    for (let i = 0; i < 24; i++) params.push(like);
+  }
+  return { whereSql: `(${groups.join(" AND ")})`, params };
 }
 
 export interface FilterRnpmResultsOptions {
@@ -705,7 +713,8 @@ export function filterRnpmSearchResults(opts: FilterRnpmResultsOptions): FilterR
 
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
 
-  const { whereSql, params } = buildResultsFilterClause(q);
+  const tokens = tokenizeFilterQuery(q);
+  const { whereSql, params } = buildResultsFilterClause(tokens);
 
   const countSql = `SELECT COUNT(*) AS c FROM rnpm_avize a
     WHERE a.owner_id = ? AND a.search_id = ? AND ${whereSql}`;

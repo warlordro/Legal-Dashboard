@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { formatRnpmAvizStatus } from "@/lib/rnpmAvizStatus";
 import { rnpmGetAvizDetail } from "@/lib/rnpmApi";
+import { highlightTokens } from "@/lib/rnpmHighlightTokens";
 import type { RnpmAvizFull, RnpmParty, RnpmBun, RnpmBunPartyRef } from "@/types/rnpm";
 
 type Tab = "general" | "creditori" | "debitori" | "bunuri" | "istoric";
@@ -45,7 +46,8 @@ export function RnpmDetailModal({ avizId, onClose }: RnpmDetailModalProps) {
 export function RnpmAvizDetailContent({
   avizId,
   onIdentificatorLoaded,
-}: { avizId: number; onIdentificatorLoaded?: (id: string) => void }) {
+  filterTokens = [],
+}: { avizId: number; onIdentificatorLoaded?: (id: string) => void; filterTokens?: string[] }) {
   const [data, setData] = useState<RnpmAvizFull | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -126,12 +128,21 @@ export function RnpmAvizDetailContent({
       </div>
       <div ref={contentRef} className="p-4">
         {tab === "general" && <GeneralTab data={data} />}
-        {tab === "creditori" && <PartyList parties={data.creditori} emptyMsg="Fara creditori" />}
-        {tab === "debitori" && (
-          <PartyList parties={data.debitori} emptyMsg={isSpecifice ? "Fara parti" : "Fara debitori"} showCalitate />
+        {tab === "creditori" && (
+          <PartyList parties={data.creditori} emptyMsg="Fara creditori" filterTokens={filterTokens} />
         )}
-        {tab === "bunuri" && <BunuriList bunuri={data.bunuri} detaliiComune={data.aviz.detalii_comune} />}
-        {tab === "istoric" && <IstoricList istoric={data.istoric} />}
+        {tab === "debitori" && (
+          <PartyList
+            parties={data.debitori}
+            emptyMsg={isSpecifice ? "Fara parti" : "Fara debitori"}
+            showCalitate
+            filterTokens={filterTokens}
+          />
+        )}
+        {tab === "bunuri" && (
+          <BunuriList bunuri={data.bunuri} detaliiComune={data.aviz.detalii_comune} filterTokens={filterTokens} />
+        )}
+        {tab === "istoric" && <IstoricList istoric={data.istoric} filterTokens={filterTokens} />}
       </div>
     </div>
   );
@@ -170,7 +181,8 @@ function PartyList({
   parties,
   emptyMsg,
   showCalitate,
-}: { parties: RnpmParty[]; emptyMsg: string; showCalitate?: boolean }) {
+  filterTokens = [],
+}: { parties: RnpmParty[]; emptyMsg: string; showCalitate?: boolean; filterTokens?: string[] }) {
   if (parties.length === 0) return <p className="text-sm text-muted-foreground">{emptyMsg}</p>;
   return (
     <div className="space-y-2">
@@ -188,54 +200,68 @@ function PartyList({
               </Badge>
             )}
             <span className="text-sm font-medium">
-              {p.tip_persoana === "PF" ? `${p.denumire ?? ""} ${p.prenume ?? ""}`.trim() : p.denumire}
+              {p.tip_persoana === "PF" ? (
+                <>
+                  {highlightTokens(p.denumire ?? "", filterTokens)} {highlightTokens(p.prenume ?? "", filterTokens)}
+                </>
+              ) : (
+                highlightTokens(p.denumire, filterTokens)
+              )}
             </span>
           </div>
           <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-[13.5px] text-muted-foreground">
             {p.tip_entitate && (
               <span className="col-span-2">
-                Tipul: <span className="text-foreground">{p.tip_entitate}</span>
+                Tipul: <span className="text-foreground">{highlightTokens(p.tip_entitate, filterTokens)}</span>
               </span>
             )}
             {p.cod && (
               <span>
-                CUI: <span className="font-mono text-foreground">{p.cod}</span>
+                CUI: <span className="font-mono text-foreground">{highlightTokens(p.cod, filterTokens)}</span>
               </span>
             )}
             {p.cnp && (
               <span>
-                CNP: <span className="font-mono text-foreground">{p.cnp}</span>
+                CNP: <span className="font-mono text-foreground">{highlightTokens(p.cnp, filterTokens)}</span>
               </span>
             )}
             {p.nr_identificare && (
               <span>
-                Nr. Reg: <span className="font-mono text-foreground">{p.nr_identificare}</span>
+                Nr. Reg:{" "}
+                <span className="font-mono text-foreground">{highlightTokens(p.nr_identificare, filterTokens)}</span>
               </span>
             )}
             {p.sediu && (
               <span className="col-span-2">
-                Sediu: <span className="text-foreground">{p.sediu}</span>
+                Sediu: <span className="text-foreground">{highlightTokens(p.sediu, filterTokens)}</span>
               </span>
             )}
             {(p.localitate || p.judet || p.tara) && (
               <span className="col-span-2">
-                {p.localitate && <span className="text-foreground">{p.localitate}</span>}
+                {p.localitate && <span className="text-foreground">{highlightTokens(p.localitate, filterTokens)}</span>}
                 {p.judet && (
                   <span className="text-foreground">
-                    {p.localitate ? `, sector/judet ${p.judet}` : `Sector/judet ${p.judet}`}
+                    {highlightTokens(
+                      p.localitate ? `, sector/judet ${p.judet}` : `Sector/judet ${p.judet}`,
+                      filterTokens
+                    )}
                   </span>
                 )}
-                {p.tara && <span className="text-foreground">{p.localitate || p.judet ? `, ${p.tara}` : p.tara}</span>}
+                {p.tara && (
+                  <span className="text-foreground">
+                    {highlightTokens(p.localitate || p.judet ? `, ${p.tara}` : p.tara, filterTokens)}
+                  </span>
+                )}
               </span>
             )}
             {p.cod_postal && (
               <span>
-                Cod postal: <span className="text-foreground">{p.cod_postal}</span>
+                Cod postal: <span className="text-foreground">{highlightTokens(p.cod_postal, filterTokens)}</span>
               </span>
             )}
             {p.alte_date && (
               <span className="col-span-2">
-                Alte date: <span className="text-foreground">{p.alte_date}</span>
+                Alte date: <span className="text-foreground">{highlightTokens(p.alte_date, filterTokens)}</span>
               </span>
             )}
           </div>
@@ -245,10 +271,18 @@ function PartyList({
   );
 }
 
-function BunuriList({ bunuri, detaliiComune }: { bunuri: RnpmBun[]; detaliiComune: string | null }) {
+function BunuriList({
+  bunuri,
+  detaliiComune,
+  filterTokens = [],
+}: { bunuri: RnpmBun[]; detaliiComune: string | null; filterTokens?: string[] }) {
   return (
     <div className="space-y-3">
-      {detaliiComune && <div className="rounded-lg bg-muted/30 p-3 text-xs whitespace-pre-wrap">{detaliiComune}</div>}
+      {detaliiComune && (
+        <div className="rounded-lg bg-muted/30 p-3 text-xs whitespace-pre-wrap">
+          {highlightTokens(detaliiComune, filterTokens)}
+        </div>
+      )}
       {bunuri.length === 0 ? (
         <p className="text-sm text-muted-foreground">Fara bunuri listate.</p>
       ) : (
@@ -259,46 +293,47 @@ function BunuriList({ bunuri, detaliiComune }: { bunuri: RnpmBun[]; detaliiComun
             style={{ contentVisibility: "auto", containIntrinsicSize: "auto 150px" }}
           >
             <Badge variant="outline" className="mb-1 text-[10px]">
-              {b.tip_bun}
+              {highlightTokens(b.tip_bun, filterTokens)}
             </Badge>
             <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
               {b.categorie && (
                 <span>
-                  <span className="text-muted-foreground">Categorie:</span> {b.categorie}
+                  <span className="text-muted-foreground">Categorie:</span> {highlightTokens(b.categorie, filterTokens)}
                 </span>
               )}
               {b.model && (
                 <span>
-                  <span className="text-muted-foreground">Model:</span> {b.model}
+                  <span className="text-muted-foreground">Model:</span> {highlightTokens(b.model, filterTokens)}
                 </span>
               )}
               {b.serie_sasiu && (
                 <span>
                   <span className="text-muted-foreground">Sasiu:</span>{" "}
-                  <span className="font-mono">{b.serie_sasiu}</span>
+                  <span className="font-mono">{highlightTokens(b.serie_sasiu, filterTokens)}</span>
                 </span>
               )}
               {b.nr_inmatriculare && (
                 <span>
                   <span className="text-muted-foreground">Nr:</span>{" "}
-                  <span className="font-mono">{b.nr_inmatriculare}</span>
+                  <span className="font-mono">{highlightTokens(b.nr_inmatriculare, filterTokens)}</span>
                 </span>
               )}
               {b.identificare && (
                 <span className="col-span-2">
-                  <span className="text-muted-foreground">Identificare:</span> {b.identificare}
+                  <span className="text-muted-foreground">Identificare:</span>{" "}
+                  {highlightTokens(b.identificare, filterTokens)}
                 </span>
               )}
               {b.descriere && (
                 <span className="col-span-2">
-                  <span className="text-muted-foreground">Descriere:</span> {b.descriere}
+                  <span className="text-muted-foreground">Descriere:</span> {highlightTokens(b.descriere, filterTokens)}
                 </span>
               )}
             </div>
             {b.referinte && b.referinte.length > 0 && (
               <div className="mt-2 space-y-1.5">
                 {b.referinte.map((r) => (
-                  <BunRefRow key={JSON.stringify(r)} r={r} />
+                  <BunRefRow key={JSON.stringify(r)} r={r} filterTokens={filterTokens} />
                 ))}
               </div>
             )}
@@ -309,7 +344,7 @@ function BunuriList({ bunuri, detaliiComune }: { bunuri: RnpmBun[]; detaliiComun
   );
 }
 
-function BunRefRow({ r }: { r: RnpmBunPartyRef }) {
+function BunRefRow({ r, filterTokens = [] }: { r: RnpmBunPartyRef; filterTokens?: string[] }) {
   const name = r.tip_persoana === "PF" ? `${r.denumire ?? ""} ${r.prenume ?? ""}`.trim() : (r.denumire ?? "");
   return (
     <div className="rounded border border-border/60 bg-muted/20 p-2">
@@ -325,53 +360,58 @@ function BunRefRow({ r }: { r: RnpmBunPartyRef }) {
         <Badge variant="outline" className="text-[10px]">
           {r.tip_persoana}
         </Badge>
-        <span className="text-xs font-medium">{name}</span>
+        <span className="text-xs font-medium">{highlightTokens(name, filterTokens)}</span>
       </div>
       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[13.5px] text-muted-foreground">
         {r.tip_entitate && (
           <span className="col-span-2">
-            Tipul: <span className="text-foreground">{r.tip_entitate}</span>
+            Tipul: <span className="text-foreground">{highlightTokens(r.tip_entitate, filterTokens)}</span>
           </span>
         )}
         {r.cod && (
           <span>
-            CUI: <span className="font-mono text-foreground">{r.cod}</span>
+            CUI: <span className="font-mono text-foreground">{highlightTokens(r.cod, filterTokens)}</span>
           </span>
         )}
         {r.cnp && (
           <span>
-            CNP: <span className="font-mono text-foreground">{r.cnp}</span>
+            CNP: <span className="font-mono text-foreground">{highlightTokens(r.cnp, filterTokens)}</span>
           </span>
         )}
         {r.nr_identificare && (
           <span>
-            Nr. Reg: <span className="font-mono text-foreground">{r.nr_identificare}</span>
+            Nr. Reg:{" "}
+            <span className="font-mono text-foreground">{highlightTokens(r.nr_identificare, filterTokens)}</span>
           </span>
         )}
         {r.sediu && (
           <span className="col-span-2">
-            Sediu: <span className="text-foreground">{r.sediu}</span>
+            Sediu: <span className="text-foreground">{highlightTokens(r.sediu, filterTokens)}</span>
           </span>
         )}
         {(r.localitate || r.judet || r.tara) && (
           <span className="col-span-2">
-            {r.localitate && <span className="text-foreground">{r.localitate}</span>}
+            {r.localitate && <span className="text-foreground">{highlightTokens(r.localitate, filterTokens)}</span>}
             {r.judet && (
               <span className="text-foreground">
-                {r.localitate ? `, sector/judet ${r.judet}` : `Sector/judet ${r.judet}`}
+                {highlightTokens(r.localitate ? `, sector/judet ${r.judet}` : `Sector/judet ${r.judet}`, filterTokens)}
               </span>
             )}
-            {r.tara && <span className="text-foreground">{r.localitate || r.judet ? `, ${r.tara}` : r.tara}</span>}
+            {r.tara && (
+              <span className="text-foreground">
+                {highlightTokens(r.localitate || r.judet ? `, ${r.tara}` : r.tara, filterTokens)}
+              </span>
+            )}
           </span>
         )}
         {r.cod_postal && (
           <span>
-            Cod postal: <span className="text-foreground">{r.cod_postal}</span>
+            Cod postal: <span className="text-foreground">{highlightTokens(r.cod_postal, filterTokens)}</span>
           </span>
         )}
         {r.alte_date && (
           <span className="col-span-2">
-            Alte date: <span className="text-foreground">{r.alte_date}</span>
+            Alte date: <span className="text-foreground">{highlightTokens(r.alte_date, filterTokens)}</span>
           </span>
         )}
       </div>
@@ -391,7 +431,7 @@ function istoricBadgeClass(tip: string): string {
   return "";
 }
 
-function IstoricList({ istoric }: { istoric: RnpmAvizFull["istoric"] }) {
+function IstoricList({ istoric, filterTokens = [] }: { istoric: RnpmAvizFull["istoric"]; filterTokens?: string[] }) {
   if (istoric.length === 0) return <p className="text-sm text-muted-foreground">Fara modificari inregistrate.</p>;
   return (
     <ol className="space-y-2">
@@ -400,10 +440,12 @@ function IstoricList({ istoric }: { istoric: RnpmAvizFull["istoric"] }) {
           <div className="flex items-center gap-2">
             <span className="font-mono text-sm text-foreground">{h.data}</span>
             <Badge variant="outline" className={cn("text-xs", istoricBadgeClass(h.tip))}>
-              {h.tip}
+              {highlightTokens(h.tip, filterTokens)}
             </Badge>
           </div>
-          <div className="mt-1 font-mono text-[13.5px] text-foreground">{h.identificator}</div>
+          <div className="mt-1 font-mono text-[13.5px] text-foreground">
+            {highlightTokens(h.identificator, filterTokens)}
+          </div>
         </li>
       ))}
     </ol>

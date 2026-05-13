@@ -337,3 +337,76 @@ describe("filterRnpmSearchResults", () => {
     expect(res.matchedAvizIds).toEqual(ids);
   });
 });
+
+describe("filterRnpmSearchResults - multi-token AND", () => {
+  it("token1 in debitor si token2 in descriere bun -> match", () => {
+    const sid = makeSearch(db, "local", "ipoteci");
+    const avizId = makeAviz(db, { ownerId: "local", searchId: sid, identificator: "AV-AND-001" });
+    makeDebitor(db, { avizId, ownerId: "local", denumire: "ALTEX ROMANIA SRL" });
+    makeBun(db, {
+      avizId,
+      ownerId: "local",
+      descriereText: "Totalitatea creantelor prezente si viitoare",
+    });
+
+    const res = filterRnpmSearchResults({ ownerId: "local", searchId: sid, q: "altex totalitatea" });
+
+    expect(res.matchedAvizIds).toEqual([avizId]);
+    expect(res.matchedCount).toBe(1);
+  });
+
+  it("token1 in debitor si token2 nicaieri -> no match", () => {
+    const sid = makeSearch(db, "local", "ipoteci");
+    const avizId = makeAviz(db, { ownerId: "local", searchId: sid, identificator: "AV-AND-002" });
+    makeDebitor(db, { avizId, ownerId: "local", denumire: "ALTEX ROMANIA SRL" });
+
+    const res = filterRnpmSearchResults({ ownerId: "local", searchId: sid, q: "altex inexistent" });
+
+    expect(res.matchedAvizIds).toEqual([]);
+    expect(res.matchedCount).toBe(0);
+  });
+
+  it("3 tokens AND, fiecare in alt camp", () => {
+    const sid = makeSearch(db, "local", "ipoteci");
+    const avizId = makeAviz(db, {
+      ownerId: "local",
+      searchId: sid,
+      identificator: "AV-AND-003",
+      tip: "Ipoteca mobiliara",
+      detaliComune: "contract cadru finantare",
+    });
+    makeCreditor(db, { avizId, ownerId: "local", denumire: "BANCA EXEMPLU" });
+    makeBun(db, { avizId, ownerId: "local", model: "John Deere 6195" });
+
+    const res = filterRnpmSearchResults({ ownerId: "local", searchId: sid, q: "banca john contract" });
+
+    expect(res.matchedAvizIds).toEqual([avizId]);
+    expect(res.matchedCount).toBe(1);
+  });
+
+  it("dedup tokens evita conditii duplicate si pastreaza match-ul", () => {
+    const sid = makeSearch(db, "local", "ipoteci");
+    const avizId = makeAviz(db, { ownerId: "local", searchId: sid, identificator: "AV-AND-004" });
+    makeDebitor(db, { avizId, ownerId: "local", denumire: "Stefan SRL" });
+
+    const res = filterRnpmSearchResults({
+      ownerId: "local",
+      searchId: sid,
+      q: "Stefan stefan \u0218TEFAN",
+    });
+
+    expect(res.matchedAvizIds).toEqual([avizId]);
+    expect(res.matchedCount).toBe(1);
+  });
+
+  it("q whitespace-only intoarce toate avizele search-ului", () => {
+    const sid = makeSearch(db, "local", "ipoteci");
+    const a1 = makeAviz(db, { ownerId: "local", searchId: sid, identificator: "AV-AND-005" });
+    const a2 = makeAviz(db, { ownerId: "local", searchId: sid, identificator: "AV-AND-006" });
+
+    const res = filterRnpmSearchResults({ ownerId: "local", searchId: sid, q: "   \t  " });
+
+    expect(res.matchedAvizIds).toEqual([a1, a2]);
+    expect(res.matchedCount).toBe(2);
+  });
+});

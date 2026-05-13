@@ -7,19 +7,18 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.24.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.25.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.24.0** - filtru text incremental peste rezultatele cautarii
-RNPM. Endpoint nou `POST /api/rnpm/search/:searchId/filter` cu owner isolation,
-anti-enumeration 404, timeout 5s, limita 1500 ID-uri si kill switch
-`RNPM_RESULTS_FILTER_DISABLED=1`. UI-ul adauga input live in `RnpmResultsTable`
-cu debounce 300ms, AbortController, bannere pentru `missingDetails` /
-`truncated`, iar exportul si paginarea folosesc acelasi set filtrat afisat.
-Migration 0021 adauga `idx_rnpm_avize_owner_search` si boot-time probe.
-**51 teste noi**.
+Ultimul release **v2.25.0** - filtru RNPM multi-token cu logica AND peste
+rezultatele unei cautari salvate. Tokenizer-ul backend/frontend deduplica
+termenii case-insensitive si diacritics-insensitive, limiteaza filtrul la 8
+tokeni si pastreaza cautarea backend peste cele 24 campuri normalizate existente.
+UI-ul evidentiaza termenii cautati in randul colapsat si in tab-urile expandate
+Creditori, Debitori, Bunuri si Istoric; cand potrivirea este doar in expand,
+tabelul afiseaza badge-ul `match in detalii`.
 
-Predecesor **v2.23.0** - master switch monitoring per-owner. Buton global
+Predecesor - master switch monitoring per-owner. Buton global
 "Opreste/Reia monitorizarea" expus in pagina Monitorizare; cand owner-ul opreste
 monitorizarea, scheduler-ul nu mai claim-uieste joburile (anti-join via partial
 index pe `owner_monitoring_settings.monitoring_enabled = 0`), dar joburile raman

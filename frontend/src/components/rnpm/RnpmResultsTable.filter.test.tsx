@@ -195,4 +195,35 @@ describe("RnpmResultsTable - filter integration", () => {
     await advance(0);
     expect(container?.textContent).toContain("1 din 3 avize");
   });
+
+  it("v2.25.0 - highlight pe Identificator cand token match", async () => {
+    filterSpy.mockResolvedValueOnce({
+      matchedAvizIds: [10],
+      matchedCount: 1,
+      totalInSearch: 3,
+      missingDetails: 0,
+      truncated: false,
+    });
+    mount();
+    await typeFilter("av-a");
+    await advance(300);
+    await advance(0);
+    const marks = Array.from(container?.querySelectorAll("mark") ?? []).map((mark) => mark.textContent);
+    expect(marks).toContain("AV-A");
+  });
+
+  it("v2.25.0 - badge match in detalii apare cand match-ul nu e in randul colapsat", async () => {
+    filterSpy.mockResolvedValueOnce({
+      matchedAvizIds: [10],
+      matchedCount: 1,
+      totalInSearch: 3,
+      missingDetails: 0,
+      truncated: false,
+    });
+    mount();
+    await typeFilter("hidden-token");
+    await advance(300);
+    await advance(0);
+    expect(container?.textContent).toContain("match in detalii");
+  });
 });

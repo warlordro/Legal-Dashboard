@@ -38,6 +38,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.25.0",
+    date: "13 Mai 2026",
+    subtitle:
+      "Filtru RNPM multi-token cu logica AND, highlight galben pentru termenii cautati si badge 'match in detalii' cand potrivirea este doar in continutul expandat al avizului.",
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    borderColor: "border-l-yellow-500",
+    badgeClass: "bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-300",
+    sections: [
+      {
+        title: "Filtru multi-token AND",
+        content:
+          "Query-uri precum 'totalitatea creantelor' sunt sparte in tokeni, deduplicate si evaluate cu logica AND peste acelasi set de 24 campuri RNPM normalizate; fiecare token poate aparea in alt camp al aceluiasi aviz.",
+      },
+      {
+        title: "Highlight in rand si detalii",
+        content:
+          "Termenii cautati sunt marcati cu highlight galben in randul colapsat (Identificator, Tip, Utilizator) si in tab-urile expandate Creditori, Debitori, Bunuri si Istoric.",
+      },
+      {
+        title: "Badge match in detalii",
+        content:
+          "Cand niciun token nu apare in randul vizibil, dar avizul este pastrat de filtrul backend, tabelul afiseaza badge-ul 'match in detalii' sub Identificator ca indiciu ca potrivirea este in expand.",
+      },
+      {
+        title: "Protectii si teste",
+        content:
+          "Tokenizer-ul backend si frontend limiteaza filtrul la maximum 8 tokeni pentru anti-DoS. Testele noi acopera tokenizare, logica AND, EXPLAIN QUERY PLAN, helperii de highlight si integrarea in tabel.",
+      },
+    ],
+  },
+  {
     version: "v2.24.0",
     date: "13 Mai 2026",
     subtitle:

@@ -8,6 +8,8 @@ import { getRnpmAvizStatusDisplay } from "@/lib/rnpmAvizStatus";
 import { RnpmAvizDetailContent } from "./RnpmDetailModal";
 import { TablePagination } from "@/components/table-pagination";
 import { useRnpmResultsFilter } from "@/hooks/useRnpmResultsFilter";
+import { tokenizeFilterQuery } from "@/lib/rnpmFilterTokens";
+import { highlightTokens, anyTokenMatches } from "@/lib/rnpmHighlightTokens";
 import type { RnpmDocument } from "@/types/rnpm";
 
 export interface RnpmResultsTableResult {
@@ -156,6 +158,7 @@ export function RnpmResultsTable({
   const resultCriteriu = result?.criteriu;
   const resultDocumentCount = result?.documents.length ?? 0;
   const filter = useRnpmResultsFilter(result?.searchId ?? null, filterQuery);
+  const tokens = useMemo(() => tokenizeFilterQuery(filterQuery), [filterQuery]);
   const matchedSet = useMemo(() => {
     if (!filter.data) return null;
     return new Set(filter.data.matchedAvizIds);
@@ -464,6 +467,7 @@ export function RnpmResultsTable({
             {paged.map(({ doc, avizId }) => {
               const isExpanded = expandedId === doc.identificator.v;
               const status = getRnpmAvizStatusDisplay(doc.activ);
+              const collapsedMatches = anyTokenMatches([doc.identificator.v, doc.tip, doc.utilizatorAutorizat], tokens);
               const toggleExpand = () => {
                 if (isExpanded) {
                   setExpandedId(null);
@@ -513,13 +517,16 @@ export function RnpmResultsTable({
                             <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
                           </span>
                         )}
-                        <span>{doc.identificator.v}</span>
+                        <span>{highlightTokens(doc.identificator.v, tokens)}</span>
                       </div>
+                      {tokens.length > 0 && !collapsedMatches && (
+                        <div className="mt-0.5 text-[10px] font-medium text-amber-600">match in detalii</div>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-[13px] whitespace-nowrap">{doc.data}</td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <Badge variant="outline" className="text-[12.5px] whitespace-nowrap">
-                        {doc.tip}
+                        {highlightTokens(doc.tip, tokens)}
                       </Badge>
                     </td>
                     <td className="px-4 py-3 text-center">
@@ -535,7 +542,7 @@ export function RnpmResultsTable({
                       </div>
                     </td>
                     <td className="px-4 py-3 text-[13px] text-foreground whitespace-nowrap">
-                      {doc.utilizatorAutorizat}
+                      {highlightTokens(doc.utilizatorAutorizat, tokens)}
                     </td>
                     <td className="px-4 py-3 text-center">
                       <ChevronRight
@@ -549,7 +556,7 @@ export function RnpmResultsTable({
                   {isExpanded && avizId != null && (
                     <tr ref={expandedDetailRef} className="border-t border-border bg-muted/20">
                       <td colSpan={8} className="p-0">
-                        <RnpmAvizDetailContent avizId={avizId} />
+                        <RnpmAvizDetailContent avizId={avizId} filterTokens={tokens} />
                       </td>
                     </tr>
                   )}
