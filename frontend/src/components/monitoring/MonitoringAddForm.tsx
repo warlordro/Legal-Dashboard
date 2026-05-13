@@ -147,8 +147,11 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
           {formKind === "dosar" ? (
             <div className="grid grid-cols-1 sm:grid-cols-[1fr,140px] gap-3">
               <div>
-                <label className="text-xs font-medium mb-1 block">Numar dosar</label>
+                <label htmlFor="monitoring-numar-dosar" className="text-xs font-medium mb-1 block">
+                  Numar dosar
+                </label>
                 <Input
+                  id="monitoring-numar-dosar"
                   type="text"
                   placeholder="1234/180/2024"
                   value={numarDosar}
@@ -158,9 +161,11 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
                 />
               </div>
               <div>
-                <label className="text-xs font-medium mb-1 block">Cadenta</label>
+                <label htmlFor="monitoring-dosar-cadence" className="text-xs font-medium mb-1 block">
+                  Cadenta
+                </label>
                 <Select value={String(cadenceSec)} onValueChange={(v) => setCadenceSec(Number(v))}>
-                  <SelectTrigger disabled={submitting}>
+                  <SelectTrigger id="monitoring-dosar-cadence" disabled={submitting}>
                     <SelectValue placeholder="Cadenta" />
                   </SelectTrigger>
                   <SelectContent>
@@ -177,8 +182,11 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
             <>
               <div className="grid grid-cols-1 sm:grid-cols-[1fr,140px] gap-3">
                 <div>
-                  <label className="text-xs font-medium mb-1 block">Nume subiect</label>
+                  <label htmlFor="monitoring-nume-subiect" className="text-xs font-medium mb-1 block">
+                    Nume subiect
+                  </label>
                   <Input
+                    id="monitoring-nume-subiect"
                     type="text"
                     placeholder="ex: POPESCU ION sau SC EXAMPLE SRL"
                     value={nameValue}
@@ -190,9 +198,11 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
                   />
                 </div>
                 <div>
-                  <label className="text-xs font-medium mb-1 block">Cadenta</label>
+                  <label htmlFor="monitoring-nume-cadence" className="text-xs font-medium mb-1 block">
+                    Cadenta
+                  </label>
                   <Select value={String(cadenceSec)} onValueChange={(v) => setCadenceSec(Number(v))}>
-                    <SelectTrigger disabled={submitting}>
+                    <SelectTrigger id="monitoring-nume-cadence" disabled={submitting}>
                       <SelectValue placeholder="Cadenta" />
                     </SelectTrigger>
                     <SelectContent>
@@ -206,7 +216,7 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
                 </div>
               </div>
               <div>
-                <label className="text-xs font-medium mb-1 block">Institutii (optional)</label>
+                <div className="text-xs font-medium mb-1">Institutii (optional)</div>
                 <InstitutieSelect value={institutie} onChange={setInstitutie} />
                 <p className="mt-1 text-[11px] text-muted-foreground">Lasa gol pentru cautare in toate institutiile.</p>
               </div>
@@ -214,14 +224,17 @@ export function MonitoringAddForm({ onJobAdded }: Props) {
           )}
 
           <div>
-            <label className="text-xs font-medium mb-1 block">Note (optional)</label>
+            <label htmlFor="monitoring-notes" className="text-xs font-medium mb-1 block">
+              Note (optional)
+            </label>
             <Input
+              id="monitoring-notes"
               type="text"
               placeholder="ex: Client X — apel"
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               disabled={submitting}
-              maxLength={2000}
+              maxLength={200}
             />
           </div>
           <div className="flex items-center gap-3">
