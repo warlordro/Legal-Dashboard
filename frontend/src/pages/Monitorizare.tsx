@@ -27,6 +27,7 @@ import { TablePagination } from "@/components/table-pagination";
 import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
+import { NoteEditor } from "@/components/monitoring/NoteEditor";
 import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "@/lib/api";
 import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
@@ -501,6 +502,15 @@ export default function Monitorizare({
                       {jobs.map((job) => {
                         const target = formatMonitoringTarget(job);
                         const isDosar = job.kind === "dosar_soap";
+                        const noteEditor = (
+                          <NoteEditor
+                            jobId={job.id}
+                            initialNote={job.notes}
+                            onSaved={(next) => {
+                              setJobs((prev) => prev.map((j) => (j.id === job.id ? { ...j, notes: next } : j)));
+                            }}
+                          />
+                        );
                         return (
                           <tr
                             key={job.id}
@@ -517,8 +527,8 @@ export default function Monitorizare({
                             </td>
                             <td className="px-3 py-2 font-mono">
                               {isDosar ? (
-                                <div className="flex items-center justify-between gap-2">
-                                  <span className="inline-flex min-w-[180px] flex-1 items-center">
+                                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
+                                  <span className="inline-flex min-w-0 items-center">
                                     <a
                                       href={getPortalJustUrl(target)}
                                       target="_blank"
@@ -547,20 +557,19 @@ export default function Monitorizare({
                                       // Alerts. Compensating with h-7 / px-2.5 /
                                       // text-[10.5px] / icon 3.5 keeps the two
                                       // pages visually consistent.
-                                      className="h-7 gap-1.5 px-2.5 text-[10.5px]"
+                                      className="col-start-2 row-start-1 h-7 gap-1.5 px-2.5 text-[10.5px]"
                                     >
                                       <Eye className="h-3.5 w-3.5" />
                                       Dosare
                                     </Button>
                                   )}
+                                  <div className="col-start-1 min-w-0">{noteEditor}</div>
                                 </div>
                               ) : job.kind === "name_soap" ? (
                                 (() => {
-                                  const scope = getNameSoapInstitutie(job) ?? [];
-                                  const labels = scope.map(getInstitutieLabel);
                                   return (
-                                    <div className="flex items-center justify-between gap-2">
-                                      <span className="block min-w-[180px] flex-1 break-words font-bold leading-tight">
+                                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
+                                      <span className="block min-w-0 break-words font-bold leading-tight">
                                         {target}
                                       </span>
                                       {onOpenName && (
@@ -572,24 +581,20 @@ export default function Monitorizare({
                                             navigate("/dosare");
                                           }}
                                           title={`Cauta dosare pentru ${target}`}
-                                          className="h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
+                                          className="col-start-2 row-start-1 h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
                                         >
                                           <Eye className="h-3.5 w-3.5" />
                                           Dosare
                                         </Button>
                                       )}
+                                      <div className="col-start-1 min-w-0">{noteEditor}</div>
                                     </div>
                                   );
                                 })()
                               ) : (
-                                target
-                              )}
-                              {job.notes && (
-                                <div
-                                  className="mt-1 max-w-[420px] truncate text-xs italic text-muted-foreground font-sans"
-                                  title={job.notes}
-                                >
-                                  {job.notes}
+                                <div className="min-w-0">
+                                  <span>{target}</span>
+                                  {noteEditor}
                                 </div>
                               )}
                             </td>
@@ -738,17 +743,15 @@ export default function Monitorizare({
           const labels = scope.map(getInstitutieLabel);
           if (labels.length === 0) return null;
           return (
-            <div
-              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-              onClick={() => setOpenInstantePopover(null)}
-              role="dialog"
-              aria-modal="true"
+            <dialog
+              open
+              className="fixed inset-0 z-[100] m-0 flex h-auto max-h-none max-w-none items-center justify-center border-0 bg-black/50 p-4 backdrop-blur-sm"
+              onMouseDown={(e) => {
+                if (e.target === e.currentTarget) setOpenInstantePopover(null);
+              }}
               aria-labelledby="instante-modal-title"
             >
-              <div
-                className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl"
-                onClick={(e) => e.stopPropagation()}
-              >
+              <div className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl">
                 <div className="mb-3 flex items-start justify-between gap-3 border-b border-border pb-2">
                   <div className="min-w-0">
                     <h3 id="instante-modal-title" className="text-[15px] font-semibold text-foreground">
@@ -778,7 +781,7 @@ export default function Monitorizare({
                   ))}
                 </ul>
               </div>
-            </div>
+            </dialog>
           );
         })()}
     </div>

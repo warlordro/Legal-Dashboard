@@ -90,7 +90,7 @@ const JobCreateBaseFields = {
   // so AlertConfigSchema.parse({}) returns the populated object — wrap that in
   // a thunk to satisfy the type-checker without losing the empty-input ergonomic.
   alert_config: AlertConfigSchema.default(() => AlertConfigSchema.parse({})),
-  notes: z.string().max(2000).optional(),
+  notes: z.string().max(200, "Notita maxim 200 caractere").optional(),
   client_request_id: z.string().min(1).max(128).optional(),
 };
 
@@ -131,7 +131,7 @@ export const JobUpdateBodySchema = z
     active: z.boolean().optional(),
     paused_until: z.iso.datetime().nullable().optional(),
     alert_config: AlertConfigSchema.partial().optional(),
-    notes: z.string().max(2000).nullable().optional(),
+    notes: z.string().max(200, "Notita maxim 200 caractere").nullable().optional(),
   })
   .strict()
   .refine((data) => Object.keys(data).length > 0, {

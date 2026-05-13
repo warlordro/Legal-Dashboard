@@ -1,5 +1,28 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api } from "./api";
+import { api, extractErrorMessage } from "./api";
+
+describe("extractErrorMessage", () => {
+  it("citeste string error legacy", () => {
+    expect(extractErrorMessage({ error: "Eroare X" }, "fallback")).toBe("Eroare X");
+  });
+
+  it("citeste envelope error.message", () => {
+    expect(
+      extractErrorMessage(
+        { data: null, error: { code: "PAYLOAD_TOO_LARGE", message: "Payload prea mare" }, requestId: "x" },
+        "fallback"
+      )
+    ).toBe("Payload prea mare");
+  });
+
+  it("returneaza fallback cand error lipseste", () => {
+    expect(extractErrorMessage({ data: {} }, "fallback")).toBe("fallback");
+  });
+
+  it("returneaza fallback cand error este null", () => {
+    expect(extractErrorMessage({ error: null }, "fallback")).toBe("fallback");
+  });
+});
 
 // Caracterizeaza parser-ul SSE folosit de api.dosare.loadMore /
 // api.termene.loadMore (loadMoreSSE in api.ts). Aceste teste protejeaza

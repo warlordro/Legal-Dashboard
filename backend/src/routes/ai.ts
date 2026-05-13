@@ -19,6 +19,7 @@ import { getOwnerId } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import type { AiUsageTrackingContext } from "../services/aiUsage.ts";
 import { getAuthMode } from "../auth/config.ts";
+import { ErrorCodes, fail } from "../util/envelope.ts";
 
 export const aiRouter = new Hono();
 
@@ -28,19 +29,20 @@ export const aiRouter = new Hono();
 // / OPENAI_API_KEY / GOOGLE_AI_KEY in env. Desktop loopback keeps BYOK via
 // safeStorage IPC. Returns 501 (not 403) because the body shape is valid but
 // not implemented in this auth mode.
-function rejectApiKeysFromBodyInWebMode(body: { apiKeys?: unknown }): Response | null {
+function rejectApiKeysFromBodyInWebMode(c: Context, body: { apiKeys?: unknown }): Response | null {
   if (getAuthMode() !== "web") return null;
   if (!body.apiKeys || typeof body.apiKeys !== "object") return null;
   const hasSetKey = Object.values(body.apiKeys as Record<string, unknown>).some(
     (v) => typeof v === "string" && v.length > 0
   );
   if (!hasSetKey) return null;
-  return Response.json(
-    {
-      error:
-        "Cheile AI nu pot fi trimise in body in modul web. Configurati ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_KEY in env-ul serverului.",
-    },
-    { status: 501 }
+  return c.json(
+    fail(
+      ErrorCodes.WEB_MODE_NOT_IMPLEMENTED,
+      "Cheile AI nu pot fi trimise in body in modul web. Configurati ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_KEY in env-ul serverului.",
+      c
+    ),
+    501
   );
 }
 
@@ -66,36 +68,55 @@ async function parseAiBody(c: Context): Promise<ParsedAiBody> {
   }
 }
 
+function parsedBodyError(c: Context, parsed: Extract<ParsedAiBody, { kind: "error" }>) {
+  const code = parsed.status === 413 ? ErrorCodes.PAYLOAD_TOO_LARGE : ErrorCodes.INVALID_JSON;
+  return c.json(fail(code, parsed.message, c), parsed.status);
+}
+
+function invalidParams(c: Context, message: string) {
+  return c.json(fail(ErrorCodes.INVALID_PARAMS, message, c), 400);
+}
+
+function modelError(c: Context, message: string) {
+  return c.json(fail(ErrorCodes.UNKNOWN_MODEL, message, c), 400);
+}
+
+function aiFailure(c: Context, message: string) {
+  return c.json(fail(ErrorCodes.AI_ANALYSIS_FAILED, message, c), 500);
+}
+
 // AI Analysis endpoint
 aiRouter.post("/analyze", async (c) => {
   try {
     const parsed = await parseAiBody(c);
-    if (parsed.kind === "error") return c.json({ error: parsed.message }, parsed.status);
-    // NOTE: typed `any` here is validated below by validateAiBody before any field access.
-    const body: any = parsed.body;
+    if (parsed.kind === "error") return parsedBodyError(c, parsed);
+    const body = parsed.body as Record<string, unknown>;
 
-    const webGate = rejectApiKeysFromBodyInWebMode(body);
+    const webGate = rejectApiKeysFromBodyInWebMode(c, body);
     if (webGate) return webGate;
 
     // Schema validation
     const validationError = validateAiBody(body);
     if (validationError) {
-      return c.json({ error: validationError }, 400);
+      if (validationError === "Model necunoscut.") return modelError(c, validationError);
+      return invalidParams(c, validationError);
     }
 
-    const { dosar, model: modelKey, apiKeys } = body;
+    const dosar = body.dosar as Record<string, unknown>;
+    const modelKey = typeof body.model === "string" ? body.model : undefined;
+    const apiKeys = body.apiKeys && typeof body.apiKeys === "object" ? (body.apiKeys as Record<string, string>) : {};
 
     const selectedModel = AI_MODELS[modelKey || "claude-sonnet"];
     if (!selectedModel) {
-      return c.json({ error: "Model necunoscut." }, 400);
+      return modelError(c, "Model necunoscut.");
     }
 
     // Get API key for the provider (env preferred, body fallback — see getApiKey)
-    const keys = apiKeys || {};
+    const keys = apiKeys;
     const apiKey = getApiKey(selectedModel.provider, keys);
 
     if (!apiKey) {
-      return c.json({ error: "NO_API_KEY" }, 400);
+      return c.json(fail(ErrorCodes.MISSING_API_KEY, "NO_API_KEY", c), 400);
     }
 
     const prompt = buildPrompt(dosar);
@@ -125,7 +146,7 @@ aiRouter.post("/analyze", async (c) => {
   } catch (err: unknown) {
     // SECURITY: Log error server-side but never expose internal details to client
     console.error("Eroare AI:", err instanceof Error ? err.message : err);
-    return c.json({ error: "Eroare la analiza AI. Verificati cheia API si incercati din nou." }, 500);
+    return aiFailure(c, "Eroare la analiza AI. Verificati cheia API si incercati din nou.");
   }
 });
 
@@ -133,46 +154,48 @@ aiRouter.post("/analyze", async (c) => {
 aiRouter.post("/analyze-multi", async (c) => {
   try {
     const parsed = await parseAiBody(c);
-    if (parsed.kind === "error") return c.json({ error: parsed.message }, parsed.status);
-    // NOTE: typed `any` here is validated below by validateAiBody and per-field checks.
-    const body: any = parsed.body;
+    if (parsed.kind === "error") return parsedBodyError(c, parsed);
+    const body = parsed.body as Record<string, unknown>;
 
-    const webGate = rejectApiKeysFromBodyInWebMode(body);
+    const webGate = rejectApiKeysFromBodyInWebMode(c, body);
     if (webGate) return webGate;
 
     // Validate structure (reuse dosar validation from single-agent endpoint)
-    if (!body || typeof body !== "object") return c.json({ error: "Body invalid." }, 400);
-    if (!body.dosar || typeof body.dosar !== "object") return c.json({ error: "Lipsesc datele dosarului." }, 400);
+    if (!body || typeof body !== "object") return invalidParams(c, "Body invalid.");
+    if (!body.dosar || typeof body.dosar !== "object") return invalidParams(c, "Lipsesc datele dosarului.");
 
     // SECURITY: Validate dosar fields (same validation as single-agent endpoint)
     const dosarValidationError = validateAiBody(body);
     if (dosarValidationError) {
-      return c.json({ error: dosarValidationError }, 400);
+      if (dosarValidationError === "Model necunoscut.") return modelError(c, dosarValidationError);
+      return invalidParams(c, dosarValidationError);
     }
 
     if (!Array.isArray(body.analysts) || body.analysts.length !== 2)
-      return c.json({ error: "Trebuie exact 2 modele analist." }, 400);
+      return invalidParams(c, "Trebuie exact 2 modele analist.");
     for (const m of body.analysts) {
-      if (typeof m !== "string" || !(m in AI_MODELS)) return c.json({ error: "Model analist necunoscut." }, 400);
+      if (typeof m !== "string" || !(m in AI_MODELS)) return modelError(c, "Model analist necunoscut.");
     }
-    if (!body.judge || typeof body.judge !== "string") return c.json({ error: "Lipseste modelul judecator." }, 400);
+    if (!body.judge || typeof body.judge !== "string") return invalidParams(c, "Lipseste modelul judecator.");
     if (!JUDGE_MODELS.includes(body.judge))
-      return c.json({ error: "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4 si Gemini 3.1 Pro." }, 400);
-    if (!(body.judge in AI_MODELS)) return c.json({ error: "Model judecator necunoscut." }, 400);
+      return invalidParams(c, "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4 si Gemini 3.1 Pro.");
+    if (!(body.judge in AI_MODELS)) return modelError(c, "Model judecator necunoscut.");
 
     // Validate apiKeys
-    const keys = body.apiKeys || {};
-    if (body.apiKeys && typeof body.apiKeys !== "object") return c.json({ error: "Format apiKeys invalid." }, 400);
+    const keys = body.apiKeys && typeof body.apiKeys === "object" ? (body.apiKeys as Record<string, string>) : {};
+    if (body.apiKeys && typeof body.apiKeys !== "object") return invalidParams(c, "Format apiKeys invalid.");
     if (body.apiKeys && typeof body.apiKeys === "object") {
       for (const [k, v] of Object.entries(body.apiKeys as Record<string, unknown>)) {
         if (v !== undefined && v !== null && v !== "") {
-          if (typeof v !== "string") return c.json({ error: `Cheie API invalida: ${k}` }, 400);
-          if ((v as string).length > 256) return c.json({ error: `Cheie API prea lunga: ${k}` }, 400);
+          if (typeof v !== "string") return invalidParams(c, `Cheie API invalida: ${k}`);
+          if ((v as string).length > 256) return invalidParams(c, `Cheie API prea lunga: ${k}`);
         }
       }
     }
 
-    const { dosar, analysts, judge } = body;
+    const dosar = body.dosar as Record<string, unknown>;
+    const analysts = body.analysts as string[];
+    const judge = body.judge as string;
     const prompt = buildPrompt(dosar);
     const trackingBase = {
       ownerId: getOwnerId(c),
@@ -260,6 +283,6 @@ aiRouter.post("/analyze-multi", async (c) => {
     });
   } catch (err: unknown) {
     console.error("Eroare AI Multi:", err instanceof Error ? err.message : err);
-    return c.json({ error: "Eroare la analiza AI avansata. Verificati cheile API si incercati din nou." }, 500);
+    return aiFailure(c, "Eroare la analiza AI avansata. Verificati cheile API si incercati din nou.");
   }
 });

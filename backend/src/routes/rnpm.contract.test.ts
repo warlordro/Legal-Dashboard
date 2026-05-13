@@ -25,13 +25,22 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { rnpmRouter } from "./rnpm.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
 import { updateUserRole } from "../db/userRepository.ts";
+import { requestIdContext } from "../middleware/requestId.ts";
+
+vi.mock("../services/captchaSolver.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/captchaSolver.ts")>();
+  return {
+    ...actual,
+    getCaptchaBalance: vi.fn(),
+  };
+});
 
 let tmpRoot: string;
 
@@ -43,12 +52,28 @@ function buildApp() {
   // ca guard-ul sa lase requestul prin. Restul rutelor (/saved, /searches,
   // /stats) raman fara guard si folosesc ownerId-ul fallback fara probleme.
   const app = new Hono();
+  app.use("*", requestIdContext);
   app.route("/api/v1/rnpm", rnpmRouter);
   return app;
 }
 
 async function jsonOf<T>(res: Response): Promise<T> {
   return (await res.json()) as T;
+}
+
+type EnvelopeErrorBody = {
+  data: null;
+  error: { code: string; message: string };
+  requestId: string;
+};
+
+function expectEnvelopeError(body: EnvelopeErrorBody, code: string) {
+  expect(body).toMatchObject({
+    data: null,
+    error: { code, message: expect.any(String) },
+    requestId: expect.any(String),
+  });
+  expect(body.requestId.length).toBeGreaterThan(0);
 }
 
 function seedAviz(opts: {
@@ -83,6 +108,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.clearAllMocks();
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
@@ -142,15 +168,15 @@ describe("GET /api/v1/rnpm/saved/:id", () => {
   it("returns 404 + { error } when missing", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/9999");
     expect(res.status).toBe(404);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "NOT_FOUND");
   });
 
   it("returns 400 + { error } when id is non-numeric", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/notanumber");
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns AvizFull shape { aviz, creditori, debitori, bunuri, istoric } when found", async () => {
@@ -187,8 +213,8 @@ describe("DELETE /api/v1/rnpm/saved/:id", () => {
   it("returns 400 + { error } on non-numeric id", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/notanumber", { method: "DELETE" });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
@@ -224,8 +250,8 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
       body: JSON.stringify({ ids: [] }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } when JSON body is malformed", async () => {
@@ -235,8 +261,8 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
       body: "{not json",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
   });
 });
 
@@ -262,8 +288,8 @@ describe("POST /api/v1/rnpm/saved/export", () => {
       body: JSON.stringify({ ids: [] }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
@@ -336,8 +362,8 @@ describe("DELETE /api/v1/rnpm/searches/:id", () => {
   it("returns 400 + { error } on non-numeric id", async () => {
     const res = await buildApp().request("/api/v1/rnpm/searches/notanumber", { method: "DELETE" });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
@@ -356,6 +382,17 @@ describe("POST /api/v1/rnpm/search input validation", () => {
   // and a captcha provider. Tests here cover only the input-validation branches
   // where the response shape is { error: string } and no network is touched.
 
+  it("returns 413 PAYLOAD_TOO_LARGE envelope when body exceeds search limit", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: "x".repeat(70_000) }),
+    });
+    expect(res.status).toBe(413);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "PAYLOAD_TOO_LARGE");
+  });
+
   it("returns 400 + { error } on malformed JSON", async () => {
     const res = await buildApp().request("/api/v1/rnpm/search", {
       method: "POST",
@@ -363,8 +400,8 @@ describe("POST /api/v1/rnpm/search input validation", () => {
       body: "{not json",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
   });
 
   it("returns 400 + { error } on invalid type", async () => {
@@ -374,8 +411,8 @@ describe("POST /api/v1/rnpm/search input validation", () => {
       body: JSON.stringify({ type: "invalid_type", params: {}, captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on missing captcha key", async () => {
@@ -385,12 +422,23 @@ describe("POST /api/v1/rnpm/search input validation", () => {
       body: JSON.stringify({ type: "ipoteci", params: { foo: "bar" }, captchaKey: "" }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_CAPTCHA_KEY");
   });
 });
 
 describe("POST /api/v1/rnpm/bulk input validation", () => {
+  it("returns 413 PAYLOAD_TOO_LARGE envelope when body exceeds bulk limit", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/bulk", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ payload: "x".repeat(530_000) }),
+    });
+    expect(res.status).toBe(413);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "PAYLOAD_TOO_LARGE");
+  });
+
   it("returns 400 + { error } on empty items list", async () => {
     const res = await buildApp().request("/api/v1/rnpm/bulk", {
       method: "POST",
@@ -398,8 +446,8 @@ describe("POST /api/v1/rnpm/bulk input validation", () => {
       body: JSON.stringify({ items: [], captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on items > 200", async () => {
@@ -410,8 +458,8 @@ describe("POST /api/v1/rnpm/bulk input validation", () => {
       body: JSON.stringify({ items, captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on invalid type within items", async () => {
@@ -424,33 +472,68 @@ describe("POST /api/v1/rnpm/bulk input validation", () => {
       }),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 });
 
 describe("POST /api/v1/rnpm/captcha/balance input validation", () => {
   // Only validation branches — happy path requires a real captcha provider.
-  it("returns 400 + { error } when key field is missing", async () => {
+  it("returns 400 INVALID_CAPTCHA_KEY envelope when key field is missing", async () => {
     const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_CAPTCHA_KEY");
   });
 
-  it("returns 400 + { error } on malformed JSON", async () => {
+  it("returns 400 INVALID_JSON envelope on malformed JSON", async () => {
     const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "not-json",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
+  });
+
+  it("returns 402 INSUFFICIENT_FUNDS cand provider raporteaza fonduri insuficiente", async () => {
+    const { CaptchaInsufficientFundsError, getCaptchaBalance } = await import("../services/captchaSolver.ts");
+    vi.mocked(getCaptchaBalance).mockRejectedValueOnce(
+      new CaptchaInsufficientFundsError("Sold insuficient (2Captcha)")
+    );
+
+    const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captchaKey: "0".repeat(32), captchaProvider: "2captcha" }),
+    });
+
+    expect(res.status).toBe(402);
+    expect(res.headers.get("Retry-After")).toBe("0");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INSUFFICIENT_FUNDS");
+    expect(body.error.message).toContain("Sold insuficient");
+  });
+
+  it("returns 400 CAPTCHA_BALANCE_UNAVAILABLE pentru alte erori provider", async () => {
+    const { getCaptchaBalance } = await import("../services/captchaSolver.ts");
+    vi.mocked(getCaptchaBalance).mockRejectedValueOnce(new Error("Could not parse balance response"));
+
+    const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captchaKey: "0".repeat(32), captchaProvider: "2captcha" }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "CAPTCHA_BALANCE_UNAVAILABLE");
+    expect(body.error.message).toBe("Could not parse balance response");
   });
 });
 
@@ -462,8 +545,8 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_PARAMS");
   });
 
   it("returns 400 + { error } on malformed JSON", async () => {
@@ -473,8 +556,8 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
       body: "{",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
   });
 });
 
@@ -502,9 +585,9 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
       body: JSON.stringify({ type: "ipoteci", params: {}, captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(501);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
-    expect(body.error).toMatch(/web mode|server-side|captcha/i);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
+    expect(body.error.message).toMatch(/web mode|server-side|captcha/i);
   });
 
   it("POST /bulk returns 501 in web mode", async () => {
@@ -517,6 +600,8 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
       }),
     });
     expect(res.status).toBe(501);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
   });
 
   it("POST /captcha/balance returns 501 in web mode", async () => {
@@ -526,6 +611,8 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
       body: JSON.stringify({ captchaKey: "x".repeat(20) }),
     });
     expect(res.status).toBe(501);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
   });
 });
 

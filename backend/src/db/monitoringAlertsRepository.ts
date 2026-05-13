@@ -62,6 +62,9 @@ export interface MonitoringAlertRow {
   // listAlerts (the only consumer of the alerts UI) emits these fields.
   job_target_json?: string | null;
   job_kind?: string | null;
+  // v2.27.0 - propagated from monitoring_jobs.notes in listAlerts for display
+  // in /alerte. Optional: insertAlert / getAlertById do not populate it.
+  job_notes?: string | null;
 }
 
 export interface InsertAlertInput {
@@ -213,7 +216,7 @@ export function insertAlert(input: InsertAlertInput): InsertAlertResult {
     // scoping on every query — this preserves that invariant in code until
     // migration 0005 lands a DB-level trigger.
     const jobOwner = db
-      .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+      .prepare("SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?")
       .get(input.jobId, input.ownerId);
     if (!jobOwner) {
       throw new Error(`insertAlert: job ${input.jobId} not found for owner ${input.ownerId}`);
@@ -356,7 +359,8 @@ export function listAlerts(opts: ListAlertsOptions): ListAlertsResult {
     .prepare(
       `SELECT a.*,
               j.target_json AS job_target_json,
-              j.kind AS job_kind
+              j.kind AS job_kind,
+              j.notes AS job_notes
        FROM monitoring_alerts a
        LEFT JOIN monitoring_jobs j
          ON j.id = a.job_id AND j.owner_id = a.owner_id
@@ -405,7 +409,7 @@ export function countAlertsCreatedSince(ownerId: string, since: string): number 
 }
 
 export function getAlertById(ownerId: string, id: number): MonitoringAlertRow | null {
-  const row = getDb().prepare(`SELECT * FROM monitoring_alerts WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+  const row = getDb().prepare("SELECT * FROM monitoring_alerts WHERE id = ? AND owner_id = ?").get(id, ownerId) as
     | MonitoringAlertRow
     | undefined;
   return row ?? null;
@@ -443,7 +447,7 @@ export function markAlertUnseen(ownerId: string, id: number): MonitoringAlertRow
     const existing = getAlertById(ownerId, id);
     if (!existing) return null;
     if (existing.read_at === null) return existing;
-    db.prepare(`UPDATE monitoring_alerts SET read_at = NULL WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+    db.prepare("UPDATE monitoring_alerts SET read_at = NULL WHERE id = ? AND owner_id = ?").run(id, ownerId);
     return getAlertById(ownerId, id);
   });
   return tx();
@@ -687,7 +691,7 @@ export function selectAlertIdsByFilters(opts: DismissByFiltersOptions, limit: nu
 // be audited as denied access in web mode). Returns only a boolean so it
 // can never leak the foreign owner_id back to the caller.
 export function alertExistsForAnyOwner(id: number): boolean {
-  return getDb().prepare(`SELECT 1 FROM monitoring_alerts WHERE id = ? LIMIT 1`).get(id) !== undefined;
+  return getDb().prepare("SELECT 1 FROM monitoring_alerts WHERE id = ? LIMIT 1").get(id) !== undefined;
 }
 
 // Stage 10 — enrichment subsystem split into its own module. Re-exported

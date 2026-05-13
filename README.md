@@ -7,16 +7,15 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.25.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.27.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.25.0** - filtru RNPM multi-token cu logica AND peste
-rezultatele unei cautari salvate. Tokenizer-ul backend/frontend deduplica
-termenii case-insensitive si diacritics-insensitive, limiteaza filtrul la 8
-tokeni si pastreaza cautarea backend peste cele 24 campuri normalizate existente.
-UI-ul evidentiaza termenii cautati in randul colapsat si in tab-urile expandate
-Creditori, Debitori, Bunuri si Istoric; cand potrivirea este doar in expand,
-tabelul afiseaza badge-ul `match in detalii`.
+Ultimul release **v2.27.0** - notite editabile per job de monitorizare si
+propagare in Alerte. Utilizatorul poate adauga, modifica sau sterge o notita
+scurta direct din pagina Monitorizare, limita este 200 caractere, iar cardurile
+din Alerte afiseaza blocul `Notita: ...` pentru joburile care au context salvat.
+Afisarea este live-read, fara snapshot, deci modificarile se vad si pe alertele
+deja emise.
 
 Predecesor - master switch monitoring per-owner. Buton global
 "Opreste/Reia monitorizarea" expus in pagina Monitorizare; cand owner-ul opreste

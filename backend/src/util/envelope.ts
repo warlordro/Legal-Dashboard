@@ -18,6 +18,29 @@
 import type { Context } from "hono";
 import { getRequestId } from "../middleware/requestId.ts";
 
+export const ErrorCodes = {
+  INVALID_JSON: "INVALID_JSON",
+  INVALID_PARAMS: "INVALID_PARAMS",
+  VALIDATION_ERROR: "VALIDATION_ERROR",
+  INVALID_CAPTCHA_KEY: "INVALID_CAPTCHA_KEY",
+  PAYLOAD_TOO_LARGE: "PAYLOAD_TOO_LARGE",
+  LIMIT_EXCEEDED: "LIMIT_EXCEEDED",
+  DUPLICATE_REQUEST: "DUPLICATE_REQUEST",
+  CAPTCHA_BALANCE_UNAVAILABLE: "CAPTCHA_BALANCE_UNAVAILABLE",
+  INSUFFICIENT_FUNDS: "INSUFFICIENT_FUNDS",
+  FILTER_DISABLED: "FILTER_DISABLED",
+  FILTER_TIMEOUT: "FILTER_TIMEOUT",
+  MISSING_API_KEY: "MISSING_API_KEY",
+  UNKNOWN_MODEL: "UNKNOWN_MODEL",
+  AI_ANALYSIS_FAILED: "AI_ANALYSIS_FAILED",
+  WEB_MODE_NOT_IMPLEMENTED: "WEB_MODE_NOT_IMPLEMENTED",
+  DESKTOP_ONLY: "DESKTOP_ONLY",
+  NOT_FOUND: "NOT_FOUND",
+  INTERNAL_ERROR: "INTERNAL_ERROR",
+} as const;
+
+export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];
+
 export interface EnvelopeOk<T> {
   data: T;
   requestId: string;
@@ -37,7 +60,7 @@ export function ok<T>(data: T, c: Context): EnvelopeOk<T> {
   return { data, requestId: getRequestId(c) };
 }
 
-export function fail(code: string, message: string, c: Context, details?: unknown): EnvelopeError {
+export function fail(code: ErrorCode | string, message: string, c: Context, details?: unknown): EnvelopeError {
   const error: EnvelopeError["error"] = { code, message };
   if (details !== undefined) error.details = details;
   return { data: null, error, requestId: getRequestId(c) };

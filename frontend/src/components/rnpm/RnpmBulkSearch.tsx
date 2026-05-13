@@ -348,9 +348,11 @@ export function RnpmBulkSearch({
     <div className="space-y-4">
       <div className="grid gap-4 md:grid-cols-2">
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Categorie</label>
+          <label htmlFor="bulk-categorie" className="mb-1 block text-xs font-medium text-muted-foreground">
+            Categorie
+          </label>
           <Select value={type} onValueChange={(v) => handleTypeChange(v as RnpmSearchType)}>
-            <SelectTrigger disabled={running}>
+            <SelectTrigger id="bulk-categorie" disabled={running}>
               <SelectValue placeholder="Categorie" />
             </SelectTrigger>
             <SelectContent>
@@ -363,9 +365,11 @@ export function RnpmBulkSearch({
           </Select>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Camp cautare</label>
+          <label htmlFor="bulk-camp" className="mb-1 block text-xs font-medium text-muted-foreground">
+            Camp cautare
+          </label>
           <Select value={activeField.key} onValueChange={setField}>
-            <SelectTrigger disabled={running}>
+            <SelectTrigger id="bulk-camp" disabled={running}>
               <SelectValue placeholder="Camp cautare" />
             </SelectTrigger>
             <SelectContent>
@@ -380,11 +384,12 @@ export function RnpmBulkSearch({
       </div>
 
       <div>
-        <label className="mb-1 block text-xs font-medium text-muted-foreground">
+        <label htmlFor="bulk-valori" className="mb-1 block text-xs font-medium text-muted-foreground">
           Valori (una pe linie) — {allValues.length} intrari (max {MAX_BATCH} per batch)
           {overLimit && <span className="ml-2 text-amber-600">· primele {MAX_BATCH} vor fi procesate</span>}
         </label>
         <textarea
+          id="bulk-valori"
           value={valuesText}
           onChange={(e) => setValuesText(e.target.value)}
           disabled={running}
@@ -429,7 +434,7 @@ export function RnpmBulkSearch({
           <span className="ml-1 text-muted-foreground">(creste cu numarul de rezultate per item)</span>
         </span>
         {running ? (
-          <Button onClick={handleStop} variant="outline" size="sm">
+          <Button onClick={handleStop} variant="destructive" size="sm">
             <Square className="h-4 w-4" /> Opreste
           </Button>
         ) : (
@@ -451,9 +456,9 @@ export function RnpmBulkSearch({
             </span>
           </div>
           <ul className="max-h-64 overflow-y-auto divide-y divide-border">
-            {progress.filter(Boolean).map((p, i) => (
+            {progress.filter(Boolean).map((p) => (
               <li
-                key={i}
+                key={`${p.index}-${p.label}`}
                 className={cn(
                   "flex items-center gap-2 px-3 py-1.5 text-xs",
                   p.phase === "error" && "text-red-500",

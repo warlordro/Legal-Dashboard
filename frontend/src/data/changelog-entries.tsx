@@ -9,6 +9,7 @@ import {
   MousePointerClick,
   Layers,
   CalendarSearch,
+  FileText,
   FileSpreadsheet,
   Lock,
   Wrench,
@@ -37,6 +38,67 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.27.0",
+    date: "14 Mai 2026",
+    subtitle:
+      "Notite editabile per job de monitorizare, limita 200 caractere si propagare live in cardurile din Alerte.",
+    icon: <FileText className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
+    sections: [
+      {
+        title: "Notite editabile in Monitorizare",
+        content:
+          "Fiecare job de monitorizare poate avea o notita scurta editabila direct din rand: click pe nota existenta sau pe '+ Adauga notita', apoi Salveaza sau Anuleaza. Limita este 200 caractere.",
+      },
+      {
+        title: "Propagare in Alerte",
+        content:
+          "Cardurile din /alerte afiseaza blocul 'Notita: ...' cand alerta provine dintr-un job cu notita setata. Afisarea este live-read, deci editarea notitei se reflecta in alertele deja emise.",
+      },
+      {
+        title: "Validare si bulk import",
+        content:
+          "Backend-ul valideaza notitele la maximum 200 caractere, formularul de adaugare foloseste aceeasi limita, iar preview-ul de bulk import semnaleaza randurile cu notite prea lungi.",
+      },
+      {
+        title: "Polish vizual",
+        content: "Notitele lungi din lista de joburi fac wrap in coloana tintei si nu intra sub butonul Dosare.",
+      },
+    ],
+  },
+  {
+    version: "v2.26.0",
+    date: "13 Mai 2026",
+    subtitle:
+      "PR-6 Envelope Migration: rutele HTTP legacy din RNPM, AI si Termene returneaza envelope standard pe 4xx/5xx, iar frontend-ul citeste dual-shape mesajele de eroare pentru exporturi si SSE AI judge.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Envelope standard pe erori HTTP",
+        content:
+          "RNPM, AI si Termene folosesc acum forma { data, error: { code, message }, requestId } pentru raspunsurile 4xx/5xx migrate, cu requestId propagat pentru diagnostic.",
+      },
+      {
+        title: "Semantica pastrata",
+        content:
+          "INSUFFICIENT_FUNDS raspunde 402 Payment Required cu Retry-After: 0, LIMIT_EXCEEDED pastreaza details pentru split-search, iar pagination ramane shape-only fara INVALID_PAGE nou.",
+      },
+      {
+        title: "Frontend dual-shape",
+        content:
+          "Clientul API extrage mesajul real atat din erorile legacy string, cat si din envelope, astfel exporturile XLSX/PDF si SSE AI judge nu mai cad pe fallback generic.",
+      },
+      {
+        title: "Scope controlat",
+        content:
+          "Payload-urile SSE, path-ul RNPM 499 abort cu searchId, raspunsurile OK 200/201 si audit events raman nemigrate intentionat.",
+      },
+    ],
+  },
   {
     version: "v2.25.0",
     date: "13 Mai 2026",

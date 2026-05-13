@@ -279,6 +279,14 @@ export function MonitoringBulkImportCard({
   const safePage = Math.min(bulkPage, totalPages - 1);
   const pageStart = safePage * bulkPageSize;
   const pageRows = visiblePreviewRows.slice(pageStart, pageStart + bulkPageSize);
+  const longNameNoteCount = useMemo(
+    () => bulkPreview?.rows.filter((row) => (row.notes?.length ?? 0) > 200).length ?? 0,
+    [bulkPreview]
+  );
+  const longDosarNoteCount = useMemo(
+    () => bulkDosarRows.filter((row) => (row.notes?.length ?? 0) > 200).length,
+    [bulkDosarRows]
+  );
 
   // Numar randuri care vor ajunge efectiv la commit dupa toate filtrele
   // (rejected scos automat, manual excluse, +/- warn-uri auto-excluse).
@@ -296,25 +304,20 @@ export function MonitoringBulkImportCard({
 
   return (
     <Card>
-      <CardHeader
-        role="button"
-        tabIndex={0}
-        onClick={() => setBulkOpen((v) => !v)}
-        onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") {
-            e.preventDefault();
-            setBulkOpen((v) => !v);
-          }
-        }}
-        aria-expanded={bulkOpen}
-        aria-controls="bulk-import-content"
-        className="cursor-pointer hover:bg-accent/30 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <CardTitle className="text-base flex items-center gap-2">
-          {bulkOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-          <FileSpreadsheet className="h-4 w-4" />
-          Adaugare bulk din fisier
-        </CardTitle>
+      <CardHeader className="p-0">
+        <button
+          type="button"
+          onClick={() => setBulkOpen((v) => !v)}
+          aria-expanded={bulkOpen}
+          aria-controls="bulk-import-content"
+          className="w-full cursor-pointer px-6 py-4 text-left transition-colors hover:bg-accent/30 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <CardTitle className="text-base flex items-center gap-2">
+            {bulkOpen ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+            <FileSpreadsheet className="h-4 w-4" />
+            Adaugare bulk din fisier
+          </CardTitle>
+        </button>
       </CardHeader>
       {bulkOpen && (
         <CardContent id="bulk-import-content">
@@ -413,6 +416,12 @@ export function MonitoringBulkImportCard({
               {bulkDosarRows.length > 0 && (
                 <div className="text-sm text-muted-foreground">
                   {bulkDosarRows.length} randuri cu numar_dosar vor fi create ca joburi dosar_soap.
+                </div>
+              )}
+              {longNameNoteCount + longDosarNoteCount > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 dark:border-amber-900/40 dark:bg-amber-900/20 dark:text-amber-300">
+                  {longNameNoteCount + longDosarNoteCount} randuri au notite mai lungi de 200 caractere si vor fi
+                  respinse la salvare. Verifica coloana notes.
                 </div>
               )}
 
@@ -535,7 +544,11 @@ export function MonitoringBulkImportCard({
                                     </span>
                                   )}
                                 </td>
-                                <td className="px-3 py-2 text-muted-foreground">{row.validationMsg ?? "-"}</td>
+                                <td className="px-3 py-2 text-muted-foreground">
+                                  {(row.notes?.length ?? 0) > 200
+                                    ? "Notita > 200 chars - va fi respinsa la salvare"
+                                    : (row.validationMsg ?? "-")}
+                                </td>
                                 <td className="px-3 py-2 text-right">
                                   {row.validation === "rejected" ? (
                                     <span className="text-xs text-muted-foreground">-</span>

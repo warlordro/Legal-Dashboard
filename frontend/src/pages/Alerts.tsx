@@ -34,6 +34,7 @@ import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useFontSize } from "@/hooks/useFontSize";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
+import { AlertNoteBlock } from "@/components/alerts/AlertNoteBlock";
 import { JobKindTabs, type JobKindFilter } from "@/components/monitoring/JobKindTabs";
 import { TablePagination } from "@/components/table-pagination";
 import { AlertsExportModal } from "@/components/AlertsExportModal";
@@ -197,6 +198,7 @@ export default function Alerts({
     }
   }, [debouncedQuery, from, includeDismissed, jobKind, kind, onlyUnread, page, pageSize, severity, to]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: streamVersion intentionally reloads the list after SSE notifications.
   useEffect(() => {
     load();
     return () => {
@@ -786,6 +788,7 @@ export default function Alerts({
                           ))}
                         </dl>
                       )}
+                      <AlertNoteBlock note={alert.job_notes} />
                     </div>
                     <div className="flex shrink-0 flex-wrap items-center gap-2">
                       {ctx.numarDosar && onOpenDosar && (
@@ -853,19 +856,15 @@ export default function Alerts({
         filteredTotal={total}
       />
       {bulkDismissPending && (
-        <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
-          onClick={() => {
-            if (!bulkDismissBusy) setBulkDismissPending(null);
+        <dialog
+          open
+          className="fixed inset-0 z-[100] m-0 flex h-auto max-h-none max-w-none items-center justify-center border-0 bg-black/50 p-4 backdrop-blur-sm"
+          onMouseDown={(e) => {
+            if (!bulkDismissBusy && e.target === e.currentTarget) setBulkDismissPending(null);
           }}
+          aria-labelledby="bulk-dismiss-title"
         >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="bulk-dismiss-title"
-            className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
             <div className="px-5 pt-5">
               <h3 id="bulk-dismiss-title" className="text-base font-semibold text-foreground">
                 {bulkDismissPending.mode === "ids" ? "Inchide alertele selectate?" : "Inchide toate alertele filtrate?"}
@@ -911,7 +910,7 @@ export default function Alerts({
               </Button>
             </div>
           </div>
-        </div>
+        </dialog>
       )}
     </div>
   );

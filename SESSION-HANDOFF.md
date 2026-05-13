@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.25.0 (2026-05-13)
+**Versiune curenta**: v2.27.0 (2026-05-14)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -62,6 +62,42 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
+
+## Sprint inchis 2026-05-14 - Notite editabile per job + propagare in alerte
+
+**Status**: livrat pe branch `feat/monitoring-notes-edit`.
+
+**Solutie**: `monitoring_jobs.notes` ramane coloana existenta, fara migration
+noua. Backend-ul limiteaza write-urile la 200 caractere prin Zod, `listAlerts`
+propaga `j.notes AS job_notes`, iar frontend-ul ofera `NoteEditor` inline in
+Monitorizare si bloc `Notita: ...` in Alerte.
+
+**UX validat**: notitele lungi fac wrap in coloana tintei si nu intra sub
+butonul `Dosare`; randurile fara nota afiseaza `+ Adauga notita`.
+
+**Teste cheie**: limita Zod notes, join `job_notes`, `NoteEditor` si
+`AlertNoteBlock`.
+
+## Sprint inchis 2026-05-13 - PR-6 Envelope Migration
+
+**Status**: Task 1-8 complet pe branch `feat/pr6-envelope-migration`.
+Executia este oprita intentionat dupa release bump v2.26.0, inainte de Task 9
+smoke desktop, push si tag.
+
+**Solutie**: rutele HTTP legacy din `rnpm.ts`, `ai.ts` si `termene.ts` emit
+envelope standard pentru 4xx/5xx. `INSUFFICIENT_FUNDS` foloseste 402 +
+`Retry-After: 0`, detectat tipizat prin `CaptchaInsufficientFundsError`;
+`LIMIT_EXCEEDED` pastreaza `details` pentru split-search; `FILTER_DISABLED` si
+`FILTER_TIMEOUT` se citesc din `body.error.code`.
+
+**Frontend**: `frontend/src/lib/api.ts` are `extractErrorMessage` dual-shape,
+folosit pe exporturi XLSX/PDF, load-more SSE si AI multi-model ca mesajele
+reale sa nu cada pe fallback generic.
+
+**Scope exclus intentionat**: path-ul RNPM 499 abort cu `searchId`,
+payload-urile SSE, raspunsurile OK 200/201 si `recordAudit()` raman nemigrate.
+Pagination ramane shape-only, fara `INVALID_PAGE` nou unde exista coercitie
+silentioasa.
 
 ## Sprint inchis 2026-05-13 - Filtru RNPM multi-token + highlight
 

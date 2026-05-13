@@ -2,6 +2,20 @@ import type { Dosar, SearchParams, Termen } from "@/types";
 
 const BASE = "/api";
 
+type EnvelopeError = { code?: string; message?: string };
+
+export function extractErrorMessage(data: unknown, fallback: string): string {
+  if (data && typeof data === "object" && "error" in data) {
+    const err = (data as { error: unknown }).error;
+    if (typeof err === "string") return err;
+    if (err && typeof err === "object" && "message" in err) {
+      const msg = (err as EnvelopeError).message;
+      if (typeof msg === "string") return msg;
+    }
+  }
+  return fallback;
+}
+
 // Single audited fetch site for the renderer. Per-domain modules
 // (monitoringApi, adminApi, dashboardApi, aiUsageApi, alertsApi) import this
 // instead of calling fetch() directly — that keeps the renderer-fetch hook
@@ -24,7 +38,7 @@ async function get<T>(url: string, params: Record<string, string | string[] | un
   }
   const res = await apiFetch(`${BASE}${url}?${search.toString()}`);
   const text = await res.text();
-  let json: any;
+  let json: unknown;
   try {
     json = JSON.parse(text);
   } catch {
@@ -32,8 +46,8 @@ async function get<T>(url: string, params: Record<string, string | string[] | un
       res.ok ? "Raspuns invalid de la server." : "Eroare la comunicarea cu serviciul PortalJust. Incercati din nou."
     );
   }
-  if (!res.ok) throw new Error(json.error ?? "Eroare necunoscuta");
-  return json;
+  if (!res.ok) throw new Error(extractErrorMessage(json, "Eroare necunoscuta"));
+  return json as T;
 }
 
 function parseFilenameFromContentDisposition(header: string | null, fallback: string): string {
@@ -60,8 +74,8 @@ async function postBlob<T>(url: string, body: T, fallbackFilename: string): Prom
   if (!res.ok) {
     let msg = `Eroare server (${res.status})`;
     try {
-      const data = (await res.json()) as { error?: unknown };
-      if (typeof data.error === "string") msg = data.error;
+      const data = await res.json();
+      msg = extractErrorMessage(data, msg);
     } catch {
       // Binary/non-JSON error body; keep status fallback.
     }
@@ -126,7 +140,8 @@ async function loadMoreSSE<T>(
     let serverMessage: string | null = null;
     try {
       const json = JSON.parse(text);
-      if (json && typeof json.error === "string") serverMessage = json.error;
+      const extracted = extractErrorMessage(json, "");
+      if (extracted) serverMessage = extracted;
     } catch {
       // body wasn't JSON — fall through to generic message
     }
@@ -156,7 +171,7 @@ async function loadMoreSSE<T>(
           currentEvent = line.slice(7).trim();
         } else if (line.startsWith("data: ")) {
           const data = line.slice(6);
-          let parsed: any;
+          let parsed: unknown;
           try {
             parsed = JSON.parse(data);
           } catch (parseErr) {
@@ -170,14 +185,15 @@ async function loadMoreSSE<T>(
             onProgress(parsed as LoadMoreProgress);
           } else if (currentEvent === "batch") {
             // Accumulate new items from this interval
-            if (parsed.data && Array.isArray(parsed.data)) {
-              accumulated.push(...parsed.data);
-              onBatch?.(parsed.data as T[]);
+            const batch = parsed as { data?: unknown };
+            if (batch.data && Array.isArray(batch.data)) {
+              accumulated.push(...(batch.data as T[]));
+              onBatch?.(batch.data as T[]);
             }
           } else if (currentEvent === "done") {
-            doneResult = parsed;
+            doneResult = parsed as { total: number; warnings: string[] };
           } else if (currentEvent === "error") {
-            throw new SseExplicitError(parsed.error || "Eroare la incarcarea extinsa.");
+            throw new SseExplicitError(extractErrorMessage(parsed, "Eroare la incarcarea extinsa."));
           }
           currentEvent = "";
         }
@@ -277,7 +293,7 @@ export const api = {
         signal: AbortSignal.timeout(180000), // 3 min — increased for large dosare
       });
       const json = await res.json();
-      if (!res.ok) throw new Error(json.error ?? "Eroare AI");
+      if (!res.ok) throw new Error(extractErrorMessage(json, "Eroare AI"));
       return json;
     },
     analyzeMulti: async (
@@ -300,7 +316,7 @@ export const api = {
       if (!res.ok) {
         // Validation/size/rate-limit errors still come back as JSON with a non-2xx status.
         const errJson = await res.json().catch(() => ({ error: "Eroare AI Multi" }));
-        throw new Error(errJson.error ?? "Eroare AI Multi");
+        throw new Error(extractErrorMessage(errJson, "Eroare AI Multi"));
       }
       if (!res.body) throw new Error("Raspuns streaming indisponibil");
 
@@ -330,7 +346,7 @@ export const api = {
           if (!eventName || !dataStr) continue;
           const data = JSON.parse(dataStr);
           if (eventName === "done") final = data.result;
-          else if (eventName === "error") throw new Error(data.error ?? "Eroare AI Multi");
+          else if (eventName === "error") throw new Error(extractErrorMessage(data, "Eroare AI Multi"));
           else if (eventName === "analyst_done") onPhase?.(data.which === 1 ? "analyst1_done" : "analyst2_done");
           else if (eventName === "judge_started") onPhase?.("judge_started");
         }

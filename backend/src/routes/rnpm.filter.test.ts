@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { closeDb, getDb } from "../db/schema.ts";
+import { requestIdContext } from "../middleware/requestId.ts";
 import { rnpmRouter } from "./rnpm.ts";
 
 let tmpRoot: string;
@@ -18,8 +19,8 @@ interface FilterRouteBody {
   totalInSearch: number;
   missingDetails: number;
   truncated: boolean;
-  code?: string;
-  error?: string;
+  error?: { code: string; message: string };
+  requestId?: string;
 }
 
 beforeEach(async () => {
@@ -30,6 +31,7 @@ beforeEach(async () => {
   seed.close();
   db = getDb();
   app = new Hono();
+  app.use("*", requestIdContext);
   app.route("/api/rnpm", rnpmRouter);
 });
 
@@ -86,7 +88,9 @@ describe("POST /api/rnpm/search/:searchId/filter", () => {
       body: "{not json",
     });
     expect(res.status).toBe(400);
-    expect(((await res.json()) as FilterRouteBody).error).toMatch(/JSON invalid/);
+    const body = (await res.json()) as FilterRouteBody;
+    expect(body.error?.code).toBe("INVALID_JSON");
+    expect(body.error?.message).toMatch(/JSON invalid/);
   });
 
   it("q lipsa -> 400", async () => {
@@ -107,7 +111,9 @@ describe("POST /api/rnpm/search/:searchId/filter", () => {
       body: JSON.stringify({ q: "x" }),
     });
     expect(res.status).toBe(400);
-    expect(((await res.json()) as FilterRouteBody).error).toMatch(/Minim 2 caractere/);
+    const body = (await res.json()) as FilterRouteBody;
+    expect(body.error?.code).toBe("INVALID_PARAMS");
+    expect(body.error?.message).toMatch(/Minim 2 caractere/);
   });
 
   it("q doar whitespace -> 400 (trim apoi min 2)", async () => {
@@ -128,7 +134,9 @@ describe("POST /api/rnpm/search/:searchId/filter", () => {
       body: JSON.stringify({ q: "x".repeat(201) }),
     });
     expect(res.status).toBe(400);
-    expect(((await res.json()) as FilterRouteBody).error).toMatch(/Termen prea lung/);
+    const body = (await res.json()) as FilterRouteBody;
+    expect(body.error?.code).toBe("INVALID_PARAMS");
+    expect(body.error?.message).toMatch(/Termen prea lung/);
   });
 
   it("q cu control chars este sanitizat", async () => {
@@ -160,7 +168,9 @@ describe("POST /api/rnpm/search/:searchId/filter", () => {
       body: JSON.stringify({ q: "test" }),
     });
     expect(res.status).toBe(404);
-    expect(((await res.json()) as FilterRouteBody).error).toBe("Search inexistent");
+    const body = (await res.json()) as FilterRouteBody;
+    expect(body.error?.code).toBe("NOT_FOUND");
+    expect(body.error?.message).toBe("Search inexistent");
   });
 
   it("kill switch RNPM_RESULTS_FILTER_DISABLED=1 -> 503 cu code FILTER_DISABLED", async () => {
@@ -173,7 +183,7 @@ describe("POST /api/rnpm/search/:searchId/filter", () => {
     });
     expect(res.status).toBe(503);
     const body = (await res.json()) as FilterRouteBody;
-    expect(body.code).toBe("FILTER_DISABLED");
+    expect(body.error?.code).toBe("FILTER_DISABLED");
     expect(JSON.stringify(body)).not.toContain("RNPM_RESULTS_FILTER_DISABLED");
   });
 
@@ -215,7 +225,9 @@ describe("POST /api/rnpm/search/:searchId/filter", () => {
       body: JSON.stringify({ q: "popescu" }),
     });
     expect(res.status).toBe(404);
-    expect(((await res.json()) as FilterRouteBody).error).toBe("Search inexistent");
+    const body = (await res.json()) as FilterRouteBody;
+    expect(body.error?.code).toBe("NOT_FOUND");
+    expect(body.error?.message).toBe("Search inexistent");
   });
 
   it("matchedCount > 1500 -> truncated=true, matchedAvizIds capped la limit configurat", async () => {

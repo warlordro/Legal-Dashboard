@@ -143,8 +143,9 @@ describe("RNPM owner isolation — Alice vs Bob", () => {
         headers: { "x-test-owner": "bob" },
       });
       expect(res.status).toBe(404);
-      const body = await jsonOf<{ error: string }>(res);
-      expect(typeof body.error).toBe("string");
+      const body = await jsonOf<{ error: { code: string; message: string } }>(res);
+      expect(body.error.code).toBe("NOT_FOUND");
+      expect(typeof body.error.message).toBe("string");
     });
 
     it("Alice can fetch her own aviz", async () => {

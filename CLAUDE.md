@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.25.0** - 13 Mai 2026
+**v2.27.0** - 14 Mai 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 

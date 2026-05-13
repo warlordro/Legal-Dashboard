@@ -35,19 +35,19 @@ Target release: **v2.20.6** (LIVRAT).
 
 ---
 
-## Batch 1 — API envelope consistency (MED risk, 2-3h) — partially DONE
+## Batch 1 — API envelope consistency (MED risk, 2-3h) — DONE in v2.26.0
 
-Target release: **v2.20.6 (1.1 only)** + **PR-6** (rest deferred).
+Target release: **v2.20.6 (1.1 only)** + **v2.26.0 / PR-6** (LIVRAT local, Task 1-8).
 
 Standard envelope (din v2.14.0): `{ data: T | null, error: { code, message } | null, requestId }`. Mai multe rute returneaza inca shape-uri legacy.
 
 - [x] **`backend/src/middleware/requireRole.ts:35-60`** — 401/403 returneaza acum `fail()` cu `data: null` + `requestId`. ✅ LIVRAT v2.20.6 (Batch 1.1).
-- [ ] **DEFER PR-6** — **`backend/src/routes/rnpm.ts:108-117`** — web-mode 501 returneaza raw `{ error: "..." }`. Migrare blocata de `rnpm.contract.test.ts` care asertea `expect(typeof body.error).toBe("string")` ca guard de migrare; `util/envelope.ts` cere migrare one-shot odata cu `@hono/zod-openapi`.
-- [ ] **DEFER PR-6** — **`backend/src/routes/ai.ts`** — toate caile 4xx/5xx legacy.
-- [ ] **DEFER PR-6** — **`bodyTooLarge` 413** in `rnpm.ts` + `termene.ts` — raw `{ error: "Payload prea mare" }`.
-- [ ] **DEFER PR-6** — **Pagination 400 vs 422** — `page=0` raspunde 400 cu cod `INVALID_PAGE`; alinieaza-l cu envelope.
-- [ ] **DEFER PR-6** — **Captcha balance** — `400 INSUFFICIENT_FUNDS` ar trebui `503 SERVICE_UNAVAILABLE` cu envelope.
-- [ ] **DEFER PR-6** — **Zod 422 -> 400** — alineaza la `400 VALIDATION_ERROR`.
+- [x] **PR-6 / v2.26.0** — **`backend/src/routes/rnpm.ts`** — web-mode 501 si caile legacy 4xx/5xx migrate la envelope; contract tests actualizate.
+- [x] **PR-6 / v2.26.0** — **`backend/src/routes/ai.ts`** — toate caile HTTP 4xx/5xx legacy migrate la envelope; payload-urile SSE raman nemigrate.
+- [x] **PR-6 / v2.26.0** — **`bodyTooLarge` 413** in `rnpm.ts` + `termene.ts` — migrat la `PAYLOAD_TOO_LARGE`.
+- [x] **PR-6 / v2.26.0** — **Pagination** — migrat shape-only unde era cazul; nu s-a introdus `INVALID_PAGE` nou unde exista coercitie silentioasa.
+- [x] **PR-6 / v2.26.0** — **Captcha balance** — `INSUFFICIENT_FUNDS` raspunde 402 Payment Required cu `Retry-After: 0`, detectat prin `CaptchaInsufficientFundsError`.
+- [x] **PR-6 / v2.26.0** — **Zod / validare params** — caile migrate returneaza envelope cu coduri standardizate (`INVALID_JSON`, `INVALID_PARAMS`, `UNKNOWN_MODEL`, `MISSING_API_KEY`, etc.).
 
 **Risc modificare:** MEDIU — schimba shape-ul de eroare consumat de UI. **Decizie 2026-05-10 (v2.20.6):** singura migrare facuta in afara PR-6 e `requireRole.ts` (admin guard) pentru ca pre-migration shape-ul era deja `{ error: { code, message } }` raw — schimbarea la `fail()` e strict aditiva (`data: null` + `requestId` adaugate). Migrarea pe rute care emit raw `{ error: "..." }` (string) ar sparge `rnpm.contract.test.ts` si frontend client (`api.ts` fallback dual-shape NU e o invitatie la migrare incrementala — e doar safety net pentru PR-6). Restul Batch-ului 1 ramane in PR-6 (`@hono/zod-openapi`).
 
