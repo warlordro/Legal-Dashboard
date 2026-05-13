@@ -45,7 +45,8 @@ export function RnpmDetailModal({ avizId, onClose }: RnpmDetailModalProps) {
 export function RnpmAvizDetailContent({
   avizId,
   onIdentificatorLoaded,
-}: { avizId: number; onIdentificatorLoaded?: (id: string) => void }) {
+  filterTokens: _filterTokens = [],
+}: { avizId: number; onIdentificatorLoaded?: (id: string) => void; filterTokens?: string[] }) {
   const [data, setData] = useState<RnpmAvizFull | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
