@@ -13,7 +13,7 @@ import {
 } from "../services/rnpmSearchService.ts";
 import { defaultRnpmClient, RnpmError, type RnpmSearchType } from "../services/rnpmClient.ts";
 import { validateSubTypeLabels } from "../services/rnpmSubTypes.ts";
-import { getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
+import { CaptchaInsufficientFundsError, getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
 import { getDbPath, compactDb } from "../db/schema.ts";
 import {
   getBackupDir,
@@ -1098,15 +1098,19 @@ rnpmRouter.post("/captcha/balance", limitSmall, async (c) => {
   try {
     body = await c.req.json();
   } catch {
-    return c.json({ error: "JSON invalid" }, 400);
+    return c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400);
   }
   const { captchaKey, captchaProvider } = (body ?? {}) as { captchaKey?: unknown; captchaProvider?: unknown };
-  if (typeof captchaKey !== "string") return c.json({ error: "Cheie lipsa" }, 400);
+  if (typeof captchaKey !== "string") return c.json(fail(ErrorCodes.INVALID_CAPTCHA_KEY, "Cheie lipsa", c), 400);
   try {
     const balance = await getCaptchaBalance(captchaKey, parseProvider(captchaProvider));
     return c.json({ balance });
   } catch (e) {
+    if (e instanceof CaptchaInsufficientFundsError) {
+      c.header("Retry-After", "0");
+      return c.json(fail(ErrorCodes.INSUFFICIENT_FUNDS, e.message, c), 402);
+    }
     const msg = e instanceof Error ? e.message : "Eroare";
-    return c.json({ error: msg }, 400);
+    return c.json(fail(ErrorCodes.CAPTCHA_BALANCE_UNAVAILABLE, msg, c), 400);
   }
 });

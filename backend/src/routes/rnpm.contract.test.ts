@@ -25,7 +25,7 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { rnpmRouter } from "./rnpm.ts";
 import { closeDb, getDb } from "../db/schema.ts";
@@ -33,6 +33,14 @@ import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
 import { updateUserRole } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
+
+vi.mock("../services/captchaSolver.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../services/captchaSolver.ts")>();
+  return {
+    ...actual,
+    getCaptchaBalance: vi.fn(),
+  };
+});
 
 let tmpRoot: string;
 
@@ -100,6 +108,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.clearAllMocks();
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
@@ -470,26 +479,61 @@ describe("POST /api/v1/rnpm/bulk input validation", () => {
 
 describe("POST /api/v1/rnpm/captcha/balance input validation", () => {
   // Only validation branches — happy path requires a real captcha provider.
-  it("returns 400 + { error } when key field is missing", async () => {
+  it("returns 400 INVALID_CAPTCHA_KEY envelope when key field is missing", async () => {
     const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_CAPTCHA_KEY");
   });
 
-  it("returns 400 + { error } on malformed JSON", async () => {
+  it("returns 400 INVALID_JSON envelope on malformed JSON", async () => {
     const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: "not-json",
     });
     expect(res.status).toBe(400);
-    const body = await jsonOf<{ error: string }>(res);
-    expect(typeof body.error).toBe("string");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INVALID_JSON");
+  });
+
+  it("returns 402 INSUFFICIENT_FUNDS cand provider raporteaza fonduri insuficiente", async () => {
+    const { CaptchaInsufficientFundsError, getCaptchaBalance } = await import("../services/captchaSolver.ts");
+    vi.mocked(getCaptchaBalance).mockRejectedValueOnce(
+      new CaptchaInsufficientFundsError("Sold insuficient (2Captcha)")
+    );
+
+    const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captchaKey: "0".repeat(32), captchaProvider: "2captcha" }),
+    });
+
+    expect(res.status).toBe(402);
+    expect(res.headers.get("Retry-After")).toBe("0");
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "INSUFFICIENT_FUNDS");
+    expect(body.error.message).toContain("Sold insuficient");
+  });
+
+  it("returns 400 CAPTCHA_BALANCE_UNAVAILABLE pentru alte erori provider", async () => {
+    const { getCaptchaBalance } = await import("../services/captchaSolver.ts");
+    vi.mocked(getCaptchaBalance).mockRejectedValueOnce(new Error("Could not parse balance response"));
+
+    const res = await buildApp().request("/api/v1/rnpm/captcha/balance", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captchaKey: "0".repeat(32), captchaProvider: "2captcha" }),
+    });
+
+    expect(res.status).toBe(400);
+    const body = await jsonOf<EnvelopeErrorBody>(res);
+    expectEnvelopeError(body, "CAPTCHA_BALANCE_UNAVAILABLE");
+    expect(body.error.message).toBe("Could not parse balance response");
   });
 });
 
