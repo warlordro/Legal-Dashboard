@@ -1,6 +1,6 @@
-# RNPM Results Text Filter — Implementation Plan
+# RNPM Results Text Filter — Implementation Plan (pentru Codex)
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **Pentru Codex (executant):** Acesta este planul tau de lucru, self-contained. Citeste sectiunea **"Pentru Codex: cum sa folosesti acest fisier"** de mai jos, apoi parcurge task-urile 0 -> 10 strict in ordine. Owner-ul (Cezar) supervizeaza si revizuieste intre commit-uri.
 
 **Goal:** Adauga un filtru text incremental peste rezultatele unei cautari RNPM (`/api/rnpm/search/:searchId/filter`) cu owner isolation, anti-enumeration 404, AbortSignal timeout 5s, truncare 1500 ID-uri si counter `missingDetails` transparent. Zero regresii pe `getAvize()` si `/api/rnpm/saved?q=`.
 
@@ -8,9 +8,55 @@
 
 **Tech Stack:** TypeScript strict, Hono, better-sqlite3, Vitest, React 18, Zod, biome. Target: v2.24.0, branch `feat/rnpm-results-filter`.
 
-**Reference spec:** `docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md` (commit `38cdac3`).
+**Reference spec (citeste-l INTAI):** `docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md` (commit `38cdac3`). Aici e contextul complet: decizii arhitecturale, threat model, contracte API, edge cases. Planul de mai jos e executia pas-cu-pas; spec-ul explica "de ce".
 
-**Limba**: romana fara diacritice in surse cod, comentarii, UI strings.
+**Conventii proiect (citeste si):** `CLAUDE.md` (root) si `backend/CLAUDE.md` daca exista. Atentie speciala la sectiunea "Workflow obligatoriu pentru push pe GitHub" si "Checklist bump de versiune".
+
+**Limba**: romana fara diacritice in surse cod, comentarii, UI strings, commit messages.
+
+---
+
+## Pentru Codex: cum sa folosesti acest fisier
+
+**1. Setup initial (o singura data, inainte de Task 0):**
+
+- Working directory: `c:\Users\Cezar\Desktop\Claude Code\Legal Dashboard` (Windows + PowerShell sau bash via Git for Windows).
+- Verifica `git status` clean si `git branch --show-current` = `main`.
+- Citeste integral spec-ul de la `docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md`. Daca un task pare ambiguu, raspunsul e in spec.
+- Citeste `CLAUDE.md` root pentru conventii (biome obligatoriu inainte de push, romana fara diacritice, etc.).
+
+**2. Cum executi un task:**
+
+- Fiecare task are 4-11 pasi numerotati (`Step N.M`). Executa-i IN ORDINE.
+- Pasii cu `Run:` au comenzi exacte — copy-paste si executa.
+- Pasii cu cod TypeScript / SQL au continutul exact ce trebuie scris in fisier. NU improviza variabile sau structuri alternative.
+- TDD strict: scrie testul INTAI, ruleaza-l, vezi FAIL, apoi implementeaza pana trece. NU sari peste pasul "verifica testul pica" — e parte din metoda.
+- La sfarsitul fiecarui task exista un `git commit`. NU bate task-uri intr-un singur commit.
+
+**3. Cand sa te opresti si sa raportezi:**
+
+- Daca un test PICA dupa implementare si nu intelegi de ce dupa 2 incercari → STOP, raporteaza la Cezar cu output-ul exact.
+- Daca planul iti cere sa modifici o linie care nu exista (codebase-ul a evoluat) → STOP, raporteaza.
+- Daca biome / tsc / build pica pe ceva ce planul nu explica → STOP, raporteaza output-ul.
+- Daca o decizie arhitecturala pare contradictorie cu spec-ul → STOP, citeaza ambele locuri si intreaba.
+
+**4. Cum raportezi status la final de task:**
+
+Dupa `git commit` la finalul unui task, scrie un mesaj scurt cu:
+- `Status: DONE | DONE_WITH_CONCERNS | BLOCKED`
+- Ce ai implementat (file paths atinse)
+- Test results (X tests pass / Y total)
+- Concerns (daca DONE_WITH_CONCERNS): ce te-a deranjat, dar nu blocheaza.
+- Blocker (daca BLOCKED): ce ai incercat + ce ai vazut.
+
+**5. Reguli non-negotiable:**
+
+- NU modifica `getAvize()` din `backend/src/db/avizRepository.ts` (linii 422-506). Niciun caracter. Functionalitatea `/api/rnpm/saved?q=` trebuie sa ramana identica.
+- NU folosi `/api/v1/rnpm/...` — productia este montata la `/api/rnpm` (vezi `backend/src/index.ts:242`).
+- NU exporta `buildResultsFilterClause` — e helper privat al `filterRnpmSearchResults`.
+- NU folosi GET pentru ruta de filtru — POST obligatoriu (anti-leak in `logger()`).
+- NU sterge `.git/`, NU `git push --force` pe main, NU `git reset --hard` pe modificari ne-commit-uite.
+- Biome obligatoriu inainte de fiecare `git commit`: `npx biome check --write <fisiere-atinse>`. Daca biome reformateaza, re-stage cu `git add` inainte de commit.
 
 ---
 
