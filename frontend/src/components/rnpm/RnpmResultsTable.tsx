@@ -7,9 +7,11 @@ import { exportRnpmExcel, exportRnpmPDF } from "@/lib/rnpmExport";
 import { getRnpmAvizStatusDisplay } from "@/lib/rnpmAvizStatus";
 import { RnpmAvizDetailContent } from "./RnpmDetailModal";
 import { TablePagination } from "@/components/table-pagination";
+import { useRnpmResultsFilter } from "@/hooks/useRnpmResultsFilter";
 import type { RnpmDocument } from "@/types/rnpm";
 
 export interface RnpmResultsTableResult {
+  searchId?: number | null;
   total: number;
   pagesTotal: number;
   pageSize: number;
@@ -111,6 +113,7 @@ export function RnpmResultsTable({
   const [pageSize, setPageSize] = useState(15);
   const [sortKey, setSortKey] = useState<SortKey>("no");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [filterQuery, setFilterQuery] = useState("");
   const tableRef = useRef<HTMLDivElement>(null);
 
   const toggleSort = (key: SortKey) => {
@@ -152,6 +155,11 @@ export function RnpmResultsTable({
 
   const resultCriteriu = result?.criteriu;
   const resultDocumentCount = result?.documents.length ?? 0;
+  const filter = useRnpmResultsFilter(result?.searchId ?? null, filterQuery);
+  const matchedSet = useMemo(() => {
+    if (!filter.data) return null;
+    return new Set(filter.data.matchedAvizIds);
+  }, [filter.data]);
 
   useEffect(() => {
     void resultCriteriu;
@@ -165,9 +173,16 @@ export function RnpmResultsTable({
     }
   }, [resultCriteriu, resultDocumentCount]);
 
+  useEffect(() => {
+    if (filter.data) setPage(0);
+  }, [filter.data]);
+
   const sortedPairs = useMemo(() => {
     if (!result) return [];
     let pairs = result.documents.map((doc, idx) => ({ doc, avizId: result.avizIds[idx] ?? null }));
+    if (matchedSet) {
+      pairs = pairs.filter((p) => p.avizId != null && matchedSet.has(p.avizId));
+    }
     const startMs = dateStart ? new Date(`${dateStart}T00:00:00`).getTime() : null;
     const endMs = dateEnd ? new Date(`${dateEnd}T23:59:59`).getTime() : null;
     if (startMs != null || endMs != null) {
@@ -200,7 +215,7 @@ export function RnpmResultsTable({
       }
     };
     return [...pairs].sort(cmp);
-  }, [result, sortKey, sortDir, dateStart, dateEnd]);
+  }, [result, matchedSet, sortKey, sortDir, dateStart, dateEnd]);
 
   if (!result) return null;
   if (result.total === 0) {
@@ -240,6 +255,8 @@ export function RnpmResultsTable({
   const endIdx = startIdx + pageSize;
   const paged = sortedPairs.slice(startIdx, endIdx);
   const hasMore = result.nextRnpmPage != null;
+  const exportCountLabel =
+    selected.size > 0 ? `(${selected.size})` : matchedSet ? `(${sortedPairs.length} filtrate)` : "";
 
   return (
     <div className="space-y-3">
@@ -248,8 +265,8 @@ export function RnpmResultsTable({
           <span>
             {result.total.toLocaleString("ro-RO")} rezultate · incarcate {result.documents.length}
             {elapsedMs != null && <span> ({formatElapsed(elapsedMs)})</span>}
-            {(dateStart || dateEnd) && sortedPairs.length !== result.documents.length && (
-              <span className="ml-1 text-amber-600">· {sortedPairs.length} dupa filtru data</span>
+            {(dateStart || dateEnd || matchedSet) && sortedPairs.length !== result.documents.length && (
+              <span className="ml-1 text-amber-600">· {sortedPairs.length} dupa filtre</span>
             )}
           </span>
           {selected.size > 0 && <span className="font-medium text-violet-600">({selected.size} selectate)</span>}
@@ -287,7 +304,7 @@ export function RnpmResultsTable({
             }}
           >
             {exporting === "xlsx" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}{" "}
-            Excel {selected.size > 0 ? `(${selected.size})` : ""}
+            Excel {exportCountLabel}
           </Button>
           <Button
             variant="outline"
@@ -312,7 +329,7 @@ export function RnpmResultsTable({
             }}
           >
             {exporting === "pdf" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} PDF{" "}
-            {selected.size > 0 ? `(${selected.size})` : ""}
+            {exportCountLabel}
           </Button>
         </div>
       </div>
@@ -334,6 +351,43 @@ export function RnpmResultsTable({
         <p className="truncate text-[11px] text-muted-foreground/70" title={result.criteriu}>
           {result.criteriu}
         </p>
+      )}
+
+      {result.searchId != null && (
+        <div className="mb-3 space-y-2">
+          <div className="flex items-center gap-2">
+            <input
+              type="text"
+              value={filterQuery}
+              onChange={(e) => setFilterQuery(e.target.value)}
+              placeholder="Filtreaza rezultatele (debitor, creditor, descriere bun, identificator...)"
+              aria-label="Filtru text peste rezultatele cautarii RNPM"
+              className="w-full max-w-md rounded border border-gray-300 px-3 py-1 text-sm focus:border-blue-500 focus:outline-none disabled:bg-gray-100"
+              disabled={filter.disabled}
+              maxLength={200}
+            />
+            {filter.loading && <span className="text-xs text-gray-500">Filtrez...</span>}
+            {filter.error && <span className="text-xs text-red-600">{filter.error}</span>}
+            {filter.disabled && <span className="text-xs text-amber-600">Filtru indisponibil temporar.</span>}
+          </div>
+          {filter.data && (
+            <div className="text-xs text-gray-600">
+              {filter.data.matchedCount === filter.data.totalInSearch
+                ? `${filter.data.totalInSearch} avize`
+                : `${filter.data.matchedCount} din ${filter.data.totalInSearch} avize`}
+              {filter.data.truncated && (
+                <span className="ml-2 text-amber-600">
+                  Afisez primele {filter.data.matchedAvizIds.length}. Restrange textul pentru rezultate complete.
+                </span>
+              )}
+              {filter.data.missingDetails > 0 && (
+                <span className="ml-2 text-amber-600">
+                  {filter.data.missingDetails} avize fara detalii - unele rezultate pot fi ascunse.
+                </span>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       <div ref={tableRef} className="overflow-x-auto rounded-lg border border-border">
