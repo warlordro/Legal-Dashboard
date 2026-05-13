@@ -4,6 +4,42 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.24.0] - 2026-05-13
+
+### Filtru text peste rezultatele cautarii RNPM
+
+Endpoint nou `POST /api/rnpm/search/:searchId/filter` pentru filtrare
+incrementala peste rezultatele unei cautari RNPM deja salvate. Ruta foloseste
+POST ca sa nu expuna `q` in URL logs, valideaza body-ul cu Zod, aplica owner
+isolation cu anti-enumeration 404 pentru `searchId` inexistent sau cross-owner,
+are timeout intern 5s si returneaza maximum 1500 ID-uri cu flag `truncated`.
+
+#### Backend
+
+- Migration 0021 adauga indexul `idx_rnpm_avize_owner_search` pe
+  `(owner_id, search_id, id)`, cu test de idempotenta UP/DOWN si boot-time probe
+  in `schema.ts`.
+- Helper nou `filterRnpmSearchResults`, separat de `getAvize()`, cauta peste
+  24 campuri normalizate: 9 din `rnpm_avize`, 3 creditori, 3 debitori si 9
+  bunuri, inclusiv `rnpm_bunuri_descrieri.text` via JOIN.
+- Kill switch operational `RNPM_RESULTS_FILTER_DISABLED=1`: ruta raspunde 503
+  cu `FILTER_DISABLED`, iar UI-ul ascunde inputul si afiseaza state degraded.
+
+#### Frontend
+
+- Client API `filterRnpmResults` si hook `useRnpmResultsFilter` cu debounce
+  300ms, AbortController si suport pentru abort/disabled/truncate.
+- `RnpmResultsTable` primeste input live de filtru, bannere pentru
+  `missingDetails` si `truncated`, iar paginarea si exportul folosesc acelasi
+  set filtrat afisat in tabel.
+
+#### Tests
+
+- 51 teste noi: 4 migration, 17 repository unit, 1 EXPLAIN QUERY PLAN, 2
+  cross-tenant breach drill, 13 route, 7 hook si 7 component integration.
+
+---
+
 ## [2.23.0] - 2026-05-13
 
 ### Master switch monitoring — pauza/reluare globala per-owner

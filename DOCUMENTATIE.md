@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.23.0** (13 Mai 2026, master switch monitoring per-owner: migration 0020 `owner_monitoring_settings` cu partial index pentru anti-join scheduler claim, rute `GET/PUT /api/v1/monitoring/master-switch` cu audit `monitoring.master_switch.on/.off`, frontend hook + banner + buton in toolbar). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.24.0** (13 Mai 2026, filtru text incremental peste rezultatele cautarii RNPM: migration 0021 `idx_rnpm_avize_owner_search`, ruta `POST /api/rnpm/search/:searchId/filter` cu owner isolation + anti-enumeration 404 + timeout 5s + kill switch, hook frontend cu debounce/AbortController si input live in `RnpmResultsTable`). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)

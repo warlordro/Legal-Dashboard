@@ -38,6 +38,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.24.0",
+    date: "13 Mai 2026",
+    subtitle:
+      "Filtru text incremental peste rezultatele cautarii RNPM. Endpoint nou POST /api/rnpm/search/:searchId/filter cu owner isolation, anti-enumeration 404, timeout 5s, truncare la 1500 ID-uri si kill switch operational. UI-ul filtreaza live rezultatele din RnpmResultsTable cu debounce 300ms, AbortController si bannere transparente pentru rezultate trunchiate sau avize fara detalii.",
+    icon: <FileSpreadsheet className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400",
+    sections: [
+      {
+        title: "Migration 0021 - idx_rnpm_avize_owner_search",
+        content:
+          "Index nou `(owner_id, search_id, id)` pentru filtrarea peste rezultatele unei cautari salvate, plus test de idempotenta UP/DOWN si boot-time probe care verifica prezenta indexului la startup.",
+      },
+      {
+        title: "Backend - filtru dedicat, fara regresie pe getAvize",
+        content:
+          "`filterRnpmSearchResults` sta separat de `getAvize()` si cauta peste 24 campuri normalizate: 9 din `rnpm_avize`, 3 creditori, 3 debitori si 9 bunuri, inclusiv `rnpm_bunuri_descrieri.text` via JOIN. Ruta POST valideaza body-ul cu Zod, nu pune `q` in URL logs, logheaza doar `qLen`, aplica anti-enumeration 404 pentru searchId inexistent sau cross-owner si returneaza `missingDetails` + `truncated`.",
+      },
+      {
+        title: "Frontend - filtru live in tabelul de rezultate",
+        content:
+          "`RnpmResultsTable` primeste input de filtru text, hook dedicat `useRnpmResultsFilter`, debounce 300ms si abort pe query nou/unmount. Filtrarea se face local pe perechi `avizId` + document, astfel exportul si paginarea folosesc exact setul filtrat afisat.",
+      },
+      {
+        title: "Operational + tests",
+        content:
+          "`RNPM_RESULTS_FILTER_DISABLED=1` opreste rapid ruta si UI-ul afiseaza state degraded. 51 teste noi acopera migration, repository helper, EXPLAIN QUERY PLAN, cross-tenant breach drill, route validation/errors, hook debounce/abort si component integration.",
+      },
+    ],
+  },
+  {
     version: "v2.23.0",
     date: "13 Mai 2026",
     subtitle:

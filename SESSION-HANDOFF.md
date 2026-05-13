@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.23.0 (2026-05-13)
+**Versiune curenta**: v2.24.0 (2026-05-13)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -15,6 +15,7 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
 | `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` | Scheduler-ul nu mai claim-uieste tipurile listate; joburile raman in DB, alertele existente raman accesibile | Stop temporar pe sursa upstream cu probleme (PortalJust SOAP rate-limit) |
 | `RNPM_AUDIT_CAP_HIT_DISABLED=1` | `POST /api/v1/rnpm/search-split` sare INSERT-ul `rnpm.cap_hit` din `audit_log`; restul flow-ului (SSE, decision, captchasUsed) ruleaza neschimbat | Stop urgent daca tabela audit creste suspect sau introduce contention vizibil pe write |
 | `RNPM_RUNTIME_VALIDATION_ENFORCED=1` | Promoveaza validarea runtime RNPM de la `safeParse` + warning la fail loud pe payload invalid | Activare dupa o perioada stabila de observatie a raspunsurilor upstream |
+| `RNPM_RESULTS_FILTER_DISABLED=1` | Ruta POST `/api/rnpm/search/:searchId/filter` raspunde 503 cu `code: "FILTER_DISABLED"`; UI ascunde inputul si arata banner | Stop urgent daca filtrul provoaca contention DB sau bug regresat |
 | `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (+ `ACK_NO_AUTH=...` + `AUTH_MODE=web`) | Backend-ul accepta bind non-loopback | Setup web/server, niciodata desktop |
 | Cooldown POST `/email-settings/test` (60s/owner) | Ruta returneaza 429 cu `Retry-After`; audit `me.email_settings.test outcome=denied reason=cooldown` | Limita built-in vs user click loop pe butonul "Trimite test" |
 | `drainEmailDispatches(timeoutMs)` | Asteapta SMTP-urile in flight inainte sa inchida DB-ul; default 10s, shutdown 5s | Gracefull shutdown — invocat automat din `gracefulShutdown()` |
@@ -61,6 +62,22 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
+
+## Sprint inchis 2026-05-13 - Filtru text rezultate RNPM
+
+**Status**: livrat integral pe branch `feat/rnpm-results-filter`. 9 commit-uri TDD planificate pentru implementare + release, cu biome, tsc si 51 teste noi pe zonele schimbate.
+
+**Trigger**: search RNPM cu zeci-sute de avize facea inutil scroll-ul fara filtru text peste rezultatele deja gasite. Planul/spec-ul au fost realiniate la schema curenta inainte de Task 2: `rnpm_bunuri` nu are `descriere_proprie`, iar textul descrierii vine exclusiv prin `descriere_id -> rnpm_bunuri_descrieri.text`.
+
+**Solutie**: endpoint nou `POST /api/rnpm/search/:searchId/filter` cu helper repository dedicat, fara refactor pe `getAvize()`. Helper-ul cauta in 24 campuri normalizate pe `rnpm_norm()`: 9 din `rnpm_avize`, 3 creditori, 3 debitori si 9 bunuri, inclusiv `rnpm_bunuri_descrieri.text` via JOIN. UI-ul filtreaza local pe `Set<avizId>` si pastreaza exportul/paginarea aliniate cu randurile vizibile. Spec full: [`docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md`](docs/superpowers/specs/2026-05-13-rnpm-results-text-filter-design.md).
+
+**Decizii arhitecturale cheie**:
+- POST, nu GET - evita leak `q` in Hono `logger()` URL.
+- Anti-enumeration 404 pentru `searchId` neexistent sau apartinand altui owner.
+- `AbortSignal.any([req.signal, AbortSignal.timeout(5000)])` - cancel client + timeout intern.
+- Truncare la 1500 ID-uri cu `truncated: boolean`.
+- `missingDetails` counter transparent - UI banner non-blocant pentru avize fara detalii.
+- Helper privat `buildResultsFilterClause` - nu este partajat cu `getAvize().searchText`, pentru zero-regresie pe `/api/rnpm/saved?q=`.
 
 ## Sprint inchis 2026-05-13 — Migrare exporturi server-side streaming
 

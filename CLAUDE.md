@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.23.0** - 13 Mai 2026
+**v2.24.0** - 13 Mai 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -80,7 +80,7 @@ legal-dashboard/
 Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhitecturale cheie:
 - Repository-only DB access: SQL raw doar in `backend/src/db/**`
 - `owner_id` pe toate tabelele (DEFAULT `'local'`)
-- Migrations in `backend/src/db/migrations/` (latest 0019)
+- Migrations in `backend/src/db/migrations/` (latest 0021)
 - Backend bundled CJS (esbuild) - vezi `## Nota Importanta Build`
 - Tabele monitoring: `monitoring_jobs`, `monitoring_runs`, `monitoring_snapshots`, `monitoring_alerts`, `owner_email_settings`
 
@@ -93,7 +93,7 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - `npm run dist` - electron-builder pentru Windows NSIS
 - `npm run dist:mac` - electron-builder pentru macOS DMG (x64 + arm64; pe runner macOS)
 - `npm run dist:server` - ZIP server deployabil; Docker Build ruleaza in GitHub Actions la push pe `main`
-- `npm test --workspace=backend` - vitest backend (926 teste in v2.23.0)
+- `npm test --workspace=backend` - vitest backend
 - `cd frontend && npm test -- --run` - vitest frontend (102 teste)
 - `npx tsc --noEmit -p backend/tsconfig.json` - type-check backend
 - `cd frontend && npx tsc --noEmit` - type-check frontend
