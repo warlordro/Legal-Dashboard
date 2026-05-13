@@ -57,14 +57,14 @@ export const versions: VersionEntry[] = [
           "`claimDueJobs` din scheduler filtreaza via anti-join cu partial index — joburile owner-ilor cu `monitoring_enabled = 0` nu mai apar in result set, deci scheduler-ul nu le mai atinge intre ticks. Rute `GET/PUT /api/v1/monitoring/master-switch` cu Zod `.strict()` validation (422 pe payload invalid), upsert idempotent, audit entry `monitoring.master_switch.on/.off` cu `actor_id` (owner-id) + `request_id` propagate, scris doar pe schimbare reala de state (no-op = no audit).",
       },
       {
-        title: "Frontend — hook + banner + toolbar button",
+        title: "Frontend — hook + buton in cardul de joburi",
         content:
-          "`useMonitoringMasterSwitch` hook cu `enabled / loading / saving / toggle(next) / refresh()`, `AbortController` pe GET (cleanup la unmount) si optimistic flip cu rollback pe esec. Buton `Opreste/Reia monitorizarea` in toolbar-ul paginii Monitorizare cu spinner pe saving. Banner amber persistent `MasterSwitchBanner` (`<output aria-live='polite'>`) randat sub header cand monitorizarea e oprita — buton stateless, parent owns the hook (no double subscription).",
+          "`useMonitoringMasterSwitch` hook cu `enabled / loading / saving / toggle(next) / refresh()`, `AbortController` pe GET (cleanup la unmount) si optimistic flip cu rollback pe esec. Buton `Opreste/Reia monitorizarea` plasat in headerul cardului `Monitorizari active`, langa export Excel/PDF, cu spinner pe saving. Cand master e off, iconita per-rand de pauza individuala (`job.active`) e fortata la `Play` ca semnal vizual coerent ca scheduler-ul nu ruleaza nimic — toggle-ul per-job ramane functional pentru pre-configurare.",
       },
       {
         title: "Tests",
         content:
-          "926 teste backend (26 noi: migration + repository + scheduler anti-join + route GET/PUT/422 + audit propagation + idempotency cu rapid back-to-back PUTs pe ambele directii .on/.off) si 105 teste frontend (1 nou pentru `refresh()` care reflecta un flip server-side de la alt client).",
+          "926 teste backend (26 noi: migration + repository + scheduler anti-join + route GET/PUT/422 + audit propagation + idempotency cu rapid back-to-back PUTs pe ambele directii .on/.off) si 102 teste frontend (1 nou pentru `refresh()` care reflecta un flip server-side de la alt client).",
       },
     ],
   },

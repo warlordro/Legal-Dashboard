@@ -19,8 +19,9 @@ reset, fara dublu-run. Audit complet pe ambele directii
 (`monitoring.master_switch.on/.off`) cu `request_id` + `actor_id` propagate.
 Migration noua 0020 (`owner_monitoring_settings` + partial index), endpoint-uri
 `GET/PUT /api/v1/monitoring/master-switch` cu Zod `.strict()` validation,
-frontend hook + banner amber persistent + buton in toolbar. **926 teste backend,
-105 teste frontend**.
+frontend hook + buton in headerul cardului "Monitorizari active" + flip al
+iconitei per-rand la `Play` cand master e off. **926 teste backend, 102 teste
+frontend**.
 
 Predecesor **v2.22.0** - supply chain hardening + polish (Batch 7 + Batch 8
 din `FIXES-TODO.md`) + migrare exporturi mari la backend streaming. GitHub Actions

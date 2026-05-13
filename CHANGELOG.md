@@ -55,13 +55,13 @@ directii (`monitoring.master_switch.on` / `.off`) cu `request_id` +
   hook cu `enabled / loading / saving / toggle(next) / refresh()`,
   `AbortController` pe GET (cleanup la unmount), optimistic flip cu
   rollback pe esec si rethrow ca caller-ul sa poata afisa toast.
-- [frontend/src/components/monitoring/MasterSwitchBanner.tsx](frontend/src/components/monitoring/MasterSwitchBanner.tsx):
-  banner amber persistent in capul card-ului de joburi cand
-  `enabled=false` (live region cu `<output aria-live="polite">`), buton
-  "Reia" stateless (parent owns the hook).
 - [frontend/src/pages/Monitorizare.tsx](frontend/src/pages/Monitorizare.tsx):
-  toolbar primeste buton "Opreste/Reia monitorizarea" cu spinner pe
-  `saving`, banner-ul randat sub header cand monitorizarea e oprita.
+  card-ul "Monitorizari active" primeste buton "Opreste/Reia
+  monitorizarea" (langa Excel/PDF) cu spinner pe `saving`. Cand
+  master e off, iconita per-rand de pauza individuala (`job.active`)
+  e fortata la `Play` ca semnal vizual coerent ca scheduler-ul nu
+  ruleaza nimic — toggle-ul per-job ramane functional pentru
+  pre-configurare.
 
 #### Audit + tests
 
@@ -71,7 +71,7 @@ directii (`monitoring.master_switch.on` / `.off`) cu `request_id` +
   route GET/PUT/422, audit propagation, idempotency cu rapid back-to-back
   PUTs pe ambele directii). 1 test frontend nou pentru `refresh()` care
   re-fetcheaza si reflecta un flip server-side de la alt client.
-- **926 teste backend, 105 teste frontend** verde.
+- **926 teste backend, 102 teste frontend** verde.
 
 ---
 
