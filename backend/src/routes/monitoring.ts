@@ -24,8 +24,14 @@ import {
   updateJob,
   type MonitoringJobRow,
 } from "../db/monitoringJobsRepository.ts";
+import { getMonitoringEnabled, setMonitoringEnabled } from "../db/ownerMonitoringSettingsRepository.ts";
 import { getDb } from "../db/schema.ts";
-import { JobCreateBodySchema, JobListQuerySchema, JobUpdateBodySchema } from "../schemas/monitoring.ts";
+import {
+  JobCreateBodySchema,
+  JobListQuerySchema,
+  JobUpdateBodySchema,
+  MasterSwitchBodySchema,
+} from "../schemas/monitoring.ts";
 import { fail, ok } from "../util/envelope.ts";
 import { executeCreateMonitoringJob } from "../services/monitoring/commands/createMonitoringJob.ts";
 
@@ -501,4 +507,50 @@ monitoringRouter.post("/jobs/:id/run", limitMonitoringBody, async (c) => {
   });
 
   return c.json(ok({ runId }, c), 202);
+});
+
+// Faza B — per-owner master switch (global pause/resume monitoring claim).
+//
+// Contract (PLAN-MASTER-SWITCH-MONITORING.md):
+//   GET  /master-switch  -> { enabled: boolean }   (default true cand randul lipseste)
+//   PUT  /master-switch  -> body { enabled: boolean } strict; raspunde
+//                            { enabled, changed }. Audit log scris doar cand
+//                            changed=true (evita poluare la PUT-uri idempotente).
+//
+// Anti-join in claimDueJobs respecta monitoring_enabled = 0 fara mutatii pe
+// per-job state, deci pause/resume nu pierde context (next_run_at ramane in
+// trecut si jobul redevine claimable imediat dupa re-enable).
+monitoringRouter.get("/master-switch", (c) => {
+  const ownerId = getOwnerId(c);
+  const enabled = getMonitoringEnabled(ownerId);
+  return c.json(ok({ enabled }, c));
+});
+
+monitoringRouter.put("/master-switch", limitMonitoringBody, async (c) => {
+  const ownerId = getOwnerId(c);
+  const bodyResult = await readLimitedJsonBody(c);
+  if (!bodyResult.ok) return bodyResult.response;
+  const body = bodyResult.body;
+
+  const parsed = MasterSwitchBodySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Payload invalid", c, parsed.error.issues), 400);
+  }
+
+  // Atomic: SELECT pre-state + UPSERT + audit row commit impreuna. Daca
+  // procesul moare intre setMonitoringEnabled si recordAudit, ramanem cu
+  // "switch flip-uit fara urma in audit" — tranzactia inchide gaura.
+  const result = getDb().transaction((): { enabled: boolean; changed: boolean } => {
+    const { changed } = setMonitoringEnabled(ownerId, parsed.data.enabled);
+    if (changed) {
+      recordAudit(c, parsed.data.enabled ? "monitoring.master_switch.on" : "monitoring.master_switch.off", {
+        targetKind: "owner_monitoring_settings",
+        targetId: ownerId,
+        detail: { enabled: parsed.data.enabled },
+      });
+    }
+    return { enabled: parsed.data.enabled, changed };
+  })();
+
+  return c.json(ok(result, c));
 });

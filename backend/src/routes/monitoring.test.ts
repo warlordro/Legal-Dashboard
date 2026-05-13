@@ -1107,3 +1107,180 @@ describe("POST /api/v1/monitoring/jobs/bulk-delete (Stage 1 caracterizare)", () 
     expect(detail.count).toBe(2);
   });
 });
+
+// Faza B — per-owner master switch endpoints.
+//
+// Acopera (PLAN-MASTER-SWITCH-MONITORING.md):
+//   - GET intoarce enabled=true pe owner proaspat (rand absent).
+//   - PUT { enabled: false } pe rand absent: changed=true + audit
+//     monitoring.master_switch.off.
+//   - PUT idempotent (acelasi value): changed=false + ZERO audit rows.
+//   - PUT { enabled: true } dupa disable: changed=true + audit
+//     monitoring.master_switch.on.
+//   - Body invalid (cheie extra / tip gresit / vid): 400 invalid_body.
+//   - Owner isolation: PUT pe Alice nu schimba GET-ul pe Bob.
+describe("GET/PUT /api/v1/monitoring/master-switch", () => {
+  it("GET returns enabled=true for a fresh owner (default)", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/monitoring/master-switch");
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { enabled: boolean }; error?: unknown; requestId: string };
+    expect(json.error).toBeUndefined();
+    expect(json.data.enabled).toBe(true);
+    expect(json.requestId).toBeTruthy();
+  });
+
+  it("PUT enabled=false on fresh owner returns changed=true and writes audit .off", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as {
+      data: { enabled: boolean; changed: boolean };
+      error?: unknown;
+    };
+    expect(json.error).toBeUndefined();
+    expect(json.data).toEqual({ enabled: false, changed: true });
+
+    const offEvents = getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" });
+    expect(offEvents).toHaveLength(1);
+    expect(offEvents[0].target_kind).toBe("owner_monitoring_settings");
+    expect(offEvents[0].target_id).toBe("local");
+    expect(JSON.parse(offEvents[0].detail_json)).toMatchObject({ enabled: false });
+
+    // GET must reflect the new state.
+    const after = await app.request("/api/v1/monitoring/master-switch");
+    const afterJson = (await after.json()) as { data: { enabled: boolean } };
+    expect(afterJson.data.enabled).toBe(false);
+  });
+
+  it("PUT with same value is idempotent: changed=false, no second audit row", async () => {
+    const app = buildTestApp();
+    // First flip writes audit.
+    await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    // Second PUT with same value must be a no-op.
+    const res = await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { enabled: boolean; changed: boolean } };
+    expect(json.data).toEqual({ enabled: false, changed: false });
+
+    const offEvents = getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" });
+    expect(offEvents).toHaveLength(1);
+    const onEvents = getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.on" });
+    expect(onEvents).toHaveLength(0);
+  });
+
+  it("PUT enabled=true on absent row is a no-op (default already true): changed=false, no audit", async () => {
+    const app = buildTestApp();
+    const res = await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { enabled: boolean; changed: boolean } };
+    expect(json.data).toEqual({ enabled: true, changed: false });
+
+    expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.on" })).toHaveLength(0);
+    expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" })).toHaveLength(0);
+  });
+
+  it("PUT enabled=true after disable returns changed=true and writes audit .on", async () => {
+    const app = buildTestApp();
+    await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false }),
+    });
+    const res = await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: true }),
+    });
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { data: { enabled: boolean; changed: boolean } };
+    expect(json.data).toEqual({ enabled: true, changed: true });
+
+    const onEvents = getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.on" });
+    expect(onEvents).toHaveLength(1);
+    expect(onEvents[0].target_kind).toBe("owner_monitoring_settings");
+    expect(onEvents[0].target_id).toBe("local");
+    expect(JSON.parse(onEvents[0].detail_json)).toMatchObject({ enabled: true });
+  });
+
+  it("PUT with invalid body returns 400 invalid_body", async () => {
+    const app = buildTestApp();
+
+    // Missing 'enabled' field.
+    const r1 = await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({}),
+    });
+    expect(r1.status).toBe(400);
+    const j1 = (await r1.json()) as { error: { code: string } };
+    expect(j1.error.code).toBe("invalid_body");
+
+    // Wrong type for 'enabled'.
+    const r2 = await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: "yes" }),
+    });
+    expect(r2.status).toBe(400);
+    const j2 = (await r2.json()) as { error: { code: string } };
+    expect(j2.error.code).toBe("invalid_body");
+
+    // Extra key rejected by .strict().
+    const r3 = await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ enabled: false, extra: 1 }),
+    });
+    expect(r3.status).toBe(400);
+    const j3 = (await r3.json()) as { error: { code: string } };
+    expect(j3.error.code).toBe("invalid_body");
+
+    // Niciun audit row scris pe path-ul de validation failure.
+    expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" })).toHaveLength(0);
+    expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.on" })).toHaveLength(0);
+  });
+
+  it("isolates owners: disabling Alice does not affect Bob", async () => {
+    const app = buildTestApp();
+    await app.request("/api/v1/monitoring/master-switch", {
+      method: "PUT",
+      headers: { "content-type": "application/json", "x-test-owner": "alice" },
+      body: JSON.stringify({ enabled: false }),
+    });
+
+    const bobRes = await app.request("/api/v1/monitoring/master-switch", {
+      headers: { "x-test-owner": "bob" },
+    });
+    const bobJson = (await bobRes.json()) as { data: { enabled: boolean } };
+    expect(bobJson.data.enabled).toBe(true);
+
+    const aliceRes = await app.request("/api/v1/monitoring/master-switch", {
+      headers: { "x-test-owner": "alice" },
+    });
+    const aliceJson = (await aliceRes.json()) as { data: { enabled: boolean } };
+    expect(aliceJson.data.enabled).toBe(false);
+
+    // Audit row scris pe alice, nu pe bob.
+    const aliceEvents = getAuditEvents({ ownerId: "alice", action: "monitoring.master_switch.off" });
+    expect(aliceEvents).toHaveLength(1);
+    const bobEvents = getAuditEvents({ ownerId: "bob", action: "monitoring.master_switch.off" });
+    expect(bobEvents).toHaveLength(0);
+  });
+});

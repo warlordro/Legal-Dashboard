@@ -160,3 +160,15 @@ export const JobListQuerySchema = z
   .strict();
 
 export type JobListQuery = z.infer<typeof JobListQuerySchema>;
+
+// Per-owner master switch payload (Faza B). PUT /api/v1/monitoring/master-switch
+// accepta strict { enabled: boolean } — orice alta cheie respinsa cu 400
+// invalid_body. Route handler-ul mapeaza pe setMonitoringEnabled si scrie audit
+// log DOAR cand changed=true.
+export const MasterSwitchBodySchema = z
+  .object({
+    enabled: z.boolean(),
+  })
+  .strict();
+
+export type MasterSwitchBody = z.infer<typeof MasterSwitchBodySchema>;

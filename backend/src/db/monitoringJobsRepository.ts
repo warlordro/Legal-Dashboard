@@ -437,12 +437,23 @@ export function claimDueJobs(input: ClaimDueJobsInput): ClaimedJob[] {
     const kindSql = kindClauses.join(" ");
 
     const selectParams: (string | number)[] = [now, now, ...kindParams, limit];
+    // Anti-join cu owner_monitoring_settings: master-switch off (rand cu
+    // monitoring_enabled = 0) exclude TOATE joburile ownerului din claim, fara
+    // mutatie per job. Rand lipsa = enabled implicit, deci owner-ul vechi nu e
+    // afectat. Indexul partial `idx_owner_monitoring_disabled` (vezi migration
+    // 0020) acopera exact predicatul `monitoring_enabled = 0` si pastreaza
+    // costul anti-join-ului O(1) per row candidat.
     const due = db
       .prepare(
         `SELECT * FROM monitoring_jobs
          WHERE active = 1
            AND (paused_until IS NULL OR paused_until <= ?)
            AND next_run_at <= ?
+           AND NOT EXISTS (
+             SELECT 1 FROM owner_monitoring_settings oms
+             WHERE oms.owner_id = monitoring_jobs.owner_id
+               AND oms.monitoring_enabled = 0
+           )
            ${kindSql}
            AND NOT EXISTS (
              SELECT 1 FROM monitoring_runs

@@ -27,6 +27,7 @@ import fsPromises from "fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { claimDueJobs, markJobOutcome } from "./monitoringJobsRepository.ts";
+import { setMonitoringEnabled } from "./ownerMonitoringSettingsRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 import type { JobKind } from "../schemas/monitoring.ts";
 
@@ -327,5 +328,64 @@ describe("markJobOutcome — owner_id scoping", () => {
       .prepare("SELECT last_status, fail_streak, next_run_at FROM monitoring_jobs WHERE id = ?")
       .get(id) as { last_status: string | null; fail_streak: number; next_run_at: string };
     expect(after).toEqual(before);
+  });
+});
+
+// Faza B — per-owner master switch: scheduler claim respecta starea din
+// owner_monitoring_settings. Cand monitoring_enabled = 0, NICIUN job al
+// ownerului nu se claimuieste, fara mutatii per-job. Re-enable face joburile
+// re-eligibile imediat (next_run_at deja in trecut).
+//
+// Cele 3 scenarii sunt definite in PLAN-MASTER-SWITCH-MONITORING.md:
+//   1. Owner cu master-switch off + job due -> NU se claimuieste.
+//   2. Acelasi job devine claimable dupa re-enable.
+//   3. Doi owneri, unul enabled + unul disabled -> doar primul se claimuieste.
+describe("claimDueJobs - per-owner master switch", () => {
+  it("does NOT claim a job whose owner has master-switch off", () => {
+    seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z" });
+    setMonitoringEnabled(OWNER, false);
+
+    const claimed = claimDueJobs({ now: NOW, limit: 10 });
+    expect(claimed.length).toBe(0);
+
+    // Niciun rand 'running' nu trebuie inserat — anti-join blocheaza claim-ul
+    // inainte de INSERT INTO monitoring_runs, deci nu avem orphan runs.
+    const running = getDb().prepare(`SELECT COUNT(*) as c FROM monitoring_runs WHERE status = 'running'`).get() as {
+      c: number;
+    };
+    expect(running.c).toBe(0);
+  });
+
+  it("claims the same job after master-switch flips back to on", () => {
+    const id = seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z" });
+    setMonitoringEnabled(OWNER, false);
+    expect(claimDueJobs({ now: NOW, limit: 10 }).length).toBe(0);
+
+    setMonitoringEnabled(OWNER, true);
+    const claimed = claimDueJobs({ now: NOW, limit: 10 });
+    expect(claimed.length).toBe(1);
+    expect(claimed[0]!.job.id).toBe(id);
+  });
+
+  it("isolates owners: A enabled + B disabled -> claims only A's job", () => {
+    // Owner A (OWNER = "local") foloseste seedJob helper-ul standard.
+    const aId = seedJob({ nextRunAt: "2026-04-28T09:00:00.000Z", hashSeed: "h-a" });
+
+    // Owner B: insert direct, fara helper, ca sa pastram OWNER constant la "local".
+    const bInfo = getDb()
+      .prepare(
+        `INSERT INTO monitoring_jobs
+           (owner_id, kind, target_json, target_hash, cadence_sec,
+            alert_config_json, next_run_at, active, paused_until)
+         VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', ?, 1, NULL)`
+      )
+      .run("owner-b", "h-b", "2026-04-28T09:00:00.000Z");
+    const bId = bInfo.lastInsertRowid as number;
+
+    setMonitoringEnabled("owner-b", false);
+
+    const claimed = claimDueJobs({ now: NOW, limit: 10 });
+    expect(claimed.map((r) => r.job.id).sort()).toEqual([aId].sort());
+    expect(claimed.map((r) => r.job.id)).not.toContain(bId);
   });
 });
