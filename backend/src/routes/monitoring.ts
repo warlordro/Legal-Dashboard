@@ -534,7 +534,7 @@ monitoringRouter.put("/master-switch", limitMonitoringBody, async (c) => {
 
   const parsed = MasterSwitchBodySchema.safeParse(body);
   if (!parsed.success) {
-    return c.json(fail("invalid_body", "Payload invalid", c, parsed.error.issues), 400);
+    return c.json(fail("invalid_payload", "Payload invalid", c, parsed.error.issues), 422);
   }
 
   // Atomic: SELECT pre-state + UPSERT + audit row commit impreuna. Daca

@@ -1117,7 +1117,7 @@ describe("POST /api/v1/monitoring/jobs/bulk-delete (Stage 1 caracterizare)", () 
 //   - PUT idempotent (acelasi value): changed=false + ZERO audit rows.
 //   - PUT { enabled: true } dupa disable: changed=true + audit
 //     monitoring.master_switch.on.
-//   - Body invalid (cheie extra / tip gresit / vid): 400 invalid_body.
+//   - Body invalid (cheie extra / tip gresit / vid): 422 invalid_payload.
 //   - Owner isolation: PUT pe Alice nu schimba GET-ul pe Bob.
 describe("GET/PUT /api/v1/monitoring/master-switch", () => {
   it("GET returns enabled=true for a fresh owner (default)", async () => {
@@ -1219,7 +1219,7 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
     expect(JSON.parse(onEvents[0].detail_json)).toMatchObject({ enabled: true });
   });
 
-  it("PUT with invalid body returns 400 invalid_body", async () => {
+  it("PUT with invalid body returns 422 invalid_payload", async () => {
     const app = buildTestApp();
 
     // Missing 'enabled' field.
@@ -1228,9 +1228,9 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({}),
     });
-    expect(r1.status).toBe(400);
+    expect(r1.status).toBe(422);
     const j1 = (await r1.json()) as { error: { code: string } };
-    expect(j1.error.code).toBe("invalid_body");
+    expect(j1.error.code).toBe("invalid_payload");
 
     // Wrong type for 'enabled'.
     const r2 = await app.request("/api/v1/monitoring/master-switch", {
@@ -1238,9 +1238,9 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ enabled: "yes" }),
     });
-    expect(r2.status).toBe(400);
+    expect(r2.status).toBe(422);
     const j2 = (await r2.json()) as { error: { code: string } };
-    expect(j2.error.code).toBe("invalid_body");
+    expect(j2.error.code).toBe("invalid_payload");
 
     // Extra key rejected by .strict().
     const r3 = await app.request("/api/v1/monitoring/master-switch", {
@@ -1248,9 +1248,9 @@ describe("GET/PUT /api/v1/monitoring/master-switch", () => {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ enabled: false, extra: 1 }),
     });
-    expect(r3.status).toBe(400);
+    expect(r3.status).toBe(422);
     const j3 = (await r3.json()) as { error: { code: string } };
-    expect(j3.error.code).toBe("invalid_body");
+    expect(j3.error.code).toBe("invalid_payload");
 
     // Niciun audit row scris pe path-ul de validation failure.
     expect(getAuditEvents({ ownerId: "local", action: "monitoring.master_switch.off" })).toHaveLength(0);

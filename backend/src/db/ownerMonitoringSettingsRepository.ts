@@ -10,6 +10,10 @@
 //
 // Acest fisier intentionat oglindeste forma stabilita in `ownerEmailSettingsRepository.ts`:
 // raw row interface + `toDomain` + `COLUMNS` constant + UPSERT cu ON CONFLICT.
+// Divergenta intentionata: timestamp-urile folosesc `strftime('%Y-%m-%dT%H:%M:%fZ','now')`
+// (ISO-8601 cu milisecunde + Z) ca sa fie aliniate cu DEFAULT-ul din migration 0020,
+// in timp ce `ownerEmailSettingsRepository.ts` foloseste `datetime('now')` (rezolutie sec).
+// Ambele sunt UTC; consumatorii citesc string-ul ca data UTC fara conversie.
 //
 // `setMonitoringEnabled` este idempotent: SELECT pre-state -> compara cu
 // requested -> UPSERT doar daca s-a schimbat, iar `changed` boolean reflecta
@@ -59,7 +63,7 @@ export function getOwnerMonitoringSettings(ownerId: string): OwnerMonitoringSett
 // public — restul aplicatiei nu trebuie sa stie ca DB-ul foloseste 0/1.
 export function getMonitoringEnabled(ownerId: string): boolean {
   const row = getDb()
-    .prepare(`SELECT monitoring_enabled FROM owner_monitoring_settings WHERE owner_id = ?`)
+    .prepare("SELECT monitoring_enabled FROM owner_monitoring_settings WHERE owner_id = ?")
     .get(ownerId) as { monitoring_enabled: number } | undefined;
   if (!row) return true;
   return row.monitoring_enabled === 1;
@@ -75,7 +79,7 @@ export function getMonitoringEnabled(ownerId: string): boolean {
 // audit rows duplicate pentru "active -> active" pe ownerii noi.
 export function setMonitoringEnabled(ownerId: string, enabled: boolean): { changed: boolean } {
   const db = getDb();
-  const row = db.prepare(`SELECT monitoring_enabled FROM owner_monitoring_settings WHERE owner_id = ?`).get(ownerId) as
+  const row = db.prepare("SELECT monitoring_enabled FROM owner_monitoring_settings WHERE owner_id = ?").get(ownerId) as
     | { monitoring_enabled: number }
     | undefined;
 
