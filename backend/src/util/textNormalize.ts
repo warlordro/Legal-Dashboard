@@ -4,10 +4,11 @@
 // filter so a user can find "Ștefan" by typing "stefan".
 //
 // Pattern: Unicode NFD decomposes letter+diacritic into base + combining marks,
-// then we drop the combining range (U+0300..U+036F).
+// then we drop combining marks with Unicode property matching.
+const COMBINING_MARKS_RE = /\p{M}/gu;
 
 export function stripDiacritics(s: string): string {
-  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  return s.normalize("NFD").replace(COMBINING_MARKS_RE, "");
 }
 
 // Escape user-supplied SQL LIKE meta characters (%, _, \) so the bound value
@@ -53,4 +54,34 @@ export function stripDiacriticsDeep<T>(value: T): T {
     return out as unknown as T;
   }
   return value;
+}
+
+// Tokenizeaza query-ul de filtru in lista de tokens distincte.
+// Reguli:
+//   - split pe whitespace (orice rulada de \s)
+//   - trim per token
+//   - drop empty
+//   - dedup case-insensitive si diacritice-insensitive
+//   - max 8 tokens (anti-DoS; fiecare token adauga 24 LIKE-uri in SQL)
+//
+// Returneaza tokens originale, cu diacritice si majuscule pastrate, in ordinea
+// primei aparitii. Normalizarea este aplicata la consum prin buildRnpmLikePattern
+// si functia SQL rnpm_norm.
+export const FILTER_TOKEN_MAX_COUNT = 8;
+
+export function tokenizeFilterQuery(q: string): string[] {
+  if (typeof q !== "string") return [];
+  const raw = q.split(/\s+/);
+  const seenKeys = new Set<string>();
+  const out: string[] = [];
+  for (const t of raw) {
+    const trimmed = t.trim();
+    if (trimmed.length === 0) continue;
+    const key = stripDiacritics(trimmed).toLowerCase();
+    if (seenKeys.has(key)) continue;
+    seenKeys.add(key);
+    out.push(trimmed);
+    if (out.length >= FILTER_TOKEN_MAX_COUNT) break;
+  }
+  return out;
 }
