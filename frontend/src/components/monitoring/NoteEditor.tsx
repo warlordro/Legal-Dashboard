@@ -23,7 +23,7 @@ export function NoteEditor({ jobId, initialNote, onSaved }: NoteEditorProps) {
           setError(null);
           setEditing(true);
         }}
-        className="mt-1 block max-w-[420px] cursor-pointer truncate text-left font-sans text-xs italic text-muted-foreground hover:text-foreground"
+        className="mt-1 block max-w-[420px] cursor-pointer whitespace-normal break-words text-left font-sans text-xs italic leading-relaxed text-muted-foreground hover:text-foreground"
         title={initialNote}
       >
         {initialNote}

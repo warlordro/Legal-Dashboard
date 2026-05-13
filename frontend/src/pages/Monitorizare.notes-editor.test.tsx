@@ -104,6 +104,21 @@ describe("NoteEditor - inline editor pentru notita per job", () => {
     expect(getTextarea().value).toBe("vechi");
   });
 
+  it("notita existenta se rupe pe randuri in loc sa fie truncata", () => {
+    render(
+      <NoteEditor
+        jobId={1}
+        initialNote="Instant Factoringsadasdasdasdasdasdasdasdasdasdasdasdasdasdas"
+        onSaved={() => {}}
+      />
+    );
+    const noteButton = getButton(/instant factoring/i);
+
+    expect(noteButton.className).toContain("whitespace-normal");
+    expect(noteButton.className).toContain("break-words");
+    expect(noteButton.className).not.toContain("truncate");
+  });
+
   it("buton + Adauga notita apare cand notes e null", () => {
     render(<NoteEditor jobId={1} initialNote={null} onSaved={() => {}} />);
     expect(getButton(/adauga notita/i)).toBeTruthy();
