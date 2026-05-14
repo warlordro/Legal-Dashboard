@@ -1,7 +1,7 @@
-import fsPromises from "fs/promises";
-import os from "os";
-import path from "path";
-import { setTimeout as delay } from "timers/promises";
+import fsPromises from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
@@ -104,6 +104,28 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(health.status).toBe(200);
     const body = (await health.json()) as { emailConfigured: boolean };
     expect(body.emailConfigured).toBe(false);
+  });
+
+  it("/health exposes authMode + loginAvailable=false while preserving Electron splash contract", async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+    });
+
+    const health = await waitForHealth(port);
+    expect(health.status).toBe(200);
+    const body = (await health.json()) as {
+      status: string;
+      service: string;
+      authMode: string;
+      loginAvailable: boolean;
+    };
+    expect(body.status).toBe("ok");
+    expect(body.service).toBe("Legal Dashboard API");
+    expect(body.authMode).toBe("desktop");
+    expect(body.loginAvailable).toBe(false);
   });
 
   it("/health exposes emailConfigured=true with full SMTP_* config (Batch 2.3)", async () => {

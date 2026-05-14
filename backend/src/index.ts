@@ -234,6 +234,8 @@ function healthHandler(c: Context): Response {
   return c.json({
     status: "ok",
     service: "Legal Dashboard API",
+    authMode: getAuthMode(),
+    loginAvailable: false,
     monitoring,
     emailConfigured,
   });
