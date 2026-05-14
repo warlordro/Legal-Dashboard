@@ -1,5 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cautareDosare, decodeXmlEntities, extractAll, extractFirst, parseDosar, toLegacyDiacritics } from "./soap.ts";
+import {
+  cautareDosare,
+  decodeXmlEntities,
+  extractAll,
+  extractFirst,
+  parseDosar,
+  SOAP_MAX_RESPONSE_BYTES,
+  SoapResponseTooLargeError,
+  toLegacyDiacritics,
+} from "./soap.ts";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -17,33 +26,67 @@ describe("toLegacyDiacritics", () => {
 });
 
 describe("SOAP response cap", () => {
-  it("arunca eroare generica si logheaza cand Content-Length depaseste 8MB", async () => {
+  // v2.27.1: cap-ul a fost ridicat la 50MB (de la 8MB). PortalJust intoarce
+  // empiric ~17MB pentru query-uri largi precum "AUTO IN SRL" (1000 dosare cu
+  // parti+sedinte). Cap-ul opreste in continuare un upstream runaway (GB).
+  it("cap-ul este expus si configurat la 50MB", () => {
+    expect(SOAP_MAX_RESPONSE_BYTES).toBe(50 * 1024 * 1024);
+  });
+
+  it("arunca SoapResponseTooLargeError cand Content-Length depaseste cap-ul", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response("<soap:Envelope/>", {
         status: 200,
-        headers: { "content-length": String(10 * 1024 * 1024) },
+        headers: { "content-length": String(SOAP_MAX_RESPONSE_BYTES + 1) },
       })
     );
 
-    await expect(cautareDosare({ numarDosar: "1/1/2024" })).rejects.toThrow(
-      "Eroare la comunicarea cu serviciul PortalJust."
-    );
+    await expect(cautareDosare({ numarDosar: "1/1/2024" })).rejects.toBeInstanceOf(SoapResponseTooLargeError);
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("SOAP response prea mare"));
   });
 
-  it("arunca eroare generica si logheaza cand body-ul real depaseste 8MB fara Content-Length", async () => {
+  it("arunca SoapResponseTooLargeError cand body-ul real depaseste cap-ul fara Content-Length", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response("x".repeat(9 * 1024 * 1024), {
+      new Response("x".repeat(SOAP_MAX_RESPONSE_BYTES + 1), {
         status: 200,
       })
     );
 
-    await expect(cautareDosare({ numeParte: "POPESCU" })).rejects.toThrow(
-      "Eroare la comunicarea cu serviciul PortalJust."
-    );
+    await expect(cautareDosare({ numeParte: "POPESCU" })).rejects.toBeInstanceOf(SoapResponseTooLargeError);
     expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("SOAP response prea mare (post-read)"));
+  });
+
+  it("eroarea expune code SOAP_RESPONSE_TOO_LARGE + bytes pentru dispatch in route handlers", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<soap:Envelope/>", {
+        status: 200,
+        headers: { "content-length": String(SOAP_MAX_RESPONSE_BYTES + 42) },
+      })
+    );
+
+    try {
+      await cautareDosare({ numarDosar: "1/1/2024" });
+      throw new Error("expected SoapResponseTooLargeError");
+    } catch (err) {
+      expect(err).toBeInstanceOf(SoapResponseTooLargeError);
+      const typed = err as SoapResponseTooLargeError;
+      expect(typed.code).toBe("SOAP_RESPONSE_TOO_LARGE");
+      expect(typed.bytes).toBe(SOAP_MAX_RESPONSE_BYTES + 42);
+    }
+  });
+
+  it("nu trip-uieste cap-ul pentru raspunsuri normale (~1KB)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        '<?xml version="1.0"?><soap:Envelope><soap:Body><CautareDosareResponse xmlns="portalquery.just.ro"><CautareDosareResult></CautareDosareResult></CautareDosareResponse></soap:Body></soap:Envelope>',
+        { status: 200 }
+      )
+    );
+
+    await expect(cautareDosare({ numarDosar: "1/1/2024" })).resolves.toEqual([]);
   });
 });
 

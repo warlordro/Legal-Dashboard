@@ -72,7 +72,25 @@ function buildEnvelope(action: string, body: string): string {
 // the threshold). 60s gives the upstream a 33% margin without inflating the
 // scheduler-level budget (still 10min/run via DEFAULT_BUDGET_MS).
 const SOAP_TIMEOUT_MS = 60000;
-const SOAP_MAX_RESPONSE_BYTES = 8 * 1024 * 1024; // 8MB
+// v2.27.1: bumped from 8MB → 50MB after the search "AUTO IN SRL" tripped the
+// 8MB guard. PortalJust caps internally at 1000 dosare/response; an empirical
+// worst case (1000 dosare with rich parti+sedinte) lands at ~17MB. 50MB gives
+// ~3× margin so future per-dosar growth doesn't reject legitimate broad
+// searches, while still bounding OOM/DoS exposure from a runaway upstream.
+export const SOAP_MAX_RESPONSE_BYTES = 50 * 1024 * 1024;
+
+// Typed error so route handlers can map the size-cap trip to HTTP 413
+// ("restrange filtrele") instead of the generic 500 ("retry") which is
+// misleading when the response is deterministic-too-large.
+export class SoapResponseTooLargeError extends Error {
+  readonly code = "SOAP_RESPONSE_TOO_LARGE";
+  readonly bytes: number;
+  constructor(bytes: number) {
+    super("Raspunsul PortalJust depaseste limita interna.");
+    this.name = "SoapResponseTooLargeError";
+    this.bytes = bytes;
+  }
+}
 
 function combineSignals(external?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(SOAP_TIMEOUT_MS);
@@ -96,14 +114,14 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
   if (Number.isFinite(contentLength) && contentLength > SOAP_MAX_RESPONSE_BYTES) {
     // SECURITY: previne OOM/DoS pasiv din upstream PortalJust.
     console.error(`SOAP response prea mare: ${contentLength} bytes (cap ${SOAP_MAX_RESPONSE_BYTES})`);
-    throw new Error("Eroare la comunicarea cu serviciul PortalJust.");
+    throw new SoapResponseTooLargeError(contentLength);
   }
 
   const text = await response.text();
   if (text.length > SOAP_MAX_RESPONSE_BYTES) {
     // Content-Length poate lipsi sau minti pe chunked encoding.
     console.error(`SOAP response prea mare (post-read): ${text.length} bytes`);
-    throw new Error("Eroare la comunicarea cu serviciul PortalJust.");
+    throw new SoapResponseTooLargeError(text.length);
   }
 
   if (!response.ok || text.includes("soap:Fault")) {

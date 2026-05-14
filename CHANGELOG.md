@@ -4,6 +4,50 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.27.1] - 2026-05-14
+
+### Fix cautari largi PortalJust (cap SOAP 8MB -> 50MB + mesaj actionable)
+
+Cautarile largi pe Nume Parte (de exemplu "AUTO IN SRL") faceau ca raspunsul SOAP
+de la `portalquery.just.ro` sa intoarca cap-ul intern de 1000 dosare cu
+parti+sedinte (empiric ~17MB). Cap-ul intern al backend-ului era setat la 8MB,
+asa ca aceste raspunsuri legitime erau respinse cu eroarea generica "Eroare la
+comunicarea cu serviciul PortalJust. Incercati din nou.", desi retry-ul nu putea
+schimba nimic (query-ul e determinist).
+
+#### Modificat
+
+- `SOAP_MAX_RESPONSE_BYTES` urcat de la `8 * 1024 * 1024` la `50 * 1024 * 1024`
+  in [backend/src/soap.ts](backend/src/soap.ts) cu rationale documentat inline,
+  pe baza evidentei empirice 17MB worst-case PortalJust si ~3x margin.
+- Noul typed error `SoapResponseTooLargeError` (cu `code = "SOAP_RESPONSE_TOO_LARGE"`
+  si `bytes`) inlocuieste `Error` generic pe path-ul de oversize, ca rutele
+  caller sa poata diferentia cauza.
+
+#### Backend
+
+- `GET /api/dosare` mapeaza `SoapResponseTooLargeError` la `413` cu textul "Prea
+  multe rezultate de la PortalJust (>1000). Restrange filtrele: adauga interval
+  de date, institutie sau nume mai specific.", restul erorilor SOAP raman 500
+  generic.
+- `GET /api/termene` la fel, prin envelope `fail(ErrorCodes.PAYLOAD_TOO_LARGE, ...)`.
+
+#### Securitate
+
+- Cap-ul intern ramane defense-in-depth contra unui upstream PortalJust runaway
+  (zeci-sute de MB). Pre-read pe `Content-Length` si post-read pe `text.length`
+  raman ambele in vigoare.
+
+#### Tests
+
+- 81 -> 88 in `backend/src/soap.test.ts`: cap-ul nou expus, typed error verificat
+  cu `code` si `bytes`, sanity check pentru raspunsuri normale.
+- Fisier nou `backend/src/routes/soap-too-large.test.ts` cu regression pentru
+  ambele rute (4 cazuri: 413 + 500 pe dosare si termene).
+- Totalul backend: 1029 teste pass (de la 1025).
+
+---
+
 ## [2.27.0] - 2026-05-14
 
 ### Notite editabile per job de monitorizare

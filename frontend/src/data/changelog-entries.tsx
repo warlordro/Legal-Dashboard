@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.27.1",
+    date: "14 Mai 2026",
+    subtitle:
+      "Fix cautari largi PortalJust: cap-ul intern de raspuns SOAP urcat de la 8MB la 50MB si mesaj actionable 413 in loc de 'retry' pe rezultate prea multe.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Cautari largi (ex. 'AUTO IN SRL') nu mai pica",
+        content:
+          "PortalJust raspunde la query-uri largi cu pana la 1000 dosare cu parti+sedinte (~17MB empiric). Vechiul cap intern de 8MB respingea aceste raspunsuri ca 'eroare de comunicare'. Cap-ul a fost ridicat la 50MB, cu ~3x margin fata de worst-case-ul real, fara sa pierdem protectia anti-runaway.",
+      },
+      {
+        title: "Mesaj de eroare actionable",
+        content:
+          "Cand raspunsul depaseste totusi cap-ul, backend-ul returneaza acum 413 cu 'Prea multe rezultate de la PortalJust (>1000). Restrange filtrele: adauga interval de date, institutie sau nume mai specific.' Mesajul vechi 'Incercati din nou' era inselator pentru ca query-ul e determinist.",
+      },
+      {
+        title: "Aplicat pe ambele rute",
+        content:
+          "GET /api/dosare si GET /api/termene primesc acelasi tratament prin typed error SoapResponseTooLargeError. Restul erorilor SOAP (network, fault) raman ca 500 generic.",
+      },
+    ],
+  },
+  {
     version: "v2.27.0",
     date: "14 Mai 2026",
     subtitle:

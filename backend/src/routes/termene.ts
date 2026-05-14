@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { cautareDosare } from "../soap.ts";
+import { cautareDosare, SoapResponseTooLargeError } from "../soap.ts";
 import { defaultDateRange, generateMonthlyIntervals } from "../intervals.ts";
 import {
   MAX_DOSARE_RESPONSE,
@@ -196,6 +196,17 @@ termeneRouter.get("/", async (c) => {
     return c.json({ data: termene, total: termene.length, dosareCount: dosare.length });
   } catch (err) {
     console.error("Eroare cautare termene:", err);
+    if (err instanceof SoapResponseTooLargeError) {
+      // Query e determinist — "retry" nu ajuta. Mesaj actionable: restrange.
+      return c.json(
+        fail(
+          ErrorCodes.PAYLOAD_TOO_LARGE,
+          "Prea multe rezultate de la PortalJust (>1000). Restrange filtrele: adauga interval de date, institutie sau nume mai specific.",
+          c
+        ),
+        413
+      );
+    }
     return internalError(c, "Eroare la comunicarea cu serviciul PortalJust. Incercati din nou.");
   }
 });

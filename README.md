@@ -7,15 +7,17 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.27.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.27.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.27.0** - notite editabile per job de monitorizare si
-propagare in Alerte. Utilizatorul poate adauga, modifica sau sterge o notita
-scurta direct din pagina Monitorizare, limita este 200 caractere, iar cardurile
-din Alerte afiseaza blocul `Notita: ...` pentru joburile care au context salvat.
-Afisarea este live-read, fara snapshot, deci modificarile se vad si pe alertele
-deja emise.
+Ultimul release **v2.27.1** - fix cautari largi PortalJust. Cap-ul intern al
+raspunsului SOAP a fost ridicat de la 8MB la 50MB (PortalJust raspunde empiric
+cu pana la 17MB pentru query-uri largi precum "AUTO IN SRL", la 1000 dosare cu
+parti+sedinte). Cand totusi se depaseste, backend-ul returneaza 413 cu un mesaj
+actionable "Restrange filtrele..." in loc de eroarea generica "Incercati din
+nou", pentru ca query-ul fiind determinist retry-ul nu putea ajuta. Aplicat
+identic pe `/api/dosare` si `/api/termene` prin typed error
+`SoapResponseTooLargeError`.
 
 Predecesor - master switch monitoring per-owner. Buton global
 "Opreste/Reia monitorizarea" expus in pagina Monitorizare; cand owner-ul opreste
