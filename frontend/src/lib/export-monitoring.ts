@@ -1,7 +1,5 @@
-import type { Dosar, Termen } from "@/types";
 import { getInstitutieLabel } from "./institutii";
 import { formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "./api";
-import { api } from "./api";
 import {
   cellAddr,
   ensureCell,
@@ -19,64 +17,14 @@ import {
 } from "./excel-helpers";
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
 import { getPortalJustUrl } from "@/components/dosare-table-helpers";
-import type { AnalysisPdfArgs } from "./export-analysis";
-
-// Re-export so existing consumers (export.worker.ts, callers of export.ts) keep
-// working without churn after the Stage 7 split. The canonical homes are
-// pdf-helpers.ts (ExportResult) and export-analysis.ts (AnalysisPdfArgs).
-export type { ExportResult, AnalysisPdfArgs };
+import { triggerDownload } from "./download-helpers";
+import { runExportInWorker } from "./exportRunner";
 
 // ─── Worker helpers (orchestratori) ───────────────────────────────────────────
 // Builderii (build*) sunt pure si pot rula in worker; orchestratorii (export*)
 // fac round-trip prin worker si declanseaza download-ul din main thread.
 
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
-
-export type ExportJob =
-  | { kind: "monitoringXlsx"; data: MonitoringJob[] }
-  | { kind: "monitoringPdf"; data: MonitoringJob[] }
-  | { kind: "analysisPdf"; data: AnalysisPdfArgs }
-  | { kind: "manualPdf"; data: null }
-  | { kind: "reportXlsx"; data: import("./dashboardApi").DashboardReportPayload }
-  | { kind: "reportPdf"; data: import("./dashboardApi").DashboardReportPayload };
-
-function triggerDownload(buffer: ArrayBuffer, filename: string, mime: string): void {
-  const blob = new Blob([buffer], { type: mime });
-  triggerBlobDownload(blob, filename);
-}
-
-function triggerBlobDownload(blob: Blob, filename: string): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = filename;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
-
-async function runExportInWorker(job: ExportJob): Promise<ExportResult> {
-  const ExportWorker = (await import("./export.worker.ts?worker")).default;
-  return new Promise<ExportResult>((resolve, reject) => {
-    const worker = new ExportWorker();
-    worker.onmessage = (
-      e: MessageEvent<{ ok: true; buffer: ArrayBuffer; filename: string; mime: string } | { ok: false; error: string }>
-    ) => {
-      worker.terminate();
-      if (!e.data.ok) {
-        reject(new Error(e.data.error));
-        return;
-      }
-      resolve({ buffer: e.data.buffer, filename: e.data.filename, mime: e.data.mime });
-    };
-    worker.onerror = (err: ErrorEvent) => {
-      worker.terminate();
-      reject(err.error ?? new Error(err.message || "Worker export error"));
-    };
-    worker.postMessage(job);
-  });
-}
 
 // xlsx-js-style@1.2.0 returneaza ArrayBuffer pentru type:"array" (nu Uint8Array
 // ca documenteaza SheetJS upstream); `Uint8Array.set(ArrayBuffer)` se evalueaza
@@ -287,26 +235,6 @@ export async function buildMonitoringPdf(jobs: MonitoringJob[]): Promise<ExportR
 
 // ─── Orchestratori (DOM-bound, ruleaza in main thread) ────────────────────────
 
-export async function exportDosareExcel(dosare: Dosar[]): Promise<void> {
-  const { blob, filename } = await api.dosare.exportXlsxBlob(dosare);
-  triggerBlobDownload(blob, filename);
-}
-
-export async function exportTermeneExcel(termene: Termen[]): Promise<void> {
-  const { blob, filename } = await api.termene.exportXlsxBlob(termene);
-  triggerBlobDownload(blob, filename);
-}
-
-export async function exportDosarePDF(dosare: Dosar[]): Promise<void> {
-  const { blob, filename } = await api.dosare.exportPdfBlob(dosare);
-  triggerBlobDownload(blob, filename);
-}
-
-export async function exportTermenePDF(termene: Termen[]): Promise<void> {
-  const { blob, filename } = await api.termene.exportPdfBlob(termene);
-  triggerBlobDownload(blob, filename);
-}
-
 export async function exportMonitoringExcel(jobs: MonitoringJob[]): Promise<void> {
   const result = await runExportInWorker({ kind: "monitoringXlsx", data: jobs });
   triggerDownload(result.buffer, result.filename, result.mime);
@@ -314,39 +242,5 @@ export async function exportMonitoringExcel(jobs: MonitoringJob[]): Promise<void
 
 export async function exportMonitoringPDF(jobs: MonitoringJob[]): Promise<void> {
   const result = await runExportInWorker({ kind: "monitoringPdf", data: jobs });
-  triggerDownload(result.buffer, result.filename, result.mime);
-}
-
-// ─── Orchestratori AI / Manual (route prin worker) ────────────────────────────
-
-export async function exportAnalysisPDF(
-  dosarNumar: string,
-  dosarInstitutie: string,
-  dosarObiect: string,
-  analysisText: string,
-  type: "simple" | "advanced" = "simple",
-  judgeModel?: string
-): Promise<void> {
-  const result = await runExportInWorker({
-    kind: "analysisPdf",
-    data: { dosarNumar, dosarInstitutie, dosarObiect, analysisText, type, judgeModel },
-  });
-  triggerDownload(result.buffer, result.filename, result.mime);
-}
-
-export async function exportManualPDF(): Promise<void> {
-  const result = await runExportInWorker({ kind: "manualPdf", data: null });
-  triggerDownload(result.buffer, result.filename, result.mime);
-}
-
-// ─── Orchestratori raport (PR-C v2.9.0) ──────────────────────────────────────
-
-export async function exportReportXlsx(payload: import("./dashboardApi").DashboardReportPayload): Promise<void> {
-  const result = await runExportInWorker({ kind: "reportXlsx", data: payload });
-  triggerDownload(result.buffer, result.filename, result.mime);
-}
-
-export async function exportReportPdf(payload: import("./dashboardApi").DashboardReportPayload): Promise<void> {
-  const result = await runExportInWorker({ kind: "reportPdf", data: payload });
   triggerDownload(result.buffer, result.filename, result.mime);
 }

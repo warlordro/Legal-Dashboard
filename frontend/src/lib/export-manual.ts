@@ -6,6 +6,8 @@
 // share `runExportInWorker` there.
 
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
+import { triggerDownload } from "./download-helpers";
+import { runExportInWorker } from "./exportRunner";
 
 export async function buildManualPdf(): Promise<ExportResult> {
   const { default: jsPDF } = await import("jspdf");
@@ -503,4 +505,9 @@ export async function buildManualPdf(): Promise<ExportResult> {
     filename: `Legal-Dashboard-Manual-v${__APP_VERSION__}.pdf`,
     mime: MIME_PDF,
   };
+}
+
+export async function exportManualPDF(): Promise<void> {
+  const result = await runExportInWorker({ kind: "manualPdf", data: null });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }

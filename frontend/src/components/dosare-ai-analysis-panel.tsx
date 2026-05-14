@@ -3,7 +3,7 @@ import DOMPurify from "dompurify";
 import { Bot, Check, ChevronDown, Circle, Download, Key, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import type { Dosar } from "@/types";
-import { exportAnalysisPDF } from "@/lib/export";
+import { exportAnalysisPDF } from "@/lib/export-analysis";
 import {
   AI_MODELS,
   JUDGE_MODELS_LIST,
@@ -422,8 +422,8 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                   done,
                   active,
                   label,
-                  role,
-                }: { done: boolean; active: boolean; label: string; role: string }) => (
+                  stepLabel,
+                }: { done: boolean; active: boolean; label: string; stepLabel: string }) => (
                   <div
                     className={`flex items-center gap-2 text-xs ${done ? mc.text : active ? `${mc.text} animate-pulse` : "text-muted-foreground"}`}
                   >
@@ -435,15 +435,15 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                       <Circle className="h-3.5 w-3.5" />
                     )}
                     <span>
-                      {role}: <span className="font-medium">{label}</span>
+                      {stepLabel}: <span className="font-medium">{label}</span>
                     </span>
                   </div>
                 );
                 return (
                   <div className="space-y-1">
-                    <Row done={a1Done} active={!a1Done} label={a1Label} role="Analist 1" />
-                    <Row done={a2Done} active={!a2Done} label={a2Label} role="Analist 2" />
-                    <Row done={false} active={judgeStarted} label={judgeLabel} role="Judecator" />
+                    <Row done={a1Done} active={!a1Done} label={a1Label} stepLabel="Analist 1" />
+                    <Row done={a2Done} active={!a2Done} label={a2Label} stepLabel="Analist 2" />
+                    <Row done={false} active={judgeStarted} label={judgeLabel} stepLabel="Judecator" />
                   </div>
                 );
               })()}

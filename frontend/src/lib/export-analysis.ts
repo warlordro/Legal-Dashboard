@@ -7,6 +7,8 @@
 // orchestrators share `runExportInWorker` there.
 
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
+import { triggerDownload } from "./download-helpers";
+import { runExportInWorker } from "./exportRunner";
 
 export interface AnalysisPdfArgs {
   dosarNumar: string;
@@ -240,4 +242,19 @@ export async function buildAnalysisPdf(args: AnalysisPdfArgs): Promise<ExportRes
     filename: `analiza-${safeName}.pdf`,
     mime: MIME_PDF,
   };
+}
+
+export async function exportAnalysisPDF(
+  dosarNumar: string,
+  dosarInstitutie: string,
+  dosarObiect: string,
+  analysisText: string,
+  type: "simple" | "advanced" = "simple",
+  judgeModel?: string
+): Promise<void> {
+  const result = await runExportInWorker({
+    kind: "analysisPdf",
+    data: { dosarNumar, dosarInstitutie, dosarObiect, analysisText, type, judgeModel },
+  });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }

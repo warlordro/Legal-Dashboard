@@ -30,7 +30,7 @@ import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulk
 import { NoteEditor } from "@/components/monitoring/NoteEditor";
 import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "@/lib/api";
 import { getInstitutieLabel } from "@/lib/institutii";
-import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export";
+import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export-monitoring";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";

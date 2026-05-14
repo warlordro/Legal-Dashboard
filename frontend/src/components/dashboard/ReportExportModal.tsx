@@ -14,7 +14,7 @@ import { FileSpreadsheet, FileText, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { dashboardApi, type ChartsRange, MonitoringApiError } from "@/lib/api";
-import { exportReportPdf, exportReportXlsx } from "@/lib/export";
+import { exportReportPdf, exportReportXlsx } from "@/lib/export-report";
 import { cn } from "@/lib/utils";
 
 interface ReportExportModalProps {

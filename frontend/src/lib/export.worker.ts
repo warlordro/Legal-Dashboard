@@ -1,9 +1,9 @@
 /// <reference lib="webworker" />
-import { buildMonitoringPdf, buildMonitoringXlsx, type ExportJob } from "./export";
 import { buildAnalysisPdf } from "./export-analysis";
 import { buildManualPdf } from "./export-manual";
+import { buildMonitoringPdf, buildMonitoringXlsx } from "./export-monitoring";
 import { buildReportPdf, buildReportXlsx } from "./export-report";
-import type { ExportResult } from "./pdf-helpers";
+import type { ExportJob, ExportResult } from "./export-types";
 
 // Web Worker care preia generarea XLSX/PDF de pe main thread pentru monitorizari,
 // analize AI si manualul de utilizare. Pe rezultate mari (sute/mii de
