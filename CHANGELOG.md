@@ -4,6 +4,48 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.27.2] - 2026-05-14
+
+### Fix UI: dialog-uri lipite de marginea stanga + integrare interna OriginGuard F11-F1
+
+Doua modaluri din UI ("Inchide toate alertele filtrate?" din /alerte si popover-ul
+de instante asociate unui job de monitorizare din /monitorizare) apareau lipite
+de marginea stanga a ecranului in loc sa fie centrate. Cauza: foloseau tag-ul
+HTML nativ `<dialog open>` care primeste de la browser stiluri UA
+(`width: fit-content; height: fit-content`) ce nu sunt suprascrise de
+`inset-0` din Tailwind si forteaza fereastra in coltul din stanga sus pe
+direction `ltr`. Inlocuirea cu `<div>` + `role="alertdialog"`/`role="dialog"`
+si flex centering (acelasi pattern ca `<ConfirmProvider>`) rezolva
+pozitionarea.
+
+#### Fix
+
+- [frontend/src/pages/Alerts.tsx](frontend/src/pages/Alerts.tsx) — bulk
+  dismiss confirm: `<dialog open>` -> `<div>` + inner
+  `<div role="alertdialog" aria-modal="true" aria-labelledby="bulk-dismiss-title">`.
+- [frontend/src/pages/Monitorizare.tsx](frontend/src/pages/Monitorizare.tsx) —
+  popover instante: `<dialog open>` -> `<div>` + inner
+  `<div role="dialog" aria-modal="true" aria-labelledby="instante-modal-title">`.
+  Adaugat `biome-ignore lint/a11y/useSemanticElements` matching conventia
+  existenta din `AlertsExportModal.tsx:186`.
+
+#### Hardening intern (work-in-progress)
+
+- Branch `feat/f11-1-originguard-hardening` integrat in main: backend impune
+  `X-Legal-Dashboard-Desktop` pe rutele admin body-less (POST/DELETE),
+  frontendul injecteaza header-ul pe toate request-urile catre API,
+  `originGuard` returneaza envelope-shape `{ data, error, requestId }` pe
+  refuz. **F11 nu e final pentru web mode** — ramane de finalizat in release
+  viitor.
+
+#### Verificari
+
+- Restul confirmarilor in app (folosesc `<ConfirmProvider>`) sunt deja centrate
+  corect — nicio modificare aici.
+- Grep `<dialog open` pe `frontend/src/**` returneaza 0 hits dupa fix.
+
+---
+
 ## [2.27.1] - 2026-05-14
 
 ### Fix cautari largi PortalJust (cap SOAP 8MB -> 50MB + mesaj actionable)

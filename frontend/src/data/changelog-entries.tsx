@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.27.2",
+    date: "14 Mai 2026",
+    subtitle:
+      "Fix UI: dialog-urile de confirmare ('Inchide toate alertele filtrate?', popover instante monitorizate) nu mai apar lipite de marginea stanga a ecranului. Plus integrare interna F11-F1 a hardeningului OriginGuard (request-header desktop-only).",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Dialog-uri centrate corect",
+        content:
+          "Doua modaluri foloseau tag-ul nativ <dialog open> care primeste de la browser stiluri UA (width: fit-content) ce intra in conflict cu Tailwind inset-0 si fortau fereastra in coltul din stanga sus. Le-am inlocuit cu div + role=alertdialog/dialog si flex centering, pe acelasi pattern ca ConfirmProvider.",
+      },
+      {
+        title: "Locatii afectate",
+        content:
+          "Bulk dismiss in /alerte (confirmarea 'Inchide toate alertele filtrate?') si popover-ul cu instante asociate jobului din /monitorizare. Restul confirmarilor (folosesc ConfirmProvider) erau deja centrate corect.",
+      },
+      {
+        title: "Hardening OriginGuard (intern, in progres)",
+        content:
+          "Faza 11 / F11-F1 integrata in main (work-in-progress): backend impune X-Legal-Dashboard-Desktop pe POST/DELETE admin body-less, frontendul injecteaza header-ul pe toate request-urile catre backend, originGuard returneaza envelope-shape pe erori. Inca nu e final pentru web mode - ramane de finalizat in release viitor.",
+      },
+    ],
+  },
+  {
     version: "v2.27.1",
     date: "14 Mai 2026",
     subtitle:

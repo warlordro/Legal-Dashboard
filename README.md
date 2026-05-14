@@ -7,10 +7,22 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.27.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.27.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.27.1** - fix cautari largi PortalJust. Cap-ul intern al
+Ultimul release **v2.27.2** - fix UI: doua dialog-uri ("Inchide toate alertele
+filtrate?" din /alerte si popover-ul cu instante asociate din /monitorizare)
+nu mai apar lipite de marginea stanga a ecranului. Cauza era tag-ul nativ
+`<dialog open>` care primeste stiluri UA (`width: fit-content`) ce nu sunt
+suprascrise de Tailwind `inset-0` si fortau fereastra in coltul stanga-sus.
+Inlocuit cu `<div>` + `role="alertdialog"` / `role="dialog"` + flex centering,
+acelasi pattern ca `<ConfirmProvider>`. Plus: branch
+`feat/f11-1-originguard-hardening` integrat in main (work-in-progress) —
+backend impune `X-Legal-Dashboard-Desktop` pe rutele admin body-less, frontend
+injecteaza header-ul global, `originGuard` returneaza envelope-shape la refuz.
+F11 ramane de finalizat in release viitor pentru web mode.
+
+Predecesor **v2.27.1** - fix cautari largi PortalJust. Cap-ul intern al
 raspunsului SOAP a fost ridicat de la 8MB la 50MB (PortalJust raspunde empiric
 cu pana la 17MB pentru query-uri largi precum "AUTO IN SRL", la 1000 dosare cu
 parti+sedinte). Cand totusi se depaseste, backend-ul returneaza 413 cu un mesaj
