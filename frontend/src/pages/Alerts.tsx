@@ -856,15 +856,18 @@ export default function Alerts({
         filteredTotal={total}
       />
       {bulkDismissPending && (
-        <dialog
-          open
-          className="fixed inset-0 z-[100] m-0 flex h-auto max-h-none max-w-none items-center justify-center border-0 bg-black/50 p-4 backdrop-blur-sm"
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           onMouseDown={(e) => {
             if (!bulkDismissBusy && e.target === e.currentTarget) setBulkDismissPending(null);
           }}
-          aria-labelledby="bulk-dismiss-title"
         >
-          <div className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl">
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="bulk-dismiss-title"
+            className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+          >
             <div className="px-5 pt-5">
               <h3 id="bulk-dismiss-title" className="text-base font-semibold text-foreground">
                 {bulkDismissPending.mode === "ids" ? "Inchide alertele selectate?" : "Inchide toate alertele filtrate?"}
@@ -910,7 +913,7 @@ export default function Alerts({
               </Button>
             </div>
           </div>
-        </dialog>
+        </div>
       )}
     </div>
   );
