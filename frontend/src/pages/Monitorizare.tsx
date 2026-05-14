@@ -743,15 +743,19 @@ export default function Monitorizare({
           const labels = scope.map(getInstitutieLabel);
           if (labels.length === 0) return null;
           return (
-            <dialog
-              open
-              className="fixed inset-0 z-[100] m-0 flex h-auto max-h-none max-w-none items-center justify-center border-0 bg-black/50 p-4 backdrop-blur-sm"
+            <div
+              className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
               onMouseDown={(e) => {
                 if (e.target === e.currentTarget) setOpenInstantePopover(null);
               }}
-              aria-labelledby="instante-modal-title"
             >
-              <div className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl">
+              {/* biome-ignore lint/a11y/useSemanticElements: app modal style relies on a div dialog wrapper. */}
+              <div
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="instante-modal-title"
+                className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl"
+              >
                 <div className="mb-3 flex items-start justify-between gap-3 border-b border-border pb-2">
                   <div className="min-w-0">
                     <h3 id="instante-modal-title" className="text-[15px] font-semibold text-foreground">
@@ -781,7 +785,7 @@ export default function Monitorizare({
                   ))}
                 </ul>
               </div>
-            </dialog>
+            </div>
           );
         })()}
     </div>

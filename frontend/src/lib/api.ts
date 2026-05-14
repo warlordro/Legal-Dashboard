@@ -20,10 +20,24 @@ export function extractErrorMessage(data: unknown, fallback: string): string {
 // (monitoringApi, adminApi, dashboardApi, aiUsageApi, alertsApi) import this
 // instead of calling fetch() directly — that keeps the renderer-fetch hook
 // (.claude/hooks/block-renderer-fetch.mjs) satisfied without a per-file
-// allowlist entry. Pass-through today; future cross-cutting concerns (auth
-// header injection, request-id propagation, web-mode origin pinning) land here.
+// allowlist entry.
+//
+// F11-F1 Stage 3: injecteaza X-Legal-Dashboard-Desktop: 1 pe toate
+// request-urile. Backend-ul (requireDesktopHeader middleware) gateaza
+// POST/DELETE-urile admin body-less ca defensa in depth peste originGuard.
+// In web mode, backend-ul ignora headerul (autentificarea SSO + CSRF token
+// preiau rolul). Pe browser ostil, simple-POST cross-origin nu poate seta
+// header custom -> declanseaza preflight CORS care esueaza pe configul
+// existent.
+const DESKTOP_HEADER_NAME = "X-Legal-Dashboard-Desktop";
+const DESKTOP_HEADER_VALUE = "1";
+
 export function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  return fetch(input, init);
+  const headers = new Headers(init?.headers);
+  if (!headers.has(DESKTOP_HEADER_NAME)) {
+    headers.set(DESKTOP_HEADER_NAME, DESKTOP_HEADER_VALUE);
+  }
+  return fetch(input, { ...init, headers });
 }
 
 async function get<T>(url: string, params: Record<string, string | string[] | undefined>): Promise<T> {

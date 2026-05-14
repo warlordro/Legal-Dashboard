@@ -26,6 +26,7 @@ import { recordAudit } from "../db/auditRepository.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
+import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 
@@ -784,7 +785,7 @@ rnpmRouter.get("/saved/:id", (c) => {
   return c.json(aviz);
 });
 
-rnpmRouter.delete("/saved/all", requireRole("admin"), (c) => {
+rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin"), (c) => {
   const count = deleteAllAvize(getOwnerId(c));
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
@@ -840,7 +841,7 @@ rnpmRouter.get("/stats", async (c) => {
 // `require("electron")` is marked external at bundle time (scripts/build.js) so it
 // resolves at runtime inside the main process; web deployments will hit the catch
 // and return 501.
-rnpmRouter.post("/open-db-folder", requireRole("admin"), (c) => {
+rnpmRouter.post("/open-db-folder", requireDesktopHeader, requireRole("admin"), (c) => {
   const dbPath = getDbPath();
   try {
     // esbuild emits `require("electron")` verbatim in the CJS bundle because
@@ -858,7 +859,7 @@ rnpmRouter.post("/open-db-folder", requireRole("admin"), (c) => {
   }
 });
 
-rnpmRouter.post("/compact", requireRole("admin"), (c) => {
+rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin"), (c) => {
   try {
     const result = compactDb();
     return c.json({ ok: true, ...result });
@@ -872,7 +873,7 @@ rnpmRouter.post("/compact", requireRole("admin"), (c) => {
 // later can reconstruct who wiped/rolled back the database. Audit on both
 // success and failure paths — a failed restore that left a pre-restore
 // snapshot behind still matters for reconstruction.
-rnpmRouter.delete("/backups", requireRole("admin"), async (c) => {
+rnpmRouter.delete("/backups", requireDesktopHeader, requireRole("admin"), async (c) => {
   try {
     const deleted = await deleteAllBackups();
     recordAudit(c, "backup.delete_all", {
@@ -932,7 +933,7 @@ rnpmRouter.post("/backups/restore", requireRole("admin"), limitSmall, async (c) 
   }
 });
 
-rnpmRouter.post("/open-backups-folder", requireRole("admin"), async (c) => {
+rnpmRouter.post("/open-backups-folder", requireDesktopHeader, requireRole("admin"), async (c) => {
   const dir = getBackupDir();
   try {
     await mkdir(dir, { recursive: true });

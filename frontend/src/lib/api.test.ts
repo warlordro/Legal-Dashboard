@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, extractErrorMessage } from "./api";
+import { api, apiFetch, extractErrorMessage } from "./api";
 
 describe("extractErrorMessage", () => {
   it("citeste string error legacy", () => {
@@ -21,6 +21,58 @@ describe("extractErrorMessage", () => {
 
   it("returneaza fallback cand error este null", () => {
     expect(extractErrorMessage({ error: null }, "fallback")).toBe("fallback");
+  });
+});
+
+// F11-F1 Stage 3: apiFetch injecteaza X-Legal-Dashboard-Desktop pe toate
+// request-urile. Backend-ul gateaza POST/DELETE-urile admin body-less prin
+// requireDesktopHeader.
+describe("apiFetch — header X-Legal-Dashboard-Desktop", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn().mockResolvedValue(new Response("{}", { status: 200 }));
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it("injecteaza headerul pe request fara init", async () => {
+    await apiFetch("/api/foo");
+    const call = fetchSpy.mock.calls[0];
+    const init = call[1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(headers.get("X-Legal-Dashboard-Desktop")).toBe("1");
+  });
+
+  it("injecteaza headerul cand init are alte headere", async () => {
+    await apiFetch("/api/foo", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    });
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(headers.get("X-Legal-Dashboard-Desktop")).toBe("1");
+    expect(headers.get("Content-Type")).toBe("application/json");
+  });
+
+  it("nu suprascrie headerul daca apelantul l-a setat deja", async () => {
+    await apiFetch("/api/foo", {
+      headers: { "X-Legal-Dashboard-Desktop": "custom-value" },
+    });
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    const headers = new Headers(init.headers);
+    expect(headers.get("X-Legal-Dashboard-Desktop")).toBe("custom-value");
+  });
+
+  it("pastreaza method si body neatinse", async () => {
+    await apiFetch("/api/foo", { method: "DELETE", body: '{"a":1}' });
+    const init = fetchSpy.mock.calls[0][1] as RequestInit;
+    expect(init.method).toBe("DELETE");
+    expect(init.body).toBe('{"a":1}');
   });
 });
 

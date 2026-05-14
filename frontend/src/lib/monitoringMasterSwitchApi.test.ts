@@ -76,8 +76,8 @@ describe("monitoringMasterSwitch.set", () => {
     const result = await monitoringMasterSwitch.set(true);
     expect(lastCalledUrl).toBe("/api/v1/monitoring/master-switch");
     expect(lastInit?.method).toBe("PUT");
-    const headers = lastInit?.headers as Record<string, string> | undefined;
-    expect(headers?.["Content-Type"]).toBe("application/json");
+    const headers = new Headers(lastInit?.headers);
+    expect(headers.get("Content-Type")).toBe("application/json");
     expect(JSON.parse(lastInit?.body as string)).toEqual({ enabled: true });
     expect(result).toEqual({ enabled: true, changed: true });
   });
