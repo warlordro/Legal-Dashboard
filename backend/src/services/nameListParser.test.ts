@@ -9,13 +9,13 @@
 //     MISSING_NAME_COLUMN, PARSE_ERROR)
 //   - sha256 stabil per buffer
 //
-// NOTA F3: parser-ul XLSX foloseste exceljs in productie. Fixturile XLSX din
-// teste sunt construite cu xlsx (devDependency) — testele nu sunt suprafata
-// de atac, iar API-ul `xlsx@0.18.5` ramane convenient pentru creare de
-// fisiere. Nicio invocare `XLSX.read` in cod productie.
+// NOTA: fixturile XLSX sunt construite cu exceljs (deja productie); xlsx
+// devDep eliminat in 2026-05-15 ca sa inchidem alertele Dependabot
+// (Prototype Pollution + ReDoS), pastrand zero suprafata de atac in cod
+// productie (parser-ul XLSX foloseste exceljs).
 
 import { describe, expect, it } from "vitest";
-import * as XLSX from "xlsx";
+import ExcelJS from "exceljs";
 
 import {
   MAX_FILE_BYTES,
@@ -32,11 +32,12 @@ function csv(s: string): Buffer {
   return Buffer.from(s, "utf8");
 }
 
-function xlsx(rows: string[][]): Buffer {
-  const sheet = XLSX.utils.aoa_to_sheet(rows);
-  const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, sheet, "lista");
-  return XLSX.write(wb, { type: "buffer", bookType: "xlsx" }) as Buffer;
+async function xlsx(rows: string[][]): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const sheet = wb.addWorksheet("lista");
+  for (const row of rows) sheet.addRow(row);
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf as ArrayBuffer);
 }
 
 describe("normalizeName", () => {
@@ -94,7 +95,7 @@ describe("parseNameList — CSV", () => {
 
 describe("parseNameList — XLSX", () => {
   it("parseaza un fisier XLSX cu header + 2 rinduri", async () => {
-    const buf = xlsx([["nume"], ["Ion Popescu"], ["Acme SRL"]]);
+    const buf = await xlsx([["nume"], ["Ion Popescu"], ["Acme SRL"]]);
     const r = await parseNameList(buf, { filename: "lista.xlsx" });
     expect(r.totals.ok).toBe(2);
     expect(r.rows[0]?.nameRaw).toBe("Ion Popescu");
@@ -102,7 +103,7 @@ describe("parseNameList — XLSX", () => {
   });
 
   it("XLSX cu zip magic bytes corect identificat (filename irrelevant)", async () => {
-    const buf = xlsx([["nume"], ["Ion"]]);
+    const buf = await xlsx([["nume"], ["Ion"]]);
     // Filename mincinos — magic bytes castiga.
     const r = await parseNameList(buf, { filename: "lista.csv" });
     expect(r.totals.warn + r.totals.ok).toBe(1);
@@ -281,13 +282,13 @@ describe("capuri si erori", () => {
 
   // F3 audit: XLSX cu mai mult decat MAX_ROWS randuri trebuie sa arunce
   // TOO_MANY_ROWS. Folosim un fisier de probă cu MAX_ROWS + 2 rinduri (header
-  // + 50001 randuri de date). Generarea cu xlsx (devDep) este sincrona si
-  // produce ~600KB. exceljs eachRow-ul nostru adauga un sentinel cand
-  // detecteaza depasirea, asa ca dispatchParse arunca TOO_MANY_ROWS.
+  // + 50001 randuri de date). Generarea cu exceljs produce ~600KB. exceljs
+  // eachRow-ul nostru adauga un sentinel cand detecteaza depasirea, asa ca
+  // dispatchParse arunca TOO_MANY_ROWS.
   it("TOO_MANY_ROWS pe XLSX peste MAX_ROWS", async () => {
     const rows: string[][] = [["nume"]];
     for (let i = 0; i < MAX_ROWS + 1; i++) rows.push([`Persoana${i}`]);
-    const buf = xlsx(rows);
+    const buf = await xlsx(rows);
     // Sub plafonul de 10 MB cu siguranta (header simplu).
     expect(buf.length).toBeLessThan(MAX_FILE_BYTES);
     try {

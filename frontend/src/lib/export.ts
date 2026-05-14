@@ -186,7 +186,7 @@ export async function buildMonitoringXlsx(jobs: MonitoringJob[]): Promise<Export
   sanitizeFormulaCells(ws);
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Monitorizare");
+  XLSX.utils.book_append_sheet(wb, ws as import("xlsx-js-style").WorkSheet, "Monitorizare");
   const out = XLSX.write(wb, { bookType: "xlsx", type: "array" }) as ArrayBuffer | Uint8Array;
   return { buffer: toTransferableBuffer(out), filename: monitoringFilename(jobs, "xlsx"), mime: MIME_XLSX };
 }

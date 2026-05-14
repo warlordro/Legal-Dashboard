@@ -475,11 +475,11 @@ export async function buildRnpmXlsx(payload: RnpmExportPayload): Promise<RnpmExp
   if (wsIst) sanitizeFormulaCells(wsIst);
 
   const wb = XLSX.utils.book_new();
-  XLSX.utils.book_append_sheet(wb, wsAvize as import("xlsx").WorkSheet, "Avize");
-  if (wsCred) XLSX.utils.book_append_sheet(wb, wsCred as import("xlsx").WorkSheet, "Creditori");
-  if (wsDeb) XLSX.utils.book_append_sheet(wb, wsDeb as import("xlsx").WorkSheet, partyLabel2);
-  if (wsBun) XLSX.utils.book_append_sheet(wb, wsBun as import("xlsx").WorkSheet, "Bunuri");
-  if (wsIst) XLSX.utils.book_append_sheet(wb, wsIst as import("xlsx").WorkSheet, "Istoric");
+  XLSX.utils.book_append_sheet(wb, wsAvize as import("xlsx-js-style").WorkSheet, "Avize");
+  if (wsCred) XLSX.utils.book_append_sheet(wb, wsCred as import("xlsx-js-style").WorkSheet, "Creditori");
+  if (wsDeb) XLSX.utils.book_append_sheet(wb, wsDeb as import("xlsx-js-style").WorkSheet, partyLabel2);
+  if (wsBun) XLSX.utils.book_append_sheet(wb, wsBun as import("xlsx-js-style").WorkSheet, "Bunuri");
+  if (wsIst) XLSX.utils.book_append_sheet(wb, wsIst as import("xlsx-js-style").WorkSheet, "Istoric");
 
   const fileBase =
     docs.length === 1

@@ -257,7 +257,7 @@ export async function downloadBulkTemplate(): Promise<void> {
   sanitizeFormulaCells(ws);
 
   const wb = StyledXLSX.utils.book_new();
-  StyledXLSX.utils.book_append_sheet(wb, ws as import("xlsx").WorkSheet, "Monitorizare");
+  StyledXLSX.utils.book_append_sheet(wb, ws as import("xlsx-js-style").WorkSheet, "Monitorizare");
 
   const out = StyledXLSX.write(wb, { type: "array", bookType: "xlsx" }) as ArrayBuffer | Uint8Array;
   const bytes = out instanceof ArrayBuffer ? new Uint8Array(out) : out;
