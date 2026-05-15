@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import fsPromises from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -35,9 +35,13 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_AUTH_MODE;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_JWT_SECRET;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_AUTH_COOKIE_SECURE;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -60,7 +64,8 @@ describe("/api/v1/auth", () => {
     expect(res.status).toBe(501);
     const body = (await res.json()) as ErrorBody;
     expect(body.error.code).toBe("not_implemented");
-    expect(body.error.message).toContain("Login endpoint nu este disponibil in v2.7.x");
+    expect(body.error.message).not.toMatch(/PR-10/i);
+    expect(body.error.message).toMatch(/extern/i);
   });
 
   it("clears the session cookie on logout without requiring a valid token", async () => {

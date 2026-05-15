@@ -74,6 +74,14 @@ and treat the current defaults as insufficient.
   active row in `users`. Missing/invalid/expired tokens do not fall back to
   `local`. This is the backend seam only; real Google Workspace SSO/deploy/TLS
   cutover remains out of scope for this branch.
+- **Web mode este auth seam, nu produs web self-service.**
+  `LEGAL_DASHBOARD_AUTH_MODE=web` activeaza validarea JWT
+  (issuer/audience/secret) si forteaza cookies `Secure`. Nu este livrat un
+  endpoint `/login` first-party: tokenele trebuie emise de un IdP extern
+  (Google Workspace, Auth0, etc.) si injectate prin cookie
+  `legal_dashboard_session`. `/health` expune `authMode` si
+  `loginAvailable:false` pentru ca operatorii sa nu confunde modul web cu un
+  produs deploy-ready out-of-the-box.
 - **Boot guard remote+desktop refused (PR-9).** `LEGAL_DASHBOARD_ALLOW_REMOTE=1`
   cere `LEGAL_DASHBOARD_AUTH_MODE=web`, JWT secret valid si ack explicit.
   Desktop/local pe LAN este refuzat la boot.
