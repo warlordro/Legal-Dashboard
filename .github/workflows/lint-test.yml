@@ -8,6 +8,16 @@ on:
     branches:
       - main
 
+# Anuleaza run-urile superseded pe acelasi ref (PR push rapid sau merge consecutiv)
+# ca sa nu ardem minute CI pe commits deja invechite.
+concurrency:
+  group: lint-test-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least-privilege: job-ul nu scrie nimic, deci read-only e suficient.
+permissions:
+  contents: read
+
 jobs:
   lint-test:
     runs-on: ubuntu-latest
