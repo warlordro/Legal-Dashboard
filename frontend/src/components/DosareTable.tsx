@@ -48,13 +48,6 @@ interface DosareTableProps {
   onConfigureApiKey?: () => void;
 }
 
-function isNameMatch(partyName: string, searchedName: string): boolean {
-  const nameLower = stripDiacritics(partyName.toLowerCase());
-  const searchWords = stripDiacritics(searchedName.toLowerCase()).trim().split(/\s+/).filter(Boolean);
-  if (searchWords.length === 0) return false;
-  return searchWords.every((word) => nameLower.includes(word));
-}
-
 type SortKey = "numar" | "data" | "institutie";
 
 export function DosareTable({
@@ -63,7 +56,7 @@ export function DosareTable({
   onExportPDF,
   searchedName,
   apiKeys,
-  onConfigureApiKey,
+  onConfigureApiKey: _onConfigureApiKey,
 }: DosareTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("data");
@@ -77,7 +70,7 @@ export function DosareTable({
   const [showKeyPrompt, setShowKeyPrompt] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
-  const [hiddenAnalysis, setHiddenAnalysis] = useState<Set<string>>(new Set());
+  const [_hiddenAnalysis, _setHiddenAnalysis] = useState<Set<string>>(new Set());
   const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
   // Per-dosar monitor state: pending = request in flight, "added" / "exists" /
   // error message. Lives in component state so feedback is local to the row;
@@ -170,7 +163,7 @@ export function DosareTable({
   }, [expandedIdx]);
 
   // Multi-agent state
-  const [multiMode, setMultiMode] = useState(false);
+  const [_multiMode, _setMultiMode] = useState(false);
   const [multiAnalysts, setMultiAnalysts] = useState<[string, string]>(["claude-sonnet", "gpt-5.4-mini"]);
   const [multiJudge, setMultiJudge] = useState<string>("claude-opus");
   const [multiLoading, setMultiLoading] = useState<string | null>(null);
@@ -335,9 +328,9 @@ export function DosareTable({
     setSelected((prev) => {
       const next = new Set(prev);
       if (allPageSelected) {
-        paged.forEach((d) => next.delete(d.numar));
+        for (const d of paged) next.delete(d.numar);
       } else {
-        paged.forEach((d) => next.add(d.numar));
+        for (const d of paged) next.add(d.numar);
       }
       return next;
     });
@@ -361,6 +354,7 @@ export function DosareTable({
         <div className="flex items-center gap-2">
           {selected.size > 0 && (
             <button
+              type="button"
               className="text-xs text-muted-foreground hover:text-foreground underline"
               onClick={() => setSelected(new Set())}
             >

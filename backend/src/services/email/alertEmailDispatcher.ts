@@ -66,7 +66,7 @@ export async function dispatchAlertEmail(alert: MonitoringAlertRow): Promise<voi
   // Cheaper than a SELECT per insertAlert and avoids spinning up a no-op
   // sendAlertEmail call that would just return mailer_disabled.
   if (!isMailerConfigured()) return;
-  let settings;
+  let settings: ReturnType<typeof getEmailSettings>;
   try {
     settings = getEmailSettings(alert.owner_id);
   } catch (err) {

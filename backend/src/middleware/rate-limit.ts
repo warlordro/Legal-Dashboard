@@ -12,7 +12,7 @@ const RATE_WINDOW = 60000;
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
-export async function rateLimit(c: Context, next: Next): Promise<Response | void> {
+export async function rateLimit(c: Context, next: Next): Promise<Response | undefined> {
   // SECURITY: rate-limit by real socket address. X-Forwarded-For is spoofable and
   // deliberately ignored. If the runtime cannot surface a remote address (proxy
   // misconfiguration, raw stream, etc.), fail closed — a shared "unknown" bucket
@@ -31,7 +31,8 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | void
   const now = Date.now();
   // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit
   if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved")) {
-    return next();
+    await next();
+    return undefined;
   }
 
   // Tier 3 #15: bucket per (ip, ownerId). On desktop ownerId is always
@@ -133,7 +134,7 @@ function releasePreAuthAttempt(key: string): void {
   if (entry.count <= 0) preAuthMap.delete(key);
 }
 
-export async function preAuthRateLimit(c: Context, next: Next): Promise<Response | void> {
+export async function preAuthRateLimit(c: Context, next: Next): Promise<Response | undefined> {
   const ip = getConnInfo(c).remote.address;
   if (!ip) {
     return c.json(

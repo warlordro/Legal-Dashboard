@@ -78,6 +78,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
       {/* Analiză AI - Collapsible per dosar */}
       <div className="rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-950/20">
         <button
+          type="button"
           className="flex w-full items-center justify-between p-4 pb-2 cursor-pointer hover:bg-violet-100/50 dark:hover:bg-violet-900/20 rounded-t-lg transition-colors"
           onClick={(e) => {
             e.stopPropagation();
@@ -90,6 +91,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
           <div className="flex items-center gap-1.5">
             {ai.analysis[dosar.numar] && (
               <button
+                type="button"
                 className="p-1 rounded hover:bg-violet-100 dark:hover:bg-violet-900/30 text-violet-500 hover:text-violet-700 dark:hover:text-violet-300 transition-colors disabled:opacity-50"
                 title="Exportă PDF"
                 disabled={exportingPdf !== null}
@@ -139,6 +141,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                       </span>
                       {models.map((m) => (
                         <button
+                          type="button"
                           key={m.key}
                           onClick={(e) => {
                             e.stopPropagation();
@@ -227,6 +230,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
       {/* Multi-Agent Analysis - Collapsible per dosar */}
       <div className={`mt-3 rounded-lg border ${mc.border} ${mc.bg}`}>
         <button
+          type="button"
           className={`flex w-full items-center justify-between p-4 pb-2 cursor-pointer ${mc.hoverBg} rounded-t-lg transition-colors`}
           onClick={(e) => {
             e.stopPropagation();
@@ -240,6 +244,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
           <div className="flex items-center gap-1.5">
             {multi.result[dosar.numar] && (
               <button
+                type="button"
                 className="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors disabled:opacity-50"
                 title="Exportă PDF"
                 disabled={exportingPdf !== null}
@@ -284,6 +289,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                 <span className={`px-1.5 text-[11px] font-medium ${mc.selectLabel} w-20`}>Analist 1</span>
                 {ai.availableModels.map((m) => (
                   <button
+                    type="button"
                     key={m.key}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -311,6 +317,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                 <span className={`px-1.5 text-[11px] font-medium ${mc.selectLabel} w-20`}>Analist 2</span>
                 {ai.availableModels.map((m) => (
                   <button
+                    type="button"
                     key={m.key}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -343,6 +350,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                   return false;
                 }).map((j) => (
                   <button
+                    type="button"
                     key={j.key}
                     onClick={(e) => {
                       e.stopPropagation();
@@ -398,8 +406,8 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                   done,
                   active,
                   label,
-                  role,
-                }: { done: boolean; active: boolean; label: string; role: string }) => (
+                  agentRole,
+                }: { done: boolean; active: boolean; label: string; agentRole: string }) => (
                   <div
                     className={`flex items-center gap-2 text-xs ${done ? mc.text : active ? `${mc.text} animate-pulse` : "text-muted-foreground"}`}
                   >
@@ -411,15 +419,15 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                       <Circle className="h-3.5 w-3.5" />
                     )}
                     <span>
-                      {role}: <span className="font-medium">{label}</span>
+                      {agentRole}: <span className="font-medium">{label}</span>
                     </span>
                   </div>
                 );
                 return (
                   <div className="space-y-1">
-                    <Row done={a1Done} active={!a1Done} label={a1Label} role="Analist 1" />
-                    <Row done={a2Done} active={!a2Done} label={a2Label} role="Analist 2" />
-                    <Row done={false} active={judgeStarted} label={judgeLabel} role="Judecator" />
+                    <Row done={a1Done} active={!a1Done} label={a1Label} agentRole="Analist 1" />
+                    <Row done={a2Done} active={!a2Done} label={a2Label} agentRole="Analist 2" />
+                    <Row done={false} active={judgeStarted} label={judgeLabel} agentRole="Judecator" />
                   </div>
                 );
               })()}
@@ -467,6 +475,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                 </div>
                 {/* Toggle individual analyses */}
                 <button
+                  type="button"
                   className={`text-xs ${mc.link} ${mc.linkHover} underline`}
                   onClick={(e) => {
                     e.stopPropagation();

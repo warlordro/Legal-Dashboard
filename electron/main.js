@@ -13,9 +13,7 @@ const {
 const path = require("node:path");
 const fs = require("node:fs");
 const pkg = require(path.join(__dirname, "..", "package.json"));
-const { getNotificationStatus, showNativeNotification, registerNotificationIpc } = require(
-  path.join(__dirname, "notifications.js")
-);
+const { registerNotificationIpc } = require(path.join(__dirname, "notifications.js"));
 const APP_USER_MODEL_ID = app.isPackaged ? "ro.legaldashboard.app" : "ro.legaldashboard.dev";
 
 // Windows: setAppUserModelId must run before any window/notification is shown
@@ -442,7 +440,7 @@ function createWindow() {
   });
 
   // Right-click context menu with Copy, Select All, Print
-  mainWindow.webContents.on("context-menu", (event, params) => {
+  mainWindow.webContents.on("context-menu", (_event, params) => {
     const menuItems = [];
 
     if (params.selectionText) {

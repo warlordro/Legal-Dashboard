@@ -17,14 +17,6 @@ interface TermeneTableProps {
   searchedName?: string;
 }
 
-function getSolutieBadgeVariant(solutie: string): "default" | "secondary" | "outline" | "success" | "warning" {
-  const s = (solutie ?? "").toLowerCase();
-  if (s.includes("admite") || s.includes("hotărâre") || s.includes("hotarare")) return "success";
-  if (s.includes("respinge") || s.includes("perim")) return "warning";
-  if (s.includes("amân") || s.includes("aman")) return "secondary";
-  return "outline";
-}
-
 // PortalJust SharePoint indexer nu retine sufixul de dosar asociat (/a, /a1, /a2 ...).
 function getPortalJustUrl(numar: string): string {
   const parent = numar.replace(/\/a\d*$/i, "");
@@ -154,9 +146,9 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
     setSelected((prev) => {
       const next = new Set(prev);
       if (allSelected) {
-        pageKeys.forEach((k) => next.delete(k));
+        for (const k of pageKeys) next.delete(k);
       } else {
-        pageKeys.forEach((k) => next.add(k));
+        for (const k of pageKeys) next.add(k);
       }
       return next;
     });

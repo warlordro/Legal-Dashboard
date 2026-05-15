@@ -24,7 +24,7 @@ export function requireRole(...allowed: UserRole[]) {
   if (allowed.length === 0) {
     throw new Error("requireRole: at least one role must be specified");
   }
-  return async (c: Context, next: Next): Promise<Response | void> => {
+  return async (c: Context, next: Next): Promise<Response | undefined> => {
     const userId = getOwnerId(c);
     const user = getUserById(userId);
 

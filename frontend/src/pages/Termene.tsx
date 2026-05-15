@@ -131,7 +131,7 @@ export default function Termene({
       // from the response. The backend returns total termene count.
       // Since 1000 dosare can produce many more termene, we track via a special header or heuristic.
       // For simplicity: if the response includes a `dosareCount` we use that, otherwise we estimate.
-      const dosareCount = (res as any).dosareCount ?? 0;
+      const dosareCount = "dosareCount" in res && typeof res.dosareCount === "number" ? res.dosareCount : 0;
       setInitialDosareCount(dosareCount);
       onStateChange({
         allTermene: res.data,

@@ -83,6 +83,7 @@ export function RnpmRestoreModal({ onClose, onRestored }: { onClose: () => void;
             Restaurare baza locala
           </h3>
           <button
+            type="button"
             onClick={onClose}
             disabled={!!restoring}
             className="rounded-lg p-1 hover:bg-muted disabled:opacity-50"

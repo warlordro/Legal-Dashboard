@@ -229,6 +229,7 @@ function StatsModal({
             Info baza locala
           </h3>
           <button
+            type="button"
             onClick={onClose}
             disabled={compacting}
             className="rounded-lg p-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"

@@ -1291,7 +1291,7 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
 // commit. We assert the lock is RELEASED while runner.run is parked.
 describe("Scheduler — finalize lock window only (#T2)", () => {
   it("runner.run() does NOT hold the maintenance read lock", async () => {
-    const jobId = seedJob({
+    const _jobId = seedJob({
       cadenceSec: 600,
       nextRunAt: "2026-04-28T09:00:00.000Z",
     });

@@ -132,6 +132,7 @@ export function TablePagination({
           <span className="text-xs text-muted-foreground">Rezultate pe pagina:</span>
           {pageSizes.map((size) => (
             <button
+              type="button"
               key={size}
               onClick={() => onPageSizeChange(size)}
               disabled={disabled}

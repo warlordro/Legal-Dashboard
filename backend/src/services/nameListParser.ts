@@ -420,7 +420,7 @@ function rowsFromXlsx(buf: Buffer): Promise<RawRow[]> {
 // Async din cauza migrarii la exceljs (F3 audit): parser-ul XLSX e
 // streaming-async; CSV path-ul ramane sincron dar e wrap-uit in acelasi
 // promise pentru simetrie.
-export async function parseNameList(buf: Buffer, opts: ParseOptions = {}): Promise<ParseResult> {
+export async function parseNameList(buf: Buffer, _opts: ParseOptions = {}): Promise<ParseResult> {
   if (buf.length === 0) {
     throw new ParseError("EMPTY_FILE", "Fisier gol.");
   }

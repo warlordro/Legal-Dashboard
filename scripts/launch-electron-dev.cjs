@@ -2,6 +2,7 @@ const { copyFileSync, existsSync, readFileSync, statSync, writeFileSync } = requ
 const { dirname, join } = require("path");
 const { spawn, spawnSync } = require("child_process");
 
+function main() {
 const projectRoot = join(__dirname, "..");
 const electronExe = require("electron");
 
@@ -135,3 +136,6 @@ if (!existsSync(devExe) || !stampMatches(readStamp())) {
 
 writeDevShortcut();
 launch(devExe);
+}
+
+main();

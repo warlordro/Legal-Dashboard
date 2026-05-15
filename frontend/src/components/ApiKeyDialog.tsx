@@ -84,7 +84,12 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
             <Key className="h-5 w-5 text-violet-600" />
             Configurare Chei API
           </h3>
-          <button onClick={onClose} aria-label="Inchide configurare chei" className="rounded-lg p-1 hover:bg-muted">
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Inchide configurare chei"
+            className="rounded-lg p-1 hover:bg-muted"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -112,10 +117,10 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
               value={keyInputs.anthropic}
               onChange={(e) => setKeyInputs({ ...keyInputs, anthropic: e.target.value })}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
-              autoFocus
             />
             {hasAnthropic && (
               <button
+                type="button"
                 className="mt-1.5 text-[11px] text-red-500 hover:underline"
                 onClick={() => {
                   clearKey("anthropic");
@@ -143,6 +148,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
             />
             {hasOpenai && (
               <button
+                type="button"
                 className="mt-1.5 text-[11px] text-red-500 hover:underline"
                 onClick={() => {
                   clearKey("openai");
@@ -170,6 +176,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
             />
             {hasGoogle && (
               <button
+                type="button"
                 className="mt-1.5 text-[11px] text-red-500 hover:underline"
                 onClick={() => {
                   clearKey("google");
@@ -250,6 +257,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
             />
             {hasTwoCaptcha && (
               <button
+                type="button"
                 className="mt-1.5 text-[11px] text-red-500 hover:underline"
                 onClick={() => {
                   clearKey("twocaptcha");
@@ -278,6 +286,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
             />
             {hasCapSolver && (
               <button
+                type="button"
                 className="mt-1.5 text-[11px] text-red-500 hover:underline"
                 onClick={() => {
                   clearKey("capsolver");

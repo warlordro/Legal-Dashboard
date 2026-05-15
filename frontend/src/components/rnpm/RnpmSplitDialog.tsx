@@ -69,7 +69,7 @@ export function RnpmSplitDialog({ open, type, total, limit, captchaProvider, onC
             <Split className="h-5 w-5 text-amber-600" />
             Cautare prea larga
           </h3>
-          <button onClick={onCancel} aria-label="Inchide" className="rounded-lg p-1 hover:bg-muted">
+          <button type="button" onClick={onCancel} aria-label="Inchide" className="rounded-lg p-1 hover:bg-muted">
             <X className="h-4 w-4" />
           </button>
         </div>
