@@ -36,10 +36,12 @@ describe("filterRnpmSearchResults - EXPLAIN QUERY PLAN", () => {
   });
 
   it("query cu 3 tokens AND inca foloseste indexul", () => {
+    // v2.27.5 — coloanele _norm sunt materializate (migration 0022); query-ul real foloseste
+    // direct ${col}_norm LIKE ?, fara apel UDF. Replicam pattern-ul aici ca EXPLAIN sa fie reprezentativ.
     const sql = `SELECT a.id FROM rnpm_avize a WHERE a.owner_id = 'local' AND a.search_id = 1
-      AND ((rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\')
-        AND (rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\')
-        AND (rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\'))
+      AND ((a.identificator_norm LIKE ? ESCAPE '\\' OR a.tip_norm LIKE ? ESCAPE '\\')
+        AND (a.identificator_norm LIKE ? ESCAPE '\\' OR a.tip_norm LIKE ? ESCAPE '\\')
+        AND (a.identificator_norm LIKE ? ESCAPE '\\' OR a.tip_norm LIKE ? ESCAPE '\\'))
       ORDER BY a.id ASC LIMIT 1500`;
     const plan = db.prepare(`EXPLAIN QUERY PLAN ${sql}`).all("%x%", "%x%", "%y%", "%y%", "%z%", "%z%") as {
       detail: string;

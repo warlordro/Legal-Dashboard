@@ -456,11 +456,14 @@ export function getAvize(opts: GetAvizeOptions = {}): OffsetPage<AvizRecord> {
     // inscriere_initiala_id / inscriere_modificata_id: pe randurile "aviz de modificare" aceste
     // coloane contin identificator-ul avizului parinte. Includerea lor in cautare face ca
     // filtrarea dupa identificator sa scoata si lantul de modificari legate de parinte (daca sunt in baza).
+    // v2.27.5 — folosim coloanele _norm materializate (migration 0022). Pattern LIKE
+    // este construit deja in JS (stripDiacritics + lowercase via buildRnpmLikePattern),
+    // deci nu mai e nevoie de rnpm_norm() la fiecare comparatie -> elimina 12 apeluri UDF/query.
     where.push(`(
-      rnpm_norm(a.identificator) LIKE ? ESCAPE '\\' OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\' OR rnpm_norm(a.utilizator_autorizat) LIKE ? ESCAPE '\\' OR rnpm_norm(a.numar_act) LIKE ? ESCAPE '\\'
-      OR rnpm_norm(a.inscriere_initiala_id) LIKE ? ESCAPE '\\' OR rnpm_norm(a.inscriere_modificata_id) LIKE ? ESCAPE '\\'
-      OR EXISTS (SELECT 1 FROM rnpm_creditori c WHERE c.aviz_id = a.id AND c.owner_id = a.owner_id AND (rnpm_norm(c.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(c.cnp) LIKE ? ESCAPE '\\'))
-      OR EXISTS (SELECT 1 FROM rnpm_debitori d WHERE d.aviz_id = a.id AND d.owner_id = a.owner_id AND (rnpm_norm(d.denumire) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cod) LIKE ? ESCAPE '\\' OR rnpm_norm(d.cnp) LIKE ? ESCAPE '\\'))
+      a.identificator_norm LIKE ? ESCAPE '\\' OR a.tip_norm LIKE ? ESCAPE '\\' OR a.utilizator_autorizat_norm LIKE ? ESCAPE '\\' OR a.numar_act_norm LIKE ? ESCAPE '\\'
+      OR a.inscriere_initiala_id_norm LIKE ? ESCAPE '\\' OR a.inscriere_modificata_id_norm LIKE ? ESCAPE '\\'
+      OR EXISTS (SELECT 1 FROM rnpm_creditori c WHERE c.aviz_id = a.id AND c.owner_id = a.owner_id AND (c.denumire_norm LIKE ? ESCAPE '\\' OR c.cod_norm LIKE ? ESCAPE '\\' OR c.cnp_norm LIKE ? ESCAPE '\\'))
+      OR EXISTS (SELECT 1 FROM rnpm_debitori d WHERE d.aviz_id = a.id AND d.owner_id = a.owner_id AND (d.denumire_norm LIKE ? ESCAPE '\\' OR d.cod_norm LIKE ? ESCAPE '\\' OR d.cnp_norm LIKE ? ESCAPE '\\'))
     )`);
     const like = buildRnpmLikePattern(opts.searchText);
     for (let i = 0; i < 12; i++) params.push(like);
@@ -618,38 +621,43 @@ export function getAvizeByIds(ids: number[], ownerId = "local"): AvizFull[] {
 function buildResultsFilterClause(tokens: string[]): { whereSql: string; params: string[] } {
   if (tokens.length === 0) return { whereSql: "1=1", params: [] };
 
+  // v2.27.5 — coloane _norm materializate (migration 0022) + trigger-e care le tin in sync.
+  // Eliminam 24 apeluri rnpm_norm() per token: backend-ul tracta ~8s per filter pe 148 randuri
+  // pentru ca SQLite reapela UDF-ul pentru fiecare scan x coloana x token. Acum LIKE ruleaza
+  // direct pe coloana stored (zero overhead per row). Set-ul de coloane acoperite si pattern-ul
+  // LIKE construit cu buildRnpmLikePattern raman identice -> matchedAvizIds nu se schimba.
   const perTokenSql = `(
-    rnpm_norm(a.identificator) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.tip) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.utilizator_autorizat) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.numar_act) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.tip_act) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.alte_mentiuni) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.detalii_comune) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.inscriere_initiala_id) LIKE ? ESCAPE '\\'
-    OR rnpm_norm(a.inscriere_modificata_id) LIKE ? ESCAPE '\\'
+    a.identificator_norm LIKE ? ESCAPE '\\'
+    OR a.tip_norm LIKE ? ESCAPE '\\'
+    OR a.utilizator_autorizat_norm LIKE ? ESCAPE '\\'
+    OR a.numar_act_norm LIKE ? ESCAPE '\\'
+    OR a.tip_act_norm LIKE ? ESCAPE '\\'
+    OR a.alte_mentiuni_norm LIKE ? ESCAPE '\\'
+    OR a.detalii_comune_norm LIKE ? ESCAPE '\\'
+    OR a.inscriere_initiala_id_norm LIKE ? ESCAPE '\\'
+    OR a.inscriere_modificata_id_norm LIKE ? ESCAPE '\\'
     OR EXISTS (SELECT 1 FROM rnpm_creditori c
       WHERE c.aviz_id = a.id AND c.owner_id = a.owner_id
-      AND (rnpm_norm(c.denumire) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(c.cod) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(c.cnp) LIKE ? ESCAPE '\\'))
+      AND (c.denumire_norm LIKE ? ESCAPE '\\'
+        OR c.cod_norm LIKE ? ESCAPE '\\'
+        OR c.cnp_norm LIKE ? ESCAPE '\\'))
     OR EXISTS (SELECT 1 FROM rnpm_debitori d
       WHERE d.aviz_id = a.id AND d.owner_id = a.owner_id
-      AND (rnpm_norm(d.denumire) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(d.cod) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(d.cnp) LIKE ? ESCAPE '\\'))
+      AND (d.denumire_norm LIKE ? ESCAPE '\\'
+        OR d.cod_norm LIKE ? ESCAPE '\\'
+        OR d.cnp_norm LIKE ? ESCAPE '\\'))
     OR EXISTS (SELECT 1 FROM rnpm_bunuri b
       LEFT JOIN rnpm_bunuri_descrieri bd ON bd.id = b.descriere_id
       WHERE b.aviz_id = a.id AND b.owner_id = a.owner_id
-      AND (rnpm_norm(b.tip_bun) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(b.categorie) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(b.identificare) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(b.model) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(b.serie_sasiu) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(b.serie_motor) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(b.nr_inmatriculare) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(b.referinte_json) LIKE ? ESCAPE '\\'
-        OR rnpm_norm(bd.text) LIKE ? ESCAPE '\\'))
+      AND (b.tip_bun_norm LIKE ? ESCAPE '\\'
+        OR b.categorie_norm LIKE ? ESCAPE '\\'
+        OR b.identificare_norm LIKE ? ESCAPE '\\'
+        OR b.model_norm LIKE ? ESCAPE '\\'
+        OR b.serie_sasiu_norm LIKE ? ESCAPE '\\'
+        OR b.serie_motor_norm LIKE ? ESCAPE '\\'
+        OR b.nr_inmatriculare_norm LIKE ? ESCAPE '\\'
+        OR b.referinte_json_norm LIKE ? ESCAPE '\\'
+        OR bd.text_norm LIKE ? ESCAPE '\\'))
   )`;
 
   const groups: string[] = [];

@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.27.4** (15 Mai 2026, release de consolidare: inchide Faza 11 + proiectul "biome total cleanup" (0 errors permanent), absoarbe trei runde CodeRabbit (#37 #38 #39) si trei polish-uri scurte: BarChart Tooltip cursor + animatie, plafon export RNPM 500 -> 5000 ids, nitpicks CI permissions/concurrency lint-test). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.27.5** (16 Mai 2026, fix performanta filtrare RNPM: materializare cu migration 0022 - 24 coloane `*_norm` populate de 10 triggere `AFTER INSERT/UPDATE OF` pe rnpm_avize/creditori/debitori/bunuri/bunuri_descrieri, plus backfill idempotent post-migration. Read-path citeste direct `col_norm` in loc sa apeleze UDF-ul `rnpm_norm()` per rand. Elimina freeze-ul de ~8s pe filtrare cu 148 rezultate. Zero regresie functionala - aceleasi 24 coloane match, acelasi pattern LIKE, acelasi highlight). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)

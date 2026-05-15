@@ -125,6 +125,12 @@ export function getDb(): Database.Database {
 
   initSchema(db);
 
+  // v2.27.5 — backfill _norm columns post-migration. Trigger-ele din 0022 populeaza
+  // INSERT/UPDATE viitoare, dar randurile pre-existente in DB raman cu NULL pe _norm
+  // dupa ALTER. Backfill-ul ruleaza aici (UDF e registrat) si e idempotent — la
+  // boot-urile urmatoare WHERE-ul gaseste 0 randuri si nu face nimic.
+  backfillRnpmNormColumns(db);
+
   // v2.24.0 - probe lightweight pentru index-ul filterRnpmSearchResults.
   // NU fail-closed: doar warn pentru ops (migration 0021 ar trebui sa-l creeze).
   try {
@@ -432,6 +438,74 @@ function initSchema(d: Database.Database): void {
     const t2 = Date.now();
     d.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     console.log(`[schema] WAL truncate done in ${Date.now() - t2}ms`);
+  }
+}
+
+// v2.27.5 — backfill randurilor pre-existente cu valorile normalizate.
+// Idempotent (WHERE col_norm IS NULL AND col IS NOT NULL); ruleaza rapid pe boot daca DB e deja in sync.
+function backfillRnpmNormColumns(d: Database.Database): void {
+  // Guard: daca migration-ul 0022 nu a rulat inca (ex. install fresh inainte de PR-ul asta), iesim.
+  // Verificam o singura coloana — daca exista, restul sunt garantate de migration.
+  try {
+    const cols = d.prepare("PRAGMA table_info(rnpm_avize)").all() as { name: string }[];
+    if (!cols.some((c) => c.name === "identificator_norm")) return;
+  } catch {
+    return;
+  }
+
+  type Group = { table: string; cols: string[] };
+  const groups: Group[] = [
+    {
+      table: "rnpm_avize",
+      cols: [
+        "identificator",
+        "tip",
+        "utilizator_autorizat",
+        "numar_act",
+        "tip_act",
+        "alte_mentiuni",
+        "detalii_comune",
+        "inscriere_initiala_id",
+        "inscriere_modificata_id",
+      ],
+    },
+    { table: "rnpm_creditori", cols: ["denumire", "cod", "cnp"] },
+    { table: "rnpm_debitori", cols: ["denumire", "cod", "cnp"] },
+    {
+      table: "rnpm_bunuri",
+      cols: [
+        "tip_bun",
+        "categorie",
+        "identificare",
+        "model",
+        "serie_sasiu",
+        "serie_motor",
+        "nr_inmatriculare",
+        "referinte_json",
+      ],
+    },
+    { table: "rnpm_bunuri_descrieri", cols: ["text"] },
+  ];
+
+  let totalUpdated = 0;
+  const t0 = Date.now();
+  for (const g of groups) {
+    // Detecteaza randuri unde *vreuna* dintre _norm e NULL dar sursa nu e NULL.
+    // Trimite UPDATE pe TOATE _norm-urile (cheltuiala suplimentara minima, dar singura tranzactie).
+    const needsClause = g.cols.map((c) => `(${c}_norm IS NULL AND ${c} IS NOT NULL)`).join(" OR ");
+    const setClause = g.cols.map((c) => `${c}_norm = rnpm_norm(${c})`).join(", ");
+    const sql = `UPDATE ${g.table} SET ${setClause} WHERE ${needsClause}`;
+    try {
+      const res = d.prepare(sql).run();
+      if (res.changes > 0) totalUpdated += res.changes;
+    } catch (e) {
+      console.warn(
+        `[schema] backfill _norm pe ${g.table} esuat (continuam): ${e instanceof Error ? e.message : "unknown"}`
+      );
+    }
+  }
+  if (totalUpdated > 0) {
+    console.log(`[schema] backfill _norm: ${totalUpdated} randuri actualizate in ${Date.now() - t0}ms`);
   }
 }
 

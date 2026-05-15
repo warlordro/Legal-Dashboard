@@ -7,21 +7,19 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.27.4**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.27.5**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.27.4** - release de consolidare: inchide Faza 11
-(F11-F2..F11-F5: shell:true eliminat din rebuild electron, separare auth/health
-handler, split frontend export pe module per-domain, biome gate fara
-continue-on-error) plus proiectul "biome total cleanup" (9 PR-uri Codex care
-duc biome la 0 errors si urca gate-ul permanent in CI). Absorbite trei runde
-CodeRabbit (#37 pending-search deps + dedup Users + bootstrap lint-test, #38
-delete process.env semantic + a11y warn, #39 fix-uri reale htmlFor) si trei
-polish-uri din sesiunea curenta (BarChart Tooltip cursor transparent + fara
-animatie, plafon export RNPM 500 -> 5000 ids cu EXPORT_BODY_LIMIT 64KB -> 256KB,
-nitpicks CI permissions/concurrency pe lint-test.yml). Hard constraints
-respectate pe tot parcursul: SQL raw doar in backend/src/db/**, owner_id pe
-toate tabelele, DOMPurify activ, whitelist URL neatinsa.
+Ultimul release **v2.27.5** - fix performanta filtrare RNPM. Cauza freeze-ului
+de ~8s pe filtrare cu input "2026" peste 148 rezultate: `buildResultsFilterClause`
+apela UDF-ul JS `rnpm_norm()` prin SQLite per rand x 24 coloane. Fix:
+materializare cu migration 0022 - 24 coloane `*_norm` populate de 10 triggere
+`AFTER INSERT/UPDATE OF` pe rnpm_avize/creditori/debitori/bunuri/bunuri_descrieri,
+plus backfill idempotent post-migration in schema.ts. Read-path
+(avizRepository.ts) citeste direct `col_norm` in loc sa apeleze UDF.
+Zero regresie functionala - aceleasi 24 coloane match, acelasi pattern LIKE,
+acelasi highlightTokens UI. 7 teste regresie noi acopera populare triggere +
+scenarii diacritice/JSON/4-char prefix.
 
 Predecesor **v2.27.2** - fix UI: doua dialog-uri ("Inchide toate alertele
 filtrate?" din /alerte si popover-ul cu instante asociate din /monitorizare)

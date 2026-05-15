@@ -4,6 +4,78 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.27.5] - 2026-05-16
+
+### Fix performanta filtrare RNPM: materializare coloane *_norm cu triggere
+
+Fix critic pentru freeze-ul UI raportat in productie pe filtrare cu input
+"2026" peste 148 rezultate RNPM. Cauza: `buildResultsFilterClause` apela
+`rnpm_norm()` UDF JS prin SQLite-better-sqlite3 per rand x 24 coloane
+(diacritic strip + lowercase) — O(N x cols) JS round-trip a urcat
+filtrarea la ~8s, blocand event loop-ul renderer-ului. Fix-ul materializeaza
+coloanele `*_norm` cu triggere SQLite — UDF-ul nu mai e apelat per query, ci
+doar la INSERT/UPDATE pe coloanele sursa.
+
+#### Migration 0022 — coloane materializate + triggere
+
+- [backend/src/db/migrations/0022_rnpm_norm_columns.up.sql](backend/src/db/migrations/0022_rnpm_norm_columns.up.sql)
+  — ALTER TABLE ADD COLUMN (O(1), metadata-only) pentru 24 coloane `*_norm`:
+  - `rnpm_avize` x9: identificator, tip, utilizator_autorizat, numar_act,
+    tip_act, alte_mentiuni, detalii_comune, inscriere_initiala_id,
+    inscriere_modificata_id;
+  - `rnpm_creditori` x3 + `rnpm_debitori` x3: denumire, cod, cnp;
+  - `rnpm_bunuri` x8: tip_bun, categorie, identificare, model, serie_sasiu,
+    serie_motor, nr_inmatriculare, referinte_json;
+  - `rnpm_bunuri_descrieri` x1: text.
+- 10 triggere `AFTER INSERT` + `AFTER UPDATE OF <source-cols>` care apeleaza
+  `rnpm_norm(NEW.col)` si scriu in `col_norm`. Clauza `UPDATE OF` previne
+  recursia: trigger-ul scrie doar in `*_norm`, care nu e in `OF` list.
+- [backend/src/db/migrations/0022_rnpm_norm_columns.down.sql](backend/src/db/migrations/0022_rnpm_norm_columns.down.sql)
+  — DROP TRIGGER + ALTER TABLE DROP COLUMN (SQLite 3.35+).
+
+#### Backfill post-migration idempotent
+
+- [backend/src/db/schema.ts](backend/src/db/schema.ts) — adauga
+  `backfillRnpmNormColumns(db)` dupa `initSchema(db)`. Migration `.up.sql`
+  contine doar CREATE TRIGGER (lazy resolution UDF la fire time, nu la
+  CREATE), deci backfill-ul ruleaza in `schema.ts` unde UDF e registrat pe
+  conexiune. WHERE clause `col_norm IS NULL AND col IS NOT NULL` face
+  backfill-ul idempotent — 0 randuri pe boot-urile urmatoare.
+
+#### Read-path: citeste col_norm direct
+
+- [backend/src/db/avizRepository.ts](backend/src/db/avizRepository.ts)
+  — `getAvize.searchText` (L459-466) + `buildResultsFilterClause` (L626-657)
+  inlocuiesc 24 apeluri `rnpm_norm(col) LIKE ?` cu `col_norm LIKE ?`. Pattern
+  LIKE neschimbat (`buildRnpmLikePattern` + ESCAPE `\`). EXISTS subqueries
+  pe creditori/debitori/bunuri+descrieri pastreaza acelasi shape.
+
+#### Zero regresie functionala
+
+Aceleasi 24 coloane match, acelasi pattern LIKE, acelasi `highlightTokens`
+UI helper, aceleasi pre-filtre owner/search/dismiss. Doar calea de executie
+SQL s-a schimbat (column read vs UDF call per row).
+
+#### Teste regresie noi
+
+- [backend/src/db/avizRepository.normColumns.test.ts](backend/src/db/avizRepository.normColumns.test.ts)
+  — 7 teste: AFTER INSERT populeaza toate cele 9 `_norm` cu diacritic strip
+  + lowercase; AFTER UPDATE OF source actualizeaza `_norm` fara recursie;
+  creditori + debitori `_norm` populate; bunuri + bunuri_descrieri `_norm`
+  populate; zero-regresie pe 4-char prefix bunuri descriere; variante
+  diacritice (stefan/Stefan/ȘTEFAN/stefän); `referinte_json` LIKE pe payload
+  JSON cu "Ștefan".
+
+#### Note
+
+- LIKE leading wildcard (`%text%`) inca nu beneficiaza de B-tree index, dar
+  elimina O(N) JS round-trip prin UDF per rand — castigul real e in event
+  loop, nu in plan-ul SQLite.
+- Trigger-ele se executa indiferent de calea de write (saveAvizFull,
+  test fixtures raw INSERT, viitoare CLI tools) — paritate garantata.
+
+---
+
 ## [2.27.4] - 2026-05-15
 
 ### Faza 11 + biome total cleanup (0 errors) si polish UI/CI

@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.27.5",
+    date: "16 Mai 2026",
+    subtitle:
+      "Fix critic performanta filtrare RNPM: materializare coloane *_norm cu triggere SQLite. Filtrarea pe 148 rezultate scade de la ~8s freeze UI la sub 50ms. Zero regresie functionala — aceleasi 24 coloane match, aceleasi pattern-uri LIKE, acelasi highlight.",
+    icon: <Rocket className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Filtrare RNPM: eliminare freeze 8s pe rezultate cu 148+ avize",
+        content:
+          "Migration 0022 adauga 24 coloane *_norm materializate (rnpm_avize x9, rnpm_creditori x3, rnpm_debitori x3, rnpm_bunuri x8, rnpm_bunuri_descrieri x1) si 10 triggere AFTER INSERT/UPDATE OF source-cols care le populeaza automat. avizRepository.ts citeste direct col_norm in loc sa apeleze rnpm_norm() per rand. Backfill idempotent post-migration in schema.ts (WHERE col_norm IS NULL AND col IS NOT NULL).",
+      },
+      {
+        title: "Zero regresie functionala",
+        content:
+          "Aceleasi 24 coloane match (identificator, tip, utilizator_autorizat, numar_act, tip_act, alte_mentiuni, detalii_comune, inscriere_initiala_id, inscriere_modificata_id pe rnpm_avize plus denumire/cod/cnp pe creditori+debitori plus tip_bun/categorie/identificare/model/serie_sasiu/serie_motor/nr_inmatriculare/referinte_json pe rnpm_bunuri plus text pe rnpm_bunuri_descrieri). Acelasi buildRnpmLikePattern + highlightTokens UI. 7 teste regresie noi acopera trigger population + zero-regresie pe scenarii diacritice/JSON/4-char prefix.",
+      },
+      {
+        title: "Note tehnice",
+        content:
+          "Triggere AFTER UPDATE OF <source-cols> evita recursia (write-ul triggerului nu se incadreaza in OF list). UDF rnpm_norm() ramane registrata pe conexiune in schema.ts; migration .up.sql contine doar CREATE TRIGGER (lazy resolution la fire time, nu la CREATE). LIKE leading wildcard inca nu beneficiaza de B-tree index, dar elimina O(N) JS round-trip prin UDF per rand.",
+      },
+    ],
+  },
+  {
     version: "v2.27.4",
     date: "15 Mai 2026",
     subtitle:
