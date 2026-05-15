@@ -134,7 +134,7 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
     setIsDownloadingManual(true);
     try {
       // Dynamic import keeps jspdf/xlsx out of the initial Dashboard chunk.
-      const { exportManualPDF } = await import("@/lib/export");
+      const { exportManualPDF } = await import("@/lib/export-manual");
       await exportManualPDF();
     } finally {
       setIsDownloadingManual(false);

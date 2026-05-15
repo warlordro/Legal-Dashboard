@@ -1,15 +1,18 @@
 /// <reference lib="webworker" />
-import { buildDosarePdf, buildMonitoringPdf, buildMonitoringXlsx, buildTermenePdf, type ExportJob } from "./export";
 import { buildAnalysisPdf } from "./export-analysis";
+import { buildDosarePdf } from "./export-dosare";
 import { buildManualPdf } from "./export-manual";
+import { buildMonitoringPdf, buildMonitoringXlsx } from "./export-monitoring";
 import { buildReportPdf, buildReportXlsx } from "./export-report";
-import type { ExportResult } from "./pdf-helpers";
+import { buildTermenePdf } from "./export-termene";
+import type { ExportJob, ExportResult } from "./export-types";
 
-// Web Worker care preia generarea XLSX/PDF de pe main thread pentru monitorizari,
-// analize AI si manualul de utilizare. Pe rezultate mari (sute/mii de
-// inregistrari, sau manualul cu 12 capitole) build-ul blocheaza main
-// thread-ul cateva secunde daca ruleaza in pagina; in worker, UI-ul ramane
-// responsiv si spinner-ul React poate randa fluid pana la salvare.
+// Web Worker care preia generarea XLSX/PDF de pe main thread pentru dosare,
+// termene, monitorizari, analize AI si manualul de utilizare. Pe rezultate
+// mari (sute/mii de inregistrari, sau manualul cu 12 capitole) build-ul
+// blocheaza main thread-ul cateva secunde daca ruleaza in pagina; in worker,
+// UI-ul ramane responsiv si spinner-ul React poate randa fluid pana la
+// salvare.
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
 
 ctx.onmessage = async (e: MessageEvent<ExportJob>) => {

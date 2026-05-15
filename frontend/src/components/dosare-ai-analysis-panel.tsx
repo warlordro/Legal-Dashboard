@@ -3,7 +3,7 @@ import DOMPurify from "dompurify";
 import { Bot, Check, ChevronDown, Circle, Download, Key, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
 import type { Dosar } from "@/types";
-import { exportAnalysisPDF } from "@/lib/export";
+import { exportAnalysisPDF } from "@/lib/export-analysis";
 import {
   AI_MODELS,
   JUDGE_MODELS_LIST,
