@@ -1,5 +1,23 @@
-# Forteaza line endings consistente pentru fisierele a caror integritate este
-# verificata via hash (migrari SQL). Fara aceasta directiva, git core.autocrlf
-# pe Windows converteste \n -> \r\n la checkout si invalideaza hash-urile
-# stocate in _schema_versions.
+# Default: toate fisierele text sunt stocate cu LF si checkout-uite cu LF
+# (biome.json lineEnding:"lf"). Fara aceasta regula, core.autocrlf pe Windows
+# inlocuieste \n cu \r\n la checkout si biome raporteaza 600+ "use lf" errors.
+* text=auto eol=lf
+
+# Binare explicite (extensii care nu trebuie normalizate)
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.icns binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dll binary
+*.node binary
+*.db binary
+*.db-wal binary
+*.db-shm binary
+*.xlsx binary
+
+# Pastrare existenta: migrari SQL trebuie LF strict (hash check)
 backend/src/db/migrations/*.sql text eol=lf
