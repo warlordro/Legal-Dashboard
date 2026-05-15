@@ -30,9 +30,8 @@ jobs:
         run: npm ci
 
       - name: Biome lint + format check
-        # Temporar pana sprintul biome-cleanup livreaza 0 errors.
-        # PR-8 elimina acest flag si activeaza gate-ul permanent.
-        continue-on-error: true
+        # Gate permanent: orice eroare biome pica CI.
+        # CLAUDE.md cere npx biome check --write local obligatoriu inainte de orice push.
         run: npx biome check
 
       # Type-check + test gate runs BEFORE rebuild:electron so better-sqlite3
