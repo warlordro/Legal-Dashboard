@@ -29,6 +29,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Biome lint + format check
+        run: npx biome check
+
       # Type-check + test gate runs BEFORE rebuild:electron so better-sqlite3
       # is still bound to Node's ABI (npm ci prebuild). After rebuild:electron
       # the module flips to Electron's ABI and `vitest` (Node) crashes on load.
