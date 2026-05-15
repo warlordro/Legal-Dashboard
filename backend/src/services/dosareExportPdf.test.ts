@@ -47,4 +47,28 @@ describe("buildDosarePdf", () => {
     expect(bytes.subarray(0, 4).toString("utf8")).toBe("%PDF");
     expect(result.filename).toBe("dosar_123-3-2026.pdf");
   });
+
+  it("dosar cu 50+ parti nu spam-uieste rendering-ul si PDF-ul ramane finite", async () => {
+    const manyParti = Array.from({ length: 50 }, (_, i) => ({
+      calitateParte: i % 2 === 0 ? "Creditor" : "Debitor",
+      nume: `Parte ${i + 1} SRL`,
+    }));
+    const manySedinte = Array.from({ length: 20 }, (_, i) => ({
+      complet: `C${i + 1}`,
+      data: "2026-05-13",
+      ora: "10:00",
+      solutie: "Amanare",
+      solutieSumar: `Iter ${i + 1}`,
+      documentSedinta: "Incheiere",
+      numarDocument: String(i + 1),
+      dataPronuntare: "2026-05-13",
+    }));
+    const result = await buildDosarePdf([makeDosar({ parti: manyParti, sedinte: manySedinte })]);
+    generatedFiles.push(result.filepath);
+
+    expect(result.mime).toBe("application/pdf");
+    // PDF-ul trebuie sa fie finite; vechiul rendering "exploda" cu randuri ce depaseau pagina.
+    expect(result.byteLength).toBeGreaterThan(1000);
+    expect(result.byteLength).toBeLessThan(200_000);
+  });
 });

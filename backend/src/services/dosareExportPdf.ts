@@ -31,6 +31,7 @@ const FONT_SIZE = 7;
 const LINE_HEIGHT = FONT_SIZE + 2;
 const CELL_PAD_X = 3;
 const CELL_PAD_Y = 4;
+const MAX_PARTI_PDF = 8;
 
 function stripDiacritics(value: string): string {
   return (value ?? "").normalize("NFD").replace(/\p{Diacritic}/gu, "");
@@ -52,7 +53,11 @@ function getPortalJustUrl(numar: string): string {
 
 function formatParti(parti: Dosar["parti"]): string {
   if (parti.length === 0) return "-";
-  return parti.map((parte) => `${stripDiacritics(parte.calitateParte)}: ${stripDiacritics(parte.nume)}`).join("\n");
+  const shown = parti.slice(0, MAX_PARTI_PDF);
+  const lines = shown.map((parte) => `${stripDiacritics(parte.calitateParte)}: ${stripDiacritics(parte.nume)}`);
+  const remaining = parti.length - shown.length;
+  if (remaining > 0) lines.push(`(+${remaining} parti — vezi XLSX)`);
+  return lines.join("\n");
 }
 
 function formatSedinte(sedinte: Dosar["sedinte"]): string {
@@ -147,6 +152,7 @@ function drawTable(
       if (availableLines < 2) {
         pageNumber = addPage(doc, pageNumber);
         y = drawHeader(doc, headers, widths, MARGIN_TOP);
+        continue;
       }
       const chunkLines = Math.min(
         availableLines,

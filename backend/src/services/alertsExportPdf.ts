@@ -136,6 +136,7 @@ function drawTable(doc: PDFKit.PDFDocument, rows: AlertExportDecoratedRow[], y: 
       if (availableLines < 2) {
         pageNumber = addPage(doc, pageNumber);
         y = drawHeader(doc, MARGIN_TOP);
+        continue;
       }
       const chunkLines = Math.min(
         availableLines,

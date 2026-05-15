@@ -132,6 +132,7 @@ function drawTable(
       if (availableLines < 2) {
         pageNumber = addPage(doc, pageNumber);
         y = drawHeader(doc, headers, widths, MARGIN_TOP);
+        continue;
       }
       const chunkLines = Math.min(
         availableLines,
