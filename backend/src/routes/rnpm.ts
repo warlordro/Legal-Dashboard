@@ -37,7 +37,7 @@ function parseProvider(v: unknown): CaptchaProvider | undefined {
 // Body size limits — prevent DoS via oversized POST payloads
 const SEARCH_BODY_LIMIT = 64 * 1024; // 64KB: single search params
 const BULK_BODY_LIMIT = 512 * 1024; // 512KB: up to 200 bulk items
-const EXPORT_BODY_LIMIT = 64 * 1024; // 64KB: up to 500 numeric ids
+const EXPORT_BODY_LIMIT = 256 * 1024; // 256KB: up to 5000 numeric ids
 const SMALL_BODY_LIMIT = 4 * 1024; // 4KB: captcha balance
 
 const bodyTooLarge = (c: import("hono").Context) =>
@@ -974,7 +974,7 @@ rnpmRouter.post("/saved/export", limitExport, async (c) => {
   if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
-  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per export");
+  if (numIds.length > 5000) return invalidParams(c, "Maxim 5000 avize per export");
   return c.json({ items: getAvizeByIds(numIds, getOwnerId(c)) });
 });
 
@@ -982,7 +982,7 @@ rnpmRouter.post("/saved/export", limitExport, async (c) => {
 // the Electron renderer at ~150 avizi (peak heap ~2.7GB). Backend builds the
 // workbook and streams the binary back; frontend just triggers the download.
 //
-// Body: { ids: number[]; searchType?: string }. Same 500-id cap as /saved/export.
+// Body: { ids: number[]; searchType?: string }. Same 5000-id cap as /saved/export.
 // `searchType` controls layout (sheet count + columns) for "specifice" vs others.
 rnpmRouter.post("/saved/export.xlsx", limitExport, async (c) => {
   let body: unknown;
@@ -995,7 +995,7 @@ rnpmRouter.post("/saved/export.xlsx", limitExport, async (c) => {
   if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
-  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per export");
+  if (numIds.length > 5000) return invalidParams(c, "Maxim 5000 avize per export");
   const searchTypeStr =
     typeof searchType === "string" && searchType.length > 0 && searchType.length <= 64 ? searchType : undefined;
 
@@ -1038,7 +1038,7 @@ rnpmRouter.post("/saved/export.pdf", limitExport, async (c) => {
   if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
-  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per export");
+  if (numIds.length > 5000) return invalidParams(c, "Maxim 5000 avize per export");
   const searchTypeStr =
     typeof searchType === "string" && searchType.length > 0 && searchType.length <= 64 ? searchType : undefined;
 

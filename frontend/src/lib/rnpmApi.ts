@@ -347,9 +347,11 @@ export async function rnpmRestoreBackup(name: string): Promise<{ preRestoreName:
   return jsonOrThrow<{ ok: true; preRestoreName: string }>(res);
 }
 
-// Backend `/saved/export` cap = 500 ids per request (rnpm.ts). Splitam in chunks
-// transparente la nivel de API client ca apelantul sa nu trebuiasca sa stie.
+// `rnpmExport` (detail fetch) chunkuieste transparent in loturi de 500 pentru a
+// limita memoria pe response-uri mari. Hard cap pentru blob xlsx/pdf e mai mare
+// (5000) — corespunde plafonului server din rnpm.ts.
 const EXPORT_BATCH_SIZE = 500;
+const EXPORT_BLOB_MAX = 5000;
 
 export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[] }> {
   if (ids.length === 0) return { items: [] };
@@ -370,7 +372,7 @@ export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[]
 // Server-side XLSX generation — backend builds the workbook from DB and streams
 // the file back. Replaces the frontend Web Worker build which OOM'd the renderer
 // at ~150 avizi. Caller passes the same id list and optional searchType (controls
-// layout). Backend caps at EXPORT_BATCH_SIZE per request (matches /saved/export).
+// layout). Backend caps at EXPORT_BLOB_MAX per request (matches /saved/export).
 function parseFilenameFromContentDisposition(header: string | null, fallback: string): string {
   if (!header) return fallback;
   const utf8 = /filename\*=UTF-8''([^;]+)/i.exec(header);
@@ -391,8 +393,8 @@ export async function rnpmExportXlsxBlob(
   searchType?: string
 ): Promise<{ blob: Blob; filename: string }> {
   if (ids.length === 0) throw new Error("Lista id-uri goala");
-  if (ids.length > EXPORT_BATCH_SIZE) {
-    throw new Error(`Maxim ${EXPORT_BATCH_SIZE} avize per export`);
+  if (ids.length > EXPORT_BLOB_MAX) {
+    throw new Error(`Maxim ${EXPORT_BLOB_MAX} avize per export`);
   }
   const res = await apiFetch(`${BASE}/saved/export.xlsx`, {
     method: "POST",
@@ -425,8 +427,8 @@ export async function rnpmExportXlsxBlob(
 
 export async function rnpmExportPdfBlob(ids: number[], searchType?: string): Promise<{ blob: Blob; filename: string }> {
   if (ids.length === 0) throw new Error("Lista id-uri goala");
-  if (ids.length > EXPORT_BATCH_SIZE) {
-    throw new Error(`Maxim ${EXPORT_BATCH_SIZE} avize per export`);
+  if (ids.length > EXPORT_BLOB_MAX) {
+    throw new Error(`Maxim ${EXPORT_BLOB_MAX} avize per export`);
   }
   const res = await apiFetch(`${BASE}/saved/export.pdf`, {
     method: "POST",
