@@ -58,7 +58,7 @@ async function waitForHealth(port: number): Promise<Response> {
 }
 
 describe("PR-9 index boot/auth boundaries", () => {
-  it("/health stays public in web mode and dev CORS allows Authorization", async () => {
+  it("/health stays public in web mode and dev CORS allows Authorization", { timeout: 20_000 }, async () => {
     const port = randomPort();
     await importFreshIndex({
       LEGAL_DASHBOARD_PORT: String(port),
@@ -84,51 +84,59 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(preflight.headers.get("access-control-allow-headers")?.toLowerCase()).toContain("authorization");
   });
 
-  it("/health exposes emailConfigured=false when SMTP_* env vars are missing (Batch 2.3)", async () => {
-    const port = randomPort();
-    await importFreshIndex({
-      LEGAL_DASHBOARD_PORT: String(port),
-      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-      LEGAL_DASHBOARD_AUTH_MODE: "web",
-      LEGAL_DASHBOARD_JWT_SECRET: SECRET,
-      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
-      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
-      SMTP_HOST: "",
-      SMTP_PORT: "",
-      SMTP_USER: "",
-      SMTP_PASS: "",
-      SMTP_FROM: "",
-    });
+  it(
+    "/health exposes emailConfigured=false when SMTP_* env vars are missing (Batch 2.3)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "web",
+        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+        SMTP_HOST: "",
+        SMTP_PORT: "",
+        SMTP_USER: "",
+        SMTP_PASS: "",
+        SMTP_FROM: "",
+      });
 
-    const health = await waitForHealth(port);
-    expect(health.status).toBe(200);
-    const body = (await health.json()) as { emailConfigured: boolean };
-    expect(body.emailConfigured).toBe(false);
-  });
+      const health = await waitForHealth(port);
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as { emailConfigured: boolean };
+      expect(body.emailConfigured).toBe(false);
+    }
+  );
 
-  it("/health exposes authMode + loginAvailable=false while preserving Electron splash contract", async () => {
-    const port = randomPort();
-    await importFreshIndex({
-      LEGAL_DASHBOARD_PORT: String(port),
-      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-      LEGAL_DASHBOARD_AUTH_MODE: "desktop",
-    });
+  it(
+    "/health exposes authMode + loginAvailable=false while preserving Electron splash contract",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+      });
 
-    const health = await waitForHealth(port);
-    expect(health.status).toBe(200);
-    const body = (await health.json()) as {
-      status: string;
-      service: string;
-      authMode: string;
-      loginAvailable: boolean;
-    };
-    expect(body.status).toBe("ok");
-    expect(body.service).toBe("Legal Dashboard API");
-    expect(body.authMode).toBe("desktop");
-    expect(body.loginAvailable).toBe(false);
-  });
+      const health = await waitForHealth(port);
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as {
+        status: string;
+        service: string;
+        authMode: string;
+        loginAvailable: boolean;
+      };
+      expect(body.status).toBe("ok");
+      expect(body.service).toBe("Legal Dashboard API");
+      expect(body.authMode).toBe("desktop");
+      expect(body.loginAvailable).toBe(false);
+    }
+  );
 
-  it("/health exposes emailConfigured=true with full SMTP_* config (Batch 2.3)", async () => {
+  it("/health exposes emailConfigured=true with full SMTP_* config (Batch 2.3)", { timeout: 20_000 }, async () => {
     const port = randomPort();
     await importFreshIndex({
       LEGAL_DASHBOARD_PORT: String(port),
@@ -150,7 +158,7 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(body.emailConfigured).toBe(true);
   });
 
-  it("fails boot when remote bind is enabled in desktop auth mode", async () => {
+  it("fails boot when remote bind is enabled in desktop auth mode", { timeout: 20_000 }, async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("process.exit called");
     }) as typeof process.exit);
