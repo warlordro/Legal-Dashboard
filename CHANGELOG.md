@@ -4,6 +4,154 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.27.4] - 2026-05-15
+
+### Faza 11 + biome total cleanup (0 errors) si polish UI/CI
+
+Release de consolidare: inchide Faza 11 (hardening F11-F2..F11-F5), inchide
+proiectul "biome total cleanup" (9 PR-uri Codex care duc biome la 0 errors
+si urca gate-ul in CI la `--reporter=github` permanent), absoarbe trei runde
+CodeRabbit (#37, #38, #39) si trei polish-uri scurte din sesiunea curenta
+(tooltip cursor pe BarChart, plafon export RNPM 500 → 5000, nitpicks CI
+permissions/concurrency pe `lint-test.yml`).
+
+#### Faza 11 hardening
+
+- [scripts/rebuild-electron.cjs](scripts/rebuild-electron.cjs) — F11-F5
+  elimina `shell: true` din spawn-ul `npm rebuild`, foloseste resolver-ul
+  `where`/`which` pentru a localiza binarul `npm.cmd` fara a deschide o suprafata
+  command-injection.
+- [backend/src/routes/auth.ts](backend/src/routes/auth.ts) +
+  [backend/src/routes/health.ts](backend/src/routes/health.ts) — F11-F4
+  separa explicit handlerul `/login` (form parse + bcrypt) de `/health` (boot
+  probe). Comentariu de seam clarifica unde primesc cele doua rute traffic
+  diferit (renderer/Electron vs LB / docker healthcheck).
+- [frontend/src/lib/export.ts](frontend/src/lib/export.ts) — F11-F3
+  refactor: module per-domain (`exportDosare`, `exportTermene`, `exportAlerte`,
+  `exportMonitoring`, `exportRnpm`) in loc de un god-module. Worker-ul de
+  export ramane single-entry; reexport per-domain doar din test-uri.
+- [.github/workflows/lint-test.yml](.github/workflows/lint-test.yml) — F11-F2
+  `npx biome check` ruleaza permanent fara `continue-on-error` (baseline-ul
+  de 501 erori a fost zero-uit prin Faza 11 / biome cleanup, vezi mai jos).
+- [backend/src/routes/health.test.ts](backend/src/routes/health.test.ts) —
+  bump timeout 1500ms → 3000ms ca sa nu mai flake-uiasca pe runner-ul Windows
+  GitHub Actions (cold boot mai lent decat WSL).
+
+#### Biome total cleanup (Codex PR-0..PR-8)
+
+Toate cele 9 PR-uri Codex au mers prin CI gate Codex; sunt deja in main si
+inchid backlog-ul de biome warnings/errors mostenit din Faza 9-10. Highlights:
+
+- **PR-0** (`2d2b88d`) — `lint-test.yml` mentine `--reporter=github` soft pana
+  s-a zero-uit baseline-ul; dezactivat la PR-8.
+- **PR-1** (`891824d`) — `biome.json` adauga `overrides` tintite pentru
+  fisiere de migratii / fixtures unde regulile `noUnusedVariables` si
+  `noConsole` sunt zgomot.
+- **PR-2** (`be1a6b1`) — autofix safe-only aplicat in bundle, fara
+  modificari semantice (formatare + reordonare import-uri).
+- **PR-3** (`4e9a1df`) — pastreaza explicit `delete process.env.X` ca
+  statement, NU rescris in `process.env.X = ""` (gresit semantic — vezi
+  feedback inchis in memorie).
+- **PR-4** (`59c090d`) — centralizeaza sanitizarea AI intr-un helper unic
+  `frontend/src/lib/aiSanitize.ts`, pastreaza DOMPurify active in toate
+  cele 4 call-site-uri (nu dezactivat).
+- **PR-5** (`6b702ff`) — elimina toate `!` non-null assertions din `backend/`
+  prod cod (testele raman cu `!` unde e valid prin set-up); inlocuieste cu
+  validari Zod sau guards explicite.
+- **PR-6** (`fe636c0`) — rezolva `react/exhaustive-deps` warnings cu
+  `useCallback` / `useMemo` unde dependenta era stabila si cu `// biome-ignore`
+  comentat doar unde dependent-array intentionat eluda un re-render.
+- **PR-7** (`9fd2dd7`) — inchide tail-rules ramase (`noEmptyBlockStatements`,
+  `useLiteralKeys`, etc.).
+- **PR-8** (`da2dc48`) — `lint-test.yml` urca biome la **gate permanent**
+  (`npx biome check` fara `continue-on-error`); orice eroare/warning va pica
+  PR-ul.
+
+Hard constraints respectate pe tot parcursul (verificate la fiecare wake-up
+in monitoring loop):
+
+- SQL raw doar in `backend/src/db/**` (zero violari).
+- `owner_id` pe toate tabelele noi (DEFAULT `'local'`).
+- DOMPurify nu a fost dezactivat in niciun PR.
+- Whitelist external URL neatins (`portal.just.ro`, `www.just.ro`,
+  `portalquery.just.ro`, `mj.rnpm.ro`, `www.rnpm.ro`).
+- `delete process.env.X` ramane statement, nu string assignment.
+
+#### CodeRabbit rounds
+
+##### PR #37 — `fix(rabbit)`
+
+- [frontend/src/pages/Cautare.tsx](frontend/src/pages/Cautare.tsx) — pending
+  search effect avea dependent-array incomplet; adaugat `pendingSearch` si
+  `runSearch` ca dependencies, paseaza ESLint exhaustive-deps fara `// ignore`.
+- [frontend/src/pages/Users.tsx](frontend/src/pages/Users.tsx) — dedup pe key
+  React: lista de useri foloseste `id` ca key (era index, producea warning la
+  reorder dupa edit).
+- [.github/workflows/lint-test.yml](.github/workflows/lint-test.yml) — bootstrap
+  pentru workflow-ul de gate CI (lint + tsc + tests).
+
+##### PR #38 — `chore(tech-debt)`
+
+- Aplica regula biome `delete process.env.X` peste tot, dupa ce PR-3 din
+  cleanup confirmase pattern-ul corect.
+- Urca biome a11y rules de la `off` la `warn` (tranzitie blanda inainte de
+  PR #39 care le foloseste pe `error`).
+
+##### PR #39 — `chore(a11y)`
+
+- Fix-uri reale `htmlFor` pe formurile modal-urilor + tabele (in loc de
+  comentariu `// biome-ignore`).
+- `biome-ignore lint/a11y/useSemanticElements` documentat acolo unde Radix
+  primitives nu permit semantic element-ul corect (pattern stabilit).
+
+#### Polish UI/UX si CI (sesiunea curenta)
+
+- [frontend/src/components/TermeneMetrics.tsx](frontend/src/components/TermeneMetrics.tsx),
+  [frontend/src/components/dashboard/Charts.tsx](frontend/src/components/dashboard/Charts.tsx),
+  [frontend/src/components/metrics-panel-parts.tsx](frontend/src/components/metrics-panel-parts.tsx) —
+  `<Tooltip cursor={{ fill: "transparent" }} isAnimationActive={false} />`
+  pe toate cele 5 BarChart-uri (Alerte/zi, Rulari/zi, Termene viitoare/luni,
+  Stadii procesuale, Top 5 institutii). Inlatura overlay-ul gri pe hover si
+  animatia de slide din lateral. PieChart si AreaChart neatinse — cursor
+  propriu si UX diferit.
+- [backend/src/routes/rnpm.ts](backend/src/routes/rnpm.ts) +
+  [frontend/src/lib/rnpmApi.ts](frontend/src/lib/rnpmApi.ts) — plafon
+  `/saved/export`, `/saved/export.xlsx`, `/saved/export.pdf` ridicat **500 →
+  5000 ids/request**; `EXPORT_BODY_LIMIT` urcat 64KB → 256KB pentru a incapea
+  payload-ul JSON. Frontend: constanta noua `EXPORT_BLOB_MAX = 5000` pentru
+  xlsx/pdf blob, `EXPORT_BATCH_SIZE = 500` ramane neschimbat pentru
+  chunkuirea transparenta din `rnpmExport` (detail fetch). Batch DELETE
+  (rnpm.ts:816) ramane plafonat la 500 — concern separat, mutations nu
+  trebuie sa concureze plafonul de export read-only.
+- [.github/workflows/lint-test.yml](.github/workflows/lint-test.yml) —
+  CodeRabbit nitpicks aplicate: bloc `concurrency` cu `cancel-in-progress:
+  true` (nu mai ardem minute CI pe runs superseded de push-uri rapide /
+  merge consecutive) si bloc `permissions: contents: read` explicit
+  (least-privilege; job-ul nu scrie in repo).
+
+#### Cunoscut, lasat asa
+
+- Text Solutie/Sumar din PortalJust contine ocazional `?` literale acolo unde
+  diacriticele s-au pierdut in pipeline-ul lor legacy ANSI/cp1250 -> UTF-8.
+  **Nu este reparabil din client** (substitutia este facuta de serializatorul
+  upstream cand nu poate mapa byte-ul; reconstructia "?i" -> "şi" sau "ţi"
+  este ambigua). Aceeasi sesiune contine cuvinte cu ţ si ş care randeaza
+  corect — dovada ca fontul si decodificarea UTF-8 lucreaza, doar datele
+  surse au pierderi. Lasam ca atare; nu introducem dictionar de mapare
+  hardcodat.
+
+#### Verificari
+
+- `npx biome check`: 0 errors / 0 warnings (gate permanent activ).
+- `npx tsc --noEmit -p backend/tsconfig.json`: clean.
+- `cd frontend && npx tsc --noEmit`: clean.
+- `cd frontend && npm test -- --run`: 177 / 177 verde.
+- `npm test --workspace=backend`: tests verzi pe Node ABI; Electron-side ABI
+  necesita `npx prebuild-install --runtime=electron --target=41.5.0` (issue
+  cunoscut, nelegat de release).
+
+---
+
 ## [2.27.3] - 2026-05-15
 
 ### Revert export PDF dosare + termene la jsPDF (calitate randare restaurata)

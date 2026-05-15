@@ -39,6 +39,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.27.4",
+    date: "15 Mai 2026",
+    subtitle:
+      "Release de consolidare: inchide Faza 11 (F11-F2..F11-F5), inchide proiectul 'biome total cleanup' (9 PR-uri Codex care duc biome la 0 errors si urca gate-ul permanent in CI), absoarbe trei runde CodeRabbit (#37, #38, #39) si trei polish-uri scurte din sesiunea curenta (BarChart tooltip cursor + animatie, plafon export RNPM 500 -> 5000, nitpicks CI lint-test).",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-violet-500",
+    badgeClass: "bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-300",
+    sections: [
+      {
+        title: "Faza 11 hardening (F11-F2..F11-F5)",
+        content:
+          "Hardening pe scripts/rebuild-electron.cjs (eliminat shell:true din spawn npm rebuild, resolver where/which pentru npm.cmd), separat handler auth/login de health probe in backend, split export.ts pe module per-domain (dosare, termene, alerte, monitoring, rnpm), biome check ruleaza permanent pe lint-test fara continue-on-error.",
+      },
+      {
+        title: "Biome total cleanup: 9 PR-uri Codex la 0 errors",
+        content:
+          "PR-0..PR-8 inchid backlog-ul de biome warnings/errors mostenit. Highlights: overrides tintite pentru migratii/fixtures (PR-1), autofix safe-only fara modificari semantice (PR-2), pastreaza delete process.env.X ca statement NU string assignment (PR-3), centralizeaza sanitizarea AI intr-un singur helper cu DOMPurify activ (PR-4), elimina non-null assertions din prod backend (PR-5), rezolva exhaustive-deps (PR-6), inchide tail rules (PR-7), urca gate permanent in CI (PR-8). Hard constraints respectate: SQL raw doar in backend/src/db/**, owner_id pe toate tabelele, DOMPurify activ, whitelist URL neatinsa.",
+      },
+      {
+        title: "CodeRabbit rounds #37 #38 #39",
+        content:
+          "PR #37 (fix-rabbit): pending search effect cu deps complete, dedup React key pe lista users, bootstrap workflow gate CI. PR #38 (tech-debt): aplica regula delete process.env.X peste tot, urca a11y rules la warn. PR #39 (a11y): fix-uri reale htmlFor pe modaluri/tabele in loc de biome-ignore, documentat use-pattern Radix unde semantic element-ul nu e accesibil.",
+      },
+      {
+        title: "Polish UI/UX + CI in aceasta sesiune",
+        content:
+          "BarChart Tooltip cu cursor transparent si fara animatie de slide pe toate cele 5 grafice (Alerte/zi, Rulari/zi, Termene viitoare, Stadii procesuale, Top 5 institutii). Plafon export RNPM ridicat 500 -> 5000 ids/request pe /saved/export[.xlsx|.pdf], EXPORT_BODY_LIMIT urcat 64KB -> 256KB. Lint-test workflow primeste bloc concurrency (cancel runs superseded) si bloc permissions: contents: read (least-privilege).",
+      },
+      {
+        title: "Lasat asa - cunoscut upstream",
+        content:
+          "Textul Solutie/Sumar din PortalJust contine ocazional ? literale acolo unde diacriticele s-au pierdut in pipeline-ul lor legacy ANSI/cp1250 -> UTF-8. Nu este reparabil din client - substitutia este facuta de serializatorul upstream cand nu poate mapa byte-ul, iar reconstructia (?i -> şi sau ţi) este ambigua. Lasam ca atare, nu introducem dictionar hardcodat.",
+      },
+    ],
+  },
+  {
     version: "v2.27.3",
     date: "15 Mai 2026",
     subtitle:

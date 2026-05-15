@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.27.3** (15 Mai 2026, revert export PDF dosare + termene la jsPDF + jspdf-autotable in Web Worker; PDFKit backend streaming livrat in v2.27.0 producea pe dosare cu ~600 sedinte un PDF dezorganizat — text suprapus, coloana Parti trunchiata la wrap. Eliminati handlerii `POST /api/v1/dosare/export.pdf` + `POST /api/v1/termene/export.pdf` si serviciile aferente. Export PDF RNPM + alerte raman pe PDFKit streaming, export XLSX neafectat). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.27.4** (15 Mai 2026, release de consolidare: inchide Faza 11 + proiectul "biome total cleanup" (0 errors permanent), absoarbe trei runde CodeRabbit (#37 #38 #39) si trei polish-uri scurte: BarChart Tooltip cursor + animatie, plafon export RNPM 500 -> 5000 ids, nitpicks CI permissions/concurrency lint-test). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
