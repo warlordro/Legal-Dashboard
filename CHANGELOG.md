@@ -6,6 +6,35 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ## [2.27.5] - 2026-05-16
 
+### Fix performanta filtrare RNPM + RNPM details concurrency bump + diagnostic captcha race
+
+Release de performanta cu doua tracks: (1) fix critic freeze-ul UI pe filtrare
+RNPM cu 148+ rezultate; (2) reducere ~30% timp total per cautare RNPM prin
+crestere concurency details fetch 7 -> 12; (3) diagnostic vizibil pentru
+race-ul captcha (per-slot OK/ERR/abort).
+
+#### RNPM details concurrency bump (7 -> 12)
+
+- [backend/src/services/rnpmSearchService.ts](backend/src/services/rnpmSearchService.ts)
+  — `DEFAULT_DETAIL_CONCURRENCY` urcat de la 7 la 12. Empiric pe cautare
+  ipoteci cu 148 rezultate (6 pagini x 25): timp total scade de la ~174s la
+  ~125s (-28.6%) la zero erori upstream RNPM (148 detail-page-uri fetched
+  fara 429/503/silent_refusal). Castig concentrat pe pagini cand RNPM e in
+  regim mediu (p2: 32s -> 12s, p4: 45s -> 28s); pe pagini deja rapide,
+  break-even. Daca apare regres rate-limit in productie, revine la 7 (sau
+  10/9 intermediar) — schimbarea e localizata intr-o singura constanta.
+
+#### Diagnostic captcha race per-slot
+
+- [backend/src/services/captchaSolver.ts](backend/src/services/captchaSolver.ts)
+  — `solveRace()` logheaza acum outcome-ul fiecarui slot (`slot=A/B
+  provider=... OK/ERR <ms> <err>`). Anterior, `Promise.any` inghitea
+  rejection-urile pana cand ambele esuau, deci nu se vedea cand un provider
+  pica devreme (ERROR_KEY/ERROR_ZERO_BALANCE/abort) vs cand pierdea race-ul
+  fair. Validat empiric: 2Captcha 5.4s + CapSolver abort la +4ms = race
+  functioneaza in ambele directii; CapSolver 20.4s + 2Captcha abort la +2ms
+  in run anterior; lipsa erorilor confirma sanatatea configurarii.
+
 ### Fix performanta filtrare RNPM: materializare coloane *_norm cu triggere
 
 Fix critic pentru freeze-ul UI raportat in productie pe filtrare cu input

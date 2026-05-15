@@ -207,10 +207,18 @@ async function solveRace(
   };
   if (signal) signal.addEventListener("abort", onOuterAbort, { once: true });
 
+  // v2.27.5 — log per-slot end ca sa vedem ce face si perdantul; Promise.any
+  // ignora rejection-urile pana cand toate cad, deci fara asta nu stim daca
+  // primarul a esuat repede vs solve-uit dupa winner (work wasted).
   const wrap = (slot: "A" | "B", p: { key: string; provider: CaptchaProvider }, ctrl: AbortController) =>
     solveWith(p.provider, p.key, ctrl.signal).then(
-      (tok) => ({ ok: true as const, slot, provider: p.provider, tok }),
+      (tok) => {
+        console.log(`[captcha] slot=${slot} provider=${p.provider} OK ${Date.now() - t0}ms`);
+        return { ok: true as const, slot, provider: p.provider, tok };
+      },
       (err) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.log(`[captcha] slot=${slot} provider=${p.provider} ERR ${Date.now() - t0}ms ${msg}`);
         throw { slot, provider: p.provider, err };
       }
     );

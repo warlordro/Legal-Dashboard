@@ -42,7 +42,7 @@ export const versions: VersionEntry[] = [
     version: "v2.27.5",
     date: "16 Mai 2026",
     subtitle:
-      "Fix critic performanta filtrare RNPM: materializare coloane *_norm cu triggere SQLite. Filtrarea pe 148 rezultate scade de la ~8s freeze UI la sub 50ms. Zero regresie functionala — aceleasi 24 coloane match, aceleasi pattern-uri LIKE, acelasi highlight.",
+      "Release de performanta RNPM: (1) fix critic freeze filtrare 148 rezultate via materializare coloane *_norm cu triggere SQLite (8s -> sub 50ms); (2) crestere concurency details fetch 7 -> 12 reduce timpul total per cautare cu ~30% (174s -> 125s pe 148 avize, zero erori upstream); (3) diagnostic per-slot la captcha race ca sa vedem ce face fiecare provider (OK/ERR/abort).",
     icon: <Rocket className="h-5 w-5" />,
     borderColor: "border-l-emerald-500",
     badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
@@ -61,6 +61,16 @@ export const versions: VersionEntry[] = [
         title: "Note tehnice",
         content:
           "Triggere AFTER UPDATE OF <source-cols> evita recursia (write-ul triggerului nu se incadreaza in OF list). UDF rnpm_norm() ramane registrata pe conexiune in schema.ts; migration .up.sql contine doar CREATE TRIGGER (lazy resolution la fire time, nu la CREATE). LIKE leading wildcard inca nu beneficiaza de B-tree index, dar elimina O(N) JS round-trip prin UDF per rand.",
+      },
+      {
+        title: "RNPM details concurrency 7 -> 12 (~30% cautare mai rapida)",
+        content:
+          "DEFAULT_DETAIL_CONCURRENCY bump de la 7 la 12 in rnpmSearchService.ts. Empiric pe ipoteci cu 148 rezultate (6 pagini x 25 avize): timpul total per cautare scade de la ~174s la ~125s (-28.6%), zero erori upstream RNPM (148 detail-page-uri fetched fara 429/503/silent_refusal). Castig concentrat pe pagini cand RNPM e in regim mediu (p2: 32s -> 12s, p4: 45s -> 28s); pe pagini deja rapide, break-even. Localizat intr-o singura constanta - daca apare rate-limit in productie, revine la 7.",
+      },
+      {
+        title: "Diagnostic captcha race per-slot",
+        content:
+          "solveRace() logheaza acum outcome-ul fiecarui slot (slot=A/B provider=... OK/ERR ms). Anterior, Promise.any inghitea rejection-urile pana cand ambele esuau, deci nu se vedea cand un provider pica devreme (ERROR_KEY/ERROR_ZERO_BALANCE/abort) vs cand pierdea race-ul fair. Validat empiric: race functioneaza in ambele directii (2Captcha 5.4s win + CapSolver abort la +4ms; CapSolver 20.4s win + 2Captcha abort la +2ms in run anterior).",
       },
     ],
   },

@@ -61,7 +61,12 @@ export interface ExecuteSearchResult {
   nextRnpmPage: number | null;
 }
 
-const DEFAULT_DETAIL_CONCURRENCY = 7;
+// v2.27.5 — bump 7 -> 12 ca test empiric pe RNPM details fetch. La 7
+// vedeam pagini de 25 avize ce dureaza 30-40s in stari calme (4 batch-uri
+// secventiale 7+7+7+4). Cu 12 sunt 2 batch-uri (12+13), ar trebui sa taie
+// ~40% din details time. Risk: rate-limit / banare temporara RNPM —
+// daca apare regres (429/503/silent_refusal), revine la 7.
+const DEFAULT_DETAIL_CONCURRENCY = 12;
 const DEFAULT_BATCH_SIZE = 25;
 // Cap upstream RNPM, confirmat empiric 2026-05-06: la query cu total=1826,
 // API-ul intoarce 200 pe toate paginile DAR `documents: []` — refuz silentios.
