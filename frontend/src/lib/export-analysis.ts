@@ -3,9 +3,11 @@
 // and so export.ts no longer hosts ~220 LOC of feature-specific layout.
 //
 // Loaded by export.worker.ts on demand (`analysisPdf` job kind). The
-// orchestrator `exportAnalysisPDF` stays in export.ts because all DOM-bound
-// orchestrators share `runExportInWorker` there.
+// orchestrator `exportAnalysisPDF` lives in this module after F11-F3 since
+// each domain now hosts both its builder and its DOM-bound orchestrator.
 
+import { triggerDownload } from "./download-helpers";
+import { runExportInWorker } from "./exportRunner";
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
 
 export interface AnalysisPdfArgs {
@@ -240,4 +242,19 @@ export async function buildAnalysisPdf(args: AnalysisPdfArgs): Promise<ExportRes
     filename: `analiza-${safeName}.pdf`,
     mime: MIME_PDF,
   };
+}
+
+export async function exportAnalysisPDF(
+  dosarNumar: string,
+  dosarInstitutie: string,
+  dosarObiect: string,
+  analysisText: string,
+  type: "simple" | "advanced" = "simple",
+  judgeModel?: string
+): Promise<void> {
+  const result = await runExportInWorker({
+    kind: "analysisPdf",
+    data: { dosarNumar, dosarInstitutie, dosarObiect, analysisText, type, judgeModel },
+  });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }

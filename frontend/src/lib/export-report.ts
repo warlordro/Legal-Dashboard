@@ -11,6 +11,7 @@
 // events.
 
 import type { DashboardReportPayload, TimelineEvent } from "./dashboardApi";
+import { triggerDownload } from "./download-helpers";
 import {
   BLUE_DARK,
   BLUE_MAIN,
@@ -28,6 +29,7 @@ import {
   todayRo,
   WHITE,
 } from "./excel-helpers";
+import { runExportInWorker } from "./exportRunner";
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
 
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
@@ -473,4 +475,14 @@ export async function buildReportPdf(report: DashboardReportPayload): Promise<Ex
     filename: reportFilename(report.range, "pdf"),
     mime: MIME_PDF,
   };
+}
+
+export async function exportReportXlsx(payload: DashboardReportPayload): Promise<void> {
+  const result = await runExportInWorker({ kind: "reportXlsx", data: payload });
+  triggerDownload(result.buffer, result.filename, result.mime);
+}
+
+export async function exportReportPdf(payload: DashboardReportPayload): Promise<void> {
+  const result = await runExportInWorker({ kind: "reportPdf", data: payload });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }

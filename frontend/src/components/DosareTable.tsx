@@ -20,7 +20,7 @@ import { Card } from "./ui/card";
 import { formatDate, parseSqliteUtc, splitConcatenatedWords, formatDocumentSedinta } from "@/lib/utils";
 import { api, monitoring, MonitoringApiError } from "@/lib/api";
 import type { Dosar } from "@/types";
-import { exportAnalysisPDF } from "@/lib/export";
+import { exportAnalysisPDF } from "@/lib/export-analysis";
 import { TablePagination } from "@/components/table-pagination";
 import { AI_MODELS } from "@/components/dosare-ai-config";
 import { DosareAiAnalysisPanel } from "@/components/dosare-ai-analysis-panel";
