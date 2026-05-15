@@ -236,6 +236,10 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
   }
 
   // --- both ticks present: sedinta-level diff ---
+  if (!filteredDosar) {
+    return { newSnapshot, alerts, resetReason: null };
+  }
+  const activeDosar = filteredDosar;
   const prevKeys = new Set(prevSnapshot.sedintaKeys);
   const currentKeys = new Set(newSnapshot.sedintaKeys);
 
@@ -246,9 +250,9 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
 
   // Index current sedinte by key for solutie inspection.
   const currentSedintaByKey = new Map<string, Dosar["sedinte"][number]>();
-  for (const s of filteredDosar!.sedinte) {
+  for (const s of activeDosar.sedinte) {
     const key = buildSedintaKey({
-      stadiuProcesual: filteredDosar!.stadiuProcesual,
+      stadiuProcesual: activeDosar.stadiuProcesual,
       data: s.data,
       ora: s.ora,
       complet: s.complet,
@@ -283,7 +287,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
       continue;
     }
     const sub = buildSedintaKeyWithoutSolutie({
-      stadiuProcesual: filteredDosar!.stadiuProcesual,
+      stadiuProcesual: activeDosar.stadiuProcesual,
       data: sed.data,
       ora: sed.ora,
       complet: sed.complet,
@@ -317,7 +321,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
           sedinta: sed,
           sub,
         };
-        const bucketStadiu = normalizeStadiu(filteredDosar!.stadiuProcesual);
+        const bucketStadiu = normalizeStadiu(activeDosar.stadiuProcesual);
         const bucketComplet = (sed.complet ?? "").trim();
         const bucket = `${bucketStadiu}|${bucketComplet}`;
         const arr = pendingSolutiiByBucket.get(bucket) ?? [];
@@ -356,7 +360,8 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
       const bucket = `${parsed.stadiu}|${parsed.complet}`;
       const candidates = missingByStadiuComplet.get(bucket) ?? [];
       if (candidates.length === 1) {
-        const oldKey = candidates[0]!;
+        const oldKey = candidates[0];
+        if (!oldKey) continue;
         const old = parseSedintaKey(oldKey);
         termenAlerts.push({
           kind: "termen_changed",

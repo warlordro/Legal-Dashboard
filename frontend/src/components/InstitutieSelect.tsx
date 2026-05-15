@@ -49,7 +49,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
     }
     return INSTITUTII_GROUPS.filter((g) => map.has(g)).map((g) => ({
       group: g,
-      items: map.get(g)!,
+      items: map.get(g) ?? [],
     }));
   }, [filtered]);
 

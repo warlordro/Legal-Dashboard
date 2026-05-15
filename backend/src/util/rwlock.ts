@@ -102,17 +102,23 @@ export class RWLock {
     // window would expose `writerActive=false, queue empty, activeReaders=0`
     // to any synchronous observer — i.e. a freshly-arriving acquireRead
     // would slip past mutual exclusion. Setting state first closes the gap.
-    if (this.queue[0]!.kind === "write") {
+    const head = this.queue[0];
+    if (!head) return;
+    if (head.kind === "write") {
       this.writerActive = true;
-      this.queue.shift()!.resolve();
+      const writer = this.queue.shift();
+      writer?.resolve();
       return;
     }
     // Reader prefix: collect everyone first, bump the counter once, then
     // resolve. Doing it in two passes keeps the counter consistent for any
     // probe that runs between consecutive resolves.
     const woken: Waiter[] = [];
-    while (this.queue.length > 0 && this.queue[0]!.kind === "read") {
-      woken.push(this.queue.shift()!);
+    while (true) {
+      const reader = this.queue[0];
+      if (!reader || reader.kind !== "read") break;
+      this.queue.shift();
+      woken.push(reader);
     }
     this.activeReaders += woken.length;
     for (const w of woken) w.resolve();

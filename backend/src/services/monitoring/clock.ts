@@ -82,7 +82,11 @@ export class FakeClock implements Clock {
         return;
       }
 
-      const next = due[0]!;
+      const next = due[0];
+      if (!next) {
+        this.currentMs = target;
+        return;
+      }
       this.currentMs = next.fireAt;
       next.cancelled = true; // one-shot timer, prevent re-fire
       // Drop the fired timer from the list so retained refs don't grow.

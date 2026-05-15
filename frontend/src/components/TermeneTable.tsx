@@ -102,9 +102,9 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
         setLastExpandedKey(null);
         return new Set();
       }
-        setLastExpandedKey(key);
-        if (numarDosar) markAsViewed(numarDosar);
-        return new Set([key]);
+      setLastExpandedKey(key);
+      if (numarDosar) markAsViewed(numarDosar);
+      return new Set([key]);
     });
   };
 
@@ -361,7 +361,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                     <td className="px-4 py-3 text-[13px] max-w-[250px]">
                       {t.solutie ? (
                         <div>
-                          <p className="font-medium">{formatDocumentSedinta(t.solutie!)}</p>
+                          <p className="font-medium">{formatDocumentSedinta(t.solutie)}</p>
                           {t.solutieSumar && (
                             <p className="text-muted-foreground truncate" title={t.solutieSumar}>
                               {t.solutieSumar}

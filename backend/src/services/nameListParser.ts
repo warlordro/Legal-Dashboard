@@ -457,7 +457,9 @@ export async function parseNameList(buf: Buffer, opts: ParseOptions = {}): Promi
   let rejectedCount = 0;
 
   for (let i = 1; i < rawRows.length; i++) {
-    const cells = rawRows[i]!.cells;
+    const row = rawRows[i];
+    if (!row) continue;
+    const cells = row.cells;
     const nameRaw = String(cells[headerMap.nume] ?? "").trim();
     const cnpRaw = headerMap.cnp !== undefined ? String(cells[headerMap.cnp] ?? "").trim() || null : null;
     const cuiRaw = headerMap.cui !== undefined ? String(cells[headerMap.cui] ?? "").trim() || null : null;
@@ -538,7 +540,8 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
   let rejectedCount = 0;
 
   for (let i = 0; i < items.length; i++) {
-    const item = items[i]!;
+    const item = items[i];
+    if (!item) continue;
     const nameRaw = String(item.nameRaw ?? "").trim();
     const nameNormalized = normalizeName(nameRaw);
     const cnp = item.cnp ?? null;
