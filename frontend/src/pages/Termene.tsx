@@ -5,7 +5,7 @@ import { TermeneTable } from "@/components/TermeneTable";
 import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
 import type { LoadMoreProgress } from "@/lib/api";
-import { exportTermeneExcel, exportTermenePDF } from "@/lib/export";
+import { exportTermeneExcel, exportTermenePDF } from "@/lib/export-termene";
 import type { Termen, SearchParams } from "@/types";
 import { CalendarView } from "@/components/CalendarView";
 // Lazy: TermeneMetrics pulls in recharts (heavy). Only mounts when results exist.

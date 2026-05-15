@@ -8,7 +8,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { LoadMoreProgress } from "@/lib/api";
-import { exportDosareExcel, exportDosarePDF } from "@/lib/export";
+import { exportDosareExcel, exportDosarePDF } from "@/lib/export-dosare";
 import type { Dosar, SearchParams } from "@/types";
 import type { ApiKeys } from "@/hooks/useApiKey";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";

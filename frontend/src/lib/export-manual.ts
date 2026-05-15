@@ -2,9 +2,11 @@
 // ~450 LOC of chapter content + jsPDF layout no longer dominates export.ts.
 //
 // Loaded by export.worker.ts on demand (`manualPdf` job kind). The orchestrator
-// `exportManualPDF` stays in export.ts because all DOM-bound orchestrators
-// share `runExportInWorker` there.
+// `exportManualPDF` lives in this module after F11-F3 since each domain now
+// hosts both its builder and its DOM-bound orchestrator.
 
+import { triggerDownload } from "./download-helpers";
+import { runExportInWorker } from "./exportRunner";
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
 
 export async function buildManualPdf(): Promise<ExportResult> {
@@ -503,4 +505,9 @@ export async function buildManualPdf(): Promise<ExportResult> {
     filename: `Legal-Dashboard-Manual-v${__APP_VERSION__}.pdf`,
     mime: MIME_PDF,
   };
+}
+
+export async function exportManualPDF(): Promise<void> {
+  const result = await runExportInWorker({ kind: "manualPdf", data: null });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }
