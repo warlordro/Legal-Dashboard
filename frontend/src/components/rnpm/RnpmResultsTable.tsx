@@ -496,7 +496,12 @@ export function RnpmResultsTable({
                       isExpanded ? "bg-accent/40" : "hover:bg-accent/30"
                     )}
                   >
-                    <td className="px-4 py-3" onMouseDown={(e) => e.stopPropagation()}>
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
                       <input
                         type="checkbox"
                         className="h-4 w-4 rounded border-border accent-blue-600 cursor-pointer"

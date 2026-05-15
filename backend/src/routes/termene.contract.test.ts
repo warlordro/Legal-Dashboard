@@ -38,8 +38,8 @@ describe("termene routes - envelope shape", () => {
     await expectEnvelope(res, "PAYLOAD_TOO_LARGE");
   });
 
-  it("POST /api/v1/termene/export.pdf cu lista goala returneaza INVALID_PARAMS 400", async () => {
-    const res = await buildApp().request("/api/v1/termene/export.pdf", {
+  it("POST /api/v1/termene/export.xlsx cu lista goala returneaza INVALID_PARAMS 400", async () => {
+    const res = await buildApp().request("/api/v1/termene/export.xlsx", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ termene: [] }),

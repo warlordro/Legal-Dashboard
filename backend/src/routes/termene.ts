@@ -11,7 +11,6 @@ import {
   validateParams,
 } from "../util/validation.ts";
 import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
-import { buildTermenePdf } from "../services/termeneExportPdf.ts";
 import { buildTermeneXlsx, type TermenExportRow } from "../services/termeneExportXlsx.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 
@@ -92,13 +91,6 @@ termeneExportRouter.post("/export.xlsx", limitExport, async (c) => {
   const parsed = await readTermeneExportBody(c);
   if ("error" in parsed) return parsed.error;
   const result = await buildTermeneXlsx(parsed.termene);
-  return streamExportResult(c, result);
-});
-
-termeneExportRouter.post("/export.pdf", limitExport, async (c) => {
-  const parsed = await readTermeneExportBody(c);
-  if ("error" in parsed) return parsed.error;
-  const result = await buildTermenePdf(parsed.termene);
   return streamExportResult(c, result);
 });
 

@@ -253,8 +253,6 @@ export const api = {
       get<{ data: Dosar[]; total: number }>("/dosare", params as Record<string, string | string[] | undefined>),
     exportXlsxBlob: (dosare: Dosar[]) =>
       postBlob("/v1/dosare/export.xlsx", { dosare }, dosare.length === 1 ? "dosar.xlsx" : "dosare.xlsx"),
-    exportPdfBlob: (dosare: Dosar[]) =>
-      postBlob("/v1/dosare/export.pdf", { dosare }, dosare.length === 1 ? "dosar.pdf" : "dosare.pdf"),
     loadMore: (
       params: SearchParams,
       onProgress?: (p: LoadMoreProgress) => void,
@@ -276,8 +274,6 @@ export const api = {
       get<{ data: Termen[]; total: number }>("/termene", params as Record<string, string | string[] | undefined>),
     exportXlsxBlob: (termene: Termen[]) =>
       postBlob("/v1/termene/export.xlsx", { termene }, termene.length === 1 ? "termen.xlsx" : "termene.xlsx"),
-    exportPdfBlob: (termene: Termen[]) =>
-      postBlob("/v1/termene/export.pdf", { termene }, termene.length === 1 ? "termen.pdf" : "termene.pdf"),
     loadMore: (
       params: SearchParams,
       onProgress?: (p: LoadMoreProgress) => void,

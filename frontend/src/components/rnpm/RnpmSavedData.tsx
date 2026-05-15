@@ -457,7 +457,12 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
                     }}
                     tabIndex={0}
                   >
-                    <td className="px-4 py-3" onMouseDown={(e) => e.stopPropagation()}>
+                    <td
+                      className="px-4 py-3"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
                       <input
                         type="checkbox"
                         checked={selectedIds.has(a.id)}
@@ -478,7 +483,12 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
                         {status.label}
                       </Badge>
                     </td>
-                    <td className="px-4 py-3 text-center" onMouseDown={(e) => e.stopPropagation()}>
+                    <td
+                      className="px-4 py-3 text-center"
+                      onClick={(e) => e.stopPropagation()}
+                      onMouseDown={(e) => e.stopPropagation()}
+                      onKeyDown={(e) => e.stopPropagation()}
+                    >
                       <div className="flex justify-center gap-1">
                         <Button
                           variant="ghost"

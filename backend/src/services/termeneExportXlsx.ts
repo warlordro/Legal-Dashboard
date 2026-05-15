@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { todayRo } from "../util/xlsxHelpers.ts";
 import { formatRoDate } from "../util/dateFormat.ts";
+import { normalizeInstitutie } from "../util/institutionLabel.ts";
 
 export interface TermenExportRow {
   numarDosar: string;
@@ -137,7 +138,7 @@ export async function buildTermeneXlsx(termene: TermenExportRow[]): Promise<Term
           termen.numarDosar || "-",
           formatRoDate(termen.data),
           termen.ora || "-",
-          termen.institutie || "-",
+          termen.institutie ? normalizeInstitutie(termen.institutie) : "-",
           termen.complet || "-",
           termen.solutie || "-",
           termen.solutieSumar || "-",
