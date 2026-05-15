@@ -71,6 +71,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -241,11 +242,13 @@ describe("nameSoapRunner - source_partial (Batch 2.1)", () => {
       expect(detail.failed_institutii).toHaveLength(1);
       expect(detail.failed_institutii[0].institutie).toBe("Judecatoria B");
     } finally {
+      // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
       delete process.env.MONITORING_PARTIAL_ALERTS_ENABLED;
     }
   });
 
   it("does NOT emit source_partial alert when flag is off (default)", async () => {
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
     delete process.env.MONITORING_PARTIAL_ALERTS_ENABLED;
     const job = seedJob({
       targetJson: JSON.stringify({

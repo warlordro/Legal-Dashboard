@@ -44,6 +44,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -128,6 +129,7 @@ describe("PR-2 migration 0002 — schema shape", () => {
     // Re-opening the same DB simulates an app restart. The runner must NOT try
     // to re-execute 0002 (would fail on duplicate CREATE TABLE).
     closeDb();
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
     delete process.env.LEGAL_DASHBOARD_DB_PATH;
     process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
     const db = getDb();

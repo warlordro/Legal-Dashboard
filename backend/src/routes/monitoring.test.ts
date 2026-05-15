@@ -82,6 +82,7 @@ beforeEach(async () => {
 afterEach(async () => {
   setMonitoringScheduler(null);
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });

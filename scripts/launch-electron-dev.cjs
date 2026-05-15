@@ -7,6 +7,7 @@ const electronExe = require("electron");
 
 function launch(exePath) {
   const env = { ...process.env };
+  // biome-ignore lint/performance/noDelete: ELECTRON_RUN_AS_NODE trebuie unset real, nu valoare undefined.
   delete env.ELECTRON_RUN_AS_NODE;
   const child = spawn(exePath, [projectRoot], {
     cwd: projectRoot,
