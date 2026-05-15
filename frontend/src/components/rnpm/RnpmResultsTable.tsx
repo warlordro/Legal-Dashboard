@@ -8,6 +8,7 @@ import { getRnpmAvizStatusDisplay } from "@/lib/rnpmAvizStatus";
 import { RnpmAvizDetailContent } from "./RnpmDetailModal";
 import { TablePagination } from "@/components/table-pagination";
 import { useRnpmResultsFilter } from "@/hooks/useRnpmResultsFilter";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { tokenizeFilterQuery } from "@/lib/rnpmFilterTokens";
 import { highlightTokens, anyTokenMatches } from "@/lib/rnpmHighlightTokens";
 import type { RnpmDocument } from "@/types/rnpm";
@@ -158,7 +159,11 @@ export function RnpmResultsTable({
   const resultCriteriu = result?.criteriu;
   const resultDocumentCount = result?.documents.length ?? 0;
   const filter = useRnpmResultsFilter(result?.searchId ?? null, filterQuery);
-  const tokens = useMemo(() => tokenizeFilterQuery(filterQuery), [filterQuery]);
+  // Debounce tokens used for highlight + anyTokenMatches: altfel pe fiecare keystroke
+  // se re-randeaza ~15 randuri × 3 celule + intregul detail expandat (zeci de campuri),
+  // ceea ce blocheaza input-ul la valori scurte gen "2" sau "20".
+  const [debouncedFilterForTokens] = useDebouncedValue(filterQuery, 300);
+  const tokens = useMemo(() => tokenizeFilterQuery(debouncedFilterForTokens), [debouncedFilterForTokens]);
   const matchedSet = useMemo(() => {
     if (!filter.data) return null;
     return new Set(filter.data.matchedAvizIds);
