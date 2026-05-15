@@ -11,7 +11,6 @@ import {
   validateParams,
 } from "../util/validation.ts";
 import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
-import { buildDosarePdf } from "../services/dosareExportPdf.ts";
 import { buildDosareXlsx } from "../services/dosareExportXlsx.ts";
 
 export const dosareRouter = new Hono();
@@ -84,13 +83,6 @@ dosareExportRouter.post("/export.xlsx", limitExport, async (c) => {
   const parsed = await readDosareExportBody(c);
   if ("error" in parsed) return parsed.error;
   const result = await buildDosareXlsx(parsed.dosare);
-  return streamExportResult(c, result);
-});
-
-dosareExportRouter.post("/export.pdf", limitExport, async (c) => {
-  const parsed = await readDosareExportBody(c);
-  if ("error" in parsed) return parsed.error;
-  const result = await buildDosarePdf(parsed.dosare);
   return streamExportResult(c, result);
 });
 

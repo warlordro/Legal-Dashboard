@@ -1,5 +1,6 @@
 import type { Dosar, Termen } from "@/types";
-import { getInstitutieLabel } from "./institutii";
+import { formatDate } from "./utils";
+import { getInstitutieLabel, normalizeInstitutie } from "./institutii";
 import { formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "./api";
 import { api } from "./api";
 import {
@@ -33,6 +34,8 @@ export type { ExportResult, AnalysisPdfArgs };
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 export type ExportJob =
+  | { kind: "dosarePdf"; data: Dosar[] }
+  | { kind: "termenePdf"; data: Termen[] }
   | { kind: "monitoringXlsx"; data: MonitoringJob[] }
   | { kind: "monitoringPdf"; data: MonitoringJob[] }
   | { kind: "analysisPdf"; data: AnalysisPdfArgs }
@@ -87,10 +90,225 @@ function toTransferableBuffer(out: ArrayBuffer | Uint8Array): ArrayBuffer {
   return out.buffer.slice(out.byteOffset, out.byteOffset + out.byteLength) as ArrayBuffer;
 }
 
+function formatInstitutie(raw: string): string {
+  if (!raw) return "-";
+  return normalizeInstitutie(raw);
+}
+
 // ─── Filename helpers ─────────────────────────────────────────────────────────
 
 function sanitizeNr(nr: string): string {
   return (nr || "").replace(/[/\\:*?"<>|]/g, "-").trim() || "dosar";
+}
+
+function dosareFilename(dosare: Dosar[], ext: "xlsx" | "pdf"): string {
+  if (dosare.length === 1) return `dosar_${sanitizeNr(dosare[0].numar)}.${ext}`;
+  return `dosare_${todayRo()}.${ext}`;
+}
+
+function termeneFilename(termene: Termen[], ext: "xlsx" | "pdf"): string {
+  if (termene.length === 1) return `termen_${sanitizeNr(termene[0].numarDosar)}.${ext}`;
+  return `termene_${todayRo()}.${ext}`;
+}
+
+function formatPartiPDF(parti: Dosar["parti"]): string {
+  if (parti.length === 0) return "-";
+  return parti.map((p) => `${stripDiacritics(p.calitateParte)}: ${stripDiacritics(p.nume)}`).join("\n");
+}
+
+function formatSedintePDF(sedinte: Dosar["sedinte"]): string {
+  if (sedinte.length === 0) return "-";
+  return sedinte
+    .map((s) => {
+      const parts = [formatDate(s.data)];
+      if (s.ora) parts.push(s.ora);
+      if (s.solutie) parts.push("- " + stripDiacritics(s.solutie));
+      if (s.solutieSumar) parts.push("(" + stripDiacritics(s.solutieSumar) + ")");
+      return parts.join(" ");
+    })
+    .join("\n");
+}
+
+export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
+  const { default: jsPDF } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("Legal Dashboard - Dosare", 14, 16);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  const totalSedinte = dosare.reduce((sum, d) => sum + d.sedinte.length, 0);
+  doc.text(
+    `Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${dosare.length} dosare, ${totalSedinte} sedinte`,
+    14,
+    22
+  );
+
+  // Side-band: row index → portal.just.ro URL pentru coloana "Numar Dosar"
+  // (autotable nu are acces la valoarea originala in didDrawCell, doar la
+  // textul rendat).
+  const dosarLinks = new Map<number, string>();
+  dosare.forEach((d, i) => {
+    if (d.numar) dosarLinks.set(i, getPortalJustUrl(d.numar));
+  });
+
+  autoTable(doc, {
+    startY: 28,
+    head: [["#", "Numar Dosar", "Data", "Institutie", "Categorie / Stadiu", "Obiect", "Parti", "Sedinte"]],
+    body: dosare.map((d, i) => [
+      String(i + 1),
+      d.numar || "-",
+      formatDate(d.data),
+      stripDiacritics(formatInstitutie(d.institutie)),
+      stripDiacritics([d.categorieCaz, d.stadiuProcesual].filter(Boolean).join(" / ")),
+      stripDiacritics(d.obiect || "-"),
+      formatPartiPDF(d.parti),
+      formatSedintePDF(d.sedinte),
+    ]),
+    styles: {
+      fontSize: 7,
+      cellPadding: 2,
+      lineColor: [200, 200, 200],
+      lineWidth: 0.1,
+      overflow: "linebreak",
+      font: "helvetica",
+    },
+    headStyles: {
+      fillColor: [37, 99, 235],
+      textColor: 255,
+      fontSize: 7.5,
+      fontStyle: "bold",
+      halign: "left",
+    },
+    alternateRowStyles: { fillColor: [245, 247, 250] },
+    columnStyles: {
+      0: { cellWidth: 7, halign: "center" },
+      1: { cellWidth: 24, fontStyle: "bold", textColor: [29, 78, 216] },
+      2: { cellWidth: 16 },
+      3: { cellWidth: 28 },
+      4: { cellWidth: 24 },
+      5: { cellWidth: 32 },
+      6: { cellWidth: 50 },
+      7: { cellWidth: "auto" },
+    },
+    margin: { left: 10, right: 10 },
+    didDrawCell: (data: {
+      section: string;
+      column: { index: number };
+      row: { index: number };
+      cell: { x: number; y: number; width: number; height: number };
+    }) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const url = dosarLinks.get(data.row.index);
+      if (!url) return;
+      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
+    },
+    didDrawPage: (data: { pageNumber: number }) => {
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text(
+        `Pagina ${data.pageNumber}`,
+        doc.internal.pageSize.getWidth() / 2,
+        doc.internal.pageSize.getHeight() - 7,
+        { align: "center" }
+      );
+    },
+  });
+  return {
+    buffer: doc.output("arraybuffer") as ArrayBuffer,
+    filename: dosareFilename(dosare, "pdf"),
+    mime: MIME_PDF,
+  };
+}
+
+export async function buildTermenePdf(termene: Termen[]): Promise<ExportResult> {
+  const { default: jsPDF } = await import("jspdf");
+  const { default: autoTable } = await import("jspdf-autotable");
+  const doc = new jsPDF({ orientation: "landscape", unit: "mm", format: "a4" });
+
+  doc.setFontSize(16);
+  doc.setFont("helvetica", "bold");
+  doc.text("Legal Dashboard - Termene", 14, 16);
+  doc.setFontSize(9);
+  doc.setFont("helvetica", "normal");
+  doc.text(`Generat: ${new Date().toLocaleDateString("ro-RO")}  |  Total: ${termene.length} termene`, 14, 22);
+
+  const dosarLinks = new Map<number, string>();
+  termene.forEach((t, i) => {
+    if (t.numarDosar) dosarLinks.set(i, getPortalJustUrl(t.numarDosar));
+  });
+
+  autoTable(doc, {
+    startY: 28,
+    head: [["#", "Numar Dosar", "Data", "Ora", "Institutie", "Complet", "Solutie", "Sumar"]],
+    body: termene.map((t, i) => [
+      String(i + 1),
+      t.numarDosar || "-",
+      formatDate(t.data),
+      t.ora || "-",
+      stripDiacritics(formatInstitutie(t.institutie)),
+      stripDiacritics(t.complet || "-"),
+      stripDiacritics(t.solutie || "-"),
+      stripDiacritics(t.solutieSumar || "-"),
+    ]),
+    styles: {
+      fontSize: 7.5,
+      cellPadding: 2,
+      lineColor: [200, 200, 200],
+      lineWidth: 0.1,
+      overflow: "linebreak",
+      font: "helvetica",
+    },
+    headStyles: {
+      fillColor: [37, 99, 235],
+      textColor: 255,
+      fontSize: 8,
+      fontStyle: "bold",
+      halign: "left",
+    },
+    alternateRowStyles: { fillColor: [245, 247, 250] },
+    columnStyles: {
+      0: { cellWidth: 8, halign: "center" },
+      1: { cellWidth: 28, fontStyle: "bold", textColor: [29, 78, 216] },
+      2: { cellWidth: 18 },
+      3: { cellWidth: 12 },
+      4: { cellWidth: 32 },
+      5: { cellWidth: 25 },
+      6: { cellWidth: 30 },
+      7: { cellWidth: "auto" },
+    },
+    margin: { left: 14, right: 14 },
+    didDrawCell: (data: {
+      section: string;
+      column: { index: number };
+      row: { index: number };
+      cell: { x: number; y: number; width: number; height: number };
+    }) => {
+      if (data.section !== "body") return;
+      if (data.column.index !== 1) return;
+      const url = dosarLinks.get(data.row.index);
+      if (!url) return;
+      doc.link(data.cell.x, data.cell.y, data.cell.width, data.cell.height, { url });
+    },
+    didDrawPage: (data: { pageNumber: number }) => {
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.text(
+        `Pagina ${data.pageNumber}`,
+        doc.internal.pageSize.getWidth() / 2,
+        doc.internal.pageSize.getHeight() - 7,
+        { align: "center" }
+      );
+    },
+  });
+  return {
+    buffer: doc.output("arraybuffer") as ArrayBuffer,
+    filename: termeneFilename(termene, "pdf"),
+    mime: MIME_PDF,
+  };
 }
 
 // Same as formatMonitoringTarget but for name_soap appends the institutie scope
@@ -298,13 +516,13 @@ export async function exportTermeneExcel(termene: Termen[]): Promise<void> {
 }
 
 export async function exportDosarePDF(dosare: Dosar[]): Promise<void> {
-  const { blob, filename } = await api.dosare.exportPdfBlob(dosare);
-  triggerBlobDownload(blob, filename);
+  const result = await runExportInWorker({ kind: "dosarePdf", data: dosare });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }
 
 export async function exportTermenePDF(termene: Termen[]): Promise<void> {
-  const { blob, filename } = await api.termene.exportPdfBlob(termene);
-  triggerBlobDownload(blob, filename);
+  const result = await runExportInWorker({ kind: "termenePdf", data: termene });
+  triggerDownload(result.buffer, result.filename, result.mime);
 }
 
 export async function exportMonitoringExcel(jobs: MonitoringJob[]): Promise<void> {

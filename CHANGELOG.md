@@ -4,6 +4,63 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.27.3] - 2026-05-15
+
+### Revert export PDF dosare + termene la jsPDF (calitate randare restaurata)
+
+Export PDF pentru `/dosare` si `/termene` revine pe pipeline-ul jsPDF +
+jspdf-autotable (versiunea anterioara `d600959`), ruland in Web Worker pentru a
+nu bloca main thread. Streaming backend PDFKit livrat in `d600959`/`9ece8ca`
+producea pe dosare cu ~600 sedinte un PDF dezorganizat (text suprapus, coloana
+"Parti" trunchiata la wrap). Pe seturi mici (zeci-sute de dosare), randarea
+jsPDF este vizibil mai curata, asa cum era in v2.0.x (`dosare_05.05.2026.pdf`
+de referinta).
+
+Streaming backend PDFKit ramane activ unde dimensiunea reala depaseste un
+single-page worker (RNPM cu ~2000 avize / ~50k pagini si export alerte).
+
+#### Modificat
+
+- [frontend/src/lib/export.ts](frontend/src/lib/export.ts) — restaurare
+  `buildDosarePdf` + `buildTermenePdf` (jsPDF landscape A4, autoTable, hyperlink
+  portal.just.ro pe `didDrawCell` la coloana Numar Dosar, footer paginat).
+  `exportDosarePDF` + `exportTermenePDF` deleaga acum catre worker.
+- [frontend/src/lib/export.worker.ts](frontend/src/lib/export.worker.ts) — case-uri
+  noi `dosarePdf` + `termenePdf` pe langa cele existente XLSX/monitoring/alerte.
+- [frontend/src/lib/api.ts](frontend/src/lib/api.ts) — eliminat
+  `api.dosare.exportPdfBlob` + `api.termene.exportPdfBlob` (nu mai sunt apelate).
+
+#### Eliminat
+
+- `backend/src/routes/dosare.ts` — handler `POST /api/v1/dosare/export.pdf`.
+- `backend/src/routes/termene.ts` — handler `POST /api/v1/termene/export.pdf`.
+- `backend/src/services/dosareExportPdf.ts` + `dosareExportPdf.test.ts`.
+- `backend/src/services/termeneExportPdf.ts` + `termeneExportPdf.test.ts`.
+- [backend/src/routes/termene.contract.test.ts](backend/src/routes/termene.contract.test.ts) —
+  testul `.pdf` (acum inexistent) migrat pe `.xlsx` (acelasi cod `INVALID_PARAMS`
+  pe lista goala).
+
+#### Pastrat
+
+- `backend/src/services/alertsExportPdf.ts` — export PDF alerte ramane pe
+  PDFKit streaming (a fost mereu acolo, nu este regresie).
+- `backend/src/services/rnpmExportPdf.ts` — export PDF RNPM ramane pe PDFKit
+  streaming (single page worker insuficient la 50k pagini).
+- Export XLSX pe backend ExcelJS WorkbookWriter pentru toate fluxurile
+  (functioneaza corect si pe seturi mari).
+
+#### Verificari
+
+- `npx tsc --noEmit` curat pe backend + frontend.
+- `npm run build` (Vite + esbuild) iese curat.
+- `frontend vitest run`: 166 / 166 verde.
+- `backend termene.contract.test.ts`: 4 / 4 verde (restul fail-urilor backend
+  sunt better-sqlite3 ABI mismatch — issue infrastructure cunoscut, nelegat de
+  acest release).
+- `npx biome check --write` aplicat pe toate fisierele atinse.
+
+---
+
 ## [2.27.2] - 2026-05-14
 
 ### Fix UI: dialog-uri lipite de marginea stanga + integrare interna OriginGuard F11-F1

@@ -6,6 +6,7 @@ import { join } from "node:path";
 import type { Dosar } from "../soap.ts";
 import { todayRo } from "../util/xlsxHelpers.ts";
 import { formatRoDate } from "../util/dateFormat.ts";
+import { normalizeInstitutie } from "../util/institutionLabel.ts";
 
 export interface DosareXlsxResult {
   filepath: string;
@@ -183,7 +184,7 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<DosareXlsxResult
           index + 1,
           dosar.numar || "-",
           formatRoDate(dosar.data),
-          dosar.institutie || "-",
+          dosar.institutie ? normalizeInstitutie(dosar.institutie) : "-",
           dosar.departament || "-",
           [dosar.categorieCaz, dosar.stadiuProcesual].filter(Boolean).join(" / ") || "-",
           dosar.obiect || "-",

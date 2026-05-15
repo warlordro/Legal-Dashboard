@@ -1,5 +1,5 @@
 /// <reference lib="webworker" />
-import { buildMonitoringPdf, buildMonitoringXlsx, type ExportJob } from "./export";
+import { buildDosarePdf, buildMonitoringPdf, buildMonitoringXlsx, buildTermenePdf, type ExportJob } from "./export";
 import { buildAnalysisPdf } from "./export-analysis";
 import { buildManualPdf } from "./export-manual";
 import { buildReportPdf, buildReportXlsx } from "./export-report";
@@ -16,6 +16,12 @@ ctx.onmessage = async (e: MessageEvent<ExportJob>) => {
   try {
     let result: ExportResult;
     switch (e.data.kind) {
+      case "dosarePdf":
+        result = await buildDosarePdf(e.data.data);
+        break;
+      case "termenePdf":
+        result = await buildTermenePdf(e.data.data);
+        break;
       case "monitoringXlsx":
         result = await buildMonitoringXlsx(e.data.data);
         break;

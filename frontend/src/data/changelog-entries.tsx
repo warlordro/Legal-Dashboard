@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.27.3",
+    date: "15 Mai 2026",
+    subtitle:
+      "Revert export PDF pentru Dosare + Termene la pipeline-ul jsPDF + autotable (rulat in Web Worker), pentru ca PDFKit streaming livrat in v2.27.0 producea pe dosare cu ~600 sedinte un PDF dezorganizat. Export RNPM + Alerte ramane pe PDFKit streaming (volum mare). Export XLSX nu este afectat.",
+    icon: <FileText className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Calitatea PDF-ului restaurata pe Dosare + Termene",
+        content:
+          "Comparativ cu dosare_05.05.2026.pdf (jsPDF), build-ul backend din v2.27.0 (PDFKit streaming) producea text suprapus si coloana Parti trunchiata la wrap pe export-uri cu sute de sedinte. Am revenit la jsPDF + jspdf-autotable, mutat in Web Worker pentru a nu bloca UI-ul. Rezultatul este identic vizual cu randarea din v2.0.x.",
+      },
+      {
+        title: "Ce ramane pe backend streaming",
+        content:
+          "Export PDF pentru RNPM (poate atinge ~2000 avize si ~50k pagini) si export PDF pentru Alerte raman pe PDFKit streaming pe backend - acolo single-page jsPDF in worker nu este suficient. Export XLSX continua sa foloseasca ExcelJS WorkbookWriter pe backend pentru toate fluxurile.",
+      },
+      {
+        title: "Cleanup backend",
+        content:
+          "Am eliminat handlerii POST /api/v1/dosare/export.pdf si POST /api/v1/termene/export.pdf, serviciile dosareExportPdf.ts + termeneExportPdf.ts si testele aferente. Frontendul nu mai face request HTTP la backend pentru aceste PDF-uri.",
+      },
+    ],
+  },
+  {
     version: "v2.27.2",
     date: "14 Mai 2026",
     subtitle:

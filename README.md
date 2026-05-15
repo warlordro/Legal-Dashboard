@@ -7,10 +7,21 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.27.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.27.3**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.27.2** - fix UI: doua dialog-uri ("Inchide toate alertele
+Ultimul release **v2.27.3** - revert export PDF pentru `/dosare` si `/termene`
+la pipeline-ul jsPDF + jspdf-autotable (rulat in Web Worker), pentru ca
+streaming-ul backend PDFKit livrat in v2.27.0 producea pe dosare cu ~600
+sedinte un PDF dezorganizat (text suprapus, coloana Parti trunchiata la wrap).
+Pe seturi mici (zeci-sute de dosare) randarea jsPDF este vizibil mai curata,
+ca in `dosare_05.05.2026.pdf` de referinta. Export RNPM (~50k pagini posibile)
+si export alerte raman pe PDFKit streaming - acolo single-page worker e
+insuficient. Export XLSX continua pe ExcelJS WorkbookWriter pe backend.
+Handlerii `POST /api/v1/dosare/export.pdf` + `POST /api/v1/termene/export.pdf`
+si serviciile `dosareExportPdf.ts` + `termeneExportPdf.ts` au fost eliminate.
+
+Predecesor **v2.27.2** - fix UI: doua dialog-uri ("Inchide toate alertele
 filtrate?" din /alerte si popover-ul cu instante asociate din /monitorizare)
 nu mai apar lipite de marginea stanga a ecranului. Cauza era tag-ul nativ
 `<dialog open>` care primeste stiluri UA (`width: fit-content`) ce nu sunt
