@@ -69,10 +69,12 @@ export function RnpmRestoreModal({ onClose, onRestored }: { onClose: () => void;
   };
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdropul se inchide via butonul X dedicat sau Escape printr-un document-level handler.
     <div
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4"
       onClick={restoring ? undefined : onClose}
     >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via focus trap intern. */}
       <div
         className="flex w-full max-w-lg flex-col rounded-xl border border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}

@@ -170,6 +170,7 @@ export function SearchForm({
 
           {/* Institutie */}
           <div className="space-y-1.5">
+            {/* biome-ignore lint/a11y/noLabelWithoutControl: InstitutieSelect e un combobox custom care expune trigger button cu aria-label propriu. */}
             <label className="text-xs font-medium text-muted-foreground">Instituție (opțional)</label>
             <InstitutieSelect
               value={
@@ -185,6 +186,7 @@ export function SearchForm({
           {/* Categorie Caz */}
           {showFilters && (
             <div className="space-y-2">
+              {/* biome-ignore lint/a11y/noLabelWithoutControl: label e folosit ca header pentru un grup de toggle-uri, nu pentru un singur control. */}
               <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <Filter className="h-3.5 w-3.5" />
                 Categorie Caz
@@ -219,6 +221,7 @@ export function SearchForm({
           {/* Stadiu Procesual */}
           {showFilters && (
             <div className="space-y-2">
+              {/* biome-ignore lint/a11y/noLabelWithoutControl: label e folosit ca header pentru un grup de toggle-uri, nu pentru un singur control. */}
               <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
                 <Scale className="h-3.5 w-3.5" />
                 Stadiu Procesual

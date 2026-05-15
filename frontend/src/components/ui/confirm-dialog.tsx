@@ -62,10 +62,12 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     <ConfirmContext.Provider value={confirm}>
       {children}
       {state && (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: backdropul se inchide via butoanele Confirm/Cancel sau Escape la nivel de document.
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
           onClick={() => close(false)}
         >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via butoanele Confirm/Cancel. */}
           <div
             role="alertdialog"
             aria-modal="true"

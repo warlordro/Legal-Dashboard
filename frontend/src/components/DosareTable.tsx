@@ -414,6 +414,7 @@ export function DosareTable({
                 />
               </th>
               {([["numar", "Numar Dosar"]] as [SortKey, string][]).map(([key, label]) => (
+                // biome-ignore lint/a11y/useKeyWithClickEvents: <th> nu primeste focus de tastatura nativ; sortarea e expusa si prin meniul de filtru/sort din toolbar.
                 <th
                   key={key}
                   className="cursor-pointer px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
@@ -433,6 +434,7 @@ export function DosareTable({
                   ["institutie", "Institutie"],
                 ] as [SortKey, string][]
               ).map(([key, label]) => (
+                // biome-ignore lint/a11y/useKeyWithClickEvents: <th> nu primeste focus de tastatura nativ; sortarea e expusa si prin meniul de filtru/sort din toolbar.
                 <th
                   key={key}
                   className="cursor-pointer px-4 py-3 text-left text-xs font-semibold uppercase tracking-wider text-muted-foreground hover:text-foreground"
@@ -458,6 +460,7 @@ export function DosareTable({
               const isExpanded = expandedIdx === globalIdx;
               return (
                 <Fragment key={`dosar-${dosar.numar}-${i}`}>
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: <tr> nu primeste focus de tastatura; expandarea e expusa si prin butoanele inline (chevron + actions). */}
                   <tr
                     className={`transition-colors cursor-pointer hover:bg-muted/30 ${isExpanded ? "bg-muted/40" : ""} ${selected.has(dosar.numar) ? "bg-violet-50 dark:bg-violet-900/10" : ""}`}
                     onClick={() => {
@@ -465,6 +468,7 @@ export function DosareTable({
                       if (!isExpanded && dosar.numar) markAsViewed(dosar.numar);
                     }}
                   >
+                    {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe celula checkbox impiedica expand-ul liniei; tastatura merge prin checkbox. */}
                     <td className="px-3 py-3 w-8" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"

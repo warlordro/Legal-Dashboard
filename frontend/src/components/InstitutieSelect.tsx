@@ -129,6 +129,8 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
         </span>
         <span className="flex shrink-0 items-center gap-1 pl-2">
           {count > 0 && (
+            // biome-ignore lint/a11y/useSemanticElements: <button> nu poate fi nested intr-un <button>; clear-X foloseste stopPropagation pe acelasi trigger combobox.
+            // biome-ignore lint/a11y/useKeyWithClickEvents: clear-X are tabIndex={-1} - nu primeste focus la tab, butonul parinte e tinta keyboard primara.
             <span role="button" tabIndex={-1} onClick={handleClear} className="rounded p-0.5 hover:bg-muted">
               <X className="h-3.5 w-3.5" />
             </span>
@@ -139,15 +141,18 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
 
       {/* Modal overlay */}
       {open && (
+        // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop-ul se inchide via Escape printr-un handler la nivel de document (efect useEffect mai jos).
         <div
           className="fixed inset-0 z-50 flex items-start justify-center bg-black/60 pt-[10vh] backdrop-blur-sm"
           onClick={handleClose}
         >
+          {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div pentru a impiedica clickul interior sa inchida modalul; tastatura e gestionata de document handler. */}
           <div
+            className="mx-4 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-black/5 focus:outline-none"
+            // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita refactor major (focus trap + showModal), pattern portal cu role="dialog"+aria-modal e standard React.
             role="dialog"
             aria-modal="true"
             aria-labelledby="institutie-select-title"
-            className="mx-4 w-full max-w-lg overflow-hidden rounded-xl border border-border bg-background shadow-2xl ring-1 ring-black/5 focus:outline-none"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Header */}

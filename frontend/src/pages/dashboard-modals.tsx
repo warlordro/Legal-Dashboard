@@ -24,9 +24,12 @@ export function ChangelogDialog({
   onClose: () => void;
 }) {
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdropul se inchide via butonul X dedicat sau Escape la nivel de document.
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via focus trap intern. */}
       <div
         ref={dialogRef}
+        // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
         role="dialog"
         aria-modal="true"
         aria-labelledby="changelog-title"
@@ -72,9 +75,12 @@ export function ManualDialog({
   isDownloading: boolean;
 }) {
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdropul se inchide via butonul X dedicat sau Escape la nivel de document.
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via focus trap intern. */}
       <div
         ref={dialogRef}
+        // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
         role="dialog"
         aria-modal="true"
         aria-labelledby="manual-title"

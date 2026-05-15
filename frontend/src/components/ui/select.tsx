@@ -79,6 +79,7 @@ export const SelectTrigger = React.forwardRef<HTMLButtonElement, SelectTriggerPr
       <button
         ref={triggerRef}
         type="button"
+        // biome-ignore lint/a11y/useSemanticElements: combobox pattern Radix-style; role="combobox" pe <button> e ARIA Authoring Practices standard pentru select customizat.
         role="combobox"
         aria-expanded={open}
         aria-haspopup="listbox"
@@ -227,6 +228,7 @@ export function SelectContent({ children, className }: SelectContentProps) {
     <div
       ref={ref}
       id={contentId}
+      // biome-ignore lint/a11y/useSemanticElements: listbox-ul ARIA peste <div> e standard pentru combobox custom; <ul> ar pierde controlul fin pe navigare ARROW/HOME/END/ENTER.
       role="listbox"
       tabIndex={-1}
       onKeyDown={(e) => {
@@ -283,9 +285,11 @@ export function SelectItem({ value, disabled, children, className }: SelectItemP
   const isActive = ctx.active === index;
 
   return (
+    // biome-ignore lint/a11y/useFocusableInteractive: optiunile listbox-ului nu sunt tabbable individual; navigarea se face din parinte cu ARROW/ENTER si focus pe trigger.
     <div
-      role="option"
       aria-selected={isSelected}
+      // biome-ignore lint/a11y/useSemanticElements: role="option" peste <div> e standard ARIA Authoring Practices pentru combobox custom (<option> e rezervat pentru <select> nativ).
+      role="option"
       aria-disabled={disabled || undefined}
       data-index={index}
       data-active={isActive || undefined}

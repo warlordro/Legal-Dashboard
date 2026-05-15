@@ -278,11 +278,13 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
 
               return (
                 <>
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: <tr> nu primeste focus de tastatura; expandarea termenului e expusa si prin butoanele de actiune. */}
                   <tr
                     key={rowKey}
                     onClick={() => hasDetails && toggleRow(rowKey, t.numarDosar)}
                     className={`transition-colors hover:bg-muted/30 ${isViitor(t.data) ? "bg-primary/5" : ""} ${hasDetails ? "cursor-pointer" : ""} ${isSelected ? "bg-violet-50 dark:bg-violet-900/10" : ""}`}
                   >
+                    {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe celula checkbox impiedica expand-ul liniei; tastatura merge prin checkbox. */}
                     <td className="w-10 px-2 py-3 text-center" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
