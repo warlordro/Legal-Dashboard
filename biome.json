@@ -33,10 +33,10 @@
         "noArrayIndexKey": "off"
       },
       "a11y": {
-        "noLabelWithoutControl": "off",
-        "useFocusableInteractive": "off",
-        "useKeyWithClickEvents": "off",
-        "useSemanticElements": "off"
+        "noLabelWithoutControl": "warn",
+        "useFocusableInteractive": "warn",
+        "useKeyWithClickEvents": "warn",
+        "useSemanticElements": "warn"
       },
       "style": {
         "noParameterAssign": "off",
