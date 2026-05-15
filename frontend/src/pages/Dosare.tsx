@@ -258,14 +258,15 @@ export default function Dosare({
     loadMoreAbort.current?.abort();
   };
 
-  // Handle pending search from history
-  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingSearch este trigger one-shot; callback-urile curente sunt apelate doar la consumarea intrarii din istoric.
+  // Handle pending search from history. Re-fires cand pendingSearch sau loading se schimba,
+  // ca sa nu pierdem un trigger sosit in timpul unei cautari deja in curs.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: consumePendingSearch + handleSearch nu sunt memoizate; consumam valoarea curenta in callback.
   useEffect(() => {
     if (pendingSearch && !loading) {
       consumePendingSearch?.();
       handleSearch(pendingSearch);
     }
-  }, [pendingSearch]);
+  }, [pendingSearch, loading]);
 
   const handleCategoriiChange = (cats: string[]) => {
     onStateChange({ ...state, categorii: cats });

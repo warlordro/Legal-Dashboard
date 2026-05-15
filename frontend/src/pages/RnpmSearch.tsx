@@ -303,14 +303,13 @@ export default function RnpmSearchPage({
   useEffect(() => {
     if (!pendingSearch) return;
     const { type, params } = pendingSearch;
-    consumePendingSearch();
     setTab("search");
     setActiveSearchType(type);
     setLastType(type);
     setLastParams(params);
     setFormResetKey((k) => k + 1);
     void runSearch(type, params);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    consumePendingSearch();
   }, [pendingSearch]);
 
   const openDetailByAvizId = (id: number | null) => {

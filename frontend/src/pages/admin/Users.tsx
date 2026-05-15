@@ -56,21 +56,16 @@ export default function AdminUsers() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const loadUsers = async (filters: {
-    page: number;
-    search: string;
-    roleFilter: UserRole | "all";
-    statusFilter: UserStatus | "all";
-  }) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
       const result = await admin.listUsers({
-        page: filters.page,
+        page,
         pageSize: PAGE_SIZE,
-        search: filters.search || undefined,
-        role: filters.roleFilter === "all" ? undefined : filters.roleFilter,
-        status: filters.statusFilter === "all" ? undefined : filters.statusFilter,
+        search: search || undefined,
+        role: roleFilter === "all" ? undefined : roleFilter,
+        status: statusFilter === "all" ? undefined : statusFilter,
       });
       setRows(result.rows);
       setTotal(result.total);
@@ -79,30 +74,11 @@ export default function AdminUsers() {
     } finally {
       setLoading(false);
     }
-  };
-
-  const load = () => loadUsers({ page, search, roleFilter, statusFilter });
+  }, [page, roleFilter, search, statusFilter]);
 
   useEffect(() => {
-    setLoading(true);
-    setError(null);
-    admin
-      .listUsers({
-        page,
-        pageSize: PAGE_SIZE,
-        search: search || undefined,
-        role: roleFilter === "all" ? undefined : roleFilter,
-        status: statusFilter === "all" ? undefined : statusFilter,
-      })
-      .then((result) => {
-        setRows(result.rows);
-        setTotal(result.total);
-      })
-      .catch((err: unknown) => {
-        setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorilor.");
-      })
-      .finally(() => setLoading(false));
-  }, [page, roleFilter, search, statusFilter]);
+    load();
+  }, [load]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii depinde explicit de filtrele vizibile.
   useEffect(() => {
