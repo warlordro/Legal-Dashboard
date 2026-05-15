@@ -12,9 +12,9 @@
 //   9. getAuditEvents owner-scoped read + system-event query (owner_id IS NULL).
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -44,6 +44,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -77,7 +78,7 @@ describe("PR-2 migration 0002 — schema shape", () => {
 
   it("records 0002 in _schema_versions with a real (non-sentinel) hash", () => {
     const db = getDb();
-    const v2 = db.prepare(`SELECT version, sha256_up FROM _schema_versions WHERE version = 2`).get() as
+    const v2 = db.prepare("SELECT version, sha256_up FROM _schema_versions WHERE version = 2").get() as
       | { version: number; sha256_up: string }
       | undefined;
     expect(v2?.version).toBe(2);
@@ -88,12 +89,12 @@ describe("PR-2 migration 0002 — schema shape", () => {
   it("rejects invalid role / status on users via CHECK", () => {
     const db = getDb();
     expect(() =>
-      db.prepare(`INSERT INTO users(id,email,display_name,role) VALUES (?,?,?,?)`).run("u1", "u1@x", "U1", "BAD_ROLE")
+      db.prepare("INSERT INTO users(id,email,display_name,role) VALUES (?,?,?,?)").run("u1", "u1@x", "U1", "BAD_ROLE")
     ).toThrow(/CHECK/);
 
     expect(() =>
       db
-        .prepare(`INSERT INTO users(id,email,display_name,status) VALUES (?,?,?,?)`)
+        .prepare("INSERT INTO users(id,email,display_name,status) VALUES (?,?,?,?)")
         .run("u2", "u2@x", "U2", "BAD_STATUS")
     ).toThrow(/CHECK/);
   });
@@ -102,15 +103,15 @@ describe("PR-2 migration 0002 — schema shape", () => {
     const db = getDb();
     expect(() =>
       db
-        .prepare(`INSERT INTO audit_log(owner_id, actor_id, action, outcome) VALUES (?,?,?,?)`)
+        .prepare("INSERT INTO audit_log(owner_id, actor_id, action, outcome) VALUES (?,?,?,?)")
         .run("local", "local", "test.bad", "MAYBE")
     ).toThrow(/CHECK/);
   });
 
   it("user_sessions cascades on user delete", () => {
     const db = getDb();
-    db.prepare(`INSERT INTO users(id,email,display_name) VALUES (?,?,?)`).run("u1", "u1@x", "U1");
-    db.prepare(`INSERT INTO user_sessions(id, user_id, token_hash, expires_at) VALUES (?,?,?,?)`).run(
+    db.prepare("INSERT INTO users(id,email,display_name) VALUES (?,?,?)").run("u1", "u1@x", "U1");
+    db.prepare("INSERT INTO user_sessions(id, user_id, token_hash, expires_at) VALUES (?,?,?,?)").run(
       "s1",
       "u1",
       "h1",
@@ -128,10 +129,11 @@ describe("PR-2 migration 0002 — schema shape", () => {
     // Re-opening the same DB simulates an app restart. The runner must NOT try
     // to re-execute 0002 (would fail on duplicate CREATE TABLE).
     closeDb();
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
     delete process.env.LEGAL_DASHBOARD_DB_PATH;
     process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
     const db = getDb();
-    const v2 = db.prepare(`SELECT COUNT(*) AS n FROM _schema_versions WHERE version = 2`).get() as { n: number };
+    const v2 = db.prepare("SELECT COUNT(*) AS n FROM _schema_versions WHERE version = 2").get() as { n: number };
     expect(v2.n).toBe(1);
     // Local user was inserted exactly once across both boots.
     expect((db.prepare(`SELECT COUNT(*) AS n FROM users WHERE id='local'`).get() as { n: number }).n).toBe(1);
@@ -440,7 +442,7 @@ describe("v2.20.3 — purgeOldAuditLog retention", () => {
     const deleted = purgeOldAuditLog(90);
     expect(deleted).toBe(1);
 
-    const remaining = db.prepare(`SELECT action FROM audit_log ORDER BY ts ASC`).all() as { action: string }[];
+    const remaining = db.prepare("SELECT action FROM audit_log ORDER BY ts ASC").all() as { action: string }[];
     const actions = remaining.map((r) => r.action);
     expect(actions).toContain("recent.event");
     expect(actions).toContain("now.event");

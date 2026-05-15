@@ -10,12 +10,10 @@ const {
   nativeTheme,
   shell,
 } = require("electron");
-const path = require("path");
-const fs = require("fs");
+const path = require("node:path");
+const fs = require("node:fs");
 const pkg = require(path.join(__dirname, "..", "package.json"));
-const { getNotificationStatus, showNativeNotification, registerNotificationIpc } = require(
-  path.join(__dirname, "notifications.js")
-);
+const { registerNotificationIpc } = require(path.join(__dirname, "notifications.js"));
 const APP_USER_MODEL_ID = app.isPackaged ? "ro.legaldashboard.app" : "ro.legaldashboard.dev";
 
 // Windows: setAppUserModelId must run before any window/notification is shown
@@ -49,7 +47,7 @@ if (process.env.LEGAL_DASHBOARD_DISABLE_GPU === "1") {
 // logged and ignored — showing a dialog + quitting on those would be a regression.
 const NON_FATAL_CODES = new Set(["EPIPE", "EIO", "ECONNRESET", "ECONNABORTED"]);
 process.on("uncaughtException", (err) => {
-  const code = err && err.code;
+  const code = err?.code;
   if (code && NON_FATAL_CODES.has(code)) {
     console.warn(`[main] non-fatal ${code}:`, err.message || err);
     return;
@@ -58,7 +56,7 @@ process.on("uncaughtException", (err) => {
   try {
     dialog.showErrorBox(
       "Eroare neasteptata Legal Dashboard",
-      `Aplicatia a intampinat o eroare si se va inchide:\n\n${err && err.message ? err.message : err}`
+      `Aplicatia a intampinat o eroare si se va inchide:\n\n${err?.message ? err.message : err}`
     );
   } catch {
     /* dialog may not be ready; log only */
@@ -226,7 +224,7 @@ function startBackend() {
   try {
     require(path.join(__dirname, "..", "dist-backend", "index.cjs"));
   } catch (err) {
-    return Promise.reject(new Error(`Initializare backend esuata: ${err && err.message ? err.message : err}`));
+    return Promise.reject(new Error(`Initializare backend esuata: ${err?.message ? err.message : err}`));
   }
 
   return new Promise((resolve, reject) => {
@@ -235,7 +233,7 @@ function startBackend() {
     const fail = (err) => {
       reject(
         new Error(
-          `Backend nu raspunde dupa ${STARTUP_TIMEOUT_MS / 1000}s. Ultima eroare: ${err && err.message ? err.message : err}`
+          `Backend nu raspunde dupa ${STARTUP_TIMEOUT_MS / 1000}s. Ultima eroare: ${err?.message ? err.message : err}`
         )
       );
     };
@@ -318,7 +316,7 @@ function registerSafeStorageIpc() {
 }
 
 function showStartupErrorAndQuit(err) {
-  const message = err && err.message ? err.message : String(err);
+  const message = err?.message ? err.message : String(err);
   dialog.showErrorBox(
     "Eroare pornire Legal Dashboard",
     `Aplicatia nu a putut porni:\n\n${message}\n\nVerificati daca portul ${BACKEND_PORT} este liber si baza de date este accesibila, apoi reporniti aplicatia.`
@@ -365,7 +363,7 @@ function createWindow() {
     try {
       mainWindow.setIcon(APP_ICON_PATH);
     } catch (err) {
-      console.warn("[main] could not set taskbar icon:", err && err.message ? err.message : err);
+      console.warn("[main] could not set taskbar icon:", err?.message ? err.message : err);
     }
   }
   mainWindow.setMenuBarVisibility(false);
@@ -442,7 +440,7 @@ function createWindow() {
   });
 
   // Right-click context menu with Copy, Select All, Print
-  mainWindow.webContents.on("context-menu", (event, params) => {
+  mainWindow.webContents.on("context-menu", (_event, params) => {
     const menuItems = [];
 
     if (params.selectionText) {
@@ -513,7 +511,7 @@ function ensureDevTaskbarShortcut() {
     shell.writeShortcutLink(shortcutPath, operation, shortcutDetails);
     console.log(`[main] dev taskbar icon shortcut ${operation}d at ${shortcutPath}`);
   } catch (err) {
-    console.warn("[main] could not create dev taskbar shortcut:", err && err.message ? err.message : err);
+    console.warn("[main] could not create dev taskbar shortcut:", err?.message ? err.message : err);
   }
 }
 

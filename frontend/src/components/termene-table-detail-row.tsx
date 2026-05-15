@@ -13,7 +13,8 @@ export interface TermeneExpandedDetailProps {
 }
 
 export function TermeneExpandedDetail({ termen, searchedName, monitorState, onMonitor }: TermeneExpandedDetailProps) {
-  const hasParts = termen.parti && termen.parti.length > 0;
+  const parti = termen.parti ?? [];
+  const hasParts = parti.length > 0;
   const isPending = monitorState === "pending";
   const isAdded = monitorState === "added";
   const isExists = monitorState === "exists";
@@ -82,7 +83,7 @@ export function TermeneExpandedDetail({ termen, searchedName, monitorState, onMo
           </h4>
           <div className="rounded-lg border border-border bg-background p-3">
             {termen.solutie && (
-              <p className="mb-2 text-sm font-medium text-foreground">{formatDocumentSedinta(termen.solutie!)}</p>
+              <p className="mb-2 text-sm font-medium text-foreground">{formatDocumentSedinta(termen.solutie)}</p>
             )}
             {termen.solutieSumar && (
               <div className="rounded bg-muted/30 p-2">
@@ -99,10 +100,10 @@ export function TermeneExpandedDetail({ termen, searchedName, monitorState, onMo
       {hasParts && (
         <div>
           <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <Users className="h-3.5 w-3.5" /> Parti ({termen.parti!.length})
+            <Users className="h-3.5 w-3.5" /> Parti ({parti.length})
           </h4>
           <div className="grid gap-1 rounded-lg border border-border bg-background p-3 sm:grid-cols-2">
-            {termen.parti!.map((p, j) => (
+            {parti.map((p, j) => (
               <div key={j} className="flex items-center gap-1.5 text-xs">
                 <Badge variant="outline" className="shrink-0 text-xs">
                   {p.calitateParte}

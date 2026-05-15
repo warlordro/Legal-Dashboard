@@ -30,8 +30,9 @@ jobs:
         run: npm ci
 
       - name: Biome lint + format check
-        continue-on-error: true
-        run: npx biome check --max-diagnostics=15
+        # Gate permanent: orice eroare biome pica CI.
+        # CLAUDE.md cere npx biome check --write local obligatoriu inainte de orice push.
+        run: npx biome check
 
       # Type-check + test gate runs BEFORE electron-builder so better-sqlite3
       # is still bound to Node's ABI (npm ci prebuild). electron-builder's

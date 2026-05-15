@@ -296,7 +296,9 @@ function isLegalSuffixToken(token: string): boolean {
 // "II" / cifre romane si alte cuvinte care nu apar in lista legala.
 export function stripLegalSuffix(tokens: string[]): string[] {
   let end = tokens.length;
-  while (end > 0 && isLegalSuffixToken(tokens[end - 1]!)) {
+  while (end > 0) {
+    const token = tokens[end - 1];
+    if (!token || !isLegalSuffixToken(token)) break;
     end--;
   }
   return tokens.slice(0, end);

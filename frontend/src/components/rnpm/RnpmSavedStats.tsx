@@ -97,6 +97,7 @@ function StatsModal({
     }
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey este trigger extern intentionat pentru reincarcarea statisticilor.
   useEffect(() => {
     void load();
     void loadBackups();
@@ -228,6 +229,7 @@ function StatsModal({
             Info baza locala
           </h3>
           <button
+            type="button"
             onClick={onClose}
             disabled={compacting}
             className="rounded-lg p-1 hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"

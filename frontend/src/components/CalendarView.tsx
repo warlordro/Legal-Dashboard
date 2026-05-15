@@ -36,7 +36,7 @@ const DAYS_RO = ["Lu", "Ma", "Mi", "Jo", "Vi", "Sa", "Du"];
 function parseDate(dateStr: string): Date | null {
   if (!dateStr) return null;
   const d = new Date(dateStr);
-  return isNaN(d.getTime()) ? null : d;
+  return Number.isNaN(d.getTime()) ? null : d;
 }
 
 export function CalendarView({ termene }: CalendarViewProps) {

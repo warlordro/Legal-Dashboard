@@ -71,9 +71,9 @@ function filterByMetrics(termene: Termen[], filters: MetricFilter[]): Termen[] {
   now.setHours(0, 0, 0, 0);
   return termene.filter((t) => {
     const d = t.data ? new Date(t.data) : null;
-    const isViitor = d && !isNaN(d.getTime()) && d >= now;
+    const isViitor = d && !Number.isNaN(d.getTime()) && d >= now;
     const isTrecut = !isViitor;
-    const hasSolutie = !!(t.solutie && t.solutie.trim());
+    const hasSolutie = !!t.solutie?.trim();
 
     // OR logic: match any active filter
     if (filters.includes("viitoare") && isViitor) return true;
@@ -131,7 +131,7 @@ export default function Termene({
       // from the response. The backend returns total termene count.
       // Since 1000 dosare can produce many more termene, we track via a special header or heuristic.
       // For simplicity: if the response includes a `dosareCount` we use that, otherwise we estimate.
-      const dosareCount = (res as any).dosareCount ?? 0;
+      const dosareCount = "dosareCount" in res && typeof res.dosareCount === "number" ? res.dosareCount : 0;
       setInitialDosareCount(dosareCount);
       onStateChange({
         allTermene: res.data,
@@ -235,6 +235,7 @@ export default function Termene({
   };
 
   // Handle pending search from history
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingSearch este trigger one-shot; callback-urile curente sunt apelate doar la consumarea intrarii din istoric.
   useEffect(() => {
     if (pendingSearch && !loading) {
       consumePendingSearch?.();

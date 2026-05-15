@@ -18,7 +18,7 @@
 //
 // NOT an external API contract — only used to derive deterministic hashes.
 
-import { createHash } from "crypto";
+import { createHash } from "node:crypto";
 
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(canonicalize(value));

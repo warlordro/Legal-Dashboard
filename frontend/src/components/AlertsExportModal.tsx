@@ -177,13 +177,10 @@ export function AlertsExportModal({
   if (!open) return null;
 
   return (
-    // biome-ignore lint/a11y/useKeyWithClickEvents: keyboard users close with Escape or the explicit close button.
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={handleClose}
     >
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: this click only prevents backdrop bubbling. */}
-      {/* biome-ignore lint/a11y/useSemanticElements: app modal style relies on a div dialog wrapper. */}
       <div
         role="dialog"
         aria-modal="true"

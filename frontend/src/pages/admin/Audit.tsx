@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { ClipboardList, RefreshCw, Filter, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -61,11 +61,48 @@ export default function AdminAudit() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const load = useCallback(async () => {
+  const loadAudit = async (filters: {
+    page: number;
+    action: string;
+    ownerId: string;
+    actorId: string;
+    targetKind: string;
+    outcome: "all" | "ok" | "denied" | "error";
+    from: string;
+    to: string;
+  }) => {
     setLoading(true);
     setError(null);
     try {
       const result = await admin.listAudit({
+        page: filters.page,
+        pageSize: PAGE_SIZE,
+        // actionLike supports prefix/substring matching (admin.users.*); plain
+        // `action` requires an exact value, which is rarely what an auditor wants.
+        actionLike: filters.action || undefined,
+        ownerId: filters.ownerId || undefined,
+        actorId: filters.actorId || undefined,
+        targetKind: filters.targetKind || undefined,
+        outcome: filters.outcome === "all" ? undefined : filters.outcome,
+        since: localDateInputToIso(filters.from, false),
+        until: localDateInputToIso(filters.to, true),
+      });
+      setRows(result.rows);
+      setTotal(result.total);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const load = () => loadAudit({ page, action, ownerId, actorId, targetKind, outcome, from, to });
+
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    admin
+      .listAudit({
         page,
         pageSize: PAGE_SIZE,
         // actionLike supports prefix/substring matching (admin.users.*); plain
@@ -77,20 +114,18 @@ export default function AdminAudit() {
         outcome: outcome === "all" ? undefined : outcome,
         since: localDateInputToIso(from, false),
         until: localDateInputToIso(to, true),
-      });
-      setRows(result.rows);
-      setTotal(result.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
-    } finally {
-      setLoading(false);
-    }
+      })
+      .then((result) => {
+        setRows(result.rows);
+        setTotal(result.total);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
+      })
+      .finally(() => setLoading(false));
   }, [action, actorId, from, outcome, ownerId, page, targetKind, to]);
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii si expanded depinde explicit de filtrele vizibile.
   useEffect(() => {
     setPage(1);
     setExpanded(new Set());
@@ -105,7 +140,7 @@ export default function AdminAudit() {
     });
   };
 
-  const summary = useMemo(() => {
+  const summary = (() => {
     const parts = [`${total} evenimente`];
     if (action) parts.push(`actiune~="${action}"`);
     if (ownerId) parts.push(`owner=${ownerId}`);
@@ -113,7 +148,7 @@ export default function AdminAudit() {
     if (targetKind) parts.push(`tinta=${targetKind}`);
     if (outcome !== "all") parts.push(`rezultat=${outcome}`);
     return parts.join(" · ");
-  }, [action, actorId, outcome, ownerId, targetKind, total]);
+  })();
 
   return (
     <div className="min-h-full bg-background p-6">
@@ -226,7 +261,7 @@ export default function AdminAudit() {
               <table className="w-full text-sm">
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
-                    <th className="w-8 px-2 py-2"></th>
+                    <th className="w-8 px-2 py-2" />
                     <th className="px-3 py-2 font-semibold">Cand</th>
                     <th className="px-3 py-2 font-semibold">Actiune</th>
                     <th className="px-3 py-2 font-semibold">Rezultat</th>

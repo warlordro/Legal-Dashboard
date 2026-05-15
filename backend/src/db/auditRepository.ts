@@ -265,7 +265,7 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
 // constanta din `services/monitoring/scheduler.ts:AUDIT_LOG_RETENTION_DAYS`.
 export function purgeOldAuditLog(retentionDays = 90): number {
   const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
-  const info = getDb().prepare(`DELETE FROM audit_log WHERE ts < ?`).run(cutoff);
+  const info = getDb().prepare("DELETE FROM audit_log WHERE ts < ?").run(cutoff);
   return info.changes;
 }
 

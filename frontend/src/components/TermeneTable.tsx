@@ -17,14 +17,6 @@ interface TermeneTableProps {
   searchedName?: string;
 }
 
-function getSolutieBadgeVariant(solutie: string): "default" | "secondary" | "outline" | "success" | "warning" {
-  const s = (solutie ?? "").toLowerCase();
-  if (s.includes("admite") || s.includes("hotărâre") || s.includes("hotarare")) return "success";
-  if (s.includes("respinge") || s.includes("perim")) return "warning";
-  if (s.includes("amân") || s.includes("aman")) return "secondary";
-  return "outline";
-}
-
 // PortalJust SharePoint indexer nu retine sufixul de dosar asociat (/a, /a1, /a2 ...).
 function getPortalJustUrl(numar: string): string {
   const parent = numar.replace(/\/a\d*$/i, "");
@@ -101,11 +93,10 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
       if (prev.has(key)) {
         setLastExpandedKey(null);
         return new Set();
-      } else {
-        setLastExpandedKey(key);
-        if (numarDosar) markAsViewed(numarDosar);
-        return new Set([key]);
       }
+      setLastExpandedKey(key);
+      if (numarDosar) markAsViewed(numarDosar);
+      return new Set([key]);
     });
   };
 
@@ -155,9 +146,9 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
     setSelected((prev) => {
       const next = new Set(prev);
       if (allSelected) {
-        pageKeys.forEach((k) => next.delete(k));
+        for (const k of pageKeys) next.delete(k);
       } else {
-        pageKeys.forEach((k) => next.add(k));
+        for (const k of pageKeys) next.add(k);
       }
       return next;
     });
@@ -177,7 +168,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
   const isViitor = (dateStr: string) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
-    return !isNaN(d.getTime()) && d >= today;
+    return !Number.isNaN(d.getTime()) && d >= today;
   };
 
   const totalPages = Math.ceil(termene.length / pageSize);
@@ -362,7 +353,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                     <td className="px-4 py-3 text-[13px] max-w-[250px]">
                       {t.solutie ? (
                         <div>
-                          <p className="font-medium">{formatDocumentSedinta(t.solutie!)}</p>
+                          <p className="font-medium">{formatDocumentSedinta(t.solutie)}</p>
                           {t.solutieSumar && (
                             <p className="text-muted-foreground truncate" title={t.solutieSumar}>
                               {t.solutieSumar}

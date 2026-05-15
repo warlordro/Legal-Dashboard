@@ -14,6 +14,7 @@ import { CATEGORY_COLORS, CATEGORY_FALLBACK } from "@/lib/chart-colors";
 import { SummaryCard, PartyAnalysisCard, CategoryChart, StadiiChart, InstitutiiChart } from "./metrics-panel-parts";
 
 function stripDiacritics(s: string): string {
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 

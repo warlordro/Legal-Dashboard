@@ -237,6 +237,7 @@ function AppShell({
           <div className="fixed bottom-4 right-2 z-40 flex flex-col gap-1.5">
             {canScrollUp && (
               <button
+                type="button"
                 onClick={scrollToTop}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/80 text-primary-foreground shadow-md transition-all hover:scale-110 hover:bg-primary hover:shadow-lg active:scale-95"
                 title="Inapoi sus"
@@ -246,6 +247,7 @@ function AppShell({
             )}
             {canScrollDown && (
               <button
+                type="button"
                 onClick={scrollToBottom}
                 className="flex h-8 w-8 items-center justify-center rounded-full bg-primary/80 text-primary-foreground shadow-md transition-all hover:scale-110 hover:bg-primary hover:shadow-lg active:scale-95"
                 title="Mergi jos"

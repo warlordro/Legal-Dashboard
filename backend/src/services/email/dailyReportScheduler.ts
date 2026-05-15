@@ -216,7 +216,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
       }
     }
 
-    let alerts;
+    let alerts: ReturnType<typeof listAlerts>["rows"];
     try {
       const list = listAlerts({
         ownerId: owner.ownerId,

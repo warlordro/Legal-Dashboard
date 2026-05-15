@@ -16,9 +16,9 @@
 // belt-and-suspenders; this test locks in the in-repo contract today.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
@@ -72,6 +72,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -125,7 +126,7 @@ describe("insertAlert", () => {
     expect(second.id).toBe(first.id);
     expect(second.title).toBe("first");
 
-    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts`).get() as { n: number }).n;
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts").get() as { n: number }).n;
     expect(count).toBe(1);
   });
 
@@ -144,7 +145,7 @@ describe("insertAlert", () => {
     ).toThrow(/not found for owner/);
 
     // Nothing was written.
-    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts`).get() as { n: number }).n;
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts").get() as { n: number }).n;
     expect(count).toBe(0);
   });
 
@@ -446,7 +447,7 @@ describe("enrichSolutieAlertsForJob", () => {
 
     expect(patched).toBe(1);
     const detailJson = (
-      getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as { detail_json: string }
+      getDb().prepare("SELECT detail_json FROM monitoring_alerts WHERE id = ?").get(alertId) as { detail_json: string }
     ).detail_json;
     const detail = JSON.parse(detailJson);
     expect(detail.solutie_sumar).toBe("Admite cererea reclamantului.");
@@ -511,11 +512,11 @@ describe("enrichSolutieAlertsForJob", () => {
     expect(patched).toBe(1);
 
     const detailA = JSON.parse(
-      (getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(aId) as { detail_json: string })
+      (getDb().prepare("SELECT detail_json FROM monitoring_alerts WHERE id = ?").get(aId) as { detail_json: string })
         .detail_json
     );
     const detailB = JSON.parse(
-      (getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(bId) as { detail_json: string })
+      (getDb().prepare("SELECT detail_json FROM monitoring_alerts WHERE id = ?").get(bId) as { detail_json: string })
         .detail_json
     );
     expect(detailA.solutie_sumar).toBe("Owner A only");
@@ -545,7 +546,7 @@ describe("enrichSolutieAlertsForJob", () => {
     expect(patched).toBe(1);
     const detail = JSON.parse(
       (
-        getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as {
+        getDb().prepare("SELECT detail_json FROM monitoring_alerts WHERE id = ?").get(alertId) as {
           detail_json: string;
         }
       ).detail_json
@@ -583,7 +584,7 @@ describe("enrichSolutieAlertsForJob", () => {
     expect(patched).toBe(0);
     const detail = JSON.parse(
       (
-        getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as {
+        getDb().prepare("SELECT detail_json FROM monitoring_alerts WHERE id = ?").get(alertId) as {
           detail_json: string;
         }
       ).detail_json
@@ -630,7 +631,7 @@ describe("enrichSolutieAlertsForJob", () => {
     ]);
     expect(patched).toBe(1);
     const goodDetail = JSON.parse(
-      (getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(goodId) as { detail_json: string })
+      (getDb().prepare("SELECT detail_json FROM monitoring_alerts WHERE id = ?").get(goodId) as { detail_json: string })
         .detail_json
     );
     expect(goodDetail.solutie_sumar).toBe("OK");
@@ -654,7 +655,7 @@ describe("enrichSolutieAlertsForJob", () => {
     expect(patched).toBe(1);
     const detail = JSON.parse(
       (
-        getDb().prepare(`SELECT detail_json FROM monitoring_alerts WHERE id = ?`).get(alertId) as {
+        getDb().prepare("SELECT detail_json FROM monitoring_alerts WHERE id = ?").get(alertId) as {
           detail_json: string;
         }
       ).detail_json

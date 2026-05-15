@@ -13,9 +13,9 @@
 // real runner ships; C2 ships only the orchestration shell.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
@@ -79,7 +79,7 @@ function seedNameSoapJob(opts: {
 }
 
 function readJob(id: number) {
-  return getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(id) as {
+  return getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(id) as {
     id: number;
     next_run_at: string;
     last_status: string | null;
@@ -98,6 +98,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -159,7 +160,7 @@ describe("Scheduler — crash recovery", () => {
     await sch.start();
     await sch.stop();
 
-    const orphan = getDb().prepare(`SELECT status FROM monitoring_runs WHERE job_id = ?`).get(jobId) as {
+    const orphan = getDb().prepare("SELECT status FROM monitoring_runs WHERE job_id = ?").get(jobId) as {
       status: string;
     };
     expect(orphan.status).toBe("aborted");
@@ -200,7 +201,7 @@ describe("Scheduler — tick success path", () => {
     expect(job.next_run_at).toBe("2026-04-28T10:10:00.000Z"); // T0 + 600s
 
     const run = getDb()
-      .prepare(`SELECT status, ended_at, duration_ms FROM monitoring_runs WHERE job_id = ?`)
+      .prepare("SELECT status, ended_at, duration_ms FROM monitoring_runs WHERE job_id = ?")
       .get(jobId) as { status: string; ended_at: string; duration_ms: number };
     expect(run.status).toBe("ok");
     expect(run.ended_at).toBe(T0);
@@ -286,7 +287,7 @@ describe("Scheduler — tick error path", () => {
     // T0 + 3600s, NOT computeNextRunAt(failStreak=5)=min(60*32,3600)=1920s.
     expect(job.next_run_at).toBe("2026-04-28T11:00:00.000Z");
 
-    const alerts = getDb().prepare(`SELECT kind, severity FROM monitoring_alerts WHERE job_id = ?`).all(jobId) as {
+    const alerts = getDb().prepare("SELECT kind, severity FROM monitoring_alerts WHERE job_id = ?").all(jobId) as {
       kind: string;
       severity: string;
     }[];
@@ -323,7 +324,7 @@ describe("Scheduler — tick error path", () => {
     expect(job.next_run_at).toBe("2026-04-28T11:00:00.000Z");
 
     const alertCount = (
-      getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`).get(jobId) as { n: number }
+      getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?").get(jobId) as { n: number }
     ).n;
     expect(alertCount).toBe(0);
   });
@@ -354,7 +355,7 @@ describe("Scheduler — source_error probable_cause enrichment", () => {
     await sch.tickOnce();
     await sch.stop();
 
-    const alert = getDb().prepare(`SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?`).get(jobId) as {
+    const alert = getDb().prepare("SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?").get(jobId) as {
       title: string;
       detail_json: string;
     };
@@ -385,7 +386,7 @@ describe("Scheduler — source_error probable_cause enrichment", () => {
     await sch.tickOnce();
     await sch.stop();
 
-    const alert = getDb().prepare(`SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?`).get(jobId) as {
+    const alert = getDb().prepare("SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?").get(jobId) as {
       title: string;
       detail_json: string;
     };
@@ -415,7 +416,7 @@ describe("Scheduler — source_error probable_cause enrichment", () => {
     await sch.tickOnce();
     await sch.stop();
 
-    const alert = getDb().prepare(`SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?`).get(jobId) as {
+    const alert = getDb().prepare("SELECT title, detail_json FROM monitoring_alerts WHERE job_id = ?").get(jobId) as {
       title: string;
       detail_json: string;
     };
@@ -550,7 +551,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     });
 
     await sch.start();
-    const job = getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(jobId) as ScheduledJob;
+    const job = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(jobId) as ScheduledJob;
     const { runId } = await sch.runJobNow(job);
     await sch.stop();
 
@@ -558,7 +559,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     expect(runner.calls.length).toBe(1);
     expect(runner.calls[0]!.job.id).toBe(jobId);
 
-    const run = getDb().prepare(`SELECT id, status FROM monitoring_runs WHERE id = ?`).get(runId) as {
+    const run = getDb().prepare("SELECT id, status FROM monitoring_runs WHERE id = ?").get(runId) as {
       id: number;
       status: string;
     };
@@ -577,7 +578,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
       claimLimit: 10,
       jitterSecMax: 0,
     });
-    const job = getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(jobId) as ScheduledJob;
+    const job = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(jobId) as ScheduledJob;
 
     await expect(sch.runJobNow(job)).rejects.toMatchObject({
       code: "not_running",
@@ -613,7 +614,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     const tickPromise = sch.tickOnce();
     await new Promise((r) => setImmediate(r));
 
-    const job = getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(jobId) as ScheduledJob;
+    const job = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(jobId) as ScheduledJob;
     await expect(sch.runJobNow(job)).rejects.toMatchObject({
       code: "in_flight",
     });
@@ -665,7 +666,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     });
 
     await sch.start();
-    const job = getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(1) as ScheduledJob;
+    const job = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(1) as ScheduledJob;
 
     // Kick off the manual run; runJobNow's brief read lock around
     // insertRunning has already released by the time it returns.
@@ -736,7 +737,7 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     await sch.start();
     // The runner.run() itself is lock-free (mock has no DB ops), so it
     // returns quickly; finalize then waits for the writer to release.
-    const job = getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(1) as ScheduledJob;
+    const job = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(1) as ScheduledJob;
 
     // Fire the manual run — it parks at insertRunning's read lock first
     // (which is queued behind the writer). Once the writer releases, the
@@ -1073,7 +1074,7 @@ describe("Scheduler — concurrent tick lease semantics (#T4)", () => {
 
     // After both ticks complete, exactly one terminal run + the job advanced
     // its schedule once.
-    const runs = getDb().prepare(`SELECT status FROM monitoring_runs WHERE job_id = ? ORDER BY id`).all(jobId) as {
+    const runs = getDb().prepare("SELECT status FROM monitoring_runs WHERE job_id = ? ORDER BY id").all(jobId) as {
       status: string;
     }[];
     expect(runs.length).toBe(1);
@@ -1112,13 +1113,13 @@ describe("Scheduler — source_error recovery cycle (#T5)", () => {
 
     let job = readJob(jobId);
     expect(job.fail_streak).toBe(5);
-    let alerts = getDb().prepare(`SELECT id FROM monitoring_alerts WHERE job_id = ?`).all(jobId) as { id: number }[];
+    let alerts = getDb().prepare("SELECT id FROM monitoring_alerts WHERE job_id = ?").all(jobId) as { id: number }[];
     expect(alerts.length).toBe(1);
 
     // Move the clock past +1h and align next_run_at so the second scheduler
     // can reclaim. Then run a successful tick to reset the streak.
     const T_RECOVERY = "2026-04-28T11:30:00.000Z";
-    getDb().prepare(`UPDATE monitoring_jobs SET next_run_at = ? WHERE id = ?`).run(T_RECOVERY, jobId);
+    getDb().prepare("UPDATE monitoring_jobs SET next_run_at = ? WHERE id = ?").run(T_RECOVERY, jobId);
 
     {
       const sch = new Scheduler({
@@ -1169,7 +1170,7 @@ describe("Scheduler — source_error recovery cycle (#T5)", () => {
     await sch.tickOnce();
     await sch.stop();
 
-    alerts = getDb().prepare(`SELECT id FROM monitoring_alerts WHERE job_id = ?`).all(jobId) as { id: number }[];
+    alerts = getDb().prepare("SELECT id FROM monitoring_alerts WHERE job_id = ?").all(jobId) as { id: number }[];
     expect(alerts.length).toBe(2);
   });
 });
@@ -1259,7 +1260,7 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
     await clock.advance(86_400_000);
     await sch.stop();
 
-    const rows = getDb().prepare(`SELECT id FROM monitoring_runs ORDER BY id`).all() as { id: number }[];
+    const rows = getDb().prepare("SELECT id FROM monitoring_runs ORDER BY id").all() as { id: number }[];
     expect(rows.map((r) => r.id)).toEqual([freshRun]);
     expect(rows.find((r) => r.id === oldRun)).toBeUndefined();
   });
@@ -1279,7 +1280,7 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
     await sch.stop();
     await clock.advance(86_400_000);
 
-    const rows = getDb().prepare(`SELECT id FROM monitoring_runs ORDER BY id`).all() as { id: number }[];
+    const rows = getDb().prepare("SELECT id FROM monitoring_runs ORDER BY id").all() as { id: number }[];
     expect(rows.map((r) => r.id)).toEqual([oldRun]);
   });
 });
@@ -1290,7 +1291,7 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
 // commit. We assert the lock is RELEASED while runner.run is parked.
 describe("Scheduler — finalize lock window only (#T2)", () => {
   it("runner.run() does NOT hold the maintenance read lock", async () => {
-    const jobId = seedJob({
+    const _jobId = seedJob({
       cadenceSec: 600,
       nextRunAt: "2026-04-28T09:00:00.000Z",
     });
@@ -1388,7 +1389,7 @@ describe("Scheduler — per-owner master switch", () => {
     expect(bJob.next_run_at).toBe("2026-04-28T09:00:00.000Z");
 
     // And no run row was inserted for owner-B.
-    const bRuns = getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_runs WHERE job_id = ?`).get(bId) as {
+    const bRuns = getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_runs WHERE job_id = ?").get(bId) as {
       n: number;
     };
     expect(bRuns.n).toBe(0);

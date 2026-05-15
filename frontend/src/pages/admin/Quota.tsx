@@ -251,7 +251,7 @@ export default function AdminQuota() {
                       <th className="px-3 py-2 font-semibold">Limita / zi</th>
                       <th className="px-3 py-2 font-semibold">Actualizat</th>
                       <th className="px-3 py-2 font-semibold">De</th>
-                      <th className="px-3 py-2"></th>
+                      <th className="px-3 py-2" />
                     </tr>
                   </thead>
                   <tbody>

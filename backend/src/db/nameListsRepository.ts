@@ -133,7 +133,7 @@ export function createList(input: CreateListInput): CreateListResult {
       }
     }
 
-    const list = db.prepare(`SELECT * FROM name_lists WHERE id = ?`).get(listId) as NameListRow;
+    const list = db.prepare("SELECT * FROM name_lists WHERE id = ?").get(listId) as NameListRow;
     return { list, duplicate: false };
   });
 
@@ -144,7 +144,7 @@ export function createList(input: CreateListInput): CreateListResult {
 }
 
 export function getListById(ownerId: string, id: number): NameListRow | null {
-  const row = getDb().prepare(`SELECT * FROM name_lists WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+  const row = getDb().prepare("SELECT * FROM name_lists WHERE id = ? AND owner_id = ?").get(id, ownerId) as
     | NameListRow
     | undefined;
   return row ?? null;

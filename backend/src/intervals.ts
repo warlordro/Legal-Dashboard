@@ -18,7 +18,7 @@ export function generateMonthlyIntervals(startDate: string, stopDate: string): D
   const start = new Date(startDate + "T00:00:00Z");
   const stop = new Date(stopDate + "T00:00:00Z");
 
-  if (isNaN(start.getTime()) || isNaN(stop.getTime()) || start > stop) {
+  if (Number.isNaN(start.getTime()) || Number.isNaN(stop.getTime()) || start > stop) {
     return [];
   }
 

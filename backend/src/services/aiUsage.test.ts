@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getDb, closeDb } from "../db/schema.ts";
@@ -22,6 +22,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -82,7 +83,7 @@ describe("AI service usage tracking", () => {
       "openai",
       "gpt-5.4-mini",
       async () => {
-        rowsBeforeResolve = (getDb().prepare(`SELECT COUNT(*) AS n FROM ai_usage`).get() as { n: number }).n;
+        rowsBeforeResolve = (getDb().prepare("SELECT COUNT(*) AS n FROM ai_usage").get() as { n: number }).n;
         return {
           value: "analysis text",
           meta: { usageInput: 1_000_000, usageOutput: 1_000_000, httpStatus: 200 },
@@ -98,7 +99,7 @@ describe("AI service usage tracking", () => {
     expect(result).toBe("analysis text");
     expect(rowsBeforeResolve).toBe(0);
 
-    const row = getDb().prepare(`SELECT * FROM ai_usage`).get() as {
+    const row = getDb().prepare("SELECT * FROM ai_usage").get() as {
       owner_id: string;
       provider: string;
       model: string;
@@ -142,7 +143,7 @@ describe("AI service usage tracking", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const row = getDb().prepare(`SELECT * FROM ai_usage`).get() as {
+    const row = getDb().prepare("SELECT * FROM ai_usage").get() as {
       owner_id: string;
       http_status: number | null;
       was_aborted: number;
@@ -171,7 +172,7 @@ describe("AI service usage tracking", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const row = getDb().prepare(`SELECT http_status FROM ai_usage`).get() as { http_status: number | null };
+    const row = getDb().prepare("SELECT http_status FROM ai_usage").get() as { http_status: number | null };
     expect(row.http_status).toBeNull();
   });
 
@@ -186,7 +187,7 @@ describe("AI service usage tracking", () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM ai_usage`).get() as { n: number }).n;
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM ai_usage").get() as { n: number }).n;
     expect(count).toBe(0);
   });
 });

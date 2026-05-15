@@ -24,6 +24,7 @@ export function useCurrentUser(): UseCurrentUserResult {
   const [error, setError] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: tick este trigger explicit pentru refresh, iar me.get este import stabil la nivel de modul.
   useEffect(() => {
     const ac = new AbortController();
     let cancelled = false;

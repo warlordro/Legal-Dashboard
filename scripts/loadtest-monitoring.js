@@ -57,7 +57,7 @@ export const options = {
 
 function jsonHeaders() {
   const h = { "Content-Type": "application/json" };
-  if (AUTH) h["Authorization"] = AUTH;
+  if (AUTH) h.Authorization = AUTH;
   return h;
 }
 

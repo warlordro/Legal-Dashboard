@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import path from "path";
-import os from "os";
-import fs from "fs";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
 import {
   deleteAllBackups,
@@ -45,6 +45,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });

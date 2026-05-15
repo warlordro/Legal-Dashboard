@@ -53,5 +53,6 @@ export const DESTINATII_BY_CATEGORY: Partial<Record<RnpmSearchType, string[]>> =
 };
 
 export function hasNestedDestinations(type: RnpmSearchType): boolean {
-  return Array.isArray(DESTINATII_BY_CATEGORY[type]) && DESTINATII_BY_CATEGORY[type]!.length > 0;
+  const destinations = DESTINATII_BY_CATEGORY[type];
+  return Array.isArray(destinations) && destinations.length > 0;
 }

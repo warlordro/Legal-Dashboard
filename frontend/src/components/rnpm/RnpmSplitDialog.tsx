@@ -35,14 +35,14 @@ export function RnpmSplitDialog({ open, type, total, limit, captchaProvider, onC
 
   const subTypeLabels = TIP_AVIZ_BY_CATEGORY[type];
   const n = subTypeLabels.length;
-  const destinationsForType = DESTINATIONS_BY_CATEGORY[type];
-  const hasTier2 = (destinationsForType?.length ?? 0) > 0;
+  const destinationsForType = DESTINATIONS_BY_CATEGORY[type] ?? [];
+  const hasTier2 = destinationsForType.length > 0;
   // Tier-2 (best-effort): worst case daca toate sub-tipurile depasesc tot capul,
   // costul este `n * (1 + destinations.length)` captcha-uri. In practica cel mult
   // 1-2 sub-tipuri din N triggered tier-2 (caz empiric specifice CUI 33317138:
   // 1 sub-tip "aviz initial" cu 1823 records). Aratam ESTIMARE realista (1 tier-2)
   // pentru a nu inflata fals costul.
-  const tier2Captchas = hasTier2 ? destinationsForType!.length : 0;
+  const tier2Captchas = hasTier2 ? destinationsForType.length : 0;
   const captchasMin = n;
   const captchasMax = n + tier2Captchas;
   const costMinUsd = (captchasMin * PER_CAPTCHA_USD[captchaProvider]).toFixed(3);
@@ -69,7 +69,7 @@ export function RnpmSplitDialog({ open, type, total, limit, captchaProvider, onC
             <Split className="h-5 w-5 text-amber-600" />
             Cautare prea larga
           </h3>
-          <button onClick={onCancel} aria-label="Inchide" className="rounded-lg p-1 hover:bg-muted">
+          <button type="button" onClick={onCancel} aria-label="Inchide" className="rounded-lg p-1 hover:bg-muted">
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -119,7 +119,7 @@ export function RnpmSplitDialog({ open, type, total, limit, captchaProvider, onC
             {hasTier2 ? (
               <>
                 Daca un sub-tip individual depaseste tot limita RNPM, incercam o a doua runda de split pe destinatie (
-                <b>{destinationsForType!.length} valori</b>). Recuperarea este <b>best-effort</b>: inregistrarile fara
+                <b>{destinationsForType.length} valori</b>). Recuperarea este <b>best-effort</b>: inregistrarile fara
                 destinatie atribuita pot ramane neacoperite (un gap evidentiat dupa rulare).
               </>
             ) : (

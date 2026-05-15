@@ -420,7 +420,7 @@ function rowsFromXlsx(buf: Buffer): Promise<RawRow[]> {
 // Async din cauza migrarii la exceljs (F3 audit): parser-ul XLSX e
 // streaming-async; CSV path-ul ramane sincron dar e wrap-uit in acelasi
 // promise pentru simetrie.
-export async function parseNameList(buf: Buffer, opts: ParseOptions = {}): Promise<ParseResult> {
+export async function parseNameList(buf: Buffer, _opts: ParseOptions = {}): Promise<ParseResult> {
   if (buf.length === 0) {
     throw new ParseError("EMPTY_FILE", "Fisier gol.");
   }
@@ -457,7 +457,9 @@ export async function parseNameList(buf: Buffer, opts: ParseOptions = {}): Promi
   let rejectedCount = 0;
 
   for (let i = 1; i < rawRows.length; i++) {
-    const cells = rawRows[i]!.cells;
+    const row = rawRows[i];
+    if (!row) continue;
+    const cells = row.cells;
     const nameRaw = String(cells[headerMap.nume] ?? "").trim();
     const cnpRaw = headerMap.cnp !== undefined ? String(cells[headerMap.cnp] ?? "").trim() || null : null;
     const cuiRaw = headerMap.cui !== undefined ? String(cells[headerMap.cui] ?? "").trim() || null : null;
@@ -538,7 +540,8 @@ export function validateRawItems(items: RawNameItem[]): ValidateResult {
   let rejectedCount = 0;
 
   for (let i = 0; i < items.length; i++) {
-    const item = items[i]!;
+    const item = items[i];
+    if (!item) continue;
     const nameRaw = String(item.nameRaw ?? "").trim();
     const nameNormalized = normalizeName(nameRaw);
     const cnp = item.cnp ?? null;

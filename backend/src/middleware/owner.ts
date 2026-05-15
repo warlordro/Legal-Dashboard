@@ -65,7 +65,7 @@ function readRemoteIp(c: Context): string | null {
 
 // PR-9 auth seam: desktop stays a noop `local` identity; web mode resolves the
 // caller through the configured AuthProvider and fails closed for API calls.
-export async function ownerContext(c: Context, next: Next): Promise<Response | void> {
+export async function ownerContext(c: Context, next: Next): Promise<Response | undefined> {
   if (!shouldAuthenticatePath(c)) {
     await next();
     return;

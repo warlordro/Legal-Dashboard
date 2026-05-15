@@ -14,6 +14,7 @@ import type { ApiKeys } from "@/hooks/useApiKey";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
 
 function stripDiacritics(s: string): string {
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
@@ -258,6 +259,7 @@ export default function Dosare({
   };
 
   // Handle pending search from history
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingSearch este trigger one-shot; callback-urile curente sunt apelate doar la consumarea intrarii din istoric.
   useEffect(() => {
     if (pendingSearch && !loading) {
       consumePendingSearch?.();

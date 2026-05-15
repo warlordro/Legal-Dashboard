@@ -28,6 +28,7 @@ const CHAR_MAP: Record<string, string> = {
 function normalize(s: string): string {
   let out = "";
   for (const ch of s) out += CHAR_MAP[ch] ?? ch;
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
   return out.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 

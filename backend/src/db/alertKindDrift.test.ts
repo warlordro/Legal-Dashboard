@@ -10,8 +10,8 @@
 // regex-extracts the union members, and asserts set equality with the backend
 // const tuples.
 
-import fsPromises from "fs/promises";
-import path from "path";
+import fsPromises from "node:fs/promises";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { ALERT_JOB_KINDS, ALERT_KINDS, ALERT_SEVERITIES } from "./monitoringAlertsRepository.ts";

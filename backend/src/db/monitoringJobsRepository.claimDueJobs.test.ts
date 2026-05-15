@@ -21,9 +21,9 @@
 // commit — same effect as cross-process locking on the SQLite file).
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { claimDueJobs, markJobOutcome } from "./monitoringJobsRepository.ts";
@@ -82,7 +82,9 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.MONITORING_DISABLED_KINDS;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });

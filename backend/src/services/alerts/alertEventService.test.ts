@@ -12,9 +12,9 @@
 // services/alerts so the repo stays pure persistence + in-process listeners.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
@@ -68,6 +68,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await drainEmailDispatches(2_000);
   closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });

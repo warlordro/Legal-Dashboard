@@ -3,6 +3,7 @@ import { Search, X, Building2, ChevronDown, Check } from "lucide-react";
 import { INSTITUTII, INSTITUTII_GROUPS, getInstitutieLabel } from "@/lib/institutii";
 
 function stripDiacritics(s: string): string {
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 
@@ -24,6 +25,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Sync draft with value when opening
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draft-ul se reseteaza intentionat doar la tranzitia de deschidere.
   useEffect(() => {
     if (open) setDraft(value);
   }, [open]);
@@ -48,7 +50,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
     }
     return INSTITUTII_GROUPS.filter((g) => map.has(g)).map((g) => ({
       group: g,
-      items: map.get(g)!,
+      items: map.get(g) ?? [],
     }));
   }, [filtered]);
 
@@ -61,6 +63,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
   }, [open]);
 
   // Close on Escape
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draft-ul este citit prin handleClose; handlerul se reface doar cat modalul este deschis.
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {

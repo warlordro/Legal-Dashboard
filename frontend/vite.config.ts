@@ -1,8 +1,8 @@
 /// <reference types="vitest" />
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
-import path from "path";
-import { readFileSync } from "fs";
+import path from "node:path";
+import { readFileSync } from "node:fs";
 
 // Single source of truth for app version: root package.json. UI reads __APP_VERSION__.
 const rootPkg = JSON.parse(readFileSync(path.resolve(__dirname, "../package.json"), "utf-8"));

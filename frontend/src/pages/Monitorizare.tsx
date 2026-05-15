@@ -749,7 +749,6 @@ export default function Monitorizare({
                 if (e.target === e.currentTarget) setOpenInstantePopover(null);
               }}
             >
-              {/* biome-ignore lint/a11y/useSemanticElements: app modal style relies on a div dialog wrapper. */}
               <div
                 role="dialog"
                 aria-modal="true"
