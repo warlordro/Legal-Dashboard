@@ -30,8 +30,10 @@ jobs:
         run: npm ci
 
       - name: Biome lint + format check
+        # Temporar pana sprintul biome-cleanup livreaza 0 errors.
+        # PR-8 elimina acest flag si activeaza gate-ul permanent.
         continue-on-error: true
-        run: npx biome check --max-diagnostics=15
+        run: npx biome check
 
       # Type-check + test gate runs BEFORE rebuild:electron so better-sqlite3
       # is still bound to Node's ABI (npm ci prebuild). After rebuild:electron
