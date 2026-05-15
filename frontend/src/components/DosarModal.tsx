@@ -12,6 +12,7 @@ interface DosarModalProps {
 
 export function DosarModal({ dosar, onClose }: DosarModalProps) {
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: modalul se inchide via butonul X dedicat sau Escape printr-un document-level handler.
     <div
       className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={(e) => e.target === e.currentTarget && onClose()}

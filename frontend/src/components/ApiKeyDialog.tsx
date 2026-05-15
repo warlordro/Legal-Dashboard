@@ -69,9 +69,12 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
     !keyInputs.capsolver.trim();
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdropul se inchide via Escape printr-un document-level handler.
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={onClose}>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div pentru a impiedica click-through pe backdrop; tastatura merge prin focus trap intern. */}
       <div
         ref={dialogRef}
+        // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
         role="dialog"
         aria-modal="true"
         aria-labelledby="api-key-dialog-title"

@@ -467,14 +467,18 @@ export function RnpmSearchForm({
 
       <div className="grid gap-4 md:grid-cols-4">
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Identificator inscriere</label>
+          <label htmlFor="rnpm-identificator" className="mb-1 block text-xs font-medium text-muted-foreground">
+            Identificator inscriere
+          </label>
           <Input
+            id="rnpm-identificator"
             value={identificator.value}
             onChange={(e) => identificator.setValue(e.target.value)}
             placeholder="2015-00038..."
           />
         </div>
         <div>
+          {/* biome-ignore lint/a11y/noLabelWithoutControl: Select-ul Radix nu accepta id direct pe trigger, asocierea label-input se face via aria. */}
           <label className="mb-1 block text-xs font-medium text-muted-foreground">
             {TIP_LABEL_BY_CATEGORY[activeType]}
           </label>
@@ -496,12 +500,26 @@ export function RnpmSearchForm({
           </div>
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Perioada start</label>
-          <Input type="date" value={perioadaStart} onChange={(e) => setPerioadaStart(e.target.value)} />
+          <label htmlFor="rnpm-perioada-start" className="mb-1 block text-xs font-medium text-muted-foreground">
+            Perioada start
+          </label>
+          <Input
+            id="rnpm-perioada-start"
+            type="date"
+            value={perioadaStart}
+            onChange={(e) => setPerioadaStart(e.target.value)}
+          />
         </div>
         <div>
-          <label className="mb-1 block text-xs font-medium text-muted-foreground">Perioada final</label>
-          <Input type="date" value={perioadaFinal} onChange={(e) => setPerioadaFinal(e.target.value)} />
+          <label htmlFor="rnpm-perioada-final" className="mb-1 block text-xs font-medium text-muted-foreground">
+            Perioada final
+          </label>
+          <Input
+            id="rnpm-perioada-final"
+            type="date"
+            value={perioadaFinal}
+            onChange={(e) => setPerioadaFinal(e.target.value)}
+          />
         </div>
       </div>
 

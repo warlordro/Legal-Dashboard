@@ -131,6 +131,7 @@ export function CalendarView({ termene }: CalendarViewProps) {
             const isSelected = day === selectedDay;
 
             return (
+              // biome-ignore lint/a11y/useKeyWithClickEvents: celula de zi din calendar e parte dintr-un grid de 42 celule (multe goale); selectia e expusa si prin lista de termene de mai jos.
               <div
                 key={i}
                 onClick={() => day && setSelectedDay(isSelected ? null : day)}
@@ -192,6 +193,7 @@ export function CalendarView({ termene }: CalendarViewProps) {
                   key={i}
                   className={`rounded-lg border border-border bg-muted/30 text-[13.5px] transition-colors ${hasDetails ? "cursor-pointer hover:bg-muted/50" : ""}`}
                 >
+                  {/* biome-ignore lint/a11y/useKeyWithClickEvents: card-ul expandabil ofera link-uri si butoane interne accesibile prin tab; toggle-ul liniei e un shortcut click-only. */}
                   <div
                     className="flex items-center justify-between gap-2 p-3"
                     onClick={() => hasDetails && toggleCard(i)}

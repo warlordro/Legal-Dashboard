@@ -95,15 +95,18 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
   if (!open) return null;
 
   return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdropul se inchide via butonul X dedicat sau Escape la nivel de document.
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
       onClick={handleClose}
     >
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via focus trap intern. */}
       <div
+        className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
+        // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
         role="dialog"
         aria-modal="true"
         aria-labelledby="report-export-title"
-        className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-3 px-5 pt-5">

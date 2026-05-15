@@ -750,10 +750,11 @@ export default function Monitorizare({
               }}
             >
               <div
+                className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl"
+                // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="instante-modal-title"
-                className="w-full max-w-md rounded-lg border border-border bg-card p-4 text-card-foreground shadow-xl"
               >
                 <div className="mb-3 flex items-start justify-between gap-3 border-b border-border pb-2">
                   <div className="min-w-0">
