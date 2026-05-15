@@ -1,6 +1,6 @@
-const { spawnSync } = require("child_process");
-const fs = require("fs");
-const path = require("path");
+const { spawnSync } = require("node:child_process");
+const fs = require("node:fs");
+const path = require("node:path");
 
 const rootDir = path.resolve(__dirname, "..");
 
@@ -18,19 +18,21 @@ if (process.platform === "darwin" && hasInstalledModule("macos-notification-stat
   modules.push("macos-notification-state");
 }
 
-const npxCommand = process.platform === "win32" ? "npx.cmd" : "npx";
-const args = ["--yes", "@electron/rebuild", "-f", "-o", modules.join(",")];
-
 console.log(`[rebuild:electron] rebuilding native modules: ${modules.join(", ")}`);
 
-const result = spawnSync(npxCommand, args, {
+// Invoke @electron/rebuild directly through Node to avoid shell:true / DEP0190
+// and npx/PATHEXT ambiguity on Windows.
+const rebuildMain = require.resolve("@electron/rebuild");
+const rebuildCli = path.join(path.dirname(rebuildMain), "cli.js");
+const args = [rebuildCli, "-f", "-o", modules.join(",")];
+
+const result = spawnSync(process.execPath, args, {
   cwd: rootDir,
   stdio: "inherit",
-  shell: process.platform === "win32",
 });
 
 if (result.error) {
-  console.error(`[rebuild:electron] failed to start ${npxCommand}: ${result.error.message}`);
+  console.error(`[rebuild:electron] failed to spawn: ${result.error.message}`);
   process.exit(1);
 }
 
