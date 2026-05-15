@@ -27,9 +27,9 @@
 //   - invalid range -> 400 with envelope error code
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -183,7 +183,7 @@ describe("GET /api/v1/dashboard/summary", () => {
     });
     // Backdate read flag: sets read_at so countUnreadAlerts excludes it.
     getDb()
-      .prepare(`UPDATE monitoring_alerts SET read_at = ? WHERE id = ?`)
+      .prepare("UPDATE monitoring_alerts SET read_at = ? WHERE id = ?")
       .run(new Date().toISOString(), insertedRead.row.id);
 
     // Old alert (older than 24h): created_at backdated to 2 days ago.
@@ -197,7 +197,7 @@ describe("GET /api/v1/dashboard/summary", () => {
       dedupKey: "k-old",
     });
     const oldCreated = new Date(Date.now() - 2 * 86_400_000).toISOString();
-    getDb().prepare(`UPDATE monitoring_alerts SET created_at = ? WHERE id = ?`).run(oldCreated, oldRow.row.id);
+    getDb().prepare("UPDATE monitoring_alerts SET created_at = ? WHERE id = ?").run(oldCreated, oldRow.row.id);
 
     const app = buildTestApp();
     const res = await app.request("/api/v1/dashboard/summary", {
@@ -356,19 +356,19 @@ interface TimelineResponse {
 }
 
 function backdateAlert(alertId: number, ts: string): void {
-  getDb().prepare(`UPDATE monitoring_alerts SET created_at = ? WHERE id = ?`).run(ts, alertId);
+  getDb().prepare("UPDATE monitoring_alerts SET created_at = ? WHERE id = ?").run(ts, alertId);
 }
 
 function backdateRun(runId: number, endedAt: string): void {
-  getDb().prepare(`UPDATE monitoring_runs SET ended_at = ? WHERE id = ?`).run(endedAt, runId);
+  getDb().prepare("UPDATE monitoring_runs SET ended_at = ? WHERE id = ?").run(endedAt, runId);
 }
 
 function backdateAudit(auditId: number, ts: string): void {
-  getDb().prepare(`UPDATE audit_log SET ts = ? WHERE id = ?`).run(ts, auditId);
+  getDb().prepare("UPDATE audit_log SET ts = ? WHERE id = ?").run(ts, auditId);
 }
 
 function lastAuditId(): number {
-  return (getDb().prepare(`SELECT MAX(id) AS id FROM audit_log`).get() as { id: number }).id;
+  return (getDb().prepare("SELECT MAX(id) AS id FROM audit_log").get() as { id: number }).id;
 }
 
 describe("GET /api/v1/dashboard/timeline", () => {

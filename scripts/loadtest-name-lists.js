@@ -51,7 +51,7 @@ function csvFor(iteration) {
     rows.push(`Persoana Bulk ${iteration}-${i},,`);
   }
   rows.push(`Persoana Bulk ${iteration}-0,,`);
-  rows.push(`1,,`);
+  rows.push("1,,");
   return `${rows.join("\n")}\n`;
 }
 

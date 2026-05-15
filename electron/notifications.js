@@ -98,7 +98,7 @@ function getNotificationStatus() {
         supported,
         state: "unknown",
         canNotify: null,
-        reason: `Statusul Windows nu a putut fi citit: ${err && err.message ? err.message : err}`,
+        reason: `Statusul Windows nu a putut fi citit: ${err?.message ? err.message : err}`,
       };
     }
   }
@@ -129,7 +129,7 @@ function getNotificationStatus() {
         supported,
         state: "unknown",
         canNotify: null,
-        reason: `Statusul macOS nu a putut fi citit: ${err && err.message ? err.message : err}`,
+        reason: `Statusul macOS nu a putut fi citit: ${err?.message ? err.message : err}`,
       };
     }
   }

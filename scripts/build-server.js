@@ -1,7 +1,7 @@
-import { execSync } from "child_process";
-import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "fs";
-import { resolve, dirname, join } from "path";
-import { fileURLToPath } from "url";
+import { execSync } from "node:child_process";
+import { cpSync, mkdirSync, rmSync, existsSync, readFileSync, writeFileSync } from "node:fs";
+import { resolve, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");

@@ -146,13 +146,13 @@ export function createJob(input: CreateJobInput): CreateJobResult {
       input.nameListId ?? null
     );
 
-  const job = db.prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(result.lastInsertRowid) as MonitoringJobRow;
+  const job = db.prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(result.lastInsertRowid) as MonitoringJobRow;
 
   return { job, duplicate: false, idempotentReplay: false };
 }
 
 export function getJobById(ownerId: string, id: number): MonitoringJobRow | null {
-  const row = getDb().prepare(`SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+  const row = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?").get(id, ownerId) as
     | MonitoringJobRow
     | undefined;
   return row ?? null;
@@ -163,7 +163,7 @@ export function getJobById(ownerId: string, id: number): MonitoringJobRow | null
 // distinge "row inexistent" (nu se auditeaza) de "row exista la alt owner"
 // (denied access — trebuie auditat pentru reconstruct antifraud in web mode).
 export function jobExistsForAnyOwner(id: number): boolean {
-  return getDb().prepare(`SELECT 1 AS one FROM monitoring_jobs WHERE id = ? LIMIT 1`).get(id) !== undefined;
+  return getDb().prepare("SELECT 1 AS one FROM monitoring_jobs WHERE id = ? LIMIT 1").get(id) !== undefined;
 }
 
 export interface ListJobsOptions {
@@ -280,7 +280,7 @@ export function updateJob(ownerId: string, id: number, patch: JobUpdateBody): Mo
     if (sets.length === 0) {
       return (
         (db
-          .prepare(`SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+          .prepare("SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?")
           .get(id, ownerId) as MonitoringJobRow | null) ?? null
       );
     }
@@ -292,7 +292,7 @@ export function updateJob(ownerId: string, id: number, patch: JobUpdateBody): Mo
       const cadence =
         patch.cadence_sec ??
         (
-          db.prepare(`SELECT cadence_sec FROM monitoring_jobs WHERE id = ? AND owner_id = ?`).get(id, ownerId) as
+          db.prepare("SELECT cadence_sec FROM monitoring_jobs WHERE id = ? AND owner_id = ?").get(id, ownerId) as
             | { cadence_sec: number }
             | undefined
         )?.cadence_sec;
@@ -310,7 +310,7 @@ export function updateJob(ownerId: string, id: number, patch: JobUpdateBody): Mo
     if (info.changes === 0) return null;
 
     return db
-      .prepare(`SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+      .prepare("SELECT * FROM monitoring_jobs WHERE id = ? AND owner_id = ?")
       .get(id, ownerId) as MonitoringJobRow;
   });
 
@@ -320,7 +320,7 @@ export function updateJob(ownerId: string, id: number, patch: JobUpdateBody): Mo
 // DELETE cascades to snapshots/alerts/runs via FK ON DELETE CASCADE in DDL.
 // Returns true when a row was actually deleted (false = not found OR not owned).
 export function deleteJob(ownerId: string, id: number): boolean {
-  const info = getDb().prepare(`DELETE FROM monitoring_jobs WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+  const info = getDb().prepare("DELETE FROM monitoring_jobs WHERE id = ? AND owner_id = ?").run(id, ownerId);
   return info.changes > 0;
 }
 

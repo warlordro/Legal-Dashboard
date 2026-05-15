@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import path from "path";
-import os from "os";
-import fs from "fs";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fs from "node:fs";
+import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
 import {
   deleteAllBackups,

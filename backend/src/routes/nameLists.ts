@@ -60,7 +60,6 @@ function parseErrorStatus(code: ParseError["code"]): 400 | 413 | 422 {
     case "EMPTY_FILE":
     case "MISSING_NAME_COLUMN":
       return 422;
-    case "PARSE_ERROR":
     default:
       return 400;
   }

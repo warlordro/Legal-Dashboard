@@ -13,9 +13,9 @@
 //   - List filter by kind / active flag returns owner-scoped paginated result
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -377,7 +377,7 @@ describe("Owner isolation — GET/PATCH/DELETE /jobs/:id", () => {
     // (id doesn't exist anywhere) — only the former is audit-worthy noise.
     // A regression that audits all 404s would flood the log on a fuzzer.
     const app = buildTestApp();
-    const res = await app.request(`/api/v1/monitoring/jobs/999999`, {
+    const res = await app.request("/api/v1/monitoring/jobs/999999", {
       method: "PATCH",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ active: false }),
@@ -918,7 +918,7 @@ describe("POST /jobs/:id/run + real Scheduler (#T6)", () => {
 
     await realScheduler.stop();
 
-    const run = getDb().prepare(`SELECT id, status FROM monitoring_runs WHERE id = ?`).get(json.data.runId) as {
+    const run = getDb().prepare("SELECT id, status FROM monitoring_runs WHERE id = ?").get(json.data.runId) as {
       id: number;
       status: string;
     };

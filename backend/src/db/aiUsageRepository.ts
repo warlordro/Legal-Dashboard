@@ -84,7 +84,7 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
       input.feature
     );
 
-  return db.prepare(`SELECT * FROM ai_usage WHERE id = ?`).get(info.lastInsertRowid) as AiUsageRow;
+  return db.prepare("SELECT * FROM ai_usage WHERE id = ?").get(info.lastInsertRowid) as AiUsageRow;
 }
 
 // Closed interval `[since, until]`. The previous version used a strict lower
@@ -210,6 +210,6 @@ export function listAiUsageLastDays(input: {
 export function purgeOldAiUsage(retentionDays: number): number {
   const days = Math.max(1, Math.floor(retentionDays));
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-  const info = getDb().prepare(`DELETE FROM ai_usage WHERE ts < ?`).run(cutoff);
+  const info = getDb().prepare("DELETE FROM ai_usage WHERE ts < ?").run(cutoff);
   return info.changes;
 }

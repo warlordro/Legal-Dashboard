@@ -54,10 +54,10 @@ export function getSearches(opts: GetSearchesOptions = {}): CursorPage<SearchRec
   const rows =
     cursor == null
       ? (db
-          .prepare(`SELECT * FROM rnpm_searches WHERE owner_id = ? ORDER BY id DESC LIMIT ?`)
+          .prepare("SELECT * FROM rnpm_searches WHERE owner_id = ? ORDER BY id DESC LIMIT ?")
           .all(ownerId, limit + 1) as SearchRecord[])
       : (db
-          .prepare(`SELECT * FROM rnpm_searches WHERE owner_id = ? AND id < ? ORDER BY id DESC LIMIT ?`)
+          .prepare("SELECT * FROM rnpm_searches WHERE owner_id = ? AND id < ? ORDER BY id DESC LIMIT ?")
           .all(ownerId, cursor, limit + 1) as SearchRecord[]);
 
   const hasMore = rows.length > limit;
@@ -68,14 +68,14 @@ export function getSearches(opts: GetSearchesOptions = {}): CursorPage<SearchRec
 export function updateSearchTotal(id: number, totalResults: number, ownerId = "local"): boolean {
   const db = getDb();
   const res = db
-    .prepare(`UPDATE rnpm_searches SET total_results = ? WHERE id = ? AND owner_id = ?`)
+    .prepare("UPDATE rnpm_searches SET total_results = ? WHERE id = ? AND owner_id = ?")
     .run(totalResults, id, ownerId);
   return res.changes > 0;
 }
 
 export function deleteSearch(id: number, ownerId = "local"): boolean {
   const db = getDb();
-  const res = db.prepare(`DELETE FROM rnpm_searches WHERE id = ? AND owner_id = ?`).run(id, ownerId);
+  const res = db.prepare("DELETE FROM rnpm_searches WHERE id = ? AND owner_id = ?").run(id, ownerId);
   return res.changes > 0;
 }
 
@@ -84,6 +84,6 @@ export function deleteSearch(id: number, ownerId = "local"): boolean {
 // in continuare s-ar lega de istoricul altui owner. Vezi audit 2026-04-29 #11.
 export function searchBelongsToOwner(id: number, ownerId: string): boolean {
   const db = getDb();
-  const row = db.prepare(`SELECT 1 FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1`).get(id, ownerId);
+  const row = db.prepare("SELECT 1 FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1").get(id, ownerId);
   return row !== undefined;
 }

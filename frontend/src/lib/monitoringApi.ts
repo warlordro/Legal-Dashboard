@@ -85,7 +85,7 @@ export const monitoring = {
     if (params.pageSize !== undefined) search.set("pageSize", String(params.pageSize));
     if (params.kind) search.set("kind", params.kind);
     if (params.active !== undefined) search.set("active", String(params.active));
-    if (params.q && params.q.trim()) search.set("q", params.q.trim());
+    if (params.q?.trim()) search.set("q", params.q.trim());
     const qs = search.toString();
     const res = await apiFetch(`/api/v1/monitoring/jobs${qs ? "?" + qs : ""}`, { signal: params.signal });
     return unwrapMonitoring<MonitoringListResult>(res);
@@ -97,7 +97,7 @@ export const monitoring = {
   },
 
   createDosarWithResult: async (input: CreateDosarMonitoringInput): Promise<MonitoringCreateResult> => {
-    const res = await apiFetch(`/api/v1/monitoring/jobs`, {
+    const res = await apiFetch("/api/v1/monitoring/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -125,7 +125,7 @@ export const monitoring = {
     if (input.institutie && input.institutie.length > 0) {
       target.institutie = input.institutie;
     }
-    const res = await apiFetch(`/api/v1/monitoring/jobs`, {
+    const res = await apiFetch("/api/v1/monitoring/jobs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -159,7 +159,7 @@ export const monitoring = {
   },
 
   bulkDeleteJobs: async (ids: number[]): Promise<BulkDeleteResult> => {
-    const res = await apiFetch(`/api/v1/monitoring/jobs/bulk-delete`, {
+    const res = await apiFetch("/api/v1/monitoring/jobs/bulk-delete", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
@@ -235,7 +235,7 @@ export const nameLists = {
   preview: async (file: File): Promise<NameListPreviewResult> => {
     const fd = new FormData();
     fd.append("file", file);
-    const res = await apiFetch(`/api/v1/name-lists/preview`, {
+    const res = await apiFetch("/api/v1/name-lists/preview", {
       method: "POST",
       body: fd,
     });
@@ -243,7 +243,7 @@ export const nameLists = {
   },
 
   commit: async (input: NameListCommitInput): Promise<NameListCommitResult> => {
-    const res = await apiFetch(`/api/v1/name-lists/commit`, {
+    const res = await apiFetch("/api/v1/name-lists/commit", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(input),

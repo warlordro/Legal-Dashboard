@@ -14,9 +14,9 @@
 // same factory.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
@@ -56,7 +56,7 @@ function seedJob(opts?: {
           notify_on_dosar_disappeared: true,
         })
     );
-  return db.prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(info.lastInsertRowid) as ScheduledJob;
+  return db.prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(info.lastInsertRowid) as ScheduledJob;
 }
 
 function seedRunningRow(jobId: number): number {
@@ -136,7 +136,7 @@ describe("dosarSoapRunner — happy path baseline", () => {
     expect(Array.isArray(payload.sedintaKeys)).toBe(true);
 
     const alertCount = (
-      getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`).get(job.id) as { n: number }
+      getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?").get(job.id) as { n: number }
     ).n;
     expect(alertCount).toBe(0);
   });
@@ -184,7 +184,7 @@ describe("dosarSoapRunner — diff emits alerts", () => {
     expect(second.status).toBe("ok");
     expect(second.alertsCreated).toBeGreaterThanOrEqual(1);
 
-    const alerts = getDb().prepare(`SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY id`).all(job.id) as {
+    const alerts = getDb().prepare("SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY id").all(job.id) as {
       kind: string;
     }[];
     expect(alerts.some((a) => a.kind === "termen_new")).toBe(true);
@@ -388,7 +388,7 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
     expect(snapAfter!.id).toBe(baselineId);
 
     const alertCount = (
-      getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?`).get(job.id) as { n: number }
+      getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?").get(job.id) as { n: number }
     ).n;
     expect(alertCount).toBe(0);
   });

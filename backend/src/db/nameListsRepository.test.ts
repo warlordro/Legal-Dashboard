@@ -15,9 +15,9 @@
 //     already-linked items excluded)
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
@@ -394,7 +394,7 @@ describe("FK ON DELETE RESTRICT", () => {
       items: [mkItem()],
     });
     const db = getDb();
-    expect(() => db.prepare(`DELETE FROM name_lists WHERE id = ?`).run(created.list.id)).toThrow(/FOREIGN KEY/);
+    expect(() => db.prepare("DELETE FROM name_lists WHERE id = ?").run(created.list.id)).toThrow(/FOREIGN KEY/);
   });
 
   it("blocks DELETE on name_lists while monitoring_jobs reference it", () => {
@@ -407,6 +407,6 @@ describe("FK ON DELETE RESTRICT", () => {
     });
     seedJob(OWNER, created.list.id);
     const db = getDb();
-    expect(() => db.prepare(`DELETE FROM name_lists WHERE id = ?`).run(created.list.id)).toThrow(/FOREIGN KEY/);
+    expect(() => db.prepare("DELETE FROM name_lists WHERE id = ?").run(created.list.id)).toThrow(/FOREIGN KEY/);
   });
 });

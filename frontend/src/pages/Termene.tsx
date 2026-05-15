@@ -71,9 +71,9 @@ function filterByMetrics(termene: Termen[], filters: MetricFilter[]): Termen[] {
   now.setHours(0, 0, 0, 0);
   return termene.filter((t) => {
     const d = t.data ? new Date(t.data) : null;
-    const isViitor = d && !isNaN(d.getTime()) && d >= now;
+    const isViitor = d && !Number.isNaN(d.getTime()) && d >= now;
     const isTrecut = !isViitor;
-    const hasSolutie = !!(t.solutie && t.solutie.trim());
+    const hasSolutie = !!(t.solutie?.trim());
 
     // OR logic: match any active filter
     if (filters.includes("viitoare") && isViitor) return true;

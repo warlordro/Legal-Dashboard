@@ -1,7 +1,7 @@
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
@@ -40,7 +40,7 @@ function seedJob(opts?: {
           notify_on_dosar_disappeared: true,
         })
     );
-  return db.prepare(`SELECT * FROM monitoring_jobs WHERE id = ?`).get(info.lastInsertRowid) as ScheduledJob;
+  return db.prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(info.lastInsertRowid) as ScheduledJob;
 }
 
 function seedRunningRow(jobId: number): number {
@@ -158,7 +158,7 @@ describe("nameSoapRunner - diff", () => {
     expect(out.status).toBe("ok");
     expect(out.alertsCreated).toBe(1);
     const alerts = getDb()
-      .prepare(`SELECT kind, dedup_key FROM monitoring_alerts WHERE job_id = ?`)
+      .prepare("SELECT kind, dedup_key FROM monitoring_alerts WHERE job_id = ?")
       .all(job.id) as Array<{ kind: string; dedup_key: string }>;
     expect(alerts).toEqual([{ kind: "dosar_new", dedup_key: "name_soap|999/1/2025|dosar_new" }]);
   });
@@ -195,7 +195,7 @@ describe("nameSoapRunner - diff", () => {
 
     expect(out.status).toBe("ok");
     const kinds = getDb()
-      .prepare(`SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY kind`)
+      .prepare("SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY kind")
       .all(job.id)
       .map((r) => (r as { kind: string }).kind);
     expect(kinds).toEqual(["dosar_relevant_now", "stadiu_changed"]);

@@ -16,9 +16,9 @@
 // Captcha is stubbed via vi.mock at module boundary to avoid real network.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./captchaSolver.ts", () => ({

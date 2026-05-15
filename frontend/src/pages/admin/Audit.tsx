@@ -226,7 +226,7 @@ export default function AdminAudit() {
               <table className="w-full text-sm">
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
-                    <th className="w-8 px-2 py-2"></th>
+                    <th className="w-8 px-2 py-2" />
                     <th className="px-3 py-2 font-semibold">Cand</th>
                     <th className="px-3 py-2 font-semibold">Actiune</th>
                     <th className="px-3 py-2 font-semibold">Rezultat</th>

@@ -1,7 +1,7 @@
 import type { Hono } from "hono";
-import fsPromises from "fs/promises";
-import fs from "fs";
-import path from "path";
+import fsPromises from "node:fs/promises";
+import fs from "node:fs";
+import path from "node:path";
 
 const mimeTypes: Record<string, string> = {
   ".html": "text/html",

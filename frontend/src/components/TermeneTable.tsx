@@ -101,11 +101,10 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
       if (prev.has(key)) {
         setLastExpandedKey(null);
         return new Set();
-      } else {
+      }
         setLastExpandedKey(key);
         if (numarDosar) markAsViewed(numarDosar);
         return new Set([key]);
-      }
     });
   };
 
@@ -177,7 +176,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
   const isViitor = (dateStr: string) => {
     if (!dateStr) return false;
     const d = new Date(dateStr);
-    return !isNaN(d.getTime()) && d >= today;
+    return !Number.isNaN(d.getTime()) && d >= today;
   };
 
   const totalPages = Math.ceil(termene.length / pageSize);

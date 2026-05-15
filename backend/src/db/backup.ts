@@ -1,5 +1,5 @@
-import path from "path";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
 import { getDb, getDbPath, closeDb } from "./schema.ts";
 import { RWLock } from "../util/rwlock.ts";

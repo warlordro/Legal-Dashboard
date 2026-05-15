@@ -22,9 +22,9 @@
 //     - body invalid → 422
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -145,7 +145,7 @@ describe("POST /api/v1/name-lists/preview", () => {
   it("nu persista nimic in DB la /preview", async () => {
     const app = buildTestApp();
     await postPreviewCsv(app, "nume\nIon\n");
-    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM name_lists`).get() as { n: number }).n;
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM name_lists").get() as { n: number }).n;
     expect(count).toBe(0);
   });
 });

@@ -113,7 +113,7 @@ export function updateUserRole(id: string, role: UserRole): UserRow {
     throw new Error(`invalid role: ${role}`);
   }
   const db = getDb();
-  const result = db.prepare(`UPDATE users SET role = ? WHERE id = ?`).run(role, id);
+  const result = db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
   if (result.changes === 0) {
     throw new Error(`user not found: ${id}`);
   }
@@ -125,7 +125,7 @@ export function updateUserStatus(id: string, status: UserStatus): UserRow {
     throw new Error(`invalid status: ${status}`);
   }
   const db = getDb();
-  const result = db.prepare(`UPDATE users SET status = ? WHERE id = ?`).run(status, id);
+  const result = db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, id);
   if (result.changes === 0) {
     throw new Error(`user not found: ${id}`);
   }

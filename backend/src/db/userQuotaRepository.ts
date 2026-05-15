@@ -85,7 +85,7 @@ export function upsertOverride(input: UpsertOverrideInput): QuotaOverrideRow {
 // HTTP layer so we don't throw on a missing row.
 export function deleteOverride(userId: string, feature: string): boolean {
   const result = getDb()
-    .prepare(`DELETE FROM user_quota_overrides WHERE user_id = ? AND feature = ?`)
+    .prepare("DELETE FROM user_quota_overrides WHERE user_id = ? AND feature = ?")
     .run(userId, feature);
   return result.changes > 0;
 }

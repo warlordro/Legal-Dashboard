@@ -16,7 +16,7 @@ const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
 export function isValidDate(dateStr: string): boolean {
   if (!DATE_REGEX.test(dateStr)) return false;
   const d = new Date(dateStr + "T00:00:00Z");
-  if (isNaN(d.getTime())) return false;
+  if (Number.isNaN(d.getTime())) return false;
   // Ensure parsed date matches input (rejects e.g. 2024-02-30 → Mar 1)
   return d.toISOString().startsWith(dateStr);
 }

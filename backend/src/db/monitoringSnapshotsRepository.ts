@@ -57,7 +57,7 @@ export function insertSnapshot(input: InsertSnapshotInput): number {
   // — diff cross-tenant contaminat.
   const db = getDb();
   const jobOwner = db
-    .prepare(`SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?`)
+    .prepare("SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?")
     .get(input.jobId, input.ownerId);
   if (!jobOwner) {
     throw new Error(`insertSnapshot: job ${input.jobId} not found for owner ${input.ownerId}`);

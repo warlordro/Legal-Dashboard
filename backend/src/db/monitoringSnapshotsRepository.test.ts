@@ -12,9 +12,9 @@
 // place raw SQL touches the snapshots table per CLAUDE.md raw-SQL rule.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getLatestSnapshot, insertSnapshot } from "./monitoringSnapshotsRepository.ts";
@@ -77,7 +77,7 @@ describe("insertSnapshot", () => {
     });
     expect(id).toBeGreaterThan(0);
 
-    const row = getDb().prepare(`SELECT * FROM monitoring_snapshots WHERE id = ?`).get(id) as {
+    const row = getDb().prepare("SELECT * FROM monitoring_snapshots WHERE id = ?").get(id) as {
       owner_id: string;
       job_id: number;
       run_id: number;
@@ -162,7 +162,7 @@ describe("insertSnapshot", () => {
       })
     ).toThrow(/not found for owner/);
 
-    const count = (getDb().prepare(`SELECT COUNT(*) AS n FROM monitoring_snapshots`).get() as { n: number }).n;
+    const count = (getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_snapshots").get() as { n: number }).n;
     expect(count).toBe(0);
   });
 

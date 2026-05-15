@@ -1,9 +1,9 @@
 // PR-8 userQuotaRepository — CRUD on the user_quota_overrides table from 0011.
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { deleteOverride, getOverride, listOverridesForUser, upsertOverride } from "./userQuotaRepository.ts";
@@ -135,7 +135,7 @@ describe("userQuotaRepository — write paths", () => {
   it("ON DELETE CASCADE removes overrides when user is deleted", () => {
     upsertOverride({ userId: "u-1", feature: "ai.single", dailyLimitUsdMilli: 1000 });
     upsertOverride({ userId: "u-1", feature: "ai.multi", dailyLimitUsdMilli: 5000 });
-    getDb().prepare(`DELETE FROM users WHERE id = ?`).run("u-1");
+    getDb().prepare("DELETE FROM users WHERE id = ?").run("u-1");
     expect(listOverridesForUser("u-1")).toEqual([]);
   });
 });

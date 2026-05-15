@@ -1,9 +1,9 @@
 // Integration tests for /api/v1/alerts (PR-6 backend worker).
 
 import Database from "better-sqlite3";
-import path from "path";
-import os from "os";
-import fsPromises from "fs/promises";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
@@ -720,7 +720,7 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     expect(json.data.alreadyDismissedCount).toBe(0);
 
     // Owner A's rows are now dismissed; owner B's row is untouched.
-    const dbRows = getDb().prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`).all() as {
+    const dbRows = getDb().prepare("SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC").all() as {
       id: number;
       dismissed_at: string | null;
     }[];
@@ -791,7 +791,7 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     expect(json.data.totalMatched).toBe(1);
     expect(json.data.dismissedCount).toBe(1);
 
-    const rows = getDb().prepare(`SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC`).all() as {
+    const rows = getDb().prepare("SELECT id, dismissed_at FROM monitoring_alerts ORDER BY id ASC").all() as {
       id: number;
       dismissed_at: string | null;
     }[];
@@ -834,10 +834,10 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     expect(json.data.totalMatched).toBe(1);
     expect(json.data.dismissedCount).toBe(1);
 
-    const ownDb = getDb().prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`).get(own.id) as {
+    const ownDb = getDb().prepare("SELECT dismissed_at FROM monitoring_alerts WHERE id = ?").get(own.id) as {
       dismissed_at: string | null;
     };
-    const foreignDb = getDb().prepare(`SELECT dismissed_at FROM monitoring_alerts WHERE id = ?`).get(foreign.id) as {
+    const foreignDb = getDb().prepare("SELECT dismissed_at FROM monitoring_alerts WHERE id = ?").get(foreign.id) as {
       dismissed_at: string | null;
     };
     expect(ownDb.dismissed_at).toBeTruthy();

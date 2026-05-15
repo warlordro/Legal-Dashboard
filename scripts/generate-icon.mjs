@@ -1,8 +1,8 @@
 import sharp from "sharp";
 import pngToIco from "png-to-ico";
-import { writeFileSync, mkdirSync } from "fs";
-import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { writeFileSync, mkdirSync } from "node:fs";
+import { resolve, dirname } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const root = resolve(__dirname, "..");
@@ -68,6 +68,6 @@ console.log(`\n  Created icon.ico (${icoSizes.join(", ")}px)`);
 // Copy 512px as the main icon.png for electron-builder
 const mainPngPath = resolve(buildDir, "icon.png");
 writeFileSync(mainPngPath, pngBuffers[256]);
-console.log(`  Created icon.png (256px)`);
+console.log("  Created icon.png (256px)");
 
 console.log(`\nAll icons saved to: ${buildDir}`);
