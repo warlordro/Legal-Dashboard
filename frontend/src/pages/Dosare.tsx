@@ -14,6 +14,7 @@ import type { ApiKeys } from "@/hooks/useApiKey";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
 
 function stripDiacritics(s: string): string {
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 

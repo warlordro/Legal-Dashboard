@@ -302,6 +302,7 @@ export const INSTITUTII: Institutie[] = [
 const _normalizeCache = new Map<string, string>();
 
 function _stripDiacritics(s: string): string {
+  // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 }
 

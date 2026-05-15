@@ -27,6 +27,7 @@ export function validateParams(params: Record<string, string | undefined>): stri
       return `Parametrul '${key}' depaseste lungimea maxima permisa`;
     }
     // Reject null bytes and control characters
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: range-ul blocheaza explicit caractere de control in input HTTP.
     if (val && /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(val)) {
       return `Parametrul '${key}' contine caractere invalide`;
     }

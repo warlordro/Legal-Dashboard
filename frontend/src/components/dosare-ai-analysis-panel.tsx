@@ -1,7 +1,7 @@
 import { useState } from "react";
-import DOMPurify from "dompurify";
 import { Bot, Check, ChevronDown, Circle, Download, Key, Loader2 } from "lucide-react";
 import { Button } from "./ui/button";
+import { formatAiMarkdownLine, SanitizedHtml } from "./SanitizedHtml";
 import type { Dosar } from "@/types";
 import { exportAnalysisPDF } from "@/lib/export-analysis";
 import {
@@ -201,14 +201,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                     return (
                       <div key={li} className="flex gap-2 ml-2">
                         <span className="text-violet-500">•</span>
-                        <span
-                          dangerouslySetInnerHTML={{
-                            __html: DOMPurify.sanitize(content.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"), {
-                              ALLOWED_TAGS: ["strong", "em", "b", "i"],
-                              ALLOWED_ATTR: [],
-                            }),
-                          }}
-                        />
+                        <SanitizedHtml html={formatAiMarkdownLine(content)} />
                       </div>
                     );
                   }
@@ -218,29 +211,12 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                     return (
                       <div key={li} className="flex gap-2 ml-2">
                         <span className="font-semibold text-violet-600 dark:text-violet-400 min-w-[1.2em]">{num}.</span>
-                        <span
-                          dangerouslySetInnerHTML={{
-                            __html: DOMPurify.sanitize(content.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"), {
-                              ALLOWED_TAGS: ["strong", "em", "b", "i"],
-                              ALLOWED_ATTR: [],
-                            }),
-                          }}
-                        />
+                        <SanitizedHtml html={formatAiMarkdownLine(content)} />
                       </div>
                     );
                   }
                   if (line.trim() === "") return <div key={li} className="h-2" />;
-                  return (
-                    <p
-                      key={li}
-                      dangerouslySetInnerHTML={{
-                        __html: DOMPurify.sanitize(line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"), {
-                          ALLOWED_TAGS: ["strong", "em", "b", "i"],
-                          ALLOWED_ATTR: [],
-                        }),
-                      }}
-                    />
-                  );
+                  return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
                 })}
               </div>
             )}
@@ -470,14 +446,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                         return (
                           <div key={li} className="flex gap-2 ml-2">
                             <span className={mc.bullet}>•</span>
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: DOMPurify.sanitize(content.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"), {
-                                  ALLOWED_TAGS: ["strong", "em", "b", "i"],
-                                  ALLOWED_ATTR: [],
-                                }),
-                              }}
-                            />
+                            <SanitizedHtml html={formatAiMarkdownLine(content)} />
                           </div>
                         );
                       }
@@ -487,29 +456,12 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                         return (
                           <div key={li} className="flex gap-2 ml-2">
                             <span className={`font-semibold ${mc.num} min-w-[1.2em]`}>{num}.</span>
-                            <span
-                              dangerouslySetInnerHTML={{
-                                __html: DOMPurify.sanitize(content.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"), {
-                                  ALLOWED_TAGS: ["strong", "em", "b", "i"],
-                                  ALLOWED_ATTR: [],
-                                }),
-                              }}
-                            />
+                            <SanitizedHtml html={formatAiMarkdownLine(content)} />
                           </div>
                         );
                       }
                       if (line.trim() === "") return <div key={li} className="h-2" />;
-                      return (
-                        <p
-                          key={li}
-                          dangerouslySetInnerHTML={{
-                            __html: DOMPurify.sanitize(line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"), {
-                              ALLOWED_TAGS: ["strong", "em", "b", "i"],
-                              ALLOWED_ATTR: [],
-                            }),
-                          }}
-                        />
-                      );
+                      return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
                     })}
                   </div>
                 </div>
@@ -549,28 +501,11 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                                 return (
                                   <div key={li} className="flex gap-1.5 ml-1">
                                     <span>•</span>
-                                    <span
-                                      dangerouslySetInnerHTML={{
-                                        __html: DOMPurify.sanitize(
-                                          line.slice(2).replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"),
-                                          { ALLOWED_TAGS: ["strong", "em", "b", "i"], ALLOWED_ATTR: [] }
-                                        ),
-                                      }}
-                                    />
+                                    <SanitizedHtml html={formatAiMarkdownLine(line.slice(2))} />
                                   </div>
                                 );
                               if (line.trim() === "") return <div key={li} className="h-1" />;
-                              return (
-                                <p
-                                  key={li}
-                                  dangerouslySetInnerHTML={{
-                                    __html: DOMPurify.sanitize(line.replace(/\*\*(.*?)\*\*/g, "<strong>$1</strong>"), {
-                                      ALLOWED_TAGS: ["strong", "em", "b", "i"],
-                                      ALLOWED_ATTR: [],
-                                    }),
-                                  }}
-                                />
-                              );
+                              return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
                             })}
                           </div>
                         </div>
