@@ -254,7 +254,7 @@ export function Charts() {
                     tickLine={false}
                     width={28}
                   />
-                  <Tooltip content={<AlertsTooltip />} />
+                  <Tooltip content={<AlertsTooltip />} cursor={{ fill: "transparent" }} isAnimationActive={false} />
                   <Bar dataKey="count" fill={CHART_FILLS.alerts} radius={[3, 3, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
@@ -279,7 +279,7 @@ export function Charts() {
                     tickLine={false}
                     width={28}
                   />
-                  <Tooltip content={<RunsTooltip />} />
+                  <Tooltip content={<RunsTooltip />} cursor={{ fill: "transparent" }} isAnimationActive={false} />
                   <Legend wrapperStyle={{ fontSize: 10 }} iconType="square" iconSize={8} />
                   <Bar dataKey="ok" stackId="r" name="ok" fill={CHART_FILLS.runOk} />
                   <Bar dataKey="error" stackId="r" name="erori" fill={CHART_FILLS.runError} />

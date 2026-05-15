@@ -164,7 +164,7 @@ export function TermeneMetrics({ termene, activeFilters = [], onFilterToggle, on
                   tickLine={false}
                   allowDecimals={false}
                 />
-                <Tooltip content={<ChartTooltip />} />
+                <Tooltip content={<ChartTooltip />} cursor={{ fill: "transparent" }} isAnimationActive={false} />
                 <Bar dataKey="value" fill={CHART_FILLS.termene} radius={[4, 4, 0, 0]} maxBarSize={40} />
               </BarChart>
             </ResponsiveContainer>

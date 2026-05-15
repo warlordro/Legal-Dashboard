@@ -218,7 +218,7 @@ export function StadiiChart({ data }: { data: NamedDatum[] }) {
                 tickLine={false}
                 allowDecimals={false}
               />
-              <Tooltip content={<ChartTooltip />} />
+              <Tooltip content={<ChartTooltip />} cursor={{ fill: "transparent" }} isAnimationActive={false} />
               <Bar dataKey="value" fill={CHART_FILLS.primary} radius={[4, 4, 0, 0]} maxBarSize={40} />
             </BarChart>
           </ResponsiveContainer>
@@ -259,7 +259,7 @@ export function InstitutiiChart({ data }: { data: NamedDatum[] }) {
                 tickLine={false}
                 width={90}
               />
-              <Tooltip content={<ChartTooltip />} />
+              <Tooltip content={<ChartTooltip />} cursor={{ fill: "transparent" }} isAnimationActive={false} />
               <Bar dataKey="value" fill={CHART_FILLS.accent} radius={[0, 4, 4, 0]} maxBarSize={24} />
             </BarChart>
           </ResponsiveContainer>
