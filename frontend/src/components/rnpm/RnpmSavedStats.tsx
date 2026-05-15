@@ -97,6 +97,7 @@ function StatsModal({
     }
   }, []);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshKey este trigger extern intentionat pentru reincarcarea statisticilor.
   useEffect(() => {
     void load();
     void loadBackups();

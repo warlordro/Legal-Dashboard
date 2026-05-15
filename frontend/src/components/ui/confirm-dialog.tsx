@@ -41,6 +41,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
     });
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: close este callback local pentru dialogul curent; includerea lui rebindeaza handlerul la fiecare render.
   useEffect(() => {
     if (!state) return;
     confirmBtnRef.current?.focus();

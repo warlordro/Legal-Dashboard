@@ -259,6 +259,7 @@ export default function Dosare({
   };
 
   // Handle pending search from history
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingSearch este trigger one-shot; callback-urile curente sunt apelate doar la consumarea intrarii din istoric.
   useEffect(() => {
     if (pendingSearch && !loading) {
       consumePendingSearch?.();

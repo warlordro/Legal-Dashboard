@@ -25,6 +25,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Sync draft with value when opening
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draft-ul se reseteaza intentionat doar la tranzitia de deschidere.
   useEffect(() => {
     if (open) setDraft(value);
   }, [open]);
@@ -62,6 +63,7 @@ export function InstitutieSelect({ value, onChange }: InstitutieSelectProps) {
   }, [open]);
 
   // Close on Escape
+  // biome-ignore lint/correctness/useExhaustiveDependencies: draft-ul este citit prin handleClose; handlerul se reface doar cat modalul este deschis.
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {

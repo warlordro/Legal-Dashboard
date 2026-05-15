@@ -280,6 +280,7 @@ export default function RnpmSearchPage({
 
   // Auto-loop: after a batch completes, trigger the next one while autoLoading is on.
   // Stops naturally when nextRnpmPage becomes null; user can cancel via handleStop.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: auto-loop-ul urmareste doar pagina urmatoare; callback-ul complet ar re-triggera batch-uri.
   useEffect(() => {
     if (!autoLoading || loading) return;
     if (!result || result.nextRnpmPage == null) {
@@ -298,6 +299,7 @@ export default function RnpmSearchPage({
     setPhase("");
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingSearch este trigger one-shot pentru istoric; runSearch complet ar reporni cautarea.
   useEffect(() => {
     if (!pendingSearch) return;
     const { type, params } = pendingSearch;

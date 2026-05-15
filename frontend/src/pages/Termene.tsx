@@ -73,7 +73,7 @@ function filterByMetrics(termene: Termen[], filters: MetricFilter[]): Termen[] {
     const d = t.data ? new Date(t.data) : null;
     const isViitor = d && !Number.isNaN(d.getTime()) && d >= now;
     const isTrecut = !isViitor;
-    const hasSolutie = !!(t.solutie?.trim());
+    const hasSolutie = !!t.solutie?.trim();
 
     // OR logic: match any active filter
     if (filters.includes("viitoare") && isViitor) return true;
@@ -235,6 +235,7 @@ export default function Termene({
   };
 
   // Handle pending search from history
+  // biome-ignore lint/correctness/useExhaustiveDependencies: pendingSearch este trigger one-shot; callback-urile curente sunt apelate doar la consumarea intrarii din istoric.
   useEffect(() => {
     if (pendingSearch && !loading) {
       consumePendingSearch?.();

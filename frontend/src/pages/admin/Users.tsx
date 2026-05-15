@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Users as UsersIcon, RefreshCw, ShieldAlert, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -56,16 +56,21 @@ export default function AdminUsers() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const load = useCallback(async () => {
+  const loadUsers = async (filters: {
+    page: number;
+    search: string;
+    roleFilter: UserRole | "all";
+    statusFilter: UserStatus | "all";
+  }) => {
     setLoading(true);
     setError(null);
     try {
       const result = await admin.listUsers({
-        page,
+        page: filters.page,
         pageSize: PAGE_SIZE,
-        search: search || undefined,
-        role: roleFilter === "all" ? undefined : roleFilter,
-        status: statusFilter === "all" ? undefined : statusFilter,
+        search: filters.search || undefined,
+        role: filters.roleFilter === "all" ? undefined : filters.roleFilter,
+        status: filters.statusFilter === "all" ? undefined : filters.statusFilter,
       });
       setRows(result.rows);
       setTotal(result.total);
@@ -74,12 +79,32 @@ export default function AdminUsers() {
     } finally {
       setLoading(false);
     }
-  }, [page, roleFilter, search, statusFilter]);
+  };
+
+  const load = () => loadUsers({ page, search, roleFilter, statusFilter });
 
   useEffect(() => {
-    load();
-  }, [load]);
+    setLoading(true);
+    setError(null);
+    admin
+      .listUsers({
+        page,
+        pageSize: PAGE_SIZE,
+        search: search || undefined,
+        role: roleFilter === "all" ? undefined : roleFilter,
+        status: statusFilter === "all" ? undefined : statusFilter,
+      })
+      .then((result) => {
+        setRows(result.rows);
+        setTotal(result.total);
+      })
+      .catch((err: unknown) => {
+        setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorilor.");
+      })
+      .finally(() => setLoading(false));
+  }, [page, roleFilter, search, statusFilter]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii depinde explicit de filtrele vizibile.
   useEffect(() => {
     setPage(1);
   }, [roleFilter, search, statusFilter]);
@@ -162,13 +187,13 @@ export default function AdminUsers() {
     }
   };
 
-  const summary = useMemo(() => {
+  const summary = (() => {
     const parts = [`${total} total`];
     if (search) parts.push(`filtru: "${search}"`);
     if (roleFilter !== "all") parts.push(`rol: ${roleLabel(roleFilter)}`);
     if (statusFilter !== "all") parts.push(`status: ${statusLabel(statusFilter)}`);
     return parts.join(" · ");
-  }, [roleFilter, search, statusFilter, total]);
+  })();
 
   return (
     <div className="min-h-full bg-background p-6">
