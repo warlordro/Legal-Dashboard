@@ -232,8 +232,12 @@ describe("runMigrations - drift detection", () => {
     try {
       expect(() => runMigrations(db, migrationsDir)).toThrow(/MIGRATIONS_STRICT=1/);
     } finally {
-      if (previous === undefined) process.env.MIGRATIONS_STRICT = undefined;
-      else process.env.MIGRATIONS_STRICT = previous;
+      if (previous === undefined) {
+        // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+        delete process.env.MIGRATIONS_STRICT;
+      } else {
+        process.env.MIGRATIONS_STRICT = previous;
+      }
     }
   });
 

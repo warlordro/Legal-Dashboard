@@ -8,7 +8,8 @@ function jsonFetch(payload: unknown): typeof fetch {
 
 afterEach(() => {
   vi.restoreAllMocks();
-  process.env.RNPM_RUNTIME_VALIDATION_ENFORCED = undefined;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+  delete process.env.RNPM_RUNTIME_VALIDATION_ENFORCED;
 });
 
 describe("RnpmClient.search runtime validation", () => {

@@ -58,7 +58,8 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
-  process.env.LEGAL_DASHBOARD_DB_PATH = undefined;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+  delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
   vi.restoreAllMocks();
 });
@@ -379,7 +380,8 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
       // Audit row NU trebuie scris cand kill switch e activ.
       expect(getCapHitRow()).toBeUndefined();
     } finally {
-      process.env.RNPM_AUDIT_CAP_HIT_DISABLED = undefined;
+      // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+      delete process.env.RNPM_AUDIT_CAP_HIT_DISABLED;
     }
   });
 });
