@@ -12,6 +12,7 @@ export interface ApiKeys {
   anthropic: string;
   openai: string;
   google: string;
+  openrouter: string;
   twocaptcha: string;
   capsolver: string;
 }
@@ -22,7 +23,7 @@ const ENC_KEY = "portaljust-api-keys-enc";
 const PROVIDER_KEY = "portaljust-captcha-provider";
 const MODE_KEY = "portaljust-captcha-mode";
 
-const EMPTY: ApiKeys = { anthropic: "", openai: "", google: "", twocaptcha: "", capsolver: "" };
+const EMPTY: ApiKeys = { anthropic: "", openai: "", google: "", openrouter: "", twocaptcha: "", capsolver: "" };
 
 // One-shot migration reader: legacy localStorage entries were XOR-obfuscated.
 // Used ONLY to re-save them through safeStorage at first boot after upgrade,
@@ -45,6 +46,7 @@ function readLegacyForMigration(): ApiKeys | null {
         anthropic: deobfuscate(parsed.anthropic || ""),
         openai: deobfuscate(parsed.openai || ""),
         google: deobfuscate(parsed.google || ""),
+        openrouter: deobfuscate(parsed.openrouter || ""),
         twocaptcha: deobfuscate(parsed.twocaptcha || ""),
         capsolver: deobfuscate(parsed.capsolver || ""),
       };
@@ -65,7 +67,7 @@ function clearLegacyStorage() {
 }
 
 function hasAnyKey(k: ApiKeys): boolean {
-  return !!(k.anthropic || k.openai || k.google || k.twocaptcha || k.capsolver);
+  return !!(k.anthropic || k.openai || k.google || k.openrouter || k.twocaptcha || k.capsolver);
 }
 
 function loadProvider(): CaptchaProvider {
@@ -197,7 +199,8 @@ export function useApiKey() {
   };
 
   const apiKey = keys.anthropic;
-  const hasKey = keys.anthropic.length > 0 || keys.openai.length > 0 || keys.google.length > 0;
+  const hasKey =
+    keys.anthropic.length > 0 || keys.openai.length > 0 || keys.google.length > 0 || keys.openrouter.length > 0;
   const activeCaptchaKey = captchaProvider === "capsolver" ? keys.capsolver : keys.twocaptcha;
 
   return {
@@ -210,6 +213,7 @@ export function useApiKey() {
     hasAnthropic: keys.anthropic.length > 0,
     hasOpenai: keys.openai.length > 0,
     hasGoogle: keys.google.length > 0,
+    hasOpenrouter: keys.openrouter.length > 0,
     hasTwoCaptcha: keys.twocaptcha.length > 0,
     hasCapSolver: keys.capsolver.length > 0,
     captchaProvider,

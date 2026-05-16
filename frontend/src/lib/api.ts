@@ -294,7 +294,7 @@ export const api = {
     analyze: async (
       dosar: Dosar,
       model = "claude-sonnet",
-      apiKeys?: { anthropic?: string; openai?: string; google?: string }
+      apiKeys?: { anthropic?: string; openai?: string; google?: string; openrouter?: string }
     ): Promise<{ analysis: string }> => {
       const res = await apiFetch(`${BASE}/ai/analyze`, {
         method: "POST",
@@ -310,7 +310,7 @@ export const api = {
       dosar: Dosar,
       analysts: [string, string],
       judge: string,
-      apiKeys?: { anthropic?: string; openai?: string; google?: string },
+      apiKeys?: { anthropic?: string; openai?: string; google?: string; openrouter?: string },
       onPhase?: (phase: "analyst1_done" | "analyst2_done" | "judge_started") => void
     ): Promise<{
       analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };

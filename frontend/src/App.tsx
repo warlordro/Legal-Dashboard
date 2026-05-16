@@ -17,6 +17,7 @@ import { AdminGate } from "@/components/AdminGate";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
+import { useAiSettings } from "@/hooks/useAiSettings";
 import { useAlertsStream } from "@/hooks/useAlertsStream";
 import type { Dosar, Termen, SearchParams } from "@/types";
 import type { RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
@@ -53,6 +54,7 @@ function AppShell({
   removeEntry,
   clearHistory,
   keys,
+  aiSettings,
   hasKey,
   handleOpenKeyDialog,
   activeCaptchaKey,
@@ -78,6 +80,7 @@ function AppShell({
   removeEntry: ReturnType<typeof useSearchHistory>["removeEntry"];
   clearHistory: ReturnType<typeof useSearchHistory>["clearHistory"];
   keys: ReturnType<typeof useApiKey>["keys"];
+  aiSettings: ReturnType<typeof useAiSettings>;
   hasKey: boolean;
   handleOpenKeyDialog: () => void;
   activeCaptchaKey: string;
@@ -171,6 +174,7 @@ function AppShell({
             pendingSearch={pendingSearch?.type === "dosare" ? pendingSearch.params : null}
             consumePendingSearch={consumePendingSearch}
             apiKeys={keys}
+            aiSettings={{ mode: aiSettings.mode, stack: aiSettings.stack }}
             onConfigureApiKey={handleOpenKeyDialog}
           />
         </div>
@@ -295,6 +299,7 @@ export default function App() {
     hasAnthropic,
     hasOpenai,
     hasGoogle,
+    hasOpenrouter,
     hasTwoCaptcha,
     hasCapSolver,
     captchaProvider,
@@ -303,6 +308,7 @@ export default function App() {
     setCaptchaMode,
     activeCaptchaKey,
   } = useApiKey();
+  const aiSettings = useAiSettings();
   const [showKeyDialog, setShowKeyDialog] = useState(false);
   const handleOpenKeyDialog = useCallback(() => setShowKeyDialog(true), []);
   const closeKeyDialog = useCallback(() => setShowKeyDialog(false), []);
@@ -346,6 +352,7 @@ export default function App() {
           removeEntry={removeEntry}
           clearHistory={clearHistory}
           keys={keys}
+          aiSettings={aiSettings}
           hasKey={hasKey}
           handleOpenKeyDialog={handleOpenKeyDialog}
           activeCaptchaKey={activeCaptchaKey}
@@ -372,12 +379,14 @@ export default function App() {
               hasAnthropic,
               hasOpenai,
               hasGoogle,
+              hasOpenrouter,
               hasTwoCaptcha,
               hasCapSolver,
               captchaProvider,
               setCaptchaProvider,
               captchaMode,
               setCaptchaMode,
+              aiSettings,
             }}
           />
         )}

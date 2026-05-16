@@ -22,7 +22,13 @@ import { api, monitoring, MonitoringApiError } from "@/lib/api";
 import type { Dosar } from "@/types";
 import { exportAnalysisPDF } from "@/lib/export-analysis";
 import { TablePagination } from "@/components/table-pagination";
-import { AI_MODELS } from "@/components/dosare-ai-config";
+import {
+  AI_MODELS,
+  availableJudgeModels as getAvailableJudgeModels,
+  availableModels as getAvailableModels,
+  type AiMode,
+  type OpenRouterStack,
+} from "@/components/dosare-ai-config";
 import { DosareAiAnalysisPanel } from "@/components/dosare-ai-analysis-panel";
 import { stripDiacritics, HighlightName } from "@/components/dosare-table-highlight";
 import {
@@ -37,6 +43,7 @@ interface ApiKeys {
   anthropic: string;
   openai: string;
   google: string;
+  openrouter: string;
 }
 
 interface DosareTableProps {
@@ -45,6 +52,7 @@ interface DosareTableProps {
   onExportPDF: (selected?: Dosar[]) => Promise<void> | void;
   searchedName?: string;
   apiKeys?: ApiKeys;
+  aiSettings: { mode: AiMode; stack: OpenRouterStack };
   onConfigureApiKey?: () => void;
 }
 
@@ -56,6 +64,7 @@ export function DosareTable({
   onExportPDF,
   searchedName,
   apiKeys,
+  aiSettings,
   onConfigureApiKey: _onConfigureApiKey,
 }: DosareTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -183,15 +192,37 @@ export function DosareTable({
   >({});
   const [showIndividual, setShowIndividual] = useState<Set<string>>(new Set());
 
-  const hasAnyKey = apiKeys && (apiKeys.anthropic || apiKeys.openai || apiKeys.google);
+  const hasAnyKey =
+    aiSettings.mode === "openrouter"
+      ? Boolean(apiKeys?.openrouter)
+      : Boolean(apiKeys && (apiKeys.anthropic || apiKeys.openai || apiKeys.google));
 
-  // Filter to only show models with active keys
-  const availableModels = AI_MODELS.filter((m) => {
-    if (m.provider === "anthropic") return apiKeys?.anthropic;
-    if (m.provider === "openai") return apiKeys?.openai;
-    if (m.provider === "google") return apiKeys?.google;
-    return false;
-  });
+  const stackModels = getAvailableModels(aiSettings.mode, aiSettings.stack);
+  const stackJudgeModels = getAvailableJudgeModels(aiSettings.mode, aiSettings.stack);
+
+  const availableModels =
+    aiSettings.mode === "openrouter"
+      ? apiKeys?.openrouter
+        ? stackModels
+        : []
+      : stackModels.filter((m) => {
+          if (m.provider === "anthropic") return apiKeys?.anthropic;
+          if (m.provider === "openai") return apiKeys?.openai;
+          if (m.provider === "google") return apiKeys?.google;
+          return false;
+        });
+
+  const availableJudgeModels =
+    aiSettings.mode === "openrouter"
+      ? apiKeys?.openrouter
+        ? stackJudgeModels
+        : []
+      : stackJudgeModels.filter((m) => {
+          if (m.provider === "anthropic") return apiKeys?.anthropic;
+          if (m.provider === "openai") return apiKeys?.openai;
+          if (m.provider === "google") return apiKeys?.google;
+          return false;
+        });
 
   // Group available models by provider
   const providerGroups = availableModels.reduce(
@@ -202,6 +233,24 @@ export function DosareTable({
     },
     {} as Record<string, typeof AI_MODELS>
   );
+
+  useEffect(() => {
+    if (availableModels.length > 0 && !availableModels.some((model) => model.key === aiModel)) {
+      setAiModel(availableModels[0].key);
+    }
+    if (availableModels.length >= 2) {
+      setMultiAnalysts((prev) => {
+        const [first, second] = prev;
+        const firstOk = availableModels.some((model) => model.key === first);
+        const secondOk = availableModels.some((model) => model.key === second);
+        if (firstOk && secondOk && first !== second) return prev;
+        return [availableModels[0].key, availableModels[1].key];
+      });
+    }
+    if (availableJudgeModels.length > 0 && !availableJudgeModels.some((model) => model.key === multiJudge)) {
+      setMultiJudge(availableJudgeModels[0].key);
+    }
+  }, [aiModel, availableModels, availableJudgeModels, multiJudge]);
 
   const handleAiAnalyze = async (dosar: Dosar) => {
     if (!hasAnyKey) {
@@ -241,24 +290,30 @@ export function DosareTable({
       setShowKeyPrompt(true);
       return;
     }
-    // Check required provider keys
-    const neededProviders = new Set<string>();
-    for (const m of [...multiAnalysts, multiJudge]) {
-      const modelDef = AI_MODELS.find((mod) => mod.key === m);
-      if (modelDef) neededProviders.add(modelDef.provider);
-    }
-    for (const provider of neededProviders) {
-      if (provider === "anthropic" && !apiKeys?.anthropic) {
-        setMultiError("Lipseste cheia API pentru Anthropic (Claude)");
+    if (aiSettings.mode === "openrouter") {
+      if (!apiKeys?.openrouter) {
+        setMultiError("Lipseste cheia API pentru OpenRouter");
         return;
       }
-      if (provider === "openai" && !apiKeys?.openai) {
-        setMultiError("Lipseste cheia API pentru OpenAI (GPT)");
-        return;
+    } else {
+      const neededProviders = new Set<string>();
+      for (const m of [...multiAnalysts, multiJudge]) {
+        const modelDef = AI_MODELS.find((mod) => mod.key === m);
+        if (modelDef) neededProviders.add(modelDef.provider);
       }
-      if (provider === "google" && !apiKeys?.google) {
-        setMultiError("Lipseste cheia API pentru Google (Gemini)");
-        return;
+      for (const provider of neededProviders) {
+        if (provider === "anthropic" && !apiKeys?.anthropic) {
+          setMultiError("Lipseste cheia API pentru Anthropic (Claude)");
+          return;
+        }
+        if (provider === "openai" && !apiKeys?.openai) {
+          setMultiError("Lipseste cheia API pentru OpenAI (GPT)");
+          return;
+        }
+        if (provider === "google" && !apiKeys?.google) {
+          setMultiError("Lipseste cheia API pentru Google (Gemini)");
+          return;
+        }
       }
     }
     setMultiLoading(dosar.numar);
@@ -710,6 +765,7 @@ export function DosareTable({
                               showKeyPrompt,
                               hasAnyKey: !!hasAnyKey,
                               availableModels,
+                              availableJudgeModels,
                               providerGroups,
                               collapsed: collapsedAiConfig,
                               toggleCollapsed: (key: string) =>

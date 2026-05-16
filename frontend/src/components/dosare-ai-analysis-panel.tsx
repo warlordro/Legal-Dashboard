@@ -16,6 +16,7 @@ interface ApiKeys {
   anthropic: string;
   openai: string;
   google: string;
+  openrouter: string;
 }
 
 interface MultiResult {
@@ -36,6 +37,7 @@ export interface DosareAiAnalysisPanelProps {
     showKeyPrompt: boolean;
     hasAnyKey: boolean;
     availableModels: AiModelDef[];
+    availableJudgeModels: AiModelDef[];
     providerGroups: Record<string, AiModelDef[]>;
     collapsed: Set<string>;
     toggleCollapsed: (key: string) => void;
@@ -56,7 +58,7 @@ export interface DosareAiAnalysisPanelProps {
   };
 }
 
-export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAnalysisPanelProps) {
+export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPanelProps) {
   const [exportingPdf, setExportingPdf] = useState<"simple" | "advanced" | null>(null);
   // When no provider key is configured, replace both AI panels with a single
   // discreet banner. Hiding completely would erase the feature from view, so
@@ -259,7 +261,9 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                       dosar.obiect,
                       r.final,
                       "advanced",
-                      JUDGE_MODELS_LIST.find((j) => j.key === r.judge.model)?.label || r.judge.model
+                      ai.availableJudgeModels.find((j) => j.key === r.judge.model)?.label ||
+                        JUDGE_MODELS_LIST.find((j) => j.key === r.judge.model)?.label ||
+                        r.judge.model
                     );
                   } catch (err) {
                     console.error("[ai] export advanced pdf failed:", err);
@@ -343,12 +347,7 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
               {/* Judge */}
               <div className={`flex items-center gap-0.5 rounded-lg border ${mc.selectBorder} bg-background p-0.5`}>
                 <span className={`px-1.5 text-[11px] font-medium ${mc.selectLabel} w-20`}>Judecător</span>
-                {JUDGE_MODELS_LIST.filter((j) => {
-                  if (j.provider === "anthropic") return apiKeys?.anthropic;
-                  if (j.provider === "openai") return apiKeys?.openai;
-                  if (j.provider === "google") return apiKeys?.google;
-                  return false;
-                }).map((j) => (
+                {ai.availableJudgeModels.map((j) => (
                   <button
                     type="button"
                     key={j.key}
@@ -366,7 +365,9 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                   </button>
                 ))}
                 {(() => {
-                  const sel = JUDGE_MODELS_LIST.find((j) => j.key === multi.judge);
+                  const sel =
+                    ai.availableJudgeModels.find((j) => j.key === multi.judge) ??
+                    JUDGE_MODELS_LIST.find((j) => j.key === multi.judge);
                   return sel ? <span className="px-1.5 text-[10px] text-muted-foreground">{sel.desc}</span> : null;
                 })()}
               </div>
@@ -401,7 +402,10 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                 const judgeStarted = phase.has("judge_started");
                 const a1Label = AI_MODELS.find((m) => m.key === multi.analysts[0])?.label ?? multi.analysts[0];
                 const a2Label = AI_MODELS.find((m) => m.key === multi.analysts[1])?.label ?? multi.analysts[1];
-                const judgeLabel = AI_MODELS.find((m) => m.key === multi.judge)?.label ?? multi.judge;
+                const judgeLabel =
+                  ai.availableJudgeModels.find((m) => m.key === multi.judge)?.label ??
+                  AI_MODELS.find((m) => m.key === multi.judge)?.label ??
+                  multi.judge;
                 const Row = ({
                   done,
                   active,
@@ -439,7 +443,8 @@ export function DosareAiAnalysisPanel({ dosar, apiKeys, ai, multi }: DosareAiAna
                   <div className="p-4 pb-2">
                     <h4 className={`flex items-center gap-1.5 text-sm font-semibold ${mc.text}`}>
                       <Bot className="h-3.5 w-3.5" /> Analiză AI Avansată (Judecător:{" "}
-                      {JUDGE_MODELS_LIST.find((j) => j.key === multi.result[dosar.numar].judge.model)?.label ||
+                      {ai.availableJudgeModels.find((j) => j.key === multi.result[dosar.numar].judge.model)?.label ||
+                        JUDGE_MODELS_LIST.find((j) => j.key === multi.result[dosar.numar].judge.model)?.label ||
                         multi.result[dosar.numar].judge.model}
                       )
                     </h4>

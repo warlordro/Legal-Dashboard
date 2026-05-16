@@ -11,6 +11,7 @@ import type { LoadMoreProgress } from "@/lib/api";
 import { exportDosareExcel, exportDosarePDF } from "@/lib/export-dosare";
 import type { Dosar, SearchParams } from "@/types";
 import type { ApiKeys } from "@/hooks/useApiKey";
+import type { AiMode, OpenRouterStack } from "@/components/dosare-ai-config";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
 
 function stripDiacritics(s: string): string {
@@ -104,6 +105,7 @@ interface DosareProps {
   pendingSearch?: SearchParams | null;
   consumePendingSearch?: () => void;
   apiKeys?: ApiKeys;
+  aiSettings: { mode: AiMode; stack: OpenRouterStack };
   onConfigureApiKey?: () => void;
 }
 
@@ -114,6 +116,7 @@ export default function Dosare({
   pendingSearch,
   consumePendingSearch,
   apiKeys,
+  aiSettings,
   onConfigureApiKey,
 }: DosareProps) {
   const [loading, setLoading] = useState(false);
@@ -374,6 +377,7 @@ export default function Dosare({
           onExportPDF={(sel) => exportDosarePDF(sel || dosare)}
           searchedName={state.searchedName}
           apiKeys={apiKeys}
+          aiSettings={aiSettings}
           onConfigureApiKey={onConfigureApiKey}
         />
       )}

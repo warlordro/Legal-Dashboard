@@ -6,6 +6,7 @@ import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
 import type { useApiKey } from "@/hooks/useApiKey";
+import type { useAiSettings } from "@/hooks/useAiSettings";
 
 type UseApiKey = ReturnType<typeof useApiKey>;
 
@@ -23,16 +24,17 @@ interface Props {
     | "hasAnthropic"
     | "hasOpenai"
     | "hasGoogle"
+    | "hasOpenrouter"
     | "hasTwoCaptcha"
     | "hasCapSolver"
     | "captchaProvider"
     | "setCaptchaProvider"
     | "captchaMode"
     | "setCaptchaMode"
-  >;
+  > & { aiSettings: ReturnType<typeof useAiSettings> };
 }
 
-const EMPTY = { anthropic: "", openai: "", google: "", twocaptcha: "", capsolver: "" };
+const EMPTY = { anthropic: "", openai: "", google: "", openrouter: "", twocaptcha: "", capsolver: "" };
 
 export function ApiKeyDialog({ onClose, apiKey }: Props) {
   const {
@@ -42,12 +44,14 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
     hasAnthropic,
     hasOpenai,
     hasGoogle,
+    hasOpenrouter,
     hasTwoCaptcha,
     hasCapSolver,
     captchaProvider,
     setCaptchaProvider,
     captchaMode,
     setCaptchaMode,
+    aiSettings,
   } = apiKey;
   const [keyInputs, setKeyInputs] = useState(EMPTY);
   const dialogRef = useDialog<HTMLDivElement>(true, onClose);
@@ -56,6 +60,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
     if (keyInputs.anthropic.trim()) setKey("anthropic", keyInputs.anthropic);
     if (keyInputs.openai.trim()) setKey("openai", keyInputs.openai);
     if (keyInputs.google.trim()) setKey("google", keyInputs.google);
+    if (keyInputs.openrouter.trim()) setKey("openrouter", keyInputs.openrouter);
     if (keyInputs.twocaptcha.trim()) setKey("twocaptcha", keyInputs.twocaptcha);
     if (keyInputs.capsolver.trim()) setKey("capsolver", keyInputs.capsolver);
     setKeyInputs(EMPTY);
@@ -65,6 +70,7 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
     !keyInputs.anthropic.trim() &&
     !keyInputs.openai.trim() &&
     !keyInputs.google.trim() &&
+    !keyInputs.openrouter.trim() &&
     !keyInputs.twocaptcha.trim() &&
     !keyInputs.capsolver.trim();
 
@@ -100,96 +106,183 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
           Introdu cheile API pentru furnizorii AI pe care doresti sa ii folosesti. Poti configura unul sau mai multi.
         </p>
 
+        <div className="mb-3 rounded-lg border border-border p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium">Rutare AI</span>
+            {aiSettings.error && <span className="text-[11px] text-red-600">{aiSettings.error}</span>}
+          </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => aiSettings.setMode("native")}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                aiSettings.mode === "native"
+                  ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Native
+            </button>
+            <button
+              type="button"
+              onClick={() => aiSettings.setMode("openrouter")}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                aiSettings.mode === "openrouter"
+                  ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              OpenRouter
+            </button>
+          </div>
+          {aiSettings.mode === "openrouter" && (
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => aiSettings.setStack("western")}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                  aiSettings.stack === "western"
+                    ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Vestic
+              </button>
+              <button
+                type="button"
+                onClick={() => aiSettings.setStack("chinese")}
+                className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                  aiSettings.stack === "chinese"
+                    ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
+                    : "border-border bg-background text-muted-foreground hover:bg-muted"
+                }`}
+              >
+                Chinezesc
+              </button>
+            </div>
+          )}
+        </div>
+
         <AIUsagePanel />
         <NotificationStatusPanel />
         <EmailSettingsPanel />
 
         {/* AI providers — side-by-side */}
-        <div className="mb-3 grid grid-cols-3 gap-3">
-          <div className="rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm font-medium flex items-center gap-1.5">
+        {aiSettings.mode === "native" ? (
+          <div className="mb-3 grid grid-cols-3 gap-3">
+            <div className="rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-medium flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
+                  Anthropic
+                </span>
+                {hasAnthropic && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+              </div>
+              <input
+                type="password"
+                placeholder={hasAnthropic ? "Cheie noua..." : "sk-ant-api03-..."}
+                value={keyInputs.anthropic}
+                onChange={(e) => setKeyInputs({ ...keyInputs, anthropic: e.target.value })}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+              />
+              {hasAnthropic && (
+                <button
+                  type="button"
+                  className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                  onClick={() => {
+                    clearKey("anthropic");
+                  }}
+                >
+                  Sterge cheia
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-medium flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                  OpenAI
+                </span>
+                {hasOpenai && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+              </div>
+              <input
+                type="password"
+                placeholder={hasOpenai ? "Cheie noua..." : "sk-proj-..."}
+                value={keyInputs.openai}
+                onChange={(e) => setKeyInputs({ ...keyInputs, openai: e.target.value })}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+              />
+              {hasOpenai && (
+                <button
+                  type="button"
+                  className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                  onClick={() => {
+                    clearKey("openai");
+                  }}
+                >
+                  Sterge cheia
+                </button>
+              )}
+            </div>
+
+            <div className="rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-sm font-medium flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                  Google
+                </span>
+                {hasGoogle && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+              </div>
+              <input
+                type="password"
+                placeholder={hasGoogle ? "Cheie noua..." : "AIza..."}
+                value={keyInputs.google}
+                onChange={(e) => setKeyInputs({ ...keyInputs, google: e.target.value })}
+                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+              />
+              {hasGoogle && (
+                <button
+                  type="button"
+                  className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                  onClick={() => {
+                    clearKey("google");
+                  }}
+                >
+                  Sterge cheia
+                </button>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="mb-3 rounded-lg border border-border p-3">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="flex items-center gap-1.5 text-sm font-medium">
                 <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
-                Anthropic
+                OpenRouter API Key
               </span>
-              {hasAnthropic && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+              {hasOpenrouter && <span className="text-[11px] font-medium text-green-600">Activa</span>}
             </div>
             <input
               type="password"
-              placeholder={hasAnthropic ? "Cheie noua..." : "sk-ant-api03-..."}
-              value={keyInputs.anthropic}
-              onChange={(e) => setKeyInputs({ ...keyInputs, anthropic: e.target.value })}
+              placeholder={hasOpenrouter ? "Cheie noua..." : "sk-or-v1-..."}
+              value={keyInputs.openrouter}
+              onChange={(e) => setKeyInputs({ ...keyInputs, openrouter: e.target.value })}
               className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
             />
-            {hasAnthropic && (
+            {hasOpenrouter && (
               <button
                 type="button"
                 className="mt-1.5 text-[11px] text-red-500 hover:underline"
                 onClick={() => {
-                  clearKey("anthropic");
+                  clearKey("openrouter");
                 }}
               >
                 Sterge cheia
               </button>
             )}
           </div>
-
-          <div className="rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm font-medium flex items-center gap-1.5">
-                <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-                OpenAI
-              </span>
-              {hasOpenai && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
-            </div>
-            <input
-              type="password"
-              placeholder={hasOpenai ? "Cheie noua..." : "sk-proj-..."}
-              value={keyInputs.openai}
-              onChange={(e) => setKeyInputs({ ...keyInputs, openai: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-            />
-            {hasOpenai && (
-              <button
-                type="button"
-                className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                onClick={() => {
-                  clearKey("openai");
-                }}
-              >
-                Sterge cheia
-              </button>
-            )}
-          </div>
-
-          <div className="rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm font-medium flex items-center gap-1.5">
-                <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
-                Google
-              </span>
-              {hasGoogle && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
-            </div>
-            <input
-              type="password"
-              placeholder={hasGoogle ? "Cheie noua..." : "AIza..."}
-              value={keyInputs.google}
-              onChange={(e) => setKeyInputs({ ...keyInputs, google: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-            />
-            {hasGoogle && (
-              <button
-                type="button"
-                className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                onClick={() => {
-                  clearKey("google");
-                }}
-              >
-                Sterge cheia
-              </button>
-            )}
-          </div>
-        </div>
+        )}
 
         {/* Captcha provider selector */}
         <div className="mb-3 rounded-lg border border-border p-3">
