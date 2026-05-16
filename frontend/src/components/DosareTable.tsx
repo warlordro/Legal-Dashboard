@@ -79,7 +79,6 @@ export function DosareTable({
   const [showKeyPrompt, setShowKeyPrompt] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
-  const [_hiddenAnalysis, _setHiddenAnalysis] = useState<Set<string>>(new Set());
   const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
   // Per-dosar monitor state: pending = request in flight, "added" / "exists" /
   // error message. Lives in component state so feedback is local to the row;
@@ -172,7 +171,6 @@ export function DosareTable({
   }, [expandedIdx]);
 
   // Multi-agent state
-  const [_multiMode, _setMultiMode] = useState(false);
   const [multiAnalysts, setMultiAnalysts] = useState<[string, string]>(["claude-sonnet", "gpt-5.4-mini"]);
   const [multiJudge, setMultiJudge] = useState<string>("claude-opus");
   const [multiLoading, setMultiLoading] = useState<string | null>(null);
