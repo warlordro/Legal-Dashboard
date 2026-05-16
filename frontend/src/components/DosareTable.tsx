@@ -39,6 +39,7 @@ import {
   getPortalJustUrl,
 } from "@/components/dosare-table-helpers";
 import { useViewedDosareSession } from "@/hooks/useViewedDosareSession";
+import { useDosareSelection } from "@/hooks/useDosareSelection";
 
 interface ApiKeys {
   anthropic: string;
@@ -78,7 +79,6 @@ export function DosareTable({
   const [aiError, setAiError] = useState<string | null>(null);
   const [aiModel, setAiModel] = useState<string>("claude-sonnet");
   const [showKeyPrompt, setShowKeyPrompt] = useState(false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
   // Per-dosar monitor state: pending = request in flight, "added" / "exists" /
@@ -346,27 +346,7 @@ export function DosareTable({
 
   const colCount = 8;
 
-  const toggleSelect = (numar: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(numar)) next.delete(numar);
-      else next.add(numar);
-      return next;
-    });
-  };
-
-  const allPageSelected = paged.length > 0 && paged.every((d) => selected.has(d.numar));
-  const toggleSelectAll = () => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allPageSelected) {
-        for (const d of paged) next.delete(d.numar);
-      } else {
-        for (const d of paged) next.add(d.numar);
-      }
-      return next;
-    });
-  };
+  const { selected, toggleSelect, toggleSelectAll, clearSelection, allPageSelected } = useDosareSelection(paged);
 
   const getExportDosare = (): Dosar[] => {
     if (selected.size === 0) return dosare;
@@ -388,7 +368,7 @@ export function DosareTable({
             <button
               type="button"
               className="text-xs text-muted-foreground hover:text-foreground underline"
-              onClick={() => setSelected(new Set())}
+              onClick={clearSelection}
             >
               Deselecteaza tot
             </button>
