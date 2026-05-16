@@ -82,6 +82,8 @@ export const JUDGE_MODELS_LIST: AiModelDef[] = [
     color: "blue",
     desc: "Premium",
   },
+  { key: "glm-5.1", label: "GLM 5.1", provider: "openrouter", stack: "chinese", color: "rose", desc: "Premium" },
+  { key: "kimi-k2.6", label: "Kimi K2.6", provider: "openrouter", stack: "chinese", color: "cyan", desc: "Premium" },
   {
     key: "qwen-3.6-max",
     label: "Qwen 3.6 Max",

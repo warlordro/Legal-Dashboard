@@ -31,7 +31,7 @@ export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: str
   "qwen-3.6-max": { provider: "openrouter", modelId: "qwen/qwen3.6-max-preview", stack: "chinese" },
 };
 
-export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3", "qwen-3.6-max"];
+export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3", "glm-5.1", "kimi-k2.6", "qwen-3.6-max"];
 
 export const OPENROUTER_WESTERN_MAP: Record<string, string> = {
   "claude-haiku": "anthropic/claude-haiku-4.5",
@@ -72,9 +72,37 @@ const TRUNCATE_ANALYSIS = 50000;
 const TRUNCATE_FIELD = 200;
 
 // SECURITY: Timeout for AI API calls
-export const AI_TIMEOUT = 120000; // 120s per call — single analysis
+export const AI_TIMEOUT = 120000; // 120s per call — single analysis (native: Claude/GPT/Gemini)
 export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analysts + judge)
+// Chinese OpenRouter models (Qwen/GLM/Kimi) routinely take 90-180s per call —
+// provider queues + token throughput are much slower than native US providers.
+// Empirically observed: Qwen 3.6 Max -preview hit 120s+ on routine analyses
+// and Kimi K2.6 landed at ~87s. Bump defaults so the bottleneck stays at the
+// model, not the client.
+export const AI_TIMEOUT_CHINESE = 360000; // 360s per call — chinese OpenRouter single analysis
+// Kimi K2.6 (judge) cu cap 16k tokens consuma ~298s pe dosare medii (43 tok/s).
+// Cap-ul de 300s vechi expira la 1.8s margine. 480s acopera worst case ~16k tokens
+// + retele lente + spike-uri queue OpenRouter.
+export const AI_MULTI_TIMEOUT_CHINESE = 480000;
+
+// Auto-bump default timeouts for chinese stack. Custom timeouts (e.g. test
+// harness using 5000ms) flow through unchanged — only the two known defaults
+// get promoted to their chinese counterparts.
+function effectiveOpenRouterTimeout(timeout: number, stack: string): number {
+  if (stack !== "chinese") return timeout;
+  if (timeout === AI_TIMEOUT) return AI_TIMEOUT_CHINESE;
+  if (timeout === AI_MULTI_TIMEOUT) return AI_MULTI_TIMEOUT_CHINESE;
+  return timeout;
+}
 const AI_MAX_TOKENS = 8000; // max output tokens — increased from 3000 for complex dosare
+// Chinese OpenRouter models (Kimi K2.6 in special) consuma tokens pentru reasoning
+// inainte de raspuns final; cap-ul de 8000 e lovit constant cu finish_reason="length"
+// si raspunsul ramane gol sau trunchiat. 16000 lasa headroom pentru thinking + final.
+const AI_MAX_TOKENS_CHINESE = 16000;
+
+function effectiveOpenRouterMaxTokens(stack: string): number {
+  return stack === "chinese" ? AI_MAX_TOKENS_CHINESE : AI_MAX_TOKENS;
+}
 
 // SECURITY: Body size limit for AI endpoint (100KB max)
 export const MAX_AI_BODY_SIZE = 100 * 1024;
@@ -453,7 +481,8 @@ export async function callOpenRouter(
   timeout: number,
   tracking?: AiUsageTrackingContext,
   signal?: AbortSignal,
-  routingTag?: AiUsageRoutingTag
+  routingTag?: AiUsageRoutingTag,
+  maxTokens: number = AI_MAX_TOKENS
 ): Promise<string> {
   if (process.env.OPENROUTER_DISABLED === "1") {
     throw new Error("OPENROUTER_DISABLED");
@@ -476,7 +505,7 @@ export async function callOpenRouter(
         {
           model: slug,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: AI_MAX_TOKENS,
+          max_tokens: maxTokens,
           // @ts-expect-error OpenRouter extension for returning real per-call cost.
           extra_body: { usage: { include: true } },
         },
@@ -489,8 +518,21 @@ export async function callOpenRouter(
             cost?: number;
           }
         | undefined;
+      const choice = completion.choices?.[0];
+      const content = choice?.message?.content ?? "";
+      if (!content.trim()) {
+        // TEMP DIAG: capture shape of empty-content responses (thinking models like Kimi K2.6).
+        console.error(
+          "[openrouter_empty_content]",
+          slug,
+          "finish_reason:",
+          choice?.finish_reason,
+          "message:",
+          JSON.stringify(choice?.message).slice(0, 2000)
+        );
+      }
       return {
-        value: completion.choices?.[0]?.message?.content ?? "",
+        value: content,
         meta: {
           usageInput: usage?.prompt_tokens,
           usageOutput: usage?.completion_tokens,
@@ -569,7 +611,18 @@ export async function callModel(
     if (!apiKey) throw new Error("NO_API_KEY:openrouter");
     const slug = resolveOpenRouterSlug(modelKey, stack);
     if (!slug) throw new Error(`MODEL_NOT_IN_STACK:${modelKey}:${stack}`);
-    return callOpenRouter(apiKey, slug, prompt, timeout, tracking, signal, `openrouter:${stack}`);
+    const effectiveTimeout = effectiveOpenRouterTimeout(timeout, stack);
+    const effectiveMaxTokens = effectiveOpenRouterMaxTokens(stack);
+    return callOpenRouter(
+      apiKey,
+      slug,
+      prompt,
+      effectiveTimeout,
+      tracking,
+      signal,
+      `openrouter:${stack}`,
+      effectiveMaxTokens
+    );
   }
 
   const apiKey = getApiKey(model.provider, apiKeys);

@@ -4,6 +4,56 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.28.1] - 2026-05-16
+
+### Fix chinese stack OpenRouter + unificare layout dialog AI
+
+Release de bug fixes post-v2.28.0: cap-uri token + timeout neadaptate pentru
+modele chineze thinking (Kimi K2.6 lovea `finish_reason: "length"` la 8000
+tokens si analiza judecatorului ramanea goala), plus layout dialog Config
+chei API mai unitar.
+
+#### Per-stack max tokens + timeout-uri pentru chinese
+
+- `backend/src/services/ai.ts` adauga `AI_MAX_TOKENS_CHINESE = 16000` si
+  helper `effectiveOpenRouterMaxTokens(stack)` analog
+  `effectiveOpenRouterTimeout`. Kimi K2.6 e thinking model si consuma tokens
+  pentru reasoning inainte de raspuns; cap-ul de 8000 era lovit constant.
+- `AI_TIMEOUT_CHINESE`: 240s -> 360s, `AI_MULTI_TIMEOUT_CHINESE`: 300s -> 480s.
+  Kimi K2.6 (judecator) ajunge la ~298s pentru 13k tokens (43 tok/s); cap-ul
+  vechi expira la 1.8s margine.
+- `callOpenRouter` primeste `maxTokens` ca parametru optional (default
+  `AI_MAX_TOKENS`), plumb-uit din dispatch-ul `callAi` cu valoarea per-stack.
+  GLM 5.1 si Qwen 3.6 Max nu sunt afectate (termina natural sub 6k tokens).
+- Log diagnostic `[openrouter_empty_content]` adaugat ca tripwire pentru
+  viitoare regresii (fires doar daca `content.trim()` empty).
+
+#### Frontend timeout aliniat la backend chinese
+
+- `frontend/src/lib/api.ts`: `analyze-multi` AbortSignal bumpat 300s -> 1020s
+  (17 min) ca sa acopere analysts in parallel (480s) + judge (480s) + margine
+  retea. Cap-ul vechi cauza `BodyStreamBuffer was aborted` la run-uri chinese
+  chiar cand backend-ul livra cu succes.
+
+#### Whitelist judge models chinese complet
+
+- `backend/src/routes/ai.ts` + `backend/src/services/ai.ts`: `JUDGE_MODELS`
+  include `glm-5.1`, `kimi-k2.6`, `qwen-3.6-max` (era doar Qwen, dropdown
+  frontend permitea cei trei dar backend respingea cu `Model judecator
+  nepermis`).
+- Mesajul de eroare actualizat sa enumere toate cele 6 optiuni valide.
+
+#### Layout unitar config chei API
+
+- `frontend/src/components/ApiKeyDialog.tsx`: blocul "Rutare AI" (toggle
+  Native/OpenRouter + Vestic/Chinezesc) mutat adiacent cu blocul de chei API
+  providers, ca toata configurarea AI sa stea unitara vizual. Panourile
+  status (AI Usage, Notifications, Email) raman deasupra.
+
+#### Versionare si documentatie
+
+- Bump manifest/lockfile la `2.28.1` si intrare noua in changelog-ul in-app.
+
 ## [2.28.0] - 2026-05-16
 
 ### OpenRouter toggle cu stack vestic/chinezesc pentru AI

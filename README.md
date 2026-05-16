@@ -7,10 +7,17 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.28.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.28.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.28.0** - integrare OpenRouter in modulul AI. Adminul poate
+Ultimul release **v2.28.1** - bug fixes pentru stack chinezesc OpenRouter:
+`AI_MAX_TOKENS_CHINESE = 16000` (Kimi K2.6 e thinking model si lovea cap-ul
+de 8000 cu `finish_reason: length`), bump `AI_MULTI_TIMEOUT_CHINESE` 300s ->
+480s plus frontend timeout 1020s, completare whitelist judge models chinese
+(GLM 5.1 + Kimi K2.6) si unificare vizuala bloc Rutare AI + chei API in
+dialog-ul Configurare Chei.
+
+Predecesor **v2.28.0** - integrare OpenRouter in modulul AI. Adminul poate
 alege intre mode native (Anthropic/OpenAI/Google, flow existent) si mode
 OpenRouter, cu stack vestic (mirror al modelelor native) sau chinezesc (GLM
 5.1, Kimi K2.6, Qwen 3.6 Max). Include tabela `owner_ai_settings`, extensie

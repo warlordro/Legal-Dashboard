@@ -39,6 +39,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.28.1",
+    date: "16 Mai 2026",
+    subtitle:
+      "Bug fixes pentru stack chinezesc OpenRouter: Kimi K2.6 (thinking model) lovea cap-ul de 8000 tokens si analiza judecatorului ramanea goala. Cap nou 16000 tokens dedicat chinese stack, timeout-uri bumpate 300s -> 480s (backend) si 300s -> 1020s (frontend), whitelist judge models complet (GLM 5.1 + Kimi K2.6), plus reorganizare layout dialog Config Chei API.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-rose-500",
+    badgeClass: "bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-300",
+    sections: [
+      {
+        title: "Cap tokens per-stack pentru thinking models",
+        content:
+          "AI_MAX_TOKENS_CHINESE = 16000 (vs 8000 western). Kimi K2.6 e thinking model si consuma tokens pentru reasoning inainte de raspuns; cap-ul de 8000 era lovit constant (finish_reason: length, output trunchiat). GLM 5.1 si Qwen 3.6 Max termina natural sub 6k tokens, nu sunt impactate. Pattern: helper effectiveOpenRouterMaxTokens(stack), analog effectiveOpenRouterTimeout.",
+      },
+      {
+        title: "Timeout-uri aliniate cu realitatea chinese stack",
+        content:
+          "Backend: AI_TIMEOUT_CHINESE 240s -> 360s, AI_MULTI_TIMEOUT_CHINESE 300s -> 480s (Kimi K2.6 judge ajunge la ~298s pentru 13k tokens). Frontend: analyze-multi AbortSignal 300s -> 1020s (acopera analysts paralel 480s + judge 480s + margine retea). Cap-ul vechi cauza BodyStreamBuffer was aborted chiar cand backend-ul livra cu succes.",
+      },
+      {
+        title: "Whitelist judge models chinese complet",
+        content:
+          "JUDGE_MODELS include acum cele trei chinese (GLM 5.1, Kimi K2.6, Qwen 3.6 Max), nu doar Qwen. Dropdown-ul frontend si validarea backend sunt sincronizate; mesajul de eroare actualizat sa enumere toate cele 6 optiuni valide.",
+      },
+      {
+        title: "Layout dialog Config Chei API unitar",
+        content:
+          "Blocul Rutare AI (toggle Native/OpenRouter + Vestic/Chinezesc) mutat adiacent cu blocul de chei API providers, ca toata configurarea AI sa stea unitara vizual. Panourile status (AI Usage, Notifications, Email) raman deasupra.",
+      },
+    ],
+  },
+  {
     version: "v2.28.0",
     date: "16 Mai 2026",
     subtitle:

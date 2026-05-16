@@ -26,6 +26,10 @@ describe("dosare-ai-config availableModels", () => {
       "gpt-5.4",
       "gemini-pro-3",
     ]);
-    expect(availableJudgeModels("openrouter", "chinese").map((model) => model.key)).toEqual(["qwen-3.6-max"]);
+    expect(availableJudgeModels("openrouter", "chinese").map((model) => model.key)).toEqual([
+      "glm-5.1",
+      "kimi-k2.6",
+      "qwen-3.6-max",
+    ]);
   });
 });

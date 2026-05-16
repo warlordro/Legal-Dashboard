@@ -106,6 +106,11 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
           Introdu cheile API pentru furnizorii AI pe care doresti sa ii folosesti. Poti configura unul sau mai multi.
         </p>
 
+        <AIUsagePanel />
+        <NotificationStatusPanel />
+        <EmailSettingsPanel />
+
+        {/* AI config zone: routing + provider keys grouped vizual */}
         <div className="mb-3 rounded-lg border border-border p-3">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-sm font-medium">Rutare AI</span>
@@ -162,10 +167,6 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
             </div>
           )}
         </div>
-
-        <AIUsagePanel />
-        <NotificationStatusPanel />
-        <EmailSettingsPanel />
 
         {/* AI providers — side-by-side */}
         {aiSettings.mode === "native" ? (

@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.28.0** (16 Mai 2026, integrare OpenRouter pentru analiza AI: mode native ramane compatibil cu Anthropic/OpenAI/Google, iar mode OpenRouter adauga stack vestic mirror native si stack chinezesc premium cu GLM 5.1, Kimi K2.6 si Qwen 3.6 Max. Setarile sunt per owner in `owner_ai_settings`, usage-ul primeste `routing_tag`, multi-agent refuza mixarea stack-urilor, web mode foloseste doar `OPENROUTER_API_KEY` din env, iar `OPENROUTER_DISABLED=1` opreste OpenRouter fara fallback silent). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.28.1** (16 Mai 2026, bug fixes pentru stack chinezesc OpenRouter: `AI_MAX_TOKENS_CHINESE = 16000` (Kimi K2.6 thinking model lovea cap-ul 8000 cu `finish_reason: length`), bump `AI_MULTI_TIMEOUT_CHINESE` 300s -> 480s, frontend `analyze-multi` AbortSignal 300s -> 1020s, completare `JUDGE_MODELS` whitelist cu GLM 5.1 + Kimi K2.6 + Qwen 3.6 Max, unificare vizuala bloc Rutare AI + chei API in dialog Config Chei). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)

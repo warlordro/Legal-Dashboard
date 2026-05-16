@@ -118,7 +118,11 @@ export function useApiKey() {
         const enc = localStorage.getItem(ENC_KEY);
         if (enc) {
           const plain = await api.decryptKeys(enc);
-          if (plain) loaded = JSON.parse(plain) as ApiKeys;
+          // Merge over EMPTY so payloads written before a field was added to the
+          // schema (e.g. legacy ciphertext predating `openrouter`) still expose
+          // every key as an empty string instead of `undefined`. Without this,
+          // `keys.openrouter.length` throws on first render.
+          if (plain) loaded = { ...EMPTY, ...(JSON.parse(plain) as Partial<ApiKeys>) };
         }
       } catch {}
 
