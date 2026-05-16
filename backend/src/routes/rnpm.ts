@@ -121,6 +121,47 @@ export const rnpmRouter = new Hono();
 // owner-ul corect — singura schimbare de comportament pe desktop e zero
 // (continua sa scrie sub "local").
 const inflightRequests = new Map<string, Promise<unknown>>();
+const inflightTimers = new Map<string, ReturnType<typeof setTimeout>>();
+// Per-operation TTL ceiling: timeout-ul intern SSE + buffer 60s ca timer-ul
+// sa nu reaper-uiasca o cerere care e inca activa pe upstream-ul lent. /search
+// nu are timeout SSE intern, dar finally-ul curata oricum — TTL = safety net
+// pentru cazul patologic in care finally-ul nu apuca sa ruleze (proces SIGKILL,
+// finally-ul intra-n event loop iar GC kicks in, etc.).
+export const INFLIGHT_TTL_SEARCH_MS = 120_000;
+export const INFLIGHT_TTL_BULK_MS = SSE_TIMEOUT_MS + 60_000;
+export const INFLIGHT_TTL_SPLIT_MS = SSE_SPLIT_TIMEOUT_MS + 60_000;
+
+// Helperele NU schimba semantica existenta — sentinel-only invariant pe /bulk si /split
+// se pastreaza pentru ca setInflight ramane sincron (zero await intre has() si set()).
+// Timer-ul e doar un safety net: daca finally-ul nu apuca sa ruleze (proces SIGKILL
+// mid-stream, GC al promise-urilor leak-uite), TTL elimina automat cheia.
+export function setInflight(key: string, ttlMs: number, value: Promise<unknown>): void {
+  const existing = inflightTimers.get(key);
+  if (existing) clearTimeout(existing);
+  inflightRequests.set(key, value);
+  const timer = setTimeout(() => {
+    inflightTimers.delete(key);
+    inflightRequests.delete(key);
+  }, ttlMs);
+  timer.unref?.();
+  inflightTimers.set(key, timer);
+}
+
+export function clearInflight(key: string): void {
+  const timer = inflightTimers.get(key);
+  if (timer) {
+    clearTimeout(timer);
+    inflightTimers.delete(key);
+  }
+  inflightRequests.delete(key);
+}
+
+// Exportat doar pentru teste — ruteaza intern prin Map-ul de dedup, deci
+// reflecta exact ce vede branch-ul `inflightRequests.has(dedupKey)` din rute.
+export function hasInflight(key: string): boolean {
+  return inflightRequests.has(key);
+}
+
 function inflightKey(ownerId: string, clientRequestId: string): string {
   return `${ownerId}:${clientRequestId}`;
 }
@@ -225,7 +266,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
       createdSearchId = sid;
     },
   });
-  if (dedupKey) inflightRequests.set(dedupKey, run);
+  if (dedupKey) setInflight(dedupKey, INFLIGHT_TTL_SEARCH_MS, run);
 
   try {
     const result = await run;
@@ -272,7 +313,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     console.error("[rnpm/search]", msg);
     return internalError(c, msg);
   } finally {
-    if (dedupKey) inflightRequests.delete(dedupKey);
+    if (dedupKey) clearInflight(dedupKey);
   }
 });
 
@@ -447,7 +488,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     if (inflightRequests.has(dedupKey)) {
       return duplicateRequest(c, "Bulk deja in curs (dedup clientRequestId)");
     }
-    inflightRequests.set(dedupKey, Promise.resolve());
+    setInflight(dedupKey, INFLIGHT_TTL_BULK_MS, Promise.resolve());
   }
 
   return streamSSE(c, async (stream) => {
@@ -502,7 +543,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     } finally {
       clearTimeout(timeoutHandle);
       c.req.raw.signal?.removeEventListener?.("abort", onAbort);
-      if (dedupKey) inflightRequests.delete(dedupKey);
+      if (dedupKey) clearInflight(dedupKey);
     }
   });
 });
@@ -571,7 +612,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
     if (inflightRequests.has(dedupKey)) {
       return duplicateRequest(c, "Split deja in curs (dedup clientRequestId)");
     }
-    inflightRequests.set(dedupKey, Promise.resolve());
+    setInflight(dedupKey, INFLIGHT_TTL_SPLIT_MS, Promise.resolve());
   }
 
   return streamSSE(c, async (stream) => {
@@ -742,7 +783,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
     } finally {
       clearTimeout(timeoutHandle);
       c.req.raw.signal?.removeEventListener?.("abort", onAbort);
-      if (dedupKey) inflightRequests.delete(dedupKey);
+      if (dedupKey) clearInflight(dedupKey);
     }
   });
 });
