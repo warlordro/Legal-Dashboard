@@ -4,7 +4,7 @@
 
 CREATE TABLE ai_usage_new (
   id              INTEGER PRIMARY KEY AUTOINCREMENT,
-  owner_id        TEXT NOT NULL,
+  owner_id        TEXT NOT NULL DEFAULT 'local',
   ts              TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   provider        TEXT NOT NULL CHECK(provider IN ('anthropic','openai','google','openrouter')),
   model           TEXT NOT NULL CHECK(length(model) > 0),

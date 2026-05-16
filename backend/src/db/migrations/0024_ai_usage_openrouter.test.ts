@@ -46,8 +46,17 @@ describe("migration 0024_ai_usage_openrouter", () => {
     ).run("owner-a", provider, model, 10, 20, 30, "dosare");
   }
 
+  function expectOwnerDefaultLocal(): void {
+    const ownerColumn = db
+      .prepare("PRAGMA table_info(ai_usage)")
+      .all()
+      .find((column) => (column as { name: string }).name === "owner_id") as { dflt_value: string | null } | undefined;
+    expect(ownerColumn?.dflt_value).toBe("'local'");
+  }
+
   it("UP extinde CHECK provider la openrouter si adauga routing_tag", () => {
     db.exec(readSql("0024_ai_usage_openrouter.up.sql"));
+    expectOwnerDefaultLocal();
 
     insertUsage("openrouter", "qwen/qwen3.6-max-preview");
 
@@ -66,6 +75,7 @@ describe("migration 0024_ai_usage_openrouter", () => {
   it("DOWN restrange CHECK provider si refuza openrouter", () => {
     db.exec(readSql("0024_ai_usage_openrouter.up.sql"));
     db.exec(readSql("0024_ai_usage_openrouter.down.sql"));
+    expectOwnerDefaultLocal();
 
     expect(() => insertUsage("openrouter")).toThrow(/CHECK constraint/i);
     expect(() => insertUsage("anthropic", "claude-haiku")).not.toThrow();
