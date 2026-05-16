@@ -87,7 +87,7 @@ if (process.env.NODE_ENV !== "production") {
     "*",
     cors({
       origin: ["http://localhost:5173", "http://localhost:4173"],
-      allowMethods: ["GET", "POST", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
       // PR-9 M3: Bearer auth necesita ca preflight-ul sa permita Authorization,
       // altfel browser-ul dev (Vite) nu poate trimite token-ul dupa OPTIONS.
       allowHeaders: ["Content-Type", "Authorization"],
@@ -247,6 +247,7 @@ app.route("/api/termene", termeneRouter);
 app.route("/api/v1/dosare", dosareExportRouter);
 app.route("/api/v1/termene", termeneExportRouter);
 app.route("/api/ai", aiRouter);
+app.route("/api/v1/ai", aiRouter);
 app.route("/api/v1/ai-usage", aiUsageRouter);
 app.route("/api/v1/auth", authRouter);
 // PR-8: current-user profile (always mounted) + admin surface (gated by

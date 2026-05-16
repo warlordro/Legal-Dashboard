@@ -1,5 +1,6 @@
 import { Hono, type Context } from "hono";
 import { streamSSE } from "hono/streaming";
+import { z } from "zod";
 import {
   AI_MODELS,
   AI_MULTI_TIMEOUT,
@@ -8,13 +9,12 @@ import {
   MAX_AI_BODY_SIZE,
   buildJudgePrompt,
   buildPrompt,
-  callAnthropic,
-  callGoogle,
   callModel,
-  callOpenAI,
   getApiKey,
+  type AiRouting,
   validateAiBody,
 } from "../services/ai.ts";
+import { getSettings, upsertSettings } from "../db/ownerAiSettingsRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import type { AiUsageTrackingContext } from "../services/aiUsage.ts";
@@ -23,10 +23,15 @@ import { ErrorCodes, fail } from "../util/envelope.ts";
 
 export const aiRouter = new Hono();
 
+const aiSettingsSchema = z.object({
+  mode: z.enum(["native", "openrouter"]),
+  openrouter_stack: z.enum(["western", "chinese"]),
+});
+
 // In AUTH_MODE=web, BYOK via request body is refused: secrets transiting the
 // server contradict the server-side config direction (decizia #4 in roadmap —
 // AI keys centralizate in `.env` server). Operators must set ANTHROPIC_API_KEY
-// / OPENAI_API_KEY / GOOGLE_AI_KEY in env. Desktop loopback keeps BYOK via
+// / OPENAI_API_KEY / GOOGLE_AI_KEY / OPENROUTER_API_KEY in env. Desktop loopback keeps BYOK via
 // safeStorage IPC. Returns 501 (not 403) because the body shape is valid but
 // not implemented in this auth mode.
 function rejectApiKeysFromBodyInWebMode(c: Context, body: { apiKeys?: unknown }): Response | null {
@@ -39,7 +44,7 @@ function rejectApiKeysFromBodyInWebMode(c: Context, body: { apiKeys?: unknown })
   return c.json(
     fail(
       ErrorCodes.WEB_MODE_NOT_IMPLEMENTED,
-      "Cheile AI nu pot fi trimise in body in modul web. Configurati ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_KEY in env-ul serverului.",
+      "Cheile AI nu pot fi trimise in body in modul web. Configurati ANTHROPIC_API_KEY / OPENAI_API_KEY / GOOGLE_AI_KEY / OPENROUTER_API_KEY in env-ul serverului.",
       c
     ),
     501
@@ -85,6 +90,66 @@ function aiFailure(c: Context, message: string) {
   return c.json(fail(ErrorCodes.AI_ANALYSIS_FAILED, message, c), 500);
 }
 
+function missingApiKey(c: Context, provider: string) {
+  if (getAuthMode() === "web") {
+    return c.json(
+      fail(
+        ErrorCodes.WEB_MODE_NOT_IMPLEMENTED,
+        `AI indisponibil in modul web: configurati cheia ${provider.toUpperCase()} in env-ul serverului.`,
+        c
+      ),
+      501
+    );
+  }
+  return c.json(fail(ErrorCodes.MISSING_API_KEY, "NO_API_KEY", c), 400);
+}
+
+function getRouting(c: Context): AiRouting {
+  const settings = getSettings(getOwnerId(c));
+  return { mode: settings.mode, stack: settings.openrouter_stack };
+}
+
+function routesViaOpenRouter(modelKey: string, apiKeys: Record<string, string>, routing: AiRouting): boolean {
+  return (
+    routing.mode === "openrouter" ||
+    Boolean(process.env.OPENROUTER_API_KEY) ||
+    Boolean(apiKeys.openrouter?.startsWith("sk-or-")) ||
+    AI_MODELS[modelKey]?.provider === "openrouter"
+  );
+}
+
+function assertStackPurity(modelKeys: string[], stack: AiRouting["stack"]): string | null {
+  return modelKeys.find((key) => AI_MODELS[key]?.stack !== stack) ?? null;
+}
+
+aiRouter.get("/settings", (c) => {
+  const settings = getSettings(getOwnerId(c));
+  return c.json({
+    mode: settings.mode,
+    openrouter_stack: settings.openrouter_stack,
+  });
+});
+
+aiRouter.put("/settings", async (c) => {
+  let body: unknown;
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid.", c), 400);
+  }
+
+  const parsed = aiSettingsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail(ErrorCodes.INVALID_PARAMS, "Setari AI invalide.", c, parsed.error.issues), 400);
+  }
+
+  const settings = upsertSettings(getOwnerId(c), parsed.data);
+  return c.json({
+    mode: settings.mode,
+    openrouter_stack: settings.openrouter_stack,
+  });
+});
+
 // AI Analysis endpoint
 aiRouter.post("/analyze", async (c) => {
   try {
@@ -113,10 +178,18 @@ aiRouter.post("/analyze", async (c) => {
 
     // Get API key for the provider (env preferred, body fallback — see getApiKey)
     const keys = apiKeys;
-    const apiKey = getApiKey(selectedModel.provider, keys);
+    const routing = getRouting(c);
+    if (routing.mode === "openrouter" && selectedModel.stack !== routing.stack) {
+      return modelError(c, `Modelul ${modelKey || "claude-sonnet"} nu apartine stack-ului ${routing.stack}.`);
+    }
+
+    const requiredProvider = routesViaOpenRouter(modelKey || "claude-sonnet", keys, routing)
+      ? "openrouter"
+      : selectedModel.provider;
+    const apiKey = getApiKey(requiredProvider, keys);
 
     if (!apiKey) {
-      return c.json(fail(ErrorCodes.MISSING_API_KEY, "NO_API_KEY", c), 400);
+      return missingApiKey(c, requiredProvider);
     }
 
     const prompt = buildPrompt(dosar);
@@ -125,22 +198,7 @@ aiRouter.post("/analyze", async (c) => {
       requestId: getRequestId(c),
       feature: "dosar_summary",
     };
-    const dispatch: Record<
-      string,
-      (
-        key: string,
-        modelId: string,
-        prompt: string,
-        timeout: number,
-        tracking?: AiUsageTrackingContext
-      ) => Promise<string>
-    > = {
-      anthropic: callAnthropic,
-      openai: callOpenAI,
-      google: callGoogle,
-    };
-    const providerFn = dispatch[selectedModel.provider];
-    const text = providerFn ? await providerFn(apiKey, selectedModel.modelId, prompt, AI_TIMEOUT, tracking) : "";
+    const text = await callModel(modelKey || "claude-sonnet", prompt, keys, AI_TIMEOUT, tracking, undefined, routing);
 
     return c.json({ analysis: text });
   } catch (err: unknown) {
@@ -178,7 +236,10 @@ aiRouter.post("/analyze-multi", async (c) => {
     }
     if (!body.judge || typeof body.judge !== "string") return invalidParams(c, "Lipseste modelul judecator.");
     if (!JUDGE_MODELS.includes(body.judge))
-      return invalidParams(c, "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4 si Gemini 3.1 Pro.");
+      return invalidParams(
+        c,
+        "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro si Qwen 3.6 Max."
+      );
     if (!(body.judge in AI_MODELS)) return modelError(c, "Model judecator necunoscut.");
 
     // Validate apiKeys
@@ -196,6 +257,16 @@ aiRouter.post("/analyze-multi", async (c) => {
     const dosar = body.dosar as Record<string, unknown>;
     const analysts = body.analysts as string[];
     const judge = body.judge as string;
+    const routing = getRouting(c);
+    if (routing.mode === "openrouter") {
+      const wrongStackModel = assertStackPurity([...analysts, judge], routing.stack);
+      if (wrongStackModel) {
+        return c.json(
+          fail("STACK_MIX_FORBIDDEN", `Model ${wrongStackModel} nu apartine stack-ului ${routing.stack}`, c),
+          400
+        );
+      }
+    }
     const prompt = buildPrompt(dosar);
     const trackingBase = {
       ownerId: getOwnerId(c),
@@ -221,7 +292,8 @@ aiRouter.post("/analyze-multi", async (c) => {
             ...trackingBase,
             feature: "dosar_multi_analyst",
           },
-          analystsAbort.signal
+          analystsAbort.signal,
+          routing
         ).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 1 }) });
           return text;
@@ -235,7 +307,8 @@ aiRouter.post("/analyze-multi", async (c) => {
             ...trackingBase,
             feature: "dosar_multi_analyst",
           },
-          analystsAbort.signal
+          analystsAbort.signal,
+          routing
         ).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
@@ -252,10 +325,18 @@ aiRouter.post("/analyze-multi", async (c) => {
         // Phase 3: judge reconciliation.
         await stream.writeSSE({ event: "judge_started", data: "{}" });
         const judgePrompt = buildJudgePrompt(dosar, analysisA, analysts[0], analysisB, analysts[1]);
-        const finalAnalysis = await callModel(judge, judgePrompt, keys, AI_MULTI_TIMEOUT, {
-          ...trackingBase,
-          feature: "dosar_multi_judge",
-        });
+        const finalAnalysis = await callModel(
+          judge,
+          judgePrompt,
+          keys,
+          AI_MULTI_TIMEOUT,
+          {
+            ...trackingBase,
+            feature: "dosar_multi_judge",
+          },
+          undefined,
+          routing
+        );
 
         await stream.writeSSE({
           event: "done",
