@@ -18,17 +18,10 @@ import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
 import { formatDate, formatDocumentSedinta } from "@/lib/utils";
-import { api } from "@/lib/api";
 import type { Dosar } from "@/types";
 import { exportAnalysisPDF } from "@/lib/export-analysis";
 import { TablePagination } from "@/components/table-pagination";
-import {
-  AI_MODELS,
-  availableJudgeModels as getAvailableJudgeModels,
-  availableModels as getAvailableModels,
-  type AiMode,
-  type OpenRouterStack,
-} from "@/components/dosare-ai-config";
+import type { AiMode, OpenRouterStack } from "@/components/dosare-ai-config";
 import { DosareAiAnalysisPanel } from "@/components/dosare-ai-analysis-panel";
 import { stripDiacritics, HighlightName } from "@/components/dosare-table-highlight";
 import {
@@ -41,6 +34,7 @@ import {
 import { useViewedDosareSession } from "@/hooks/useViewedDosareSession";
 import { useDosareSelection } from "@/hooks/useDosareSelection";
 import { useMonitorRowState } from "@/hooks/useMonitorRowState";
+import { useDosareAi } from "@/hooks/useDosareAi";
 
 interface ApiKeys {
   anthropic: string;
@@ -75,17 +69,12 @@ export function DosareTable({
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc");
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(15);
-  const [aiAnalysis, setAiAnalysis] = useState<Record<string, string>>({});
-  const [aiLoading, setAiLoading] = useState<string | null>(null);
-  const [aiError, setAiError] = useState<string | null>(null);
-  const [aiModel, setAiModel] = useState<string>("claude-sonnet");
-  const [showKeyPrompt, setShowKeyPrompt] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
-  const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
 
   const { monitorState, handleMonitor } = useMonitorRowState();
   const { viewedDosare, markAsViewed } = useViewedDosareSession();
+  const { ai, multiForRow } = useDosareAi({ apiKeys, aiSettings });
 
   // Auto-scroll to expanded row details
   useEffect(() => {
@@ -118,173 +107,6 @@ export function DosareTable({
     }, 50);
     return () => clearTimeout(timer);
   }, [expandedIdx]);
-
-  // Multi-agent state
-  const [multiAnalysts, setMultiAnalysts] = useState<[string, string]>(["claude-sonnet", "gpt-5.4-mini"]);
-  const [multiJudge, setMultiJudge] = useState<string>("claude-opus");
-  const [multiLoading, setMultiLoading] = useState<string | null>(null);
-  const [multiResult, setMultiResult] = useState<
-    Record<
-      string,
-      {
-        analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
-        judge: { model: string; text: string };
-        final: string;
-      }
-    >
-  >({});
-  const [multiError, setMultiError] = useState<string | null>(null);
-  const [multiPhase, setMultiPhase] = useState<
-    Record<string, Set<"analyst1_done" | "analyst2_done" | "judge_started">>
-  >({});
-  const [showIndividual, setShowIndividual] = useState<Set<string>>(new Set());
-
-  const hasAnyKey =
-    aiSettings.mode === "openrouter"
-      ? Boolean(apiKeys?.openrouter)
-      : Boolean(apiKeys && (apiKeys.anthropic || apiKeys.openai || apiKeys.google));
-
-  const stackModels = getAvailableModels(aiSettings.mode, aiSettings.stack);
-  const stackJudgeModels = getAvailableJudgeModels(aiSettings.mode, aiSettings.stack);
-
-  const availableModels =
-    aiSettings.mode === "openrouter"
-      ? apiKeys?.openrouter
-        ? stackModels
-        : []
-      : stackModels.filter((m) => {
-          if (m.provider === "anthropic") return apiKeys?.anthropic;
-          if (m.provider === "openai") return apiKeys?.openai;
-          if (m.provider === "google") return apiKeys?.google;
-          return false;
-        });
-
-  const availableJudgeModels =
-    aiSettings.mode === "openrouter"
-      ? apiKeys?.openrouter
-        ? stackJudgeModels
-        : []
-      : stackJudgeModels.filter((m) => {
-          if (m.provider === "anthropic") return apiKeys?.anthropic;
-          if (m.provider === "openai") return apiKeys?.openai;
-          if (m.provider === "google") return apiKeys?.google;
-          return false;
-        });
-
-  // Group available models by provider
-  const providerGroups = availableModels.reduce(
-    (acc, m) => {
-      if (!acc[m.provider]) acc[m.provider] = [];
-      acc[m.provider].push(m);
-      return acc;
-    },
-    {} as Record<string, typeof AI_MODELS>
-  );
-
-  useEffect(() => {
-    if (availableModels.length > 0 && !availableModels.some((model) => model.key === aiModel)) {
-      setAiModel(availableModels[0].key);
-    }
-    if (availableModels.length >= 2) {
-      setMultiAnalysts((prev) => {
-        const [first, second] = prev;
-        const firstOk = availableModels.some((model) => model.key === first);
-        const secondOk = availableModels.some((model) => model.key === second);
-        if (firstOk && secondOk && first !== second) return prev;
-        return [availableModels[0].key, availableModels[1].key];
-      });
-    }
-    if (availableJudgeModels.length > 0 && !availableJudgeModels.some((model) => model.key === multiJudge)) {
-      setMultiJudge(availableJudgeModels[0].key);
-    }
-  }, [aiModel, availableModels, availableJudgeModels, multiJudge]);
-
-  const handleAiAnalyze = async (dosar: Dosar) => {
-    if (!hasAnyKey) {
-      setShowKeyPrompt(true);
-      return;
-    }
-    // Check if selected model's provider has a key
-    const selectedModelDef = AI_MODELS.find((m) => m.key === aiModel);
-    if (selectedModelDef && !availableModels.find((m) => m.key === aiModel)) {
-      // Selected model's provider has no key - switch to first available
-      if (availableModels.length > 0) {
-        setAiModel(availableModels[0].key);
-      }
-      setShowKeyPrompt(true);
-      return;
-    }
-    const key = dosar.numar;
-    setAiLoading(key);
-    setAiError(null);
-    try {
-      const result = await api.ai.analyze(dosar, aiModel, apiKeys);
-      setAiAnalysis((prev) => ({ ...prev, [key]: result.analysis }));
-    } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : "Eroare la analiza AI";
-      if (msg.includes("401") || msg.includes("invalid") || msg.includes("authentication")) {
-        setAiError("Cheie API invalida. Verifica setarile.");
-      } else {
-        setAiError(msg);
-      }
-    } finally {
-      setAiLoading(null);
-    }
-  };
-
-  const handleMultiAnalyze = async (dosar: Dosar) => {
-    if (!hasAnyKey) {
-      setShowKeyPrompt(true);
-      return;
-    }
-    if (aiSettings.mode === "openrouter") {
-      if (!apiKeys?.openrouter) {
-        setMultiError("Lipseste cheia API pentru OpenRouter");
-        return;
-      }
-    } else {
-      const neededProviders = new Set<string>();
-      for (const m of [...multiAnalysts, multiJudge]) {
-        const modelDef = AI_MODELS.find((mod) => mod.key === m);
-        if (modelDef) neededProviders.add(modelDef.provider);
-      }
-      for (const provider of neededProviders) {
-        if (provider === "anthropic" && !apiKeys?.anthropic) {
-          setMultiError("Lipseste cheia API pentru Anthropic (Claude)");
-          return;
-        }
-        if (provider === "openai" && !apiKeys?.openai) {
-          setMultiError("Lipseste cheia API pentru OpenAI (GPT)");
-          return;
-        }
-        if (provider === "google" && !apiKeys?.google) {
-          setMultiError("Lipseste cheia API pentru Google (Gemini)");
-          return;
-        }
-      }
-    }
-    setMultiLoading(dosar.numar);
-    setMultiError(null);
-    setMultiPhase((prev) => ({ ...prev, [dosar.numar]: new Set() }));
-    try {
-      const result = await api.ai.analyzeMulti(dosar, multiAnalysts, multiJudge, apiKeys, (phase) => {
-        setMultiPhase((prev) => {
-          const next = new Set(prev[dosar.numar] ?? []);
-          next.add(phase);
-          return { ...prev, [dosar.numar]: next };
-        });
-      });
-      setMultiResult((prev) => ({ ...prev, [dosar.numar]: result }));
-    } catch (err: unknown) {
-      setMultiError(err instanceof Error ? err.message : "Eroare la analiza avansata");
-    } finally {
-      setMultiLoading(null);
-      setMultiPhase((prev) => {
-        const { [dosar.numar]: _, ...rest } = prev;
-        return rest;
-      });
-    }
-  };
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === "asc" ? "desc" : "asc"));
@@ -683,46 +505,8 @@ export function DosareTable({
                           <DosareAiAnalysisPanel
                             dosar={dosar}
                             apiKeys={apiKeys}
-                            ai={{
-                              analysis: aiAnalysis,
-                              loading: aiLoading,
-                              error: aiError,
-                              model: aiModel,
-                              setModel: setAiModel,
-                              showKeyPrompt,
-                              hasAnyKey: !!hasAnyKey,
-                              availableModels,
-                              availableJudgeModels,
-                              providerGroups,
-                              collapsed: collapsedAiConfig,
-                              toggleCollapsed: (key: string) =>
-                                setCollapsedAiConfig((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(key)) next.delete(key);
-                                  else next.add(key);
-                                  return next;
-                                }),
-                              onAnalyze: handleAiAnalyze,
-                            }}
-                            multi={{
-                              analysts: multiAnalysts,
-                              setAnalysts: setMultiAnalysts,
-                              judge: multiJudge,
-                              setJudge: setMultiJudge,
-                              loading: multiLoading,
-                              phase: multiPhase[dosar.numar],
-                              result: multiResult,
-                              error: multiError,
-                              showIndividual,
-                              toggleIndividual: (numar: string) =>
-                                setShowIndividual((prev) => {
-                                  const next = new Set(prev);
-                                  if (next.has(numar)) next.delete(numar);
-                                  else next.add(numar);
-                                  return next;
-                                }),
-                              onAnalyze: handleMultiAnalyze,
-                            }}
+                            ai={ai}
+                            multi={multiForRow(dosar.numar)}
                           />
                         </div>
                       </td>
