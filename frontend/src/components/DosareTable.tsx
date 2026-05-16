@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, Fragment } from "react";
+import { useState, useEffect, useRef, Fragment } from "react";
 import {
   ChevronDown,
   ChevronUp,
@@ -17,8 +17,8 @@ import {
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Card } from "./ui/card";
-import { formatDate, parseSqliteUtc, splitConcatenatedWords, formatDocumentSedinta } from "@/lib/utils";
-import { api, monitoring, MonitoringApiError } from "@/lib/api";
+import { formatDate, formatDocumentSedinta } from "@/lib/utils";
+import { api } from "@/lib/api";
 import type { Dosar } from "@/types";
 import { exportAnalysisPDF } from "@/lib/export-analysis";
 import { TablePagination } from "@/components/table-pagination";
@@ -40,6 +40,7 @@ import {
 } from "@/components/dosare-table-helpers";
 import { useViewedDosareSession } from "@/hooks/useViewedDosareSession";
 import { useDosareSelection } from "@/hooks/useDosareSelection";
+import { useMonitorRowState } from "@/hooks/useMonitorRowState";
 
 interface ApiKeys {
   anthropic: string;
@@ -81,40 +82,9 @@ export function DosareTable({
   const [showKeyPrompt, setShowKeyPrompt] = useState(false);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
-  // Per-dosar monitor state: pending = request in flight, "added" / "exists" /
-  // error message. Lives in component state so feedback is local to the row;
-  // the global Monitorizare page is the source of truth and is refreshed on visit.
-  const [monitorState, setMonitorState] = useState<Record<string, "pending" | "added" | "exists" | string>>({});
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
 
-  const handleMonitor = useCallback(
-    async (numar: string) => {
-      if (!numar || monitorState[numar] === "pending") return;
-      setMonitorState((prev) => ({ ...prev, [numar]: "pending" }));
-      try {
-        // client_request_id makes a double-click idempotent: backend returns the
-        // existing row instead of erroring or creating a duplicate.
-        const reqId = `dosar-${numar}-${Date.now()}`;
-        const job = await monitoring.createDosar({
-          numar_dosar: numar,
-          client_request_id: reqId,
-        });
-        // The backend returns 201 on fresh insert and 200 on target_hash collision;
-        // both are exposed as the same shape here, so we infer "exists" when the
-        // job's created_at predates the request by more than a few seconds.
-        const wasJustCreated = Date.now() - parseSqliteUtc(job.created_at).getTime() < 5000;
-        setMonitorState((prev) => ({
-          ...prev,
-          [numar]: wasJustCreated ? "added" : "exists",
-        }));
-      } catch (err) {
-        const msg = err instanceof MonitoringApiError ? err.message : err instanceof Error ? err.message : "Eroare";
-        setMonitorState((prev) => ({ ...prev, [numar]: msg }));
-      }
-    },
-    [monitorState]
-  );
-
+  const { monitorState, handleMonitor } = useMonitorRowState();
   const { viewedDosare, markAsViewed } = useViewedDosareSession();
 
   // Auto-scroll to expanded row details
