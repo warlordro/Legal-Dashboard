@@ -7,19 +7,15 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.27.5**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **2.28.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.27.5** - fix performanta filtrare RNPM. Cauza freeze-ului
-de ~8s pe filtrare cu input "2026" peste 148 rezultate: `buildResultsFilterClause`
-apela UDF-ul JS `rnpm_norm()` prin SQLite per rand x 24 coloane. Fix:
-materializare cu migration 0022 - 24 coloane `*_norm` populate de 10 triggere
-`AFTER INSERT/UPDATE OF` pe rnpm_avize/creditori/debitori/bunuri/bunuri_descrieri,
-plus backfill idempotent post-migration in schema.ts. Read-path
-(avizRepository.ts) citeste direct `col_norm` in loc sa apeleze UDF.
-Zero regresie functionala - aceleasi 24 coloane match, acelasi pattern LIKE,
-acelasi highlightTokens UI. 7 teste regresie noi acopera populare triggere +
-scenarii diacritice/JSON/4-char prefix.
+Ultimul release **v2.28.0** - integrare OpenRouter in modulul AI. Adminul poate
+alege intre mode native (Anthropic/OpenAI/Google, flow existent) si mode
+OpenRouter, cu stack vestic (mirror al modelelor native) sau chinezesc (GLM
+5.1, Kimi K2.6, Qwen 3.6 Max). Include tabela `owner_ai_settings`, extensie
+`ai_usage.routing_tag`, protectie `STACK_MIX_FORBIDDEN`, web mode env-only
+pentru `OPENROUTER_API_KEY` si kill switch `OPENROUTER_DISABLED=1`.
 
 Predecesor **v2.27.2** - fix UI: doua dialog-uri ("Inchide toate alertele
 filtrate?" din /alerte si popover-ul cu instante asociate din /monitorizare)

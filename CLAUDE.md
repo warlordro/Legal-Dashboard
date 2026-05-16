@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.27.5** - 16 Mai 2026
+**v2.28.0** - 16 Mai 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -88,6 +88,8 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - `npm run electron:dev` - porneste Electron (backend in-process pe 3002)
 - `npm run rebuild:electron` - recompileaza `better-sqlite3` pentru ABI-ul Electron dupa teste Node / `npm rebuild`
 - `npm run dev:backend` - backend standalone (pentru dev web)
+- `OPENROUTER_DISABLED=1` - kill switch operational pentru OpenRouter; call-urile OpenRouter esueaza imediat, fara fallback silent la native
+- `OPENROUTER_MODEL_OVERRIDES=modelKey:provider/slug` - hot-patch pentru slug-uri OpenRouter cand provider-ul redenumeste modele
 - `npm run dev:frontend` - Vite dev server pe 5173
 - `npm run build` - build productie (frontend + backend CJS)
 - `npm run dist` - electron-builder pentru Windows NSIS

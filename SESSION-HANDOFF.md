@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.27.4 (2026-05-15)
+**Versiune curenta**: v2.28.0 (2026-05-16)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -13,6 +13,8 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
 | `SMTP_HOST/PORT/USER/PASS/FROM` lipsesc sau invalide | `isMailerConfigured()` ramane `false`; dispatcher-ul scurt-circuiteaza inainte de SELECT, panoul UI arata "SMTP off" | Default desktop / mod degraded controlat |
 | `SMTP_SECURE=true\|false` | Forteaza TLS implicit/explicit; default = `port === 465` | Cand provider-ul SMTP cere STARTTLS pe 587 (`SMTP_SECURE=false`) sau implicit TLS pe 465 |
 | `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` | Scheduler-ul nu mai claim-uieste tipurile listate; joburile raman in DB, alertele existente raman accesibile | Stop temporar pe sursa upstream cu probleme (PortalJust SOAP rate-limit) |
+| `OPENROUTER_DISABLED=1` | `callOpenRouter` esueaza imediat si nu face fallback silent la native | Stop urgent daca OpenRouter are incident, billing risc sau policy drift |
+| `OPENROUTER_MODEL_OVERRIDES=modelKey:provider/slug` | Suprascrie slug-uri OpenRouter fara rebuild backend | Cand OpenRouter redenumeste un model sau muta un provider |
 | `RNPM_AUDIT_CAP_HIT_DISABLED=1` | `POST /api/v1/rnpm/search-split` sare INSERT-ul `rnpm.cap_hit` din `audit_log`; restul flow-ului (SSE, decision, captchasUsed) ruleaza neschimbat | Stop urgent daca tabela audit creste suspect sau introduce contention vizibil pe write |
 | `RNPM_RUNTIME_VALIDATION_ENFORCED=1` | Promoveaza validarea runtime RNPM de la `safeParse` + warning la fail loud pe payload invalid | Activare dupa o perioada stabila de observatie a raspunsurilor upstream |
 | `RNPM_RESULTS_FILTER_DISABLED=1` | Ruta POST `/api/rnpm/search/:searchId/filter` raspunde 503 cu `code: "FILTER_DISABLED"`; UI ascunde inputul si arata banner | Stop urgent daca filtrul provoaca contention DB sau bug regresat |

@@ -39,6 +39,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.28.0",
+    date: "16 Mai 2026",
+    subtitle:
+      "Integrare OpenRouter in modulul AI: toggle admin intre native si OpenRouter, stack vestic mirror native, stack chinezesc premium (GLM 5.1, Kimi K2.6, Qwen 3.6 Max), persistenta per owner si protectie impotriva mixarii stack-urilor in multi-agent.",
+    icon: <Layers className="h-5 w-5" />,
+    borderColor: "border-l-cyan-500",
+    badgeClass: "bg-cyan-100 text-cyan-900 dark:bg-cyan-900/30 dark:text-cyan-300",
+    sections: [
+      {
+        title: "Toggle AI native / OpenRouter",
+        content:
+          "Adminul poate pastra mode=native, cu flow-ul existent Anthropic/OpenAI/Google, sau poate comuta pe mode=openrouter. Cand OpenRouter este activ, UI-ul afiseaza un singur slot vizibil pentru OpenRouter API Key (sk-or-v1-...), iar sloturile native sunt unmounted complet.",
+      },
+      {
+        title: "Doua stack-uri OpenRouter",
+        content:
+          "Stack-ul vestic mirror-uieste modelele native prin OpenRouter. Stack-ul chinezesc expune trei modele premium: GLM 5.1, Kimi K2.6 si Qwen 3.6 Max. Model picker-ul filtreaza analistii si judecatorul dupa stack-ul activ.",
+      },
+      {
+        title: "Persistenta si audit usage",
+        content:
+          "Migration 0023 adauga owner_ai_settings per owner. Migration 0024 rebuild-uieste ai_usage ca sa accepte provider=openrouter si routing_tag, astfel incat costurile si ruta efectiva raman auditate.",
+      },
+      {
+        title: "Protectii operationale",
+        content:
+          "Multi-agent refuza mixarea stack-urilor cu STACK_MIX_FORBIDDEN. Web mode accepta OpenRouter doar prin OPENROUTER_API_KEY din env, iar OPENROUTER_DISABLED=1 opreste call-urile OpenRouter imediat, fara fallback silent la native.",
+      },
+    ],
+  },
+  {
     version: "v2.27.5",
     date: "16 Mai 2026",
     subtitle:

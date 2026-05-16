@@ -4,6 +4,48 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.28.0] - 2026-05-16
+
+### OpenRouter toggle cu stack vestic/chinezesc pentru AI
+
+Release de integrare AI routing: adminul poate pastra flow-ul native existent
+(Anthropic/OpenAI/Google) sau poate comuta pe OpenRouter, cu stack vestic
+mirror native si stack chinezesc premium (GLM 5.1, Kimi K2.6, Qwen 3.6 Max).
+
+#### Backend routing + persistenta per owner
+
+- Migration 0023 adauga `owner_ai_settings` cu `owner_id`, `mode` si
+  `openrouter_stack`, plus repository dedicat cu defaults `native/western`.
+- Migration 0024 rebuild-uieste `ai_usage` ca sa accepte provider
+  `openrouter` si coloana `routing_tag`, pastrand schema reala existenta.
+- `callOpenRouter` foloseste endpoint-ul OpenAI-compatible de la OpenRouter,
+  captureaza costul returnat in `usage.cost`, respecta abort/timeout si opreste
+  imediat pe `OPENROUTER_DISABLED=1`.
+
+#### Stack purity + web mode
+
+- `GET/PUT /api/v1/ai/settings` persista setarile AI per owner si pastreaza
+  ruta legacy `/api/ai/settings` pentru compatibilitate.
+- Multi-agent refuza mixarea stack-urilor cu 400 si
+  `error.code = "STACK_MIX_FORBIDDEN"`.
+- In web mode, cheile trimise in body raman refuzate; OpenRouter este permis
+  doar prin `OPENROUTER_API_KEY` server-side.
+
+#### UI admin si model picker
+
+- `ApiKeyDialog` afiseaza toggle pe doua niveluri: `Native` vs `OpenRouter`,
+  iar cand OpenRouter este activ arata un singur slot vizibil
+  `OpenRouter API Key` (`sk-or-v1-...`). Sloturile Anthropic/OpenAI/Google
+  sunt unmounted complet.
+- Model picker-ul filtreaza analistii si judecatorul dupa mode/stack. Qwen 3.6
+  Max este disponibil ca judge in stack-ul chinezesc.
+
+#### Versionare si documentatie
+
+- `.env.example` root + backend documenteaza `OPENROUTER_API_KEY`,
+  `OPENROUTER_DISABLED` si `OPENROUTER_MODEL_OVERRIDES`.
+- Bump manifest/lockfile la `2.28.0` si intrare noua in changelog-ul in-app.
+
 ## [2.27.5] - 2026-05-16
 
 ### Fix performanta filtrare RNPM + RNPM details concurrency bump + diagnostic captcha race
