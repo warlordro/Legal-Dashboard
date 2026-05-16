@@ -38,6 +38,7 @@ import {
   formatInstitutie,
   getPortalJustUrl,
 } from "@/components/dosare-table-helpers";
+import { useViewedDosareSession } from "@/hooks/useViewedDosareSession";
 
 interface ApiKeys {
   anthropic: string;
@@ -114,29 +115,7 @@ export function DosareTable({
     [monitorState]
   );
 
-  // Track viewed (expanded) dosare — persist in sessionStorage
-  const [viewedDosare, setViewedDosare] = useState<Set<string>>(() => {
-    try {
-      const saved = sessionStorage.getItem("viewedDosare");
-      return saved ? new Set(JSON.parse(saved)) : new Set();
-    } catch {
-      return new Set();
-    }
-  });
-
-  const markAsViewed = useCallback((numar: string) => {
-    setViewedDosare((prev) => {
-      if (prev.has(numar)) return prev;
-      const next = new Set(prev);
-      next.add(numar);
-      try {
-        sessionStorage.setItem("viewedDosare", JSON.stringify([...next]));
-      } catch {
-        /* sessionStorage unavailable; visited-markers are best-effort */
-      }
-      return next;
-    });
-  }, []);
+  const { viewedDosare, markAsViewed } = useViewedDosareSession();
 
   // Auto-scroll to expanded row details
   useEffect(() => {
