@@ -172,6 +172,20 @@ function parseClientRequestId(body: Record<string, unknown> | null): string | nu
   return v;
 }
 
+// Body parse helper: returns parsed JSON or null on parse failure / literal-null body.
+// Caller-ul early-return-uie cu invalidJson(c) la null. Literal `null` body era anterior
+// coerced la `{}` via `(body ?? {})`; e nonsens semantic pe rutele astea, deci e OK
+// sa-l respingem ca input invalid. Convention: returneaza null in loc sa throw, matching
+// parseClientRequestId mai sus.
+async function parseJsonBody(c: import("hono").Context): Promise<unknown | null> {
+  try {
+    const body = await c.req.json();
+    return body == null ? null : body;
+  } catch {
+    return null;
+  }
+}
+
 // Web-readiness closure (#12): in `desktop` mode, `captchaKey` vine din
 // safeStorage in renderer si e trimis cu fiecare request — comportament
 // pastrat. In `web` mode browserul nu trebuie sa puna cheia in body
@@ -194,12 +208,8 @@ function rejectCaptchaKeyInWebMode(c: import("hono").Context): Response | null {
 rnpmRouter.post("/search", limitSearch, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const {
     type,
     params,
@@ -351,12 +361,8 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
   }
   const searchId = sidParsed.data;
 
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const parsed = FilterBodySchema.safeParse(body);
   if (!parsed.success) {
     return invalidParams(c, parsed.error.issues[0]?.message ?? "Body invalid");
@@ -436,12 +442,8 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
 rnpmRouter.post("/bulk", limitBulk, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const { items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as {
     items?: unknown;
     captchaKey?: unknown;
@@ -558,12 +560,8 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
 rnpmRouter.post("/search-split", limitSearch, async (c) => {
   const webGate = rejectCaptchaKeyInWebMode(c);
   if (webGate) return webGate;
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const { type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ??
     {}) as {
     type?: unknown;
@@ -844,12 +842,8 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin"), (c) 
 });
 
 rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const { ids } = (body ?? {}) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
@@ -944,12 +938,8 @@ rnpmRouter.get("/backups", requireRole("admin"), async (c) => {
 });
 
 rnpmRouter.post("/backups/restore", requireRole("admin"), limitSmall, async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const name = (body as { name?: unknown })?.name;
   if (typeof name !== "string" || name.length === 0) {
     return invalidParams(c, "Nume backup lipsa");
@@ -1005,12 +995,8 @@ rnpmRouter.delete("/saved/:id", (c) => {
 });
 
 rnpmRouter.post("/saved/export", limitExport, async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const { ids } = (body ?? {}) as { ids?: unknown };
   if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
@@ -1026,12 +1012,8 @@ rnpmRouter.post("/saved/export", limitExport, async (c) => {
 // Body: { ids: number[]; searchType?: string }. Same 5000-id cap as /saved/export.
 // `searchType` controls layout (sheet count + columns) for "specifice" vs others.
 rnpmRouter.post("/saved/export.xlsx", limitExport, async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const { ids, searchType } = (body ?? {}) as { ids?: unknown; searchType?: unknown };
   if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
@@ -1069,12 +1051,8 @@ rnpmRouter.post("/saved/export.xlsx", limitExport, async (c) => {
 });
 
 rnpmRouter.post("/saved/export.pdf", limitExport, async (c) => {
-  let body: unknown;
-  try {
-    body = await c.req.json();
-  } catch {
-    return invalidJson(c);
-  }
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
   const { ids, searchType } = (body ?? {}) as { ids?: unknown; searchType?: unknown };
   if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
