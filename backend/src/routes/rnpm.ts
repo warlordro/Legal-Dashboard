@@ -34,6 +34,15 @@ function parseProvider(v: unknown): CaptchaProvider | undefined {
   return v === "capsolver" || v === "2captcha" ? v : undefined;
 }
 
+// Captcha key validation predicate: rejects empty / whitespace-only / sub-10-char
+// strings. Length 10 e arbitrar dar prinde tipic erori (gol, "DEMO", "test").
+// Folosit pe /search, /bulk si /search-split (POST cu corp normal). Ruta
+// /captcha/balance pastreaza validare doar `typeof === "string"` ca sa nu
+// blocheze diagnostic-ul cand cheia e introdusa partial.
+function isValidCaptchaKey(input: unknown): input is string {
+  return typeof input === "string" && input.trim().length >= 10;
+}
+
 // Body size limits — prevent DoS via oversized POST payloads
 const SEARCH_BODY_LIMIT = 64 * 1024; // 64KB: single search params
 const BULK_BODY_LIMIT = 512 * 1024; // 512KB: up to 200 bulk items
@@ -245,9 +254,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   if (!params || typeof params !== "object") return invalidParams(c, "Parametri cautare lipsa");
   const paramsErr = validateParamsDepth(params);
   if (paramsErr) return invalidParams(c, paramsErr);
-  if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
-    return invalidCaptchaKey(c);
-  }
+  if (!isValidCaptchaKey(captchaKey)) return invalidCaptchaKey(c);
   const provider = parseProvider(captchaProvider);
   const startPage = typeof startRnpmPage === "number" && startRnpmPage >= 1 && startRnpmPage <= 500 ? startRnpmPage : 1;
   const batch = typeof batchSize === "number" && batchSize >= 1 && batchSize <= 200 ? batchSize : 25;
@@ -461,9 +468,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
 
   if (!Array.isArray(items) || items.length === 0) return invalidParams(c, "Lista cautari goala");
   if (items.length > 200) return invalidParams(c, "Maxim 200 cautari per bulk");
-  if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
-    return invalidCaptchaKey(c);
-  }
+  if (!isValidCaptchaKey(captchaKey)) return invalidCaptchaKey(c);
   const provider = parseProvider(captchaProvider);
 
   const ownerId = getOwnerId(c);
@@ -603,9 +608,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   if (canonicalErr) {
     return invalidParams(c, canonicalErr);
   }
-  if (typeof captchaKey !== "string" || captchaKey.trim().length < 10) {
-    return invalidCaptchaKey(c);
-  }
+  if (!isValidCaptchaKey(captchaKey)) return invalidCaptchaKey(c);
   const provider = parseProvider(captchaProvider);
 
   const ownerId = getOwnerId(c);
