@@ -120,6 +120,13 @@ export const rnpmRouter = new Hono();
 // `executeSearch`/`executeBulkSearch` ca service-ul + repo-urile sa scrie sub
 // owner-ul corect — singura schimbare de comportament pe desktop e zero
 // (continua sa scrie sub "local").
+//
+// ANCHOR (web cutover): Map-ul este process-local. Pe desktop e suficient (un
+// singur proces backend), dar in web mode cu mai multe instante backend acelasi
+// (ownerId, dedupKey) ar putea sa ruleze de doua ori in paralel. Decizia
+// distributed-store (Redis SETNX / Postgres advisory lock) este deferred la
+// PR-11+ cutover-ul web — vezi PLAN-monitoring-webmode.md. Pana atunci, fara
+// fallback distribuit aici.
 const inflightRequests = new Map<string, Promise<unknown>>();
 const inflightTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // Per-operation TTL ceiling: timeout-ul intern SSE + buffer 60s ca timer-ul
