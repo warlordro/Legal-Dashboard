@@ -1,4 +1,4 @@
-import { MonitoringApiError, alertsSeenBulkRequest, apiFetch } from "@/lib/api";
+import { MonitoringApiError, alertsSeenBulkRequest, apiFetch, unwrapMonitoring } from "@/lib/api";
 
 export type AlertKind =
   | "dosar_new"
@@ -50,35 +50,15 @@ export interface AlertsListResult {
   unread: number;
 }
 
-interface EnvelopeOk<T> {
-  data: T;
-  requestId: string;
-  error?: undefined;
-}
-interface EnvelopeError {
+// Local envelope error shape used only by unwrapAlertBlob (the JSON parser
+// detects an error envelope before falling through to res.blob()). Kept inline
+// — exporting `MonitoringEnvelopeError` from api.ts would expose internals
+// without a benefit beyond this single call site.
+type EnvelopeError = {
   data: null;
   error: { code: string; message: string; details?: unknown };
   requestId: string;
-}
-
-async function unwrapAlerts<T>(res: Response): Promise<T> {
-  let body: EnvelopeOk<T> | EnvelopeError;
-  try {
-    body = (await res.json()) as EnvelopeOk<T> | EnvelopeError;
-  } catch {
-    throw new MonitoringApiError("invalid_response", "Raspuns invalid de la server.", res.status);
-  }
-  if (!res.ok || (body as EnvelopeError).error) {
-    const err = (body as EnvelopeError).error;
-    throw new MonitoringApiError(
-      err?.code ?? "unknown_error",
-      err?.message ?? "Eroare necunoscuta",
-      res.status,
-      err?.details
-    );
-  }
-  return (body as EnvelopeOk<T>).data;
-}
+};
 
 function parseFilenameFromContentDisposition(header: string | null, fallback: string): string {
   if (!header) return fallback;
@@ -170,27 +150,27 @@ export const alertsApi = {
     if (params.to) search.set("to", params.to);
     const qs = search.toString();
     const res = await apiFetch(`/api/v1/alerts${qs ? `?${qs}` : ""}`, { signal: params.signal });
-    return unwrapAlerts<AlertsListResult>(res);
+    return unwrapMonitoring<AlertsListResult>(res);
   },
 
   markSeen: async (id: number): Promise<MonitoringAlert> => {
     const res = await apiFetch(`/api/v1/alerts/${id}/seen`, { method: "PATCH" });
-    return unwrapAlerts<MonitoringAlert>(res);
+    return unwrapMonitoring<MonitoringAlert>(res);
   },
 
   markUnseen: async (id: number): Promise<MonitoringAlert> => {
     const res = await apiFetch(`/api/v1/alerts/${id}/unseen`, { method: "PATCH" });
-    return unwrapAlerts<MonitoringAlert>(res);
+    return unwrapMonitoring<MonitoringAlert>(res);
   },
 
   markAlertsSeen: async (ids: number[]): Promise<MonitoringAlert[]> => {
     const res = await alertsSeenBulkRequest(ids);
-    return unwrapAlerts<MonitoringAlert[]>(res);
+    return unwrapMonitoring<MonitoringAlert[]>(res);
   },
 
   dismiss: async (id: number): Promise<MonitoringAlert> => {
     const res = await apiFetch(`/api/v1/alerts/${id}/dismissed`, { method: "PATCH" });
-    return unwrapAlerts<MonitoringAlert>(res);
+    return unwrapMonitoring<MonitoringAlert>(res);
   },
 
   exportAlerts: async (payload: AlertExportRequest, signal?: AbortSignal): Promise<AlertExportResult> => {
@@ -200,7 +180,7 @@ export const alertsApi = {
       body: JSON.stringify(payload),
       signal,
     });
-    return unwrapAlerts<AlertExportResult>(res);
+    return unwrapMonitoring<AlertExportResult>(res);
   },
 
   alertsExportXlsxBlob: async (
@@ -242,7 +222,7 @@ export const alertsApi = {
       body: JSON.stringify(payload),
       signal,
     });
-    return unwrapAlerts<AlertDismissBulkResult>(res);
+    return unwrapMonitoring<AlertDismissBulkResult>(res);
   },
 };
 
