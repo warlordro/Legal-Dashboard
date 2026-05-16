@@ -1,5 +1,6 @@
 import { getDb } from "./schema.ts";
 import { escapeLikeMeta } from "../util/textNormalize.ts";
+import { clampInt } from "../util/validation.ts";
 
 // Roles and statuses must match the CHECK constraints from
 // 0002_users_sessions_audit.up.sql. Drift here vs DDL would be caught by
@@ -40,15 +41,11 @@ const COLUMNS = "id, email, display_name, role, status, created_at, last_login_a
 // generous for an admin UI; total count is returned separately so the UI can
 // render pagination without re-querying.
 function clampLimit(limit: number | undefined): number {
-  const n = typeof limit === "number" && Number.isFinite(limit) ? Math.floor(limit) : 50;
-  if (n < 1) return 1;
-  if (n > 200) return 200;
-  return n;
+  return clampInt(limit, { min: 1, max: 200, def: 50 });
 }
 
 function clampOffset(offset: number | undefined): number {
-  const n = typeof offset === "number" && Number.isFinite(offset) ? Math.floor(offset) : 0;
-  return n < 0 ? 0 : n;
+  return clampInt(offset, { min: 0, max: Number.MAX_SAFE_INTEGER, def: 0 });
 }
 
 function buildWhere(opts: ListUsersOpts): { sql: string; params: (string | number)[] } {

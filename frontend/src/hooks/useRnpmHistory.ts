@@ -1,21 +1,12 @@
 import { useState, useCallback } from "react";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
+import { clearList, readList, writeList } from "./_localStorageList";
 
 const STORAGE_KEY = "legal-dashboard-rnpm-history";
 const MAX_ENTRIES = 15;
 
-function loadHistory(): RnpmSearchHistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(entries: RnpmSearchHistoryEntry[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
+const loadHistory = (): RnpmSearchHistoryEntry[] => readList<RnpmSearchHistoryEntry>(STORAGE_KEY);
+const saveHistory = (entries: RnpmSearchHistoryEntry[]) => writeList(STORAGE_KEY, entries);
 
 function buildLabel(type: RnpmSearchType, params: RnpmSearchParams): string {
   const parts: string[] = [];
@@ -60,7 +51,7 @@ export function useRnpmHistory() {
 
   const clearHistory = useCallback(() => {
     setHistory([]);
-    localStorage.removeItem(STORAGE_KEY);
+    clearList(STORAGE_KEY);
   }, []);
 
   return { history, addEntry, removeEntry, clearHistory };

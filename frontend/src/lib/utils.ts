@@ -40,12 +40,6 @@ export function formatDate(dateStr: string): string {
   }
 }
 
-export function formatDateTime(dateStr: string, timeStr?: string): string {
-  const date = formatDate(dateStr);
-  if (!timeStr) return date;
-  return `${date} ${timeStr}`;
-}
-
 export function formatBytes(n: number): string {
   if (n < 1024) return `${n} B`;
   const kb = n / 1024;

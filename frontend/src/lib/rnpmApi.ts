@@ -347,27 +347,8 @@ export async function rnpmRestoreBackup(name: string): Promise<{ preRestoreName:
   return jsonOrThrow<{ ok: true; preRestoreName: string }>(res);
 }
 
-// `rnpmExport` (detail fetch) chunkuieste transparent in loturi de 500 pentru a
-// limita memoria pe response-uri mari. Hard cap pentru blob xlsx/pdf e mai mare
-// (5000) — corespunde plafonului server din rnpm.ts.
-const EXPORT_BATCH_SIZE = 500;
+// Hard cap pentru blob xlsx/pdf — corespunde plafonului server din rnpm.ts.
 const EXPORT_BLOB_MAX = 5000;
-
-export async function rnpmExport(ids: number[]): Promise<{ items: RnpmAvizFull[] }> {
-  if (ids.length === 0) return { items: [] };
-  const all: RnpmAvizFull[] = [];
-  for (let i = 0; i < ids.length; i += EXPORT_BATCH_SIZE) {
-    const chunk = ids.slice(i, i + EXPORT_BATCH_SIZE);
-    const res = await apiFetch(`${BASE}/saved/export`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids: chunk }),
-    });
-    const { items } = await jsonOrThrow<{ items: RnpmAvizFull[] }>(res);
-    all.push(...items);
-  }
-  return { items: all };
-}
 
 // Server-side XLSX generation — backend builds the workbook from DB and streams
 // the file back. Replaces the frontend Web Worker build which OOM'd the renderer

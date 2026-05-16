@@ -12,6 +12,19 @@ const RATE_WINDOW = 60000;
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
+// Standard envelope for limiter failures (503 fail-closed, 429 throttle).
+// Inlined in fiecare loc inseamna o copie de envelope per branch (4x) — sub un singur helper se vede mai usor cand schema evolueaza.
+function fail(c: Context, status: 429 | 503, code: string, message: string): Response {
+  return c.json(
+    {
+      data: null,
+      error: { code, message },
+      requestId: c.get("requestId") ?? "",
+    },
+    status
+  );
+}
+
 export async function rateLimit(c: Context, next: Next): Promise<Response | undefined> {
   // SECURITY: rate-limit by real socket address. X-Forwarded-For is spoofable and
   // deliberately ignored. If the runtime cannot surface a remote address (proxy
@@ -19,14 +32,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   // would let a single misbehaving caller starve every other client.
   const ip = getConnInfo(c).remote.address;
   if (!ip) {
-    return c.json(
-      {
-        data: null,
-        error: { code: "origin_unavailable", message: "Origine indisponibila." },
-        requestId: c.get("requestId") ?? "",
-      },
-      503
-    );
+    return fail(c, 503, "origin_unavailable", "Origine indisponibila.");
   }
   const now = Date.now();
   // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit
@@ -54,17 +60,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   } else {
     entry.count += weight;
     if (entry.count > RATE_LIMIT) {
-      return c.json(
-        {
-          data: null,
-          error: {
-            code: "rate_limited",
-            message: "Prea multe cereri. Incercati din nou in cateva momente.",
-          },
-          requestId: c.get("requestId") ?? "",
-        },
-        429
-      );
+      return fail(c, 429, "rate_limited", "Prea multe cereri. Incercati din nou in cateva momente.");
     }
   }
 
@@ -137,14 +133,7 @@ function releasePreAuthAttempt(key: string): void {
 export async function preAuthRateLimit(c: Context, next: Next): Promise<Response | undefined> {
   const ip = getConnInfo(c).remote.address;
   if (!ip) {
-    return c.json(
-      {
-        data: null,
-        error: { code: "origin_unavailable", message: "Origine indisponibila." },
-        requestId: c.get("requestId") ?? "",
-      },
-      503
-    );
+    return fail(c, 503, "origin_unavailable", "Origine indisponibila.");
   }
 
   const key = `${PRE_AUTH_PREFIX}${ip}`;
@@ -156,14 +145,7 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
   } else {
     entry.count += 1;
     if (entry.count > PRE_AUTH_LIMIT) {
-      return c.json(
-        {
-          data: null,
-          error: { code: "rate_limited", message: "Prea multe cereri neautentificate." },
-          requestId: c.get("requestId") ?? "",
-        },
-        429
-      );
+      return fail(c, 429, "rate_limited", "Prea multe cereri neautentificate.");
     }
   }
 

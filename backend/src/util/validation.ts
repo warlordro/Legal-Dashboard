@@ -21,6 +21,17 @@ export function isValidDate(dateStr: string): boolean {
   return d.toISOString().startsWith(dateStr);
 }
 
+// Numeric clamp shared intre dashboard.ts (string input din query) si
+// userRepository.ts (number input din service layer). Caller-ul mapeaza
+// raw -> number; helper-ul aplica doar min/max/default si filtreaza NaN.
+export function clampInt(raw: number | undefined, opts: { min: number; max: number; def: number }): number {
+  const n = typeof raw === "number" && Number.isFinite(raw) ? Math.floor(raw) : Number.NaN;
+  if (!Number.isFinite(n)) return opts.def;
+  if (n < opts.min) return opts.min;
+  if (n > opts.max) return opts.max;
+  return n;
+}
+
 export function validateParams(params: Record<string, string | undefined>): string | null {
   for (const [key, val] of Object.entries(params)) {
     if (val && val.length > MAX_PARAM_LENGTH) {

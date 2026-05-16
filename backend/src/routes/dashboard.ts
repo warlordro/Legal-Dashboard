@@ -20,6 +20,7 @@ import {
 } from "../db/dashboardActivityRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { fail, ok } from "../util/envelope.ts";
+import { clampInt } from "../util/validation.ts";
 
 // PR-A (v2.7.0) — Dashboard summary endpoint.
 //
@@ -201,8 +202,9 @@ const TIMELINE_MAX_LIMIT = 100;
 function clampLimit(raw: string | undefined, def: number, max: number): number {
   if (!raw) return def;
   const n = Number.parseInt(raw, 10);
+  // Pastreaza semantica originala pentru 0 / negative: cad pe `def`, nu pe min=1.
   if (!Number.isFinite(n) || n <= 0) return def;
-  return Math.min(n, max);
+  return clampInt(n, { min: 1, max, def });
 }
 
 function safeJsonParse(json: string | null | undefined): Record<string, unknown> {

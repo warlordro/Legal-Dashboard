@@ -1,21 +1,12 @@
 import { useState, useCallback } from "react";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
+import { clearList, readList, writeList } from "./_localStorageList";
 
 const STORAGE_KEY = "portaljust-search-history";
 const MAX_ENTRIES = 15;
 
-function loadHistory(): SearchHistoryEntry[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    return raw ? JSON.parse(raw) : [];
-  } catch {
-    return [];
-  }
-}
-
-function saveHistory(entries: SearchHistoryEntry[]) {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-}
+const loadHistory = (): SearchHistoryEntry[] => readList<SearchHistoryEntry>(STORAGE_KEY);
+const saveHistory = (entries: SearchHistoryEntry[]) => writeList(STORAGE_KEY, entries);
 
 function buildLabel(params: SearchParams): string {
   const parts: string[] = [];
@@ -66,7 +57,7 @@ export function useSearchHistory() {
 
   const clearHistory = useCallback(() => {
     setHistory([]);
-    localStorage.removeItem(STORAGE_KEY);
+    clearList(STORAGE_KEY);
   }, []);
 
   return { history, addEntry, removeEntry, clearHistory };
