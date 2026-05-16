@@ -1,6 +1,7 @@
-import { insertAiUsage, type AiUsageProvider } from "../db/aiUsageRepository.ts";
+import { insertAiUsage, type AiUsageProvider, type AiUsageRoutingTag } from "../db/aiUsageRepository.ts";
 
 export type { AiUsageProvider };
+export type { AiUsageRoutingTag };
 
 export interface AiUsageTrackingContext {
   ownerId: string;
@@ -12,6 +13,8 @@ export interface AiUsageCallMeta {
   usageInput?: number;
   usageOutput?: number;
   httpStatus?: number;
+  costUsdMilli?: number | null;
+  routingTag?: AiUsageRoutingTag;
 }
 
 interface ModelPrice {
@@ -19,8 +22,7 @@ interface ModelPrice {
   outputUsdPerMillion: number;
 }
 
-// Provider keys MUST match the ai_usage.provider CHECK in
-// `backend/src/db/migrations/0010_ai_usage.up.sql` ('anthropic'/'openai'/'google').
+// Provider keys MUST match the ai_usage.provider CHECK in the latest migration.
 // Adding a provider requires a paired migration that widens the CHECK and a new
 // entry here; otherwise either insert fails (CHECK) or cost stays at 0 (no entry).
 // modelIds MUST match the entries in `backend/src/services/ai.ts:AI_MODELS`.
@@ -40,6 +42,20 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.4 },
     "gemini-3-flash-preview": { inputUsdPerMillion: 0.3, outputUsdPerMillion: 2.5 },
     "gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
+  },
+  openrouter: {
+    "anthropic/claude-haiku-4.5": { inputUsdPerMillion: 1, outputUsdPerMillion: 5 },
+    "anthropic/claude-sonnet-4.6": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
+    "anthropic/claude-opus-4.6": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
+    "openai/gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
+    "openai/gpt-5.4-mini": { inputUsdPerMillion: 0.25, outputUsdPerMillion: 2 },
+    "openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 10 },
+    "google/gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.075, outputUsdPerMillion: 0.3 },
+    "google/gemini-3-flash-preview": { inputUsdPerMillion: 0.3, outputUsdPerMillion: 2.5 },
+    "google/gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
+    "z-ai/glm-5.1": { inputUsdPerMillion: 0.98, outputUsdPerMillion: 3.08 },
+    "moonshotai/kimi-k2.6": { inputUsdPerMillion: 0.73, outputUsdPerMillion: 3.49 },
+    "qwen/qwen3.6-max-preview": { inputUsdPerMillion: 1.04, outputUsdPerMillion: 6.24 },
   },
 };
 
@@ -64,6 +80,11 @@ function safeHttpStatus(value: number | undefined): number | null {
   const rounded = Math.floor(value);
   if (rounded < 100 || rounded > 599) return null;
   return rounded;
+}
+
+function safeCostUsdMilli(value: number | null | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.floor(value);
 }
 
 export function estimateAiCostUsdMilli(input: {
@@ -109,13 +130,17 @@ export function recordAiUsageSafely(input: {
 
   const inputTokens = safeTokenCount(input.meta?.usageInput);
   const outputTokens = safeTokenCount(input.meta?.usageOutput);
-  const costUsdMilli = estimateAiCostUsdMilli({
-    provider: input.provider,
-    model: input.model,
-    inputTokens,
-    outputTokens,
-  });
+  const directCostUsdMilli = safeCostUsdMilli(input.meta?.costUsdMilli);
+  const costUsdMilli =
+    directCostUsdMilli ??
+    estimateAiCostUsdMilli({
+      provider: input.provider,
+      model: input.model,
+      inputTokens,
+      outputTokens,
+    });
   const httpStatus = safeHttpStatus(input.meta?.httpStatus);
+  const routingTag = input.meta?.routingTag;
   const tracking = input.tracking;
   const provider = input.provider;
   const model = input.model;
@@ -139,6 +164,7 @@ export function recordAiUsageSafely(input: {
         httpStatus,
         wasAborted,
         requestId: tracking.requestId,
+        routingTag,
       });
     } catch (e) {
       // Structured single-line JSON so log scrapers can grep

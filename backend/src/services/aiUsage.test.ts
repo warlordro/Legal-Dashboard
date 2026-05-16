@@ -66,7 +66,7 @@ describe("AI_MODELS price table coverage", () => {
   it("has a non-zero price entry for every registered AI_MODELS modelId", () => {
     for (const [, model] of Object.entries(AI_MODELS)) {
       const cost = estimateAiCostUsdMilli({
-        provider: model.provider as "anthropic" | "openai" | "google",
+        provider: model.provider,
         model: model.modelId,
         inputTokens: 1_000_000,
         outputTokens: 0,
@@ -118,6 +118,45 @@ describe("AI service usage tracking", () => {
     expect(row.cost_usd_milli).toBe(2_250);
     expect(row.request_id).toBe("req-write-after-call");
     expect(row.feature).toBe("dosar_summary");
+  });
+
+  it("uses direct OpenRouter cost and persists routing_tag when provided", async () => {
+    const result = await withAiLogging(
+      "openrouter",
+      "qwen/qwen3.6-max-preview",
+      async () => ({
+        value: "analysis text",
+        meta: {
+          usageInput: 1_000_000,
+          usageOutput: 1_000_000,
+          costUsdMilli: 123,
+          routingTag: "openrouter:chinese",
+        },
+      }),
+      {
+        ownerId: "alice",
+        feature: "dosar_summary",
+        requestId: "req-openrouter-cost",
+      }
+    );
+
+    expect(result).toBe("analysis text");
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = getDb().prepare("SELECT provider, model, cost_usd_milli, routing_tag FROM ai_usage").get() as {
+      provider: string;
+      model: string;
+      cost_usd_milli: number;
+      routing_tag: string | null;
+    };
+
+    expect(row).toEqual({
+      provider: "openrouter",
+      model: "qwen/qwen3.6-max-preview",
+      cost_usd_milli: 123,
+      routing_tag: "openrouter:chinese",
+    });
   });
 
   it("writes a row on the failure path with the SDK status code and aborted flag", async () => {

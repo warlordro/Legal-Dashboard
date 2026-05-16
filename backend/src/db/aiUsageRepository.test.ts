@@ -44,6 +44,7 @@ describe("insertAiUsage", () => {
       costUsdMilli: 2.2,
       httpStatus: 200,
       requestId: "req-ai-1",
+      routingTag: "openrouter:western",
       ts: "2026-04-30T10:00:00.000Z",
     });
 
@@ -53,6 +54,23 @@ describe("insertAiUsage", () => {
     expect(row.cost_usd_milli).toBe(2);
     expect(row.was_aborted).toBe(0);
     expect(row.request_id).toBe("req-ai-1");
+    expect(row.routing_tag).toBe("openrouter:western");
+  });
+
+  it("accepts openrouter as a provider after migration 0024", () => {
+    const row = insertAiUsage({
+      ownerId: "alice",
+      provider: "openrouter",
+      model: "qwen/qwen3.6-max-preview",
+      feature: "dosar_summary",
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsdMilli: 30,
+      routingTag: "openrouter:chinese",
+    });
+
+    expect(row.provider).toBe("openrouter");
+    expect(row.routing_tag).toBe("openrouter:chinese");
   });
 });
 

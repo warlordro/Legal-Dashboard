@@ -1,6 +1,7 @@
 import { getDb } from "./schema.ts";
 
-export type AiUsageProvider = "anthropic" | "openai" | "google";
+export type AiUsageProvider = "anthropic" | "openai" | "google" | "openrouter";
+export type AiUsageRoutingTag = "native" | "openrouter:western" | "openrouter:chinese";
 
 export interface AiUsageRow {
   id: number;
@@ -15,6 +16,7 @@ export interface AiUsageRow {
   was_aborted: 0 | 1;
   request_id: string | null;
   feature: string;
+  routing_tag: AiUsageRoutingTag | null;
 }
 
 export interface InsertAiUsageInput {
@@ -28,6 +30,7 @@ export interface InsertAiUsageInput {
   httpStatus?: number | null;
   wasAborted?: boolean;
   requestId?: string | null;
+  routingTag?: AiUsageRoutingTag | null;
   ts?: string;
 }
 
@@ -67,8 +70,8 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
     .prepare(
       `INSERT INTO ai_usage
          (owner_id, ts, provider, model, input_tokens, output_tokens,
-          cost_usd_milli, http_status, was_aborted, request_id, feature)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          cost_usd_milli, http_status, was_aborted, request_id, feature, routing_tag)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.ownerId,
@@ -81,7 +84,8 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
       input.httpStatus ?? null,
       input.wasAborted ? 1 : 0,
       input.requestId || null,
-      input.feature
+      input.feature,
+      input.routingTag ?? null
     );
 
   return db.prepare("SELECT * FROM ai_usage WHERE id = ?").get(info.lastInsertRowid) as AiUsageRow;

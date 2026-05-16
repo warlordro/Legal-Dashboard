@@ -1,28 +1,66 @@
 import Anthropic from "@anthropic-ai/sdk";
+import OpenAI from "openai";
 import {
   recordAiUsageSafely,
   type AiUsageCallMeta,
   type AiUsageProvider,
+  type AiUsageRoutingTag,
   type AiUsageTrackingContext,
 } from "./aiUsage.ts";
 
 // AI Models configuration
-export const AI_MODELS: Record<string, { provider: string; modelId: string }> = {
+export type OpenRouterStack = "western" | "chinese";
+export type AiRouting = { mode: "native" | "openrouter"; stack: OpenRouterStack };
+
+export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: string; stack: OpenRouterStack }> = {
   // Anthropic
-  "claude-haiku": { provider: "anthropic", modelId: "claude-haiku-4-5-20251001" },
-  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-4-6" },
-  "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-6" },
+  "claude-haiku": { provider: "anthropic", modelId: "claude-haiku-4-5-20251001", stack: "western" },
+  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-4-6", stack: "western" },
+  "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-6", stack: "western" },
   // OpenAI
-  "gpt-5.4-nano": { provider: "openai", modelId: "gpt-5.4-nano" },
-  "gpt-5.4-mini": { provider: "openai", modelId: "gpt-5.4-mini" },
-  "gpt-5.4": { provider: "openai", modelId: "gpt-5.4" },
+  "gpt-5.4-nano": { provider: "openai", modelId: "gpt-5.4-nano", stack: "western" },
+  "gpt-5.4-mini": { provider: "openai", modelId: "gpt-5.4-mini", stack: "western" },
+  "gpt-5.4": { provider: "openai", modelId: "gpt-5.4", stack: "western" },
   // Google
-  "gemini-flash-lite-3": { provider: "google", modelId: "gemini-3.1-flash-lite-preview" },
-  "gemini-flash-3": { provider: "google", modelId: "gemini-3-flash-preview" },
-  "gemini-pro-3": { provider: "google", modelId: "gemini-3.1-pro-preview" },
+  "gemini-flash-lite-3": { provider: "google", modelId: "gemini-3.1-flash-lite-preview", stack: "western" },
+  "gemini-flash-3": { provider: "google", modelId: "gemini-3-flash-preview", stack: "western" },
+  "gemini-pro-3": { provider: "google", modelId: "gemini-3.1-pro-preview", stack: "western" },
+  // OpenRouter Chinese stack
+  "glm-5.1": { provider: "openrouter", modelId: "z-ai/glm-5.1", stack: "chinese" },
+  "kimi-k2.6": { provider: "openrouter", modelId: "moonshotai/kimi-k2.6", stack: "chinese" },
+  "qwen-3.6-max": { provider: "openrouter", modelId: "qwen/qwen3.6-max-preview", stack: "chinese" },
 };
 
-export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3"];
+export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3", "qwen-3.6-max"];
+
+export const OPENROUTER_WESTERN_MAP: Record<string, string> = {
+  "claude-haiku": "anthropic/claude-haiku-4.5",
+  "claude-sonnet": "anthropic/claude-sonnet-4.6",
+  "claude-opus": "anthropic/claude-opus-4.6",
+  "gpt-5.4-nano": "openai/gpt-5.4-nano",
+  "gpt-5.4-mini": "openai/gpt-5.4-mini",
+  "gpt-5.4": "openai/gpt-5.4",
+  "gemini-flash-lite-3": "google/gemini-3.1-flash-lite-preview",
+  "gemini-flash-3": "google/gemini-3-flash-preview",
+  "gemini-pro-3": "google/gemini-3.1-pro-preview",
+};
+
+export const OPENROUTER_CHINESE_MAP: Record<string, string> = {
+  "glm-5.1": "z-ai/glm-5.1",
+  "kimi-k2.6": "moonshotai/kimi-k2.6",
+  "qwen-3.6-max": "qwen/qwen3.6-max-preview",
+};
+
+export function resolveOpenRouterSlug(modelKey: string, stack: OpenRouterStack): string | null {
+  const override = process.env.OPENROUTER_MODEL_OVERRIDES;
+  if (override) {
+    const pairs = override.split(",").map((p) => p.split(":").map((s) => s.trim()));
+    const hit = pairs.find(([k]) => k === modelKey);
+    if (hit?.[1]) return hit[1];
+  }
+  const map = stack === "western" ? OPENROUTER_WESTERN_MAP : OPENROUTER_CHINESE_MAP;
+  return map[modelKey] || null;
+}
 
 // SECURITY: Truncation limits for user-supplied dosar fields (prompt injection mitigation)
 const TRUNCATE_OBIECT = 500;
@@ -408,6 +446,63 @@ async function callGoogle(
   );
 }
 
+export async function callOpenRouter(
+  apiKey: string,
+  slug: string,
+  prompt: string,
+  timeout: number,
+  tracking?: AiUsageTrackingContext,
+  signal?: AbortSignal,
+  routingTag?: AiUsageRoutingTag
+): Promise<string> {
+  if (process.env.OPENROUTER_DISABLED === "1") {
+    throw new Error("OPENROUTER_DISABLED");
+  }
+
+  return withAiLogging(
+    "openrouter",
+    slug,
+    async () => {
+      const client = new OpenAI({
+        apiKey,
+        baseURL: "https://openrouter.ai/api/v1",
+        defaultHeaders: {
+          "HTTP-Referer": "https://github.com/warlordro/Legal-Dashboard",
+          "X-Title": "Legal Dashboard",
+        },
+        timeout,
+      });
+      const completion = await client.chat.completions.create(
+        {
+          model: slug,
+          messages: [{ role: "user", content: prompt }],
+          max_tokens: AI_MAX_TOKENS,
+          // @ts-expect-error OpenRouter extension for returning real per-call cost.
+          extra_body: { usage: { include: true } },
+        },
+        { signal: composeSignal(timeout, signal) }
+      );
+      const usage = completion.usage as
+        | {
+            prompt_tokens?: number;
+            completion_tokens?: number;
+            cost?: number;
+          }
+        | undefined;
+      return {
+        value: completion.choices?.[0]?.message?.content ?? "",
+        meta: {
+          usageInput: usage?.prompt_tokens,
+          usageOutput: usage?.completion_tokens,
+          costUsdMilli: usage?.cost != null ? Math.round(usage.cost * 1000) : null,
+          routingTag,
+        },
+      };
+    },
+    tracking
+  );
+}
+
 export { callAnthropic, callOpenAI, callGoogle };
 
 // Schema validation for AI request body
@@ -446,6 +541,7 @@ export function getApiKey(provider: string, keys: Record<string, string>): strin
   if (provider === "anthropic") return process.env.ANTHROPIC_API_KEY || keys.anthropic || "";
   if (provider === "openai") return process.env.OPENAI_API_KEY || keys.openai || "";
   if (provider === "google") return process.env.GOOGLE_AI_KEY || keys.google || "";
+  if (provider === "openrouter") return process.env.OPENROUTER_API_KEY || keys.openrouter || "";
   return "";
 }
 
@@ -455,10 +551,27 @@ export async function callModel(
   apiKeys: Record<string, string>,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  routing?: AiRouting
 ): Promise<string> {
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");
+
+  const useOpenRouter =
+    routing?.mode === "openrouter" ||
+    Boolean(process.env.OPENROUTER_API_KEY) ||
+    Boolean(apiKeys.openrouter?.startsWith("sk-or-")) ||
+    model.provider === "openrouter";
+
+  if (useOpenRouter) {
+    const stack = routing?.stack ?? model.stack ?? "western";
+    const apiKey = process.env.OPENROUTER_API_KEY || apiKeys.openrouter || "";
+    if (!apiKey) throw new Error("NO_API_KEY:openrouter");
+    const slug = resolveOpenRouterSlug(modelKey, stack);
+    if (!slug) throw new Error(`MODEL_NOT_IN_STACK:${modelKey}:${stack}`);
+    return callOpenRouter(apiKey, slug, prompt, timeout, tracking, signal, `openrouter:${stack}`);
+  }
+
   const apiKey = getApiKey(model.provider, apiKeys);
   if (!apiKey) throw new Error(`NO_API_KEY:${model.provider}`);
   if (model.provider === "anthropic") return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking, signal);
