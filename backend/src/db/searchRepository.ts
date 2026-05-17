@@ -10,8 +10,12 @@ export interface SearchRecord {
   created_at: string;
 }
 
+// F2 hardening (v2.28.4): ownerId obligatoriu pentru toate web-facing APIs.
+// Singura sursa de fallback `"local"` este `getOwnerId()` din
+// `backend/src/middleware/owner.ts` — desktop ramane neschimbat, web mode
+// arunca daca authProvider-ul nu seteaza ownerId in context.
 export interface SaveSearchInput {
-  ownerId?: string;
+  ownerId: string;
   searchType: string;
   paramsJson: string;
   totalResults: number;
@@ -24,18 +28,12 @@ export function saveSearch(input: SaveSearchInput): number {
     INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
     VALUES (?, ?, ?, ?, ?)
   `);
-  const res = stmt.run(
-    input.ownerId ?? "local",
-    input.searchType,
-    input.paramsJson,
-    input.totalResults,
-    input.criteriu ?? null
-  );
+  const res = stmt.run(input.ownerId, input.searchType, input.paramsJson, input.totalResults, input.criteriu ?? null);
   return Number(res.lastInsertRowid);
 }
 
 export interface GetSearchesOptions {
-  ownerId?: string;
+  ownerId: string;
   limit?: number;
   cursor?: number | null;
 }
@@ -45,9 +43,9 @@ export interface CursorPage<T> {
   nextCursor: number | null;
 }
 
-export function getSearches(opts: GetSearchesOptions = {}): CursorPage<SearchRecord> {
+export function getSearches(opts: GetSearchesOptions): CursorPage<SearchRecord> {
   const db = getDb();
-  const ownerId = opts.ownerId ?? "local";
+  const ownerId = opts.ownerId;
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const cursor = opts.cursor ?? null;
 

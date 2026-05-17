@@ -23,7 +23,11 @@ export interface ExecuteSearchInput {
   captchaProvider?: CaptchaProvider;
   fallback2CaptchaKey?: string;
   captchaMode?: CaptchaMode;
-  ownerId?: string;
+  // F2 hardening (v2.28.4): ownerId este OBLIGATORIU pentru fail-closed web
+  // mode. Singurul adapter cu fallback `"local"` e `getOwnerId()` in
+  // `backend/src/middleware/owner.ts` — desktop ramane neschimbat, web mode
+  // arunca daca callerul uita sa propage owner-ul autentificat.
+  ownerId: string;
   startRnpmPage?: number;
   batchSize?: number;
   existingGcode?: string;
@@ -100,7 +104,7 @@ export async function executeSearch(
   input: ExecuteSearchInput,
   client: RnpmClient = defaultRnpmClient
 ): Promise<ExecuteSearchResult> {
-  const ownerId = input.ownerId ?? "local";
+  const ownerId = input.ownerId;
 
   // Tenant guard: refuza continuarile pe `existingSearchId` care apartin altui
   // owner (audit 2026-04-29 #11). Cazul "missing" e benign — searchId e cache-uit
@@ -523,7 +527,8 @@ export interface SplitSearchInput {
   captchaProvider?: CaptchaProvider;
   fallback2CaptchaKey?: string;
   captchaMode?: CaptchaMode;
-  ownerId?: string;
+  // F2 hardening (v2.28.4): ownerId obligatoriu — vezi nota din ExecuteSearchInput.
+  ownerId: string;
   signal?: AbortSignal;
   // v2.20.3 Grupul K — invoked exact o data, sincron, dupa ce parent search row
   // e creat (inainte de prima sub-cautare). Permite SSE handler-ului sa emita
@@ -615,7 +620,7 @@ export async function executeSplitSearch(
   onProgress: (p: SplitSearchProgress) => void,
   client: RnpmClient = defaultRnpmClient
 ): Promise<SplitSearchResult> {
-  const ownerId = input.ownerId ?? "local";
+  const ownerId = input.ownerId;
   const subN = input.subTypeLabels.length;
 
   // Pre-creare row parinte cu baseParams (fara tipInscriere). Sub-cautarile

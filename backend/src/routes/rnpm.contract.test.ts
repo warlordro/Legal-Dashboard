@@ -89,6 +89,7 @@ function seedAviz(opts: {
   activ?: boolean | null;
 }): number {
   return saveAvizFull({
+    ownerId: "local",
     uuid: `uuid-${opts.identificator}`,
     identificator: opts.identificator,
     searchType: opts.searchType ?? "ipoteci",
@@ -335,8 +336,8 @@ describe("GET /api/v1/rnpm/searches", () => {
   });
 
   it("returns SearchRecord shape with cursor pagination metadata", async () => {
-    saveSearch({ searchType: "ipoteci", paramsJson: "{}", totalResults: 5, criteriu: "test" });
-    saveSearch({ searchType: "fiducii", paramsJson: "{}", totalResults: 1 });
+    saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 5, criteriu: "test" });
+    saveSearch({ ownerId: "local", searchType: "fiducii", paramsJson: "{}", totalResults: 1 });
 
     const res = await buildApp().request("/api/v1/rnpm/searches?limit=10");
     const body = await jsonOf<{
@@ -353,7 +354,7 @@ describe("GET /api/v1/rnpm/searches", () => {
 
 describe("DELETE /api/v1/rnpm/searches/:id", () => {
   it("returns { deleted: true } on existing row", async () => {
-    const id = saveSearch({ searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
+    const id = saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
     const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, { method: "DELETE" });
     expect(res.status).toBe(200);
     const body = await jsonOf<{ deleted: boolean }>(res);

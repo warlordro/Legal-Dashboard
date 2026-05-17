@@ -36,6 +36,7 @@ describe("executeSearch RNPM first result guard", () => {
       executeSearch(
         {
           type: "ipoteci",
+          ownerId: "test-owner",
           params: {},
           captchaKey: "stub-key",
         },
