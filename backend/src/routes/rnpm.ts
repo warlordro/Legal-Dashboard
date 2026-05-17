@@ -27,20 +27,11 @@ import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
-import { getAuthMode } from "../auth/config.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
+import { parseJsonBody, rejectCaptchaKeyInWebMode, withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
 function parseProvider(v: unknown): CaptchaProvider | undefined {
   return v === "capsolver" || v === "2captcha" ? v : undefined;
-}
-
-// Captcha key validation predicate: rejects empty / whitespace-only / sub-10-char
-// strings. Length 10 e arbitrar dar prinde tipic erori (gol, "DEMO", "test").
-// Folosit pe /search, /bulk si /search-split (POST cu corp normal). Ruta
-// /captcha/balance pastreaza validare doar `typeof === "string"` ca sa nu
-// blocheze diagnostic-ul cand cheia e introdusa partial.
-function isValidCaptchaKey(input: unknown): input is string {
-  return typeof input === "string" && input.trim().length >= 10;
 }
 
 // Body size limits — prevent DoS via oversized POST payloads
@@ -59,8 +50,6 @@ const limitSmall = bodyLimit({ maxSize: SMALL_BODY_LIMIT, onError: bodyTooLarge 
 const invalidJson = (c: import("hono").Context) => c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400);
 const invalidParams = (c: import("hono").Context, message: string) =>
   c.json(fail(ErrorCodes.INVALID_PARAMS, message, c), 400);
-const invalidCaptchaKey = (c: import("hono").Context, message = "Cheie captcha lipsa sau invalida") =>
-  c.json(fail(ErrorCodes.INVALID_CAPTCHA_KEY, message, c), 400);
 const notFound = (c: import("hono").Context, message: string) => c.json(fail(ErrorCodes.NOT_FOUND, message, c), 404);
 const internalError = (c: import("hono").Context, message: string) =>
   c.json(fail(ErrorCodes.INTERNAL_ERROR, message, c), 500);
@@ -188,73 +177,27 @@ function parseClientRequestId(body: Record<string, unknown> | null): string | nu
   return v;
 }
 
-// Body parse helper: returns parsed JSON or null on parse failure / literal-null body.
-// Caller-ul early-return-uie cu invalidJson(c) la null. Literal `null` body era anterior
-// coerced la `{}` via `(body ?? {})`; e nonsens semantic pe rutele astea, deci e OK
-// sa-l respingem ca input invalid. Convention: returneaza null in loc sa throw, matching
-// parseClientRequestId mai sus.
-async function parseJsonBody(c: import("hono").Context): Promise<unknown | null> {
-  try {
-    const body = await c.req.json();
-    return body == null ? null : body;
-  } catch {
-    return null;
-  }
-}
-
-// Web-readiness closure (#12): in `desktop` mode, `captchaKey` vine din
-// safeStorage in renderer si e trimis cu fiecare request — comportament
-// pastrat. In `web` mode browserul nu trebuie sa puna cheia in body
-// (localStorage/inspectabil), asa ca rutele care primesc `captchaKey`
-// raspund 501 pana cand exista per-user server-side storage. Rutele de
-// `/saved`, `/searches`, `/stats`, `/backups/*` raman functionale; doar
-// caile care fac call efectiv la captcha provider sunt blocate.
-function rejectCaptchaKeyInWebMode(c: import("hono").Context): Response | null {
-  if (getAuthMode() !== "web") return null;
-  return c.json(
-    fail(
-      ErrorCodes.WEB_MODE_NOT_IMPLEMENTED,
-      "RNPM in web mode necesita stocare server-side a cheii captcha. Folositi desktop sau asteptati per-user key storage.",
-      c
-    ),
-    501
-  );
-}
-
 rnpmRouter.post("/search", limitSearch, async (c) => {
-  const webGate = rejectCaptchaKeyInWebMode(c);
-  if (webGate) return webGate;
-  const body = await parseJsonBody(c);
-  if (body === null) return invalidJson(c);
-  const {
-    type,
-    params,
-    captchaKey,
-    captchaProvider,
-    fallback2CaptchaKey,
-    captchaMode,
-    startRnpmPage,
-    batchSize,
-    gcode,
-    searchId,
-  } = (body ?? {}) as {
-    type?: unknown;
-    params?: unknown;
-    captchaKey?: unknown;
-    captchaProvider?: unknown;
-    fallback2CaptchaKey?: unknown;
-    captchaMode?: unknown;
-    startRnpmPage?: unknown;
-    batchSize?: unknown;
-    gcode?: unknown;
-    searchId?: unknown;
-  };
+  const guard = await withRnpmCaptchaGuards(c);
+  if (!guard.ok) return guard.response;
+  const { body, captchaKey } = guard;
+  const { type, params, captchaProvider, fallback2CaptchaKey, captchaMode, startRnpmPage, batchSize, gcode, searchId } =
+    (body ?? {}) as {
+      type?: unknown;
+      params?: unknown;
+      captchaProvider?: unknown;
+      fallback2CaptchaKey?: unknown;
+      captchaMode?: unknown;
+      startRnpmPage?: unknown;
+      batchSize?: unknown;
+      gcode?: unknown;
+      searchId?: unknown;
+    };
 
   if (!isValidType(type)) return invalidParams(c, "Tip cautare invalid");
   if (!params || typeof params !== "object") return invalidParams(c, "Parametri cautare lipsa");
   const paramsErr = validateParamsDepth(params);
   if (paramsErr) return invalidParams(c, paramsErr);
-  if (!isValidCaptchaKey(captchaKey)) return invalidCaptchaKey(c);
   const provider = parseProvider(captchaProvider);
   const startPage = typeof startRnpmPage === "number" && startRnpmPage >= 1 && startRnpmPage <= 500 ? startRnpmPage : 1;
   const batch = typeof batchSize === "number" && batchSize >= 1 && batchSize <= 200 ? batchSize : 25;
@@ -454,13 +397,11 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
 });
 
 rnpmRouter.post("/bulk", limitBulk, async (c) => {
-  const webGate = rejectCaptchaKeyInWebMode(c);
-  if (webGate) return webGate;
-  const body = await parseJsonBody(c);
-  if (body === null) return invalidJson(c);
-  const { items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ?? {}) as {
+  const guard = await withRnpmCaptchaGuards(c);
+  if (!guard.ok) return guard.response;
+  const { body, captchaKey } = guard;
+  const { items, captchaProvider, fallback2CaptchaKey, captchaMode } = body as {
     items?: unknown;
-    captchaKey?: unknown;
     captchaProvider?: unknown;
     fallback2CaptchaKey?: unknown;
     captchaMode?: unknown;
@@ -468,7 +409,6 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
 
   if (!Array.isArray(items) || items.length === 0) return invalidParams(c, "Lista cautari goala");
   if (items.length > 200) return invalidParams(c, "Maxim 200 cautari per bulk");
-  if (!isValidCaptchaKey(captchaKey)) return invalidCaptchaKey(c);
   const provider = parseProvider(captchaProvider);
 
   const ownerId = getOwnerId(c);
@@ -570,16 +510,13 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
 // (terminal_cap / silent_refusal / residual_unclassified) si skipped; celelalte
 // continua. Vezi rnpmSearchService.executeSplitSearch.
 rnpmRouter.post("/search-split", limitSearch, async (c) => {
-  const webGate = rejectCaptchaKeyInWebMode(c);
-  if (webGate) return webGate;
-  const body = await parseJsonBody(c);
-  if (body === null) return invalidJson(c);
-  const { type, baseParams, subTypeLabels, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode } = (body ??
-    {}) as {
+  const guard = await withRnpmCaptchaGuards(c);
+  if (!guard.ok) return guard.response;
+  const { body, captchaKey } = guard;
+  const { type, baseParams, subTypeLabels, captchaProvider, fallback2CaptchaKey, captchaMode } = body as {
     type?: unknown;
     baseParams?: unknown;
     subTypeLabels?: unknown;
-    captchaKey?: unknown;
     captchaProvider?: unknown;
     fallback2CaptchaKey?: unknown;
     captchaMode?: unknown;
@@ -608,7 +545,6 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   if (canonicalErr) {
     return invalidParams(c, canonicalErr);
   }
-  if (!isValidCaptchaKey(captchaKey)) return invalidCaptchaKey(c);
   const provider = parseProvider(captchaProvider);
 
   const ownerId = getOwnerId(c);
