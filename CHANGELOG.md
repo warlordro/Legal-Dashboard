@@ -4,6 +4,143 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## [2.28.2] - 2026-05-17
+
+### Bugfixes + UX tuning + ops watchdog peste audit refactor Tier 1+2+3 partial
+
+Release de bug fixes, hardening operational si UX tuning peste sprintul de
+audit refactor (Tier 1+2 din `audit/AUDIT-REFACTOR.md` plus inceputul Tier 4
+pe `DosareTable`). Toate schimbarile sunt pe code paths existente, fara DDL si
+fara breaking changes pe contractul HTTP.
+
+#### Audit refactor Tier 1+2+3 partial (commits anterioare in branch)
+
+13 commits livrate sub umbrela acestui release, deja in main local inainte de
+push:
+
+- **Tier 1 cleanup** (`72f2ccc`): dead code + shared helpers (`-LOC` per modul,
+  `cn()` reusage, simplificari pe forme arhaice).
+- **Tier 2 consolidari**: per-operation TTL safety net pe `inflightRequests`
+  RNPM (`7ca3885`), `parseJsonBody` helper care deduplica 9 site-uri RNPM
+  (`f600d5f`, `-22 LOC`), `extractErrorMessage` consolidat in
+  `aiUsageApi` + `alertsApi` (`45c9f39`, `-52 LOC`).
+- **Tier 3 RNPM**: `isValidCaptchaKey` type predicate extras (`48ff771`,
+  `-8 LOC`), `inflightRequests` Map ancorat ca process-local + deferred web
+  cutover (docs only, `e19e476`).
+- **Tier 4 DosareTable P3** (incepe): 14 teste caracterizare (`d0d8ae5`,
+  `28d05cc`), dead state eliminat (`da780a3`), 4 hooks extrase ca pasi `H`
+  (`useViewedDosareSession 5583d58`, `useDosareSelection 15c125a`,
+  `useMonitorRowState 7f3d13d`, `useDosareAi de535c5`). Pasii ramasi
+  (I/S1/S2/S3) raman in backlog pentru releases viitoare.
+
+#### Fix `[object Object]` la cautari RNPM (regresie v2.14.0)
+
+`frontend/src/lib/rnpmApi.ts` nu dezambala envelope-ul v2.14.0
+(`{ error: { code, message, details } }`) la 400/500/503/SSE error events.
+Cauza: `new Error(envelope.error)` cu un obiect produce
+`Error.message === "[object Object]"`, vizibil userului ca banner inutil pe
+formularul de cautare.
+
+- `rnpmSearch` 400 branch rescris: detecteaza `error.code === "LIMIT_EXCEEDED"`
+  (uppercase, vechiul cod cauta `limit_exceeded` lowercase pe path-ul gresit),
+  extrage `details.total/limit/splittable.type` din envelope si arunca
+  `RnpmLimitExceededError` corect. Re-activeaza flow-ul de Split care era
+  silent rupt din v2.14.0 — cautarile peste 250 rezultate pe nume nu mai
+  esueaza cu mesaj generic, ci re-deschid prompt-ul de split de la UI.
+- `rnpmSplitSearch` + `rnpmBulkSearch` `!res.ok` branch unwrap via
+  `extractErrorMessage(parsed, fallback)`.
+- SSE error events pe split + bulk folosesc `extractErrorMessage(data, ...)`
+  ca preventie pentru migrarea backendului la envelope pe stream.
+- `filterRnpmResults` (Aviz specific): unwrap explicit pe `error.message` +
+  preservare `code` pentru `FILTER_DISABLED` (503). Era acelasi bug pe form-ul
+  specific care a generat report-ul utilizatorului.
+
+#### Fix missing search rows dupa "Sterge baza" (regresie audit #11)
+
+`backend/src/services/rnpmSearchService.ts` arunca `403 "searchId nu apartine
+owner-ului curent"` cand UI-ul cache-uia un `existingSearchId` invalidat de
+"Sterge baza" — vizibil userului ca eroare cross-tenant fals.
+
+- `backend/src/db/searchRepository.ts`: nou `getSearchOwnership(id, ownerId)`
+  cu return type `"owned" | "foreign" | "missing"`. `searchBelongsToOwner`
+  ramane wrapper (`=== "owned"`) ca sa nu rupa caller-i existenti.
+- `executeSearch`: distinge `missing` (drop `existingSearchId/Gcode/page` +
+  trateaza ca search nou) de `foreign` (ramane 403, audit 2026-04-29 #11
+  intact). Captcha proaspat e rezolvat in flow normal.
+- Frontend `RnpmSearch.tsx` `onAfterDeleteAll`: abort orice cautare in-flight
+  (`abortRef.current.abort()` + `stoppedRef.current = true`) si reset 8 stari
+  (`result/error/elapsedMs/phase/autoLoading/detailAvizId/pendingSplit/splitProgress`),
+  ca sa nu existe ferestre in care UI-ul mai pointeaza la searchId sters.
+
+#### Fix native AI mode regression (v2.28.0)
+
+`backend/src/services/ai.ts`: `useOpenRouter` continua sa ruteze prin
+OpenRouter chiar cand userul toggla inapoi la mode native, daca cheia
+`sk-or-*` ramanea salvata sau `OPENROUTER_API_KEY` env era setat. Rezultat:
+`MODEL_NOT_IN_STACK` pe modele native (Anthropic/OpenAI/Google).
+
+- Extras `shouldRouteViaOpenRouter(modelKey, apiKeys, routing)` ca singura
+  sursa de adevar; folosit din `routesViaOpenRouter` (routes/ai.ts) + din
+  `callModel`.
+- `routing.mode === "native"` invinge auto-detect-ul pe env / saved key.
+- Fallback defensive: modelele `provider === "openrouter"` raman rutate prin
+  OpenRouter chiar in native mode (nu exista SDK nativ; UI-ul filtreaza dar
+  pastram garda).
+- 6 teste noi in `ai.openrouter.test.ts` care acopera matricea
+  `mode × envKey × bodyKey × modelProvider`.
+
+#### Event-loop watchdog pentru main process Electron
+
+`electron/event-loop-watchdog.js` (nou, 124 linii): foloseste
+`monitorEventLoopDelay({ resolution: 100 })` din `node:perf_hooks` (libuv-level
+deci masoara lag-ul corect chiar in timpul stall-urilor JS). Polling 5s; daca
+`histogram.max > 5000ms` scrie linie in `${userData}/diagnostic/event-loop-lag.log`
+(trim la 200 linii) si `process.report.writeReport()` la
+`${userData}/diagnostic/reports/stall-*.json` (prune la 20 fisiere).
+`timer.unref()` ca sa nu tina procesul viu.
+
+Motivatie: incidentul 2026-05-17 in care main process a fost stuck CPU 1161s,
+iar simptomul vizibil userului a fost `safeStorage` IPC timeout 10s aparut ca
+"API keys disparute". Watchdog-ul prinde stack-ul V8 data viitoare.
+
+Wire-up in `electron/main.js:app.whenReady()`.
+
+#### UX tuning
+
+- `frontend/src/components/dosare-ai-analysis-panel.tsx`: headerele
+  colapsabile "Analiza AI" / "Analiza AI Avansata" stranse de la
+  `p-4 pb-2` la `px-4 py-2` (height -33% cand sunt colapsate; expand-ul
+  pastreaza acelasi gap inainte de continut).
+- `frontend/src/pages/Monitorizare.tsx`: row-urile din tabelul de joburi
+  vertical-centered (`[&>td]:align-middle`) cu butonul "Dosare" intins peste
+  ambele rand-uri grid (`row-end-3 self-center`) — alinierea anterioara
+  agata butonul de baseline-ul targetului, lasand spatiu inutil sub el.
+- `frontend/src/components/monitoring/NoteEditor.tsx`: latimea notitelor
+  inline constrânsa la `max-w-[12rem]` (input `12.4rem`) — fara constrangere
+  scrolla la dimensiunea coloanei si ascundea coloanele urmatoare.
+- `frontend/src/components/rnpm/RnpmResultsTable.tsx`: rândurile cu
+  `avizId == null` (detail fetch esuat in timpul cautarii) sunt acum dezactivate
+  silent (`cursor-not-allowed opacity-60` + tooltip explicativ pe `<tr>`) in loc
+  sa setteze un banner page-level fara context per-row. `onOpenDetail` prop
+  scoasa (caller-ul si tests adjustate).
+
+#### Versionare si documentatie
+
+- Bump manifest/lockfile la `2.28.2`; entrie noua in changelog-ul in-app
+  (necesita restart Electron pentru `__APP_VERSION__`).
+- `CHANGELOG.md`, `README.md`, `STATUS.md`, `DOCUMENTATIE.md` actualizate.
+- `audit/` (7 documente) si `AUDIT-REFACTOR-PLAN.md`, `CODEX-TASK-openrouter-toggle.md`
+  adaugate ca artefacte permanente ale procesului de refactor; raman in
+  repo ca referinta pentru Tier 3 (web cutover blockers) si Tier 4 (god
+  components ramase) ce vor continua in releases viitoare.
+
+#### Tests
+
+- Backend: +6 teste in `ai.openrouter.test.ts` (`shouldRouteViaOpenRouter`).
+- Frontend: 1 test ajustat in `Monitorizare.notes-editor.test.tsx`
+  (`max-w-full` → `max-w-[12rem]`); tests RnpmResultsTable 2x ajustate dupa
+  scoaterea propsului `onOpenDetail`. Restul suitelor neschimbate.
+
 ## [2.28.1] - 2026-05-16
 
 ### Fix chinese stack OpenRouter + unificare layout dialog AI

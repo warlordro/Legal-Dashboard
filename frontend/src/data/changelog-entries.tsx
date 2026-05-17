@@ -39,6 +39,47 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.28.2",
+    date: "17 Mai 2026",
+    subtitle:
+      "Bugfixes + UX tuning + ops watchdog peste audit refactor Tier 1+2 livrat. Re-activeaza flow-ul Split RNPM (silent rupt din v2.14.0), repara native AI mode (regresie v2.28.0), trateaza graceful searchId cache-uit dupa Sterge baza, adauga event-loop watchdog pentru main process Electron, strange headerele AI Analiza si vertical-aligneaza row-urile din Monitorizare.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
+    sections: [
+      {
+        title: "Audit refactor Tier 1+2 livrat (13 commits)",
+        content:
+          "Tier 1 cleanup: dead code + shared helpers. Tier 2 consolidari: per-operation TTL safety net pe inflightRequests RNPM, parseJsonBody helper (-22 LOC pe 9 site-uri), extractErrorMessage consolidat in aiUsageApi + alertsApi (-52 LOC). Tier 3 RNPM partial: isValidCaptchaKey type predicate, inflightRequests Map ancorat ca process-local. Tier 4 DosareTable P3 incepe: 14 teste caracterizare + 4 hooks extrase (useViewedDosareSession, useDosareSelection, useMonitorRowState, useDosareAi). Pasii ramasi din Tier 3+4 raman in backlog.",
+      },
+      {
+        title: "Fix [object Object] in cautari RNPM + Split flow re-activat",
+        content:
+          "rnpmApi.ts nu dezambala envelope-ul v2.14.0 (error: { code, message, details }) la 400/500/SSE error. Cauza: new Error(envelope.error) cu un obiect producea Error.message = '[object Object]'. Fix: extractErrorMessage(parsed, fallback) aplicat pe rnpmSearch / rnpmSplitSearch / rnpmBulkSearch / filterRnpmResults + SSE error events. Bonus: detectia LIMIT_EXCEEDED (uppercase, pe path-ul corect error.code) re-activeaza flow-ul de Split care era silent rupt din v2.14.0 — cautarile peste 250 rezultate pe nume redeschid prompt-ul de split.",
+      },
+      {
+        title: "Fix missing search rows dupa Sterge baza (UX cross-tenant fals)",
+        content:
+          "searchRepository introduce getSearchOwnership(id, ownerId): 'owned' | 'foreign' | 'missing'. executeSearch trateaza missing ca search nou (drop existingSearchId/Gcode/page + captcha proaspat in flow normal); foreign ramane 403 (audit 2026-04-29 #11 intact). Frontend: onAfterDeleteAll aborteaza orice cautare in-flight si reseteaza 8 stari (result/error/elapsedMs/phase/autoLoading/detailAvizId/pendingSplit/splitProgress).",
+      },
+      {
+        title: "Fix native AI mode regression (v2.28.0)",
+        content:
+          "useOpenRouter continua sa ruteze prin OpenRouter cand userul toggla inapoi la native daca cheia sk-or-* ramanea salvata sau OPENROUTER_API_KEY env era setat — MODEL_NOT_IN_STACK pe modele native. Extras shouldRouteViaOpenRouter(modelKey, apiKeys, routing) ca singura sursa de adevar; routing.mode === 'native' invinge auto-detect-ul. Modelele provider === 'openrouter' raman rutate prin OpenRouter (fara SDK nativ). +6 teste in ai.openrouter.test.ts.",
+      },
+      {
+        title: "Event-loop watchdog pentru main process Electron",
+        content:
+          "electron/event-loop-watchdog.js (nou): monitorEventLoopDelay (perf_hooks, libuv-level) polleaza 5s; daca max lag > 5000ms scrie diagnostic/event-loop-lag.log + process.report.writeReport() la diagnostic/reports/stall-*.json (trim 200 linii, prune 20 rapoarte). Motivat de incidentul 2026-05-17: main process stuck CPU 1161s -> safeStorage IPC timeout 10s vizibil userului ca 'API keys disparute'. Watchdog-ul prinde stack-ul V8 data viitoare.",
+      },
+      {
+        title: "UX tuning headere AI + Monitorizare + notite + rows RNPM",
+        content:
+          "DosareAiAnalysisPanel: headerele 'Analiza AI' / 'Analiza AI Avansata' stranse de la p-4 pb-2 la px-4 py-2 (-33% inaltime cand sunt colapsate). Monitorizare: row-uri vertical-centered (align-middle) + butonul Dosare intins peste 2 randuri grid. NoteEditor: latimea notitelor inline constrânsa la max-w-[12rem]. RnpmResultsTable: row-urile cu avizId null (detail fetch esuat) sunt dezactivate silent (cursor-not-allowed + tooltip) in loc sa setteze un banner page-level fara context per-row.",
+      },
+    ],
+  },
+  {
     version: "v2.28.1",
     date: "16 Mai 2026",
     subtitle:
