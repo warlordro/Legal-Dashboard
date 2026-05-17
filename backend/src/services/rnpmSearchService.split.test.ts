@@ -231,6 +231,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     const result = await executeSplitSearch(
       {
         type: "specifice",
+        ownerId: "test-owner",
         baseParams: {},
         subTypeLabels: ipotSubTypes,
         captchaKey: "stub-key",
@@ -289,7 +290,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "creante", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "creante", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* progress ignored */
       },
@@ -320,7 +321,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "specifice", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "specifice", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* ignored */
       },
@@ -353,7 +354,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* progress ignored */
       },
@@ -395,7 +396,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* progress ignored */
       },
@@ -459,7 +460,14 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
 
     await expect(
       executeSplitSearch(
-        { type: "specifice", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key", signal: ac.signal },
+        {
+          type: "specifice",
+          ownerId: "test-owner",
+          baseParams: {},
+          subTypeLabels: subTypes,
+          captchaKey: "stub-key",
+          signal: ac.signal,
+        },
         () => {
           /* ignored */
         },
@@ -523,7 +531,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* ignored */
       },
@@ -561,7 +569,13 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "creante", baseParams: {}, subTypeLabels: ["aviz initial"], captchaKey: "stub-key" },
+      {
+        type: "creante",
+        ownerId: "test-owner",
+        baseParams: {},
+        subTypeLabels: ["aviz initial"],
+        captchaKey: "stub-key",
+      },
       () => {
         /* ignored */
       },
@@ -580,7 +594,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     const stub = new StubClient(() => emptyResult());
 
     const result = await executeSplitSearch(
-      { type: "creante", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "creante", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* ignored */
       },
@@ -612,7 +626,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* ignored */
       },
@@ -642,7 +656,7 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     });
 
     await executeSplitSearch(
-      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* ignored */
       },
@@ -699,7 +713,7 @@ describe("invariants critice (audit §6.5)", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* progress ignored */
       },
@@ -722,7 +736,7 @@ describe("invariants critice (audit §6.5)", () => {
     });
 
     const result = await executeSplitSearch(
-      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
       () => {
         /* progress ignored */
       },
@@ -751,6 +765,7 @@ describe("invariants critice (audit §6.5)", () => {
       executeSplitSearch(
         {
           type: "ipoteci",
+          ownerId: "test-owner",
           baseParams: {},
           subTypeLabels: ["s1", "s2", "s3"],
           captchaKey: "stub-key",
@@ -765,7 +780,7 @@ describe("invariants critice (audit §6.5)", () => {
 
     const row = getDb()
       .prepare("SELECT total_results FROM rnpm_searches WHERE owner_id = ? ORDER BY id DESC LIMIT 1")
-      .get("local") as { total_results: number } | undefined;
+      .get("test-owner") as { total_results: number } | undefined;
     expect(row?.total_results).toBe(1);
   });
 });

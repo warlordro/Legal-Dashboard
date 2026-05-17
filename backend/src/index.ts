@@ -1,4 +1,5 @@
 import { serve } from "@hono/node-server";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { cors } from "hono/cors";
@@ -184,7 +185,17 @@ app.use("*", requestIdContext);
 // PR-9 fix B4: /health trebuie sa fie disponibil fara DB user lookup. Mount-uit
 // inainte de ownerContext, ca readiness probes sa nu cada cand users.local
 // lipseste sau auth web nu are token.
-app.get("/health", healthHandler);
+//
+// F15 audit hardening (v2.28.4): /health expune **minim** (status + service)
+// pentru probe externe / load balancer / Electron splash. Detaliile
+// operationale (authMode, monitoring scheduler state, emailConfigured) leakuiau
+// telemetry intern catre orice client neautentificat in mod web. Mutate la
+// `/health/detail`, accesibil:
+//   - de pe loopback (desktop in-proc + container-internal probes), sau
+//   - cu rol `admin` (web cutover: ops loggat).
+// Restul publicului primeste 403 fara informatii operationale.
+app.get("/health", publicHealthHandler);
+app.get("/health/detail", detailedHealthHandler);
 
 // PR-9 fix B2: pre-auth IP-only rate limiter pe /api/* (cheap, no DB).
 // Floods cu token missing/invalid se opresc inainte sa loveasca ownerContext.
@@ -207,9 +218,41 @@ app.use("/api/*", originGuard);
 // is locked by another tool or temporarily inaccessible we keep /health serving
 // 503 until ready=true. Container orchestrators / Electron splash poll this.
 let ready = false;
-function healthHandler(c: Context): Response {
+
+const HEALTH_LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
+
+// F15 audit hardening (v2.28.4): /health public expune doar `status` +
+// `service`. Probele externe (LB, container orchestrator) au tot ce le trebuie:
+// 200=ok, 503=starting. Telemetry-ul operational (authMode, monitoring,
+// emailConfigured) e disponibil pe `/health/detail` filtrat prin loopback.
+function publicHealthHandler(c: Context): Response {
   if (!ready) {
     return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
+  }
+  return c.json({ status: "ok", service: "Legal Dashboard API" });
+}
+
+function isLoopbackPeer(c: Context): boolean {
+  try {
+    const remoteAddr = getConnInfo(c).remote.address ?? "";
+    return HEALTH_LOOPBACK_ADDRESSES.has(remoteAddr);
+  } catch {
+    // getConnInfo may throw in test harnesses without a real socket — treat as
+    // non-loopback so the gate stays closed by default.
+    return false;
+  }
+}
+
+function detailedHealthHandler(c: Context): Response {
+  if (!ready) {
+    return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
+  }
+  // Loopback gate: desktop in-proc (Electron renderer pe 127.0.0.1) si probele
+  // container-internal pot accesa fara auth; orice apel cross-LAN intoarce 403
+  // fara informatii operationale. In mod web, admin loggat acceseaza via
+  // /api/v1/admin/health (mount-uit dupa ownerContext) — vezi adminRouter.
+  if (!isLoopbackPeer(c)) {
+    return c.json({ error: { code: "forbidden", message: "loopback required" } }, 403);
   }
   // Tier 3 #12: surface monitoring scheduler liveness so ops can detect
   // "scheduler died but HTTP still up" without scraping logs. Shape:
@@ -225,11 +268,12 @@ function healthHandler(c: Context): Response {
         inflight: status?.inflight ?? 0,
       }
     : { enabled: false, running: false, inflight: 0 };
-  // v2.20.8: expune `emailConfigured` la /health ca operatorii sa stie din
-  // probe-uri externe (curl /health, Electron splash, monitoring extern) daca
-  // canalul SMTP e activ. Deriva din readMailerConfig() — true daca toate
-  // SMTP_* sunt setate si SMTP_PORT e in range; false in rest. Matchuieste
-  // exact ce vede dispatcher-ul real (isMailerConfigured re-evalueaza la fel).
+  // v2.20.8: expune `emailConfigured` la /health/detail ca operatorii sa stie
+  // din probe-uri externe (curl /health/detail, Electron splash, monitoring
+  // extern) daca canalul SMTP e activ. Deriva din readMailerConfig() — true
+  // daca toate SMTP_* sunt setate si SMTP_PORT e in range; false in rest.
+  // Matchuieste exact ce vede dispatcher-ul real (isMailerConfigured
+  // re-evalueaza la fel).
   const emailConfigured = isMailerConfigured();
   return c.json({
     status: "ok",
@@ -365,7 +409,10 @@ if (getAuthMode() === "desktop") {
 // behind the migration. Better: bind only when ready. Electron splash and any
 // orchestrator see connection-refused → polled retry, not a misleading 200.
 try {
-  getAvize({ pageSize: 1 });
+  // Boot prewarm: ownerId-ul nu conteaza functional (rezultatul nu e folosit),
+  // dar F2 cere ca apelul sa il primeasca explicit; trecem `"local"` pentru
+  // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
+  getAvize({ ownerId: "local", pageSize: 1 });
   getAvizStats();
 } catch (e) {
   // Boot-time DB failure means subsequent requests will fail too. Server mode:

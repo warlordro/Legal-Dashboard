@@ -84,8 +84,12 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(preflight.headers.get("access-control-allow-headers")?.toLowerCase()).toContain("authorization");
   });
 
+  // F15 audit hardening (v2.28.4): /health public expune doar status + service.
+  // Detalii operationale (authMode, emailConfigured, monitoring) sunt mutate la
+  // /health/detail, accesibil doar de pe loopback. Probele de mai jos verifica
+  // ca /health/detail intoarce telemetry-ul corect cand sunt apelate local.
   it(
-    "/health exposes emailConfigured=false when SMTP_* env vars are missing (Batch 2.3)",
+    "/health/detail exposes emailConfigured=false when SMTP_* env vars are missing (Batch 2.3)",
     { timeout: 20_000 },
     async () => {
       const port = randomPort();
@@ -103,15 +107,16 @@ describe("PR-9 index boot/auth boundaries", () => {
         SMTP_FROM: "",
       });
 
-      const health = await waitForHealth(port);
-      expect(health.status).toBe(200);
-      const body = (await health.json()) as { emailConfigured: boolean };
+      await waitForHealth(port);
+      const detail = await fetch(`http://127.0.0.1:${port}/health/detail`);
+      expect(detail.status).toBe(200);
+      const body = (await detail.json()) as { emailConfigured: boolean };
       expect(body.emailConfigured).toBe(false);
     }
   );
 
   it(
-    "/health exposes authMode + loginAvailable=false while preserving Electron splash contract",
+    "/health/detail exposes authMode + loginAvailable=false while preserving Electron splash contract",
     { timeout: 20_000 },
     async () => {
       const port = randomPort();
@@ -121,9 +126,10 @@ describe("PR-9 index boot/auth boundaries", () => {
         LEGAL_DASHBOARD_AUTH_MODE: "desktop",
       });
 
-      const health = await waitForHealth(port);
-      expect(health.status).toBe(200);
-      const body = (await health.json()) as {
+      await waitForHealth(port);
+      const detail = await fetch(`http://127.0.0.1:${port}/health/detail`);
+      expect(detail.status).toBe(200);
+      const body = (await detail.json()) as {
         status: string;
         service: string;
         authMode: string;
@@ -136,26 +142,50 @@ describe("PR-9 index boot/auth boundaries", () => {
     }
   );
 
-  it("/health exposes emailConfigured=true with full SMTP_* config (Batch 2.3)", { timeout: 20_000 }, async () => {
+  it(
+    "/health/detail exposes emailConfigured=true with full SMTP_* config (Batch 2.3)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "web",
+        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+        SMTP_HOST: "smtp.example.test",
+        SMTP_PORT: "587",
+        SMTP_USER: "user",
+        SMTP_PASS: "pass",
+        SMTP_FROM: "alerts@example.test",
+      });
+
+      await waitForHealth(port);
+      const detail = await fetch(`http://127.0.0.1:${port}/health/detail`);
+      expect(detail.status).toBe(200);
+      const body = (await detail.json()) as { emailConfigured: boolean };
+      expect(body.emailConfigured).toBe(true);
+    }
+  );
+
+  it("/health public response strips operational telemetry (F15 audit hardening)", { timeout: 20_000 }, async () => {
     const port = randomPort();
     await importFreshIndex({
       LEGAL_DASHBOARD_PORT: String(port),
       LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-      LEGAL_DASHBOARD_AUTH_MODE: "web",
-      LEGAL_DASHBOARD_JWT_SECRET: SECRET,
-      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
-      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
-      SMTP_HOST: "smtp.example.test",
-      SMTP_PORT: "587",
-      SMTP_USER: "user",
-      SMTP_PASS: "pass",
-      SMTP_FROM: "alerts@example.test",
+      LEGAL_DASHBOARD_AUTH_MODE: "desktop",
     });
 
     const health = await waitForHealth(port);
     expect(health.status).toBe(200);
-    const body = (await health.json()) as { emailConfigured: boolean };
-    expect(body.emailConfigured).toBe(true);
+    const body = (await health.json()) as Record<string, unknown>;
+    expect(body.status).toBe("ok");
+    expect(body.service).toBe("Legal Dashboard API");
+    expect(body.authMode).toBeUndefined();
+    expect(body.monitoring).toBeUndefined();
+    expect(body.emailConfigured).toBeUndefined();
+    expect(body.loginAvailable).toBeUndefined();
   });
 
   it("fails boot when remote bind is enabled in desktop auth mode", { timeout: 20_000 }, async () => {

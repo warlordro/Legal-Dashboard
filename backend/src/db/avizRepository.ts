@@ -103,8 +103,12 @@ export interface AvizFull {
   istoric: IstoricRecord[];
 }
 
+// F2 hardening (v2.28.4): ownerId obligatoriu pe inputurile web-facing. Singura
+// sursa de fallback `"local"` ramane `getOwnerId()` din
+// `backend/src/middleware/owner.ts` — desktop ramane neschimbat, web mode
+// arunca daca callerul uita sa propage owner-ul autentificat.
 export interface UpsertAvizInput {
-  ownerId?: string;
+  ownerId: string;
   searchId?: number | null;
   uuid: string;
   identificator: string;
@@ -147,7 +151,7 @@ function serializeActiv(activ: boolean | null | undefined): 0 | 1 | null {
 
 export function saveAvizFull(input: SaveAvizInput): number {
   const db = getDb();
-  const ownerId = input.ownerId ?? "local";
+  const ownerId = input.ownerId;
 
   const run = db.transaction((): number => {
     const existing = db
@@ -407,7 +411,7 @@ export type AvizSortKey = "id" | "identificator" | "search_type" | "data" | "tip
 export type SortDir = "asc" | "desc";
 
 export interface GetAvizeOptions {
-  ownerId?: string;
+  ownerId: string;
   page?: number;
   pageSize?: number;
   searchType?: string;
@@ -419,9 +423,9 @@ export interface GetAvizeOptions {
   sortDir?: SortDir;
 }
 
-export function getAvize(opts: GetAvizeOptions = {}): OffsetPage<AvizRecord> {
+export function getAvize(opts: GetAvizeOptions): OffsetPage<AvizRecord> {
   const db = getDb();
-  const ownerId = opts.ownerId ?? "local";
+  const ownerId = opts.ownerId;
   const pageSize = Math.min(Math.max(opts.pageSize ?? 25, 1), 200);
   const page = Math.max(opts.page ?? 0, 0);
 
