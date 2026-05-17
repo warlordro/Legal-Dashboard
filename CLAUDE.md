@@ -80,7 +80,7 @@ legal-dashboard/
 Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhitecturale cheie:
 - Repository-only DB access: SQL raw doar in `backend/src/db/**`
 - `owner_id` pe toate tabelele (DEFAULT `'local'`)
-- Migrations in `backend/src/db/migrations/` (latest 0021)
+- Migrations in `backend/src/db/migrations/` (latest 0025)
 - Backend bundled CJS (esbuild) - vezi `## Nota Importanta Build`
 - Tabele monitoring: `monitoring_jobs`, `monitoring_runs`, `monitoring_snapshots`, `monitoring_alerts`, `owner_email_settings`
 

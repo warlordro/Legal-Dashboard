@@ -87,7 +87,7 @@ if (process.env.NODE_ENV !== "production") {
     "*",
     cors({
       origin: ["http://localhost:5173", "http://localhost:4173"],
-      allowMethods: ["GET", "POST", "PUT", "OPTIONS"],
+      allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
       // PR-9 M3: Bearer auth necesita ca preflight-ul sa permita Authorization,
       // altfel browser-ul dev (Vite) nu poate trimite token-ul dupa OPTIONS.
       allowHeaders: ["Content-Type", "Authorization"],
