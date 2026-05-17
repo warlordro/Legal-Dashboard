@@ -33,6 +33,7 @@ export interface UseMonitoringMasterSwitchResult {
   enabled: boolean | null;
   loading: boolean;
   saving: boolean;
+  loadError: boolean;
   toggle: (next: boolean) => Promise<void>;
   refresh: () => Promise<void>;
 }
@@ -41,6 +42,7 @@ export function useMonitoringMasterSwitch(): UseMonitoringMasterSwitchResult {
   const [enabled, setEnabled] = useState<boolean | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
   const getAbortRef = useRef<AbortController | null>(null);
   const mountedRef = useRef(true);
@@ -59,6 +61,7 @@ export function useMonitoringMasterSwitch(): UseMonitoringMasterSwitchResult {
     const ctrl = new AbortController();
     getAbortRef.current = ctrl;
     setLoading(true);
+    setLoadError(false);
     try {
       const result = await monitoringMasterSwitch.get({ signal: ctrl.signal });
       if (ctrl.signal.aborted || !mountedRef.current) return;
@@ -67,6 +70,7 @@ export function useMonitoringMasterSwitch(): UseMonitoringMasterSwitchResult {
       if (e instanceof DOMException && e.name === "AbortError") return;
       if (e instanceof Error && e.name === "AbortError") return;
       if (ctrl.signal.aborted || !mountedRef.current) return;
+      setLoadError(true);
       throw e;
     } finally {
       if (mountedRef.current && getAbortRef.current === ctrl) {
@@ -113,5 +117,5 @@ export function useMonitoringMasterSwitch(): UseMonitoringMasterSwitchResult {
     [enabled]
   );
 
-  return { enabled, loading, saving, toggle, refresh };
+  return { enabled, loading, saving, loadError, toggle, refresh };
 }

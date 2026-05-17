@@ -241,7 +241,11 @@ describe("RNPM owner isolation — Alice vs Bob", () => {
 
       const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
         method: "POST",
-        headers: { "content-type": "application/json", "x-test-owner": "bob" },
+        headers: {
+          "content-type": "application/json",
+          "x-test-owner": "bob",
+          "x-legal-dashboard-desktop": "1",
+        },
         body: JSON.stringify({ ids: [aliceId, bobId1, bobId2] }),
       });
       expect(res.status).toBe(200);

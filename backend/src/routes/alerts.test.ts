@@ -711,6 +711,7 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
       headers: {
         "x-test-owner": OWNER_A,
         "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
       },
       body: JSON.stringify({ mode: "ids", ids: [a.id, b.id, foreign.id] }),
     });
@@ -739,14 +740,22 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
 
     const first = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({ mode: "ids", ids: [alert.id] }),
     });
     expect(first.status).toBe(200);
 
     const second = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({ mode: "ids", ids: [alert.id] }),
     });
     expect(second.status).toBe(200);
@@ -781,7 +790,11 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
 
     const res = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({
         mode: "filters",
         filters: { jobKind: "dosar_soap" },
@@ -808,7 +821,11 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
 
     const res = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({
         mode: "filters",
         filters: { kind: "source_error" },
@@ -827,7 +844,11 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
 
     const res = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({ mode: "filters", filters: {} }),
     });
     expect(res.status).toBe(200);
@@ -849,7 +870,11 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     const app = buildTestApp();
     const res = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({ mode: "ids", ids: [] }),
     });
     expect(res.status).toBe(400);
@@ -861,7 +886,11 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     const app = buildTestApp();
     const res = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({ mode: "garbage" }),
     });
     expect(res.status).toBe(400);
@@ -873,7 +902,11 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
     const app = buildTestApp();
     const res = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({
         mode: "filters",
         filters: { includeDismissed: true },
@@ -893,7 +926,11 @@ describe("POST /api/v1/alerts/dismiss-bulk", () => {
 
     const res = await app.request("/api/v1/alerts/dismiss-bulk", {
       method: "POST",
-      headers: { "x-test-owner": OWNER_A, "Content-Type": "application/json" },
+      headers: {
+        "x-test-owner": OWNER_A,
+        "Content-Type": "application/json",
+        "X-Legal-Dashboard-Desktop": "1",
+      },
       body: JSON.stringify({
         mode: "filters",
         filters: { kind: "termen_dupa_solutie" },
