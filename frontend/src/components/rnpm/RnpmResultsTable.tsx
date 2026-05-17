@@ -28,7 +28,6 @@ export interface RnpmResultsTableProps {
   result: RnpmResultsTableResult | null;
   loading: boolean;
   onNeedMore: () => void;
-  onOpenDetail: (doc: RnpmDocument, avizId: number | null) => void;
   searchType?: string;
   dateStart?: string; // YYYY-MM-DD
   dateEnd?: string; // YYYY-MM-DD
@@ -65,7 +64,6 @@ export function RnpmResultsTable({
   result,
   loading,
   onNeedMore,
-  onOpenDetail,
   searchType,
   dateStart,
   dateEnd,
@@ -473,15 +471,16 @@ export function RnpmResultsTable({
               const isExpanded = expandedId === doc.identificator.v;
               const status = getRnpmAvizStatusDisplay(doc.activ);
               const collapsedMatches = anyTokenMatches([doc.identificator.v, doc.tip, doc.utilizatorAutorizat], tokens);
+              const detailUnavailable = avizId == null;
               const toggleExpand = () => {
                 if (isExpanded) {
                   setExpandedId(null);
                   return;
                 }
-                if (avizId == null) {
-                  onOpenDetail(doc, avizId);
-                  return;
-                }
+                // Detail-fetch a esuat in timpul cautarii (UUID lipsa / fetch error
+                // / parse error). Click silentios — fara banner page-level care nu
+                // are context per-row. Cue vizual e in title + cursor pe <tr>.
+                if (detailUnavailable) return;
                 markAsViewed(doc.identificator.v);
                 setExpandedId(doc.identificator.v);
               };
@@ -496,9 +495,12 @@ export function RnpmResultsTable({
                       }
                     }}
                     tabIndex={0}
+                    title={detailUnavailable ? "Detalii indisponibile pentru acest aviz (fetch esuat)." : undefined}
                     className={cn(
-                      "border-t border-border cursor-pointer transition-colors",
-                      isExpanded ? "bg-accent/40" : "hover:bg-accent/30"
+                      "border-t border-border transition-colors",
+                      detailUnavailable
+                        ? "cursor-not-allowed opacity-60"
+                        : cn("cursor-pointer", isExpanded ? "bg-accent/40" : "hover:bg-accent/30")
                     )}
                   >
                     <td

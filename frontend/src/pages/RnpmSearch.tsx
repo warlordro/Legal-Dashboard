@@ -312,14 +312,6 @@ export default function RnpmSearchPage({
     consumePendingSearch();
   }, [pendingSearch]);
 
-  const openDetailByAvizId = (id: number | null) => {
-    if (id != null) setDetailAvizId(id);
-    else
-      setError(
-        "Detaliile nu sunt disponibile pentru acest aviz (UUID expirat in timpul cautarii). Refa cautarea pentru a reincarca detaliile."
-      );
-  };
-
   const tabs: { id: Tab; label: string; icon: typeof FileLock2 }[] = [
     { id: "search", label: "Cautare", icon: FileLock2 },
     { id: "bulk", label: "Bulk", icon: ListChecks },
@@ -368,10 +360,23 @@ export default function RnpmSearchPage({
             <RnpmSavedStats
               refreshKey={savedRefreshKey + savedStatsKey}
               onAfterDeleteAll={() => {
+                // Abort orice cautare in-flight: poate scrie inca rezultate care pointeaza la
+                // ID-uri sterse server-side, plus auto-loop-ul de "Incarca tot" trebuie oprit.
+                if (abortRef.current) {
+                  stoppedRef.current = true;
+                  abortRef.current.abort();
+                }
                 setSavedRefreshKey((k) => k + 1);
                 setResult(null);
                 setError(null);
                 setElapsedMs(null);
+                setPhase("");
+                setAutoLoading(false);
+                // Modal aviz: ID-ul referit e acum 404 server-side.
+                setDetailAvizId(null);
+                // Stari de split agatate de o cautare invalidata.
+                setPendingSplit(null);
+                setSplitProgress(null);
               }}
             />
           </div>
@@ -495,7 +500,6 @@ export default function RnpmSearchPage({
           result={visibleResult}
           loading={loading}
           onNeedMore={loadNextBatch}
-          onOpenDetail={(_doc, avizId) => openDetailByAvizId(avizId)}
           searchType={lastType}
           dateStart={lastParams.perioadaStart}
           dateEnd={lastParams.perioadaFinal}

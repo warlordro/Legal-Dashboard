@@ -9,7 +9,7 @@ import {
   type RnpmDocument,
   type RnpmFullDetail,
 } from "./rnpmClient.ts";
-import { saveSearch, searchBelongsToOwner, updateSearchTotal } from "../db/searchRepository.ts";
+import { getSearchOwnership, saveSearch, updateSearchTotal } from "../db/searchRepository.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { withMaintenanceRead } from "../db/backup.ts";
 import { buildSaveAvizInput } from "./rnpmAvizMapper.ts";
@@ -102,18 +102,32 @@ export async function executeSearch(
 ): Promise<ExecuteSearchResult> {
   const ownerId = input.ownerId ?? "local";
 
-  // Tenant guard: refuza continuarile pe `existingSearchId` care nu apartin
-  // owner-ului curent (audit 2026-04-29 #11). Fara aceasta, un client local
-  // ar putea atasa avize la istoricul altui tenant in mod web mode.
-  if (input.existingSearchId != null && !searchBelongsToOwner(input.existingSearchId, ownerId)) {
-    throw new RnpmError("searchId nu apartine owner-ului curent", 403);
+  // Tenant guard: refuza continuarile pe `existingSearchId` care apartin altui
+  // owner (audit 2026-04-29 #11). Cazul "missing" e benign — searchId e cache-uit
+  // in UI dupa "Sterge baza" care a sters rnpm_searches; in loc sa raspundem 403
+  // (vizibil userului ca eroare cross-tenant), tratam ca search nou: dropam
+  // existingSearchId/existingGcode/startRnpmPage si lasam restul fluxului sa
+  // creeze un row nou + sa rezolve un captcha proaspat.
+  let existingSearchId = input.existingSearchId ?? undefined;
+  let existingGcode = input.existingGcode ?? undefined;
+  let startRnpmPage = input.startRnpmPage;
+  if (existingSearchId != null) {
+    const ownership = getSearchOwnership(existingSearchId, ownerId);
+    if (ownership === "foreign") {
+      throw new RnpmError("searchId nu apartine owner-ului curent", 403);
+    }
+    if (ownership === "missing") {
+      existingSearchId = undefined;
+      existingGcode = undefined;
+      startRnpmPage = undefined;
+    }
   }
 
   const batchSize = input.batchSize ?? DEFAULT_BATCH_SIZE;
   const fetchDetails = input.fetchDetails !== false;
   const concurrency = input.detailConcurrency ?? DEFAULT_DETAIL_CONCURRENCY;
   const signal = input.signal;
-  let rnpmPage = input.startRnpmPage ?? 1;
+  let rnpmPage = startRnpmPage ?? 1;
 
   // Per-phase timing accumulators — emitted at the end as a single
   // `rnpm_search` summary line so the slow-search complaint can be triaged
@@ -128,8 +142,8 @@ export async function executeSearch(
 
   throwIfAborted(signal);
   let gcode: string;
-  if (input.existingGcode) {
-    gcode = input.existingGcode;
+  if (existingGcode) {
+    gcode = existingGcode;
   } else {
     const tCaptcha = Date.now();
     gcode = await solveRnpmCaptcha(
@@ -188,7 +202,7 @@ export async function executeSearch(
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     const isExpired = e instanceof RnpmError && (e.status === 410 || e.status === 401 || e.status === 403);
-    if ((input.existingGcode && e instanceof RnpmError) || isExpired) {
+    if ((existingGcode && e instanceof RnpmError) || isExpired) {
       throwIfAborted(signal);
       const tRetry = Date.now();
       gcode = await solveRnpmCaptcha(
@@ -238,7 +252,7 @@ export async function executeSearch(
   const criteriu = firstResult.criteriu;
 
   const searchId =
-    input.existingSearchId ??
+    existingSearchId ??
     saveSearch({
       ownerId,
       searchType: input.type,
@@ -396,7 +410,7 @@ export async function executeSearch(
     total,
     pagesTotal,
     pageSize,
-    currentPage: input.startRnpmPage ?? 1,
+    currentPage: startRnpmPage ?? 1,
     criteriu,
     gcode,
     nextRnpmPage,

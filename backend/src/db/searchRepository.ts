@@ -83,7 +83,20 @@ export function deleteSearch(id: number, ownerId = "local"): boolean {
 // `existingSearchId` arbitrar; fara aceasta verificare, avizele descoperite
 // in continuare s-ar lega de istoricul altui owner. Vezi audit 2026-04-29 #11.
 export function searchBelongsToOwner(id: number, ownerId: string): boolean {
+  return getSearchOwnership(id, ownerId) === "owned";
+}
+
+// 3-state ownership pentru a putea distinge "row sters din baza" (missing) de
+// "row exista dar e al altui tenant" (foreign). Missing nu e atac — apare cand
+// userul sterge baza ("Sterge baza") iar UI-ul cache-uieste searchId vechi.
+// Foreign trebuie sa ramana 403 ca sa pastram garda din audit 2026-04-29 #11.
+export type SearchOwnership = "owned" | "foreign" | "missing";
+
+export function getSearchOwnership(id: number, ownerId: string): SearchOwnership {
   const db = getDb();
-  const row = db.prepare("SELECT 1 FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1").get(id, ownerId);
-  return row !== undefined;
+  const row = db.prepare("SELECT owner_id FROM rnpm_searches WHERE id = ? LIMIT 1").get(id) as
+    | { owner_id: string }
+    | undefined;
+  if (!row) return "missing";
+  return row.owner_id === ownerId ? "owned" : "foreign";
 }

@@ -59,7 +59,7 @@ function mount(result = resultWithStatuses()) {
   document.body.appendChild(nextContainer);
   act(() => {
     root = createRoot(nextContainer);
-    root.render(<RnpmResultsTable result={result} loading={false} onNeedMore={() => {}} onOpenDetail={() => {}} />);
+    root.render(<RnpmResultsTable result={result} loading={false} onNeedMore={() => {}} />);
   });
 }
 

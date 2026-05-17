@@ -1,4 +1,4 @@
-﻿import { apiFetch } from "@/lib/api";
+﻿import { apiFetch, extractErrorMessage } from "@/lib/api";
 import type {
   RnpmSearchType,
   RnpmSearchParams,
@@ -63,14 +63,28 @@ export async function filterRnpmResults(
     signal,
   });
   if (!res.ok) {
-    let data: { error?: string; code?: string } | null = null;
+    let data: { error?: unknown; code?: string } | null = null;
     try {
-      data = (await res.json()) as { error?: string; code?: string };
+      data = (await res.json()) as { error?: unknown; code?: string };
     } catch {
       throw new Error(`Eroare server (${res.status})`);
     }
-    const errorMsg = data?.error ?? "Eroare necunoscuta";
-    if (res.status === 503 && data?.code === "FILTER_DISABLED") {
+    // v2.14.0 envelope: error e obiect { code, message }; legacy: string.
+    // Fara unwrap, `new Error(objectError)` produce message="[object Object]".
+    const raw = data?.error;
+    let errorMsg: string;
+    let envelopeCode: string | undefined;
+    if (typeof raw === "string") {
+      errorMsg = raw;
+    } else if (raw && typeof raw === "object") {
+      const obj = raw as { message?: unknown; code?: unknown };
+      errorMsg = typeof obj.message === "string" ? obj.message : `Eroare server (${res.status})`;
+      if (typeof obj.code === "string") envelopeCode = obj.code;
+    } else {
+      errorMsg = "Eroare necunoscuta";
+    }
+    const code = envelopeCode ?? data?.code;
+    if (res.status === 503 && code === "FILTER_DISABLED") {
       throw new RnpmFilterDisabledError(errorMsg);
     }
     throw new Error(errorMsg);
@@ -126,7 +140,9 @@ export async function rnpmSearch(
     body: JSON.stringify({ type, params, captchaKey, ...opts }),
     signal,
   });
-  // Special-case 400 + code:"limit_exceeded" — escape din jsonOrThrow inainte de a colapsa eroarea.
+  // Special-case 400 + code:"LIMIT_EXCEEDED" — escape din jsonOrThrow inainte de a colapsa eroarea.
+  // v2.14.0 envelope: { data: null, error: { code, message, details: { total, limit, splittable } }, requestId }.
+  // Fara unwrap, `new Error(obj.error)` produce message="[object Object]".
   if (res.status === 400) {
     const text = await res.text();
     let parsed: unknown;
@@ -136,18 +152,22 @@ export async function rnpmSearch(
       parsed = null;
     }
     if (parsed && typeof parsed === "object") {
-      const obj = parsed as {
-        error?: string;
-        code?: string;
-        total?: number;
-        limit?: number;
-        splittable?: { type?: string };
+      const envelope = parsed as {
+        error?: {
+          code?: string;
+          message?: string;
+          details?: { total?: number; limit?: number; splittable?: { type?: string } };
+        };
       };
-      if (obj.code === "limit_exceeded") {
-        const splitType = (obj.splittable?.type as RnpmSearchType) ?? type;
-        throw new RnpmLimitExceededError(obj.error ?? "Cap rezultate depasit", obj.total, obj.limit, splitType);
+      const msg = extractErrorMessage(parsed, `Eroare (${res.status})`);
+      if (envelope.error?.code === "LIMIT_EXCEEDED") {
+        const details = envelope.error.details;
+        const total = typeof details?.total === "number" ? details.total : undefined;
+        const limit = typeof details?.limit === "number" ? details.limit : undefined;
+        const splitType = (details?.splittable?.type as RnpmSearchType) ?? type;
+        throw new RnpmLimitExceededError(msg, total, limit, splitType);
       }
-      throw new Error(obj.error ?? `Eroare (${res.status})`);
+      throw new Error(msg);
     }
     throw new Error(`Eroare server (${res.status})`);
   }
@@ -181,7 +201,14 @@ export async function rnpmSplitSearch(
   });
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
-    throw new Error(text || `Eroare split (${res.status})`);
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      // not JSON — text e plain
+    }
+    const msg = extractErrorMessage(parsed, text || `Eroare split (${res.status})`);
+    throw new Error(msg);
   }
 
   const reader = res.body.getReader();
@@ -209,7 +236,9 @@ export async function rnpmSplitSearch(
           const data = JSON.parse(dataMatch[1]);
           if (event === "progress") onProgress(data as RnpmSplitProgress);
           else if (event === "complete") finalResult = data as RnpmSplitResult;
-          else if (event === "error") throw new Error((data as { error?: string }).error ?? "Eroare split");
+          // extractErrorMessage acopera ambele shape-uri: { error: "..." } (curent)
+          // si v2.14.0 envelope { error: { code, message } } daca backendul migreaza.
+          else if (event === "error") throw new Error(extractErrorMessage(data, "Eroare split"));
         } catch (e) {
           if (e instanceof Error && e.message !== "Unexpected end of JSON input") throw e;
         }
@@ -485,7 +514,14 @@ export async function rnpmBulkSearch(
   });
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "");
-    throw new Error(text || `Eroare bulk (${res.status})`);
+    let parsed: unknown = null;
+    try {
+      parsed = text ? JSON.parse(text) : null;
+    } catch {
+      // not JSON — text e plain
+    }
+    const msg = extractErrorMessage(parsed, text || `Eroare bulk (${res.status})`);
+    throw new Error(msg);
   }
 
   const reader = res.body.getReader();
@@ -511,7 +547,9 @@ export async function rnpmBulkSearch(
         try {
           const data = JSON.parse(dataMatch[1]);
           if (event === "progress") onProgress(data as RnpmBulkProgress);
-          else if (event === "error") throw new Error((data as { error?: string }).error ?? "Eroare bulk");
+          // extractErrorMessage acopera ambele shape-uri: { error: "..." } (curent)
+          // si v2.14.0 envelope { error: { code, message } } daca backendul migreaza.
+          else if (event === "error") throw new Error(extractErrorMessage(data, "Eroare bulk"));
         } catch (e) {
           if (e instanceof Error && e.message !== "Unexpected end of JSON input") throw e;
         }
