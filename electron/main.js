@@ -14,6 +14,7 @@ const path = require("node:path");
 const fs = require("node:fs");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 const { registerNotificationIpc } = require(path.join(__dirname, "notifications.js"));
+const { startEventLoopWatchdog } = require(path.join(__dirname, "event-loop-watchdog.js"));
 const APP_USER_MODEL_ID = app.isPackaged ? "ro.legaldashboard.app" : "ro.legaldashboard.dev";
 
 // Windows: setAppUserModelId must run before any window/notification is shown
@@ -517,6 +518,7 @@ function ensureDevTaskbarShortcut() {
 
 app.whenReady().then(async () => {
   ensureDevTaskbarShortcut();
+  startEventLoopWatchdog(app.getPath("userData"));
 
   // SECURITY: Set CSP header for all responses
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
