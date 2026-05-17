@@ -27,6 +27,7 @@ import {
   callModel,
   callOpenRouter,
   resolveOpenRouterSlug,
+  shouldRouteViaOpenRouter,
   OPENROUTER_CHINESE_MAP,
   OPENROUTER_WESTERN_MAP,
 } from "./ai.ts";
@@ -242,5 +243,51 @@ describe("callModel OpenRouter routing", () => {
         stack: "western",
       })
     ).rejects.toThrow("MODEL_NOT_IN_STACK:qwen-3.6-max:western");
+  });
+});
+
+describe("shouldRouteViaOpenRouter", () => {
+  it("routes when mode is explicitly openrouter", () => {
+    expect(
+      shouldRouteViaOpenRouter("claude-sonnet", { anthropic: "sk-ant" }, { mode: "openrouter", stack: "western" })
+    ).toBe(true);
+  });
+
+  it("does NOT route to openrouter when mode is native, even with a saved sk-or-* body key", () => {
+    // Repro: user toggles back to native mode while keeping the OpenRouter key in
+    // settings. routing.mode === "native" must win over the auto-detect on the
+    // saved sk-or-* key.
+    expect(
+      shouldRouteViaOpenRouter(
+        "claude-sonnet",
+        { anthropic: "sk-ant", openrouter: "sk-or-v1-test" },
+        { mode: "native", stack: "chinese" }
+      )
+    ).toBe(false);
+  });
+
+  it("does NOT route to openrouter when mode is native, even with OPENROUTER_API_KEY env set", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-env";
+    expect(shouldRouteViaOpenRouter("gpt-5.4-mini", { openai: "sk-test" }, { mode: "native", stack: "western" })).toBe(
+      false
+    );
+  });
+
+  it("still routes to openrouter in native mode for openrouter-only models (defensive fallback)", () => {
+    // The UI filter prevents picking a chinese-only model in native mode, but if it
+    // somehow happens we route to OpenRouter rather than failing — there is no
+    // native SDK for these models.
+    expect(
+      shouldRouteViaOpenRouter("qwen-3.6-max", { openrouter: "sk-or-v1-test" }, { mode: "native", stack: "chinese" })
+    ).toBe(true);
+  });
+
+  it("auto-detects openrouter when routing is undefined and a sk-or-* body key is present", () => {
+    expect(shouldRouteViaOpenRouter("claude-sonnet", { openrouter: "sk-or-v1-test" }, undefined)).toBe(true);
+  });
+
+  it("auto-detects openrouter when routing is undefined and OPENROUTER_API_KEY env is set", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-env";
+    expect(shouldRouteViaOpenRouter("claude-sonnet", {}, undefined)).toBe(true);
   });
 });

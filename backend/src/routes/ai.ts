@@ -11,6 +11,7 @@ import {
   buildPrompt,
   callModel,
   getApiKey,
+  shouldRouteViaOpenRouter,
   type AiRouting,
   validateAiBody,
 } from "../services/ai.ts";
@@ -110,12 +111,7 @@ function getRouting(c: Context): AiRouting {
 }
 
 function routesViaOpenRouter(modelKey: string, apiKeys: Record<string, string>, routing: AiRouting): boolean {
-  return (
-    routing.mode === "openrouter" ||
-    Boolean(process.env.OPENROUTER_API_KEY) ||
-    Boolean(apiKeys.openrouter?.startsWith("sk-or-")) ||
-    AI_MODELS[modelKey]?.provider === "openrouter"
-  );
+  return shouldRouteViaOpenRouter(modelKey, apiKeys, routing);
 }
 
 function assertStackPurity(modelKeys: string[], stack: AiRouting["stack"]): string | null {

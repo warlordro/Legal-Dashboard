@@ -587,6 +587,29 @@ export function getApiKey(provider: string, keys: Record<string, string>): strin
   return "";
 }
 
+// Single source of truth for "do we route this call via OpenRouter?".
+// Explicit native mode wins over the auto-detect on saved sk-or-* keys or env —
+// otherwise toggling back to native silently kept routing on OpenRouter and
+// threw MODEL_NOT_IN_STACK for native model keys (v2.28.0 regression).
+// Defensive fallback: openrouter-only models (provider === "openrouter") still
+// route via OpenRouter even in native mode, since they have no native SDK path.
+export function shouldRouteViaOpenRouter(
+  modelKey: string,
+  apiKeys: Record<string, string>,
+  routing: AiRouting | undefined
+): boolean {
+  const model = AI_MODELS[modelKey];
+  if (routing?.mode === "native") {
+    return model?.provider === "openrouter";
+  }
+  return (
+    routing?.mode === "openrouter" ||
+    Boolean(process.env.OPENROUTER_API_KEY) ||
+    Boolean(apiKeys.openrouter?.startsWith("sk-or-")) ||
+    model?.provider === "openrouter"
+  );
+}
+
 export async function callModel(
   modelKey: string,
   prompt: string,
@@ -599,11 +622,7 @@ export async function callModel(
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");
 
-  const useOpenRouter =
-    routing?.mode === "openrouter" ||
-    Boolean(process.env.OPENROUTER_API_KEY) ||
-    Boolean(apiKeys.openrouter?.startsWith("sk-or-")) ||
-    model.provider === "openrouter";
+  const useOpenRouter = shouldRouteViaOpenRouter(modelKey, apiKeys, routing);
 
   if (useOpenRouter) {
     const stack = routing?.stack ?? model.stack ?? "western";
