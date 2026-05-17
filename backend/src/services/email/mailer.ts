@@ -137,12 +137,14 @@ function prettyDetail(alert: MonitoringAlertRow): string {
   );
 }
 
+/** @internal - exported only for tests in mailer.test.ts */
 export function buildSubject(alert: MonitoringAlertRow): string {
   const severity = SEVERITY_LABELS[alert.severity] ?? "Info";
   const kind = KIND_LABELS[alert.kind] ?? alert.kind;
   return `[Legal Dashboard] ${severity}: ${kind}`;
 }
 
+/** @internal - exported only for tests in mailer.test.ts */
 export function buildHtmlBody(alert: MonitoringAlertRow): string {
   const subject = buildSubject(alert);
   const detail = escapeHtml(prettyDetail(alert));
@@ -154,6 +156,7 @@ export function buildHtmlBody(alert: MonitoringAlertRow): string {
   ].join("");
 }
 
+/** @internal - exported only for tests in mailer.test.ts */
 export function buildTextBody(alert: MonitoringAlertRow): string {
   return [
     buildSubject(alert),

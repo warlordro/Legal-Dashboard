@@ -84,6 +84,7 @@ export interface DiffOutput {
 // Sets are normalized + sorted so {Apel, Fond} and {Fond, Apel} fingerprint
 // identically — preserving order would mint phantom resets on cosmetic UI
 // reorderings.
+/** @internal - exported only for tests in diff/dosarSoap.test.ts */
 export function computeFilterFingerprint(alertConfig: AlertConfig): string {
   const stadii = alertConfig.stadii ? Array.from(new Set(alertConfig.stadii.map(normalizeStadiu))).sort() : null;
   const categorii = alertConfig.categorii

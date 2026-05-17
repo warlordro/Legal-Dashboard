@@ -70,7 +70,7 @@ export function SiSauToggle({ value, onChange }: { value: "1" | "2"; onChange: (
   );
 }
 
-export function PJPFToggle({ value, onChange }: { value: "PJ" | "PF"; onChange: (v: "PJ" | "PF") => void }) {
+function PJPFToggle({ value, onChange }: { value: "PJ" | "PF"; onChange: (v: "PJ" | "PF") => void }) {
   return (
     <div className="mb-2 flex gap-1">
       {(["PJ", "PF"] as const).map((t) => (
@@ -124,7 +124,7 @@ export function PJBlock({
   );
 }
 
-export function PFBlock({
+function PFBlock({
   field,
   showPrenume = false,
   numePlaceholder = "Nume",

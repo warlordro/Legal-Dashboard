@@ -169,7 +169,7 @@ export function purgeOldRuns(retentionDays = 90, chunkSize = 1000): number {
 // "completed runs in the last 24h", nu "started in the last 24h". Caller-ul
 // decide prezentarea statusurilor terminale; dashboard-ul tine `aborted`
 // separat de `error` ca restart/drain noise sa nu para source failure.
-export interface RunsByStatusRow {
+interface RunsByStatusRow {
   status: string;
   n: number;
 }

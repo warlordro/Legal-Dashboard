@@ -34,7 +34,7 @@ import { getDb } from "./schema.ts";
 // its action is not on the list, because a denied/error event is interesting
 // regardless of which subsystem produced it.
 // ────────────────────────────────────────────────────────────────────────────
-export const CURATED_AUDIT_ACTIONS: readonly string[] = [
+const CURATED_AUDIT_ACTIONS: readonly string[] = [
   "auth.denied",
   "monitoring.job.deleted",
   "monitoring.job.bulk_deleted",
@@ -263,7 +263,7 @@ export function listCuratedAuditInRange(opts: {
 // portion); valid because every column is stored as ISO string with `Z` suffix.
 // ────────────────────────────────────────────────────────────────────────────
 
-export interface AlertsDailyRow {
+interface AlertsDailyRow {
   day: string;
   count: number;
 }
@@ -284,7 +284,7 @@ export function aggregateAlertsByDayInRange(opts: {
     .all(opts.ownerId, opts.since, opts.until) as AlertsDailyRow[];
 }
 
-export interface RunsByDayStatusRow {
+interface RunsByDayStatusRow {
   day: string;
   status: string;
   n: number;
