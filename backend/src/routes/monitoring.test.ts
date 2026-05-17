@@ -54,7 +54,10 @@ async function postJson(
   body: unknown,
   opts: { owner?: string; requestId?: string; rawBody?: string } = {}
 ): Promise<Response> {
-  const headers: Record<string, string> = { "content-type": "application/json" };
+  const headers: Record<string, string> = {
+    "content-type": "application/json",
+    "x-legal-dashboard-desktop": "1",
+  };
   if (opts.owner) headers["x-test-owner"] = opts.owner;
   if (opts.requestId) headers["x-request-id"] = opts.requestId;
   return app.request(url, {

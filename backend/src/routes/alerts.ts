@@ -28,6 +28,7 @@ import { deriveAlertDigestRow } from "../services/email/dailyReportTemplate.ts";
 import { buildAlertsPdf } from "../services/alertsExportPdf.ts";
 import { buildAlertsXlsx, type AlertExportDecoratedRow } from "../services/alertsExportXlsx.ts";
 import { getOwnerId } from "../middleware/owner.ts";
+import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { fail, ok } from "../util/envelope.ts";
 
 // PATCH /:id/seen and /:id/dismissed both expect an empty body. 4 KiB is far
@@ -298,7 +299,7 @@ const AlertDismissBulkBodySchema = z.discriminatedUnion("mode", [
     .strict(),
 ]);
 
-alertsRouter.post("/dismiss-bulk", limitAlertDismissBulkBody, async (c) => {
+alertsRouter.post("/dismiss-bulk", requireDesktopHeader, limitAlertDismissBulkBody, async (c) => {
   const ownerId = getOwnerId(c);
   let body: unknown;
   try {

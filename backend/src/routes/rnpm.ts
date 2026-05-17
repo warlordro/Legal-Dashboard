@@ -787,7 +787,7 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin"), (c) 
   return c.json({ deleted: count });
 });
 
-rnpmRouter.post("/saved/delete-batch", limitExport, async (c) => {
+rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async (c) => {
   const body = await parseJsonBody(c);
   if (body === null) return invalidJson(c);
   const { ids } = (body ?? {}) as { ids?: unknown };
@@ -883,7 +883,7 @@ rnpmRouter.get("/backups", requireRole("admin"), async (c) => {
   }
 });
 
-rnpmRouter.post("/backups/restore", requireRole("admin"), limitSmall, async (c) => {
+rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin"), limitSmall, async (c) => {
   const body = await parseJsonBody(c);
   if (body === null) return invalidJson(c);
   const name = (body as { name?: unknown })?.name;

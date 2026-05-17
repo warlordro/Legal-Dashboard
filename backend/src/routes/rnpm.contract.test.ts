@@ -243,7 +243,7 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
     const id2 = seedAviz({ identificator: "AV-BATCH-2" });
     const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
       body: JSON.stringify({ ids: [id1, id2] }),
     });
     expect(res.status).toBe(200);
@@ -254,7 +254,7 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
   it("returns 400 + { error } on empty list", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
       body: JSON.stringify({ ids: [] }),
     });
     expect(res.status).toBe(400);
@@ -265,7 +265,7 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
   it("returns 400 + { error } when JSON body is malformed", async () => {
     const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
       body: "{not json",
     });
     expect(res.status).toBe(400);
@@ -552,7 +552,7 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
   it("returns 400 + { error } when name field is missing", async () => {
     const res = await buildApp().request("/api/v1/rnpm/backups/restore", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
       body: JSON.stringify({}),
     });
     expect(res.status).toBe(400);
@@ -563,7 +563,7 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
   it("returns 400 + { error } on malformed JSON", async () => {
     const res = await buildApp().request("/api/v1/rnpm/backups/restore", {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
       body: "{",
     });
     expect(res.status).toBe(400);

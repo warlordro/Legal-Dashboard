@@ -14,6 +14,7 @@ import { bodyLimit } from "hono/body-limit";
 import type { Context } from "hono";
 
 import { getOwnerId } from "../middleware/owner.ts";
+import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import {
   deleteJob,
@@ -355,7 +356,7 @@ monitoringRouter.delete("/jobs/:id", (c) => {
 // e fuzionat in not_found pentru ca raspunsul nu trebuie sa scurga
 // existenta). Audit unic agregat pe toata operatia.
 const BULK_DELETE_MAX = 100;
-monitoringRouter.post("/jobs/bulk-delete", limitMonitoringBody, async (c) => {
+monitoringRouter.post("/jobs/bulk-delete", requireDesktopHeader, limitMonitoringBody, async (c) => {
   const ownerId = getOwnerId(c);
   const bodyResult = await readLimitedJsonBody(c);
   if (!bodyResult.ok) return bodyResult.response;

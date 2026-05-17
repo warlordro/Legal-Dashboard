@@ -291,10 +291,22 @@ export default function Monitorizare({
             </CardTitle>
             <div className="flex items-center gap-2">
               {masterSwitch.enabled === null ? (
-                <Button variant="outline" size="sm" disabled>
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Se incarca...
-                </Button>
+                masterSwitch.loadError ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      masterSwitch.refresh().catch(() => {});
+                    }}
+                  >
+                    Reincearca incarcarea
+                  </Button>
+                ) : (
+                  <Button variant="outline" size="sm" disabled>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Se incarca...
+                  </Button>
+                )
               ) : masterSwitch.enabled ? (
                 <Button
                   variant="outline"
