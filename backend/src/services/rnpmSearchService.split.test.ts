@@ -28,7 +28,8 @@ vi.mock("./captchaSolver.ts", () => ({
 }));
 
 import { closeDb, getDb } from "../db/schema.ts";
-import { executeSplitSearch } from "./rnpmSearchService.ts";
+import { saveSearch } from "../db/searchRepository.ts";
+import { executeSearch, executeSplitSearch } from "./rnpmSearchService.ts";
 import {
   RnpmClient,
   RnpmError,
@@ -655,5 +656,116 @@ describe("executeSplitSearch — v2.18.0 nested destination dispatcher", () => {
     for (let i = 1; i <= DESTINATII_IPOTECI.length; i++) {
       expect(setIndices.has(String(i))).toBe(true);
     }
+  });
+});
+
+describe("invariants critice (audit §6.5)", () => {
+  function silentRefusalResult(total = 600): RnpmSearchResult {
+    return { total, pagesTotal: 24, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
+  }
+
+  it("[I1] respinge cross-tenant existingSearchId cu RnpmError(403)", async () => {
+    const aliceSearchId = saveSearch({
+      ownerId: "alice",
+      searchType: "ipoteci",
+      paramsJson: "{}",
+      totalResults: 0,
+      criteriu: null,
+    });
+    const stub = new StubClient(() => singleDocResult("not-called"));
+
+    const promise = executeSearch(
+      {
+        type: "ipoteci",
+        params: {},
+        captchaKey: "stub-key",
+        ownerId: "bob",
+        existingSearchId: aliceSearchId,
+      },
+      stub
+    );
+
+    await expect(promise).rejects.toBeInstanceOf(RnpmError);
+    await expect(promise).rejects.toMatchObject({ status: 403 });
+    expect(stub.searchCalls.length).toBe(0);
+  });
+
+  it("[I3] NU fail-fast la eroare transienta inainte de al 3-lea refuz silentios", async () => {
+    const subTypes = ["s1", "s2", "s3", "s4"];
+    const stub = new StubClient(({ tipIdx }) => {
+      if (tipIdx === "1" || tipIdx === "2") return silentRefusalResult();
+      if (tipIdx === "3") throw new Error("transient network");
+      return singleDocResult(tipIdx ?? "?");
+    });
+
+    const result = await executeSplitSearch(
+      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => {
+        /* progress ignored */
+      },
+      stub
+    );
+
+    expect(
+      Array.from(new Set(stub.searchCalls.filter((c) => c.destinatie == null).map((c) => c.tipInscriere)))
+    ).toEqual(["1", "2", "3", "4"]);
+    expect(result.splitStats.some((s) => s.reason?.match(/fail-fast/i))).toBe(false);
+    expect(result.splitStats[2]).toMatchObject({ status: "error", reason: "transient network" });
+    expect(result.splitStats[3]).toMatchObject({ status: "ok", count: 1 });
+  });
+
+  it("[I3] fail-fast la 3 refuzuri silentioase consecutive", async () => {
+    const subTypes = ["s1", "s2", "s3", "s4", "s5"];
+    const stub = new StubClient(({ tipIdx }) => {
+      if (tipIdx === "1" || tipIdx === "2" || tipIdx === "3") return silentRefusalResult();
+      return singleDocResult(tipIdx ?? "?");
+    });
+
+    const result = await executeSplitSearch(
+      { type: "ipoteci", baseParams: {}, subTypeLabels: subTypes, captchaKey: "stub-key" },
+      () => {
+        /* progress ignored */
+      },
+      stub
+    );
+
+    const tier1Calls = Array.from(
+      new Set(stub.searchCalls.filter((c) => c.destinatie == null).map((c) => c.tipInscriere))
+    );
+    expect(tier1Calls).toEqual(["1", "2", "3"]);
+    expect(result.splitStats.slice(0, 3).every((s) => s.status === "blocked" && s.gapReason === "silent_refusal")).toBe(
+      true
+    );
+    expect(result.splitStats.slice(3).every((s) => s.status === "error" && s.reason?.match(/fail-fast/i))).toBe(true);
+  });
+
+  it("[I-final-update] updateSearchTotal ruleaza in finally pe abort mid-split", async () => {
+    const abortController = new AbortController();
+    const stub = new StubClient(({ tipIdx }) => {
+      if (tipIdx === "1") return singleDocResult("partial");
+      abortController.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+
+    await expect(
+      executeSplitSearch(
+        {
+          type: "ipoteci",
+          baseParams: {},
+          subTypeLabels: ["s1", "s2", "s3"],
+          captchaKey: "stub-key",
+          signal: abortController.signal,
+        },
+        () => {
+          /* progress ignored */
+        },
+        stub
+      )
+    ).rejects.toThrow(/Aborted/);
+
+    const row = getDb()
+      .prepare("SELECT total_results FROM rnpm_searches WHERE owner_id = ? ORDER BY id DESC LIMIT 1")
+      .get("local") as { total_results: number } | undefined;
+    expect(row?.total_results).toBe(1);
   });
 });
