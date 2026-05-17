@@ -5,6 +5,7 @@ import { defaultDateRange, generateMonthlyIntervals } from "../intervals.ts";
 import {
   MAX_DOSARE_RESPONSE,
   MAX_INSTITUTII,
+  MAX_LOADMORE_BODY,
   MAX_SOAP_FANOUT,
   MAX_SSE_INTERVALS,
   SSE_TIMEOUT_MS,
@@ -21,6 +22,15 @@ export const dosareExportRouter = new Hono();
 const EXPORT_BODY_LIMIT = 25 * 1024 * 1024;
 const limitExport = bodyLimit({
   maxSize: EXPORT_BODY_LIMIT,
+  onError: (c) => c.json({ error: "Payload prea mare" }, 413),
+});
+
+// F7: hard cap pe load-more inainte ca Hono sa aloce body-ul in memorie.
+// parseExistingFromBody face deja un soft-check post-`c.req.text()`, dar
+// guardul de aici e fail-fast: payload > MAX_LOADMORE_BODY (512KB) e respins
+// la nivel de framework, fara sa mai citim string-ul.
+const limitLoadMore = bodyLimit({
+  maxSize: MAX_LOADMORE_BODY,
   onError: (c) => c.json({ error: "Payload prea mare" }, 413),
 });
 
@@ -181,7 +191,7 @@ dosareRouter.get("/", async (c) => {
 });
 
 // Load More Dosare (SSE stream)
-dosareRouter.post("/load-more", async (c) => {
+dosareRouter.post("/load-more", limitLoadMore, async (c) => {
   const { numarDosar, obiectDosar, numeParte, dataStart, dataStop } = c.req.query();
   const institutii = c.req.queries("institutie") ?? [];
 

@@ -521,14 +521,23 @@ export async function callOpenRouter(
       const choice = completion.choices?.[0];
       const content = choice?.message?.content ?? "";
       if (!content.trim()) {
-        // TEMP DIAG: capture shape of empty-content responses (thinking models like Kimi K2.6).
+        // F10: diagnosticul OpenRouter pentru raspunsuri goale logheaza doar
+        // shape-ul (finish_reason, presence flags, lungimi) si NU continutul
+        // mesajului. Continutul ar fi derivat din prompt-ul AI care include
+        // date de dosar/parti — leak in stdout/loguri.
+        const msg = choice?.message;
+        const reasoningPresent = msg && typeof msg === "object" && "reasoning" in msg && msg.reasoning != null;
         console.error(
           "[openrouter_empty_content]",
           slug,
           "finish_reason:",
           choice?.finish_reason,
-          "message:",
-          JSON.stringify(choice?.message).slice(0, 2000)
+          "content_length:",
+          typeof msg?.content === "string" ? msg.content.length : 0,
+          "reasoning_present:",
+          Boolean(reasoningPresent),
+          "role:",
+          msg?.role
         );
       }
       return {

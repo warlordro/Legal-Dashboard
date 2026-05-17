@@ -5,6 +5,7 @@ import { defaultDateRange, generateMonthlyIntervals } from "../intervals.ts";
 import {
   MAX_DOSARE_RESPONSE,
   MAX_INSTITUTII,
+  MAX_LOADMORE_BODY,
   MAX_SOAP_FANOUT,
   MAX_SSE_INTERVALS,
   SSE_TIMEOUT_MS,
@@ -23,6 +24,13 @@ const EXPORT_BODY_LIMIT = 25 * 1024 * 1024;
 const MAX_TERMENE_EXPORT = 100_000;
 const limitExport = bodyLimit({
   maxSize: EXPORT_BODY_LIMIT,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+
+// F7: hard cap pe /load-more inainte sa alocam body-ul. parseExistingFromBody
+// face soft-check post-text(); guardul de aici e fail-fast la framework.
+const limitLoadMore = bodyLimit({
+  maxSize: MAX_LOADMORE_BODY,
   onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
 });
 
@@ -204,7 +212,7 @@ termeneRouter.get("/", async (c) => {
 });
 
 // Load More Termene (SSE stream)
-termeneRouter.post("/load-more", async (c) => {
+termeneRouter.post("/load-more", limitLoadMore, async (c) => {
   const { numarDosar, obiectDosar, numeParte, dataStart, dataStop } = c.req.query();
   const institutii = c.req.queries("institutie") ?? [];
 
