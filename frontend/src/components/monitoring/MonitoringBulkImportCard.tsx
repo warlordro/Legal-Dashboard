@@ -13,7 +13,12 @@ import {
   type NameListValidation,
   MonitoringApiError,
 } from "@/lib/api";
-import { downloadBulkTemplate, parseBulkFile, type BulkRowDosar } from "@/lib/monitoringBulkTemplate";
+import {
+  downloadBulkTemplate,
+  MAX_BULK_FILE_BYTES,
+  parseBulkFile,
+  type BulkRowDosar,
+} from "@/lib/monitoringBulkTemplate";
 
 // Stage 4 extract din pages/Monitorizare.tsx — toata starea + handlerele +
 // JSX pentru flow-ul "Adaugare bulk din fisier" traieste aici. Page-ul ramane
@@ -71,6 +76,18 @@ export function MonitoringBulkImportCard({
     setExcludedRows(new Set());
     setExcludeWarnsAuto(false);
     setBulkPage(0);
+    // Cap defensiv inainte de `arrayBuffer()` ca rendererul sa nu cada pe
+    // fisiere uriase/craftate. Backend-ul are propriile capuri, dar parserul
+    // ruleaza in proces; un fisier de 200 MB poate freezee UI-ul cateva
+    // secunde inainte ca handler-ul de eroare sa-l respinga.
+    if (file.size > MAX_BULK_FILE_BYTES) {
+      const sizeMb = (file.size / (1024 * 1024)).toFixed(1);
+      const limitMb = (MAX_BULK_FILE_BYTES / (1024 * 1024)).toFixed(0);
+      setBulkError(`Fisier prea mare (${sizeMb} MB). Limita: ${limitMb} MB. Imparte importul in fisiere mai mici.`);
+      setBulkBusy(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+      return;
+    }
     try {
       const buffer = await file.arrayBuffer();
       const parsedBulk = parseBulkFile(buffer, file.name);

@@ -112,6 +112,14 @@ export interface ParseResult {
   invalid: BulkRowInvalid[];
 }
 
+// Caps client-side ca renderer-ul sa nu se blocheze pe fisiere uriase / craftate
+// inainte ca backend-ul (`backend/src/services/nameListParser.ts`) sa-si aplice
+// limitele. Valorile sunt pragmatice pentru cazurile reale (max ~10k joburi
+// bulk) si lasa marja de siguranta peste limitele backend.
+export const MAX_BULK_FILE_BYTES = 10 * 1024 * 1024; // 10 MB
+export const MAX_BULK_DATA_ROWS = 10_000;
+export const MAX_BULK_COLS = 64;
+
 // Match dropdown din `MonitoringAddForm` (label → secunde).
 const CADENCE_LABEL_MAP: Record<string, number> = {
   "4h": 14400,
@@ -317,6 +325,28 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
   const invalid: BulkRowInvalid[] = [];
   if (!sheet) return { valid, invalid };
 
+  // Cap pe dimensiunea sheet-ului (`!ref`) inainte de a materializa matricea —
+  // fisierele crafted pot declara intervale uriase care exploadeaza
+  // `sheet_to_json` in memorie. Decodam manual ref-ul si refuzam controlat.
+  const sheetRef = (sheet as { "!ref"?: string })["!ref"];
+  if (sheetRef) {
+    const match = /^[A-Z]+\d+:([A-Z]+)(\d+)$/.exec(sheetRef);
+    if (match) {
+      const lastCol = match[1];
+      const lastRow = Number(match[2]);
+      let colNum = 0;
+      for (const ch of lastCol) colNum = colNum * 26 + (ch.charCodeAt(0) - 64);
+      if (lastRow > MAX_BULK_DATA_ROWS + 20 || colNum > MAX_BULK_COLS) {
+        invalid.push({
+          rowNumber: 1,
+          display: fileName,
+          message: `Fisier prea mare: ${lastRow} randuri x ${colNum} coloane. Limita: ${MAX_BULK_DATA_ROWS} randuri x ${MAX_BULK_COLS} coloane.`,
+        });
+        return { valid, invalid };
+      }
+    }
+  }
+
   // Citim ca matrice raw, gasim randul de header, apoi parsam manual.
   const matrix = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
   const headerIdx = findHeaderRow(matrix);
@@ -344,7 +374,19 @@ export function parseBulkFile(buffer: ArrayBuffer, fileName: string): ParseResul
   const colCadence = headerRow.indexOf("cadence_sec");
   const colNotes = headerRow.indexOf("notes");
 
-  for (let i = headerIdx + 1; i < matrix.length; i++) {
+  // Cap hard pe randurile de date procesate, dupa header. Daca fisierul are mai
+  // multe randuri decat limita, retinem un mesaj informativ in `invalid` ca
+  // utilizatorul sa-si dea seama ca importul a fost trunchiat.
+  const dataEnd = Math.min(matrix.length, headerIdx + 1 + MAX_BULK_DATA_ROWS);
+  if (matrix.length > dataEnd) {
+    invalid.push({
+      rowNumber: dataEnd + 1,
+      display: fileName,
+      message: `Fisier trunchiat la ${MAX_BULK_DATA_ROWS} randuri (avea ${matrix.length - headerIdx - 1} randuri de date).`,
+    });
+  }
+
+  for (let i = headerIdx + 1; i < dataEnd; i++) {
     const row = matrix[i] ?? [];
     // rowNumber este numarul Excel (1-based) — utilizat in mesajele de eroare
     // pentru ca user-ul sa il poata localiza in foaia originala.

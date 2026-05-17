@@ -48,6 +48,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -75,6 +76,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
 
   const load = useCallback(async () => {
     setLoading(true);
+    setLoadError(null);
     try {
       const result = await rnpmGetSaved({
         page,
@@ -89,6 +91,11 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
       });
       setItems(result.items);
       setTotal(result.total);
+    } catch (err) {
+      console.error("[rnpm] saved load failed:", err);
+      setLoadError(err instanceof Error ? err.message : "Eroare la incarcarea bazei locale.");
+      setItems([]);
+      setTotal(0);
     } finally {
       setLoading(false);
     }
@@ -96,7 +103,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
 
   useEffect(() => {
     void refreshKey;
-    load();
+    void load();
   }, [load, refreshKey]);
 
   // Reset selection when filters/sort/page change, since the visible set changes too.
@@ -308,7 +315,22 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
         </Button>
       </form>
 
-      {items.length === 0 && !loading && (
+      {loadError && (
+        <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 dark:border-red-900/60 dark:bg-red-950/30 dark:text-red-300">
+          <div className="flex items-start justify-between gap-2">
+            <p className="break-words">{loadError}</p>
+            <button
+              type="button"
+              className="shrink-0 text-xs text-red-700/70 underline hover:text-red-700 dark:text-red-300/70 dark:hover:text-red-300"
+              onClick={() => void load()}
+            >
+              Reincearca
+            </button>
+          </div>
+        </div>
+      )}
+
+      {items.length === 0 && !loading && !loadError && (
         <div className="rounded-lg border border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
           Baza locala este goala. Fa o cautare pentru a popula datele.
         </div>
