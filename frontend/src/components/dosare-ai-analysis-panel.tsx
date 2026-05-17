@@ -81,7 +81,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
       <div className="rounded-lg border border-violet-200 dark:border-violet-800 bg-violet-50/30 dark:bg-violet-950/20">
         <button
           type="button"
-          className="flex w-full items-center justify-between p-4 pb-2 cursor-pointer hover:bg-violet-100/50 dark:hover:bg-violet-900/20 rounded-t-lg transition-colors"
+          className="flex w-full items-center justify-between px-4 py-2 cursor-pointer hover:bg-violet-100/50 dark:hover:bg-violet-900/20 rounded-t-lg transition-colors"
           onClick={(e) => {
             e.stopPropagation();
             ai.toggleCollapsed(`ai-${dosar.numar}`);
@@ -233,7 +233,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
       <div className={`mt-3 rounded-lg border ${mc.border} ${mc.bg}`}>
         <button
           type="button"
-          className={`flex w-full items-center justify-between p-4 pb-2 cursor-pointer ${mc.hoverBg} rounded-t-lg transition-colors`}
+          className={`flex w-full items-center justify-between px-4 py-2 cursor-pointer ${mc.hoverBg} rounded-t-lg transition-colors`}
           onClick={(e) => {
             e.stopPropagation();
             ai.toggleCollapsed(`multi-${dosar.numar}`);

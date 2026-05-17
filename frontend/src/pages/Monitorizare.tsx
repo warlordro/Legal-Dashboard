@@ -514,7 +514,10 @@ export default function Monitorizare({
                         return (
                           <tr
                             key={job.id}
-                            className={cn("border-b hover:bg-accent/30", selectedIds.has(job.id) && "bg-accent/40")}
+                            className={cn(
+                              "border-b hover:bg-accent/30 [&>td]:align-middle",
+                              selectedIds.has(job.id) && "bg-accent/40"
+                            )}
                           >
                             <td className="px-3 py-2">
                               <input
@@ -527,7 +530,7 @@ export default function Monitorizare({
                             </td>
                             <td className="px-3 py-2 font-mono">
                               {isDosar ? (
-                                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
+                                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
                                   <span className="inline-flex min-w-0 items-center">
                                     <a
                                       href={getPortalJustUrl(target)}
@@ -557,7 +560,7 @@ export default function Monitorizare({
                                       // Alerts. Compensating with h-7 / px-2.5 /
                                       // text-[10.5px] / icon 3.5 keeps the two
                                       // pages visually consistent.
-                                      className="col-start-2 row-start-1 h-7 gap-1.5 px-2.5 text-[10.5px]"
+                                      className="col-start-2 row-start-1 row-end-3 self-center h-7 gap-1.5 px-2.5 text-[10.5px]"
                                     >
                                       <Eye className="h-3.5 w-3.5" />
                                       Dosare
@@ -568,7 +571,7 @@ export default function Monitorizare({
                               ) : job.kind === "name_soap" ? (
                                 (() => {
                                   return (
-                                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-start gap-x-2 gap-y-1">
+                                    <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
                                       <span className="block min-w-0 break-words font-bold leading-tight">
                                         {target}
                                       </span>
@@ -581,7 +584,7 @@ export default function Monitorizare({
                                             navigate("/dosare");
                                           }}
                                           title={`Cauta dosare pentru ${target}`}
-                                          className="col-start-2 row-start-1 h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
+                                          className="col-start-2 row-start-1 row-end-3 self-center h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
                                         >
                                           <Eye className="h-3.5 w-3.5" />
                                           Dosare
