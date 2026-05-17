@@ -388,11 +388,15 @@ export class MonitoringApiError extends Error {
   code: string;
   status: number;
   details?: unknown;
-  constructor(code: string, message: string, status: number, details?: unknown) {
+  // requestId vine din envelope ({ data, error, requestId }) si e propagat aici
+  // ca bannerele de eroare sa-l poata afisa pentru corelare cu logurile server.
+  requestId?: string;
+  constructor(code: string, message: string, status: number, details?: unknown, requestId?: string) {
     super(message);
     this.code = code;
     this.status = status;
     this.details = details;
+    this.requestId = requestId;
   }
 }
 
@@ -405,11 +409,13 @@ export async function unwrapMonitoring<T>(res: Response): Promise<T> {
   }
   if (!res.ok || (body as MonitoringEnvelopeError).error) {
     const e = (body as MonitoringEnvelopeError).error;
+    const requestId = (body as MonitoringEnvelopeError).requestId;
     throw new MonitoringApiError(
       e?.code ?? "unknown_error",
       e?.message ?? "Eroare necunoscuta",
       res.status,
-      e?.details
+      e?.details,
+      typeof requestId === "string" ? requestId : undefined
     );
   }
   return (body as MonitoringEnvelopeOk<T>).data;
