@@ -4,6 +4,49 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## v2.28.4 — 2026-05-18
+
+Remediation pack audit `AUDIT-PACK-FULL-PROJECT-MAIN-2026-05-18.md` (16 findings → 5 PR-uri merged in main local intr-o singura zi). Toate finding-urile P0/P1/P2 inchise; zero behavior change pe modul desktop (Electron in-proc), pre-cutover hardening pentru modul web.
+
+### Security hotfix (PR #42 — F1, F4)
+
+- **F1 — CSRF gating pe rute bulk**: `requireDesktopHeader` middleware aplicat pe `POST /api/v1/monitoring/jobs/bulk-dismiss` si `POST /api/v1/alerts/dismiss-bulk` cand `authMode=desktop`. Validare Origin/Referer + `X-Desktop-Header` ca renderer-ul Electron (singurul caller legitim) sa nu poata fi mimat de un site cross-origin. Web mode foloseste deja JWT pe autoritate — neschimbat.
+- **F4 — Master switch retry**: Env override OpenRouter (`OPENROUTER_API_KEY` cu prefix `sk-or-`) primeste retry exponential cu jitter (200ms / 500ms) inainte sa flip-uiasca la native. Regresii de boot transitorii (DNS, proxy) nu mai trippeaza silent fallback-ul; eroarea reala apare in log.
+
+### Backend hygiene (PR #44 — F6, F7, F10)
+
+- **F6 — AI signal propagation**: `AbortSignal` ajunge in toate SDK-urile AI (Anthropic, OpenAI, Google Generative AI, OpenRouter) pana in `fetch`. Frontend cancel-ul devine functional end-to-end — nu se mai consuma tokens dupa abort.
+- **F7 — `/search/load-more` bodyLimit**: `bodyLimit({ maxSize: 512_000 })` explicit pe `POST /api/v1/rnpm/search/load-more`. Payload-uri mari intorc `413 payload_too_large` cu envelope standard, in loc sa consume RAM in handler.
+- **F10 — Log redact**: Hono `logger` middleware redact-uieste `Authorization`, `Cookie`, `X-API-Key` si query params cu nume sensibile (`token`, `key`, `secret`). Evenimentele de audit detail-json sterg aceleasi field-uri inainte de scriere SQLite.
+
+### Frontend hardening (PR #45 — F5, F11, F12, F14)
+
+- **F5 — XLSX bulk import caps**: `MAX_BULK_FILE_BYTES=10MB`, `MAX_BULK_DATA_ROWS=10_000`, `MAX_BULK_COLS=64`. `MonitoringBulkImportCard` valideaza `file.size` inainte de `arrayBuffer()`. `parseBulkFile` decode `!ref` manual ca sa refuze early daca col-count depaseste limita; trunchiaza la `dataEnd` cu eroare informativa.
+- **F11 — Saved load error banner**: `RnpmSavedData` adauga state `loadError`, catch block in `load()`, reset items/total pe failure si banner cu buton "Reincearca" in loc sa ramana blank.
+- **F12 — requestId pe MonitoringApiError**: Cross-referencing logs din backend la frontend toast — `unwrapMonitoring` propaga `body.requestId` la error.
+- **F14 — useDialog focus trap**: `FOCUSABLE_SELECTOR` aplicat pe Tab/Shift+Tab wrap, focus re-entry cand sare in afara dialogului, fallback `container.focus()`.
+
+### Web pre-cutover (PR #46 — F2, F15)
+
+- **F2 — `ownerId` obligatoriu pe inputuri repo/service**: `SaveSearchInput.ownerId`, `GetSearchesOptions.ownerId`, `UpsertAvizInput.ownerId`, `GetAvizeOptions.ownerId`, `ExecuteSearchInput.ownerId`, `SplitSearchInput.ownerId` toate devin required. Fallback-ul `?? "local"` sters din corpurile functiilor; singura sursa de adevar ramane `getOwnerId()` din `middleware/owner.ts` — desktop adapter intoarce `"local"`, web mode arunca daca un caller uita sa propage ownerul autentificat. Boot prewarm in `index.ts` trece explicit `ownerId: "local"`.
+- **F15 — `/health` split**: `/health` (public, fara auth) intoarce doar `{ status, service }`. Telemetry-ul operational (`authMode`, `monitoring` scheduler state, `emailConfigured`) mutat la `/health/detail` gated prin loopback (`getConnInfo`). Electron splash continua sa identifice serviciul prin `body.service === "Legal Dashboard API"`. Cross-LAN GET `/health/detail` intoarce `403` fara payload.
+
+### Ops & supply chain (PR #43 — F8, F9, F13, F16)
+
+- **F8 — Migration doc**: `backend/src/db/migrations/README.md` documenteaza pattern de write + rollback (migration 0001 → 0021 inspectabile).
+- **F9 — Docker SHA pin**: `Dockerfile` si `.github/workflows/*.yml` pinneaza imagini/actions la commit SHA, nu tag mutabil.
+- **F13 — CORS PATCH/DELETE**: `app.use("/api/*", cors({ allowMethods: ["GET", "POST", "PATCH", "DELETE", "OPTIONS"] }))`. Lipseau PATCH si DELETE din lista; admin operations din browser primeau preflight reject.
+- **F16 — Worktree cleanup**: `scripts/build.js` + `scripts/build-server.js` adauga check pentru worktree-uri orfane si fail clean cand un cleanup nu poate sterge.
+
+### Test coverage
+
+- 1099 teste backend passing (Vitest, Node 22+). +5 teste noi acoperind F2/F15.
+- 102 teste frontend passing (Vitest + RTL).
+- Biome + `tsc --noEmit` clean pe toate fisierele atinse in cele 5 PR-uri.
+- `npm run build` (Vite frontend + esbuild backend CJS) verde.
+
+---
+
 ## v2.28.3 — 2026-05-17
 
 ### Cleanup & invariants pin

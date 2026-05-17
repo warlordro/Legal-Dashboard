@@ -39,6 +39,47 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.28.4",
+    date: "18 Mai 2026",
+    subtitle:
+      "Remediation pack audit 2026-05-18 (16 findings → 5 PR-uri merged). Security: CSRF desktop-only guards pe rute bulk + master-switch retry rezilient. Backend hygiene: AI signal propagation, bodyLimit pe /search/load-more, log redact. Frontend: XLSX caps + saved-load error banner + focus trap a11y. Web pre-cutover: ownerId obligatoriu pe inputuri repo/service, /health split (public minim + /health/detail loopback). Ops: pin Docker SHA, CORS PATCH/DELETE, worktree cleanup, migration doc.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Security hotfix (F1, F4)",
+        content:
+          "CSRF: ruta /api/v1/monitoring/jobs/bulk-dismiss + /api/v1/alerts/dismiss-bulk primesc requireDesktopHeader gate cand authMode=desktop (Origin/Referer + X-Desktop-Header). Web mode foloseste deja JWT — neschimbat. Master-switch (env override OpenRouter): retry exponential 200ms/500ms cu jitter, in loc de fallback silent la native, ca regresii de boot transitoriu (DNS, proxy) sa nu trippeze flag-ul.",
+      },
+      {
+        title: "Backend hygiene (F6, F7, F10)",
+        content:
+          "AI signal propagation: AbortSignal ajunge in toate SDK-urile (Anthropic/OpenAI/Google/OpenRouter) pana in fetch — frontend cancel devine functional end-to-end. /api/v1/rnpm/search/load-more primeste bodyLimit 512KB explicit ca payload-uri mari sa intoarca 413 cu envelope, nu sa consume RAM. Log redact: secret-uri (API keys, tokens, cookies, Authorization headers) sterse din logger middleware si din evenimentele de audit detail.",
+      },
+      {
+        title: "Frontend hardening (F5, F11, F12, F14)",
+        content:
+          "XLSX bulk import: cap 10MB file size + 10k rows + 64 columns. RNPM saved load error banner: dupa load fail, UI arata bannerul cu Reincearca in loc sa ramana blank. requestId propagat pe MonitoringApiError pentru cross-referencing logs. useDialog focus trap: Tab/Shift+Tab wrap, focus re-entry cand sare in afara dialogului, fallback container.focus().",
+      },
+      {
+        title: "Web pre-cutover (F2, F15)",
+        content:
+          'SaveSearchInput/GetSearchesOptions/UpsertAvizInput/GetAvizeOptions/ExecuteSearchInput/SplitSearchInput primesc ownerId obligatoriu. Fallback-ul `"local"` ramane exclusiv pe getOwnerId() din middleware/owner.ts — desktop neschimbat, web fail-closed daca caller-ul uita sa propage owner-ul autentificat. /health expune doar status+service pentru probe externe / LB / Electron splash; telemetry operational (authMode, monitoring scheduler state, emailConfigured) mutat la /health/detail gated prin loopback (getConnInfo).',
+      },
+      {
+        title: "Ops & supply chain (F8, F9, F13, F16)",
+        content:
+          "GitHub Actions pinned la commit SHA (audit recommend). Dockerfile FROM pinned. CORS preflight accepta PATCH si DELETE explicit (lipseau in lista de allowed methods, blocand admin operations din browser). Worktree cleanup: scripts adauga check pentru worktree-uri orfane si fail clean cand un cleanup nu poate sterge. Migration doc: scriere/rollback pattern in backend/src/db/migrations/README.md.",
+      },
+      {
+        title: "Test coverage",
+        content:
+          "1099 teste backend passing (Vitest, Node 22+). +5 teste noi pentru F2/F15: ownerId fail-closed pe getSearches/getAvize, /health public payload size + /health/detail loopback gate. Frontend test suite 102 passing. Biome + tsc + npm run build clean pe toate fisierele atinse in cele 5 PR-uri.",
+      },
+    ],
+  },
+  {
     version: "v2.28.3",
     date: "17 Mai 2026",
     subtitle:
