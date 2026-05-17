@@ -171,11 +171,11 @@ npx knip --workspace backend
 
 | # | Actiune | Impact | Risc | Estimare |
 |---|---|---|---|---|
-| 1 | `npm uninstall date-fns react-day-picker --workspace=frontend` | -2 deps in lockfile, ~600 KB node_modules | 0 (zero usages) | 2 min |
-| 2 | Delete `frontend/src/components/DosarModal.tsx` | -80 LOC | 0 (orfan) | 2 min |
-| 3 | Delete `rnpmExport()` din `frontend/src/lib/rnpmApi.ts` + cleanup comentariu line 350 | -25 LOC | 0 (functia nu e apelata) | 5 min |
-| 4 | Drop `export` pe `PJPFToggle`, `PFBlock`, `CURATED_AUDIT_ACTIONS`, `AlertsDailyRow`, `RunsByDayStatusRow`, `RunsByStatusRow`, `AuthProvider` interface | -7 exports din suprafata API | LOW (intern doar) | 10 min |
-| 5 | Adauga `@internal` JSDoc pe `computeFilterFingerprint`, `buildSubject`, `buildHtmlBody`, `buildTextBody` | semnaleaza ca sunt export-pentru-teste | 0 | 5 min |
+| 1 | **[DONE pre-v2.28.3]** `npm uninstall date-fns react-day-picker --workspace=frontend` | -2 deps in lockfile, ~600 KB node_modules | 0 (zero usages) | 2 min |
+| 2 | **[DONE pre-v2.28.3]** Delete `frontend/src/components/DosarModal.tsx` | -80 LOC | 0 (orfan) | 2 min |
+| 3 | **[DONE pre-v2.28.3]** Delete `rnpmExport()` din `frontend/src/lib/rnpmApi.ts` + cleanup comentariu line 350 | -25 LOC | 0 (functia nu e apelata) | 5 min |
+| 4 | **[DONE in v2.28.3]** Drop `export` pe `PJPFToggle`, `PFBlock`, `CURATED_AUDIT_ACTIONS`, `AlertsDailyRow`, `RunsByDayStatusRow`, `RunsByStatusRow`, `AuthProvider` interface | -7 exports din suprafata API | LOW (intern doar) | 10 min |
+| 5 | **[DONE in v2.28.3]** Adauga `@internal` JSDoc pe `computeFilterFingerprint`, `buildSubject`, `buildHtmlBody`, `buildTextBody` | semnaleaza ca sunt export-pentru-teste | 0 | 5 min |
 
 **Estimare totala remediation:** ~25 min + 1 ciclu CI complet (lint/tsc/tests/build).
 

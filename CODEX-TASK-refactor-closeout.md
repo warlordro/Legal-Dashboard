@@ -28,7 +28,7 @@ Read CLAUDE.md                        — workflow obligatoriu push + checklist 
 
 ```powershell
 git status                                # MUST be clean
-git log --oneline -3                      # MUST show 9eb9f59 release v2.28.2 at HEAD
+git log --oneline -3                      # MUST show 9eb9f59 release commit at HEAD
 npx tsc --noEmit -p backend/tsconfig.json # MUST be green
 cd frontend; npx tsc --noEmit; cd ..      # MUST be green
 npm test --workspace=backend              # MUST be green
@@ -243,7 +243,7 @@ k) `CLAUDE.md` — sectiunea "Versiune Curenta" → `**v2.28.3** - 17 Mai 2026`
 Get-ChildItem -Recurse -Include *.md `
   | Select-String -Pattern "v2\.28\.2" `
   | Where-Object { $_.Path -notlike "*CHANGELOG.md" -and $_.Path -notlike "*changelog-entries*" -and $_.Path -notlike "*audit/AUDIT*" }
-# 0 hits = clean (toate v2.28.2 ramase sunt in istoric, nu in headers active)
+# 0 hits = clean (toate referintele la versiunea veche ramase sunt in istoric, nu in headers active)
 ```
 
 ```powershell

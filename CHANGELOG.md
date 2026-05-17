@@ -4,6 +4,21 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## v2.28.3 — 2026-05-17
+
+### Cleanup & invariants pin
+
+- Drop-export cleanup pe 7 simboluri folosite doar intern (audit/06 §5+§7).
+- `withRnpmGuards` middleware: consolidare guard-uri pe 22 endpoints RNPM —
+  inchide auth-drift hazard (un endpoint viitor NU mai poate uita web-mode gate).
+- 3 teste de characterizare pe `rnpmSearchService.ts` invariants I1 (cross-tenant
+  precheck), I3 (silent-refusals reset), I-final-update (updateSearchTotal in finally).
+- Refactor closeout: Tier 3 (web blockers) + restul Tier 4 (god components) marcate
+  DEFERRED in `audit/AUDIT-REFACTOR.md` §8 dupa validare cu 5 agenti. Trigger
+  reactivare = decizie active-active / >500 useri activi.
+
+---
+
 ## [2.28.2] - 2026-05-17
 
 ### Bugfixes + UX tuning + ops watchdog peste audit refactor Tier 1+2+3 partial

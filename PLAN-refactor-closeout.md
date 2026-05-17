@@ -48,7 +48,7 @@ Inainte de orice modificare, Codex confirma starea de plecare:
 
 ```powershell
 git status                                # working tree clean
-git log --oneline -3                      # head = 9eb9f59 release v2.28.2
+git log --oneline -3                      # head = 9eb9f59 release commit
 npx tsc --noEmit -p backend/tsconfig.json # type-check verde
 cd frontend; npx tsc --noEmit; cd ..      # type-check frontend verde
 npm test --workspace=backend              # ~200 teste verzi
