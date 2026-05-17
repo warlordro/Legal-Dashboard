@@ -9,13 +9,26 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 ### Cleanup & invariants pin
 
 - Drop-export cleanup pe 7 simboluri folosite doar intern (audit/06 §5+§7).
-- `withRnpmGuards` middleware: consolidare guard-uri pe 22 endpoints RNPM —
-  inchide auth-drift hazard (un endpoint viitor NU mai poate uita web-mode gate).
+- `withRnpmGuards` middleware: consolidare guard-uri pe 3 rute RNPM (`/search`,
+  `/bulk`, `/search-split`) — reduce auth-drift hazard. Helper-ul e opt-in, NU
+  middleware router-level; un endpoint viitor poate inca uita sa-l apeleze daca
+  developerul nu citeste pattern-ul. Enforcement structural ramane datorie tehnica.
 - 3 teste de characterizare pe `rnpmSearchService.ts` invariants I1 (cross-tenant
   precheck), I3 (silent-refusals reset), I-final-update (updateSearchTotal in finally).
 - Refactor closeout: Tier 3 (web blockers) + restul Tier 4 (god components) marcate
   DEFERRED in `audit/AUDIT-REFACTOR.md` §8 dupa validare cu 5 agenti. Trigger
   reactivare = decizie active-active / >500 useri activi.
+
+#### Nota comportamentala
+
+Ordinea de validare pe `/search`, `/bulk`, `/search-split` s-a schimbat in cadrul
+refactor-ului `withRnpmCaptchaGuards`: `captchaKey` se verifica acum INAINTE de
+`type`/`params` (era LAST). Status (400) si envelope-ul `{ data, error: { code,
+message }, requestId }` raman identice. Pentru requesturi invalide pe ambele axe
+simultan (params gresite + captchaKey gresit), `error.code` raporteaza acum
+`INVALID_CAPTCHA_KEY` in loc de `INVALID_PARAMS`. Frontend-ul nu branch-uieste
+pe aceste coduri (doar pe `LIMIT_EXCEEDED` / `FILTER_DISABLED`), deci zero impact
+UI. Edge-case practic inexistent din UI; flagat aici pentru ops/debugging.
 
 ---
 

@@ -479,7 +479,12 @@ schimbarea functionala loveste fisierul respectiv.
 ### Livrat in v2.28.3 (refactor closeout)
 
 - Drop-export cleanup pe 7 simboluri (`audit/06` sectiunile 5+7)
-- `withRnpmGuards` middleware: 22 endpoints RNPM cu pattern consistent
+- `withRnpmGuards` middleware (helper opt-in): 3 rute RNPM (`/search`, `/bulk`,
+  `/search-split`) consolidate pe acelasi pattern web-gate → JSON → captchaKey.
+  **Auth-drift hazard ramane PARTIAL OPEN** — guard-ul e helper, NU middleware
+  router-level; un endpoint viitor poate uita sa-l apeleze. Pentru enforcement
+  structural ar fi nevoie de `rnpmRouter.use("/captcha-routes/*", withRnpmCaptchaGuards)`
+  sau mutare a 3 rute sub un sub-router dedicat — deferred ca datorie tehnica.
 - 3 teste de characterizare pe invariants I1/I3/I-final-update din rnpmSearchService
 
 **Effort total livrat:** ~3-4h.

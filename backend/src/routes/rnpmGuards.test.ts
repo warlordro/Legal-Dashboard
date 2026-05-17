@@ -39,6 +39,10 @@ describe("withRnpmCaptchaGuards", () => {
     });
 
     expect(res.status).toBe(501);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: { code: "WEB_MODE_NOT_IMPLEMENTED" },
+    });
   });
 
   it("respinge body JSON invalid cu 400", async () => {
@@ -49,6 +53,10 @@ describe("withRnpmCaptchaGuards", () => {
     });
 
     expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: { code: "INVALID_JSON" },
+    });
   });
 
   it("respinge captchaKey prea scurt cu 400", async () => {
@@ -59,6 +67,24 @@ describe("withRnpmCaptchaGuards", () => {
     });
 
     expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: { code: "INVALID_CAPTCHA_KEY" },
+    });
+  });
+
+  it("respinge captchaKey lipsa din body cu 400", async () => {
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: { code: "INVALID_CAPTCHA_KEY" },
+    });
   });
 
   it("trece in desktop mode cu captchaKey valid", async () => {
