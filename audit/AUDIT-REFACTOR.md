@@ -442,37 +442,55 @@ Plan curent **NU intersecteaza** `feat/openrouter-toggle-stacks` (mergat in main
 
 ---
 
-## 8. Verdict final [REVISED post-validation]
+## 8. Verdict final [CLOSED 2026-05-17 - v2.28.3]
 
-**Stare codebase:** 🟡 **Sanatos cu datorie tehnica concentrata.**
+**Stare codebase:** OK **Sanatos cu datorie tehnica concentrata DEFERRED.**
 
-- Niciun god-file critic peste 1200 LOC (top: rnpm.ts 1128, rnpmSearchService.ts 1081)
-- Nicio dependinta toxica
-- Dead code real minim (~110 LOC + 2 deps, verificat)
-- **3 singletoni multi-instance (P0-new + P1+P15 combinat + P2)** sunt singurii blocker-i web-cutover de natura tehnica — restul cutover-ului este infrastructure (Redis, Litestream, observability)
-- Test coverage gap concentrat pe DosareTable (P3) + rnpmSearchService 2/4 (P4) + zero teste pe `inflightRequests` sentinel — restul codului are coverage rezonabil
-- **17 invariants ascunse** identificate post-validation (vezi sectiunea 6.5); refactor-ul respecta toate <=> nu reintroducere bugs istorice
+Auditul a fost validat cu 5 agenti specializati (refactor-planner, backend-reliability,
+release-readiness, deep-code-reviewer, test-architect) inainte de v2.28.3. Concluzii:
 
-**Daca livrezi doar path-minim cutover web (~22h):** elimini toti 3 blocker-i + acoperi cu teste cele 3 zone CRITICAL. Feature flags + rollback trivial. **Cel mai sigur deliverable.**
+### Tier 3 - Web cutover blockers: DEFERRED
 
-**Daca livrezi Sprint 1+2+3 (~50h):** elimini toti blocker-ii + acoperi cu teste cele 3 zone HIGH cu coverage gap + reduci coupling pe DosareTable + rnpmSearchService. **Suficient pentru cutover web fara datorie blocanta.**
+P0-new (scheduler), P1 (AlertPubSub), P2 (IdempotencyStore) NU sunt blocker-i sub
+topologia declarata in `PLAN-monitoring-webmode.md`:
 
-**Daca livrezi tot (~76h):** elimini ~505 LOC duplicate (NU ~1555 cum spunea audit original) + simplifici 6 god components + curatesti API surface. **Maintainability ↑ semnificativ pentru urmatorul an de dezvoltare.**
+- SQLite + Litestream forever = single-writer prin fizica
+- <100 useri interni = 1 replica suficient
+- Singletoni corecti pe single-instance
 
-### LOC delta net realist
+**Trigger reactivare:** decizie active-active (>1 replica simultan) sau >500 useri
+activi simultan. Pana atunci, codul actual e correct, fara latent bugs in deployul tinta.
 
-| Categorie | LOC delta |
-|-----------|-----------|
-| Dead code (P14) | **-110** |
-| Quick wins (P13) | **-120** |
-| Duplicate clusters (P12 cu G5 corectie) | **-505** |
-| Structural reductions (P4+P6+P7+P8+P11) | **-390** |
-| Structural growth (P0-new + P1+P15 combinat + P2 + P3 interface scaffolds) | **+118** |
-| **NET TOTAL refactor complet** | **~-1007 LOC + 2 packages npm (~2.4 MB)** |
-| Codebase: 40,734 → ~39,727 LOC (~2.5% reduction) |
+### Tier 4 - God components: DEFERRED + 4 erori factuale identificate
+
+- P3 S1/S2/S3: `useAiAnalysisCache` NU EXISTA in cod (errata G4). DosareTable e deja
+  decomposed cu 4 hooks + AI panel sibling (`DosareAiAnalysisPanel`).
+- P6 Alerts.tsx SSE: hook-ul deja exista in `frontend/src/hooks/useAlertsStream.ts:112-183`
+  cu reconnect exponential corect. Audit-ul a citat fisierul gresit.
+- P7 manual-content.tsx: JSX static, zero state/effect. Category error.
+- P10 alerts.ts dismiss-bulk: tranzactia EXISTA deja la `monitoringAlertsRepository.ts:574`
+  (wraps loop-ul de chunk-uri in `db.transaction`). Bug-ul nu exista.
+- P11 avizRepository.ts: `buildAvizWhere` L462 vs L629 acopera coloane diferite
+  (12 vs 24) - NU duplicare.
+
+**Restul P-urilor (P3/P4/P6/P8/P9):** "Revisit on touch" - split numai cand
+schimbarea functionala loveste fisierul respectiv.
+
+### Livrat in v2.28.3 (refactor closeout)
+
+- Drop-export cleanup pe 7 simboluri (`audit/06` sectiunile 5+7)
+- `withRnpmGuards` middleware (helper opt-in): 3 rute RNPM (`/search`, `/bulk`,
+  `/search-split`) consolidate pe acelasi pattern web-gate → JSON → captchaKey.
+  **Auth-drift hazard ramane PARTIAL OPEN** — guard-ul e helper, NU middleware
+  router-level; un endpoint viitor poate uita sa-l apeleze. Pentru enforcement
+  structural ar fi nevoie de `rnpmRouter.use("/captcha-routes/*", withRnpmCaptchaGuards)`
+  sau mutare a 3 rute sub un sub-router dedicat — deferred ca datorie tehnica.
+- 3 teste de characterizare pe invariants I1/I3/I-final-update din rnpmSearchService
+
+**Effort total livrat:** ~3-4h.
+**Effort total economisit prin defer:** ~60h (Tier 3 22h + Tier 4 ramas 38h).
 
 ---
-
 ## 9. Surse (audit/ folder)
 
 | Fisier | Rol |

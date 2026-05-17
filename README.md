@@ -7,20 +7,16 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **2.28.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **v2.28.3**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.28.2** - bugfixes + UX tuning + ops watchdog peste auditul
-de refactor Tier 1+2 (13 commits livrate ca grup): re-activeaza flow-ul Split
-RNPM (silent rupt din v2.14.0 din cauza unui envelope unwrap gresit), repara
-native AI mode (regresie v2.28.0 unde toggle-ul inapoi la native ramanea ancorat
-pe OpenRouter), trateaza graceful searchId cache-uit dupa "Sterge baza" (in
-loc de 403 cross-tenant fals), adauga event-loop watchdog pe main process
-Electron (`diagnostic/event-loop-lag.log` + `process.report.writeReport()`),
-strange headerele "Analiza AI" cu -33% inaltime cand sunt colapsate si
-vertical-aligneaza row-urile din /monitorizare.
+Ultimul release **v2.28.3** - refactor closeout util peste auditul
+`AUDIT-REFACTOR`: drop-export cleanup pe 7 simboluri interne, `withRnpmGuards`
+pentru rutele RNPM cu captcha si teste noi pentru invariants I1/I3/I-final-update.
+Tier 3 si restul Tier 4 sunt marcate DEFERRED in audit §8; se reactiveaza doar
+la active-active sau peste 500 useri activi.
 
-Predecesor **v2.28.1** - bug fixes pentru stack chinezesc OpenRouter:
+Context anterior AI **v2.28.1** - bug fixes pentru stack chinezesc OpenRouter:
 `AI_MAX_TOKENS_CHINESE = 16000` (Kimi K2.6 e thinking model si lovea cap-ul
 de 8000 cu `finish_reason: length`), bump `AI_MULTI_TIMEOUT_CHINESE` 300s ->
 480s plus frontend timeout 1020s, completare whitelist judge models chinese

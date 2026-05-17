@@ -39,6 +39,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.28.3",
+    date: "17 Mai 2026",
+    subtitle:
+      "Refactor closeout v2.28.3: cleanup de exporturi interne, middleware withRnpmGuards pentru rutele RNPM cu captcha si teste noi pentru invariants critice I1/I3/I-final-update. Tier 3 si restul Tier 4 raman deferred explicit dupa validare.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Cleanup API surface",
+        content:
+          "Drop-export pe 7 simboluri folosite doar intern: PJPFToggle, PFBlock, CURATED_AUDIT_ACTIONS, AlertsDailyRow, RunsByDayStatusRow, RunsByStatusRow si AuthProvider. Helperii exportati doar pentru teste au primit marker @internal.",
+      },
+      {
+        title: "RNPM guards consolidate",
+        content:
+          "withRnpmGuards centralizeaza web-mode gate, parse JSON si validarea captchaKey pentru /search, /bulk si /search-split. /captcha/balance pastreaza web gate-ul direct, fara validarea completa de body.",
+      },
+      {
+        title: "Invariants pin",
+        content:
+          "Teste noi fixeaza comportamentele critice din rnpmSearchService: I1 cross-tenant existingSearchId ramane 403, I3 fail-fast pe refuzuri silentioase ramane predictibil, iar updateSearchTotal ruleaza in finally pentru partial state dupa abort.",
+      },
+      {
+        title: "Refactor closeout",
+        content:
+          "audit/AUDIT-REFACTOR.md §8 marcheaza Tier 3 si restul Tier 4 ca DEFERRED sub topologia curenta SQLite + Litestream + 1 replica + sub 100 useri interni. Reactivare doar la active-active sau peste 500 useri activi.",
+      },
+    ],
+  },
+  {
     version: "v2.28.2",
     date: "17 Mai 2026",
     subtitle:

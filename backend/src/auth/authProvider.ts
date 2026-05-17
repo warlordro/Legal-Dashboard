@@ -13,7 +13,7 @@ export interface AuthenticatedContext {
   tokenPayload?: AuthJwtPayload;
 }
 
-export interface AuthProvider {
+interface AuthProvider {
   mode: AuthMode;
   authenticate(c: Context): AuthenticatedContext;
 }
