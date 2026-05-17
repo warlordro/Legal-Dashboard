@@ -24,7 +24,10 @@ try {
 const lines = porcelain.split("\n").filter(Boolean);
 // Format porcelain v1: "XY path" unde X=index, Y=worktree.
 // " D path" = deleted in worktree dar nu staged.
-const worktreeDeletions = lines.filter((l) => l.startsWith(" D "));
+// "D  path" = deleted in index (staged) — la fel de periculos daca cineva
+// face `git add -A` peste un wipe de antivirus inainte de build.
+// "DD path" = deleted in ambele (rar, dar inclus din precautie).
+const worktreeDeletions = lines.filter((l) => l.startsWith(" D ") || l.startsWith("D  ") || l.startsWith("DD "));
 
 if (worktreeDeletions.length <= THRESHOLD) {
   process.exit(0);
