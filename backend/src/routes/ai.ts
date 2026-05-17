@@ -194,7 +194,18 @@ aiRouter.post("/analyze", async (c) => {
       requestId: getRequestId(c),
       feature: "dosar_summary",
     };
-    const text = await callModel(modelKey || "claude-sonnet", prompt, keys, AI_TIMEOUT, tracking, undefined, routing);
+    // F6: paseaza signal-ul HTTP request-ului catre SDK-ul AI ca, daca clientul
+    // inchide tabul, sa nu mai consumam tokens degeaba. callModel deja respecta
+    // signal-ul prin Anthropic/OpenAI SDK + abort propagation.
+    const text = await callModel(
+      modelKey || "claude-sonnet",
+      prompt,
+      keys,
+      AI_TIMEOUT,
+      tracking,
+      c.req.raw.signal,
+      routing
+    );
 
     return c.json({ analysis: text });
   } catch (err: unknown) {
@@ -277,6 +288,23 @@ aiRouter.post("/analyze-multi", async (c) => {
       // controller, cancelling the sibling's in-flight HTTP request instead
       // of letting it run to its full AI_MULTI_TIMEOUT (180s) and burn tokens.
       const analystsAbort = new AbortController();
+      const judgeAbort = new AbortController();
+      // F6: daca clientul inchide tabul (request.signal.aborted) sau SSE-ul
+      // (stream.onAbort fires when the connection closes), abortam toate
+      // call-urile AI ramase ca sa nu mai consumam tokens.
+      const clientSignal = c.req.raw.signal;
+      const cancelAll = () => {
+        analystsAbort.abort();
+        judgeAbort.abort();
+      };
+      if (clientSignal.aborted) {
+        cancelAll();
+      } else {
+        clientSignal.addEventListener("abort", cancelAll, { once: true });
+      }
+      stream.onAbort(() => {
+        cancelAll();
+      });
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
         const p1 = callModel(
@@ -330,7 +358,7 @@ aiRouter.post("/analyze-multi", async (c) => {
             ...trackingBase,
             feature: "dosar_multi_judge",
           },
-          undefined,
+          judgeAbort.signal,
           routing
         );
 
