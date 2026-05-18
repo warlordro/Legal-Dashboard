@@ -19,6 +19,15 @@ import { z } from "zod";
 
 import { recordAudit } from "../db/auditRepository.ts";
 import { listAuditEvents } from "../db/auditRepository.ts";
+import {
+  getTenantKeys,
+  isTenantKeyField,
+  setCaptchaSettings,
+  setTenantKey,
+  type CaptchaMode,
+  type CaptchaProvider,
+  type TenantKeyField,
+} from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import {
   getUserById,
@@ -31,14 +40,15 @@ import {
   type UserStatus,
 } from "../db/userRepository.ts";
 import { deleteOverride, listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
-import { getOwnerId } from "../middleware/owner.ts";
-import { fail, ok } from "../util/envelope.ts";
+import { getActorId, getOwnerId } from "../middleware/owner.ts";
+import { validateKey } from "../services/keyValidation.ts";
+import { ErrorCodes, fail, ok } from "../util/envelope.ts";
 
 // 4 KiB on bodies — admin payloads are tiny ({role}, {status}, {feature, dailyLimitUsdMilli}).
 const ADMIN_BODY_LIMIT = 4096;
 const limitAdminBody = bodyLimit({
   maxSize: ADMIN_BODY_LIMIT,
-  onError: (c) => c.json(fail("payload_too_large", "Payload prea mare", c), 413),
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
 });
 
 const ListUsersQuerySchema = z
@@ -91,6 +101,26 @@ const UpsertQuotaSchema = z
     feature: z.string().trim().min(1).max(80),
     // Integer milli-USD aligned with ai_usage.cost_usd_milli precision.
     dailyLimitUsdMilli: z.number().int().min(0).max(1_000_000_000),
+  })
+  .strict();
+
+const PutTenantKeySchema = z
+  .object({
+    // Trim before persistence so paste-copies with trailing whitespace either
+    // collapse to "" (clear path) or store the canonical key. Without the
+    // transform, "   " bypassed the empty-string clear branch and got encrypted
+    // verbatim, breaking AI calls at runtime.
+    value: z
+      .string()
+      .max(4096)
+      .transform((v) => v.trim()),
+  })
+  .strict();
+
+const CaptchaSettingsSchema = z
+  .object({
+    provider: z.enum(["2captcha", "capsolver"]),
+    mode: z.enum(["sequential", "race"]),
   })
   .strict();
 
@@ -276,6 +306,104 @@ adminRouter.get("/audit", (c) => {
   );
 });
 
+// ---------- Tenant API keys ----------
+
+adminRouter.get("/keys", (c) => {
+  const keys = getTenantKeys();
+  return c.json(
+    ok(
+      {
+        keys: {
+          anthropic: toKeyStatus(keys.anthropic),
+          openai: toKeyStatus(keys.openai),
+          google: toKeyStatus(keys.google),
+          openrouter: toKeyStatus(keys.openrouter),
+          twocaptcha: toKeyStatus(keys.twocaptcha),
+          capsolver: toKeyStatus(keys.capsolver),
+        },
+        captcha: {
+          provider: keys.captchaProvider,
+          mode: keys.captchaMode,
+        },
+        updatedAt: keys.updatedAt,
+        updatedBy: keys.updatedBy,
+      },
+      c
+    ),
+    200
+  );
+});
+
+adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = CaptchaSettingsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+  // Capture before-state for audit so an auditor can diff provider/mode without
+  // querying a sibling row. Captcha key values stay redacted: only the
+  // provider/mode strings (non-secret enums) appear in the audit detail.
+  const prevKeys = getTenantKeys();
+  const adminId = getActorId(c);
+  setCaptchaSettings({
+    provider: parsed.data.provider as CaptchaProvider,
+    mode: parsed.data.mode as CaptchaMode,
+    updatedBy: adminId,
+  });
+  recordAudit(c, "admin.tenantKeys.captchaSettings.update", {
+    targetKind: "tenant_keys",
+    targetId: "captcha",
+    detail: {
+      provider: parsed.data.provider,
+      mode: parsed.data.mode,
+      previous: { provider: prevKeys.captchaProvider, mode: prevKeys.captchaMode },
+    },
+  });
+  return c.json(ok({ provider: parsed.data.provider, mode: parsed.data.mode }, c), 200);
+});
+
+adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
+  const field = c.req.param("field");
+  if (!isTenantKeyField(field)) {
+    return c.json(fail("invalid_field", "Camp cheie invalid", c), 404);
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = PutTenantKeySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+
+  const before = getTenantKeys()[field];
+  const validation = await validateKey(field, parsed.data.value);
+  if (!validation.valid) {
+    return c.json(fail("INVALID_KEY", validation.reason ?? "Cheie invalida", c), 422);
+  }
+
+  const adminId = getActorId(c);
+  setTenantKey(field, parsed.data.value, adminId);
+  const after = getTenantKeys()[field];
+  // `cleared: true` distinguishes an intentional delete (paste-empty / explicit
+  // clear) from a save-empty-on-already-absent. Without it, an audit row for
+  // an accidental deletion is indistinguishable from a benign "was never set".
+  const cleared = parsed.data.value === "";
+  const detail: Record<string, unknown> = {
+    field,
+    hadPrevious: before.length > 0,
+    cleared,
+    last4After: last4(after),
+  };
+  if (validation.validationSkipped) {
+    detail.validationSkipped = true;
+    if (validation.reason) detail.validationSkipReason = validation.reason;
+  }
+  recordAudit(c, "admin.tenantKeys.update", {
+    targetKind: "tenant_keys",
+    targetId: field,
+    detail,
+  });
+  return c.json(ok({ field, ...toKeyStatus(after), validationSkipped: validation.validationSkipped === true }, c), 200);
+});
+
 // ---------- Quota ----------
 
 adminRouter.get("/users/:id/quota", (c) => {
@@ -376,4 +504,15 @@ function safeJsonParse(s: string): unknown {
   } catch {
     return { _parse_error: true, raw: s };
   }
+}
+
+function toKeyStatus(value: string): { set: boolean; last4: string | null } {
+  return {
+    set: value.length > 0,
+    last4: last4(value),
+  };
+}
+
+function last4(value: string): string | null {
+  return value.length > 0 ? value.slice(-4) : null;
 }

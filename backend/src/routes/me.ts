@@ -2,13 +2,17 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { recordAudit } from "../db/auditRepository.ts";
+import { sumAiUsageMilliToday } from "../db/aiUsageRepository.ts";
 import {
   defaultEmailSettingsFor,
   getEmailSettings,
   upsertEmailSettings,
   type EmailSettings,
 } from "../db/ownerEmailSettingsRepository.ts";
+import { getTenantKeys } from "../db/tenantKeysRepository.ts";
 import { getUserById } from "../db/userRepository.ts";
+import { listOverridesForUser } from "../db/userQuotaRepository.ts";
+import { getAuthMode } from "../auth/config.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { isMailerConfigured, sendTestEmail } from "../services/email/mailer.ts";
 import { fail, ok } from "../util/envelope.ts";
@@ -76,6 +80,65 @@ meRouter.get("/", (c) => {
         status: user.status,
         createdAt: user.created_at,
         lastLoginAt: user.last_login_at,
+      },
+      c
+    ),
+    200
+  );
+});
+
+meRouter.get("/key-status", (c) => {
+  const authMode = getAuthMode();
+  if (authMode !== "web") {
+    return c.json(
+      ok(
+        {
+          authMode,
+          tenantKeysConfigured: {
+            anthropic: false,
+            openai: false,
+            google: false,
+            openrouter: false,
+            captcha: false,
+          },
+        },
+        c
+      ),
+      200
+    );
+  }
+  const keys = getTenantKeys();
+  const captchaKey = keys.captchaProvider === "capsolver" ? keys.capsolver : keys.twocaptcha;
+  return c.json(
+    ok(
+      {
+        authMode,
+        tenantKeysConfigured: {
+          anthropic: keys.anthropic.length > 0,
+          openai: keys.openai.length > 0,
+          google: keys.google.length > 0,
+          openrouter: keys.openrouter.length > 0,
+          captcha: captchaKey.length > 0,
+        },
+      },
+      c
+    ),
+    200
+  );
+});
+
+meRouter.get("/budget", (c) => {
+  const ownerId = getOwnerId(c);
+  const limits = new Map(listOverridesForUser(ownerId).map((row) => [row.feature, row.daily_limit_usd_milli]));
+  const features = Array.from(new Set(["ai.single", "ai.multi", ...limits.keys()])).sort();
+  return c.json(
+    ok(
+      {
+        items: features.map((feature) => ({
+          feature,
+          usedMilli: sumAiUsageMilliToday(ownerId, feature),
+          limitMilli: limits.get(feature) ?? null,
+        })),
       },
       c
     ),

@@ -168,6 +168,27 @@ export function getAiUsageByFeature(input: AiUsageWindow): AiUsageBreakdownRow[]
     .all(...params) as AiUsageBreakdownRow[];
 }
 
+export function sumAiUsageMilliToday(ownerId: string, feature: string): number {
+  const features = quotaFeatureAliases(feature);
+  const placeholders = features.map(() => "?").join(", ");
+  const row = getDb()
+    .prepare(
+      `SELECT COALESCE(SUM(cost_usd_milli), 0) AS total
+       FROM ai_usage
+       WHERE owner_id = ?
+         AND feature IN (${placeholders})
+         AND date(ts) = date('now')`
+    )
+    .get(ownerId, ...features) as { total: number };
+  return row.total;
+}
+
+function quotaFeatureAliases(feature: string): string[] {
+  if (feature === "ai.single") return ["ai.single", "dosar_summary"];
+  if (feature === "ai.multi") return ["ai.multi", "dosar_multi_analyst", "dosar_multi_judge"];
+  return [feature];
+}
+
 // Anchor the daily window to UTC-midnight `today − (days − 1)` so the chart's
 // leftmost bar is exactly `days` UTC days before today inclusive. Returning
 // the start instant here lets the caller use the same `since` for totals so

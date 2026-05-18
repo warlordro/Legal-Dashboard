@@ -1,21 +1,58 @@
 import type { Context } from "hono";
 
 import { getAuthMode } from "../auth/config.ts";
+import { getTenantKeys, type CaptchaMode, type CaptchaProvider } from "../db/tenantKeysRepository.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 
 export type RnpmCaptchaGuardResult =
-  | { ok: true; body: Record<string, unknown>; captchaKey: string }
+  | {
+      ok: true;
+      // "body" = desktop BYOK; "tenant" = web tenant-shared key from
+      // `tenant_api_keys`. Routes use this to audit tenant captcha consumption
+      // so admins can attribute the shared wallet burn to individual users.
+      source: "body" | "tenant";
+      body: Record<string, unknown>;
+      captchaKey: string;
+      captchaProvider?: CaptchaProvider;
+      captchaMode?: CaptchaMode;
+      fallback2CaptchaKey?: string;
+    }
   | { ok: false; response: Response };
 
-export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuardResult> {
-  const webGate = rejectCaptchaKeyInWebMode(c);
-  if (webGate) return { ok: false, response: webGate };
+export type CaptchaResolution =
+  | { source: "body" }
+  | { source: "tenant"; ok: true; captchaKey: string; provider: CaptchaProvider; mode: CaptchaMode }
+  | { source: "tenant"; ok: false; response: Response };
 
+export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuardResult> {
   const body = await parseJsonBody(c);
   if (body === null) {
     return {
       ok: false,
       response: c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400),
+    };
+  }
+
+  const resolved = resolveCaptchaKeyForRoute(c);
+  if (resolved.source === "tenant") {
+    if (!resolved.ok) return { ok: false, response: resolved.response };
+    // Web mode side note: if the request body still ships a `captchaKey`
+    // string, we silently ignore it (the tenant key wins) but log a warning
+    // so the admin can see that a client tried to BYOK in web mode. Logging
+    // the *fact* not the *value* — never echo the body key to stdout.
+    const bodyCaptchaKey = (body as { captchaKey?: unknown } | null)?.captchaKey;
+    if (typeof bodyCaptchaKey === "string" && bodyCaptchaKey.length > 0) {
+      console.warn(
+        `[rnpm.guards] body.captchaKey ignored in web mode (tenant key wins) path=${c.req.path} method=${c.req.method}`
+      );
+    }
+    return {
+      ok: true,
+      source: "tenant",
+      body: body as Record<string, unknown>,
+      captchaKey: resolved.captchaKey,
+      captchaProvider: resolved.provider,
+      captchaMode: resolved.mode,
     };
   }
 
@@ -27,7 +64,17 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
     };
   }
 
-  return { ok: true, body: body as Record<string, unknown>, captchaKey };
+  const b = body as { captchaProvider?: unknown; captchaMode?: unknown; fallback2CaptchaKey?: unknown };
+  return {
+    ok: true,
+    source: "body",
+    body: body as Record<string, unknown>,
+    captchaKey,
+    captchaProvider:
+      b.captchaProvider === "capsolver" || b.captchaProvider === "2captcha" ? b.captchaProvider : undefined,
+    captchaMode: b.captchaMode === "race" ? "race" : "sequential",
+    fallback2CaptchaKey: typeof b.fallback2CaptchaKey === "string" ? b.fallback2CaptchaKey : undefined,
+  };
 }
 
 // Body parse helper: returns parsed JSON or null on parse failure / literal-null body.
@@ -52,15 +99,26 @@ export async function parseJsonBody(c: Context): Promise<unknown | null> {
 // `/saved`, `/searches`, `/stats`, `/backups/*` raman functionale; doar
 // caile care fac call efectiv la captcha provider sunt blocate.
 export function rejectCaptchaKeyInWebMode(c: Context): Response | null {
-  if (getAuthMode() !== "web") return null;
-  return c.json(
-    fail(
-      ErrorCodes.WEB_MODE_NOT_IMPLEMENTED,
-      "RNPM in web mode necesita stocare server-side a cheii captcha. Folositi desktop sau asteptati per-user key storage.",
-      c
-    ),
-    501
-  );
+  const resolved = resolveCaptchaKeyForRoute(c);
+  return resolved.source === "tenant" && !resolved.ok ? resolved.response : null;
+}
+
+export function resolveCaptchaKeyForRoute(c: Context): CaptchaResolution {
+  if (getAuthMode() !== "web") return { source: "body" };
+  const tenant = getTenantKeys();
+  const provider = tenant.captchaProvider;
+  const key = provider === "capsolver" ? tenant.capsolver : tenant.twocaptcha;
+  if (!key) {
+    return {
+      source: "tenant",
+      ok: false,
+      response: c.json(
+        fail(ErrorCodes.CAPTCHA_NOT_CONFIGURED, "Cheia captcha nu e configurata. Contacteaza adminul.", c),
+        501
+      ),
+    };
+  }
+  return { source: "tenant", ok: true, captchaKey: key, provider, mode: tenant.captchaMode };
 }
 
 // Captcha key validation predicate: rejects empty / whitespace-only / sub-10-char

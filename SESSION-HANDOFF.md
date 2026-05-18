@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.29.0 (2026-05-18)
+**Versiune curenta**: v2.30.0 (2026-05-19)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -19,6 +19,7 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
 | `RNPM_RUNTIME_VALIDATION_ENFORCED=1` | Promoveaza validarea runtime RNPM de la `safeParse` + warning la fail loud pe payload invalid | Activare dupa o perioada stabila de observatie a raspunsurilor upstream |
 | `RNPM_RESULTS_FILTER_DISABLED=1` | Ruta POST `/api/rnpm/search/:searchId/filter` raspunde 503 cu `code: "FILTER_DISABLED"`; UI ascunde inputul si arata banner | Stop urgent daca filtrul provoaca contention DB sau bug regresat |
 | `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (+ `ACK_NO_AUTH=...` + `AUTH_MODE=web`) | Backend-ul accepta bind non-loopback | Setup web/server, niciodata desktop |
+| `TENANT_KEY_ENCRYPTION_SECRET` | Master key AES-256-GCM pentru `tenant_api_keys`; lipsa in web mode opreste boot-ul | Obligatoriu pentru web admin keys; pastreaza separat de backup-ul DB |
 | Cooldown POST `/email-settings/test` (60s/owner) | Ruta returneaza 429 cu `Retry-After`; audit `me.email_settings.test outcome=denied reason=cooldown` | Limita built-in vs user click loop pe butonul "Trimite test" |
 | `drainEmailDispatches(timeoutMs)` | Asteapta SMTP-urile in flight inainte sa inchida DB-ul; default 10s, shutdown 5s | Gracefull shutdown — invocat automat din `gracefulShutdown()` |
 | `DAILY_REPORT_HOUR=9` | Schimba ora locala la care ruleaza scheduler-ul de raport zilnic | Cand 09:00 default e nepotrivit (ex. dev local sau alt fus orar operator) |
@@ -39,6 +40,8 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
 - SQLite nu permite modificarea unui CHECK existent via `ALTER TABLE`; pentru
   CHECK-uri trebuie rebuild de tabel sau drop complet de CHECK.
 - Nu lasa procese Electron/backend pornite inutil daca nu sunt necesare.
+- Pentru web mode v2.30.0, cheile AI/captcha sunt ale tenantului si stau in
+  `tenant_api_keys`; non-adminii nu trebuie sa poata trimite BYOK in body.
 - **Promovarea la admin pe desktop ramane manuala**:
   `UPDATE users SET role='admin' WHERE id='local';` direct in SQLite. Workflow
   tehnic acceptat pentru desktop solo; cutover-ul web (daca se reia) ar expune
@@ -64,6 +67,16 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
+
+## Sprint inchis 2026-05-19 - v2.30.0 web admin keys + per-user budget
+
+**Status**: livrat pe branch `feat/web-admin-keys-budget`.
+
+**Solutie**: web mode muta cheile AI si captcha in `tenant_api_keys`, criptate AES-256-GCM cu `TENANT_KEY_ENCRYPTION_SECRET`. Adminul foloseste `/admin/keys`; non-adminii nu mai vad dialogul BYOK in web mode. AI foloseste fallback-ul `env > tenant DB > BYOK desktop`, iar RNPM captcha ia provider/mode/cheie din tenant DB in web mode.
+
+**Budget**: `quotaGuard` aplica limitele zilnice per user pentru AI single si multi, cu `QUOTA_EXCEEDED` 429 si `Retry-After`. `/me/budget` si `BudgetIndicator` expun consumul curent cand exista limita.
+
+**Teste cheie**: crypto, repository tenant keys, admin routes, me key-status/budget, quota guard, OpenRouter tenant DB, RNPM captcha web flow, ApiKeyDialog guard, AdminKeys page si BudgetIndicator.
 
 ## Sprint inchis 2026-05-18 - v2.29.0 monitoring noise & storage
 

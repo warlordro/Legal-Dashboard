@@ -15,6 +15,18 @@
 
 const { Notification } = require("electron");
 
+// Native dep missing in dev: either Node could not resolve the JS package
+// (MODULE_NOT_FOUND) or the package resolved but its .node file was never
+// compiled, in which case `bindings` throws a plain Error whose message starts
+// with "Could not locate the bindings file". Both cases mean the same thing
+// for our diagnostic: optimistic-available, not a hard error.
+function isMissingNativeNotificationDep(err) {
+  if (!err) return false;
+  if (err.code === "MODULE_NOT_FOUND") return true;
+  const message = typeof err.message === "string" ? err.message : "";
+  return /could not locate the bindings file/i.test(message);
+}
+
 const MAX_NOTIFICATION_TITLE = 120;
 const MAX_NOTIFICATION_BODY = 500;
 const MAX_NOTIFICATION_TAG = 200;
@@ -77,13 +89,12 @@ function getNotificationStatus() {
         ...normalizeNotificationCapability(state, process.platform),
       };
     } catch (err) {
-      // MODULE_NOT_FOUND happens in dev environments without Visual Studio C++
-      // Build Tools where the optional native dep failed to compile. Treat it
-      // as optimistic-available (same path as Linux) rather than a hard error,
-      // because the packaged installer always ships the prebuilt .node from
-      // CI runner. Genuine runtime failures (module loaded but throws) keep
-      // the diagnostic "unknown" status.
-      if (err && err.code === "MODULE_NOT_FOUND") {
+      // Missing native dep in dev (either MODULE_NOT_FOUND on the JS package or
+      // "Could not locate the bindings file" when the .node was never built
+      // without Visual Studio C++ Build Tools) is treated as optimistic-available
+      // — packaged installers always ship the prebuilt .node from CI. Genuine
+      // runtime failures (module loaded but throws) keep the "unknown" status.
+      if (isMissingNativeNotificationDep(err)) {
         return {
           platform: process.platform,
           supported,
@@ -114,7 +125,7 @@ function getNotificationStatus() {
         ...normalizeNotificationCapability(state, process.platform),
       };
     } catch (err) {
-      if (err && err.code === "MODULE_NOT_FOUND") {
+      if (isMissingNativeNotificationDep(err)) {
         return {
           platform: process.platform,
           supported,

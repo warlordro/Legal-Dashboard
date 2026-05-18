@@ -22,6 +22,25 @@ vi.mock("../services/rnpmSearchService.ts", async (importOriginal) => {
   };
 });
 
+vi.mock("../db/tenantKeysRepository.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../db/tenantKeysRepository.ts")>();
+  return {
+    ...actual,
+    getTenantKeys: vi.fn(() => ({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "",
+      capsolver: "",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: null,
+    })),
+  };
+});
+
 type EnvelopeErrorBody = {
   data: null;
   error: { code: string; message: string; details?: Record<string, unknown> };
@@ -54,7 +73,7 @@ describe("rnpm envelope sentinel", () => {
     expect(body.requestId).toEqual(expect.any(String));
   });
 
-  it("web-mode captcha gate returneaza WEB_MODE_NOT_IMPLEMENTED envelope", async () => {
+  it("web-mode captcha gate returneaza CAPTCHA_NOT_CONFIGURED envelope", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
 
     const res = await buildApp().request("/api/v1/rnpm/search", {
@@ -65,7 +84,7 @@ describe("rnpm envelope sentinel", () => {
 
     expect(res.status).toBe(501);
     const body = (await res.json()) as EnvelopeErrorBody;
-    expect(body.error.code).toBe("WEB_MODE_NOT_IMPLEMENTED");
+    expect(body.error.code).toBe("CAPTCHA_NOT_CONFIGURED");
   });
 
   it("captcha balance cu sold insuficient returneaza 402 INSUFFICIENT_FUNDS", async () => {

@@ -35,6 +35,7 @@ import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
+import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -414,6 +415,23 @@ try {
   // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
   getAvize({ ownerId: "local", pageSize: 1 });
   getAvizStats();
+  if (getAuthMode() === "web") {
+    getMasterKey();
+    // Round-trip probe: encrypt + decrypt a non-secret sentinel so a
+    // misconfigured master key (length-32 but wrong, mid-rotation drift, or a
+    // crypto polyfill regression) fails BOOT instead of failing the first real
+    // admin /keys PUT later. Sentinel is generated per boot — never logs or
+    // touches the DB. F1.5 (audit 2026-05-19).
+    try {
+      const probe = `boot-probe-${Date.now()}`;
+      const round = decryptKey(encryptKey(probe));
+      if (round !== probe) {
+        throw new Error("tenant key crypto round-trip mismatch");
+      }
+    } catch (probeErr) {
+      fatalBoot("tenant key crypto self-test failed", probeErr);
+    }
+  }
 } catch (e) {
   // Boot-time DB failure means subsequent requests will fail too. Server mode:
   // exit so the process manager restarts cleanly. Electron in-proc: throw so

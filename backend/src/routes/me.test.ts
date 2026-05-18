@@ -1,4 +1,5 @@
 import Database from "better-sqlite3";
+import { randomBytes } from "node:crypto";
 import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
@@ -6,10 +7,14 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getAuditEvents } from "../db/auditRepository.ts";
+import { insertAiUsage } from "../db/aiUsageRepository.ts";
 import { getEmailSettings, upsertEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
+import { invalidateCache, setCaptchaSettings, setTenantKey } from "../db/tenantKeysRepository.ts";
+import { upsertOverride } from "../db/userQuotaRepository.ts";
 import { insertUser } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
+import { resetMasterKeyCacheForTests } from "../util/tenantKeyCrypto.ts";
 import { meRouter, resetEmailTestCooldownForTests } from "./me.ts";
 import { isMailerConfigured, sendTestEmail } from "../services/email/mailer.ts";
 
@@ -21,6 +26,9 @@ vi.mock("../services/email/mailer.ts", () => ({
 const isMailerConfiguredMock = vi.mocked(isMailerConfigured);
 const sendTestEmailMock = vi.mocked(sendTestEmail);
 let tmpRoot: string;
+const originalDbPath = process.env.LEGAL_DASHBOARD_DB_PATH;
+const originalAuthMode = process.env.LEGAL_DASHBOARD_AUTH_MODE;
+const originalSecret = process.env.TENANT_KEY_ENCRYPTION_SECRET;
 
 function buildApp(ownerId = "local") {
   const app = new Hono();
@@ -45,9 +53,12 @@ beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-me-route-"));
   const dbPath = path.join(tmpRoot, "legal-dashboard.db");
   process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+  process.env.TENANT_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64");
+  resetMasterKeyCacheForTests();
   const seed = new Database(dbPath);
   seed.close();
   getDb();
+  invalidateCache();
   isMailerConfiguredMock.mockReset();
   sendTestEmailMock.mockReset();
   isMailerConfiguredMock.mockReturnValue(false);
@@ -56,9 +67,88 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
-  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
-  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  invalidateCache();
+  resetMasterKeyCacheForTests();
+  restoreEnv("LEGAL_DASHBOARD_DB_PATH", originalDbPath);
+  restoreEnv("LEGAL_DASHBOARD_AUTH_MODE", originalAuthMode);
+  restoreEnv("TENANT_KEY_ENCRYPTION_SECRET", originalSecret);
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+});
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+  } else {
+    process.env[key] = value;
+  }
+}
+
+describe("/api/v1/me/key-status", () => {
+  it("returns desktop mode with tenant status disabled", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "desktop";
+    const res = await buildApp().request("/api/v1/me/key-status");
+
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toEqual({
+      authMode: "desktop",
+      tenantKeysConfigured: {
+        anthropic: false,
+        openai: false,
+        google: false,
+        openrouter: false,
+        captcha: false,
+      },
+    });
+  });
+
+  it("returns tenant key status in web mode without exposing values", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    setTenantKey("anthropic", "sk-ant-secret", "admin");
+    setTenantKey("capsolver", "cap-secret", "admin");
+    setCaptchaSettings({ provider: "capsolver", mode: "race", updatedBy: "admin" });
+
+    const res = await buildApp().request("/api/v1/me/key-status");
+
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(JSON.stringify(body)).not.toContain("secret");
+    expect(body.data).toEqual({
+      authMode: "web",
+      tenantKeysConfigured: {
+        anthropic: true,
+        openai: false,
+        google: false,
+        openrouter: false,
+        captcha: true,
+      },
+    });
+  });
+});
+
+describe("/api/v1/me/budget", () => {
+  it("returns usage plus configured limits for the current user", async () => {
+    upsertOverride({ userId: "local", feature: "ai.single", dailyLimitUsdMilli: 50, updatedBy: "admin" });
+    insertAiUsage({
+      ownerId: "local",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 12,
+      ts: new Date().toISOString(),
+    });
+
+    const res = await buildApp().request("/api/v1/me/budget");
+
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data.items).toEqual(
+      expect.arrayContaining([
+        { feature: "ai.single", usedMilli: 12, limitMilli: 50 },
+        { feature: "ai.multi", usedMilli: 0, limitMilli: null },
+      ])
+    );
+  });
 });
 
 describe("/api/v1/me/email-settings", () => {

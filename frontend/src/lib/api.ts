@@ -480,6 +480,13 @@ export {
   type PaginatedAudit,
   type QuotaOverride,
   type QuotaListResult,
+  type TenantKeyField,
+  type TenantCaptchaProvider,
+  type TenantCaptchaMode,
+  type TenantKeyStatus,
+  type TenantKeysResult,
+  type MeBudgetItem,
+  type MeBudgetResult,
   type ListUsersOpts,
   type ListAuditOpts,
 } from "./adminApi";

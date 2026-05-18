@@ -23,6 +23,8 @@ vi.mock("openai", () => ({
 }));
 
 import { closeDb, getDb } from "../db/schema.ts";
+import { invalidateCache, setTenantKey } from "../db/tenantKeysRepository.ts";
+import { resetMasterKeyCacheForTests } from "../util/tenantKeyCrypto.ts";
 import {
   callModel,
   callOpenRouter,
@@ -33,6 +35,8 @@ import {
 } from "./ai.ts";
 
 let tmpRoot: string;
+const originalAuthMode = process.env.LEGAL_DASHBOARD_AUTH_MODE;
+const originalTenantSecret = process.env.TENANT_KEY_ENCRYPTION_SECRET;
 
 beforeEach(async () => {
   openRouterCreateMock.mockReset();
@@ -42,11 +46,16 @@ beforeEach(async () => {
   process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
   const seed = new Database(dbPath);
   seed.close();
+  process.env.TENANT_KEY_ENCRYPTION_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+  resetMasterKeyCacheForTests();
   getDb();
+  invalidateCache();
 });
 
 afterEach(async () => {
   closeDb();
+  invalidateCache();
+  resetMasterKeyCacheForTests();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
@@ -55,6 +64,18 @@ afterEach(async () => {
   delete process.env.OPENROUTER_DISABLED;
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.OPENROUTER_MODEL_OVERRIDES;
+  if (originalAuthMode === undefined) {
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+    delete process.env.LEGAL_DASHBOARD_AUTH_MODE;
+  } else {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = originalAuthMode;
+  }
+  if (originalTenantSecret === undefined) {
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+    delete process.env.TENANT_KEY_ENCRYPTION_SECRET;
+  } else {
+    process.env.TENANT_KEY_ENCRYPTION_SECRET = originalTenantSecret;
+  }
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -226,6 +247,20 @@ describe("callModel OpenRouter routing", () => {
     expect(openAiConstructorMock).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "sk-or-v1-body" }));
     expect(openRouterCreateMock).toHaveBeenCalledWith(
       expect.objectContaining({ model: "openai/gpt-5.4-mini" }),
+      expect.any(Object)
+    );
+  });
+
+  it("uses tenant DB OpenRouter key in web mode", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    setTenantKey("openrouter", "sk-or-v1-tenant", "admin");
+    mockOpenRouterResponse();
+
+    await callModel("claude-sonnet", "prompt", {}, 5000);
+
+    expect(openAiConstructorMock).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "sk-or-v1-tenant" }));
+    expect(openRouterCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({ model: "anthropic/claude-sonnet-4.6" }),
       expect.any(Object)
     );
   });

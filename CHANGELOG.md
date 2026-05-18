@@ -4,6 +4,32 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## v2.30.0 — 2026-05-19
+
+Web admin pentru chei API centralizate si buget zilnic per user. In `AUTH_MODE=web`, adminul tenantului configureaza cheile AI si captcha din `/admin/keys`; userii non-admin nu mai folosesc BYOK si sunt limitati prin bugetele din `/admin/quota`. Desktop ramane BYOK neschimbat.
+
+### Livrabile
+
+**Chei tenant criptate.** Migration `0026_tenant_api_keys` introduce singleton row-ul `tenant_api_keys`, cu ciphertext, iv si tag separate pentru Anthropic, OpenAI, Google, OpenRouter, 2Captcha si CapSolver. `TENANT_KEY_ENCRYPTION_SECRET` este master key-ul AES-256-GCM; in web mode lipsa sau lungimea gresita opresc boot-ul dupa migrations, cu mesaj explicit. Pierderea secretului face cheile nerecuperabile si cere reintroducere manuala din `/admin/keys`.
+
+**Admin keys API si UI.** Backend-ul expune `GET /api/v1/admin/keys`, `PUT /api/v1/admin/keys/:field` si `PUT /api/v1/admin/keys/captcha`, toate sub `requireRole("admin")`. Raspunsurile afiseaza doar status `set` si `last4`; auditul logheaza `field`, `hadPrevious` si `last4After`, fara plaintext sau ciphertext. Pagina noua `/admin/keys` permite salvarea celor 6 chei, providerului captcha si modului `sequential`/`race`.
+
+**Fallback AI si quota enforcement.** `getApiKey()` foloseste lantul `env > tenant DB in web > BYOK body in desktop`, iar `rejectApiKeysFromBodyInWebMode` ramane activ ca defense-in-depth. `quotaGuard()` aplica bugetele zilnice per user pe `/ai/analyze` si `/ai/analyze-multi`, cu `QUOTA_EXCEEDED` 429 si `Retry-After` pana la miezul noptii. `GET /api/v1/me/key-status` si `GET /api/v1/me/budget` dau UI-ului statusul cheilor si consumul curent.
+
+**Captcha server-side in web mode.** Flow-ul RNPM citeste cheia, providerul si modul captcha din tenant DB in web mode si ignora cheile trimise in body. Daca adminul nu a configurat cheia tenantului, rutele returneaza `CAPTCHA_NOT_CONFIGURED` 501; desktop pastreaza flow-ul existent cu cheia din UI/safeStorage.
+
+**UX web.** `ApiKeyDialog` este ascuns pentru non-admin in web mode, sidebar-ul admin primeste link-ul "Chei API", iar pagina Dosare afiseaza `BudgetIndicator` in web mode cand utilizatorul are limita zilnica configurata.
+
+### Test coverage
+
+Teste noi si extinse pentru crypto AES-GCM, repository-ul `tenant_api_keys`, rutele admin keys, `me/key-status`, `me/budget`, suma de cost zilnic cu aliasuri AI, `quotaGuard`, fallback OpenRouter prin tenant DB, RNPM captcha web flow, `ApiKeyDialog`, pagina admin Keys si `BudgetIndicator`.
+
+### Verificare
+
+`npm run typecheck:backend`, `npm run typecheck:frontend`, backend focused Vitest pentru crypto/repository/admin/me/quota/RNPM/OpenRouter si frontend focused Vitest pentru ApiKeyDialog/BudgetIndicator/AdminKeys. Full-suite, build si Electron ABI restore raman gate-ul final al PR-ului.
+
+---
+
 ## v2.29.0 — 2026-05-18
 
 Zgomot si storage pentru `name_soap` si `dosar_soap`. Release-ul reduce cresterea `monitoring_snapshots`, ridica plafonul pentru snapshot-uri legitime mari si elimina doua surse de zgomot confirmate in monitorizarea pe nume.

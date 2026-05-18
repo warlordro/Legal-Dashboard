@@ -5,6 +5,8 @@ import { EmailSettingsPanel } from "@/components/EmailSettingsPanel";
 import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
+import { useAuthMode } from "@/hooks/useAuthMode";
+import { useCurrentUser } from "@/hooks/useCurrentUser";
 import type { useApiKey } from "@/hooks/useApiKey";
 import type { useAiSettings } from "@/hooks/useAiSettings";
 
@@ -37,6 +39,8 @@ interface Props {
 const EMPTY = { anthropic: "", openai: "", google: "", openrouter: "", twocaptcha: "", capsolver: "" };
 
 export function ApiKeyDialog({ onClose, apiKey }: Props) {
+  const authMode = useAuthMode();
+  const { user } = useCurrentUser();
   const {
     setKey,
     clearKey,
@@ -55,6 +59,8 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
   } = apiKey;
   const [keyInputs, setKeyInputs] = useState(EMPTY);
   const dialogRef = useDialog<HTMLDivElement>(true, onClose);
+
+  if (authMode === "web" && user?.role !== "admin") return null;
 
   const handleSaveKeys = () => {
     if (keyInputs.anthropic.trim()) setKey("anthropic", keyInputs.anthropic);

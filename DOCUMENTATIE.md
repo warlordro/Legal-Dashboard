@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.29.0** (18 Mai 2026, monitoring noise & storage - snapshot retention atomica, cap payload 3 MiB, set equality pe name_soap si suppressie dosar_new istoric cu latest_sedinta_at/jobCreatedAt). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.30.0** (19 Mai 2026, web admin keys + per-user budget - chei AI/captcha tenant criptate AES-256-GCM, pagina `/admin/keys`, BYOK ascuns pentru non-admin web, quotaGuard AI si RNPM captcha server-side). Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
@@ -772,4 +772,4 @@ Parsate din enumerarea WSDL a Ministerului Justitiei, grupate in 7 categorii:
 
 ---
 
-*Ultima actualizare: 26 Aprilie 2026 - v2.0.10 hardening: AI logging extension + backup maintenance lock + safeStorage trim*
+*Ultima actualizare: 19 Mai 2026 - v2.30.0 web admin centralized API keys + per-user budget (tenant_api_keys, admin /keys + /quota, quotaGuard, captcha consumption audit)*
