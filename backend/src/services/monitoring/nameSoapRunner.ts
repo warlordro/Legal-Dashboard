@@ -305,10 +305,9 @@ export function stripLegalSuffix(tokens: string[]): string[] {
   return tokens.slice(0, end);
 }
 
-// Strict word match: TOATE cuvintele targetului (excluzand sufixul legal de
-// forma juridica) trebuie sa apara ca tokeni distincti in MACAR O parte
-// (dosar.parti[i].nume), tokenizata si curatata identic. SRL/SA in target sau
-// in party sunt ignorate — nu valideaza, nu invalideaza match-ul.
+// Strict word match: tokenii targetului (excluzand sufixul legal de forma
+// juridica) trebuie sa fie acelasi set cu tokenii unei parti. SRL/SA in target
+// sau in party sunt ignorate - nu valideaza, nu invalideaza match-ul.
 //
 // Cazul fara parti = false (fara nume sa verificam → nu confirmam match-ul).
 // Cazul targetCore gol (target = doar sufixe legale, ex. "SRL") = false: nu
@@ -318,8 +317,12 @@ export function dosarMatchesAllNameTokens(dosar: Dosar, targetName: string): boo
   const targetCore = stripLegalSuffix(tokenizeNameForMatch(targetName));
   if (targetCore.length === 0) return false;
   if (!dosar.parti || dosar.parti.length === 0) return false;
+  const targetSet = new Set(targetCore);
   for (const parte of dosar.parti) {
-    const partySet = new Set(stripLegalSuffix(tokenizeNameForMatch(parte.nume)));
+    const partyCore = stripLegalSuffix(tokenizeNameForMatch(parte.nume));
+    if (partyCore.length !== targetSet.size) continue;
+    const partySet = new Set(partyCore);
+    if (partySet.size !== targetSet.size) continue;
     let allPresent = true;
     for (const token of targetCore) {
       if (!partySet.has(token)) {

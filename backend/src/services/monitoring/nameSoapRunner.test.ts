@@ -530,6 +530,53 @@ describe("nameSoapRunner - strict word filter", () => {
     expect(dosarMatchesAllNameTokens(dosar, "  SRL  LLC  ")).toBe(false);
   });
 
+  describe("dosarMatchesAllNameTokens (set equality)", () => {
+    function dosarCuParte(nume: unknown): Dosar {
+      return {
+        numar: "1/1/2024",
+        data: "",
+        institutie: "",
+        departament: "",
+        categorieCaz: "",
+        stadiuProcesual: "",
+        obiect: "",
+        parti: [{ nume, calitateParte: "Reclamant" }] as Dosar["parti"],
+        sedinte: [],
+      };
+    }
+
+    it("accepta match exact dupa strip de sufix legal", () => {
+      expect(dosarMatchesAllNameTokens(dosarCuParte("PROFESIONAL CONSTRUCT SRL"), "PROFESIONAL CONSTRUCT SRL")).toBe(
+        true
+      );
+    });
+
+    it("respinge superset-ul NG PROFESIONAL CONSTRUCT pentru target PROFESIONAL CONSTRUCT", () => {
+      expect(dosarMatchesAllNameTokens(dosarCuParte("NG PROFESIONAL CONSTRUCT SRL"), "PROFESIONAL CONSTRUCT SRL")).toBe(
+        false
+      );
+    });
+
+    it("pastreaza echivalenta sufixelor juridice punctate", () => {
+      expect(dosarMatchesAllNameTokens(dosarCuParte("X S.R.L."), "X SRL")).toBe(true);
+    });
+
+    it("respinge tokenii duplicati in party", () => {
+      expect(dosarMatchesAllNameTokens(dosarCuParte("X X"), "X")).toBe(false);
+    });
+
+    it("respinge targetul gol, parti goale, parti undefined si nume null fara throw", () => {
+      expect(dosarMatchesAllNameTokens(dosarCuParte("ABC"), "")).toBe(false);
+      expect(dosarMatchesAllNameTokens({ ...dosarCuParte("ABC"), parti: [] }, "ABC")).toBe(false);
+      expect(dosarMatchesAllNameTokens({ ...dosarCuParte("ABC"), parti: undefined } as unknown as Dosar, "ABC")).toBe(
+        false
+      );
+      expect(dosarMatchesAllNameTokens(dosarCuParte(null), "ABC")).toBe(false);
+      expect(dosarMatchesAllNameTokens(dosarCuParte(undefined), "ABC")).toBe(false);
+      expect(dosarMatchesAllNameTokens(dosarCuParte("ABC"), null as unknown as string)).toBe(false);
+    });
+  });
+
   it("filtru runner: SOAP returneaza dosare false-pozitive, ele NU ajung in snapshot", async () => {
     const job = seedJob({
       targetJson: '{"name_normalized":"GLOBAL LEARNING LOGISTICS"}',
