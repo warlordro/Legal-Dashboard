@@ -7,14 +7,11 @@
 export type DiffAlertSeverity = "info" | "warning" | "critical";
 
 // Plafon dur pentru `monitoring_snapshots.payload_json` (canonicalJson UTF-8
-// bytes). 1 MiB e suficient pentru orice dosar real de pe portalquery.just.ro
-// (cele mai mari dosare publice au sub 200 KB de sedinte cumulate); peste
-// pragul asta e fie un dosar patologic fie un pumn de date neasteptat de la
-// upstream — in oricare caz scrierea inseamna umflarea SQLite WAL si
-// degradarea diff-ului urmator (fiecare tick deserializeaza payload-ul).
-// Runner-ul refuza scrierea si emite o alerta SNAPSHOT_OVERSIZE; repo-ul
-// pastreaza acelasi cap ca defense-in-depth.
-export const SNAPSHOT_PAYLOAD_MAX_BYTES = 1 << 20;
+// bytes). 3 MiB acomodeaza joburile name_soap pe corporate names mari cu
+// sute de dosare. Peste pragul asta e fie un dosar patologic, fie un raspuns
+// neasteptat de la upstream; runner-ul emite SNAPSHOT_OVERSIZE si refuza
+// scrierea, iar repo-ul pastreaza acelasi cap ca defense-in-depth.
+export const SNAPSHOT_PAYLOAD_MAX_BYTES = 3 << 20;
 
 // Forma generica pe care orice diff engine o emite pentru fiecare alerta
 // candidata. `dedupKey` trebuie sa fie stabila intre re-run-uri pe acelasi

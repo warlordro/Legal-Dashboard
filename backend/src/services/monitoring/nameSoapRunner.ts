@@ -104,7 +104,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
             runId,
             kind: "source_error",
             severity: "warning",
-            title: "Snapshot peste plafon (1 MiB) - refuzat la scriere",
+            title: `Snapshot peste plafon (${SNAPSHOT_PAYLOAD_MAX_BYTES >> 20} MiB) - refuzat la scriere`,
             detail: {
               error_code: "SNAPSHOT_OVERSIZE",
               payload_bytes: payloadBytes,

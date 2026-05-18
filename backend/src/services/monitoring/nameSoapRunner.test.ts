@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
 import { getLatestSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
+import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
 import { createNameSoapRunner, dosarMatchesAllNameTokens, tokenizeNameForMatch } from "./nameSoapRunner.ts";
 import type { ScheduledJob } from "./scheduler.ts";
 import type { Dosar } from "../../soap.ts";
@@ -298,6 +299,75 @@ describe("nameSoapRunner - SOAP error", () => {
     expect(out.status).toBe("error");
     expect(out.errorCode).toBe("SOAP_FAIL");
     expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+  });
+});
+
+describe("nameSoapRunner - SNAPSHOT_OVERSIZE plafon", () => {
+  it("payload peste 3 MiB -> outcome error SNAPSHOT_OVERSIZE si niciun snapshot scris", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+    const runner = createNameSoapRunner({
+      searchDosare: async () => [
+        makeDosar("1234/180/2024", "fond", "civil", "Judecatoria ".concat("X".repeat(SNAPSHOT_PAYLOAD_MAX_BYTES))),
+      ],
+    });
+
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("error");
+    expect(out.errorCode).toBe("SNAPSHOT_OVERSIZE");
+    expect(out.alertsCreated).toBe(1);
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+
+    const alert = getDb()
+      .prepare(
+        `SELECT title, kind, severity, detail_json
+           FROM monitoring_alerts
+          WHERE job_id = ?`
+      )
+      .get(job.id) as { title: string; kind: string; severity: string; detail_json: string };
+    expect(alert.kind).toBe("source_error");
+    expect(alert.severity).toBe("warning");
+    expect(alert.title).toBe(`Snapshot peste plafon (${SNAPSHOT_PAYLOAD_MAX_BYTES >> 20} MiB) - refuzat la scriere`);
+    const detail = JSON.parse(alert.detail_json) as { error_code: string; payload_bytes: number; max_bytes: number };
+    expect(detail.error_code).toBe("SNAPSHOT_OVERSIZE");
+    expect(detail.payload_bytes).toBeGreaterThan(SNAPSHOT_PAYLOAD_MAX_BYTES);
+    expect(detail.max_bytes).toBe(SNAPSHOT_PAYLOAD_MAX_BYTES);
+  });
+
+  it("payload de 2 MiB ramane sub plafonul de 3 MiB si se scrie normal", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+    const runner = createNameSoapRunner({
+      searchDosare: async () => [
+        makeDosar("1234/180/2024", "fond", "civil", "Judecatoria ".concat("X".repeat(2 * 1024 * 1024))),
+      ],
+    });
+
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    expect(getLatestSnapshot(job.owner_id, job.id)).not.toBeNull();
+    const oversizeCount = (
+      getDb()
+        .prepare(
+          `SELECT COUNT(*) AS n
+             FROM monitoring_alerts
+            WHERE job_id = ? AND kind = 'source_error' AND detail_json LIKE '%SNAPSHOT_OVERSIZE%'`
+        )
+        .get(job.id) as { n: number }
+    ).n;
+    expect(oversizeCount).toBe(0);
   });
 });
 

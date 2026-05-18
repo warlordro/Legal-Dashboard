@@ -22,6 +22,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, getDb } from "../../db/schema.ts";
 import { getLatestSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
 import { createDosarSoapRunner } from "./dosarSoapRunner.ts";
 import type { ScheduledJob } from "./scheduler.ts";
 import type { Dosar } from "../../soap.ts";
@@ -395,7 +396,7 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
   });
 });
 
-// Constatare adversiala #1 — plafon 1 MiB pe payload_json. Runner-ul refuza
+// Constatare adversiala #1 — plafon 3 MiB pe payload_json. Runner-ul refuza
 // scrierea snapshotului oversize si emite o alerta source_error/SNAPSHOT_OVERSIZE.
 // Asigura ca:
 //   - statusul outcome e "error" cu errorCode SNAPSHOT_OVERSIZE
@@ -403,13 +404,12 @@ describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", (
 //   - prev_snapshot ramane neschimbat (niciun rand de snapshot scris)
 describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
   function makeBigDosar(numar: string, count: number): Dosar {
-    // ~250 chars/sedinta in canonical JSON; 5000 sedinte trec confortabil de
-    // 1 MiB chiar tinand cont de deduplicarea cheilor in sedinteWithSolution.
+    // Campul solutie mare tine fixture-ul determinist peste plafonul de 3 MiB.
     const sedinte: Dosar["sedinte"] = Array.from({ length: count }, (_, i) => ({
       complet: `Complet${i}`,
       data: `2026-${String((i % 12) + 1).padStart(2, "0")}-${String((i % 28) + 1).padStart(2, "0")}`,
       ora: `${String(i % 24).padStart(2, "0")}:00`,
-      solutie: "x".repeat(250),
+      solutie: "x".repeat(900),
       solutieSumar: "",
       documentSedinta: "",
       numarDocument: "",
@@ -418,7 +418,7 @@ describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
     return makeDosar(numar, sedinte);
   }
 
-  it("payload >1 MiB → outcome error SNAPSHOT_OVERSIZE + 1 alerta + niciun snapshot scris", async () => {
+  it("payload peste 3 MiB -> outcome error SNAPSHOT_OVERSIZE + 1 alerta + niciun snapshot scris", async () => {
     const job = seedJob();
     const runId = seedRunningRow(job.id);
 
@@ -443,11 +443,12 @@ describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
     // Alerta source_error cu detail.error_code = SNAPSHOT_OVERSIZE.
     const alerts = getDb()
       .prepare(
-        `SELECT kind, severity, detail_json, dedup_key
+        `SELECT title, kind, severity, detail_json, dedup_key
            FROM monitoring_alerts
           WHERE job_id = ?`
       )
       .all(job.id) as {
+      title: string;
       kind: string;
       severity: string;
       detail_json: string;
@@ -457,10 +458,13 @@ describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
     expect(alerts[0]!.kind).toBe("source_error");
     expect(alerts[0]!.severity).toBe("warning");
     expect(alerts[0]!.dedup_key).toBe(`snapshot_oversize|${runId}`);
+    expect(alerts[0]!.title).toBe(
+      `Snapshot peste plafon (${SNAPSHOT_PAYLOAD_MAX_BYTES >> 20} MiB) - refuzat la scriere`
+    );
     const detail = JSON.parse(alerts[0]!.detail_json);
     expect(detail.error_code).toBe("SNAPSHOT_OVERSIZE");
-    expect(detail.payload_bytes).toBeGreaterThan(1 << 20);
-    expect(detail.max_bytes).toBe(1 << 20);
+    expect(detail.payload_bytes).toBeGreaterThan(SNAPSHOT_PAYLOAD_MAX_BYTES);
+    expect(detail.max_bytes).toBe(SNAPSHOT_PAYLOAD_MAX_BYTES);
   });
 });
 
