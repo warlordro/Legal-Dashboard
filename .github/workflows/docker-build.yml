@@ -75,6 +75,12 @@ jobs:
           # longer allowed when binding to a remote interface. We use deterministic
           # CI-only values; they never authenticate a real request because the
           # smoke test only hits /health (public, no auth required).
+          # v2.30.0 adds the tenant key master secret gate: web mode boots fail-fast
+          # without TENANT_KEY_ENCRYPTION_SECRET (32 bytes base64) because the boot
+          # probe does an encrypt/decrypt round-trip self-test against the master
+          # key. The value below is base64("ci-only-tenant-key-master-secret"), a
+          # 32-byte literal that decodes cleanly — it never protects real tenant
+          # data because the smoke test never writes a key.
           docker run -d --name ld-ci -p 3002:3002 \
             -e HOST=0.0.0.0 \
             -e LEGAL_DASHBOARD_ALLOW_REMOTE=1 \
@@ -83,6 +89,7 @@ jobs:
             -e LEGAL_DASHBOARD_JWT_SECRET=ci-only-test-secret-32-chars-minimum-do-not-use-in-prod \
             -e LEGAL_DASHBOARD_JWT_ISSUER=legal-dashboard-ci \
             -e LEGAL_DASHBOARD_JWT_AUDIENCE=legal-dashboard-ci \
+            -e TENANT_KEY_ENCRYPTION_SECRET=Y2ktb25seS10ZW5hbnQta2V5LW1hc3Rlci1zZWNyZXQ= \
             legal-dashboard:ci
           # Poll /health every 2s for 60s. start-period=120s keeps healthcheck
           # green during prewarm, but the endpoint itself flips to 200 as soon
