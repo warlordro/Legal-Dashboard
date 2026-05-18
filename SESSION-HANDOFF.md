@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.28.4 (2026-05-18)
+**Versiune curenta**: v2.29.0 (2026-05-18)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -64,6 +64,16 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
+
+## Sprint inchis 2026-05-18 - v2.29.0 monitoring noise & storage
+
+**Status**: livrat pe branch `feat/monitoring-noise-storage`.
+
+**Solutie**: `monitoring_snapshots` este curatat incremental prin `deletePriorSnapshots()` in aceeasi tranzactie cu insertul nou pentru `name_soap` si `dosar_soap`. Snapshot cap-ul este 3 MiB, cu titlu oversize parametrizat. Filtrarea pe nume foloseste set equality, deci un party superset nu mai trece pentru target mai scurt. `name_soap` snapshot include `latest_sedinta_at`, iar `diffNameSoap` primeste `jobCreatedAt` ca sa suprime `dosar_new` istoric fara activitate dupa adaugarea la monitorizare.
+
+**Observability**: retention emite log JSON `monitoring.snapshot_retention` cand sterge randuri. Suppressia istorica face fail-open si logheaza `console.error("[diffNameSoap.isHistoricNoise] invalid date input", ...)` pentru date invalide.
+
+**Teste cheie**: rollback tranzactie DELETE+INSERT, 3 tick-uri = 1 snapshot/job, oversize peste 3 MiB vs 2 MiB valid, `parte.nume` null/undefined, set equality si suppressie istorica cu date invalide.
 
 ## Sprint inchis 2026-05-14 - Notite editabile per job + propagare in alerte
 

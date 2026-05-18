@@ -39,6 +39,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.29.0",
+    date: "18 Mai 2026",
+    subtitle:
+      "Monitoring noise & storage: retention atomica pentru monitoring_snapshots, cap payload 3 MiB, set equality pe nume si suppressie dosar_new istoric pe name_soap.",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Storage retention",
+        content:
+          "deletePriorSnapshots(ownerId, jobId) curata snapshot-urile vechi in aceeasi tranzactie cu insertSnapshot pentru runnerii name_soap si dosar_soap. Daca insertul de alerta esueaza, rollback-ul pastreaza baseline-ul anterior. Cand sterge randuri, backend-ul emite log JSON monitoring.snapshot_retention cu owner_id, job_id, deleted_count si ts.",
+      },
+      {
+        title: "Snapshot cap 3 MiB",
+        content:
+          "SNAPSHOT_PAYLOAD_MAX_BYTES creste la 3 MiB pentru nume corporative mari cu sute de dosare. Alerta SNAPSHOT_OVERSIZE afiseaza plafonul curent in titlu si detail.max_bytes=3145728; payload-urile de 2 MiB sunt acceptate normal.",
+      },
+      {
+        title: "Name matching mai strict",
+        content:
+          "dosarMatchesAllNameTokens foloseste set equality, nu subset. PROFESIONAL CONSTRUCT SRL nu mai match-uieste NG PROFESIONAL CONSTRUCT SRL. Sufixele juridice raman ignorate, iar parti.nume null/undefined nu arunca.",
+      },
+      {
+        title: "Historic noise suppression",
+        content:
+          "Snapshot-ul name_soap include latest_sedinta_at, iar diffNameSoap primeste jobCreatedAt. dosar_new este suprimat pentru dosare mai vechi decat jobul cand nu exista activitate dupa adaugarea la monitorizare. Datele invalide fac fail-open si sunt logate prin console.error.",
+      },
+      {
+        title: "Verificare",
+        content:
+          "Acoperire noua pentru rollback DELETE+INSERT, 3 tick-uri = 1 snapshot/job, oversize peste 3 MiB vs 2 MiB valid, set equality, parti.nume null/undefined si suppressie istorica cu date invalide. Gate release: Biome, tsc backend, tsc frontend, teste backend, teste frontend si npm run build.",
+      },
+    ],
+  },
+  {
     version: "v2.28.4",
     date: "18 Mai 2026",
     subtitle:

@@ -7,16 +7,12 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage`.
 
-Versiune curenta: **v2.28.4**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **v2.29.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.28.4** - remediation pack audit `AUDIT-PACK-FULL-PROJECT-MAIN-2026-05-18.md` (16 findings -> 5 PR-uri merged). Security hotfix (CSRF desktop-only pe rute bulk, master switch retry rezilient), backend hygiene (AI signal propagation, bodyLimit pe `/search/load-more`, log redact), frontend hardening (XLSX caps 10MB / 10k rows / 64 cols, saved load error banner, focus trap a11y, requestId pe error envelope), web pre-cutover (`ownerId` obligatoriu pe inputuri repo/service, `/health` split: public minim + `/health/detail` loopback) si ops (pin Docker SHA, CORS PATCH/DELETE, worktree cleanup). Zero behavior change pe desktop.
+Ultimul release **v2.29.0** - monitoring noise & storage: `deletePriorSnapshots()` curata snapshot-urile vechi in tranzactia runnerilor `name_soap` si `dosar_soap`, plafonul snapshot creste la 3 MiB, match-ul pe nume devine set equality (fara subset false-positive), iar `dosar_new` istoric este suprimat pentru joburile `name_soap` cand dosarul vechi nu are activitate dupa adaugarea la monitorizare. Include log JSON `monitoring.snapshot_retention` si fail-open cu `console.error` pentru date invalide in suppressia istorica.
 
-Predecesor **v2.28.3** - refactor closeout util peste auditul
-`AUDIT-REFACTOR`: drop-export cleanup pe 7 simboluri interne, `withRnpmGuards`
-pentru rutele RNPM cu captcha si teste noi pentru invariants I1/I3/I-final-update.
-Tier 3 si restul Tier 4 sunt marcate DEFERRED in audit §8; se reactiveaza doar
-la active-active sau peste 500 useri activi.
+Predecesor **v2.28.4** - remediation pack audit `AUDIT-PACK-FULL-PROJECT-MAIN-2026-05-18.md` (16 findings -> 5 PR-uri merged). Security hotfix (CSRF desktop-only pe rute bulk, master switch retry rezilient), backend hygiene (AI signal propagation, bodyLimit pe `/search/load-more`, log redact), frontend hardening (XLSX caps 10MB / 10k rows / 64 cols, saved load error banner, focus trap a11y, requestId pe error envelope), web pre-cutover (`ownerId` obligatoriu pe inputuri repo/service, `/health` split: public minim + `/health/detail` loopback) si ops (pin Docker SHA, CORS PATCH/DELETE, worktree cleanup). Zero behavior change pe desktop.
 
 Context anterior AI **v2.28.1** - bug fixes pentru stack chinezesc OpenRouter:
 `AI_MAX_TOKENS_CHINESE = 16000` (Kimi K2.6 e thinking model si lovea cap-ul
