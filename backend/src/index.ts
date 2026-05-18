@@ -35,6 +35,7 @@ import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
+import { getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -414,6 +415,9 @@ try {
   // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
   getAvize({ ownerId: "local", pageSize: 1 });
   getAvizStats();
+  if (getAuthMode() === "web") {
+    getMasterKey();
+  }
 } catch (e) {
   // Boot-time DB failure means subsequent requests will fail too. Server mode:
   // exit so the process manager restarts cleanly. Electron in-proc: throw so

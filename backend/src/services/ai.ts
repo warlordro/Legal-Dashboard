@@ -7,6 +7,8 @@ import {
   type AiUsageRoutingTag,
   type AiUsageTrackingContext,
 } from "./aiUsage.ts";
+import { getAuthMode } from "../auth/config.ts";
+import { getDecryptedKey, type TenantKeyField } from "../db/tenantKeysRepository.ts";
 
 // AI Models configuration
 export type OpenRouterStack = "western" | "chinese";
@@ -589,11 +591,32 @@ export function validateAiBody(body: unknown): string | null {
 // operators can lock the provider credentials via env; desktop users without env fall
 // back to keys saved in the UI (passed through the request body).
 export function getApiKey(provider: string, keys: Record<string, string>): string {
-  if (provider === "anthropic") return process.env.ANTHROPIC_API_KEY || keys.anthropic || "";
-  if (provider === "openai") return process.env.OPENAI_API_KEY || keys.openai || "";
-  if (provider === "google") return process.env.GOOGLE_AI_KEY || keys.google || "";
-  if (provider === "openrouter") return process.env.OPENROUTER_API_KEY || keys.openrouter || "";
+  const envKey = readEnvKey(provider);
+  if (envKey) return envKey;
+  const tenantField = providerToTenantField(provider);
+  if (tenantField && getAuthMode() === "web") {
+    return getDecryptedKey(tenantField) || "";
+  }
+  if (provider === "anthropic") return keys.anthropic || "";
+  if (provider === "openai") return keys.openai || "";
+  if (provider === "google") return keys.google || "";
+  if (provider === "openrouter") return keys.openrouter || "";
   return "";
+}
+
+function readEnvKey(provider: string): string {
+  if (provider === "anthropic") return process.env.ANTHROPIC_API_KEY || "";
+  if (provider === "openai") return process.env.OPENAI_API_KEY || "";
+  if (provider === "google") return process.env.GOOGLE_AI_KEY || "";
+  if (provider === "openrouter") return process.env.OPENROUTER_API_KEY || "";
+  return "";
+}
+
+function providerToTenantField(provider: string): TenantKeyField | null {
+  if (provider === "anthropic" || provider === "openai" || provider === "google" || provider === "openrouter") {
+    return provider;
+  }
+  return null;
 }
 
 // Single source of truth for "do we route this call via OpenRouter?".
@@ -614,6 +637,7 @@ export function shouldRouteViaOpenRouter(
   return (
     routing?.mode === "openrouter" ||
     Boolean(process.env.OPENROUTER_API_KEY) ||
+    (getAuthMode() === "web" && Boolean(getDecryptedKey("openrouter"))) ||
     Boolean(apiKeys.openrouter?.startsWith("sk-or-")) ||
     model?.provider === "openrouter"
   );
@@ -635,7 +659,7 @@ export async function callModel(
 
   if (useOpenRouter) {
     const stack = routing?.stack ?? model.stack ?? "western";
-    const apiKey = process.env.OPENROUTER_API_KEY || apiKeys.openrouter || "";
+    const apiKey = getApiKey("openrouter", apiKeys);
     if (!apiKey) throw new Error("NO_API_KEY:openrouter");
     const slug = resolveOpenRouterSlug(modelKey, stack);
     if (!slug) throw new Error(`MODEL_NOT_IN_STACK:${modelKey}:${stack}`);

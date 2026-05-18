@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, useEffect, useRef } from "react";
 import { FileSearch, AlertTriangle } from "lucide-react";
 import { SearchForm } from "@/components/SearchForm";
 import { DosareTable } from "@/components/DosareTable";
+import { BudgetIndicator } from "@/components/BudgetIndicator";
 // Lazy: MetricsPanel pulls in recharts (heavy). Only mounts after a successful search.
 const MetricsPanel = lazy(() => import("@/components/MetricsPanel").then((m) => ({ default: m.MetricsPanel })));
 import { Spinner } from "@/components/ui/spinner";
@@ -107,6 +108,7 @@ interface DosareProps {
   apiKeys?: ApiKeys;
   aiSettings: { mode: AiMode; stack: OpenRouterStack };
   onConfigureApiKey?: () => void;
+  showBudgetIndicator?: boolean;
 }
 
 export default function Dosare({
@@ -118,6 +120,7 @@ export default function Dosare({
   apiKeys,
   aiSettings,
   onConfigureApiKey,
+  showBudgetIndicator = false,
 }: DosareProps) {
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
@@ -388,6 +391,8 @@ export default function Dosare({
           <p className="text-sm text-muted-foreground">Introduceti criteriile de cautare pentru a gasi dosare</p>
         </div>
       )}
+
+      <BudgetIndicator enabled={showBudgetIndicator} />
     </div>
   );
 }

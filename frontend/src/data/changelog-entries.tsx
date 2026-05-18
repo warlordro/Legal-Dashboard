@@ -39,6 +39,47 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.30.0",
+    date: "19 Mai 2026",
+    subtitle:
+      "Web admin pentru chei API centralizate si buget zilnic per user: adminul configureaza cheile AI + captcha din /admin/keys, non-adminii nu mai vad BYOK in web mode, iar AI/RNPM folosesc cheile tenantului criptate AES-256-GCM.",
+    icon: <Lock className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Chei tenant criptate",
+        content:
+          "Migration 0026 adauga tenant_api_keys cu singleton scope=tenant si coloane separate cipher/iv/tag pentru Anthropic, OpenAI, Google, OpenRouter, 2Captcha si CapSolver. Cheile sunt criptate AES-256-GCM cu TENANT_KEY_ENCRYPTION_SECRET; in web mode secretul lipsa sau invalid opreste boot-ul dupa migrations.",
+      },
+      {
+        title: "Admin /keys",
+        content:
+          "Pagina noua /admin/keys permite adminului sa seteze cele 6 chei, providerul captcha si modul sequential/race. API-ul returneaza doar status set + last4; auditul salveaza field, hadPrevious si last4After fara plaintext sau ciphertext.",
+      },
+      {
+        title: "AI + buget",
+        content:
+          "getApiKey foloseste lantul env > tenant DB in web > BYOK body in desktop, iar rejectApiKeysFromBodyInWebMode ramane activ. quotaGuard aplica bugetele zilnice din /admin/quota pe analiza AI single si multi, cu QUOTA_EXCEEDED 429 si Retry-After.",
+      },
+      {
+        title: "RNPM captcha server-side",
+        content:
+          "In web mode, RNPM foloseste cheia, providerul si modul captcha din tenant DB si ignora captchaKey din body. Daca cheia tenantului lipseste, rutele returneaza CAPTCHA_NOT_CONFIGURED 501. Desktop ramane pe flow-ul BYOK existent.",
+      },
+      {
+        title: "UX web",
+        content:
+          "ApiKeyDialog este ascuns pentru non-admin in web mode, sidebar-ul admin primeste Chei API, iar Dosare afiseaza BudgetIndicator cand utilizatorul are limita zilnica configurata.",
+      },
+      {
+        title: "Verificare",
+        content:
+          "Acoperire noua pentru crypto/repository/admin keys/me budget/quota/RNPM captcha/OpenRouter tenant DB plus teste frontend pentru ApiKeyDialog, AdminKeys si BudgetIndicator. Gate final PR: Biome, typecheck backend/frontend, full tests, build si rebuild Electron ABI.",
+      },
+    ],
+  },
+  {
     version: "v2.29.0",
     date: "18 Mai 2026",
     subtitle:

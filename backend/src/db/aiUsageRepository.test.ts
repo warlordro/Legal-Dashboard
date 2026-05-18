@@ -10,6 +10,7 @@ import {
   getAiUsageTotals,
   insertAiUsage,
   listAiUsageLastDays,
+  sumAiUsageMilliToday,
 } from "./aiUsageRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
@@ -171,5 +172,36 @@ describe("AI usage queries", () => {
     });
 
     expect(totals.calls).toBe(2);
+  });
+
+  it("sums today's quota aliases for AI features", () => {
+    const today = new Date().toISOString();
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      feature: "dosar_summary",
+      costUsdMilli: 7,
+      ts: today,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_multi_analyst",
+      costUsdMilli: 11,
+      ts: today,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "google",
+      model: "gemini-pro-3",
+      feature: "dosar_multi_judge",
+      costUsdMilli: 13,
+      ts: today,
+    });
+
+    expect(sumAiUsageMilliToday("alice", "ai.single")).toBe(7);
+    expect(sumAiUsageMilliToday("alice", "ai.multi")).toBe(24);
   });
 });

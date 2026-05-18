@@ -28,7 +28,7 @@ import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
-import { parseJsonBody, rejectCaptchaKeyInWebMode, withRnpmCaptchaGuards } from "./rnpmGuards.ts";
+import { parseJsonBody, resolveCaptchaKeyForRoute, withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
 function parseProvider(v: unknown): CaptchaProvider | undefined {
   return v === "capsolver" || v === "2captcha" ? v : undefined;
@@ -198,7 +198,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   if (!params || typeof params !== "object") return invalidParams(c, "Parametri cautare lipsa");
   const paramsErr = validateParamsDepth(params);
   if (paramsErr) return invalidParams(c, paramsErr);
-  const provider = parseProvider(captchaProvider);
+  const provider = guard.captchaProvider ?? parseProvider(captchaProvider);
   const startPage = typeof startRnpmPage === "number" && startRnpmPage >= 1 && startRnpmPage <= 500 ? startRnpmPage : 1;
   const batch = typeof batchSize === "number" && batchSize >= 1 && batchSize <= 200 ? batchSize : 25;
   const existingGcode = typeof gcode === "string" && gcode.length > 0 ? gcode : undefined;
@@ -221,8 +221,9 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     params: params as Parameters<typeof executeSearch>[0]["params"],
     captchaKey,
     captchaProvider: provider,
-    fallback2CaptchaKey: typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
-    captchaMode: captchaMode === "race" ? "race" : "sequential",
+    fallback2CaptchaKey:
+      guard.fallback2CaptchaKey ?? (typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined),
+    captchaMode: guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential"),
     ownerId,
     startRnpmPage: startPage,
     batchSize: batch,
@@ -409,7 +410,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
 
   if (!Array.isArray(items) || items.length === 0) return invalidParams(c, "Lista cautari goala");
   if (items.length > 200) return invalidParams(c, "Maxim 200 cautari per bulk");
-  const provider = parseProvider(captchaProvider);
+  const provider = guard.captchaProvider ?? parseProvider(captchaProvider);
 
   const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
@@ -469,8 +470,8 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
       defaultRnpmClient,
       controller.signal,
       provider,
-      typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
-      captchaMode === "race" ? "race" : "sequential"
+      guard.fallback2CaptchaKey ?? (typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined),
+      guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential")
     );
 
     try {
@@ -545,7 +546,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   if (canonicalErr) {
     return invalidParams(c, canonicalErr);
   }
-  const provider = parseProvider(captchaProvider);
+  const provider = guard.captchaProvider ?? parseProvider(captchaProvider);
 
   const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
@@ -584,8 +585,9 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
         subTypeLabels: subTypeLabels as string[],
         captchaKey,
         captchaProvider: provider,
-        fallback2CaptchaKey: typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined,
-        captchaMode: captchaMode === "race" ? "race" : "sequential",
+        fallback2CaptchaKey:
+          guard.fallback2CaptchaKey ?? (typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined),
+        captchaMode: guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential"),
         ownerId,
         signal: controller.signal,
         onSearchCreated: (sid) => {
@@ -1069,18 +1071,21 @@ rnpmRouter.delete("/searches/:id", (c) => {
 });
 
 rnpmRouter.post("/captcha/balance", limitSmall, async (c) => {
-  const webGate = rejectCaptchaKeyInWebMode(c);
-  if (webGate) return webGate;
+  const resolved = resolveCaptchaKeyForRoute(c);
+  if (resolved.source === "tenant" && !resolved.ok) return resolved.response;
   let body: unknown;
   try {
     body = await c.req.json();
   } catch {
-    return c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400);
+    if (resolved.source === "body") return c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400);
+    body = {};
   }
   const { captchaKey, captchaProvider } = (body ?? {}) as { captchaKey?: unknown; captchaProvider?: unknown };
-  if (typeof captchaKey !== "string") return c.json(fail(ErrorCodes.INVALID_CAPTCHA_KEY, "Cheie lipsa", c), 400);
+  const effectiveKey = resolved.source === "tenant" ? resolved.captchaKey : captchaKey;
+  const effectiveProvider = resolved.source === "tenant" ? resolved.provider : parseProvider(captchaProvider);
+  if (typeof effectiveKey !== "string") return c.json(fail(ErrorCodes.INVALID_CAPTCHA_KEY, "Cheie lipsa", c), 400);
   try {
-    const balance = await getCaptchaBalance(captchaKey, parseProvider(captchaProvider));
+    const balance = await getCaptchaBalance(effectiveKey, effectiveProvider);
     return c.json({ balance });
   } catch (e) {
     if (e instanceof CaptchaInsufficientFundsError) {

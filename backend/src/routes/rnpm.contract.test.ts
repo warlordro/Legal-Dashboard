@@ -573,9 +573,8 @@ describe("POST /api/v1/rnpm/backups/restore input validation", () => {
   });
 });
 
-// v2.11.0 web-readiness closure (#12): rutele care primesc captchaKey in body
-// (search, bulk, captcha/balance) sunt gated cu 501 in `web` mode pana cand
-// exista per-user server-side captcha key storage. Desktop ramane neschimbat.
+// v2.30.0: rutele captcha in web mode nu mai folosesc cheia din body; daca
+// adminul nu a configurat cheia tenantului, primesc 501 explicit.
 describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => {
   // Salvam si restauram env-ul ca testele care urmeaza in alte fisiere sa nu
   // fie poluate. `getAuthMode()` citeste process.env la fiecare apel, asa ca
@@ -598,8 +597,8 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
     });
     expect(res.status).toBe(501);
     const body = await jsonOf<EnvelopeErrorBody>(res);
-    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
-    expect(body.error.message).toMatch(/web mode|server-side|captcha/i);
+    expectEnvelopeError(body, "CAPTCHA_NOT_CONFIGURED");
+    expect(body.error.message).toMatch(/captcha|adminul/i);
   });
 
   it("POST /bulk returns 501 in web mode", async () => {
@@ -613,7 +612,7 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
     });
     expect(res.status).toBe(501);
     const body = await jsonOf<EnvelopeErrorBody>(res);
-    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
+    expectEnvelopeError(body, "CAPTCHA_NOT_CONFIGURED");
   });
 
   it("POST /captcha/balance returns 501 in web mode", async () => {
@@ -624,7 +623,7 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
     });
     expect(res.status).toBe(501);
     const body = await jsonOf<EnvelopeErrorBody>(res);
-    expectEnvelopeError(body, "WEB_MODE_NOT_IMPLEMENTED");
+    expectEnvelopeError(body, "CAPTCHA_NOT_CONFIGURED");
   });
 });
 

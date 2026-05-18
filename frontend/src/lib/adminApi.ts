@@ -86,6 +86,35 @@ export interface QuotaListResult {
   overrides: QuotaOverride[];
 }
 
+export type TenantKeyField = "anthropic" | "openai" | "google" | "openrouter" | "twocaptcha" | "capsolver";
+export type TenantCaptchaProvider = "2captcha" | "capsolver";
+export type TenantCaptchaMode = "sequential" | "race";
+
+export interface TenantKeyStatus {
+  set: boolean;
+  last4: string | null;
+}
+
+export interface TenantKeysResult {
+  keys: Record<TenantKeyField, TenantKeyStatus>;
+  captcha: {
+    provider: TenantCaptchaProvider;
+    mode: TenantCaptchaMode;
+  };
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
+export interface MeBudgetItem {
+  feature: string;
+  usedMilli: number;
+  limitMilli: number | null;
+}
+
+export interface MeBudgetResult {
+  items: MeBudgetItem[];
+}
+
 export interface ListUsersOpts {
   page?: number;
   pageSize?: number;
@@ -151,6 +180,11 @@ export const me = {
       return unwrapMonitoring<TestEmailResult>(res);
     },
   },
+
+  budget: async (signal?: AbortSignal): Promise<MeBudgetResult> => {
+    const res = await apiFetch("/api/v1/me/budget", { signal });
+    return unwrapMonitoring<MeBudgetResult>(res);
+  },
 };
 
 export const admin = {
@@ -209,5 +243,34 @@ export const admin = {
       { method: "DELETE" }
     );
     return unwrapMonitoring<{ feature: string; removed: boolean }>(res);
+  },
+
+  getTenantKeys: async (signal?: AbortSignal): Promise<TenantKeysResult> => {
+    const res = await apiFetch("/api/v1/admin/keys", { signal });
+    return unwrapMonitoring<TenantKeysResult>(res);
+  },
+
+  setTenantKey: async (
+    field: TenantKeyField,
+    value: string
+  ): Promise<TenantKeyStatus & { field: TenantKeyField; validationSkipped: boolean }> => {
+    const res = await apiFetch(`/api/v1/admin/keys/${encodeURIComponent(field)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ value }),
+    });
+    return unwrapMonitoring<TenantKeyStatus & { field: TenantKeyField; validationSkipped: boolean }>(res);
+  },
+
+  setTenantCaptchaSettings: async (
+    provider: TenantCaptchaProvider,
+    mode: TenantCaptchaMode
+  ): Promise<{ provider: TenantCaptchaProvider; mode: TenantCaptchaMode }> => {
+    const res = await apiFetch("/api/v1/admin/keys/captcha", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, mode }),
+    });
+    return unwrapMonitoring<{ provider: TenantCaptchaProvider; mode: TenantCaptchaMode }>(res);
   },
 };

@@ -5,6 +5,7 @@ import { setTimeout as delay } from "node:timers/promises";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
+const TENANT_KEY_SECRET = Buffer.from("0123456789abcdef0123456789abcdef").toString("base64");
 
 let tmpRoots: string[] = [];
 let originalEnv: NodeJS.ProcessEnv;
@@ -36,6 +37,7 @@ async function importFreshIndex(env: NodeJS.ProcessEnv): Promise<void> {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",
     MONITORING_ENABLED: "0",
+    ...(env.LEGAL_DASHBOARD_AUTH_MODE === "web" ? { TENANT_KEY_ENCRYPTION_SECRET: TENANT_KEY_SECRET } : {}),
     ...env,
   };
   vi.resetModules();

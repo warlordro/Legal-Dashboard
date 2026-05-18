@@ -5,12 +5,14 @@ dosarelor in portalul instantelor, interogarea Registrului National de
 Publicitate Mobiliara (RNPM) si monitorizarea automata a dosarelor prin
 PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
-`safeStorage`.
+`safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.29.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **v2.30.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model.
 
-Ultimul release **v2.29.0** - monitoring noise & storage: `deletePriorSnapshots()` curata snapshot-urile vechi in tranzactia runnerilor `name_soap` si `dosar_soap`, plafonul snapshot creste la 3 MiB, match-ul pe nume devine set equality (fara subset false-positive), iar `dosar_new` istoric este suprimat pentru joburile `name_soap` cand dosarul vechi nu are activitate dupa adaugarea la monitorizare. Include log JSON `monitoring.snapshot_retention` si fail-open cu `console.error` pentru date invalide in suppressia istorica.
+Ultimul release **v2.30.0** - web admin pentru chei centralizate si buget per user: adminul seteaza cheile AI + captcha din `/admin/keys`, cheile sunt criptate AES-256-GCM in `tenant_api_keys`, non-adminii nu mai vad BYOK in web mode, iar AI/RNPM consuma cheile tenantului cu enforcement de buget zilnic. Desktop ramane BYOK identic.
+
+Predecesor **v2.29.0** - monitoring noise & storage: `deletePriorSnapshots()` curata snapshot-urile vechi in tranzactia runnerilor `name_soap` si `dosar_soap`, plafonul snapshot creste la 3 MiB, match-ul pe nume devine set equality (fara subset false-positive), iar `dosar_new` istoric este suprimat pentru joburile `name_soap` cand dosarul vechi nu are activitate dupa adaugarea la monitorizare. Include log JSON `monitoring.snapshot_retention` si fail-open cu `console.error` pentru date invalide in suppressia istorica.
 
 Predecesor **v2.28.4** - remediation pack audit `AUDIT-PACK-FULL-PROJECT-MAIN-2026-05-18.md` (16 findings -> 5 PR-uri merged). Security hotfix (CSRF desktop-only pe rute bulk, master switch retry rezilient), backend hygiene (AI signal propagation, bodyLimit pe `/search/load-more`, log redact), frontend hardening (XLSX caps 10MB / 10k rows / 64 cols, saved load error banner, focus trap a11y, requestId pe error envelope), web pre-cutover (`ownerId` obligatoriu pe inputuri repo/service, `/health` split: public minim + `/health/detail` loopback) si ops (pin Docker SHA, CORS PATCH/DELETE, worktree cleanup). Zero behavior change pe desktop.
 

@@ -17,6 +17,7 @@ import {
   ClipboardList,
   Gauge,
   ShieldCheck,
+  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
@@ -38,6 +39,7 @@ const adminNavItems = [
   { to: "/admin/users", label: "Utilizatori", icon: UsersIcon },
   { to: "/admin/audit", label: "Audit", icon: ClipboardList },
   { to: "/admin/quota", label: "Cote", icon: Gauge },
+  { to: "/admin/keys", label: "Chei API", icon: KeyRound },
 ];
 
 interface SidebarProps {

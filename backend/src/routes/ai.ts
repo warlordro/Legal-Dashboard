@@ -17,6 +17,7 @@ import {
 } from "../services/ai.ts";
 import { getSettings, upsertSettings } from "../db/ownerAiSettingsRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
+import { quotaGuard } from "../middleware/quotaGuard.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import type { AiUsageTrackingContext } from "../services/aiUsage.ts";
 import { getAuthMode } from "../auth/config.ts";
@@ -95,11 +96,11 @@ function missingApiKey(c: Context, provider: string) {
   if (getAuthMode() === "web") {
     return c.json(
       fail(
-        ErrorCodes.WEB_MODE_NOT_IMPLEMENTED,
-        `AI indisponibil in modul web: configurati cheia ${provider.toUpperCase()} in env-ul serverului.`,
+        ErrorCodes.MISSING_API_KEY,
+        `Cheia AI pentru ${provider} nu e configurata. Contacteaza adminul pentru a o seta in /admin/keys.`,
         c
       ),
-      501
+      400
     );
   }
   return c.json(fail(ErrorCodes.MISSING_API_KEY, "NO_API_KEY", c), 400);
@@ -147,7 +148,7 @@ aiRouter.put("/settings", async (c) => {
 });
 
 // AI Analysis endpoint
-aiRouter.post("/analyze", async (c) => {
+aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
   try {
     const parsed = await parseAiBody(c);
     if (parsed.kind === "error") return parsedBodyError(c, parsed);
@@ -216,7 +217,7 @@ aiRouter.post("/analyze", async (c) => {
 });
 
 // Multi-Agent AI Analysis endpoint
-aiRouter.post("/analyze-multi", async (c) => {
+aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
   try {
     const parsed = await parseAiBody(c);
     if (parsed.kind === "error") return parsedBodyError(c, parsed);

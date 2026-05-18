@@ -13,7 +13,9 @@ import Alerts from "@/pages/Alerts";
 import AdminUsers from "@/pages/admin/Users";
 import AdminAudit from "@/pages/admin/Audit";
 import AdminQuota from "@/pages/admin/Quota";
+import AdminKeys from "@/pages/admin/Keys";
 import { AdminGate } from "@/components/AdminGate";
+import { useAuthMode } from "@/hooks/useAuthMode";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
@@ -98,6 +100,7 @@ function AppShell({
   consumeRnpmPendingSearch: () => void;
 }) {
   const { pathname } = useLocation();
+  const authMode = useAuthMode();
   const mainRef = useRef<HTMLElement>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
   const [canScrollDown, setCanScrollDown] = useState(false);
@@ -176,6 +179,7 @@ function AppShell({
             apiKeys={keys}
             aiSettings={{ mode: aiSettings.mode, stack: aiSettings.stack }}
             onConfigureApiKey={handleOpenKeyDialog}
+            showBudgetIndicator={pathname === "/dosare" && authMode === "web"}
           />
         </div>
         <div style={{ display: pathname === "/termene" ? undefined : "none" }}>
@@ -213,6 +217,11 @@ function AppShell({
         {pathname === "/admin/quota" && (
           <AdminGate>
             <AdminQuota />
+          </AdminGate>
+        )}
+        {pathname === "/admin/keys" && (
+          <AdminGate>
+            <AdminKeys />
           </AdminGate>
         )}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>

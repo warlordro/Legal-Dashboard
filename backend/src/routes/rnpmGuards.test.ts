@@ -9,17 +9,33 @@ vi.mock("../auth/config.ts", async (importOriginal) => {
   };
 });
 
+vi.mock("../db/tenantKeysRepository.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../db/tenantKeysRepository.ts")>();
+  return {
+    ...actual,
+    getTenantKeys: vi.fn(),
+  };
+});
+
 import { getAuthMode } from "../auth/config.ts";
+import { getTenantKeys } from "../db/tenantKeysRepository.ts";
 import { withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
 const mockedGetAuthMode = vi.mocked(getAuthMode);
+const mockedGetTenantKeys = vi.mocked(getTenantKeys);
 
 function buildApp() {
   const app = new Hono();
   app.post("/", async (c) => {
     const guard = await withRnpmCaptchaGuards(c);
     if (!guard.ok) return guard.response;
-    return c.json({ ok: true, body: guard.body, captchaKey: guard.captchaKey });
+    return c.json({
+      ok: true,
+      body: guard.body,
+      captchaKey: guard.captchaKey,
+      captchaProvider: guard.captchaProvider,
+      captchaMode: guard.captchaMode,
+    });
   });
   return app;
 }
@@ -27,9 +43,21 @@ function buildApp() {
 describe("withRnpmCaptchaGuards", () => {
   beforeEach(() => {
     mockedGetAuthMode.mockReturnValue("desktop");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "",
+      capsolver: "",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: null,
+    });
   });
 
-  it("blocheaza web mode cu 501", async () => {
+  it("returneaza 501 in web mode cand tenantul nu are cheia captcha configurata", async () => {
     mockedGetAuthMode.mockReturnValue("web");
 
     const res = await buildApp().request("/", {
@@ -41,7 +69,38 @@ describe("withRnpmCaptchaGuards", () => {
     expect(res.status).toBe(501);
     await expect(res.json()).resolves.toMatchObject({
       data: null,
-      error: { code: "WEB_MODE_NOT_IMPLEMENTED" },
+      error: { code: "CAPTCHA_NOT_CONFIGURED" },
+    });
+  });
+
+  it("in web mode ignora captchaKey din body si foloseste cheia tenantului", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "capsolver",
+      captchaMode: "race",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captchaKey: "body-key-should-not-win", type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      body: { captchaKey: "body-key-should-not-win", type: "ipoteci" },
+      captchaKey: "tenant-capsolver-key",
+      captchaProvider: "capsolver",
+      captchaMode: "race",
     });
   });
 

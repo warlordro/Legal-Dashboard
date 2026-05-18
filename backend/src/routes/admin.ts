@@ -19,6 +19,15 @@ import { z } from "zod";
 
 import { recordAudit } from "../db/auditRepository.ts";
 import { listAuditEvents } from "../db/auditRepository.ts";
+import {
+  getTenantKeys,
+  isTenantKeyField,
+  setCaptchaSettings,
+  setTenantKey,
+  type CaptchaMode,
+  type CaptchaProvider,
+  type TenantKeyField,
+} from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import {
   getUserById,
@@ -32,6 +41,7 @@ import {
 } from "../db/userRepository.ts";
 import { deleteOverride, listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
+import { validateKey } from "../services/keyValidation.ts";
 import { fail, ok } from "../util/envelope.ts";
 
 // 4 KiB on bodies — admin payloads are tiny ({role}, {status}, {feature, dailyLimitUsdMilli}).
@@ -91,6 +101,19 @@ const UpsertQuotaSchema = z
     feature: z.string().trim().min(1).max(80),
     // Integer milli-USD aligned with ai_usage.cost_usd_milli precision.
     dailyLimitUsdMilli: z.number().int().min(0).max(1_000_000_000),
+  })
+  .strict();
+
+const PutTenantKeySchema = z
+  .object({
+    value: z.string().max(4096),
+  })
+  .strict();
+
+const CaptchaSettingsSchema = z
+  .object({
+    provider: z.enum(["2captcha", "capsolver"]),
+    mode: z.enum(["sequential", "race"]),
   })
   .strict();
 
@@ -276,6 +299,88 @@ adminRouter.get("/audit", (c) => {
   );
 });
 
+// ---------- Tenant API keys ----------
+
+adminRouter.get("/keys", (c) => {
+  const keys = getTenantKeys();
+  return c.json(
+    ok(
+      {
+        keys: {
+          anthropic: toKeyStatus(keys.anthropic),
+          openai: toKeyStatus(keys.openai),
+          google: toKeyStatus(keys.google),
+          openrouter: toKeyStatus(keys.openrouter),
+          twocaptcha: toKeyStatus(keys.twocaptcha),
+          capsolver: toKeyStatus(keys.capsolver),
+        },
+        captcha: {
+          provider: keys.captchaProvider,
+          mode: keys.captchaMode,
+        },
+        updatedAt: keys.updatedAt,
+        updatedBy: keys.updatedBy,
+      },
+      c
+    ),
+    200
+  );
+});
+
+adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = CaptchaSettingsSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+  const adminId = getOwnerId(c);
+  setCaptchaSettings({
+    provider: parsed.data.provider as CaptchaProvider,
+    mode: parsed.data.mode as CaptchaMode,
+    updatedBy: adminId,
+  });
+  recordAudit(c, "admin.tenantKeys.captchaSettings.update", {
+    targetKind: "tenant_keys",
+    targetId: "captcha",
+    detail: { provider: parsed.data.provider, mode: parsed.data.mode },
+  });
+  return c.json(ok({ provider: parsed.data.provider, mode: parsed.data.mode }, c), 200);
+});
+
+adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
+  const field = c.req.param("field");
+  if (!isTenantKeyField(field)) {
+    return c.json(fail("invalid_field", "Camp cheie invalid", c), 404);
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = PutTenantKeySchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+
+  const before = getTenantKeys()[field];
+  const validation = await validateKey(field, parsed.data.value);
+  if (!validation.valid) {
+    return c.json(fail("INVALID_KEY", validation.reason ?? "Cheie invalida", c), 422);
+  }
+
+  const adminId = getOwnerId(c);
+  setTenantKey(field, parsed.data.value, adminId);
+  const after = getTenantKeys()[field];
+  const detail: Record<string, unknown> = {
+    field,
+    hadPrevious: before.length > 0,
+    last4After: last4(after),
+  };
+  if (validation.validationSkipped) detail.validationSkipped = true;
+  recordAudit(c, "admin.tenantKeys.update", {
+    targetKind: "tenant_keys",
+    targetId: field,
+    detail,
+  });
+  return c.json(ok({ field, ...toKeyStatus(after), validationSkipped: validation.validationSkipped === true }, c), 200);
+});
+
 // ---------- Quota ----------
 
 adminRouter.get("/users/:id/quota", (c) => {
@@ -376,4 +481,15 @@ function safeJsonParse(s: string): unknown {
   } catch {
     return { _parse_error: true, raw: s };
   }
+}
+
+function toKeyStatus(value: string): { set: boolean; last4: string | null } {
+  return {
+    set: value.length > 0,
+    last4: last4(value),
+  };
+}
+
+function last4(value: string): string | null {
+  return value.length > 0 ? value.slice(-4) : null;
 }

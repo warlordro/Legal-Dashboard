@@ -95,6 +95,13 @@ and treat the current defaults as insufficient.
   `GOOGLE_AI_KEY` are set in the backend environment, they take precedence
   over keys submitted in the request body. This lets an operator who runs the
   backend as a service prevent the renderer from overriding the server's keys.
+- **Web tenant API keys (v2.30.0)**: in `LEGAL_DASHBOARD_AUTH_MODE=web`,
+  admin-configured AI and captcha keys are stored in `tenant_api_keys` as
+  AES-256-GCM ciphertext with separate iv/tag columns. The master key is
+  `TENANT_KEY_ENCRYPTION_SECRET`, required in web mode and not stored in the
+  database. API responses expose only configured/not-configured status and
+  `last4`; audit details never include plaintext or ciphertext. Non-admin
+  web requests still cannot supply BYOK `apiKeys`/`captchaKey` in the body.
 - **SOAP fan-out cap** (`MAX_SOAP_FANOUT = 500`) on `/api/dosare/load-more`
   and `/api/termene/load-more` to prevent an attacker (or a buggy client) from
   amplifying one request into thousands of upstream SOAP calls.
@@ -154,11 +161,11 @@ The scheduler does **not** add authentication, encryption, or rate-limiting to i
 | `LEGAL_DASHBOARD_JWT_TTL_SECONDS` | `3600` | TTL for refreshed web auth session tokens; allowed range `60..86400`. |
 | `LEGAL_DASHBOARD_AUTH_TOKEN_TTL_SECONDS` | unset | Legacy alias for JWT TTL. |
 | `LEGAL_DASHBOARD_AUTH_COOKIE_SECURE` | secure in web mode | Set to `0` only for local HTTP testing. |
+| `TENANT_KEY_ENCRYPTION_SECRET` | unset | Required in web auth mode for centralized tenant API keys. Must decode from base64 to exactly 32 bytes. Store separately from DB backups; losing it requires re-entering all tenant keys from `/admin/keys`. |
 | `MONITORING_ENABLED` | `1` in Electron | Set to `0` to disable monitoring routes and scheduler. |
 | `MONITORING_DISABLED_KINDS` | unset | Comma-separated monitoring kinds to skip in scheduler claims, for example `dosar_soap,name_soap`. |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_SECURE` | unset | Optional SMTP channel for alert emails. Incomplete config disables email without blocking boot. |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_AI_KEY` | unset | If set, override in-app keys. Use for server-mode deployments. |
-| `CAPTCHA_PROVIDER` / `TWOCAPTCHA_API_KEY` / `CAPSOLVER_API_KEY` | unset | Planned for PR-9 web/server mode. RNPM captcha provider keys must live server-side and must not be accepted from browser clients. Desktop v2.4.0 ignores these and keeps UI + safeStorage. |
+| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_AI_KEY` / `OPENROUTER_API_KEY` | unset | If set, override tenant DB keys in web mode and in-app keys on desktop. Normal web setup should prefer `/admin/keys`. |
 | `NODE_ENV` | `production` in Electron | `development` enables DevTools and the dev menu. |
 
 Desktop v2.4.0: the 2Captcha / CapSolver key is **not** read from env; it is
@@ -220,6 +227,7 @@ the report should be private. Please include:
 
 | Date | Change |
 |---|---|
+| 2026-05-19 | v2.30.0 web admin centralized keys: `tenant_api_keys` stores Anthropic/OpenAI/Google/OpenRouter/2Captcha/CapSolver keys encrypted with AES-256-GCM under `TENANT_KEY_ENCRYPTION_SECRET`; `/admin/keys` is admin-only and returns only `set`/`last4`; audit rows never include plaintext/ciphertext. Web non-admin BYOK remains blocked, AI quota enforcement returns `QUOTA_EXCEEDED` with `Retry-After`, and RNPM captcha in web mode resolves provider/mode/key server-side from tenant DB. Desktop safeStorage/BYOK behavior remains unchanged. |
 | 2026-05-16 | v2.28.0 OpenRouter AI routing: admin settings are owner-scoped through `owner_ai_settings`, web mode keeps API keys server-side only (`OPENROUTER_API_KEY` env; body-supplied keys remain rejected), and `OPENROUTER_DISABLED=1` provides an immediate operational kill switch with no silent fallback to native providers. Multi-agent requests reject mixed OpenRouter stacks with `STACK_MIX_FORBIDDEN`, so routing/cost attribution cannot silently cross the selected stack boundary. `ai_usage` accepts provider `openrouter` and records `routing_tag`; no change to AI HTML sanitization, URL whitelist, or owner isolation rules. |
 | 2026-05-13 | v2.25.0 RNPM multi-token filter: tokenizer caps filter evaluation at `FILTER_TOKEN_MAX_COUNT = 8` tokens, deduplicates case-insensitive/diacritics-insensitive input, and keeps every token owner-scoped through the existing `owner_id + search_id` filter path. Query logging remains raw-query-free (`qLen` only), LIKE patterns continue through `buildRnpmLikePattern()`, and the existing kill switch `RNPM_RESULTS_FILTER_DISABLED=1` remains valid. |
 | 2026-05-13 | Previous RNPM results filter: new POST-only `POST /api/rnpm/search/:searchId/filter` keeps raw `q` out of URL logs, structured route logs record `qLen` instead of query text, and ownership precheck returns the same 404 for missing vs cross-owner `searchId` (anti-enumeration). Filter query stays owner-scoped through `owner_id + search_id`, caps response IDs at 1500, times out after 5s, exposes `missingDetails` without leaking detail content, and can be disabled through `RNPM_RESULTS_FILTER_DISABLED=1` if DB contention or a regression appears. |
