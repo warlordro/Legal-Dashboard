@@ -40,15 +40,15 @@ import {
   type UserStatus,
 } from "../db/userRepository.ts";
 import { deleteOverride, listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
-import { getOwnerId } from "../middleware/owner.ts";
+import { getActorId, getOwnerId } from "../middleware/owner.ts";
 import { validateKey } from "../services/keyValidation.ts";
-import { fail, ok } from "../util/envelope.ts";
+import { ErrorCodes, fail, ok } from "../util/envelope.ts";
 
 // 4 KiB on bodies — admin payloads are tiny ({role}, {status}, {feature, dailyLimitUsdMilli}).
 const ADMIN_BODY_LIMIT = 4096;
 const limitAdminBody = bodyLimit({
   maxSize: ADMIN_BODY_LIMIT,
-  onError: (c) => c.json(fail("payload_too_large", "Payload prea mare", c), 413),
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
 });
 
 const ListUsersQuerySchema = z
@@ -106,7 +106,14 @@ const UpsertQuotaSchema = z
 
 const PutTenantKeySchema = z
   .object({
-    value: z.string().max(4096),
+    // Trim before persistence so paste-copies with trailing whitespace either
+    // collapse to "" (clear path) or store the canonical key. Without the
+    // transform, "   " bypassed the empty-string clear branch and got encrypted
+    // verbatim, breaking AI calls at runtime.
+    value: z
+      .string()
+      .max(4096)
+      .transform((v) => v.trim()),
   })
   .strict();
 
@@ -333,7 +340,11 @@ adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
   if (!parsed.success) {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
   }
-  const adminId = getOwnerId(c);
+  // Capture before-state for audit so an auditor can diff provider/mode without
+  // querying a sibling row. Captcha key values stay redacted: only the
+  // provider/mode strings (non-secret enums) appear in the audit detail.
+  const prevKeys = getTenantKeys();
+  const adminId = getActorId(c);
   setCaptchaSettings({
     provider: parsed.data.provider as CaptchaProvider,
     mode: parsed.data.mode as CaptchaMode,
@@ -342,7 +353,11 @@ adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
   recordAudit(c, "admin.tenantKeys.captchaSettings.update", {
     targetKind: "tenant_keys",
     targetId: "captcha",
-    detail: { provider: parsed.data.provider, mode: parsed.data.mode },
+    detail: {
+      provider: parsed.data.provider,
+      mode: parsed.data.mode,
+      previous: { provider: prevKeys.captchaProvider, mode: prevKeys.captchaMode },
+    },
   });
   return c.json(ok({ provider: parsed.data.provider, mode: parsed.data.mode }, c), 200);
 });
@@ -364,15 +379,23 @@ adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
     return c.json(fail("INVALID_KEY", validation.reason ?? "Cheie invalida", c), 422);
   }
 
-  const adminId = getOwnerId(c);
+  const adminId = getActorId(c);
   setTenantKey(field, parsed.data.value, adminId);
   const after = getTenantKeys()[field];
+  // `cleared: true` distinguishes an intentional delete (paste-empty / explicit
+  // clear) from a save-empty-on-already-absent. Without it, an audit row for
+  // an accidental deletion is indistinguishable from a benign "was never set".
+  const cleared = parsed.data.value === "";
   const detail: Record<string, unknown> = {
     field,
     hadPrevious: before.length > 0,
+    cleared,
     last4After: last4(after),
   };
-  if (validation.validationSkipped) detail.validationSkipped = true;
+  if (validation.validationSkipped) {
+    detail.validationSkipped = true;
+    if (validation.reason) detail.validationSkipReason = validation.reason;
+  }
   recordAudit(c, "admin.tenantKeys.update", {
     targetKind: "tenant_keys",
     targetId: field,

@@ -78,6 +78,13 @@ export function getDecryptedKey(field: TenantKeyField): string {
 }
 
 export function setTenantKey(field: TenantKeyField, value: string, updatedBy: string): void {
+  // Defense in depth: the column-name interpolation below trusts `field` to
+  // come from a typed call site. A runtime guard means a future TS-bypassed
+  // call (any-cast / dynamic dispatch / parser regression) cannot become a
+  // SQL injection vector through the `${field}_cipher` template literal.
+  if (!isTenantKeyField(field)) {
+    throw new Error(`Invalid tenant key field: ${String(field)}`);
+  }
   const db = getDb();
   ensureTenantRow();
   if (value === "") {
@@ -131,5 +138,24 @@ function decryptField(row: TenantKeysRow, field: TenantKeyField): string {
   const iv = row[`${field}_iv` as keyof TenantKeysRow];
   const tag = row[`${field}_tag` as keyof TenantKeysRow];
   if (typeof cipher !== "string" || typeof iv !== "string" || typeof tag !== "string") return "";
-  return decryptKey({ cipher, iv, tag });
+  try {
+    return decryptKey({ cipher, iv, tag });
+  } catch (err) {
+    // GCM auth failure = either the master key rotated without re-encryption,
+    // the row was tampered with, or the IV/tag column got truncated. Either
+    // way we surface it as a structured log (no plaintext, no ciphertext) so
+    // an operator can investigate. Returning "" keeps the rest of the tenant
+    // record usable and lets the caller treat the field as "not configured"
+    // — admins will see a stale `last4`/empty key in /admin/keys and re-set.
+    console.error(
+      JSON.stringify({
+        level: "error",
+        event: "tenant_key.decrypt_failed",
+        field,
+        reason: err instanceof Error ? err.message : "unknown",
+        ts: new Date().toISOString(),
+      })
+    );
+    return "";
+  }
 }

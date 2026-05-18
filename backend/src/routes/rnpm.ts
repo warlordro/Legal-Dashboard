@@ -27,6 +27,8 @@ import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
+import { getAuthMode } from "../auth/config.ts";
+import { getUserById } from "../db/userRepository.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 import { parseJsonBody, resolveCaptchaKeyForRoute, withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
@@ -181,6 +183,12 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const guard = await withRnpmCaptchaGuards(c);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
+  if (guard.source === "tenant") {
+    recordAudit(c, "rnpm.captcha.consume", {
+      targetKind: "rnpm_search",
+      detail: { provider: guard.captchaProvider ?? null, mode: guard.captchaMode ?? null, route: "search" },
+    });
+  }
   const { type, params, captchaProvider, fallback2CaptchaKey, captchaMode, startRnpmPage, batchSize, gcode, searchId } =
     (body ?? {}) as {
       type?: unknown;
@@ -401,6 +409,12 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   const guard = await withRnpmCaptchaGuards(c);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
+  if (guard.source === "tenant") {
+    recordAudit(c, "rnpm.captcha.consume", {
+      targetKind: "rnpm_search",
+      detail: { provider: guard.captchaProvider ?? null, mode: guard.captchaMode ?? null, route: "bulk" },
+    });
+  }
   const { items, captchaProvider, fallback2CaptchaKey, captchaMode } = body as {
     items?: unknown;
     captchaProvider?: unknown;
@@ -514,6 +528,12 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   const guard = await withRnpmCaptchaGuards(c);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
+  if (guard.source === "tenant") {
+    recordAudit(c, "rnpm.captcha.consume", {
+      targetKind: "rnpm_search",
+      detail: { provider: guard.captchaProvider ?? null, mode: guard.captchaMode ?? null, route: "search-split" },
+    });
+  }
   const { type, baseParams, subTypeLabels, captchaProvider, fallback2CaptchaKey, captchaMode } = body as {
     type?: unknown;
     baseParams?: unknown;
@@ -1071,8 +1091,22 @@ rnpmRouter.delete("/searches/:id", (c) => {
 });
 
 rnpmRouter.post("/captcha/balance", limitSmall, async (c) => {
+  // Resolve captcha config first: in web mode without tenant key configured,
+  // the 501 CAPTCHA_NOT_CONFIGURED response is the canonical signal regardless
+  // of the caller's role. This keeps the route contract identical whether the
+  // request hits before or after the admin gate.
   const resolved = resolveCaptchaKeyForRoute(c);
   if (resolved.source === "tenant" && !resolved.ok) return resolved.response;
+  // In web mode the captcha key is a tenant-shared admin secret; only admins
+  // can read the balance number. Non-admin web users get a 403 with a generic
+  // message — exposing the balance leaks how much the tenant spends and could
+  // be used to time fraud / probe the tenant wallet.
+  if (getAuthMode() === "web") {
+    const user = getUserById(getOwnerId(c));
+    if (!user || user.role !== "admin") {
+      return c.json(fail("forbidden", "Doar adminul poate vedea soldul captcha.", c), 403);
+    }
+  }
   let body: unknown;
   try {
     body = await c.req.json();

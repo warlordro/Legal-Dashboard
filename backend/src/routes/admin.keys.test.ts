@@ -121,6 +121,7 @@ describe("/api/v1/admin/keys", () => {
     expect(JSON.parse(events[0].detail_json)).toEqual({
       field: "anthropic",
       hadPrevious: false,
+      cleared: false,
       last4After: "abcd",
     });
   });
@@ -199,5 +200,60 @@ describe("/api/v1/admin/keys", () => {
     expect(body.data).toEqual({ provider: "capsolver", mode: "race" });
     const events = getAuditEvents({ ownerId: "local", action: "admin.tenantKeys.captchaSettings.update" });
     expect(events).toHaveLength(1);
+  });
+
+  it("rejects PUT /keys/:field with an unknown field as invalid_field 404", async () => {
+    updateUserRole("local", "admin");
+
+    const res = await buildApp().request("/api/v1/admin/keys/unknown_provider", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "irrelevant" }),
+    });
+
+    expect(res.status).toBe(404);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("invalid_field");
+  });
+
+  it("returns PAYLOAD_TOO_LARGE 413 when admin PUT body exceeds the limit", async () => {
+    updateUserRole("local", "admin");
+    // ADMIN_BODY_LIMIT is 4096 bytes; pad value to push the raw JSON well over.
+    const oversizedValue = "x".repeat(5000);
+
+    const res = await buildApp().request("/api/v1/admin/keys/openai", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: oversizedValue }),
+    });
+
+    expect(res.status).toBe(413);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("PAYLOAD_TOO_LARGE");
+  });
+
+  it("clears a tenant key via empty value and records cleared:true in audit detail", async () => {
+    updateUserRole("local", "admin");
+    const app = buildApp();
+    await app.request("/api/v1/admin/keys/openai", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "sk-existing-value-abcd" }),
+    });
+
+    const res = await app.request("/api/v1/admin/keys/openai", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ value: "" }),
+    });
+
+    expect(res.status).toBe(200);
+    const events = getAuditEvents({ ownerId: "local", action: "admin.tenantKeys.update" });
+    const last = events[0];
+    expect(JSON.parse(last.detail_json)).toMatchObject({
+      field: "openai",
+      cleared: true,
+      hadPrevious: true,
+    });
   });
 });

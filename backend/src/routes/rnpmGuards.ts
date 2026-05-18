@@ -7,6 +7,10 @@ import { ErrorCodes, fail } from "../util/envelope.ts";
 export type RnpmCaptchaGuardResult =
   | {
       ok: true;
+      // "body" = desktop BYOK; "tenant" = web tenant-shared key from
+      // `tenant_api_keys`. Routes use this to audit tenant captcha consumption
+      // so admins can attribute the shared wallet burn to individual users.
+      source: "body" | "tenant";
       body: Record<string, unknown>;
       captchaKey: string;
       captchaProvider?: CaptchaProvider;
@@ -32,8 +36,19 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
   const resolved = resolveCaptchaKeyForRoute(c);
   if (resolved.source === "tenant") {
     if (!resolved.ok) return { ok: false, response: resolved.response };
+    // Web mode side note: if the request body still ships a `captchaKey`
+    // string, we silently ignore it (the tenant key wins) but log a warning
+    // so the admin can see that a client tried to BYOK in web mode. Logging
+    // the *fact* not the *value* — never echo the body key to stdout.
+    const bodyCaptchaKey = (body as { captchaKey?: unknown } | null)?.captchaKey;
+    if (typeof bodyCaptchaKey === "string" && bodyCaptchaKey.length > 0) {
+      console.warn(
+        `[rnpm.guards] body.captchaKey ignored in web mode (tenant key wins) path=${c.req.path} method=${c.req.method}`
+      );
+    }
     return {
       ok: true,
+      source: "tenant",
       body: body as Record<string, unknown>,
       captchaKey: resolved.captchaKey,
       captchaProvider: resolved.provider,
@@ -52,6 +67,7 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
   const b = body as { captchaProvider?: unknown; captchaMode?: unknown; fallback2CaptchaKey?: unknown };
   return {
     ok: true,
+    source: "body",
     body: body as Record<string, unknown>,
     captchaKey,
     captchaProvider:

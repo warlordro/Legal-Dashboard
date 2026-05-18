@@ -15,6 +15,7 @@ import { quotaGuard } from "./quotaGuard.ts";
 let tmpRoot: string;
 const originalDbPath = process.env.LEGAL_DASHBOARD_DB_PATH;
 const originalAuthMode = process.env.LEGAL_DASHBOARD_AUTH_MODE;
+const originalDefaultQuota = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
 
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-quota-guard-"));
@@ -29,6 +30,7 @@ afterEach(async () => {
   closeDb();
   restoreEnv("LEGAL_DASHBOARD_DB_PATH", originalDbPath);
   restoreEnv("LEGAL_DASHBOARD_AUTH_MODE", originalAuthMode);
+  restoreEnv("LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI", originalDefaultQuota);
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -99,11 +101,65 @@ describe("quotaGuard", () => {
     });
 
     const res = await buildApp().request("/probe", { method: "POST" });
-    const body = (await res.json()) as { error: { code: string; details: { usedMilli: number; limitMilli: number } } };
+    const body = (await res.json()) as {
+      error: { code: string; details: { usedMilli: number; limitMilli: number; source: string } };
+    };
 
     expect(res.status).toBe(429);
     expect(res.headers.get("Retry-After")).toMatch(/^\d+$/);
-    expect(body.error.code).toBe("quota_exceeded");
-    expect(body.error.details).toMatchObject({ usedMilli: 10, limitMilli: 10 });
+    expect(body.error.code).toBe("QUOTA_EXCEEDED");
+    expect(body.error.details).toMatchObject({ usedMilli: 10, limitMilli: 10, source: "override" });
+  });
+
+  it("returns 429 when no override exists and the tenant default cap is reached", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "500";
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 500,
+      ts: new Date().toISOString(),
+    });
+
+    const res = await buildApp().request("/probe", { method: "POST" });
+    const body = (await res.json()) as {
+      error: { code: string; details: { source: string; limitMilli: number } };
+    };
+
+    expect(res.status).toBe(429);
+    expect(body.error.code).toBe("QUOTA_EXCEEDED");
+    expect(body.error.details).toMatchObject({ source: "default", limitMilli: 500 });
+  });
+
+  it("allows requests under the tenant default cap when no override exists", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "500";
+
+    const res = await buildApp().request("/probe", { method: "POST" });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("blocks every web request when override.daily_limit_usd_milli is 0 (deny-all)", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    upsertOverride({ userId: "alice", feature: "ai.single", dailyLimitUsdMilli: 0 });
+
+    const res = await buildApp().request("/probe", { method: "POST" });
+    const body = (await res.json()) as { error: { code: string; details: { limitMilli: number } } };
+
+    expect(res.status).toBe(429);
+    expect(body.error.code).toBe("QUOTA_EXCEEDED");
+    expect(body.error.details).toMatchObject({ limitMilli: 0 });
+  });
+
+  it("blocks every web request when default cap is 0 and no override exists", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "0";
+
+    const res = await buildApp().request("/probe", { method: "POST" });
+
+    expect(res.status).toBe(429);
   });
 });

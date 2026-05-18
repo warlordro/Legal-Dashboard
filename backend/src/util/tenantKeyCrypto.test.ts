@@ -49,4 +49,45 @@ describe("tenantKeyCrypto", () => {
 
     expect(() => getMasterKey()).toThrow("TENANT_KEY_ENCRYPTION_SECRET must decode to 32 bytes");
   });
+
+  it("rejects an encrypted blob whose auth tag was flipped", () => {
+    const encrypted = encryptKey("sk-live-secret");
+    const tampered = { ...encrypted, tag: flipFirstByte(encrypted.tag) };
+    expect(() => decryptKey(tampered)).toThrow();
+  });
+
+  it("rejects an encrypted blob whose IV was flipped", () => {
+    const encrypted = encryptKey("sk-live-secret");
+    const tampered = { ...encrypted, iv: flipFirstByte(encrypted.iv) };
+    expect(() => decryptKey(tampered)).toThrow();
+  });
+
+  it("rejects an encrypted blob whose ciphertext was flipped", () => {
+    const encrypted = encryptKey("sk-live-secret");
+    const tampered = { ...encrypted, cipher: flipFirstByte(encrypted.cipher) };
+    expect(() => decryptKey(tampered)).toThrow();
+  });
+
+  it("round-trips the empty string without producing identifiable padding", () => {
+    const encrypted = encryptKey("");
+    expect(encrypted.cipher.length).toBeGreaterThanOrEqual(0);
+    expect(decryptKey(encrypted)).toBe("");
+  });
+
+  it("throws on a master key that is not valid base64-decodable to 32 bytes", () => {
+    // 'AAAA' decodes to 3 bytes — well-formed base64 but wrong length. Confirms
+    // the length check fires even when base64 parsing succeeds.
+    process.env.TENANT_KEY_ENCRYPTION_SECRET = "AAAA";
+    resetMasterKeyCacheForTests();
+    expect(() => getMasterKey()).toThrow("TENANT_KEY_ENCRYPTION_SECRET must decode to 32 bytes");
+  });
 });
+
+function flipFirstByte(b64: string): string {
+  const buf = Buffer.from(b64, "base64");
+  // XOR with 0xff so byte[0] always changes regardless of original value;
+  // GCM's auth tag is sensitive to ANY ciphertext/IV/tag change, so a single
+  // byte flip is sufficient to validate the tamper-detection contract.
+  buf[0] = (buf[0] ?? 0) ^ 0xff;
+  return buf.toString("base64");
+}

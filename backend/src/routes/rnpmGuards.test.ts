@@ -31,6 +31,7 @@ function buildApp() {
     if (!guard.ok) return guard.response;
     return c.json({
       ok: true,
+      source: guard.source,
       body: guard.body,
       captchaKey: guard.captchaKey,
       captchaProvider: guard.captchaProvider,
@@ -158,8 +159,71 @@ describe("withRnpmCaptchaGuards", () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
       ok: true,
+      source: "body",
       body: { captchaKey, type: "ipoteci" },
       captchaKey,
     });
+  });
+
+  it("in web mode propaga tripletul (key, provider, mode) ca 2captcha sequential cu source tenant", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      source: "tenant",
+      captchaKey: "tenant-2captcha-key",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+    });
+  });
+
+  it("in web mode body.captchaKey ramane in body dar declanseaza un warning structurat", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ captchaKey: "leaked-body-key" }),
+    });
+
+    expect(res.status).toBe(200);
+    expect(warnSpy).toHaveBeenCalled();
+    const msg = warnSpy.mock.calls[0]?.[0];
+    expect(typeof msg).toBe("string");
+    expect(String(msg)).not.toContain("leaked-body-key");
+    expect(String(msg)).toContain("body.captchaKey ignored");
+    warnSpy.mockRestore();
   });
 });

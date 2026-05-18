@@ -772,4 +772,4 @@ Parsate din enumerarea WSDL a Ministerului Justitiei, grupate in 7 categorii:
 
 ---
 
-*Ultima actualizare: 26 Aprilie 2026 - v2.0.10 hardening: AI logging extension + backup maintenance lock + safeStorage trim*
+*Ultima actualizare: 19 Mai 2026 - v2.30.0 web admin centralized API keys + per-user budget (tenant_api_keys, admin /keys + /quota, quotaGuard, captcha consumption audit)*
