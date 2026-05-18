@@ -62,6 +62,16 @@ function seedRunningRow(jobId: number): number {
   return info.lastInsertRowid as number;
 }
 
+function countSnapshots(jobId: number): number {
+  return (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM monitoring_snapshots WHERE owner_id = ? AND job_id = ?")
+      .get(OWNER, jobId) as {
+      n: number;
+    }
+  ).n;
+}
+
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-name-runner-"));
   process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
@@ -163,6 +173,69 @@ describe("nameSoapRunner - diff", () => {
       .prepare("SELECT kind, dedup_key FROM monitoring_alerts WHERE job_id = ?")
       .all(job.id) as Array<{ kind: string; dedup_key: string }>;
     expect(alerts).toEqual([{ kind: "dosar_new", dedup_key: "name_soap|999/1/2025|dosar_new" }]);
+  });
+
+  it("three consecutive ticks leave exactly 1 snapshot for the job", async () => {
+    const job = seedJob();
+    const runner = createNameSoapRunner({
+      searchDosare: async () => [makeDosar("1234/180/2024")],
+    });
+
+    for (const nowIso of [NOW_ISO, "2026-04-28T11:00:00.000Z", "2026-04-28T12:00:00.000Z"]) {
+      const out = await runner.run({
+        job,
+        runId: seedRunningRow(job.id),
+        nowIso,
+        signal: new AbortController().signal,
+      });
+      expect(out.status).toBe("ok");
+    }
+
+    expect(countSnapshots(job.id)).toBe(1);
+  });
+
+  it("alert insert failure rolls back retention and keeps the previous snapshot", async () => {
+    const job = seedJob();
+    let secondTick = false;
+    const runner = createNameSoapRunner({
+      searchDosare: async () =>
+        secondTick ? [makeDosar("1234/180/2024"), makeDosar("999/1/2026")] : [makeDosar("1234/180/2024")],
+    });
+
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+    const baseline = getLatestSnapshot(job.owner_id, job.id);
+    expect(baseline).not.toBeNull();
+
+    getDb()
+      .prepare(
+        [
+          "CREATE TRIGGER fail_name_alert_insert",
+          "BEFORE INSERT ON monitoring_alerts",
+          "BEGIN SELECT RAISE(FAIL, 'forced name alert failure'); END",
+        ].join(" ")
+      )
+      .run();
+
+    secondTick = true;
+    await expect(
+      runner.run({
+        job,
+        runId: seedRunningRow(job.id),
+        nowIso: "2026-04-28T11:00:00.000Z",
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow(/forced name alert failure/);
+
+    getDb().prepare("DROP TRIGGER fail_name_alert_insert").run();
+
+    const after = getLatestSnapshot(job.owner_id, job.id);
+    expect(countSnapshots(job.id)).toBe(1);
+    expect(after?.id).toBe(baseline!.id);
   });
 
   it("stadiu change entering filter -> emits relevance + stadiu alerts", async () => {

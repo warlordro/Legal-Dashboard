@@ -88,3 +88,25 @@ export function getLatestSnapshot(ownerId: string, jobId: number): MonitoringSna
     .get(ownerId, jobId) as MonitoringSnapshotRow | undefined;
   return row ?? null;
 }
+
+// Sterge toate snapshot-urile pentru un job. Caller-ul trebuie sa cheme
+// functia in aceeasi tranzactie cu insertSnapshot, inaintea insertului nou,
+// ca jobul sa nu ramana fara baseline daca apare rollback.
+export function deletePriorSnapshots(ownerId: string, jobId: number): number {
+  const info = getDb()
+    .prepare("DELETE FROM monitoring_snapshots WHERE owner_id = ? AND job_id = ?")
+    .run(ownerId, jobId);
+  const deletedCount = Number(info.changes);
+  if (deletedCount > 0) {
+    console.log(
+      JSON.stringify({
+        action: "monitoring.snapshot_retention",
+        owner_id: ownerId,
+        job_id: jobId,
+        deleted_count: deletedCount,
+        ts: new Date().toISOString(),
+      })
+    );
+  }
+  return deletedCount;
+}

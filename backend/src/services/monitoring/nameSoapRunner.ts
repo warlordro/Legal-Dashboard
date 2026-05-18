@@ -5,7 +5,7 @@ import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
 import { stripDiacritics } from "../../util/textNormalize.ts";
 import { buildNameSoapSnapshot, diffNameSoap, type NameSoapSnapshotPayload } from "./diff/nameSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
-import { getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
+import { deletePriorSnapshots, getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
@@ -127,6 +127,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
 
         let insertedCount = 0;
         getDb().transaction(() => {
+          deletePriorSnapshots(job.owner_id, job.id);
           insertSnapshot({
             ownerId: job.owner_id,
             jobId: job.id,

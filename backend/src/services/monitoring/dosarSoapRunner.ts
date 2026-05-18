@@ -22,7 +22,7 @@ import { AlertConfigSchema } from "../../schemas/monitoring.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
 import { diffDosarSoap, type DiffSnapshotPayload } from "./diff/dosarSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
-import { getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
+import { deletePriorSnapshots, getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { enrichSolutieAlertsForJob } from "../../db/monitoringAlertsRepository.ts";
 import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
@@ -156,6 +156,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         // only on the SOAP call above, which has already resolved here.
         let insertedCount = 0;
         getDb().transaction(() => {
+          deletePriorSnapshots(job.owner_id, job.id);
           insertSnapshot({
             ownerId: job.owner_id,
             jobId: job.id,

@@ -15,16 +15,16 @@ import Database from "better-sqlite3";
 import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { getLatestSnapshot, insertSnapshot } from "./monitoringSnapshotsRepository.ts";
+import { deletePriorSnapshots, getLatestSnapshot, insertSnapshot } from "./monitoringSnapshotsRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 let tmpRoot: string;
 
 const OWNER = "local";
 
-function seedJob(hashSeed: string): number {
+function seedJob(hashSeed: string, ownerId = OWNER): number {
   const db = getDb();
   const info = db
     .prepare(
@@ -33,20 +33,28 @@ function seedJob(hashSeed: string): number {
           alert_config_json, next_run_at)
        VALUES (?, 'dosar_soap', '{}', ?, 14400, '{}', '2026-04-28T12:00:00.000Z')`
     )
-    .run(OWNER, hashSeed);
+    .run(ownerId, hashSeed);
   return info.lastInsertRowid as number;
 }
 
 // Tier 3 #9: every snapshot now carries a run_id FK. Tests seed a running
 // row per job so the FK resolves and the constraint can be exercised.
-function seedRun(jobId: number): number {
+function seedRun(jobId: number, ownerId = OWNER): number {
   const info = getDb()
     .prepare(
       `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
        VALUES (?, ?, ?, 'running')`
     )
-    .run(OWNER, jobId, "2026-04-28T10:00:00.000Z");
+    .run(ownerId, jobId, "2026-04-28T10:00:00.000Z");
   return info.lastInsertRowid as number;
+}
+
+function countSnapshots(ownerId: string, jobId: number): number {
+  return (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM monitoring_snapshots WHERE owner_id = ? AND job_id = ?")
+      .get(ownerId, jobId) as { n: number }
+  ).n;
 }
 
 beforeEach(async () => {
@@ -58,6 +66,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   closeDb();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
@@ -286,5 +295,158 @@ describe("getLatestSnapshot", () => {
       .run("other-owner", jobId, runId, "2026-04-28T11:00:00.000Z", "foreign-owner-newer", "{}");
 
     expect(getLatestSnapshot(OWNER, jobId)!.payload_hash).toBe("owned");
+  });
+});
+
+describe("deletePriorSnapshots", () => {
+  it("returns 0 and does not log when the job has no snapshots", () => {
+    const jobId = seedJob("empty");
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    expect(deletePriorSnapshots(OWNER, jobId)).toBe(0);
+
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(countSnapshots(OWNER, jobId)).toBe(0);
+  });
+
+  it("deletes all rows for (owner_id, job_id), returns the count and logs retention JSON", () => {
+    const jobId = seedJob("delete-count");
+    const runId = seedRun(jobId);
+    for (let i = 0; i < 5; i++) {
+      insertSnapshot({
+        ownerId: OWNER,
+        jobId,
+        runId,
+        observedAt: `2026-04-28T10:0${i}:00.000Z`,
+        payloadHash: `h${i}`,
+        payloadJson: `{"i":${i}}`,
+      });
+    }
+    const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
+
+    expect(deletePriorSnapshots(OWNER, jobId)).toBe(5);
+
+    expect(countSnapshots(OWNER, jobId)).toBe(0);
+    expect(logSpy).toHaveBeenCalledTimes(1);
+    const entry = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
+      action: string;
+      owner_id: string;
+      job_id: number;
+      deleted_count: number;
+      ts: string;
+    };
+    expect(entry).toMatchObject({
+      action: "monitoring.snapshot_retention",
+      owner_id: OWNER,
+      job_id: jobId,
+      deleted_count: 5,
+    });
+    expect(entry.ts).toEqual(expect.any(String));
+  });
+
+  it("does not touch snapshots for other jobs or owners", () => {
+    const jobA = seedJob("job-a");
+    const jobB = seedJob("job-b");
+    const otherOwner = "other-owner";
+    const otherJob = seedJob("other-job", otherOwner);
+    const runA = seedRun(jobA);
+    const runB = seedRun(jobB);
+    const otherRun = seedRun(otherJob, otherOwner);
+    for (const [jobId, runId, ownerId, payloadHash] of [
+      [jobA, runA, OWNER, "job-a-1"],
+      [jobA, runA, OWNER, "job-a-2"],
+      [jobB, runB, OWNER, "job-b-1"],
+      [otherJob, otherRun, otherOwner, "other-job-1"],
+    ] as Array<[number, number, string, string]>) {
+      insertSnapshot({
+        ownerId,
+        jobId,
+        runId,
+        observedAt: "2026-04-28T10:00:00.000Z",
+        payloadHash,
+        payloadJson: "{}",
+      });
+    }
+
+    expect(deletePriorSnapshots(OWNER, jobA)).toBe(2);
+
+    expect(countSnapshots(OWNER, jobA)).toBe(0);
+    expect(countSnapshots(OWNER, jobB)).toBe(1);
+    expect(countSnapshots(otherOwner, otherJob)).toBe(1);
+  });
+
+  it("commits DELETE + INSERT atomically inside a composed transaction", () => {
+    const jobId = seedJob("atomic-commit");
+    const runId = seedRun(jobId);
+    insertSnapshot({
+      ownerId: OWNER,
+      jobId,
+      runId,
+      observedAt: "2026-04-28T10:00:00.000Z",
+      payloadHash: "old-1",
+      payloadJson: '{"v":"old-1"}',
+    });
+    insertSnapshot({
+      ownerId: OWNER,
+      jobId,
+      runId,
+      observedAt: "2026-04-28T10:01:00.000Z",
+      payloadHash: "old-2",
+      payloadJson: '{"v":"old-2"}',
+    });
+
+    getDb().transaction(() => {
+      deletePriorSnapshots(OWNER, jobId);
+      insertSnapshot({
+        ownerId: OWNER,
+        jobId,
+        runId,
+        observedAt: "2026-04-28T10:02:00.000Z",
+        payloadHash: "new",
+        payloadJson: '{"v":"new"}',
+      });
+    })();
+
+    expect(countSnapshots(OWNER, jobId)).toBe(1);
+    expect(getLatestSnapshot(OWNER, jobId)?.payload_hash).toBe("new");
+  });
+
+  it("rolls back DELETE + INSERT when the composed transaction throws", () => {
+    const jobId = seedJob("atomic-rollback");
+    const runId = seedRun(jobId);
+    insertSnapshot({
+      ownerId: OWNER,
+      jobId,
+      runId,
+      observedAt: "2026-04-28T10:00:00.000Z",
+      payloadHash: "old-1",
+      payloadJson: '{"v":"old-1"}',
+    });
+    insertSnapshot({
+      ownerId: OWNER,
+      jobId,
+      runId,
+      observedAt: "2026-04-28T10:01:00.000Z",
+      payloadHash: "old-2",
+      payloadJson: '{"v":"old-2"}',
+    });
+
+    expect(() =>
+      getDb().transaction(() => {
+        deletePriorSnapshots(OWNER, jobId);
+        insertSnapshot({
+          ownerId: OWNER,
+          jobId,
+          runId,
+          observedAt: "2026-04-28T10:02:00.000Z",
+          payloadHash: "new",
+          payloadJson: '{"v":"new"}',
+        });
+        throw new Error("forced rollback");
+      })()
+    ).toThrow(/forced rollback/);
+
+    expect(countSnapshots(OWNER, jobId)).toBe(2);
+    expect(getLatestSnapshot(OWNER, jobId)?.payload_hash).toBe("old-2");
   });
 });

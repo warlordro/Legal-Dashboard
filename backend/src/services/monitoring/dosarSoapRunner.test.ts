@@ -83,6 +83,16 @@ function seedRunningRow(jobId: number): number {
   return info.lastInsertRowid as number;
 }
 
+function countSnapshots(jobId: number): number {
+  return (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM monitoring_snapshots WHERE owner_id = ? AND job_id = ?")
+      .get(OWNER, jobId) as {
+      n: number;
+    }
+  ).n;
+}
+
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-runner-"));
   process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
@@ -190,6 +200,78 @@ describe("dosarSoapRunner — diff emits alerts", () => {
       kind: string;
     }[];
     expect(alerts.some((a) => a.kind === "termen_new")).toBe(true);
+  });
+
+  it("three consecutive ticks leave exactly 1 snapshot for the job", async () => {
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [makeDosar("1234/180/2024")],
+    });
+    const job = seedJob();
+
+    for (const nowIso of [NOW_ISO, "2026-04-28T10:05:00.000Z", "2026-04-28T10:10:00.000Z"]) {
+      const out = await runner.run({
+        job,
+        runId: seedRunningRow(job.id),
+        nowIso,
+        signal: new AbortController().signal,
+      });
+      expect(out.status).toBe("ok");
+    }
+
+    expect(countSnapshots(job.id)).toBe(1);
+  });
+
+  it("alert insert failure rolls back retention and keeps the previous snapshot", async () => {
+    const sedinta = {
+      complet: "C1",
+      data: "2026-05-01",
+      ora: "10:00",
+      solutie: "",
+      solutieSumar: "",
+      documentSedinta: "",
+      numarDocument: "",
+      dataPronuntare: "",
+    };
+    let secondTick = false;
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => (secondTick ? [makeDosar("1234/180/2024", [sedinta])] : [makeDosar("1234/180/2024")]),
+    });
+    const job = seedJob();
+
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+    const baseline = getLatestSnapshot(job.owner_id, job.id);
+    expect(baseline).not.toBeNull();
+
+    getDb()
+      .prepare(
+        [
+          "CREATE TRIGGER fail_dosar_alert_insert",
+          "BEFORE INSERT ON monitoring_alerts",
+          "BEGIN SELECT RAISE(FAIL, 'forced dosar alert failure'); END",
+        ].join(" ")
+      )
+      .run();
+
+    secondTick = true;
+    await expect(
+      runner.run({
+        job,
+        runId: seedRunningRow(job.id),
+        nowIso: "2026-04-28T10:05:00.000Z",
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow(/forced dosar alert failure/);
+
+    getDb().prepare("DROP TRIGGER fail_dosar_alert_insert").run();
+
+    const after = getLatestSnapshot(job.owner_id, job.id);
+    expect(countSnapshots(job.id)).toBe(1);
+    expect(after?.id).toBe(baseline!.id);
   });
 });
 
