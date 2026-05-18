@@ -42,35 +42,45 @@ export const versions: VersionEntry[] = [
     version: "v2.29.0",
     date: "18 Mai 2026",
     subtitle:
-      "Monitoring noise & storage: retention atomica pentru monitoring_snapshots, cap payload 3 MiB, set equality pe nume si suppressie dosar_new istoric pe name_soap.",
+      "Zgomot si storage pentru name_soap si dosar_soap: retentie atomica pentru monitoring_snapshots, plafon payload 3 MiB, set equality pe nume si suppresie dosar_new istoric pe name_soap.",
     icon: <Activity className="h-5 w-5" />,
     borderColor: "border-l-sky-500",
     badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
     sections: [
       {
-        title: "Storage retention",
+        title: "Retentie snapshots",
         content:
-          "deletePriorSnapshots(ownerId, jobId) curata snapshot-urile vechi in aceeasi tranzactie cu insertSnapshot pentru runnerii name_soap si dosar_soap. Daca insertul de alerta esueaza, rollback-ul pastreaza baseline-ul anterior. Cand sterge randuri, backend-ul emite log JSON monitoring.snapshot_retention cu owner_id, job_id, deleted_count si ts.",
+          "deletePriorSnapshots(ownerId, jobId) curata snapshot-urile vechi in aceeasi tranzactie cu insertSnapshot pentru runnerii name_soap si dosar_soap. Daca insertul de alerta esueaza, rollback-ul pastreaza baseline-ul anterior. Cand sterge randuri, backend-ul emite log JSON monitoring.snapshot_retention (owner_id, job_id, deleted_count, ts), deferit prin queueMicrotask ca scrierea pe stdout sa nu adauge latenta in critical section-ul tranzactiei.",
       },
       {
-        title: "Snapshot cap 3 MiB",
+        title: "Plafon snapshot 3 MiB",
         content:
-          "SNAPSHOT_PAYLOAD_MAX_BYTES creste la 3 MiB pentru nume corporative mari cu sute de dosare. Alerta SNAPSHOT_OVERSIZE afiseaza plafonul curent in titlu si detail.max_bytes=3145728; payload-urile de 2 MiB sunt acceptate normal.",
+          "SNAPSHOT_PAYLOAD_MAX_BYTES creste la 3 MiB pentru nume corporative mari cu sute de dosare. Alerta SNAPSHOT_OVERSIZE afiseaza plafonul curent in titlu si detail.max_bytes=3145728; payload-urile de 2 MiB sunt acceptate normal. insertSnapshot reaplica plafonul ca defense-in-depth pentru callerii non-runner.",
       },
       {
-        title: "Name matching mai strict",
+        title: "Match nume mai strict",
         content:
-          "dosarMatchesAllNameTokens foloseste set equality, nu subset. PROFESIONAL CONSTRUCT SRL nu mai match-uieste NG PROFESIONAL CONSTRUCT SRL. Sufixele juridice raman ignorate, iar parti.nume null/undefined nu arunca.",
+          "dosarMatchesAllNameTokens foloseste set equality, nu subset. PROFESIONAL CONSTRUCT SRL nu mai match-uieste NG PROFESIONAL CONSTRUCT SRL. Sufixele juridice raman ignorate, iar parti.nume null/undefined nu arunca. Guard suplimentar pentru party-uri cu token repetat: partyCore.length plus partySet.size trebuie sa egaleze numarul de token-uri din target.",
       },
       {
-        title: "Historic noise suppression",
+        title: "Suppresie zgomot istoric",
         content:
-          "Snapshot-ul name_soap include latest_sedinta_at, iar diffNameSoap primeste jobCreatedAt. dosar_new este suprimat pentru dosare mai vechi decat jobul cand nu exista activitate dupa adaugarea la monitorizare. Datele invalide fac fail-open si sunt logate prin console.error.",
+          "Snapshot-ul name_soap include latest_sedinta_at, iar diffNameSoap primeste jobCreatedAt. dosar_new este suprimat pentru dosare mai vechi decat jobul cand nu exista activitate dupa adaugarea la monitorizare. Datele invalide fac fail-open si sunt logate prin console.error. Investigatia se activeaza cu MONITORING_DEBUG_HISTORIC=1.",
+      },
+      {
+        title: "Versiune payload v2",
+        content:
+          "NameSoapSnapshotPayload.version urca la 2 ca semnal explicit ca baseline-ul contine latest_sedinta_at. Reader-ul accepta version: 1 ca union type (NameSoapSnapshotPayloadV1) ca un baseline scris inainte de bump sa nu trippeze un cast invalid. Bucla dosar_disappeared e gated pe version >= 2, ca pre-v2 sa nu emita un val masiv de dosar_disappeared pentru dosare istorice care, in modelul nou, n-ar fi fost alertate niciodata.",
+      },
+      {
+        title: "Parsare data robusta",
+        content:
+          "computeLatestSedinta foloseste Date.parse strict cu pereche maxTime / maxValue in loc de comparatie lexicografica. Input-uri mixte (YYYY-MM-DD plus DD.MM.YYYY sau strings non-parseable) nu mai produc rezultate false; valorile invalide sunt ignorate, iar maximul e calculat cronologic real.",
       },
       {
         title: "Verificare",
         content:
-          "Acoperire noua pentru rollback DELETE+INSERT, 3 tick-uri = 1 snapshot/job, oversize peste 3 MiB vs 2 MiB valid, set equality, parti.nume null/undefined si suppressie istorica cu date invalide. Gate release: Biome, tsc backend, tsc frontend, teste backend, teste frontend si npm run build.",
+          "Acoperire noua pentru rollback DELETE+INSERT, 3 tick-uri = 1 snapshot/job, oversize peste 3 MiB vs 2 MiB valid, set equality cu duplicate token guard, parti.nume null/undefined, suppresie istorica cu date invalide si pre-v2 safety belt pe dosar_disappeared. Gate release: Biome, tsc backend, tsc frontend, 1133 teste backend (1 skipped), 200 teste frontend si npm run build.",
       },
     ],
   },

@@ -6,31 +6,29 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ## v2.29.0 — 2026-05-18
 
-Monitoring noise & storage pentru `name_soap` si `dosar_soap`. Release-ul reduce cresterea `monitoring_snapshots`, ridica plafonul pentru snapshot-uri legitime mari si elimina doua surse de zgomot confirmate in monitorizarea pe nume.
+Zgomot si storage pentru `name_soap` si `dosar_soap`. Release-ul reduce cresterea `monitoring_snapshots`, ridica plafonul pentru snapshot-uri legitime mari si elimina doua surse de zgomot confirmate in monitorizarea pe nume.
 
 ### Livrabile
 
-- **Retention deadweight**: `deletePriorSnapshots(ownerId, jobId)` sterge snapshot-urile vechi in aceeasi tranzactie cu insertul nou, inainte de `insertSnapshot`. Ambele runner-e (`name_soap`, `dosar_soap`) pastreaza rollback atomic: daca insertul de alerta esueaza, baseline-ul anterior ramane in DB. Cand sterge randuri, logheaza JSON cu `action: "monitoring.snapshot_retention"`, `owner_id`, `job_id`, `deleted_count`, `ts`.
-- **Plafon snapshot 3 MiB**: `SNAPSHOT_PAYLOAD_MAX_BYTES` creste de la 1 MiB la 3 MiB. Titlurile `SNAPSHOT_OVERSIZE` sunt parametrizate cu valoarea curenta, iar `detail.max_bytes` reflecta `3145728`.
-- **Set equality pe nume**: `dosarMatchesAllNameTokens` nu mai accepta subset match. `PROFESIONAL CONSTRUCT SRL` nu mai match-uieste `NG PROFESIONAL CONSTRUCT SRL`; sufixele juridice raman ignorate, iar `parte.nume` null/undefined nu arunca.
-- **Suppressie zgomot istoric**: `NameSoapSnapshotDosar` include `latest_sedinta_at`. `diffNameSoap` primeste `jobCreatedAt` si suprima `dosar_new` pentru dosare cu an mai vechi decat jobul si fara activitate dupa adaugarea la monitorizare. Datele invalide fac fail-open, cu `console.error("[diffNameSoap.isHistoricNoise] invalid date input", ...)`.
+**Retentie deadweight.** `deletePriorSnapshots(ownerId, jobId)` sterge snapshot-urile vechi in aceeasi tranzactie cu insertul nou, inainte de `insertSnapshot`. Ambele runner-e (`name_soap` si `dosar_soap`) pastreaza rollback atomic: daca insertul de alerta esueaza, baseline-ul anterior ramane in DB. Cand sterge randuri, logheaza JSON structurat (`action: "monitoring.snapshot_retention"`, `owner_id`, `job_id`, `deleted_count`, `ts`) deferit prin `queueMicrotask` ca scrierea pe stdout sa nu adauge latenta in critical section-ul tranzactiei.
+
+**Plafon snapshot 3 MiB.** `SNAPSHOT_PAYLOAD_MAX_BYTES` creste de la 1 MiB la 3 MiB. Titlurile `SNAPSHOT_OVERSIZE` sunt parametrizate cu valoarea curenta, iar `detail.max_bytes` reflecta `3145728`. `insertSnapshot` reaplica plafonul ca defense-in-depth pentru callerii non-runner.
+
+**Set equality pe nume.** `dosarMatchesAllNameTokens` nu mai accepta subset match. `PROFESIONAL CONSTRUCT SRL` nu mai match-uieste `NG PROFESIONAL CONSTRUCT SRL`; sufixele juridice raman ignorate, iar `parte.nume` null/undefined nu arunca. Guard suplimentar pentru party-uri cu token repetat: `partyCore.length === expectedTokens.length` plus `partySet.size === expectedTokens.length` ca un token repetat sa nu mai treaca de comparatia de seturi.
+
+**Suppresie zgomot istoric.** `NameSoapSnapshotDosar` include `latest_sedinta_at`. `diffNameSoap` primeste `jobCreatedAt` si suprima `dosar_new` pentru dosare cu an mai vechi decat jobul si fara activitate dupa adaugarea la monitorizare. Datele invalide fac fail-open, cu `console.error("[diffNameSoap.isHistoricNoise] invalid date input", ...)`. Investigatia poate fi activata cu `MONITORING_DEBUG_HISTORIC=1` (debug log structurat la fiecare suppress).
+
+**Snapshot payload version 2.** `NameSoapSnapshotPayload.version` urca de la 1 la 2 ca semnal explicit ca baseline-ul contine `latest_sedinta_at`. Reader-ul accepta `version: 1` (`NameSoapSnapshotPayloadV1`) ca union type, ca un baseline scris inainte de bump sa nu trippeze un cast invalid. Bucla `dosar_disappeared` e gated pe `prevSnapshot.version >= 2`: pre-v2 nu mai emite un val masiv de dosar_disappeared pentru dosare istorice care, in modelul nou, n-ar fi fost alertate niciodata.
+
+**Parsare data robusta.** `computeLatestSedinta` foloseste `Date.parse` strict cu pereche `maxTime`/`maxValue` in loc de comparatie lexicografica. Input-uri mixte (`YYYY-MM-DD` plus `DD.MM.YYYY` sau strings non-parseable) nu mai produc rezultate false; valorile invalide sunt ignorate, iar `max` e calculat cronologic real.
 
 ### Test coverage
 
-- Teste repository pentru `deletePriorSnapshots`: count 0, count cu log JSON, izolare owner/job, tranzactie commit si rollback.
-- Teste runner `name_soap` si `dosar_soap`: 3 tick-uri lasa exact 1 snapshot per job, iar fail la insertAlert pastreaza snapshot-ul anterior.
-- Teste `SNAPSHOT_OVERSIZE`: payload peste 3 MiB genereaza source_error, payload de 2 MiB se scrie normal.
-- Teste `dosarMatchesAllNameTokens`: exact match, superset rejected, suffix stripping, duplicate token guard, input null/undefined.
-- Teste `diffNameSoap`: suppressie pentru dosare istorice, emitere pentru activitate noua, edge case prev existent, numar non-standard, `jobCreatedAt` invalid si `latest_sedinta_at` invalid.
+Teste repository pentru `deletePriorSnapshots` (count 0, count cu log JSON deferred, izolare owner/job, tranzactie commit si rollback) plus teste runner `name_soap` si `dosar_soap` (3 tick-uri lasa exact 1 snapshot per job, fail la insertAlert pastreaza snapshot-ul anterior). Teste `SNAPSHOT_OVERSIZE` (payload peste 3 MiB genereaza source_error, payload de 2 MiB se scrie normal). Teste `dosarMatchesAllNameTokens` (exact match, superset rejected, suffix stripping, duplicate token guard, input null/undefined). Teste `diffNameSoap` (suppresie pentru dosare istorice, emitere pentru activitate noua, edge case prev existent, numar non-standard, `jobCreatedAt` invalid, `latest_sedinta_at` invalid, pre-v2 safety belt pe `dosar_disappeared`).
 
 ### Verificare
 
-- `npx biome check --write` pe fisierele atinse.
-- `npx tsc --noEmit -p backend/tsconfig.json`.
-- `cd frontend && npx tsc --noEmit`.
-- `npm test --workspace=backend`.
-- `cd frontend && npm test -- --run`.
-- `npm run build`.
+`npx biome check --write` pe fisierele atinse, `npx tsc --noEmit -p backend/tsconfig.json`, `cd frontend && npx tsc --noEmit`, `npm test --workspace=backend` (1133 teste pass, 1 skipped), `cd frontend && npm test -- --run` (200 teste), `npm run build`.
 
 Nota operationala: primul tick post-deploy curata natural cele 12,200+ snapshot-uri deadweight per utilizator, pe masura ce joburile ruleaza.
 
