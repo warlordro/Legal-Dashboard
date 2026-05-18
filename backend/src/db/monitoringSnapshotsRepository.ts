@@ -1,12 +1,15 @@
-// Repository for monitoring_snapshots (PR-4). One row per observed payload
-// per job — the diff engine reads the latest row, computes alerts against
-// the current SOAP response, and persists the new payload. Old rows are
-// retained for debug/replay; PR-12's retention sweep will trim them.
+// Repository for monitoring_snapshots. Una singura per job — `deletePriorSnapshots`
+// ruleaza in aceeasi tranzactie cu `insertSnapshot` (vezi runner-ele
+// name_soap si dosar_soap), pentru ca jobul sa ramana cu exact 1 rand
+// post-commit. Caller-ul citeste prev cu `getLatestSnapshot` IN AFARA
+// tranzactiei si trece prin diff fara sa depinda de history persistat —
+// snapshot-ul anterior ramane in scope-ul JS pana cand tranzactia se commit-eaza.
 //
-// Why a separate row per observation (vs. UPSERT on job_id): keeping history
-// makes "why was this alert emitted?" investigations possible — you can
-// replay diff(prev, current) for any pair of snapshots offline. Storage is
-// trivial (canonicalized JSON, sub-kilobyte per snapshot, deleted on cadence).
+// Pre-v2.29.0: pastram cate o linie pentru fiecare tick (debug/replay) si
+// purjam la 14 zile via retention sweep. Modelul nou (Design A, atomic
+// delete + insert) elimina deadweight-ul fara sa pierdem corectitudinea
+// diff-ului. Daca tranzactia da rollback (ex: insertAlert pica), DELETE-ul
+// se ruleaza inapoi si jobul ramane cu baseline-ul anterior intact.
 
 import { getDb } from "./schema.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "../services/monitoring/diff/types.ts";
@@ -89,24 +92,48 @@ export function getLatestSnapshot(ownerId: string, jobId: number): MonitoringSna
   return row ?? null;
 }
 
-// Sterge toate snapshot-urile pentru un job. Caller-ul trebuie sa cheme
-// functia in aceeasi tranzactie cu insertSnapshot, inaintea insertului nou,
-// ca jobul sa nu ramana fara baseline daca apare rollback.
+/**
+ * Sterge toate snapshot-urile pentru `(ownerId, jobId)`.
+ *
+ * IMPORTANT: caller-ul TREBUIE sa invoce aceasta functie in aceeasi
+ * `db.transaction(...)` cu `insertSnapshot(...)`, INAINTE de insert. Daca
+ * tranzactia da rollback (ex: insertAlert pica), DELETE-ul se ruleaza
+ * inapoi si jobul ramane cu baseline-ul anterior intact.
+ *
+ * Caller-ul citeste `prev` cu `getLatestSnapshot(...)` IN AFARA tranzactiei,
+ * inainte sa cheme runner-ul de diff. Snapshot-ul anterior ramane in
+ * memorie pana cand tranzactia se commit-eaza — DELETE-ul nu afecteaza
+ * corectitudinea diff-ului.
+ *
+ * Modelul atomic (Design A) tine exact un rand per job in tabel, evitand
+ * deadweight-ul vechi care necesita un retention sweep periodic.
+ *
+ * Logging-ul este deferred prin `queueMicrotask` pentru ca `console.log`
+ * sincron este suficient de scump (flush stdout pe Windows) cat sa adauge
+ * latenta in critical section-ul tranzactiei. Microtask-ul se executa
+ * dupa ce stack-ul curent se goleste, deci dupa commit.
+ *
+ * @param ownerId tenant id (DEFAULT 'local')
+ * @param jobId   monitoring_jobs.id
+ * @returns numarul de randuri sterse (0 daca jobul nu avea baseline)
+ */
 export function deletePriorSnapshots(ownerId: string, jobId: number): number {
   const info = getDb()
     .prepare("DELETE FROM monitoring_snapshots WHERE owner_id = ? AND job_id = ?")
     .run(ownerId, jobId);
   const deletedCount = Number(info.changes);
   if (deletedCount > 0) {
-    console.log(
-      JSON.stringify({
-        action: "monitoring.snapshot_retention",
-        owner_id: ownerId,
-        job_id: jobId,
-        deleted_count: deletedCount,
-        ts: new Date().toISOString(),
-      })
-    );
+    queueMicrotask(() => {
+      console.log(
+        JSON.stringify({
+          action: "monitoring.snapshot_retention",
+          owner_id: ownerId,
+          job_id: jobId,
+          deleted_count: deletedCount,
+          ts: new Date().toISOString(),
+        })
+      );
+    });
   }
   return deletedCount;
 }

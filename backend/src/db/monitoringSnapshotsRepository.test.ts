@@ -299,17 +299,20 @@ describe("getLatestSnapshot", () => {
 });
 
 describe("deletePriorSnapshots", () => {
-  it("returns 0 and does not log when the job has no snapshots", () => {
+  it("returns 0 and does not log when the job has no snapshots", async () => {
     const jobId = seedJob("empty");
     const logSpy = vi.spyOn(console, "log").mockImplementation(() => undefined);
 
     expect(deletePriorSnapshots(OWNER, jobId)).toBe(0);
 
+    // Flush microtask queue (logging-ul este deferred) ca sa eliminam orice
+    // ambiguitate inainte sa asertam absenta call-ului.
+    await Promise.resolve();
     expect(logSpy).not.toHaveBeenCalled();
     expect(countSnapshots(OWNER, jobId)).toBe(0);
   });
 
-  it("deletes all rows for (owner_id, job_id), returns the count and logs retention JSON", () => {
+  it("deletes all rows for (owner_id, job_id), returns the count and logs retention JSON", async () => {
     const jobId = seedJob("delete-count");
     const runId = seedRun(jobId);
     for (let i = 0; i < 5; i++) {
@@ -327,6 +330,10 @@ describe("deletePriorSnapshots", () => {
     expect(deletePriorSnapshots(OWNER, jobId)).toBe(5);
 
     expect(countSnapshots(OWNER, jobId)).toBe(0);
+    // Logging-ul este deferred prin queueMicrotask pentru a nu rula in
+    // critical section-ul tranzactiei. Asteptam flushing-ul microtask queue
+    // inainte sa asertam log-ul.
+    await Promise.resolve();
     expect(logSpy).toHaveBeenCalledTimes(1);
     const entry = JSON.parse(String(logSpy.mock.calls[0]?.[0])) as {
       action: string;

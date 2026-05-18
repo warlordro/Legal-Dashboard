@@ -3,7 +3,7 @@ import type { JobRunner, RunOutcome, ScheduledJob } from "./scheduler.ts";
 import { AlertConfigSchema } from "../../schemas/monitoring.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
 import { stripDiacritics } from "../../util/textNormalize.ts";
-import { buildNameSoapSnapshot, diffNameSoap, type NameSoapSnapshotPayload } from "./diff/nameSoap.ts";
+import { buildNameSoapSnapshot, diffNameSoap, type NameSoapPrevSnapshot } from "./diff/nameSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
 import { deletePriorSnapshots, getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
@@ -83,7 +83,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
       let oversizeOutcome: RunOutcome | null = null;
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
-        const prevSnapshot = prevRow ? (JSON.parse(prevRow.payload_json) as NameSoapSnapshotPayload) : null;
+        const prevSnapshot = prevRow ? (JSON.parse(prevRow.payload_json) as NameSoapPrevSnapshot) : null;
 
         const { newSnapshot, alerts } = diffNameSoap({
           prevSnapshot,

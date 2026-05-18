@@ -21,13 +21,23 @@ export interface NameSoapSnapshotDosar {
 }
 
 export interface NameSoapSnapshotPayload {
+  version: 2;
+  fetched_at: string;
+  dosare: NameSoapSnapshotDosar[];
+}
+
+// Pre-bump snapshots din v2.29.0 au `version: 1`. Le acceptam la citire ca
+// reader-ul sa nu pice cand intalneste un baseline scris inainte de bump.
+export interface NameSoapSnapshotPayloadV1 {
   version: 1;
   fetched_at: string;
   dosare: NameSoapSnapshotDosar[];
 }
 
+export type NameSoapPrevSnapshot = NameSoapSnapshotPayload | NameSoapSnapshotPayloadV1;
+
 export interface NameSoapDiffInput {
-  prevSnapshot: NameSoapSnapshotPayload | null;
+  prevSnapshot: NameSoapPrevSnapshot | null;
   currentSnapshot: NameSoapSnapshotPayload;
   alertConfig: AlertConfig;
   now: string;
@@ -57,7 +67,7 @@ function dosarPassesFilter(dosar: NameSoapSnapshotDosar, alertConfig: AlertConfi
   return true;
 }
 
-function byNumar(snapshot: NameSoapSnapshotPayload): Map<string, NameSoapSnapshotDosar> {
+function byNumar(snapshot: NameSoapPrevSnapshot): Map<string, NameSoapSnapshotDosar> {
   const m = new Map<string, NameSoapSnapshotDosar>();
   for (const dosar of snapshot.dosare) {
     if (dosar.numar) m.set(dosar.numar, dosar);
@@ -71,15 +81,27 @@ function dedupKey(numar: string, transition: NameSoapAlertKind): string {
 
 function computeLatestSedinta(dosar: Dosar): string | null {
   if (!dosar.sedinte || dosar.sedinte.length === 0) return null;
-  let max: string | null = null;
+  // PortalJust returneaza in mod normal ISO 8601 (YYYY-MM-DD), unde comparatia
+  // lexicografica e echivalenta cu cea cronologica. Dar nu garantam formatul
+  // — daca apare DD.MM.YYYY sau alt format mixt, comparatia lexicografica
+  // produce un rezultat gresit. Folosim Date.parse strict pentru a ignora
+  // input-urile invalide si pentru a compara cronologic real.
+  let maxTime = Number.NEGATIVE_INFINITY;
+  let maxValue: string | null = null;
   for (const sedinta of dosar.sedinte) {
     for (const candidate of [sedinta.data, sedinta.dataPronuntare] as unknown[]) {
       if (typeof candidate !== "string") continue;
       const value = candidate.trim();
-      if (value && (!max || value > max)) max = value;
+      if (!value) continue;
+      const t = Date.parse(value);
+      if (!Number.isFinite(t)) continue;
+      if (t > maxTime) {
+        maxTime = t;
+        maxValue = value;
+      }
     }
   }
-  return max;
+  return maxValue;
 }
 
 function logInvalidHistoricDate(dosar: NameSoapSnapshotDosar, jobCreatedAt: string): void {
@@ -87,6 +109,23 @@ function logInvalidHistoricDate(dosar: NameSoapSnapshotDosar, jobCreatedAt: stri
     dosar_numar: dosar.numar,
     job_created_at: jobCreatedAt,
     latest_sedinta_at: dosar.latest_sedinta_at ?? null,
+  });
+}
+
+// Gated de env ca sa nu polueze log-ul productiv. Activeaza cu
+// `MONITORING_DEBUG_HISTORIC=1` cand investighezi de ce un dosar a fost (sau nu)
+// suprimat la primul tick.
+function logHistoricSuppressed(
+  dosar: NameSoapSnapshotDosar,
+  jobCreatedAt: string,
+  reason: "no_latest_sedinta_pre_year" | "latest_sedinta_before_job_creation"
+): void {
+  if (process.env.MONITORING_DEBUG_HISTORIC !== "1") return;
+  console.debug("[diffNameSoap.isHistoricNoise] suppressed", {
+    dosar_numar: dosar.numar,
+    job_created_at: jobCreatedAt,
+    latest_sedinta_at: dosar.latest_sedinta_at ?? null,
+    reason,
   });
 }
 
@@ -101,13 +140,20 @@ function isHistoricNoise(dosar: NameSoapSnapshotDosar, jobCreatedAt: string): bo
     return false;
   }
   if (dosarYear >= jobYear) return false;
-  if (!dosar.latest_sedinta_at) return true;
+  if (!dosar.latest_sedinta_at) {
+    logHistoricSuppressed(dosar, jobCreatedAt, "no_latest_sedinta_pre_year");
+    return true;
+  }
   const latestTime = Date.parse(dosar.latest_sedinta_at);
   if (!Number.isFinite(latestTime)) {
     logInvalidHistoricDate(dosar, jobCreatedAt);
     return false;
   }
-  return latestTime <= jobTime;
+  if (latestTime <= jobTime) {
+    logHistoricSuppressed(dosar, jobCreatedAt, "latest_sedinta_before_job_creation");
+    return true;
+  }
+  return false;
 }
 
 export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameSoapSnapshotPayload {
@@ -124,7 +170,7 @@ export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameS
     });
   }
   return {
-    version: 1,
+    version: 2,
     fetched_at: fetchedAt,
     dosare: Array.from(byNumber.values()).sort((a, b) => a.numar.localeCompare(b.numar)),
   };
@@ -194,17 +240,26 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
     }
   }
 
-  for (const [numar, prev] of prevByNumar) {
-    if (currentByNumar.has(numar)) continue;
-    if (!alertConfig.notify_on_dosar_disappeared) continue;
-    if (!dosarPassesFilter(prev, alertConfig)) continue;
-    alerts.push({
-      kind: "dosar_disappeared",
-      severity: "warning",
-      title: `Dosarul nu mai apare pentru nume: ${numar}`,
-      detail: { observedAt: now, ...prev },
-      dedupKey: dedupKey(numar, "dosar_disappeared"),
-    });
+  // Defense-in-depth: prev snapshot anterior bump-ului de version (v1) poate
+  // contine dosare istorice pe care isHistoricNoise le-ar fi suprimat acum.
+  // Daca PortalJust nu le mai returneaza, am emite un val masiv de
+  // dosar_disappeared pentru baseline-uri vechi care, in modelul nou, n-ar
+  // fi trebuit sa fie alertate niciodata. Sarim bucla pana cand prev e v2
+  // (= scris de runner-ul actual, baseline curat).
+  const prevAllowsDisappeared = prevSnapshot ? prevSnapshot.version >= 2 : false;
+  if (prevAllowsDisappeared) {
+    for (const [numar, prev] of prevByNumar) {
+      if (currentByNumar.has(numar)) continue;
+      if (!alertConfig.notify_on_dosar_disappeared) continue;
+      if (!dosarPassesFilter(prev, alertConfig)) continue;
+      alerts.push({
+        kind: "dosar_disappeared",
+        severity: "warning",
+        title: `Dosarul nu mai apare pentru nume: ${numar}`,
+        detail: { observedAt: now, ...prev },
+        dedupKey: dedupKey(numar, "dosar_disappeared"),
+      });
+    }
   }
 
   return { newSnapshot: currentSnapshot, alerts };

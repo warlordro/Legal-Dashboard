@@ -130,7 +130,7 @@ describe("nameSoapRunner - baseline", () => {
     const snap = getLatestSnapshot(job.owner_id, job.id);
     expect(snap).not.toBeNull();
     expect(JSON.parse(snap!.payload_json)).toMatchObject({
-      version: 1,
+      version: 2,
       fetched_at: NOW_ISO,
       dosare: [
         {
@@ -563,6 +563,18 @@ describe("nameSoapRunner - strict word filter", () => {
 
     it("respinge tokenii duplicati in party", () => {
       expect(dosarMatchesAllNameTokens(dosarCuParte("X X"), "X")).toBe(false);
+    });
+
+    it("respinge party cu token repetat cand lungimea corespunde dar set-ul e mai mic", () => {
+      // Target = "X Y" (set {X,Y}, size 2). Party = "X X" (length 2, set {X}, size 1).
+      // Length guard trece (2 === 2); partySet.size guard prinde cazul.
+      expect(dosarMatchesAllNameTokens(dosarCuParte("X X"), "X Y")).toBe(false);
+    });
+
+    it("respinge superset-ul BC ABC SRL pentru target ABC SRL", () => {
+      // Target = "ABC SRL" → dupa strip sufix legal: {ABC}.
+      // Party = "BC ABC SRL" → dupa strip sufix legal: {BC, ABC}. Set diferit → false.
+      expect(dosarMatchesAllNameTokens(dosarCuParte("BC ABC SRL"), "ABC SRL")).toBe(false);
     });
 
     it("respinge targetul gol, parti goale, parti undefined si nume null fara throw", () => {

@@ -4,8 +4,10 @@ import type { Dosar } from "../../../soap.ts";
 import {
   buildNameSoapSnapshot,
   diffNameSoap,
+  type NameSoapPrevSnapshot,
   type NameSoapSnapshotDosar,
   type NameSoapSnapshotPayload,
+  type NameSoapSnapshotPayloadV1,
 } from "./nameSoap.ts";
 
 const DEFAULT_ALERT_CONFIG: AlertConfig = {
@@ -24,6 +26,14 @@ afterEach(() => {
 
 function snapshot(dosare: NameSoapSnapshotDosar[]): NameSoapSnapshotPayload {
   return {
+    version: 2,
+    fetched_at: NOW,
+    dosare,
+  };
+}
+
+function snapshotV1(dosare: NameSoapSnapshotDosar[]): NameSoapSnapshotPayloadV1 {
+  return {
     version: 1,
     fetched_at: NOW,
     dosare,
@@ -41,7 +51,7 @@ function snapshotDosar(numar: string, latestSedintaAt: string | null): NameSoapS
 }
 
 function runDiff(input: {
-  prevSnapshot?: NameSoapSnapshotPayload | null;
+  prevSnapshot?: NameSoapPrevSnapshot | null;
   current: NameSoapSnapshotDosar;
   jobCreatedAt?: string;
 }) {
@@ -110,6 +120,44 @@ describe("buildNameSoapSnapshot latest_sedinta_at", () => {
 
     expect(out.dosare[0]?.latest_sedinta_at).toBeNull();
   });
+
+  it("stores null when sedinte array is empty", () => {
+    const out = buildNameSoapSnapshot([makeDosar([])], NOW);
+
+    expect(out.dosare[0]?.latest_sedinta_at).toBeNull();
+  });
+
+  it("ignores unparseable date strings without throwing and picks the latest parseable one", () => {
+    const out = buildNameSoapSnapshot(
+      [
+        makeDosar([
+          {
+            complet: "C1",
+            data: "not-a-date",
+            ora: "",
+            solutie: "",
+            solutieSumar: "",
+            documentSedinta: "",
+            numarDocument: "",
+            dataPronuntare: "2026-05-10",
+          },
+          {
+            complet: "C2",
+            data: "2026-05-12",
+            ora: "",
+            solutie: "",
+            solutieSumar: "",
+            documentSedinta: "",
+            numarDocument: "",
+            dataPronuntare: "still-not-a-date",
+          },
+        ]),
+      ],
+      NOW
+    );
+
+    expect(out.dosare[0]?.latest_sedinta_at).toBe("2026-05-12");
+  });
 });
 
 describe("diffNameSoap isHistoricNoise + dosar_new suppression", () => {
@@ -133,6 +181,16 @@ describe("diffNameSoap isHistoricNoise + dosar_new suppression", () => {
 
   it("emits first-tick current-year dosar even without sedinte", () => {
     const out = runDiff({ current: snapshotDosar("100/325/2026", null) });
+
+    expect(out.alerts.map((a) => a.kind)).toEqual(["dosar_new"]);
+  });
+
+  it("does not suppress when dosarYear equals jobYear (boundary case)", () => {
+    // Job creat in 2026, dosar din 2026: NICIODATA suprimat, indiferent de sedinte.
+    const out = runDiff({
+      current: snapshotDosar("500/325/2026", null),
+      jobCreatedAt: "2026-01-01T00:00:00.000Z",
+    });
 
     expect(out.alerts.map((a) => a.kind)).toEqual(["dosar_new"]);
   });
@@ -185,5 +243,31 @@ describe("diffNameSoap isHistoricNoise + dosar_new suppression", () => {
         latest_sedinta_at: "not-a-date",
       })
     );
+  });
+});
+
+describe("diffNameSoap dosar_disappeared pre-v2 safety belt", () => {
+  it("skips dosar_disappeared when prev snapshot is pre-v2 (post-upgrade burst guard)", () => {
+    const prev = snapshotV1([snapshotDosar("100/325/2018", null)]);
+    const out = diffNameSoap({
+      prevSnapshot: prev,
+      currentSnapshot: snapshot([]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+    });
+    expect(out.alerts).toEqual([]);
+  });
+
+  it("emits dosar_disappeared when prev snapshot is v2 (post-baseline)", () => {
+    const prev = snapshot([snapshotDosar("100/325/2026", null)]);
+    const out = diffNameSoap({
+      prevSnapshot: prev,
+      currentSnapshot: snapshot([]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+    });
+    expect(out.alerts.map((a) => a.kind)).toEqual(["dosar_disappeared"]);
   });
 });
