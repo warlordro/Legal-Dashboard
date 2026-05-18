@@ -150,7 +150,7 @@ describe("nameSoapRunner - diff", () => {
     let secondTick = false;
     const runner = createNameSoapRunner({
       searchDosare: async () =>
-        secondTick ? [makeDosar("1234/180/2024"), makeDosar("999/1/2025")] : [makeDosar("1234/180/2024")],
+        secondTick ? [makeDosar("1234/180/2024"), makeDosar("999/1/2026")] : [makeDosar("1234/180/2024")],
     });
 
     await runner.run({
@@ -172,7 +172,7 @@ describe("nameSoapRunner - diff", () => {
     const alerts = getDb()
       .prepare("SELECT kind, dedup_key FROM monitoring_alerts WHERE job_id = ?")
       .all(job.id) as Array<{ kind: string; dedup_key: string }>;
-    expect(alerts).toEqual([{ kind: "dosar_new", dedup_key: "name_soap|999/1/2025|dosar_new" }]);
+    expect(alerts).toEqual([{ kind: "dosar_new", dedup_key: "name_soap|999/1/2026|dosar_new" }]);
   });
 
   it("three consecutive ticks leave exactly 1 snapshot for the job", async () => {

@@ -90,6 +90,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
           currentSnapshot,
           alertConfig,
           now: nowIso,
+          jobCreatedAt: job.created_at,
         });
 
         const newSnapshotJson = canonicalJson(newSnapshot);

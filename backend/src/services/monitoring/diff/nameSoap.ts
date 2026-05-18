@@ -17,6 +17,7 @@ export interface NameSoapSnapshotDosar {
   stadiu: string;
   categorie: string;
   instanta: string;
+  latest_sedinta_at: string | null;
 }
 
 export interface NameSoapSnapshotPayload {
@@ -30,6 +31,7 @@ export interface NameSoapDiffInput {
   currentSnapshot: NameSoapSnapshotPayload;
   alertConfig: AlertConfig;
   now: string;
+  jobCreatedAt: string;
 }
 
 export interface NameSoapDiffOutput {
@@ -67,6 +69,47 @@ function dedupKey(numar: string, transition: NameSoapAlertKind): string {
   return `name_soap|${numar}|${transition}`;
 }
 
+function computeLatestSedinta(dosar: Dosar): string | null {
+  if (!dosar.sedinte || dosar.sedinte.length === 0) return null;
+  let max: string | null = null;
+  for (const sedinta of dosar.sedinte) {
+    for (const candidate of [sedinta.data, sedinta.dataPronuntare] as unknown[]) {
+      if (typeof candidate !== "string") continue;
+      const value = candidate.trim();
+      if (value && (!max || value > max)) max = value;
+    }
+  }
+  return max;
+}
+
+function logInvalidHistoricDate(dosar: NameSoapSnapshotDosar, jobCreatedAt: string): void {
+  console.error("[diffNameSoap.isHistoricNoise] invalid date input", {
+    dosar_numar: dosar.numar,
+    job_created_at: jobCreatedAt,
+    latest_sedinta_at: dosar.latest_sedinta_at ?? null,
+  });
+}
+
+function isHistoricNoise(dosar: NameSoapSnapshotDosar, jobCreatedAt: string): boolean {
+  const m = dosar.numar.match(/\/(\d{4})(?:\/|$)/);
+  if (!m) return false;
+  const dosarYear = Number.parseInt(m[1], 10);
+  const jobTime = Date.parse(jobCreatedAt);
+  const jobYear = new Date(jobTime).getUTCFullYear();
+  if (!Number.isFinite(dosarYear) || Number.isNaN(jobYear)) {
+    logInvalidHistoricDate(dosar, jobCreatedAt);
+    return false;
+  }
+  if (dosarYear >= jobYear) return false;
+  if (!dosar.latest_sedinta_at) return true;
+  const latestTime = Date.parse(dosar.latest_sedinta_at);
+  if (!Number.isFinite(latestTime)) {
+    logInvalidHistoricDate(dosar, jobCreatedAt);
+    return false;
+  }
+  return latestTime <= jobTime;
+}
+
 export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameSoapSnapshotPayload {
   const byNumber = new Map<string, NameSoapSnapshotDosar>();
   for (const dosar of dosare) {
@@ -77,6 +120,7 @@ export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameS
       stadiu: String(dosar.stadiuProcesual ?? "").trim(),
       categorie: String(dosar.categorieCaz ?? "").trim(),
       instanta: String(dosar.institutie ?? "").trim(),
+      latest_sedinta_at: computeLatestSedinta(dosar),
     });
   }
   return {
@@ -87,12 +131,9 @@ export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameS
 }
 
 export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
-  const { prevSnapshot, currentSnapshot, alertConfig, now } = input;
-  if (!prevSnapshot) {
-    return { newSnapshot: currentSnapshot, alerts: [] };
-  }
+  const { prevSnapshot, currentSnapshot, alertConfig, now, jobCreatedAt } = input;
 
-  const prevByNumar = byNumar(prevSnapshot);
+  const prevByNumar = prevSnapshot ? byNumar(prevSnapshot) : new Map<string, NameSoapSnapshotDosar>();
   const currentByNumar = byNumar(currentSnapshot);
   const alerts: NameSoapDiffAlert[] = [];
 
@@ -102,7 +143,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
     const prevRelevant = prev ? dosarPassesFilter(prev, alertConfig) : false;
 
     if (!prev) {
-      if (currentRelevant) {
+      if (currentRelevant && !isHistoricNoise(current, jobCreatedAt)) {
         alerts.push({
           kind: "dosar_new",
           severity: "info",
