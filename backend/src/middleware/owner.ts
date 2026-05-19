@@ -22,7 +22,14 @@ function shouldAuthenticatePath(c: Context): boolean {
   if (!c.req.path.startsWith("/api/")) return false;
   // /auth/refresh ramane autentificat in v2.7.x: token expirat => auth.denied
   // si re-login in PR-10, nu grace-window implementat partial in seam-ul curent.
-  return c.req.path !== "/api/v1/auth/login" && c.req.path !== "/api/v1/auth/logout";
+  //
+  // /auth/oauth2/sync (v2.31.0) e gate-uit prin shared secret + email lookup in
+  // handler-ul propriu — nu poate fi gardat de ownerContext pentru ca *minteste*
+  // sesiunea pe care ownerContext o asteapta. Vezi backend/src/routes/auth.ts.
+  if (c.req.path === "/api/v1/auth/login") return false;
+  if (c.req.path === "/api/v1/auth/logout") return false;
+  if (c.req.path === "/api/v1/auth/oauth2/sync") return false;
+  return true;
 }
 
 function writeAuthError(c: Context, err: AuthenticationError): Response {

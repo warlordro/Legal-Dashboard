@@ -45,6 +45,25 @@ export function getTokenTtlSeconds(env: NodeJS.ProcessEnv = process.env): number
   return Math.floor(parsed);
 }
 
+// v2.31.0 — shared secret folosit DOAR de endpoint-ul `/api/v1/auth/oauth2/sync`
+// pentru a verifica ca request-ul vine de la sidecar-ul oauth2-proxy (vezi
+// `deploy/docker-compose.prod.yml`). Daca lipseste sau e prea scurt, bridge-ul
+// raspunde 503 si NU accepta nicio identitate din header-e — fail-closed.
+// Minim 32 chars: rezistenta la brute-force daca cineva descopera endpoint-ul.
+const OAUTH2_PROXY_SECRET_MIN_LENGTH = 32;
+
+export function getOAuth2ProxySharedSecret(env: NodeJS.ProcessEnv = process.env): string | null {
+  const raw = firstNonEmpty(env.LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET, env.OAUTH2_PROXY_SHARED_SECRET);
+  if (raw === null) return null;
+  if (raw.length < OAUTH2_PROXY_SECRET_MIN_LENGTH) {
+    console.warn(
+      `[auth.config] LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET prea scurt (${raw.length} < ${OAUTH2_PROXY_SECRET_MIN_LENGTH}); bridge ramane dezactivat.`
+    );
+    return null;
+  }
+  return raw;
+}
+
 export function requireJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
   const secret = getJwtSecret(env);
   if (!secret || secret.length < WEB_SECRET_MIN_LENGTH) {

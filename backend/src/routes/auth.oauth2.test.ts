@@ -1,0 +1,279 @@
+import Database from "better-sqlite3";
+import fsPromises from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { Hono } from "hono";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { AUTH_COOKIE_NAME } from "../auth/authProvider.ts";
+import { verifyAuthToken } from "../auth/jwt.ts";
+import { closeDb, getDb } from "../db/schema.ts";
+import { getAuditEvents } from "../db/auditRepository.ts";
+import { insertUser, updateUserStatus } from "../db/userRepository.ts";
+import { getOwnerId, ownerContext } from "../middleware/owner.ts";
+import { requestIdContext } from "../middleware/requestId.ts";
+import { ok } from "../util/envelope.ts";
+import { authRouter } from "./auth.ts";
+
+// 32-char minimums for both JWT secret and shared bridge secret.
+const JWT_SECRET = "0123456789abcdef0123456789abcdef";
+const PROXY_SECRET = "abcdefghijklmnopqrstuvwxyz012345";
+const JWT_ISSUER = "legal-dashboard-test";
+const JWT_AUDIENCE = "legal-dashboard-test";
+
+let tmpRoot: string;
+
+interface EnvelopeErrorBody {
+  data: null;
+  error: { code: string; message: string };
+  requestId: string;
+}
+
+beforeEach(async () => {
+  tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-auth-oauth2-"));
+  const dbPath = path.join(tmpRoot, "legal-dashboard.db");
+  process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+  process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+  process.env.LEGAL_DASHBOARD_JWT_SECRET = JWT_SECRET;
+  process.env.LEGAL_DASHBOARD_JWT_ISSUER = JWT_ISSUER;
+  process.env.LEGAL_DASHBOARD_JWT_AUDIENCE = JWT_AUDIENCE;
+  process.env.LEGAL_DASHBOARD_AUTH_COOKIE_SECURE = "1";
+  process.env.LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET = PROXY_SECRET;
+  const seed = new Database(dbPath);
+  seed.close();
+  getDb();
+});
+
+afterEach(async () => {
+  closeDb();
+  // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+  delete process.env.LEGAL_DASHBOARD_AUTH_MODE;
+  // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+  delete process.env.LEGAL_DASHBOARD_JWT_SECRET;
+  // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+  delete process.env.LEGAL_DASHBOARD_JWT_ISSUER;
+  // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+  delete process.env.LEGAL_DASHBOARD_JWT_AUDIENCE;
+  // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+  delete process.env.LEGAL_DASHBOARD_AUTH_COOKIE_SECURE;
+  // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+  delete process.env.LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET;
+  await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+});
+
+function buildApp() {
+  const app = new Hono();
+  app.use("*", requestIdContext);
+  app.use("*", ownerContext);
+  app.route("/api/v1/auth", authRouter);
+  app.get("/api/v1/probe", (c) => c.json(ok({ ownerId: getOwnerId(c) }, c)));
+  return app;
+}
+
+function syncRequest(headers: Record<string, string>) {
+  return buildApp().request("/api/v1/auth/oauth2/sync", { method: "POST", headers });
+}
+
+describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
+  it("returneaza 503 bridge_disabled cand shared secret-ul nu e setat", async () => {
+    // biome-ignore lint/performance/noDelete: env vars trebuie unset real.
+    delete process.env.LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET;
+
+    const res = await syncRequest({});
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("bridge_disabled");
+  });
+
+  it("returneaza 503 cand shared secret-ul are sub 32 chars", async () => {
+    process.env.LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET = "prea-scurt";
+
+    const res = await syncRequest({ "x-proxy-auth": "prea-scurt" });
+
+    expect(res.status).toBe(503);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("bridge_disabled");
+  });
+
+  it("returneaza 403 cand header-ul X-Proxy-Auth lipseste", async () => {
+    const res = await syncRequest({ "x-auth-request-email": "alice@example.test" });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("forbidden");
+
+    const audits = getAuditEvents({ action: "auth.oauth2.sync" });
+    expect(audits[0]?.outcome).toBe("denied");
+    expect(JSON.parse(audits[0]?.detail_json ?? "{}")).toMatchObject({ reason: "bad_proxy_secret" });
+  });
+
+  it("returneaza 403 cand shared secret-ul nu se potriveste", async () => {
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET.replace("a", "z"),
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("forbidden");
+  });
+
+  it("returneaza 400 missing_identity cand header-ele email lipsesc", async () => {
+    const res = await syncRequest({ "x-proxy-auth": PROXY_SECRET });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("missing_identity");
+  });
+
+  it("returneaza 403 not_provisioned cand user-ul nu exista in DB", async () => {
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "necunoscut@example.test",
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("not_provisioned");
+
+    const audits = getAuditEvents({ action: "auth.oauth2.sync" });
+    const denied = audits.find((a) => a.outcome === "denied");
+    expect(denied).toBeDefined();
+    const detail = JSON.parse(denied?.detail_json ?? "{}");
+    expect(detail.reason).toBe("user_not_provisioned");
+    expect(detail.emailHash).toMatch(/^[0-9a-f]{16}$/);
+    // CONSTRAINT: audit log NU primeste plaintext.
+    expect(denied?.detail_json).not.toContain("necunoscut@example.test");
+  });
+
+  it("returneaza 403 account_inactive cand user-ul exista dar nu e active", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    updateUserStatus("alice", "suspended");
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("account_inactive");
+  });
+
+  it("mintea JWT-ul si seteaza cookie-ul cu HttpOnly + Secure + SameSite=Lax", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(200);
+    const cookie = res.headers.get("set-cookie") ?? "";
+    expect(cookie).toContain(`${AUTH_COOKIE_NAME}=`);
+    expect(cookie.toLowerCase()).toContain("httponly");
+    expect(cookie.toLowerCase()).toContain("secure");
+    expect(cookie.toLowerCase()).toContain("samesite=lax");
+    expect(cookie.toLowerCase()).toContain("path=/");
+  });
+
+  it("token-ul mint-uit are sub=user.id, iss, aud corecte si e verificabil", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(200);
+    const cookie = res.headers.get("set-cookie") ?? "";
+    const token = cookie.match(new RegExp(`${AUTH_COOKIE_NAME}=([^;]+)`))?.[1] ?? "";
+    expect(token.length).toBeGreaterThan(0);
+
+    const payload = verifyAuthToken(token, {
+      secret: JWT_SECRET,
+      issuer: JWT_ISSUER,
+      audience: JWT_AUDIENCE,
+    });
+    expect(payload.sub).toBe("alice");
+    expect(payload.iss).toBe(JWT_ISSUER);
+    expect(payload.aud).toBe(JWT_AUDIENCE);
+  });
+
+  it("dupa sync, request-ul cu cookie-ul mint-uit autentifica probe-ul", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const app = buildApp();
+    const syncRes = await app.request("/api/v1/auth/oauth2/sync", {
+      method: "POST",
+      headers: {
+        "x-proxy-auth": PROXY_SECRET,
+        "x-auth-request-email": "alice@example.test",
+      },
+    });
+    expect(syncRes.status).toBe(200);
+    const cookie = syncRes.headers.get("set-cookie")?.split(";")[0] ?? "";
+
+    const probeRes = await app.request("/api/v1/probe", { headers: { cookie } });
+    expect(probeRes.status).toBe(200);
+    expect(await probeRes.json()).toMatchObject({
+      data: { ownerId: "alice" },
+      requestId: expect.any(String),
+    });
+  });
+
+  it("normalizeaza emailul (trim + lowercase) inainte de lookup", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "  Alice@Example.Test  ",
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("foloseste X-Forwarded-Email cand X-Auth-Request-Email lipseste", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-forwarded-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("audit-ul de succes contine targetId=user.id si NU plaintext email", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "alice@example.test",
+    });
+    expect(res.status).toBe(200);
+
+    const audits = getAuditEvents({ action: "auth.oauth2.sync" });
+    const success = audits.find((a) => a.outcome === "ok");
+    expect(success).toBeDefined();
+    expect(success?.target_id).toBe("alice");
+    expect(success?.owner_id).toBe("alice");
+    expect(success?.detail_json).not.toContain("alice@example.test");
+  });
+
+  it("respinge in mod desktop cu desktop_only", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "desktop";
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("desktop_only");
+  });
+});

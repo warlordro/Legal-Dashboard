@@ -39,6 +39,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.31.0",
+    date: "19 Mai 2026",
+    subtitle:
+      "Stack deploy pe server cu Google OAuth2 prin sidecar oauth2-proxy: Caddy + oauth2-proxy + backend in docker-compose, bridge endpoint /auth/oauth2/sync care converteste sesiunea Google in JWT HS256 nativ, plus DEPLOY-SERVER.md cu pasii completi.",
+    icon: <Shield className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Bridge oauth2-proxy",
+        content:
+          "Endpoint nou POST /api/v1/auth/oauth2/sync care valideaza shared secret X-Proxy-Auth cu timingSafeEqual, citeste X-Auth-Request-Email injectat de oauth2-proxy, cauta userul in tabela users si mintea JWT-ul HS256 nativ pe cookie-ul legal_dashboard_session. Audit log primeste DOAR hash SHA-256 al emailului pe refuzuri, NU plaintext.",
+      },
+      {
+        title: "Stack deploy/",
+        content:
+          "docker-compose.prod.yml cu Caddy (TLS auto Let s Encrypt) + oauth2-proxy v7.7.1-alpine + backend pe network intern. Backend foloseste expose: nu ports:, asa ca poate fi atins doar prin proxy. Caddyfile aduce HSTS, Referrer-Policy si X-Frame-Options DENY. .env.prod.example cu instructiuni de generare pentru toate secretele.",
+      },
+      {
+        title: "Seed admin",
+        content:
+          "scripts/seed-admin.mjs provisioneaza primul admin dupa primul docker compose up. Idempotent: ruleaza de doua ori cu acelasi email returneaza already_admin, refuza email-uri existente cu alt rol (cere escaladare manuala), si verifica ca migrations au creat tabela users inainte de insert.",
+      },
+      {
+        title: "DEPLOY-SERVER.md",
+        content:
+          "Ghid complet: prerequisite domeniu, generare secrete cu openssl rand, Google Cloud OAuth client (redirect /oauth2/callback), docker compose up, seed admin, primul login, backup SQLite, update, rotire secrete si troubleshooting. Constrangerea cheie: NICIODATA ports: pe backend in productie.",
+      },
+      {
+        title: "Verificare",
+        content:
+          "12 teste noi pentru bridge in backend/src/routes/auth.oauth2.test.ts: bridge_disabled, forbidden, missing_identity, not_provisioned, account_inactive, mint cu sub/iss/aud verificabile, probe-ul autentifica cu cookie-ul mintat, normalizare email, fallback X-Forwarded-Email, audit fara plaintext, respinge in mod desktop. Biome, typecheck si build raman gate-uri obligatorii pre-push.",
+      },
+    ],
+  },
+  {
     version: "v2.30.0",
     date: "19 Mai 2026",
     subtitle:

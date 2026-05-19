@@ -4,6 +4,34 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## v2.31.0 — 2026-05-19
+
+Stack de deploy pe server cu autentificare Google OAuth2 prin sidecar oauth2-proxy. Modul desktop ramane neschimbat; web mode primeste un endpoint bridge (`POST /api/v1/auth/oauth2/sync`) care converteste sesiunea verificata de oauth2-proxy in JWT-ul HS256 nativ.
+
+### Livrabile
+
+**Bridge oauth2-proxy.** Endpoint nou `POST /api/v1/auth/oauth2/sync` care valideaza header-ul `X-Proxy-Auth` cu `LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET` (>=32 chars, comparat timing-safe). Daca shared secret-ul lipseste sau e prea scurt, endpoint-ul raspunde `503 bridge_disabled`. Dupa validare citeste `X-Auth-Request-Email` (fallback `X-Forwarded-Email`), normalizeaza emailul si cauta user-ul in tabela `users`. Daca exista cu `status=active`, mintea JWT-ul HS256 si seteaza cookie-ul `legal_dashboard_session` (HttpOnly + Secure + SameSite=Lax). Toate refuzurile loggeaza audit log doar cu hash SHA-256 al emailului — fara plaintext.
+
+**Stack deploy `deploy/`.** `docker-compose.prod.yml` cu trei servicii: Caddy (TLS auto via Let's Encrypt), oauth2-proxy v7.7.1-alpine si backend. Backend-ul foloseste `expose:` (NU `ports:`) ca sa nu fie accesibil direct din afara docker network. `Caddyfile` reverse-proxy catre oauth2-proxy cu HSTS, `Referrer-Policy: no-referrer` si `X-Frame-Options: DENY`. `.env.prod.example` template cu instructiuni de generare pentru `JWT_SECRET`, `PROXY_BRIDGE_SECRET`, `TENANT_KEY_SECRET`, `OAUTH2_PROXY_COOKIE_SECRET`.
+
+**Seed admin idempotent.** `scripts/seed-admin.mjs` provisioneaza primul admin pe baza `SEED_ADMIN_EMAIL` + `SEED_ADMIN_DISPLAY_NAME`. Verifica `sqlite_master` pentru tabela `users` inainte de insert, refuza email-uri existente cu rol non-admin (cere escaladare manuala) si returneaza `already_admin` cand emailul are deja admin activ.
+
+**`DEPLOY-SERVER.md`.** Ghid pas-cu-pas: prerequisite, generare secrete, Google Cloud OAuth client, boot stack, seed admin, primul login, backup, update, rotire secrete, troubleshooting si constrangeri de securitate (NU expune portul 3002, NU loga shared secret).
+
+### Securitate
+
+`getOAuth2ProxySharedSecret()` fail-closed: lungime sub 32 chars => warn la boot si bridge dezactivat. `timingSafeEqual` pe comparatia shared secret. `pass_authorization_header=false` si `pass_access_token=false` in oauth2-proxy config — tokenurile Google nu intra niciodata in DB-ul nostru. Backend-ul ramane `expose:` only pe productie. Audit log respecta verbatim regula "NU primeste plaintext" — emailuri hash-uite cu SHA-256 prefix 16 hex pe denials, doar `user.id` pe success.
+
+### Test coverage
+
+`backend/src/routes/auth.oauth2.test.ts` cu 12 teste: bridge_disabled (secret lipsa + sub 32 chars), forbidden (header lipsa + secret gresit), missing_identity (header email lipsa), not_provisioned (user inexistent), account_inactive (suspended), mint JWT cu cookie corect, sub/iss/aud verificabile, probe-ul cu cookie-ul mintat autentifica, normalizare email (trim + lowercase), fallback `X-Forwarded-Email`, audit fara plaintext, respinge in mod desktop.
+
+### Verificare
+
+`npx biome check --write` pe fisierele atinse, `npx tsc --noEmit -p backend/tsconfig.json`, `cd frontend && npx tsc --noEmit`, `npm test --workspace=backend` (target 1186+ teste pass), `npm run build`. Smoke test recomandat inainte de productie: `docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d` si verificare `/health` peste TLS.
+
+---
+
 ## v2.30.0 — 2026-05-19
 
 Web admin pentru chei API centralizate si buget zilnic per user. In `AUTH_MODE=web`, adminul tenantului configureaza cheile AI si captcha din `/admin/keys`; userii non-admin nu mai folosesc BYOK si sunt limitati prin bugetele din `/admin/quota`. Desktop ramane BYOK neschimbat.
