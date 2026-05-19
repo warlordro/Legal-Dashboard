@@ -10,25 +10,13 @@ afterEach(() => {
   vi.restoreAllMocks();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.RNPM_RUNTIME_VALIDATION_ENFORCED;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+  delete process.env.RNPM_RUNTIME_VALIDATION_DISABLED;
 });
 
 describe("RnpmClient.search runtime validation", () => {
-  it("Stage 1: payload care esueaza safeParse logheaza warning si returneaza raw", async () => {
+  it("default: payload care esueaza safeParse arunca schema_violation", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const client = new RnpmClient({
-      requestDelayMs: 0,
-      fetchImpl: jsonFetch({ documents: [], total: "invalid", pagesTotal: 0, pageSize: 50 }),
-    });
-
-    const result = await client.search("creante", { gcode: "captcha" }, 1);
-
-    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[rnpm] runtime validation failed"), expect.any(String));
-    expect(result.total).toBe("invalid");
-  });
-
-  it("Stage 2 prep: RNPM_RUNTIME_VALIDATION_ENFORCED=1 arunca pe payload corupt", async () => {
-    process.env.RNPM_RUNTIME_VALIDATION_ENFORCED = "1";
-    vi.spyOn(console, "warn").mockImplementation(() => {});
     const client = new RnpmClient({
       requestDelayMs: 0,
       fetchImpl: jsonFetch({ documents: [], total: "invalid", pagesTotal: 0, pageSize: 50 }),
@@ -39,6 +27,21 @@ describe("RnpmClient.search runtime validation", () => {
       status: 502,
       code: "schema_violation",
     } satisfies Partial<RnpmError>);
+
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining("[rnpm] runtime validation failed"), expect.any(String));
+  });
+
+  it("RNPM_RUNTIME_VALIDATION_DISABLED=1 pastreaza fail-open operational temporar", async () => {
+    process.env.RNPM_RUNTIME_VALIDATION_DISABLED = "1";
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    const client = new RnpmClient({
+      requestDelayMs: 0,
+      fetchImpl: jsonFetch({ documents: [], total: "invalid", pagesTotal: 0, pageSize: 50 }),
+    });
+
+    const result = await client.search("creante", { gcode: "captcha" }, 1);
+
+    expect(result.total).toBe("invalid");
   });
 
   it("payload valid returneaza parsed.data fara warning", async () => {

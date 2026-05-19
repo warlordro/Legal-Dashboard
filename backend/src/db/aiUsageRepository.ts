@@ -17,6 +17,8 @@ export interface AiUsageRow {
   request_id: string | null;
   feature: string;
   routing_tag: AiUsageRoutingTag | null;
+  status: "pending" | "confirmed";
+  estimated_cost_usd_milli: number | null;
 }
 
 export interface InsertAiUsageInput {
@@ -89,6 +91,97 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
     );
 
   return db.prepare("SELECT * FROM ai_usage WHERE id = ?").get(info.lastInsertRowid) as AiUsageRow;
+}
+
+export interface InsertReservationInput {
+  ownerId: string;
+  provider: AiUsageProvider;
+  feature: string;
+  estimatedCostUsdMilli: number;
+  requestId?: string | null;
+}
+
+export const RESERVATION_EXPIRE_SECONDS = 300;
+
+export function insertAiUsageReservation(input: InsertReservationInput): number {
+  const estimatedCost = clampToNonNegativeInteger(input.estimatedCostUsdMilli);
+  const info = getDb()
+    .prepare(
+      `INSERT INTO ai_usage
+         (owner_id, ts, provider, model, feature, input_tokens, output_tokens,
+          cost_usd_milli, estimated_cost_usd_milli, status, request_id)
+       VALUES (?, ?, ?, 'pending', ?, 0, 0, ?, ?, 'pending', ?)`
+    )
+    .run(
+      input.ownerId,
+      new Date().toISOString(),
+      input.provider,
+      input.feature,
+      estimatedCost,
+      estimatedCost,
+      input.requestId ?? null
+    );
+  return Number(info.lastInsertRowid);
+}
+
+export function confirmAiUsageReservation(
+  reservationId: number,
+  real: {
+    provider: AiUsageProvider;
+    model: string;
+    inputTokens: number;
+    outputTokens: number;
+    costUsdMilli: number;
+    httpStatus: number | null;
+    wasAborted: boolean;
+    routingTag: AiUsageRoutingTag | null;
+    feature?: string;
+  }
+): boolean {
+  const info = getDb()
+    .prepare(
+      `UPDATE ai_usage
+       SET status = 'confirmed',
+           provider = ?,
+           model = ?,
+           input_tokens = ?,
+           output_tokens = ?,
+           cost_usd_milli = ?,
+           http_status = ?,
+           was_aborted = ?,
+           routing_tag = ?,
+           feature = COALESCE(?, feature)
+       WHERE id = ? AND status = 'pending'`
+    )
+    .run(
+      real.provider,
+      real.model,
+      clampToNonNegativeInteger(real.inputTokens),
+      clampToNonNegativeInteger(real.outputTokens),
+      clampToNonNegativeInteger(real.costUsdMilli),
+      real.httpStatus,
+      real.wasAborted ? 1 : 0,
+      real.routingTag ?? null,
+      real.feature ?? null,
+      reservationId
+    );
+  return info.changes > 0;
+}
+
+export function releaseAiUsageReservation(reservationId: number): boolean {
+  const info = getDb().prepare("DELETE FROM ai_usage WHERE id = ? AND status = 'pending'").run(reservationId);
+  return info.changes > 0;
+}
+
+export function purgeExpiredReservations(now: Date = new Date()): number {
+  const cutoff = new Date(now.getTime() - RESERVATION_EXPIRE_SECONDS * 1000).toISOString();
+  const info = getDb()
+    .prepare(
+      `DELETE FROM ai_usage
+       WHERE status = 'pending' AND ts < ?`
+    )
+    .run(cutoff);
+  return info.changes;
 }
 
 // Closed interval `[since, until]`. The previous version used a strict lower
@@ -202,7 +295,12 @@ export function sumAiUsageMilliInWindow(ownerId: string, feature: string, window
   const modifier = `-${Math.floor(windowSeconds)} seconds`;
   const row = getDb()
     .prepare(
-      `SELECT COALESCE(SUM(cost_usd_milli), 0) AS total
+      `SELECT COALESCE(SUM(
+         CASE
+           WHEN status = 'pending' THEN COALESCE(estimated_cost_usd_milli, cost_usd_milli, 0)
+           ELSE cost_usd_milli
+         END
+       ), 0) AS total
        FROM ai_usage
        WHERE owner_id = ?
          AND feature IN (${placeholders})

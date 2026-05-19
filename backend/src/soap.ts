@@ -1,3 +1,5 @@
+import { readResponseTextWithCap, ResponseTooLargeSignal } from "./util/streamCap.ts";
+
 // NOTE: portalquery.just.ro does NOT support HTTPS (government legacy service)
 // Traffic is unencrypted - this is an accepted risk as no auth data is transmitted
 const SOAP_ENDPOINT = "http://portalquery.just.ro/query.asmx";
@@ -99,6 +101,7 @@ function combineSignals(external?: AbortSignal): AbortSignal {
 
 async function callSoap(action: string, body: string, signal?: AbortSignal): Promise<string> {
   const envelope = buildEnvelope(action, body);
+  const combinedSignal = combineSignals(signal);
 
   const response = await fetch(SOAP_ENDPOINT, {
     method: "POST",
@@ -107,21 +110,18 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
       SOAPAction: `"${NS}/${action}"`,
     },
     body: envelope,
-    signal: combineSignals(signal),
+    signal: combinedSignal,
   });
 
-  const contentLength = Number(response.headers.get("content-length"));
-  if (Number.isFinite(contentLength) && contentLength > SOAP_MAX_RESPONSE_BYTES) {
-    // SECURITY: previne OOM/DoS pasiv din upstream PortalJust.
-    console.error(`SOAP response prea mare: ${contentLength} bytes (cap ${SOAP_MAX_RESPONSE_BYTES})`);
-    throw new SoapResponseTooLargeError(contentLength);
-  }
-
-  const text = await response.text();
-  if (text.length > SOAP_MAX_RESPONSE_BYTES) {
-    // Content-Length poate lipsi sau minti pe chunked encoding.
-    console.error(`SOAP response prea mare (post-read): ${text.length} bytes`);
-    throw new SoapResponseTooLargeError(text.length);
+  let text: string;
+  try {
+    text = await readResponseTextWithCap(response, SOAP_MAX_RESPONSE_BYTES, combinedSignal);
+  } catch (err) {
+    if (err instanceof ResponseTooLargeSignal) {
+      console.error(`SOAP response prea mare: ${err.bytes} bytes (cap ${SOAP_MAX_RESPONSE_BYTES})`);
+      throw new SoapResponseTooLargeError(err.bytes);
+    }
+    throw err;
   }
 
   if (!response.ok || text.includes("soap:Fault")) {

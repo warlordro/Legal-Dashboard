@@ -16,8 +16,9 @@ import {
   validateAiBody,
 } from "../services/ai.ts";
 import { getSettings, upsertSettings } from "../db/ownerAiSettingsRepository.ts";
+import { releaseAiUsageReservation } from "../db/aiUsageRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
-import { quotaGuard } from "../middleware/quotaGuard.ts";
+import { quotaGuard, reserveQuotaBudget } from "../middleware/quotaGuard.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import type { AiUsageTrackingContext } from "../services/aiUsage.ts";
 import { getAuthMode } from "../auth/config.ts";
@@ -149,6 +150,14 @@ aiRouter.put("/settings", async (c) => {
 
 // AI Analysis endpoint
 aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
+  // FIX #5 (v2.33.0 follow-up): rezervarea pentru ai.single trebuie eliberata
+  // explicit cand callModel nu confirma usage-ul. Inainte, orice throw intre
+  // reserveQuotaBudget si callModel (buildPrompt sync, fetch error, abort
+  // anticipat) lasa pending-ul in DB pana cand purgeExpiredReservations rula
+  // (~5min), umflandu-i artificial bugetul user-ului. confirmAiUsageReservation
+  // este apelat in interiorul callModel pe succes -> in branch-ul de succes
+  // reservationToRelease devine null si finally-ul nu mai face nimic.
+  let reservationToRelease: number | null = null;
   try {
     const parsed = await parseAiBody(c);
     if (parsed.kind === "error") return parsedBodyError(c, parsed);
@@ -189,11 +198,16 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
       return missingApiKey(c, requiredProvider);
     }
 
+    const quotaReservation = reserveQuotaBudget(c, "ai.single", requiredProvider);
+    if (!quotaReservation.ok) return quotaReservation.response;
+    reservationToRelease = quotaReservation.reservationId;
+
     const prompt = buildPrompt(dosar);
     const tracking: AiUsageTrackingContext = {
       ownerId: getOwnerId(c),
       requestId: getRequestId(c),
       feature: "dosar_summary",
+      reservationId: quotaReservation.reservationId,
     };
     // F6: paseaza signal-ul HTTP request-ului catre SDK-ul AI ca, daca clientul
     // inchide tabul, sa nu mai consumam tokens degeaba. callModel deja respecta
@@ -208,11 +222,31 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
       routing
     );
 
+    // Succes: callModel a apelat deja confirmAiUsageReservation in interior.
+    reservationToRelease = null;
     return c.json({ analysis: text });
   } catch (err: unknown) {
     // SECURITY: Log error server-side but never expose internal details to client
     console.error("Eroare AI:", err instanceof Error ? err.message : err);
     return aiFailure(c, "Eroare la analiza AI. Verificati cheia API si incercati din nou.");
+  } finally {
+    if (reservationToRelease !== null) {
+      const reservationId = reservationToRelease;
+      queueMicrotask(() => {
+        try {
+          releaseAiUsageReservation(reservationId);
+        } catch (releaseErr) {
+          console.warn(
+            JSON.stringify({
+              action: "quota.reservation_release_failed",
+              reservationId,
+              error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+              ts: new Date().toISOString(),
+            })
+          );
+        }
+      });
+    }
   }
 });
 
@@ -275,6 +309,10 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
         );
       }
     }
+    const reserveProvider = routing.mode === "openrouter" ? "openrouter" : AI_MODELS[judge]?.provider;
+    if (!reserveProvider) return modelError(c, "Model judecator necunoscut.");
+    const quotaReservation = reserveQuotaBudget(c, "ai.multi", reserveProvider);
+    if (!quotaReservation.ok) return quotaReservation.response;
     const prompt = buildPrompt(dosar);
     const trackingBase = {
       ownerId: getOwnerId(c),
@@ -284,6 +322,7 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
     // Stream phase events so the UI can show progress (analysts take 30-60s each,
     // judge 60-120s — without streaming the user sees a blank spinner for up to 4 min).
     return streamSSE(c, async (stream) => {
+      let releaseReservationAfterStream = quotaReservation.reservationId;
       // Shared cancellation for the analyst pair: when one analyst rejects,
       // Promise.all rethrows immediately and the catch below aborts the
       // controller, cancelling the sibling's in-flight HTTP request instead
@@ -385,6 +424,25 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
           errorText = `Lipseste cheia API pentru ${provider}. Configureaza din Setari AI.`;
         }
         await stream.writeSSE({ event: "error", data: JSON.stringify({ error: errorText }) });
+      } finally {
+        if (releaseReservationAfterStream != null) {
+          const reservationId = releaseReservationAfterStream;
+          releaseReservationAfterStream = null;
+          queueMicrotask(() => {
+            try {
+              releaseAiUsageReservation(reservationId);
+            } catch (err) {
+              console.warn(
+                JSON.stringify({
+                  action: "quota.reservation_release_failed",
+                  reservationId,
+                  error: err instanceof Error ? err.message : String(err),
+                  ts: new Date().toISOString(),
+                })
+              );
+            }
+          });
+        }
       }
     });
   } catch (err: unknown) {

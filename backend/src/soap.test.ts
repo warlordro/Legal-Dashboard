@@ -55,7 +55,7 @@ describe("SOAP response cap", () => {
     );
 
     await expect(cautareDosare({ numeParte: "POPESCU" })).rejects.toBeInstanceOf(SoapResponseTooLargeError);
-    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("SOAP response prea mare (post-read)"));
+    expect(consoleError).toHaveBeenCalledWith(expect.stringContaining("SOAP response prea mare"));
   });
 
   it("eroarea expune code SOAP_RESPONSE_TOO_LARGE + bytes pentru dispatch in route handlers", async () => {

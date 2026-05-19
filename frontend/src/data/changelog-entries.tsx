@@ -39,6 +39,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.33.0",
+    date: "19 Mai 2026",
+    subtitle:
+      "Security hardening v2.33.0: CRITICAL-1, 5 HIGH, 11 MEDIUM si 3 LOW inchise pe quota/budget, deployment topology, validation I/O si audit trail. Desktop ramane neimpactat.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-rose-500",
+    badgeClass: "bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-300",
+    sections: [
+      {
+        title: "Quota + budget",
+        content:
+          "quotaGuard primeste rezervari atomice dupa rezolvarea providerului real, include costurile pending in fereastra rolling si ramane no-op in afara modului web. Granturile au limita de 365 zile, listele admin sunt paginate defensiv, iar warning-urile 80% au audit si retry/cooldown email.",
+      },
+      {
+        title: "Deployment + topology",
+        content:
+          "Boot-ul web foloseste instance lock atomic pentru SQLite, reclaim auditat, digest pinning pentru imaginile Caddy/oauth2-proxy, X-Forwarded-For doar prin proxy CIDR explicit si strip pentru headere sensibile in Caddy.",
+      },
+      {
+        title: "Validation + external I/O",
+        content:
+          "SOAP citeste streaming cu byte cap real si AbortSignal comun, RNPM runtime validation este fail-closed by default, validarea Google API key foloseste header, iar cursul BCE fail-closed respinge rate implauzibile fara fallback manual.",
+      },
+      {
+        title: "Audit trail",
+        content:
+          "Auditul ramane fara plaintext pentru secrete: key updates pastreaza doar last4/hadPrevious/field/validationSkipped, logout-ul este atribuit fara a reinvia sesiuni, erorile SMTP sunt redactate, iar audit.viewed se scrie doar pentru filtre investigative.",
+      },
+    ],
+  },
+  {
     version: "v2.32.0",
     date: "19 Mai 2026",
     subtitle:
@@ -736,7 +767,7 @@ export const versions: VersionEntry[] = [
     version: "v2.21.0",
     date: "12 Mai 2026",
     subtitle:
-      "RNPM trust + DB migrations safety: validare runtime Stage 1 cu Zod (`safeParse` + warning, throw pregatit prin `RNPM_RUNTIME_VALIDATION_ENFORCED=1`), status RNPM `activ` pastrat ca `null` cand upstream-ul nu il trimite si afisat ca `Necunoscut`, purge chunked pentru `monitoring_runs`, index nou `idx_monitoring_runs_started_at` si sentinel explicit `0001_baseline.down.sql`.",
+      "RNPM trust + DB migrations safety: validare runtime cu Zod, fail-closed by default din v2.33.0 si rollback temporar prin `RNPM_RUNTIME_VALIDATION_DISABLED=1`, status RNPM `activ` pastrat ca `null` cand upstream-ul nu il trimite si afisat ca `Necunoscut`, purge chunked pentru `monitoring_runs`, index nou `idx_monitoring_runs_started_at` si sentinel explicit `0001_baseline.down.sql`.",
     icon: <Shield className="h-5 w-5" />,
     borderColor: "border-l-amber-500",
     badgeClass: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
@@ -744,7 +775,7 @@ export const versions: VersionEntry[] = [
       {
         title: "RNPM runtime validation Stage 1",
         content:
-          "`RnpmClient.search()` valideaza payload-ul cu o schema Zod minima si `.passthrough()`. In acest release payload-urile invalide logheaza warning si raman compatibile; flag-ul `RNPM_RUNTIME_VALIDATION_ENFORCED=1` pregateste tranzitia la fail-loud.",
+          "`RnpmClient.search()` valideaza payload-ul cu o schema Zod minima si `.passthrough()`. Din v2.33.0 payload-urile invalide esueaza fail-closed by default; `RNPM_RUNTIME_VALIDATION_DISABLED=1` ramane rollback operational temporar.",
       },
       {
         title: "`activ: null` + badge Necunoscut",

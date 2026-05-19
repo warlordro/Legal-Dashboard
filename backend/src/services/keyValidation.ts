@@ -86,8 +86,9 @@ async function fetchValidation(field: TenantKeyField, value: string): Promise<Re
     });
   }
   if (field === "google") {
-    return fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(value)}`, {
+    return fetch("https://generativelanguage.googleapis.com/v1beta/models", {
       method: "GET",
+      headers: { "x-goog-api-key": value },
       signal,
     });
   }

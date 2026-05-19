@@ -29,6 +29,7 @@ import {
   type TenantKeyField,
 } from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
+import { QUOTA_FEATURES } from "../middleware/quotaGuard.ts";
 import {
   getUserById,
   listUsers,
@@ -49,6 +50,7 @@ import {
 } from "../db/userQuotaGrantsRepository.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
 import { validateKey } from "../services/keyValidation.ts";
+import { truncateAuditText } from "../util/auditSanitize.ts";
 import { ErrorCodes, fail, ok } from "../util/envelope.ts";
 
 // 4 KiB on bodies — admin payloads are tiny ({role}, {status}, {feature, dailyLimitUsdMilli}).
@@ -108,7 +110,7 @@ const ListAuditQuerySchema = z
 // clientii care nu au migrat inca; il mapam la limitUsdMilli + period='day'.
 const UpsertQuotaSchema = z
   .object({
-    feature: z.string().trim().min(1).max(80),
+    feature: z.enum(QUOTA_FEATURES),
     period: z.enum(["day", "week", "month"]).optional(),
     limitUsdMilli: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
     dailyLimitUsdMilli: z.number().int().min(0).max(1_000_000_000).optional(),
@@ -125,20 +127,24 @@ const UpsertQuotaSchema = z
 // effect, doar audit noise).
 const CreateGrantSchema = z
   .object({
-    feature: z.string().trim().min(1).max(80),
+    feature: z.enum(QUOTA_FEATURES),
     extraUsdMilli: z.number().int().min(1).max(1_000_000_000),
     expiresAt: z.string().datetime({ offset: true }),
-    reason: z.string().trim().max(500).optional(),
+    reason: z.string().trim().max(200).optional(),
   })
   .strict()
   .refine((v) => Date.parse(v.expiresAt) > Date.now(), {
     message: "expiresAt trebuie sa fie in viitor",
     path: ["expiresAt"],
+  })
+  .refine((v) => Date.parse(v.expiresAt) <= Date.now() + 365 * 86_400_000, {
+    message: "expiresAt nu poate depasi 365 zile de la creare",
+    path: ["expiresAt"],
   });
 
 const RevokeGrantSchema = z
   .object({
-    reason: z.string().trim().max(500).optional(),
+    reason: z.string().trim().max(200).optional(),
   })
   .strict();
 
@@ -317,6 +323,25 @@ adminRouter.get("/audit", (c) => {
     limit: pageSize,
     offset: (page - 1) * pageSize,
   });
+  if (shouldAuditAuditView(parsed.data)) {
+    recordAudit(c, "audit.viewed", {
+      targetKind: "audit_log",
+      detail: {
+        ownerId: ownerId ?? null,
+        actorId: actorId ?? null,
+        action: action ?? null,
+        actionLike: actionLike ?? null,
+        targetKind: targetKind ?? null,
+        targetId: targetId ?? null,
+        outcome: outcome ?? null,
+        since: since ?? null,
+        until: until ?? null,
+        requestId: requestId ?? null,
+        count: result.rows.length,
+        total: result.total,
+      },
+    });
+  }
   return c.json(
     ok(
       {
@@ -577,7 +602,7 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
       feature: row.feature,
       extraUsdMilli: row.extra_usd_milli,
       expiresAt: row.expires_at,
-      reason: row.reason,
+      reason: truncateAuditText(row.reason, 200),
     },
   });
   return c.json(ok(toGrantDto(row), c), 201);
@@ -614,7 +639,7 @@ adminRouter.delete("/grants/:id", limitAdminBody, async (c) => {
         grantId: before.id,
         feature: before.feature,
         extraUsdMilli: before.extra_usd_milli,
-        reason,
+        reason: truncateAuditText(reason, 200),
       },
     });
   }
@@ -638,6 +663,11 @@ function toUserDto(u: ReturnType<typeof getUserById>) {
     createdAt: u.created_at,
     lastLoginAt: u.last_login_at,
   };
+}
+
+function shouldAuditAuditView(query: z.infer<typeof ListAuditQuerySchema>): boolean {
+  if (query.action === "audit.viewed") return false;
+  return Boolean(query.actorId || query.targetId || query.since || query.until || query.actionLike || query.requestId);
 }
 
 function safeJsonParse(s: string): unknown {

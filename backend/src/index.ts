@@ -31,12 +31,18 @@ import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
 import { isMailerConfigured, readMailerConfig } from "./services/email/mailer.ts";
 import { startDailyReportScheduler, stopDailyReportScheduler } from "./services/email/dailyReportScheduler.ts";
 import { fetchEcbDailyRates } from "./services/fxFetcher.ts";
+import { selectPendingEmailRetries } from "./db/budgetNotificationsRepository.ts";
+import { checkBudgetWarningRetry } from "./services/budgetWarningService.ts";
+import { purgeExpiredReservations } from "./db/aiUsageRepository.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
+import { recordAudit } from "./db/auditRepository.ts";
+import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
+import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -50,6 +56,13 @@ import dotenv from "dotenv";
 // time — no empty-import-meta warning, and the branch is dead anyway (__dirname is
 // defined) so the empty string is never used.
 const __curdir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
+const APP_VERSION: string = (() => {
+  try {
+    return (require("../../package.json") as { version: string }).version;
+  } catch {
+    return "unknown";
+  }
+})();
 // Audit 2026-04-29 R3: in productie nu suprascriem env-ul oferit de orchestrator
 // (Docker / systemd / Kubernetes secrets). `.env` din imagine ramane fallback,
 // dar nu poate sterge un secret injectat la runtime.
@@ -148,6 +161,12 @@ process.on("unhandledRejection", (reason: unknown) => {
   }
   process.exit(1);
 });
+
+try {
+  acquireInstanceLock(path.dirname(getDbPath()), APP_VERSION);
+} catch (e) {
+  fatalBoot("instance lock failed", e);
+}
 
 try {
   validateAuthConfig();
@@ -415,6 +434,7 @@ try {
   // dar F2 cere ca apelul sa il primeasca explicit; trecem `"local"` pentru
   // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
   getAvize({ ownerId: "local", pageSize: 1 });
+  flushPendingReclaimAudit();
   getAvizStats();
   if (getAuthMode() === "web") {
     getMasterKey();
@@ -431,6 +451,61 @@ try {
       }
     } catch (probeErr) {
       fatalBoot("tenant key crypto self-test failed", probeErr);
+    }
+  }
+  recordAudit(null, "system.boot", {
+    ownerId: null,
+    actorId: "system",
+    detail: {
+      version: APP_VERSION,
+      authMode: getAuthMode(),
+      hostname,
+      port,
+      processId: process.pid,
+      nodeEnv: process.env.NODE_ENV ?? "unknown",
+    },
+  });
+
+  // LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR e IPv4-only in parser. Entry-urile IPv6
+  // (sau prefixele invalide) sunt acceptate de env loader dar ignorate de
+  // cidrContains, ceea ce inseamna ca XFF venit prin proxy IPv6 ar fi tratat ca
+  // peer non-trusted si rate-limit key-ul ar flip-ui pe peer la fiecare call.
+  // Warn-ul la boot face vizibila configurarea fara efect inainte sa devina
+  // incident operational.
+  const unsupportedProxyCidrs = findUnsupportedTrustedCidrEntries();
+  if (unsupportedProxyCidrs.length > 0) {
+    console.warn(
+      JSON.stringify({
+        action: "proxy.trusted_cidr.unsupported",
+        note: "LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR contine entry-uri non-IPv4 / prefix invalid; sunt ignorate de XFF walk.",
+        entries: unsupportedProxyCidrs,
+        ts: new Date().toISOString(),
+      })
+    );
+  }
+
+  // MEDIUM-2: cand operator-ul opreste runtime validation pe schema RNPM
+  // pentru un debug, semnalam explicit la boot + lasam trace in audit log. Fara
+  // asta, flipul `RNPM_RUNTIME_VALIDATION_DISABLED=1` ramane silent in
+  // operationale si UI continua sa accepte payload-uri nevalidate fara ca
+  // auditul sa stie cand a inceput fereastra. Operatorul vede warn-ul in
+  // stdout, complianta vede entry-ul dedicat in audit_log.
+  if (process.env.RNPM_RUNTIME_VALIDATION_DISABLED === "1") {
+    console.warn(
+      JSON.stringify({
+        action: "rnpm.validation.disabled.boot",
+        note: "RNPM runtime validation OFF (fail-open) pentru toate request-urile",
+        ts: new Date().toISOString(),
+      })
+    );
+    try {
+      recordAudit(null, "rnpm.validation.disabled", {
+        ownerId: null,
+        actorId: "system",
+        detail: { source: "env", flag: "RNPM_RUNTIME_VALIDATION_DISABLED" },
+      });
+    } catch (err) {
+      console.error("[boot] rnpm.validation.disabled audit failed:", err);
     }
   }
 } catch (e) {
@@ -461,6 +536,16 @@ let backupInterval: NodeJS.Timeout | null = null;
 // UI afiseaza "EUR indisponibil" in loc sa fabrice un fallback.
 const FX_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let fxRefreshInterval: NodeJS.Timeout | null = null;
+let budgetWarningRetryInterval: NodeJS.Timeout | null = null;
+// Web-mode quota reservations expire via `purgeExpiredReservations`, normally
+// called by the monitoring scheduler (services/monitoring/scheduler.ts:383). In
+// deploys that disable monitoring (MONITORING_ENABLED=0 or all kinds disabled),
+// orphan reservations from crashed SDK calls would inflate
+// sumAiUsageMilliInWindow until the next restart — valid clients receive 429
+// against a budget that is actually free. Run an independent daily timer in
+// web mode only; desktop has neither quotas nor reservations.
+const RESERVATION_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let reservationPurgeInterval: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {
   try {
@@ -482,6 +567,7 @@ async function refreshFxRatesSafely(label: string): Promise<void> {
           action: "fx.refresh.fail",
           label,
           reason: result.reason,
+          observedRate: result.observedRate,
           ts: new Date().toISOString(),
         })
       );
@@ -512,6 +598,51 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
     refreshFxRatesSafely("periodic");
   }, FX_REFRESH_INTERVAL_MS);
   fxRefreshInterval.unref?.();
+
+  if (getAuthMode() === "web") {
+    budgetWarningRetryInterval = setInterval(() => {
+      const pending = selectPendingEmailRetries();
+      for (const item of pending) {
+        checkBudgetWarningRetry(item.userId, item.feature, item.thresholdPct).catch((err) => {
+          console.warn(
+            JSON.stringify({
+              action: "budget_warning.retry_failed",
+              userId: item.userId,
+              feature: item.feature,
+              error: err instanceof Error ? err.message : String(err),
+              ts: new Date().toISOString(),
+            })
+          );
+        });
+      }
+    }, 120_000);
+    budgetWarningRetryInterval.unref?.();
+
+    reservationPurgeInterval = setInterval(() => {
+      try {
+        const purged = purgeExpiredReservations();
+        if (purged > 0) {
+          console.log(
+            JSON.stringify({
+              action: "quota.reservation_purged",
+              source: "standalone_interval",
+              deleted_count: purged,
+              ts: new Date().toISOString(),
+            })
+          );
+        }
+      } catch (err) {
+        console.warn(
+          JSON.stringify({
+            action: "quota.reservation_purge_failed",
+            error: err instanceof Error ? err.message : String(err),
+            ts: new Date().toISOString(),
+          })
+        );
+      }
+    }, RESERVATION_PURGE_INTERVAL_MS);
+    reservationPurgeInterval.unref?.();
+  }
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
   // shares the maintenance lock with backup so concurrent ticks pause cleanly
@@ -563,6 +694,15 @@ async function gracefulShutdown(reason: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[shutdown] ${reason} — draining HTTP + scheduler + closing SQLite`);
+  try {
+    recordAudit(null, "system.shutdown", {
+      ownerId: null,
+      actorId: "system",
+      detail: { reason, version: APP_VERSION },
+    });
+  } catch (err) {
+    console.error("[shutdown] system.shutdown audit failed:", err);
+  }
 
   // Audit 2026-04-29 R1: inchidem socket-ul de listen ca sa nu mai acceptam
   // conexiuni noi, dar pastram conexiunile in-flight pana cand termina (sau
@@ -599,6 +739,14 @@ async function gracefulShutdown(reason: string): Promise<void> {
     clearInterval(fxRefreshInterval);
     fxRefreshInterval = null;
   }
+  if (budgetWarningRetryInterval) {
+    clearInterval(budgetWarningRetryInterval);
+    budgetWarningRetryInterval = null;
+  }
+  if (reservationPurgeInterval) {
+    clearInterval(reservationPurgeInterval);
+    reservationPurgeInterval = null;
+  }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca
   // sweeper-ul nu a pornit, ex. boot failure inainte de listen).
@@ -634,6 +782,7 @@ async function gracefulShutdown(reason: string): Promise<void> {
   } catch (e) {
     console.error("[shutdown] markShuttingDown failed:", e);
   }
+  releaseInstanceLock();
 }
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM").finally(() => process.exit(0));
@@ -649,14 +798,6 @@ process.on("beforeExit", () => {
 // Uses a globalThis key to survive esbuild's CJS bundle boundary.
 (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> }).__legalDashboardShutdown = () =>
   gracefulShutdown("before-quit");
-
-const APP_VERSION: string = (() => {
-  try {
-    return (require("../../package.json") as { version: string }).version;
-  } catch {
-    return "unknown";
-  }
-})();
 
 console.log("");
 console.log(`  Legal Dashboard v${APP_VERSION}`);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getDb } from "./schema.ts";
 
 // v2.32.0 budget_notifications - state machine pentru soft warning (80%).
@@ -18,10 +19,12 @@ export interface BudgetNotificationRow {
   email_sent_at: string | null;
   cleared_at: string | null;
   updated_at: string;
+  email_attempts: number;
+  last_email_attempted_at: string | null;
 }
 
 const COLUMNS =
-  "user_id, feature, threshold_pct, above_threshold_since, fired_at, email_sent_at, cleared_at, updated_at";
+  "user_id, feature, threshold_pct, above_threshold_since, fired_at, email_sent_at, cleared_at, updated_at, email_attempts, last_email_attempted_at";
 
 function assertFeature(feature: string): void {
   if (typeof feature !== "string" || feature.length === 0) {
@@ -109,6 +112,22 @@ export function markEmailSent(userId: string, feature: string, thresholdPct: num
   return info.changes > 0;
 }
 
+export function incrementEmailAttempt(userId: string, feature: string, thresholdPct: number): boolean {
+  assertFeature(feature);
+  assertThreshold(thresholdPct);
+  const info = getDb()
+    .prepare(
+      `UPDATE budget_notifications
+         SET email_attempts = email_attempts + 1,
+             last_email_attempted_at = datetime('now'),
+             updated_at = datetime('now')
+       WHERE user_id = ? AND feature = ? AND threshold_pct = ?
+         AND fired_at IS NOT NULL AND cleared_at IS NULL`
+    )
+    .run(userId, feature, thresholdPct);
+  return info.changes > 0;
+}
+
 // clearWarning: usedPct a scazut sub threshold; inchidem episodul. Idempotent
 // (UPDATE prinde doar randuri cu fired_at NOT NULL si cleared_at NULL).
 export function clearWarning(userId: string, feature: string, thresholdPct: number): boolean {
@@ -134,4 +153,64 @@ export function isWarningActive(userId: string, feature: string, thresholdPct: n
   const row = getState(userId, feature, thresholdPct);
   if (row === null) return false;
   return row.fired_at !== null && row.cleared_at === null;
+}
+
+export const EMAIL_RETRY_BACKOFF_SECONDS = [60, 300, 900, 3600] as const;
+export const EMAIL_MAX_ATTEMPTS = EMAIL_RETRY_BACKOFF_SECONDS.length;
+// Per-user, per-attempt jitter added on top of the base backoff so that 50
+// users hitting 80% in the same scheduling tick do not retry the SMTP relay in
+// lockstep. Deterministic (hash-derived) so the same row produces the same
+// delay between observations; spread caps at JITTER_MAX_MS regardless of base.
+export const EMAIL_RETRY_JITTER_MAX_MS = 30_000;
+
+export interface PendingEmailRetry {
+  userId: string;
+  feature: string;
+  thresholdPct: number;
+}
+
+export function computeEmailRetryJitterMs(userId: string, feature: string, attempt: number): number {
+  const hash = createHash("sha256").update(`${userId}::${feature}::${attempt}`).digest();
+  // First 4 bytes as uint32 -> modulo into [0, JITTER_MAX_MS). Avoids needing
+  // a PRNG and matches across processes (multi-replica deploys).
+  const bucket = hash.readUInt32BE(0);
+  return bucket % EMAIL_RETRY_JITTER_MAX_MS;
+}
+
+export function selectPendingEmailRetries(now: Date = new Date()): PendingEmailRetry[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT user_id, feature, threshold_pct, email_attempts, last_email_attempted_at
+       FROM budget_notifications
+       WHERE fired_at IS NOT NULL
+         AND cleared_at IS NULL
+         AND email_sent_at IS NULL
+         AND email_attempts < ?
+       ORDER BY fired_at ASC
+       LIMIT 50`
+    )
+    .all(EMAIL_MAX_ATTEMPTS) as Array<{
+    user_id: string;
+    feature: string;
+    threshold_pct: number;
+    email_attempts: number;
+    last_email_attempted_at: string | null;
+  }>;
+
+  const nowMs = now.getTime();
+  return rows
+    .filter((row) => {
+      if (row.last_email_attempted_at === null) return true;
+      const lastMs = Date.parse(row.last_email_attempted_at);
+      if (Number.isNaN(lastMs)) return true;
+      const backoffIdx = Math.min(row.email_attempts - 1, EMAIL_RETRY_BACKOFF_SECONDS.length - 1);
+      const baseMs = EMAIL_RETRY_BACKOFF_SECONDS[backoffIdx] * 1000;
+      const jitterMs = computeEmailRetryJitterMs(row.user_id, row.feature, row.email_attempts);
+      return nowMs - lastMs >= baseMs + jitterMs;
+    })
+    .map((row) => ({
+      userId: row.user_id,
+      feature: row.feature,
+      thresholdPct: row.threshold_pct,
+    }));
 }

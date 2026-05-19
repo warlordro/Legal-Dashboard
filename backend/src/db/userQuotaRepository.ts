@@ -49,14 +49,16 @@ function assertLimit(milli: number | null): void {
   }
 }
 
-export function listOverridesForUser(userId: string): QuotaOverrideRow[] {
+export function listOverridesForUser(userId: string, limit = 200): QuotaOverrideRow[] {
+  const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
   return getDb()
     .prepare(
       `SELECT ${COLUMNS} FROM user_quota_overrides
        WHERE user_id = ?
-       ORDER BY feature ASC`
+       ORDER BY feature ASC
+       LIMIT ?`
     )
-    .all(userId) as QuotaOverrideRow[];
+    .all(userId, boundedLimit) as QuotaOverrideRow[];
 }
 
 export function getOverride(userId: string, feature: string): QuotaOverrideRow | null {

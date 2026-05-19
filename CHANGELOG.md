@@ -1,5 +1,29 @@
 # Changelog - Legal Dashboard
 
+## v2.33.0 - 2026-05-19
+
+Security hardening release pentru CRITICAL-1 + 5 HIGH + 11 MEDIUM + 3 LOW, implementat conform `audit/FIX-PLAN-v2.33.0-REMEDIATION.md` peste cele patru planuri de cluster.
+
+### Livrabile
+
+**Quota + Budget.** `quotaGuard` pastreaza desktop ZERO impact si rezerva buget doar in web mode, dupa rezolvarea providerului real. Costurile pending intra in calculul rolling, rezervarile expira/purge-uiesc, iar consumul real confirma rezervarea in loc sa dubleze accounting-ul. Granturile sunt plafonate la 365 zile, listele admin au `LIMIT`, iar warning-urile 80% au audit, cooldown si retry controlat pentru email.
+
+**Deployment + Topology.** Boot-ul backend foloseste instance lock atomic inainte de initializarea DB, reclaim-ul stale este auditat dupa DB init, iar shutdown-ul elibereaza lock-ul best-effort. LAN bind ramane opt-in prin `LEGAL_DASHBOARD_ALLOW_REMOTE=1`. Reverse proxy-ul foloseste `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` pentru `X-Forwarded-For`, imaginile Caddy/oauth2-proxy sunt pin-uite la digest, iar Caddy strip-uieste headere sensibile injectabile de client.
+
+**Validation + External I/O.** SOAP raspunsurile sunt citite streaming cu cap in bytes si acelasi `AbortSignal` pentru fetch + body read. RNPM runtime validation este fail-closed by default, cu opt-out operational `RNPM_RUNTIME_VALIDATION_DISABLED=1`. Google key validation muta cheia in header `x-goog-api-key`. FX BCE fail-closed respinge rate implauzibile si nu introduce manual rate entry sau fallback hardcoded.
+
+**Audit Trail.** Audit log-ul nu primeste plaintext pentru chei sau secrete. Logout-ul este auditat fara a reinvia o sesiune invalida, erorile SMTP sunt redactate, grant reason este truncat, `audit.viewed` se scrie doar pentru filtre investigative, iar boot/shutdown emit evenimente sistemice minimale.
+
+### Securitate
+
+Regulile load-bearing raman active: `rejectApiKeysFromBodyInWebMode` nu a fost relaxat, web-mode 501 gate ramane pe `rejectCaptchaKeyInWebMode`, `TENANT_KEY_ENCRYPTION_SECRET` este strict 32 bytes base64, D14/D15/D16 raman fail-closed/locked/auto-clear, iar SQL raw nou ramane in `backend/src/db/**`.
+
+### Verificare
+
+Validarea completa pre-push este rulata pe branch-ul `feat/v2.33.0-security-hardening`: Biome, typecheck backend/frontend, build, backend tests si frontend tests.
+
+---
+
 Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier.
 
 ---
@@ -1184,7 +1208,7 @@ mai jos in istoric.
   (`documents`, `total`, `pagesTotal`, `pageSize`, `criteriu`) si
   `.passthrough()`. In v2.21.0 foloseste `safeParse`: payload-urile invalide
   emit warning si raman compatibile. Flag-ul
-  `RNPM_RUNTIME_VALIDATION_ENFORCED=1` activeaza throw cu `schema_violation`
+  v2.33.0 activeaza fail-closed implicit cu `schema_violation`; `RNPM_RUNTIME_VALIDATION_DISABLED=1` este rollback temporar
   pentru pregatirea Stage 2.
 
 #### `activ: null` pentru status necunoscut

@@ -1,5 +1,5 @@
-import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Next } from "hono";
+import { readClientIp } from "../util/proxyIp.ts";
 
 // v2.20.4 fix: pragul anterior (30 req/min) era prea conservator pentru UX
 // pe desktop — pagina Alerts cu Refresh + Inchide toate + paginare burst-uia
@@ -30,7 +30,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   // deliberately ignored. If the runtime cannot surface a remote address (proxy
   // misconfiguration, raw stream, etc.), fail closed — a shared "unknown" bucket
   // would let a single misbehaving caller starve every other client.
-  const ip = getConnInfo(c).remote.address;
+  const ip = readClientIp(c);
   if (!ip) {
     return fail(c, 503, "origin_unavailable", "Origine indisponibila.");
   }
@@ -131,7 +131,7 @@ function releasePreAuthAttempt(key: string): void {
 }
 
 export async function preAuthRateLimit(c: Context, next: Next): Promise<Response | undefined> {
-  const ip = getConnInfo(c).remote.address;
+  const ip = readClientIp(c);
   if (!ip) {
     return fail(c, 503, "origin_unavailable", "Origine indisponibila.");
   }

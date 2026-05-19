@@ -1,13 +1,27 @@
 import type { Context, Next } from "hono";
 
 import { getAuthMode } from "../auth/config.ts";
-import { earliestAiUsageTsInWindow, sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
+import {
+  earliestAiUsageTsInWindow,
+  insertAiUsageReservation,
+  sumAiUsageMilliInWindow,
+  type AiUsageProvider,
+} from "../db/aiUsageRepository.ts";
+import { getDb } from "../db/schema.ts";
 import { sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { type QuotaPeriod, getOverride } from "../db/userQuotaRepository.ts";
 import { getOwnerId } from "./owner.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 
-export type QuotaFeature = "ai.single" | "ai.multi";
+declare module "hono" {
+  interface ContextVariableMap {
+    quotaFeature: QuotaFeature;
+    quotaReservationId: number | null;
+  }
+}
+
+export const QUOTA_FEATURES = ["ai.single", "ai.multi"] as const;
+export type QuotaFeature = (typeof QUOTA_FEATURES)[number];
 
 // v2.32.0 rolling window seconds per period. Locked in D15 — operatorul nu
 // alege secundele, doar perioada (day/week/month). 24h/7d/30d.
@@ -16,6 +30,22 @@ const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
   week: 604_800,
   month: 2_592_000,
 };
+
+const FEATURE_ESTIMATED_COST_MILLI: Record<QuotaFeature, number> = {
+  "ai.single": 2_000,
+  "ai.multi": 8_000,
+};
+
+function estimatedCostMilli(feature: QuotaFeature): number {
+  const rawMultiplier = process.env.LEGAL_DASHBOARD_QUOTA_ESTIMATE_MULTIPLIER;
+  const multiplier =
+    rawMultiplier === undefined || rawMultiplier === ""
+      ? 1
+      : Number.isFinite(Number(rawMultiplier)) && Number(rawMultiplier) > 0
+        ? Number(rawMultiplier)
+        : 1;
+  return Math.ceil(FEATURE_ESTIMATED_COST_MILLI[feature] * multiplier);
+}
 
 // Default-deny floor for users without an explicit per-feature override.
 // LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI (integer milli-USD, daily) gives the
@@ -38,6 +68,7 @@ function readDefaultQuotaMilli(): number | null {
 export function quotaGuard(feature: QuotaFeature) {
   return async (c: Context, next: Next) => {
     if (getAuthMode() !== "web") return next();
+    c.set("quotaFeature", feature);
     const ownerId = getOwnerId(c);
     const override = getOverride(ownerId, feature);
     const defaultMilli = readDefaultQuotaMilli();
@@ -82,6 +113,70 @@ export function quotaGuard(feature: QuotaFeature) {
 
     return next();
   };
+}
+
+export function reserveQuotaBudget(
+  c: Context,
+  feature: QuotaFeature,
+  provider: AiUsageProvider
+): { ok: true; reservationId: number | null } | { ok: false; response: Response } {
+  if (getAuthMode() !== "web") return { ok: true, reservationId: null };
+
+  const ownerId = getOwnerId(c);
+  const override = getOverride(ownerId, feature);
+  const defaultMilli = readDefaultQuotaMilli();
+  const period: QuotaPeriod = override?.period ?? "day";
+  const windowSeconds = PERIOD_SECONDS[period];
+  const baseLimit = override ? override.limit_usd_milli : defaultMilli;
+  if (baseLimit === null) return { ok: true, reservationId: null };
+
+  const extraFromGrants = sumActiveExtraMilli(ownerId, feature);
+  const effectiveLimit = baseLimit + extraFromGrants;
+  const estimatedCost = estimatedCostMilli(feature);
+  let reservationId: number | null = null;
+  let usedMilli = 0;
+  let blocked = false;
+
+  getDb()
+    .transaction(() => {
+      usedMilli = sumAiUsageMilliInWindow(ownerId, feature, windowSeconds);
+      if (effectiveLimit === 0 || usedMilli + estimatedCost > effectiveLimit) {
+        blocked = true;
+        return;
+      }
+      reservationId = insertAiUsageReservation({
+        ownerId,
+        provider,
+        feature,
+        estimatedCostUsdMilli: estimatedCost,
+        requestId: c.get("requestId") ?? null,
+      });
+    })
+    .immediate();
+
+  if (blocked) {
+    const retryAfter = retryAfterSecondsForWindow(ownerId, feature, windowSeconds);
+    c.header("Retry-After", String(retryAfter));
+    return {
+      ok: false,
+      response: c.json(
+        fail(ErrorCodes.QUOTA_EXCEEDED, `Bugetul pentru ${feature} a fost depasit. Contacteaza adminul.`, c, {
+          usedMilli,
+          reservedMilli: estimatedCost,
+          limitMilli: effectiveLimit,
+          baseLimitMilli: baseLimit,
+          extraFromGrantsMilli: extraFromGrants,
+          period,
+          feature,
+          source: override ? "override" : "default",
+        }),
+        429
+      ),
+    };
+  }
+
+  c.set("quotaReservationId", reservationId);
+  return { ok: true, reservationId };
 }
 
 // Retry-After corect pentru rolling window: cea mai veche ts care contribuie

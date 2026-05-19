@@ -9,6 +9,9 @@ export function getMasterKey(): Buffer {
   if (masterKeyCache) return masterKeyCache;
   const raw = process.env.TENANT_KEY_ENCRYPTION_SECRET;
   if (!raw) throw new Error("TENANT_KEY_ENCRYPTION_SECRET missing");
+  if (!/^[A-Za-z0-9+/]{43}=$/.test(raw.trim())) {
+    throw new Error("TENANT_KEY_ENCRYPTION_SECRET must decode to 32 bytes (strict base64)");
+  }
   const buf = Buffer.from(raw, "base64");
   if (buf.length !== 32) throw new Error("TENANT_KEY_ENCRYPTION_SECRET must decode to 32 bytes");
   masterKeyCache = buf;

@@ -53,14 +53,16 @@ function assertIsoString(label: string, value: string): void {
   }
 }
 
-export function listGrantsForUser(userId: string): QuotaGrantRow[] {
+export function listGrantsForUser(userId: string, limit = 200): QuotaGrantRow[] {
+  const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
   return getDb()
     .prepare(
       `SELECT ${COLUMNS} FROM user_quota_grants
        WHERE user_id = ?
-       ORDER BY granted_at DESC, id DESC`
+       ORDER BY granted_at DESC, id DESC
+       LIMIT ?`
     )
-    .all(userId) as QuotaGrantRow[];
+    .all(userId, boundedLimit) as QuotaGrantRow[];
 }
 
 // SQLite quirk: datetime('now') returneaza 'YYYY-MM-DD HH:MM:SS' (spatiu);

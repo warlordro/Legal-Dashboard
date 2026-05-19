@@ -27,7 +27,7 @@ import {
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
 import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
-import { purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
+import { purgeExpiredReservations, purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
 import { purgeOldAuditLog } from "../../db/auditRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
@@ -380,6 +380,16 @@ export class Scheduler {
       // not skip the other (monitoring_runs is operational, ai_usage is
       // observability; both matter, neither blocks the loop).
       try {
+        const expiredReservations = purgeExpiredReservations(this.opts.clock.now());
+        if (expiredReservations > 0) {
+          console.log(
+            JSON.stringify({
+              action: "quota.reservation_purged",
+              deleted_count: expiredReservations,
+              ts: this.opts.clock.now().toISOString(),
+            })
+          );
+        }
         const deletedUsage = purgeOldAiUsage(AI_USAGE_RETENTION_DAYS);
         if (deletedUsage > 0) {
           console.log(
