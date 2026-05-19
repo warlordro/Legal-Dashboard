@@ -4,6 +4,40 @@ Toate modificarile notabile ale acestui proiect sunt documentate in acest fisier
 
 ---
 
+## v2.32.0 — 2026-05-19
+
+Extensie politici cota AI in web mode. Adminul tenantului poate seta buget per feature pe perioade rolling (zi, saptamana, luna) sau marca feature-ul ca nelimitat, poate emite granturi suplimentare cu expirare, primeste avertizari soft la 80% prin banner si email, si vede consumul in USD si EUR. Conversia EUR foloseste rata oficiala BCE preluata zilnic. Desktop mode ramane neimpactat (quotaGuard scurt-circuiteaza in afara modului web).
+
+### Livrabile
+
+**Migratii 0027-0030.** `0027_user_quota_overrides_extension` adauga coloana `period` (`day` default, `week`, `month`) si suporta `limit_usd_milli` NULL pentru `unlimited`. `0028_user_quota_grants` introduce tabela de granturi (`extra_usd_milli`, `expires_at`, `granted_by`, `granted_at`, `revoked_at`, `revoke_reason`). `0029_fx_rates` stocheaza ratele BCE (`pair`, `rate`, `rate_date`, `source`, `fetched_at`). `0030_budget_notifications` urmareste pragul 80% per user/feature/period (`above_threshold_since`, `fired_at`, `cleared_at`, `email_sent_at`). Toate migratiile au scripturi UP, DOWN si test de roundtrip.
+
+**`quotaGuard` cu fereastra rolling, unlimited si granturi.** Middleware-ul calculeaza limita efectiva ca `baza + suma granturi active`. Daca limita e NULL =>` unlimited (skip enforcement). Fereastra de consum se calculeaza ca rolling N secunde inainte de `now` (day=86400, week=604800, month=2592000). Refuza cu `QUOTA_EXCEEDED` 429 + `Retry-After` cand consumul depaseste limita; granturile expirate sunt automat excluse.
+
+**Granturi cu expirare.** Rute admin noi: `GET /api/v1/admin/users/:id/grants`, `POST /api/v1/admin/users/:id/grants` (validare: `extra_usd_milli > 0`, `expires_at` ISO viitor), `DELETE /api/v1/admin/grants/:id` (idempotent — returneaza `{id, revoked: true/false}`). Auditul logheaza `admin.users.grant_create` / `admin.users.grant_revoke` cu feature, suma, expiresAt, motivul, fara plaintext.
+
+**Soft warning la 80%.** Service `budgetWarningService` ruleaza la fiecare write de `ai_usage` (queueMicrotask, NU blocheaza response-ul). State machine: cand consumul depaseste 80% din limita efectiva, deschide o notificare (`above_threshold_since`), trimite email + banner UI (`fired_at`), si auto-clears (`cleared_at`) cand consumul scade sub prag. Anti-spam: o singura emisie email per episod activ pana la clear.
+
+**FX fetcher BCE zilnic.** `fxFetcher.ts` interogheaza `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml` (timeout 10s, fail-closed), parseaza XML-ul cu regex, inverseaza `EUR/USD` -> `USD/EUR` si salveaza in `fx_rates`. Scheduler ruleaza la 16:30 CET (dupa publicarea BCE). Boot fail-safe: fetch una la pornire, ignora eroarea; UI ramane pe ultima rata valida sau "EUR indisponibil" daca rata e stale > 48h. Manual entry interzis.
+
+**API consum extins.** `GET /api/v1/me/budget` returneaza per feature: `period`, `usedMilli`, `baseLimitMilli`, `extraFromGrantsMilli`, `effectiveLimitMilli` (NULL = unlimited), plus `fx: { pair, rate, rateDate, stale }`. `GET /api/v1/me/budget/warnings` returneaza episoadele active (feature, thresholdPct, aboveThresholdSince, emailSentAt). Campul legacy `limitMilli` ramane alias pentru `effectiveLimitMilli`.
+
+**UI admin.** Pagina `/admin/quota` primeste selector perioada (zilnic, saptamanal, lunar) si checkbox "Nelimitat", iar tabela arata badge "Nelimitat" cand limita e NULL. Pagina noua `/admin/grants`: cautare user, formular grant (feature, extra USD, expiresAt datetime-local, motiv), tabela cu badge stare (Activ, Expirat, Revocat) si buton revocare. Pagina noua `/admin/usage` (link "Consum" in sidebar): banner avertizari active, card per feature cu bar progres color-coded (verde sub 80%, amber sub 100%, rosu peste 100%), afisare USD + EUR (fail-closed cu "EUR indisponibil" daca rata e stale > 48h), badge rata curenta.
+
+### Securitate
+
+D14 fail-closed pe afisare EUR (fara fallback hardcoded la 0.92); UI explicit semnaleaza problema. D15 ferestre rolling locked (day=86400s, week=604800s, month=2592000s). D16 banner auto-clear si email anti-spam (un singur trigger per episod). Master key tenant si valorile captcha NICIODATA logate — audit log primeste doar `field`, `hadPrevious`, `last4`. `rejectApiKeysFromBodyInWebMode` ramane activ. `quotaGuard` short-circuit cand `getAuthMode() !== "web"` — desktop ZERO impact.
+
+### Test coverage
+
+Backend (1285 teste pass): migrations 0027-0030 cu roundtrip, repositories `userQuotaGrants`/`fxRates`/`budgetNotifications`, `fxFetcher` (parse + inversie + fail modes), `budgetWarningService` (state machine + anti-spam), `quotaGuard` extins (rolling, unlimited, granturi expirate), admin grants routes (validare + idempotency), `me/budget` + `me/budgetWarnings` cu shape extins. Frontend (209 teste pass): `BudgetIndicator` cu shape nou (legacy alias), `Quota` (period + unlimited), `Grants` (CRUD UI), `Usage` (fail-closed EUR + pct bar).
+
+### Verificare
+
+`npx biome check --write` pe fisierele atinse, `npx tsc --noEmit -p backend/tsconfig.json`, `cd frontend && npx tsc --noEmit`, `npm test --workspace=backend` (1285 teste pass), `cd frontend && npm test -- --run` (209 teste pass), `npm run build`.
+
+---
+
 ## v2.31.0 — 2026-05-19
 
 Stack de deploy pe server cu autentificare Google OAuth2 prin sidecar oauth2-proxy. Modul desktop ramane neschimbat; web mode primeste un endpoint bridge (`POST /api/v1/auth/oauth2/sync`) care converteste sesiunea verificata de oauth2-proxy in JWT-ul HS256 nativ.

@@ -122,7 +122,7 @@ describe("AI routes - web mode contract (§9)", () => {
   });
 
   it("POST /api/ai/analyze returneaza 429 QUOTA_EXCEEDED cu Retry-After cand override-ul e atins", async () => {
-    upsertOverride({ userId: "alice", feature: "ai.single", dailyLimitUsdMilli: 10 });
+    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 10 });
     insertAiUsage({
       ownerId: "alice",
       provider: "openai",

@@ -2,7 +2,9 @@ import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 import { recordAudit } from "../db/auditRepository.ts";
-import { sumAiUsageMilliToday } from "../db/aiUsageRepository.ts";
+import { sumAiUsageMilliInWindow, sumAiUsageMilliToday } from "../db/aiUsageRepository.ts";
+import { getState as getBudgetWarningState } from "../db/budgetNotificationsRepository.ts";
+import { getLatest as getLatestFxRate } from "../db/fxRatesRepository.ts";
 import {
   defaultEmailSettingsFor,
   getEmailSettings,
@@ -11,11 +13,23 @@ import {
 } from "../db/ownerEmailSettingsRepository.ts";
 import { getTenantKeys } from "../db/tenantKeysRepository.ts";
 import { getUserById } from "../db/userRepository.ts";
-import { listOverridesForUser } from "../db/userQuotaRepository.ts";
+import { sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
+import { type QuotaPeriod, listOverridesForUser } from "../db/userQuotaRepository.ts";
+import type { QuotaFeature } from "../middleware/quotaGuard.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { isMailerConfigured, sendTestEmail } from "../services/email/mailer.ts";
 import { fail, ok } from "../util/envelope.ts";
+
+const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
+  day: 86_400,
+  week: 604_800,
+  month: 2_592_000,
+};
+
+// D14 fail-closed: dupa 48h fara update consideram rate-ul stale; UI afiseaza
+// "EUR indisponibil" in loc sa randeze un numar potential nefolositor.
+const FX_STALE_THRESHOLD_HOURS = 48;
 
 // GET /api/v1/me — returns the current user's profile (id, email, role, status,
 // displayName). Frontend uses this to decide whether to render the Admin
@@ -129,21 +143,84 @@ meRouter.get("/key-status", (c) => {
 
 meRouter.get("/budget", (c) => {
   const ownerId = getOwnerId(c);
-  const limits = new Map(listOverridesForUser(ownerId).map((row) => [row.feature, row.daily_limit_usd_milli]));
-  const features = Array.from(new Set(["ai.single", "ai.multi", ...limits.keys()])).sort();
+  // v2.32.0: response include period (day/week/month rolling), baseLimit,
+  // extraFromGrants, effectiveLimit (base + grants), usedMilli per rolling
+  // window, si fxRate (USD->EUR) cu staleness flag. limitMilli ramane in
+  // raspuns pentru clientii vechi (= effectiveLimit cand exista override,
+  // null cand e unlimited sau lipsa).
+  const overrides = listOverridesForUser(ownerId);
+  const overrideByFeature = new Map(overrides.map((row) => [row.feature, row]));
+  const features = Array.from(new Set(["ai.single", "ai.multi", ...overrideByFeature.keys()])).sort();
+  const fx = getLatestFxRate("USD/EUR");
+  const fxStale =
+    fx === null ? true : Date.now() - Date.parse(`${fx.rate_date}T00:00:00Z`) > FX_STALE_THRESHOLD_HOURS * 3_600_000;
+
   return c.json(
     ok(
       {
-        items: features.map((feature) => ({
-          feature,
-          usedMilli: sumAiUsageMilliToday(ownerId, feature),
-          limitMilli: limits.get(feature) ?? null,
-        })),
+        items: features.map((feature) => {
+          const override = overrideByFeature.get(feature) ?? null;
+          const period: QuotaPeriod = override?.period ?? "day";
+          const baseLimit = override?.limit_usd_milli ?? null;
+          const extraFromGrants = sumActiveExtraMilli(ownerId, feature);
+          const effectiveLimit = baseLimit === null ? null : baseLimit + extraFromGrants;
+          const usedMilli =
+            period === "day"
+              ? sumAiUsageMilliToday(ownerId, feature)
+              : sumAiUsageMilliInWindow(ownerId, feature, PERIOD_SECONDS[period]);
+          return {
+            feature,
+            period,
+            usedMilli,
+            baseLimitMilli: baseLimit,
+            extraFromGrantsMilli: extraFromGrants,
+            effectiveLimitMilli: effectiveLimit,
+            // Legacy alias for old clients — equals effectiveLimitMilli.
+            limitMilli: effectiveLimit,
+          };
+        }),
+        fx:
+          fx === null
+            ? { pair: "USD/EUR", rate: null, rateDate: null, stale: true }
+            : { pair: fx.pair, rate: fx.rate, rateDate: fx.rate_date, stale: fxStale },
       },
       c
     ),
     200
   );
+});
+
+// v2.32.0: banner pentru avertizarea de buget la 80%. UI il poll-uieste (sau
+// re-cere dupa orice request AI) si afiseaza banner pentru fiecare entry.
+// State e per (user, feature, threshold_pct=80) — vezi budget_notifications.
+meRouter.get("/budget-warnings", (c) => {
+  const ownerId = getOwnerId(c);
+  const features: QuotaFeature[] = ["ai.single", "ai.multi"];
+  const items = features
+    .map((feature) => {
+      const state = getBudgetWarningState(ownerId, feature, 80);
+      if (state === null) return null;
+      if (state.fired_at === null || state.cleared_at !== null) return null;
+      return {
+        feature,
+        thresholdPct: state.threshold_pct,
+        firedAt: state.fired_at,
+        aboveSince: state.above_threshold_since,
+        emailSentAt: state.email_sent_at,
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+
+  return c.json(ok({ items }, c), 200);
+});
+
+meRouter.get("/fx/usd-eur", (c) => {
+  const fx = getLatestFxRate("USD/EUR");
+  if (fx === null) {
+    return c.json(ok({ pair: "USD/EUR", rate: null, rateDate: null, stale: true }, c), 200);
+  }
+  const stale = Date.now() - Date.parse(`${fx.rate_date}T00:00:00Z`) > FX_STALE_THRESHOLD_HOURS * 3_600_000;
+  return c.json(ok({ pair: fx.pair, rate: fx.rate, rateDate: fx.rate_date, stale }, c), 200);
 });
 
 meRouter.get("/email-settings", (c) => {

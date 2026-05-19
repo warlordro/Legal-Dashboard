@@ -14,6 +14,7 @@ import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
 import { listOverridesForUser } from "../db/userQuotaRepository.ts";
+import { listGrantsForUser, sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
 
 let tmpRoot: string;
@@ -375,10 +376,76 @@ describe("/api/v1/admin/users/:id/quota", () => {
     expect(res.status).toBe(200);
     const stored = listOverridesForUser("u-1");
     expect(stored).toHaveLength(1);
-    expect(stored[0].daily_limit_usd_milli).toBe(5000);
+    expect(stored[0].limit_usd_milli).toBe(5000);
+    expect(stored[0].period).toBe("day");
     expect(stored[0].updated_by).toBe("local");
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.quota_upsert" });
     expect(events).toHaveLength(1);
+  });
+
+  it("PUT accepts canonical {period, limitUsdMilli} payload", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", period: "week", limitUsdMilli: 25000 }),
+    });
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toMatchObject({
+      feature: "ai.single",
+      period: "week",
+      limitUsdMilli: 25000,
+      dailyLimitUsdMilli: null,
+    });
+    const stored = listOverridesForUser("u-1");
+    expect(stored[0].period).toBe("week");
+    expect(stored[0].limit_usd_milli).toBe(25000);
+  });
+
+  it("PUT accepts limitUsdMilli=null (unlimited)", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", period: "day", limitUsdMilli: null }),
+    });
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toMatchObject({
+      feature: "ai.single",
+      period: "day",
+      limitUsdMilli: null,
+      dailyLimitUsdMilli: null,
+    });
+    const stored = listOverridesForUser("u-1");
+    expect(stored[0].limit_usd_milli).toBeNull();
+  });
+
+  it("PUT rejects body missing both limitUsdMilli and dailyLimitUsdMilli", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", period: "day" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("GET exposes legacy dailyLimitUsdMilli only when period=day", async () => {
+    const app = buildApp();
+    await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", period: "week", limitUsdMilli: 25000 }),
+    });
+    const res = await app.request("/api/v1/admin/users/u-1/quota");
+    const body = await jsonOf(res);
+    const overrides = (
+      body.data as { overrides: { dailyLimitUsdMilli: number | null; limitUsdMilli: number | null }[] }
+    ).overrides;
+    expect(overrides[0].dailyLimitUsdMilli).toBeNull();
+    expect(overrides[0].limitUsdMilli).toBe(25000);
   });
 
   it("PUT updates an existing override (idempotent upsert)", async () => {
@@ -396,7 +463,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     expect(res.status).toBe(200);
     const stored = listOverridesForUser("u-1");
     expect(stored).toHaveLength(1);
-    expect(stored[0].daily_limit_usd_milli).toBe(7500);
+    expect(stored[0].limit_usd_milli).toBe(7500);
   });
 
   it("PUT rejects invalid body (400)", async () => {
@@ -447,5 +514,142 @@ describe("/api/v1/admin/users/:id/quota", () => {
     expect((body.data as { removed: boolean }).removed).toBe(false);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.quota_delete" });
     expect(events).toHaveLength(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// grants (v2.32.0)
+// ---------------------------------------------------------------------------
+
+describe("/api/v1/admin/users/:id/grants", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+    insertUser({ id: "u-1", email: "a@x", displayName: "A" });
+  });
+
+  it("GET returns empty list initially", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/u-1/grants");
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toEqual({ userId: "u-1", grants: [] });
+  });
+
+  it("POST creates grant + records audit + 201", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        feature: "ai.single",
+        extraUsdMilli: 2500,
+        expiresAt,
+        reason: "boost vineri",
+      }),
+    });
+    expect(res.status).toBe(201);
+    const body = await jsonOf(res);
+    expect(body.data).toMatchObject({
+      userId: "u-1",
+      feature: "ai.single",
+      extraUsdMilli: 2500,
+      expiresAt,
+      reason: "boost vineri",
+      revokedAt: null,
+    });
+    const stored = listGrantsForUser("u-1");
+    expect(stored).toHaveLength(1);
+    expect(sumActiveExtraMilli("u-1", "ai.single")).toBe(2500);
+    const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_create" });
+    expect(events).toHaveLength(1);
+  });
+
+  it("POST rejects expiresAt in the past with 400", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() - 60_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 1000, expiresAt }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST rejects extraUsdMilli=0 with 400", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 0, expiresAt }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST returns 404 for missing user", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/ghost/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 1000, expiresAt }),
+    });
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE revokes grant + records audit", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 3000, expiresAt }),
+    });
+    const { data } = await jsonOf(createRes);
+    const grantId = (data as { id: number }).id;
+    const res = await app.request(`/api/v1/admin/grants/${grantId}`, {
+      method: "DELETE",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "fix typo" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toMatchObject({ id: grantId, revoked: true });
+    expect(sumActiveExtraMilli("u-1", "ai.single")).toBe(0);
+    const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_revoke" });
+    expect(events).toHaveLength(1);
+  });
+
+  it("DELETE second time returns 200 + revoked:false (idempotent)", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 3000, expiresAt }),
+    });
+    const { data } = await jsonOf(createRes);
+    const grantId = (data as { id: number }).id;
+    await app.request(`/api/v1/admin/grants/${grantId}`, { method: "DELETE" });
+    const res = await app.request(`/api/v1/admin/grants/${grantId}`, { method: "DELETE" });
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect((body.data as { revoked: boolean }).revoked).toBe(false);
+    const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_revoke" });
+    // Audit doar la prima revocare reala; al doilea DELETE e no-op.
+    expect(events).toHaveLength(1);
+  });
+
+  it("DELETE returns 404 for missing grant", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/grants/9999", { method: "DELETE" });
+    expect(res.status).toBe(404);
+  });
+
+  it("DELETE rejects non-numeric id with 400", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/grants/not-a-number", { method: "DELETE" });
+    expect(res.status).toBe(400);
   });
 });

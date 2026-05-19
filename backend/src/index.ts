@@ -30,6 +30,7 @@ import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
 import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
 import { isMailerConfigured, readMailerConfig } from "./services/email/mailer.ts";
 import { startDailyReportScheduler, stopDailyReportScheduler } from "./services/email/dailyReportScheduler.ts";
+import { fetchEcbDailyRates } from "./services/fxFetcher.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
@@ -453,6 +454,46 @@ try {
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let backupInterval: NodeJS.Timeout | null = null;
 
+// v2.32.0 ECB FX refresh: la 6h. ECB publica zilnic 16:00 CET — 4 ferestre/zi
+// asigura ca surprindem update-ul indiferent de fusul orar al serverului. La
+// boot rulam o data sincron-deferred (fire-and-forget) ca pe primul afisaj EUR
+// sa avem fie rate proaspat, fie ultimul cunoscut. D14 fail-closed: la eroare,
+// UI afiseaza "EUR indisponibil" in loc sa fabrice un fallback.
+const FX_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
+let fxRefreshInterval: NodeJS.Timeout | null = null;
+
+async function refreshFxRatesSafely(label: string): Promise<void> {
+  try {
+    const result = await fetchEcbDailyRates();
+    if (result.ok) {
+      console.log(
+        JSON.stringify({
+          action: "fx.refresh.ok",
+          label,
+          pair: result.pair,
+          rate: result.rate,
+          rate_date: result.rateDate,
+          ts: new Date().toISOString(),
+        })
+      );
+    } else {
+      console.warn(
+        JSON.stringify({
+          action: "fx.refresh.fail",
+          label,
+          reason: result.reason,
+          ts: new Date().toISOString(),
+        })
+      );
+    }
+  } catch (err) {
+    console.error("[fx] refresh threw", {
+      label,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   ready = true;
   // Defer the daily snapshot until the listener is verified up. Same fire-and-forget
@@ -463,6 +504,14 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   }, BACKUP_INTERVAL_MS);
   // unref so a stuck timer doesn't keep Node alive past graceful shutdown.
   backupInterval.unref?.();
+
+  // v2.32.0: ECB FX refresh — fire-and-forget la boot + recurring every 6h.
+  // Non-blocking: D14 fail-closed daca primul fetch esueaza (UI EUR indisponibil).
+  refreshFxRatesSafely("boot");
+  fxRefreshInterval = setInterval(() => {
+    refreshFxRatesSafely("periodic");
+  }, FX_REFRESH_INTERVAL_MS);
+  fxRefreshInterval.unref?.();
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
   // shares the maintenance lock with backup so concurrent ticks pause cleanly
@@ -545,6 +594,10 @@ async function gracefulShutdown(reason: string): Promise<void> {
   if (backupInterval) {
     clearInterval(backupInterval);
     backupInterval = null;
+  }
+  if (fxRefreshInterval) {
+    clearInterval(fxRefreshInterval);
+    fxRefreshInterval = null;
   }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca

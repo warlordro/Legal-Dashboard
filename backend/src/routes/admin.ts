@@ -39,7 +39,14 @@ import {
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
-import { deleteOverride, listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
+import { deleteOverride, listOverridesForUser, upsertOverride, type QuotaPeriod } from "../db/userQuotaRepository.ts";
+import {
+  createGrant,
+  getGrant,
+  listGrantsForUser,
+  revokeGrant,
+  type QuotaGrantRow,
+} from "../db/userQuotaGrantsRepository.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
 import { validateKey } from "../services/keyValidation.ts";
 import { ErrorCodes, fail, ok } from "../util/envelope.ts";
@@ -96,11 +103,42 @@ const ListAuditQuerySchema = z
   })
   .strict();
 
+// v2.32.0: period + nullable limit. `limitUsdMilli` e canonical (null =
+// unlimited). `dailyLimitUsdMilli` ramane acceptat ca alias legacy pentru
+// clientii care nu au migrat inca; il mapam la limitUsdMilli + period='day'.
 const UpsertQuotaSchema = z
   .object({
     feature: z.string().trim().min(1).max(80),
-    // Integer milli-USD aligned with ai_usage.cost_usd_milli precision.
-    dailyLimitUsdMilli: z.number().int().min(0).max(1_000_000_000),
+    period: z.enum(["day", "week", "month"]).optional(),
+    limitUsdMilli: z.number().int().min(0).max(1_000_000_000).nullable().optional(),
+    dailyLimitUsdMilli: z.number().int().min(0).max(1_000_000_000).optional(),
+  })
+  .strict()
+  .refine((v) => v.limitUsdMilli !== undefined || v.dailyLimitUsdMilli !== undefined, {
+    message: "limitUsdMilli sau dailyLimitUsdMilli sunt obligatorii",
+    path: ["limitUsdMilli"],
+  });
+
+// v2.32.0 grant: one-shot extra over base cap. `extraUsdMilli` must be >0
+// (refacing un grant cu 0 ar fi no-op). `expiresAt` ISO 8601 cu offset; tot
+// stricteneste la "in viitor" (un grant care expira in trecut nu produce
+// effect, doar audit noise).
+const CreateGrantSchema = z
+  .object({
+    feature: z.string().trim().min(1).max(80),
+    extraUsdMilli: z.number().int().min(1).max(1_000_000_000),
+    expiresAt: z.string().datetime({ offset: true }),
+    reason: z.string().trim().max(500).optional(),
+  })
+  .strict()
+  .refine((v) => Date.parse(v.expiresAt) > Date.now(), {
+    message: "expiresAt trebuie sa fie in viitor",
+    path: ["expiresAt"],
+  });
+
+const RevokeGrantSchema = z
+  .object({
+    reason: z.string().trim().max(500).optional(),
   })
   .strict();
 
@@ -414,7 +452,12 @@ adminRouter.get("/users/:id/quota", (c) => {
   }
   const rows = listOverridesForUser(id).map((r) => ({
     feature: r.feature,
-    dailyLimitUsdMilli: r.daily_limit_usd_milli,
+    period: r.period,
+    limitUsdMilli: r.limit_usd_milli,
+    // Legacy alias: clientii vechi citesc dailyLimitUsdMilli ca numar. Cand
+    // perioada nu e "day" nu mai are sens — emitem null ca sa fortam un upgrade
+    // de client in loc sa surface-uim un numar inselator.
+    dailyLimitUsdMilli: r.period === "day" ? r.limit_usd_milli : null,
     updatedAt: r.updated_at,
     updatedBy: r.updated_by,
   }));
@@ -432,11 +475,21 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
   if (!parsed.success) {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
   }
+  // Resolve canonical limit. New clients send limitUsdMilli (nullable=unlimited);
+  // legacy clients send dailyLimitUsdMilli (numeric only, period implied 'day').
+  // Refine garanteaza ca cel putin unul e definit.
+  const usedLegacyAlias = parsed.data.limitUsdMilli === undefined && parsed.data.dailyLimitUsdMilli !== undefined;
+  const limitUsdMilli: number | null = usedLegacyAlias
+    ? (parsed.data.dailyLimitUsdMilli as number)
+    : (parsed.data.limitUsdMilli as number | null);
+  const period: QuotaPeriod = parsed.data.period ?? (usedLegacyAlias ? "day" : "day");
+
   const adminId = getOwnerId(c);
   const row = upsertOverride({
     userId: id,
     feature: parsed.data.feature,
-    dailyLimitUsdMilli: parsed.data.dailyLimitUsdMilli,
+    period,
+    limitUsdMilli,
     updatedBy: adminId,
   });
   recordAudit(c, "admin.users.quota_upsert", {
@@ -444,14 +497,17 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
     targetId: id,
     detail: {
       feature: row.feature,
-      dailyLimitUsdMilli: row.daily_limit_usd_milli,
+      period: row.period,
+      limitUsdMilli: row.limit_usd_milli,
     },
   });
   return c.json(
     ok(
       {
         feature: row.feature,
-        dailyLimitUsdMilli: row.daily_limit_usd_milli,
+        period: row.period,
+        limitUsdMilli: row.limit_usd_milli,
+        dailyLimitUsdMilli: row.period === "day" ? row.limit_usd_milli : null,
         updatedAt: row.updated_at,
         updatedBy: row.updated_by,
       },
@@ -479,6 +535,92 @@ adminRouter.delete("/users/:id/quota/:feature", (c) => {
     });
   }
   return c.json(ok({ feature, removed }, c), 200);
+});
+
+// ---------- Grants ----------
+
+adminRouter.get("/users/:id/grants", (c) => {
+  const id = c.req.param("id");
+  const user = getUserById(id);
+  if (user === null) {
+    return c.json(fail("not_found", "Utilizatorul nu exista", c), 404);
+  }
+  const rows = listGrantsForUser(id).map(toGrantDto);
+  return c.json(ok({ userId: id, grants: rows }, c), 200);
+});
+
+adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
+  const id = c.req.param("id");
+  const user = getUserById(id);
+  if (user === null) {
+    return c.json(fail("not_found", "Utilizatorul nu exista", c), 404);
+  }
+  const body = await c.req.json().catch(() => null);
+  const parsed = CreateGrantSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+  const adminId = getOwnerId(c);
+  const row = createGrant({
+    userId: id,
+    feature: parsed.data.feature,
+    extraUsdMilli: parsed.data.extraUsdMilli,
+    expiresAt: parsed.data.expiresAt,
+    reason: parsed.data.reason ?? null,
+    grantedBy: adminId,
+  });
+  recordAudit(c, "admin.users.grant_create", {
+    targetKind: "user",
+    targetId: id,
+    detail: {
+      grantId: row.id,
+      feature: row.feature,
+      extraUsdMilli: row.extra_usd_milli,
+      expiresAt: row.expires_at,
+      reason: row.reason,
+    },
+  });
+  return c.json(ok(toGrantDto(row), c), 201);
+});
+
+adminRouter.delete("/grants/:id", limitAdminBody, async (c) => {
+  const rawId = c.req.param("id");
+  const grantId = Number(rawId);
+  if (!Number.isInteger(grantId) || grantId <= 0) {
+    return c.json(fail("invalid_id", "ID grant invalid", c), 400);
+  }
+  const before = getGrant(grantId);
+  if (before === null) {
+    return c.json(fail("not_found", "Grant inexistent", c), 404);
+  }
+  const body = await c.req.json().catch(() => null);
+  // Body opt: revocarea fara reason e acceptata. Daca body lipseste / e gol,
+  // sarim peste parse strict si tratam reason ca undefined.
+  let reason: string | null = null;
+  if (body !== null && typeof body === "object") {
+    const parsed = RevokeGrantSchema.safeParse(body);
+    if (!parsed.success) {
+      return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+    }
+    reason = parsed.data.reason ?? null;
+  }
+  const adminId = getOwnerId(c);
+  const revoked = revokeGrant(grantId, adminId, reason);
+  if (revoked) {
+    recordAudit(c, "admin.users.grant_revoke", {
+      targetKind: "user",
+      targetId: before.user_id,
+      detail: {
+        grantId: before.id,
+        feature: before.feature,
+        extraUsdMilli: before.extra_usd_milli,
+        reason,
+      },
+    });
+  }
+  // 200 in both cases (idempotent at HTTP) so the admin UI nu trebuie sa
+  // discrimineze "deja revocat" vs "tocmai revocat".
+  return c.json(ok({ id: grantId, revoked }, c), 200);
 });
 
 // ---------- helpers ----------
@@ -515,4 +657,32 @@ function toKeyStatus(value: string): { set: boolean; last4: string | null } {
 
 function last4(value: string): string | null {
   return value.length > 0 ? value.slice(-4) : null;
+}
+
+function toGrantDto(row: QuotaGrantRow): {
+  id: number;
+  userId: string;
+  feature: string;
+  extraUsdMilli: number;
+  expiresAt: string;
+  reason: string | null;
+  grantedAt: string;
+  grantedBy: string;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  revokedReason: string | null;
+} {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    feature: row.feature,
+    extraUsdMilli: row.extra_usd_milli,
+    expiresAt: row.expires_at,
+    reason: row.reason,
+    grantedAt: row.granted_at,
+    grantedBy: row.granted_by,
+    revokedAt: row.revoked_at,
+    revokedBy: row.revoked_by,
+    revokedReason: row.revoked_reason,
+  };
 }

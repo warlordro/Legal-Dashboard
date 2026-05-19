@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, type AdminUser, type QuotaOverride } from "@/lib/api";
+import { admin, type AdminUser, type QuotaOverride, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
@@ -12,15 +12,22 @@ import { cn } from "@/lib/utils";
 // AI usage cost model from PR-7. UI exposes USD with up to 3-decimal precision.
 const MILLI = 1000;
 
-function milliToUsd(milli: number): string {
+const PERIOD_LABELS: Record<QuotaPeriod, string> = {
+  day: "Zilnic",
+  week: "Saptamanal",
+  month: "Lunar",
+};
+
+function milliToUsd(milli: number | null): string {
+  if (milli === null) return "—";
   return (milli / MILLI).toFixed(3);
 }
 
-function parseUsdInputToMilli(value: string): number | null {
+function parseUsdInputToMilli(value: string): number | null | "invalid" {
   const trimmed = value.trim();
-  if (!trimmed) return null;
+  if (!trimmed) return "invalid";
   const n = Number(trimmed);
-  if (!Number.isFinite(n) || n < 0) return null;
+  if (!Number.isFinite(n) || n < 0) return "invalid";
   return Math.round(n * MILLI);
 }
 
@@ -34,7 +41,9 @@ export default function AdminQuota() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [feature, setFeature] = useState("");
+  const [period, setPeriod] = useState<QuotaPeriod>("day");
   const [limitUsd, setLimitUsd] = useState("");
+  const [unlimited, setUnlimited] = useState(false);
   const [busyFeature, setBusyFeature] = useState<string | null>(null);
 
   const search = async (e: React.FormEvent) => {
@@ -75,7 +84,9 @@ export default function AdminQuota() {
     setSelected(user);
     setCandidates([]);
     setFeature("");
+    setPeriod("day");
     setLimitUsd("");
+    setUnlimited(false);
   };
 
   const onUpsert = async (e: React.FormEvent) => {
@@ -86,18 +97,30 @@ export default function AdminQuota() {
       setError("Introdu un nume pentru feature.");
       return;
     }
-    const milli = parseUsdInputToMilli(limitUsd);
-    if (milli === null) {
-      setError("Introdu o limita zilnica valida (>= 0).");
-      return;
+    let limitUsdMilli: number | null;
+    if (unlimited) {
+      limitUsdMilli = null;
+    } else {
+      const parsed = parseUsdInputToMilli(limitUsd);
+      if (parsed === "invalid") {
+        setError("Introdu o limita valida (>= 0) sau bifeaza 'Nelimitat'.");
+        return;
+      }
+      limitUsdMilli = parsed;
     }
     setBusyFeature(featureKey);
     setError(null);
     try {
-      await admin.upsertQuota(selected.id, featureKey, milli);
+      await admin.upsertQuota(selected.id, {
+        feature: featureKey,
+        period,
+        limitUsdMilli,
+      });
       await loadOverrides(selected.id);
       setFeature("");
       setLimitUsd("");
+      setPeriod("day");
+      setUnlimited(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la salvarea cotei.");
     } finally {
@@ -107,9 +130,11 @@ export default function AdminQuota() {
 
   const onDelete = async (override: QuotaOverride) => {
     if (!selected) return;
+    const limitLabel = override.limitUsdMilli === null ? "nelimitat" : `${milliToUsd(override.limitUsdMilli)} $`;
+    const periodLabel = PERIOD_LABELS[override.period].toLowerCase();
     const ok = await confirm({
       title: "Sterge cota",
-      message: `Sterge override-ul pentru "${override.feature}" (${milliToUsd(override.dailyLimitUsdMilli)} $/zi)? Userul va reveni la limita default.`,
+      message: `Sterge override-ul pentru "${override.feature}" (${limitLabel} / ${periodLabel})? Userul va reveni la limita default.`,
       destructive: true,
       confirmLabel: "Sterge",
     });
@@ -128,7 +153,14 @@ export default function AdminQuota() {
 
   const startEdit = (override: QuotaOverride) => {
     setFeature(override.feature);
-    setLimitUsd(milliToUsd(override.dailyLimitUsdMilli));
+    setPeriod(override.period);
+    if (override.limitUsdMilli === null) {
+      setUnlimited(true);
+      setLimitUsd("");
+    } else {
+      setUnlimited(false);
+      setLimitUsd(milliToUsd(override.limitUsdMilli));
+    }
   };
 
   return (
@@ -140,7 +172,8 @@ export default function AdminQuota() {
             Cote utilizatori
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Override-uri zilnice per feature (in USD). Salvate ca milli-USD pentru aliniere cu modelul de cost AI.
+            Override-uri pe rolling window (zi / saptamana / luna) in USD. Bifeaza "Nelimitat" pentru a scoate capul.
+            Stocate ca milli-USD pentru aliniere cu modelul de cost AI.
           </p>
         </div>
 
@@ -220,27 +253,67 @@ export default function AdminQuota() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={onUpsert} className="grid gap-3 md:grid-cols-[1fr_180px_auto]">
-                <input
-                  type="text"
-                  value={feature}
-                  onChange={(e) => setFeature(e.target.value)}
-                  placeholder="Feature (ex: ai.claude, monitoring.dosar)"
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                />
-                <input
-                  type="number"
-                  step="0.001"
-                  min="0"
-                  value={limitUsd}
-                  onChange={(e) => setLimitUsd(e.target.value)}
-                  placeholder="Limita / zi (USD)"
-                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
-                />
+              <form onSubmit={onUpsert} className="grid gap-3 md:grid-cols-[1fr_140px_160px_auto] md:items-end">
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-feature">
+                    Feature
+                  </label>
+                  <input
+                    id="quota-feature"
+                    type="text"
+                    value={feature}
+                    onChange={(e) => setFeature(e.target.value)}
+                    placeholder="ex: ai.single, ai.multi"
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-period">
+                    Perioada
+                  </label>
+                  <select
+                    id="quota-period"
+                    value={period}
+                    onChange={(e) => setPeriod(e.target.value as QuotaPeriod)}
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    <option value="day">Zilnic</option>
+                    <option value="week">Saptamanal</option>
+                    <option value="month">Lunar</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-limit">
+                    Limita (USD)
+                  </label>
+                  <input
+                    id="quota-limit"
+                    type="number"
+                    step="0.001"
+                    min="0"
+                    value={limitUsd}
+                    onChange={(e) => setLimitUsd(e.target.value)}
+                    placeholder="ex: 25"
+                    disabled={unlimited}
+                    className={cn(
+                      "h-9 w-full rounded-md border border-input bg-background px-3 text-sm",
+                      unlimited && "opacity-50"
+                    )}
+                  />
+                </div>
                 <Button type="submit" disabled={busyFeature !== null}>
                   <Plus className="h-4 w-4" />
                   Salveaza
                 </Button>
+                <label className="col-span-full flex items-center gap-2 text-xs text-muted-foreground">
+                  <input
+                    type="checkbox"
+                    checked={unlimited}
+                    onChange={(e) => setUnlimited(e.target.checked)}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span>Nelimitat (limita NULL — pass-through fara cap)</span>
+                </label>
               </form>
 
               <div className="overflow-x-auto">
@@ -248,7 +321,8 @@ export default function AdminQuota() {
                   <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                     <tr>
                       <th className="px-3 py-2 font-semibold">Feature</th>
-                      <th className="px-3 py-2 font-semibold">Limita / zi</th>
+                      <th className="px-3 py-2 font-semibold">Perioada</th>
+                      <th className="px-3 py-2 font-semibold">Limita</th>
                       <th className="px-3 py-2 font-semibold">Actualizat</th>
                       <th className="px-3 py-2 font-semibold">De</th>
                       <th className="px-3 py-2" />
@@ -257,7 +331,7 @@ export default function AdminQuota() {
                   <tbody>
                     {overrides.length === 0 && !loading && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-6 text-center text-muted-foreground">
+                        <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
                           Nu exista override-uri. Userul foloseste limita default.
                         </td>
                       </tr>
@@ -265,8 +339,13 @@ export default function AdminQuota() {
                     {overrides.map((row) => (
                       <tr key={row.feature} className="border-b border-border last:border-b-0 hover:bg-muted/30">
                         <td className="px-3 py-2 align-top font-mono text-xs">{row.feature}</td>
+                        <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[row.period]}</td>
                         <td className="px-3 py-2 align-top">
-                          <span className="font-mono">${milliToUsd(row.dailyLimitUsdMilli)}</span>
+                          {row.limitUsdMilli === null ? (
+                            <Badge variant="outline">Nelimitat</Badge>
+                          ) : (
+                            <span className="font-mono">${milliToUsd(row.limitUsdMilli)}</span>
+                          )}
                         </td>
                         <td className="px-3 py-2 align-top text-xs text-muted-foreground">
                           {formatIsoDateTime(row.updatedAt)}

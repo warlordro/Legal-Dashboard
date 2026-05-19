@@ -16,6 +16,7 @@ import {
   Users as UsersIcon,
   ClipboardList,
   Gauge,
+  Gift,
   ShieldCheck,
   KeyRound,
 } from "lucide-react";
@@ -39,6 +40,8 @@ const adminNavItems = [
   { to: "/admin/users", label: "Utilizatori", icon: UsersIcon },
   { to: "/admin/audit", label: "Audit", icon: ClipboardList },
   { to: "/admin/quota", label: "Cote", icon: Gauge },
+  { to: "/admin/grants", label: "Granturi", icon: Gift },
+  { to: "/admin/usage", label: "Consum", icon: Activity },
   { to: "/admin/keys", label: "Chei API", icon: KeyRound },
 ];
 

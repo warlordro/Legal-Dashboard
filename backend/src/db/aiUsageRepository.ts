@@ -183,6 +183,58 @@ export function sumAiUsageMilliToday(ownerId: string, feature: string): number {
   return row.total;
 }
 
+// v2.32.0 rolling window: suma cost intr-o fereastra rolling (secunde inapoi)
+// per quotaGuard. Spre deosebire de sumAiUsageMilliToday (date='now', calendar),
+// asta foloseste fereastra "-N seconds" pentru a respecta semantica rolling
+// (D5/D15). features: aliasele se aplica identic ca la sumToday.
+//
+// Format-ul timpului boundary trebuie sa fie ISO 8601 ('YYYY-MM-DDTHH:MM:SS.sssZ')
+// ca sa fie lexicografic-comparabil cu ts-ul coloanei (default-ul tabelei e
+// strftime cu T+Z). datetime('now') returneaza 'YYYY-MM-DD HH:MM:SS' (spatiu),
+// iar spatiul (0x20) < 'T' (0x54) face ca orice ts ISO > orice datetime('now'),
+// indiferent de timpul real - bug subtle de string comparison.
+export function sumAiUsageMilliInWindow(ownerId: string, feature: string, windowSeconds: number): number {
+  if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) {
+    throw new Error("windowSeconds must be a positive number");
+  }
+  const features = quotaFeatureAliases(feature);
+  const placeholders = features.map(() => "?").join(", ");
+  const modifier = `-${Math.floor(windowSeconds)} seconds`;
+  const row = getDb()
+    .prepare(
+      `SELECT COALESCE(SUM(cost_usd_milli), 0) AS total
+       FROM ai_usage
+       WHERE owner_id = ?
+         AND feature IN (${placeholders})
+         AND ts > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)`
+    )
+    .get(ownerId, ...features, modifier) as { total: number };
+  return row.total;
+}
+
+// earliestAiUsageTsInWindow: timestamp-ul cel mai vechi din fereastra rolling
+// care contribuie la suma. Folosit de quotaGuard pentru Retry-After corect
+// (Codex C2): retry_after = (earliest_ts + window_seconds) - now. Null cand
+// fereastra e goala.
+export function earliestAiUsageTsInWindow(ownerId: string, feature: string, windowSeconds: number): string | null {
+  if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) {
+    throw new Error("windowSeconds must be a positive number");
+  }
+  const features = quotaFeatureAliases(feature);
+  const placeholders = features.map(() => "?").join(", ");
+  const modifier = `-${Math.floor(windowSeconds)} seconds`;
+  const row = getDb()
+    .prepare(
+      `SELECT MIN(ts) AS earliest
+       FROM ai_usage
+       WHERE owner_id = ?
+         AND feature IN (${placeholders})
+         AND ts > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)`
+    )
+    .get(ownerId, ...features, modifier) as { earliest: string | null };
+  return row.earliest ?? null;
+}
+
 function quotaFeatureAliases(feature: string): string[] {
   if (feature === "ai.single") return ["ai.single", "dosar_summary"];
   if (feature === "ai.multi") return ["ai.multi", "dosar_multi_analyst", "dosar_multi_judge"];

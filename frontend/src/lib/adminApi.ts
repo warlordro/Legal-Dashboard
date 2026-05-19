@@ -74,9 +74,15 @@ export interface PaginatedAudit {
   total: number;
 }
 
+export type QuotaPeriod = "day" | "week" | "month";
+
 export interface QuotaOverride {
   feature: string;
-  dailyLimitUsdMilli: number;
+  period: QuotaPeriod;
+  // v2.32.0: limita canonica (nullable = unlimited). dailyLimitUsdMilli ramane
+  // pentru clientii vechi — null cand period != 'day'.
+  limitUsdMilli: number | null;
+  dailyLimitUsdMilli: number | null;
   updatedAt: string;
   updatedBy: string | null;
 }
@@ -84,6 +90,32 @@ export interface QuotaOverride {
 export interface QuotaListResult {
   userId: string;
   overrides: QuotaOverride[];
+}
+
+export interface QuotaGrant {
+  id: number;
+  userId: string;
+  feature: string;
+  extraUsdMilli: number;
+  expiresAt: string;
+  reason: string | null;
+  grantedAt: string;
+  grantedBy: string;
+  revokedAt: string | null;
+  revokedBy: string | null;
+  revokedReason: string | null;
+}
+
+export interface QuotaGrantListResult {
+  userId: string;
+  grants: QuotaGrant[];
+}
+
+export interface CreateGrantInput {
+  feature: string;
+  extraUsdMilli: number;
+  expiresAt: string;
+  reason?: string | null;
 }
 
 export type TenantKeyField = "anthropic" | "openai" | "google" | "openrouter" | "twocaptcha" | "capsolver";
@@ -107,12 +139,38 @@ export interface TenantKeysResult {
 
 export interface MeBudgetItem {
   feature: string;
+  period: QuotaPeriod;
   usedMilli: number;
+  baseLimitMilli: number | null;
+  extraFromGrantsMilli: number;
+  effectiveLimitMilli: number | null;
+  // Legacy alias mentinut pentru BudgetIndicator + clienti vechi. Egal cu
+  // effectiveLimitMilli; null = unlimited.
   limitMilli: number | null;
+}
+
+export interface MeFxRate {
+  pair: "USD/EUR";
+  rate: number | null;
+  rateDate: string | null;
+  stale: boolean;
 }
 
 export interface MeBudgetResult {
   items: MeBudgetItem[];
+  fx: MeFxRate;
+}
+
+export interface MeBudgetWarning {
+  feature: string;
+  thresholdPct: number;
+  firedAt: string;
+  emailSentAt: string | null;
+  aboveThresholdSince: string;
+}
+
+export interface MeBudgetWarningsResult {
+  warnings: MeBudgetWarning[];
 }
 
 export interface ListUsersOpts {
@@ -185,6 +243,16 @@ export const me = {
     const res = await apiFetch("/api/v1/me/budget", { signal });
     return unwrapMonitoring<MeBudgetResult>(res);
   },
+
+  budgetWarnings: async (signal?: AbortSignal): Promise<MeBudgetWarningsResult> => {
+    const res = await apiFetch("/api/v1/me/budget-warnings", { signal });
+    return unwrapMonitoring<MeBudgetWarningsResult>(res);
+  },
+
+  fxUsdEur: async (signal?: AbortSignal): Promise<MeFxRate> => {
+    const res = await apiFetch("/api/v1/me/fx/usd-eur", { signal });
+    return unwrapMonitoring<MeFxRate>(res);
+  },
 };
 
 export const admin = {
@@ -228,11 +296,18 @@ export const admin = {
     return unwrapMonitoring<QuotaListResult>(res);
   },
 
-  upsertQuota: async (userId: string, feature: string, dailyLimitUsdMilli: number): Promise<QuotaOverride> => {
+  upsertQuota: async (
+    userId: string,
+    input: { feature: string; period: QuotaPeriod; limitUsdMilli: number | null }
+  ): Promise<QuotaOverride> => {
     const res = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(userId)}/quota`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ feature, dailyLimitUsdMilli }),
+      body: JSON.stringify({
+        feature: input.feature,
+        period: input.period,
+        limitUsdMilli: input.limitUsdMilli,
+      }),
     });
     return unwrapMonitoring<QuotaOverride>(res);
   },
@@ -243,6 +318,34 @@ export const admin = {
       { method: "DELETE" }
     );
     return unwrapMonitoring<{ feature: string; removed: boolean }>(res);
+  },
+
+  listGrants: async (userId: string, signal?: AbortSignal): Promise<QuotaGrantListResult> => {
+    const res = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(userId)}/grants`, { signal });
+    return unwrapMonitoring<QuotaGrantListResult>(res);
+  },
+
+  createGrant: async (userId: string, input: CreateGrantInput): Promise<QuotaGrant> => {
+    const res = await apiFetch(`/api/v1/admin/users/${encodeURIComponent(userId)}/grants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        feature: input.feature,
+        extraUsdMilli: input.extraUsdMilli,
+        expiresAt: input.expiresAt,
+        reason: input.reason ?? undefined,
+      }),
+    });
+    return unwrapMonitoring<QuotaGrant>(res);
+  },
+
+  revokeGrant: async (grantId: number, reason?: string | null): Promise<{ id: number; revoked: boolean }> => {
+    const res = await apiFetch(`/api/v1/admin/grants/${grantId}`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ reason: reason ?? undefined }),
+    });
+    return unwrapMonitoring<{ id: number; revoked: boolean }>(res);
   },
 
   getTenantKeys: async (signal?: AbortSignal): Promise<TenantKeysResult> => {

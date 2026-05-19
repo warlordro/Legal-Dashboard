@@ -1,12 +1,21 @@
 import type { Context, Next } from "hono";
 
 import { getAuthMode } from "../auth/config.ts";
-import { sumAiUsageMilliToday } from "../db/aiUsageRepository.ts";
-import { getOverride } from "../db/userQuotaRepository.ts";
+import { earliestAiUsageTsInWindow, sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
+import { sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
+import { type QuotaPeriod, getOverride } from "../db/userQuotaRepository.ts";
 import { getOwnerId } from "./owner.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 
 export type QuotaFeature = "ai.single" | "ai.multi";
+
+// v2.32.0 rolling window seconds per period. Locked in D15 — operatorul nu
+// alege secundele, doar perioada (day/week/month). 24h/7d/30d.
+const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
+  day: 86_400,
+  week: 604_800,
+  month: 2_592_000,
+};
 
 // Default-deny floor for users without an explicit per-feature override.
 // LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI (integer milli-USD, daily) gives the
@@ -32,19 +41,38 @@ export function quotaGuard(feature: QuotaFeature) {
     const ownerId = getOwnerId(c);
     const override = getOverride(ownerId, feature);
     const defaultMilli = readDefaultQuotaMilli();
-    const limitMilli = override ? override.daily_limit_usd_milli : defaultMilli;
-    if (limitMilli === null) return next();
 
-    const usedMilli = sumAiUsageMilliToday(ownerId, feature);
+    // Period selection: override.period > default 'day'. Defaults sunt mereu
+    // daily window — adminul nu poate seta period default fara override.
+    const period: QuotaPeriod = override?.period ?? "day";
+    const windowSeconds = PERIOD_SECONDS[period];
+
+    // Base limit: override.limit_usd_milli (poate fi NULL = unlimited),
+    // altfel defaultMilli (env). Daca NU exista nici override nici default,
+    // pass-through (backward compatible).
+    const baseLimit = override ? override.limit_usd_milli : defaultMilli;
+    if (baseLimit === null) return next();
+
+    // Grants active la baza limitei: append-only, fiecare grant adauga
+    // extra_usd_milli pana la expirare. NU se aplica pe windowSeconds — sunt
+    // grants pe FEATURE per user, valabile pana la expires_at.
+    const extraFromGrants = sumActiveExtraMilli(ownerId, feature);
+    const effectiveLimit = baseLimit + extraFromGrants;
+
+    const usedMilli = sumAiUsageMilliInWindow(ownerId, feature, windowSeconds);
     // Explicit limit=0 always blocks (admin opt-in to deny-all). Otherwise we
-    // block when today's spend equals or exceeds the cap.
-    if (limitMilli === 0 || usedMilli >= limitMilli) {
-      const retryAfter = secondsUntilUtcMidnight();
+    // block when spend equals or exceeds the cap. Grants nu pot "unblock" un
+    // limit=0 fara grant: baseLimit=0+extra raman caz numeric normal.
+    if (effectiveLimit === 0 || usedMilli >= effectiveLimit) {
+      const retryAfter = retryAfterSecondsForWindow(ownerId, feature, windowSeconds);
       c.header("Retry-After", String(retryAfter));
       return c.json(
-        fail(ErrorCodes.QUOTA_EXCEEDED, `Bugetul zilnic pentru ${feature} a fost depasit. Contacteaza adminul.`, c, {
+        fail(ErrorCodes.QUOTA_EXCEEDED, `Bugetul pentru ${feature} a fost depasit. Contacteaza adminul.`, c, {
           usedMilli,
-          limitMilli,
+          limitMilli: effectiveLimit,
+          baseLimitMilli: baseLimit,
+          extraFromGrantsMilli: extraFromGrants,
+          period,
           feature,
           source: override ? "override" : "default",
         }),
@@ -56,7 +84,20 @@ export function quotaGuard(feature: QuotaFeature) {
   };
 }
 
-function secondsUntilUtcMidnight(now = new Date()): number {
-  const next = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-  return Math.max(1, Math.ceil((next.getTime() - now.getTime()) / 1000));
+// Retry-After corect pentru rolling window: cea mai veche ts care contribuie
+// la suma + windowSeconds = momentul cand iese din fereastra. Daca fereastra
+// e goala (improbabil daca am ajuns la blocaj), fallback la windowSeconds.
+function retryAfterSecondsForWindow(
+  ownerId: string,
+  feature: QuotaFeature,
+  windowSeconds: number,
+  now: Date = new Date()
+): number {
+  const earliest = earliestAiUsageTsInWindow(ownerId, feature, windowSeconds);
+  if (!earliest) return windowSeconds;
+  const earliestMs = Date.parse(earliest);
+  if (Number.isNaN(earliestMs)) return windowSeconds;
+  const releaseMs = earliestMs + windowSeconds * 1000;
+  const deltaSec = Math.ceil((releaseMs - now.getTime()) / 1000);
+  return Math.max(1, deltaSec);
 }

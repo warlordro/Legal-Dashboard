@@ -13,6 +13,8 @@ import Alerts from "@/pages/Alerts";
 import AdminUsers from "@/pages/admin/Users";
 import AdminAudit from "@/pages/admin/Audit";
 import AdminQuota from "@/pages/admin/Quota";
+import AdminGrants from "@/pages/admin/Grants";
+import AdminUsage from "@/pages/admin/Usage";
 import AdminKeys from "@/pages/admin/Keys";
 import { AdminGate } from "@/components/AdminGate";
 import { useAuthMode } from "@/hooks/useAuthMode";
@@ -217,6 +219,16 @@ function AppShell({
         {pathname === "/admin/quota" && (
           <AdminGate>
             <AdminQuota />
+          </AdminGate>
+        )}
+        {pathname === "/admin/grants" && (
+          <AdminGate>
+            <AdminGrants />
+          </AdminGate>
+        )}
+        {pathname === "/admin/usage" && (
+          <AdminGate>
+            <AdminUsage />
           </AdminGate>
         )}
         {pathname === "/admin/keys" && (

@@ -1,18 +1,18 @@
 import { getDb } from "./schema.ts";
 
-// PR-8 admin quota overrides. CRUD only — the AI rate-limit path that consumes
-// these values lands in PR-9 alongside the web-mode quota tightening. Values
-// are integer milli-USD to match ai_usage.cost_usd_milli precision.
-//
-// The key is (user_id, feature). `feature` is free-form text on the schema
-// side (CHECK length > 0) — today the AI service emits values like
-// "ai.single", "ai.multi", and we accept whatever the admin entered without a
-// closed enum, so a future feature added in code does not require a DDL bump.
+// v2.32.0 quota extension. Tabel extins prin migration 0027 cu:
+//   - period (day | week | month) - rolling window 24h / 7d / 30d
+//   - limit_usd_milli NULLABLE - NULL inseamna unlimited (orice admin poate seta)
+// Pastreaza cheia (user_id, feature) si CRUD-ul stabilit in PR-8.
+// quotaGuard consuma rolling window din ai_usage in functie de period.
+
+export type QuotaPeriod = "day" | "week" | "month";
 
 export interface QuotaOverrideRow {
   user_id: string;
   feature: string;
-  daily_limit_usd_milli: number;
+  period: QuotaPeriod;
+  limit_usd_milli: number | null;
   updated_at: string;
   updated_by: string | null;
 }
@@ -20,11 +20,14 @@ export interface QuotaOverrideRow {
 export interface UpsertOverrideInput {
   userId: string;
   feature: string;
-  dailyLimitUsdMilli: number;
+  period: QuotaPeriod;
+  limitUsdMilli: number | null;
   updatedBy?: string | null;
 }
 
-const COLUMNS = "user_id, feature, daily_limit_usd_milli, updated_at, updated_by";
+const COLUMNS = "user_id, feature, period, limit_usd_milli, updated_at, updated_by";
+
+const VALID_PERIODS: ReadonlySet<QuotaPeriod> = new Set(["day", "week", "month"]);
 
 function assertFeature(feature: string): void {
   if (typeof feature !== "string" || feature.length === 0) {
@@ -32,9 +35,17 @@ function assertFeature(feature: string): void {
   }
 }
 
-function assertLimit(milli: number): void {
+function assertPeriod(period: string): asserts period is QuotaPeriod {
+  if (!VALID_PERIODS.has(period as QuotaPeriod)) {
+    throw new Error("invalid period: must be day | week | month");
+  }
+}
+
+// NULL = unlimited; orice numar trebuie sa fie integer non-negativ.
+function assertLimit(milli: number | null): void {
+  if (milli === null) return;
   if (typeof milli !== "number" || !Number.isFinite(milli) || !Number.isInteger(milli) || milli < 0) {
-    throw new Error("invalid daily_limit_usd_milli: must be non-negative integer");
+    throw new Error("invalid limit_usd_milli: must be null or non-negative integer");
   }
 }
 
@@ -58,31 +69,29 @@ export function getOverride(userId: string, feature: string): QuotaOverrideRow |
   return row ?? null;
 }
 
-// Upsert because the admin UI is "set the limit" rather than "create vs edit".
-// updated_at is refreshed on every call so the audit trail can show the most
-// recent admin action (the audit_log row carries the diff; this column is for
-// quick "when did this last change" lookups in admin lists).
+// Upsert: admin UI e "set the limit" si nu "create vs edit". updated_at refresh
+// la fiecare apel da audit timeline rapid; modificarile concrete merg in
+// audit_log (diff). Acum accepta period si NULL limit (unlimited).
 export function upsertOverride(input: UpsertOverrideInput): QuotaOverrideRow {
   assertFeature(input.feature);
-  assertLimit(input.dailyLimitUsdMilli);
+  assertPeriod(input.period);
+  assertLimit(input.limitUsdMilli);
 
   const db = getDb();
   db.prepare(
     `INSERT INTO user_quota_overrides
-       (user_id, feature, daily_limit_usd_milli, updated_at, updated_by)
-     VALUES (?, ?, ?, datetime('now'), ?)
+       (user_id, feature, period, limit_usd_milli, updated_at, updated_by)
+     VALUES (?, ?, ?, ?, datetime('now'), ?)
      ON CONFLICT(user_id, feature) DO UPDATE SET
-       daily_limit_usd_milli = excluded.daily_limit_usd_milli,
+       period = excluded.period,
+       limit_usd_milli = excluded.limit_usd_milli,
        updated_at = excluded.updated_at,
        updated_by = excluded.updated_by`
-  ).run(input.userId, input.feature, input.dailyLimitUsdMilli, input.updatedBy ?? null);
+  ).run(input.userId, input.feature, input.period, input.limitUsdMilli, input.updatedBy ?? null);
 
   return getOverride(input.userId, input.feature) as QuotaOverrideRow;
 }
 
-// Returns true if a row was deleted, false if the override did not exist.
-// Caller can map false to a 404 if it cares, but DELETE is idempotent at the
-// HTTP layer so we don't throw on a missing row.
 export function deleteOverride(userId: string, feature: string): boolean {
   const result = getDb()
     .prepare("DELETE FROM user_quota_overrides WHERE user_id = ? AND feature = ?")

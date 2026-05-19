@@ -11,6 +11,7 @@ import { insertAiUsage } from "../db/aiUsageRepository.ts";
 import { getEmailSettings, upsertEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { invalidateCache, setCaptchaSettings, setTenantKey } from "../db/tenantKeysRepository.ts";
+import { createGrant } from "../db/userQuotaGrantsRepository.ts";
 import { upsertOverride } from "../db/userQuotaRepository.ts";
 import { insertUser } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
@@ -128,7 +129,7 @@ describe("/api/v1/me/key-status", () => {
 
 describe("/api/v1/me/budget", () => {
   it("returns usage plus configured limits for the current user", async () => {
-    upsertOverride({ userId: "local", feature: "ai.single", dailyLimitUsdMilli: 50, updatedBy: "admin" });
+    upsertOverride({ userId: "local", feature: "ai.single", period: "day", limitUsdMilli: 50, updatedBy: "admin" });
     insertAiUsage({
       ownerId: "local",
       provider: "openai",
@@ -144,10 +145,66 @@ describe("/api/v1/me/budget", () => {
     const body = await jsonOf(res);
     expect(body.data.items).toEqual(
       expect.arrayContaining([
-        { feature: "ai.single", usedMilli: 12, limitMilli: 50 },
-        { feature: "ai.multi", usedMilli: 0, limitMilli: null },
+        expect.objectContaining({
+          feature: "ai.single",
+          usedMilli: 12,
+          limitMilli: 50,
+          period: "day",
+          baseLimitMilli: 50,
+          extraFromGrantsMilli: 0,
+          effectiveLimitMilli: 50,
+        }),
+        expect.objectContaining({
+          feature: "ai.multi",
+          usedMilli: 0,
+          limitMilli: null,
+          period: "day",
+          baseLimitMilli: null,
+          extraFromGrantsMilli: 0,
+          effectiveLimitMilli: null,
+        }),
       ])
     );
+    expect(body.data.fx).toMatchObject({ pair: "USD/EUR" });
+  });
+
+  it("adds active grants into effectiveLimit", async () => {
+    upsertOverride({ userId: "local", feature: "ai.single", period: "day", limitUsdMilli: 50, updatedBy: "admin" });
+    createGrant({
+      userId: "local",
+      feature: "ai.single",
+      extraUsdMilli: 30,
+      expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
+      reason: "test",
+      grantedBy: "admin",
+    });
+
+    const res = await buildApp().request("/api/v1/me/budget");
+    const body = await jsonOf(res);
+    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai.single");
+    expect(single).toMatchObject({
+      baseLimitMilli: 50,
+      extraFromGrantsMilli: 30,
+      effectiveLimitMilli: 80,
+      limitMilli: 80,
+    });
+  });
+
+  it("reports rolling-window usage when period=week", async () => {
+    upsertOverride({ userId: "local", feature: "ai.single", period: "week", limitUsdMilli: 100, updatedBy: "admin" });
+    insertAiUsage({
+      ownerId: "local",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 30,
+      ts: new Date(Date.now() - 3 * 86_400_000).toISOString(),
+    });
+
+    const res = await buildApp().request("/api/v1/me/budget");
+    const body = await jsonOf(res);
+    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai.single");
+    expect(single).toMatchObject({ period: "week", usedMilli: 30, baseLimitMilli: 100 });
   });
 });
 

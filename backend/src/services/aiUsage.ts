@@ -1,4 +1,6 @@
 import { insertAiUsage, type AiUsageProvider, type AiUsageRoutingTag } from "../db/aiUsageRepository.ts";
+import { getAuthMode } from "../auth/config.ts";
+import { checkBudgetWarning } from "./budgetWarningService.ts";
 
 export type { AiUsageProvider };
 export type { AiUsageRoutingTag };
@@ -166,6 +168,23 @@ export function recordAiUsageSafely(input: {
         requestId: tracking.requestId,
         routingTag,
       });
+      // v2.32.0: dupa write reusit, verifica pragul 80% (web mode only).
+      // Failure-ul aici nu trebuie sa ridice exceptie peste insertAiUsage —
+      // catch separat in checkBudgetWarning, dar tot wrap-uit aici ca un
+      // throw sincron sa nu rupa microtask-ul.
+      if (getAuthMode() === "web") {
+        checkBudgetWarning(tracking.ownerId, tracking.feature).catch((warnErr) => {
+          console.warn(
+            JSON.stringify({
+              action: "budget_warning.check_failed",
+              owner_id: tracking.ownerId,
+              feature: tracking.feature,
+              error: warnErr instanceof Error ? warnErr.message : String(warnErr),
+              ts: new Date().toISOString(),
+            })
+          );
+        });
+      }
     } catch (e) {
       // Structured single-line JSON so log scrapers can grep
       // `"action":"ai_usage.persist_failed"`. Mirrors the shape used by

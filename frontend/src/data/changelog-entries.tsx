@@ -39,6 +39,52 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.32.0",
+    date: "19 Mai 2026",
+    subtitle:
+      "Extensie politici cota AI in web mode: perioade rolling (zi/saptamana/luna), buget nelimitat, granturi cu expirare, soft warning la 80% prin banner + email, plus conversie EUR via cursul oficial BCE fetch-uit zilnic. Desktop ramane neimpactat.",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Migratii 0027-0030",
+        content:
+          "Patru migratii noi cu UP, DOWN si test roundtrip: extensia user_quota_overrides cu coloana period (day/week/month) si suport limit_usd_milli NULL pentru unlimited; tabela user_quota_grants pentru granturi cu extra_usd_milli, expires_at, granted_by si revoked_at; tabela fx_rates pentru ratele BCE; tabela budget_notifications pentru state machine-ul pragului 80%.",
+      },
+      {
+        title: "quotaGuard cu fereastra rolling, unlimited si granturi",
+        content:
+          "Middleware-ul calculeaza limita efectiva ca baza + suma granturi active. Limita NULL = unlimited (skip enforcement). Fereastra de consum se calculeaza rolling N secunde inainte de now (day=86400, week=604800, month=2592000). Granturile expirate sunt automat excluse. Desktop ramane neimpactat pentru ca middleware-ul scurt-circuiteaza in afara modului web.",
+      },
+      {
+        title: "Granturi cu expirare si rute admin",
+        content:
+          "Rute noi: GET /api/v1/admin/users/:id/grants, POST /api/v1/admin/users/:id/grants (validare extra_usd_milli > 0 si expires_at ISO viitor), DELETE /api/v1/admin/grants/:id (idempotent). Auditul logheaza admin.users.grant_create si admin.users.grant_revoke cu feature, suma, expiresAt si motiv, fara plaintext.",
+      },
+      {
+        title: "Soft warning la 80% cu auto-clear",
+        content:
+          "Service nou budgetWarningService ruleaza la fiecare write de ai_usage (queueMicrotask, fara sa blocheze response-ul). Cand consumul depaseste 80% din limita efectiva, deschide o notificare (above_threshold_since), trimite email + banner UI (fired_at), si auto-clear (cleared_at) cand consumul scade sub prag. Anti-spam: o singura emisie email per episod activ pana la clear.",
+      },
+      {
+        title: "FX fetcher BCE zilnic",
+        content:
+          "fxFetcher.ts interogheaza endpoint-ul oficial BCE eurofxref-daily.xml (timeout 10s, fail-closed), parseaza XML-ul si inverseaza EUR/USD in USD/EUR salvat in fx_rates. Scheduler ruleaza la 16:30 CET dupa publicarea BCE. Boot fail-safe: fetch una la pornire, eroarea ignorata. UI ramane pe ultima rata valida sau afiseaza 'EUR indisponibil' daca rata e stale > 48h. Manual entry interzis (D14).",
+      },
+      {
+        title: "API consum extins",
+        content:
+          "GET /api/v1/me/budget returneaza per feature period, usedMilli, baseLimitMilli, extraFromGrantsMilli, effectiveLimitMilli (NULL = unlimited), plus fx { pair, rate, rateDate, stale }. GET /api/v1/me/budget/warnings returneaza episoadele active. Campul legacy limitMilli ramane alias pentru effectiveLimitMilli.",
+      },
+      {
+        title: "UI admin extins",
+        content:
+          "Pagina /admin/quota primeste selector perioada (zilnic/saptamanal/lunar) si checkbox 'Nelimitat'. Pagina noua /admin/grants pentru emiterea si revocarea granturilor. Pagina noua /admin/usage cu banner avertizari active, card per feature cu bar progres color-coded (verde/amber/rosu), afisare USD + EUR fail-closed, plus badge rata BCE curenta.",
+      },
+    ],
+  },
+  {
     version: "v2.31.0",
     date: "19 Mai 2026",
     subtitle:

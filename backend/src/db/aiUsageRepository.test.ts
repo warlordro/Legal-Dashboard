@@ -5,11 +5,13 @@ import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  earliestAiUsageTsInWindow,
   getAiUsageByFeature,
   getAiUsageByProvider,
   getAiUsageTotals,
   insertAiUsage,
   listAiUsageLastDays,
+  sumAiUsageMilliInWindow,
   sumAiUsageMilliToday,
 } from "./aiUsageRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
@@ -203,5 +205,92 @@ describe("AI usage queries", () => {
 
     expect(sumAiUsageMilliToday("alice", "ai.single")).toBe(7);
     expect(sumAiUsageMilliToday("alice", "ai.multi")).toBe(24);
+  });
+});
+
+describe("sumAiUsageMilliInWindow", () => {
+  it("includes only rows inside the rolling window", () => {
+    const now = new Date();
+    const inside = new Date(now.getTime() - 30 * 60_000).toISOString(); // 30 min ago
+    const outside = new Date(now.getTime() - 5 * 3_600_000).toISOString(); // 5h ago
+
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 4,
+      ts: inside,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 9,
+      ts: outside,
+    });
+
+    // 1h window includes only the 30-min row.
+    expect(sumAiUsageMilliInWindow("alice", "ai.single", 3600)).toBe(4);
+    // 24h window includes both.
+    expect(sumAiUsageMilliInWindow("alice", "ai.single", 86_400)).toBe(13);
+  });
+
+  it("expands ai.multi aliases (dosar_multi_analyst / dosar_multi_judge)", () => {
+    const now = new Date();
+    const ts = new Date(now.getTime() - 60_000).toISOString();
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt",
+      feature: "dosar_multi_analyst",
+      costUsdMilli: 5,
+      ts,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "google",
+      model: "gemini",
+      feature: "dosar_multi_judge",
+      costUsdMilli: 7,
+      ts,
+    });
+    expect(sumAiUsageMilliInWindow("alice", "ai.multi", 3600)).toBe(12);
+  });
+
+  it("rejects non-positive windowSeconds", () => {
+    expect(() => sumAiUsageMilliInWindow("alice", "ai.single", 0)).toThrow();
+    expect(() => sumAiUsageMilliInWindow("alice", "ai.single", -1)).toThrow();
+  });
+});
+
+describe("earliestAiUsageTsInWindow", () => {
+  it("returns the oldest ts inside the window or null when empty", () => {
+    expect(earliestAiUsageTsInWindow("alice", "ai.single", 3600)).toBeNull();
+
+    const now = Date.now();
+    const tA = new Date(now - 50 * 60_000).toISOString(); // 50 min ago
+    const tB = new Date(now - 20 * 60_000).toISOString(); // 20 min ago
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: tA,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: tB,
+    });
+
+    const earliest = earliestAiUsageTsInWindow("alice", "ai.single", 3600);
+    // SQLite stores ISO strings; lexicographic order matches chronological.
+    expect(earliest).toBe(tA);
   });
 });

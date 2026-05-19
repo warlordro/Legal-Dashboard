@@ -42,7 +42,18 @@ describe("BudgetIndicator", () => {
 
   it("renders used and limit for a configured feature", async () => {
     vi.mocked(me.budget).mockResolvedValue({
-      items: [{ feature: "ai.single", usedMilli: 1250, limitMilli: 5000 }],
+      items: [
+        {
+          feature: "ai.single",
+          period: "day",
+          usedMilli: 1250,
+          baseLimitMilli: 5000,
+          extraFromGrantsMilli: 0,
+          effectiveLimitMilli: 5000,
+          limitMilli: 5000,
+        },
+      ],
+      fx: { pair: "USD/EUR", rate: null, rateDate: null, stale: true },
     });
 
     await render(<BudgetIndicator />);
@@ -53,7 +64,18 @@ describe("BudgetIndicator", () => {
 
   it("hides when limit is null", async () => {
     vi.mocked(me.budget).mockResolvedValue({
-      items: [{ feature: "ai.single", usedMilli: 1250, limitMilli: null }],
+      items: [
+        {
+          feature: "ai.single",
+          period: "day",
+          usedMilli: 1250,
+          baseLimitMilli: null,
+          extraFromGrantsMilli: 0,
+          effectiveLimitMilli: null,
+          limitMilli: null,
+        },
+      ],
+      fx: { pair: "USD/EUR", rate: null, rateDate: null, stale: true },
     });
 
     await render(<BudgetIndicator />);
