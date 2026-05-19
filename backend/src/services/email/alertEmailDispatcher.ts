@@ -1,6 +1,7 @@
 import type { MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
 import { getEmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
 import { recordAudit } from "../../db/auditRepository.ts";
+import { sanitizeSmtpError } from "../../util/auditSanitize.ts";
 import { isMailerConfigured, sendAlertEmail } from "./mailer.ts";
 
 // v2.10.1 #6: bounded concurrency on outbound SMTP dispatches. Without a cap,
@@ -96,6 +97,7 @@ export async function dispatchAlertEmail(alert: MonitoringAlertRow): Promise<voi
       }
     } catch (err) {
       console.error("[email] dispatchAlertEmail isolated failure", err);
+      const smtp = sanitizeSmtpError(err);
       try {
         recordAudit(null, "email.dispatch.failed", {
           outcome: "error",
@@ -104,7 +106,8 @@ export async function dispatchAlertEmail(alert: MonitoringAlertRow): Promise<voi
           targetId: String(alert.id),
           detail: {
             reason: "exception",
-            message: err instanceof Error ? err.message : String(err),
+            smtp,
+            alertKind: alert.kind,
           },
         });
       } catch (auditErr) {

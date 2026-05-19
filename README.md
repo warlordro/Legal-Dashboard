@@ -7,10 +7,12 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.32.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
+Versiune curenta: **v2.33.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
 si [SECURITY.md](SECURITY.md) pentru threat model. Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.32.0** - extensie politici cota AI in web mode: perioade rolling (zi, saptamana, luna) sau buget nelimitat per feature, granturi suplimentare cu expirare emise de admin, soft warning la 80% cu banner + email anti-spam si auto-clear, conversie EUR via cursul oficial BCE fetch-uit zilnic (fail-closed daca rata e stale > 48h). Pagini admin noi `/admin/grants` si `/admin/usage` in sidebar. Desktop ramane neimpactat pentru ca quotaGuard scurt-circuiteaza in afara modului web.
+Ultimul release **v2.33.0** - security hardening pentru CRITICAL-1 + 5 HIGH + 11 MEDIUM + 3 LOW: rezervari atomice quota/budget in web mode, instance lock si proxy trust explicite pentru deploy, SOAP streaming byte cap + RNPM fail-closed validation, FX BCE fara fallback manual si audit trail fara plaintext pentru secrete. Desktop ramane neimpactat pentru ca quotaGuard si helperii noi scurt-circuiteaza in afara modului web.
+
+Predecesor **v2.32.0** - extensie politici cota AI in web mode: perioade rolling (zi, saptamana, luna) sau buget nelimitat per feature, granturi suplimentare cu expirare emise de admin, soft warning la 80% cu banner + email anti-spam si auto-clear, conversie EUR via cursul oficial BCE fetch-uit zilnic (fail-closed daca rata e stale > 48h). Pagini admin noi `/admin/grants` si `/admin/usage` in sidebar. Desktop ramane neimpactat pentru ca quotaGuard scurt-circuiteaza in afara modului web.
 
 Predecesor **v2.31.0** - stack de deploy pe server cu Google OAuth2 prin sidecar oauth2-proxy. `deploy/docker-compose.prod.yml` aduce Caddy (TLS auto via Let s Encrypt) + oauth2-proxy v7.7.1-alpine + backend pe network intern (expose only, nu ports). Endpoint nou `POST /api/v1/auth/oauth2/sync` valideaza shared secret timing-safe, citeste `X-Auth-Request-Email` injectat de oauth2-proxy si mintea JWT-ul HS256 nativ pe cookie. `scripts/seed-admin.mjs` provisioneaza primul admin idempotent, iar `DEPLOY-SERVER.md` documenteaza pasii completi: prerequisite domeniu, Google Cloud OAuth client, generare secrete, boot stack, troubleshooting si rotire credentiale.
 
@@ -81,8 +83,8 @@ temp-file dupa send — elimina OOM-ul Electron main process pe export-uri mari
 helpers de formatare data TZ-safe. **900 teste backend, 92 teste frontend**.
 
 Predecesor **v2.21.0** - RNPM trust + DB migrations safety. `RnpmClient.search`
-are validare runtime Stage 1 cu Zod (`safeParse` + warning, throw pregatit prin
-`RNPM_RUNTIME_VALIDATION_ENFORCED=1`), statusul RNPM necunoscut ramane `NULL` in
+are validare runtime cu Zod; in v2.33.0 path-ul a devenit fail-closed by default,
+cu rollback operational temporar prin `RNPM_RUNTIME_VALIDATION_DISABLED=1`. Statusul RNPM necunoscut ramane `NULL` in
 baza locala si se afiseaza ca `Necunoscut`, iar `monitoring_runs` se purge-uieste
 chunked cu index nou `idx_monitoring_runs_started_at`. Include si safety hardening
 v2.20.9: type-guard total pe `firstResult.total`, SOAP response cap 8MB si sentinel

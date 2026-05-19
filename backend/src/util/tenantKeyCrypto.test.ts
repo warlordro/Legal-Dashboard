@@ -81,6 +81,13 @@ describe("tenantKeyCrypto", () => {
     resetMasterKeyCacheForTests();
     expect(() => getMasterKey()).toThrow("TENANT_KEY_ENCRYPTION_SECRET must decode to 32 bytes");
   });
+
+  it("requires strict padded base64 for the 32-byte web master key", () => {
+    process.env.TENANT_KEY_ENCRYPTION_SECRET = randomBytes(32).toString("base64url");
+    resetMasterKeyCacheForTests();
+
+    expect(() => getMasterKey()).toThrow("TENANT_KEY_ENCRYPTION_SECRET must decode to 32 bytes");
+  });
 });
 
 function flipFirstByte(b64: string): string {

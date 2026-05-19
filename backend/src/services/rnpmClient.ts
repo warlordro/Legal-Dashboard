@@ -275,10 +275,8 @@ export class RnpmClient {
         "[rnpm] runtime validation failed pe payload search:",
         JSON.stringify(parsed.error.flatten().fieldErrors).slice(0, 500)
       );
-      if (process.env.RNPM_RUNTIME_VALIDATION_ENFORCED === "1") {
-        throw new RnpmError("Raspunsul RNPM nu respecta schema asteptata.", 502, undefined, "schema_violation");
-      }
-      return raw as RnpmSearchResult;
+      if (process.env.RNPM_RUNTIME_VALIDATION_DISABLED === "1") return raw as RnpmSearchResult;
+      throw new RnpmError("Raspunsul RNPM nu respecta schema asteptata.", 502, undefined, "schema_violation");
     }
     return parsed.data as unknown as RnpmSearchResult;
   }

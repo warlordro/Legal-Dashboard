@@ -23,12 +23,11 @@
 // and routes require a JWT, CSRF token can be embedded in the JWT and this
 // middleware can be tightened to require the token instead of just-Origin.
 
-import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context, Next } from "hono";
+import { isLoopbackAddress, readClientIp } from "../util/proxyIp.ts";
 import { fail } from "../util/envelope.ts";
 
 const SAFE_METHODS = new Set(["GET", "HEAD", "OPTIONS"]);
-const LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1"]);
 
 function safeHost(input: string | undefined | null): string | null {
   if (!input) return null;
@@ -50,8 +49,8 @@ export async function originGuard(c: Context, next: Next): Promise<Response | un
   // local machine. The TCP peer address is the trustworthy signal — Origin
   // headers from a localhost browser look identical regardless of how the
   // app was loaded, but the socket reveals whether it came over the LAN.
-  const remoteAddr = getConnInfo(c).remote.address ?? "";
-  if (LOOPBACK_ADDRESSES.has(remoteAddr)) {
+  const remoteAddr = readClientIp(c);
+  if (isLoopbackAddress(remoteAddr)) {
     await next();
     return;
   }

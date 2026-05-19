@@ -18,11 +18,14 @@ export interface FxFetchResult {
   rate?: number;
   rateDate?: string;
   reason?: string;
+  observedRate?: number;
 }
 
 // Network-side timeout: ECB e in general < 1s; 10s e safety net. Boot-ul nu
 // trebuie sa blocheze pe asta — apelantul fire-and-forget.
 const ECB_FETCH_TIMEOUT_MS = 10_000;
+const DEFAULT_EUR_USD_MIN = 0.5;
+const DEFAULT_EUR_USD_MAX = 2.0;
 
 // Pure: extrage USD rate si rate_date dintr-un XML ECB. Exportat pentru teste
 // (eliminam dependenta de retea). XML-ul are forma fixed:
@@ -51,6 +54,15 @@ export function computeUsdToEur(eurUsdRate: number): number {
   return Math.round((1 / eurUsdRate) * 1_000_000) / 1_000_000;
 }
 
+function readPlausibilityBand(): { min: number; max: number } {
+  const min = Number(process.env.FX_PLAUSIBLE_EUR_USD_MIN ?? DEFAULT_EUR_USD_MIN);
+  const max = Number(process.env.FX_PLAUSIBLE_EUR_USD_MAX ?? DEFAULT_EUR_USD_MAX);
+  if (!Number.isFinite(min) || !Number.isFinite(max) || min <= 0 || max <= min) {
+    return { min: DEFAULT_EUR_USD_MIN, max: DEFAULT_EUR_USD_MAX };
+  }
+  return { min, max };
+}
+
 export async function fetchEcbDailyRates(
   options: { fetchImpl?: typeof fetch; now?: Date } = {}
 ): Promise<FxFetchResult> {
@@ -66,6 +78,10 @@ export async function fetchEcbDailyRates(
     const parsed = parseEcbFeed(xml);
     if (!parsed) {
       return { ok: false, reason: "parse_failed" };
+    }
+    const band = readPlausibilityBand();
+    if (parsed.eurUsdRate < band.min || parsed.eurUsdRate > band.max) {
+      return { ok: false, reason: "implausible_rate", observedRate: parsed.eurUsdRate };
     }
     const usdToEur = computeUsdToEur(parsed.eurUsdRate);
     upsertFxRate({ pair: "USD/EUR", rate: usdToEur, rateDate: parsed.rateDate, source: "ecb" });

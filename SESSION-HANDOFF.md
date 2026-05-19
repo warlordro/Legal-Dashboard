@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.32.0 (2026-05-19)
+**Versiune curenta**: v2.33.0 (2026-05-19)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -16,7 +16,9 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
 | `OPENROUTER_DISABLED=1` | `callOpenRouter` esueaza imediat si nu face fallback silent la native | Stop urgent daca OpenRouter are incident, billing risc sau policy drift |
 | `OPENROUTER_MODEL_OVERRIDES=modelKey:provider/slug` | Suprascrie slug-uri OpenRouter fara rebuild backend | Cand OpenRouter redenumeste un model sau muta un provider |
 | `RNPM_AUDIT_CAP_HIT_DISABLED=1` | `POST /api/v1/rnpm/search-split` sare INSERT-ul `rnpm.cap_hit` din `audit_log`; restul flow-ului (SSE, decision, captchasUsed) ruleaza neschimbat | Stop urgent daca tabela audit creste suspect sau introduce contention vizibil pe write |
-| `RNPM_RUNTIME_VALIDATION_ENFORCED=1` | Promoveaza validarea runtime RNPM de la `safeParse` + warning la fail loud pe payload invalid | Activare dupa o perioada stabila de observatie a raspunsurilor upstream |
+| `RNPM_RUNTIME_VALIDATION_DISABLED=1` | Opt-out temporar pentru validarea runtime RNPM fail-closed; payload-urile invalide sunt acceptate doar cat timp flag-ul este setat | Foloseste doar ca rollback operational daca upstream-ul RNPM schimba schema in productie |
+| `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` | Permite folosirea `X-Forwarded-For` doar cand peer-ul intra in CIDR-ul proxy-ului de incredere | Setat in deploy prin Docker network CIDR; lasa gol pe desktop |
+| `LEGAL_DASHBOARD_FORCE_BOOT=1` | Permite reclaim fortat al instance lock-ului SQLite cand operatorul confirma manual ca procesul vechi nu mai ruleaza | Break-glass dupa crash/stale lock, cu audit `system.instance_lock.reclaim` |
 | `RNPM_RESULTS_FILTER_DISABLED=1` | Ruta POST `/api/rnpm/search/:searchId/filter` raspunde 503 cu `code: "FILTER_DISABLED"`; UI ascunde inputul si arata banner | Stop urgent daca filtrul provoaca contention DB sau bug regresat |
 | `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (+ `ACK_NO_AUTH=...` + `AUTH_MODE=web`) | Backend-ul accepta bind non-loopback | Setup web/server, niciodata desktop |
 | `TENANT_KEY_ENCRYPTION_SECRET` | Master key AES-256-GCM pentru `tenant_api_keys`; lipsa in web mode opreste boot-ul | Obligatoriu pentru web admin keys; pastreaza separat de backup-ul DB |
@@ -67,6 +69,16 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
+
+## Sprint inchis 2026-05-19 - v2.33.0 security hardening
+
+**Status**: livrat pe branch `feat/v2.33.0-security-hardening`.
+
+**Scope**: inchide CRITICAL-1 + 5 HIGH + 11 MEDIUM + 3 LOW din planurile `audit/FIX-PLAN-CLUSTER-*.md`, cu overlay obligatoriu din `audit/FIX-PLAN-v2.33.0-REMEDIATION.md`.
+
+**Solutie**: quota/budget foloseste rezervari atomice in web mode dupa provider resolution si include pending spend in fereastra rolling; deployment-ul primeste instance lock atomic, proxy trust explicit si digest pinning; SOAP/RNPM/FX/key validation devin fail-closed unde planul cere; audit trail-ul elimina plaintext din SMTP errors, key events si logout attribution edge cases.
+
+**Invariante pastrate**: desktop ZERO impact, `rejectApiKeysFromBodyInWebMode` activ, web-mode 501 gate pe `rejectCaptchaKeyInWebMode`, `TENANT_KEY_ENCRYPTION_SECRET` strict 32 bytes base64, LAN bind doar cu `LEGAL_DASHBOARD_ALLOW_REMOTE=1`, raw SQL nou doar in `backend/src/db/**`.
 
 ## Sprint inchis 2026-05-19 - v2.30.0 web admin keys + per-user budget
 

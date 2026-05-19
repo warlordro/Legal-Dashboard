@@ -21,6 +21,12 @@
 	# originGuard see the correct headers. Without `X-Forwarded-Proto=https`,
 	# oauth2-proxy may build the wrong redirect URL after Google callback.
 	reverse_proxy oauth2-proxy:4180 {
+		header_up -Authorization
+		header_up -Cookie
+		header_up -X-Auth-Request-Email
+		header_up -X-Forwarded-Email
+		header_up -X-Forwarded-User
+		header_up -X-Proxy-Auth
 		header_up Host {host}
 		header_up X-Real-IP {remote}
 		header_up X-Forwarded-For {remote}

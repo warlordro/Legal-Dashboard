@@ -16,7 +16,7 @@
 
 services:
   caddy:
-    image: caddy:2.8-alpine
+    image: caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
     restart: unless-stopped
     ports:
       - "80:80"
@@ -35,7 +35,7 @@ services:
       - ld_net
 
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine@sha256:36b46309c74e368e4b894314f5c69723c73728d60f66b777c13a40686a1364f7
     restart: unless-stopped
     expose:
       - "4180"
@@ -78,7 +78,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:-2.31.0}
+    image: legal-dashboard:${APP_VERSION:-2.33.0}
     restart: unless-stopped
     expose:
       # IMPORTANT: NEVER replace with `ports:` — backend must remain reachable
@@ -97,9 +97,13 @@ services:
       LEGAL_DASHBOARD_JWT_AUDIENCE: ${JWT_AUDIENCE:-legal-dashboard-prod}
       LEGAL_DASHBOARD_JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
       LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET: ${PROXY_BRIDGE_SECRET}
+      LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: ${LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR:-172.16.0.0/12}
       TENANT_KEY_ENCRYPTION_SECRET: ${TENANT_KEY_SECRET}
       LEGAL_DASHBOARD_DB_PATH: /data/legal-dashboard.db
       MONITORING_DISABLED_KINDS: ${MONITORING_DISABLED_KINDS:-}
+      RNPM_RUNTIME_VALIDATION_DISABLED: ${RNPM_RUNTIME_VALIDATION_DISABLED:-}
+      FX_PLAUSIBLE_EUR_USD_MIN: ${FX_PLAUSIBLE_EUR_USD_MIN:-}
+      FX_PLAUSIBLE_EUR_USD_MAX: ${FX_PLAUSIBLE_EUR_USD_MAX:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}
       SMTP_USER: ${SMTP_USER:-}

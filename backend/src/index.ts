@@ -31,9 +31,13 @@ import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
 import { isMailerConfigured, readMailerConfig } from "./services/email/mailer.ts";
 import { startDailyReportScheduler, stopDailyReportScheduler } from "./services/email/dailyReportScheduler.ts";
 import { fetchEcbDailyRates } from "./services/fxFetcher.ts";
+import { selectPendingEmailRetries } from "./db/budgetNotificationsRepository.ts";
+import { checkBudgetWarningRetry } from "./services/budgetWarningService.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
+import { recordAudit } from "./db/auditRepository.ts";
+import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
@@ -50,6 +54,13 @@ import dotenv from "dotenv";
 // time — no empty-import-meta warning, and the branch is dead anyway (__dirname is
 // defined) so the empty string is never used.
 const __curdir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
+const APP_VERSION: string = (() => {
+  try {
+    return (require("../../package.json") as { version: string }).version;
+  } catch {
+    return "unknown";
+  }
+})();
 // Audit 2026-04-29 R3: in productie nu suprascriem env-ul oferit de orchestrator
 // (Docker / systemd / Kubernetes secrets). `.env` din imagine ramane fallback,
 // dar nu poate sterge un secret injectat la runtime.
@@ -148,6 +159,12 @@ process.on("unhandledRejection", (reason: unknown) => {
   }
   process.exit(1);
 });
+
+try {
+  acquireInstanceLock(path.dirname(getDbPath()), APP_VERSION);
+} catch (e) {
+  fatalBoot("instance lock failed", e);
+}
 
 try {
   validateAuthConfig();
@@ -415,6 +432,7 @@ try {
   // dar F2 cere ca apelul sa il primeasca explicit; trecem `"local"` pentru
   // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
   getAvize({ ownerId: "local", pageSize: 1 });
+  flushPendingReclaimAudit();
   getAvizStats();
   if (getAuthMode() === "web") {
     getMasterKey();
@@ -433,6 +451,16 @@ try {
       fatalBoot("tenant key crypto self-test failed", probeErr);
     }
   }
+  recordAudit(null, "system.boot", {
+    ownerId: null,
+    actorId: "system",
+    detail: {
+      version: APP_VERSION,
+      authMode: getAuthMode(),
+      hostname,
+      port,
+    },
+  });
 } catch (e) {
   // Boot-time DB failure means subsequent requests will fail too. Server mode:
   // exit so the process manager restarts cleanly. Electron in-proc: throw so
@@ -461,6 +489,7 @@ let backupInterval: NodeJS.Timeout | null = null;
 // UI afiseaza "EUR indisponibil" in loc sa fabrice un fallback.
 const FX_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let fxRefreshInterval: NodeJS.Timeout | null = null;
+let budgetWarningRetryInterval: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {
   try {
@@ -482,6 +511,7 @@ async function refreshFxRatesSafely(label: string): Promise<void> {
           action: "fx.refresh.fail",
           label,
           reason: result.reason,
+          observedRate: result.observedRate,
           ts: new Date().toISOString(),
         })
       );
@@ -512,6 +542,26 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
     refreshFxRatesSafely("periodic");
   }, FX_REFRESH_INTERVAL_MS);
   fxRefreshInterval.unref?.();
+
+  if (getAuthMode() === "web") {
+    budgetWarningRetryInterval = setInterval(() => {
+      const pending = selectPendingEmailRetries();
+      for (const item of pending) {
+        checkBudgetWarningRetry(item.userId, item.feature, item.thresholdPct).catch((err) => {
+          console.warn(
+            JSON.stringify({
+              action: "budget_warning.retry_failed",
+              userId: item.userId,
+              feature: item.feature,
+              error: err instanceof Error ? err.message : String(err),
+              ts: new Date().toISOString(),
+            })
+          );
+        });
+      }
+    }, 120_000);
+    budgetWarningRetryInterval.unref?.();
+  }
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
   // shares the maintenance lock with backup so concurrent ticks pause cleanly
@@ -563,6 +613,15 @@ async function gracefulShutdown(reason: string): Promise<void> {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[shutdown] ${reason} — draining HTTP + scheduler + closing SQLite`);
+  try {
+    recordAudit(null, "system.shutdown", {
+      ownerId: null,
+      actorId: "system",
+      detail: { reason, version: APP_VERSION },
+    });
+  } catch (err) {
+    console.error("[shutdown] system.shutdown audit failed:", err);
+  }
 
   // Audit 2026-04-29 R1: inchidem socket-ul de listen ca sa nu mai acceptam
   // conexiuni noi, dar pastram conexiunile in-flight pana cand termina (sau
@@ -599,6 +658,10 @@ async function gracefulShutdown(reason: string): Promise<void> {
     clearInterval(fxRefreshInterval);
     fxRefreshInterval = null;
   }
+  if (budgetWarningRetryInterval) {
+    clearInterval(budgetWarningRetryInterval);
+    budgetWarningRetryInterval = null;
+  }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca
   // sweeper-ul nu a pornit, ex. boot failure inainte de listen).
@@ -634,6 +697,7 @@ async function gracefulShutdown(reason: string): Promise<void> {
   } catch (e) {
     console.error("[shutdown] markShuttingDown failed:", e);
   }
+  releaseInstanceLock();
 }
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM").finally(() => process.exit(0));
@@ -649,14 +713,6 @@ process.on("beforeExit", () => {
 // Uses a globalThis key to survive esbuild's CJS bundle boundary.
 (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> }).__legalDashboardShutdown = () =>
   gracefulShutdown("before-quit");
-
-const APP_VERSION: string = (() => {
-  try {
-    return (require("../../package.json") as { version: string }).version;
-  } catch {
-    return "unknown";
-  }
-})();
 
 console.log("");
 console.log(`  Legal Dashboard v${APP_VERSION}`);

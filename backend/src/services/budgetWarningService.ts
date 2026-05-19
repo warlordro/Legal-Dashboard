@@ -14,7 +14,15 @@
 // "ai.multi". Mapping in `quotaFeatureOf` mai jos.
 
 import { earliestAiUsageTsInWindow, sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
-import { clearWarning, fireWarning, isWarningActive, markEmailSent } from "../db/budgetNotificationsRepository.ts";
+import { recordAudit } from "../db/auditRepository.ts";
+import {
+  clearWarning,
+  fireWarning,
+  getState,
+  incrementEmailAttempt,
+  isWarningActive,
+  markEmailSent,
+} from "../db/budgetNotificationsRepository.ts";
 import { getEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 import { getUserById } from "../db/userRepository.ts";
 import { sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
@@ -24,6 +32,7 @@ import { sendComposedEmail } from "./email/mailer.ts";
 export type QuotaFeature = "ai.single" | "ai.multi";
 
 const WARNING_THRESHOLD_PCT = 80;
+const EMAIL_COOLDOWN_SECONDS = 3600;
 const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
   day: 86_400,
   week: 604_800,
@@ -107,6 +116,30 @@ export async function checkBudgetWarning(
     return { state: "noop", pct };
   }
 
+  recordAudit(null, "budget.warning.fired", {
+    ownerId,
+    actorId: "system",
+    detail: {
+      feature: quotaFeature,
+      thresholdPct: WARNING_THRESHOLD_PCT,
+      pct: Math.round(pct),
+      usedMilli,
+      effectiveLimit,
+      period,
+    },
+  });
+
+  const now = options.now ?? new Date();
+  const currentState = getState(ownerId, quotaFeature, WARNING_THRESHOLD_PCT);
+  const lastAttemptMs = currentState?.last_email_attempted_at
+    ? Date.parse(currentState.last_email_attempted_at)
+    : Number.NaN;
+  if (!Number.isNaN(lastAttemptMs) && now.getTime() - lastAttemptMs < EMAIL_COOLDOWN_SECONDS * 1000) {
+    return { state: "fired", pct, emailDispatched: false };
+  }
+
+  incrementEmailAttempt(ownerId, quotaFeature, WARNING_THRESHOLD_PCT);
+
   // Episode tocmai aprins -> dispatch email best-effort. Failure-ul nu
   // afecteaza banner-ul (state-ul ramane fired, email_sent_at ramane NULL).
   const emailDispatched = await dispatchWarningEmail(
@@ -114,10 +147,53 @@ export async function checkBudgetWarning(
     quotaFeature,
     { usedMilli, effectiveLimit, period, pct },
     options.sendEmail ?? sendComposedEmail,
-    options.now ?? new Date()
+    now
   );
 
   return { state: "fired", pct, emailDispatched };
+}
+
+export async function checkBudgetWarningRetry(
+  ownerId: string,
+  usageFeature: string,
+  thresholdPct: number,
+  options: CheckBudgetWarningOptions = {}
+): Promise<CheckBudgetWarningResult> {
+  const quotaFeature = quotaFeatureOf(usageFeature);
+  if (!quotaFeature) return { state: "skipped", reason: "not_quota_feature" };
+  if (thresholdPct !== WARNING_THRESHOLD_PCT) return { state: "skipped", reason: "unsupported_threshold" };
+
+  const state = getState(ownerId, quotaFeature, thresholdPct);
+  if (!state || state.fired_at === null || state.cleared_at !== null || state.email_sent_at !== null) {
+    return { state: "noop" };
+  }
+
+  const override = getOverride(ownerId, quotaFeature);
+  const defaultMilli = readDefaultQuotaMilli();
+  const baseLimit = override ? override.limit_usd_milli : defaultMilli;
+  if (baseLimit === null) return { state: "skipped", reason: "unlimited" };
+
+  const period: QuotaPeriod = override?.period ?? "day";
+  const extraFromGrants = sumActiveExtraMilli(ownerId, quotaFeature);
+  const effectiveLimit = baseLimit + extraFromGrants;
+  if (effectiveLimit <= 0) return { state: "skipped", reason: "zero_limit" };
+
+  const usedMilli = sumAiUsageMilliInWindow(ownerId, quotaFeature, PERIOD_SECONDS[period]);
+  const pct = (usedMilli / effectiveLimit) * 100;
+  if (pct < WARNING_THRESHOLD_PCT) {
+    clearWarning(ownerId, quotaFeature, thresholdPct);
+    return { state: "cleared", pct };
+  }
+
+  incrementEmailAttempt(ownerId, quotaFeature, thresholdPct);
+  const emailDispatched = await dispatchWarningEmail(
+    ownerId,
+    quotaFeature,
+    { usedMilli, effectiveLimit, period, pct },
+    options.sendEmail ?? sendComposedEmail,
+    options.now ?? new Date()
+  );
+  return { state: "noop", pct, emailDispatched };
 }
 
 async function dispatchWarningEmail(

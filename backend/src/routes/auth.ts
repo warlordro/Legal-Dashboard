@@ -1,7 +1,7 @@
 import { createHash, timingSafeEqual } from "node:crypto";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { deleteCookie, setCookie } from "hono/cookie";
+import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { AUTH_COOKIE_NAME } from "../auth/authProvider.ts";
 import {
   getAuthMode,
@@ -12,9 +12,9 @@ import {
   isAuthCookieSecureDisabled,
   requireJwtSecret,
 } from "../auth/config.ts";
-import { signAuthToken } from "../auth/jwt.ts";
+import { signAuthToken, verifyAuthToken } from "../auth/jwt.ts";
 import { recordAudit } from "../db/auditRepository.ts";
-import { getUserByEmail } from "../db/userRepository.ts";
+import { getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
 import { fail, ok } from "../util/envelope.ts";
 
@@ -47,6 +47,42 @@ authRouter.post("/login", (c) => {
 });
 
 authRouter.post("/logout", (c) => {
+  const rawToken = getCookie(c, AUTH_COOKIE_NAME);
+  let auditOwnerId: string | null = null;
+  let auditActorId: string | null = null;
+  let tokenVerified = false;
+  try {
+    if (rawToken) {
+      const payload = verifyAuthToken(rawToken, {
+        secret: requireJwtSecret(),
+        issuer: getJwtIssuer(),
+        audience: getJwtAudience(),
+      });
+      const user = getUserById(payload.sub);
+      if (user && user.status === "active") {
+        auditOwnerId = user.id;
+        auditActorId = user.id;
+        tokenVerified = true;
+      }
+    }
+  } catch {
+    tokenVerified = false;
+  }
+  try {
+    recordAudit(null, "auth.logout", {
+      ownerId: auditOwnerId,
+      actorId: auditActorId,
+      targetKind: auditOwnerId ? "user" : "http_request",
+      targetId: auditOwnerId ?? c.req.path,
+      detail: {
+        triggered: "user_request",
+        tokenPresent: Boolean(rawToken),
+        tokenVerified,
+      },
+    });
+  } catch (err) {
+    console.error("[auth] auth.logout audit failed:", err);
+  }
   deleteCookie(c, AUTH_COOKIE_NAME, {
     secure: secureCookie(),
     sameSite: "Lax",

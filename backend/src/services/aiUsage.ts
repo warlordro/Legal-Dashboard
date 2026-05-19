@@ -1,4 +1,5 @@
 import { insertAiUsage, type AiUsageProvider, type AiUsageRoutingTag } from "../db/aiUsageRepository.ts";
+import { confirmAiUsageReservation } from "../db/aiUsageRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { checkBudgetWarning } from "./budgetWarningService.ts";
 
@@ -9,6 +10,7 @@ export interface AiUsageTrackingContext {
   ownerId: string;
   feature: string;
   requestId?: string;
+  reservationId?: number | null;
 }
 
 export interface AiUsageCallMeta {
@@ -155,19 +157,34 @@ export function recordAiUsageSafely(input: {
   // captured below so an unhandled microtask rejection cannot escape.
   queueMicrotask(() => {
     try {
-      insertAiUsage({
-        ownerId: tracking.ownerId,
-        provider,
-        model,
-        feature: tracking.feature,
-        inputTokens,
-        outputTokens,
-        costUsdMilli,
-        httpStatus,
-        wasAborted,
-        requestId: tracking.requestId,
-        routingTag,
-      });
+      const reservationId = tracking.reservationId;
+      if (reservationId != null) {
+        confirmAiUsageReservation(reservationId, {
+          provider,
+          model,
+          inputTokens,
+          outputTokens,
+          costUsdMilli,
+          httpStatus,
+          wasAborted: wasAborted ?? false,
+          routingTag: routingTag ?? null,
+          feature: tracking.feature,
+        });
+      } else {
+        insertAiUsage({
+          ownerId: tracking.ownerId,
+          provider,
+          model,
+          feature: tracking.feature,
+          inputTokens,
+          outputTokens,
+          costUsdMilli,
+          httpStatus,
+          wasAborted,
+          requestId: tracking.requestId,
+          routingTag,
+        });
+      }
       // v2.32.0: dupa write reusit, verifica pragul 80% (web mode only).
       // Failure-ul aici nu trebuie sa ridice exceptie peste insertAiUsage —
       // catch separat in checkBudgetWarning, dar tot wrap-uit aici ca un
