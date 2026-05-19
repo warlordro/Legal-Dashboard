@@ -33,6 +33,7 @@ import { startDailyReportScheduler, stopDailyReportScheduler } from "./services/
 import { fetchEcbDailyRates } from "./services/fxFetcher.ts";
 import { selectPendingEmailRetries } from "./db/budgetNotificationsRepository.ts";
 import { checkBudgetWarningRetry } from "./services/budgetWarningService.ts";
+import { purgeExpiredReservations } from "./db/aiUsageRepository.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
@@ -459,8 +460,35 @@ try {
       authMode: getAuthMode(),
       hostname,
       port,
+      processId: process.pid,
+      nodeEnv: process.env.NODE_ENV ?? "unknown",
     },
   });
+
+  // MEDIUM-2: cand operator-ul opreste runtime validation pe schema RNPM
+  // pentru un debug, semnalam explicit la boot + lasam trace in audit log. Fara
+  // asta, flipul `RNPM_RUNTIME_VALIDATION_DISABLED=1` ramane silent in
+  // operationale si UI continua sa accepte payload-uri nevalidate fara ca
+  // auditul sa stie cand a inceput fereastra. Operatorul vede warn-ul in
+  // stdout, complianta vede entry-ul dedicat in audit_log.
+  if (process.env.RNPM_RUNTIME_VALIDATION_DISABLED === "1") {
+    console.warn(
+      JSON.stringify({
+        action: "rnpm.validation.disabled.boot",
+        note: "RNPM runtime validation OFF (fail-open) pentru toate request-urile",
+        ts: new Date().toISOString(),
+      })
+    );
+    try {
+      recordAudit(null, "rnpm.validation.disabled", {
+        ownerId: null,
+        actorId: "system",
+        detail: { source: "env", flag: "RNPM_RUNTIME_VALIDATION_DISABLED" },
+      });
+    } catch (err) {
+      console.error("[boot] rnpm.validation.disabled audit failed:", err);
+    }
+  }
 } catch (e) {
   // Boot-time DB failure means subsequent requests will fail too. Server mode:
   // exit so the process manager restarts cleanly. Electron in-proc: throw so
@@ -490,6 +518,15 @@ let backupInterval: NodeJS.Timeout | null = null;
 const FX_REFRESH_INTERVAL_MS = 6 * 60 * 60 * 1000;
 let fxRefreshInterval: NodeJS.Timeout | null = null;
 let budgetWarningRetryInterval: NodeJS.Timeout | null = null;
+// Web-mode quota reservations expire via `purgeExpiredReservations`, normally
+// called by the monitoring scheduler (services/monitoring/scheduler.ts:383). In
+// deploys that disable monitoring (MONITORING_ENABLED=0 or all kinds disabled),
+// orphan reservations from crashed SDK calls would inflate
+// sumAiUsageMilliInWindow until the next restart — valid clients receive 429
+// against a budget that is actually free. Run an independent daily timer in
+// web mode only; desktop has neither quotas nor reservations.
+const RESERVATION_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+let reservationPurgeInterval: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {
   try {
@@ -561,6 +598,31 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
       }
     }, 120_000);
     budgetWarningRetryInterval.unref?.();
+
+    reservationPurgeInterval = setInterval(() => {
+      try {
+        const purged = purgeExpiredReservations();
+        if (purged > 0) {
+          console.log(
+            JSON.stringify({
+              action: "quota.reservation_purged",
+              source: "standalone_interval",
+              deleted_count: purged,
+              ts: new Date().toISOString(),
+            })
+          );
+        }
+      } catch (err) {
+        console.warn(
+          JSON.stringify({
+            action: "quota.reservation_purge_failed",
+            error: err instanceof Error ? err.message : String(err),
+            ts: new Date().toISOString(),
+          })
+        );
+      }
+    }, RESERVATION_PURGE_INTERVAL_MS);
+    reservationPurgeInterval.unref?.();
   }
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
@@ -661,6 +723,10 @@ async function gracefulShutdown(reason: string): Promise<void> {
   if (budgetWarningRetryInterval) {
     clearInterval(budgetWarningRetryInterval);
     budgetWarningRetryInterval = null;
+  }
+  if (reservationPurgeInterval) {
+    clearInterval(reservationPurgeInterval);
+    reservationPurgeInterval = null;
   }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca

@@ -276,4 +276,36 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     const body = (await res.json()) as EnvelopeErrorBody;
     expect(body.error.code).toBe("desktop_only");
   });
+
+  // FIX #6 (v2.33.0 follow-up — MEDIUM-5 defensive): Caddyfile strip-uieste
+  // X-Auth-Request-Email / X-Forwarded-Email / X-Proxy-Auth la marginea
+  // public-facing inainte de a forwarda la oauth2-proxy. Daca un attacker
+  // bypass-eaza Caddy (port-forward intern, mis-config de retea, expose
+  // direct port 3002 in afara enclavei), injecteaza header-ul direct la
+  // backend. Backendul nu trebuie sa-l accepte ca semn de autenticitate
+  // pentru altceva decat bridge-ul cu shared secret. Verificam ca:
+  //   1. Endpoint-uri protejate (afara bridge-ului) nu citesc header-ul.
+  //   2. Singura cale legitima ramane /oauth2/sync + X-Proxy-Auth valid.
+  it("nu autorizeaza request-uri pe rute protejate doar pe baza X-Auth-Request-Email injectat", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/probe", {
+      headers: {
+        "x-auth-request-email": "alice@example.test",
+        "x-forwarded-email": "alice@example.test",
+      },
+    });
+
+    // ownerContext (in web mode) cere JWT cookie; X-Auth-Request-Email NU e
+    // citit nicaieri in afara bridge-ului. Rezultat: anonymous, ownerId nu e
+    // "alice". Probe-ul returneaza ownerId="local" sau 401 in functie de
+    // configul ownerContext — important e sa NU fie "alice".
+    if (res.status === 200) {
+      const body = (await res.json()) as { data: { ownerId: string | null } };
+      expect(body.data.ownerId).not.toBe("alice");
+    } else {
+      expect([401, 403]).toContain(res.status);
+    }
+  });
 });

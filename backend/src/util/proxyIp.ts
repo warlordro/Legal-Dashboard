@@ -31,14 +31,27 @@ export function readClientIp(c: Context): string | null {
   const peer = getConnInfo(c).remote.address ?? null;
   if (!peer) return null;
   const cidrs = trustedCidrs();
-  const trusted = cidrs.some((cidr) => cidrContains(cidr, peer));
-  if (!trusted) return peer;
-  const forwarded = c.req
-    .header("x-forwarded-for")
-    ?.split(",")
-    .map((part) => part.trim())
-    .find((part) => net.isIP(part) !== 0);
-  return forwarded || peer;
+  if (cidrs.length === 0 || !cidrs.some((cidr) => cidrContains(cidr, peer))) {
+    return peer;
+  }
+  // Walk right-to-left, skipping trusted proxies. The right-most non-trusted
+  // entry is the closest hop we still trust to identify the real client. Going
+  // leftmost would let any client spoof X-Forwarded-For: "1.1.1.1, <proxy>" and
+  // forge the rate-limit key. Trusted entries inserted by our own proxies are
+  // skipped; we stop at the first non-trusted IP from the right.
+  const forwarded =
+    c.req
+      .header("x-forwarded-for")
+      ?.split(",")
+      .map((part) => part.trim())
+      .filter(Boolean) ?? [];
+  for (let i = forwarded.length - 1; i >= 0; i--) {
+    const candidate = forwarded[i];
+    if (net.isIP(candidate) === 0) continue;
+    if (cidrs.some((cidr) => cidrContains(cidr, candidate))) continue;
+    return candidate;
+  }
+  return peer;
 }
 
 export function isLoopbackAddress(ip: string | null | undefined): boolean {

@@ -150,6 +150,14 @@ aiRouter.put("/settings", async (c) => {
 
 // AI Analysis endpoint
 aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
+  // FIX #5 (v2.33.0 follow-up): rezervarea pentru ai.single trebuie eliberata
+  // explicit cand callModel nu confirma usage-ul. Inainte, orice throw intre
+  // reserveQuotaBudget si callModel (buildPrompt sync, fetch error, abort
+  // anticipat) lasa pending-ul in DB pana cand purgeExpiredReservations rula
+  // (~5min), umflandu-i artificial bugetul user-ului. confirmAiUsageReservation
+  // este apelat in interiorul callModel pe succes -> in branch-ul de succes
+  // reservationToRelease devine null si finally-ul nu mai face nimic.
+  let reservationToRelease: number | null = null;
   try {
     const parsed = await parseAiBody(c);
     if (parsed.kind === "error") return parsedBodyError(c, parsed);
@@ -192,6 +200,7 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
 
     const quotaReservation = reserveQuotaBudget(c, "ai.single", requiredProvider);
     if (!quotaReservation.ok) return quotaReservation.response;
+    reservationToRelease = quotaReservation.reservationId;
 
     const prompt = buildPrompt(dosar);
     const tracking: AiUsageTrackingContext = {
@@ -213,11 +222,31 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
       routing
     );
 
+    // Succes: callModel a apelat deja confirmAiUsageReservation in interior.
+    reservationToRelease = null;
     return c.json({ analysis: text });
   } catch (err: unknown) {
     // SECURITY: Log error server-side but never expose internal details to client
     console.error("Eroare AI:", err instanceof Error ? err.message : err);
     return aiFailure(c, "Eroare la analiza AI. Verificati cheia API si incercati din nou.");
+  } finally {
+    if (reservationToRelease !== null) {
+      const reservationId = reservationToRelease;
+      queueMicrotask(() => {
+        try {
+          releaseAiUsageReservation(reservationId);
+        } catch (releaseErr) {
+          console.warn(
+            JSON.stringify({
+              action: "quota.reservation_release_failed",
+              reservationId,
+              error: releaseErr instanceof Error ? releaseErr.message : String(releaseErr),
+              ts: new Date().toISOString(),
+            })
+          );
+        }
+      });
+    }
   }
 });
 

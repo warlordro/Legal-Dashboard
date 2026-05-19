@@ -337,6 +337,8 @@ adminRouter.get("/audit", (c) => {
         since: since ?? null,
         until: until ?? null,
         requestId: requestId ?? null,
+        count: result.rows.length,
+        total: result.total,
       },
     });
   }

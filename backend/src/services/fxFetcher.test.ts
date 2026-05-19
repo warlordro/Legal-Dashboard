@@ -134,6 +134,24 @@ describe("fetchEcbDailyRates", () => {
     expect(getLatest("USD/EUR")).toBeNull();
   });
 
+  // FIX #9 (v2.33.0 follow-up — MEDIUM-11 low-bound coverage): plausibility
+  // band must fail-closed on BOTH directions. High-bound (2.5) was already
+  // covered above; without this low-bound test, a regressing operator override
+  // (FX_PLAUSIBLE_EUR_USD_MIN set < 0 or a parser bug emitting rate=0) could
+  // slip through. D14 invariant: never fabricate a fallback EUR rate.
+  it("fails closed on implausibly low ECB rates (below band.min)", async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      text: async () => SAMPLE_XML.replace('rate="1.0834"', 'rate="0.0001"'),
+    })) as unknown as typeof fetch;
+
+    const result = await fetchEcbDailyRates({ fetchImpl });
+
+    expect(result).toEqual({ ok: false, reason: "implausible_rate", observedRate: 0.0001 });
+    expect(getLatest("USD/EUR")).toBeNull();
+  });
+
   it("allows operator override of the plausibility band without manual FX entry", async () => {
     process.env.FX_PLAUSIBLE_EUR_USD_MAX = "3";
     const fetchImpl = vi.fn(async () => ({

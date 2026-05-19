@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { getDb } from "./schema.ts";
 
 // v2.32.0 budget_notifications - state machine pentru soft warning (80%).
@@ -156,11 +157,24 @@ export function isWarningActive(userId: string, feature: string, thresholdPct: n
 
 export const EMAIL_RETRY_BACKOFF_SECONDS = [60, 300, 900, 3600] as const;
 export const EMAIL_MAX_ATTEMPTS = EMAIL_RETRY_BACKOFF_SECONDS.length;
+// Per-user, per-attempt jitter added on top of the base backoff so that 50
+// users hitting 80% in the same scheduling tick do not retry the SMTP relay in
+// lockstep. Deterministic (hash-derived) so the same row produces the same
+// delay between observations; spread caps at JITTER_MAX_MS regardless of base.
+export const EMAIL_RETRY_JITTER_MAX_MS = 30_000;
 
 export interface PendingEmailRetry {
   userId: string;
   feature: string;
   thresholdPct: number;
+}
+
+export function computeEmailRetryJitterMs(userId: string, feature: string, attempt: number): number {
+  const hash = createHash("sha256").update(`${userId}::${feature}::${attempt}`).digest();
+  // First 4 bytes as uint32 -> modulo into [0, JITTER_MAX_MS). Avoids needing
+  // a PRNG and matches across processes (multi-replica deploys).
+  const bucket = hash.readUInt32BE(0);
+  return bucket % EMAIL_RETRY_JITTER_MAX_MS;
 }
 
 export function selectPendingEmailRetries(now: Date = new Date()): PendingEmailRetry[] {
@@ -190,7 +204,9 @@ export function selectPendingEmailRetries(now: Date = new Date()): PendingEmailR
       const lastMs = Date.parse(row.last_email_attempted_at);
       if (Number.isNaN(lastMs)) return true;
       const backoffIdx = Math.min(row.email_attempts - 1, EMAIL_RETRY_BACKOFF_SECONDS.length - 1);
-      return nowMs - lastMs >= EMAIL_RETRY_BACKOFF_SECONDS[backoffIdx] * 1000;
+      const baseMs = EMAIL_RETRY_BACKOFF_SECONDS[backoffIdx] * 1000;
+      const jitterMs = computeEmailRetryJitterMs(row.user_id, row.feature, row.email_attempts);
+      return nowMs - lastMs >= baseMs + jitterMs;
     })
     .map((row) => ({
       userId: row.user_id,
