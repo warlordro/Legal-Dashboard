@@ -57,3 +57,17 @@ export function readClientIp(c: Context): string | null {
 export function isLoopbackAddress(ip: string | null | undefined): boolean {
   return Boolean(ip && LOOPBACK.has(ip));
 }
+
+// Returns CIDR entries that this parser cannot honour (non-IPv4 base, missing
+// prefix, prefix outside [0,32]). Caller emits a startup warning so an operator
+// who set "10.0.0.0/8, ::1/128" is not surprised when the IPv6 hop is silently
+// ignored and rate-limit keys flip back to peer for every XFF lookup.
+export function findUnsupportedTrustedCidrEntries(): string[] {
+  return trustedCidrs().filter((entry) => {
+    const [base, rawPrefix] = entry.split("/");
+    if (!base || rawPrefix === undefined) return true;
+    if (net.isIP(base.startsWith("::ffff:") ? base.slice(7) : base) !== 4) return true;
+    const prefix = Number(rawPrefix);
+    return !Number.isInteger(prefix) || prefix < 0 || prefix > 32;
+  });
+}

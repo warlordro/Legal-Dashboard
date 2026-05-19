@@ -42,6 +42,7 @@ import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } fr
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
+import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -464,6 +465,24 @@ try {
       nodeEnv: process.env.NODE_ENV ?? "unknown",
     },
   });
+
+  // LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR e IPv4-only in parser. Entry-urile IPv6
+  // (sau prefixele invalide) sunt acceptate de env loader dar ignorate de
+  // cidrContains, ceea ce inseamna ca XFF venit prin proxy IPv6 ar fi tratat ca
+  // peer non-trusted si rate-limit key-ul ar flip-ui pe peer la fiecare call.
+  // Warn-ul la boot face vizibila configurarea fara efect inainte sa devina
+  // incident operational.
+  const unsupportedProxyCidrs = findUnsupportedTrustedCidrEntries();
+  if (unsupportedProxyCidrs.length > 0) {
+    console.warn(
+      JSON.stringify({
+        action: "proxy.trusted_cidr.unsupported",
+        note: "LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR contine entry-uri non-IPv4 / prefix invalid; sunt ignorate de XFF walk.",
+        entries: unsupportedProxyCidrs,
+        ts: new Date().toISOString(),
+      })
+    );
+  }
 
   // MEDIUM-2: cand operator-ul opreste runtime validation pe schema RNPM
   // pentru un debug, semnalam explicit la boot + lasam trace in audit log. Fara

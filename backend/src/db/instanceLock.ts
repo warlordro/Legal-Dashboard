@@ -79,6 +79,7 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
   const path = lockPath(dataDir);
   const record = buildRecord(appVersion);
 
+  let forcedReclaim: { previousPid: number | null; previousHostname: string | null } | null = null;
   if (process.env.LEGAL_DASHBOARD_FORCE_BOOT === "1" && existsSync(path)) {
     const existing = readLock(path);
     const deadPath = `${path}.dead-force-${Date.now()}`;
@@ -87,8 +88,7 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
     } catch {
       // Continue into atomic claim; if a peer wins, writeNewLock throws.
     }
-    pendingReclaimAudit = {
-      forced: true,
+    forcedReclaim = {
       previousPid: existing?.pid ?? null,
       previousHostname: existing?.hostname ?? null,
     };
@@ -96,6 +96,9 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
 
   try {
     writeNewLock(path, record);
+    if (forcedReclaim) {
+      pendingReclaimAudit = { forced: true, ...forcedReclaim };
+    }
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
     const existing = readLock(path);
@@ -111,18 +114,18 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
       }
       const deadPath = `${path}.dead-${existing.pid}-${Date.now()}`;
       renameSync(path, deadPath);
+      writeNewLock(path, record);
       pendingReclaimAudit = {
         forced: false,
         previousPid: existing.pid,
         previousHostname: existing.hostname,
         previousHeartbeatAgeMs: heartbeatAge,
       };
-      writeNewLock(path, record);
     } else {
       const deadPath = `${path}.dead-invalid-${Date.now()}`;
       renameSync(path, deadPath);
-      pendingReclaimAudit = { forced: false, invalidPrevious: true };
       writeNewLock(path, record);
+      pendingReclaimAudit = { forced: false, invalidPrevious: true };
     }
   }
 
