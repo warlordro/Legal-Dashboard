@@ -70,9 +70,7 @@ describe("migration 0028_user_quota_grants", () => {
   it("UP + DOWN + UP este reversibil", () => {
     db.exec(readSql("0028_user_quota_grants.up.sql"));
     db.exec(readSql("0028_user_quota_grants.down.sql"));
-    const dropped = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_quota_grants'")
-      .get();
+    const dropped = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='user_quota_grants'").get();
     expect(dropped).toBeUndefined();
     expect(() => db.exec(readSql("0028_user_quota_grants.up.sql"))).not.toThrow();
   });

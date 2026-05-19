@@ -48,7 +48,9 @@ describe("migration 0027_user_quota_overrides_extension", () => {
     db.exec(readSql("0027_user_quota_overrides_extension.up.sql"));
 
     const row = db
-      .prepare("SELECT user_id, feature, period, limit_usd_milli, updated_by FROM user_quota_overrides WHERE user_id = ?")
+      .prepare(
+        "SELECT user_id, feature, period, limit_usd_milli, updated_by FROM user_quota_overrides WHERE user_id = ?"
+      )
       .get("u-1") as {
       user_id: string;
       feature: string;

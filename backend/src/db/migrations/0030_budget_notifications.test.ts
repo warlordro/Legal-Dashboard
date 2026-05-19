@@ -30,14 +30,16 @@ describe("migration 0030_budget_notifications", () => {
   it("UP creeaza tabela cu PRIMARY KEY (user_id, feature, threshold_pct)", () => {
     db.exec(readSql("0030_budget_notifications.up.sql"));
 
-    db.prepare(
-      `INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)`
-    ).run("u-1", "ai.single", 80);
+    db.prepare("INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)").run(
+      "u-1",
+      "ai.single",
+      80
+    );
 
     // Duplicate (user, feature, threshold) -> PRIMARY KEY violation.
     expect(() =>
       db
-        .prepare(`INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)`)
+        .prepare("INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)")
         .run("u-1", "ai.single", 80)
     ).toThrow(/UNIQUE constraint|PRIMARY KEY/i);
   });
@@ -46,7 +48,7 @@ describe("migration 0030_budget_notifications", () => {
     db.exec(readSql("0030_budget_notifications.up.sql"));
     expect(() =>
       db
-        .prepare(`INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)`)
+        .prepare("INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)")
         .run("u-1", "ai.single", 50)
     ).toThrow(/CHECK constraint/i);
   });
@@ -55,9 +57,11 @@ describe("migration 0030_budget_notifications", () => {
     // Doar 80 e suportat in v2.32.0; verificam doar ca PRIMARY KEY include
     // threshold_pct (admin va putea adauga 50/90 in viitor fara schema bump).
     db.exec(readSql("0030_budget_notifications.up.sql"));
-    db.prepare(
-      `INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)`
-    ).run("u-1", "ai.single", 80);
+    db.prepare("INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)").run(
+      "u-1",
+      "ai.single",
+      80
+    );
     // Verify primary key index existence via PRAGMA.
     const idx = db.prepare(`PRAGMA index_list('budget_notifications')`).all() as Array<{ name: string }>;
     expect(idx.some((i) => i.name === "idx_budget_notifications_active")).toBe(true);
@@ -65,9 +69,11 @@ describe("migration 0030_budget_notifications", () => {
 
   it("UP ON DELETE CASCADE sterge notifs cand userul e sters", () => {
     db.exec(readSql("0030_budget_notifications.up.sql"));
-    db.prepare(
-      `INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)`
-    ).run("u-1", "ai.single", 80);
+    db.prepare("INSERT INTO budget_notifications (user_id, feature, threshold_pct) VALUES (?, ?, ?)").run(
+      "u-1",
+      "ai.single",
+      80
+    );
     db.prepare("DELETE FROM users WHERE id = ?").run("u-1");
     const n = (db.prepare("SELECT COUNT(*) AS n FROM budget_notifications").get() as { n: number }).n;
     expect(n).toBe(0);
