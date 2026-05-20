@@ -1,4 +1,4 @@
-import { createHash, timingSafeEqual } from "node:crypto";
+import { timingSafeEqual } from "node:crypto";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
@@ -16,6 +16,7 @@ import { signAuthToken, verifyAuthToken } from "../auth/jwt.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
+import { hashEmail } from "../util/auditSanitize.ts";
 import { fail, ok } from "../util/envelope.ts";
 
 export const authRouter = new Hono();
@@ -114,10 +115,6 @@ authRouter.post("/logout", (c) => {
 //    `targetId = user.id` (UUID-ul intern, nu identifiable info).
 //  - Cookie-ul folosit pentru sesiune e identic cu cel de la `/auth/refresh`:
 //    HttpOnly, Secure (in productie), SameSite=Lax, Path=/.
-function hashEmail(email: string): string {
-  return createHash("sha256").update(email.trim().toLowerCase()).digest("hex").slice(0, 16);
-}
-
 function constantTimeStringEquals(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
@@ -146,7 +143,13 @@ authRouter.post("/oauth2/sync", (c) => {
     return c.json(fail("forbidden", "Acces interzis.", c), 403);
   }
 
-  const rawEmail = c.req.header("x-auth-request-email") ?? c.req.header("x-forwarded-email") ?? "";
+  // v2.34.0 P0-4-edit: am eliminat fallback-ul pe `x-forwarded-email`. Caddy-ul
+  // public-facing strip-uieste ambele headers inainte de oauth2-proxy si le
+  // re-injecteaza din variabilele oauth2-proxy (vezi deploy/Caddyfile). Daca
+  // Caddy e misconfigurat sau cineva expune direct backend-ul (port 3002 in
+  // afara enclavei), fallback-ul devine bypass. Acceptam doar header-ul
+  // canonical setat de oauth2-proxy, dupa shared-secret check.
+  const rawEmail = c.req.header("x-auth-request-email") ?? "";
   const email = rawEmail.trim().toLowerCase();
   if (!email || !email.includes("@") || email.length > 254) {
     recordAudit(null, "auth.oauth2.sync", {

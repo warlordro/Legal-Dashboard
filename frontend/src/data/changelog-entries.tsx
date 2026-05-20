@@ -39,6 +39,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.34.0",
+    date: "20 Mai 2026",
+    subtitle:
+      "Web hardening v2.34.0: 4 P0 + 8 P1 inchise din auditul intern (device_codes RL, GET/token off, admin guard pe tenant-keys/edit, SOAP retry budget, captcha balance per-tenant TTL, owner-scoped tenant key guard, body-key warning hardening, per-user captcha quota, CI fixtures off + RUNBOOK + offsite backup hook). Sentry SDK amanat la v2.35.0. Desktop ramane neimpactat.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-rose-500",
+    badgeClass: "bg-rose-100 text-rose-900 dark:bg-rose-900/30 dark:text-rose-300",
+    sections: [
+      {
+        title: "Auth surface + admin hardening (P0)",
+        content:
+          "GET /api/v1/auth/device-code/:code returnat 410 forever — token doar prin POST autentificat. Rate-limiter pe /device-codes acum cheie compusa (ip + UA-hash) pentru a impiedica un client botnet sa epuizeze cota globala. Job nightly purge sterge device_codes expirate. Admin role check intarit pe /admin/tenant-keys POST/PUT/DELETE — owner-only nu mai e suficient in web mode.",
+      },
+      {
+        title: "Per-user captcha quota (P1-4)",
+        content:
+          "Tabela noua captcha_usage (migration 0033) cu rolling-window 24h/7d/30d, mirror la quotaGuard dar count-based (nu cost-based). Reuseste user_quota_overrides cu feature 'captcha.rnpm' interpretat ca numar de captcha-uri. Default cap configurabil prin LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA. 429 cu Retry-After accurate. UI /admin/quota afiseaza dual-unit (USD pentru ai.*, captcha-uri pentru captcha.*).",
+      },
+      {
+        title: "Backend reliability (P1-1, P1-2, P1-3, P1-5, P1-6)",
+        content:
+          "SOAP retry budget cu circuit breaker per provider. Captcha balance cu TTL 60s + invalidate pe write pentru a opri DoS-ul implicit pe /admin/keys. Owner-scoped guard pe tenant_api_keys mutations. Web mode body-key warning hardening — nu mai logam token-ul brut nici in stack trace. Admin route auth in web mode acum require explicit role check, nu doar ownerId.",
+      },
+      {
+        title: "Operational readiness (P1-7, P1-8)",
+        content:
+          "CI fixture secrets scoase din .github/workflows/docker-build.yml — folosite acum CI_JWT_SECRET / CI_TENANT_KEY_SECRET repo secrets cu fallback la openssl rand per run. RUNBOOK.md livrat cu 12 sectiuni operationale (boot failure, DB corruption, restore local + offsite, tenant key loss, rollback versiune, JWT rotation, forensics). Offsite backup hook configurabil via LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD (rclone / aws s3 / scp / etc) ruleaza dupa fiecare daily backup local, timeout 10min, fail-open (failure offsite nu sterge backup-ul local).",
+      },
+      {
+        title: "Sentry SDK amanat la v2.35.0",
+        content:
+          'APM integration (Sentry / Rollbar) ramane in roadmap dar v2.34.0 livreaza doar abstractia operationala (RUNBOOK + offsite). Workaround temporar pana la v2.35.0: stdout-ul backendului este structured JSON, deci grep-friendly pe "level":"error" cu Loki / Promtail / fluent-bit. Decizia: vendor-ul de APM trebuie ales de adminul firmei inainte de wire-up (cont + CSP connect-src + tunnel mode).',
+      },
+    ],
+  },
+  {
     version: "v2.33.0",
     date: "19 Mai 2026",
     subtitle:

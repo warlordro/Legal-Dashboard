@@ -42,6 +42,17 @@ const BULK_BODY_LIMIT = 512 * 1024; // 512KB: up to 200 bulk items
 const EXPORT_BODY_LIMIT = 256 * 1024; // 256KB: up to 5000 numeric ids
 const SMALL_BODY_LIMIT = 4 * 1024; // 4KB: captcha balance
 
+// v2.34.0 P1-3: server-side clamp pe pageSize / limit. Fara cap, un client
+// (sau atacator) putea cere pageSize=100000 -> SQLite reader timeout + Node
+// OOM. Cap 200 e suficient pentru UI normal (lista cu 200 randuri) si
+// previne expunerea de unbounded data dumps.
+const MAX_PAGE_SIZE = 200;
+
+function clampPageSize(raw: number, fallback: number): number {
+  const n = Number.isFinite(raw) && raw > 0 ? Math.floor(raw) : fallback;
+  return Math.min(Math.max(1, n), MAX_PAGE_SIZE);
+}
+
 const bodyTooLarge = (c: import("hono").Context) =>
   c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413);
 const limitSearch = bodyLimit({ maxSize: SEARCH_BODY_LIMIT, onError: bodyTooLarge });
@@ -768,8 +779,8 @@ rnpmRouter.get("/saved", (c) => {
 
   const result = getAvize({
     ownerId: getOwnerId(c),
-    page: Number.isFinite(pageRaw) ? pageRaw : 0,
-    pageSize: Number.isFinite(pageSizeRaw) ? pageSizeRaw : 25,
+    page: Number.isFinite(pageRaw) && pageRaw >= 0 ? pageRaw : 0,
+    pageSize: clampPageSize(pageSizeRaw, 25),
     searchType,
     activ,
     searchText,
@@ -1071,7 +1082,8 @@ rnpmRouter.get("/searches", (c) => {
   return c.json(
     getSearches({
       ownerId: getOwnerId(c),
-      limit: Number.isFinite(limit) ? limit : 50,
+      // v2.34.0 P1-3: clamp limit server-side la MAX_PAGE_SIZE (200).
+      limit: clampPageSize(limit, 50),
       cursor: Number.isFinite(cursor as number) ? (cursor as number) : null,
     })
   );

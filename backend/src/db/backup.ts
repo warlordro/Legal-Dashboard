@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
@@ -413,6 +414,80 @@ export async function deleteAllBackups(): Promise<number> {
   return deleted;
 }
 
+// v2.34.0 P1-8: offsite upload hook. Env `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`
+// is a shell command (POSIX `sh -c` on linux/darwin, `cmd /c` on win32) that
+// receives the absolute backup path as positional `$1`/`%1`. Example values:
+//   - `rclone copy "$1" s3:mybucket/legal-dashboard/`
+//   - `aws s3 cp "$1" s3://mybucket/legal-dashboard/`
+//   - `scp "$1" user@offsite.example:/var/backups/legal-dashboard/`
+// Unset = no-op (preserves desktop default behavior). Timeout: 10 minutes
+// (offsite transports must finish within that window or the run is
+// considered failed; the local backup is kept regardless).
+const OFFSITE_HOOK_TIMEOUT_MS = 10 * 60 * 1000;
+async function runOffsiteBackupHook(backupPath: string): Promise<void> {
+  const cmd = process.env.LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD;
+  if (!cmd || cmd.trim() === "") return;
+  const isWindows = process.platform === "win32";
+  const shell = isWindows ? "cmd.exe" : "/bin/sh";
+  const shellFlag = isWindows ? "/c" : "-c";
+  const startMs = Date.now();
+  await new Promise<void>((resolve) => {
+    const child = spawn(shell, [shellFlag, cmd, backupPath], {
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, LEGAL_DASHBOARD_BACKUP_PATH: backupPath },
+    });
+    let stderr = "";
+    child.stdout?.on("data", () => {
+      /* discard stdout — hook is fire-and-log */
+    });
+    child.stderr?.on("data", (chunk: Buffer) => {
+      stderr += chunk.toString();
+      if (stderr.length > 4096) stderr = stderr.slice(-4096);
+    });
+    const killTimer = setTimeout(() => {
+      child.kill("SIGKILL");
+      logBackupEvent({
+        action: "offsite_backup_failed",
+        stage: "timeout",
+        file: path.basename(backupPath),
+        durationMs: Date.now() - startMs,
+      });
+      resolve();
+    }, OFFSITE_HOOK_TIMEOUT_MS);
+    child.on("error", (err) => {
+      clearTimeout(killTimer);
+      logBackupEvent({
+        action: "offsite_backup_failed",
+        stage: "spawn",
+        file: path.basename(backupPath),
+        reason: err.message,
+      });
+      resolve();
+    });
+    child.on("close", (code, signal) => {
+      clearTimeout(killTimer);
+      if (code === 0) {
+        logBackupEvent({
+          action: "offsite_backup",
+          file: path.basename(backupPath),
+          durationMs: Date.now() - startMs,
+        });
+      } else {
+        logBackupEvent({
+          action: "offsite_backup_failed",
+          stage: "exit",
+          file: path.basename(backupPath),
+          exitCode: code,
+          signal,
+          stderr: stderr.slice(0, 1024),
+          durationMs: Date.now() - startMs,
+        });
+      }
+      resolve();
+    });
+  });
+}
+
 export async function runDailyBackup(): Promise<void> {
   // Serialize with restoreFromBackup so a user-triggered restore that closes
   // the DB cannot interleave with `db.backup()` running from this scheduler.
@@ -461,6 +536,13 @@ async function runDailyBackupImpl(): Promise<void> {
       file: path.basename(dest),
       pruned,
     });
+    // v2.34.0 P1-8: optional offsite upload hook. Configured via env so the
+    // user can plug in rclone / aws s3 cp / az storage blob upload / scp /
+    // any other transport without recompiling. Hook receives the absolute
+    // path to the freshly-written backup as $1; non-zero exit is logged but
+    // does NOT fail the local backup (offsite is a redundancy layer, the
+    // local snapshot already succeeded by this point).
+    await runOffsiteBackupHook(dest);
   } catch (e) {
     // Best-effort cleanup so the next attempt does not race a half-written sibling.
     await fsPromises.unlink(tmp).catch(() => {

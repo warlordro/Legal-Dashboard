@@ -23,6 +23,7 @@
 // activare a unui canal care era deja activ implicit.
 
 import { getDb } from "./schema.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export interface OwnerMonitoringSettings {
   owner_id: string;
@@ -78,6 +79,7 @@ export function getMonitoringEnabled(ownerId: string): boolean {
 // (returneaza { changed: false }, nu inserteaza rand). Acest design evita
 // audit rows duplicate pentru "active -> active" pe ownerii noi.
 export function setMonitoringEnabled(ownerId: string, enabled: boolean): { changed: boolean } {
+  assertOwnerIdForMutation(ownerId, "setMonitoringEnabled");
   const db = getDb();
   const row = db.prepare("SELECT monitoring_enabled FROM owner_monitoring_settings WHERE owner_id = ?").get(ownerId) as
     | { monitoring_enabled: number }

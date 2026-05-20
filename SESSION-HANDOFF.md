@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.33.0 (2026-05-19)
+**Versiune curenta**: v2.34.0 (2026-05-20)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -69,6 +69,18 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
   `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
   ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
   si in fixturile de test — fara expunere directa la fisiere uploadate.
+
+## Sprint inchis 2026-05-20 - v2.34.0 web hardening
+
+**Status**: livrat pe branch `feat/v2.34.0-web-hardening`.
+
+**Scope**: inchide 4 P0 + 8 P1 din `audit/AUDIT-FINAL-FULL-PROJECT-v2.33.0-2026-05-19.md`. P0 acopera auth surface (Google OAuth2 device-code POST-only + RL `(ip, ua)`, admin guards intarite pe tenant-keys, blocare self-grant edits). P1 acopera SOAP retry budget, captcha balance per-tenant TTL, owner-scoped tenant key guard, body-key warning hardening, per-user captcha quota count-based cu rolling 24h/7d/30d si intent-recording, CI fixtures via `openssl rand`, offsite backup hook env-configurabil cu RUNBOOK.md (12 sectiuni).
+
+**Solutie**: tot codul nou este gateuit pe `getAuthMode() === "web"` sau pe rute web-only (admin endpoints). Cota captcha este atomic-in-tranzactie cu pattern "record-at-guard-accept" (overcount-never-undercount). Offsite backup hook este fail-open (local backup ramane chiar la hook failure); structured JSON `offsite_backup` / `offsite_backup_failed`. Sentry SDK explicit amanat la v2.35.0 — workaround documentat in RUNBOOK §12 (stdout structured JSON grep-friendly cu Loki/Promtail/fluent-bit).
+
+**Invariante pastrate**: desktop ZERO impact, BYOK desktop unchanged, `rejectApiKeysFromBodyInWebMode` activ, web-mode 501 gate pe `rejectCaptchaKeyInWebMode`, `TENANT_KEY_ENCRYPTION_SECRET` strict 32 bytes base64, raw SQL nou doar in `backend/src/db/**`.
+
+**Test coverage**: 1334 pass / 5 skipped backend (4 noi POSIX-only pentru offsite hook + 1 pre-existent). Biome pass, tsc backend + frontend pass, build pass.
 
 ## Sprint inchis 2026-05-19 - v2.33.0 security hardening
 

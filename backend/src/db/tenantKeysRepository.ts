@@ -46,9 +46,19 @@ interface TenantKeysRow {
 }
 
 let cached: TenantKeys | null = null;
+let cachedAt = 0;
+
+// v2.34.0 P1-1: in-process cache cu TTL 60s. Invalidarea explicita ramane
+// principalul path (toate setterele de mai jos cheama invalidateCache()), dar
+// TTL-ul protejeaza scenariile out-of-band: migration manual, seed script,
+// sau un viitor sidecar care updateaza `tenant_api_keys` ocolind repo-ul.
+// 60s = compromis intre throughput (decryptField e ieftin dar nu free) si
+// freshness operationala.
+const TENANT_KEYS_TTL_MS = 60_000;
 
 export function invalidateCache(): void {
   cached = null;
+  cachedAt = 0;
 }
 
 export function isTenantKeyField(field: string): field is TenantKeyField {
@@ -56,7 +66,9 @@ export function isTenantKeyField(field: string): field is TenantKeyField {
 }
 
 export function getTenantKeys(): TenantKeys {
-  if (cached) return cached;
+  if (cached !== null && Date.now() - cachedAt < TENANT_KEYS_TTL_MS) {
+    return cached;
+  }
   const row = ensureTenantRow();
   cached = {
     anthropic: decryptField(row, "anthropic"),
@@ -70,6 +82,7 @@ export function getTenantKeys(): TenantKeys {
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   };
+  cachedAt = Date.now();
   return cached;
 }
 

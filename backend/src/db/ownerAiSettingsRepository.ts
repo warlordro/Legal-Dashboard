@@ -1,4 +1,5 @@
 import { getDb } from "./schema.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export type AiProviderMode = "native" | "openrouter";
 export type OpenRouterStack = "western" | "chinese";
@@ -59,6 +60,7 @@ export function getSettings(ownerId: string): OwnerAiSettings {
 }
 
 export function upsertSettings(ownerId: string, input: UpsertOwnerAiSettingsInput): OwnerAiSettings {
+  assertOwnerIdForMutation(ownerId, "upsertSettings(ownerAi)");
   assertMode(input.mode);
   assertStack(input.openrouter_stack);
 

@@ -542,9 +542,15 @@ let budgetWarningRetryInterval: NodeJS.Timeout | null = null;
 // deploys that disable monitoring (MONITORING_ENABLED=0 or all kinds disabled),
 // orphan reservations from crashed SDK calls would inflate
 // sumAiUsageMilliInWindow until the next restart — valid clients receive 429
-// against a budget that is actually free. Run an independent daily timer in
-// web mode only; desktop has neither quotas nor reservations.
-const RESERVATION_PURGE_INTERVAL_MS = 24 * 60 * 60 * 1000;
+// against a budget that is actually free. Run an independent timer in web
+// mode only; desktop has neither quotas nor reservations.
+//
+// v2.34.0 P1-purge: interval scazut de la 24h la 60s. Reservation expira la
+// 5min (RESERVATION_EXPIRE_SECONDS=300 in aiUsageRepository); cu purge 24h,
+// fereastra in care reservations expirate dar nepurjate inflateaza falsa
+// utilizare poate ajunge 24h => DoS-by-quota daca un atacator pompeaza
+// reservations care expira fara settle. 60s = fereastra max de inflatie.
+const RESERVATION_PURGE_INTERVAL_MS = 60_000;
 let reservationPurgeInterval: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {

@@ -252,7 +252,7 @@ describe("/api/v1/me/email-settings", () => {
     });
   });
 
-  it("PUT saves settings and records audit before/after", async () => {
+  it("PUT saves settings si scrie audit cu whitelist (fara email plaintext)", async () => {
     const res = await buildApp().request("/api/v1/me/email-settings", {
       method: "PUT",
       headers: { "content-type": "application/json" },
@@ -265,9 +265,19 @@ describe("/api/v1/me/email-settings", () => {
     expect(getEmailSettings("local")?.toAddress).toBe("alerts@firma.ro");
     const events = getAuditEvents({ ownerId: "local", action: "me.email_settings.update" });
     expect(events).toHaveLength(1);
-    const detail = JSON.parse(events[0].detail_json);
-    expect(detail.before).toBeNull();
-    expect(detail.after.toAddress).toBe("alerts@firma.ro");
+    const detailJson = events[0].detail_json;
+    // P0-1: audit NU mai contine email plaintext, doar hash + last4.
+    expect(detailJson).not.toContain("alerts@firma.ro");
+    const detail = JSON.parse(detailJson);
+    expect(detail).toMatchObject({
+      enabledBefore: null,
+      enabledAfter: true,
+      toAddressHadPrevious: false,
+      toAddressHashBefore: null,
+      toAddressLast4After: "a.ro",
+      toAddressChanged: true,
+    });
+    expect(detail.toAddressHashAfter).toMatch(/^[0-9a-f]{16}$/);
   });
 
   it("PUT rejects enabled without toAddress", async () => {

@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.33.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric
-si [SECURITY.md](SECURITY.md) pentru threat model. Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
+Versiune curenta: **v2.34.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+[SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.33.0** - security hardening pentru CRITICAL-1 + 5 HIGH + 11 MEDIUM + 3 LOW: rezervari atomice quota/budget in web mode, instance lock si proxy trust explicite pentru deploy, SOAP streaming byte cap + RNPM fail-closed validation, FX BCE fara fallback manual si audit trail fara plaintext pentru secrete. Desktop ramane neimpactat pentru ca quotaGuard si helperii noi scurt-circuiteaza in afara modului web.
+Ultimul release **v2.34.0** - web hardening pentru 4 P0 + 8 P1 din auditul intern: GET/device-code dezactivat (POST-only), device_codes RL ip+UA, admin guards intarite pe tenant-keys, SOAP retry budget, captcha balance per-tenant TTL, owner-scoped tenant key guard, body-key warning hardening, per-user captcha quota cu UI dual-unit, CI fixtures off + RUNBOOK + offsite backup hook env-configurabil. Sentry SDK amanat la v2.35.0. Desktop ramane neimpactat.
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 

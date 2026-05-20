@@ -1,5 +1,6 @@
 import { getDb, checkpointWal } from "./schema.ts";
 import { buildRnpmLikePattern, tokenizeFilterQuery } from "../util/textNormalize.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export interface AvizRecord {
   id: number;
@@ -150,6 +151,7 @@ function serializeActiv(activ: boolean | null | undefined): 0 | 1 | null {
 }
 
 export function saveAvizFull(input: SaveAvizInput): number {
+  assertOwnerIdForMutation(input.ownerId, "saveAvizFull");
   const db = getDb();
   const ownerId = input.ownerId;
 
@@ -528,6 +530,7 @@ function cleanupOrphanDescrieri(db: ReturnType<typeof getDb>): number {
 }
 
 export function deleteAviz(id: number, ownerId = "local"): boolean {
+  assertOwnerIdForMutation(ownerId, "deleteAviz");
   const db = getDb();
   const deleted = db.transaction(() => {
     const res = db.prepare("DELETE FROM rnpm_avize WHERE id = ? AND owner_id = ?").run(id, ownerId);
@@ -540,6 +543,7 @@ export function deleteAviz(id: number, ownerId = "local"): boolean {
 }
 
 export function deleteAllAvize(ownerId = "local"): number {
+  assertOwnerIdForMutation(ownerId, "deleteAllAvize");
   const db = getDb();
   // Sterge avizele (CASCADE curata creditori/debitori/bunuri/istoric) si metadata din rnpm_searches.
   // search_id din rnpm_avize are ON DELETE SET NULL, deci searches nu cad in cascada — le stergem explicit.
@@ -555,6 +559,7 @@ export function deleteAllAvize(ownerId = "local"): number {
 
 export function deleteAvizeByIds(ids: number[], ownerId = "local"): number {
   if (ids.length === 0) return 0;
+  assertOwnerIdForMutation(ownerId, "deleteAvizeByIds");
   const db = getDb();
   const placeholders = ids.map(() => "?").join(",");
   // CASCADE pe creditori/debitori/bunuri/istoric; rnpm_searches nu se sterge aici

@@ -9,6 +9,7 @@
 // ultima valoare valida din fx_rates.
 
 import { upsertFxRate } from "../db/fxRatesRepository.ts";
+import { withMaintenanceRead } from "../db/backup.ts";
 
 export const ECB_FEED_URL = "https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml";
 
@@ -84,7 +85,13 @@ export async function fetchEcbDailyRates(
       return { ok: false, reason: "implausible_rate", observedRate: parsed.eurUsdRate };
     }
     const usdToEur = computeUsdToEur(parsed.eurUsdRate);
-    upsertFxRate({ pair: "USD/EUR", rate: usdToEur, rateDate: parsed.rateDate, source: "ecb" });
+    // v2.34.0 P1-5: write-ul `upsertFxRate` trebuie sa coordoneze cu
+    // maintenanceLock-ul ca daily backup / restore sa nu prinda un fisier
+    // mid-write. `withMaintenanceRead` (shared) e suficient — un singur
+    // upsert pe zi, sub backupWrite atomic.
+    await withMaintenanceRead(async () => {
+      upsertFxRate({ pair: "USD/EUR", rate: usdToEur, rateDate: parsed.rateDate, source: "ecb" });
+    });
     return { ok: true, pair: "USD/EUR", rate: usdToEur, rateDate: parsed.rateDate };
   } catch (err) {
     if ((err as { name?: string })?.name === "AbortError") {

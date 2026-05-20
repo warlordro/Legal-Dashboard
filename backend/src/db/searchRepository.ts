@@ -1,4 +1,5 @@
 import { getDb } from "./schema.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export interface SearchRecord {
   id: number;
@@ -23,6 +24,7 @@ export interface SaveSearchInput {
 }
 
 export function saveSearch(input: SaveSearchInput): number {
+  assertOwnerIdForMutation(input.ownerId, "saveSearch");
   const db = getDb();
   const stmt = db.prepare(`
     INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
@@ -64,6 +66,7 @@ export function getSearches(opts: GetSearchesOptions): CursorPage<SearchRecord> 
 }
 
 export function updateSearchTotal(id: number, totalResults: number, ownerId = "local"): boolean {
+  assertOwnerIdForMutation(ownerId, "updateSearchTotal");
   const db = getDb();
   const res = db
     .prepare("UPDATE rnpm_searches SET total_results = ? WHERE id = ? AND owner_id = ?")
@@ -72,6 +75,7 @@ export function updateSearchTotal(id: number, totalResults: number, ownerId = "l
 }
 
 export function deleteSearch(id: number, ownerId = "local"): boolean {
+  assertOwnerIdForMutation(ownerId, "deleteSearch");
   const db = getDb();
   const res = db.prepare("DELETE FROM rnpm_searches WHERE id = ? AND owner_id = ?").run(id, ownerId);
   return res.changes > 0;

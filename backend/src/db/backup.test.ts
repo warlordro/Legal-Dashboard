@@ -231,6 +231,63 @@ describe("runDailyBackup — atomicity + retention", () => {
   });
 });
 
+// v2.34.0 P1-8: optional offsite upload hook on `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`.
+// POSIX-only because the impl uses `sh -c` on linux/darwin and `cmd /c` on win32;
+// `true` / `false` are POSIX shell builtins — Windows test runner would need
+// `exit /b 0` / `exit /b 1` instead, but the deployment surface that actually
+// uses this hook is the Docker image (ubuntu-latest).
+describe("runDailyBackup — offsite hook (POSIX only)", () => {
+  const isWindows = process.platform === "win32";
+
+  afterEach(() => {
+    // biome-ignore lint/performance/noDelete: env must be truly unset.
+    delete process.env.LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD;
+  });
+
+  it.skipIf(isWindows)("hook unset = no offsite_backup log emitted", async () => {
+    const { lines } = await captureConsoleLog(() => runDailyBackup());
+    expect(lines.some((s) => s.includes('"action":"offsite_backup"'))).toBe(false);
+    expect(lines.some((s) => s.includes('"action":"offsite_backup_failed"'))).toBe(false);
+  });
+
+  it.skipIf(isWindows)("hook exit 0 emits offsite_backup success line with file + duration", async () => {
+    process.env.LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD = "true";
+    const { lines } = await captureConsoleLog(() => runDailyBackup());
+
+    const successLine = lines.find(
+      (s) => s.includes('"action":"offsite_backup"') && !s.includes("offsite_backup_failed")
+    );
+    expect(successLine).toBeDefined();
+    const parsed = JSON.parse(successLine!);
+    expect(parsed.action).toBe("offsite_backup");
+    expect(parsed.file).toMatch(/^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/);
+    expect(typeof parsed.durationMs).toBe("number");
+  });
+
+  it.skipIf(isWindows)("hook exit non-zero emits offsite_backup_failed with exit code + stderr", async () => {
+    process.env.LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD = "echo boom 1>&2; exit 7";
+    const { lines } = await captureConsoleLog(() => runDailyBackup());
+
+    const failureLine = lines.find((s) => s.includes('"action":"offsite_backup_failed"'));
+    expect(failureLine).toBeDefined();
+    const parsed = JSON.parse(failureLine!);
+    expect(parsed.action).toBe("offsite_backup_failed");
+    expect(parsed.exitCode).toBe(7);
+    expect(parsed.stage).toBe("exit");
+    expect(parsed.stderr).toContain("boom");
+  });
+
+  it.skipIf(isWindows)("hook failure does NOT remove the local backup", async () => {
+    process.env.LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD = "false";
+    await runDailyBackup();
+
+    const names = (await listBackupsWithMeta()).map((b) => b.name);
+    const dated = names.filter((name) => /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/.test(name));
+    // Hook failure is fail-open: local backup persists, only the offsite leg failed.
+    expect(dated.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
 // Regression for the maintenance RWLock: writer (backup/restore) acquired
 // exclusive access blocks new readers (scheduler ticks); concurrent readers
 // run in parallel; writer-preference prevents reader starvation. The lock

@@ -1,15 +1,18 @@
 // AlertEventService — verifies the persistence-vs-fanout seam.
 //
-// Contract under test:
-//   - recordAndDispatchAlert returns the same shape as insertAlert.
-//   - On a fresh insert (inserted=true) it schedules an email dispatch via
-//     queueMicrotask. The dispatcher is mocked at the mailer boundary so the
-//     test exercises the wire-up without spinning up SMTP.
-//   - On a dedup hit (inserted=false) the dispatch is NOT scheduled.
-//
-// Why this exists: until v2.11.x, `insertAlert` itself reached into the email
-// dispatcher inside the repo module. The seam moved that hand-off into
-// services/alerts so the repo stays pure persistence + in-process listeners.
+// Contract under test (v2.34.0 P1-6 — split persist vs dispatch):
+//   - recordAndDispatchAlert returns the same shape as insertAlert and writes
+//     a monitoring.alert.emitted audit row when the row is freshly inserted.
+//   - recordAndDispatchAlert DOES NOT trigger email dispatch on its own.
+//   - dispatchInsertedAlertEmails(results) schedules an email dispatch per
+//     inserted=true row via queueMicrotask. The dispatcher is mocked at the
+//     mailer boundary so the test exercises the wire-up without spinning up
+//     SMTP.
+//   - On a dedup hit (inserted=false) dispatchInsertedAlertEmails skips the
+//     row — no SMTP send.
+//   - Regression: when recordAndDispatchAlert is called inside a SQLite
+//     transaction that subsequently rolls back, no email is dispatched
+//     (phantom-email bug from pre-P1-6 queueMicrotask-inside-tx pattern).
 
 import Database from "better-sqlite3";
 import path from "node:path";
@@ -20,7 +23,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDb, getDb } from "../../db/schema.ts";
 import { upsertEmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
 import { drainEmailDispatches } from "../email/alertEmailDispatcher.ts";
-import { recordAndDispatchAlert } from "./alertEventService.ts";
+import { dispatchInsertedAlertEmails, recordAndDispatchAlert } from "./alertEventService.ts";
 
 vi.mock("../email/mailer.ts", () => ({
   isMailerConfigured: vi.fn(() => true),
@@ -93,7 +96,7 @@ describe("recordAndDispatchAlert", () => {
     expect(row.dedup_key).toBe("evt-k1");
   });
 
-  it("dispatches email exactly once when the row is freshly inserted", async () => {
+  it("does NOT dispatch email on its own (split persist vs dispatch)", async () => {
     upsertEmailSettings("local", {
       enabled: true,
       toAddress: "alerts@firma.ro",
@@ -111,8 +114,9 @@ describe("recordAndDispatchAlert", () => {
       detail: {},
       dedupKey: "evt-k2",
     });
+    // Without dispatchInsertedAlertEmails(...), no email should ever fire.
     await drainEmailDispatches(2_000);
-    expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
+    expect(sendAlertEmailMock).toHaveBeenCalledTimes(0);
   });
 
   it("writes a monitoring.alert.emitted audit row on fresh insert", () => {
@@ -199,6 +203,31 @@ describe("recordAndDispatchAlert", () => {
       .get() as { n: number };
     expect(after2.n).toBe(after1.n);
   });
+});
+
+describe("dispatchInsertedAlertEmails", () => {
+  it("dispatches email exactly once for each inserted=true row", async () => {
+    upsertEmailSettings("local", {
+      enabled: true,
+      toAddress: "alerts@firma.ro",
+      minSeverity: "info",
+    });
+    const jobId = seedJob("local");
+    const runId = seedRun("local", jobId);
+    const result = recordAndDispatchAlert({
+      ownerId: "local",
+      jobId,
+      runId,
+      kind: "dosar_new",
+      severity: "warning",
+      title: "Dosar nou",
+      detail: {},
+      dedupKey: "evt-k2-dispatch",
+    });
+    dispatchInsertedAlertEmails([result]);
+    await drainEmailDispatches(2_000);
+    expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
+  });
 
   it("does not dispatch email on a dedup hit (inserted=false)", async () => {
     upsertEmailSettings("local", {
@@ -208,7 +237,7 @@ describe("recordAndDispatchAlert", () => {
     });
     const jobId = seedJob("local");
     const runId = seedRun("local", jobId);
-    recordAndDispatchAlert({
+    const first = recordAndDispatchAlert({
       ownerId: "local",
       jobId,
       runId,
@@ -218,6 +247,7 @@ describe("recordAndDispatchAlert", () => {
       detail: {},
       dedupKey: "evt-k3",
     });
+    dispatchInsertedAlertEmails([first]);
     await drainEmailDispatches(2_000);
     expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
 
@@ -231,9 +261,59 @@ describe("recordAndDispatchAlert", () => {
       detail: {},
       dedupKey: "evt-k3",
     });
+    dispatchInsertedAlertEmails([second]);
     await drainEmailDispatches(2_000);
     expect(second.inserted).toBe(false);
     // Still 1 — the dedup hit must not trigger a second SMTP send.
     expect(sendAlertEmailMock).toHaveBeenCalledTimes(1);
+  });
+
+  // v2.34.0 P1-6 regression: pre-fix, `recordAndDispatchAlert` queued the
+  // email via queueMicrotask immediately after `insertAlert`. If the caller
+  // wrapped the call in `getDb().transaction(() => { ... })` and the
+  // transaction subsequently rolled back, the alert row was gone but the
+  // microtask still ran → phantom email. The split-persist-vs-dispatch
+  // contract forbids this: the dispatch site lives AFTER the transaction
+  // returns, so a rollback aborts the dispatch path entirely.
+  it("does not dispatch email when the wrapping transaction rolls back", async () => {
+    upsertEmailSettings("local", {
+      enabled: true,
+      toAddress: "alerts@firma.ro",
+      minSeverity: "info",
+    });
+    const jobId = seedJob("local");
+    const runId = seedRun("local", jobId);
+
+    const insertedResults: ReturnType<typeof recordAndDispatchAlert>[] = [];
+    const alertsBefore = getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts").get() as { n: number };
+
+    expect(() => {
+      getDb().transaction(() => {
+        const result = recordAndDispatchAlert({
+          ownerId: "local",
+          jobId,
+          runId,
+          kind: "dosar_new",
+          severity: "warning",
+          title: "Dosar nou (rolled back)",
+          detail: {},
+          dedupKey: "evt-rollback",
+        });
+        insertedResults.push(result);
+        // Simulate a later step in the transaction throwing (e.g.
+        // enrichSolutieAlertsForJob blowing up after the alert insert).
+        throw new Error("simulated rollback");
+      })();
+    }).toThrow(/simulated rollback/);
+
+    // Sanity: the alert row was rolled back.
+    const alertsAfter = getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts").get() as { n: number };
+    expect(alertsAfter.n).toBe(alertsBefore.n);
+
+    // Because the throw aborted the call stack BEFORE we reached
+    // dispatchInsertedAlertEmails, no email is sent — even though
+    // `insertedResults` was populated inside the transaction.
+    await drainEmailDispatches(2_000);
+    expect(sendAlertEmailMock).toHaveBeenCalledTimes(0);
   });
 });

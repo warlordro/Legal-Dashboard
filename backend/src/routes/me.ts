@@ -19,6 +19,7 @@ import type { QuotaFeature } from "../middleware/quotaGuard.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { isMailerConfigured, sendTestEmail } from "../services/email/mailer.ts";
+import { buildEmailSettingsAuditDetail } from "../util/auditSanitize.ts";
 import { fail, ok } from "../util/envelope.ts";
 
 const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
@@ -251,10 +252,13 @@ meRouter.put("/email-settings", limitMeBody, async (c) => {
     minSeverity,
     dailyReportEnabled,
   });
+  // v2.34.0 P0-1: NU serializa `before/after` raw — `toAddress` plaintext in
+  // audit_log e PII GDPR. Folosim whitelist explicit cu hash + last4 pentru
+  // email; restul campurilor (boolean/enum) sunt nepericuloase.
   recordAudit(c, "me.email_settings.update", {
     targetKind: "owner_email_settings",
     targetId: ownerId,
-    detail: { before, after },
+    detail: buildEmailSettingsAuditDetail(before, after),
   });
   return c.json(ok(toEmailSettingsDto(after), c), 200);
 });

@@ -26,7 +26,11 @@ import {
   recoverOrphanRuns,
   type TerminalRunStatus,
 } from "../../db/monitoringRunsRepository.ts";
-import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
+import {
+  recordAndDispatchAlert as insertAlert,
+  dispatchInsertedAlertEmails,
+  type InsertAlertResult,
+} from "../alerts/alertEventService.ts";
 import { purgeExpiredReservations, purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
 import { purgeOldAuditLog } from "../../db/auditRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
@@ -496,6 +500,13 @@ export class Scheduler {
       // The source_error insertAlert inside applyJobOutcome is part of the
       // same atomic boundary so a half-applied recovery never persists.
       // Tier 3 #11: the lock now only wraps this terminal-commit transaction.
+      //
+      // v2.34.0 P1-6: applyJobOutcome may insert a source_error alert as part
+      // of the atomic transaction. Capture the InsertAlertResult and dispatch
+      // its email AFTER the transaction commits — same pattern as the runners.
+      // If the transaction throws, we never reach the dispatch line and the
+      // (rolled-back) alert never emails.
+      let sourceErrorResult: InsertAlertResult | null = null;
       await withMaintenanceRead(async () => {
         getDb().transaction(() => {
           finalize(runId, {
@@ -515,10 +526,13 @@ export class Scheduler {
           // fail_streak on every clean shutdown and trip spurious source_error
           // alerts on healthy jobs.
           if (outcome.status !== "aborted") {
-            this.applyJobOutcome(job, runId, outcome, nowIso);
+            sourceErrorResult = this.applyJobOutcome(job, runId, outcome, nowIso);
           }
         })();
       });
+      if (sourceErrorResult) {
+        dispatchInsertedAlertEmails([sourceErrorResult]);
+      }
     })().finally(() => {
       this.inflight.delete(job.id);
     });
@@ -535,7 +549,12 @@ export class Scheduler {
     return Object.keys(this.opts.runners) as JobKind[];
   }
 
-  private applyJobOutcome(job: ScheduledJob, runId: number, outcome: RunOutcome, nowIso: string): void {
+  private applyJobOutcome(
+    job: ScheduledJob,
+    runId: number,
+    outcome: RunOutcome,
+    nowIso: string
+  ): InsertAlertResult | null {
     const success = outcome.status === "ok";
     const failStreak = success ? 0 : job.fail_streak + 1;
     const lastStatus: "ok" | "error" = success ? "ok" : "error";
@@ -581,7 +600,7 @@ export class Scheduler {
         probableCause === "nume_prea_lung_pentru_portaljust"
           ? "Sursa indisponibila — nume prea lung pentru PortalJust (5 esecuri consecutive)"
           : baseTitle;
-      insertAlert({
+      const sourceErrorResult = insertAlert({
         ownerId: job.owner_id,
         jobId: job.id,
         runId,
@@ -597,7 +616,9 @@ export class Scheduler {
         },
         dedupKey: `source_error|${runId}`,
       });
-    } else if (failStreak > SOURCE_ERROR_THRESHOLD) {
+      return sourceErrorResult;
+    }
+    if (failStreak > SOURCE_ERROR_THRESHOLD) {
       // Tier 4 #22: when a chronically broken job keeps failing past the
       // threshold, the alert is intentionally suppressed (one alert per
       // streak, not per tick). Without a log line, ops have no way to tell
@@ -615,5 +636,6 @@ export class Scheduler {
         })
       );
     }
+    return null;
   }
 }

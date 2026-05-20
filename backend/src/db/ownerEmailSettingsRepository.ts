@@ -1,4 +1,5 @@
 import { getDb } from "./schema.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 // v2.10.1 note: `min_severity` ramane stocat per-owner, dar dispatcher-ul NU
 // foloseste valoarea ca filtru — design explicit din v2.10.0 ("email = toate
@@ -82,6 +83,7 @@ export function getEmailSettings(ownerId: string): EmailSettings | null {
 }
 
 export function upsertEmailSettings(ownerId: string, input: UpsertEmailSettingsInput): EmailSettings {
+  assertOwnerIdForMutation(ownerId, "upsertEmailSettings");
   const toAddress = normalizeToAddress(input.toAddress);
   getDb()
     .prepare(

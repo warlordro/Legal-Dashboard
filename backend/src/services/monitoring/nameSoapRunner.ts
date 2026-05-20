@@ -6,7 +6,11 @@ import { stripDiacritics } from "../../util/textNormalize.ts";
 import { buildNameSoapSnapshot, diffNameSoap, type NameSoapPrevSnapshot } from "./diff/nameSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
 import { deletePriorSnapshots, getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
-import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
+import {
+  recordAndDispatchAlert as insertAlert,
+  dispatchInsertedAlertEmails,
+  type InsertAlertResult,
+} from "../alerts/alertEventService.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 
@@ -81,6 +85,9 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
 
       let alertsCreated = 0;
       let oversizeOutcome: RunOutcome | null = null;
+      // v2.34.0 P1-6: collect alert results during persistence so emails fire
+      // only AFTER the SQLite transaction commits. See alertEventService.ts.
+      const insertedResults: InsertAlertResult[] = [];
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
         const prevSnapshot = prevRow ? (JSON.parse(prevRow.payload_json) as NameSoapPrevSnapshot) : null;
@@ -115,6 +122,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
             },
             dedupKey: `snapshot_oversize|${runId}`,
           });
+          insertedResults.push(oversizeResult);
           const oversizeInserted = oversizeResult.inserted ? 1 : 0;
           alertsCreated = oversizeInserted;
           oversizeOutcome = {
@@ -156,13 +164,20 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
               detail: { ...targetContext, ...alert.detail },
               dedupKey: alert.dedupKey,
             });
+            insertedResults.push(result);
             if (result.inserted) insertedCount += 1;
           }
         })();
         alertsCreated = insertedCount;
       });
 
-      if (oversizeOutcome) return oversizeOutcome;
+      if (oversizeOutcome) {
+        // v2.34.0 P1-6: oversize alert lives outside the transaction, but we
+        // still defer email dispatch to here so the dispatch site is the same
+        // for both branches.
+        dispatchInsertedAlertEmails(insertedResults);
+        return oversizeOutcome;
+      }
 
       // v2.20.8 — Batch 2.1: emit source_partial daca cel putin o institutie a
       // esuat dar nu toate (cazul "all failed" e tratat de fetchForTarget care
@@ -190,9 +205,15 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
             // dar runuri diferite emit alerta noua (operatorul vede recurenta).
             dedupKey: `source_partial|${runId}`,
           });
+          insertedResults.push(partialResult);
           if (partialResult.inserted) alertsCreated += 1;
         });
       }
+
+      // v2.34.0 P1-6: dispatch emails AFTER both the snapshot transaction and
+      // the optional source_partial write commit. If either threw, we never
+      // reach here.
+      dispatchInsertedAlertEmails(insertedResults);
 
       // F10 asymmetry note: name_soap does not call enrichSolutieAlertsForJob
       // (the sedinta-level backfill is anchored to numar_dosar identity, which

@@ -10,6 +10,9 @@ import { cn } from "@/lib/utils";
 
 // Daily limits are stored as integer milli-USD ($0.001 = 1 milli) to match the
 // AI usage cost model from PR-7. UI exposes USD with up to 3-decimal precision.
+// v2.34.0 P1-4: pentru `captcha.*` valoarea stocata in `limit_usd_milli` se
+// interpreteaza ca NUMAR (integer count de captcha-uri pe fereastra), nu USD.
+// UI bypass-uieste conversia milli ca admin sa tasteze "50" si sa stocam 50.
 const MILLI = 1000;
 
 const PERIOD_LABELS: Record<QuotaPeriod, string> = {
@@ -18,17 +21,30 @@ const PERIOD_LABELS: Record<QuotaPeriod, string> = {
   month: "Lunar",
 };
 
-function milliToUsd(milli: number | null): string {
-  if (milli === null) return "—";
-  return (milli / MILLI).toFixed(3);
+function isCountFeature(feature: string): boolean {
+  return feature.startsWith("captcha.");
 }
 
-function parseUsdInputToMilli(value: string): number | null | "invalid" {
+function formatStoredValue(feature: string, stored: number | null): string {
+  if (stored === null) return "—";
+  if (isCountFeature(feature)) return String(stored);
+  return (stored / MILLI).toFixed(3);
+}
+
+function parseInputToStored(feature: string, value: string): number | null | "invalid" {
   const trimmed = value.trim();
   if (!trimmed) return "invalid";
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n < 0) return "invalid";
+  if (isCountFeature(feature)) {
+    if (!Number.isInteger(n)) return "invalid";
+    return n;
+  }
   return Math.round(n * MILLI);
+}
+
+function limitUnitLabel(feature: string): string {
+  return isCountFeature(feature) ? "captcha-uri" : "USD";
 }
 
 export default function AdminQuota() {
@@ -101,9 +117,12 @@ export default function AdminQuota() {
     if (unlimited) {
       limitUsdMilli = null;
     } else {
-      const parsed = parseUsdInputToMilli(limitUsd);
+      const parsed = parseInputToStored(featureKey, limitUsd);
       if (parsed === "invalid") {
-        setError("Introdu o limita valida (>= 0) sau bifeaza 'Nelimitat'.");
+        const hint = isCountFeature(featureKey)
+          ? "Introdu un numar intreg >= 0 sau bifeaza 'Nelimitat'."
+          : "Introdu o limita valida (>= 0) sau bifeaza 'Nelimitat'.";
+        setError(hint);
         return;
       }
       limitUsdMilli = parsed;
@@ -130,7 +149,12 @@ export default function AdminQuota() {
 
   const onDelete = async (override: QuotaOverride) => {
     if (!selected) return;
-    const limitLabel = override.limitUsdMilli === null ? "nelimitat" : `${milliToUsd(override.limitUsdMilli)} $`;
+    const limitLabel =
+      override.limitUsdMilli === null
+        ? "nelimitat"
+        : isCountFeature(override.feature)
+          ? `${override.limitUsdMilli} ${limitUnitLabel(override.feature)}`
+          : `${formatStoredValue(override.feature, override.limitUsdMilli)} $`;
     const periodLabel = PERIOD_LABELS[override.period].toLowerCase();
     const ok = await confirm({
       title: "Sterge cota",
@@ -159,7 +183,7 @@ export default function AdminQuota() {
       setLimitUsd("");
     } else {
       setUnlimited(false);
-      setLimitUsd(milliToUsd(override.limitUsdMilli));
+      setLimitUsd(formatStoredValue(override.feature, override.limitUsdMilli));
     }
   };
 
@@ -172,8 +196,8 @@ export default function AdminQuota() {
             Cote utilizatori
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Override-uri pe rolling window (zi / saptamana / luna) in USD. Bifeaza "Nelimitat" pentru a scoate capul.
-            Stocate ca milli-USD pentru aliniere cu modelul de cost AI.
+            Override-uri pe rolling window (zi / saptamana / luna). Pentru `ai.*` limita e in USD (stocata milli),
+            pentru `captcha.*` e numar de captcha-uri / fereastra. Bifeaza "Nelimitat" pentru a scoate capul.
           </p>
         </div>
 
@@ -263,7 +287,7 @@ export default function AdminQuota() {
                     type="text"
                     value={feature}
                     onChange={(e) => setFeature(e.target.value)}
-                    placeholder="ex: ai.single, ai.multi"
+                    placeholder="ex: ai.single, ai.multi, captcha.rnpm"
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </div>
@@ -284,16 +308,16 @@ export default function AdminQuota() {
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-limit">
-                    Limita (USD)
+                    Limita ({limitUnitLabel(feature)})
                   </label>
                   <input
                     id="quota-limit"
                     type="number"
-                    step="0.001"
+                    step={isCountFeature(feature) ? "1" : "0.001"}
                     min="0"
                     value={limitUsd}
                     onChange={(e) => setLimitUsd(e.target.value)}
-                    placeholder="ex: 25"
+                    placeholder={isCountFeature(feature) ? "ex: 50" : "ex: 25"}
                     disabled={unlimited}
                     className={cn(
                       "h-9 w-full rounded-md border border-input bg-background px-3 text-sm",
@@ -343,8 +367,12 @@ export default function AdminQuota() {
                         <td className="px-3 py-2 align-top">
                           {row.limitUsdMilli === null ? (
                             <Badge variant="outline">Nelimitat</Badge>
+                          ) : isCountFeature(row.feature) ? (
+                            <span className="font-mono">
+                              {row.limitUsdMilli} {limitUnitLabel(row.feature)}
+                            </span>
                           ) : (
-                            <span className="font-mono">${milliToUsd(row.limitUsdMilli)}</span>
+                            <span className="font-mono">${formatStoredValue(row.feature, row.limitUsdMilli)}</span>
                           )}
                         </td>
                         <td className="px-3 py-2 align-top text-xs text-muted-foreground">

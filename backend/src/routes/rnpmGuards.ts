@@ -1,8 +1,47 @@
 import type { Context } from "hono";
 
 import { getAuthMode } from "../auth/config.ts";
+import {
+  countTenantCaptchaUsageInWindow,
+  earliestTenantCaptchaTsInWindow,
+  recordCaptchaUsage,
+} from "../db/captchaUsageRepository.ts";
 import { getTenantKeys, type CaptchaMode, type CaptchaProvider } from "../db/tenantKeysRepository.ts";
+import { type QuotaPeriod, getOverride } from "../db/userQuotaRepository.ts";
+import { getOwnerId } from "../middleware/owner.ts";
+import { getRequestId } from "../middleware/requestId.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
+
+// v2.34.0 P1-4 — per-user captcha quota (mirror al rolling-window din quotaGuard).
+// 24h / 7d / 30d, configurabil din `/admin/quota` cu feature `captcha.rnpm`.
+const CAPTCHA_QUOTA_FEATURE = "captcha.rnpm";
+
+const CAPTCHA_PERIOD_SECONDS: Record<QuotaPeriod, number> = {
+  day: 86_400,
+  week: 604_800,
+  month: 2_592_000,
+};
+
+// Default cap pe captcha-uri / fereastra rolling pentru useri fara override.
+// Format: integer non-negativ (numar de captcha-uri). Unset = pass-through
+// (backward compatible: niciun cap). 0 = block hard pe orice user fara override.
+function readDefaultCaptchaQuota(): number | null {
+  const raw = process.env.LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA;
+  if (raw === undefined || raw === "") return null;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) return null;
+  return parsed;
+}
+
+function captchaRetryAfterSeconds(ownerId: string, windowSeconds: number, now: Date = new Date()): number {
+  const earliest = earliestTenantCaptchaTsInWindow(ownerId, windowSeconds);
+  if (!earliest) return windowSeconds;
+  const earliestMs = Date.parse(earliest);
+  if (Number.isNaN(earliestMs)) return windowSeconds;
+  const releaseMs = earliestMs + windowSeconds * 1000;
+  const deltaSec = Math.ceil((releaseMs - now.getTime()) / 1000);
+  return Math.max(1, deltaSec);
+}
 
 export type RnpmCaptchaGuardResult =
   | {
@@ -46,6 +85,53 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
         `[rnpm.guards] body.captchaKey ignored in web mode (tenant key wins) path=${c.req.path} method=${c.req.method}`
       );
     }
+
+    // v2.34.0 P1-4: cap pe captcha-uri / fereastra rolling. Override-ul din
+    // /admin/quota cu feature 'captcha.rnpm' se interpreteaza ca NUMAR de
+    // captcha-uri (NU milli-USD). Default-ul vine din env.
+    const ownerId = getOwnerId(c);
+    const override = getOverride(ownerId, CAPTCHA_QUOTA_FEATURE);
+    const defaultCap = readDefaultCaptchaQuota();
+    const limitCount = override ? override.limit_usd_milli : defaultCap;
+    if (limitCount !== null) {
+      const period: QuotaPeriod = override?.period ?? "day";
+      const windowSeconds = CAPTCHA_PERIOD_SECONDS[period];
+      const used = countTenantCaptchaUsageInWindow(ownerId, windowSeconds);
+      if (limitCount === 0 || used >= limitCount) {
+        const retryAfter = captchaRetryAfterSeconds(ownerId, windowSeconds);
+        c.header("Retry-After", String(retryAfter));
+        return {
+          ok: false,
+          response: c.json(
+            fail(ErrorCodes.QUOTA_EXCEEDED, "Cota de captcha-uri a fost atinsa. Contacteaza adminul.", c, {
+              used,
+              limit: limitCount,
+              period,
+              feature: CAPTCHA_QUOTA_FEATURE,
+              source: override ? "override" : "default",
+            }),
+            429
+          ),
+        };
+      }
+    }
+
+    // Record-and-accept: contam captcha-ul ca "intent-based" (1 row per request
+    // acceptat de guard). Daca SOAP-ul ulterior nu mai consuma cheia (timeout
+    // / abort), riscul e overcount, niciodata undercount — exact semantica pe
+    // care o vrem la un cap operational. requestId leaga randul de auditul
+    // existent (`rnpm.captcha.consume`).
+    try {
+      recordCaptchaUsage({
+        ownerId,
+        provider: resolved.provider,
+        source: "tenant",
+        requestId: getRequestId(c),
+      });
+    } catch (err) {
+      console.error("[rnpm.guards] captcha usage record failed", err);
+    }
+
     return {
       ok: true,
       source: "tenant",

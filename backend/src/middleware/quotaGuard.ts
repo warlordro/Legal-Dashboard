@@ -20,8 +20,14 @@ declare module "hono" {
   }
 }
 
-export const QUOTA_FEATURES = ["ai.single", "ai.multi"] as const;
+// v2.34.0 P1-4: `captcha.rnpm` is also valid for `user_quota_overrides` but
+// uses count semantics (cap = numar de captcha-uri / fereastra), nu cost milli-USD.
+// `quotaGuard()` ramane AI-only (cite ai_usage); captcha quota se aplica in
+// `withRnpmCaptchaGuards` care citeste din `captcha_usage` cu acelasi tabel
+// `user_quota_overrides`.
+export const QUOTA_FEATURES = ["ai.single", "ai.multi", "captcha.rnpm"] as const;
 export type QuotaFeature = (typeof QUOTA_FEATURES)[number];
+export type AiQuotaFeature = Extract<QuotaFeature, "ai.single" | "ai.multi">;
 
 // v2.32.0 rolling window seconds per period. Locked in D15 — operatorul nu
 // alege secundele, doar perioada (day/week/month). 24h/7d/30d.
@@ -31,12 +37,12 @@ const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
   month: 2_592_000,
 };
 
-const FEATURE_ESTIMATED_COST_MILLI: Record<QuotaFeature, number> = {
+const FEATURE_ESTIMATED_COST_MILLI: Record<AiQuotaFeature, number> = {
   "ai.single": 2_000,
   "ai.multi": 8_000,
 };
 
-function estimatedCostMilli(feature: QuotaFeature): number {
+function estimatedCostMilli(feature: AiQuotaFeature): number {
   const rawMultiplier = process.env.LEGAL_DASHBOARD_QUOTA_ESTIMATE_MULTIPLIER;
   const multiplier =
     rawMultiplier === undefined || rawMultiplier === ""
@@ -65,7 +71,7 @@ function readDefaultQuotaMilli(): number | null {
   return parsed;
 }
 
-export function quotaGuard(feature: QuotaFeature) {
+export function quotaGuard(feature: AiQuotaFeature) {
   return async (c: Context, next: Next) => {
     if (getAuthMode() !== "web") return next();
     c.set("quotaFeature", feature);
@@ -117,7 +123,7 @@ export function quotaGuard(feature: QuotaFeature) {
 
 export function reserveQuotaBudget(
   c: Context,
-  feature: QuotaFeature,
+  feature: AiQuotaFeature,
   provider: AiUsageProvider
 ): { ok: true; reservationId: number | null } | { ok: false; response: Response } {
   if (getAuthMode() !== "web") return { ok: true, reservationId: null };
@@ -184,7 +190,7 @@ export function reserveQuotaBudget(
 // e goala (improbabil daca am ajuns la blocaj), fallback la windowSeconds.
 function retryAfterSecondsForWindow(
   ownerId: string,
-  feature: QuotaFeature,
+  feature: AiQuotaFeature,
   windowSeconds: number,
   now: Date = new Date()
 ): number {

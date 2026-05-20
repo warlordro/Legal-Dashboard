@@ -236,7 +236,13 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(res.status).toBe(200);
   });
 
-  it("foloseste X-Forwarded-Email cand X-Auth-Request-Email lipseste", async () => {
+  // v2.34.0 P0-4-edit: fallback-ul pe X-Forwarded-Email a fost ELIMINAT. Daca
+  // Caddy uita sa setze X-Auth-Request-Email (mis-config) sau cineva expune
+  // direct backend-ul si seteaza doar X-Forwarded-Email, bridge-ul respinge
+  // requestul cu missing_identity. Caddyfile (deploy/Caddyfile) deja
+  // strip-uieste ambele headers inbound, deci aceasta nu poate fi forjat
+  // legitim.
+  it("respinge cand DOAR X-Forwarded-Email e prezent (fallback eliminat in v2.34.0)", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
 
     const res = await syncRequest({
@@ -244,7 +250,9 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
       "x-forwarded-email": "alice@example.test",
     });
 
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("missing_identity");
   });
 
   it("audit-ul de succes contine targetId=user.id si NU plaintext email", async () => {

@@ -1,5 +1,9 @@
+import Database from "better-sqlite3";
 import { Hono } from "hono";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../auth/config.ts", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../auth/config.ts")>();
@@ -18,14 +22,24 @@ vi.mock("../db/tenantKeysRepository.ts", async (importOriginal) => {
 });
 
 import { getAuthMode } from "../auth/config.ts";
+import { closeDb, getDb } from "../db/schema.ts";
 import { getTenantKeys } from "../db/tenantKeysRepository.ts";
 import { withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
 const mockedGetAuthMode = vi.mocked(getAuthMode);
 const mockedGetTenantKeys = vi.mocked(getTenantKeys);
 
+let tmpRoot: string;
+
 function buildApp() {
   const app = new Hono();
+  // v2.34.0 P1-4: tenant-branch path needs ownerId + requestId in context
+  // because `withRnpmCaptchaGuards` reads them for the captcha quota gate.
+  app.use("*", async (c, next) => {
+    c.set("ownerId", "test-user");
+    c.set("requestId", "req-test");
+    await next();
+  });
   app.post("/", async (c) => {
     const guard = await withRnpmCaptchaGuards(c);
     if (!guard.ok) return guard.response;
@@ -42,7 +56,16 @@ function buildApp() {
 }
 
 describe("withRnpmCaptchaGuards", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
+    // v2.34.0 P1-4: the tenant-branch captcha quota gate touches the DB, so
+    // every test gets an isolated SQLite file with migrations applied.
+    tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-rnpm-guards-"));
+    process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
+    const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
+    seed.close();
+    getDb();
+    // biome-ignore lint/performance/noDelete: env must be truly unset, not undefined.
+    delete process.env.LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA;
     mockedGetAuthMode.mockReturnValue("desktop");
     mockedGetTenantKeys.mockReturnValue({
       anthropic: "",
@@ -56,6 +79,15 @@ describe("withRnpmCaptchaGuards", () => {
       updatedAt: "2026-05-19T00:00:00Z",
       updatedBy: null,
     });
+  });
+
+  afterEach(async () => {
+    closeDb();
+    // biome-ignore lint/performance/noDelete: env must be truly unset.
+    delete process.env.LEGAL_DASHBOARD_DB_PATH;
+    // biome-ignore lint/performance/noDelete: env must be truly unset.
+    delete process.env.LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA;
+    await fsPromises.rm(tmpRoot, { recursive: true, force: true });
   });
 
   it("returneaza 501 in web mode cand tenantul nu are cheia captcha configurata", async () => {
