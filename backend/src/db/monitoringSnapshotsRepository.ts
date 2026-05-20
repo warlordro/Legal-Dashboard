@@ -13,6 +13,7 @@
 
 import { getDb } from "./schema.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "../services/monitoring/diff/types.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export interface MonitoringSnapshotRow {
   id: number;
@@ -41,6 +42,7 @@ export interface InsertSnapshotInput {
 }
 
 export function insertSnapshot(input: InsertSnapshotInput): number {
+  assertOwnerIdForMutation(input.ownerId, "insertSnapshot");
   // Constatare adversiala #1 (defense in depth) — runner-ul filtreaza deja
   // payload-urile oversize si emite SNAPSHOT_OVERSIZE inainte sa cheme aici.
   // Repo-ul reaplica plafonul ca nu cumva un alt apelator (replay backfill,
@@ -118,6 +120,7 @@ export function getLatestSnapshot(ownerId: string, jobId: number): MonitoringSna
  * @returns numarul de randuri sterse (0 daca jobul nu avea baseline)
  */
 export function deletePriorSnapshots(ownerId: string, jobId: number): number {
+  assertOwnerIdForMutation(ownerId, "deletePriorSnapshots");
   const info = getDb()
     .prepare("DELETE FROM monitoring_snapshots WHERE owner_id = ? AND job_id = ?")
     .run(ownerId, jobId);

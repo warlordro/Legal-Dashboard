@@ -11,6 +11,7 @@
 // that's still `running` after a process restart cannot have a live execution.
 
 import { getDb } from "./schema.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export type RunStatus = "running" | "ok" | "error" | "timeout" | "aborted";
 export type TerminalRunStatus = Exclude<RunStatus, "running">;
@@ -46,6 +47,7 @@ export interface InsertRunningInput {
 // numele lui, ceea ce ar contamina query-urile owner-scoped pe runs (audit,
 // purgeOldRuns by owner, viitor UI alerts run filter).
 export function insertRunning(input: InsertRunningInput): number {
+  assertOwnerIdForMutation(input.ownerId, "insertRunning");
   const db = getDb();
   const jobOwner = db
     .prepare("SELECT 1 FROM monitoring_jobs WHERE id = ? AND owner_id = ?")

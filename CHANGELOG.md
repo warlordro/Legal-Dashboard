@@ -1,5 +1,35 @@
 # Changelog - Legal Dashboard
 
+## v2.34.0 - 2026-05-20
+
+Web hardening release pentru inchiderea celor 4 P0 si 8 P1 documentate in `audit/AUDIT-FINAL-FULL-PROJECT-v2.33.0-2026-05-19.md`. Desktop ramane neimpactat (toate gate-urile sunt web-mode-only sau env-gated).
+
+### Livrabile
+
+**Auth surface + admin guards (P0).** `GET /api/v1/auth/device-code/:code` returneaza acum 410 forever — token-ul nu mai e accesibil prin GET ci doar prin POST autentificat. Rate-limiter-ul pe rute `/device-codes` foloseste cheie compusa (`ip + UA-hash`) ca un client botnet sa nu poata epuiza cota globala dintr-un singur User-Agent. Job nightly purjeaza `device_codes` expirate. Admin role check intarit pe `POST/PUT/DELETE /admin/tenant-keys` — `ownerId` egal cu adminul nu mai e suficient in web mode, e nevoie de role check explicit prin `requireRole("admin")`.
+
+**Per-user captcha quota (P1-4).** Tabela noua `captcha_usage` (migration `0033_captcha_usage`) cu rolling-window 24h/7d/30d, mirror la `quotaGuard` dar count-based (nu cost-based). Reuseste `user_quota_overrides` cu feature `captcha.rnpm` interpretat ca numar de captcha-uri (nu milli-USD). Default cap configurabil prin `LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA` (unset = pass-through, 0 = block hard). 429 cu `Retry-After` accurate calculat din earliest tenant captcha in fereastra. UI `/admin/quota` afiseaza dual-unit: "USD" pentru `ai.*`, "captcha-uri" pentru `captcha.*`.
+
+**Backend reliability si security hygiene (P1-1, P1-2, P1-3, P1-5, P1-6).** SOAP retry budget cu circuit breaker per provider. Captcha balance pruning cu TTL 60s + invalidate pe write pentru a opri DoS implicit pe `/admin/keys`. Owner-scoped guard pe `tenant_api_keys` mutations. Web mode body-key warning hardening — nu mai logam token-ul brut nici in stack trace. Admin route auth in web mode require explicit role check, nu doar ownerId.
+
+**Operational readiness (P1-7, P1-8).** CI fixture "secrets" scoase din `.github/workflows/docker-build.yml` — folosite acum `CI_JWT_SECRET` / `CI_TENANT_KEY_SECRET` repo secrets cu fallback la `openssl rand` per run (workflow ramane self-contained pentru forks). RUNBOOK.md livrat cu 12 sectiuni operationale: boot failure, DB corruption, restore local + offsite, tenant key loss, rollback versiune, JWT key rotation, reset cota captcha urgent, forensics, cheat sheet comenzi de urgenta. Offsite backup hook configurabil via `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` (rclone / aws s3 / scp / rsync / azure-cli — orice shell command) ruleaza dupa fiecare daily backup local, timeout 10min, fail-open (failure offsite nu sterge backup-ul local, doar logheaza).
+
+**Sentry SDK amanat la v2.35.0.** APM integration (Sentry / Rollbar / Datadog) ramane in roadmap dar v2.34.0 livreaza doar abstractia operationala (RUNBOOK + offsite). Workaround temporar pana la v2.35.0: stdout-ul backendului este structured JSON, deci grep-friendly pe `"level":"error"` cu Loki / Promtail / fluent-bit. Decizia conscienta: vendor-ul de APM trebuie ales de adminul firmei inainte de wire-up (cont + CSP `connect-src` + tunnel mode pentru CSP-strict environments).
+
+### Securitate
+
+Regulile load-bearing raman active: `rejectApiKeysFromBodyInWebMode`, `rejectCaptchaKeyInWebMode` 501 gate, `TENANT_KEY_ENCRYPTION_SECRET` 32 bytes base64, D14/D15/D16 fail-closed/locked/auto-clear, SQL raw only in `backend/src/db/**`. Audit log-ul ramane fara plaintext pentru secrete (key updates: doar `last4` / `hadPrevious` / `field` / `validationSkipped`).
+
+### Test coverage
+
+Backend 1334 pass / 5 skipped (4 skipped sunt offsite hook tests POSIX-only — ruleaza pe Docker CI ubuntu-latest). Frontend 209 pass. Suita totala creste cu 6 teste P1-4 (`rnpmCaptchaQuota.test.ts`) + 4 teste P1-8 (offsite hook). Migrations roundtrip tests pentru `0033_captcha_usage` UP/DOWN.
+
+### Verificare
+
+Validarea completa pre-push rulata pe branch-ul `feat/v2.34.0-web-hardening`: Biome, typecheck backend/frontend, build, backend tests si frontend tests.
+
+---
+
 ## v2.33.0 - 2026-05-19
 
 Security hardening release pentru CRITICAL-1 + 5 HIGH + 11 MEDIUM + 3 LOW, implementat conform `audit/FIX-PLAN-v2.33.0-REMEDIATION.md` peste cele patru planuri de cluster.

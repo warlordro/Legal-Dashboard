@@ -1,4 +1,5 @@
 import { getDb } from "./schema.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export type AiUsageProvider = "anthropic" | "openai" | "google" | "openrouter";
 export type AiUsageRoutingTag = "native" | "openrouter:western" | "openrouter:chinese";
@@ -67,6 +68,7 @@ function clampToNonNegativeInteger(value: number | null | undefined): number {
 }
 
 export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
+  assertOwnerIdForMutation(input.ownerId, "insertAiUsage");
   const db = getDb();
   const info = db
     .prepare(
@@ -104,6 +106,7 @@ export interface InsertReservationInput {
 export const RESERVATION_EXPIRE_SECONDS = 300;
 
 export function insertAiUsageReservation(input: InsertReservationInput): number {
+  assertOwnerIdForMutation(input.ownerId, "insertAiUsageReservation");
   const estimatedCost = clampToNonNegativeInteger(input.estimatedCostUsdMilli);
   const info = getDb()
     .prepare(

@@ -19,6 +19,7 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  AUDIT_DETAIL_MAX_BYTES,
   getAuditEvents,
   listAuditEvents,
   purgeOldAuditLog,
@@ -267,6 +268,30 @@ describe("recordAudit() — write paths", () => {
     const events = getAuditEvents({ ownerId: null, action: "test.circular" });
     expect(events).toHaveLength(1);
     expect(JSON.parse(events[0].detail_json)).toEqual({ _audit_serialize_error: true });
+  });
+
+  it("v2.34.0 P0-2: trunchiaza detail peste 16KB cu marker explicit", () => {
+    // Construim un blob care depaseste sigur AUDIT_DETAIL_MAX_BYTES dupa
+    // JSON.stringify (200 KB de date 'A').
+    const huge = "A".repeat(200 * 1024);
+    recordAudit(null, "test.bomb", { detail: { payload: huge } });
+    const events = getAuditEvents({ ownerId: null, action: "test.bomb" });
+    expect(events).toHaveLength(1);
+    const stored = events[0].detail_json;
+    expect(stored.length).toBeLessThan(AUDIT_DETAIL_MAX_BYTES + 256);
+    const parsed = JSON.parse(stored);
+    expect(parsed._truncated).toBe(true);
+    expect(parsed._maxBytes).toBe(AUDIT_DETAIL_MAX_BYTES);
+    expect(parsed._originalLength).toBeGreaterThan(AUDIT_DETAIL_MAX_BYTES);
+    expect(typeof parsed.head).toBe("string");
+    expect(parsed.head.length).toBeLessThanOrEqual(AUDIT_DETAIL_MAX_BYTES - 200);
+  });
+
+  it("v2.34.0 P0-2: pastreaza detail sub 16KB integral", () => {
+    const small = { msg: "hello", n: 42 };
+    recordAudit(null, "test.small", { detail: small });
+    const events = getAuditEvents({ ownerId: null, action: "test.small" });
+    expect(JSON.parse(events[0].detail_json)).toEqual(small);
   });
 });
 

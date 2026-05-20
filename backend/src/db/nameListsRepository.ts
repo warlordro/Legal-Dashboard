@@ -15,6 +15,7 @@
 // (commit-ul de joburi face parte din /commit, dupa preview).
 
 import { getDb } from "./schema.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 // Validation status pentru un rind individual din lista. Decizii:
 //   - 'ok'       — campurile prezente, dedup OK
@@ -78,6 +79,7 @@ export interface CreateListResult {
 }
 
 export function createList(input: CreateListInput): CreateListResult {
+  assertOwnerIdForMutation(input.ownerId, "createList");
   const db = getDb();
 
   const tx = db.transaction((): CreateListResult => {
@@ -248,6 +250,7 @@ export function getCommittableItems(ownerId: string, listId: number): NameListIt
 // pentru item X"). Idempotent: daca item-ul are deja monitoring_job_id setat,
 // nu suprascriem (un retry pe /commit nu ar trebui sa schimbe legaturile).
 export function linkItemToJob(ownerId: string, itemId: number, jobId: number): boolean {
+  assertOwnerIdForMutation(ownerId, "linkItemToJob");
   const info = getDb()
     .prepare(
       `UPDATE name_list_items
@@ -272,6 +275,7 @@ export interface ArchiveListResult {
 }
 
 export function archiveList(ownerId: string, listId: number): ArchiveListResult {
+  assertOwnerIdForMutation(ownerId, "archiveList");
   const db = getDb();
 
   const tx = db.transaction((): ArchiveListResult => {

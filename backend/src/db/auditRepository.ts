@@ -29,14 +29,32 @@ export interface AuditOptions {
 // Shape stored in detail_json. Routes/services that record audit events build
 // a plain object; we serialize once at write time and rely on the column's
 // JSON-text contract (no CHECK json_valid — see PLAN §2.2 header).
+//
+// v2.34.0 P0-2: cap 16KB pe payload. Fara cap, un caller (sau attacker) care
+// pompeaza un blob mare in `detail` (de ex. monitoring snapshot diff) ar fi
+// putut umfla DB-ul rapid — SQLite single-writer => coada blocata + disk fill
+// DoS. Cand depasim limita, scriem un marker explicit cu lungimea originala
+// si head-ul truncat (pastreaza vizibilitate operationala fara amplificare).
+export const AUDIT_DETAIL_MAX_BYTES = 16 * 1024;
+
 function serializeDetail(detail: Record<string, unknown> | null | undefined): string {
   if (detail == null) return "{}";
+  let raw: string;
   try {
-    return JSON.stringify(detail);
+    raw = JSON.stringify(detail);
   } catch {
     // Circular ref or BigInt — log loudly, never throw out of an audit path.
     return JSON.stringify({ _audit_serialize_error: true });
   }
+  if (raw.length > AUDIT_DETAIL_MAX_BYTES) {
+    return JSON.stringify({
+      _truncated: true,
+      _originalLength: raw.length,
+      _maxBytes: AUDIT_DETAIL_MAX_BYTES,
+      head: raw.slice(0, AUDIT_DETAIL_MAX_BYTES - 200),
+    });
+  }
+  return raw;
 }
 
 // Best-effort context extraction. Returns null fields rather than throwing so

@@ -14,13 +14,24 @@
 //      can never observe a half-committed row).
 // External fanout (right now: email; later: webhooks, queues, etc.) moves
 // here. Production write paths (runners + scheduler) call
-// `recordAndDispatchAlert`. Tests that only need persistence keep calling
+// `recordAndDispatchAlert` strictly for persistence + audit, then hand the
+// collected results to `dispatchInsertedAlertEmails` AFTER the wrapping
+// SQLite transaction commits. Tests that only need persistence keep calling
 // `insertAlert` directly so they don't pull SMTP/audit infra into scope.
 //
 // "MIN-VIABLE" is intentional: no outbox table, no retry queue, no failure
 // budget. The dispatcher already has bounded concurrency (`MAX_CONCURRENT=1`)
 // and a graceful drain (`drainEmailDispatches`) so this seam can stay a
 // single-call indirection until web-mode webhooks land.
+//
+// v2.34.0 P1-6 — split persist vs dispatch. Previously `recordAndDispatchAlert`
+// queued the email via `queueMicrotask` immediately after `insertAlert`. When
+// the caller wrapped the call in `getDb().transaction(() => { ... })`, a
+// rollback (e.g. a later enrich step throwing) would drop the alert row but
+// leave the microtask in flight — producing a phantom email for an alert that
+// never persisted. Fix: callers collect `InsertAlertResult[]` inside the
+// transaction and call `dispatchInsertedAlertEmails(results)` AFTER the
+// transaction returns successfully.
 
 import { recordAudit } from "../../db/auditRepository.ts";
 import { insertAlert, type InsertAlertInput, type InsertAlertResult } from "../../db/monitoringAlertsRepository.ts";
@@ -28,13 +39,12 @@ import { dispatchAlertEmail } from "../email/alertEmailDispatcher.ts";
 
 export type { InsertAlertInput, InsertAlertResult };
 
-// Persists the alert and, when a fresh row is written (inserted=true on the
-// dedup upsert), schedules an email dispatch via queueMicrotask so the SMTP
-// call never runs inside the SQLite write lock that the runners hold.
+// Persists the alert and writes a best-effort audit row. Does NOT trigger any
+// external dispatch — see `dispatchInsertedAlertEmails` for that.
 //
 // Returns the same `InsertAlertResult` as the repo so existing call sites
 // can swap `insertAlert` → `recordAndDispatchAlert` with no behavior delta
-// other than the email side effect coming back.
+// other than the audit side effect.
 //
 // v2.17.0 — every fresh alert gets a `monitoring.alert.emitted` audit row.
 // Pre-fix the runners wrote alert rows but no audit trail, so a "why was this
@@ -61,9 +71,23 @@ export function recordAndDispatchAlert(input: InsertAlertInput): InsertAlertResu
     } catch (err) {
       console.error("[alertEventService] audit write failed", err);
     }
-    queueMicrotask(() => {
-      void dispatchAlertEmail(result.row);
-    });
   }
   return result;
+}
+
+// Schedules email dispatch for every freshly-inserted alert in the batch.
+// Callers MUST invoke this AFTER the wrapping `getDb().transaction(() => {...})`
+// returns — otherwise a rollback after `recordAndDispatchAlert` would drop the
+// alert row while leaving the email side effect armed (see header note).
+//
+// The dispatcher itself is responsible for SMTP errors, retries within the
+// process lifetime, and graceful drain on shutdown.
+export function dispatchInsertedAlertEmails(results: readonly InsertAlertResult[]): void {
+  for (const result of results) {
+    if (result.inserted) {
+      queueMicrotask(() => {
+        void dispatchAlertEmail(result.row);
+      });
+    }
+  }
 }

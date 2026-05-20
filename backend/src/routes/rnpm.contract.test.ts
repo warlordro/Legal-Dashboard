@@ -168,6 +168,22 @@ describe("GET /api/v1/rnpm/saved", () => {
     expect(body.total).toBe(1);
     expect(body.items[0].activ).toBeNull();
   });
+
+  // v2.34.0 P1-3: pageSize/limit clamped server-side to MAX_PAGE_SIZE=200
+  // (DoS-by-quota / memory blowup prevention pe API public web).
+  it("clamps pageSize to MAX_PAGE_SIZE=200 when client requests larger value", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/saved?pageSize=99999");
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ items: unknown[]; total: number; page: number; pageSize: number }>(res);
+    expect(body.pageSize).toBe(200);
+  });
+
+  it("clamps non-positive pageSize back to the default", async () => {
+    const res = await buildApp().request("/api/v1/rnpm/saved?pageSize=0");
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ pageSize: number }>(res);
+    expect(body.pageSize).toBe(25);
+  });
 });
 
 describe("GET /api/v1/rnpm/saved/:id", () => {
@@ -349,6 +365,17 @@ describe("GET /api/v1/rnpm/searches", () => {
     for (const key of ["id", "owner_id", "search_type", "params_json", "total_results", "criteriu", "created_at"]) {
       expect(body.items[0]).toHaveProperty(key);
     }
+  });
+
+  // v2.34.0 P1-3: limit-ul de /searches e clamped la MAX_PAGE_SIZE=200.
+  // Cu un singur rand seed-uit, ne intereseaza ca cererea cu limit=99999
+  // intoarce 200 (nu 500/crash) si raspunsul e populat.
+  it("accepts and clamps oversized limit values without crashing", async () => {
+    saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
+    const res = await buildApp().request("/api/v1/rnpm/searches?limit=99999");
+    expect(res.status).toBe(200);
+    const body = await jsonOf<{ items: unknown[]; nextCursor: number | null }>(res);
+    expect(Array.isArray(body.items)).toBe(true);
   });
 });
 

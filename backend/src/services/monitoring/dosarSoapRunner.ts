@@ -24,7 +24,11 @@ import { diffDosarSoap, type DiffSnapshotPayload } from "./diff/dosarSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
 import { deletePriorSnapshots, getLatestSnapshot, insertSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
 import { enrichSolutieAlertsForJob } from "../../db/monitoringAlertsRepository.ts";
-import { recordAndDispatchAlert as insertAlert } from "../alerts/alertEventService.ts";
+import {
+  recordAndDispatchAlert as insertAlert,
+  dispatchInsertedAlertEmails,
+  type InsertAlertResult,
+} from "../alerts/alertEventService.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 
@@ -93,6 +97,14 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
       // brand-new alert was emitted.
       let alertsPatched = 0;
       let oversizeOutcome: RunOutcome | null = null;
+      // v2.34.0 P1-6: collect every InsertAlertResult emitted by this tick so
+      // we can dispatch emails AFTER the wrapping SQLite transaction commits.
+      // If the transaction throws (e.g. enrichSolutieAlertsForJob blows up
+      // after the inserts), the array still holds the results but we never
+      // reach the dispatch call below — rollback drops the rows and we drop
+      // the emails. Outside the transaction (oversize path), the row commits
+      // immediately, so we still need to dispatch its email.
+      const insertedResults: InsertAlertResult[] = [];
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
         const prevSnapshot = prevRow ? (JSON.parse(prevRow.payload_json) as DiffSnapshotPayload) : null;
@@ -136,6 +148,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
             },
             dedupKey: `snapshot_oversize|${runId}`,
           });
+          insertedResults.push(oversizeResult);
           const oversizeInserted = oversizeResult.inserted ? 1 : 0;
           alertsCreated = oversizeInserted;
           oversizeOutcome = {
@@ -193,6 +206,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
               detail: { ...dosarContext, ...alert.detail },
               dedupKey: alert.dedupKey,
             });
+            insertedResults.push(result);
             if (result.inserted) insertedCount += 1;
           }
           // v2.6.4 — backfill ruling text on existing solutie_aparuta alerts
@@ -225,6 +239,11 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         })();
         alertsCreated = insertedCount;
       });
+
+      // v2.34.0 P1-6: dispatch emails AFTER the transaction commits. If the
+      // transaction (or withMaintenanceRead callback) threw, we never reach
+      // here — emails are dropped for rolled-back alerts.
+      dispatchInsertedAlertEmails(insertedResults);
 
       if (oversizeOutcome) {
         return oversizeOutcome;

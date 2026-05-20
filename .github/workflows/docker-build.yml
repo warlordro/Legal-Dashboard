@@ -57,7 +57,33 @@ jobs:
       - name: Smoke test — node available in image
         run: docker run --rm legal-dashboard:ci node -e "console.log('node', process.version)"
 
+      # v2.34.0 P1-7: previously the smoke-test step had hardcoded fallback
+      # values for LEGAL_DASHBOARD_JWT_SECRET + TENANT_KEY_ENCRYPTION_SECRET
+      # baked into the workflow YAML. They were never real secrets (the smoke
+      # test only hits /health, which is public + auth-less), but hardcoded
+      # secret-shaped literals tripped repo secret scanners and were against
+      # hygiene. Now: prefer GitHub repo secrets (CI_JWT_SECRET, CI_TENANT_KEY_SECRET),
+      # fall back to fresh per-run random values so the workflow stays self-
+      # contained for forks / workflow_dispatch on a fresh clone where the
+      # repo secrets aren't configured yet.
+      - name: Generate CI smoke-test fixtures (fallback when repo secrets unset)
+        id: fixtures
+        run: |
+          # Output values never authenticate a real request; the smoke test
+          # only hits /health (public, no auth). The validators still require:
+          #   - JWT secret length >= 32 chars  (openssl rand -base64 48 = 64)
+          #   - tenant key = 32 bytes when base64-decoded (openssl rand -base64 32)
+          echo "jwt_secret=$(openssl rand -base64 48 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "tenant_key=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+
       - name: Smoke test — /health responds (max 60s)
+        env:
+          # GitHub expressions: prefer repo secret, fall back to per-run random
+          # generated above. Repo secrets (set in Settings > Secrets > Actions):
+          #   - CI_JWT_SECRET (>=32 char string)
+          #   - CI_TENANT_KEY_SECRET (base64 of 32 bytes)
+          CI_JWT_SECRET: ${{ secrets.CI_JWT_SECRET || steps.fixtures.outputs.jwt_secret }}
+          CI_TENANT_KEY_SECRET: ${{ secrets.CI_TENANT_KEY_SECRET || steps.fixtures.outputs.tenant_key }}
         run: |
           # HOST=0.0.0.0 + LEGAL_DASHBOARD_ALLOW_REMOTE=1 are required for the
           # container's port 3002 to actually be reachable from the host: the
@@ -72,24 +98,20 @@ jobs:
           # v2.7.0 PR-9 strengthens the gate: ALLOW_REMOTE=1 (or non-loopback HOST)
           # now also requires LEGAL_DASHBOARD_AUTH_MODE=web + a valid JWT secret
           # (>=32 chars) + JWT_ISSUER + JWT_AUDIENCE. Desktop noop mode is no
-          # longer allowed when binding to a remote interface. We use deterministic
-          # CI-only values; they never authenticate a real request because the
-          # smoke test only hits /health (public, no auth required).
+          # longer allowed when binding to a remote interface.
           # v2.30.0 adds the tenant key master secret gate: web mode boots fail-fast
           # without TENANT_KEY_ENCRYPTION_SECRET (32 bytes base64) because the boot
           # probe does an encrypt/decrypt round-trip self-test against the master
-          # key. The value below is base64("ci-only-tenant-key-master-secret"), a
-          # 32-byte literal that decodes cleanly — it never protects real tenant
-          # data because the smoke test never writes a key.
+          # key.
           docker run -d --name ld-ci -p 3002:3002 \
             -e HOST=0.0.0.0 \
             -e LEGAL_DASHBOARD_ALLOW_REMOTE=1 \
             -e LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet \
             -e LEGAL_DASHBOARD_AUTH_MODE=web \
-            -e LEGAL_DASHBOARD_JWT_SECRET=ci-only-test-secret-32-chars-minimum-do-not-use-in-prod \
+            -e LEGAL_DASHBOARD_JWT_SECRET="$CI_JWT_SECRET" \
             -e LEGAL_DASHBOARD_JWT_ISSUER=legal-dashboard-ci \
             -e LEGAL_DASHBOARD_JWT_AUDIENCE=legal-dashboard-ci \
-            -e TENANT_KEY_ENCRYPTION_SECRET=Y2ktb25seS10ZW5hbnQta2V5LW1hc3Rlci1zZWNyZXQ= \
+            -e TENANT_KEY_ENCRYPTION_SECRET="$CI_TENANT_KEY_SECRET" \
             legal-dashboard:ci
           # Poll /health every 2s for 60s. start-period=120s keeps healthcheck
           # green during prewarm, but the endpoint itself flips to 200 as soon

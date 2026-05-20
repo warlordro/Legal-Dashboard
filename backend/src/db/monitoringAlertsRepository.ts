@@ -6,6 +6,7 @@
 
 import { getDb } from "./schema.ts";
 import { buildRnpmLikePattern } from "../util/textNormalize.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 // Single source of truth for alert kinds. Routes consume this via z.enum so a
 // new kind (e.g. v2.15.0 termen_dupa_solutie) added here automatically becomes
@@ -202,6 +203,7 @@ export interface InsertAlertResult {
 }
 
 export function insertAlert(input: InsertAlertInput): InsertAlertResult {
+  assertOwnerIdForMutation(input.ownerId, "insertAlert");
   const db = getDb();
   const detailJson = input.detail ? JSON.stringify(input.detail) : "{}";
 
@@ -416,6 +418,7 @@ export function getAlertById(ownerId: string, id: number): MonitoringAlertRow | 
 }
 
 export function markAlertSeen(ownerId: string, id: number): MonitoringAlertRow | null {
+  assertOwnerIdForMutation(ownerId, "markAlertSeen");
   const db = getDb();
   const info = db
     .prepare(
@@ -442,6 +445,7 @@ export function markAlertSeen(ownerId: string, id: number): MonitoringAlertRow |
 // B does the same, both issue UPDATE, both readbacks return identical rows but
 // the audit log claims two unseen toggles when only one was meaningful.
 export function markAlertUnseen(ownerId: string, id: number): MonitoringAlertRow | null {
+  assertOwnerIdForMutation(ownerId, "markAlertUnseen");
   const db = getDb();
   const tx = db.transaction((): MonitoringAlertRow | null => {
     const existing = getAlertById(ownerId, id);
@@ -454,6 +458,7 @@ export function markAlertUnseen(ownerId: string, id: number): MonitoringAlertRow
 }
 
 export function dismissAlert(ownerId: string, id: number): MonitoringAlertRow | null {
+  assertOwnerIdForMutation(ownerId, "dismissAlert");
   const db = getDb();
   const info = db
     .prepare(
@@ -479,6 +484,7 @@ export function dismissAlert(ownerId: string, id: number): MonitoringAlertRow | 
 // snapshot under concurrent writes.
 export function markAlertsSeen(ownerId: string, ids: number[]): MonitoringAlertRow[] {
   if (ids.length === 0) return [];
+  assertOwnerIdForMutation(ownerId, "markAlertsSeen");
   // Defensive de-dup + integer coerce — a buggy caller passing the same id
   // twice would otherwise inflate the placeholder list and the IN clause.
   const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
@@ -565,6 +571,7 @@ export function dismissAlertsByIds(ownerId: string, ids: number[]): DismissBulkR
   if (ids.length === 0) {
     return { dismissedCount: 0, alreadyDismissedCount: 0, totalMatched: 0 };
   }
+  assertOwnerIdForMutation(ownerId, "dismissAlertsByIds");
   const uniqueIds = Array.from(new Set(ids.filter((id) => Number.isInteger(id) && id > 0)));
   if (uniqueIds.length === 0) {
     return { dismissedCount: 0, alreadyDismissedCount: 0, totalMatched: 0 };

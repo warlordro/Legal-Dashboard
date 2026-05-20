@@ -12,6 +12,7 @@
 import { getDb } from "./schema.ts";
 import { canonicalSha256 } from "../util/canonicalJson.ts";
 import { buildRnpmLikePattern } from "../util/textNormalize.ts";
+import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 import type { JobCreateBody, JobKind, JobUpdateBody } from "../schemas/monitoring.ts";
 
 export type JobStatus = "ok" | "error" | "partial" | "skipped";
@@ -79,6 +80,7 @@ export class IdempotencyConflictError extends Error {
 }
 
 export function createJob(input: CreateJobInput): CreateJobResult {
+  assertOwnerIdForMutation(input.ownerId, "createJob");
   const db = getDb();
   const { ownerId, body } = input;
   const targetJson = JSON.stringify(body.target);
@@ -240,6 +242,7 @@ export function listJobs(opts: ListJobsOptions): ListJobsResult {
 // new cadence. Same for cadence shrink. We recompute it inside the same
 // transaction so the row is internally consistent before audit reads it.
 export function updateJob(ownerId: string, id: number, patch: JobUpdateBody): MonitoringJobRow | null {
+  assertOwnerIdForMutation(ownerId, "updateJob");
   const db = getDb();
 
   const tx = db.transaction((): MonitoringJobRow | null => {
@@ -320,6 +323,7 @@ export function updateJob(ownerId: string, id: number, patch: JobUpdateBody): Mo
 // DELETE cascades to snapshots/alerts/runs via FK ON DELETE CASCADE in DDL.
 // Returns true when a row was actually deleted (false = not found OR not owned).
 export function deleteJob(ownerId: string, id: number): boolean {
+  assertOwnerIdForMutation(ownerId, "deleteJob");
   const info = getDb().prepare("DELETE FROM monitoring_jobs WHERE id = ? AND owner_id = ?").run(id, ownerId);
   return info.changes > 0;
 }

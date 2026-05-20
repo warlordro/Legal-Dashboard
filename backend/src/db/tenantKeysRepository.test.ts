@@ -112,4 +112,28 @@ describe("tenantKeysRepository", () => {
       updatedBy: "admin-1",
     });
   });
+
+  // v2.34.0 P1-1: TTL cache de 60s — daca cineva updateaza randul direct in
+  // SQLite (migration, seed, sidecar viitor) ocolind setTenantKey, randul
+  // proaspat trebuie sa fie vizibil dupa expirarea TTL-ului. Verificam aici
+  // doar invariantul "cache-ul re-citeste DB-ul dupa invalidare" — testarea
+  // ferestrei de 60s in real-time ar fi fragila.
+  it("re-reads tenant_api_keys after explicit invalidation", () => {
+    setTenantKey("openrouter", "sk-or-v1", "admin-1");
+    expect(getDecryptedKey("openrouter")).toBe("sk-or-v1");
+
+    // Simulam un update out-of-band: stergem cipher/iv/tag direct in DB.
+    getDb()
+      .prepare(
+        "UPDATE tenant_api_keys SET openrouter_cipher = NULL, openrouter_iv = NULL, openrouter_tag = NULL WHERE scope = 'tenant'"
+      )
+      .run();
+
+    // Fara invalidare, cache-ul inca raporteaza vechea valoare.
+    expect(getDecryptedKey("openrouter")).toBe("sk-or-v1");
+
+    invalidateCache();
+
+    expect(getDecryptedKey("openrouter")).toBe("");
+  });
 });
