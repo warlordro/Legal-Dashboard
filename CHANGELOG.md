@@ -1,5 +1,35 @@
 # Changelog - Legal Dashboard
 
+## v2.36.0 - 2026-05-22
+
+React Error Boundaries pe tot arborele de UI — inchide finding-ul critic B1 din `audit/DEEP-REVIEW-ARCHITECTURE-CODE-BUGS-SECURITY-2026-05-22.md`. Pana acum orice exceptie aruncata in render lasa userul cu ecran alb, identic in Electron si in web mode (acelasi bundle ruleaza in ambele). Acum un crash e izolat la sectiunea afectata si restul aplicatiei ramane utilizabila.
+
+### Livrabile
+
+**Componenta `ErrorBoundary`.** Class component React cu `getDerivedStateFromError` plus `componentDidCatch`, in doua variante. Varianta `app` randeaza un fallback full-page cu buton "Reincarca aplicatia" (`window.location.reload()`) si e montata in `main.tsx` in jurul intregului `<App/>` — in afara lui, fiindca un boundary nu prinde erorile componentei care il randeaza, iar crash-urile cele mai probabile vin din hook-urile lui `App()` care parseaza localStorage. Varianta `page` randeaza un fallback inline cu buton "Reincearca" care reseteaza boundary-ul fara reload, deci o eroare tranzitorie se poate recupera in loc.
+
+**Acoperire pe 12 sloturi de pagina plus Sidebar si ApiKeyDialog.** Fiecare slot din `AppShell` (Dashboard, Cautare Dosare, Termene, Cautare RNPM, Monitorizare, Alerte plus cele sase pagini admin) este impachetat intr-un `PageBoundary` etichetat. Boundary-urile NU sunt keyed pe pathname — un key le-ar remonta la fiecare schimbare de tab si ar rupe pattern-ul keep-mounted (`display:none`) care tine Dosare, Termene si RNPM montate ca operatiile async sa supravietuiasca navigarii.
+
+**Logging fara scurgeri.** `componentDidCatch` scrie `console.error("[ErrorBoundary]", { label, error, componentStack })`. `componentStack` ramane exclusiv in consola si nu se randeaza niciodata in DOM. Mesajul tehnic al erorii apare in UI doar in dev (`import.meta.env.DEV`, ramura tree-shaken in build-ul de productie).
+
+### Limitare cunoscuta
+
+Error boundaries prind doar erori din render, lifecycle si constructori. Nu prind erori din event handlers, cod async (`setTimeout`, `fetch().then`) sau SSR — acele cai isi trateaza erorile local prin try/catch plus state de eroare, pattern deja prezent in paginile existente.
+
+### Securitate
+
+Fara schimbari pe perimetrul de securitate. Boundary-ul nu expune `componentStack` sau mesaje tehnice de eroare in productie.
+
+### Test coverage
+
+Backend neschimbat (1334 pass / 5 skipped). Frontend 216 pass (plus 7 teste in suita noua `ErrorBoundary.test.tsx`: ambele variante, reset pe retry, gating dev/prod al mesajului tehnic, prefix `[ErrorBoundary]` in log).
+
+### Verificare
+
+Biome curat, `tsc --noEmit` backend plus frontend curat, build curat, backend plus frontend tests verde.
+
+---
+
 ## v2.35.0 - 2026-05-22
 
 Model refresh pe stack-ul OpenRouter chinezesc: Qwen 3.6 Max Preview e inlocuit cu Qwen 3.7 Max (GA, fara sufix `-preview`, release Alibaba 2026-05-21). Stack-ul chinezesc ramane premium pe trei modele: GLM 5.1, Kimi K2.6 si Qwen 3.7 Max.
