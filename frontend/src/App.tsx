@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { BrowserRouter, useLocation } from "react-router-dom";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/Sidebar";
 import { ApiKeyDialog } from "@/components/ApiKeyDialog";
 import Dashboard from "@/pages/Dashboard";
@@ -146,115 +147,144 @@ function AppShell({
         className="fixed top-0 left-0 right-0 h-8 bg-background z-[60]"
         style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
       />
-      <Sidebar
-        history={history}
-        onHistoryClick={handleHistoryClick}
-        onRemoveEntry={removeEntry}
-        onClearHistory={clearHistory}
-        hasApiKey={hasKey}
-        onConfigureApiKey={handleOpenKeyDialog}
-        rnpmHistory={rnpmHistory}
-        onRnpmHistoryClick={handleRnpmHistoryClick}
-        onRnpmRemoveEntry={removeRnpmEntry}
-        onRnpmClearHistory={clearRnpmHistory}
-        unreadAlerts={unreadAlerts}
-      />
+      <PageBoundary label="Meniu lateral">
+        <Sidebar
+          history={history}
+          onHistoryClick={handleHistoryClick}
+          onRemoveEntry={removeEntry}
+          onClearHistory={clearHistory}
+          hasApiKey={hasKey}
+          onConfigureApiKey={handleOpenKeyDialog}
+          rnpmHistory={rnpmHistory}
+          onRnpmHistoryClick={handleRnpmHistoryClick}
+          onRnpmRemoveEntry={removeRnpmEntry}
+          onRnpmClearHistory={clearRnpmHistory}
+          unreadAlerts={unreadAlerts}
+        />
+      </PageBoundary>
       <main ref={mainRef} className="flex-1 overflow-y-auto scrollbar-thin relative">
         {/* Dashboard only renders on "/" — no long-running ops */}
         {pathname === "/" && (
-          <Dashboard
-            dosareState={dosareState}
-            rnpmHistory={rnpmHistory}
-            history={history}
-            onHistoryClick={handleHistoryClick}
-          />
+          <PageBoundary label="Dashboard">
+            <Dashboard
+              dosareState={dosareState}
+              rnpmHistory={rnpmHistory}
+              history={history}
+              onHistoryClick={handleHistoryClick}
+            />
+          </PageBoundary>
         )}
 
-        {/* Dosare & Termene stay mounted so async operations survive tab switches */}
+        {/* Dosare & Termene stay mounted so async operations survive tab switches.
+            PageBoundary sta in interiorul div-ului keep-mounted si NU e keyed pe
+            pathname — un key l-ar remonta la fiecare schimbare de tab si ar rupe
+            operatiile async in curs. */}
         <div style={{ display: pathname === "/dosare" ? undefined : "none" }}>
-          <Dosare
-            state={dosareState}
-            onStateChange={setDosareState}
-            onSearchComplete={(params, count, meta) => addEntry("dosare", params, count, meta)}
-            pendingSearch={pendingSearch?.type === "dosare" ? pendingSearch.params : null}
-            consumePendingSearch={consumePendingSearch}
-            apiKeys={keys}
-            aiSettings={{ mode: aiSettings.mode, stack: aiSettings.stack }}
-            onConfigureApiKey={handleOpenKeyDialog}
-            showBudgetIndicator={pathname === "/dosare" && authMode === "web"}
-          />
+          <PageBoundary label="Cautare Dosare">
+            <Dosare
+              state={dosareState}
+              onStateChange={setDosareState}
+              onSearchComplete={(params, count, meta) => addEntry("dosare", params, count, meta)}
+              pendingSearch={pendingSearch?.type === "dosare" ? pendingSearch.params : null}
+              consumePendingSearch={consumePendingSearch}
+              apiKeys={keys}
+              aiSettings={{ mode: aiSettings.mode, stack: aiSettings.stack }}
+              onConfigureApiKey={handleOpenKeyDialog}
+              showBudgetIndicator={pathname === "/dosare" && authMode === "web"}
+            />
+          </PageBoundary>
         </div>
         <div style={{ display: pathname === "/termene" ? undefined : "none" }}>
-          <Termene
-            state={termeneState}
-            onStateChange={setTermeneState}
-            onSearchComplete={(params, count) => addEntry("termene", params, count)}
-            pendingSearch={pendingSearch?.type === "termene" ? pendingSearch.params : null}
-            consumePendingSearch={consumePendingSearch}
-          />
+          <PageBoundary label="Termene & Calendar">
+            <Termene
+              state={termeneState}
+              onStateChange={setTermeneState}
+              onSearchComplete={(params, count) => addEntry("termene", params, count)}
+              pendingSearch={pendingSearch?.type === "termene" ? pendingSearch.params : null}
+              consumePendingSearch={consumePendingSearch}
+            />
+          </PageBoundary>
         </div>
         {pathname === "/monitorizare" && (
-          <Monitorizare
-            onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
-            onOpenName={(nume) => handleHistoryClick("dosare", { numeParte: nume })}
-          />
+          <PageBoundary label="Monitorizare">
+            <Monitorizare
+              onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
+              onOpenName={(nume) => handleHistoryClick("dosare", { numeParte: nume })}
+            />
+          </PageBoundary>
         )}
         {pathname === "/alerte" && (
-          <Alerts
-            streamVersion={alertsStreamVersion}
-            onAlertsChanged={refreshUnreadAlerts}
-            onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
-          />
+          <PageBoundary label="Alerte">
+            <Alerts
+              streamVersion={alertsStreamVersion}
+              onAlertsChanged={refreshUnreadAlerts}
+              onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
+            />
+          </PageBoundary>
         )}
         {pathname === "/admin/users" && (
-          <AdminGate>
-            <AdminUsers />
-          </AdminGate>
+          <PageBoundary label="Utilizatori">
+            <AdminGate>
+              <AdminUsers />
+            </AdminGate>
+          </PageBoundary>
         )}
         {pathname === "/admin/audit" && (
-          <AdminGate>
-            <AdminAudit />
-          </AdminGate>
+          <PageBoundary label="Audit">
+            <AdminGate>
+              <AdminAudit />
+            </AdminGate>
+          </PageBoundary>
         )}
         {pathname === "/admin/quota" && (
-          <AdminGate>
-            <AdminQuota />
-          </AdminGate>
+          <PageBoundary label="Cote">
+            <AdminGate>
+              <AdminQuota />
+            </AdminGate>
+          </PageBoundary>
         )}
         {pathname === "/admin/grants" && (
-          <AdminGate>
-            <AdminGrants />
-          </AdminGate>
+          <PageBoundary label="Granturi">
+            <AdminGate>
+              <AdminGrants />
+            </AdminGate>
+          </PageBoundary>
         )}
         {pathname === "/admin/usage" && (
-          <AdminGate>
-            <AdminUsage />
-          </AdminGate>
+          <PageBoundary label="Consum">
+            <AdminGate>
+              <AdminUsage />
+            </AdminGate>
+          </PageBoundary>
         )}
         {pathname === "/admin/keys" && (
-          <AdminGate>
-            <AdminKeys />
-          </AdminGate>
+          <PageBoundary label="Chei API">
+            <AdminGate>
+              <AdminKeys />
+            </AdminGate>
+          </PageBoundary>
         )}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>
-          <RnpmSearchPage
-            captchaKey={activeCaptchaKey}
-            captchaProvider={captchaProvider}
-            fallback2CaptchaKey={
-              captchaMode === "race"
-                ? captchaProvider === "capsolver"
-                  ? keys.twocaptcha
-                  : keys.capsolver
-                : captchaProvider === "capsolver"
-                  ? keys.twocaptcha
-                  : undefined
-            }
-            captchaMode={captchaMode}
-            onConfigureKey={handleOpenKeyDialog}
-            onSearchComplete={addRnpmEntry}
-            pendingSearch={rnpmPendingSearch}
-            consumePendingSearch={consumeRnpmPendingSearch}
-          />
+          <PageBoundary label="Cautare RNPM">
+            <RnpmSearchPage
+              captchaKey={activeCaptchaKey}
+              captchaProvider={captchaProvider}
+              fallback2CaptchaKey={
+                captchaMode === "race"
+                  ? captchaProvider === "capsolver"
+                    ? keys.twocaptcha
+                    : keys.capsolver
+                  : captchaProvider === "capsolver"
+                    ? keys.twocaptcha
+                    : undefined
+              }
+              captchaMode={captchaMode}
+              onConfigureKey={handleOpenKeyDialog}
+              onSearchComplete={addRnpmEntry}
+              pendingSearch={rnpmPendingSearch}
+              consumePendingSearch={consumeRnpmPendingSearch}
+            />
+          </PageBoundary>
         </div>
 
         {/* Scroll navigation buttons */}
@@ -391,25 +421,27 @@ export default function App() {
           consumeRnpmPendingSearch={consumeRnpmPendingSearch}
         />
         {showKeyDialog && (
-          <ApiKeyDialog
-            onClose={closeKeyDialog}
-            apiKey={{
-              setKey,
-              clearKey,
-              hasKey,
-              hasAnthropic,
-              hasOpenai,
-              hasGoogle,
-              hasOpenrouter,
-              hasTwoCaptcha,
-              hasCapSolver,
-              captchaProvider,
-              setCaptchaProvider,
-              captchaMode,
-              setCaptchaMode,
-              aiSettings,
-            }}
-          />
+          <ErrorBoundary variant="page" label="Configurare chei API">
+            <ApiKeyDialog
+              onClose={closeKeyDialog}
+              apiKey={{
+                setKey,
+                clearKey,
+                hasKey,
+                hasAnthropic,
+                hasOpenai,
+                hasGoogle,
+                hasOpenrouter,
+                hasTwoCaptcha,
+                hasCapSolver,
+                captchaProvider,
+                setCaptchaProvider,
+                captchaMode,
+                setCaptchaMode,
+                aiSettings,
+              }}
+            />
+          </ErrorBoundary>
         )}
       </ConfirmProvider>
     </BrowserRouter>

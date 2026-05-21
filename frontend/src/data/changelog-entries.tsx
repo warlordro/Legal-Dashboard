@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.36.0",
+    date: "22 Mai 2026",
+    subtitle:
+      "React Error Boundaries pe tot arborele de UI. Un crash de render nu mai lasa ecran alb — e izolat la sectiunea afectata, restul aplicatiei ramane utilizabila. Inchide finding-ul critic B1 din auditul intern.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Componenta ErrorBoundary",
+        content:
+          "Class component React cu getDerivedStateFromError si componentDidCatch, in doua variante. Varianta 'app' (montata in jurul intregii aplicatii) randeaza un fallback full-page cu buton 'Reincarca aplicatia'. Varianta 'page' randeaza un fallback inline cu buton 'Reincearca' care reseteaza boundary-ul fara reload, deci o eroare tranzitorie se poate recupera in loc.",
+      },
+      {
+        title: "Acoperire pe 12 sloturi de pagina",
+        content:
+          "Fiecare pagina (Dashboard, Cautare Dosare, Termene, Cautare RNPM, Monitorizare, Alerte plus cele sase pagini admin), impreuna cu meniul lateral si dialogul de chei API, este impachetata intr-un boundary etichetat. Un crash intr-o pagina nu mai darama restul aplicatiei.",
+      },
+      {
+        title: "Logging fara scurgeri",
+        content:
+          "Eroarea prinsa se logheaza in consola cu prefixul [ErrorBoundary] plus stack-ul de componente. Stack-ul ramane exclusiv in consola si nu se randeaza niciodata in interfata. Mesajul tehnic al erorii apare in UI doar in modul de dezvoltare.",
+      },
+    ],
+  },
+  {
     version: "v2.35.0",
     date: "22 Mai 2026",
     subtitle:
