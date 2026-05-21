@@ -16,7 +16,7 @@ describe("dosare-ai-config availableModels", () => {
     expect(availableModels("openrouter", "chinese").map((model) => model.key)).toEqual([
       "glm-5.1",
       "kimi-k2.6",
-      "qwen-3.6-max",
+      "qwen-3.7-max",
     ]);
   });
 
@@ -29,7 +29,7 @@ describe("dosare-ai-config availableModels", () => {
     expect(availableJudgeModels("openrouter", "chinese").map((model) => model.key)).toEqual([
       "glm-5.1",
       "kimi-k2.6",
-      "qwen-3.6-max",
+      "qwen-3.7-max",
     ]);
   });
 });

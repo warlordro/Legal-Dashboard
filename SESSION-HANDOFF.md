@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.34.0 (2026-05-20)
+**Versiune curenta**: v2.35.0 (2026-05-22)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,

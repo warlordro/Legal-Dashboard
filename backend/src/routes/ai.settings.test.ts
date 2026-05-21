@@ -113,7 +113,7 @@ describe("AI route OpenRouter guards", () => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         analysts: ["glm-5.1", "claude-sonnet"],
-        judge: "qwen-3.6-max",
+        judge: "qwen-3.7-max",
         dosar: { numar: "123/2024", institutie: "JUDECATORIA BUCURESTI" },
         apiKeys: { openrouter: "sk-or-v1-test" },
       }),

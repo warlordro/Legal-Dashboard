@@ -96,18 +96,18 @@ describe("resolveOpenRouterSlug", () => {
   });
 
   it("resolves chinese stack slugs", () => {
-    expect(resolveOpenRouterSlug("qwen-3.6-max", "chinese")).toBe(OPENROUTER_CHINESE_MAP["qwen-3.6-max"]);
+    expect(resolveOpenRouterSlug("qwen-3.7-max", "chinese")).toBe(OPENROUTER_CHINESE_MAP["qwen-3.7-max"]);
   });
 
   it("uses OPENROUTER_MODEL_OVERRIDES before the static maps", () => {
-    process.env.OPENROUTER_MODEL_OVERRIDES = "qwen-3.6-max:qwen/custom, claude-sonnet:anthropic/custom";
+    process.env.OPENROUTER_MODEL_OVERRIDES = "qwen-3.7-max:qwen/custom, claude-sonnet:anthropic/custom";
 
-    expect(resolveOpenRouterSlug("qwen-3.6-max", "chinese")).toBe("qwen/custom");
+    expect(resolveOpenRouterSlug("qwen-3.7-max", "chinese")).toBe("qwen/custom");
     expect(resolveOpenRouterSlug("claude-sonnet", "western")).toBe("anthropic/custom");
   });
 
   it("returns null for a model outside the selected stack", () => {
-    expect(resolveOpenRouterSlug("qwen-3.6-max", "western")).toBeNull();
+    expect(resolveOpenRouterSlug("qwen-3.7-max", "western")).toBeNull();
     expect(resolveOpenRouterSlug("unknown", "chinese")).toBeNull();
   });
 });
@@ -168,7 +168,7 @@ describe("callOpenRouter", () => {
 
     await callOpenRouter(
       "sk-or-v1-test",
-      "qwen/qwen3.6-max-preview",
+      "qwen/qwen3.7-max",
       "prompt",
       5000,
       { ownerId: "alice", feature: "dosar_summary", requestId: "req-cost" },
@@ -210,7 +210,7 @@ describe("callModel OpenRouter routing", () => {
     mockOpenRouterResponse({ text: "via openrouter" });
 
     const result = await callModel(
-      "qwen-3.6-max",
+      "qwen-3.7-max",
       "prompt",
       { openrouter: "sk-or-v1-test" },
       5000,
@@ -221,7 +221,7 @@ describe("callModel OpenRouter routing", () => {
 
     expect(result).toBe("via openrouter");
     expect(openRouterCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "qwen/qwen3.6-max-preview" }),
+      expect.objectContaining({ model: "qwen/qwen3.7-max" }),
       expect.any(Object)
     );
   });
@@ -273,11 +273,11 @@ describe("callModel OpenRouter routing", () => {
 
   it("throws MODEL_NOT_IN_STACK when selected model is outside the OpenRouter stack", async () => {
     await expect(
-      callModel("qwen-3.6-max", "prompt", { openrouter: "sk-or-v1-test" }, 5000, undefined, undefined, {
+      callModel("qwen-3.7-max", "prompt", { openrouter: "sk-or-v1-test" }, 5000, undefined, undefined, {
         mode: "openrouter",
         stack: "western",
       })
-    ).rejects.toThrow("MODEL_NOT_IN_STACK:qwen-3.6-max:western");
+    ).rejects.toThrow("MODEL_NOT_IN_STACK:qwen-3.7-max:western");
   });
 });
 
@@ -313,7 +313,7 @@ describe("shouldRouteViaOpenRouter", () => {
     // somehow happens we route to OpenRouter rather than failing — there is no
     // native SDK for these models.
     expect(
-      shouldRouteViaOpenRouter("qwen-3.6-max", { openrouter: "sk-or-v1-test" }, { mode: "native", stack: "chinese" })
+      shouldRouteViaOpenRouter("qwen-3.7-max", { openrouter: "sk-or-v1-test" }, { mode: "native", stack: "chinese" })
     ).toBe(true);
   });
 

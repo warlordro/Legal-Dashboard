@@ -280,7 +280,7 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
     if (!JUDGE_MODELS.includes(body.judge))
       return invalidParams(
         c,
-        "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro, GLM 5.1, Kimi K2.6 si Qwen 3.6 Max."
+        "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro, GLM 5.1, Kimi K2.6 si Qwen 3.7 Max."
       );
     if (!(body.judge in AI_MODELS)) return modelError(c, "Model judecator necunoscut.");
 

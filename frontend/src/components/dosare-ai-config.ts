@@ -55,8 +55,8 @@ export const AI_MODELS: AiModelDef[] = [
   { key: "glm-5.1", label: "GLM 5.1", provider: "openrouter", stack: "chinese", desc: "Premium", color: "rose" },
   { key: "kimi-k2.6", label: "Kimi K2.6", provider: "openrouter", stack: "chinese", desc: "Premium", color: "cyan" },
   {
-    key: "qwen-3.6-max",
-    label: "Qwen 3.6 Max",
+    key: "qwen-3.7-max",
+    label: "Qwen 3.7 Max",
     provider: "openrouter",
     stack: "chinese",
     desc: "Premium",
@@ -85,8 +85,8 @@ export const JUDGE_MODELS_LIST: AiModelDef[] = [
   { key: "glm-5.1", label: "GLM 5.1", provider: "openrouter", stack: "chinese", color: "rose", desc: "Premium" },
   { key: "kimi-k2.6", label: "Kimi K2.6", provider: "openrouter", stack: "chinese", color: "cyan", desc: "Premium" },
   {
-    key: "qwen-3.6-max",
-    label: "Qwen 3.6 Max",
+    key: "qwen-3.7-max",
+    label: "Qwen 3.7 Max",
     provider: "openrouter",
     stack: "chinese",
     color: "amber",

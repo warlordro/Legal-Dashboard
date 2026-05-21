@@ -1,5 +1,31 @@
 # Changelog - Legal Dashboard
 
+## v2.35.0 - 2026-05-22
+
+Model refresh pe stack-ul OpenRouter chinezesc: Qwen 3.6 Max Preview e inlocuit cu Qwen 3.7 Max (GA, fara sufix `-preview`, release Alibaba 2026-05-21). Stack-ul chinezesc ramane premium pe trei modele: GLM 5.1, Kimi K2.6 si Qwen 3.7 Max.
+
+### Livrabile
+
+**Qwen 3.7 Max in stack-ul chinezesc.** Cheia interna `qwen-3.6-max` redenumita `qwen-3.7-max`. Slug OpenRouter actualizat la `qwen/qwen3.7-max` in `AI_MODELS`, `OPENROUTER_CHINESE_MAP` si `JUDGE_MODELS`. Frontend dropdown analist + judecator afiseaza "Qwen 3.7 Max" pentru stack-ul chinezesc, atat in single-agent cat si multi-agent. Mesajul de eroare pe judge necunoscut listeaza acum Qwen 3.7 Max.
+
+**Pricing actualizat.** Tabela `MODEL_PRICES_USD_PER_MILLION` reflecta tariful OpenRouter pentru noul model: **$2.50 input / $7.50 output per 1M tokens** (vs $1.04 / $6.24 la 3.6 Max Preview). Calculul `estimateAiCostUsdMilli` ramane neschimbat; doar valoarea de referinta s-a modificat.
+
+**Compat & migratie.** `owner_ai_settings` stocheaza doar `mode + openrouter_stack`, nu key-uri de modele, deci nu e nevoie de migratie SQL. Selectia analist/judge e trimisa la fiecare request din UI, deci utilizatorii vor vedea direct noul dropdown la urmatoarea selectie. Slug-ul vechi `qwen/qwen3.6-max-preview` ramane acceptat in `ai_usage` (CHECK constraint pe provider, nu pe model) — istoricul de consum se pastreaza intact. Kill switch `OPENROUTER_MODEL_OVERRIDES` continua sa permita hot-patch (`qwen-3.7-max:qwen/custom`).
+
+### Securitate
+
+Fara schimbari pe perimetrul de securitate. Stack-ul chinezesc ramane gated prin acelasi flow (admin select mode/stack, body-key web mode reject, owner-scoped tenant keys).
+
+### Test coverage
+
+Backend 1334 pass / 5 skipped. Frontend 209 pass. Suita totala neschimbata ca numar — testele care referentiau `qwen-3.6-max` / `qwen/qwen3.6-max-preview` au fost migrate la noile slug-uri. `0024_ai_usage_openrouter.test.ts` pastreaza slug-ul vechi ca fixture istoric pentru CHECK constraint.
+
+### Verificare
+
+Biome curat, `tsc --noEmit` backend + frontend curat, backend + frontend tests verde.
+
+---
+
 ## v2.34.0 - 2026-05-20
 
 Web hardening release pentru inchiderea celor 4 P0 si 8 P1 documentate in `audit/AUDIT-FINAL-FULL-PROJECT-v2.33.0-2026-05-19.md`. Desktop ramane neimpactat (toate gate-urile sunt web-mode-only sau env-gated).

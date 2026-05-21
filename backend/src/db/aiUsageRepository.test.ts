@@ -64,7 +64,7 @@ describe("insertAiUsage", () => {
     const row = insertAiUsage({
       ownerId: "alice",
       provider: "openrouter",
-      model: "qwen/qwen3.6-max-preview",
+      model: "qwen/qwen3.7-max",
       feature: "dosar_summary",
       inputTokens: 10,
       outputTokens: 20,

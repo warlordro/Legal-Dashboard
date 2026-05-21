@@ -59,7 +59,7 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "google/gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
     "z-ai/glm-5.1": { inputUsdPerMillion: 0.98, outputUsdPerMillion: 3.08 },
     "moonshotai/kimi-k2.6": { inputUsdPerMillion: 0.73, outputUsdPerMillion: 3.49 },
-    "qwen/qwen3.6-max-preview": { inputUsdPerMillion: 1.04, outputUsdPerMillion: 6.24 },
+    "qwen/qwen3.7-max": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 7.5 },
   },
 };
 

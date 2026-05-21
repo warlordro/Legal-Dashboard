@@ -123,7 +123,7 @@ describe("AI service usage tracking", () => {
   it("uses direct OpenRouter cost and persists routing_tag when provided", async () => {
     const result = await withAiLogging(
       "openrouter",
-      "qwen/qwen3.6-max-preview",
+      "qwen/qwen3.7-max",
       async () => ({
         value: "analysis text",
         meta: {
@@ -153,7 +153,7 @@ describe("AI service usage tracking", () => {
 
     expect(row).toEqual({
       provider: "openrouter",
-      model: "qwen/qwen3.6-max-preview",
+      model: "qwen/qwen3.7-max",
       cost_usd_milli: 123,
       routing_tag: "openrouter:chinese",
     });

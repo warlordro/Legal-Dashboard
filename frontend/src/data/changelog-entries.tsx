@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.35.0",
+    date: "22 Mai 2026",
+    subtitle:
+      "Refresh stack OpenRouter chinezesc: Qwen 3.6 Max Preview inlocuit cu Qwen 3.7 Max (GA, release Alibaba 2026-05-21). GLM 5.1 si Kimi K2.6 raman neschimbate. Pricing nou ($2.50 / $7.50 per 1M tokens). Fara migratie SQL.",
+    icon: <BrainCircuit className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
+    sections: [
+      {
+        title: "Qwen 3.7 Max in stack-ul chinezesc",
+        content:
+          "Cheia interna 'qwen-3.6-max' redenumita 'qwen-3.7-max'. Slug OpenRouter actualizat la 'qwen/qwen3.7-max' (GA, fara sufix -preview). Frontend dropdown analist + judecator afiseaza 'Qwen 3.7 Max' pentru stack-ul chinezesc, atat in single-agent cat si in multi-agent. Mesajul de eroare pe judecator necunoscut listeaza acum Qwen 3.7 Max in locul lui 3.6 Max.",
+      },
+      {
+        title: "Pricing actualizat",
+        content:
+          "Tabela MODEL_PRICES_USD_PER_MILLION reflecta noul tarif OpenRouter: $2.50 input / $7.50 output per 1M tokens (vs $1.04 / $6.24 la 3.6 Max Preview). Calculul estimateAiCostUsdMilli ramane neschimbat; doar valoarea de referinta s-a modificat. Bugetele admin (web mode) folosesc automat noul cost.",
+      },
+      {
+        title: "Compat & migratie",
+        content:
+          "owner_ai_settings stocheaza doar mode + openrouter_stack, nu key-uri de modele, deci nu e nevoie de migratie SQL. Selectia analist/judge e trimisa la fiecare request din UI — utilizatorii vor vedea direct noul dropdown. Slug-ul vechi 'qwen/qwen3.6-max-preview' ramane acceptat in ai_usage (CHECK constraint pe provider, nu pe model), deci istoricul de consum e intact. Kill switch OPENROUTER_MODEL_OVERRIDES continua sa permita hot-patch ('qwen-3.7-max:qwen/custom').",
+      },
+    ],
+  },
+  {
     version: "v2.34.0",
     date: "20 Mai 2026",
     subtitle:

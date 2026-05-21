@@ -30,10 +30,10 @@ export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: str
   // OpenRouter Chinese stack
   "glm-5.1": { provider: "openrouter", modelId: "z-ai/glm-5.1", stack: "chinese" },
   "kimi-k2.6": { provider: "openrouter", modelId: "moonshotai/kimi-k2.6", stack: "chinese" },
-  "qwen-3.6-max": { provider: "openrouter", modelId: "qwen/qwen3.6-max-preview", stack: "chinese" },
+  "qwen-3.7-max": { provider: "openrouter", modelId: "qwen/qwen3.7-max", stack: "chinese" },
 };
 
-export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3", "glm-5.1", "kimi-k2.6", "qwen-3.6-max"];
+export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3", "glm-5.1", "kimi-k2.6", "qwen-3.7-max"];
 
 export const OPENROUTER_WESTERN_MAP: Record<string, string> = {
   "claude-haiku": "anthropic/claude-haiku-4.5",
@@ -50,7 +50,7 @@ export const OPENROUTER_WESTERN_MAP: Record<string, string> = {
 export const OPENROUTER_CHINESE_MAP: Record<string, string> = {
   "glm-5.1": "z-ai/glm-5.1",
   "kimi-k2.6": "moonshotai/kimi-k2.6",
-  "qwen-3.6-max": "qwen/qwen3.6-max-preview",
+  "qwen-3.7-max": "qwen/qwen3.7-max",
 };
 
 export function resolveOpenRouterSlug(modelKey: string, stack: OpenRouterStack): string | null {
@@ -78,7 +78,7 @@ export const AI_TIMEOUT = 120000; // 120s per call — single analysis (native: 
 export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analysts + judge)
 // Chinese OpenRouter models (Qwen/GLM/Kimi) routinely take 90-180s per call —
 // provider queues + token throughput are much slower than native US providers.
-// Empirically observed: Qwen 3.6 Max -preview hit 120s+ on routine analyses
+// Empirically observed: Qwen 3.6 Max -preview hit 120s+ on routine analyses (Qwen 3.7 Max inherits same stack budget)
 // and Kimi K2.6 landed at ~87s. Bump defaults so the bottleneck stays at the
 // model, not the client.
 export const AI_TIMEOUT_CHINESE = 360000; // 360s per call — chinese OpenRouter single analysis
