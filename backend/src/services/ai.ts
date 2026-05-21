@@ -78,7 +78,7 @@ export const AI_TIMEOUT = 120000; // 120s per call — single analysis (native: 
 export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analysts + judge)
 // Chinese OpenRouter models (Qwen/GLM/Kimi) routinely take 90-180s per call —
 // provider queues + token throughput are much slower than native US providers.
-// Empirically observed: Qwen 3.6 Max -preview hit 120s+ on routine analyses (Qwen 3.7 Max inherits same stack budget)
+// Empirically observed: chinese-stack analysts hit 120s+ on routine analyses
 // and Kimi K2.6 landed at ~87s. Bump defaults so the bottleneck stays at the
 // model, not the client.
 export const AI_TIMEOUT_CHINESE = 360000; // 360s per call — chinese OpenRouter single analysis
