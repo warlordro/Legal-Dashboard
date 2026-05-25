@@ -11,6 +11,7 @@ import {
 import type { Dosar } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
 import { CATEGORY_COLORS, CATEGORY_FALLBACK } from "@/lib/chart-colors";
+import { dropLegalFormTokens } from "@/lib/legalSuffix";
 import { SummaryCard, PartyAnalysisCard, CategoryChart, StadiiChart, InstitutiiChart } from "./metrics-panel-parts";
 
 function stripDiacritics(s: string): string {
@@ -97,7 +98,9 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
 
   const partyAnalysis = useMemo(() => {
     if (!searchedName) return null;
-    const searchWords = stripDiacritics(searchedName.toLowerCase()).trim().split(/\s+/).filter(Boolean);
+    const rawWords = stripDiacritics(searchedName.toLowerCase()).trim().split(/\s+/).filter(Boolean);
+    const filtered = dropLegalFormTokens(rawWords);
+    const searchWords = filtered.length > 0 ? filtered : rawWords;
     if (searchWords.length === 0) return null;
     const roleMap: Record<string, number> = {};
     for (const d of dosare) {

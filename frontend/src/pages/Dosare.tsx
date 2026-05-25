@@ -14,6 +14,7 @@ import type { Dosar, SearchParams } from "@/types";
 import type { ApiKeys } from "@/hooks/useApiKey";
 import type { AiMode, OpenRouterStack } from "@/components/dosare-ai-config";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
+import { dropLegalFormTokens } from "@/lib/legalSuffix";
 
 function stripDiacritics(s: string): string {
   // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
@@ -51,7 +52,9 @@ function filterByStadii(dosare: Dosar[], stadii: string[]): Dosar[] {
 
 function filterByRoles(dosare: Dosar[], roles: string[], searchedName?: string): Dosar[] {
   if (roles.length === 0 || !searchedName) return dosare;
-  const searchWords = stripDiacritics(searchedName.toLowerCase()).trim().split(/\s+/).filter(Boolean);
+  const rawWords = stripDiacritics(searchedName.toLowerCase()).trim().split(/\s+/).filter(Boolean);
+  const filtered = dropLegalFormTokens(rawWords);
+  const searchWords = filtered.length > 0 ? filtered : rawWords;
   return dosare.filter((d) =>
     d.parti.some(
       (p) =>

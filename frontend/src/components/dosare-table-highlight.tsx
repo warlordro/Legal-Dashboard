@@ -1,3 +1,5 @@
+import { dropLegalFormTokens } from "../lib/legalSuffix";
+
 export function stripDiacritics(s: string): string {
   // biome-ignore lint/suspicious/noMisleadingCharacterClass: range-ul combina diacriticele dupa normalizare NFD.
   return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
@@ -21,7 +23,9 @@ function expandDiacritics(word: string): string {
 
 export function HighlightName({ text, search }: { text: string; search?: string }) {
   if (!search || !text) return <>{text}</>;
-  const searchWords = stripDiacritics(search.toLowerCase()).trim().split(/\s+/).filter(Boolean);
+  const rawWords = stripDiacritics(search.toLowerCase()).trim().split(/\s+/).filter(Boolean);
+  const filtered = dropLegalFormTokens(rawWords);
+  const searchWords = filtered.length > 0 ? filtered : rawWords;
   if (searchWords.length === 0) return <>{text}</>;
 
   // Sort longest-first so "demolari" wins alternation over "de" inside "DEMOLARI".
