@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.36.1",
+    date: "25 Mai 2026",
+    subtitle:
+      "Fix UI in 'Cautare Dosare': highlight-ul si filtrele client-side nu mai trateaza forma juridica (SC, SRL, SA, PFA, LLC, etc.) ca identitate. Cand cauti 'SC ACME SRL', doar 'ACME' e colorat galben, iar filtrarea pe rol potriveste partile listate fara prefix/sufix juridic. Query-ul catre PortalJust ramane verbatim — zero schimbari pe wire.",
+    icon: <Palette className="h-5 w-5" />,
+    borderColor: "border-l-yellow-500",
+    badgeClass: "bg-yellow-100 text-yellow-900 dark:bg-yellow-900/30 dark:text-yellow-300",
+    sections: [
+      {
+        title: "Highlight curat",
+        content:
+          "Tokenii de forma juridica (SC, SRL, SA, SCA, SNC, SCS, PFA, IF, II, ONG plus foreign LLC, LTD, INC, GMBH, AG, BV, NV, SAS, SARL, OY, AB) sunt filtrati inainte de potrivirea regex. Daca user-ul tasteaza doar tokeni legali (caz absurd), ramane fallback ca sa nu randam zero highlight.",
+      },
+      {
+        title: "Filtre client-side corectate",
+        content:
+          "Filtrarea pe rol din 'Cautare Dosare' si analiza partilor din panoul de metrici aplica acelasi strip. Bug-ul de false-negative ('SC ACME SRL' nu mai pierde partile listate doar ca 'ACME') e rezolvat colateral.",
+      },
+      {
+        title: "Fara schimbari pe wire",
+        content:
+          "Query-ul SOAP catre PortalJust ramane neschimbat — trimitem tot textul tastat de user. Modificarea e strict in stratul de prezentare si filtrare locala.",
+      },
+    ],
+  },
+  {
     version: "v2.36.0",
     date: "22 Mai 2026",
     subtitle:

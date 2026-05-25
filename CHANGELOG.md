@@ -1,5 +1,31 @@
 # Changelog - Legal Dashboard
 
+## v2.36.1 - 2026-05-25
+
+Fix UI minor in "Cautare Dosare": highlight-ul si filtrele client-side nu mai trateaza forma juridica a unei societati (SC, SRL, SA, PFA, LLC, etc.) drept identitate. Cand cauti `SC ACME SRL`, doar `ACME` e colorat galben in tabel, iar filtrarea pe rol (creditor/debitor) potriveste partile care apar fara prefixul / sufixul juridic. Query-ul SOAP catre PortalJust ramane verbatim — fara schimbari pe wire.
+
+### Livrabile
+
+**Helper partajat.** `frontend/src/lib/legalSuffix.ts` exporta `LEGAL_FORM_TOKENS` (romana SC, SRL, SA, SCA, SNC, SCS, PFA, IF, II, ONG plus foreign LLC, LTD, INC, GMBH, AG, BV, NV, SAS, SARL, OY, AB) impreuna cu `isLegalFormToken` si `dropLegalFormTokens`. Comparatia e case-insensitive, asumand input deja normalizat (stripDiacritics + lower/upper).
+
+**Highlight.** `dosare-table-highlight.tsx` filtreaza tokenii de forma juridica din `searchWords` inainte de regex. Fallback de siguranta: daca user-ul tasteaza doar tokeni legali (caz absurd `SC SRL`), ii pastreaza ca sa nu randam zero highlight.
+
+**Filtre client-side.** `Dosare.tsx::filterByRoles` (L52-61) si `MetricsPanel.tsx::partyAnalysis` (L98-116) aplica acelasi pattern `rawWords -> filtered -> fallback`. Bug-ul de false-negative la filtrarea pe rol (`SC ACME SRL` nu mai pierde partile listate doar ca `ACME`) e rezolvat colateral.
+
+### Securitate
+
+Fara schimbari pe perimetrul de securitate. Modificare strict frontend — zero atingere SOAP / backend / DB / monitoring / Electron.
+
+### Test coverage
+
+Backend neschimbat. Frontend 229 pass (+13 teste noi: 8 helper + 5 highlight) in 31 fisiere.
+
+### Verificare
+
+Biome curat, `tsc --noEmit` frontend curat, `vitest run` verde.
+
+---
+
 ## v2.36.0 - 2026-05-22
 
 React Error Boundaries pe tot arborele de UI — inchide finding-ul critic B1 din `audit/DEEP-REVIEW-ARCHITECTURE-CODE-BUGS-SECURITY-2026-05-22.md`. Pana acum orice exceptie aruncata in render lasa userul cu ecran alb, identic in Electron si in web mode (acelasi bundle ruleaza in ambele). Acum un crash e izolat la sectiunea afectata si restul aplicatiei ramane utilizabila.

@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.36.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.36.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.36.0** - React Error Boundaries pe tot arborele de UI. Un crash de render nu mai lasa ecran alb, e izolat la sectiunea afectata si restul aplicatiei ramane utilizabila, identic in Electron si in web mode. Acoperire pe 12 sloturi de pagina plus meniul lateral si dialogul de chei API. Inchide finding-ul critic B1 din auditul intern.
+Ultimul release **v2.36.1** - Fix UI in "Cautare Dosare". Highlight-ul si filtrele client-side nu mai trateaza forma juridica (SC, SRL, SA, PFA, LLC, etc.) ca identitate. Cand cauti `SC ACME SRL`, doar `ACME` e colorat galben, iar filtrarea pe rol potriveste partile listate fara prefixul / sufixul juridic. Query-ul SOAP catre PortalJust ramane verbatim, fara schimbari pe wire.
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 

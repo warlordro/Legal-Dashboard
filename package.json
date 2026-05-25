@@ -1,6 +1,6 @@
 {
   "name": "legal-dashboard",
-  "version": "2.36.0",
+  "version": "2.36.1",
   "private": true,
   "main": "electron/main.js",
   "workspaces": ["backend", "frontend"],
