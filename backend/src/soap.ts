@@ -25,6 +25,24 @@ export function toLegacyDiacritics(s: string): string {
     .replace(/\u021B/g, "\u0163"); // ț → ţ
 }
 
+// PortalJust's full-text index concatenates dot-separated abbreviations: the
+// stored party "EURO ASFALT D.O.O. SARAJEVO" is indexed under the single token
+// "DOO", and a search for "DOO" matches it. The search-side word breaker,
+// however, splits a dotted abbreviation in the QUERY ("D.O.O.") into the
+// single-letter tokens D/O/O, which never match the concatenated "DOO" token —
+// so the whole query returns zero results. Verified against the live service
+// (2026-06): "EURO ASFALT D.O.O. SARAJEVO" -> 0 hits, "EURO ASFALT DOO SARAJEVO"
+// -> the 2 real cases. Stripping dots realigns the query with the index
+// (D.O.O.->DOO, S.R.L.->SRL, S.A.->SA, P.F.A.->PFA — the common punctuated
+// Romanian/foreign legal forms). Lossless: the index holds no dotted tokens, so
+// a dotted query can never match more than its stripped form (confirmed:
+// "BANCA TRANSILVANIA S.A." returns the same set as "...SA"). Replacing dots
+// with spaces does NOT work ("EURO ASFALT D O O SARAJEVO" -> 0); the letters
+// must merge into one token.
+export function stripSearchDots(s: string): string {
+  return s.replace(/\./g, "");
+}
+
 // XML helpers
 function esc(s: string): string {
   return (
@@ -222,7 +240,7 @@ export async function cautareDosare(params: SearchParams, options?: CautareDosar
   const body = `
     <numarDosar>${esc(toLegacyDiacritics(params.numarDosar ?? ""))}</numarDosar>
     <obiectDosar>${esc(toLegacyDiacritics(params.obiectDosar ?? ""))}</obiectDosar>
-    <numeParte>${esc(toLegacyDiacritics(params.numeParte ?? ""))}</numeParte>
+    <numeParte>${esc(toLegacyDiacritics(stripSearchDots(params.numeParte ?? "")))}</numeParte>
     ${nilOrValue("institutie", params.institutie)}
     ${nilOrValue("dataStart", params.dataStart)}
     ${nilOrValue("dataStop", params.dataStop)}

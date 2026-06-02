@@ -7,6 +7,7 @@ import {
   parseDosar,
   SOAP_MAX_RESPONSE_BYTES,
   SoapResponseTooLargeError,
+  stripSearchDots,
   toLegacyDiacritics,
 } from "./soap.ts";
 
@@ -22,6 +23,72 @@ describe("toLegacyDiacritics", () => {
 
   it("leaves ASCII and other characters untouched", () => {
     expect(toLegacyDiacritics("Popescu Ion 2024")).toBe("Popescu Ion 2024");
+  });
+});
+
+describe("stripSearchDots", () => {
+  it("strips dots from dotted abbreviations so they match the PortalJust index", () => {
+    // The reported case: D.O.O. is indexed as DOO; the dotted query returns 0.
+    expect(stripSearchDots("EURO ASFALT D.O.O. SARAJEVO")).toBe("EURO ASFALT DOO SARAJEVO");
+    expect(stripSearchDots("S.C. ACME S.R.L.")).toBe("SC ACME SRL");
+    expect(stripSearchDots("BANCA TRANSILVANIA S.A.")).toBe("BANCA TRANSILVANIA SA");
+  });
+
+  it("leaves dot-free names and empty input untouched", () => {
+    expect(stripSearchDots("BANCA TRANSILVANIA SA")).toBe("BANCA TRANSILVANIA SA");
+    expect(stripSearchDots("")).toBe("");
+  });
+});
+
+describe("cautareDosare numeParte normalization (wire)", () => {
+  // Regression guard: assert the body actually sent to PortalJust, not just the
+  // helper. A future refactor that drops the strip call site inside
+  // cautareDosare would still pass a helper-only unit test but break the search.
+  it("sends numeParte with dots stripped (D.O.O. -> DOO) on the SOAP wire", async () => {
+    let capturedBody = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = String((init as RequestInit | undefined)?.body ?? "");
+      return new Response(
+        '<?xml version="1.0"?><soap:Envelope><soap:Body><CautareDosareResponse xmlns="portalquery.just.ro"><CautareDosareResult></CautareDosareResult></CautareDosareResponse></soap:Body></soap:Envelope>',
+        { status: 200 }
+      );
+    });
+
+    await cautareDosare({ numeParte: "EURO ASFALT D.O.O. SARAJEVO" });
+
+    expect(capturedBody).toContain("<numeParte>EURO ASFALT DOO SARAJEVO</numeParte>");
+    expect(capturedBody).not.toContain("D.O.O.");
+  });
+
+  it("does NOT strip dots from numarDosar (scope guard — only numeParte is normalized)", async () => {
+    let capturedBody = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = String((init as RequestInit | undefined)?.body ?? "");
+      return new Response(
+        '<?xml version="1.0"?><soap:Envelope><soap:Body><CautareDosareResponse xmlns="portalquery.just.ro"><CautareDosareResult></CautareDosareResult></CautareDosareResponse></soap:Body></soap:Envelope>',
+        { status: 200 }
+      );
+    });
+
+    await cautareDosare({ numarDosar: "1.2/3/2024" });
+
+    expect(capturedBody).toContain("<numarDosar>1.2/3/2024</numarDosar>");
+  });
+
+  it("strips dots AND converts modern diacritics to legacy cedilla on numeParte", async () => {
+    let capturedBody = "";
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      capturedBody = String((init as RequestInit | undefined)?.body ?? "");
+      return new Response(
+        '<?xml version="1.0"?><soap:Envelope><soap:Body><CautareDosareResponse xmlns="portalquery.just.ro"><CautareDosareResult></CautareDosareResult></CautareDosareResponse></soap:Body></soap:Envelope>',
+        { status: 200 }
+      );
+    });
+
+    // "Ș" (modern, U+0218) -> "Ş" (legacy, U+015E); "S.R.L." -> "SRL"
+    await cautareDosare({ numeParte: "ȘTEFAN S.R.L." });
+
+    expect(capturedBody).toContain("<numeParte>ŞTEFAN SRL</numeParte>");
   });
 });
 

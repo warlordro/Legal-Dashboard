@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.36.2",
+    date: "2 Iunie 2026",
+    subtitle:
+      "Fix in 'Cautare Dosare', 'Cautare Termene' si monitoring pe nume: o cautare dupa un nume cu abreviere punctata (ex. 'EURO ASFALT D.O.O. SARAJEVO') returna zero rezultate desi dosarul exista pe PortalJust. Punctele din numele cautat sunt acum eliminate inainte de SOAP, aliniind query-ul cu indexul PortalJust.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-blue-500",
+    badgeClass: "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-300",
+    sections: [
+      {
+        title: "Cauza",
+        content:
+          "PortalJust indexeaza abrevierile fara puncte: numele stocat 'D.O.O.' e indexat ca tokenul 'DOO'. Query-ul cu puncte e spart in litere izolate (D/O/O) care nu se potrivesc cu 'DOO', deci cautarea intoarce zero. Numai numele partii (numeParte) e afectat; numarul de dosar si obiectul raman neatinse.",
+      },
+      {
+        title: "Fix",
+        content:
+          "Punctele din numele cautat sunt eliminate inainte de trimiterea catre PortalJust (D.O.O. devine DOO, S.R.L. devine SRL, S.A. devine SA). Fix-ul traieste in singurul punct SOAP comun, deci acopera Cautare Dosare, Cautare Termene si joburile de monitorizare pe nume. Lossless: indexul nu tine puncte, deci nu se pierd niciodata rezultate.",
+      },
+      {
+        title: "Monitoring",
+        content:
+          "Un job de monitorizare pe un astfel de nume care pana acum intorcea zero poate genera o alerta 'dosar nou' la prima rulare dupa update, pentru dosarele preexistente nou-gasite. Cele fara activitate recenta sunt suprimate automat.",
+      },
+    ],
+  },
+  {
     version: "v2.36.1",
     date: "25 Mai 2026",
     subtitle:

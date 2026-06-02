@@ -1,5 +1,31 @@
 # Changelog - Legal Dashboard
 
+## v2.36.2 - 2026-06-02
+
+Fix functional in "Cautare Dosare", "Cautare Termene" si monitoring pe nume: o cautare dupa un nume cu abreviere punctata (ex. `EURO ASFALT D.O.O. SARAJEVO`, `S.C. ACME S.R.L.`) returna zero rezultate, desi dosarul exista pe PortalJust. Cauza: serviciul SOAP PortalJust indexeaza abrevierile fara puncte (numele stocat `D.O.O.` e indexat ca tokenul `DOO`), dar query-ul cu puncte e spart de word-breaker in litere izolate (`D`/`O`/`O`) care nu se potrivesc cu `DOO`, deci cautarea intoarce zero. Fix: punctele din `numeParte` sunt eliminate inainte de trimiterea catre SOAP (`D.O.O.` devine `DOO`, `S.R.L.` devine `SRL`, `S.A.` devine `SA`), aliniind query-ul cu indexul.
+
+### Livrabile
+
+**`stripSearchDots` in `backend/src/soap.ts`.** Helper pur care elimina punctele, aplicat pe `numeParte` in `cautareDosare` — singurul choke point SOAP, deci fix-ul acopera deopotriva Cautare Dosare, Cautare Termene si joburile de monitorizare pe nume. `numarDosar` (foloseste `/`) si `obiectDosar` raman neatinse: schimbare chirurgicala, doar pe campul dovedit afectat.
+
+**Lossless.** Indexul PortalJust nu contine tokeni cu puncte, deci un query punctat nu poate gasi niciodata mai mult decat varianta fara puncte (confirmat empiric: `BANCA TRANSILVANIA S.A.` intoarce acelasi set ca `BANCA TRANSILVANIA SA`). Inlocuirea punctelor cu spatii NU functioneaza (`D O O` da zero); literele trebuie sa fuzioneze intr-un singur token.
+
+Acest fix schimba intentionat wire-ul SOAP pentru `numeParte`, spre deosebire de v2.36.1 (care era strict UI, cosmetic). Sunt corectii distincte, pe straturi diferite.
+
+### Nota pentru monitoring
+
+Un job de monitorizare pe un nume cu abreviere punctata care pana acum intorcea zero rezultate poate emite o alerta `dosar_new` la primul tick dupa update, pentru dosarele preexistente nou-gasite. `isHistoricNoise` suprima dosarele fara activitate recenta; cele cu sedinte recente apar ca noi (alerta legitima — dosarul e activ si relevant pentru watch).
+
+### Test coverage
+
+Backend: +5 teste in `soap.test.ts` (2 unit `stripSearchDots`, 3 wire — body-ul SOAP trimis are punctele eliminate pe `numeParte`, le pastreaza pe `numarDosar`, si combina strip-ul cu conversia de diacritice legacy). Verificat empiric contra serviciului live PortalJust.
+
+### Verificare
+
+Biome curat, `tsc --noEmit` backend curat, `npm run build` verde, teste SOAP verzi. Suita backend completa ruleaza in CI la push de tag.
+
+---
+
 ## v2.36.1 - 2026-05-25
 
 Fix UI minor in "Cautare Dosare": highlight-ul si filtrele client-side nu mai trateaza forma juridica a unei societati (SC, SRL, SA, PFA, LLC, etc.) drept identitate. Cand cauti `SC ACME SRL`, doar `ACME` e colorat galben in tabel, iar filtrarea pe rol (creditor/debitor) potriveste partile care apar fara prefixul / sufixul juridic. Query-ul SOAP catre PortalJust ramane verbatim — fara schimbari pe wire.

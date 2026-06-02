@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.36.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.36.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.36.1** - Fix UI in "Cautare Dosare". Highlight-ul si filtrele client-side nu mai trateaza forma juridica (SC, SRL, SA, PFA, LLC, etc.) ca identitate. Cand cauti `SC ACME SRL`, doar `ACME` e colorat galben, iar filtrarea pe rol potriveste partile listate fara prefixul / sufixul juridic. Query-ul SOAP catre PortalJust ramane verbatim, fara schimbari pe wire.
+Ultimul release **v2.36.2** - Fix in "Cautare Dosare" / "Cautare Termene" / monitoring pe nume: o cautare dupa un nume cu abreviere punctata (ex. `EURO ASFALT D.O.O. SARAJEVO`, `S.C. ACME S.R.L.`) returna zero rezultate desi dosarul exista pe PortalJust. Cauza: PortalJust indexeaza abrevierile fara puncte (`D.O.O.` indexat ca `DOO`), dar query-ul cu puncte e spart in litere izolate care nu se mai potrivesc. Fix: punctele din numele cautat sunt eliminate inainte de trimiterea catre SOAP (`D.O.O.`->`DOO`), aliniind query-ul cu indexul. Schimbare chirurgicala doar pe `numeParte`, lossless.
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
