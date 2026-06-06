@@ -14,6 +14,12 @@ export interface DosarSedinta {
   dataPronuntare: string;
 }
 
+export interface DosarCaleAtac {
+  dataDeclarare: string;
+  tipCaleAtac: string;
+  parteDeclaratoare: string;
+}
+
 export interface Dosar {
   numar: string;
   data: string;
@@ -24,6 +30,14 @@ export interface Dosar {
   stadiuProcesual: string;
   parti: DosarParte[];
   sedinte: DosarSedinta[];
+  // ── ICCJ-only (undefined for PortalJust dosare) ──
+  source?: "portaljust" | "iccj";
+  iccjId?: string;
+  numarVechi?: string;
+  dataInitiala?: string;
+  stadiulProcesualCombinat?: string;
+  obiecteSecundare?: string;
+  caiAtac?: DosarCaleAtac[];
 }
 
 export interface Termen {
@@ -38,7 +52,12 @@ export interface Termen {
   stadiuProcesual?: string;
   obiect?: string;
   parti?: DosarParte[];
+  // ICCJ-only (undefined for PortalJust termene)
+  source?: DosarSource;
+  iccjId?: string;
 }
+
+export type DosarSource = "portaljust" | "iccj";
 
 export interface SearchParams {
   numarDosar?: string;
@@ -49,6 +68,10 @@ export interface SearchParams {
   dataStop?: string;
   categorii?: string[];
   stadii?: string[];
+  // Search source toggle. Absent/"portaljust" = existing PortalJust SOAP path.
+  source?: DosarSource;
+  // ICCJ "Secție" filter (Department id, e.g. "157"); only used when source="iccj".
+  sectie?: string;
 }
 
 export interface SearchHistoryEntry {

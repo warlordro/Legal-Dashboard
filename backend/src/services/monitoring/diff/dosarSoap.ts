@@ -65,6 +65,9 @@ export interface DiffInput {
   // NOTHING absoarbe corect retry-ul. Null doar atunci cand prev e null
   // (primul tick), caz in care nu emitem nicio tranzitie oricum.
   prevSnapshotId: number | null;
+  // Human label for the upstream source in appearance/disappearance alert titles.
+  // Defaults to "PortalJust"; the ICCJ runner passes "ICCJ (scj.ro)".
+  sourceLabel?: string;
 }
 
 export interface DiffOutput {
@@ -173,6 +176,7 @@ function parseSedintaKey(key: string): {
 
 export function diffDosarSoap(input: DiffInput): DiffOutput {
   const { prevSnapshot, currentDosar, alertConfig, now, prevSnapshotId } = input;
+  const sourceLabel = input.sourceLabel ?? "PortalJust";
   const filterFingerprint = computeFilterFingerprint(alertConfig);
 
   // Pre-diff filter: dosar that doesn't pass stadii/categorii is treated as
@@ -209,7 +213,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
       alerts.push({
         kind: "dosar_disappeared",
         severity: "warning",
-        title: "Dosarul nu mai apare la PortalJust",
+        title: `Dosarul nu mai apare la ${sourceLabel}`,
         detail: { observedAt: now },
         dedupKey: `dosar_disappeared|${transitionAnchor}`,
       });
@@ -224,7 +228,7 @@ export function diffDosarSoap(input: DiffInput): DiffOutput {
     alerts.push({
       kind: "dosar_new",
       severity: "info",
-      title: "Dosarul a aparut la PortalJust",
+      title: `Dosarul a aparut la ${sourceLabel}`,
       detail: { observedAt: now, sedinteCount: filteredDosar.sedinte.length },
       dedupKey: `dosar_new|${transitionAnchor}`,
     });

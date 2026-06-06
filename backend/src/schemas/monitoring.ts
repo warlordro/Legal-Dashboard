@@ -34,6 +34,30 @@ const TargetDosarSoap = z
   })
   .strict();
 
+// ICCJ docket numbers carry markers PortalJust's regex rejects: a "**" status
+// suffix and dotted auxiliaries (e.g. "107/213/2017**", "250/2/2019/a3",
+// "1859/107/2009**/a3.1"). Separate, looser pattern (Codex review #8); only
+// whitespace is normalized — "**" and "." are significant and preserved.
+const NUMAR_DOSAR_ICCJ_RE = /^\d{1,7}\/\d{1,5}\/\d{4}\*{0,2}(?:\/[A-Za-z0-9.]+)?$/;
+
+const TargetIccjByNumber = z
+  .object({
+    numar_dosar: z
+      .string()
+      .trim()
+      .min(5)
+      .max(64)
+      .regex(NUMAR_DOSAR_ICCJ_RE, "Format invalid (asteptat: 1234/1/2024, 107/213/2017** sau 250/2/2019/a3)"),
+    // Optional internal scj.ro id (from the search result) so the monitoring UI
+    // can deep-link straight to the ICCJ detail page (/1094/Detalii-dosar?...id).
+    // Deterministic per dosar -> target_hash stays stable across re-monitors.
+    iccj_id: z
+      .string()
+      .regex(/^\d{1,20}$/)
+      .optional(),
+  })
+  .strict();
+
 const TargetNameSoap = z
   .object({
     name_normalized: z.string().trim().min(2).max(200),
@@ -116,6 +140,13 @@ export const JobCreateBodySchema = z.discriminatedUnion("kind", [
       ...JobCreateBaseFields,
     })
     .strict(),
+  z
+    .object({
+      kind: z.literal("iccj"),
+      target: TargetIccjByNumber,
+      ...JobCreateBaseFields,
+    })
+    .strict(),
 ]);
 
 export type JobCreateBody = z.infer<typeof JobCreateBodySchema>;
@@ -150,7 +181,7 @@ export const JobListQuerySchema = z
   .object({
     page: z.coerce.number().int().min(1).default(1),
     pageSize: z.coerce.number().int().min(1).max(100).default(20),
-    kind: z.enum(["dosar_soap", "name_soap", "aviz_rnpm"]).optional(),
+    kind: z.enum(["dosar_soap", "name_soap", "aviz_rnpm", "iccj"]).optional(),
     active: z
       .enum(["true", "false"])
       .transform((v) => v === "true")

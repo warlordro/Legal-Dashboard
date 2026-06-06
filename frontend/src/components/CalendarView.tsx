@@ -6,12 +6,7 @@ import { Card } from "./ui/card";
 import { formatDate } from "@/lib/utils";
 import type { Termen } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
-
-// PortalJust SharePoint indexer nu retine sufixul de dosar asociat (/a, /a1, /a2 ...).
-function getPortalJustUrl(numar: string): string {
-  const parent = numar.replace(/\/a\d*$/i, "");
-  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(parent)}`;
-}
+import { getDosarExternalUrl } from "./dosare-table-helpers";
 
 interface CalendarViewProps {
   termene: Termen[];
@@ -201,7 +196,7 @@ export function CalendarView({ termene }: CalendarViewProps) {
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <a
-                          href={getPortalJustUrl(t.numarDosar)}
+                          href={getDosarExternalUrl({ numar: t.numarDosar, source: t.source, iccjId: t.iccjId })}
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}

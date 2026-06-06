@@ -28,14 +28,14 @@ import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
 import { MonitoringBulkImportCard } from "@/components/monitoring/MonitoringBulkImportCard";
 import { NoteEditor } from "@/components/monitoring/NoteEditor";
-import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, type MonitoringJob } from "@/lib/api";
+import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, getIccjId, type MonitoringJob } from "@/lib/api";
 import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export-monitoring";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";
 import { useMonitoringMasterSwitch } from "@/hooks/useMonitoringMasterSwitch";
-import { getPortalJustUrl } from "@/components/dosare-table-helpers";
+import { getIccjUrl, getPortalJustUrl } from "@/components/dosare-table-helpers";
 
 const CADENCE_OPTIONS: { label: string; sec: number }[] = [
   { label: "4h", sec: 14400 },
@@ -48,7 +48,7 @@ export default function Monitorizare({
   onOpenDosar,
   onOpenName,
 }: {
-  onOpenDosar?: (numarDosar: string) => void;
+  onOpenDosar?: (numarDosar: string, source?: "portaljust" | "iccj") => void;
   onOpenName?: (nume: string) => void;
 } = {}) {
   const confirm = useConfirm();
@@ -513,7 +513,14 @@ export default function Monitorizare({
                     <tbody>
                       {jobs.map((job) => {
                         const target = formatMonitoringTarget(job);
+                        const iccjId = getIccjId(job);
                         const isDosar = job.kind === "dosar_soap";
+                        // Source badge (parity across kinds): PortalJust rows get "PJ", ICCJ rows "ICCJ".
+                        const pjBadge = (
+                          <span className="shrink-0 rounded border border-border bg-muted px-1 text-[9px] font-semibold uppercase leading-tight text-muted-foreground">
+                            PJ
+                          </span>
+                        );
                         const noteEditor = (
                           <NoteEditor
                             jobId={job.id}
@@ -543,13 +550,14 @@ export default function Monitorizare({
                             <td className="px-3 py-2 font-mono">
                               {isDosar ? (
                                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
-                                  <span className="inline-flex min-w-0 items-center">
+                                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                                    {pjBadge}
                                     <a
                                       href={getPortalJustUrl(target)}
                                       target="_blank"
                                       rel="noopener noreferrer"
                                       title={`Deschide ${target} pe portal.just.ro`}
-                                      className="inline-flex items-center gap-1 font-bold text-primary hover:text-primary/80 hover:underline"
+                                      className="inline-flex items-center gap-1 truncate font-bold text-primary hover:text-primary/80 hover:underline"
                                     >
                                       {target}
                                       <ExternalLink className="h-3 w-3 shrink-0" />
@@ -584,8 +592,9 @@ export default function Monitorizare({
                                 (() => {
                                   return (
                                     <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
-                                      <span className="block min-w-0 break-words font-bold leading-tight">
-                                        {target}
+                                      <span className="inline-flex min-w-0 items-center gap-1.5">
+                                        {pjBadge}
+                                        <span className="min-w-0 break-words font-bold leading-tight">{target}</span>
                                       </span>
                                       {onOpenName && (
                                         <Button
@@ -606,6 +615,56 @@ export default function Monitorizare({
                                     </div>
                                   );
                                 })()
+                              ) : job.kind === "iccj" ? (
+                                <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
+                                  <span className="inline-flex min-w-0 items-center gap-1.5">
+                                    <span className="shrink-0 rounded border border-amber-300 bg-amber-50 px-1 text-[9px] font-semibold uppercase leading-tight text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                      ICCJ
+                                    </span>
+                                    {iccjId ? (
+                                      <a
+                                        href={getIccjUrl(iccjId)}
+                                        target="_blank"
+                                        rel="noopener noreferrer"
+                                        title={`Deschide ${target} pe ICCJ (scj.ro)`}
+                                        className="inline-flex items-center gap-1 truncate font-bold text-primary hover:text-primary/80 hover:underline"
+                                      >
+                                        {target}
+                                        <ExternalLink className="h-3 w-3 shrink-0" />
+                                      </a>
+                                    ) : onOpenDosar ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          onOpenDosar(target, "iccj");
+                                          navigate("/dosare");
+                                        }}
+                                        title={`Cauta ${target} pe ICCJ (scj.ro)`}
+                                        className="truncate font-bold text-primary hover:text-primary/80 hover:underline"
+                                      >
+                                        {target}
+                                      </button>
+                                    ) : (
+                                      <span className="truncate font-bold">{target}</span>
+                                    )}
+                                  </span>
+                                  {onOpenDosar && (
+                                    <Button
+                                      variant="default"
+                                      size="sm"
+                                      onClick={() => {
+                                        onOpenDosar(target, "iccj");
+                                        navigate("/dosare");
+                                      }}
+                                      title={`Cauta ${target} in Dosare (ICCJ)`}
+                                      className="col-start-2 row-start-1 row-end-3 self-center h-7 shrink-0 gap-1.5 px-2.5 text-[10.5px]"
+                                    >
+                                      <Eye className="h-3.5 w-3.5" />
+                                      Dosare
+                                    </Button>
+                                  )}
+                                  <div className="col-start-1 min-w-0">{noteEditor}</div>
+                                </div>
                               ) : (
                                 <div className="min-w-0">
                                   <span>{target}</span>

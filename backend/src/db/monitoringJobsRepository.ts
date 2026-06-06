@@ -79,12 +79,27 @@ export class IdempotencyConflictError extends Error {
   }
 }
 
+// The logical identity used for the duplicate guard `(owner_id, target_hash, kind)`.
+// For ICCJ we hash ONLY the (marker-normalized) docket number — `iccj_id` is optional
+// metadata, so including it would let the SAME dosar be watched twice (once with id, once
+// without) under two different hashes (Codex F4). Full target (incl. iccj_id) is still
+// STORED in target_json; only the hash is normalized.
+export function targetForHash(kind: string, target: unknown): unknown {
+  if (kind === "iccj" && target && typeof target === "object" && "numar_dosar" in target) {
+    const numar = String((target as { numar_dosar: unknown }).numar_dosar ?? "")
+      .replace(/\*+\s*$/, "")
+      .trim();
+    return { numar_dosar: numar };
+  }
+  return target;
+}
+
 export function createJob(input: CreateJobInput): CreateJobResult {
   assertOwnerIdForMutation(input.ownerId, "createJob");
   const db = getDb();
   const { ownerId, body } = input;
   const targetJson = JSON.stringify(body.target);
-  const targetHash = canonicalSha256(body.target);
+  const targetHash = canonicalSha256(targetForHash(body.kind, body.target));
   const alertConfigJson = JSON.stringify(body.alert_config);
   // C6 hardening (smoke finding): freshly-created job runs on the NEXT
   // scheduler tick, not after a full cadence. The previous now+cadence math

@@ -37,7 +37,7 @@ export type AlertKind = (typeof ALERT_KINDS)[number];
 export const ALERT_SEVERITIES = ["info", "warning", "critical"] as const;
 export type AlertSeverity = (typeof ALERT_SEVERITIES)[number];
 
-export const ALERT_JOB_KINDS = ["dosar_soap", "name_soap", "aviz_rnpm"] as const;
+export const ALERT_JOB_KINDS = ["dosar_soap", "name_soap", "aviz_rnpm", "iccj"] as const;
 export type AlertJobKind = (typeof ALERT_JOB_KINDS)[number];
 
 export interface MonitoringAlertRow {
@@ -88,7 +88,7 @@ export interface ListAlertsOptions {
   page: number;
   pageSize: number;
   jobId?: number;
-  jobKind?: "dosar_soap" | "name_soap" | "aviz_rnpm";
+  jobKind?: AlertJobKind;
   q?: string;
   kind?: AlertKind;
   severity?: AlertSeverity;
@@ -618,7 +618,7 @@ export function dismissAlertsByIds(ownerId: string, ids: number[]): DismissBulkR
 
 export interface DismissByFiltersOptions {
   ownerId: string;
-  jobKind?: "dosar_soap" | "name_soap" | "aviz_rnpm";
+  jobKind?: AlertJobKind;
   q?: string;
   kind?: AlertKind;
   severity?: AlertSeverity;

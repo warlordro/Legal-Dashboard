@@ -208,7 +208,7 @@ function AppShell({
         {pathname === "/monitorizare" && (
           <PageBoundary label="Monitorizare">
             <Monitorizare
-              onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
+              onOpenDosar={(numarDosar, source) => handleHistoryClick("dosare", { numarDosar, source })}
               onOpenName={(nume) => handleHistoryClick("dosare", { numeParte: nume })}
             />
           </PageBoundary>
@@ -218,7 +218,7 @@ function AppShell({
             <Alerts
               streamVersion={alertsStreamVersion}
               onAlertsChanged={refreshUnreadAlerts}
-              onOpenDosar={(numarDosar) => handleHistoryClick("dosare", { numarDosar })}
+              onOpenDosar={(numarDosar, source) => handleHistoryClick("dosare", { numarDosar, source })}
             />
           </PageBoundary>
         )}

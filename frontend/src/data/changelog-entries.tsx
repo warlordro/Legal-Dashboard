@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.37.0",
+    date: "7 Iunie 2026",
+    subtitle:
+      "Integrare ICCJ (Inalta Curte de Casatie si Justitie). Dosarele Inaltei Curti, neacoperite de PortalJust, sunt aduse prin live-proxy de pe scj.ro: cautare cu toggle de sursa, termene-pe-dosar, imbogatire server-side (categorie + rolul partilor + sedinte), metrici source-aware si monitoring dedicat.",
+    icon: <Building2 className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
+    sections: [
+      {
+        title: "Cautare + termene ICCJ",
+        content:
+          "Toggle de sursa in 'Cautare Dosare' (PortalJust vs ICCJ), cautare dupa numar/parte/obiect/sectie. Termene-pe-dosar: cauti un dosar sau nume si vezi toate datele la care a aparut sau va aparea, fara data obligatorie (data ramane filtru optional).",
+      },
+      {
+        title: "Imbogatire server-side + metrici",
+        content:
+          "Rezultatele ICCJ sunt imbogatite pe server cu detaliul fiecarui dosar (categorie juridica, rolul partilor, sedinte) intr-un singur raspuns, fara loader. Panoul de metrici se adapteaza sursei: 'Departamente' in loc de 'Institutii', plus Analiza Parte pe rol; filtrele Stadiu/Categorie sunt derivate din rezultate.",
+      },
+      {
+        title: "Monitoring + hardening",
+        content:
+          "Tip nou de monitoring 'iccj' (migrarea 0034) cu deep-link catre scj.ro. Dupa un review dublu (10 agenti + Codex adversarial) s-au inchis 10 fix-uri: identitate monitoring pe iccj_id (marcajul */** nu mai da fals 'disparut'), conversie corecta a datei catre scj.ro, izolarea timeout-urilor per-item, parser fail-loud la markup drift, dedup joburi, kill-switch ICCJ_ROUTES_DISABLED + parametri env.",
+      },
+    ],
+  },
+  {
     version: "v2.36.2",
     date: "2 Iunie 2026",
     subtitle:

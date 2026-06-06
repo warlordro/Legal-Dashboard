@@ -426,6 +426,7 @@ function createWindow() {
     "portalquery.just.ro",
     "mj.rnpm.ro",
     "www.rnpm.ro",
+    "www.scj.ro",
   ];
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     // SECURITY: Strict URL validation — exact domain whitelist, not suffix matching

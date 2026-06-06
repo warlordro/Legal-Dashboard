@@ -40,7 +40,7 @@ function tabs(): HTMLButtonElement[] {
 describe("JobKindTabs", () => {
   it("renders one tab per kind with the correct labels", () => {
     mount("all", () => {});
-    expect(tabs().map((t) => t.textContent)).toEqual(["Toate", "Dosare", "Nume"]);
+    expect(tabs().map((t) => t.textContent)).toEqual(["Toate", "Dosare", "Nume", "ICCJ"]);
   });
 
   it("marks aria-selected=true only on the active tab", () => {
@@ -93,7 +93,7 @@ describe("JobKindTabs", () => {
     act(() => {
       all[0]?.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
     });
-    expect(onChange).toHaveBeenCalledWith("name_soap");
+    expect(onChange).toHaveBeenCalledWith("iccj");
   });
 
   it("Home/End jump to the first/last tab", () => {
@@ -112,7 +112,7 @@ describe("JobKindTabs", () => {
     act(() => {
       refreshed[1]?.dispatchEvent(new KeyboardEvent("keydown", { key: "End", bubbles: true }));
     });
-    expect(onChange).toHaveBeenLastCalledWith("name_soap");
+    expect(onChange).toHaveBeenLastCalledWith("iccj");
   });
 
   it("ignores non-navigation keys (Enter, Space, Tab fall through to default)", () => {

@@ -50,3 +50,22 @@ export function getPortalJustUrl(numar: string): string {
   const parent = numar.replace(/\/a\d*$/i, "");
   return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(parent)}`;
 }
+
+// ICCJ dosare live on www.scj.ro, NOT portal.just.ro. The detail page keys off
+// the internal id surfaced by the search, not the docket number (the same
+// number can exist at a lower court in PortalJust — see PLAN §1.1).
+export function getIccjUrl(iccjId: string): string {
+  return `https://www.scj.ro/1094/Detalii-dosar?customQuery%5B0%5D.Key=id&customQuery%5B0%5D.Value=${encodeURIComponent(iccjId)}`;
+}
+
+// ICCJ search landing page (POST-based form; can't deep-link by number, but at least
+// keeps id-less ICCJ rows on scj.ro instead of wrongly routing them to PortalJust).
+const ICCJ_SEARCH_URL = "https://www.scj.ro/738/Cautare-dosare-si-parti";
+
+// (getIccjUrl is also consumed by the Monitorizare ICCJ rows for deep-linking.)
+// Source-aware external link. Never route an ICCJ dosar to PortalJust (Codex #6) — with an
+// id go to the detail page; without an id (legacy id-less rows) go to the ICCJ search page.
+export function getDosarExternalUrl(dosar: { numar: string; source?: string; iccjId?: string }): string {
+  if (dosar.source === "iccj") return dosar.iccjId ? getIccjUrl(dosar.iccjId) : ICCJ_SEARCH_URL;
+  return getPortalJustUrl(dosar.numar);
+}

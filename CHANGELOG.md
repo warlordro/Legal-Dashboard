@@ -1,5 +1,27 @@
 # Changelog - Legal Dashboard
 
+## v2.37.0 - 2026-06-07
+
+Integrare ICCJ (Inalta Curte de Casatie si Justitie). PortalJust (SOAP) nu acopera ICCJ, asa ca dosarele Inaltei Curti sunt aduse prin live-proxy scraping pe `www.scj.ro` (search `/738`, detaliu `/1094`, sedinte `/737`; date DD.MM.YYYY normalizate la ISO). Functionalitatea apare ca un toggle de sursa in "Cautare Dosare" (PortalJust vs ICCJ) si in fluxul de termene, plus un tip nou de monitoring `iccj`.
+
+### Livrabile
+
+**Cautare + termene ICCJ.** Toggle de sursa pe pagina Dosare; cautare dupa numar/parte/obiect/sectie. Termene-pe-dosar: cauti un dosar/nume si vezi toate datele la care a aparut sau va aparea (fara data obligatorie; data ramane filtru optional).
+
+**Imbogatire server-side.** Ruta `/api/dosare-iccj` foloseste `searchIccjEnriched`: dupa cautarea de lista, fiecare dosar din pagina e imbogatit cu detaliul `/1094` (categorie juridica + rolul partilor + sedinte) intr-un singur raspuns, fara loader in frontend. Bounded (concurenta + buget de timp), izolare per-item.
+
+**Metrici + filtre source-aware.** `MetricsPanel` adapta pentru ICCJ: cardul 4 devine "Departamente" (institutia ICCJ e constanta), Categorii + "Analiza Parte" pe rol apar dupa imbogatire; chips Stadiu/Categorie derivate dinamic din rezultate. Paginare cu `hasMore` cumulativ (eliminata constanta hardcodata `ICCJ_PAGE_SIZE`).
+
+**Monitoring `iccj`.** Migrarea `0034_iccj_job_kind` extinde CHECK-ul `monitoring_jobs`; `iccjRunner` reutilizeaza diff-ul/snapshot-urile existente. Deep-link source-aware (scj.ro, niciodata portal.just.ro).
+
+### Hardening post-review (review dublu: 10 agenti `/full-review` + Codex adversarial)
+
+Identitate monitoring pe `iccj_id` stocat in loc de match exact pe numar (marcajul `*`/`**` al scj.ro nu mai cauza fals "disparut"); conversie data ISO -> DD.MM.YYYY catre scj.ro la cautarea de dosare; izolarea timeout-urilor per-item de abort-ul caller-ului + buget agregat `ICCJ_ENRICH_BUDGET_MS`; parser sedinte fail-loud la `<table>` fara `<tbody>` (markup drift, nu sterge tacit istoricul); dedup joburi pe `numar_dosar` normalizat (exclude `iccj_id`); titluri de alerta source-aware + `getDosarExternalUrl` fara fallback la PortalJust; kill-switch `ICCJ_ROUTES_DISABLED` + parametri env (`ICCJ_TIMEOUT_MS`, `ICCJ_MAX_RESPONSE_BYTES`, `ICCJ_ENRICH_BUDGET_MS`) + validare format data; parsare count tolerant la separatori de mii.
+
+### Verificare
+
+1374 teste backend + 232 teste frontend trec; `tsc` + biome + build curate; smoke live contra scj.ro (cautare, imbogatire, termene, regresie). `www.scj.ro` adaugat in whitelist-ul de URL extern (SECURITY.md + CLAUDE.md).
+
 ## v2.36.2 - 2026-06-02
 
 Fix functional in "Cautare Dosare", "Cautare Termene" si monitoring pe nume: o cautare dupa un nume cu abreviere punctata (ex. `EURO ASFALT D.O.O. SARAJEVO`, `S.C. ACME S.R.L.`) returna zero rezultate, desi dosarul exista pe PortalJust. Cauza: serviciul SOAP PortalJust indexeaza abrevierile fara puncte (numele stocat `D.O.O.` e indexat ca tokenul `DOO`), dar query-ul cu puncte e spart de word-breaker in litere izolate (`D`/`O`/`O`) care nu se potrivesc cu `DOO`, deci cautarea intoarce zero. Fix: punctele din `numeParte` sunt eliminate inainte de trimiterea catre SOAP (`D.O.O.` devine `DOO`, `S.R.L.` devine `SRL`, `S.A.` devine `SA`), aliniind query-ul cu indexul.

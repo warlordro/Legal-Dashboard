@@ -13,6 +13,9 @@ function buildLabel(params: SearchParams): string {
   if (params.numeParte) parts.push(params.numeParte);
   if (params.numarDosar) parts.push(params.numarDosar);
   if (params.obiectDosar) parts.push(params.obiectDosar);
+  // Date-only ICCJ dosare search (no text fields) — label by date so multiple
+  // day-searches stay distinct in the history.
+  if (parts.length === 0 && params.dataStart) parts.push(`Sedinte ${params.dataStart}`);
   return parts.join(" · ") || "Cautare";
 }
 
@@ -37,8 +40,13 @@ export function useSearchHistory() {
       };
 
       setHistory((prev) => {
-        // Remove duplicates with same label+type
-        const filtered = prev.filter((e) => !(e.label === entry.label && e.type === entry.type));
+        // Remove duplicates with same label+type+source. Source is part of the
+        // key so the same query on PortalJust and on ICCJ are kept as distinct
+        // entries (clicking each must re-run against its own source).
+        const srcOf = (e: SearchHistoryEntry) => e.params.source ?? "portaljust";
+        const filtered = prev.filter(
+          (e) => !(e.label === entry.label && e.type === entry.type && srcOf(e) === srcOf(entry))
+        );
         const next = [entry, ...filtered].slice(0, MAX_ENTRIES);
         saveHistory(next);
         return next;

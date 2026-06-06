@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.36.2** - 2 Iunie 2026
+**v2.37.0** - 7 Iunie 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -127,7 +127,7 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - **XLSX formula-injection escape** (`=+-@\t\r` -> prefix `'`)
 - **Body size limits** (64KB search, 512KB bulk, 4KB small, 100KB AI, 256KB bulk dismiss)
 - **Rate limits** dedicated (search, bulk, export, small)
-- **External URL whitelist** exact: portal.just.ro, www.just.ro, portalquery.just.ro, mj.rnpm.ro, www.rnpm.ro
+- **External URL whitelist** exact: portal.just.ro, www.just.ro, portalquery.just.ro, www.scj.ro, mj.rnpm.ro, www.rnpm.ro
 - **Backup atomic**: daily backup scrie la `.db.tmp` + rename atomic, cleanup orphan tmp la urmatorul run
 - **Pre-migration backup generic** (v2.16.1): orice migration rebuild trigger-uieste backup `schema-upgrade` automat
 - **SOAP cancellation**: `AbortSignal` extern propagat pana in fetch-ul PortalJust, combinat cu timeout intern (60s in v2.14.1+)

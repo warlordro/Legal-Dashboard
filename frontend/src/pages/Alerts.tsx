@@ -33,7 +33,7 @@ import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { useFontSize } from "@/hooks/useFontSize";
-import { getPortalJustUrl } from "@/components/dosare-table-helpers";
+import { getDosarExternalUrl } from "@/components/dosare-table-helpers";
 import { AlertNoteBlock } from "@/components/alerts/AlertNoteBlock";
 import { JobKindTabs, type JobKindFilter } from "@/components/monitoring/JobKindTabs";
 import { TablePagination } from "@/components/table-pagination";
@@ -103,7 +103,7 @@ export default function Alerts({
 }: {
   streamVersion: number;
   onAlertsChanged?: () => void;
-  onOpenDosar?: (numarDosar: string) => void;
+  onOpenDosar?: (numarDosar: string, source?: "portaljust" | "iccj") => void;
 }) {
   const navigate = useNavigate();
   const [rows, setRows] = useState<MonitoringAlert[]>([]);
@@ -705,7 +705,7 @@ export default function Alerts({
                     );
                   });
               }
-              onOpenDosar(ctx.numarDosar);
+              onOpenDosar(ctx.numarDosar, ctx.source);
               navigate("/dosare");
             };
             return (
@@ -741,10 +741,14 @@ export default function Alerts({
                         <div className="mt-1 text-sm">
                           <span className="text-muted-foreground">Dosar: </span>
                           <a
-                            href={getPortalJustUrl(ctx.numarDosar)}
+                            href={getDosarExternalUrl({
+                              numar: ctx.numarDosar,
+                              source: ctx.source,
+                              iccjId: ctx.iccjId,
+                            })}
                             target="_blank"
                             rel="noopener noreferrer"
-                            title={`Deschide ${ctx.numarDosar} pe portal.just.ro`}
+                            title={`Deschide ${ctx.numarDosar} pe ${ctx.source === "iccj" ? "scj.ro" : "portal.just.ro"}`}
                             className="inline-flex items-center gap-1 font-mono font-medium text-primary hover:text-primary/80 hover:underline"
                           >
                             {ctx.numarDosar}

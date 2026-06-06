@@ -29,8 +29,9 @@ import {
   getCategorieBadgeColor,
   getSolutieBadgeVariant,
   formatInstitutie,
-  getPortalJustUrl,
+  getDosarExternalUrl,
 } from "@/components/dosare-table-helpers";
+import { api } from "@/lib/api";
 import { useViewedDosareSession } from "@/hooks/useViewedDosareSession";
 import { useDosareSelection } from "@/hooks/useDosareSelection";
 import { useMonitorRowState } from "@/hooks/useMonitorRowState";
@@ -71,6 +72,27 @@ export function DosareTable({
   const [pageSize, setPageSize] = useState(15);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const expandedDetailRef = useRef<HTMLTableRowElement>(null);
+  // ICCJ search results are enriched server-side (categorie + party roles + sedinte).
+  // We only lazy-fetch detail for a row that arrived UN-enriched — e.g. a server-side
+  // enrich that failed for that one dosar. The expanded view falls back to the row's own
+  // data when there is no cached detail, so an already-enriched row needs no fetch.
+  const [iccjDetails, setIccjDetails] = useState<Record<string, Dosar>>({});
+  const [iccjDetailLoading, setIccjDetailLoading] = useState<string | null>(null);
+
+  const ensureIccjDetail = (dosar: Dosar) => {
+    if (dosar.source !== "iccj" || !dosar.iccjId) return;
+    const alreadyEnriched =
+      !!dosar.categorieCaz || dosar.sedinte.length > 0 || dosar.parti.some((p) => p.calitateParte);
+    if (alreadyEnriched) return;
+    if (iccjDetails[dosar.iccjId] || iccjDetailLoading === dosar.iccjId) return;
+    const id = dosar.iccjId;
+    setIccjDetailLoading(id);
+    api.dosare
+      .detaliuIccj(id)
+      .then((res) => setIccjDetails((prev) => ({ ...prev, [id]: res.data })))
+      .catch((e) => console.error("[iccj] detaliu fetch failed:", e))
+      .finally(() => setIccjDetailLoading((cur) => (cur === id ? null : cur)));
+  };
 
   const { monitorState, handleMonitor } = useMonitorRowState();
   const { viewedDosare, markAsViewed } = useViewedDosareSession();
@@ -262,6 +284,12 @@ export function DosareTable({
             {paged.map((dosar, i) => {
               const globalIdx = page * pageSize + i;
               const isExpanded = expandedIdx === globalIdx;
+              // For ICCJ, prefer the lazily-fetched full detail in the expanded view.
+              const detailDosar: Dosar =
+                dosar.source === "iccj" && dosar.iccjId && iccjDetails[dosar.iccjId]
+                  ? iccjDetails[dosar.iccjId]
+                  : dosar;
+              const detailLoading = dosar.source === "iccj" && !!dosar.iccjId && iccjDetailLoading === dosar.iccjId;
               return (
                 <Fragment key={`dosar-${dosar.numar}-${i}`}>
                   {/* biome-ignore lint/a11y/useKeyWithClickEvents: <tr> nu primeste focus de tastatura; expandarea e expusa si prin butoanele inline (chevron + actions). */}
@@ -270,6 +298,7 @@ export function DosareTable({
                     onClick={() => {
                       setExpandedIdx(isExpanded ? null : globalIdx);
                       if (!isExpanded && dosar.numar) markAsViewed(dosar.numar);
+                      if (!isExpanded) ensureIccjDetail(dosar);
                     }}
                   >
                     {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe celula checkbox impiedica expand-ul liniei; tastatura merge prin checkbox. */}
@@ -293,9 +322,18 @@ export function DosareTable({
                             <Eye className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
                           </span>
                         ) : null}
+                        {dosar.source === "iccj" && (
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 border-amber-300 bg-amber-50 text-[10px] text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+                            title="Inalta Curte de Casatie si Justitie"
+                          >
+                            ICCJ
+                          </Badge>
+                        )}
                         {dosar.numar ? (
                           <a
-                            href={getPortalJustUrl(dosar.numar)}
+                            href={getDosarExternalUrl(dosar)}
                             target="_blank"
                             rel="noopener noreferrer"
                             className="inline-flex items-center gap-1.5 text-primary hover:text-primary/80 hover:underline"
@@ -381,7 +419,7 @@ export function DosareTable({
                                     disabled={isPending || isAdded || isExists}
                                     onClick={(e) => {
                                       e.stopPropagation();
-                                      handleMonitor(dosar.numar);
+                                      handleMonitor(dosar.numar, dosar.source, dosar.iccjId);
                                     }}
                                   >
                                     <Activity className="h-4 w-4" />
@@ -398,31 +436,37 @@ export function DosareTable({
                               );
                             })()}
 
+                          {detailLoading && (
+                            <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                              <Loader2 className="h-3.5 w-3.5 animate-spin" /> Se incarca detaliile de la ICCJ...
+                            </div>
+                          )}
+
                           {/* Info grid */}
                           <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-                            <InfoItem icon={Calendar} label="Data Dosar" value={formatDate(dosar.data)} />
-                            <InfoItem icon={Building2} label="Departament" value={dosar.departament || "-"} />
-                            <InfoItem icon={Scale} label="Categorie" value={dosar.categorieCaz || "-"} />
-                            <InfoItem label="Stadiu" value={dosar.stadiuProcesual || "-"} />
+                            <InfoItem icon={Calendar} label="Data Dosar" value={formatDate(detailDosar.data)} />
+                            <InfoItem icon={Building2} label="Departament" value={detailDosar.departament || "-"} />
+                            <InfoItem icon={Scale} label="Categorie" value={detailDosar.categorieCaz || "-"} />
+                            <InfoItem label="Stadiu" value={detailDosar.stadiuProcesual || "-"} />
                           </div>
 
-                          {dosar.obiect && (
+                          {detailDosar.obiect && (
                             <div>
                               <h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                                 Obiect Dosar
                               </h4>
-                              <p className="text-sm">{dosar.obiect}</p>
+                              <p className="text-sm">{detailDosar.obiect}</p>
                             </div>
                           )}
 
                           {/* Parti */}
-                          {dosar.parti.length > 0 && (
+                          {detailDosar.parti.length > 0 && (
                             <div>
                               <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                <Users className="h-3.5 w-3.5" /> Parti ({dosar.parti.length})
+                                <Users className="h-3.5 w-3.5" /> Parti ({detailDosar.parti.length})
                               </h4>
                               <div className="grid gap-1 rounded-lg border border-border bg-background p-3 sm:grid-cols-2">
-                                {dosar.parti.map((p, j) => {
+                                {detailDosar.parti.map((p, j) => {
                                   return (
                                     <div key={j} className="flex items-center gap-1.5 text-xs">
                                       <Badge variant="outline" className="shrink-0 text-xs">
@@ -439,15 +483,15 @@ export function DosareTable({
                           )}
 
                           {/* Sedinte */}
-                          {dosar.sedinte.length > 0 && (
+                          {detailDosar.sedinte.length > 0 && (
                             <div>
                               <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                <Calendar className="h-3.5 w-3.5" /> Sedinte ({dosar.sedinte.length})
+                                <Calendar className="h-3.5 w-3.5" /> Sedinte ({detailDosar.sedinte.length})
                               </h4>
                               <div className="relative space-y-0">
                                 {/* Timeline line */}
                                 <div className="absolute left-[92px] top-0 bottom-0 w-px bg-border" />
-                                {dosar.sedinte.map((s, j) => (
+                                {detailDosar.sedinte.map((s, j) => (
                                   <div key={j} className="relative flex gap-4 py-3 first:pt-0 last:pb-0">
                                     {/* Date + Time column */}
                                     <div className="w-[80px] shrink-0 text-right">
@@ -502,8 +546,32 @@ export function DosareTable({
                             </div>
                           )}
 
+                          {/* Cai de atac (ICCJ) */}
+                          {detailDosar.caiAtac && detailDosar.caiAtac.length > 0 && (
+                            <div>
+                              <h4 className="mb-2 flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                                <Scale className="h-3.5 w-3.5" /> Cai de atac ({detailDosar.caiAtac.length})
+                              </h4>
+                              <div className="grid gap-1 rounded-lg border border-border bg-background p-3">
+                                {detailDosar.caiAtac.map((c, j) => (
+                                  <div key={j} className="flex flex-wrap items-center gap-1.5 text-xs">
+                                    <span className="font-mono text-muted-foreground">
+                                      {formatDate(c.dataDeclarare)}
+                                    </span>
+                                    <Badge variant="outline" className="text-[11px]">
+                                      {c.tipCaleAtac}
+                                    </Badge>
+                                    <span className="truncate" title={c.parteDeclaratoare}>
+                                      {c.parteDeclaratoare}
+                                    </span>
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
                           <DosareAiAnalysisPanel
-                            dosar={dosar}
+                            dosar={detailDosar}
                             apiKeys={apiKeys}
                             ai={ai}
                             multi={multiForRow(dosar.numar)}

@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.36.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.37.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.36.2** - Fix in "Cautare Dosare" / "Cautare Termene" / monitoring pe nume: o cautare dupa un nume cu abreviere punctata (ex. `EURO ASFALT D.O.O. SARAJEVO`, `S.C. ACME S.R.L.`) returna zero rezultate desi dosarul exista pe PortalJust. Cauza: PortalJust indexeaza abrevierile fara puncte (`D.O.O.` indexat ca `DOO`), dar query-ul cu puncte e spart in litere izolate care nu se mai potrivesc. Fix: punctele din numele cautat sunt eliminate inainte de trimiterea catre SOAP (`D.O.O.`->`DOO`), aliniind query-ul cu indexul. Schimbare chirurgicala doar pe `numeParte`, lossless.
+Ultimul release **v2.37.0** - Integrare ICCJ (Inalta Curte de Casatie si Justitie) via live-proxy scraping pe scj.ro: cautare dosare cu toggle de sursa (PortalJust vs ICCJ), termene-pe-dosar (toate datele unui dosar), imbogatire server-side a rezultatelor (categorie + rolul partilor + sedinte), metrici source-aware (Departamente in loc de Institutii, Analiza Parte) si monitoring `iccj` (migrarea 0034). Plus rundele de review (10 agenti + Codex) cu 10 fix-uri de corectitudine/fiabilitate: identitate monitoring pe `iccj_id`, conversie data DD.MM.YYYY catre scj.ro, izolarea timeout-urilor per-item, parser fail-loud la markup drift, dedup joburi, deep-link source-aware, kill-switch `ICCJ_ROUTES_DISABLED` + parametri env.
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 

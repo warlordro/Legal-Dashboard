@@ -7,6 +7,7 @@ import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { rnpmRouter } from "./routes/rnpm.ts";
 import { dosareExportRouter, dosareRouter } from "./routes/dosare.ts";
+import { dosareIccjRouter, termeneIccjRouter } from "./routes/dosareIccj.ts";
 import { termeneExportRouter, termeneRouter } from "./routes/termene.ts";
 import { aiRouter } from "./routes/ai.ts";
 import { preAuthRateLimit, rateLimit, startRateLimitSweeper, stopRateLimitSweeper } from "./middleware/rate-limit.ts";
@@ -27,6 +28,8 @@ import { Scheduler } from "./services/monitoring/scheduler.ts";
 import { realClock } from "./services/monitoring/clock.ts";
 import { createDosarSoapRunner } from "./services/monitoring/dosarSoapRunner.ts";
 import { createNameSoapRunner } from "./services/monitoring/nameSoapRunner.ts";
+import { createIccjRunner } from "./services/monitoring/iccjRunner.ts";
+import { fetchIccjDetail, IccjSourceError, searchIccj } from "./services/iccj/iccjClient.ts";
 import { drainEmailDispatches } from "./services/email/alertEmailDispatcher.ts";
 import { isMailerConfigured, readMailerConfig } from "./services/email/mailer.ts";
 import { startDailyReportScheduler, stopDailyReportScheduler } from "./services/email/dailyReportScheduler.ts";
@@ -308,7 +311,9 @@ function detailedHealthHandler(c: Context): Response {
 
 app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
+app.route("/api/dosare-iccj", dosareIccjRouter);
 app.route("/api/termene", termeneRouter);
+app.route("/api/termene-iccj", termeneIccjRouter);
 app.route("/api/v1/dosare", dosareExportRouter);
 app.route("/api/v1/termene", termeneExportRouter);
 app.route("/api/ai", aiRouter);
@@ -657,9 +662,35 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
   if (MONITORING_ENABLED) {
     const dosarSoapRunner = createDosarSoapRunner({ searchDosare: cautareDosare });
     const nameSoapRunner = createNameSoapRunner({ searchDosare: cautareDosare });
+    // ICCJ live-proxy runner: search by numar → fetch full detail → diff. A
+    // source/parse failure throws (IccjSourceError) and is mapped to an error
+    // outcome inside the runner, so a transient upstream issue never writes a
+    // false-empty snapshot. A genuine "not found" returns null.
+    const iccjRunner = createIccjRunner({
+      fetchCurrentDosar: async ({ numarDosar, iccjId }, { signal }) => {
+        // Identity by stable `iccjId` when the job stored one: scj.ro decorates the
+        // docket string with `*`/`**` markers, so an exact-string match on `numar`
+        // produces false "not found" / disappearance (Codex F1). A detail fetch that
+        // throws (IccjParseError) is surfaced as a source error by the runner, never
+        // mistaken for "disappeared" — acceptable for ICCJ (dosare don't truly vanish).
+        if (iccjId) return fetchIccjDetail(iccjId, { signal });
+        // Fallback (id-less legacy jobs): search, match by docket number with the
+        // trailing `*`/`**` markers normalized off. Ambiguous multi-match → treat as a
+        // source error (don't guess), NOT null, so we never silently watch the wrong case.
+        const norm = (s: string) => s.replace(/\*+\s*$/, "").trim();
+        const wanted = norm(numarDosar);
+        const res = await searchIccj({ numarDosar }, { signal });
+        const matches = res.dosare.filter((d) => norm(d.numar) === wanted);
+        if (matches.length === 0) return null;
+        if (matches.length > 1) {
+          throw new IccjSourceError(`ambiguous ICCJ match for "${numarDosar}" (${matches.length} dosare)`);
+        }
+        return fetchIccjDetail(matches[0].iccjId, { signal });
+      },
+    });
     monitoringScheduler = new Scheduler({
       clock: realClock,
-      runners: { dosar_soap: dosarSoapRunner, name_soap: nameSoapRunner },
+      runners: { dosar_soap: dosarSoapRunner, name_soap: nameSoapRunner, iccj: iccjRunner },
       tickIntervalMs: 60_000,
       claimLimit: 50,
       jitterSecMax: 30,

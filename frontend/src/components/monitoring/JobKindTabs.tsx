@@ -1,12 +1,13 @@
 import { useRef, type KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 
-export type JobKindFilter = "all" | "dosar_soap" | "name_soap";
+export type JobKindFilter = "all" | "dosar_soap" | "name_soap" | "iccj";
 
 const TABS: ReadonlyArray<{ key: JobKindFilter; label: string }> = [
   { key: "all", label: "Toate" },
   { key: "dosar_soap", label: "Dosare" },
   { key: "name_soap", label: "Nume" },
+  { key: "iccj", label: "ICCJ" },
 ];
 
 export function JobKindTabs({

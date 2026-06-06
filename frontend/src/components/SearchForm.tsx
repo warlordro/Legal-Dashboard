@@ -4,7 +4,8 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { InstitutieSelect } from "./InstitutieSelect";
-import type { SearchParams } from "@/types";
+import { ICCJ_SECTII } from "@/lib/iccjSectii";
+import type { DosarSource, SearchParams } from "@/types";
 
 const CATEGORII = [
   "Penal",
@@ -27,6 +28,13 @@ interface SearchFormProps {
   loading?: boolean;
   showDateRange?: boolean;
   showFilters?: boolean;
+  // ICCJ source toggle — Dosare + Termene both support it.
+  showSourceToggle?: boolean;
+  // ICCJ facet vocabularies, derived from the loaded result set (the static PortalJust
+  // Categorie/Stadiu lists do not match ICCJ values). Categorii stays empty until Tier-2
+  // detail enrichment populates categorieCaz; the section hides while empty.
+  iccjStadiiOptions?: string[];
+  iccjCategoriiOptions?: string[];
   showLoadMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
@@ -50,6 +58,9 @@ export function SearchForm({
   loading,
   showDateRange,
   showFilters = true,
+  showSourceToggle = false,
+  iccjStadiiOptions = [],
+  iccjCategoriiOptions = [],
   showLoadMore,
   loadingMore,
   onLoadMore,
@@ -71,6 +82,7 @@ export function SearchForm({
     obiectDosar: useId(),
     dataStart: useId(),
     dataStop: useId(),
+    sectie: useId(),
   };
 
   // Sync internal state when defaultParams changes (e.g., history click or tab navigation)
@@ -117,10 +129,32 @@ export function SearchForm({
     onReset?.();
   };
 
-  const hasInput = !!(params.numarDosar || params.obiectDosar || params.numeParte);
+  const source: DosarSource = params.source === "iccj" ? "iccj" : "portaljust";
+  const setSource = (next: DosarSource) => {
+    setParams((p) => {
+      if (next === "iccj") return { ...p, source: "iccj", institutie: undefined };
+      const { sectie, ...rest } = p;
+      return { ...rest, source: "portaljust" };
+    });
+  };
+
+  // At least one text field enables the search; ICCJ (Dosare) also allows date-only.
+  const hasInput = !!(
+    params.numarDosar ||
+    params.obiectDosar ||
+    params.numeParte ||
+    (source === "iccj" && params.dataStart)
+  );
   const hasAnyParam = Object.values(params).some(Boolean);
   const selectedCats = params.categorii ?? [];
   const selectedStadii = params.stadii ?? [];
+  // ICCJ uses dynamic facet vocabularies from the result set; PortalJust uses the static
+  // lists. ICCJ sections render only once their (post-search / post-enrich) options exist.
+  const isIccj = source === "iccj";
+  const categoriiChips: readonly string[] = isIccj ? iccjCategoriiOptions : CATEGORII;
+  const stadiiChips: readonly string[] = isIccj ? iccjStadiiOptions : STADII;
+  const showCategoriiSection = showFilters && categoriiChips.length > 0;
+  const showStadiiSection = showFilters && stadiiChips.length > 0;
 
   return (
     <Card>
@@ -132,6 +166,37 @@ export function SearchForm({
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Sursa: PortalJust (fond/apel/recurs) vs ICCJ. Doar pagina Dosare (Termene
+              ramane PortalJust). Segmente EGALE (grid 2 col) + selectie clara (fill primary). */}
+          {showSourceToggle && (
+            <div className="flex items-center gap-2">
+              <span className="text-xs font-medium text-muted-foreground">Sursa</span>
+              <div className="grid grid-cols-2 gap-0.5 rounded-md border border-border bg-muted p-0.5">
+                {(
+                  [
+                    { key: "portaljust", label: "PortalJust", title: "Portalul instantelor de judecata" },
+                    { key: "iccj", label: "ICCJ", title: "Inalta Curte de Casatie si Justitie" },
+                  ] as const
+                ).map((opt) => (
+                  <button
+                    key={opt.key}
+                    type="button"
+                    title={opt.title}
+                    aria-pressed={source === opt.key}
+                    onClick={() => setSource(opt.key)}
+                    className={`rounded px-3 py-1 text-xs font-medium transition-colors focus:outline-none focus-visible:ring-1 focus-visible:ring-ring ${
+                      source === opt.key
+                        ? "bg-primary text-primary-foreground shadow-sm"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
             <div className="space-y-1.5">
               <label htmlFor={ids.numarDosar} className="text-xs font-medium text-muted-foreground">
@@ -168,23 +233,44 @@ export function SearchForm({
             </div>
           </div>
 
-          {/* Institutie */}
-          <div className="space-y-1.5">
-            {/* biome-ignore lint/a11y/noLabelWithoutControl: InstitutieSelect e un combobox custom care expune trigger button cu aria-label propriu. */}
-            <label className="text-xs font-medium text-muted-foreground">Instituție (opțional)</label>
-            <InstitutieSelect
-              value={
-                Array.isArray(params.institutie) ? params.institutie : params.institutie ? [params.institutie] : []
-              }
-              onChange={(val) => {
-                setParams((p) => ({ ...p, institutie: val.length > 0 ? val : undefined }));
-                onInstitutiiChange?.(val);
-              }}
-            />
-          </div>
+          {/* Institutie (PortalJust) vs Sectie (ICCJ) */}
+          {source === "iccj" ? (
+            <div className="space-y-1.5">
+              <label htmlFor={ids.sectie} className="text-xs font-medium text-muted-foreground">
+                Secție (opțional)
+              </label>
+              <select
+                id={ids.sectie}
+                value={params.sectie ?? ""}
+                onChange={(e) => setParams((p) => ({ ...p, sectie: e.target.value || undefined }))}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 py-1 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              >
+                {ICCJ_SECTII.map((s) => (
+                  <option key={s.value} value={s.value}>
+                    {s.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              {/* biome-ignore lint/a11y/noLabelWithoutControl: InstitutieSelect e un combobox custom care expune trigger button cu aria-label propriu. */}
+              <label className="text-xs font-medium text-muted-foreground">Instituție (opțional)</label>
+              <InstitutieSelect
+                value={
+                  Array.isArray(params.institutie) ? params.institutie : params.institutie ? [params.institutie] : []
+                }
+                onChange={(val) => {
+                  setParams((p) => ({ ...p, institutie: val.length > 0 ? val : undefined }));
+                  onInstitutiiChange?.(val);
+                }}
+              />
+            </div>
+          )}
 
-          {/* Categorie Caz */}
-          {showFilters && (
+          {/* Categorie Caz (filtru client-side): PortalJust = vocabular static; ICCJ =
+              categorii distincte din rezultate, disponibile abia dupa enrich. */}
+          {showCategoriiSection && (
             <div className="space-y-2">
               {/* biome-ignore lint/a11y/noLabelWithoutControl: label e folosit ca header pentru un grup de toggle-uri, nu pentru un singur control. */}
               <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -197,7 +283,7 @@ export function SearchForm({
                 )}
               </label>
               <div className="flex flex-wrap gap-2">
-                {CATEGORII.map((cat) => {
+                {categoriiChips.map((cat) => {
                   const active = selectedCats.includes(cat);
                   return (
                     <button
@@ -218,8 +304,9 @@ export function SearchForm({
             </div>
           )}
 
-          {/* Stadiu Procesual */}
-          {showFilters && (
+          {/* Stadiu Procesual (filtru client-side): PortalJust = vocabular static; ICCJ =
+              stadii distincte din rezultate (din lista, fara enrich). */}
+          {showStadiiSection && (
             <div className="space-y-2">
               {/* biome-ignore lint/a11y/noLabelWithoutControl: label e folosit ca header pentru un grup de toggle-uri, nu pentru un singur control. */}
               <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -232,7 +319,7 @@ export function SearchForm({
                 )}
               </label>
               <div className="flex flex-wrap gap-2">
-                {STADII.map((stadiu) => {
+                {stadiiChips.map((stadiu) => {
                   const active = selectedStadii.includes(stadiu);
                   return (
                     <button

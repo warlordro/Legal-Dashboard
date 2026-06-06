@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState, useEffect, useRef } from "react";
+import { lazy, Suspense, useState, useEffect, useRef, useMemo } from "react";
 import { FileSearch, AlertTriangle } from "lucide-react";
 import { SearchForm } from "@/components/SearchForm";
 import { DosareTable } from "@/components/DosareTable";
@@ -6,11 +6,10 @@ import { BudgetIndicator } from "@/components/BudgetIndicator";
 // Lazy: MetricsPanel pulls in recharts (heavy). Only mounts after a successful search.
 const MetricsPanel = lazy(() => import("@/components/MetricsPanel").then((m) => ({ default: m.MetricsPanel })));
 import { Spinner } from "@/components/ui/spinner";
-import { Button } from "@/components/ui/button";
 import { api } from "@/lib/api";
 import type { LoadMoreProgress } from "@/lib/api";
 import { exportDosareExcel, exportDosarePDF } from "@/lib/export-dosare";
-import type { Dosar, SearchParams } from "@/types";
+import type { Dosar, DosarSource, SearchParams } from "@/types";
 import type { ApiKeys } from "@/hooks/useApiKey";
 import type { AiMode, OpenRouterStack } from "@/components/dosare-ai-config";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
@@ -132,28 +131,90 @@ export default function Dosare({
   const [loadMoreDone, setLoadMoreDone] = useState(false);
   const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
   const [dateFilter, setDateFilter] = useState<{ start?: string; stop?: string }>({});
+  // ICCJ live-proxy is paginated (page/hasMore), not SSE like PortalJust load-more.
+  const [iccjPaging, setIccjPaging] = useState<{ page: number; hasMore: boolean; total: number } | null>(null);
+  // In-flight source for the loading spinner label. Committed `isIccj` (from
+  // lastSearchParams) lags until results commit, so it would mislabel the spinner
+  // on the first search / right after a source switch. MUST be set wherever
+  // setLoading(true) is — today only at the top of handleSearch.
+  const [loadingSource, setLoadingSource] = useState<DosarSource>("portaljust");
   const lastSearchParams = useRef<SearchParams | null>(state.lastSearchParams ?? null);
   const loadMoreAbort = useRef<AbortController | null>(null);
 
-  const filteredByInst = filterByInstitutii(state.allDosare, state.institutii ?? []);
-  const filteredByDate = filterByDate(filteredByInst, dateFilter.start, dateFilter.stop);
+  // ICCJ dosare carry ISO dates (iccjDateToIso) just like PortalJust, so the same
+  // client-side facets apply. We only skip filterByInstitutii for ICCJ (its `institutie`
+  // is a single constant; the SOAP-enum institutie filter is meaningless there).
+  // Stadiu/Categorie chips for ICCJ are derived dynamically from the loaded result set
+  // (the static PortalJust vocabulary does not match ICCJ values); Categorie + role
+  // facets only become populated after Tier-2 detail enrichment.
+  const isIccj = (state.lastSearchParams?.source ?? "portaljust") === "iccj";
+  const baseDosare = isIccj ? state.allDosare : filterByInstitutii(state.allDosare, state.institutii ?? []);
+  const filteredByDate = filterByDate(baseDosare, dateFilter.start, dateFilter.stop);
   const filteredByCategAndStadiu = filterByStadii(
     filterByCategorii(filteredByDate, state.categorii),
     state.stadii ?? []
   );
   const dosare = filterByRoles(filteredByCategAndStadiu, selectedRoles, state.searchedName);
 
+  // Dynamic ICCJ facet vocabularies (distinct values from the loaded set). Empty until
+  // a search lands; categorii stays empty until detail enrichment fills categorieCaz.
+  const iccjStadiiOptions = useMemo(
+    () =>
+      isIccj
+        ? Array.from(new Set(state.allDosare.map((d) => d.stadiuProcesual).filter(Boolean))).sort((a, b) =>
+            a.localeCompare(b, "ro")
+          )
+        : [],
+    [isIccj, state.allDosare]
+  );
+  const iccjCategoriiOptions = useMemo(
+    () =>
+      isIccj
+        ? Array.from(new Set(state.allDosare.map((d) => d.categorieCaz).filter(Boolean))).sort((a, b) =>
+            a.localeCompare(b, "ro")
+          )
+        : [],
+    [isIccj, state.allDosare]
+  );
+
   const handleSearch = async (params: SearchParams) => {
     setLoading(true);
+    setLoadingSource(params.source === "iccj" ? "iccj" : "portaljust");
     setSelectedRoles([]);
     setDateFilter({});
     setLoadMoreDone(false);
     setLoadMoreWarnings([]);
     setLoadMoreProgress(null);
+    setIccjPaging(null);
     onStateChange({ ...state, error: null, searched: true });
     try {
       const { categorii: cats, stadii: st, ...searchParams } = params;
       lastSearchParams.current = searchParams;
+
+      // ICCJ live-proxy path (separate endpoint, paginated, no client-side filters).
+      if (searchParams.source === "iccj") {
+        const res = await api.dosare.searchIccj(searchParams, 1);
+        onStateChange({
+          allDosare: res.data,
+          categorii: [],
+          stadii: [],
+          institutii: [],
+          searched: true,
+          error: null,
+          searchedName: searchParams.numeParte || undefined,
+          lastSearchParams: params,
+        });
+        // hasMore is derived cumulatively (backend no longer guesses page size):
+        // page 1 added all res.data rows, so there is more iff we have fewer than total.
+        setIccjPaging({
+          page: res.page,
+          hasMore: res.data.length > 0 && res.data.length < res.total,
+          total: res.total,
+        });
+        onSearchComplete?.(params, res.total, { categoriesCount: 0, institutiiCount: 1 });
+        return;
+      }
+
       const res = await api.dosare.search(searchParams);
       onStateChange({
         allDosare: res.data,
@@ -267,6 +328,43 @@ export default function Dosare({
     loadMoreAbort.current?.abort();
   };
 
+  // ICCJ "next page": fetch the next page and append (dedup by iccjId). Unlike
+  // PortalJust load-more (SSE month-sweep), this is plain pagination over the
+  // date-DESC result set; the UI shows page-by-page, never auto-sweeps 1000.
+  const handleIccjNextPage = async () => {
+    if (!lastSearchParams.current || !iccjPaging?.hasMore) return;
+    setLoadingMore(true);
+    try {
+      const res = await api.dosare.searchIccj(lastSearchParams.current, iccjPaging.page + 1);
+      const known = new Set(state.allDosare.map((d) => d.iccjId ?? d.numar));
+      const merged = [...state.allDosare];
+      let addedNew = 0;
+      for (const d of res.data) {
+        const key = d.iccjId ?? d.numar;
+        if (!known.has(key)) {
+          known.add(key);
+          merged.push(d);
+          addedNew++;
+        }
+      }
+      onStateChange((prev) => ({ ...prev, allDosare: merged }));
+      // Stop offering "load more" when the page was empty, added nothing new (dedup
+      // stall at a page boundary), or we have reached the server-reported total.
+      setIccjPaging({
+        page: res.page,
+        hasMore: res.data.length > 0 && addedNew > 0 && merged.length < res.total,
+        total: res.total,
+      });
+    } catch (e) {
+      onStateChange((prev) => ({
+        ...prev,
+        error: e instanceof Error ? e.message : "Eroare la incarcarea paginii ICCJ",
+      }));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
   // Handle pending search from history. Re-fires cand pendingSearch sau loading se schimba,
   // ca sa nu pierdem un trigger sosit in timpul unei cautari deja in curs.
   // biome-ignore lint/correctness/useExhaustiveDependencies: consumePendingSearch + handleSearch nu sunt memoizate; consumam valoarea curenta in callback.
@@ -304,15 +402,31 @@ export default function Dosare({
         onDateChange={(start, stop) => setDateFilter({ start, stop })}
         loading={loading}
         showDateRange
-        showLoadMore={!loading && state.searched && !state.error && state.allDosare.length >= 1000 && !loadMoreDone}
+        showSourceToggle
+        iccjStadiiOptions={iccjStadiiOptions}
+        iccjCategoriiOptions={iccjCategoriiOptions}
+        showLoadMore={
+          isIccj
+            ? !loading && !!iccjPaging?.hasMore
+            : !loading && state.searched && !state.error && state.allDosare.length >= 1000 && !loadMoreDone
+        }
         loadingMore={loadingMore}
-        onLoadMore={handleLoadMore}
+        onLoadMore={isIccj ? handleIccjNextPage : handleLoadMore}
         onStopLoadMore={handleStopLoadMore}
-        loadMoreProgress={loadMoreProgress}
+        loadMoreProgress={isIccj ? null : loadMoreProgress}
         loadMoreMessage={
-          !loading && !loadingMore && state.searched && !state.error && state.allDosare.length >= 1000 && !loadMoreDone
-            ? `Cautarea a returnat ${state.allDosare.length.toLocaleString("ro-RO")} rezultate — este posibil sa existe mai multe. Apasati "Incarca mai multe" pentru a aduce toate dosarele.`
-            : undefined
+          isIccj
+            ? iccjPaging && !loading && !loadingMore
+              ? `ICCJ: ${state.allDosare.length} din ${iccjPaging.total.toLocaleString("ro-RO")} rezultate (pagina ${iccjPaging.page})${iccjPaging.hasMore ? ' — apasati "Incarca mai multe"' : ""}`
+              : undefined
+            : !loading &&
+                !loadingMore &&
+                state.searched &&
+                !state.error &&
+                state.allDosare.length >= 1000 &&
+                !loadMoreDone
+              ? `Cautarea a returnat ${state.allDosare.length.toLocaleString("ro-RO")} rezultate — este posibil sa existe mai multe. Apasati "Incarca mai multe" pentru a aduce toate dosarele.`
+              : undefined
         }
         loadMoreDone={loadMoreDone}
         loadMoreTotal={loadMoreDone ? state.allDosare.length : undefined}
@@ -324,6 +438,7 @@ export default function Dosare({
           setLoadMoreProgress(null);
           setSelectedRoles([]);
           setDateFilter({});
+          setIccjPaging(null);
           lastSearchParams.current = null;
           onStateChange({
             allDosare: [],
@@ -339,7 +454,11 @@ export default function Dosare({
       {loading && (
         <div className="flex items-center justify-center gap-3 py-16 text-muted-foreground">
           <Spinner />
-          <span className="text-sm">Se cauta in baza de date PortalJust...</span>
+          <span className="text-sm">
+            {loadingSource === "iccj"
+              ? "Se cauta in baza de date ICCJ (scj.ro)..."
+              : "Se cauta in baza de date PortalJust..."}
+          </span>
         </div>
       )}
 
@@ -367,6 +486,7 @@ export default function Dosare({
         >
           <MetricsPanel
             dosare={filteredByCategAndStadiu}
+            source={isIccj ? "iccj" : "portaljust"}
             searchedName={state.searchedName}
             selectedRoles={selectedRoles}
             onRoleFilter={(role) =>
@@ -374,6 +494,15 @@ export default function Dosare({
             }
           />
         </Suspense>
+      )}
+
+      {/* ICCJ metrics cover only the loaded pages — be explicit so partial stats aren't
+          misread as complete (PortalJust loads up to 1000 in one shot, ICCJ paginates). */}
+      {!loading && isIccj && iccjPaging && state.allDosare.length < iccjPaging.total && (
+        <p className="text-xs text-amber-600 dark:text-amber-400">
+          Metrici pentru {state.allDosare.length} din {iccjPaging.total.toLocaleString("ro-RO")} dosare incarcate —
+          apasati &quot;Incarca mai multe&quot; pentru a le include pe toate.
+        </p>
       )}
 
       {!loading && dosare.length > 0 && (

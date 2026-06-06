@@ -16,7 +16,7 @@ export type AlertKind =
   | "source_partial";
 
 export type AlertSeverity = "info" | "warning" | "critical";
-export type AlertJobKind = "dosar_soap" | "name_soap" | "aviz_rnpm";
+export type AlertJobKind = "dosar_soap" | "name_soap" | "aviz_rnpm" | "iccj";
 
 export interface MonitoringAlert {
   id: number;
