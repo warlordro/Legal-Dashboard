@@ -12,7 +12,8 @@
       "build/icon.ico",
       "*.db",
       "*.db-wal",
-      "*.db-shm"
+      "*.db-shm",
+      "**/__fixtures__/**"
     ]
   },
   "formatter": {
