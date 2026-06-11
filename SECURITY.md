@@ -123,7 +123,7 @@ The monitoring scheduler (live and hardened in v2.2.0, further hardened in v2.3.
 - **Restore integrity check (v2.3.0).** `restoreFromBackup` runs `PRAGMA integrity_check` against the candidate file before promoting it; sidecar WAL/SHM unlinks are detected for non-ENOENT errors so a disk-full does not pass silently.
 - **Graceful shutdown drain (v2.3.0).** On `SIGTERM`/`SIGINT` the HTTP server drains in-flight requests with a 30-second timeout before the scheduler is stopped and the DB is closed. Eliminates a class of dropped-request races on Quit.
 - **Source-error suppression.** A job that fails 5 times consecutively against the upstream source is marked `source_error` and stops scheduling until manual intervention. This bounds noise (audit log, console, retries) when PortalJust is degraded — a single outage cannot generate unbounded retries or fill the audit log.
-- **Per-kind operational kill switch.** `MONITORING_DISABLED_KINDS` excludes listed kinds (`dosar_soap`, `name_soap`, `aviz_rnpm`) from scheduler claims without mutating job rows. This lets an operator pause one runner class while keeping the rest of the app live.
+- **Per-kind operational kill switch.** `MONITORING_DISABLED_KINDS` excludes listed kinds (`dosar_soap`, `name_soap`, `iccj`, `aviz_rnpm`) from scheduler claims without mutating job rows. This lets an operator pause one runner class while keeping the rest of the app live. Interactive ICCJ routes have their own switch (`ICCJ_ROUTES_DISABLED=1` returns 503 on `/api/dosare-iccj` + `/api/termene-iccj`).
 - **Body-size limits on monitoring mutations.** Monitoring POST/PATCH/manual-run routes use a dedicated request body cap before JSON parsing. Oversized payloads are rejected before they can allocate large request objects.
 - **Run retention purge.** `monitoring_runs` history is purged daily with a 90-day retention window. The purge timer is stopped with the scheduler, so shutdown does not leave background work behind.
 - **Owner scoping.** Every scheduler-driven mutation carries the owning `owner_id` into `recordAudit`. Cross-owner mutations from the API surface are rejected as `404` (not `403`) so status codes do not disclose the existence of other owners' jobs; the differentiation is preserved only in the audit log (`*_denied` actions).
@@ -163,7 +163,10 @@ The scheduler does **not** add authentication, encryption, or rate-limiting to i
 | `LEGAL_DASHBOARD_AUTH_COOKIE_SECURE` | secure in web mode | Set to `0` only for local HTTP testing. |
 | `TENANT_KEY_ENCRYPTION_SECRET` | unset | Required in web auth mode for centralized tenant API keys. Must decode from base64 to exactly 32 bytes. Store separately from DB backups; losing it requires re-entering all tenant keys from `/admin/keys`. |
 | `MONITORING_ENABLED` | `1` in Electron | Set to `0` to disable monitoring routes and scheduler. |
-| `MONITORING_DISABLED_KINDS` | unset | Comma-separated monitoring kinds to skip in scheduler claims, for example `dosar_soap,name_soap`. |
+| `MONITORING_DISABLED_KINDS` | unset | Comma-separated monitoring kinds to skip in scheduler claims, for example `dosar_soap,name_soap,iccj`. |
+| `ICCJ_ROUTES_DISABLED` | unset | Set to `1` to return 503 on the interactive ICCJ routes (`/api/dosare-iccj`, `/api/termene-iccj`) without redeploy. |
+| `ICCJ_TIMEOUT_MS` / `ICCJ_MAX_RESPONSE_BYTES` / `ICCJ_ENRICH_BUDGET_MS` | `30000` / `20971520` / `45000` | Tunables for the scj.ro scraping client (per-fetch timeout, response size cap, enrich wall-clock budget). |
+| `RNPM_TIMEOUT_MS` | `60000` | Per-fetch timeout backstop for the RNPM upstream (v2.37.1). |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_SECURE` | unset | Optional SMTP channel for alert emails. Incomplete config disables email without blocking boot. |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_AI_KEY` / `OPENROUTER_API_KEY` | unset | If set, override tenant DB keys in web mode and in-app keys on desktop. Normal web setup should prefer `/admin/keys`. |
 | `NODE_ENV` | `production` in Electron | `development` enables DevTools and the dev menu. |

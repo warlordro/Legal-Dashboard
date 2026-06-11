@@ -65,8 +65,10 @@ per job - recovery-ul de crash nu mai poate produce duplicate.
 Kill switch-uri operationale:
 
 - `MONITORING_ENABLED=0` opreste mount-ul rutelor si scheduler-ul.
-- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` exclude tipurile listate din
+- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap,iccj` exclude tipurile listate din
   claim-ul scheduler-ului fara modificari in DB.
+- `ICCJ_ROUTES_DISABLED=1` opreste rutele interactive ICCJ (`/api/dosare-iccj`,
+  `/api/termene-iccj`) cu raspuns 503, fara redeploy.
 
 Tipul `aviz_rnpm` ramane rezervat pentru o etapa viitoare; `name_soap` este activ in v2.4.0+.
 
