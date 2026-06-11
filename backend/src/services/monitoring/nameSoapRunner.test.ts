@@ -172,7 +172,9 @@ describe("nameSoapRunner - diff", () => {
     const alerts = getDb()
       .prepare("SELECT kind, dedup_key FROM monitoring_alerts WHERE job_id = ?")
       .all(job.id) as Array<{ kind: string; dedup_key: string }>;
-    expect(alerts).toEqual([{ kind: "dosar_new", dedup_key: "name_soap|999/1/2026|dosar_new" }]);
+    // v2.37.1: cheia e ancorata per-baseline (s<prevSnapshotId>) ca tranzitiile
+    // ulterioare sa nu fie inghitite de ON CONFLICT DO NOTHING.
+    expect(alerts).toEqual([{ kind: "dosar_new", dedup_key: "name_soap|999/1/2026|dosar_new|s1" }]);
   });
 
   it("three consecutive ticks leave exactly 1 snapshot for the job", async () => {
@@ -321,35 +323,40 @@ describe("nameSoapRunner - source_partial (Batch 2.1)", () => {
     }
   });
 
-  it("does NOT emit source_partial alert when flag is off (default)", async () => {
-    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
-    delete process.env.MONITORING_PARTIAL_ALERTS_ENABLED;
-    const job = seedJob({
-      targetJson: JSON.stringify({
-        name_normalized: "ion popescu",
-        institutie: ["Judecatoria A", "Judecatoria B"],
-      }),
-    });
-    const runner = createNameSoapRunner({
-      searchDosare: async (params) => {
-        if (params.institutie === "Judecatoria B") {
-          throw new Error("upstream 503");
-        }
-        return [makeDosar("1234/180/2024", "fond", "civil", "Judecatoria A")];
-      },
-    });
+  it("does NOT emit source_partial alert when kill switch is set (=0)", async () => {
+    // v2.37.1: default-ul a devenit ON; opt-out-ul explicit ramane prin "0".
+    process.env.MONITORING_PARTIAL_ALERTS_ENABLED = "0";
+    try {
+      const job = seedJob({
+        targetJson: JSON.stringify({
+          name_normalized: "ion popescu",
+          institutie: ["Judecatoria A", "Judecatoria B"],
+        }),
+      });
+      const runner = createNameSoapRunner({
+        searchDosare: async (params) => {
+          if (params.institutie === "Judecatoria B") {
+            throw new Error("upstream 503");
+          }
+          return [makeDosar("1234/180/2024", "fond", "civil", "Judecatoria A")];
+        },
+      });
 
-    await runner.run({
-      job,
-      runId: seedRunningRow(job.id),
-      nowIso: NOW_ISO,
-      signal: new AbortController().signal,
-    });
+      await runner.run({
+        job,
+        runId: seedRunningRow(job.id),
+        nowIso: NOW_ISO,
+        signal: new AbortController().signal,
+      });
 
-    const alert = getDb()
-      .prepare(`SELECT kind FROM monitoring_alerts WHERE job_id = ? AND kind = 'source_partial'`)
-      .get(job.id);
-    expect(alert).toBeUndefined();
+      const alert = getDb()
+        .prepare(`SELECT kind FROM monitoring_alerts WHERE job_id = ? AND kind = 'source_partial'`)
+        .get(job.id);
+      expect(alert).toBeUndefined();
+    } finally {
+      // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+      delete process.env.MONITORING_PARTIAL_ALERTS_ENABLED;
+    }
   });
 });
 

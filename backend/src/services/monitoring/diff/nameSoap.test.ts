@@ -61,6 +61,7 @@ function runDiff(input: {
     alertConfig: DEFAULT_ALERT_CONFIG,
     now: NOW,
     jobCreatedAt: input.jobCreatedAt ?? JOB_CREATED_AT,
+    prevSnapshotId: input.prevSnapshot ? 1 : null,
   });
 }
 
@@ -255,6 +256,7 @@ describe("diffNameSoap dosar_disappeared pre-v2 safety belt", () => {
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
       jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 1,
     });
     expect(out.alerts).toEqual([]);
   });
@@ -267,7 +269,96 @@ describe("diffNameSoap dosar_disappeared pre-v2 safety belt", () => {
       alertConfig: DEFAULT_ALERT_CONFIG,
       now: NOW,
       jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 1,
     });
     expect(out.alerts.map((a) => a.kind)).toEqual(["dosar_disappeared"]);
+  });
+});
+
+describe("diffNameSoap partial-failure carry-forward (v2.37.1, review cluster 1)", () => {
+  it("nu emite dosar_disappeared pentru dosare la institutii picate si le pastreaza in snapshot", () => {
+    const prevDosar: NameSoapSnapshotDosar = {
+      numar: "1/3/2026",
+      stadiu: "fond",
+      categorie: "civil",
+      instanta: "TribunalulCLUJ",
+      latest_sedinta_at: null,
+    };
+    const out = diffNameSoap({
+      prevSnapshot: snapshot([prevDosar]),
+      currentSnapshot: snapshot([]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 7,
+      failedInstitutii: ["TribunalulCLUJ"],
+    });
+    expect(out.alerts).toHaveLength(0);
+    expect(out.newSnapshot.dosare.map((d) => d.numar)).toContain("1/3/2026");
+  });
+
+  it("emite dosar_disappeared normal cand institutia dosarului NU e in lista picata", () => {
+    const prevDosar: NameSoapSnapshotDosar = {
+      numar: "2/3/2026",
+      stadiu: "fond",
+      categorie: "civil",
+      instanta: "TribunalulIASI",
+      latest_sedinta_at: null,
+    };
+    const out = diffNameSoap({
+      prevSnapshot: snapshot([prevDosar]),
+      currentSnapshot: snapshot([]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 7,
+      failedInstitutii: ["TribunalulCLUJ"],
+    });
+    expect(out.alerts.map((a) => a.kind)).toEqual(["dosar_disappeared"]);
+    expect(out.newSnapshot.dosare).toHaveLength(0);
+  });
+});
+
+describe("diffNameSoap dedup anchor per baseline (v2.37.1, review cluster 1)", () => {
+  function dosarCu(stadiu: string): NameSoapSnapshotDosar {
+    return { numar: "9/9/2026", stadiu, categorie: "civil", instanta: "Judecatoria Test", latest_sedinta_at: null };
+  }
+
+  it("a doua tranzitie de stadiu primeste o cheie dedup diferita", () => {
+    const t1 = diffNameSoap({
+      prevSnapshot: snapshot([dosarCu("Fond")]),
+      currentSnapshot: snapshot([dosarCu("Apel")]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 1,
+    });
+    const t2 = diffNameSoap({
+      prevSnapshot: snapshot([dosarCu("Apel")]),
+      currentSnapshot: snapshot([dosarCu("Recurs")]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 2,
+    });
+    const k1 = t1.alerts.find((a) => a.kind === "stadiu_changed")?.dedupKey;
+    const k2 = t2.alerts.find((a) => a.kind === "stadiu_changed")?.dedupKey;
+    expect(k1).toBeDefined();
+    expect(k2).toBeDefined();
+    expect(k1).not.toEqual(k2);
+  });
+
+  it("retry pe ACELASI baseline pastreaza cheia identica (idempotent)", () => {
+    const input = {
+      prevSnapshot: snapshot([dosarCu("Fond")]),
+      currentSnapshot: snapshot([dosarCu("Apel")]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 5,
+    };
+    const a = diffNameSoap(input).alerts.find((x) => x.kind === "stadiu_changed")?.dedupKey;
+    const b = diffNameSoap(input).alerts.find((x) => x.kind === "stadiu_changed")?.dedupKey;
+    expect(a).toEqual(b);
   });
 });

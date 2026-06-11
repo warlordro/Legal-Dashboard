@@ -42,6 +42,20 @@ export interface NameSoapDiffInput {
   alertConfig: AlertConfig;
   now: string;
   jobCreatedAt: string;
+  // v2.37.1 (review cluster 1): ancora stabila pentru cheile dedup — id-ul
+  // prev-snapshot-ului, ca in diff/dosarSoap.ts (transitionAnchor). Fara
+  // ancora, cheia e constanta pe viata jobului si ON CONFLICT(job_id,
+  // dedup_key) DO NOTHING inghite a DOUA tranzitie reala: Fond->Apel
+  // alerteaza, Apel->Recurs nu mai alerteaza niciodata. Null doar la primul
+  // tick (prev absent).
+  prevSnapshotId: number | null;
+  // v2.37.1 (review cluster 1): institutiile (coduri PortalJust) care au
+  // esuat in fan-out-ul partial al runner-ului. Dosarele prev gazduite la o
+  // institutie picata NU au cum sa apara in currentSnapshot — absenta lor e
+  // "necunoscut", nu "disparut": (a) nu emitem dosar_disappeared pentru ele,
+  // (b) le purtam neschimbate in newSnapshot ca baseline-ul sa nu se rebazeze
+  // fara ele (altfel tick-ul de recuperare le-ar raporta fals ca dosar_new).
+  failedInstitutii?: string[];
 }
 
 export interface NameSoapDiffOutput {
@@ -75,8 +89,12 @@ function byNumar(snapshot: NameSoapPrevSnapshot): Map<string, NameSoapSnapshotDo
   return m;
 }
 
-function dedupKey(numar: string, transition: NameSoapAlertKind): string {
-  return `name_soap|${numar}|${transition}`;
+function dedupKey(numar: string, transition: NameSoapAlertKind, anchor: string): string {
+  // v2.37.1: sufixul `anchor` (s<prevSnapshotId>) face cheia idempotenta la
+  // retry pe ACELASI baseline, dar distincta pentru tranzitii ulterioare —
+  // pattern-ul stabilit de diff/dosarSoap.ts. Cheile vechi (fara sufix) raman
+  // in DB; nu coliziuneaza cu formatul nou.
+  return `name_soap|${numar}|${transition}|${anchor}`;
 }
 
 function computeLatestSedinta(dosar: Dosar): string | null {
@@ -182,6 +200,24 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
   const prevByNumar = prevSnapshot ? byNumar(prevSnapshot) : new Map<string, NameSoapSnapshotDosar>();
   const currentByNumar = byNumar(currentSnapshot);
   const alerts: NameSoapDiffAlert[] = [];
+  const anchor = `s${input.prevSnapshotId ?? "init"}`;
+  const failed = new Set((input.failedInstitutii ?? []).filter((x) => x.length > 0));
+
+  // Carry-forward pentru institutiile picate (vezi comentariul de pe
+  // NameSoapDiffInput.failedInstitutii): dosarele prev de la o instanta care
+  // n-a raspuns raman in baseline neschimbate.
+  let newSnapshot = currentSnapshot;
+  if (failed.size > 0 && prevSnapshot) {
+    const carried = prevSnapshot.dosare.filter(
+      (d) => d.numar && !currentByNumar.has(d.numar) && failed.has(d.instanta)
+    );
+    if (carried.length > 0) {
+      newSnapshot = {
+        ...currentSnapshot,
+        dosare: [...currentSnapshot.dosare, ...carried].sort((a, b) => a.numar.localeCompare(b.numar)),
+      };
+    }
+  }
 
   for (const [numar, current] of currentByNumar) {
     const prev = prevByNumar.get(numar);
@@ -195,7 +231,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
           severity: "info",
           title: `Dosar nou gasit pentru nume: ${numar}`,
           detail: { observedAt: now, ...current },
-          dedupKey: dedupKey(numar, "dosar_new"),
+          dedupKey: dedupKey(numar, "dosar_new", anchor),
         });
       }
       continue;
@@ -207,7 +243,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
         severity: "info",
         title: `Dosarul intra in filtrul curent: ${numar}`,
         detail: { observedAt: now, before: prev, after: current },
-        dedupKey: dedupKey(numar, "dosar_relevant_now"),
+        dedupKey: dedupKey(numar, "dosar_relevant_now", anchor),
       });
     } else if (prevRelevant && !currentRelevant) {
       alerts.push({
@@ -215,7 +251,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
         severity: "info",
         title: `Dosarul iese din filtrul curent: ${numar}`,
         detail: { observedAt: now, before: prev, after: current },
-        dedupKey: dedupKey(numar, "dosar_no_longer_relevant"),
+        dedupKey: dedupKey(numar, "dosar_no_longer_relevant", anchor),
       });
     }
 
@@ -225,7 +261,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
         severity: "info",
         title: `Stadiu modificat pentru ${numar}: ${prev.stadiu || "-"} -> ${current.stadiu || "-"}`,
         detail: { observedAt: now, numar, from: prev.stadiu, to: current.stadiu, instanta: current.instanta },
-        dedupKey: dedupKey(numar, "stadiu_changed"),
+        dedupKey: dedupKey(numar, "stadiu_changed", anchor),
       });
     }
 
@@ -235,7 +271,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
         severity: "info",
         title: `Categorie modificata pentru ${numar}: ${prev.categorie || "-"} -> ${current.categorie || "-"}`,
         detail: { observedAt: now, numar, from: prev.categorie, to: current.categorie, instanta: current.instanta },
-        dedupKey: dedupKey(numar, "categorie_changed"),
+        dedupKey: dedupKey(numar, "categorie_changed", anchor),
       });
     }
   }
@@ -250,6 +286,8 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
   if (prevAllowsDisappeared) {
     for (const [numar, prev] of prevByNumar) {
       if (currentByNumar.has(numar)) continue;
+      // v2.37.1: instanta picata in fan-out => absenta necunoscuta, nu disparitie.
+      if (failed.has(prev.instanta)) continue;
       if (!alertConfig.notify_on_dosar_disappeared) continue;
       if (!dosarPassesFilter(prev, alertConfig)) continue;
       alerts.push({
@@ -257,10 +295,10 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
         severity: "warning",
         title: `Dosarul nu mai apare pentru nume: ${numar}`,
         detail: { observedAt: now, ...prev },
-        dedupKey: dedupKey(numar, "dosar_disappeared"),
+        dedupKey: dedupKey(numar, "dosar_disappeared", anchor),
       });
     }
   }
 
-  return { newSnapshot: currentSnapshot, alerts };
+  return { newSnapshot, alerts };
 }
