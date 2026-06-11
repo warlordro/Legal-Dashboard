@@ -6,6 +6,8 @@ import {
   searchIccjEnriched,
   searchTermeneByDosarIccj,
 } from "../services/iccj/iccjClient.ts";
+import { ICCJ_SECTII_IDS } from "../services/iccj/iccjSectiiIds.ts";
+import { isValidDate } from "../util/validation.ts";
 
 // ICCJ (Inalta Curte) live-proxy search. Mounted at /api/dosare-iccj, so it
 // inherits the global middleware chain (preAuthRateLimit -> ownerContext ->
@@ -39,16 +41,29 @@ function tooLong(v: string | undefined): boolean {
 
 // Reject a present-but-non-ISO date: it would otherwise be forwarded to scj.ro (dosare)
 // or used in a lexicographic range filter (termene) where a junk value matches everything.
+// v2.37.1: isValidDate respinge si datele calendaristic imposibile (2026-02-31),
+// nu doar formatul gresit — aliniat cu rutele PortalJust.
 function badDate(v: string | undefined): boolean {
-  return !!v && !/^\d{4}-\d{2}-\d{2}$/.test(v);
+  return !!v && !isValidDate(v);
 }
 
-function mapError(err: unknown): { status: 502 | 500; message: string } {
+// v2.37.1: sectie validata contra id-urilor Department cunoscute, nu doar
+// length-capped — junk-ul forwardat la scj.ro producea un credibil "0 rezultate".
+function badSectie(v: string | undefined): boolean {
+  return v !== undefined && !ICCJ_SECTII_IDS.has(v);
+}
+
+function mapError(err: unknown): { status: 502 | 504 | 500; message: string } {
   if (err instanceof IccjSourceError) {
     return { status: 502, message: "Serviciul ICCJ (scj.ro) nu a raspuns corect. Incercati din nou." };
   }
   if (err instanceof IccjParseError) {
     return { status: 502, message: "Raspuns neasteptat de la ICCJ (scj.ro). Reincercati mai tarziu." };
+  }
+  // v2.37.1: expirarea ICCJ_TIMEOUT_MS (AbortSignal.timeout -> DOMException
+  // TimeoutError) e o problema de upstream lent, nu o eroare interna => 504.
+  if (err instanceof DOMException && err.name === "TimeoutError") {
+    return { status: 504, message: "Serviciul ICCJ (scj.ro) nu a raspuns in timp util. Incercati din nou." };
   }
   return { status: 500, message: "Eroare la comunicarea cu ICCJ." };
 }
@@ -67,7 +82,10 @@ dosareIccjRouter.get("/", async (c) => {
     return c.json({ error: `Parametrii de cautare nu pot depasi ${MAX_FIELD} caractere.` }, 400);
   }
   if (badDate(dataStart) || badDate(dataStop)) {
-    return c.json({ error: "Data trebuie in format YYYY-MM-DD." }, 400);
+    return c.json({ error: "Data trebuie sa fie o data calendaristica valida in format YYYY-MM-DD." }, 400);
+  }
+  if (badSectie(sectie)) {
+    return c.json({ error: "Sectie necunoscuta." }, 400);
   }
   const pageNum = page ? Number.parseInt(page, 10) : 1;
   if (!Number.isFinite(pageNum) || pageNum < 1 || pageNum > 20) {
@@ -90,7 +108,8 @@ dosareIccjRouter.get("/", async (c) => {
       page: result.page,
     });
   } catch (err) {
-    console.error("Eroare cautare ICCJ:", err);
+    // Client plecat (abort) => nu e o eroare de upstream; nu polua stderr.
+    if (!c.req.raw.signal.aborted) console.error("Eroare cautare ICCJ:", err);
     const { status, message } = mapError(err);
     return c.json({ error: message }, status);
   }
@@ -107,7 +126,7 @@ dosareIccjRouter.get("/detaliu/:id", async (c) => {
     const dosar = await fetchIccjDetail(id, { signal: c.req.raw.signal });
     return c.json({ data: dosar });
   } catch (err) {
-    console.error("Eroare detaliu ICCJ:", err);
+    if (!c.req.raw.signal.aborted) console.error("Eroare detaliu ICCJ:", err);
     const { status, message } = mapError(err);
     return c.json({ error: message }, status);
   }
@@ -137,7 +156,10 @@ termeneIccjRouter.get("/", async (c) => {
     return c.json({ error: `Parametrii nu pot depasi ${MAX_FIELD} caractere.` }, 400);
   }
   if (badDate(dataStart) || badDate(dataStop)) {
-    return c.json({ error: "Data trebuie in format YYYY-MM-DD." }, 400);
+    return c.json({ error: "Data trebuie sa fie o data calendaristica valida in format YYYY-MM-DD." }, 400);
+  }
+  if (badSectie(sectie)) {
+    return c.json({ error: "Sectie necunoscuta." }, 400);
   }
   try {
     const res = await searchTermeneByDosarIccj(
@@ -156,7 +178,7 @@ termeneIccjRouter.get("/", async (c) => {
       truncated: res.truncated,
     });
   } catch (err) {
-    console.error("Eroare termene ICCJ:", err);
+    if (!c.req.raw.signal.aborted) console.error("Eroare termene ICCJ:", err);
     const { status, message } = mapError(err);
     return c.json({ error: message }, status);
   }

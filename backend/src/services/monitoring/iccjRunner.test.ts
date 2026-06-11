@@ -101,7 +101,7 @@ describe("iccjRunner — happy path", () => {
 });
 
 describe("iccjRunner — false-empty guard (Codex #3)", () => {
-  it("fetch throws IccjSourceError → status error/ICCJ_FAIL, NO snapshot written", async () => {
+  it("fetch throws IccjSourceError → status error/ICCJ_SOURCE_FAIL, NO snapshot written", async () => {
     const job = seedIccjJob();
     const runId = seedRunningRow(job.id);
     const runner = createIccjRunner({
@@ -111,7 +111,9 @@ describe("iccjRunner — false-empty guard (Codex #3)", () => {
     });
     const out = await runner.run({ job, runId, nowIso: NOW_ISO, signal: new AbortController().signal });
     expect(out.status).toBe("error");
-    expect(out.errorCode).toBe("ICCJ_FAIL");
+    // v2.37.1: coduri distincte — sursa indisponibila (ICCJ_SOURCE_FAIL) vs
+    // markup drift (ICCJ_PARSE_FAIL) vs necunoscut (ICCJ_FAIL).
+    expect(out.errorCode).toBe("ICCJ_SOURCE_FAIL");
     // The critical guard: a source failure NEVER writes a (false-empty) snapshot.
     expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });

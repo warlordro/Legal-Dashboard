@@ -86,8 +86,12 @@ export class IdempotencyConflictError extends Error {
 // STORED in target_json; only the hash is normalized.
 export function targetForHash(kind: string, target: unknown): unknown {
   if (kind === "iccj" && target && typeof target === "object" && "numar_dosar" in target) {
+    // v2.37.1: strip si markerii mid-string ("1859/107/2009**/a3.1"), nu doar
+    // trailing — acelasi regex ca normalizeIccjNumar din
+    // services/monitoring/iccjFetchCurrent.ts (duplicat constient: repo-ul nu
+    // importa din services).
     const numar = String((target as { numar_dosar: unknown }).numar_dosar ?? "")
-      .replace(/\*+\s*$/, "")
+      .replace(/\*+(?=\/|\s*$)/g, "")
       .trim();
     return { numar_dosar: numar };
   }
