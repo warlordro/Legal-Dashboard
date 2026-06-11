@@ -56,3 +56,6 @@ Thumbs.db
 
 # RNPM debug dumps — contin PII real (CUI, denumire, identificator) si nu trebuie commit
 backend/rnpm-dumps/
+
+# Worktrees temporare create de tooling (audit/composr)
+.worktrees/
