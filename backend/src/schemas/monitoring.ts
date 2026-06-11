@@ -38,7 +38,10 @@ const TargetDosarSoap = z
 // suffix and dotted auxiliaries (e.g. "107/213/2017**", "250/2/2019/a3",
 // "1859/107/2009**/a3.1"). Separate, looser pattern (Codex review #8); only
 // whitespace is normalized — "**" and "." are significant and preserved.
-const NUMAR_DOSAR_ICCJ_RE = /^\d{1,7}\/\d{1,5}\/\d{4}\*{0,2}(?:\/[A-Za-z0-9.]+)?$/;
+// v2.37.1 (CodeRabbit): auxiliarul = segmente alfanumerice separate de UN
+// punct — respinge punctele consecutive/terminale ("a3..1", "a3.") care ar
+// produce target_hash-uri distincte pentru acelasi dosar logic.
+const NUMAR_DOSAR_ICCJ_RE = /^\d{1,7}\/\d{1,5}\/\d{4}\*{0,2}(?:\/[A-Za-z0-9]+(?:\.[A-Za-z0-9]+)*)?$/;
 
 const TargetIccjByNumber = z
   .object({

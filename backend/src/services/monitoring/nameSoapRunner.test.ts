@@ -323,6 +323,37 @@ describe("nameSoapRunner - source_partial (Batch 2.1)", () => {
     }
   });
 
+  it("emits source_partial by DEFAULT (no env var set) — v2.37.1 flip", async () => {
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+    delete process.env.MONITORING_PARTIAL_ALERTS_ENABLED;
+    const job = seedJob({
+      targetJson: JSON.stringify({
+        name_normalized: "ion popescu",
+        institutie: ["Judecatoria A", "Judecatoria B"],
+      }),
+    });
+    const runner = createNameSoapRunner({
+      searchDosare: async (params) => {
+        if (params.institutie === "Judecatoria B") {
+          throw new Error("upstream 503");
+        }
+        return [makeDosar("1234/180/2024", "fond", "civil", "Judecatoria A")];
+      },
+    });
+
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    const alert = getDb()
+      .prepare(`SELECT kind FROM monitoring_alerts WHERE job_id = ? AND kind = 'source_partial'`)
+      .get(job.id);
+    expect(alert).toBeDefined();
+  });
+
   it("does NOT emit source_partial alert when kill switch is set (=0)", async () => {
     // v2.37.1: default-ul a devenit ON; opt-out-ul explicit ramane prin "0".
     process.env.MONITORING_PARTIAL_ALERTS_ENABLED = "0";

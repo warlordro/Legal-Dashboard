@@ -218,7 +218,7 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<DosareXlsxResult
       const wsSedinte = workbook.addWorksheet("Sedinte");
       addMetaRows(
         wsSedinte,
-        "PORTALJUST DASHBOARD - SEDINTE",
+        "LEGAL DASHBOARD - SEDINTE",
         `Generat: ${dateStr}  |  ${totalSedinte} sedinte din ${dosare.length} dosare`,
         sedinteHeaders,
         sedinteWidths
