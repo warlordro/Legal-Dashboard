@@ -263,8 +263,8 @@ export default function Monitorizare({
           <div>
             <h1 className="text-2xl font-bold">Monitorizare</h1>
             <p className="text-sm text-muted-foreground">
-              Joburi recurente — verificare automata pe PortalJust pentru dosare existente sau subiecti (alerta dosare
-              noi).
+              Joburi recurente — verificare automata pe PortalJust si ICCJ (scj.ro) pentru dosare existente sau
+              subiecti (alerta dosare noi).
             </p>
           </div>
         </div>

@@ -142,7 +142,11 @@ export function DosareTable({
   const sorted = [...dosare].sort((a, b) => {
     const av = a[sortKey] ?? "";
     const bv = b[sortKey] ?? "";
-    return sortDir === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+    // numeric:true — numerele de dosar ("100/1/2026" vs "99/1/2026") se
+    // compara natural, nu lexicografic; inofensiv pentru coloanele text.
+    return sortDir === "asc"
+      ? av.localeCompare(bv, undefined, { numeric: true })
+      : bv.localeCompare(av, undefined, { numeric: true });
   });
 
   const totalPages = Math.ceil(dosare.length / pageSize);

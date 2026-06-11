@@ -21,9 +21,13 @@ function iccjRoutesDisabled(): boolean {
 }
 const ICCJ_DISABLED_BODY = {
   error: "Cautarea ICCJ (scj.ro) este dezactivata temporar de catre administrator.",
+  // v2.37.1: cod programatic ca UI-ul sa poata distinge "dezactivat deliberat"
+  // de un 5xx generic retryabil.
+  code: "ICCJ_DISABLED",
 } as const;
+const ICCJ_DISABLED_HEADERS = { "Retry-After": "300" } as const;
 dosareIccjRouter.use("*", async (c, next) => {
-  if (iccjRoutesDisabled()) return c.json(ICCJ_DISABLED_BODY, 503);
+  if (iccjRoutesDisabled()) return c.json(ICCJ_DISABLED_BODY, 503, ICCJ_DISABLED_HEADERS);
   await next();
 });
 
@@ -112,7 +116,7 @@ dosareIccjRouter.get("/detaliu/:id", async (c) => {
 // ICCJ termene — mounted at /api/termene-iccj. Same middleware chain.
 export const termeneIccjRouter = new Hono();
 termeneIccjRouter.use("*", async (c, next) => {
-  if (iccjRoutesDisabled()) return c.json(ICCJ_DISABLED_BODY, 503);
+  if (iccjRoutesDisabled()) return c.json(ICCJ_DISABLED_BODY, 503, ICCJ_DISABLED_HEADERS);
   await next();
 });
 

@@ -12,6 +12,7 @@
 // failure can never be mistaken for "dosar disappeared".
 
 import type { Dosar } from "../../soap.ts";
+import { IccjParseError, IccjSourceError } from "../iccj/iccjClient.ts";
 import type { JobRunner, RunOutcome, ScheduledJob } from "./scheduler.ts";
 import { AlertConfigSchema } from "../../schemas/monitoring.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
@@ -69,10 +70,19 @@ export function createIccjRunner(deps: IccjRunnerDeps): JobRunner {
             errorMessage: `Runner exceeded ${budgetMs}ms budget`,
           };
         }
-        // IccjSourceError / IccjParseError / network → error (NO snapshot write).
+        // Source/parse/network → error (NO snapshot write). v2.37.1: coduri
+        // distincte ca ops sa poata separa "scj.ro indisponibil — asteapta"
+        // (SOURCE) de "markup drift — trebuie patch pe parser" (PARSE) direct
+        // din monitoring_runs, fara citit mesaje free-text.
+        const errorCode =
+          err instanceof IccjSourceError
+            ? "ICCJ_SOURCE_FAIL"
+            : err instanceof IccjParseError
+              ? "ICCJ_PARSE_FAIL"
+              : "ICCJ_FAIL";
         return {
           status: "error",
-          errorCode: "ICCJ_FAIL",
+          errorCode,
           errorMessage: err instanceof Error ? err.message : String(err),
         };
       }
