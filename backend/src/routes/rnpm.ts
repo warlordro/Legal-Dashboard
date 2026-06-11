@@ -145,7 +145,12 @@ const inflightTimers = new Map<string, ReturnType<typeof setTimeout>>();
 // nu are timeout SSE intern, dar finally-ul curata oricum — TTL = safety net
 // pentru cazul patologic in care finally-ul nu apuca sa ruleze (proces SIGKILL,
 // finally-ul intra-n event loop iar GC kicks in, etc.).
-export const INFLIGHT_TTL_SEARCH_MS = 120_000;
+// v2.37.1 (review cluster 4): 15 min — peste worst-case-ul real al unui
+// /search (captcha solve 30-120s + retries + fetch-uri RNPM cu timeout 60s
+// fiecare). TTL-ul vechi de 120s expira IN TIMPUL unei cautari normale:
+// retry-ul clientului pornea o a doua cautare CONCURENTA cu originalul
+// (captcha platit dublu, randuri saved-search duplicate).
+export const INFLIGHT_TTL_SEARCH_MS = 900_000;
 export const INFLIGHT_TTL_BULK_MS = SSE_TIMEOUT_MS + 60_000;
 export const INFLIGHT_TTL_SPLIT_MS = SSE_SPLIT_TIMEOUT_MS + 60_000;
 
