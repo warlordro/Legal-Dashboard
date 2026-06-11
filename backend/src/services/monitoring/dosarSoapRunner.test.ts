@@ -682,9 +682,7 @@ describe("dosarSoapRunner — selectie sticky multi-instanta (v2.37.1, review cl
 
   it("pastreaza randul cu stadiul din baseline cand upstream-ul intoarce 2 randuri in alta ordine", async () => {
     const apel = dosarLa("Apel", "Curtea de Apel X", [sedintaApel]);
-    const fond = dosarLa("Fond", "Judecatoria Test", [
-      { ...sedintaApel, complet: "F1", data: "2026-06-01" },
-    ]);
+    const fond = dosarLa("Fond", "Judecatoria Test", [{ ...sedintaApel, complet: "F1", data: "2026-06-01" }]);
 
     let secondTick = false;
     const runner = createDosarSoapRunner({
