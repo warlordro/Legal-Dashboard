@@ -5,11 +5,13 @@
 // silentios. Exceptie: 0001_baseline.down.sql e un stub fail-loud intentionat
 // (restaurarea pre-baseline se face din backup, nu din SQL).
 import { readdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const dir = dirname(fileURLToPath(import.meta.url));
+// __dirname, nu import.meta.url — conventia repo-ului (CLAUDE.md "Nota
+// Importanta Build": backend-ul e CJS; toate testele-frate de migratii
+// folosesc acelasi pattern).
+const dir = __dirname;
 
 describe("down migrations clean up _schema_versions", () => {
   const downs = readdirSync(dir).filter((f) => f.endsWith(".down.sql"));

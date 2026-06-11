@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.37.1",
+    date: "11 Iunie 2026",
+    subtitle:
+      "Hardening post-full-review pe intreaga aplicatie: alertele de monitoring devin de incredere (fara 'dosar disparut' fals la esec partial de instanta, tranzitiile repetate alerteaza din nou), timeout pe RNPM (fara captcha platit dublu), rollback de migratii reparat si reziduuri ICCJ inchise.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Monitoring: alerte corecte",
+        content:
+          "O instanta care nu raspunde nu mai produce alerta falsa 'dosar disparut' — dosarele ei raman in baseline pana revine. Cheile de dedup sunt ancorate per-baseline, deci a doua schimbare reala de stadiu (Apel->Recurs) alerteaza din nou. Dosarele cu acelasi numar la mai multe instante sunt urmarite 'sticky' + alerta informativa unica. Raspunsurile PortalJust drifted (mentenanta/WAF) devin eroare de sursa, nu '0 rezultate'.",
+      },
+      {
+        title: "RNPM + migratii",
+        content:
+          "Timeout pe toate apelurile RNPM (RNPM_TIMEOUT_MS, 60s) si TTL-ul de idempotency crescut la 15 min — un retry nu mai porneste o cautare duplicata cu captcha platit inca o data. Toate down-migratiile isi curata jurnalul de versiuni (+ test-garda), runbook de rollback pentru 0034, index + purge chunked pe audit_log.",
+      },
+      {
+        title: "ICCJ + operational",
+        content:
+          "Cautarea de monitoring fara id foloseste numarul normalizat (marcajele */** nu mai pot da fals 'absent'), sectia e validata, datele imposibile respinse, timeout-ul upstream raspunde 504. Coduri de eroare distincte sursa/parsare in istoricul de rulari. Kill-switch-urile ICCJ si RNPM_TIMEOUT_MS documentate in .env.example/SECURITY/README; fix de auth in stack-ul web (Caddy nu mai arunca cookie-urile).",
+      },
+    ],
+  },
+  {
     version: "v2.37.0",
     date: "7 Iunie 2026",
     subtitle:
