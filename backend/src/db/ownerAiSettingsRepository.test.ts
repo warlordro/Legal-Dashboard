@@ -26,68 +26,64 @@ afterEach(async () => {
 });
 
 describe("ownerAiSettingsRepository", () => {
-  it("getSettings returns native/western defaults when row is absent", () => {
+  it("getSettings returns native defaults when row is absent", () => {
     expect(getSettings("local")).toEqual({
       owner_id: "local",
       mode: "native",
-      openrouter_stack: "western",
       updated_at: 0,
     });
   });
 
   it("upsertSettings inserts and echoes the saved settings", () => {
-    const row = upsertSettings("local", {
-      mode: "openrouter",
-      openrouter_stack: "chinese",
-    });
+    const row = upsertSettings("local", { mode: "openrouter" });
 
     expect(row).toMatchObject({
       owner_id: "local",
       mode: "openrouter",
-      openrouter_stack: "chinese",
     });
     expect(row.updated_at).toEqual(expect.any(Number));
     expect(row.updated_at).toBeGreaterThan(0);
   });
 
   it("upsertSettings updates the same owner row in place", () => {
-    upsertSettings("local", {
-      mode: "openrouter",
-      openrouter_stack: "chinese",
-    });
-    const updated = upsertSettings("local", {
-      mode: "native",
-      openrouter_stack: "western",
-    });
+    upsertSettings("local", { mode: "openrouter" });
+    const updated = upsertSettings("local", { mode: "native" });
 
-    const rows = getDb().prepare("SELECT owner_id, mode, openrouter_stack FROM owner_ai_settings").all();
+    const rows = getDb().prepare("SELECT owner_id, mode FROM owner_ai_settings").all();
     expect(rows).toHaveLength(1);
     expect(updated).toMatchObject({
       owner_id: "local",
       mode: "native",
-      openrouter_stack: "western",
     });
   });
 
+  it("upsertSettings pins the legacy openrouter_stack column to 'western'", () => {
+    upsertSettings("local", { mode: "openrouter" });
+
+    const row = getDb().prepare("SELECT openrouter_stack FROM owner_ai_settings WHERE owner_id = ?").get("local") as {
+      openrouter_stack: string;
+    };
+    expect(row.openrouter_stack).toBe("western");
+
+    // si pe update (branch-ul ON CONFLICT) coloana ramane 'western'
+    upsertSettings("local", { mode: "native" });
+    const afterUpdate = getDb()
+      .prepare("SELECT openrouter_stack FROM owner_ai_settings WHERE owner_id = ?")
+      .get("local") as { openrouter_stack: string };
+    expect(afterUpdate.openrouter_stack).toBe("western");
+  });
+
   it("keeps owners isolated", () => {
-    upsertSettings("local", {
-      mode: "openrouter",
-      openrouter_stack: "chinese",
-    });
-    upsertSettings("other", {
-      mode: "openrouter",
-      openrouter_stack: "western",
-    });
+    upsertSettings("local", { mode: "openrouter" });
+    upsertSettings("other", { mode: "native" });
 
     expect(getSettings("local")).toMatchObject({
       owner_id: "local",
       mode: "openrouter",
-      openrouter_stack: "chinese",
     });
     expect(getSettings("other")).toMatchObject({
       owner_id: "other",
-      mode: "openrouter",
-      openrouter_stack: "western",
+      mode: "native",
     });
   });
 
@@ -95,14 +91,7 @@ describe("ownerAiSettingsRepository", () => {
     expect(() =>
       upsertSettings("local", {
         mode: "bad" as "native",
-        openrouter_stack: "western",
       })
     ).toThrow(/invalid ai settings mode/);
-    expect(() =>
-      upsertSettings("local", {
-        mode: "openrouter",
-        openrouter_stack: "bad" as "western",
-      })
-    ).toThrow(/invalid openrouter stack/);
   });
 });

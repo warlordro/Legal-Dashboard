@@ -129,8 +129,7 @@ aiRouter.put("/settings", async (c) => {
     return c.json(fail(ErrorCodes.INVALID_PARAMS, "Setari AI invalide.", c, parsed.error.issues), 400);
   }
 
-  // openrouter_stack: legacy column, scris constant 'western'; Task A3 scoate campul din interfata
-  const settings = upsertSettings(getOwnerId(c), { mode: parsed.data.mode, openrouter_stack: "western" });
+  const settings = upsertSettings(getOwnerId(c), { mode: parsed.data.mode });
   return c.json({ mode: settings.mode });
 });
 

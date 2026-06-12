@@ -2,21 +2,18 @@ import { getDb } from "./schema.ts";
 import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export type AiProviderMode = "native" | "openrouter";
-export type OpenRouterStack = "western" | "chinese";
 
 export interface OwnerAiSettings {
   owner_id: string;
   mode: AiProviderMode;
-  openrouter_stack: OpenRouterStack;
   updated_at: number;
 }
 
 export interface UpsertOwnerAiSettingsInput {
   mode: AiProviderMode;
-  openrouter_stack: OpenRouterStack;
 }
 
-const COLUMNS = "owner_id, mode, openrouter_stack, updated_at";
+const COLUMNS = "owner_id, mode, updated_at";
 
 function nowMs(): number {
   return Date.now();
@@ -28,19 +25,11 @@ function assertMode(mode: string): asserts mode is AiProviderMode {
   }
 }
 
-function assertStack(stack: string): asserts stack is OpenRouterStack {
-  if (stack !== "western" && stack !== "chinese") {
-    throw new Error("invalid openrouter stack");
-  }
-}
-
 function toDomain(row: OwnerAiSettings): OwnerAiSettings {
   assertMode(row.mode);
-  assertStack(row.openrouter_stack);
   return {
     owner_id: row.owner_id,
     mode: row.mode,
-    openrouter_stack: row.openrouter_stack,
     updated_at: row.updated_at,
   };
 }
@@ -54,7 +43,6 @@ export function getSettings(ownerId: string): OwnerAiSettings {
   return {
     owner_id: ownerId,
     mode: "native",
-    openrouter_stack: "western",
     updated_at: 0,
   };
 }
@@ -62,20 +50,21 @@ export function getSettings(ownerId: string): OwnerAiSettings {
 export function upsertSettings(ownerId: string, input: UpsertOwnerAiSettingsInput): OwnerAiSettings {
   assertOwnerIdForMutation(ownerId, "upsertSettings(ownerAi)");
   assertMode(input.mode);
-  assertStack(input.openrouter_stack);
 
   const updatedAt = nowMs();
+  // openrouter_stack: coloana legacy (v2.38.0 a eliminat stack-ul chinezesc);
+  // ramane in schema pentru a evita rebuild-ul tabelei, se scrie constant 'western'.
   getDb()
     .prepare(
       `INSERT INTO owner_ai_settings
          (owner_id, mode, openrouter_stack, updated_at)
-       VALUES (?, ?, ?, ?)
+       VALUES (?, ?, 'western', ?)
        ON CONFLICT(owner_id) DO UPDATE SET
          mode = excluded.mode,
          openrouter_stack = excluded.openrouter_stack,
          updated_at = excluded.updated_at`
     )
-    .run(ownerId, input.mode, input.openrouter_stack, updatedAt);
+    .run(ownerId, input.mode, updatedAt);
 
   return getSettings(ownerId);
 }
