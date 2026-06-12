@@ -765,6 +765,22 @@ describe("GET /api/v1/dashboard/report", () => {
       detail: { reason: "missing_token" },
     });
 
+    // v2.37.1 (CI flake, Build Windows @ v2.37.1): randurile de mai sus primesc
+    // timestamp "now" din ceasuri diferite (JS Date in recordAudit, strftime
+    // SQLite in insert/finalize), iar handler-ul captureaza `until = new Date()`
+    // cateva ms mai tarziu. Pe runnerele Windows un pas de ceas (NTP) intre
+    // insert si request poate lasa un rand DUPA `until`, scotandu-l din fereastra
+    // [since, until]. Decuplam testul de ceasul de perete: backdatam explicit
+    // toate cele 3 randuri la un instant fix din interiorul ferestrei de 7 zile.
+    const backdatedTs = new Date(Date.now() - 3_600_000).toISOString();
+    const db = getDb();
+    db.prepare("UPDATE monitoring_alerts SET created_at = ? WHERE owner_id = 'alice'").run(backdatedTs);
+    db.prepare("UPDATE monitoring_runs SET started_at = ?, ended_at = ? WHERE owner_id = 'alice'").run(
+      backdatedTs,
+      backdatedTs
+    );
+    db.prepare("UPDATE audit_log SET ts = ? WHERE owner_id = 'alice'").run(backdatedTs);
+
     const app = buildTestApp();
     const res = await app.request("/api/v1/dashboard/report?range=7d", {
       headers: { "x-test-owner": "alice" },
