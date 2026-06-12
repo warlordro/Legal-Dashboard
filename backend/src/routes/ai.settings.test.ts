@@ -42,40 +42,31 @@ afterEach(async () => {
 });
 
 describe("AI settings routes", () => {
-  it("GET /api/v1/ai/settings returns native/western defaults", async () => {
+  it("GET /api/v1/ai/settings returns native default", async () => {
     const res = await buildApp().request("/api/v1/ai/settings");
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      mode: "native",
-      openrouter_stack: "western",
-    });
+    expect(await res.json()).toEqual({ mode: "native" });
   });
 
-  it("PUT /api/v1/ai/settings persists mode and stack", async () => {
+  it("PUT /api/v1/ai/settings cu doar mode persists openrouter", async () => {
     const res = await buildApp().request("/api/v1/ai/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "openrouter", openrouter_stack: "chinese" }),
+      body: JSON.stringify({ mode: "openrouter" }),
     });
 
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({
-      mode: "openrouter",
-      openrouter_stack: "chinese",
-    });
+    expect(await res.json()).toEqual({ mode: "openrouter" });
     const readback = await buildApp().request("/api/v1/ai/settings");
-    expect(await readback.json()).toEqual({
-      mode: "openrouter",
-      openrouter_stack: "chinese",
-    });
+    expect(await readback.json()).toEqual({ mode: "openrouter" });
   });
 
   it("PUT /api/v1/ai/settings rejects invalid enum values", async () => {
     const res = await buildApp().request("/api/v1/ai/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "openrouter", openrouter_stack: "invalid" }),
+      body: JSON.stringify({ mode: "invalid" }),
     });
 
     expect(res.status).toBe(400);
@@ -87,44 +78,16 @@ describe("AI settings routes", () => {
     await buildApp().request("/api/v1/ai/settings", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "openrouter", openrouter_stack: "chinese" }),
+      body: JSON.stringify({ mode: "openrouter" }),
     });
 
     ownerId = "other";
     const res = await buildApp().request("/api/v1/ai/settings");
-    expect(await res.json()).toEqual({
-      mode: "native",
-      openrouter_stack: "western",
-    });
+    expect(await res.json()).toEqual({ mode: "native" });
   });
 });
 
 describe("AI route OpenRouter guards", () => {
-  it("rejects stack mixing in multi-agent when mode=openrouter", async () => {
-    const app = buildApp();
-    await app.request("/api/v1/ai/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "openrouter", openrouter_stack: "chinese" }),
-    });
-
-    const res = await app.request("/api/v1/ai/analyze-multi", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        analysts: ["glm-5.1", "claude-sonnet"],
-        judge: "qwen-3.7-max",
-        dosar: { numar: "123/2024", institutie: "JUDECATORIA BUCURESTI" },
-        apiKeys: { openrouter: "sk-or-v1-test" },
-      }),
-    });
-
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as { error: { code: string; message: string } };
-    expect(body.error.code).toBe("STACK_MIX_FORBIDDEN");
-    expect(body.error.message).toContain("claude-sonnet");
-  });
-
   it("web mode rejects body-supplied OpenRouter key", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
     const res = await buildApp().request("/api/v1/ai/analyze", {

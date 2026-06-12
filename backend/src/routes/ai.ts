@@ -28,7 +28,6 @@ export const aiRouter = new Hono();
 
 const aiSettingsSchema = z.object({
   mode: z.enum(["native", "openrouter"]),
-  openrouter_stack: z.enum(["western", "chinese"]),
 });
 
 // In AUTH_MODE=web, BYOK via request body is refused: secrets transiting the
@@ -109,23 +108,12 @@ function missingApiKey(c: Context, provider: string) {
 
 function getRouting(c: Context): AiRouting {
   const settings = getSettings(getOwnerId(c));
-  return { mode: settings.mode, stack: settings.openrouter_stack };
-}
-
-function routesViaOpenRouter(modelKey: string, apiKeys: Record<string, string>, routing: AiRouting): boolean {
-  return shouldRouteViaOpenRouter(modelKey, apiKeys, routing);
-}
-
-function assertStackPurity(modelKeys: string[], stack: AiRouting["stack"]): string | null {
-  return modelKeys.find((key) => AI_MODELS[key]?.stack !== stack) ?? null;
+  return { mode: settings.mode };
 }
 
 aiRouter.get("/settings", (c) => {
   const settings = getSettings(getOwnerId(c));
-  return c.json({
-    mode: settings.mode,
-    openrouter_stack: settings.openrouter_stack,
-  });
+  return c.json({ mode: settings.mode });
 });
 
 aiRouter.put("/settings", async (c) => {
@@ -141,11 +129,9 @@ aiRouter.put("/settings", async (c) => {
     return c.json(fail(ErrorCodes.INVALID_PARAMS, "Setari AI invalide.", c, parsed.error.issues), 400);
   }
 
-  const settings = upsertSettings(getOwnerId(c), parsed.data);
-  return c.json({
-    mode: settings.mode,
-    openrouter_stack: settings.openrouter_stack,
-  });
+  // openrouter_stack: legacy column, scris constant 'western'; Task A3 scoate campul din interfata
+  const settings = upsertSettings(getOwnerId(c), { mode: parsed.data.mode, openrouter_stack: "western" });
+  return c.json({ mode: settings.mode });
 });
 
 // AI Analysis endpoint
@@ -185,13 +171,7 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
     // Get API key for the provider (env preferred, body fallback — see getApiKey)
     const keys = apiKeys;
     const routing = getRouting(c);
-    if (routing.mode === "openrouter" && selectedModel.stack !== routing.stack) {
-      return modelError(c, `Modelul ${modelKey || "claude-sonnet"} nu apartine stack-ului ${routing.stack}.`);
-    }
-
-    const requiredProvider = routesViaOpenRouter(modelKey || "claude-sonnet", keys, routing)
-      ? "openrouter"
-      : selectedModel.provider;
+    const requiredProvider = shouldRouteViaOpenRouter(keys, routing) ? "openrouter" : selectedModel.provider;
     const apiKey = getApiKey(requiredProvider, keys);
 
     if (!apiKey) {
@@ -278,10 +258,7 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
     }
     if (!body.judge || typeof body.judge !== "string") return invalidParams(c, "Lipseste modelul judecator.");
     if (!JUDGE_MODELS.includes(body.judge))
-      return invalidParams(
-        c,
-        "Model judecator nepermis. Doar Claude Opus 4.6, GPT-5.4, Gemini 3.1 Pro, GLM 5.1, Kimi K2.6 si Qwen 3.7 Max."
-      );
+      return invalidParams(c, "Model judecator nepermis. Doar Claude Opus 4.8, GPT-5.4 si Gemini 3.1 Pro.");
     if (!(body.judge in AI_MODELS)) return modelError(c, "Model judecator necunoscut.");
 
     // Validate apiKeys
@@ -300,15 +277,6 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
     const analysts = body.analysts as string[];
     const judge = body.judge as string;
     const routing = getRouting(c);
-    if (routing.mode === "openrouter") {
-      const wrongStackModel = assertStackPurity([...analysts, judge], routing.stack);
-      if (wrongStackModel) {
-        return c.json(
-          fail("STACK_MIX_FORBIDDEN", `Model ${wrongStackModel} nu apartine stack-ului ${routing.stack}`, c),
-          400
-        );
-      }
-    }
     const reserveProvider = routing.mode === "openrouter" ? "openrouter" : AI_MODELS[judge]?.provider;
     if (!reserveProvider) return modelError(c, "Model judecator necunoscut.");
     const quotaReservation = reserveQuotaBudget(c, "ai.multi", reserveProvider);
