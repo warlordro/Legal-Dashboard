@@ -11,57 +11,45 @@ import { getAuthMode } from "../auth/config.ts";
 import { getDecryptedKey, type TenantKeyField } from "../db/tenantKeysRepository.ts";
 
 // AI Models configuration
-export type OpenRouterStack = "western" | "chinese";
-export type AiRouting = { mode: "native" | "openrouter"; stack: OpenRouterStack };
+export type AiRouting = { mode: "native" | "openrouter" };
 
-export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: string; stack: OpenRouterStack }> = {
+export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: string }> = {
   // Anthropic
-  "claude-haiku": { provider: "anthropic", modelId: "claude-haiku-4-5-20251001", stack: "western" },
-  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-4-6", stack: "western" },
-  "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-6", stack: "western" },
+  "claude-haiku": { provider: "anthropic", modelId: "claude-haiku-4-5-20251001" },
+  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+  "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-8" },
   // OpenAI
-  "gpt-5.4-nano": { provider: "openai", modelId: "gpt-5.4-nano", stack: "western" },
-  "gpt-5.4-mini": { provider: "openai", modelId: "gpt-5.4-mini", stack: "western" },
-  "gpt-5.4": { provider: "openai", modelId: "gpt-5.4", stack: "western" },
+  "gpt-5.4-nano": { provider: "openai", modelId: "gpt-5.4-nano" },
+  "gpt-5.4-mini": { provider: "openai", modelId: "gpt-5.4-mini" },
+  "gpt-5.4": { provider: "openai", modelId: "gpt-5.4" },
   // Google
-  "gemini-flash-lite-3": { provider: "google", modelId: "gemini-3.1-flash-lite-preview", stack: "western" },
-  "gemini-flash-3": { provider: "google", modelId: "gemini-3-flash-preview", stack: "western" },
-  "gemini-pro-3": { provider: "google", modelId: "gemini-3.1-pro-preview", stack: "western" },
-  // OpenRouter Chinese stack
-  "glm-5.1": { provider: "openrouter", modelId: "z-ai/glm-5.1", stack: "chinese" },
-  "kimi-k2.6": { provider: "openrouter", modelId: "moonshotai/kimi-k2.6", stack: "chinese" },
-  "qwen-3.7-max": { provider: "openrouter", modelId: "qwen/qwen3.7-max", stack: "chinese" },
+  "gemini-flash-lite-3": { provider: "google", modelId: "gemini-3.1-flash-lite-preview" },
+  "gemini-flash-3.5": { provider: "google", modelId: "gemini-3.5-flash" },
+  "gemini-pro-3": { provider: "google", modelId: "gemini-3.1-pro-preview" },
 };
 
-export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3", "glm-5.1", "kimi-k2.6", "qwen-3.7-max"];
+export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3"];
 
-export const OPENROUTER_WESTERN_MAP: Record<string, string> = {
+export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "claude-haiku": "anthropic/claude-haiku-4.5",
   "claude-sonnet": "anthropic/claude-sonnet-4.6",
-  "claude-opus": "anthropic/claude-opus-4.6",
+  "claude-opus": "anthropic/claude-opus-4.8",
   "gpt-5.4-nano": "openai/gpt-5.4-nano",
   "gpt-5.4-mini": "openai/gpt-5.4-mini",
   "gpt-5.4": "openai/gpt-5.4",
   "gemini-flash-lite-3": "google/gemini-3.1-flash-lite-preview",
-  "gemini-flash-3": "google/gemini-3-flash-preview",
+  "gemini-flash-3.5": "google/gemini-3.5-flash",
   "gemini-pro-3": "google/gemini-3.1-pro-preview",
 };
 
-export const OPENROUTER_CHINESE_MAP: Record<string, string> = {
-  "glm-5.1": "z-ai/glm-5.1",
-  "kimi-k2.6": "moonshotai/kimi-k2.6",
-  "qwen-3.7-max": "qwen/qwen3.7-max",
-};
-
-export function resolveOpenRouterSlug(modelKey: string, stack: OpenRouterStack): string | null {
+export function resolveOpenRouterSlug(modelKey: string): string | null {
   const override = process.env.OPENROUTER_MODEL_OVERRIDES;
   if (override) {
     const pairs = override.split(",").map((p) => p.split(":").map((s) => s.trim()));
     const hit = pairs.find(([k]) => k === modelKey);
     if (hit?.[1]) return hit[1];
   }
-  const map = stack === "western" ? OPENROUTER_WESTERN_MAP : OPENROUTER_CHINESE_MAP;
-  return map[modelKey] || null;
+  return OPENROUTER_MODEL_MAP[modelKey] || null;
 }
 
 // SECURITY: Truncation limits for user-supplied dosar fields (prompt injection mitigation)
@@ -76,35 +64,7 @@ const TRUNCATE_FIELD = 200;
 // SECURITY: Timeout for AI API calls
 export const AI_TIMEOUT = 120000; // 120s per call — single analysis (native: Claude/GPT/Gemini)
 export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analysts + judge)
-// Chinese OpenRouter models (Qwen/GLM/Kimi) routinely take 90-180s per call —
-// provider queues + token throughput are much slower than native US providers.
-// Empirically observed: chinese-stack analysts hit 120s+ on routine analyses
-// and Kimi K2.6 landed at ~87s. Bump defaults so the bottleneck stays at the
-// model, not the client.
-export const AI_TIMEOUT_CHINESE = 360000; // 360s per call — chinese OpenRouter single analysis
-// Kimi K2.6 (judge) cu cap 16k tokens consuma ~298s pe dosare medii (43 tok/s).
-// Cap-ul de 300s vechi expira la 1.8s margine. 480s acopera worst case ~16k tokens
-// + retele lente + spike-uri queue OpenRouter.
-export const AI_MULTI_TIMEOUT_CHINESE = 480000;
-
-// Auto-bump default timeouts for chinese stack. Custom timeouts (e.g. test
-// harness using 5000ms) flow through unchanged — only the two known defaults
-// get promoted to their chinese counterparts.
-function effectiveOpenRouterTimeout(timeout: number, stack: string): number {
-  if (stack !== "chinese") return timeout;
-  if (timeout === AI_TIMEOUT) return AI_TIMEOUT_CHINESE;
-  if (timeout === AI_MULTI_TIMEOUT) return AI_MULTI_TIMEOUT_CHINESE;
-  return timeout;
-}
 const AI_MAX_TOKENS = 8000; // max output tokens — increased from 3000 for complex dosare
-// Chinese OpenRouter models (Kimi K2.6 in special) consuma tokens pentru reasoning
-// inainte de raspuns final; cap-ul de 8000 e lovit constant cu finish_reason="length"
-// si raspunsul ramane gol sau trunchiat. 16000 lasa headroom pentru thinking + final.
-const AI_MAX_TOKENS_CHINESE = 16000;
-
-function effectiveOpenRouterMaxTokens(stack: string): number {
-  return stack === "chinese" ? AI_MAX_TOKENS_CHINESE : AI_MAX_TOKENS;
-}
 
 // SECURITY: Body size limit for AI endpoint (100KB max)
 export const MAX_AI_BODY_SIZE = 100 * 1024;
@@ -483,8 +443,7 @@ export async function callOpenRouter(
   timeout: number,
   tracking?: AiUsageTrackingContext,
   signal?: AbortSignal,
-  routingTag?: AiUsageRoutingTag,
-  maxTokens: number = AI_MAX_TOKENS
+  routingTag?: AiUsageRoutingTag
 ): Promise<string> {
   if (process.env.OPENROUTER_DISABLED === "1") {
     throw new Error("OPENROUTER_DISABLED");
@@ -507,7 +466,7 @@ export async function callOpenRouter(
         {
           model: slug,
           messages: [{ role: "user", content: prompt }],
-          max_tokens: maxTokens,
+          max_tokens: AI_MAX_TOKENS,
           // @ts-expect-error OpenRouter extension for returning real per-call cost.
           extra_body: { usage: { include: true } },
         },
@@ -623,23 +582,14 @@ function providerToTenantField(provider: string): TenantKeyField | null {
 // Explicit native mode wins over the auto-detect on saved sk-or-* keys or env —
 // otherwise toggling back to native silently kept routing on OpenRouter and
 // threw MODEL_NOT_IN_STACK for native model keys (v2.28.0 regression).
-// Defensive fallback: openrouter-only models (provider === "openrouter") still
-// route via OpenRouter even in native mode, since they have no native SDK path.
-export function shouldRouteViaOpenRouter(
-  modelKey: string,
-  apiKeys: Record<string, string>,
-  routing: AiRouting | undefined
-): boolean {
-  const model = AI_MODELS[modelKey];
-  if (routing?.mode === "native") {
-    return model?.provider === "openrouter";
-  }
+// All models have a native SDK path, so native mode never routes via OpenRouter.
+export function shouldRouteViaOpenRouter(apiKeys: Record<string, string>, routing: AiRouting | undefined): boolean {
+  if (routing?.mode === "native") return false;
   return (
     routing?.mode === "openrouter" ||
     Boolean(process.env.OPENROUTER_API_KEY) ||
     (getAuthMode() === "web" && Boolean(getDecryptedKey("openrouter"))) ||
-    Boolean(apiKeys.openrouter?.startsWith("sk-or-")) ||
-    model?.provider === "openrouter"
+    Boolean(apiKeys.openrouter?.startsWith("sk-or-"))
   );
 }
 
@@ -655,26 +605,14 @@ export async function callModel(
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");
 
-  const useOpenRouter = shouldRouteViaOpenRouter(modelKey, apiKeys, routing);
+  const useOpenRouter = shouldRouteViaOpenRouter(apiKeys, routing);
 
   if (useOpenRouter) {
-    const stack = routing?.stack ?? model.stack ?? "western";
     const apiKey = getApiKey("openrouter", apiKeys);
     if (!apiKey) throw new Error("NO_API_KEY:openrouter");
-    const slug = resolveOpenRouterSlug(modelKey, stack);
-    if (!slug) throw new Error(`MODEL_NOT_IN_STACK:${modelKey}:${stack}`);
-    const effectiveTimeout = effectiveOpenRouterTimeout(timeout, stack);
-    const effectiveMaxTokens = effectiveOpenRouterMaxTokens(stack);
-    return callOpenRouter(
-      apiKey,
-      slug,
-      prompt,
-      effectiveTimeout,
-      tracking,
-      signal,
-      `openrouter:${stack}`,
-      effectiveMaxTokens
-    );
+    const slug = resolveOpenRouterSlug(modelKey);
+    if (!slug) throw new Error(`MODEL_NOT_IN_STACK:${modelKey}`);
+    return callOpenRouter(apiKey, slug, prompt, timeout, tracking, signal, "openrouter:western");
   }
 
   const apiKey = getApiKey(model.provider, apiKeys);
