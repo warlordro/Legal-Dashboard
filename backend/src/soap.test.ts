@@ -157,6 +157,28 @@ describe("SOAP response cap", () => {
   });
 });
 
+describe("cautareDosare false-empty guard (v2.37.1, review cluster 3)", () => {
+  it("arunca pe 200 fara envelope-ul CautareDosareResult (pagina drifted != 0 rezultate)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html><body>Mentenanta programata PortalJust</body></html>", { status: 200 })
+    );
+
+    await expect(cautareDosare({ numarDosar: "1/2/2026" })).rejects.toThrow(/envelope absent/);
+  });
+
+  it("returneaza [] pe envelope legitim cu rezultat gol (self-closed)", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        '<?xml version="1.0"?><soap:Envelope><soap:Body><CautareDosareResponse xmlns="portalquery.just.ro"><CautareDosareResult /></CautareDosareResponse></soap:Body></soap:Envelope>',
+        { status: 200 }
+      )
+    );
+
+    await expect(cautareDosare({ numarDosar: "1/2/2026" })).resolves.toEqual([]);
+  });
+});
+
 describe("extractFirst / extractAll", () => {
   it("extracts the first matching tag content", () => {
     expect(extractFirst("<a><b>hello</b><b>world</b></a>", "b")).toBe("hello");

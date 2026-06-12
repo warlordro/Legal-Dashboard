@@ -19,6 +19,8 @@
 import type { Dosar, SearchParams } from "../../soap.ts";
 import type { JobRunner, RunOutcome, ScheduledJob } from "./scheduler.ts";
 import { AlertConfigSchema } from "../../schemas/monitoring.ts";
+import { normalizeStadiu } from "./sedintaKey.ts";
+import { partialAlertsEnabled } from "./nameSoapRunner.ts";
 import { canonicalJson, canonicalSha256 } from "../../util/canonicalJson.ts";
 import { diffDosarSoap, type DiffSnapshotPayload } from "./diff/dosarSoap.ts";
 import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
@@ -33,6 +35,23 @@ import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 
 const DEFAULT_BUDGET_MS = 10 * 60 * 1000; // 10 min
+
+// v2.37.1 (review cluster 2): PortalJust intoarce un rand per instanta pentru
+// acelasi numar (fondul la tribunal + apelul la curtea de apel). Istoric
+// urmaream orbeste `dosare[0]` — ordinea upstream, nedeterminista: un flip de
+// ordine rotea toate cheile sedintelor (flood de termen_new) si pierdea starea.
+// Selectie "sticky": preferam randul al carui stadiu (normalizat) apare deja in
+// baseline-ul precedent; fallback la dosare[0] (comportamentul istoric) cand nu
+// exista baseline sau niciun rand nu se potriveste.
+function pickWatchedDosar(dosare: Dosar[], prevSedintaKeys: readonly string[] | undefined): Dosar | null {
+  if (dosare.length <= 1) return dosare[0] ?? null;
+  const prevStadii = new Set((prevSedintaKeys ?? []).map((k) => k.split("|")[0] ?? "").filter((s) => s.length > 0));
+  if (prevStadii.size > 0) {
+    const sticky = dosare.find((d) => prevStadii.has(normalizeStadiu(d.stadiuProcesual)));
+    if (sticky) return sticky;
+  }
+  return dosare[0] ?? null;
+}
 
 export interface DosarSoapRunnerDeps {
   searchDosare: (params: SearchParams, opts?: { signal?: AbortSignal }) => Promise<Dosar[]>;
@@ -81,7 +100,9 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
         };
       }
 
-      const currentDosar = dosare[0] ?? null;
+      // v2.37.1: selectia randului urmarit s-a mutat in callback-ul de mai jos
+      // (are nevoie de prev snapshot pentru regula sticky — vezi pickWatchedDosar).
+      let currentDosar: Dosar | null = null;
 
       // Tier 3 #11: the maintenance read lock now wraps ONLY the DB-touching
       // section, not the SOAP call above. This shrinks the per-run lock
@@ -108,6 +129,7 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
       await withMaintenanceRead(async () => {
         const prevRow = getLatestSnapshot(job.owner_id, job.id);
         const prevSnapshot = prevRow ? (JSON.parse(prevRow.payload_json) as DiffSnapshotPayload) : null;
+        currentDosar = pickWatchedDosar(dosare, prevSnapshot?.sedintaKeys);
 
         const { newSnapshot, alerts } = diffDosarSoap({
           prevSnapshot,
@@ -208,6 +230,32 @@ export function createDosarSoapRunner(deps: DosarSoapRunnerDeps): JobRunner {
             });
             insertedResults.push(result);
             if (result.inserted) insertedCount += 1;
+          }
+          // v2.37.1 (review cluster 2): cand acelasi numar exista la mai multe
+          // instante, userul trebuie sa stie ca doar un rand e monitorizat.
+          // Dedup pe setul sortat de instante: alerta se emite o singura data
+          // si se re-emite doar daca setul se schimba. Gated de acelasi flag ca
+          // source_partial (kill switch comun pentru alertele "de vizibilitate").
+          if (partialAlertsEnabled() && dosare.length > 1) {
+            const institutii = dosare.map((d) => d.institutie ?? "?").sort();
+            const watched = currentDosar?.institutie ?? "?";
+            const multiResult = insertAlert({
+              ownerId: job.owner_id,
+              jobId: job.id,
+              runId,
+              kind: "source_partial",
+              severity: "info",
+              title: `Dosarul apare la ${institutii.length} instante - doar ${watched} este monitorizata`,
+              detail: {
+                numar_dosar: target.numar_dosar,
+                institutii,
+                watched_instanta: watched,
+                observedAt: nowIso,
+              },
+              dedupKey: `multi_instanta|${institutii.join(",")}`,
+            });
+            insertedResults.push(multiResult);
+            if (multiResult.inserted) insertedCount += 1;
           }
           // v2.6.4 — backfill ruling text on existing solutie_aparuta alerts
           // whose detail_json was frozen with empty solutie_sumar / numar_document

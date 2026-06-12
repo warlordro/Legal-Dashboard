@@ -80,6 +80,7 @@ function monitoringKindLabel(kind: MonitoringJob["kind"]): string {
   if (kind === "dosar_soap") return "Dosar";
   if (kind === "name_soap") return "Nume";
   if (kind === "aviz_rnpm") return "Aviz RNPM";
+  if (kind === "iccj") return "ICCJ";
   return kind;
 }
 

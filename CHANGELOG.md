@@ -1,5 +1,59 @@
 # Changelog - Legal Dashboard
 
+## v2.37.1 - 2026-06-11
+
+Hardening post-full-review pe intreaga aplicatie (12 agenti, HEAD 920ef31) + pass CodeRabbit. Tema centrala: corectitudinea alertelor de monitoring — alertele false dispar, alertele reale nu mai sunt inghitite — plus fiabilitate RNPM si rollback de migratii.
+
+### Monitoring: corectitudinea alertelor
+
+**name_soap nu mai transforma un esec partial in "dosar disparut".** Cand o instanta din fan-out nu raspunde, dosarele ei sunt purtate neschimbate in baseline (fara alerta falsa, fara rebaseline); `failedInstitutii` ajunge acum in `diffNameSoap`. Cheile de dedup sunt ancorate per-baseline (`s<prevSnapshotId>`, pattern-ul din dosarSoap), astfel incat a doua tranzitie reala (Apel->Recurs dupa Fond->Apel) alerteaza din nou — inainte era inghitita pe viata de `ON CONFLICT DO NOTHING`. Alertele `source_partial` sunt acum active by default (`MONITORING_PARTIAL_ALERTS_ENABLED=0` ramane kill switch).
+
+**dosar_soap cu selectie sticky pe dosare multi-instanta.** PortalJust intoarce un rand per instanta pentru acelasi numar (fond + apel); runner-ul prefera acum randul al carui stadiu exista deja in baseline (un flip de ordine upstream nu mai roteste cheile sedintelor) si emite o alerta informativa unica "dosarul apare la N instante - doar X este monitorizata".
+
+**Guard de false-empty pe SOAP PortalJust.** Un raspuns 200 fara envelope-ul `CautareDosareResult` (pagina WAF/mentenanta, tag redenumit) arunca eroare de sursa in loc sa devina "0 rezultate" -> nu mai produce `dosar_disappeared` fals si nici snapshot resetat (oglinda guard-ului ICCJ `classifyEnvelope`).
+
+### RNPM: fiabilitate si cost
+
+Timeout per-fetch pe toate apelurile RNPM (`RNPM_TIMEOUT_MS`, default 60s) — era singurul upstream fara backstop; TTL-ul de idempotency pe `/search` crescut 120s -> 15min, ca un retry de client sa nu mai porneasca o cautare concurenta cu originalul (captcha platit dublu, randuri duplicate).
+
+### Migratii si audit
+
+Toate cele 24 de `.down.sql` care nu stergeau randul din `_schema_versions` o fac acum (+ test-garda pe toate down-urile); runbook de rollback pentru 0034 (kind `iccj`) in RUNBOOK.md, cu corectarea comenzilor stale (`migrations` -> `_schema_versions`). Migratia noua 0035 adauga index pe `audit_log(ts)` iar purge-ul de retentie e chunked (nu mai tine write lock-ul pe un full scan).
+
+### ICCJ: reziduuri inchise
+
+Fallback-ul de monitoring id-less cauta acum cu numarul normalizat (nu cu marcajele `*`/`**` in query) si stripuieste si markerii mid-string (`1859/107/2009**/a3.1`) — inclusiv in `target_hash`; logica `fetchCurrentDosar` extrasa in modul testabil (`iccjFetchCurrent.ts`, 4 teste + test normalizare). Pe rute: `sectie` validata contra id-urilor Department cunoscute, datele calendaristic imposibile (2026-02-31) respinse, timeout upstream mapat la 504 (nu 500), abort de client fara zgomot in stderr, 503-ul de kill-switch are `code: "ICCJ_DISABLED"` + `Retry-After`. `iccjRunner` scrie coduri distincte `ICCJ_SOURCE_FAIL` / `ICCJ_PARSE_FAIL` in `monitoring_runs`.
+
+### Operational / deploy
+
+Caddyfile nu mai stripuieste header-ul `Cookie` (oauth2-proxy nu-si vedea sesiunea -> login loop; stack-ul web committed era auth-dead); `docker-build.yml` cu bloc `permissions: contents: read`; tag-ul default din docker-compose actualizat. `.env.example` + SECURITY.md + README documenteaza acum kill-switch-urile ICCJ (`ICCJ_ROUTES_DISABLED`, `ICCJ_TIMEOUT_MS`, `ICCJ_MAX_RESPONSE_BYTES`, `ICCJ_ENRICH_BUDGET_MS`), `RNPM_TIMEOUT_MS` si kind-ul `iccj` la `MONITORING_DISABLED_KINDS`. Fisierele de smoke-test cu PII real din radacina sterse; `.worktrees/` gitignorat. Pass CodeRabbit: regex-ul ICCJ respinge puncte consecutive in auxiliare, branding XLSX aliniat, test default-ON.
+
+### Verificare
+
+1425+ teste backend + 232 teste frontend trec; biome + `tsc` (backend + frontend) + `npm run build` curate.
+
+## v2.37.0 - 2026-06-07
+
+Integrare ICCJ (Inalta Curte de Casatie si Justitie). PortalJust (SOAP) nu acopera ICCJ, asa ca dosarele Inaltei Curti sunt aduse prin live-proxy scraping pe `www.scj.ro` (search `/738`, detaliu `/1094`, sedinte `/737`; date DD.MM.YYYY normalizate la ISO). Functionalitatea apare ca un toggle de sursa in "Cautare Dosare" (PortalJust vs ICCJ) si in fluxul de termene, plus un tip nou de monitoring `iccj`.
+
+### Livrabile
+
+**Cautare + termene ICCJ.** Toggle de sursa pe pagina Dosare; cautare dupa numar/parte/obiect/sectie. Termene-pe-dosar: cauti un dosar/nume si vezi toate datele la care a aparut sau va aparea (fara data obligatorie; data ramane filtru optional).
+
+**Imbogatire server-side.** Ruta `/api/dosare-iccj` foloseste `searchIccjEnriched`: dupa cautarea de lista, fiecare dosar din pagina e imbogatit cu detaliul `/1094` (categorie juridica + rolul partilor + sedinte) intr-un singur raspuns, fara loader in frontend. Bounded (concurenta + buget de timp), izolare per-item.
+
+**Metrici + filtre source-aware.** `MetricsPanel` adapta pentru ICCJ: cardul 4 devine "Departamente" (institutia ICCJ e constanta), Categorii + "Analiza Parte" pe rol apar dupa imbogatire; chips Stadiu/Categorie derivate dinamic din rezultate. Paginare cu `hasMore` cumulativ (eliminata constanta hardcodata `ICCJ_PAGE_SIZE`).
+
+**Monitoring `iccj`.** Migrarea `0034_iccj_job_kind` extinde CHECK-ul `monitoring_jobs`; `iccjRunner` reutilizeaza diff-ul/snapshot-urile existente. Deep-link source-aware (scj.ro, niciodata portal.just.ro).
+
+### Hardening post-review (review dublu: 10 agenti `/full-review` + Codex adversarial)
+
+Identitate monitoring pe `iccj_id` stocat in loc de match exact pe numar (marcajul `*`/`**` al scj.ro nu mai cauza fals "disparut"); conversie data ISO -> DD.MM.YYYY catre scj.ro la cautarea de dosare; izolarea timeout-urilor per-item de abort-ul caller-ului + buget agregat `ICCJ_ENRICH_BUDGET_MS`; parser sedinte fail-loud la `<table>` fara `<tbody>` (markup drift, nu sterge tacit istoricul); dedup joburi pe `numar_dosar` normalizat (exclude `iccj_id`); titluri de alerta source-aware + `getDosarExternalUrl` fara fallback la PortalJust; kill-switch `ICCJ_ROUTES_DISABLED` + parametri env (`ICCJ_TIMEOUT_MS`, `ICCJ_MAX_RESPONSE_BYTES`, `ICCJ_ENRICH_BUDGET_MS`) + validare format data; parsare count tolerant la separatori de mii.
+
+### Verificare
+
+1374 teste backend + 232 teste frontend trec; `tsc` + biome + build curate; smoke live contra scj.ro (cautare, imbogatire, termene, regresie). `www.scj.ro` adaugat in whitelist-ul de URL extern (SECURITY.md + CLAUDE.md).
+
 ## v2.36.2 - 2026-06-02
 
 Fix functional in "Cautare Dosare", "Cautare Termene" si monitoring pe nume: o cautare dupa un nume cu abreviere punctata (ex. `EURO ASFALT D.O.O. SARAJEVO`, `S.C. ACME S.R.L.`) returna zero rezultate, desi dosarul exista pe PortalJust. Cauza: serviciul SOAP PortalJust indexeaza abrevierile fara puncte (numele stocat `D.O.O.` e indexat ca tokenul `DOO`), dar query-ul cu puncte e spart de word-breaker in litere izolate (`D`/`O`/`O`) care nu se potrivesc cu `DOO`, deci cautarea intoarce zero. Fix: punctele din `numeParte` sunt eliminate inainte de trimiterea catre SOAP (`D.O.O.` devine `DOO`, `S.R.L.` devine `SRL`, `S.A.` devine `SA`), aliniind query-ul cu indexul.

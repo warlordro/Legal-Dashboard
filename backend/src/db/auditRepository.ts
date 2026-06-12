@@ -283,8 +283,19 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
 // constanta din `services/monitoring/scheduler.ts:AUDIT_LOG_RETENTION_DAYS`.
 export function purgeOldAuditLog(retentionDays = 90): number {
   const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
-  const info = getDb().prepare("DELETE FROM audit_log WHERE ts < ?").run(cutoff);
-  return info.changes;
+  // v2.37.1 (review cluster 5): chunked ca purgeOldRuns — DELETE-ul unbounded
+  // tinea write lock-ul pe un scan complet la primul purge pe instalari vechi.
+  // Cu idx_audit_log_ts (0035) + LIMIT, fiecare batch elibereaza lock-ul rapid.
+  const stmt = getDb().prepare(
+    "DELETE FROM audit_log WHERE rowid IN (SELECT rowid FROM audit_log WHERE ts < ? LIMIT 1000)"
+  );
+  let total = 0;
+  for (;;) {
+    const info = stmt.run(cutoff);
+    total += info.changes;
+    if (info.changes < 1000) break;
+  }
+  return total;
 }
 
 export function listAuditEvents(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {

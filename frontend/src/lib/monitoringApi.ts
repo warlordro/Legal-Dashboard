@@ -13,7 +13,7 @@ export { MonitoringApiError };
 
 // ─── Monitoring jobs ─────────────────────────────────────────────────────────
 
-export type MonitoringJobKind = "dosar_soap" | "name_soap" | "aviz_rnpm";
+export type MonitoringJobKind = "dosar_soap" | "name_soap" | "aviz_rnpm" | "iccj";
 export type MonitoringJobStatus = "ok" | "error" | "partial" | "skipped";
 
 export interface MonitoringJob {
@@ -47,6 +47,8 @@ export interface CreateDosarMonitoringInput {
   cadence_sec?: number;
   notes?: string;
   client_request_id?: string;
+  // ICCJ only: internal scj.ro id so the monitoring row can deep-link to detail.
+  iccjId?: string;
 }
 
 export interface MonitoringCreateResult {
@@ -103,6 +105,31 @@ export const monitoring = {
       body: JSON.stringify({
         kind: "dosar_soap",
         target: { numar_dosar: input.numar_dosar },
+        cadence_sec: input.cadence_sec ?? 14400,
+        notes: input.notes,
+        client_request_id: input.client_request_id,
+      }),
+    });
+    const created = res.status === 201;
+    const job = await unwrapMonitoring<MonitoringJob>(res);
+    return { job, created };
+  },
+
+  // ICCJ (Inalta Curte) dosar monitoring — same shape as createDosar but kind='iccj'.
+  createIccj: async (input: CreateDosarMonitoringInput): Promise<MonitoringJob> => {
+    const result = await monitoring.createIccjWithResult(input);
+    return result.job;
+  },
+
+  createIccjWithResult: async (input: CreateDosarMonitoringInput): Promise<MonitoringCreateResult> => {
+    const res = await apiFetch("/api/v1/monitoring/jobs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        kind: "iccj",
+        target: input.iccjId
+          ? { numar_dosar: input.numar_dosar, iccj_id: input.iccjId }
+          : { numar_dosar: input.numar_dosar },
         cadence_sec: input.cadence_sec ?? 14400,
         notes: input.notes,
         client_request_id: input.client_request_id,
@@ -257,12 +284,25 @@ export const nameLists = {
 export function formatMonitoringTarget(job: MonitoringJob): string {
   try {
     const t = JSON.parse(job.target_json) as Record<string, unknown>;
-    if (job.kind === "dosar_soap" && typeof t.numar_dosar === "string") return t.numar_dosar;
+    if ((job.kind === "dosar_soap" || job.kind === "iccj") && typeof t.numar_dosar === "string") return t.numar_dosar;
     if (job.kind === "name_soap" && typeof t.name_normalized === "string") return t.name_normalized;
     if (job.kind === "aviz_rnpm" && typeof t.identificator === "string") return t.identificator;
     return job.target_json;
   } catch {
     return job.target_json;
+  }
+}
+
+// ICCJ jobs only: the internal scj.ro id (if saved at monitor time), used to
+// deep-link the monitoring row straight to the ICCJ detail page. "" if absent
+// (older jobs created before the id was captured).
+export function getIccjId(job: MonitoringJob): string {
+  if (job.kind !== "iccj") return "";
+  try {
+    const t = JSON.parse(job.target_json) as Record<string, unknown>;
+    return typeof t.iccj_id === "string" ? t.iccj_id : "";
+  } catch {
+    return "";
   }
 }
 

@@ -242,6 +242,22 @@ export interface RnpmClientOptions {
   fetchImpl?: typeof fetch;
 }
 
+// v2.37.1 (review cluster 4): RNPM era singurul upstream FARA backstop de
+// timeout (soap.ts are 60s, iccjClient 30s) — un socket mj.rnpm.ro agatat
+// tinea cererea (si gcode-ul captcha deja platit) la nesfarsit, iar dupa
+// expirarea TTL-ului de idempotency retry-ul clientului pornea o cautare
+// duplicata CONCURENTA. Timeout per-fetch, env-tunable.
+// Lazy read (nu constanta module-top) ca testele sa poata seta env-ul dupa import.
+function rnpmTimeoutMs(): number {
+  const raw = Number.parseInt(process.env.RNPM_TIMEOUT_MS ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
+}
+
+function withRnpmTimeout(signal?: AbortSignal): AbortSignal {
+  const timeout = AbortSignal.timeout(rnpmTimeoutMs());
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
 export class RnpmClient {
   private readonly delayMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -262,7 +278,7 @@ export class RnpmClient {
       method: "POST",
       headers: defaultHeaders(),
       body: JSON.stringify(params),
-      signal,
+      signal: withRnpmTimeout(signal),
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -283,7 +299,7 @@ export class RnpmClient {
 
   async fetchPart(uuid: string, part: 1 | 2 | 3 | 4, signal?: AbortSignal): Promise<unknown> {
     const url = `${RNPM_BASE_URL}/api/view/inscriere/${uuid}?part=${part}`;
-    const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal });
+    const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: withRnpmTimeout(signal) });
     if (res.status === 400 || res.status === 404 || res.status === 410) return null;
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -296,8 +312,10 @@ export class RnpmClient {
     const url = `${RNPM_BASE_URL}/api/view/istoric/${uuid}`;
     // The istoric endpoint is flaky — same URL occasionally returns 400 "command
     // execution error" then 200 with data a few seconds later. Retry once with a
-    // short backoff before giving up.
-    const doFetch = () => this.fetchImpl(url, { headers: defaultHeaders(), signal });
+    // short backoff before giving up. Un singur buget de timeout acopera ambele
+    // attempts (v2.37.1).
+    const composed = withRnpmTimeout(signal);
+    const doFetch = () => this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
     let res = await doFetch();
     if (res.status === 400) {
       await new Promise((r) => setTimeout(r, 1500));

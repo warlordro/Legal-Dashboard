@@ -334,7 +334,7 @@ Migration-urile sunt forward-only by default. Inainte de rollback verifica daca
 versiunea tinta avea **acelasi `current_migration_version`** ca cea curenta.
 
 ```bash
-sqlite3 /path/to/legal-dashboard.db "SELECT MAX(id) FROM migrations;"
+sqlite3 /path/to/legal-dashboard.db "SELECT MAX(version) FROM _schema_versions;"
 ```
 
 Daca migration-urile sunt diferite intre versiuni: NU rollback la versiunea de cod
@@ -355,9 +355,12 @@ cp /path/to/legal-dashboard.db /path/to/legal-dashboard.db.before-rollback-$(dat
 # manual (in ordine descrescatoare, una cate una).
 # Migration files: backend/src/db/migrations/NNNN_<name>.down.sql
 
-# Exemplu rollback de la migration 0033 -> 0032:
-sqlite3 /path/to/legal-dashboard.db < backend/src/db/migrations/0033_captcha_usage.down.sql
-sqlite3 /path/to/legal-dashboard.db "DELETE FROM migrations WHERE id >= 33;"
+# Exemplu rollback de la migration 0033 -> 0032 (ruleaza cu -bail ca o eroare
+# sa opreasca scriptul, nu sa continue pe jumatate):
+sqlite3 -bail /path/to/legal-dashboard.db < backend/src/db/migrations/0033_captcha_usage.down.sql
+# Din v2.37.1 fiecare .down.sql isi sterge singur randul din _schema_versions.
+# Verifica:
+sqlite3 /path/to/legal-dashboard.db "SELECT MAX(version) FROM _schema_versions;"
 
 # 4. Porneste versiunea anterioara
 docker run -d --name ld-container \
@@ -370,6 +373,29 @@ docker run -d --name ld-container \
 # 5. Health check
 sleep 10
 curl -fsS http://127.0.0.1:3002/health
+```
+
+### Rollback specific: migratia 0034 (monitoring kind `iccj`)
+
+Down-ul 0034 reconstruieste `monitoring_jobs` cu CHECK-ul vechi pe 3 kinds si
+**esueaza intentionat (fail-loud)** daca mai exista joburi `kind='iccj'`.
+Procedura completa:
+
+```bash
+# 1. Opreste aplicatia (vezi Procedura, pasul 1) + snapshot defensiv (pasul 2).
+
+# 2. Sterge joburile iccj — CASCADE curata runs/snapshots/alerts aferente:
+sqlite3 /path/to/legal-dashboard.db "DELETE FROM monitoring_jobs WHERE kind='iccj';"
+
+# 3. Ruleaza down-ul cu -bail. IMPORTANT: foloseste sqlite3 CLI (foreign_keys
+# OFF by default). Tooling cu PRAGMA foreign_keys=ON ar declansa CASCADE-wipe
+# pe snapshots/runs/alerts la DROP TABLE monitoring_jobs.
+sqlite3 -bail /path/to/legal-dashboard.db < backend/src/db/migrations/0034_iccj_job_kind.down.sql
+
+# 4. Verifica jurnalul de versiuni (down-ul sterge singur randul 34):
+sqlite3 /path/to/legal-dashboard.db "SELECT MAX(version) FROM _schema_versions;"  # asteptat: 33
+
+# 5. Instaleaza binarul versiunii anterioare (v2.36.x).
 ```
 
 ### Daca rollback-ul nu mai porneste

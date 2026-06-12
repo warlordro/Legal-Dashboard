@@ -6,7 +6,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { api } from "@/lib/api";
 import type { LoadMoreProgress } from "@/lib/api";
 import { exportTermeneExcel, exportTermenePDF } from "@/lib/export-termene";
-import type { Termen, SearchParams } from "@/types";
+import type { DosarSource, Termen, SearchParams } from "@/types";
 import { CalendarView } from "@/components/CalendarView";
 // Lazy: TermeneMetrics pulls in recharts (heavy). Only mounts when results exist.
 const TermeneMetrics = lazy(() => import("@/components/TermeneMetrics").then((m) => ({ default: m.TermeneMetrics })));
@@ -101,13 +101,23 @@ export default function Termene({
   const [viewMode, setViewMode] = useState<ViewMode>("table");
   const [metricFilters, setMetricFilters] = useState<MetricFilter[]>([]);
   const [dateFilter, setDateFilter] = useState<{ start?: string; stop?: string }>({});
+  // ICCJ-only: set when the dosar search matched more cases than we fetched termene for.
+  const [iccjNote, setIccjNote] = useState<string | null>(null);
+  // In-flight source for the loading spinner label. Committed `isIccj` (from
+  // lastSearchParams) lags until results commit, so it would mislabel the spinner
+  // on the first search / right after a source switch. MUST be set wherever
+  // setLoading(true) is — today only at the top of handleSearch.
+  const [loadingSource, setLoadingSource] = useState<DosarSource>("portaljust");
 
+  // ICCJ termene come pre-filtered server-side (date + sectie) and skip the
+  // PortalJust client-side filter pipeline (which is categorie/stadiu-specific).
+  const isIccj = (state.lastSearchParams?.source ?? "portaljust") === "iccj";
   const filteredByDate = filterByDate(state.allTermene, dateFilter.start, dateFilter.stop);
   const filteredByCatStadiu = filterTermeneByStadii(
     filterTermeneByCategorii(filteredByDate, state.categorii),
     state.stadii ?? []
   );
-  const termene = filterByMetrics(filteredByCatStadiu, metricFilters);
+  const termene = isIccj ? state.allTermene : filterByMetrics(filteredByCatStadiu, metricFilters);
 
   const toggleMetricFilter = (filter: MetricFilter) => {
     setMetricFilters((prev) => (prev.includes(filter) ? prev.filter((f) => f !== filter) : [...prev, filter]));
@@ -115,8 +125,10 @@ export default function Termene({
 
   const handleSearch = async (params: SearchParams) => {
     setLoading(true);
+    setLoadingSource(params.source === "iccj" ? "iccj" : "portaljust");
     setMetricFilters([]);
     setDateFilter({});
+    setIccjNote(null);
     setLoadMoreDone(false);
     setLoadMoreWarnings([]);
     setLoadMoreProgress(null);
@@ -125,6 +137,29 @@ export default function Termene({
     try {
       const { categorii: cats, stadii: st, ...searchParams } = params;
       lastSearchParams.current = searchParams;
+
+      // ICCJ termene — search dosare (numar/parte/obiect/sectie) and show ALL their
+      // hearings. No date required; the date range filters the result client-side.
+      if (searchParams.source === "iccj") {
+        const res = await api.termene.searchIccj(searchParams);
+        onStateChange({
+          allTermene: res.data,
+          categorii: [],
+          stadii: [],
+          searched: true,
+          error: null,
+          searchedName: searchParams.numeParte,
+          lastSearchParams: params,
+        });
+        if (res.truncated) {
+          setIccjNote(
+            `Cautarea a gasit mai multe dosare decat limita procesata (${res.dosareCount ?? 0} afisate); termenele pot fi incomplete. Restrangeti cautarea (numar de dosar sau sectie) pentru rezultate complete.`
+          );
+        }
+        onSearchComplete?.(params, res.data.length);
+        return;
+      }
+
       const res = await api.termene.search(searchParams);
       // The termene endpoint returns termene extracted from dosare.
       // We detect the 1000-dosare cap by checking if we got a large number of termene
@@ -271,6 +306,7 @@ export default function Termene({
         onSearch={handleSearch}
         loading={loading}
         showDateRange
+        showSourceToggle
         onDateChange={(start, stop) => setDateFilter({ start, stop })}
         onCategoriiChange={(cats) => onStateChange({ ...state, categorii: cats })}
         onStadiiChange={(st) => onStateChange({ ...state, stadii: st })}
@@ -296,6 +332,7 @@ export default function Termene({
           setInitialDosareCount(0);
           setMetricFilters([]);
           setDateFilter({});
+          setIccjNote(null);
           lastSearchParams.current = null;
           onStateChange({
             allTermene: [],
@@ -310,7 +347,9 @@ export default function Termene({
       {loading && (
         <div className="flex items-center justify-center gap-3 py-16 text-muted-foreground">
           <Spinner />
-          <span className="text-sm">Se cauta termene in PortalJust...</span>
+          <span className="text-sm">
+            {loadingSource === "iccj" ? "Se cauta sedinte ICCJ (scj.ro)..." : "Se cauta termene in PortalJust..."}
+          </span>
         </div>
       )}
 
@@ -324,6 +363,13 @@ export default function Termene({
         </div>
       )}
 
+      {!loading && iccjNote && (
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/50 dark:bg-amber-900/10">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-500" />
+          <p className="text-xs text-amber-800 dark:text-amber-400">{iccjNote}</p>
+        </div>
+      )}
+
       {!loading && state.searched && !state.error && state.allTermene.length === 0 && (
         <div className="flex flex-col items-center gap-2 py-16 text-center">
           <CalendarDays className="h-10 w-10 text-muted-foreground/30" />
@@ -332,7 +378,7 @@ export default function Termene({
         </div>
       )}
 
-      {!loading && state.allTermene.length > 0 && (
+      {!loading && !isIccj && state.allTermene.length > 0 && (
         <Suspense
           fallback={<div className="py-6 text-center text-xs text-muted-foreground">Se incarca graficele...</div>}
         >

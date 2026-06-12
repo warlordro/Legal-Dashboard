@@ -8,6 +8,7 @@ import type { Termen } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
 import { TablePagination } from "@/components/table-pagination";
 import { TermeneExpandedDetail } from "./termene-table-detail-row";
+import { getDosarExternalUrl } from "./dosare-table-helpers";
 import { monitoring, MonitoringApiError } from "@/lib/api";
 
 interface TermeneTableProps {
@@ -15,12 +16,6 @@ interface TermeneTableProps {
   onExportExcel: (selected?: Termen[]) => Promise<void> | void;
   onExportPDF: (selected?: Termen[]) => Promise<void> | void;
   searchedName?: string;
-}
-
-// PortalJust SharePoint indexer nu retine sufixul de dosar asociat (/a, /a1, /a2 ...).
-function getPortalJustUrl(numar: string): string {
-  const parent = numar.replace(/\/a\d*$/i, "");
-  return `https://portal.just.ro/SitePages/cautare.aspx?k=${encodeURIComponent(parent)}`;
 }
 
 function formatInstitutie(raw: string): string {
@@ -312,7 +307,7 @@ export function TermeneTable({ termene, onExportExcel, onExportPDF, searchedName
                         ) : null}
                         {t.numarDosar ? (
                           <a
-                            href={getPortalJustUrl(t.numarDosar)}
+                            href={getDosarExternalUrl({ numar: t.numarDosar, source: t.source, iccjId: t.iccjId })}
                             target="_blank"
                             rel="noopener noreferrer"
                             onClick={(e) => e.stopPropagation()}

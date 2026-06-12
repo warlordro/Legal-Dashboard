@@ -21,8 +21,12 @@
 	# originGuard see the correct headers. Without `X-Forwarded-Proto=https`,
 	# oauth2-proxy may build the wrong redirect URL after Google callback.
 	reverse_proxy oauth2-proxy:4180 {
+		# v2.37.1: NU stripui Cookie — oauth2-proxy isi citeste sesiunea si
+		# tokenul CSRF din cookie, iar backend-ul primeste legal_dashboard_session
+		# pe acelasi canal; cu `-Cookie` activ, login-ul intra in bucla infinita.
+		# Stripuim doar header-ele de identitate spoofabile, pe care DOAR
+		# oauth2-proxy are voie sa le seteze in aval.
 		header_up -Authorization
-		header_up -Cookie
 		header_up -X-Auth-Request-Email
 		header_up -X-Forwarded-Email
 		header_up -X-Forwarded-User

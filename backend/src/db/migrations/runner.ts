@@ -212,12 +212,31 @@ export function runMigrations(db: Database.Database, migrationsDir: string): Run
       continue;
     }
 
-    // New migration -> execute SQL + record version atomically.
-    const apply = db.transaction(() => {
-      db.exec(file.sql);
-      db.prepare("INSERT INTO _schema_versions(version, sha256_up) VALUES (?, ?)").run(file.version, file.sha256);
-    });
-    apply();
+    // Opt-in: a migration that rebuilds a table referenced by FOREIGN KEYs (a
+    // "parent" table) must run with foreign_keys=OFF, otherwise the implicit
+    // DELETE during `DROP TABLE <old>` CASCADE-deletes child rows. foreign_keys
+    // cannot be toggled inside a transaction (it's a no-op there), so the runner
+    // toggles it AROUND the transaction when the migration declares the marker
+    // `-- migrate:foreign_keys=off`. A foreign_key_check inside the tx fails the
+    // migration loud (rollback) if the rebuild left any dangling reference.
+    const fkOff = /^[ \t]*--[ \t]*migrate:foreign_keys=off\b/im.test(file.sql);
+    if (fkOff) db.pragma("foreign_keys = OFF");
+    try {
+      // New migration -> execute SQL + record version atomically.
+      const apply = db.transaction(() => {
+        db.exec(file.sql);
+        if (fkOff) {
+          const violations = db.pragma("foreign_key_check") as unknown[];
+          if (Array.isArray(violations) && violations.length > 0) {
+            throw new Error(`[migrations] ${file.name} left FK violations: ${JSON.stringify(violations)}`);
+          }
+        }
+        db.prepare("INSERT INTO _schema_versions(version, sha256_up) VALUES (?, ?)").run(file.version, file.sha256);
+      });
+      apply();
+    } finally {
+      if (fkOff) db.pragma("foreign_keys = ON");
+    }
     result.applied.push(file.version);
   }
 

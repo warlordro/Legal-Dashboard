@@ -251,6 +251,18 @@ export const api = {
   dosare: {
     search: (params: SearchParams) =>
       get<{ data: Dosar[]; total: number }>("/dosare", params as Record<string, string | string[] | undefined>),
+    // ICCJ live-proxy search (separate endpoint; date-DESC, paginated).
+    searchIccj: (params: SearchParams, page = 1) =>
+      get<{ data: Dosar[]; total: number; page: number }>("/dosare-iccj", {
+        numarDosar: params.numarDosar,
+        obiectDosar: params.obiectDosar,
+        numeParte: params.numeParte,
+        sectie: params.sectie,
+        dataStart: params.dataStart,
+        dataStop: params.dataStop,
+        page: String(page),
+      }),
+    detaliuIccj: (iccjId: string) => get<{ data: Dosar }>(`/dosare-iccj/detaliu/${encodeURIComponent(iccjId)}`, {}),
     exportXlsxBlob: (dosare: Dosar[]) =>
       postBlob("/v1/dosare/export.xlsx", { dosare }, dosare.length === 1 ? "dosar.xlsx" : "dosare.xlsx"),
     loadMore: (
@@ -272,6 +284,17 @@ export const api = {
   termene: {
     search: (params: SearchParams) =>
       get<{ data: Termen[]; total: number }>("/termene", params as Record<string, string | string[] | undefined>),
+    // ICCJ termene: search dosare (numar/parte/obiect/sectie) and return ALL their
+    // hearings. No date required; dataStart/dataStop are optional result filters.
+    searchIccj: (params: SearchParams) =>
+      get<{ data: Termen[]; total: number; dosareCount?: number; truncated?: boolean }>("/termene-iccj", {
+        numarDosar: params.numarDosar,
+        numeParte: params.numeParte,
+        obiectDosar: params.obiectDosar,
+        sectie: params.sectie,
+        dataStart: params.dataStart,
+        dataStop: params.dataStop,
+      }),
     exportXlsxBlob: (termene: Termen[]) =>
       postBlob("/v1/termene/export.xlsx", { termene }, termene.length === 1 ? "termen.xlsx" : "termene.xlsx"),
     loadMore: (
@@ -442,6 +465,7 @@ export {
   nameLists,
   formatMonitoringTarget,
   getNameSoapInstitutie,
+  getIccjId,
   type MonitoringJob,
   type MonitoringJobKind,
   type MonitoringJobStatus,

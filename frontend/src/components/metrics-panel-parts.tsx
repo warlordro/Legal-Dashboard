@@ -230,13 +230,13 @@ export function StadiiChart({ data }: { data: NamedDatum[] }) {
   );
 }
 
-export function InstitutiiChart({ data }: { data: NamedDatum[] }) {
+export function InstitutiiChart({ data, title = "Top 5 Institutii" }: { data: NamedDatum[]; title?: string }) {
   return (
     <Card>
       <CardHeader className="pb-2">
         <CardTitle className="flex items-center gap-2 text-sm">
           <Building2 className="h-4 w-4 text-primary" />
-          Top 5 Institutii
+          {title}
         </CardTitle>
       </CardHeader>
       <CardContent>

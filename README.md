@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.36.2**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.37.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.36.2** - Fix in "Cautare Dosare" / "Cautare Termene" / monitoring pe nume: o cautare dupa un nume cu abreviere punctata (ex. `EURO ASFALT D.O.O. SARAJEVO`, `S.C. ACME S.R.L.`) returna zero rezultate desi dosarul exista pe PortalJust. Cauza: PortalJust indexeaza abrevierile fara puncte (`D.O.O.` indexat ca `DOO`), dar query-ul cu puncte e spart in litere izolate care nu se mai potrivesc. Fix: punctele din numele cautat sunt eliminate inainte de trimiterea catre SOAP (`D.O.O.`->`DOO`), aliniind query-ul cu indexul. Schimbare chirurgicala doar pe `numeParte`, lossless.
+Ultimul release **v2.37.1** - Hardening post-full-review pe intreaga aplicatie: corectitudinea alertelor de monitoring (fara `dosar_disappeared` fals la esec partial de instanta; dedup ancorat per-baseline, tranzitiile repetate alerteaza din nou; selectie sticky pe dosare multi-instanta; guard de false-empty pe SOAP), timeout RNPM (`RNPM_TIMEOUT_MS`) + TTL idempotency 15min, down-migratii cu cleanup `_schema_versions` + runbook 0034, reziduuri ICCJ (normalizare markeri `*`/`**`, validare sectie/data, coduri eroare distincte, 504 la timeout) si fix auth in stack-ul web (Caddy pastreaza Cookie). Predecesor **v2.37.0** - Integrare ICCJ (Inalta Curte de Casatie si Justitie) via live-proxy scraping pe scj.ro: cautare dosare cu toggle de sursa (PortalJust vs ICCJ), termene-pe-dosar (toate datele unui dosar), imbogatire server-side a rezultatelor (categorie + rolul partilor + sedinte), metrici source-aware (Departamente in loc de Institutii, Analiza Parte) si monitoring `iccj` (migrarea 0034). Plus rundele de review (10 agenti + Codex) cu 10 fix-uri de corectitudine/fiabilitate: identitate monitoring pe `iccj_id`, conversie data DD.MM.YYYY catre scj.ro, izolarea timeout-urilor per-item, parser fail-loud la markup drift, dedup joburi, deep-link source-aware, kill-switch `ICCJ_ROUTES_DISABLED` + parametri env.
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -65,8 +65,10 @@ per job - recovery-ul de crash nu mai poate produce duplicate.
 Kill switch-uri operationale:
 
 - `MONITORING_ENABLED=0` opreste mount-ul rutelor si scheduler-ul.
-- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` exclude tipurile listate din
+- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap,iccj` exclude tipurile listate din
   claim-ul scheduler-ului fara modificari in DB.
+- `ICCJ_ROUTES_DISABLED=1` opreste rutele interactive ICCJ (`/api/dosare-iccj`,
+  `/api/termene-iccj`) cu raspuns 503, fara redeploy.
 
 Tipul `aviz_rnpm` ramane rezervat pentru o etapa viitoare; `name_soap` este activ in v2.4.0+.
 

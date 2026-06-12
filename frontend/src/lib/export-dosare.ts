@@ -9,7 +9,7 @@
 // the backend (`api.dosare.exportXlsxBlob`).
 
 import type { Dosar } from "@/types";
-import { getPortalJustUrl } from "@/components/dosare-table-helpers";
+import { getDosarExternalUrl } from "@/components/dosare-table-helpers";
 import { api } from "./api";
 import { triggerBlobDownload, triggerDownload } from "./download-helpers";
 import { runExportInWorker } from "./exportRunner";
@@ -34,7 +34,10 @@ function formatInstitutie(raw: string): string {
 
 function formatPartiPDF(parti: Dosar["parti"]): string {
   if (parti.length === 0) return "-";
-  return parti.map((p) => `${stripDiacritics(p.calitateParte)}: ${stripDiacritics(p.nume)}`).join("\n");
+  // Guard empty calitateParte (ICCJ list rows before enrichment) so we don't render ": NUME".
+  return parti
+    .map((p) => [stripDiacritics(p.calitateParte), stripDiacritics(p.nume)].filter(Boolean).join(": "))
+    .join("\n");
 }
 
 function formatSedintePDF(sedinte: Dosar["sedinte"]): string {
@@ -72,7 +75,8 @@ export async function buildDosarePdf(dosare: Dosar[]): Promise<ExportResult> {
   // textul rendat).
   const dosarLinks = new Map<number, string>();
   dosare.forEach((d, i) => {
-    if (d.numar) dosarLinks.set(i, getPortalJustUrl(d.numar));
+    // Source-aware: ICCJ dosare link to scj.ro, PortalJust to portal.just.ro.
+    if (d.numar) dosarLinks.set(i, getDosarExternalUrl(d));
   });
 
   autoTable(doc, {

@@ -16,15 +16,16 @@ import { getDb } from "../../db/schema.ts";
 
 const DEFAULT_BUDGET_MS = 10 * 60 * 1000;
 
-// v2.20.8 — Batch 2.1: source_partial alert e opt-in la rollout ca sa nu spam-am
-// inboxul daca la primul tick post-upgrade exista multe institutii flaky. Cu
-// flag=1 emitem alerta; fara flag (default) doar log la console.warn la fel ca
-// inainte. Dupa 24-48h de productie linistita, default-ul poate fi flipped la
-// "on" intr-un release ulterior (sau prin un al doilea kill switch DISABLED=1).
+// v2.20.8 a introdus source_partial ca opt-in de rollout; v2.37.1 a inchis
+// rollout-ul si a flipat default-ul pe ON (vezi comentariul din functie).
 // Lazy read prin functie (in loc de constanta module-top) ca testele sa poata
 // flip-ui flag-ul dupa importarea modulului.
-function partialAlertsEnabled(): boolean {
-  return process.env.MONITORING_PARTIAL_ALERTS_ENABLED === "1";
+export function partialAlertsEnabled(): boolean {
+  // v2.37.1: default ON — fereastra de rollout v2.20.8 ("flip dupa 24-48h de
+  // productie linistita") s-a incheiat demult; default-ul OFF insemna ca un
+  // outage partial de instanta ramanea doar console.warn, invizibil pentru
+  // user. `=0` ramane kill switch-ul de intoarcere.
+  return process.env.MONITORING_PARTIAL_ALERTS_ENABLED !== "0";
 }
 
 interface PartialInstitutie {
@@ -98,6 +99,13 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
           alertConfig,
           now: nowIso,
           jobCreatedAt: job.created_at,
+          // v2.37.1 (review cluster 1): ancora dedup per-baseline + lista
+          // institutiilor picate, ca diff-ul sa nu transforme un fan-out
+          // partial in dosar_disappeared fals (si sa nu arda slotul dedup).
+          prevSnapshotId: prevRow?.id ?? null,
+          failedInstitutii: partialInstitutii
+            .map((f) => f.institutie)
+            .filter((x): x is string => typeof x === "string" && x.length > 0),
         });
 
         const newSnapshotJson = canonicalJson(newSnapshot);

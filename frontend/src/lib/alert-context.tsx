@@ -3,6 +3,7 @@ import { Badge } from "@/components/ui/badge";
 import { formatInstitutie, getStadiuBadgeColor } from "@/components/dosare-table-helpers";
 import { cn } from "@/lib/utils";
 import type { MonitoringAlert } from "@/lib/alertsApi";
+import type { DosarSource } from "@/types";
 
 // Pure transforms peste MonitoringAlert.detail_json + job_target_json. Stage 3
 // extract din pages/Alerts.tsx — ramane in lib pentru testabilitate izolata
@@ -74,6 +75,11 @@ export interface AlertFact {
 
 export interface AlertContext {
   numarDosar?: string;
+  // Source of the monitored dossier — drives the external deep-link target
+  // (scj.ro vs portal.just.ro) and the "open in Dosare" search. Never route an
+  // ICCJ dosar to PortalJust (Codex #6). Derived from the joined job_kind.
+  source: DosarSource;
+  iccjId?: string;
   instanta?: string;
   nameNormalized?: string;
   hotarare?: { numarDoc?: string; dataPronuntare?: string; sumar?: string };
@@ -131,6 +137,10 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
     asString(target.numar);
   const instanta = asString(detail.instanta) ?? asString(target.instanta);
   const nameNormalized = asString(detail.name_normalized) ?? asString(target.name_normalized);
+  // ICCJ jobs (job_kind "iccj") carry their deterministic scj.ro id in target_json
+  // (and detail for runner-enriched alerts). Anything else is a PortalJust dosar.
+  const source: DosarSource = alert.job_kind === "iccj" ? "iccj" : "portaljust";
+  const iccjId = asString(detail.iccj_id) ?? asString(target.iccj_id);
 
   const facts: AlertFact[] = [];
   const push = (label: string, value: ReactNode | undefined) => {
@@ -274,5 +284,5 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
     if (v) fallback.push({ label: humanizeKey(key), value: v });
   }
 
-  return { numarDosar, instanta, nameNormalized, hotarare, facts, fallback };
+  return { numarDosar, source, iccjId, instanta, nameNormalized, hotarare, facts, fallback };
 }

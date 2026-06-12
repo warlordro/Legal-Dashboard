@@ -653,3 +653,98 @@ describe("dosarSoapRunner — F8 enrichment integration", () => {
     expect(patchedRow.dismissed_at).toBe(baselineDismissedAt);
   });
 });
+
+describe("dosarSoapRunner — selectie sticky multi-instanta (v2.37.1, review cluster 2)", () => {
+  const sedintaApel = {
+    complet: "CA1",
+    data: "2026-05-01",
+    ora: "10:00",
+    solutie: "",
+    solutieSumar: "",
+    documentSedinta: "",
+    numarDocument: "",
+    dataPronuntare: "",
+  };
+
+  function dosarLa(stadiu: string, institutie: string, sedinte: Dosar["sedinte"]): Dosar {
+    return {
+      numar: "1234/180/2024",
+      data: "2024-01-15",
+      institutie,
+      departament: "",
+      categorieCaz: "civil",
+      stadiuProcesual: stadiu,
+      obiect: "test",
+      parti: [],
+      sedinte,
+    };
+  }
+
+  it("pastreaza randul cu stadiul din baseline cand upstream-ul intoarce 2 randuri in alta ordine", async () => {
+    const apel = dosarLa("Apel", "Curtea de Apel X", [sedintaApel]);
+    const fond = dosarLa("Fond", "Judecatoria Test", [{ ...sedintaApel, complet: "F1", data: "2026-06-01" }]);
+
+    let secondTick = false;
+    const runner = createDosarSoapRunner({
+      // tick1: doar randul Apel (baseline cu chei "apel|..."); tick2: upstream
+      // intoarce [Fond, Apel] — fara sticky, dosare[0]=Fond ar fi rotit toate
+      // cheile (termen_new fals + dosar "schimbat").
+      searchDosare: async () => (secondTick ? [fond, apel] : [apel]),
+    });
+
+    const job = seedJob();
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    secondTick = true;
+    const second = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: "2026-04-28T11:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+
+    expect(second.status).toBe("ok");
+    const kinds = getDb()
+      .prepare("SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY id")
+      .all(job.id)
+      .map((r) => (r as { kind: string }).kind);
+    // Sticky => acelasi rand (Apel) ramane urmarit: zero termen_new/termen_changed.
+    // Singura alerta e cea informativa multi-instanta (kind source_partial).
+    expect(kinds).toEqual(["source_partial"]);
+  });
+
+  it("alerta multi-instanta se emite o singura data per set de instante (dedup)", async () => {
+    const apel = dosarLa("Apel", "Curtea de Apel X", [sedintaApel]);
+    const fond = dosarLa("Fond", "Judecatoria Test", []);
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [fond, apel],
+    });
+
+    const job = seedJob();
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+    const second = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: "2026-04-28T11:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+
+    expect(second.alertsCreated).toBe(0);
+    const n = (
+      getDb()
+        .prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ? AND kind = 'source_partial'")
+        .get(job.id) as { n: number }
+    ).n;
+    expect(n).toBe(1);
+  });
+});

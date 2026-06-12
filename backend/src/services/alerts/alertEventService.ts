@@ -58,6 +58,9 @@ export function recordAndDispatchAlert(input: InsertAlertInput): InsertAlertResu
     try {
       recordAudit(null, "monitoring.alert.emitted", {
         ownerId: input.ownerId,
+        // v2.37.1: "system" (nu null) — aliniat cu system.boot/system.shutdown,
+        // ca audit viewer-ul sa atribuie consistent evenimentele automate.
+        actorId: "system",
         targetKind: "monitoring_alert",
         targetId: String(result.row.id),
         detail: {

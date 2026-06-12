@@ -8,7 +8,7 @@ import {
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
-import type { Dosar } from "@/types";
+import type { Dosar, DosarSource } from "@/types";
 import { normalizeInstitutie } from "@/lib/institutii";
 import { CATEGORY_COLORS, CATEGORY_FALLBACK } from "@/lib/chart-colors";
 import { dropLegalFormTokens } from "@/lib/legalSuffix";
@@ -24,6 +24,15 @@ interface MetricsPanelProps {
   searchedName?: string;
   selectedRoles?: string[];
   onRoleFilter?: (role: string) => void;
+  // ICCJ list rows carry empty categorieCaz + empty calitateParte (those arrive only
+  // after Tier-2 detail enrichment) and a constant institutie. Source-awareness swaps
+  // the 4th card to Departamente and hides Categorii + Analiza Parte until enriched.
+  source?: DosarSource;
+}
+
+function shortLabel(raw: string): string {
+  if (!raw) return "-";
+  return raw.length > 25 ? `${raw.substring(0, 25)}...` : raw;
 }
 
 const KNOWN_CATS: [string, string][] = [
@@ -69,14 +78,32 @@ function formatInstitutieShort(raw: string): string {
   return normalized.length > 25 ? normalized.substring(0, 25) + "..." : normalized;
 }
 
-export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleFilter }: MetricsPanelProps) {
+export function MetricsPanel({
+  dosare,
+  searchedName,
+  selectedRoles = [],
+  onRoleFilter,
+  source = "portaljust",
+}: MetricsPanelProps) {
   const [expanded, setExpanded] = useState(true);
+  const isIccj = source === "iccj";
+  // Enriched once any loaded dosar carries a categorie or a party role — i.e. Tier-2
+  // detail enrichment has run. Before that, Categorii + Analiza Parte would be all
+  // "Altele" / "Necunoscut", so we hide them for ICCJ.
+  const iccjEnriched = !isIccj || dosare.some((d) => d.categorieCaz || d.parti.some((p) => p.calitateParte));
+  const showCategorii = !isIccj || iccjEnriched;
+
   const categoryData = useMemo(() => {
-    const counts = countByField(dosare, (d) => classifyCategory(d.categorieCaz));
+    if (!showCategorii) return [];
+    // During a PARTIAL ICCJ enrich, rows not yet enriched have categorieCaz="" — counting
+    // them would dump everything into an "Altele" bucket, conflating "not yet enriched"
+    // with "genuinely other". Count only rows that actually have a category for ICCJ.
+    const rows = isIccj ? dosare.filter((d) => d.categorieCaz) : dosare;
+    const counts = countByField(rows, (d) => classifyCategory(d.categorieCaz));
     return Object.entries(counts)
       .map(([name, value]) => ({ name, value, fill: CATEGORY_COLORS[name] || CATEGORY_FALLBACK }))
       .sort((a, b) => b.value - a.value);
-  }, [dosare]);
+  }, [dosare, showCategorii, isIccj]);
 
   const stadiiData = useMemo(() => {
     const counts = countByField(dosare, (d) => d.stadiuProcesual || "Necunoscut");
@@ -85,19 +112,25 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
       .sort((a, b) => b.value - a.value);
   }, [dosare]);
 
-  const institutiiCounts = useMemo(() => countByField(dosare, (d) => d.institutie || "Necunoscut"), [dosare]);
-
-  const totalInstitutii = useMemo(() => Object.keys(institutiiCounts).length, [institutiiCounts]);
-
-  const topInstitutii = useMemo(() => {
-    return Object.entries(institutiiCounts)
-      .map(([name, value]) => ({ name: formatInstitutieShort(name), value }))
-      .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
-  }, [institutiiCounts]);
+  // 4th dimension: PortalJust -> Institutii (d.institutie); ICCJ -> Departamente
+  // (d.departament — institutie is a constant for ICCJ, so its count is always 1).
+  const fourthLabel = isIccj ? "Departamente" : "Institutii";
+  const fourthCounts = useMemo(
+    () => countByField(dosare, (d) => (isIccj ? d.departament : d.institutie) || "Necunoscut"),
+    [dosare, isIccj]
+  );
+  const totalFourth = useMemo(() => Object.keys(fourthCounts).length, [fourthCounts]);
+  const topFourth = useMemo(
+    () =>
+      Object.entries(fourthCounts)
+        .map(([name, value]) => ({ name: isIccj ? shortLabel(name) : formatInstitutieShort(name), value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 5),
+    [fourthCounts, isIccj]
+  );
 
   const partyAnalysis = useMemo(() => {
-    if (!searchedName) return null;
+    if (!searchedName || !iccjEnriched) return null;
     const rawWords = stripDiacritics(searchedName.toLowerCase()).trim().split(/\s+/).filter(Boolean);
     const filtered = dropLegalFormTokens(rawWords);
     const searchWords = filtered.length > 0 ? filtered : rawWords;
@@ -116,7 +149,7 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
       .map(([role, count]) => ({ role, count }))
       .sort((a, b) => b.count - a.count)
       .slice(0, 8);
-  }, [dosare, searchedName]);
+  }, [dosare, searchedName, iccjEnriched]);
 
   return (
     <div className="space-y-4">
@@ -160,10 +193,14 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
           value={categoryData.length}
           color="text-blue-500"
           bg="bg-blue-500/10"
-          detail={categoryData
-            .slice(0, 3)
-            .map((c) => `${c.name}: ${c.value}`)
-            .join(", ")}
+          detail={
+            showCategorii
+              ? categoryData
+                  .slice(0, 3)
+                  .map((c) => `${c.name}: ${c.value}`)
+                  .join(", ")
+              : "Necesita analiza detaliata"
+          }
         />
         <SummaryCard
           icon={Scale}
@@ -178,11 +215,11 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
         />
         <SummaryCard
           icon={Building2}
-          label="Institutii"
-          value={totalInstitutii}
+          label={fourthLabel}
+          value={totalFourth}
           color="text-teal-500"
           bg="bg-teal-500/10"
-          detail={topInstitutii.length > 0 ? `Top: ${topInstitutii[0].name}` : undefined}
+          detail={topFourth.length > 0 ? `Top: ${topFourth[0].name}` : undefined}
         />
       </div>
 
@@ -198,9 +235,9 @@ export function MetricsPanel({ dosare, searchedName, selectedRoles = [], onRoleF
           )}
 
           <div className="grid gap-4 lg:grid-cols-3">
-            <CategoryChart data={categoryData} />
+            {showCategorii && <CategoryChart data={categoryData} />}
             <StadiiChart data={stadiiData} />
-            <InstitutiiChart data={topInstitutii} />
+            <InstitutiiChart data={topFourth} title={isIccj ? "Top 5 Departamente" : "Top 5 Institutii"} />
           </div>
         </>
       )}

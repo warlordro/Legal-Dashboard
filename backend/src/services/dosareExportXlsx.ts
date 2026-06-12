@@ -172,7 +172,7 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<DosareXlsxResult
     const wsDosare = workbook.addWorksheet("Dosare");
     addMetaRows(
       wsDosare,
-      "PORTALJUST DASHBOARD - DOSARE",
+      "LEGAL DASHBOARD - DOSARE",
       `Generat: ${dateStr}  |  ${dosare.length} dosare  |  ${totalSedinte} sedinte`,
       dosareHeaders,
       dosareWidths
@@ -188,7 +188,7 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<DosareXlsxResult
           dosar.departament || "-",
           [dosar.categorieCaz, dosar.stadiuProcesual].filter(Boolean).join(" / ") || "-",
           dosar.obiect || "-",
-          dosar.parti.map((parte) => `${parte.calitateParte}: ${parte.nume}`).join("\n") || "-",
+          dosar.parti.map((parte) => [parte.calitateParte, parte.nume].filter(Boolean).join(": ")).join("\n") || "-",
           dosar.sedinte.length,
         ])
       );
@@ -218,7 +218,7 @@ export async function buildDosareXlsx(dosare: Dosar[]): Promise<DosareXlsxResult
       const wsSedinte = workbook.addWorksheet("Sedinte");
       addMetaRows(
         wsSedinte,
-        "PORTALJUST DASHBOARD - SEDINTE",
+        "LEGAL DASHBOARD - SEDINTE",
         `Generat: ${dateStr}  |  ${totalSedinte} sedinte din ${dosare.length} dosare`,
         sedinteHeaders,
         sedinteWidths
