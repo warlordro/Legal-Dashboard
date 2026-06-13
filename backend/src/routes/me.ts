@@ -273,6 +273,17 @@ const lastTestSendByOwner = new Map<string, number>();
 export function resetEmailTestCooldownForTests(): void {
   lastTestSendByOwner.clear();
 }
+export function emailTestCooldownHasOwnerForTests(owner: string): boolean {
+  return lastTestSendByOwner.has(owner);
+}
+
+// Entry-urile mai vechi decat cooldown-ul nu mai influenteaza nicio decizie —
+// le stergem la fiecare acces ca Map-ul sa nu creasca nelimitat in web mode.
+function pruneExpiredTestCooldowns(now: number): void {
+  for (const [owner, ts] of lastTestSendByOwner) {
+    if (now - ts > TEST_COOLDOWN_MS) lastTestSendByOwner.delete(owner);
+  }
+}
 
 meRouter.post("/email-settings/test", async (c) => {
   const ownerId = getOwnerId(c);
@@ -297,6 +308,7 @@ meRouter.post("/email-settings/test", async (c) => {
   }
 
   // v2.10.1 #3: per-owner cooldown.
+  pruneExpiredTestCooldowns(Date.now());
   const now = Date.now();
   const last = lastTestSendByOwner.get(ownerId) ?? 0;
   const elapsed = now - last;

@@ -16,7 +16,7 @@ import { upsertOverride } from "../db/userQuotaRepository.ts";
 import { insertUser } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { resetMasterKeyCacheForTests } from "../util/tenantKeyCrypto.ts";
-import { meRouter, resetEmailTestCooldownForTests } from "./me.ts";
+import { emailTestCooldownHasOwnerForTests, meRouter, resetEmailTestCooldownForTests } from "./me.ts";
 import { isMailerConfigured, sendTestEmail } from "../services/email/mailer.ts";
 
 vi.mock("../services/email/mailer.ts", () => ({
@@ -354,6 +354,38 @@ describe("POST /api/v1/me/email-settings/test", () => {
     expect(sendTestEmailMock).toHaveBeenCalledWith("alerts@firma.ro");
     const events = getAuditEvents({ ownerId: "local", action: "me.email_settings.test" });
     expect(events[0].outcome).toBe("ok");
+  });
+
+  it("prunes expired cooldown entries on access so the map stays bounded", async () => {
+    upsertEmailSettings("alice", {
+      enabled: true,
+      toAddress: "alice@firma.ro",
+      minSeverity: "warning",
+    });
+    upsertEmailSettings("bob", {
+      enabled: true,
+      toAddress: "bob@firma.ro",
+      minSeverity: "warning",
+    });
+    isMailerConfiguredMock.mockReturnValue(true);
+    sendTestEmailMock.mockResolvedValue({ ok: true });
+
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-06-14T00:00:00.000Z"));
+      const first = await buildApp("alice").request("/api/v1/me/email-settings/test", { method: "POST" });
+      expect(first.status).toBe(200);
+      expect(emailTestCooldownHasOwnerForTests("alice")).toBe(true);
+
+      // Avans peste cooldown (60s); o cerere de la alt owner declanseaza prune-ul.
+      vi.setSystemTime(new Date("2026-06-14T00:01:01.000Z"));
+      const second = await buildApp("bob").request("/api/v1/me/email-settings/test", { method: "POST" });
+      expect(second.status).toBe(200);
+
+      expect(emailTestCooldownHasOwnerForTests("alice")).toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns 200 and audits error for a failed test email", async () => {
