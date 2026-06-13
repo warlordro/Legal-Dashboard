@@ -75,30 +75,34 @@ curl -fsS http://127.0.0.1:3002/health | jq .version
 ### 2.4 Backup offsite — configurare initiala
 
 `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` ruleaza shell command-ul cu calea backup-ului
-ca `$1` (POSIX) sau `%1` (Windows), DUPA fiecare daily backup reusit. Hook-ul nu
-afecteaza succesul backup-ului local — el e un strat de redundanta.
+expusa prin env var `LEGAL_DASHBOARD_BACKUP_PATH` (`$LEGAL_DASHBOARD_BACKUP_PATH` pe
+POSIX, `%LEGAL_DASHBOARD_BACKUP_PATH%` pe Windows) — NU ca pozitional `$1`/`%1`,
+DUPA fiecare daily backup reusit. Hook-ul nu afecteaza succesul backup-ului local
+— el e un strat de redundanta.
 
 **Exemple practice**:
 
 ```bash
 # rclone (recomandat - multi-cloud + retry built-in)
-export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='rclone copy "$1" s3:legal-dashboard-backups/$(date +%Y/%m)/'
+export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='rclone copy "$LEGAL_DASHBOARD_BACKUP_PATH" s3:legal-dashboard-backups/$(date +%Y/%m)/'
 
 # AWS S3 direct (necesita aws-cli + credentials configurate)
-export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='aws s3 cp "$1" s3://legal-dashboard-backups/$(date +%Y/%m)/'
+export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='aws s3 cp "$LEGAL_DASHBOARD_BACKUP_PATH" s3://legal-dashboard-backups/$(date +%Y/%m)/'
 
 # Azure Blob
-export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='az storage blob upload --container-name legal-dashboard --file "$1" --name "$(date +%Y/%m)/$(basename $1)"'
+export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='az storage blob upload --container-name legal-dashboard --file "$LEGAL_DASHBOARD_BACKUP_PATH" --name "$(date +%Y/%m)/$(basename "$LEGAL_DASHBOARD_BACKUP_PATH")"'
 
 # SCP catre server backup
-export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='scp "$1" backups@offsite.firma.ro:/var/backups/legal-dashboard/'
+export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='scp "$LEGAL_DASHBOARD_BACKUP_PATH" backups@offsite.firma.ro:/var/backups/legal-dashboard/'
 
 # rsync
-export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='rsync -av "$1" backups@offsite.firma.ro:/var/backups/legal-dashboard/'
+export LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD='rsync -av "$LEGAL_DASHBOARD_BACKUP_PATH" backups@offsite.firma.ro:/var/backups/legal-dashboard/'
 ```
 
 **Timeout**: 10 minute. Daca hook-ul nu termina, e ucis SIGKILL si logat ca failure.
 **Logging**: cauta `"action":"offsite_backup"` (success) sau `"action":"offsite_backup_failed"` in stdout.
+
+**Securitate (audit O3)**: valoarea e pasata verbatim catre `sh -c` (POSIX) sau `cmd /c` (Windows), deci e echivalenta cu executie de cod arbitrar la privilegiul user-ului OS sub care ruleaza backend-ul. Seteaz-o doar din env-ul shell/orchestrator de catre operatorul de incredere, niciodata derivata din vreun request sau alt input neverificat, si niciodata commit-uita intr-un `.env` livrat.
 
 **Test inainte de productie**:
 ```bash

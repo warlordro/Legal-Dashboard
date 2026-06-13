@@ -416,13 +416,22 @@ export async function deleteAllBackups(): Promise<number> {
 
 // v2.34.0 P1-8: offsite upload hook. Env `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`
 // is a shell command (POSIX `sh -c` on linux/darwin, `cmd /c` on win32) that
-// receives the absolute backup path as positional `$1`/`%1`. Example values:
-//   - `rclone copy "$1" s3:mybucket/legal-dashboard/`
-//   - `aws s3 cp "$1" s3://mybucket/legal-dashboard/`
-//   - `scp "$1" user@offsite.example:/var/backups/legal-dashboard/`
+// receives the absolute backup path via the env var `LEGAL_DASHBOARD_BACKUP_PATH`
+// (injected below) — NOT as a positional `$1`/`%1` (POSIX `sh -c` puts the
+// first operand in `$0`, and `cmd /c` does not expand positional `%1` for an
+// inline command string). Example values:
+//   - `rclone copy "$LEGAL_DASHBOARD_BACKUP_PATH" s3:mybucket/legal-dashboard/`
+//   - `aws s3 cp "$LEGAL_DASHBOARD_BACKUP_PATH" s3://mybucket/legal-dashboard/`
+//   - `scp "$LEGAL_DASHBOARD_BACKUP_PATH" user@offsite.example:/var/backups/legal-dashboard/`
 // Unset = no-op (preserves desktop default behavior). Timeout: 10 minutes
 // (offsite transports must finish within that window or the run is
 // considered failed; the local backup is kept regardless).
+//
+// SECURITY (audit O3): this value is passed verbatim to `sh -c` / `cmd /c`
+// (see the spawn below) and is therefore equivalent to arbitrary code
+// execution at the backend's OS-user privilege. It MUST be set only by the
+// trusted operator from the shell/orchestrator env, never derived from any
+// request or other untrusted input, and never committed to a shipped .env.
 const OFFSITE_HOOK_TIMEOUT_MS = 10 * 60 * 1000;
 async function runOffsiteBackupHook(backupPath: string): Promise<void> {
   const cmd = process.env.LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD;
@@ -539,7 +548,8 @@ async function runDailyBackupImpl(): Promise<void> {
     // v2.34.0 P1-8: optional offsite upload hook. Configured via env so the
     // user can plug in rclone / aws s3 cp / az storage blob upload / scp /
     // any other transport without recompiling. Hook receives the absolute
-    // path to the freshly-written backup as $1; non-zero exit is logged but
+    // path to the freshly-written backup via env `LEGAL_DASHBOARD_BACKUP_PATH`;
+    // non-zero exit is logged but
     // does NOT fail the local backup (offsite is a redundancy layer, the
     // local snapshot already succeeded by this point).
     await runOffsiteBackupHook(dest);

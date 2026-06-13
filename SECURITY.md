@@ -181,6 +181,12 @@ not BYOK / not supplied by the browser client.
   transparently for the logged-in user; any process running as that user can
   call the same IPC (via a hijacked renderer) or read DPAPI-protected secrets.
   Defense here is OS-level (antivirus, least-privilege user accounts).
+- **Operator-trusted shell eval via `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` (audit O3).**
+  The offsite-backup hook is passed verbatim to `sh -c` / `cmd /c`, so it is
+  equivalent to arbitrary code execution at the backend's OS-user privilege.
+  This is not a vulnerability — it is an operator-trusted-env item like
+  `SMTP_*` and the AI key env overrides — but it MUST be set only by the
+  trusted operator and never derived from request or other untrusted input.
 - **Compromised dependency (supply-chain attack).** npm packages are trusted
   at install time. No hash pinning beyond `package-lock.json`; no runtime
   allowlisting. If `xlsx-js-style`, `better-sqlite3`, or `@hono/node-server`
