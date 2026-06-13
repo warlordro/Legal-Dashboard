@@ -12,6 +12,8 @@ import {
   type AiModelDef,
 } from "@/components/dosare-ai-config";
 
+const AI_DISCLAIMER = "Analiza este generata de AI in scop informativ si nu constituie consultanta juridica.";
+
 interface ApiKeys {
   anthropic: string;
   openai: string;
@@ -196,34 +198,39 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
               <p className="text-sm text-destructive">{ai.error}</p>
             )}
             {ai.analysis[dosar.numar] && (
-              <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground dark:prose-invert [&_strong]:font-semibold [&_strong]:text-foreground [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-1.5 [&_ul]:my-1 [&_li]:my-0.5">
-                {ai.analysis[dosar.numar].split("\n").map((line, li) => {
-                  if (line.startsWith("## ")) return <h2 key={li}>{line.slice(3)}</h2>;
-                  if (line.startsWith("### ")) return <h3 key={li}>{line.slice(4)}</h3>;
-                  if (line.startsWith("**") && line.endsWith("**")) return <h3 key={li}>{line.slice(2, -2)}</h3>;
-                  if (line.startsWith("- ") || line.startsWith("* ")) {
-                    const content = line.slice(2);
-                    return (
-                      <div key={li} className="flex gap-2 ml-2">
-                        <span className="text-violet-500">•</span>
-                        <SanitizedHtml html={formatAiMarkdownLine(content)} />
-                      </div>
-                    );
-                  }
-                  if (line.match(/^\d+\.\s/)) {
-                    const content = line.replace(/^\d+\.\s/, "");
-                    const num = line.match(/^(\d+)\./)?.[1];
-                    return (
-                      <div key={li} className="flex gap-2 ml-2">
-                        <span className="font-semibold text-violet-600 dark:text-violet-400 min-w-[1.2em]">{num}.</span>
-                        <SanitizedHtml html={formatAiMarkdownLine(content)} />
-                      </div>
-                    );
-                  }
-                  if (line.trim() === "") return <div key={li} className="h-2" />;
-                  return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
-                })}
-              </div>
+              <>
+                <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground dark:prose-invert [&_strong]:font-semibold [&_strong]:text-foreground [&_h1]:text-base [&_h1]:font-bold [&_h1]:mt-3 [&_h1]:mb-1 [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-1.5 [&_ul]:my-1 [&_li]:my-0.5">
+                  {ai.analysis[dosar.numar].split("\n").map((line, li) => {
+                    if (line.startsWith("## ")) return <h2 key={li}>{line.slice(3)}</h2>;
+                    if (line.startsWith("### ")) return <h3 key={li}>{line.slice(4)}</h3>;
+                    if (line.startsWith("**") && line.endsWith("**")) return <h3 key={li}>{line.slice(2, -2)}</h3>;
+                    if (line.startsWith("- ") || line.startsWith("* ")) {
+                      const content = line.slice(2);
+                      return (
+                        <div key={li} className="flex gap-2 ml-2">
+                          <span className="text-violet-500">•</span>
+                          <SanitizedHtml html={formatAiMarkdownLine(content)} />
+                        </div>
+                      );
+                    }
+                    if (line.match(/^\d+\.\s/)) {
+                      const content = line.replace(/^\d+\.\s/, "");
+                      const num = line.match(/^(\d+)\./)?.[1];
+                      return (
+                        <div key={li} className="flex gap-2 ml-2">
+                          <span className="font-semibold text-violet-600 dark:text-violet-400 min-w-[1.2em]">
+                            {num}.
+                          </span>
+                          <SanitizedHtml html={formatAiMarkdownLine(content)} />
+                        </div>
+                      );
+                    }
+                    if (line.trim() === "") return <div key={li} className="h-2" />;
+                    return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
+                  })}
+                </div>
+                <p className="mt-2 text-[11px] italic text-muted-foreground">{AI_DISCLAIMER}</p>
+              </>
             )}
           </div>
         )}
@@ -477,6 +484,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
                       return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
                     })}
                   </div>
+                  <p className="mt-2 px-4 pb-2 text-[11px] italic text-muted-foreground">{AI_DISCLAIMER}</p>
                 </div>
                 {/* Toggle individual analyses */}
                 <button
