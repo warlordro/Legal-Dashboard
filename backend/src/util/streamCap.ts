@@ -12,10 +12,10 @@ export async function readResponseTextWithCap(
     throw new ResponseTooLargeSignal(contentLength);
   }
   if (!response.body) {
-    const text = await response.text();
-    const bytes = new TextEncoder().encode(text).byteLength;
-    if (bytes > maxBytes) throw new ResponseTooLargeSignal(bytes);
-    return text;
+    // Body null = raspuns fara continut (204/HEAD). Nu exista cale legitima
+    // prin care un raspuns mare sa ajunga aici — si daca ar exista, .text()
+    // l-ar citi integral in memorie INAINTE de check, anuland cap-ul.
+    return "";
   }
 
   const reader = response.body.getReader();
