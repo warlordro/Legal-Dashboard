@@ -87,6 +87,9 @@ const AI_MAX_TOKENS = 8000; // max output tokens — increased from 3000 for com
 // SECURITY: Body size limit for AI endpoint (100KB max)
 export const MAX_AI_BODY_SIZE = 100 * 1024;
 
+// SECURITY: cap list sizes inside the dosar body to bound prompt size
+const MAX_AI_LIST_ITEMS = 500;
+
 function truncate(value: unknown, maxLen: number): string {
   const s = typeof value === "string" ? value : "";
   return s.length > maxLen ? s.slice(0, maxLen) + "…" : s;
@@ -560,7 +563,11 @@ export function validateAiBody(body: unknown): string | null {
     }
   }
   if (dosar.parti !== undefined && !Array.isArray(dosar.parti)) return "Camp parti invalid.";
+  if (Array.isArray(dosar.parti) && dosar.parti.length > MAX_AI_LIST_ITEMS)
+    return `Prea multe parti (max ${MAX_AI_LIST_ITEMS}).`;
   if (dosar.sedinte !== undefined && !Array.isArray(dosar.sedinte)) return "Camp sedinte invalid.";
+  if (Array.isArray(dosar.sedinte) && dosar.sedinte.length > MAX_AI_LIST_ITEMS)
+    return `Prea multe sedinte (max ${MAX_AI_LIST_ITEMS}).`;
   return null;
 }
 

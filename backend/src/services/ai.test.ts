@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildPrompt, buildJudgePrompt, escapeFenceTags, isTimeoutOrAbort } from "./ai.ts";
+import { buildPrompt, buildJudgePrompt, escapeFenceTags, isTimeoutOrAbort, validateAiBody } from "./ai.ts";
 
 describe("escapeFenceTags", () => {
   it("neutralizes the dosar_data closing tag", () => {
@@ -122,5 +122,15 @@ describe("isTimeoutOrAbort — abort/timeout detection across SDKs", () => {
     expect(isTimeoutOrAbort(null)).toBe(false);
     expect(isTimeoutOrAbort("string")).toBe(false);
     expect(isTimeoutOrAbort(undefined)).toBe(false);
+  });
+});
+
+describe("validateAiBody", () => {
+  it("respinge dosare cu peste 500 de sedinte sau parti", () => {
+    const sedinte = Array.from({ length: 501 }, (_, i) => ({ data: `2026-01-${i}`, solutie: "x" }));
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", sedinte } })).toMatch(/sedinte/i);
+    const parti = Array.from({ length: 501 }, (_, i) => ({ nume: `P${i}`, calitateParte: "Parat" }));
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", parti } })).toMatch(/parti/i);
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", sedinte: sedinte.slice(0, 500) } })).toBeNull();
   });
 });
