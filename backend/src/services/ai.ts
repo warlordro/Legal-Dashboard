@@ -42,14 +42,32 @@ export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "gemini-pro-3": "google/gemini-3.1-pro-preview",
 };
 
+// Env var = operator-trusted, dar validam fail-fast: typo-uri sau slug-uri
+// in afara formatului provider/model ar produce erori criptice la OpenRouter.
+const OPENROUTER_ALLOWED_PROVIDERS = new Set(["anthropic", "openai", "google"]);
+const OPENROUTER_SLUG_RE = /^([\w-]+)\/[\w.:-]+$/;
+function isValidOverrideSlug(slug: string): boolean {
+  const match = OPENROUTER_SLUG_RE.exec(slug);
+  if (!match || !OPENROUTER_ALLOWED_PROVIDERS.has(match[1])) {
+    console.warn(`[ai] OPENROUTER_MODEL_OVERRIDES: slug invalid ignorat: ${slug}`);
+    return false;
+  }
+  return true;
+}
+
 export function resolveOpenRouterSlug(modelKey: string): string | null {
   const override = process.env.OPENROUTER_MODEL_OVERRIDES;
   if (override) {
-    const pairs = override.split(",").map((p) => p.split(":").map((s) => s.trim()));
+    const pairs = override.split(",").map((pair) => {
+      const i = pair.indexOf(":");
+      const k = pair.slice(0, i).trim();
+      const v = pair.slice(i + 1).trim();
+      return [k, v];
+    });
     const hit = pairs.find(([k]) => k === modelKey);
-    if (hit?.[1]) return hit[1];
+    if (hit?.[1] && isValidOverrideSlug(hit[1])) return hit[1];
   }
-  return OPENROUTER_MODEL_MAP[modelKey] || null;
+  return Object.hasOwn(OPENROUTER_MODEL_MAP, modelKey) ? OPENROUTER_MODEL_MAP[modelKey] : null;
 }
 
 // SECURITY: Truncation limits for user-supplied dosar fields (prompt injection mitigation)

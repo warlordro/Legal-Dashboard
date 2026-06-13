@@ -103,6 +103,14 @@ describe("resolveOpenRouterSlug", () => {
   it("returns null for an unknown model", () => {
     expect(resolveOpenRouterSlug("unknown")).toBeNull();
   });
+
+  it("ignora override-uri cu format invalid sau provider neacceptat", () => {
+    process.env.OPENROUTER_MODEL_OVERRIDES =
+      "claude-sonnet:javascript:alert(1), claude-opus:evil-provider/model, gpt-5.4:openai/custom-gpt";
+    expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/claude-sonnet-4.6"); // fallback static
+    expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-4.8"); // provider respins
+    expect(resolveOpenRouterSlug("gpt-5.4")).toBe("openai/custom-gpt"); // valid, trece
+  });
 });
 
 describe("callOpenRouter", () => {
