@@ -20,6 +20,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
 import { withMaintenanceWrite } from "../../db/backup.ts";
+import { isJtiRevoked, revokeJti } from "../../db/jwtDenylistRepository.ts";
 import { setMonitoringEnabled } from "../../db/ownerMonitoringSettingsRepository.ts";
 import { FakeClock } from "./clock.ts";
 import { Scheduler, type JobRunner, type RunOutcome, type ScheduledJob } from "./scheduler.ts";
@@ -1282,6 +1283,26 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
 
     const rows = getDb().prepare("SELECT id FROM monitoring_runs ORDER BY id").all() as { id: number }[];
     expect(rows.map((r) => r.id)).toEqual([oldRun]);
+  });
+
+  it("purges expired jwt_denylist entries when the daily timer fires", async () => {
+    revokeJti("x", 1, "local");
+    expect(isJtiRevoked("x")).toBe(true);
+
+    const clock = new FakeClock(T0_DATE);
+    const sch = new Scheduler({
+      clock,
+      runners: { dosar_soap: new NoopOkRunner() },
+      tickIntervalMs: 2 * 86_400_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    await clock.advance(86_400_000);
+    await sch.stop();
+
+    expect(isJtiRevoked("x")).toBe(false);
   });
 });
 

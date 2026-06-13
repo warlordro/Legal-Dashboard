@@ -33,6 +33,7 @@ import {
 } from "../alerts/alertEventService.ts";
 import { purgeExpiredReservations, purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
 import { purgeOldAuditLog } from "../../db/auditRepository.ts";
+import { purgeExpiredJti } from "../../db/jwtDenylistRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 import { isLikelyTooLongForPortalJust } from "../nameListParser.ts";
@@ -429,6 +430,24 @@ export class Scheduler {
         }
       } catch (err) {
         console.error("[scheduler] purgeOldAuditLog threw, continuing loop", {
+          error: err instanceof Error ? err.message : String(err),
+          stack: err instanceof Error ? err.stack : undefined,
+        });
+      }
+
+      try {
+        const deletedJti = purgeExpiredJti(Math.floor(this.opts.clock.now().getTime() / 1000));
+        if (deletedJti > 0) {
+          console.log(
+            JSON.stringify({
+              action: "jwt_denylist.purged",
+              deleted_count: deletedJti,
+              ts: this.opts.clock.now().toISOString(),
+            })
+          );
+        }
+      } catch (err) {
+        console.error("[scheduler] purgeExpiredJti threw, continuing loop", {
           error: err instanceof Error ? err.message : String(err),
           stack: err instanceof Error ? err.stack : undefined,
         });

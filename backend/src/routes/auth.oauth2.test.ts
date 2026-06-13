@@ -316,4 +316,66 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
       expect([401, 403]).toContain(res.status);
     }
   });
+
+  it("logout invalideaza tokenul server-side — refolosirea cookie-ului da 401", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const app = buildApp();
+
+    // 1. sync valid → extrage cookie-ul de sesiune
+    const syncRes = await app.request("/api/v1/auth/oauth2/sync", {
+      method: "POST",
+      headers: {
+        "x-proxy-auth": PROXY_SECRET,
+        "x-auth-request-email": "alice@example.test",
+      },
+    });
+    expect(syncRes.status).toBe(200);
+    const cookie = syncRes.headers.get("set-cookie")?.split(";")[0] ?? "";
+    expect(cookie.length).toBeGreaterThan(0);
+
+    // 2. GET pe ruta autentificata cu cookie → 200
+    const before = await app.request("/api/v1/probe", { headers: { cookie } });
+    expect(before.status).toBe(200);
+
+    // 3. POST logout cu acelasi cookie → 200
+    const logoutRes = await app.request("/api/v1/auth/logout", { method: "POST", headers: { cookie } });
+    expect(logoutRes.status).toBe(200);
+
+    // 4. refolosirea cookie-ului vechi → 401 (token revocat server-side)
+    const after = await app.request("/api/v1/probe", { headers: { cookie } });
+    expect(after.status).toBe(401);
+  });
+
+  it("logout pe Bearer revoca tokenul — refolosirea aceluiasi Bearer da 401", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const app = buildApp();
+
+    const syncRes = await app.request("/api/v1/auth/oauth2/sync", {
+      method: "POST",
+      headers: {
+        "x-proxy-auth": PROXY_SECRET,
+        "x-auth-request-email": "alice@example.test",
+      },
+    });
+    expect(syncRes.status).toBe(200);
+    const cookieValue = syncRes.headers.get("set-cookie") ?? "";
+    const token = cookieValue.match(new RegExp(`${AUTH_COOKIE_NAME}=([^;]+)`))?.[1] ?? "";
+    expect(token.length).toBeGreaterThan(0);
+
+    const bearer = `Bearer ${token}`;
+
+    const before = await app.request("/api/v1/probe", { headers: { authorization: bearer } });
+    expect(before.status).toBe(200);
+
+    const logoutRes = await app.request("/api/v1/auth/logout", {
+      method: "POST",
+      headers: { authorization: bearer },
+    });
+    expect(logoutRes.status).toBe(200);
+
+    const after = await app.request("/api/v1/probe", { headers: { authorization: bearer } });
+    expect(after.status).toBe(401);
+  });
 });

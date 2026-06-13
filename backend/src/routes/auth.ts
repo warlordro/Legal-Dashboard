@@ -1,8 +1,8 @@
-import { timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import type { Context } from "hono";
 import { Hono } from "hono";
-import { deleteCookie, getCookie, setCookie } from "hono/cookie";
-import { AUTH_COOKIE_NAME } from "../auth/authProvider.ts";
+import { deleteCookie, setCookie } from "hono/cookie";
+import { AUTH_COOKIE_NAME, readRequestToken } from "../auth/authProvider.ts";
 import {
   getAuthMode,
   getJwtAudience,
@@ -14,6 +14,7 @@ import {
 } from "../auth/config.ts";
 import { signAuthToken, verifyAuthToken } from "../auth/jwt.ts";
 import { recordAudit } from "../db/auditRepository.ts";
+import { revokeJti } from "../db/jwtDenylistRepository.ts";
 import { getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
 import { hashEmail } from "../util/auditSanitize.ts";
@@ -48,7 +49,7 @@ authRouter.post("/login", (c) => {
 });
 
 authRouter.post("/logout", (c) => {
-  const rawToken = getCookie(c, AUTH_COOKIE_NAME);
+  const rawToken = readRequestToken(c);
   let auditOwnerId: string | null = null;
   let auditActorId: string | null = null;
   let tokenVerified = false;
@@ -64,6 +65,9 @@ authRouter.post("/logout", (c) => {
         auditOwnerId = user.id;
         auditActorId = user.id;
         tokenVerified = true;
+        if (payload.jti && typeof payload.exp === "number") {
+          revokeJti(payload.jti, payload.exp, user.id);
+        }
       }
     }
   } catch {
@@ -199,6 +203,7 @@ authRouter.post("/oauth2/sync", (c) => {
   const audience = getJwtAudience();
   const payload = {
     sub: user.id,
+    jti: randomUUID(),
     email: user.email,
     name: user.display_name,
     iat: now,
@@ -246,6 +251,7 @@ authRouter.post("/refresh", (c) => {
   const audience = getJwtAudience();
   const payload = {
     sub: user.id,
+    jti: randomUUID(),
     email: user.email,
     name: user.display_name,
     iat: now,

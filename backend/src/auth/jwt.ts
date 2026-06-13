@@ -2,6 +2,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 
 export interface AuthJwtPayload {
   sub: string;
+  jti?: string;
   email?: string;
   name?: string;
   exp: number;

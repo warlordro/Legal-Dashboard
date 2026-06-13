@@ -2,6 +2,7 @@ import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { getAuthMode, getJwtAudience, getJwtIssuer, requireJwtSecret, type AuthMode } from "./config.ts";
 import { verifyAuthToken, type AuthJwtPayload } from "./jwt.ts";
+import { isJtiRevoked } from "../db/jwtDenylistRepository.ts";
 import { getUserById, type UserRow } from "../db/userRepository.ts";
 
 export const AUTH_COOKIE_NAME = "legal_dashboard_session";
@@ -36,7 +37,7 @@ function readBearerToken(c: Context): string | null {
   return match?.[1] ?? null;
 }
 
-function readRequestToken(c: Context): string | null {
+export function readRequestToken(c: Context): string | null {
   return readBearerToken(c) ?? getCookie(c, AUTH_COOKIE_NAME) ?? null;
 }
 
@@ -75,6 +76,11 @@ export class WebJwtAuthProvider implements AuthProvider {
       console.warn(
         `[auth.jwt_invalid] internalCode=${internalCode} message=${err instanceof Error ? err.message : "unknown"}`
       );
+      throw new AuthenticationError(401, "unauthorized", "Token de autentificare invalid.");
+    }
+
+    if (payload.jti && isJtiRevoked(payload.jti)) {
+      console.warn(`[auth.jwt_revoked] sub=${payload.sub}`);
       throw new AuthenticationError(401, "unauthorized", "Token de autentificare invalid.");
     }
 
