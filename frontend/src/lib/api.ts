@@ -344,7 +344,7 @@ export const api = {
         method: "POST",
         headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
         body: JSON.stringify({ dosar, analysts, judge, apiKeys }),
-        signal: AbortSignal.timeout(1020000), // 17 min — chinese stack: analysts in parallel (cap 480s each) + judge after (cap 480s) = 960s worst case, plus 60s margine retea
+        signal: AbortSignal.timeout(420000), // 7 min — analysts in paralel (cap 180s fiecare) + judge dupa (cap 180s) = 360s worst case, plus 60s margine retea
       });
       if (!res.ok) {
         // Validation/size/rate-limit errors still come back as JSON with a non-2xx status.

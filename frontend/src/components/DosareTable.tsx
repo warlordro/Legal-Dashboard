@@ -21,7 +21,7 @@ import { formatDate, formatDocumentSedinta } from "@/lib/utils";
 import type { Dosar } from "@/types";
 import { exportAnalysisPDF } from "@/lib/export-analysis";
 import { TablePagination } from "@/components/table-pagination";
-import type { AiMode, OpenRouterStack } from "@/components/dosare-ai-config";
+import type { AiMode } from "@/components/dosare-ai-config";
 import { DosareAiAnalysisPanel } from "@/components/dosare-ai-analysis-panel";
 import { stripDiacritics, HighlightName } from "@/components/dosare-table-highlight";
 import {
@@ -50,7 +50,7 @@ interface DosareTableProps {
   onExportPDF: (selected?: Dosar[]) => Promise<void> | void;
   searchedName?: string;
   apiKeys?: ApiKeys;
-  aiSettings: { mode: AiMode; stack: OpenRouterStack };
+  aiSettings: { mode: AiMode };
   onConfigureApiKey?: () => void;
 }
 

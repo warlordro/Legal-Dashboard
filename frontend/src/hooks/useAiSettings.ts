@@ -1,20 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { apiFetch, extractErrorMessage } from "@/lib/api";
-import type { AiMode, OpenRouterStack } from "@/components/dosare-ai-config";
+import type { AiMode } from "@/components/dosare-ai-config";
 
 export interface AiSettings {
   mode: AiMode;
-  openrouter_stack: OpenRouterStack;
 }
 
-const DEFAULT_SETTINGS: AiSettings = { mode: "native", openrouter_stack: "western" };
+const DEFAULT_SETTINGS: AiSettings = { mode: "native" };
 
 function parseSettings(value: unknown): AiSettings {
   if (!value || typeof value !== "object") return DEFAULT_SETTINGS;
   const row = value as Partial<AiSettings>;
   return {
     mode: row.mode === "openrouter" ? "openrouter" : "native",
-    openrouter_stack: row.openrouter_stack === "chinese" ? "chinese" : "western",
   };
 }
 
@@ -66,19 +64,10 @@ export function useAiSettings() {
     [persist, settings]
   );
 
-  const setStack = useCallback(
-    (openrouter_stack: OpenRouterStack) => {
-      persist({ ...settings, openrouter_stack }).catch(() => {});
-    },
-    [persist, settings]
-  );
-
   return {
     settings,
     mode: settings.mode,
-    stack: settings.openrouter_stack,
     setMode,
-    setStack,
     loading,
     error,
   };

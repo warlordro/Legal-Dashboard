@@ -11,7 +11,7 @@ import type { LoadMoreProgress } from "@/lib/api";
 import { exportDosareExcel, exportDosarePDF } from "@/lib/export-dosare";
 import type { Dosar, DosarSource, SearchParams } from "@/types";
 import type { ApiKeys } from "@/hooks/useApiKey";
-import type { AiMode, OpenRouterStack } from "@/components/dosare-ai-config";
+import type { AiMode } from "@/components/dosare-ai-config";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
 import { dropLegalFormTokens } from "@/lib/legalSuffix";
 
@@ -108,7 +108,7 @@ interface DosareProps {
   pendingSearch?: SearchParams | null;
   consumePendingSearch?: () => void;
   apiKeys?: ApiKeys;
-  aiSettings: { mode: AiMode; stack: OpenRouterStack };
+  aiSettings: { mode: AiMode };
   onConfigureApiKey?: () => void;
   showBudgetIndicator?: boolean;
 }

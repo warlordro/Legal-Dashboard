@@ -146,32 +146,6 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
               OpenRouter
             </button>
           </div>
-          {aiSettings.mode === "openrouter" && (
-            <div className="mt-3 grid grid-cols-2 gap-2">
-              <button
-                type="button"
-                onClick={() => aiSettings.setStack("western")}
-                className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-                  aiSettings.stack === "western"
-                    ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                    : "border-border bg-background text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                Vestic
-              </button>
-              <button
-                type="button"
-                onClick={() => aiSettings.setStack("chinese")}
-                className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-                  aiSettings.stack === "chinese"
-                    ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                    : "border-border bg-background text-muted-foreground hover:bg-muted"
-                }`}
-              >
-                Chinezesc
-              </button>
-            </div>
-          )}
         </div>
 
         {/* AI providers — side-by-side */}

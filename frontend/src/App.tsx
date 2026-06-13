@@ -188,7 +188,7 @@ function AppShell({
               pendingSearch={pendingSearch?.type === "dosare" ? pendingSearch.params : null}
               consumePendingSearch={consumePendingSearch}
               apiKeys={keys}
-              aiSettings={{ mode: aiSettings.mode, stack: aiSettings.stack }}
+              aiSettings={{ mode: aiSettings.mode }}
               onConfigureApiKey={handleOpenKeyDialog}
               showBudgetIndicator={pathname === "/dosare" && authMode === "web"}
             />

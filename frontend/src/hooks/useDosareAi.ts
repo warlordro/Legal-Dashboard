@@ -1,12 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
-import {
-  AI_MODELS,
-  availableJudgeModels as getAvailableJudgeModels,
-  availableModels as getAvailableModels,
-  type AiMode,
-  type OpenRouterStack,
-} from "@/components/dosare-ai-config";
+import { AI_MODELS, type AiMode, JUDGE_MODELS_LIST } from "@/components/dosare-ai-config";
 import type { Dosar } from "@/types";
 
 interface ApiKeys {
@@ -59,7 +53,7 @@ export interface MultiBundle {
 
 export interface UseDosareAiArgs {
   apiKeys: ApiKeys | undefined;
-  aiSettings: { mode: AiMode; stack: OpenRouterStack };
+  aiSettings: { mode: AiMode };
 }
 
 export interface UseDosareAiResult {
@@ -90,8 +84,8 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
       ? Boolean(apiKeys?.openrouter)
       : Boolean(apiKeys && (apiKeys.anthropic || apiKeys.openai || apiKeys.google));
 
-  const stackModels = getAvailableModels(aiSettings.mode, aiSettings.stack);
-  const stackJudgeModels = getAvailableJudgeModels(aiSettings.mode, aiSettings.stack);
+  const stackModels = AI_MODELS;
+  const stackJudgeModels = JUDGE_MODELS_LIST;
 
   const availableModels = useMemo(
     () =>

@@ -5,7 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiKeyDialog } from "./ApiKeyDialog";
-import type { AiMode, OpenRouterStack } from "./dosare-ai-config";
+import type { AiMode } from "./dosare-ai-config";
 
 vi.mock("@/components/AIUsagePanel", () => ({ AIUsagePanel: () => <div /> }));
 vi.mock("@/components/EmailSettingsPanel", () => ({ EmailSettingsPanel: () => <div /> }));
@@ -80,7 +80,7 @@ function changeInput(input: HTMLInputElement, value: string) {
   });
 }
 
-function props(mode: AiMode, stack: OpenRouterStack = "western") {
+function props(mode: AiMode) {
   return {
     onClose: vi.fn(),
     apiKey: {
@@ -99,10 +99,8 @@ function props(mode: AiMode, stack: OpenRouterStack = "western") {
       setCaptchaMode: vi.fn(),
       aiSettings: {
         mode,
-        stack,
         setMode: vi.fn(),
-        setStack: vi.fn(),
-        settings: { mode, openrouter_stack: stack },
+        settings: { mode },
         loading: false,
         error: null,
       },
@@ -199,17 +197,6 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     expect(textContent(host)).not.toContain("Google");
   });
 
-  it("shows stack toggle only in openrouter mode", () => {
-    render(<ApiKeyDialog {...props("native")} />);
-    expect(textContent(host)).not.toContain("Vestic");
-    act(() => root.unmount());
-    host.remove();
-
-    render(<ApiKeyDialog {...props("openrouter")} />);
-    expect(textContent(host)).toContain("Vestic");
-    expect(textContent(host)).toContain("Chinezesc");
-  });
-
   it("saves the OpenRouter key through the fourth key slot", () => {
     const p = props("openrouter");
     render(<ApiKeyDialog {...p} />);
@@ -220,14 +207,12 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     expect(p.apiKey.setKey).toHaveBeenCalledWith("openrouter", "  sk-or-v1-test  ");
   });
 
-  it("calls mode and stack setters from the toggles", () => {
-    const p = props("openrouter", "western");
+  it("calls the mode setter from the toggle", () => {
+    const p = props("openrouter");
     render(<ApiKeyDialog {...p} />);
 
     click(getButton(/^Native$/i));
-    click(getButton(/Chinezesc/i));
 
     expect(p.apiKey.aiSettings.setMode).toHaveBeenCalledWith("native");
-    expect(p.apiKey.aiSettings.setStack).toHaveBeenCalledWith("chinese");
   });
 });

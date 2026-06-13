@@ -1,35 +1,30 @@
 import { describe, expect, it } from "vitest";
-import { availableJudgeModels, availableModels } from "./dosare-ai-config";
+import { AI_MODELS, JUDGE_MODELS_LIST } from "./dosare-ai-config";
 
-describe("dosare-ai-config availableModels", () => {
-  it("returns 9 western models in native mode", () => {
-    expect(availableModels("native", "western").map((model) => model.key)).toHaveLength(9);
+describe("dosare-ai-config AI_MODELS", () => {
+  it("lists 9 western models", () => {
+    expect(AI_MODELS).toHaveLength(9);
   });
 
-  it("returns the same 9 western models for openrouter western", () => {
-    expect(availableModels("openrouter", "western").map((model) => model.key)).toEqual(
-      availableModels("native", "western").map((model) => model.key)
-    );
+  it("drops the chinese keys", () => {
+    const keys = AI_MODELS.map((model) => model.key);
+    expect(keys).not.toContain("glm-5.1");
+    expect(keys).not.toContain("kimi-k2.6");
+    expect(keys).not.toContain("qwen-3.7-max");
   });
 
-  it("returns 3 chinese models for openrouter chinese", () => {
-    expect(availableModels("openrouter", "chinese").map((model) => model.key)).toEqual([
-      "glm-5.1",
-      "kimi-k2.6",
-      "qwen-3.7-max",
-    ]);
+  it("uses the refreshed Opus 4.8 and 3.5 Flash labels", () => {
+    expect(AI_MODELS.find((model) => model.key === "claude-opus")?.label).toBe("Opus 4.8");
+    expect(AI_MODELS.find((model) => model.key === "gemini-flash-3.5")?.label).toBe("3.5 Flash");
+  });
+});
+
+describe("dosare-ai-config JUDGE_MODELS_LIST", () => {
+  it("lists the 3 western judges", () => {
+    expect(JUDGE_MODELS_LIST.map((model) => model.key)).toEqual(["claude-opus", "gpt-5.4", "gemini-pro-3"]);
   });
 
-  it("filters judge models per stack", () => {
-    expect(availableJudgeModels("native", "western").map((model) => model.key)).toEqual([
-      "claude-opus",
-      "gpt-5.4",
-      "gemini-pro-3",
-    ]);
-    expect(availableJudgeModels("openrouter", "chinese").map((model) => model.key)).toEqual([
-      "glm-5.1",
-      "kimi-k2.6",
-      "qwen-3.7-max",
-    ]);
+  it("labels the Claude judge Opus 4.8", () => {
+    expect(JUDGE_MODELS_LIST.find((model) => model.key === "claude-opus")?.label).toBe("Claude Opus 4.8");
   });
 });

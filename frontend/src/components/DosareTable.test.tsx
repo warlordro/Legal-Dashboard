@@ -112,7 +112,7 @@ function makeDosar(i: number, overrides: Partial<Dosar> = {}): Dosar {
 const defaultProps = {
   onExportExcel: vi.fn(),
   onExportPDF: vi.fn(),
-  aiSettings: { mode: "native" as const, stack: "western" as const },
+  aiSettings: { mode: "native" as const },
 };
 
 const apiKeysWithAnthropic = {
