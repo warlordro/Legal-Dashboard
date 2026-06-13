@@ -293,6 +293,21 @@ describe("recordAudit() — write paths", () => {
     const events = getAuditEvents({ ownerId: null, action: "test.small" });
     expect(JSON.parse(events[0].detail_json)).toEqual(small);
   });
+
+  it("audit R4: trunchiaza dupa octeti UTF-8, nu coduri UTF-16 (payload multi-byte)", () => {
+    // CJK: 1 cod UTF-16 per caracter, 3 octeti UTF-8. 10000 caractere =>
+    // raw.length ~10000 (sub cap-ul de 16384 coduri) dar ~30000 octeti UTF-8
+    // (peste cap). Cap-ul pe coduri ar lasa payload-ul intreg necontrolat.
+    const cjk = "中".repeat(10000);
+    recordAudit(null, "test.cjk", { detail: { payload: cjk } });
+    const events = getAuditEvents({ ownerId: null, action: "test.cjk" });
+    expect(events).toHaveLength(1);
+    const stored = events[0].detail_json;
+    expect(Buffer.byteLength(stored, "utf8")).toBeLessThanOrEqual(AUDIT_DETAIL_MAX_BYTES + 256);
+    const parsed = JSON.parse(stored);
+    expect(parsed._truncated).toBe(true);
+    expect(parsed._originalLength).toBeGreaterThan(AUDIT_DETAIL_MAX_BYTES);
+  });
 });
 
 describe("getAuditEvents() — read paths", () => {

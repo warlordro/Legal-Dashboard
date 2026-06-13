@@ -46,12 +46,19 @@ function serializeDetail(detail: Record<string, unknown> | null | undefined): st
     // Circular ref or BigInt — log loudly, never throw out of an audit path.
     return JSON.stringify({ _audit_serialize_error: true });
   }
-  if (raw.length > AUDIT_DETAIL_MAX_BYTES) {
+  // audit R4: cap pe octeti UTF-8 reali, nu pe coduri UTF-16 (raw.length). Un
+  // payload CJK de ~16K caractere are ~48KB UTF-8 si ar trece de un cap pe
+  // coduri. subarray taie pe octeti; toString("utf8") arunca un code point
+  // partial de la coada in loc sa-l corupa.
+  const bytes = Buffer.byteLength(raw, "utf8");
+  if (bytes > AUDIT_DETAIL_MAX_BYTES) {
     return JSON.stringify({
       _truncated: true,
-      _originalLength: raw.length,
+      _originalLength: bytes,
       _maxBytes: AUDIT_DETAIL_MAX_BYTES,
-      head: raw.slice(0, AUDIT_DETAIL_MAX_BYTES - 200),
+      head: Buffer.from(raw, "utf8")
+        .subarray(0, AUDIT_DETAIL_MAX_BYTES - 200)
+        .toString("utf8"),
     });
   }
   return raw;
