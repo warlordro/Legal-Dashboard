@@ -5,11 +5,13 @@ import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  confirmAiUsageReservation,
   earliestAiUsageTsInWindow,
   getAiUsageByFeature,
   getAiUsageByProvider,
   getAiUsageTotals,
   insertAiUsage,
+  insertAiUsageReservation,
   listAiUsageLastDays,
   sumAiUsageMilliInWindow,
   sumAiUsageMilliToday,
@@ -92,6 +94,61 @@ describe("insertAiUsage", () => {
       .prepare("SELECT model, routing_tag FROM ai_usage WHERE routing_tag = 'openrouter:chinese'")
       .get() as { model: string; routing_tag: string };
     expect(row).toEqual({ model: "anthropic/claude-sonnet-4.6", routing_tag: "openrouter:chinese" });
+  });
+
+  it("persists latency_ms and error_type when provided (migration 0037)", () => {
+    const row = insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      feature: "dosar_summary",
+      latencyMs: 1234,
+      errorType: "timeout",
+    });
+
+    expect(row.latency_ms).toBe(1234);
+    expect(row.error_type).toBe("timeout");
+  });
+
+  it("leaves latency_ms and error_type null when omitted", () => {
+    const row = insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      feature: "dosar_summary",
+    });
+
+    expect(row.latency_ms).toBeNull();
+    expect(row.error_type).toBeNull();
+  });
+
+  it("persists latency_ms and error_type when confirming a reservation (migration 0037)", () => {
+    const reservationId = insertAiUsageReservation({
+      ownerId: "alice",
+      provider: "openai",
+      feature: "dosar_summary",
+      estimatedCostUsdMilli: 100,
+    });
+
+    confirmAiUsageReservation(reservationId, {
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsdMilli: 30,
+      httpStatus: 200,
+      wasAborted: false,
+      routingTag: "openrouter:western",
+      latencyMs: 1234,
+      errorType: "timeout",
+    });
+
+    const row = getDb().prepare("SELECT latency_ms, error_type FROM ai_usage WHERE id = ?").get(reservationId) as {
+      latency_ms: number | null;
+      error_type: string | null;
+    };
+    expect(row.latency_ms).toBe(1234);
+    expect(row.error_type).toBe("timeout");
   });
 });
 

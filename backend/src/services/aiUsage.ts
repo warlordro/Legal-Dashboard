@@ -19,6 +19,8 @@ export interface AiUsageCallMeta {
   httpStatus?: number;
   costUsdMilli?: number | null;
   routingTag?: AiUsageRoutingTag;
+  latencyMs?: number;
+  errorType?: string;
 }
 
 interface ModelPrice {
@@ -142,6 +144,8 @@ export function recordAiUsageSafely(input: {
     });
   const httpStatus = safeHttpStatus(input.meta?.httpStatus);
   const routingTag = input.meta?.routingTag;
+  const latencyMs = input.meta?.latencyMs;
+  const errorType = input.meta?.errorType;
   const tracking = input.tracking;
   const provider = input.provider;
   const model = input.model;
@@ -166,6 +170,8 @@ export function recordAiUsageSafely(input: {
           wasAborted: wasAborted ?? false,
           routingTag: routingTag ?? null,
           feature: tracking.feature,
+          latencyMs,
+          errorType,
         });
       } else {
         insertAiUsage({
@@ -180,6 +186,8 @@ export function recordAiUsageSafely(input: {
           wasAborted,
           requestId: tracking.requestId,
           routingTag,
+          latencyMs,
+          errorType,
         });
       }
       // v2.32.0: dupa write reusit, verifica pragul 80% (web mode only).

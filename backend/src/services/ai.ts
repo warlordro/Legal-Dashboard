@@ -277,7 +277,7 @@ export async function withAiLogging<T>(
       status: "ok",
       ...meta,
     });
-    recordAiUsageSafely({ tracking, provider, model, meta });
+    recordAiUsageSafely({ tracking, provider, model, meta: { ...meta, latencyMs: Date.now() - start } });
     return value;
   } catch (e) {
     const errorType = isTimeoutOrAbort(e)
@@ -335,6 +335,8 @@ export async function withAiLogging<T>(
         httpStatus: typeof httpStatus === "number" ? httpStatus : undefined,
         usageInput,
         usageOutput,
+        latencyMs: Date.now() - start,
+        errorType,
       },
       wasAborted: isTimeoutOrAbort(e),
     });

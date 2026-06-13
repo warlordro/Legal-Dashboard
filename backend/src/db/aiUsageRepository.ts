@@ -23,6 +23,8 @@ export interface AiUsageRow {
   routing_tag: AiUsageRoutingTag | null;
   status: "pending" | "confirmed";
   estimated_cost_usd_milli: number | null;
+  latency_ms: number | null;
+  error_type: string | null;
 }
 
 export interface InsertAiUsageInput {
@@ -37,6 +39,8 @@ export interface InsertAiUsageInput {
   wasAborted?: boolean;
   requestId?: string | null;
   routingTag?: AiUsageRoutingTag | null;
+  latencyMs?: number | null;
+  errorType?: string | null;
   ts?: string;
 }
 
@@ -77,8 +81,9 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
     .prepare(
       `INSERT INTO ai_usage
          (owner_id, ts, provider, model, input_tokens, output_tokens,
-          cost_usd_milli, http_status, was_aborted, request_id, feature, routing_tag)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          cost_usd_milli, http_status, was_aborted, request_id, feature, routing_tag,
+          latency_ms, error_type)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     )
     .run(
       input.ownerId,
@@ -92,7 +97,9 @@ export function insertAiUsage(input: InsertAiUsageInput): AiUsageRow {
       input.wasAborted ? 1 : 0,
       input.requestId || null,
       input.feature,
-      input.routingTag ?? null
+      input.routingTag ?? null,
+      input.latencyMs ?? null,
+      input.errorType ?? null
     );
 
   return db.prepare("SELECT * FROM ai_usage WHERE id = ?").get(info.lastInsertRowid) as AiUsageRow;
@@ -142,6 +149,8 @@ export function confirmAiUsageReservation(
     wasAborted: boolean;
     routingTag: AiUsageRoutingTag | null;
     feature?: string;
+    latencyMs?: number | null;
+    errorType?: string | null;
   }
 ): boolean {
   const info = getDb()
@@ -156,7 +165,9 @@ export function confirmAiUsageReservation(
            http_status = ?,
            was_aborted = ?,
            routing_tag = ?,
-           feature = COALESCE(?, feature)
+           feature = COALESCE(?, feature),
+           latency_ms = ?,
+           error_type = ?
        WHERE id = ? AND status = 'pending'`
     )
     .run(
@@ -169,6 +180,8 @@ export function confirmAiUsageReservation(
       real.wasAborted ? 1 : 0,
       real.routingTag ?? null,
       real.feature ?? null,
+      real.latencyMs ?? null,
+      real.errorType ?? null,
       reservationId
     );
   return info.changes > 0;
