@@ -163,7 +163,7 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(body.error.code).toBe("account_inactive");
   });
 
-  it("mintea JWT-ul si seteaza cookie-ul cu HttpOnly + Secure + SameSite=Lax", async () => {
+  it("mintea JWT-ul si seteaza cookie-ul cu HttpOnly + Secure + SameSite=Strict", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
 
     const res = await syncRequest({
@@ -176,7 +176,7 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(cookie).toContain(`${AUTH_COOKIE_NAME}=`);
     expect(cookie.toLowerCase()).toContain("httponly");
     expect(cookie.toLowerCase()).toContain("secure");
-    expect(cookie.toLowerCase()).toContain("samesite=lax");
+    expect(cookie.toLowerCase()).toContain("samesite=strict");
     expect(cookie.toLowerCase()).toContain("path=/");
   });
 

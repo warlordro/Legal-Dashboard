@@ -30,7 +30,7 @@ function writeSessionCookie(c: Context, token: string, maxAge: number): void {
   setCookie(c, AUTH_COOKIE_NAME, token, {
     httpOnly: true,
     secure: secureCookie(),
-    sameSite: "Lax",
+    sameSite: "Strict",
     path: "/",
     maxAge,
   });
@@ -86,7 +86,7 @@ authRouter.post("/logout", (c) => {
   }
   deleteCookie(c, AUTH_COOKIE_NAME, {
     secure: secureCookie(),
-    sameSite: "Lax",
+    sameSite: "Strict",
     path: "/",
   });
   return c.json(ok({ loggedOut: true }, c), 200);
@@ -114,7 +114,11 @@ authRouter.post("/logout", (c) => {
 //    NICIODATA email plaintext, NICIODATA continut header. La succes loggeaza
 //    `targetId = user.id` (UUID-ul intern, nu identifiable info).
 //  - Cookie-ul folosit pentru sesiune e identic cu cel de la `/auth/refresh`:
-//    HttpOnly, Secure (in productie), SameSite=Lax, Path=/.
+//    HttpOnly, Secure (in productie), SameSite=Strict, Path=/.
+//    SameSite=Strict e sigur aici: cookie-ul e consumat doar de fetch-uri
+//    same-origin din SPA; sync-ul oauth2-proxy e server-to-server (header-e);
+//    emailurile de alerta folosesc deep-link `legal-dashboard://` (protocol
+//    custom Electron), nu un GET cross-site catre originea web.
 function constantTimeStringEquals(a: string, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);

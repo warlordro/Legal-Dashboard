@@ -92,7 +92,7 @@ describe("/api/v1/auth", () => {
     expect(cookie).toContain("legal_dashboard_session=");
     expect(cookie.toLowerCase()).toContain("httponly");
     expect(cookie.toLowerCase()).toContain("secure");
-    expect(cookie.toLowerCase()).toContain("samesite=lax");
+    expect(cookie.toLowerCase()).toContain("samesite=strict");
   });
 
   it("uses Bearer auth before the session cookie when both are present", async () => {
