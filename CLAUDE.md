@@ -1,7 +1,7 @@
 # Legal Dashboard - Context Proiect
 
 ## Descriere
-Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver). Target final: se va deploya si ca aplicatie web - fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
+Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro, SOAP) **+ modul RNPM** (Registrul National de Publicitate Mobiliara, via HTTP cu rezolvare captcha 2Captcha / CapSolver) **+ modul ICCJ** (cautare si monitorizare dosare Inalta Curte via scraping scj.ro). Target final: se va deploya si ca aplicatie web - fiecare decizie arhitecturala trebuie sa supravietuiasca ambelor moduri.
 
 ## Versiune Curenta
 
@@ -68,12 +68,13 @@ Aceasta regula este non-negotiable: niciun push pe GitHub fara biome verificat. 
 ```
 legal-dashboard/
 - frontend/   # React 18 + TypeScript + Vite + Tailwind
-    src/{pages, components, hooks, lib, types}
+    src/{pages, components, hooks, lib, types, data}
 - backend/    # Node.js 22+ + Hono (port 3002)
-    src/{routes, auth, services, middleware, db, util, soap.ts}
+    src/{routes, auth, services, middleware, db, schemas, util, soap.ts}
     tsconfig.json (strict: true, noEmit - type-check only)
-- electron/   # main.js, preload.js, notifications.js (extras in v2.12.0)
-- scripts/    # build.js (esbuild backend -> CJS), build-server.js (ZIP), generate-icon.mjs
+- electron/   # main.js, preload.js, notifications.js, event-loop-watchdog.js
+- scripts/    # build.js (esbuild backend -> CJS), build-server.js (ZIP), launch-electron-dev.cjs,
+              # rebuild-electron.cjs, check-worktree.mjs, seed-admin.mjs, smoke-deploy.*, loadtest-*, generate-icon.mjs
 - biome.json, README.md, SECURITY.md
 ```
 
@@ -88,40 +89,40 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - `npm run electron:dev` - porneste Electron (backend in-process pe 3002)
 - `npm run rebuild:electron` - recompileaza `better-sqlite3` pentru ABI-ul Electron dupa teste Node / `npm rebuild`
 - `npm run dev:backend` - backend standalone (pentru dev web)
-- `OPENROUTER_DISABLED=1` - kill switch operational pentru OpenRouter; call-urile OpenRouter esueaza imediat, fara fallback silent la native
-- `OPENROUTER_MODEL_OVERRIDES=modelKey:provider/slug` - hot-patch pentru slug-uri OpenRouter cand provider-ul redenumeste modele
 - `npm run dev:frontend` - Vite dev server pe 5173
 - `npm run build` - build productie (frontend + backend CJS)
+- `npm run check` - lint + typecheck + toate testele intr-o singura comanda (pre-push one-shot)
+- `npm run typecheck` - type-check backend + frontend
+- `npm run test:backend` / `npm run test:frontend` - vitest per workspace
 - `npm run dist` - electron-builder pentru Windows NSIS
 - `npm run dist:mac` - electron-builder pentru macOS DMG (x64 + arm64; pe runner macOS)
 - `npm run dist:server` - ZIP server deployabil; Docker Build ruleaza in GitHub Actions la push pe `main`
-- `npm test --workspace=backend` - vitest backend
-- `cd frontend && npm test -- --run` - vitest frontend
 - `npx tsc --noEmit -p backend/tsconfig.json` - type-check backend
 - `cd frontend && npx tsc --noEmit` - type-check frontend
 - `npx biome check` - lint + format check
-- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` - kill switch operational pentru a opri temporar claim-ul pe anumite tipuri de joburi
-- `SMTP_HOST`/`SMTP_PORT`/`SMTP_USER`/`SMTP_PASS`/`SMTP_FROM`/`SMTP_SECURE` - canal email optional pentru alerte; lipsa/incomplet = email disabled, boot normal
+
+### Env vars operationale
+Cele mai folosite: `OPENROUTER_DISABLED=1` (OpenRouter fail-fast, fara fallback silent la native), `OPENROUTER_MODEL_OVERRIDES=modelKey:provider/slug` (hot-patch slug-uri cand provider-ul redenumeste modele), `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` (exclude tipuri de joburi din scheduler claim), `SMTP_HOST/PORT/USER/PASS/FROM/SECURE` (email alerte; incomplet = email disabled, boot normal).
+Tabelul complet de kill switches operationale e in [SESSION-HANDOFF.md](SESSION-HANDOFF.md) — sursa unica; nu duplica lista aici.
 
 ## Arhitectura
-- **Frontend**: React 18, Vite 5, Tailwind + clsx + tailwind-merge (`cn()` helper), Recharts, DOMPurify
+- **Frontend**: React 18, Vite 6, Tailwind + clsx + tailwind-merge (`cn()` helper), Recharts, DOMPurify
 - **Backend**: Hono + `@hono/node-server`, SOAP XML parsing manual
 - **DB**: SQLite via `better-sqlite3`, repositories + schema cu `owner_id DEFAULT 'local'` pe toate tabelele
-- **AI**: Anthropic SDK, OpenAI SDK, Google Generative AI SDK
+- **AI**: Anthropic SDK, OpenAI SDK, Google Generative AI SDK **+ toggle OpenRouter** (auto-detect prefix `sk-or-`, kill switch `OPENROUTER_DISABLED`)
 - **Captcha**: 2Captcha + CapSolver (mod sequential sau race)
 - **Export**: `xlsx-js-style` cu formula-injection escape (`=+-@\t\r` prefix)
 - **Desktop**: Electron 41, single-instance lock, safeStorage (DPAPI / Keychain / libsecret)
 - **Build**: esbuild (backend -> CJS, `--external:better-sqlite3 --external:electron`), Vite (frontend)
 
-## Securitate (audit intern 19 Aprilie 2026 - v2.0.5)
-### Protectii active
+## Securitate (protectii active)
 - **safeStorage IPC** pentru cheile API (DPAPI / Keychain / libsecret), ciphertext in localStorage doar
 - **CSP strict** (`script-src 'self'`, fara `unsafe-inline`), `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`
 - **IPC timeout 10s** in preload.js (previne renderer freeze)
 - **Single-instance lock** (previne corupere SQLite din writers concurrenti)
 - **Crash handlers** (`uncaughtException`, `unhandledRejection`, `before-quit` -> cleanup SQLite WAL)
 - **DOMPurify** pe toate outputurile AI (HTML render)
-- **Rate limiter** per IP via `getConnInfo` (nu trusted proxy headers); 503/429 emit envelope standard `{ data, error: { code, message }, requestId }` (v2.14.0)
+- **Rate limiter** per IP via `getConnInfo` (nu trusted proxy headers); 503/429 emit envelope standard `{ data, error: { code, message }, requestId }`
 - **Hono `secureHeaders`** + CSP per-response
 - **LAN bind opt-in**: `LEGAL_DASHBOARD_ALLOW_REMOTE=1` required altfel `127.0.0.1` hard-forced
 - **XLSX formula-injection escape** (`=+-@\t\r` -> prefix `'`)
@@ -129,8 +130,8 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - **Rate limits** dedicated (search, bulk, export, small)
 - **External URL whitelist** exact: portal.just.ro, www.just.ro, portalquery.just.ro, www.scj.ro, mj.rnpm.ro, www.rnpm.ro
 - **Backup atomic**: daily backup scrie la `.db.tmp` + rename atomic, cleanup orphan tmp la urmatorul run
-- **Pre-migration backup generic** (v2.16.1): orice migration rebuild trigger-uieste backup `schema-upgrade` automat
-- **SOAP cancellation**: `AbortSignal` extern propagat pana in fetch-ul PortalJust, combinat cu timeout intern (60s in v2.14.1+)
+- **Pre-migration backup generic**: orice migration rebuild trigger-uieste backup `schema-upgrade` automat
+- **SOAP cancellation**: `AbortSignal` extern propagat pana in fetch-ul PortalJust, combinat cu timeout intern (60s)
 - **Monitoring operational kill switch**: `MONITORING_DISABLED_KINDS` exclude tipurile listate din scheduler claim fara modificari in DB
 - **Monitoring run retention**: `monitoring_runs` purjat zilnic la 90 zile pentru a limita cresterea istoricului operational
 - **AI usage tracking**: orice call SDK reusit sau pornit si esuat scrie owner-scoped in `ai_usage` dupa call, fara SQLite lock peste I/O extern
@@ -155,12 +156,15 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - Opt-in `clientRequestId` dedup pe mutations (idempotency)
 - No singleton state tied to user activity
 
-## Roadmap & Planuri Active
-**Trimestrul curent (sapt 1-13, 2026-04-27 -> ~2026-07)**: monitoring desktop + cutover web, livrat in 13 PR-uri secventiale (PR-0 -> PR-12).
-- [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) - roadmap saptamanal cu DoD checkboxes per PR. **Citeste sectiunea PR curent inainte de orice cod.**
-- [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md) - master spec tehnic (DDL, API contracts, security model).
-- [SESSION-HANDOFF.md](SESSION-HANDOFF.md) - context transfer intre sesiuni (decizii inchise, status PR curent).
-- [HARDENING.md](HARDENING.md) - **L274-440 SUPERSEDA de PLAN-monitoring-webmode.md** (vezi banner OBSOLETE). Restul fazelor 1-6 inca relevante.
+## Planuri & documente
+
+Sprintul monitoring + web cutover (PR-0 -> PR-12) e INCHIS pe cod din 2026-05-18
+(PR-10/PR-12 eliminate; ce ramane din web e strict operational: Docker/OAuth/DNS/TLS).
+- [SESSION-HANDOFF.md](SESSION-HANDOFF.md) - context activ + tabel complet kill switches operationale. Citeste-l la inceput de sesiune.
+- [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) + [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md) - istoric sprint inchis (referinta, nu plan activ).
+- [PLAN-iccj-integration.md](PLAN-iccj-integration.md) - spec integrare ICCJ (livrata v2.34+).
+- [RUNBOOK.md](RUNBOOK.md) / [DEPLOY-SERVER.md](DEPLOY-SERVER.md) - operare si deploy server.
+- [HARDENING.md](HARDENING.md) - backlog hardening (L274-440 obsolete, vezi banner).
 
 ## Nota Importanta Build
 - Backend-ul e compilat ca CJS de esbuild. `import.meta.url` nu functioneaza in CJS.
@@ -168,7 +172,7 @@ Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhit
 - `require("electron")` in `rnpm.ts` e marked external la bundle, rezolvat la runtime in main process.
 - `npm run dist:server` - genereaza pachet ZIP deployabil pe server (dist-backend + dist-frontend + Dockerfile + lockfile/manifests). `start.sh` / `start.bat` instaleaza runtime deps cu `npm ci` daca lipseste `node_modules/better-sqlite3`, pentru ca modulul nativ sa fie construit pe platforma tinta.
 - Dockerfile foloseste root `package-lock.json` + `npm ci --workspace=backend --omit=dev --build-from-source`; healthcheck are `--start-period=120s`.
-- **La fiecare release bump**: actualizeaza TOATE `.md` (README, CHANGELOG, ROADMAP, SESSION-HANDOFF, etc.) + `frontend/src/data/changelog-entries.tsx` (in-app changelog) + manifest/lockfile. Verifica cu Grep pe versiunea veche inainte de a inchide release-ul. Restart Electron deja rulat pentru ca `__APP_VERSION__` sa se reinjecteze in sidebar/Dashboard.
+- **La fiecare release bump**: urmeaza pasii din `## Checklist bump de versiune` (inceputul fisierului) — el e sursa unica pentru lista de fisiere si sanity checks.
 
 ## Limba
 - Interfata si mesajele sunt in **romana** (fara diacritice in cod sursa - legacy constraint PortalJust)
