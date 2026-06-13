@@ -68,7 +68,7 @@ curl -fsS http://127.0.0.1:3002/health | jq .version
 | `LEGAL_DASHBOARD_JWT_ISSUER` | Mereu in web mode | trebuie sa fie URL absolut (issuer OIDC) |
 | `LEGAL_DASHBOARD_JWT_AUDIENCE` | Mereu in web mode | client_id sau identifier resource API |
 | `TENANT_KEY_ENCRYPTION_SECRET` | Mereu in web mode | 32 bytes base64; **pierderea inseamna pierderea cheilor API tenant** |
-| `LEGAL_DASHBOARD_ALLOW_REMOTE=1` | Cand HOST != loopback | Fail-closed gate; necesita si ACK_NO_AUTH=i-understand-no-auth-yet daca nu e auth |
+| `LEGAL_DASHBOARD_ALLOW_REMOTE=1` | Cand HOST != loopback | Fail-closed gate; necesita si `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT valid, altfel boot-ul esueaza |
 | `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` | Recomandat in web mode | Command shell pentru upload (vezi §2.4) |
 | `LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA` | Optional | Default cap captcha/zi per user fara override |
 

@@ -98,8 +98,6 @@ jobs:
           # interface. The security guard refuses non-loopback HOST without the
           # explicit ALLOW_REMOTE opt-in — it's the same gate users hit when
           # exposing the LAN port at home.
-          # v2.6.4 (F2) adds a fail-closed gate: ALLOW_REMOTE=1 also requires
-          # ACK_NO_AUTH=i-understand-no-auth-yet.
           # v2.7.0 PR-9 strengthens the gate: ALLOW_REMOTE=1 (or non-loopback HOST)
           # now also requires LEGAL_DASHBOARD_AUTH_MODE=web + a valid JWT secret
           # (>=32 chars) + JWT_ISSUER + JWT_AUDIENCE. Desktop noop mode is no
@@ -111,7 +109,6 @@ jobs:
           docker run -d --name ld-ci -p 3002:3002 \
             -e HOST=0.0.0.0 \
             -e LEGAL_DASHBOARD_ALLOW_REMOTE=1 \
-            -e LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet \
             -e LEGAL_DASHBOARD_AUTH_MODE=web \
             -e LEGAL_DASHBOARD_JWT_SECRET="$CI_JWT_SECRET" \
             -e LEGAL_DASHBOARD_JWT_ISSUER=legal-dashboard-ci \

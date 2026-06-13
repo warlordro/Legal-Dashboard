@@ -8,10 +8,10 @@
 ## Web mode is multi-tenant and auth-gated:
 ##   - JWT_SECRET (>=32 chars), JWT_ISSUER, JWT_AUDIENCE are mandatory; the
 ##     backend refuses to boot without them.
-##   - HOST=0.0.0.0 + LEGAL_DASHBOARD_ALLOW_REMOTE=1 + LEGAL_DASHBOARD_ACK_NO_AUTH
-##     unlock the non-loopback bind safety guard. The ack literal is intentional
-##     so a stray HOST=0.0.0.0 in a shell session can never accidentally expose
-##     the API.
+##   - HOST=0.0.0.0 + LEGAL_DASHBOARD_ALLOW_REMOTE=1 + LEGAL_DASHBOARD_AUTH_MODE=web
+##     (with a valid JWT) unlock the non-loopback bind safety guard. Remote bind
+##     without web auth is a fatal boot error, so a stray HOST=0.0.0.0 in a shell
+##     session can never accidentally expose the API.
 ##   - LEGAL_DASHBOARD_DB_PATH is mounted on a persistent volume so the SQLite
 ##     file survives `docker compose down` (otherwise tenant data evaporates).
 ##
@@ -40,7 +40,6 @@ services:
       # and the container process binds to whatever HOST is set to (default 127.0.0.1).
       HOST: "0.0.0.0"
       LEGAL_DASHBOARD_ALLOW_REMOTE: "1"
-      LEGAL_DASHBOARD_ACK_NO_AUTH: "i-understand-no-auth-yet"
       LEGAL_DASHBOARD_AUTH_MODE: "web"
       # Persisted DB lives on a named volume so a restart doesn't lose tenant data.
       LEGAL_DASHBOARD_DB_PATH: "/data/legal-dashboard.db"

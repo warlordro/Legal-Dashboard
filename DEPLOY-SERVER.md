@@ -141,6 +141,6 @@ In `.env.prod`:
   - oauth2-proxy NU forwardeaza tokenul Google catre backend (`PASS_AUTHORIZATION_HEADER=false`, `PASS_ACCESS_TOKEN=false`). Asa, tokenurile Google nu intra niciodata in DB-ul nostru.
   - Cookie-urile sunt HttpOnly + Secure + SameSite=Lax. Frontend-ul nu poate citi JWT-ul din JavaScript.
   - Audit log-ul backend-ului inregistreaza login-uri prin `auth.oauth2.sync` cu `targetId=user.id`, dar fara plaintext-ul email (doar hash SHA-256 pe refuzuri).
-  - LAN binding (`LEGAL_DASHBOARD_ALLOW_REMOTE=1` + `ACK_NO_AUTH=i-understand-no-auth-yet`) ramane gate-ul oficial pentru `HOST=0.0.0.0`. Schimbarea acestui mecanism necesita revizuire de securitate.
+  - LAN binding (`LEGAL_DASHBOARD_ALLOW_REMOTE=1` + `LEGAL_DASHBOARD_AUTH_MODE=web` cu JWT valid) ramane gate-ul oficial pentru `HOST=0.0.0.0`. Schimbarea acestui mecanism necesita revizuire de securitate.
 
 Pentru intrebari sau bug-uri: vezi [SECURITY.md](SECURITY.md) si [CHANGELOG.md](CHANGELOG.md) entry-ul v2.31.0.

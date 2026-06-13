@@ -150,8 +150,7 @@ The scheduler does **not** add authentication, encryption, or rate-limiting to i
 | Variable | Default | Purpose |
 |---|---|---|
 | `HOST` | `127.0.0.1` | Bind address. Non-loopback values are ignored unless `LEGAL_DASHBOARD_ALLOW_REMOTE=1`. |
-| `LEGAL_DASHBOARD_ALLOW_REMOTE` | unset | Set to `1` to allow non-loopback `HOST` binds. Requires web auth + explicit ack. |
-| `LEGAL_DASHBOARD_ACK_NO_AUTH` | unset | Must be `i-understand-no-auth-yet` when remote bind is enabled. |
+| `LEGAL_DASHBOARD_ALLOW_REMOTE` | unset | Set to `1` to allow non-loopback `HOST` binds. Requires `LEGAL_DASHBOARD_AUTH_MODE=web` + a valid JWT; otherwise boot fails. |
 | `LEGAL_DASHBOARD_PORT` | `3002` | Backend port. Electron sets this automatically. |
 | `LEGAL_DASHBOARD_DB_PATH` | `%APPDATA%/legal-dashboard/legal-dashboard.db` | SQLite path. Electron sets this. |
 | `LEGAL_DASHBOARD_AUTH_MODE` | `desktop` | Auth provider selector. `desktop` keeps `local`; `web` requires signed JWT/session auth. |
@@ -201,8 +200,9 @@ not BYOK / not supplied by the browser client.
   EV / OV certificate is tracked separately.
 - **LAN-mode hardening (v2.6.4 — fail-closed by default).** Setting
   `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (or HOST non-loopback) refuza acum pornirea
-  backend-ului pana cand operatorul confirma explicit ack-ul `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet`.
-  Cand ack-ul e prezent, request-urile state-changing (POST/PUT/PATCH/DELETE)
+  backend-ului pana cand `LEGAL_DASHBOARD_AUTH_MODE=web` cu un JWT valid e
+  configurat (din v2.38.0; gate-ul istoric `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost
+  eliminat ca redundant). Pe interfata non-loopback, request-urile state-changing (POST/PUT/PATCH/DELETE)
   de la peers non-loopback sunt validate prin `originGuard` middleware:
   Origin/Referer trebuie sa match-uiasca Host-ul, altfel 403
   `csrf_origin_mismatch`. Loopback (desktop la el insusi) trece liber pe

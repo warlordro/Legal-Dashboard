@@ -363,13 +363,10 @@ if (!loopback.has(rawHost) && process.env.LEGAL_DASHBOARD_ALLOW_REMOTE !== "1") 
   hostname = "127.0.0.1";
 }
 
-// F2 (audit 2026-04-30): cand userul a optat explicit pentru bind non-loopback
-// (LEGAL_DASHBOARD_ALLOW_REMOTE=1) sau cand HOST configurat ramane non-loopback
-// dupa block-ul de mai sus, refuzam boot pana cand operatorul confirma in mod
-// explicit, prin LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet, ca a
-// inteles ca toate API-urile sunt expuse fara auth pana la PR-9. "WARNING in
-// log" e prea usor de scrolled-past — un crash la boot, in schimb, forteaza o
-// decizie. Cand ack-ul e prezent, banner-ul ramane (audit trail).
+// F2 (audit 2026-04-30) + PR-9 fix B1: remote bind cere auth_mode=web cu JWT
+// valid (fatal mai jos). Gate-ul istoric LEGAL_DASHBOARD_ACK_NO_AUTH a fost
+// eliminat in v2.38.0 — era redundant cu cerinta de web auth si numele lui
+// ("no-auth-yet") nu mai reflecta realitatea. Banner-ul ramane (audit trail).
 const REMOTE_BIND_ACTIVE = process.env.LEGAL_DASHBOARD_ALLOW_REMOTE === "1" || !loopback.has(hostname);
 if (REMOTE_BIND_ACTIVE) {
   // PR-9 fix B1: remote bind FARA auth web e refuz pentru ca toti clientii LAN
@@ -388,24 +385,10 @@ if (REMOTE_BIND_ACTIVE) {
     );
   }
 
-  const ack = process.env.LEGAL_DASHBOARD_ACK_NO_AUTH;
-  if (ack !== "i-understand-no-auth-yet") {
-    fatalBoot(
-      "remote bind without auth ack",
-      new Error(
-        "LEGAL_DASHBOARD_ALLOW_REMOTE=1 (or non-loopback HOST) is set but " +
-          "LEGAL_DASHBOARD_ACK_NO_AUTH != 'i-understand-no-auth-yet'. " +
-          "Remote bind ramane opt-in explicit pana la SSO/deploy final; setati " +
-          "LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet ca sa " +
-          "confirmati ca intelegeti riscul, sau lasati hostname pe loopback."
-      )
-    );
-  }
   console.warn("====================================================================");
   console.warn("WARNING: Legal Dashboard ruleaza pe interfata non-loopback.");
   console.warn(`Auth mode: ${authMode} (JWT validation activ).`);
   console.warn("Toate API-urile sunt accesibile oricarui client cu token valid.");
-  console.warn(`Ack acceptat: LEGAL_DASHBOARD_ACK_NO_AUTH=${ack}`);
   console.warn("====================================================================");
 }
 

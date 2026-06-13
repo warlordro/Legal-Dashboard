@@ -201,7 +201,6 @@ describe("PR-9 index boot/auth boundaries", () => {
         LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
         LEGAL_DASHBOARD_ALLOW_REMOTE: "1",
         LEGAL_DASHBOARD_AUTH_MODE: "desktop",
-        LEGAL_DASHBOARD_ACK_NO_AUTH: "i-understand-no-auth-yet",
       })
     ).rejects.toThrow("process.exit called");
 

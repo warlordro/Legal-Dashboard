@@ -20,7 +20,7 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
 | `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` | Permite folosirea `X-Forwarded-For` doar cand peer-ul intra in CIDR-ul proxy-ului de incredere | Setat in deploy prin Docker network CIDR; lasa gol pe desktop |
 | `LEGAL_DASHBOARD_FORCE_BOOT=1` | Permite reclaim fortat al instance lock-ului SQLite cand operatorul confirma manual ca procesul vechi nu mai ruleaza | Break-glass dupa crash/stale lock, cu audit `system.instance_lock.reclaim` |
 | `RNPM_RESULTS_FILTER_DISABLED=1` | Ruta POST `/api/rnpm/search/:searchId/filter` raspunde 503 cu `code: "FILTER_DISABLED"`; UI ascunde inputul si arata banner | Stop urgent daca filtrul provoaca contention DB sau bug regresat |
-| `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (+ `ACK_NO_AUTH=...` + `AUTH_MODE=web`) | Backend-ul accepta bind non-loopback | Setup web/server, niciodata desktop |
+| `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (+ `AUTH_MODE=web` + JWT valid) | Backend-ul accepta bind non-loopback | Setup web/server, niciodata desktop |
 | `TENANT_KEY_ENCRYPTION_SECRET` | Master key AES-256-GCM pentru `tenant_api_keys`; lipsa in web mode opreste boot-ul | Obligatoriu pentru web admin keys; pastreaza separat de backup-ul DB |
 | Cooldown POST `/email-settings/test` (60s/owner) | Ruta returneaza 429 cu `Retry-After`; audit `me.email_settings.test outcome=denied reason=cooldown` | Limita built-in vs user click loop pe butonul "Trimite test" |
 | `drainEmailDispatches(timeoutMs)` | Asteapta SMTP-urile in flight inainte sa inchida DB-ul; default 10s, shutdown 5s | Gracefull shutdown — invocat automat din `gracefulShutdown()` |

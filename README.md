@@ -120,9 +120,7 @@ Aplicatia suporta doua moduri de autentificare:
 - `LEGAL_DASHBOARD_JWT_AUDIENCE` - optional
 - `LEGAL_DASHBOARD_JWT_TTL_SECONDS` - optional, default `3600`
 - `LEGAL_DASHBOARD_ALLOW_REMOTE=1` - opt-in pentru bind non-loopback; cere
-  `LEGAL_DASHBOARD_AUTH_MODE=web` + `LEGAL_DASHBOARD_ACK_NO_AUTH`
-- `LEGAL_DASHBOARD_ACK_NO_AUTH=i-understand-no-auth-yet` - confirmare boot
-  pentru bind non-loopback
+  `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT valid, altfel boot-ul esueaza
 
 ### Setup user pentru web mode
 
