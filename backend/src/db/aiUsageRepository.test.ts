@@ -64,16 +64,34 @@ describe("insertAiUsage", () => {
     const row = insertAiUsage({
       ownerId: "alice",
       provider: "openrouter",
-      model: "qwen/qwen3.7-max",
+      model: "anthropic/claude-opus-4.8",
       feature: "dosar_summary",
       inputTokens: 10,
       outputTokens: 20,
       costUsdMilli: 30,
-      routingTag: "openrouter:chinese",
+      routingTag: "openrouter:western",
     });
 
     expect(row.provider).toBe("openrouter");
-    expect(row.routing_tag).toBe("openrouter:chinese");
+    expect(row.routing_tag).toBe("openrouter:western");
+  });
+
+  it("citeste randuri istorice cu routing_tag openrouter:chinese fara eroare", () => {
+    // v2.38.0 a eliminat stack-ul chinese din tipul AiUsageRoutingTag, dar
+    // coloana routing_tag e TEXT fara CHECK — randurile vechi raman in DB si
+    // trebuie sa fie citibile in continuare (read-only legacy, fara validare).
+    getDb()
+      .prepare(
+        `INSERT INTO ai_usage
+           (owner_id, provider, model, input_tokens, output_tokens, cost_usd_milli, feature, routing_tag)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("alice", "openrouter", "z-ai/glm-5.1", 10, 20, 30, "dosar_summary", "openrouter:chinese");
+
+    const row = getDb()
+      .prepare("SELECT model, routing_tag FROM ai_usage WHERE routing_tag = 'openrouter:chinese'")
+      .get() as { model: string; routing_tag: string };
+    expect(row).toEqual({ model: "z-ai/glm-5.1", routing_tag: "openrouter:chinese" });
   });
 });
 

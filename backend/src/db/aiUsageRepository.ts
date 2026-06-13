@@ -2,7 +2,10 @@ import { getDb } from "./schema.ts";
 import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export type AiUsageProvider = "anthropic" | "openai" | "google" | "openrouter";
-export type AiUsageRoutingTag = "native" | "openrouter:western" | "openrouter:chinese";
+// v2.38.0: stack-ul chinese a fost eliminat — scrierile noi emit doar
+// "native" / "openrouter:western". Randurile istorice cu "openrouter:chinese"
+// raman in DB (coloana e TEXT fara CHECK) si sunt doar citite, niciodata validate.
+export type AiUsageRoutingTag = "native" | "openrouter:western";
 
 export interface AiUsageRow {
   id: number;

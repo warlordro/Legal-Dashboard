@@ -35,7 +35,7 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
   anthropic: {
     "claude-haiku-4-5-20251001": { inputUsdPerMillion: 1, outputUsdPerMillion: 5 },
     "claude-sonnet-4-6": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
-    "claude-opus-4-6": { inputUsdPerMillion: 15, outputUsdPerMillion: 75 },
+    "claude-opus-4-8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
   },
   openai: {
     "gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
@@ -44,22 +44,19 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
   },
   google: {
     "gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.4 },
-    "gemini-3-flash-preview": { inputUsdPerMillion: 0.3, outputUsdPerMillion: 2.5 },
+    "gemini-3.5-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 9 },
     "gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
   },
   openrouter: {
     "anthropic/claude-haiku-4.5": { inputUsdPerMillion: 1, outputUsdPerMillion: 5 },
     "anthropic/claude-sonnet-4.6": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
-    "anthropic/claude-opus-4.6": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
+    "anthropic/claude-opus-4.8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
     "openai/gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
     "openai/gpt-5.4-mini": { inputUsdPerMillion: 0.25, outputUsdPerMillion: 2 },
     "openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 10 },
     "google/gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.075, outputUsdPerMillion: 0.3 },
-    "google/gemini-3-flash-preview": { inputUsdPerMillion: 0.3, outputUsdPerMillion: 2.5 },
+    "google/gemini-3.5-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 9 },
     "google/gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
-    "z-ai/glm-5.1": { inputUsdPerMillion: 0.98, outputUsdPerMillion: 3.08 },
-    "moonshotai/kimi-k2.6": { inputUsdPerMillion: 0.73, outputUsdPerMillion: 3.49 },
-    "qwen/qwen3.7-max": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 7.5 },
   },
 };
 

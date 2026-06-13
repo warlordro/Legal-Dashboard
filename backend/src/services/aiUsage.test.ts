@@ -40,10 +40,12 @@ describe("estimateAiCostUsdMilli", () => {
   });
 
   it("falls back to zero when model or tokens are missing", () => {
+    // qwen/qwen3.7-max a fost delistat in v2.38.0 (stack chinese eliminat) —
+    // model fara intrare de pret = cost 0 + warn one-shot, nu throw.
     expect(
       estimateAiCostUsdMilli({
-        provider: "anthropic",
-        model: "unknown-model",
+        provider: "openrouter",
+        model: "qwen/qwen3.7-max",
         inputTokens: 1_000_000,
         outputTokens: 1_000_000,
       })
@@ -123,14 +125,14 @@ describe("AI service usage tracking", () => {
   it("uses direct OpenRouter cost and persists routing_tag when provided", async () => {
     const result = await withAiLogging(
       "openrouter",
-      "qwen/qwen3.7-max",
+      "anthropic/claude-opus-4.8",
       async () => ({
         value: "analysis text",
         meta: {
           usageInput: 1_000_000,
           usageOutput: 1_000_000,
           costUsdMilli: 123,
-          routingTag: "openrouter:chinese",
+          routingTag: "openrouter:western",
         },
       }),
       {
@@ -153,9 +155,9 @@ describe("AI service usage tracking", () => {
 
     expect(row).toEqual({
       provider: "openrouter",
-      model: "qwen/qwen3.7-max",
+      model: "anthropic/claude-opus-4.8",
       cost_usd_milli: 123,
-      routing_tag: "openrouter:chinese",
+      routing_tag: "openrouter:western",
     });
   });
 
