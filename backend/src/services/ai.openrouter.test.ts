@@ -30,8 +30,7 @@ import {
   callOpenRouter,
   resolveOpenRouterSlug,
   shouldRouteViaOpenRouter,
-  OPENROUTER_CHINESE_MAP,
-  OPENROUTER_WESTERN_MAP,
+  OPENROUTER_MODEL_MAP,
 } from "./ai.ts";
 
 let tmpRoot: string;
@@ -91,24 +90,18 @@ function mockOpenRouterResponse(options?: { text?: string; input?: number; outpu
 }
 
 describe("resolveOpenRouterSlug", () => {
-  it("resolves western stack slugs", () => {
-    expect(resolveOpenRouterSlug("claude-sonnet", "western")).toBe(OPENROUTER_WESTERN_MAP["claude-sonnet"]);
+  it("resolves model slugs", () => {
+    expect(resolveOpenRouterSlug("claude-sonnet")).toBe(OPENROUTER_MODEL_MAP["claude-sonnet"]);
   });
 
-  it("resolves chinese stack slugs", () => {
-    expect(resolveOpenRouterSlug("qwen-3.7-max", "chinese")).toBe(OPENROUTER_CHINESE_MAP["qwen-3.7-max"]);
+  it("uses OPENROUTER_MODEL_OVERRIDES before the static map", () => {
+    process.env.OPENROUTER_MODEL_OVERRIDES = "claude-sonnet:anthropic/custom";
+
+    expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/custom");
   });
 
-  it("uses OPENROUTER_MODEL_OVERRIDES before the static maps", () => {
-    process.env.OPENROUTER_MODEL_OVERRIDES = "qwen-3.7-max:qwen/custom, claude-sonnet:anthropic/custom";
-
-    expect(resolveOpenRouterSlug("qwen-3.7-max", "chinese")).toBe("qwen/custom");
-    expect(resolveOpenRouterSlug("claude-sonnet", "western")).toBe("anthropic/custom");
-  });
-
-  it("returns null for a model outside the selected stack", () => {
-    expect(resolveOpenRouterSlug("qwen-3.7-max", "western")).toBeNull();
-    expect(resolveOpenRouterSlug("unknown", "chinese")).toBeNull();
+  it("returns null for an unknown model", () => {
+    expect(resolveOpenRouterSlug("unknown")).toBeNull();
   });
 });
 
@@ -168,12 +161,12 @@ describe("callOpenRouter", () => {
 
     await callOpenRouter(
       "sk-or-v1-test",
-      "qwen/qwen3.7-max",
+      "anthropic/claude-sonnet-4.6",
       "prompt",
       5000,
       { ownerId: "alice", feature: "dosar_summary", requestId: "req-cost" },
       undefined,
-      "openrouter:chinese"
+      "openrouter:western"
     );
     await Promise.resolve();
     await Promise.resolve();
@@ -182,7 +175,7 @@ describe("callOpenRouter", () => {
       cost_usd_milli: number;
       routing_tag: string | null;
     };
-    expect(row).toEqual({ cost_usd_milli: 456, routing_tag: "openrouter:chinese" });
+    expect(row).toEqual({ cost_usd_milli: 456, routing_tag: "openrouter:western" });
   });
 
   it("falls back to MODEL_PRICES when usage.cost is missing", async () => {
@@ -190,42 +183,22 @@ describe("callOpenRouter", () => {
 
     await callOpenRouter(
       "sk-or-v1-test",
-      "z-ai/glm-5.1",
+      "anthropic/claude-sonnet-4.6",
       "prompt",
       5000,
       { ownerId: "alice", feature: "dosar_summary" },
       undefined,
-      "openrouter:chinese"
+      "openrouter:western"
     );
     await Promise.resolve();
     await Promise.resolve();
 
     const row = getDb().prepare("SELECT cost_usd_milli FROM ai_usage").get() as { cost_usd_milli: number };
-    expect(row.cost_usd_milli).toBe(980);
+    expect(row.cost_usd_milli).toBe(3000);
   });
 });
 
 describe("callModel OpenRouter routing", () => {
-  it("uses explicit openrouter routing with selected stack", async () => {
-    mockOpenRouterResponse({ text: "via openrouter" });
-
-    const result = await callModel(
-      "qwen-3.7-max",
-      "prompt",
-      { openrouter: "sk-or-v1-test" },
-      5000,
-      undefined,
-      undefined,
-      { mode: "openrouter", stack: "chinese" }
-    );
-
-    expect(result).toBe("via openrouter");
-    expect(openRouterCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "qwen/qwen3.7-max" }),
-      expect.any(Object)
-    );
-  });
-
   it("uses OPENROUTER_API_KEY env as implicit OpenRouter override", async () => {
     process.env.OPENROUTER_API_KEY = "sk-or-v1-env";
     mockOpenRouterResponse();
@@ -267,62 +240,36 @@ describe("callModel OpenRouter routing", () => {
 
   it("throws NO_API_KEY:openrouter when OpenRouter is selected without a key", async () => {
     await expect(
-      callModel("glm-5.1", "prompt", {}, 5000, undefined, undefined, { mode: "openrouter", stack: "chinese" })
+      callModel("claude-sonnet", "prompt", {}, 5000, undefined, undefined, { mode: "openrouter" })
     ).rejects.toThrow("NO_API_KEY:openrouter");
-  });
-
-  it("throws MODEL_NOT_IN_STACK when selected model is outside the OpenRouter stack", async () => {
-    await expect(
-      callModel("qwen-3.7-max", "prompt", { openrouter: "sk-or-v1-test" }, 5000, undefined, undefined, {
-        mode: "openrouter",
-        stack: "western",
-      })
-    ).rejects.toThrow("MODEL_NOT_IN_STACK:qwen-3.7-max:western");
   });
 });
 
 describe("shouldRouteViaOpenRouter", () => {
   it("routes when mode is explicitly openrouter", () => {
-    expect(
-      shouldRouteViaOpenRouter("claude-sonnet", { anthropic: "sk-ant" }, { mode: "openrouter", stack: "western" })
-    ).toBe(true);
+    expect(shouldRouteViaOpenRouter({ anthropic: "sk-ant" }, { mode: "openrouter" })).toBe(true);
   });
 
   it("does NOT route to openrouter when mode is native, even with a saved sk-or-* body key", () => {
     // Repro: user toggles back to native mode while keeping the OpenRouter key in
     // settings. routing.mode === "native" must win over the auto-detect on the
     // saved sk-or-* key.
-    expect(
-      shouldRouteViaOpenRouter(
-        "claude-sonnet",
-        { anthropic: "sk-ant", openrouter: "sk-or-v1-test" },
-        { mode: "native", stack: "chinese" }
-      )
-    ).toBe(false);
-  });
-
-  it("does NOT route to openrouter when mode is native, even with OPENROUTER_API_KEY env set", () => {
-    process.env.OPENROUTER_API_KEY = "sk-or-v1-env";
-    expect(shouldRouteViaOpenRouter("gpt-5.4-mini", { openai: "sk-test" }, { mode: "native", stack: "western" })).toBe(
+    expect(shouldRouteViaOpenRouter({ anthropic: "sk-ant", openrouter: "sk-or-v1-test" }, { mode: "native" })).toBe(
       false
     );
   });
 
-  it("still routes to openrouter in native mode for openrouter-only models (defensive fallback)", () => {
-    // The UI filter prevents picking a chinese-only model in native mode, but if it
-    // somehow happens we route to OpenRouter rather than failing — there is no
-    // native SDK for these models.
-    expect(
-      shouldRouteViaOpenRouter("qwen-3.7-max", { openrouter: "sk-or-v1-test" }, { mode: "native", stack: "chinese" })
-    ).toBe(true);
+  it("does NOT route to openrouter when mode is native, even with OPENROUTER_API_KEY env set", () => {
+    process.env.OPENROUTER_API_KEY = "sk-or-v1-env";
+    expect(shouldRouteViaOpenRouter({ openai: "sk-test" }, { mode: "native" })).toBe(false);
   });
 
   it("auto-detects openrouter when routing is undefined and a sk-or-* body key is present", () => {
-    expect(shouldRouteViaOpenRouter("claude-sonnet", { openrouter: "sk-or-v1-test" }, undefined)).toBe(true);
+    expect(shouldRouteViaOpenRouter({ openrouter: "sk-or-v1-test" }, undefined)).toBe(true);
   });
 
   it("auto-detects openrouter when routing is undefined and OPENROUTER_API_KEY env is set", () => {
     process.env.OPENROUTER_API_KEY = "sk-or-v1-env";
-    expect(shouldRouteViaOpenRouter("claude-sonnet", {}, undefined)).toBe(true);
+    expect(shouldRouteViaOpenRouter({}, undefined)).toBe(true);
   });
 });

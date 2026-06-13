@@ -86,12 +86,12 @@ describe("insertAiUsage", () => {
            (owner_id, provider, model, input_tokens, output_tokens, cost_usd_milli, feature, routing_tag)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
-      .run("alice", "openrouter", "z-ai/glm-5.1", 10, 20, 30, "dosar_summary", "openrouter:chinese");
+      .run("alice", "openrouter", "anthropic/claude-sonnet-4.6", 10, 20, 30, "dosar_summary", "openrouter:chinese");
 
     const row = getDb()
       .prepare("SELECT model, routing_tag FROM ai_usage WHERE routing_tag = 'openrouter:chinese'")
       .get() as { model: string; routing_tag: string };
-    expect(row).toEqual({ model: "z-ai/glm-5.1", routing_tag: "openrouter:chinese" });
+    expect(row).toEqual({ model: "anthropic/claude-sonnet-4.6", routing_tag: "openrouter:chinese" });
   });
 });
 

@@ -61,7 +61,7 @@ describe("migration 0025_ai_usage_owner_default", () => {
       `INSERT INTO ai_usage
         (owner_id, provider, model, input_tokens, output_tokens, cost_usd_milli, feature, routing_tag)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run("owner-a", "openrouter", "z-ai/glm-5.1", 10, 20, 30, "dosare", "openrouter:chinese");
+    ).run("owner-a", "openrouter", "anthropic/claude-sonnet-4.6", 10, 20, 30, "dosare", "openrouter:chinese");
 
     db.exec(readSql("0025_ai_usage_owner_default.up.sql"));
 
@@ -74,7 +74,7 @@ describe("migration 0025_ai_usage_owner_default", () => {
     expect(row).toEqual({
       owner_id: "owner-a",
       provider: "openrouter",
-      model: "z-ai/glm-5.1",
+      model: "anthropic/claude-sonnet-4.6",
       routing_tag: "openrouter:chinese",
     });
   });
