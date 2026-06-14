@@ -1,5 +1,32 @@
-import { describe, it, expect } from "vitest";
-import { buildPrompt, buildJudgePrompt, escapeFenceTags, isTimeoutOrAbort, validateAiBody } from "./ai.ts";
+import { describe, it, expect, vi } from "vitest";
+import { buildPrompt, buildJudgePrompt, callOpenAI, escapeFenceTags, isTimeoutOrAbort, validateAiBody } from "./ai.ts";
+
+const openAiCalls = vi.hoisted(() => ({
+  responsesSignal: undefined as unknown,
+  chatSignal: undefined as unknown,
+}));
+
+vi.mock("openai", () => {
+  class MockOpenAI {
+    responses = {
+      create: vi.fn(async (_body: unknown, opts: { signal?: AbortSignal }) => {
+        openAiCalls.responsesSignal = opts.signal;
+        // 404 routes through the responses-unavailable branch (not abort/timeout)
+        // so the fallback to chat.completions fires.
+        throw Object.assign(new Error("responses unavailable"), { status: 404 });
+      }),
+    };
+    chat = {
+      completions: {
+        create: vi.fn(async (_body: unknown, opts: { signal?: AbortSignal }) => {
+          openAiCalls.chatSignal = opts.signal;
+          return { choices: [{ message: { content: "ok" } }], usage: {} };
+        }),
+      },
+    };
+  }
+  return { default: MockOpenAI };
+});
 
 describe("escapeFenceTags", () => {
   it("neutralizes the dosar_data closing tag", () => {
@@ -143,5 +170,32 @@ describe("validateAiBody", () => {
         dosar: { numar: "1/2/2026", parti: [{ nume: "P", calitateParte: "Parat" }], sedinte: [{ data: "2026-01-01" }] },
       })
     ).toBeNull();
+  });
+});
+
+describe("callOpenAI — chat.completions fallback timeout budget", () => {
+  it("gives the fallback a FRESH composed signal still wired to the external signal", async () => {
+    openAiCalls.responsesSignal = undefined;
+    openAiCalls.chatSignal = undefined;
+    const ac = new AbortController();
+
+    const result = await callOpenAI("sk-test", "gpt-5.4", "hello", 120000, undefined, ac.signal);
+    expect(result).toBe("ok");
+
+    type SignalLike = { aborted: boolean };
+    const { responsesSignal, chatSignal } = openAiCalls;
+    expect(responsesSignal).toBeDefined();
+    expect(chatSignal).toBeDefined();
+
+    // The fallback must NOT reuse the primary path's already-partially-consumed
+    // signal — it gets a fresh timeout budget (different instance).
+    expect(Object.is(chatSignal, responsesSignal)).toBe(false);
+    // ...and it must not be pre-aborted when the fallback fires.
+    expect((chatSignal as SignalLike).aborted).toBe(false);
+
+    // CRITICAL: the fresh signal must still be composed with the external caller
+    // signal, so an upstream cancellation still aborts the fallback.
+    ac.abort();
+    expect((chatSignal as SignalLike).aborted).toBe(true);
   });
 });

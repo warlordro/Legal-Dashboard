@@ -439,13 +439,20 @@ async function callOpenAI(
         // Fallback for keys/gateways that expose only /chat/completions.
         // Use max_completion_tokens (not the deprecated max_tokens) — the
         // configured gpt-5.4 reasoning models reject max_tokens with a 400.
+        // Compose a FRESH signal so the fallback gets a full timeout budget
+        // instead of inheriting the leftover window already consumed by the
+        // primary `responses.create` attempt above. The external `signal` is
+        // re-composed in, so an upstream cancellation still aborts the fallback
+        // (the `composed.aborted` guard above already short-circuits a fully
+        // expired/cancelled external signal before we reach here).
+        const fallbackSignal = composeSignal(timeout, signal);
         const completion = await client.chat.completions.create(
           {
             model: modelId,
             messages: [{ role: "user", content: prompt }],
             max_completion_tokens: AI_MAX_TOKENS,
           },
-          { signal: composed }
+          { signal: fallbackSignal }
         );
         const usage = completion.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
         return {
