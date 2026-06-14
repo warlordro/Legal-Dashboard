@@ -51,6 +51,8 @@ describe("dosareIccj router", () => {
     const res = await dosareIccjRouter.request("/?numeParte=Ion");
     errSpy.mockRestore();
     expect(res.status).toBe(504);
+    // 504 e retryabil ca si 503, deci poarta Retry-After — fereastra mai scurta (60s).
+    expect(res.headers.get("Retry-After")).toBe("60");
     const body = (await res.json()) as ErrorBody;
     expect(body.error).toMatch(/in timp util/);
   });
