@@ -36,6 +36,14 @@ Un `/full-review` complet (43 findings, meta-verificat independent de 3 modele O
 
 **Limitare cunoscuta (acceptata):** in web mode cu monitoring activ, `jwt_denylist` e purjat de doua cai (intervalul standalone + scheduler-ul). Randul de audit `jwt_denylist.purged` provine doar de la calea care a sters efectiv randuri, deci poate lipsi pe un ciclu daca intervalul standalone castiga cursa. Heartbeat-ul neconditionat (count ramas, fiecare ciclu) acopera observabilitatea, iar corectitudinea purjarii (denylist marginit) e neafectata.
 
+### Corectitudine PortalJust + UI alerte (post-test)
+
+**CRITIC — cautarile cu 0 rezultate dadeau eroare.** Pentru o cautare fara rezultate, PortalJust intoarce un wrapper gol `<CautareDosareResponse xmlns="portalquery.just.ro" />` FARA niciun `<CautareDosareResult>` (verificat live: 299 bytes). Guard-ul false-empty din v2.37.1 verifica `<CautareDosareResult>` si arunca "envelope absent" pe FIECARE cautare cu 0 rezultate — aparand ca "Eroare la comunicarea cu serviciul PortalJust" in Cautare Dosare si ca alerte false "Sursa indisponibila (5 esecuri consecutive)" in monitoringul pe nume si pe dosar, desi PortalJust era functional. Guard-ul verifica acum wrapper-ul `<CautareDosareResponse>` (prezent si la 0 rezultate, si cu rezultate; absent doar pe o pagina non-SOAP de mentenanta/WAF), iar `extractFirst` intoarce `[]` cand `CautareDosareResult` lipseste = 0 rezultate legitime. Respingerea paginilor de mentenanta (intentia v2.37.1) ramane intacta.
+
+**Alerte monitoring pe nume — titlu corect.** Titlul `dosar_new`/`dosar_disappeared` era "Dosar nou gasit pentru nume: `<numar>`", punand numarul dosarului GASIT dupa "pentru nume:" ca si cum ar fi numele cautat. Acum: "Dosar nou gasit pentru «`<nume monitorizat>`»: `<numar>`" (cu fallback "(monitorizare pe nume)" cand numele lipseste).
+
+**Detaliu alerta + disclaimer.** `latest_sedinta_at` afisat ca "Ultima sedinta" formatat `dd.mm.yyyy` (nu raw `2026-11-10T00:00:00`); `sedinteCount` -> "Numar sedinte"; `iccj_id` (id intern pentru deep-link) suprimat din afisaj. Disclaimer-ul legal de sub analiza AI marit de la 11px la 14px.
+
 ### Migratii
 
 `0036` (data-fix `openrouter_stack`), `0037` (`ai_usage` `latency_ms`+`error_type`), `0038` (`jwt_denylist`).
