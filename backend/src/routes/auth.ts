@@ -1,4 +1,5 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
+import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
@@ -17,6 +18,7 @@ import { recordAudit } from "../db/auditRepository.ts";
 import { revokeJti } from "../db/jwtDenylistRepository.ts";
 import { getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
+import { getRequestId } from "../middleware/requestId.ts";
 import { hashEmail } from "../util/auditSanitize.ts";
 import { fail, ok } from "../util/envelope.ts";
 
@@ -53,6 +55,8 @@ authRouter.post("/logout", (c) => {
   let auditOwnerId: string | null = null;
   let auditActorId: string | null = null;
   let tokenVerified = false;
+  let jtiPresent = false;
+  let revokeSucceeded = false;
   try {
     if (rawToken) {
       const payload = verifyAuthToken(rawToken, {
@@ -60,6 +64,7 @@ authRouter.post("/logout", (c) => {
         issuer: getJwtIssuer(),
         audience: getJwtAudience(),
       });
+      jtiPresent = Boolean(payload.jti);
       const user = getUserById(payload.sub);
       if (user && user.status === "active") {
         auditOwnerId = user.id;
@@ -68,6 +73,7 @@ authRouter.post("/logout", (c) => {
         if (payload.jti && typeof payload.exp === "number") {
           try {
             revokeJti(payload.jti, payload.exp, user.id);
+            revokeSucceeded = true;
           } catch (err) {
             // Best-effort: logout still succeeds (cookie cleared below, token
             // expires at TTL), but a failed denylist write is security-relevant
@@ -84,16 +90,32 @@ authRouter.post("/logout", (c) => {
   } catch {
     tokenVerified = false;
   }
+  // Attribution must be extracted explicitly: this route is excluded from
+  // ownerContext (owner.ts), so passing `c` as recordAudit's first arg would
+  // make getOwnerId(c) throw in web mode. Pull ip/userAgent/requestId by hand.
+  let ip: string | null = null;
+  try {
+    ip = getConnInfo(c).remote.address ?? null;
+  } catch {
+    ip = null;
+  }
+  const userAgent = c.req.header("user-agent") ?? null;
+  const requestId = getRequestId(c) || null;
   try {
     recordAudit(null, "auth.logout", {
       ownerId: auditOwnerId,
       actorId: auditActorId,
       targetKind: auditOwnerId ? "user" : "http_request",
       targetId: auditOwnerId ?? c.req.path,
+      ip,
+      userAgent,
+      requestId,
       detail: {
         triggered: "user_request",
         tokenPresent: Boolean(rawToken),
         tokenVerified,
+        jtiPresent,
+        revokeSucceeded,
       },
     });
   } catch (err) {

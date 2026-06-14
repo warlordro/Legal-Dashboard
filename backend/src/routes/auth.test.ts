@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { AUTH_COOKIE_NAME } from "../auth/authProvider.ts";
 import { signAuthToken } from "../auth/jwt.ts";
+import { getAuditEvents } from "../db/auditRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser } from "../db/userRepository.ts";
 import { getOwnerId, ownerContext } from "../middleware/owner.ts";
@@ -75,6 +76,24 @@ describe("/api/v1/auth", () => {
 
     expect(res.status).toBe(200);
     expect(res.headers.get("set-cookie")).toContain("legal_dashboard_session=");
+  });
+
+  it("records jtiPresent and revokeSucceeded on the auth.logout audit row", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice" });
+    const app = buildApp();
+    const token = signAuthToken({ sub: "alice", exp: 4_102_444_800, jti: "logout-jti-1" }, SECRET);
+
+    const res = await app.request("/api/v1/auth/logout", {
+      method: "POST",
+      headers: { cookie: `${AUTH_COOKIE_NAME}=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    const events = getAuditEvents({ action: "auth.logout" });
+    expect(events.length).toBeGreaterThan(0);
+    const detail = JSON.parse(events[0].detail_json) as Record<string, unknown>;
+    expect(detail.revokeSucceeded).toBe(true);
+    expect(detail.jtiPresent).toBe(true);
   });
 
   it("accepts cookie auth and refreshes it into a secure HttpOnly SameSite cookie", async () => {
