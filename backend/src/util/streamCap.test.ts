@@ -42,4 +42,14 @@ describe("streamCap", () => {
       name: "AbortError",
     });
   });
+
+  it("returns empty string for a 204 response with no body", async () => {
+    const text = await readResponseTextWithCap(new Response(null, { status: 204 }), 5);
+
+    expect(text).toBe("");
+  });
+
+  it("returns empty string for a null body without throwing on a tiny cap", async () => {
+    await expect(readResponseTextWithCap(new Response(null), 1)).resolves.toBe("");
+  });
 });
