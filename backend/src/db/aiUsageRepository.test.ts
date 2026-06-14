@@ -13,6 +13,7 @@ import {
   insertAiUsage,
   insertAiUsageReservation,
   listAiUsageLastDays,
+  purgeOldAiUsage,
   sumAiUsageMilliInWindow,
   sumAiUsageMilliToday,
 } from "./aiUsageRepository.ts";
@@ -337,6 +338,66 @@ describe("sumAiUsageMilliInWindow", () => {
   it("rejects non-positive windowSeconds", () => {
     expect(() => sumAiUsageMilliInWindow("alice", "ai.single", 0)).toThrow();
     expect(() => sumAiUsageMilliInWindow("alice", "ai.single", -1)).toThrow();
+  });
+});
+
+describe("purgeOldAiUsage", () => {
+  it("deletes rows older than the cutoff and returns the deleted count", () => {
+    const now = Date.now();
+    const old = new Date(now - 100 * 86_400_000).toISOString(); // 100 days ago
+    const recent = new Date(now - 10 * 86_400_000).toISOString(); // 10 days ago
+
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: old,
+    });
+    insertAiUsage({
+      ownerId: "bob",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: old,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: recent,
+    });
+
+    const deleted = purgeOldAiUsage(90);
+    expect(deleted).toBe(2);
+
+    const remaining = getDb().prepare("SELECT COUNT(*) AS n FROM ai_usage").get() as { n: number };
+    expect(remaining.n).toBe(1);
+  });
+
+  it("chunks past chunkSize and still returns the full deleted count", () => {
+    const old = new Date(Date.now() - 100 * 86_400_000).toISOString();
+    for (let i = 0; i < 5; i++) {
+      insertAiUsage({
+        ownerId: "alice",
+        provider: "openai",
+        model: "gpt-5.4",
+        feature: "dosar_summary",
+        costUsdMilli: 1,
+        ts: old,
+      });
+    }
+
+    // chunkSize 2 forces multiple delete batches (2 + 2 + 1).
+    const deleted = purgeOldAiUsage(90, 2);
+    expect(deleted).toBe(5);
+
+    const remaining = getDb().prepare("SELECT COUNT(*) AS n FROM ai_usage").get() as { n: number };
+    expect(remaining.n).toBe(0);
   });
 });
 

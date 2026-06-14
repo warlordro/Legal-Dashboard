@@ -401,9 +401,19 @@ export function listAiUsageLastDays(input: {
 // the scheduler's daily purge timer alongside it. Global (not owner-scoped):
 // older-than-N rows are aged out for everyone uniformly. Returns the deleted
 // count for audit logging.
-export function purgeOldAiUsage(retentionDays: number): number {
+//
+// Chunked ca purgeOldRuns / purgeOldAuditLog — un DELETE unbounded tinea write
+// lock-ul pe scan-ul complet la primul purge pe instalari vechi. Cu
+// idx_ai_usage_global_time + LIMIT, fiecare batch elibereaza lock-ul rapid.
+export function purgeOldAiUsage(retentionDays: number, chunkSize = 1000): number {
   const days = Math.max(1, Math.floor(retentionDays));
   const cutoff = new Date(Date.now() - days * 86_400_000).toISOString();
-  const info = getDb().prepare("DELETE FROM ai_usage WHERE ts < ?").run(cutoff);
-  return info.changes;
+  const stmt = getDb().prepare("DELETE FROM ai_usage WHERE rowid IN (SELECT rowid FROM ai_usage WHERE ts < ? LIMIT ?)");
+  let total = 0;
+  for (;;) {
+    const info = stmt.run(cutoff, chunkSize);
+    total += info.changes;
+    if (info.changes < chunkSize) break;
+  }
+  return total;
 }
