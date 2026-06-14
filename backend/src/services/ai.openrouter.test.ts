@@ -263,6 +263,20 @@ describe("callOpenAI — Responses API fallback (audit R3)", () => {
     );
     expect(openRouterCreateMock).not.toHaveBeenCalled();
   });
+
+  it("does NOT fall back when the INTERNAL timeout fires even if the error mentions 'responses'", async () => {
+    // timeout=0 → composed (AbortSignal.any incl. the internal timeout) aborts on
+    // the next tick; the mock then rejects with a NON-abort error whose message
+    // contains "responses" — the substring that would otherwise trigger fallback.
+    // The re-throw must key off composed.aborted, not just signal?.aborted.
+    openAiResponsesCreateMock.mockImplementation(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      throw new Error("the /responses request did not complete");
+    });
+
+    await expect(callOpenAI("sk-openai-test", "gpt-5.4", "prompt", 0)).rejects.toThrow(/responses/);
+    expect(openRouterCreateMock).not.toHaveBeenCalled();
+  });
 });
 
 describe("callModel OpenRouter routing", () => {

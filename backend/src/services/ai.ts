@@ -427,7 +427,10 @@ async function callOpenAI(
         // Re-throw discipline: aborts/timeouts, auth (401/403) and rate-limit
         // (429) must propagate unchanged. Only a Responses-API-unavailable
         // signal is allowed to fall through to chat.completions.
-        if (signal?.aborted || isTimeoutOrAbort(err) || status === 401 || status === 403 || status === 429) {
+        // `composed` aborts on EITHER the parent signal or the internal timeout,
+        // so checking it (not just `signal`) closes the case where an internal
+        // timeout fires and the error message happens to contain "responses".
+        if (composed.aborted || isTimeoutOrAbort(err) || status === 401 || status === 403 || status === 429) {
           throw err;
         }
         const message = String((err as { message?: unknown })?.message ?? "").toLowerCase();
