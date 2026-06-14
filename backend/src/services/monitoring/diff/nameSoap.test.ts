@@ -277,11 +277,15 @@ describe("diffNameSoap dosar_disappeared pre-v2 safety belt", () => {
 
 describe("diffNameSoap partial-failure carry-forward (v2.37.1, review cluster 1)", () => {
   it("nu emite dosar_disappeared pentru dosare la institutii picate si le pastreaza in snapshot", () => {
+    // Productie: failedInstitutii contine CODUL enum PortalJust (target.institutie,
+    // ex. TribunalulBUCURESTI fara spatiu) iar instanta din dosarul intors e NUMELE
+    // afisat (Tribunalul Bucuresti cu spatiu). Cele doua vocabulare diverg — fixul
+    // normalizeaza ambele parti la acelasi label canonic inainte de comparatie.
     const prevDosar: NameSoapSnapshotDosar = {
       numar: "1/3/2026",
       stadiu: "fond",
       categorie: "civil",
-      instanta: "TribunalulCLUJ",
+      instanta: "Tribunalul Bucuresti",
       latest_sedinta_at: null,
     };
     const out = diffNameSoap({
@@ -291,7 +295,7 @@ describe("diffNameSoap partial-failure carry-forward (v2.37.1, review cluster 1)
       now: NOW,
       jobCreatedAt: JOB_CREATED_AT,
       prevSnapshotId: 7,
-      failedInstitutii: ["TribunalulCLUJ"],
+      failedInstitutii: ["TribunalulBUCURESTI"],
     });
     expect(out.alerts).toHaveLength(0);
     expect(out.newSnapshot.dosare.map((d) => d.numar)).toContain("1/3/2026");
@@ -302,7 +306,7 @@ describe("diffNameSoap partial-failure carry-forward (v2.37.1, review cluster 1)
       numar: "2/3/2026",
       stadiu: "fond",
       categorie: "civil",
-      instanta: "TribunalulIASI",
+      instanta: "Tribunalul Iasi",
       latest_sedinta_at: null,
     };
     const out = diffNameSoap({
@@ -312,7 +316,7 @@ describe("diffNameSoap partial-failure carry-forward (v2.37.1, review cluster 1)
       now: NOW,
       jobCreatedAt: JOB_CREATED_AT,
       prevSnapshotId: 7,
-      failedInstitutii: ["TribunalulCLUJ"],
+      failedInstitutii: ["TribunalulBUCURESTI"],
     });
     expect(out.alerts.map((a) => a.kind)).toEqual(["dosar_disappeared"]);
     expect(out.newSnapshot.dosare).toHaveLength(0);

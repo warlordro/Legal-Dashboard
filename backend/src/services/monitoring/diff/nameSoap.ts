@@ -1,5 +1,6 @@
 import type { AlertConfig } from "../../../schemas/monitoring.ts";
 import type { Dosar } from "../../../soap.ts";
+import { normalizeInstitutie } from "../../../util/institutionLabel.ts";
 import type { DiffAlertEmit as GenericDiffAlertEmit } from "./types.ts";
 
 export type NameSoapAlertKind =
@@ -201,7 +202,11 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
   const currentByNumar = byNumar(currentSnapshot);
   const alerts: NameSoapDiffAlert[] = [];
   const anchor = `s${input.prevSnapshotId ?? "init"}`;
-  const failed = new Set((input.failedInstitutii ?? []).filter((x) => x.length > 0));
+  // v2.38.0: failedInstitutii contine coduri enum PortalJust (ex.
+  // TribunalulBUCURESTI), iar instanta din snapshot e numele afisat (Tribunalul
+  // Bucuresti) — vocabulare diferite. normalizeInstitutie mapeaza ambele la
+  // acelasi label canonic, deci normalizam ambele parti ale comparatiei.
+  const failed = new Set((input.failedInstitutii ?? []).filter((x) => x.length > 0).map(normalizeInstitutie));
 
   // Carry-forward pentru institutiile picate (vezi comentariul de pe
   // NameSoapDiffInput.failedInstitutii): dosarele prev de la o instanta care
@@ -209,7 +214,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
   let newSnapshot = currentSnapshot;
   if (failed.size > 0 && prevSnapshot) {
     const carried = prevSnapshot.dosare.filter(
-      (d) => d.numar && !currentByNumar.has(d.numar) && failed.has(d.instanta)
+      (d) => d.numar && !currentByNumar.has(d.numar) && failed.has(normalizeInstitutie(d.instanta))
     );
     if (carried.length > 0) {
       newSnapshot = {
@@ -287,7 +292,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
     for (const [numar, prev] of prevByNumar) {
       if (currentByNumar.has(numar)) continue;
       // v2.37.1: instanta picata in fan-out => absenta necunoscuta, nu disparitie.
-      if (failed.has(prev.instanta)) continue;
+      if (failed.has(normalizeInstitutie(prev.instanta))) continue;
       if (!alertConfig.notify_on_dosar_disappeared) continue;
       if (!dosarPassesFilter(prev, alertConfig)) continue;
       alerts.push({
