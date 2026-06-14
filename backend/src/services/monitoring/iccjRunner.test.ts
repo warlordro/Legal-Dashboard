@@ -134,6 +134,20 @@ describe("iccjRunner — false-empty guard (Codex #3)", () => {
     // Same guard: a parse failure NEVER writes a (false-empty) snapshot.
     expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
   });
+
+  it("malformed target_json (missing numar_dosar) → status error/ICCJ_PARSE_FAIL, NO snapshot written", async () => {
+    const job = seedIccjJob();
+    // Corrupt target_json: valid JSON but missing numar_dosar — must surface as a
+    // parse-level error, not an opaque TypeError mapped to ICCJ_FAIL.
+    getDb().prepare("UPDATE monitoring_jobs SET target_json = ? WHERE id = ?").run('{"iccj_id":"abc"}', job.id);
+    const reloaded = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(job.id) as ScheduledJob;
+    const runId = seedRunningRow(job.id);
+    const runner = createIccjRunner({ fetchCurrentDosar: async () => makeDosar("1085/1/2026") });
+    const out = await runner.run({ job: reloaded, runId, nowIso: NOW_ISO, signal: new AbortController().signal });
+    expect(out.status).toBe("error");
+    expect(out.errorCode).toBe("ICCJ_PARSE_FAIL");
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+  });
 });
 
 describe("iccjRunner — genuine not-found", () => {

@@ -50,11 +50,16 @@ export function createIccjRunner(deps: IccjRunnerDeps): JobRunner {
       const budgetSignal = AbortSignal.timeout(budgetMs);
       const composed = AbortSignal.any([signal, budgetSignal]);
 
-      const target = JSON.parse(job.target_json) as { numar_dosar: string; iccj_id?: string };
       const alertConfig = AlertConfigSchema.parse(JSON.parse(job.alert_config_json));
 
       let currentDosar: Dosar | null;
+      let target: { numar_dosar: string; iccj_id?: string };
       try {
+        const parsed = JSON.parse(job.target_json);
+        if (typeof parsed?.numar_dosar !== "string" || parsed.numar_dosar.length === 0) {
+          throw new IccjParseError("target_json missing numar_dosar for job " + job.id);
+        }
+        target = parsed as { numar_dosar: string; iccj_id?: string };
         currentDosar = await deps.fetchCurrentDosar(
           { numarDosar: target.numar_dosar, iccjId: target.iccj_id },
           { signal: composed }
