@@ -42,14 +42,19 @@ export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "gemini-pro-3": "google/gemini-3.1-pro-preview",
 };
 
-// Env var = operator-trusted, dar validam fail-fast: typo-uri sau slug-uri
-// in afara formatului provider/model ar produce erori criptice la OpenRouter.
+// Env var = operator-trusted, dar validam slug-ul: typo-uri sau slug-uri in
+// afara formatului provider/model ar produce erori criptice la OpenRouter. Un
+// override invalid e respins cu log + fallback la map-ul static (NU fail-fast).
 const OPENROUTER_ALLOWED_PROVIDERS = new Set(["anthropic", "openai", "google"]);
 const OPENROUTER_SLUG_RE = /^([\w-]+)\/[\w.:-]+$/;
 function isValidOverrideSlug(slug: string): boolean {
   const match = OPENROUTER_SLUG_RE.exec(slug);
   if (!match || !OPENROUTER_ALLOWED_PROVIDERS.has(match[1])) {
-    console.warn(`[ai] OPENROUTER_MODEL_OVERRIDES: slug invalid ignorat: ${slug}`);
+    console.error({
+      code: "OPENROUTER_OVERRIDE_INVALID",
+      message: "[ai] OPENROUTER_MODEL_OVERRIDES: slug invalid ignorat, fallback la map static",
+      slug,
+    });
     return false;
   }
   return true;

@@ -101,6 +101,17 @@ describe("resolveOpenRouterSlug", () => {
     expect(resolveOpenRouterSlug("claude-sonnet")).toBe(OPENROUTER_MODEL_MAP["claude-sonnet"]);
   });
 
+  // Pin literale (NU prin OPENROUTER_MODEL_MAP, altfel testul citeste aceeasi
+  // sursa pe care o citeste functia si nu ar mai prinde regresia). v2.38.0 a
+  // bumpuit gemini la 3.5-flash; vechea cheie gemini-flash-3 a fost eliminata.
+  it("pins gemini-flash-3.5 to the v2.38.0 slug (regression guard)", () => {
+    expect(resolveOpenRouterSlug("gemini-flash-3.5")).toBe("google/gemini-3.5-flash");
+  });
+
+  it("returns null for the retired gemini-flash-3 key", () => {
+    expect(resolveOpenRouterSlug("gemini-flash-3")).toBeNull();
+  });
+
   it("uses OPENROUTER_MODEL_OVERRIDES before the static map", () => {
     process.env.OPENROUTER_MODEL_OVERRIDES = "claude-sonnet:anthropic/custom";
 

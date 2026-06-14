@@ -1285,6 +1285,44 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
     expect(rows.map((r) => r.id)).toEqual([oldRun]);
   });
 
+  // The jwt_denylist purge is wrapped in its own try/catch (scheduler.ts:466)
+  // so a fault there (e.g. table dropped by an out-of-band migration rollback)
+  // logs but does NOT kill the daily timer. We drop the table so purgeExpiredJti
+  // throws, then advance the clock TWICE: a second "threw" log on the second
+  // tick proves the timer re-armed (scheduleRunPurge ran despite the throw).
+  it("purgeExpiredJti throwing is logged but does NOT stop the daily timer re-arm", async () => {
+    getDb().exec("DROP TABLE jwt_denylist");
+
+    const origError = console.error;
+    const errorCalls: unknown[][] = [];
+    console.error = (...args: unknown[]) => {
+      errorCalls.push(args);
+    };
+
+    const clock = new FakeClock(T0_DATE);
+    const sch = new Scheduler({
+      clock,
+      runners: { dosar_soap: new NoopOkRunner() },
+      tickIntervalMs: 2 * 86_400_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    try {
+      await sch.start();
+      // First purge fires → purgeExpiredJti throws (table gone) → catch logs.
+      await clock.advance(86_400_000);
+      // Second purge fires → if the timer had died, this would NOT log again.
+      await clock.advance(86_400_000);
+      await sch.stop();
+    } finally {
+      console.error = origError;
+    }
+
+    const purgeThrewLogs = errorCalls.filter((args) => String(args[0]).includes("purgeExpiredJti threw"));
+    expect(purgeThrewLogs.length).toBe(2);
+  });
+
   it("purges expired jwt_denylist entries when the daily timer fires", async () => {
     revokeJti("x", 1, "local");
     expect(isJtiRevoked("x")).toBe(true);
