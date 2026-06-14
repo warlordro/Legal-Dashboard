@@ -137,6 +137,9 @@ Tabelul complet de kill switches operationale e in [SESSION-HANDOFF.md](SESSION-
 - **AI usage tracking**: orice call SDK reusit sau pornit si esuat scrie owner-scoped in `ai_usage` dupa call, fara SQLite lock peste I/O extern
 - **Admin guards**: `requireRole("admin")` pe rutele care opereaza pe state global (RNPM `DELETE /saved/all`, `POST /compact`, backup management)
 - **Web-mode 501 gate**: `rejectCaptchaKeyInWebMode()` blocheaza POST `/rnpm/search`/`/bulk`/`/captcha/balance` cand `getAuthMode() === "web"` (necesita per-user key storage server-side)
+- **JWT revocation**: claim `jti` + tabela `jwt_denylist` (migration 0038), revoke la logout (cookie + Bearer), `isJtiRevoked` la verify, purge zilnic; tokenele fara `jti` (pre-v2.38.0) expira la TTL
+- **Session cookie SameSite=Strict**: strans de la `Lax` in v2.38.0 (anti-CSRF)
+- **ACK_NO_AUTH gate eliminat**: `LEGAL_DASHBOARD_ACK_NO_AUTH` retras in v2.38.0; web auth (`auth_mode=web` + JWT valid) e gate suficient si mai riguros pentru remote bind
 
 ### Riscuri acceptate
 - SOAP HTTP upstream (portalquery.just.ro nu ofera HTTPS) - date publice, fara autentificare

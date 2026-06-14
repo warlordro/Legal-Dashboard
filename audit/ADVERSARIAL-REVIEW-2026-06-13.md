@@ -1,5 +1,27 @@
 # Adversarial Review — Legal Dashboard
 
+> ## Reconciliere / disposition (adaugat 2026-06-14)
+>
+> **Scope real:** acest audit a fost rulat la jumatatea refactorului de drop al stack-ului chinezesc OpenRouter, pe branch-ul de feature (NU pe `main` released). Headerul "v2.37.1 (branch `main`)" e mislabeled: codul analizat era de fapt branch-ul `feat/v2.38.0-hardening-model-refresh` mid-flight, motiv pentru care `npm run check` pica (C1/T1) — testele vechi inca importau simboluri deja sterse din `ai.ts`. Defectele de tip "stack chinezesc" reflecta o stare tranzitorie a branch-ului, nu o regresie pe productie.
+>
+> **Disposition findings → outcome:**
+>
+> | Finding | Outcome | Note / commit |
+> |---|---|---|
+> | C1 / R1 / T1 / T2 (`ai.openrouter.test.ts` rupt) | FOLDED v2.38.0 | testele aliniate la noul API in dropul stack-ului chinezesc (`c503064`, `2b094d6`, `dc53aa0`) |
+> | S1 / A1 / R2 / U1 / U3 (stack chinezesc backend↔frontend) | FOLDED v2.38.0 | stack chinezesc eliminat din settings API + migration 0036 coerce `chinese->western` (`2b094d6`, `dc53aa0`) |
+> | S2 / O1 / O2 (`.env.example` ACK + JWT issuer/audience) | INCLUS v2.38.0 | ACK_NO_AUTH retras, `.env.example` + SECURITY.md sincronizate (env docs-sync, acest batch) |
+> | S6 (cookie JWT nu se invalideaza la suspendare/rol) | INCLUS v2.38.0 | JWT revocation: `jti` + `jwt_denylist` (migration 0038), revoke la logout |
+> | S3 (IP real in spatele proxy) | DEFERAT | comportament documentat (`LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR`); operational, nu blocant |
+> | S4 (captcha race controllere neabortate) | DEFERAT | next sprint |
+> | S5 (`owner_id DEFAULT 'local'`) | DEFERAT | risc latent web-mode, runtime guard de extins |
+> | R3 (callOpenAI fara fallback) / R4 (audit cap bytes) / R5 (nameListParser temp) / R6 (ICCJ batch budget) | DEFERAT | robustete, next sprint |
+> | A2 (DDL duplicat schema.ts) | DEFERAT | cross-ref comentariu adaugat (`9fe1bbf`); drift-test ramane TODO |
+> | A3 (SQL interpolat tenant keys) | ACCEPTAT | guard `isTenantKeyField` prezent; risc acceptat |
+> | T3 / T4 / U2 / O3 / O4 | DEFERAT | calitate/UX/operational, esalonat |
+>
+> Raportul de mai jos e pastrat ca atare (snapshot al starii mid-refactor) pentru trasabilitate.
+
 **Dată:** 13 iunie 2026  
 **Versiune analizată:** v2.37.1 (branch `main`)  
 **Reviewer:** Claude Code (opencode/moonshotai/kimi-k2.7-code)  

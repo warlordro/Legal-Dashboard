@@ -571,7 +571,7 @@ Run: `npm test --workspace=backend -- index` → Expected: PASS.
 
 - [ ] **Step 3: Configuri si docs**
 
-Sterge linia `LEGAL_DASHBOARD_ACK_NO_AUTH` din: `deploy/docker-compose.prod.yml:94`, `docker-compose.web.example.yml:43` (+ comentariul de la ~11), `docker-build.yml` (liniile ~102 comentariu + ~114 env), `.env.example:19`, `backend/.env.example:52`. Actualizeaza referintele din README.md, SECURITY.md (inclusiv tabelul env), RUNBOOK.md (tabel), DEPLOY-SERVER.md, SESSION-HANDOFF.md (tabel kill switches): remote bind cere acum doar `LEGAL_DASHBOARD_ALLOW_REMOTE=1` + `AUTH_MODE=web` + JWT valid.
+Sterge linia `LEGAL_DASHBOARD_ACK_NO_AUTH` din: `deploy/docker-compose.prod.yml:94`, `docker-compose.web.example.yml:43` (+ comentariul de la ~11), `docker-build.yml` (liniile ~102 comentariu + ~114 env), `.env.example:19`, `backend/.env.example:52`. Actualizeaza referintele din README.md, SECURITY.md (inclusiv tabelul env), RUNBOOK.md (tabel), DEPLOY-SERVER.md, SESSION-HANDOFF.md (tabel kill switches): remote bind cere acum doar `LEGAL_DASHBOARD_ALLOW_REMOTE=1` + `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT valid.
 
 Sanity: `Grep -i "ACK_NO_AUTH" .` la final — hit-uri acceptate doar in CHANGELOG.md, `frontend/src/data/changelog-entries.tsx` (istoric), `audit/**`, `EXECUTION-ROADMAP.md`, `STATUS.md` (istoric).
 

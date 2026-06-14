@@ -1,5 +1,7 @@
 -- 0036_openrouter_stack_western.down.sql - data-fix ireversibil (nu putem sti
 -- care owneri aveau 'chinese'). No-op pe date.
+-- Recuperare: valorile originale 'chinese' se restaureaza DOAR dintr-un backup
+-- pre-0036 (vezi hook-ul de backup 'schema-upgrade' rulat inainte de migration).
 
 -- Rollback-ul trebuie sa stearga si randul de versiune, altfel runner-ul crede
 -- ca migratia e inca aplicata si nu o re-ruleaza la upgrade. CREATE-ul defensiv

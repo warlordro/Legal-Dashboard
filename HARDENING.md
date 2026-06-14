@@ -22,7 +22,7 @@ Format: `[ ]` TODO → `[~]` in progress → `[x]` done. Cand un item e done, la
 
 - [ ] **CI pipeline GitHub Actions** (`.github/workflows/ci.yml`) — rula pe PR + push main: `npm ci` cached + `npx tsc --noEmit` pe ambele workspace-uri + `npx vitest run` + build frontend + build backend. Fara publish. **Effort:** ~4h.
 - [ ] **Biome gate in CI** — `npx biome check` ca step obligatoriu. Biome.json exista deja. **Effort:** ~1h.
-- [ ] **Dependabot** (`.github/dependabot.yml`) — patch+minor grupate saptamanal, PR separat per major. Nativ GitHub, nu Renovate (overkill pentru solo dev). **Effort:** ~30 min.
+- [x] **Dependabot** (`.github/dependabot.yml`) — patch+minor grupate saptamanal, PR separat per major. Nativ GitHub, nu Renovate (overkill pentru solo dev). **Effort:** ~30 min. **Livrat v2.38.0** (npm + github-actions + docker).
 
 ## Faza 2 — Security active findings (~3-4 zile)
 

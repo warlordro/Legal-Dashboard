@@ -402,6 +402,46 @@ sqlite3 /path/to/legal-dashboard.db "SELECT MAX(version) FROM _schema_versions;"
 # 5. Instaleaza binarul versiunii anterioare (v2.36.x).
 ```
 
+### Rollback specific: migratiile 0036-0038 (v2.38.0 -> v2.37.1)
+
+v2.38.0 a adaugat exact trei migratii peste v2.37.1 (0036, 0037, 0038). Migratia
+0035 e parte din v2.37.1, deci rollback-ul catre v2.37.1 face down DOAR pe cele
+trei migratii v2.38.0 si se opreste la versiunea 35 (binarul v2.37.1 are 0035 pe
+disk si l-ar re-aplica la boot daca DB-ul ar cobori sub 35).
+
+Down-run in ordine descrescatoare, una cate una, cu `-bail` per fisier (o eroare
+opreste scriptul, nu continua pe jumatate). Dupa fiecare pas confirma
+`MAX(version)` din `_schema_versions` (fiecare down isi sterge singur randul).
+
+```bash
+# 1. Opreste aplicatia (vezi Procedura, pasul 1) + snapshot defensiv (pasul 2).
+
+# 2. Down 0038 -> 0037 (drop jwt_denylist):
+sqlite3 -bail /path/to/legal-dashboard.db < backend/src/db/migrations/0038_jwt_denylist.down.sql
+sqlite3 /path/to/legal-dashboard.db "SELECT MAX(version) FROM _schema_versions;"  # asteptat: 37
+
+# 3. Down 0037 -> 0036 (drop coloanele latency_ms/error_type din ai_usage):
+sqlite3 -bail /path/to/legal-dashboard.db < backend/src/db/migrations/0037_ai_usage_latency.down.sql
+sqlite3 /path/to/legal-dashboard.db "SELECT MAX(version) FROM _schema_versions;"  # asteptat: 36
+
+# 4. Down 0036 -> 0035 (no-op pe date):
+sqlite3 -bail /path/to/legal-dashboard.db < backend/src/db/migrations/0036_openrouter_stack_western.down.sql
+sqlite3 /path/to/legal-dashboard.db "SELECT MAX(version) FROM _schema_versions;"  # asteptat: 35
+
+# 5. Instaleaza binarul versiunii anterioare (v2.37.1). NU rula down pe 0035 —
+#    e parte din v2.37.1; binarul nou il are pe disk si l-ar re-aplica la boot.
+```
+
+Atentie la doua down-uri non-reversibile pe date:
+
+`0036` down e no-op pe DATE — coercia `chinese -> western` din up e ireversibila
+(nu putem sti care owneri aveau `chinese`). Valorile originale `chinese` sunt
+recuperabile DOAR dintr-un backup pre-0036 (vezi hook-ul `schema-upgrade`).
+
+`0038` down face `DROP TABLE jwt_denylist`: tokenele revocate-dar-neexpirate redevin
+valide pana isi ating TTL-ul. Daca un logout/revocare era motivat de securitate,
+roteste `LEGAL_DASHBOARD_JWT_SECRET` dupa rollback ca sa invalidezi toate tokenele.
+
 ### Daca rollback-ul nu mai porneste
 
 Restore-uieste pre-rollback snapshot-ul si raman pe versiunea cu bug pana la
