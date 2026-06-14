@@ -1,9 +1,12 @@
+import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import { getAuthMode, getJwtAudience, getJwtIssuer, requireJwtSecret, type AuthMode } from "./config.ts";
 import { verifyAuthToken, type AuthJwtPayload } from "./jwt.ts";
+import { recordAudit } from "../db/auditRepository.ts";
 import { isJtiRevoked } from "../db/jwtDenylistRepository.ts";
 import { getUserById, type UserRow } from "../db/userRepository.ts";
+import { getRequestId } from "../middleware/requestId.ts";
 
 export const AUTH_COOKIE_NAME = "legal_dashboard_session";
 
@@ -81,6 +84,32 @@ export class WebJwtAuthProvider implements AuthProvider {
 
     if (payload.jti && isJtiRevoked(payload.jti)) {
       console.warn(`[auth.jwt_revoked] sub=${payload.sub}`);
+      // Best-effort durable audit: replay of a revoked token is a
+      // security-relevant event. Wrapped in its own try/catch so a failed audit
+      // write NEVER changes the auth outcome — the replay is still rejected
+      // below. Attribution extracted by hand (this seam runs before
+      // ownerContext, so passing `c` would make getOwnerId(c) throw). CP-12.
+      let ip: string | null = null;
+      try {
+        ip = getConnInfo(c).remote.address ?? null;
+      } catch {
+        ip = null;
+      }
+      const userAgent = c.req.header("user-agent") ?? null;
+      const requestId = getRequestId(c) || null;
+      try {
+        recordAudit(null, "auth.jwt_revoked", {
+          outcome: "denied",
+          targetKind: "http_request",
+          targetId: c.req.path,
+          ip,
+          userAgent,
+          requestId,
+          detail: { jti: payload.jti },
+        });
+      } catch (err) {
+        console.error("[auth] auth.jwt_revoked audit failed:", err);
+      }
       throw new AuthenticationError(401, "unauthorized", "Token de autentificare invalid.");
     }
 
