@@ -228,7 +228,9 @@ describe("runDailyBackup — atomicity + retention", () => {
     expect(preMigration).toHaveLength(5);
     expect(preMigration).toContain("legal-dashboard.pre-schema-20200107.db");
     expect(preMigration).not.toContain("legal-dashboard.pre-schema-20200101.db");
-  });
+    // 22 seeded backups + runDailyBackup = heavy real file I/O; the 5s default
+    // testTimeout flakes on slow CI runners (Windows + Defender). Generous budget.
+  }, 30_000);
 });
 
 // v2.34.0 P1-8: optional offsite upload hook on `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`.
