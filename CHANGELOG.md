@@ -14,7 +14,7 @@ Stack-ul chinezesc a fost scos din modelele backend, pricing, API-ul de settings
 
 ### Hardening de securitate
 
-Boot gate-ul `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost retras ca redundant — bind-ul remote cere deja `auth_mode=web` + JWT valid, altfel boot-ul esueaza fatal. Cookie-ul de sesiune trece de la SameSite=Lax la SameSite=Strict. Revocare JWT: claim `jti` pe tokenurile emise, tabela `jwt_denylist` (migratia `0038`), verificare contra denylist la validare, revocare la logout (cookie SI Bearer) si purjare zilnica a intrarilor expirate. Un esec al scrierii in denylist la logout e logat explicit (observabil, CP-12) in loc sa fie inghitit de catch-ul exterior; logout ramane best-effort 200 (token expira la TTL).
+Boot gate-ul `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost retras ca redundant — bind-ul remote cere deja `auth_mode=web`, ceea ce forteaza la boot configurarea JWT (secret >=32 + issuer + audience via `validateAuthConfig`); altfel boot-ul esueaza fatal. Cookie-ul de sesiune trece de la SameSite=Lax la SameSite=Strict. Revocare JWT: claim `jti` pe tokenurile emise, tabela `jwt_denylist` (migratia `0038`), verificare contra denylist la validare, revocare la logout (cookie SI Bearer) si purjare zilnica a intrarilor expirate. Un esec al scrierii in denylist la logout e logat explicit (observabil, CP-12) in loc sa fie inghitit de catch-ul exterior; logout ramane best-effort 200 (token expira la TTL).
 
 ### Hardening AI
 

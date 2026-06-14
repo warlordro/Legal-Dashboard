@@ -11,7 +11,7 @@
 > | C1 / R1 / T1 / T2 (`ai.openrouter.test.ts` rupt) | FOLDED v2.38.0 | testele aliniate la noul API in dropul stack-ului chinezesc (`c503064`, `2b094d6`, `dc53aa0`) |
 > | S1 / A1 / R2 / U1 / U3 (stack chinezesc backend↔frontend) | FOLDED v2.38.0 | stack chinezesc eliminat din settings API + migration 0036 coerce `chinese->western` (`2b094d6`, `dc53aa0`) |
 > | S2 / O1 / O2 (`.env.example` ACK + JWT issuer/audience) | INCLUS v2.38.0 | ACK_NO_AUTH retras, `.env.example` + SECURITY.md sincronizate (env docs-sync, acest batch) |
-> | S6 (cookie JWT nu se invalideaza la suspendare/rol) | INCLUS v2.38.0 | JWT revocation: `jti` + `jwt_denylist` (migration 0038), revoke la logout |
+> | S6 (cookie JWT nu se invalideaza la suspendare/rol) | INCHIS (premisa corectata) v2.38.0 | Autorizarea se decide pe randul LIVE din DB la fiecare request, nu pe claim-uri din token: `authProvider.ts:121` reverifica `status==="active"` + `requireRole.ts:47` reciteste `role` — suspendarea/downgrade prind la urmatorul request, fara TTL (JWT-ul nu poarta role/status). `jwt_denylist`+revoke la logout (0038) acopera replay post-logout, nu schimbarea de status/rol. |
 > | S3 (IP real in spatele proxy) | DEFERAT | comportament documentat (`LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR`); operational, nu blocant |
 > | S4 (captcha race controllere neabortate) | DEFERAT | next sprint |
 > | S5 (`owner_id DEFAULT 'local'`) | DEFERAT | risc latent web-mode, runtime guard de extins |
@@ -93,7 +93,7 @@ Migrations si codul de boot folosesc in continuare `"local"` ca fallback. Un han
 
 ### S6 (Low). Cookie JWT nu se invalideaza la schimbarea statusului/rolului
 
-`backend/src/routes/auth.ts:29-37` seteaza cookie cu `maxAge: ttl`, dar `authProvider.ts` nu invalideaza token-ul la suspendare sau schimbare de rol. Un token emis inainte de suspendare ramane valid pana la expirare.
+`backend/src/routes/auth.ts:29-37` seteaza cookie cu `maxAge: ttl`, dar `authProvider.ts` nu invalideaza token-ul la suspendare sau schimbare de rol. Un token emis inainte de suspendare ramane valid pana la expirare. **CORECTIE (verificare cod v2.38.0):** premisa e gresita — autorizarea se decide pe randul LIVE din DB la fiecare request: `authProvider.ts:121` reverifica `status==="active"` si `requireRole.ts:47` reciteste `role`, deci tokenul e respins la urmatorul request dupa suspendare/downgrade, NU ramane valid pana la expirare (JWT-ul nu poarta role/status). Reziduu cosmetic: tokenul nu e adaugat in `jwt_denylist` la suspend (doar la logout), irelevant cat timp re-check-ul live e fail-closed.
 
 ---
 

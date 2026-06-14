@@ -20,7 +20,7 @@
 | Model ID nativ Gemini 3.5 Flash | `gemini-3.5-flash` (stable, fara sufix preview) |
 | Pricing Gemini 3.5 Flash (nativ si OpenRouter) | $1.50 input / $9 output per 1M tokens |
 | Slug OpenRouter Gemini 3.5 Flash | `google/gemini-3.5-flash` |
-| Migratii | auto-descoperite din `backend/src/db/migrations/` (runner.ts), ultima e 0035; nu exista registru de editat |
+| Migratii | auto-descoperite din `backend/src/db/migrations/` (runner.ts), ultima inainte de v2.38.0 e 0035 (acest plan adauga 0036-0038); nu exista registru de editat |
 | Cost ai_usage | calculat la INSERT (`aiUsage.ts:140`), nu la citire — stergerea intrarilor de pricing chineze NU corupe istoricul |
 | `ai_usage` CHECK | pe `provider`, NU pe `model` — randurile istorice cu modele chineze raman valide |
 
@@ -571,7 +571,7 @@ Run: `npm test --workspace=backend -- index` → Expected: PASS.
 
 - [ ] **Step 3: Configuri si docs**
 
-Sterge linia `LEGAL_DASHBOARD_ACK_NO_AUTH` din: `deploy/docker-compose.prod.yml:94`, `docker-compose.web.example.yml:43` (+ comentariul de la ~11), `docker-build.yml` (liniile ~102 comentariu + ~114 env), `.env.example:19`, `backend/.env.example:52`. Actualizeaza referintele din README.md, SECURITY.md (inclusiv tabelul env), RUNBOOK.md (tabel), DEPLOY-SERVER.md, SESSION-HANDOFF.md (tabel kill switches): remote bind cere acum doar `LEGAL_DASHBOARD_ALLOW_REMOTE=1` + `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT valid.
+Sterge linia `LEGAL_DASHBOARD_ACK_NO_AUTH` din: `deploy/docker-compose.prod.yml:94`, `docker-compose.web.example.yml:43` (+ comentariul de la ~11), `.github/workflows/docker-build.yml` (liniile ~102 comentariu + ~114 env), `.env.example:19`, `backend/.env.example:52`. Actualizeaza referintele din README.md, SECURITY.md (inclusiv tabelul env), RUNBOOK.md (tabel), DEPLOY-SERVER.md, SESSION-HANDOFF.md (tabel kill switches): remote bind cere acum doar `LEGAL_DASHBOARD_ALLOW_REMOTE=1` + `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT valid.
 
 Sanity: `Grep -i "ACK_NO_AUTH" .` la final — hit-uri acceptate doar in CHANGELOG.md, `frontend/src/data/changelog-entries.tsx` (istoric), `audit/**`, `EXECUTION-ROADMAP.md`, `STATUS.md` (istoric).
 

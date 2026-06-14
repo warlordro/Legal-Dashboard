@@ -151,13 +151,13 @@ The scheduler does **not** add authentication, encryption, or rate-limiting to i
 | Variable | Default | Purpose |
 |---|---|---|
 | `HOST` | `127.0.0.1` | Bind address. Non-loopback values are ignored unless `LEGAL_DASHBOARD_ALLOW_REMOTE=1`. |
-| `LEGAL_DASHBOARD_ALLOW_REMOTE` | unset | Set to `1` to allow non-loopback `HOST` binds. Requires `LEGAL_DASHBOARD_AUTH_MODE=web` + a valid JWT; otherwise boot fails. |
+| `LEGAL_DASHBOARD_ALLOW_REMOTE` | unset | Set to `1` to allow non-loopback `HOST` binds. Requires `LEGAL_DASHBOARD_AUTH_MODE=web`, which at boot forces JWT config (secret >=32 + issuer + audience via `validateAuthConfig`); otherwise boot fails. |
 | `LEGAL_DASHBOARD_PORT` | `3002` | Backend port. Electron sets this automatically. |
 | `LEGAL_DASHBOARD_DB_PATH` | `%APPDATA%/legal-dashboard/legal-dashboard.db` | SQLite path. Electron sets this. |
 | `LEGAL_DASHBOARD_AUTH_MODE` | `desktop` | Auth provider selector. `desktop` keeps `local`; `web` requires signed JWT/session auth. |
 | `APP_MODE` | unset | Backward-compatible alias for `LEGAL_DASHBOARD_AUTH_MODE` when the primary variable is unset. |
 | `LEGAL_DASHBOARD_JWT_SECRET` / `JWT_SECRET` | unset | Required in web auth mode; minimum 32 characters. |
-| `LEGAL_DASHBOARD_JWT_ISSUER` / `LEGAL_DASHBOARD_JWT_AUDIENCE` | unset | Required in web auth mode — `validateAuthConfig` throws a fatal boot error if either is missing when `AUTH_MODE=web`. |
+| `LEGAL_DASHBOARD_JWT_ISSUER` / `LEGAL_DASHBOARD_JWT_AUDIENCE` | unset | Required in web auth mode — `validateAuthConfig` throws a fatal boot error if either is missing when `LEGAL_DASHBOARD_AUTH_MODE=web`. |
 | `LEGAL_DASHBOARD_JWT_TTL_SECONDS` | `3600` | TTL for refreshed web auth session tokens; allowed range `60..86400`. |
 | `LEGAL_DASHBOARD_AUTH_TOKEN_TTL_SECONDS` | unset | Legacy alias for JWT TTL. |
 | `LEGAL_DASHBOARD_AUTH_COOKIE_SECURE` | secure in web mode | Set to `0` only for local HTTP testing. |
