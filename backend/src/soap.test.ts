@@ -188,6 +188,20 @@ describe("cautareDosare false-empty guard (v2.37.1, review cluster 3)", () => {
 
     await expect(cautareDosare({ numarDosar: "1/2/2026" })).resolves.toEqual([]);
   });
+
+  it("returneaza [] pe <CautareDosareResponse/> gol fara CautareDosareResult (forma reala 0 rezultate)", async () => {
+    // Forma EXACTA verificata live (FANCHET SPEED SRL -> 299 bytes): PortalJust
+    // intoarce wrapper-ul Response GOL, fara niciun CautareDosareResult. Guard-ul
+    // vechi (pe CautareDosareResult) arunca fals "envelope absent" aici.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        '<?xml version="1.0" encoding="utf-8"?><soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"><soap:Body><CautareDosareResponse xmlns="portalquery.just.ro" /></soap:Body></soap:Envelope>',
+        { status: 200 }
+      )
+    );
+
+    await expect(cautareDosare({ numeParte: "FANCHET SPEED SRL" })).resolves.toEqual([]);
+  });
 });
 
 describe("extractFirst / extractAll", () => {

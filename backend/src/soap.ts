@@ -250,10 +250,16 @@ export async function cautareDosare(params: SearchParams, options?: CautareDosar
   // v2.37.1 (review cluster 3): un body 200 fara envelope-ul asteptat (pagina
   // WAF/proxy/mentenanta, tag redenumit) NU e totuna cu "0 rezultate". Fara
   // guard, [] ajunge in dosarSoapRunner -> diff -> dosar_disappeared FALS +
-  // snapshot resetat la lastDosarPresent=false. Raspunsul gol legitim contine
-  // elementul <CautareDosareResult/> (gol sau self-closed), deci tag-ul de
-  // deschidere exista intotdeauna pe calea sanatoasa.
-  if (!/<CautareDosareResult[\s>\/]/.test(xml)) {
+  // snapshot resetat la lastDosarPresent=false.
+  // FIX v2.38.0: pentru 0 rezultate PortalJust intoarce <CautareDosareResponse/>
+  // GOL, FARA niciun <CautareDosareResult> (verificat live: 299 bytes,
+  // `<CautareDosareResponse xmlns="portalquery.just.ro" />`). Guard-ul vechi pe
+  // <CautareDosareResult> arunca fals "envelope absent" pe cautarile cu 0
+  // rezultate (eroare la cautare + fals "sursa indisponibila" in monitoring).
+  // Verificam acum wrapper-ul <CautareDosareResponse> — prezent si la 0
+  // rezultate, si cu rezultate; absent doar pe o pagina non-SOAP. extractFirst
+  // de mai jos intoarce [] cand <CautareDosareResult> lipseste = 0 rezultate.
+  if (!/<CautareDosareResponse[\s>\/]/.test(xml)) {
     console.error(`[soap] CautareDosare: raspuns 200 fara envelope (lungime ${xml.length})`);
     throw new Error("Raspuns neasteptat de la PortalJust (envelope absent).");
   }
