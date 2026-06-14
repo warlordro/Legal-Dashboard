@@ -167,6 +167,17 @@ describe("cautareDosare false-empty guard (v2.37.1, review cluster 3)", () => {
     await expect(cautareDosare({ numarDosar: "1/2/2026" })).rejects.toThrow(/envelope absent/);
   });
 
+  it("arunca cand bare word CautareDosareResult apare intr-o pagina de eroare non-XML (fara tag)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html><body>Error 403: blocked request for CautareDosareResult endpoint</body></html>", {
+        status: 200,
+      })
+    );
+
+    await expect(cautareDosare({ numarDosar: "1/2/2026" })).rejects.toThrow(/envelope absent/);
+  });
+
   it("returneaza [] pe envelope legitim cu rezultat gol (self-closed)", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(
