@@ -604,9 +604,15 @@ export function validateAiBody(body: unknown): string | null {
   if (dosar.parti !== undefined && !Array.isArray(dosar.parti)) return "Camp parti invalid.";
   if (Array.isArray(dosar.parti) && dosar.parti.length > MAX_AI_LIST_ITEMS)
     return `Prea multe parti (max ${MAX_AI_LIST_ITEMS}).`;
+  // buildPrompt accesseaza fiecare element ca obiect (p.calitateParte, p.nume); un element
+  // non-obiect (null, numar, string) corupe promptul sau arunca TypeError pe null -> 500.
+  if (Array.isArray(dosar.parti) && dosar.parti.some((p) => p === null || typeof p !== "object"))
+    return "Elementele din parti trebuie sa fie obiecte.";
   if (dosar.sedinte !== undefined && !Array.isArray(dosar.sedinte)) return "Camp sedinte invalid.";
   if (Array.isArray(dosar.sedinte) && dosar.sedinte.length > MAX_AI_LIST_ITEMS)
     return `Prea multe sedinte (max ${MAX_AI_LIST_ITEMS}).`;
+  if (Array.isArray(dosar.sedinte) && dosar.sedinte.some((s) => s === null || typeof s !== "object"))
+    return "Elementele din sedinte trebuie sa fie obiecte.";
   return null;
 }
 

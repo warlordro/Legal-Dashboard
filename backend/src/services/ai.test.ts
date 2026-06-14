@@ -133,4 +133,15 @@ describe("validateAiBody", () => {
     expect(validateAiBody({ dosar: { numar: "1/2/2026", parti } })).toMatch(/parti/i);
     expect(validateAiBody({ dosar: { numar: "1/2/2026", sedinte: sedinte.slice(0, 500) } })).toBeNull();
   });
+
+  it("respinge elemente non-obiect in parti/sedinte (previne TypeError -> 500)", () => {
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", parti: [null] } })).toMatch(/parti/i);
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", parti: [42] } })).toMatch(/parti/i);
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", sedinte: ["x"] } })).toMatch(/sedinte/i);
+    expect(
+      validateAiBody({
+        dosar: { numar: "1/2/2026", parti: [{ nume: "P", calitateParte: "Parat" }], sedinte: [{ data: "2026-01-01" }] },
+      })
+    ).toBeNull();
+  });
 });
