@@ -96,6 +96,26 @@ describe("/api/v1/auth", () => {
     expect(detail.jtiPresent).toBe(true);
   });
 
+  it("logs out a pre-v2.38 token without jti without writing to the denylist", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice" });
+    const app = buildApp();
+    // Pre-v2.38.0 token shape: valid + active user but no `jti` claim.
+    const token = signAuthToken({ sub: "alice", exp: 4_102_444_800 }, SECRET);
+
+    const res = await app.request("/api/v1/auth/logout", {
+      method: "POST",
+      headers: { cookie: `${AUTH_COOKIE_NAME}=${token}` },
+    });
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ data: { loggedOut: true } });
+    expect(res.headers.get("set-cookie")).toContain("legal_dashboard_session=");
+
+    // No jti claim -> revokeJti must NOT run -> denylist stays empty.
+    const row = getDb().prepare("SELECT COUNT(*) AS n FROM jwt_denylist").get() as { n: number };
+    expect(row.n).toBe(0);
+  });
+
   it("accepts cookie auth and refreshes it into a secure HttpOnly SameSite cookie", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice" });
     const app = buildApp();
