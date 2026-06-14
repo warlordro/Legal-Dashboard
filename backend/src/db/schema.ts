@@ -231,6 +231,14 @@ function initSchema(d: Database.Database): void {
   // with the sentinel: those rows skip 0001_baseline so the historic ALTER chain
   // is what keeps their schema in lockstep with the code. Once all production
   // installs are migrated through the runner end-to-end this block can retire.
+  //
+  // KEEP IN SYNC with backend/src/db/migrations/0001_baseline.up.sql: this block +
+  // the idempotent ALTERs below must yield the SAME final baseline shape that a
+  // fresh DB gets from 0001_baseline. Drift silently diverges legacy (backfilled)
+  // installs from fresh (migrated) ones. No automated drift test today — it would
+  // need this block extracted from initSchema (which runs the full migration runner
+  // first) or the SQL duplicated into a test (a third drift surface). The real fix
+  // is retiring this block once all installs are migrated, not guarding it.
   d.exec(`
     CREATE TABLE IF NOT EXISTS rnpm_searches (
       id            INTEGER PRIMARY KEY AUTOINCREMENT,
