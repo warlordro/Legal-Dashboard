@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.38.0",
+    date: "14 Iunie 2026",
+    subtitle:
+      "Refresh de modele AI (Claude Opus 4.8, Gemini 3.5 Flash), eliminarea stack-ului OpenRouter chinezesc (GLM/Kimi/Qwen) si un val de hardening de securitate: revocare JWT la logout, cookie de sesiune mai strict si retragerea unui boot gate redundant.",
+    icon: <BrainCircuit className="h-5 w-5" />,
+    borderColor: "border-l-violet-500",
+    badgeClass: "bg-violet-100 text-violet-900 dark:bg-violet-900/30 dark:text-violet-300",
+    sections: [
+      {
+        title: "Modele AI actualizate",
+        content:
+          "Claude Opus 4.6 -> 4.8 si Gemini 3 Flash -> 3.5 Flash, atat pe provider-ul nativ cat si pe OpenRouter. Stack-ul OpenRouter chinezesc (GLM, Kimi, Qwen) a fost eliminat complet: toggle-ul Vestic/Chinezesc dispare din Setari AI, iar configuratiile vechi sunt mutate automat pe stack-ul vestic (fara reconfigurare).",
+      },
+      {
+        title: "Securitate intarita",
+        content:
+          "Tokenurile de sesiune pot fi revocate: la delogare tokenul intra intr-o lista de blocare, iar verificarea il respinge imediat (nu mai e valid pana la expirare). Cookie-ul de sesiune trece pe SameSite=Strict. Validare mai stricta a slug-urilor de model override si a marimii listelor de sedinte/parti trimise catre AI (cost predictibil).",
+      },
+      {
+        title: "Fiabilitate + ops",
+        content:
+          "Disclaimer legal afisat sub orice analiza AI (single si multi-agent). Fallback OpenAI catre chat.completions cand Responses API nu e disponibil. Plus reziduuri de audit inchise: CSP curatat de un port mort, cooldown-uri de email purjate, raport de diagnostic Electron care nu mai expune variabilele de mediu, dependabot saptamanal.",
+      },
+    ],
+  },
+  {
     version: "v2.37.1",
     date: "11 Iunie 2026",
     subtitle:

@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.37.1** - 11 Iunie 2026. Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.38.0** - 14 Iunie 2026. Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
@@ -292,12 +292,12 @@ Vezi sectiunea SQLite pentru schema completa. Filtre:
 |---|---|---|---|
 | **Anthropic** | Claude Haiku 4.5 (Rapid) | `claude-haiku` | `claude-haiku-4-5-20251001` |
 | | Claude Sonnet 4.6 (Echilibrat) | `claude-sonnet` | `claude-sonnet-4-6` |
-| | Claude Opus 4.6 (Premium) | `claude-opus` | `claude-opus-4-6` |
+| | Claude Opus 4.8 (Premium) | `claude-opus` | `claude-opus-4-8` |
 | **OpenAI** | GPT-5.4 nano (Rapid) | `gpt-5.4-nano` | `gpt-5.4-nano` |
 | | GPT-5.4 mini (Echilibrat) | `gpt-5.4-mini` | `gpt-5.4-mini` |
 | | GPT-5.4 (Premium) | `gpt-5.4` | `gpt-5.4` |
 | **Google** | Gemini 3.1 Flash Lite (Rapid) | `gemini-flash-lite-3` | `gemini-3.1-flash-lite-preview` |
-| | Gemini 3 Flash (Echilibrat) | `gemini-flash-3` | `gemini-3-flash-preview` |
+| | Gemini 3.5 Flash (Echilibrat) | `gemini-flash-3.5` | `gemini-3.5-flash` |
 | | Gemini 3.1 Pro (Premium) | `gemini-pro-3` | `gemini-3.1-pro-preview` |
 
 Modele permise ca **judecator** in multi-agent: `claude-opus`, `gpt-5.4`, `gemini-pro-3`.

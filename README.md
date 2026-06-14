@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.37.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.38.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.37.1** - Hardening post-full-review pe intreaga aplicatie: corectitudinea alertelor de monitoring (fara `dosar_disappeared` fals la esec partial de instanta; dedup ancorat per-baseline, tranzitiile repetate alerteaza din nou; selectie sticky pe dosare multi-instanta; guard de false-empty pe SOAP), timeout RNPM (`RNPM_TIMEOUT_MS`) + TTL idempotency 15min, down-migratii cu cleanup `_schema_versions` + runbook 0034, reziduuri ICCJ (normalizare markeri `*`/`**`, validare sectie/data, coduri eroare distincte, 504 la timeout) si fix auth in stack-ul web (Caddy pastreaza Cookie). Predecesor **v2.37.0** - Integrare ICCJ (Inalta Curte de Casatie si Justitie) via live-proxy scraping pe scj.ro: cautare dosare cu toggle de sursa (PortalJust vs ICCJ), termene-pe-dosar (toate datele unui dosar), imbogatire server-side a rezultatelor (categorie + rolul partilor + sedinte), metrici source-aware (Departamente in loc de Institutii, Analiza Parte) si monitoring `iccj` (migrarea 0034). Plus rundele de review (10 agenti + Codex) cu 10 fix-uri de corectitudine/fiabilitate: identitate monitoring pe `iccj_id`, conversie data DD.MM.YYYY catre scj.ro, izolarea timeout-urilor per-item, parser fail-loud la markup drift, dedup joburi, deep-link source-aware, kill-switch `ICCJ_ROUTES_DISABLED` + parametri env.
+Ultimul release **v2.38.0** - Refresh de modele AI (Claude Opus 4.6 -> 4.8, Gemini 3 Flash -> 3.5 Flash, nativ + OpenRouter), eliminarea stack-ului OpenRouter chinezesc (GLM/Kimi/Qwen; migratia 0036 coerce `chinese` -> `western`) si un val de hardening de securitate: revocare JWT cu `jwt_denylist` la logout (migratia 0038), cookie de sesiune SameSite Lax -> Strict, retragerea boot gate-ului redundant `LEGAL_DASHBOARD_ACK_NO_AUTH`, validare slug-uri `OPENROUTER_MODEL_OVERRIDES`, cap pe `sedinte[]`/`parti[]` la AI, disclaimer legal sub analiza AI, `latency_ms`/`error_type` per call (migratia 0037) si reziduuri din auditul adversarial 2026-06-13. Predecesor **v2.37.1** - Hardening post-full-review pe intreaga aplicatie: corectitudinea alertelor de monitoring (fara `dosar_disappeared` fals la esec partial de instanta; dedup ancorat per-baseline, selectie sticky pe dosare multi-instanta; guard de false-empty pe SOAP), timeout RNPM (`RNPM_TIMEOUT_MS`) + TTL idempotency 15min, down-migratii cu cleanup `_schema_versions` + runbook 0034 si reziduuri ICCJ inchise.
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -116,8 +116,8 @@ Aplicatia suporta doua moduri de autentificare:
 
 - `LEGAL_DASHBOARD_AUTH_MODE` - `desktop` | `web` (default `desktop`)
 - `LEGAL_DASHBOARD_JWT_SECRET` - required pentru web mode
-- `LEGAL_DASHBOARD_JWT_ISSUER` - optional, default `legal-dashboard`
-- `LEGAL_DASHBOARD_JWT_AUDIENCE` - optional
+- `LEGAL_DASHBOARD_JWT_ISSUER` - required in web mode (boot-ul esueaza fatal daca lipseste)
+- `LEGAL_DASHBOARD_JWT_AUDIENCE` - required in web mode (boot-ul esueaza fatal daca lipseste)
 - `LEGAL_DASHBOARD_JWT_TTL_SECONDS` - optional, default `3600`
 - `LEGAL_DASHBOARD_ALLOW_REMOTE=1` - opt-in pentru bind non-loopback; cere
   `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT valid, altfel boot-ul esueaza
