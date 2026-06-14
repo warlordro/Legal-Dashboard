@@ -54,3 +54,6 @@ jobs:
       - name: Frontend tests
         working-directory: frontend
         run: npm test -- --run
+
+      - name: Electron tests
+        run: node --test "electron/*.test.cjs"
