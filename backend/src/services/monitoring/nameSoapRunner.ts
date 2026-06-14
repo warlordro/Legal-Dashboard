@@ -99,6 +99,7 @@ export function createNameSoapRunner(deps: NameSoapRunnerDeps): JobRunner {
           alertConfig,
           now: nowIso,
           jobCreatedAt: job.created_at,
+          nameNormalized: target.name_normalized,
           // v2.37.1 (review cluster 1): ancora dedup per-baseline + lista
           // institutiilor picate, ca diff-ul sa nu transforme un fan-out
           // partial in dosar_disappeared fals (si sa nu arda slotul dedup).

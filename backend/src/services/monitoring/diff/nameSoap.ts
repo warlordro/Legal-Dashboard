@@ -57,6 +57,10 @@ export interface NameSoapDiffInput {
   // (b) le purtam neschimbate in newSnapshot ca baseline-ul sa nu se rebazeze
   // fara ele (altfel tick-ul de recuperare le-ar raporta fals ca dosar_new).
   failedInstitutii?: string[];
+  // v2.38.0 (post-release polish): numele monitorizat (name_normalized din job
+  // target). Trecut din runner ca titlurile dosar_new / dosar_disappeared sa
+  // arate numele real, nu sa puna numarul dosarului dupa "pentru nume:".
+  nameNormalized?: string;
 }
 
 export interface NameSoapDiffOutput {
@@ -197,6 +201,13 @@ export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameS
 
 export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
   const { prevSnapshot, currentSnapshot, alertConfig, now, jobCreatedAt } = input;
+  // Titlu pentru alertele de monitorizare pe nume: numarul ${numar} e DOSARUL
+  // GASIT, nu termenul de cautare. Cand stim numele monitorizat il aratam intre
+  // «», altfel marcam explicit ca sursa e monitorizarea pe nume (ca sa nu para
+  // ca numarul dosarului e numele).
+  const nameTrim = input.nameNormalized?.trim();
+  const nameWatchTitle = (verb: string, numar: string): string =>
+    nameTrim ? `${verb} pentru «${nameTrim}»: ${numar}` : `${verb} (monitorizare pe nume): ${numar}`;
 
   const prevByNumar = prevSnapshot ? byNumar(prevSnapshot) : new Map<string, NameSoapSnapshotDosar>();
   const currentByNumar = byNumar(currentSnapshot);
@@ -234,7 +245,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
         alerts.push({
           kind: "dosar_new",
           severity: "info",
-          title: `Dosar nou gasit pentru nume: ${numar}`,
+          title: nameWatchTitle("Dosar nou gasit", numar),
           detail: { observedAt: now, ...current },
           dedupKey: dedupKey(numar, "dosar_new", anchor),
         });
@@ -298,7 +309,7 @@ export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
       alerts.push({
         kind: "dosar_disappeared",
         severity: "warning",
-        title: `Dosarul nu mai apare pentru nume: ${numar}`,
+        title: nameWatchTitle("Dosarul nu mai apare", numar),
         detail: { observedAt: now, ...prev },
         dedupKey: dedupKey(numar, "dosar_disappeared", anchor),
       });

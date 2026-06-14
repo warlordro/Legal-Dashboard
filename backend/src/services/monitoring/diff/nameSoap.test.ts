@@ -366,3 +366,53 @@ describe("diffNameSoap dedup anchor per baseline (v2.37.1, review cluster 1)", (
     expect(a).toEqual(b);
   });
 });
+
+describe("diffNameSoap title — monitored name vs found dossier number", () => {
+  // The ${numar} in the title is the FOUND dossier, not the search term. With a
+  // known monitored name we show it in «…»; without it we mark the source so the
+  // number is not mistaken for the name. Mirrors the real case (dosar 2109/3/2023
+  // with a future sedinta => dosar_new fires).
+  it("dosar_new: includes the monitored name when provided", () => {
+    const out = diffNameSoap({
+      prevSnapshot: null,
+      currentSnapshot: snapshot([snapshotDosar("2109/3/2023", "2026-11-10T00:00:00")]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: null,
+      nameNormalized: "EURO ASFALT SRL",
+    });
+    expect(out.alerts.find((x) => x.kind === "dosar_new")?.title).toBe(
+      "Dosar nou gasit pentru «EURO ASFALT SRL»: 2109/3/2023"
+    );
+  });
+
+  it("dosar_new: falls back to a name-watch marker when the name is absent", () => {
+    const out = diffNameSoap({
+      prevSnapshot: null,
+      currentSnapshot: snapshot([snapshotDosar("2109/3/2023", "2026-11-10T00:00:00")]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: null,
+    });
+    expect(out.alerts.find((x) => x.kind === "dosar_new")?.title).toBe(
+      "Dosar nou gasit (monitorizare pe nume): 2109/3/2023"
+    );
+  });
+
+  it("dosar_disappeared: includes the monitored name when provided", () => {
+    const out = diffNameSoap({
+      prevSnapshot: snapshot([snapshotDosar("2109/3/2023", null)]),
+      currentSnapshot: snapshot([]),
+      alertConfig: DEFAULT_ALERT_CONFIG,
+      now: NOW,
+      jobCreatedAt: JOB_CREATED_AT,
+      prevSnapshotId: 1,
+      nameNormalized: "EURO ASFALT SRL",
+    });
+    expect(out.alerts.find((x) => x.kind === "dosar_disappeared")?.title).toBe(
+      "Dosarul nu mai apare pentru «EURO ASFALT SRL»: 2109/3/2023"
+    );
+  });
+});
