@@ -403,22 +403,55 @@ async function callOpenAI(
     async () => {
       const { default: OpenAI } = await import("openai");
       const client = new OpenAI({ apiKey });
-      const response = await client.responses.create(
-        {
-          model: modelId,
-          input: prompt,
-          max_output_tokens: AI_MAX_TOKENS,
-        },
-        { signal: composeSignal(timeout, signal) }
-      );
-      const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
-      return {
-        value: response.output_text || "",
-        meta: {
-          usageInput: usage?.input_tokens,
-          usageOutput: usage?.output_tokens,
-        },
-      };
+      const composed = composeSignal(timeout, signal);
+      try {
+        const response = await client.responses.create(
+          {
+            model: modelId,
+            input: prompt,
+            max_output_tokens: AI_MAX_TOKENS,
+          },
+          { signal: composed }
+        );
+        const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+        return {
+          value: response.output_text || "",
+          meta: {
+            usageInput: usage?.input_tokens,
+            usageOutput: usage?.output_tokens,
+          },
+        };
+      } catch (err) {
+        const status = (err as { status?: number })?.status;
+        // Re-throw discipline: aborts/timeouts, auth (401/403) and rate-limit
+        // (429) must propagate unchanged. Only a Responses-API-unavailable
+        // signal is allowed to fall through to chat.completions.
+        if (signal?.aborted || isTimeoutOrAbort(err) || status === 401 || status === 403 || status === 429) {
+          throw err;
+        }
+        const message = String((err as { message?: unknown })?.message ?? "").toLowerCase();
+        const responsesUnavailable = status === 404 || message.includes("responses");
+        if (!responsesUnavailable) throw err;
+        // Fallback for keys/gateways that expose only /chat/completions.
+        // Use max_completion_tokens (not the deprecated max_tokens) — the
+        // configured gpt-5.4 reasoning models reject max_tokens with a 400.
+        const completion = await client.chat.completions.create(
+          {
+            model: modelId,
+            messages: [{ role: "user", content: prompt }],
+            max_completion_tokens: AI_MAX_TOKENS,
+          },
+          { signal: composed }
+        );
+        const usage = completion.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+        return {
+          value: completion.choices?.[0]?.message?.content ?? "",
+          meta: {
+            usageInput: usage?.prompt_tokens,
+            usageOutput: usage?.completion_tokens,
+          },
+        };
+      }
     },
     tracking
   );

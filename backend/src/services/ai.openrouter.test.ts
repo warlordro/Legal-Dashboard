@@ -5,11 +5,13 @@ import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const openRouterCreateMock = vi.hoisted(() => vi.fn());
+const openAiResponsesCreateMock = vi.hoisted(() => vi.fn());
 const openAiConstructorMock = vi.hoisted(() => vi.fn());
 
 vi.mock("openai", () => ({
   default: class MockOpenAI {
     chat;
+    responses;
 
     constructor(options: unknown) {
       openAiConstructorMock(options);
@@ -17,6 +19,9 @@ vi.mock("openai", () => ({
         completions: {
           create: openRouterCreateMock,
         },
+      };
+      this.responses = {
+        create: openAiResponsesCreateMock,
       };
     }
   },
@@ -27,6 +32,7 @@ import { invalidateCache, setTenantKey } from "../db/tenantKeysRepository.ts";
 import { resetMasterKeyCacheForTests } from "../util/tenantKeyCrypto.ts";
 import {
   callModel,
+  callOpenAI,
   callOpenRouter,
   resolveOpenRouterSlug,
   shouldRouteViaOpenRouter,
@@ -39,6 +45,7 @@ const originalTenantSecret = process.env.TENANT_KEY_ENCRYPTION_SECRET;
 
 beforeEach(async () => {
   openRouterCreateMock.mockReset();
+  openAiResponsesCreateMock.mockReset();
   openAiConstructorMock.mockReset();
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-openrouter-"));
   const dbPath = path.join(tmpRoot, "legal-dashboard.db");
@@ -203,6 +210,51 @@ describe("callOpenRouter", () => {
 
     const row = getDb().prepare("SELECT cost_usd_milli FROM ai_usage").get() as { cost_usd_milli: number };
     expect(row.cost_usd_milli).toBe(3000);
+  });
+});
+
+describe("callOpenAI — Responses API fallback (audit R3)", () => {
+  it("falls back to chat.completions when responses.create rejects with 404", async () => {
+    openAiResponsesCreateMock.mockRejectedValue(Object.assign(new Error("not found"), { status: 404 }));
+    openRouterCreateMock.mockResolvedValue({
+      choices: [{ message: { content: "fallback content" } }],
+      usage: { prompt_tokens: 12, completion_tokens: 34 },
+    });
+
+    const result = await callOpenAI("sk-openai-test", "gpt-5.4", "prompt", 5000);
+
+    expect(result).toBe("fallback content");
+    expect(openAiResponsesCreateMock).toHaveBeenCalledTimes(1);
+    expect(openRouterCreateMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        model: "gpt-5.4",
+        messages: [{ role: "user", content: "prompt" }],
+        max_completion_tokens: 8000,
+      }),
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+  });
+
+  it("does NOT fall back on an auth error (401 propagates, chat.completions never called)", async () => {
+    openAiResponsesCreateMock.mockRejectedValue(Object.assign(new Error("unauthorized"), { status: 401 }));
+
+    await expect(callOpenAI("sk-openai-test", "gpt-5.4", "prompt", 5000)).rejects.toThrow("unauthorized");
+    expect(openRouterCreateMock).not.toHaveBeenCalled();
+  });
+
+  it("does NOT fall back when the signal is already aborted (propagates, chat.completions never called)", async () => {
+    const controller = new AbortController();
+    controller.abort();
+    openAiResponsesCreateMock.mockImplementation(() => {
+      const err = new Error("aborted");
+      err.name = "AbortError";
+      throw err;
+    });
+
+    await expect(callOpenAI("sk-openai-test", "gpt-5.4", "prompt", 5000, undefined, controller.signal)).rejects.toThrow(
+      "aborted"
+    );
+    expect(openRouterCreateMock).not.toHaveBeenCalled();
   });
 });
 
