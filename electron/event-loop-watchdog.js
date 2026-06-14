@@ -94,7 +94,10 @@ function startEventLoopWatchdog(userDataPath) {
     try {
       const reportName = `stall-${ts.replace(/[:.]/g, "-")}-${maxMs}ms.json`;
       const reportPath = path.join(reportsDir, reportName);
-      process.report.writeReport(reportPath);
+      const report = process.report.getReport();
+      report.environmentVariables = undefined;
+      if (report.header) report.header.commandLine = undefined;
+      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
       pruneOldReports(reportsDir);
     } catch (err) {
       console.warn("[watchdog] writeReport failed:", err?.message ?? err);
