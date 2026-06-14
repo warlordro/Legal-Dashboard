@@ -247,6 +247,14 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
   // silently dropped.
   if (instanta) push("Instanta", formatInstitutie(instanta));
   if (nameNormalized) push("Nume monitorizat", nameNormalized);
+  // name_soap dosar_new carries the dossier's max sedinta date as
+  // `latest_sedinta_at` (ISO, e.g. "2026-10-27T00:00:00"). Format to dd.mm.yyyy
+  // with a Romanian label instead of letting it fall through to the humanized-key
+  // fallback, which rendered "Latest sedinta at: 2026-10-27T00:00:00".
+  push("Ultima sedinta", formatSedintaDate(detail.latest_sedinta_at));
+  // dosar_soap / iccj dosar_new carry sedinteCount (number). Surface it as a
+  // Romanian fact instead of the humanized-key fallback ("Sedinte count").
+  if (typeof detail.sedinteCount === "number") push("Numar sedinte", String(detail.sedinteCount));
 
   push("Mesaj", asString(detail.message));
   push("Eroare", asString(detail.error_code) ?? asString(detail.error));
@@ -276,6 +284,12 @@ export function buildAlertContext(alert: MonitoringAlert): AlertContext {
     "solutie_sumar",
     "numar_document",
     "data_pronuntare",
+    "latest_sedinta_at",
+    // iccj_id is an internal scj.ro id used only for the deep-link (extracted
+    // above); suppress it from the fallback so it doesn't render raw as "Iccj id".
+    "iccj_id",
+    // sedinteCount is surfaced explicitly as "Numar sedinte" above.
+    "sedinteCount",
   ]);
   const fallback: Array<{ label: string; value: string }> = [];
   for (const key of Object.keys(detail)) {
