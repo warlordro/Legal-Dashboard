@@ -229,7 +229,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
                     return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
                   })}
                 </div>
-                <p className="mt-2 text-[11px] italic text-muted-foreground">{AI_DISCLAIMER}</p>
+                <p className="mt-2 text-sm italic text-muted-foreground">{AI_DISCLAIMER}</p>
               </>
             )}
           </div>
@@ -484,7 +484,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
                       return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
                     })}
                   </div>
-                  <p className="mt-2 px-4 pb-2 text-[11px] italic text-muted-foreground">{AI_DISCLAIMER}</p>
+                  <p className="mt-2 px-4 pb-2 text-sm italic text-muted-foreground">{AI_DISCLAIMER}</p>
                 </div>
                 {/* Toggle individual analyses */}
                 <button
