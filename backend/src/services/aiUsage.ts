@@ -90,6 +90,21 @@ function safeCostUsdMilli(value: number | null | undefined): number | null {
   return Math.floor(value);
 }
 
+// latency_ms column is integer-typed; drop non-finite or negative values to
+// NULL so latency dashboards never average over junk, otherwise round to the
+// nearest millisecond.
+function safeLatencyMs(value: number | undefined): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return null;
+  return Math.round(value);
+}
+
+// error_type is a TEXT column with no CHECK; cap at 128 chars so a runaway
+// error name/message can't bloat the row, and drop empty strings to NULL.
+function safeErrorType(value: string | undefined): string | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  return value.slice(0, 128);
+}
+
 export function estimateAiCostUsdMilli(input: {
   provider: AiUsageProvider;
   model: string;
@@ -144,8 +159,8 @@ export function recordAiUsageSafely(input: {
     });
   const httpStatus = safeHttpStatus(input.meta?.httpStatus);
   const routingTag = input.meta?.routingTag;
-  const latencyMs = input.meta?.latencyMs;
-  const errorType = input.meta?.errorType;
+  const latencyMs = safeLatencyMs(input.meta?.latencyMs);
+  const errorType = safeErrorType(input.meta?.errorType);
   const tracking = input.tracking;
   const provider = input.provider;
   const model = input.model;

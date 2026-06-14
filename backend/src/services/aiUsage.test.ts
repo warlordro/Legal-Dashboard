@@ -5,7 +5,7 @@ import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getDb, closeDb } from "../db/schema.ts";
-import { estimateAiCostUsdMilli } from "./aiUsage.ts";
+import { estimateAiCostUsdMilli, recordAiUsageSafely } from "./aiUsage.ts";
 import { withAiLogging, AI_MODELS } from "./ai.ts";
 
 let tmpRoot: string;
@@ -215,6 +215,66 @@ describe("AI service usage tracking", () => {
 
     const row = getDb().prepare("SELECT http_status FROM ai_usage").get() as { http_status: number | null };
     expect(row.http_status).toBeNull();
+  });
+
+  it("sanitizes a negative latencyMs to null before persist", async () => {
+    recordAiUsageSafely({
+      tracking: { ownerId: "alice", feature: "dosar_summary", requestId: "req-neg-latency" },
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      meta: { latencyMs: -5 },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = getDb().prepare("SELECT latency_ms FROM ai_usage").get() as { latency_ms: number | null };
+    expect(row.latency_ms).toBeNull();
+  });
+
+  it("sanitizes a NaN latencyMs to null before persist", async () => {
+    recordAiUsageSafely({
+      tracking: { ownerId: "alice", feature: "dosar_summary", requestId: "req-nan-latency" },
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      meta: { latencyMs: Number.NaN },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = getDb().prepare("SELECT latency_ms FROM ai_usage").get() as { latency_ms: number | null };
+    expect(row.latency_ms).toBeNull();
+  });
+
+  it("truncates an over-length errorType to 128 chars before persist", async () => {
+    recordAiUsageSafely({
+      tracking: { ownerId: "alice", feature: "dosar_summary", requestId: "req-long-error" },
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      meta: { errorType: "x".repeat(200) },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = getDb().prepare("SELECT error_type FROM ai_usage").get() as { error_type: string | null };
+    expect(row.error_type).toBe("x".repeat(128));
+  });
+
+  it("passes normal latencyMs and errorType through unchanged", async () => {
+    recordAiUsageSafely({
+      tracking: { ownerId: "alice", feature: "dosar_summary", requestId: "req-normal-telemetry" },
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      meta: { latencyMs: 1234, errorType: "timeout" },
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    const row = getDb().prepare("SELECT latency_ms, error_type FROM ai_usage").get() as {
+      latency_ms: number | null;
+      error_type: string | null;
+    };
+    expect(row.latency_ms).toBe(1234);
+    expect(row.error_type).toBe("timeout");
   });
 
   it("does not write a row when tracking context is omitted", async () => {
