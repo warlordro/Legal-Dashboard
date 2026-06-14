@@ -38,6 +38,7 @@ import { fetchEcbDailyRates } from "./services/fxFetcher.ts";
 import { selectPendingEmailRetries } from "./db/budgetNotificationsRepository.ts";
 import { checkBudgetWarningRetry } from "./services/budgetWarningService.ts";
 import { purgeExpiredReservations } from "./db/aiUsageRepository.ts";
+import { purgeExpiredJti } from "./db/jwtDenylistRepository.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
@@ -541,6 +542,13 @@ let budgetWarningRetryInterval: NodeJS.Timeout | null = null;
 // reservations care expira fara settle. 60s = fereastra max de inflatie.
 const RESERVATION_PURGE_INTERVAL_MS = 60_000;
 let reservationPurgeInterval: NodeJS.Timeout | null = null;
+// Web-mode jwt_denylist purge. `purgeExpiredJti` normally runs inside the
+// monitoring scheduler daily loop (scheduler.ts:439). With MONITORING_ENABLED=0
+// the scheduler is off, so revoked-JTI rows past expiry are never purged and
+// jwt_denylist grows unbounded (rows harmless but accumulate). Run an
+// independent daily timer in web mode only, mirroring reservationPurgeInterval.
+const JWT_PURGE_INTERVAL_MS = 86_400_000;
+let jwtPurgeInterval: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {
   try {
@@ -637,6 +645,27 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
       }
     }, RESERVATION_PURGE_INTERVAL_MS);
     reservationPurgeInterval.unref?.();
+
+    jwtPurgeInterval = setInterval(() => {
+      try {
+        const deletedJti = purgeExpiredJti();
+        if (deletedJti > 0) {
+          console.log(
+            JSON.stringify({
+              action: "jwt_denylist.purged",
+              source: "standalone_interval",
+              deleted_count: deletedJti,
+              ts: new Date().toISOString(),
+            })
+          );
+        }
+      } catch (err) {
+        console.error("[jwt] purgeExpiredJti threw, continuing", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+    }, JWT_PURGE_INTERVAL_MS);
+    jwtPurgeInterval.unref?.();
   }
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
@@ -749,6 +778,10 @@ async function gracefulShutdown(reason: string): Promise<void> {
   if (reservationPurgeInterval) {
     clearInterval(reservationPurgeInterval);
     reservationPurgeInterval = null;
+  }
+  if (jwtPurgeInterval) {
+    clearInterval(jwtPurgeInterval);
+    jwtPurgeInterval = null;
   }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca
