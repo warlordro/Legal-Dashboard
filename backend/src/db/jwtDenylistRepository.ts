@@ -19,3 +19,7 @@ export function isJtiRevoked(jti: string): boolean {
 export function purgeExpiredJti(nowSec: number = Math.floor(Date.now() / 1000)): number {
   return getDb().prepare("DELETE FROM jwt_denylist WHERE expires_at < ?").run(nowSec).changes;
 }
+
+export function countRevokedJti(): number {
+  return (getDb().prepare("SELECT COUNT(*) AS n FROM jwt_denylist").get() as { n: number }).n;
+}

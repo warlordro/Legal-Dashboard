@@ -1303,6 +1303,12 @@ describe("Scheduler — daily monitoring_runs retention purge (#34)", () => {
     await sch.stop();
 
     expect(isJtiRevoked("x")).toBe(false);
+
+    const audit = getDb().prepare("SELECT detail_json FROM audit_log WHERE action = 'jwt_denylist.purged'").all() as {
+      detail_json: string;
+    }[];
+    expect(audit.length).toBe(1);
+    expect(JSON.parse(audit[0].detail_json)).toMatchObject({ deleted: 1 });
   });
 });
 

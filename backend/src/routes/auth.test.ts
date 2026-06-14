@@ -3,7 +3,7 @@ import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AUTH_COOKIE_NAME } from "../auth/authProvider.ts";
 import { signAuthToken } from "../auth/jwt.ts";
@@ -102,6 +102,7 @@ describe("/api/v1/auth", () => {
     // Pre-v2.38.0 token shape: valid + active user but no `jti` claim.
     const token = signAuthToken({ sub: "alice", exp: 4_102_444_800 }, SECRET);
 
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     const res = await app.request("/api/v1/auth/logout", {
       method: "POST",
       headers: { cookie: `${AUTH_COOKIE_NAME}=${token}` },
@@ -114,6 +115,15 @@ describe("/api/v1/auth", () => {
     // No jti claim -> revokeJti must NOT run -> denylist stays empty.
     const row = getDb().prepare("SELECT COUNT(*) AS n FROM jwt_denylist").get() as { n: number };
     expect(row.n).toBe(0);
+
+    // ...and the inability to revoke server-side must be observable (side-channel
+    // warn), while the audit row still reports jtiPresent:false unchanged.
+    // Assert before mockRestore — restore also clears recorded calls in vitest.
+    expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining("token lacks jti"));
+    warnSpy.mockRestore();
+    const events = getAuditEvents({ action: "auth.logout" });
+    const detail = JSON.parse(events[0].detail_json) as Record<string, unknown>;
+    expect(detail.jtiPresent).toBe(false);
   });
 
   it("accepts cookie auth and refreshes it into a secure HttpOnly SameSite cookie", async () => {

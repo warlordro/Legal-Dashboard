@@ -84,6 +84,11 @@ authRouter.post("/logout", (c) => {
               error: err instanceof Error ? err.message : String(err),
             });
           }
+        } else if (!payload.jti) {
+          // Pre-v2.38.0 tokens carry no jti, so there is nothing to denylist —
+          // server-side revocation is impossible and we fall back to TTL expiry.
+          // Observable so a flood of these signals stale clients still in flight.
+          console.warn("[auth.logout] token lacks jti — cannot revoke server-side; relies on TTL expiry");
         }
       }
     }

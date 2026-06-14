@@ -32,8 +32,8 @@ import {
   type InsertAlertResult,
 } from "../alerts/alertEventService.ts";
 import { purgeExpiredReservations, purgeOldAiUsage } from "../../db/aiUsageRepository.ts";
-import { purgeOldAuditLog } from "../../db/auditRepository.ts";
-import { purgeExpiredJti } from "../../db/jwtDenylistRepository.ts";
+import { purgeOldAuditLog, recordAudit } from "../../db/auditRepository.ts";
+import { countRevokedJti, purgeExpiredJti } from "../../db/jwtDenylistRepository.ts";
 import { withMaintenanceRead } from "../../db/backup.ts";
 import { getDb } from "../../db/schema.ts";
 import { isLikelyTooLongForPortalJust } from "../nameListParser.ts";
@@ -445,7 +445,24 @@ export class Scheduler {
               ts: this.opts.clock.now().toISOString(),
             })
           );
+          // Durable audit so denylist purges leave a compliance trail, not only
+          // a console line lost on restart. System event => null context.
+          recordAudit(null, "jwt_denylist.purged", {
+            outcome: "ok",
+            targetKind: "system",
+            targetId: "jwt_denylist",
+            detail: { deleted: deletedJti },
+          });
         }
+        // Unconditional heartbeat: remaining denylist size every cycle, so an
+        // operator can confirm the purge timer is alive even on idle days.
+        console.log(
+          JSON.stringify({
+            action: "jwt_denylist.remaining",
+            remaining_count: countRevokedJti(),
+            ts: this.opts.clock.now().toISOString(),
+          })
+        );
       } catch (err) {
         console.error("[scheduler] purgeExpiredJti threw, continuing loop", {
           error: err instanceof Error ? err.message : String(err),
