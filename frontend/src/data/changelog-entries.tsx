@@ -62,6 +62,11 @@ export const versions: VersionEntry[] = [
         content:
           "Disclaimer legal afisat sub orice analiza AI (single si multi-agent). Fallback OpenAI catre chat.completions cand Responses API nu e disponibil. Plus reziduuri de audit inchise: CSP curatat de un port mort, cooldown-uri de email purjate, raport de diagnostic Electron care nu mai expune variabilele de mediu, dependabot saptamanal.",
       },
+      {
+        title: "Remediere post-review",
+        content:
+          "Un review complet (verificat independent de mai multe modele) a confirmat ca o corectie de monitoring din v2.37.1 era inactiva: suprimarea alertei false 'dosar disparut' la esec partial de instanta nu se declansa, pentru ca numele instantei era comparat in doua formate diferite (cod intern vs afisaj). Acum sunt normalizate inainte de comparatie, deci protectia chiar functioneaza. In plus: trail de audit la replay de token revocat si la purjarea listei de blocare JWT, guard-uri suplimentare de robustete (envelope SOAP, validare elemente AI) si teste noi (rute ICCJ, drift sectii/regex, migratia 0036, suita Electron in CI).",
+      },
     ],
   },
   {

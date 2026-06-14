@@ -2,7 +2,7 @@
 
 ## v2.38.0 - 2026-06-14
 
-Refresh de modele AI + eliminarea stack-ului OpenRouter chinezesc + un val de hardening de securitate (~30 commits pe branch). Tema centrala: aducerea modelelor la zi (Opus 4.8, Gemini 3.5 Flash), simplificarea rutarii AI prin renuntarea la GLM/Kimi/Qwen si inchiderea reziduurilor din auditul adversarial `audit/ADVERSARIAL-REVIEW-2026-06-13.md`.
+Refresh de modele AI + eliminarea stack-ului OpenRouter chinezesc + un val de hardening de securitate (~50 commits pe branch, inclusiv remedierea post-review). Tema centrala: aducerea modelelor la zi (Opus 4.8, Gemini 3.5 Flash), simplificarea rutarii AI prin renuntarea la GLM/Kimi/Qwen si inchiderea reziduurilor din auditul adversarial `audit/ADVERSARIAL-REVIEW-2026-06-13.md`.
 
 ### Model refresh
 
@@ -23,6 +23,18 @@ Slug-urile din `OPENROUTER_MODEL_OVERRIDES` sunt validate contra unui allowlist 
 ### Reziduuri / ops (audit-driven, `audit/ADVERSARIAL-REVIEW-2026-06-13.md`)
 
 `streamCap` renunta la fallback-ul nelimitat `.text()` pentru raspunsuri cu body null. CSP `connect-src` corectat de la portul mort 3001 la 3002. Map-ul de cooldown pentru email-test e purjat de intrarile expirate (era nelimitat in web mode). Adaugat `.github/dependabot.yml` (npm + github-actions saptamanal, grupat minor/patch). `audit_log` detail e acum cap-uit pe bytes UTF-8 (era pe caractere JS — multi-byte sub-numarat). `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` documentat ca shell eval operator-trusted. `environmentVariables` + `commandLine` redactate RECURSIV (inclusiv sub-rapoartele `workers[]`) din raportul de diagnostic al watchdog-ului Electron, cu acoperire `node:test`. Root `.env.example`: `JWT_ISSUER`/`JWT_AUDIENCE` etichetate REQUIRED-WEB + `JWT_TTL_SECONDS` documentat. Comentariu cross-reference `schema.ts` (bloc legacy) <-> `0001_baseline.up.sql` care semnaleaza drift-ul de schema (audit A2; un test real ar cere refactor `initSchema` sau duplicare SQL, iar blocul e tranzitoriu).
+
+### Remediere post-review (CODEX-REVIEW v2.37.1 + v2.38.0)
+
+Un `/full-review` complet (43 findings, meta-verificat independent de 3 modele Opus/GPT/Kimi) a fost remediat in etape — subagent-driven, fiecare fix cu 3 revieweri adversariali in paralel.
+
+**Headline (HIGH, bug live in v2.37.1):** corectia `name_soap` care suprima `dosar_disappeared` la esec partial de instanta era INERTA. `failedInstitutii` contine codul WSDL al instantei (`TribunalulCLUJ`), iar snapshot-ul contine numele de afisaj (`Tribunalul Cluj`), deci `failed.has(...)` returna mereu false pentru orice institutie reala — suprimarea si carry-forward-ul nu se declansau niciodata. Acum ambele parti sunt normalizate prin `normalizeInstitutie` inainte de comparatie, cu test de regresie pe string-uri divergente. Doar joburile institution-scoped erau afectate (all-institution era oricum moot).
+
+**MEDIUM:** logout audit captureaza acum `ip`/`user_agent`/`request_id` + `jtiPresent`/`revokeSucceeded`; `purgeOldAiUsage` chunked (rowid IN LIMIT, fara write-lock lung pe istoric mare); interval zilnic standalone `purgeExpiredJti` (web-gated) ca `jwt_denylist` sa ramana marginit si cu `MONITORING_ENABLED=0`. Acoperire de teste noua: rute `dosareIccj` (504/sectie/data/disabled), branch `ICCJ_PARSE_FAIL`, logout fara `jti`, `streamCap` body-null. Dependabot extins cu ecosistemul docker (Dockerfile + compose).
+
+**LOW (robustete / observabilitate / drift):** guard de forma XML pe envelope-ul SOAP (nu doar substring); reject elemente non-obiect in `parti`/`sedinte` (preveni TypeError -> 500); guard `target_json` malformat -> `ICCJ_PARSE_FAIL`; `latency_ms`/`error_type` sanitizate la persist; `Retry-After: 60` pe 504 ICCJ; rand de audit `auth.jwt_revoked` la replay de token revocat; warn la logout fara `jti`; audit + heartbeat la purjarea `jwt_denylist`; buget de timeout proaspat pe fallback-ul `chat.completions`; teste de drift `normalizeIccjNumar` + `ICCJ_SECTII` backend<->frontend; suita `electron/*.test.cjs` rulata in CI; pin pe slug-ul Gemini 3.5 Flash; test UP migratia `0036`; test error-path la purge-ul scheduler-ului; nivel de log structurat pe override-uri invalide.
+
+**Limitare cunoscuta (acceptata):** in web mode cu monitoring activ, `jwt_denylist` e purjat de doua cai (intervalul standalone + scheduler-ul). Randul de audit `jwt_denylist.purged` provine doar de la calea care a sters efectiv randuri, deci poate lipsi pe un ciclu daca intervalul standalone castiga cursa. Heartbeat-ul neconditionat (count ramas, fiecare ciclu) acopera observabilitatea, iar corectitudinea purjarii (denylist marginit) e neafectata.
 
 ### Migratii
 

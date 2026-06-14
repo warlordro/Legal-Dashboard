@@ -83,8 +83,9 @@ and treat the current defaults as insufficient.
   `loginAvailable:false` pentru ca operatorii sa nu confunde modul web cu un
   produs deploy-ready out-of-the-box.
 - **Boot guard remote+desktop refused (PR-9).** `LEGAL_DASHBOARD_ALLOW_REMOTE=1`
-  cere `LEGAL_DASHBOARD_AUTH_MODE=web`, JWT secret valid si ack explicit.
-  Desktop/local pe LAN este refuzat la boot.
+  cere `LEGAL_DASHBOARD_AUTH_MODE=web` si JWT secret valid (gate-ul istoric
+  `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost retras in v2.38.0 — web auth obligatoriu
+  e gate suficient si mai riguros). Desktop/local pe LAN este refuzat la boot.
 - **Pre-auth rate limit (PR-9).** `/api/*` are un bucket IP-only inainte de
   `ownerContext`, ca floods cu token missing/invalid sa nu epuizeze la infinit
   HMAC/user lookup. Requesturile autentificate cu succes elibereaza bucket-ul
