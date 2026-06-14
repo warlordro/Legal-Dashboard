@@ -66,7 +66,18 @@ authRouter.post("/logout", (c) => {
         auditActorId = user.id;
         tokenVerified = true;
         if (payload.jti && typeof payload.exp === "number") {
-          revokeJti(payload.jti, payload.exp, user.id);
+          try {
+            revokeJti(payload.jti, payload.exp, user.id);
+          } catch (err) {
+            // Best-effort: logout still succeeds (cookie cleared below, token
+            // expires at TTL), but a failed denylist write is security-relevant
+            // and must be observable — not swallowed by the outer verify catch
+            // (which would also mislabel the audit as tokenVerified=false). CP-12.
+            console.error("[auth.logout] revokeJti failed — token NOT revoked server-side", {
+              sub: payload.sub,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
         }
       }
     }

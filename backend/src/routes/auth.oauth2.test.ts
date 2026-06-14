@@ -3,7 +3,7 @@ import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AUTH_COOKIE_NAME } from "../auth/authProvider.ts";
 import { verifyAuthToken } from "../auth/jwt.ts";
@@ -345,6 +345,40 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     // 4. refolosirea cookie-ului vechi → 401 (token revocat server-side)
     const after = await app.request("/api/v1/probe", { headers: { cookie } });
     expect(after.status).toBe(401);
+  });
+
+  it("logout ramane 200 si logheaza cand revokeJti arunca (observabilitate, nu fail-closed)", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const app = buildApp();
+
+    const syncRes = await app.request("/api/v1/auth/oauth2/sync", {
+      method: "POST",
+      headers: {
+        "x-proxy-auth": PROXY_SECRET,
+        "x-auth-request-email": "alice@example.test",
+      },
+    });
+    expect(syncRes.status).toBe(200);
+    const cookie = syncRes.headers.get("set-cookie")?.split(";")[0] ?? "";
+    expect(cookie.length).toBeGreaterThan(0);
+
+    // Forteaza un esec real al scrierii in denylist (nu mock): dropam tabela.
+    getDb().exec("DROP TABLE jwt_denylist");
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      const logoutRes = await app.request("/api/v1/auth/logout", { method: "POST", headers: { cookie } });
+      // best-effort: logout reuseste oricum (cookie sters, token expira la TTL)
+      expect(logoutRes.status).toBe(200);
+      // esecul revocarii e observabil, nu inghitit silentios de catch-ul exterior
+      expect(errSpy).toHaveBeenCalledWith(
+        "[auth.logout] revokeJti failed — token NOT revoked server-side",
+        expect.objectContaining({ sub: "alice" })
+      );
+    } finally {
+      errSpy.mockRestore();
+    }
   });
 
   it("logout pe Bearer revoca tokenul — refolosirea aceluiasi Bearer da 401", async () => {
