@@ -58,12 +58,13 @@ function isValidOverrideSlug(slug: string): boolean {
 export function resolveOpenRouterSlug(modelKey: string): string | null {
   const override = process.env.OPENROUTER_MODEL_OVERRIDES;
   if (override) {
-    const pairs = override.split(",").map((pair) => {
+    const pairs = override.split(",").reduce<Array<[string, string]>>((acc, pair) => {
       const i = pair.indexOf(":");
-      const k = pair.slice(0, i).trim();
-      const v = pair.slice(i + 1).trim();
-      return [k, v];
-    });
+      // Skip malformed pairs (no colon) defensively instead of producing a
+      // mangled key/value via slice(0, -1).
+      if (i >= 0) acc.push([pair.slice(0, i).trim(), pair.slice(i + 1).trim()]);
+      return acc;
+    }, []);
     const hit = pairs.find(([k]) => k === modelKey);
     if (hit?.[1] && isValidOverrideSlug(hit[1])) return hit[1];
   }

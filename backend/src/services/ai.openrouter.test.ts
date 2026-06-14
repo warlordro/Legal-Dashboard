@@ -118,6 +118,13 @@ describe("resolveOpenRouterSlug", () => {
     expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-4.8"); // provider respins
     expect(resolveOpenRouterSlug("gpt-5.4")).toBe("openai/custom-gpt"); // valid, trece
   });
+
+  it("ignora pair-uri malformate fara colon (defensiv)", () => {
+    process.env.OPENROUTER_MODEL_OVERRIDES = "garbagewithoutcolon, claude-sonnet:anthropic/custom";
+    // pair-ul fara colon e sarit, nu produce un key mangled; cel valid trece
+    expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/custom");
+    expect(resolveOpenRouterSlug("garbagewithoutcolon")).toBeNull();
+  });
 });
 
 describe("callOpenRouter", () => {
