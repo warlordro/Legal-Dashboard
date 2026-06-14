@@ -16,7 +16,7 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
-  - package-ecosystem: "docker"
-    directory: "/deploy"
-    schedule:
-      interval: "weekly"
+  # NU adauga un bloc docker pentru /deploy: acolo e doar docker-compose.prod.yml
+  # (nume non-standard). Dependabot docker auto-detecteaza doar Dockerfile /
+  # docker-compose.yml, deci un entry /deploy esueaza cu dependency_file_not_found.
+  # Imaginile din compose sunt SHA-pinned si se bump-uiesc manual.
