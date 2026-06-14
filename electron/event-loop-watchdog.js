@@ -95,8 +95,8 @@ function startEventLoopWatchdog(userDataPath) {
       const reportName = `stall-${ts.replace(/[:.]/g, "-")}-${maxMs}ms.json`;
       const reportPath = path.join(reportsDir, reportName);
       const report = process.report.getReport();
-      report.environmentVariables = undefined;
-      if (report.header) report.header.commandLine = undefined;
+      // Redact secret-bearing sections recursively (incl. worker sub-reports).
+      redactReportSecrets(report);
       fs.writeFileSync(reportPath, JSON.stringify(report, null, 2));
       pruneOldReports(reportsDir);
     } catch (err) {
@@ -124,4 +124,18 @@ function stopEventLoopWatchdog() {
   started = false;
 }
 
-module.exports = { startEventLoopWatchdog, stopEventLoopWatchdog };
+// Strip secret-bearing sections from a Node diagnostic report before persisting.
+// process.report includes `environmentVariables` and `header.commandLine` verbatim,
+// plus one full sub-report per worker_thread under `workers[]` (which can nest) —
+// each carrying its own env + cmdline. Recurse so no secret survives at any level.
+// (Backend runs in-process with the Electron main process, so env can hold secrets.)
+function redactReportSecrets(node) {
+  if (!node || typeof node !== "object") return;
+  node.environmentVariables = undefined;
+  if (node.header) node.header.commandLine = undefined;
+  if (Array.isArray(node.workers)) {
+    for (const worker of node.workers) redactReportSecrets(worker);
+  }
+}
+
+module.exports = { startEventLoopWatchdog, stopEventLoopWatchdog, redactReportSecrets };

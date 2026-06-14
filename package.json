@@ -26,7 +26,8 @@
     "typecheck": "npm run typecheck:backend && npm run typecheck:frontend",
     "test:backend": "npm test --workspace=backend -- --run",
     "test:frontend": "npm test --workspace=frontend -- --run",
-    "test": "npm run test:backend && npm run test:frontend",
+    "test:electron": "node --test \"electron/*.test.cjs\"",
+    "test": "npm run test:backend && npm run test:frontend && npm run test:electron",
     "lint": "biome check",
     "check": "npm run lint && npm run typecheck && npm run test"
   },
