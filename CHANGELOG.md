@@ -2,7 +2,7 @@
 
 ## v2.38.0 - 2026-06-14
 
-Refresh de modele AI + eliminarea stack-ului OpenRouter chinezesc + un val de hardening de securitate (25 commits pe branch). Tema centrala: aducerea modelelor la zi (Opus 4.8, Gemini 3.5 Flash), simplificarea rutarii AI prin renuntarea la GLM/Kimi/Qwen si inchiderea reziduurilor din auditul adversarial `audit/ADVERSARIAL-REVIEW-2026-06-13.md`.
+Refresh de modele AI + eliminarea stack-ului OpenRouter chinezesc + un val de hardening de securitate (~30 commits pe branch). Tema centrala: aducerea modelelor la zi (Opus 4.8, Gemini 3.5 Flash), simplificarea rutarii AI prin renuntarea la GLM/Kimi/Qwen si inchiderea reziduurilor din auditul adversarial `audit/ADVERSARIAL-REVIEW-2026-06-13.md`.
 
 ### Model refresh
 
@@ -14,15 +14,15 @@ Stack-ul chinezesc a fost scos din modelele backend, pricing, API-ul de settings
 
 ### Hardening de securitate
 
-Boot gate-ul `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost retras ca redundant — bind-ul remote cere deja `auth_mode=web` + JWT valid, altfel boot-ul esueaza fatal. Cookie-ul de sesiune trece de la SameSite=Lax la SameSite=Strict. Revocare JWT: claim `jti` pe tokenurile emise, tabela `jwt_denylist` (migratia `0038`), verificare contra denylist la validare, revocare la logout (cookie SI Bearer) si purjare zilnica a intrarilor expirate.
+Boot gate-ul `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost retras ca redundant — bind-ul remote cere deja `auth_mode=web` + JWT valid, altfel boot-ul esueaza fatal. Cookie-ul de sesiune trece de la SameSite=Lax la SameSite=Strict. Revocare JWT: claim `jti` pe tokenurile emise, tabela `jwt_denylist` (migratia `0038`), verificare contra denylist la validare, revocare la logout (cookie SI Bearer) si purjare zilnica a intrarilor expirate. Un esec al scrierii in denylist la logout e logat explicit (observabil, CP-12) in loc sa fie inghitit de catch-ul exterior; logout ramane best-effort 200 (token expira la TTL).
 
 ### Hardening AI
 
-Slug-urile din `OPENROUTER_MODEL_OVERRIDES` sunt validate contra unui allowlist de provideri (anthropic/openai/google) cu split pe primul `:` si lookup `Object.hasOwn`. `validateAiBody` cap-uieste `sedinte[]`/`parti[]` la 500 (reject hard, cost predictibil). Disclaimer legal randat sub output-ul analizei AI (single + multi-agent). `latency_ms` + `error_type` persistate per call AI (migratia `0037`). `callOpenAI` face fallback pe `chat.completions` cand Responses API nu e disponibil (foloseste `max_completion_tokens`; abort/auth/rate-limit raman propagate).
+Slug-urile din `OPENROUTER_MODEL_OVERRIDES` sunt validate contra unui allowlist de provideri (anthropic/openai/google) cu split pe primul `:` si lookup `Object.hasOwn`; pair-urile malformate fara `:` sunt sarite defensiv (CodeRabbit). `validateAiBody` cap-uieste `sedinte[]`/`parti[]` la 500 (reject hard, cost predictibil). Disclaimer legal randat sub output-ul analizei AI (single + multi-agent). `latency_ms` + `error_type` persistate per call AI (migratia `0037`). `callOpenAI` face fallback pe `chat.completions` cand Responses API nu e disponibil (foloseste `max_completion_tokens`; abort/auth/rate-limit raman propagate).
 
 ### Reziduuri / ops (audit-driven, `audit/ADVERSARIAL-REVIEW-2026-06-13.md`)
 
-`streamCap` renunta la fallback-ul nelimitat `.text()` pentru raspunsuri cu body null. CSP `connect-src` corectat de la portul mort 3001 la 3002. Map-ul de cooldown pentru email-test e purjat de intrarile expirate (era nelimitat in web mode). Adaugat `.github/dependabot.yml` (npm + github-actions saptamanal, grupat minor/patch). `audit_log` detail e acum cap-uit pe bytes UTF-8 (era pe caractere JS — multi-byte sub-numarat). `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` documentat ca shell eval operator-trusted. `environmentVariables` + `commandLine` redactate din raportul de diagnostic al watchdog-ului Electron. Root `.env.example`: `JWT_ISSUER`/`JWT_AUDIENCE` etichetate REQUIRED-WEB + `JWT_TTL_SECONDS` documentat.
+`streamCap` renunta la fallback-ul nelimitat `.text()` pentru raspunsuri cu body null. CSP `connect-src` corectat de la portul mort 3001 la 3002. Map-ul de cooldown pentru email-test e purjat de intrarile expirate (era nelimitat in web mode). Adaugat `.github/dependabot.yml` (npm + github-actions saptamanal, grupat minor/patch). `audit_log` detail e acum cap-uit pe bytes UTF-8 (era pe caractere JS — multi-byte sub-numarat). `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` documentat ca shell eval operator-trusted. `environmentVariables` + `commandLine` redactate RECURSIV (inclusiv sub-rapoartele `workers[]`) din raportul de diagnostic al watchdog-ului Electron, cu acoperire `node:test`. Root `.env.example`: `JWT_ISSUER`/`JWT_AUDIENCE` etichetate REQUIRED-WEB + `JWT_TTL_SECONDS` documentat. Comentariu cross-reference `schema.ts` (bloc legacy) <-> `0001_baseline.up.sql` care semnaleaza drift-ul de schema (audit A2; un test real ar cere refactor `initSchema` sau duplicare SQL, iar blocul e tranzitoriu).
 
 ### Migratii
 
