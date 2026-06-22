@@ -11,10 +11,10 @@
   },
   "dependencies": {
     "clsx": "^2.1.1",
-    "dompurify": "^3.4.2",
-    "fflate": "^0.8.2",
+    "dompurify": "^3.4.11",
+    "fflate": "^0.8.3",
     "jspdf": "^4.2.1",
-    "jspdf-autotable": "^5.0.7",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^0.441.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
@@ -29,10 +29,10 @@
     "@vitejs/plugin-react": "^4.3.1",
     "autoprefixer": "^10.4.20",
     "jsdom": "^29.1.1",
-    "postcss": "^8.4.45",
+    "postcss": "^8.5.15",
     "tailwindcss": "^3.4.11",
     "typescript": "^5.5.3",
     "vite": "^6.4.2",
-    "vitest": "^4.1.4"
+    "vitest": "^4.1.9"
   }
 }
