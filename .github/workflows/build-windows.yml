@@ -1,0 +1,117 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        # SHA pin (supply chain hardening v2.22.0): mutable tags @v6 can be
+        # repointed; pinned SHA stops a hijacked tag from injecting code.
+        # Refresh procedure: `gh api repos/actions/checkout/git/refs/tags/v6 --jq .object.sha`.
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Biome lint + format check
+        # Gate permanent: orice eroare biome pica CI.
+        # CLAUDE.md cere npx biome check --write local obligatoriu inainte de orice push.
+        run: npx biome check
+
+      # Type-check + test gate runs BEFORE rebuild:electron so better-sqlite3
+      # is still bound to Node's ABI (npm ci prebuild). After rebuild:electron
+      # the module flips to Electron's ABI and `vitest` (Node) crashes on load.
+      - name: Backend type-check
+        run: npx tsc --noEmit -p backend/tsconfig.json
+
+      - name: Backend tests
+        run: npm test --workspace=backend -- --run
+
+      - name: Frontend type-check
+        working-directory: frontend
+        run: npx tsc --noEmit
+
+      - name: Frontend tests
+        working-directory: frontend
+        run: npm test -- --run
+
+      - name: Rebuild native modules for Electron ABI
+        # Wraps @electron/rebuild and only targets modules valid on this platform
+        # (better-sqlite3 + windows-notification-state on Windows). Skips
+        # macos-notification-state which is in node_modules but does not compile
+        # on Win32. Pairs with --config.npmRebuild=false in the next step so
+        # electron-builder does not try to rebuild everything itself.
+        run: npm run rebuild:electron
+
+      - name: Build app (backend + frontend)
+        run: npm run build
+
+      - name: Package Windows (NSIS installer, x64, unsigned)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx electron-builder --win --x64 --publish never --config.npmRebuild=false
+
+      # Branch names like `feature/foo` contain `/`, which is rejected by
+      # actions/upload-artifact since v4 (treated as path separator). Replace
+      # `/` with `-` so workflow_dispatch on feature branches still produces
+      # a usable artifact instead of silently failing the upload.
+      - name: Sanitize ref name for artifact
+        shell: bash
+        run: echo "SAFE_REF=${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
+      - name: Upload installer artifact
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # SAFE_REF (slash-sanitized ref) + run_id keep concurrent / re-run
+          # uploads distinguishable. Avoids the legacy fixed
+          # `legal-dashboard-windows` which silently overwrote prior runs.
+          # No `continue-on-error: true` — if upload fails the workflow MUST
+          # fail loudly rather than publish a green build with no artifact.
+          name: legal-dashboard-windows-${{ env.SAFE_REF }}-run${{ github.run_id }}
+          path: |
+            release/*.exe
+            release/*.exe.blockmap
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Publish installer to dev-build prerelease
+        if: github.event_name == 'workflow_dispatch'
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          tag_name: dev-build
+          name: "Dev build (Windows)"
+          body: |
+            Unsigned Windows NSIS installer produced by workflow_dispatch.
+            Commit: ${{ github.sha }}
+            Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          files: |
+            release/*.exe
+            release/*.exe.blockmap
+          draft: false
+          prerelease: true
+
+      - name: Attach installer to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@b4309332981a82ec1c5618f44dd2e27cc8bfbfda # v3.0.0
+        with:
+          files: |
+            release/*.exe
+            release/*.exe.blockmap
+          draft: false
+          prerelease: false

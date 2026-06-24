@@ -1,0 +1,56 @@
+# Legal Dashboard — Caddy reverse proxy with auto-TLS via Let's Encrypt.
+#
+# Caddy terminates HTTPS, forwards everything to oauth2-proxy on port 4180.
+# oauth2-proxy then either redirects unauthenticated users to Google OAuth or
+# proxies authenticated requests to the backend on port 3002.
+#
+# Health probe path `/health` is exempted from auth inside oauth2-proxy (see
+# OAUTH2_PROXY_SKIP_AUTH_ROUTES in docker-compose.prod.yml). External monitors
+# (UptimeRobot, Pingdom, k8s liveness) hit https://${DOMAIN}/health.
+
+{
+	email {$ACME_EMAIL}
+	# Uncomment for staging certificates while testing DNS / firewall config:
+	# acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+{$DOMAIN} {
+	encode zstd gzip
+
+	# Forward client-real-IP + scheme so oauth2-proxy + backend rate limiter +
+	# originGuard see the correct headers. Without `X-Forwarded-Proto=https`,
+	# oauth2-proxy may build the wrong redirect URL after Google callback.
+	reverse_proxy oauth2-proxy:4180 {
+		# v2.37.1: NU stripui Cookie — oauth2-proxy isi citeste sesiunea si
+		# tokenul CSRF din cookie, iar backend-ul primeste legal_dashboard_session
+		# pe acelasi canal; cu `-Cookie` activ, login-ul intra in bucla infinita.
+		# Stripuim doar header-ele de identitate spoofabile, pe care DOAR
+		# oauth2-proxy are voie sa le seteze in aval.
+		header_up -Authorization
+		header_up -X-Auth-Request-Email
+		header_up -X-Forwarded-Email
+		header_up -X-Forwarded-User
+		header_up -X-Proxy-Auth
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	# Security headers complementary to Hono's secureHeaders().
+	# HSTS is safe here: we only serve over HTTPS in prod.
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+		Referrer-Policy "no-referrer"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		# Remove server fingerprint
+		-Server
+	}
+
+	# Caddy's default log goes to stdout; docker compose captures it.
+	log {
+		output stdout
+		format json
+	}
+}

@@ -1,0 +1,45 @@
+# SECURITY: keep secrets and local-only state out of the build context. Without
+# this file, `docker build .` ships the entire repo (including .env.local,
+# release/, server-release/, .git, node_modules) into image layers — secrets
+# leak even if removed in later layers, because every layer is independently
+# fetchable from the registry.
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+.npmrc
+*.pem
+*.key
+
+# VCS + IDE
+.git
+.gitignore
+.github
+.vscode
+.idea
+.claude
+
+# Node + workspace caches
+node_modules
+**/node_modules
+.npm
+.pnpm-store
+
+# Build artifacts not needed inside the image (we COPY dist-* explicitly).
+# Keep package manifests available for the deps stage so Docker can use the
+# workspace lockfile with `npm ci --workspace=backend`.
+release
+server-release
+build
+frontend/*
+!frontend/package.json
+backend/src
+electron
+scripts
+*.log
+*.tsbuildinfo
+
+# OS noise
+.DS_Store
+Thumbs.db

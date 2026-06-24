@@ -1,0 +1,134 @@
+name: Docker Build
+
+# Aligned with Build Windows / Build macOS triggers: only fires on tag push
+# (release event) or manual workflow_dispatch. The image is built fresh on
+# every run (no registry push) and smoke-tested by invoking node inside the
+# runtime stage to confirm that the image is at least bootable.
+#
+# Why removed `push: branches: [main]` + `pull_request:`: every Dependabot
+# merge / regular dev commit on backend/** + frontend/** + lockfile fired
+# Docker Build, producing 4-5 noisy runs per release. We trade that off for
+# a clean "release event = 3 builds" mental model: Windows + macOS + Docker.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+# Least-privilege (aligned with lint-test.yml): the job only reads the repo;
+# the default GITHUB_TOKEN fallback could carry write perms.
+permissions:
+  contents: read
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      # Dockerfile expects dist-backend/ + dist-frontend/ to be present in the
+      # build context (see comments at the top of the Dockerfile). Build them
+      # locally before invoking docker build.
+      - name: Install dependencies
+        run: npm ci
+
+      # v2.10.1 #5: gate merges on backend test suite. Local Electron dev
+      # rebuilds better-sqlite3 against Electron's ABI, so `npm test` cannot
+      # run on the dev box without `npm run rebuild:electron` first. CI runs
+      # against a clean Node 22 install, so the better-sqlite3 prebuild is
+      # ABI-correct here — this is the only place the suite reliably runs.
+      - name: Backend type-check
+        run: npx tsc --noEmit -p backend/tsconfig.json
+
+      - name: Backend tests
+        run: npm test --workspace=backend -- --run
+
+      - name: Build (backend CJS + frontend static)
+        run: npm run build
+
+      - name: Build Docker image
+        run: docker build -t legal-dashboard:ci .
+
+      - name: Smoke test — node available in image
+        run: docker run --rm legal-dashboard:ci node -e "console.log('node', process.version)"
+
+      # v2.34.0 P1-7: previously the smoke-test step had hardcoded fallback
+      # values for LEGAL_DASHBOARD_JWT_SECRET + TENANT_KEY_ENCRYPTION_SECRET
+      # baked into the workflow YAML. They were never real secrets (the smoke
+      # test only hits /health, which is public + auth-less), but hardcoded
+      # secret-shaped literals tripped repo secret scanners and were against
+      # hygiene. Now: prefer GitHub repo secrets (CI_JWT_SECRET, CI_TENANT_KEY_SECRET),
+      # fall back to fresh per-run random values so the workflow stays self-
+      # contained for forks / workflow_dispatch on a fresh clone where the
+      # repo secrets aren't configured yet.
+      - name: Generate CI smoke-test fixtures (fallback when repo secrets unset)
+        id: fixtures
+        run: |
+          # Output values never authenticate a real request; the smoke test
+          # only hits /health (public, no auth). The validators still require:
+          #   - JWT secret length >= 32 chars  (openssl rand -base64 48 = 64)
+          #   - tenant key = 32 bytes when base64-decoded (openssl rand -base64 32)
+          echo "jwt_secret=$(openssl rand -base64 48 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+          echo "tenant_key=$(openssl rand -base64 32 | tr -d '\n')" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test — /health responds (max 60s)
+        env:
+          # GitHub expressions: prefer repo secret, fall back to per-run random
+          # generated above. Repo secrets (set in Settings > Secrets > Actions):
+          #   - CI_JWT_SECRET (>=32 char string)
+          #   - CI_TENANT_KEY_SECRET (base64 of 32 bytes)
+          CI_JWT_SECRET: ${{ secrets.CI_JWT_SECRET || steps.fixtures.outputs.jwt_secret }}
+          CI_TENANT_KEY_SECRET: ${{ secrets.CI_TENANT_KEY_SECRET || steps.fixtures.outputs.tenant_key }}
+        run: |
+          # HOST=0.0.0.0 + LEGAL_DASHBOARD_ALLOW_REMOTE=1 are required for the
+          # container's port 3002 to actually be reachable from the host: the
+          # default loopback bind in backend/src/index.ts is host-isolated when
+          # running inside Docker (container loopback != host loopback), so
+          # `-p 3002:3002` only works once the process listens on a non-loopback
+          # interface. The security guard refuses non-loopback HOST without the
+          # explicit ALLOW_REMOTE opt-in — it's the same gate users hit when
+          # exposing the LAN port at home.
+          # v2.7.0 PR-9 strengthens the gate: ALLOW_REMOTE=1 (or non-loopback HOST)
+          # now also requires LEGAL_DASHBOARD_AUTH_MODE=web + a valid JWT secret
+          # (>=32 chars) + JWT_ISSUER + JWT_AUDIENCE. Desktop noop mode is no
+          # longer allowed when binding to a remote interface.
+          # v2.30.0 adds the tenant key master secret gate: web mode boots fail-fast
+          # without TENANT_KEY_ENCRYPTION_SECRET (32 bytes base64) because the boot
+          # probe does an encrypt/decrypt round-trip self-test against the master
+          # key.
+          docker run -d --name ld-ci -p 3002:3002 \
+            -e HOST=0.0.0.0 \
+            -e LEGAL_DASHBOARD_ALLOW_REMOTE=1 \
+            -e LEGAL_DASHBOARD_AUTH_MODE=web \
+            -e LEGAL_DASHBOARD_JWT_SECRET="$CI_JWT_SECRET" \
+            -e LEGAL_DASHBOARD_JWT_ISSUER=legal-dashboard-ci \
+            -e LEGAL_DASHBOARD_JWT_AUDIENCE=legal-dashboard-ci \
+            -e TENANT_KEY_ENCRYPTION_SECRET="$CI_TENANT_KEY_SECRET" \
+            legal-dashboard:ci
+          # Poll /health every 2s for 60s. start-period=120s keeps healthcheck
+          # green during prewarm, but the endpoint itself flips to 200 as soon
+          # as `serve()` fires `listening` — usually under 10s on a fresh DB.
+          for i in $(seq 1 30); do
+            code=$(curl -s -o /tmp/health.json -w '%{http_code}' http://127.0.0.1:3002/health || echo "000")
+            if [ "$code" = "200" ]; then
+              echo "ready after ${i} polls (~$((i*2))s)"
+              cat /tmp/health.json
+              docker stop ld-ci >/dev/null
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::/health did not return 200 within 60s"
+          docker logs ld-ci || true
+          docker stop ld-ci >/dev/null || true
+          exit 1

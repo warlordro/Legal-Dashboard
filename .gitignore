@@ -1,0 +1,67 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+dist-frontend/
+dist-backend/
+frontend/dist/
+backend/dist/
+release/
+server-release/
+out/
+
+# Databases (local dev data, user-specific)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+
+# Logs
+*.log
+logs/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+deploy/.env.prod
+deploy/.env.local
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code local config (per-machine session settings, hooks, lockfiles)
+.claude/
+.mcp.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Electron-builder
+*.exe
+*.dmg
+*.AppImage
+*.deb
+*.rpm
+
+# RNPM debug dumps — contin PII real (CUI, denumire, identificator) si nu trebuie commit
+backend/rnpm-dumps/
+
+# Worktrees temporare create de tooling (audit/composr)
+.worktrees/
+
+# Dokploy deploy — never commit secrets
+.env
+.env.prod
+.env.prod.dokploy
+deploy/.env.prod

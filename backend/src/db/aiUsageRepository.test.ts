@@ -1,0 +1,432 @@
+import Database from "better-sqlite3";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import {
+  confirmAiUsageReservation,
+  earliestAiUsageTsInWindow,
+  getAiUsageByFeature,
+  getAiUsageByProvider,
+  getAiUsageTotals,
+  insertAiUsage,
+  insertAiUsageReservation,
+  listAiUsageLastDays,
+  purgeOldAiUsage,
+  sumAiUsageMilliInWindow,
+  sumAiUsageMilliToday,
+} from "./aiUsageRepository.ts";
+import { closeDb, getDb } from "./schema.ts";
+
+let tmpRoot: string;
+let dbPath: string;
+
+beforeEach(async () => {
+  tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-ai-usage-"));
+  dbPath = path.join(tmpRoot, "legal-dashboard.db");
+  process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+  const seed = new Database(dbPath);
+  seed.close();
+  getDb();
+});
+
+afterEach(async () => {
+  closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+});
+
+describe("insertAiUsage", () => {
+  it("persists a normalized owner-scoped usage row", () => {
+    const row = insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      feature: "dosar_summary",
+      inputTokens: 120.9,
+      outputTokens: -5,
+      costUsdMilli: 2.2,
+      httpStatus: 200,
+      requestId: "req-ai-1",
+      routingTag: "openrouter:western",
+      ts: "2026-04-30T10:00:00.000Z",
+    });
+
+    expect(row.owner_id).toBe("alice");
+    expect(row.input_tokens).toBe(120);
+    expect(row.output_tokens).toBe(0);
+    expect(row.cost_usd_milli).toBe(2);
+    expect(row.was_aborted).toBe(0);
+    expect(row.request_id).toBe("req-ai-1");
+    expect(row.routing_tag).toBe("openrouter:western");
+  });
+
+  it("accepts openrouter as a provider after migration 0024", () => {
+    const row = insertAiUsage({
+      ownerId: "alice",
+      provider: "openrouter",
+      model: "anthropic/claude-opus-4.8",
+      feature: "dosar_summary",
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsdMilli: 30,
+      routingTag: "openrouter:western",
+    });
+
+    expect(row.provider).toBe("openrouter");
+    expect(row.routing_tag).toBe("openrouter:western");
+  });
+
+  it("citeste randuri istorice cu routing_tag openrouter:chinese fara eroare", () => {
+    // v2.38.0 a eliminat stack-ul chinese din tipul AiUsageRoutingTag, dar
+    // coloana routing_tag e TEXT fara CHECK — randurile vechi raman in DB si
+    // trebuie sa fie citibile in continuare (read-only legacy, fara validare).
+    getDb()
+      .prepare(
+        `INSERT INTO ai_usage
+           (owner_id, provider, model, input_tokens, output_tokens, cost_usd_milli, feature, routing_tag)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run("alice", "openrouter", "anthropic/claude-sonnet-4.6", 10, 20, 30, "dosar_summary", "openrouter:chinese");
+
+    const row = getDb()
+      .prepare("SELECT model, routing_tag FROM ai_usage WHERE routing_tag = 'openrouter:chinese'")
+      .get() as { model: string; routing_tag: string };
+    expect(row).toEqual({ model: "anthropic/claude-sonnet-4.6", routing_tag: "openrouter:chinese" });
+  });
+
+  it("persists latency_ms and error_type when provided (migration 0037)", () => {
+    const row = insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      feature: "dosar_summary",
+      latencyMs: 1234,
+      errorType: "timeout",
+    });
+
+    expect(row.latency_ms).toBe(1234);
+    expect(row.error_type).toBe("timeout");
+  });
+
+  it("leaves latency_ms and error_type null when omitted", () => {
+    const row = insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      feature: "dosar_summary",
+    });
+
+    expect(row.latency_ms).toBeNull();
+    expect(row.error_type).toBeNull();
+  });
+
+  it("persists latency_ms and error_type when confirming a reservation (migration 0037)", () => {
+    const reservationId = insertAiUsageReservation({
+      ownerId: "alice",
+      provider: "openai",
+      feature: "dosar_summary",
+      estimatedCostUsdMilli: 100,
+    });
+
+    confirmAiUsageReservation(reservationId, {
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      inputTokens: 10,
+      outputTokens: 20,
+      costUsdMilli: 30,
+      httpStatus: 200,
+      wasAborted: false,
+      routingTag: "openrouter:western",
+      latencyMs: 1234,
+      errorType: "timeout",
+    });
+
+    const row = getDb().prepare("SELECT latency_ms, error_type FROM ai_usage WHERE id = ?").get(reservationId) as {
+      latency_ms: number | null;
+      error_type: string | null;
+    };
+    expect(row.latency_ms).toBe(1234);
+    expect(row.error_type).toBe("timeout");
+  });
+});
+
+describe("AI usage queries", () => {
+  beforeEach(() => {
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      feature: "dosar_summary",
+      inputTokens: 100,
+      outputTokens: 20,
+      costUsdMilli: 1,
+      ts: "2026-04-29T08:00:00.000Z",
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      feature: "dosar_multi_judge",
+      inputTokens: 300,
+      outputTokens: 40,
+      costUsdMilli: 3,
+      ts: "2026-04-30T08:00:00.000Z",
+    });
+    insertAiUsage({
+      ownerId: "bob",
+      provider: "openai",
+      model: "gpt-5.4-mini",
+      feature: "dosar_summary",
+      inputTokens: 999,
+      outputTokens: 999,
+      costUsdMilli: 999,
+      ts: "2026-04-30T09:00:00.000Z",
+    });
+  });
+
+  it("returns rolling-window totals scoped to the owner", () => {
+    const totals = getAiUsageTotals({
+      ownerId: "alice",
+      since: "2026-04-30T00:00:00.000Z",
+    });
+
+    expect(totals).toEqual({
+      calls: 1,
+      inputTokens: 300,
+      outputTokens: 40,
+      costUsdMilli: 3,
+    });
+  });
+
+  it("returns provider and feature breakdowns scoped to the owner", () => {
+    const window = {
+      ownerId: "alice",
+      since: "2026-04-28T00:00:00.000Z",
+    };
+
+    expect(getAiUsageByProvider(window).map((row) => [row.key, row.calls, row.costUsdMilli])).toEqual([
+      ["openai", 1, 3],
+      ["anthropic", 1, 1],
+    ]);
+    expect(getAiUsageByFeature(window).map((row) => [row.key, row.calls])).toEqual([
+      ["dosar_multi_judge", 1],
+      ["dosar_summary", 1],
+    ]);
+  });
+
+  it("groups last-days usage without leaking another owner", () => {
+    const result = listAiUsageLastDays({
+      ownerId: "alice",
+      days: 30,
+      now: new Date("2026-04-30T12:00:00.000Z"),
+    });
+
+    expect(result.rows.map((row) => [row.day, row.calls, row.costUsdMilli])).toEqual([
+      ["2026-04-29", 1, 1],
+      ["2026-04-30", 1, 3],
+    ]);
+    expect(result.since).toBe("2026-04-01T00:00:00.000Z");
+    expect(result.until).toBe("2026-04-30T12:00:00.000Z");
+  });
+
+  it("includes rows whose ts equals the window start (closed lower bound)", () => {
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      feature: "dosar_summary",
+      inputTokens: 1,
+      outputTokens: 1,
+      costUsdMilli: 1,
+      ts: "2026-04-30T00:00:00.000Z",
+    });
+
+    const totals = getAiUsageTotals({
+      ownerId: "alice",
+      since: "2026-04-30T00:00:00.000Z",
+    });
+
+    expect(totals.calls).toBe(2);
+  });
+
+  it("sums today's quota aliases for AI features", () => {
+    const today = new Date().toISOString();
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "anthropic",
+      model: "claude-sonnet-4-6",
+      feature: "dosar_summary",
+      costUsdMilli: 7,
+      ts: today,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_multi_analyst",
+      costUsdMilli: 11,
+      ts: today,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "google",
+      model: "gemini-pro-3",
+      feature: "dosar_multi_judge",
+      costUsdMilli: 13,
+      ts: today,
+    });
+
+    expect(sumAiUsageMilliToday("alice", "ai.single")).toBe(7);
+    expect(sumAiUsageMilliToday("alice", "ai.multi")).toBe(24);
+  });
+});
+
+describe("sumAiUsageMilliInWindow", () => {
+  it("includes only rows inside the rolling window", () => {
+    const now = new Date();
+    const inside = new Date(now.getTime() - 30 * 60_000).toISOString(); // 30 min ago
+    const outside = new Date(now.getTime() - 5 * 3_600_000).toISOString(); // 5h ago
+
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 4,
+      ts: inside,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 9,
+      ts: outside,
+    });
+
+    // 1h window includes only the 30-min row.
+    expect(sumAiUsageMilliInWindow("alice", "ai.single", 3600)).toBe(4);
+    // 24h window includes both.
+    expect(sumAiUsageMilliInWindow("alice", "ai.single", 86_400)).toBe(13);
+  });
+
+  it("expands ai.multi aliases (dosar_multi_analyst / dosar_multi_judge)", () => {
+    const now = new Date();
+    const ts = new Date(now.getTime() - 60_000).toISOString();
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt",
+      feature: "dosar_multi_analyst",
+      costUsdMilli: 5,
+      ts,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "google",
+      model: "gemini",
+      feature: "dosar_multi_judge",
+      costUsdMilli: 7,
+      ts,
+    });
+    expect(sumAiUsageMilliInWindow("alice", "ai.multi", 3600)).toBe(12);
+  });
+
+  it("rejects non-positive windowSeconds", () => {
+    expect(() => sumAiUsageMilliInWindow("alice", "ai.single", 0)).toThrow();
+    expect(() => sumAiUsageMilliInWindow("alice", "ai.single", -1)).toThrow();
+  });
+});
+
+describe("purgeOldAiUsage", () => {
+  it("deletes rows older than the cutoff and returns the deleted count", () => {
+    const now = Date.now();
+    const old = new Date(now - 100 * 86_400_000).toISOString(); // 100 days ago
+    const recent = new Date(now - 10 * 86_400_000).toISOString(); // 10 days ago
+
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: old,
+    });
+    insertAiUsage({
+      ownerId: "bob",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: old,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: recent,
+    });
+
+    const deleted = purgeOldAiUsage(90);
+    expect(deleted).toBe(2);
+
+    const remaining = getDb().prepare("SELECT COUNT(*) AS n FROM ai_usage").get() as { n: number };
+    expect(remaining.n).toBe(1);
+  });
+
+  it("chunks past chunkSize and still returns the full deleted count", () => {
+    const old = new Date(Date.now() - 100 * 86_400_000).toISOString();
+    for (let i = 0; i < 5; i++) {
+      insertAiUsage({
+        ownerId: "alice",
+        provider: "openai",
+        model: "gpt-5.4",
+        feature: "dosar_summary",
+        costUsdMilli: 1,
+        ts: old,
+      });
+    }
+
+    // chunkSize 2 forces multiple delete batches (2 + 2 + 1).
+    const deleted = purgeOldAiUsage(90, 2);
+    expect(deleted).toBe(5);
+
+    const remaining = getDb().prepare("SELECT COUNT(*) AS n FROM ai_usage").get() as { n: number };
+    expect(remaining.n).toBe(0);
+  });
+});
+
+describe("earliestAiUsageTsInWindow", () => {
+  it("returns the oldest ts inside the window or null when empty", () => {
+    expect(earliestAiUsageTsInWindow("alice", "ai.single", 3600)).toBeNull();
+
+    const now = Date.now();
+    const tA = new Date(now - 50 * 60_000).toISOString(); // 50 min ago
+    const tB = new Date(now - 20 * 60_000).toISOString(); // 20 min ago
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: tA,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 1,
+      ts: tB,
+    });
+
+    const earliest = earliestAiUsageTsInWindow("alice", "ai.single", 3600);
+    // SQLite stores ISO strings; lexicographic order matches chronological.
+    expect(earliest).toBe(tA);
+  });
+});

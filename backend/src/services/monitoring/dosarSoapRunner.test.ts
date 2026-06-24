@@ -1,0 +1,750 @@
+// dosarSoapRunner — orchestration glue between scheduler ↔ SOAP ↔ diff ↔ DB.
+//
+// Coverage focus:
+//   - happy path: empty prev snapshot → no alerts (baseline tick), snapshot persisted
+//   - diff produces alerts → insertAlert called once per alert, alertsCreated counted
+//   - SOAP throw on unrelated error → { status: "error", errorCode: "SOAP_FAIL" }
+//   - external abort during SOAP → { status: "aborted" }, no snapshot/alert writes
+//   - wallclock budget exceeded → { status: "timeout", errorCode: "WALLCLOCK_BUDGET" }
+//   - dosar disappeared (search returns []) → snapshot lastDosarPresent=false
+//
+// SOAP itself is injected (deps.searchDosare). The real impl in C6 will
+// wire production `cautareDosare`. Keeping the dep injectable lets these
+// tests run with no network and lets the manual-trigger route reuse the
+// same factory.
+
+import Database from "better-sqlite3";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+
+import { closeDb, getDb } from "../../db/schema.ts";
+import { getLatestSnapshot } from "../../db/monitoringSnapshotsRepository.ts";
+import { insertAlert } from "../../db/monitoringAlertsRepository.ts";
+import { SNAPSHOT_PAYLOAD_MAX_BYTES } from "./diff/types.ts";
+import { createDosarSoapRunner } from "./dosarSoapRunner.ts";
+import type { ScheduledJob } from "./scheduler.ts";
+import type { Dosar } from "../../soap.ts";
+
+let tmpRoot: string;
+
+const OWNER = "local";
+const NOW_ISO = "2026-04-28T10:00:00.000Z";
+
+let _hashCounter = 0;
+function seedJob(opts?: {
+  alertConfigJson?: string;
+  targetJson?: string;
+}): ScheduledJob {
+  const db = getDb();
+  const info = db
+    .prepare(
+      `INSERT INTO monitoring_jobs
+         (owner_id, kind, target_json, target_hash, cadence_sec,
+          alert_config_json, next_run_at)
+       VALUES (?, 'dosar_soap', ?, ?, 14400, ?, '2026-04-28T12:00:00.000Z')`
+    )
+    .run(
+      OWNER,
+      opts?.targetJson ?? '{"numar_dosar":"1234/180/2024"}',
+      `hash-${++_hashCounter}`,
+      opts?.alertConfigJson ??
+        JSON.stringify({
+          notify_days_before: [7, 1],
+          notify_on_new_termen: true,
+          notify_on_solution: true,
+          notify_on_dosar_disappeared: true,
+        })
+    );
+  return db.prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(info.lastInsertRowid) as ScheduledJob;
+}
+
+function seedRunningRow(jobId: number): number {
+  // Indexul partial unique idx_one_running_per_job (migrarea 0005) interzice
+  // doua randuri 'running' simultan pentru acelasi job. In productie scheduler-ul
+  // finalizeaza randul curent inainte de urmatorul tick; aici simulam acel
+  // contract finalizand orice rand 'running' anterior pe acelasi job inainte
+  // de a insera unul nou.
+  getDb()
+    .prepare(
+      `UPDATE monitoring_runs
+         SET status = 'aborted',
+             ended_at = strftime('%Y-%m-%dT%H:%M:%fZ','now')
+       WHERE job_id = ? AND status = 'running'`
+    )
+    .run(jobId);
+  const info = getDb()
+    .prepare(
+      `INSERT INTO monitoring_runs (owner_id, job_id, started_at, status)
+       VALUES (?, ?, ?, 'running')`
+    )
+    .run(OWNER, jobId, NOW_ISO);
+  return info.lastInsertRowid as number;
+}
+
+function countSnapshots(jobId: number): number {
+  return (
+    getDb()
+      .prepare("SELECT COUNT(*) AS n FROM monitoring_snapshots WHERE owner_id = ? AND job_id = ?")
+      .get(OWNER, jobId) as {
+      n: number;
+    }
+  ).n;
+}
+
+beforeEach(async () => {
+  tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-runner-"));
+  process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
+  const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
+  seed.close();
+  getDb();
+});
+
+afterEach(async () => {
+  closeDb();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+  delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+});
+
+function makeDosar(numar: string, sedinte: Dosar["sedinte"] = []): Dosar {
+  return {
+    numar,
+    data: "2024-01-15",
+    institutie: "Judecatoria Test",
+    departament: "",
+    categorieCaz: "civil",
+    stadiuProcesual: "fond",
+    obiect: "test",
+    parti: [],
+    sedinte,
+  };
+}
+
+describe("dosarSoapRunner — happy path baseline", () => {
+  it("empty prev snapshot → emits no alerts, persists baseline snapshot", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [makeDosar("1234/180/2024")],
+    });
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    expect(out.alertsCreated).toBe(0);
+
+    const snap = getLatestSnapshot(job.owner_id, job.id);
+    expect(snap).not.toBeNull();
+    expect(snap!.observed_at).toBe(NOW_ISO);
+    const payload = JSON.parse(snap!.payload_json);
+    expect(payload.lastDosarPresent).toBe(true);
+    expect(Array.isArray(payload.sedintaKeys)).toBe(true);
+
+    const alertCount = (
+      getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?").get(job.id) as { n: number }
+    ).n;
+    expect(alertCount).toBe(0);
+  });
+});
+
+describe("dosarSoapRunner — diff emits alerts", () => {
+  it("new termen between snapshots → termen_new alert persisted", async () => {
+    const sedinta = {
+      complet: "C1",
+      data: "2026-05-01",
+      ora: "10:00",
+      solutie: "",
+      solutieSumar: "",
+      documentSedinta: "",
+      numarDocument: "",
+      dataPronuntare: "",
+    };
+
+    // Stateful closure flips between baseline (no sedinte) and updated
+    // (one sedinta) so the second tick computes a real diff.
+    let returnSedinte = false;
+    const runner = createDosarSoapRunner({
+      searchDosare: async () =>
+        returnSedinte ? [makeDosar("1234/180/2024", [sedinta])] : [makeDosar("1234/180/2024")],
+    });
+
+    const job = seedJob();
+    const r1 = seedRunningRow(job.id);
+    await runner.run({
+      job,
+      runId: r1,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    returnSedinte = true;
+    const r2 = seedRunningRow(job.id);
+    const second = await runner.run({
+      job,
+      runId: r2,
+      nowIso: "2026-04-28T10:05:00.000Z",
+      signal: new AbortController().signal,
+    });
+
+    expect(second.status).toBe("ok");
+    expect(second.alertsCreated).toBeGreaterThanOrEqual(1);
+
+    const alerts = getDb().prepare("SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY id").all(job.id) as {
+      kind: string;
+    }[];
+    expect(alerts.some((a) => a.kind === "termen_new")).toBe(true);
+  });
+
+  it("three consecutive ticks leave exactly 1 snapshot for the job", async () => {
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [makeDosar("1234/180/2024")],
+    });
+    const job = seedJob();
+
+    for (const nowIso of [NOW_ISO, "2026-04-28T10:05:00.000Z", "2026-04-28T10:10:00.000Z"]) {
+      const out = await runner.run({
+        job,
+        runId: seedRunningRow(job.id),
+        nowIso,
+        signal: new AbortController().signal,
+      });
+      expect(out.status).toBe("ok");
+    }
+
+    expect(countSnapshots(job.id)).toBe(1);
+  });
+
+  it("alert insert failure rolls back retention and keeps the previous snapshot", async () => {
+    const sedinta = {
+      complet: "C1",
+      data: "2026-05-01",
+      ora: "10:00",
+      solutie: "",
+      solutieSumar: "",
+      documentSedinta: "",
+      numarDocument: "",
+      dataPronuntare: "",
+    };
+    let secondTick = false;
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => (secondTick ? [makeDosar("1234/180/2024", [sedinta])] : [makeDosar("1234/180/2024")]),
+    });
+    const job = seedJob();
+
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+    const baseline = getLatestSnapshot(job.owner_id, job.id);
+    expect(baseline).not.toBeNull();
+
+    getDb()
+      .prepare(
+        [
+          "CREATE TRIGGER fail_dosar_alert_insert",
+          "BEFORE INSERT ON monitoring_alerts",
+          "BEGIN SELECT RAISE(FAIL, 'forced dosar alert failure'); END",
+        ].join(" ")
+      )
+      .run();
+
+    secondTick = true;
+    await expect(
+      runner.run({
+        job,
+        runId: seedRunningRow(job.id),
+        nowIso: "2026-04-28T10:05:00.000Z",
+        signal: new AbortController().signal,
+      })
+    ).rejects.toThrow(/forced dosar alert failure/);
+
+    getDb().prepare("DROP TRIGGER fail_dosar_alert_insert").run();
+
+    const after = getLatestSnapshot(job.owner_id, job.id);
+    expect(countSnapshots(job.id)).toBe(1);
+    expect(after?.id).toBe(baseline!.id);
+  });
+});
+
+describe("dosarSoapRunner — SOAP error", () => {
+  it("searchDosare throws → returns error outcome, no snapshot written", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => {
+        throw new Error("upstream 503");
+      },
+    });
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("error");
+    expect(out.errorCode).toBe("SOAP_FAIL");
+    expect(out.errorMessage).toContain("upstream 503");
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+  });
+});
+
+describe("dosarSoapRunner — abort during SOAP", () => {
+  it("external abort propagates → status='aborted', no writes", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+    const ctrl = new AbortController();
+
+    const runner = createDosarSoapRunner({
+      searchDosare: async (_params, opts) => {
+        // Wait until the test aborts the signal, then throw an AbortError.
+        await new Promise<void>((_resolve, reject) => {
+          opts!.signal!.addEventListener("abort", () => {
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" }));
+          });
+        });
+        return [];
+      },
+    });
+
+    const promise = runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: ctrl.signal,
+    });
+    // Yield, then abort.
+    await new Promise((r) => setImmediate(r));
+    ctrl.abort();
+
+    const out = await promise;
+    expect(out.status).toBe("aborted");
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+  });
+});
+
+describe("dosarSoapRunner — wallclock budget", () => {
+  it("internal 10-min budget fires → status='timeout'", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+
+    // Inject a fake AbortSignal as the budget-equivalent: the runner is
+    // supposed to compose AbortSignal.timeout(10min) with the external
+    // signal. We can't sleep 10min in a test, so we override the budget
+    // factory via a hidden seam: pass an explicit short budget.
+    const runner = createDosarSoapRunner({
+      searchDosare: async (_params, opts) => {
+        await new Promise<void>((_resolve, reject) => {
+          opts!.signal!.addEventListener("abort", () => {
+            reject(Object.assign(new Error("timeout"), { name: "TimeoutError" }));
+          });
+        });
+        return [];
+      },
+      budgetMs: 25, // testing seam — production uses 600_000
+    });
+
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("timeout");
+    expect(out.errorCode).toBe("WALLCLOCK_BUDGET");
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+  });
+});
+
+describe("dosarSoapRunner — dosar disappeared", () => {
+  it("empty SOAP result → snapshot lastDosarPresent=false", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [],
+    });
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    const snap = getLatestSnapshot(job.owner_id, job.id);
+    expect(snap).not.toBeNull();
+    expect(JSON.parse(snap!.payload_json).lastDosarPresent).toBe(false);
+  });
+});
+
+// Tier 5 #T1 (PR-4 hardening): atomic snapshot+alert boundary.
+// Regression guard for C2: the runner persists the new snapshot AND emits
+// alerts inside a single db.transaction(). If alert inserts fail mid-loop
+// (disk-full, OS kill, FK violation), the snapshot must roll back too —
+// otherwise the next tick diffs against the new snapshot and the missed
+// alerts are silently dropped.
+//
+// Force-failure mechanism: a SQL trigger on monitoring_alerts that RAISE(FAIL)
+// after the first insert for this job. Cleaner than module-mocking because it
+// exercises the *real* transaction unwind path SQLite would use in prod.
+describe("dosarSoapRunner — snapshot+alert atomic on partial failure (#T1)", () => {
+  it("alert insert fails mid-loop → snapshot rolled back, 0 alerts persisted", async () => {
+    const sedintaA = {
+      complet: "C1",
+      data: "2026-05-01",
+      ora: "10:00",
+      solutie: "",
+      solutieSumar: "",
+      documentSedinta: "",
+      numarDocument: "",
+      dataPronuntare: "",
+    };
+    const sedintaB = { ...sedintaA, complet: "C2", data: "2026-05-02" };
+
+    let secondTick = false;
+    const runner = createDosarSoapRunner({
+      searchDosare: async () =>
+        secondTick ? [makeDosar("1234/180/2024", [sedintaA, sedintaB])] : [makeDosar("1234/180/2024")],
+    });
+
+    const job = seedJob();
+    const r1 = seedRunningRow(job.id);
+    await runner.run({
+      job,
+      runId: r1,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    // Capture baseline snapshot id so we can prove it stays the latest after
+    // the transactional rollback (vs. a new aborted snapshot leaking through).
+    const baselineSnap = getLatestSnapshot(job.owner_id, job.id);
+    expect(baselineSnap).not.toBeNull();
+    const baselineId = baselineSnap!.id;
+
+    // Trigger fires AFTER the first INSERT for this job, so the *second*
+    // alert insert raises. The transaction must unwind everything emitted
+    // by this run — both the new snapshot AND the first alert.
+    const triggerSql = [
+      "CREATE TRIGGER fail_second_alert",
+      "BEFORE INSERT ON monitoring_alerts",
+      "FOR EACH ROW",
+      "WHEN (SELECT COUNT(*) FROM monitoring_alerts WHERE job_id = NEW.job_id) >= 1",
+      "BEGIN SELECT RAISE(FAIL, 'forced regression test failure'); END",
+    ].join(" ");
+    getDb().prepare(triggerSql).run();
+
+    secondTick = true;
+    const r2 = seedRunningRow(job.id);
+    let threw = false;
+    try {
+      await runner.run({
+        job,
+        runId: r2,
+        nowIso: "2026-04-28T10:05:00.000Z",
+        signal: new AbortController().signal,
+      });
+    } catch {
+      threw = true;
+    }
+
+    // Drop the trigger so cleanup has no side effects on later tests.
+    getDb().prepare("DROP TRIGGER fail_second_alert").run();
+
+    expect(threw).toBe(true);
+
+    // Atomic boundary holds: latest snapshot is still the baseline (no new
+    // snapshot row from the failed run), and 0 alerts persisted.
+    const snapAfter = getLatestSnapshot(job.owner_id, job.id);
+    expect(snapAfter).not.toBeNull();
+    expect(snapAfter!.id).toBe(baselineId);
+
+    const alertCount = (
+      getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?").get(job.id) as { n: number }
+    ).n;
+    expect(alertCount).toBe(0);
+  });
+});
+
+// Constatare adversiala #1 — plafon 3 MiB pe payload_json. Runner-ul refuza
+// scrierea snapshotului oversize si emite o alerta source_error/SNAPSHOT_OVERSIZE.
+// Asigura ca:
+//   - statusul outcome e "error" cu errorCode SNAPSHOT_OVERSIZE
+//   - alertul SNAPSHOT_OVERSIZE e persistat (1 alerta in DB)
+//   - prev_snapshot ramane neschimbat (niciun rand de snapshot scris)
+describe("dosarSoapRunner — SNAPSHOT_OVERSIZE plafon", () => {
+  function makeBigDosar(numar: string, count: number): Dosar {
+    // Campul solutie mare tine fixture-ul determinist peste plafonul de 3 MiB.
+    const sedinte: Dosar["sedinte"] = Array.from({ length: count }, (_, i) => ({
+      complet: `Complet${i}`,
+      data: `2026-${String((i % 12) + 1).padStart(2, "0")}-${String((i % 28) + 1).padStart(2, "0")}`,
+      ora: `${String(i % 24).padStart(2, "0")}:00`,
+      solutie: "x".repeat(900),
+      solutieSumar: "",
+      documentSedinta: "",
+      numarDocument: "",
+      dataPronuntare: "",
+    }));
+    return makeDosar(numar, sedinte);
+  }
+
+  it("payload peste 3 MiB -> outcome error SNAPSHOT_OVERSIZE + 1 alerta + niciun snapshot scris", async () => {
+    const job = seedJob();
+    const runId = seedRunningRow(job.id);
+
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [makeBigDosar("1234/180/2024", 5000)],
+    });
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("error");
+    expect(out.errorCode).toBe("SNAPSHOT_OVERSIZE");
+    expect(out.errorMessage).toMatch(/payload \d+B > cap \d+B/);
+    expect(out.alertsCreated).toBe(1);
+
+    // Niciun snapshot scris — pastreaza prev (in cazul asta absent).
+    expect(getLatestSnapshot(job.owner_id, job.id)).toBeNull();
+
+    // Alerta source_error cu detail.error_code = SNAPSHOT_OVERSIZE.
+    const alerts = getDb()
+      .prepare(
+        `SELECT title, kind, severity, detail_json, dedup_key
+           FROM monitoring_alerts
+          WHERE job_id = ?`
+      )
+      .all(job.id) as {
+      title: string;
+      kind: string;
+      severity: string;
+      detail_json: string;
+      dedup_key: string;
+    }[];
+    expect(alerts.length).toBe(1);
+    expect(alerts[0]!.kind).toBe("source_error");
+    expect(alerts[0]!.severity).toBe("warning");
+    expect(alerts[0]!.dedup_key).toBe(`snapshot_oversize|${runId}`);
+    expect(alerts[0]!.title).toBe(
+      `Snapshot peste plafon (${SNAPSHOT_PAYLOAD_MAX_BYTES >> 20} MiB) - refuzat la scriere`
+    );
+    const detail = JSON.parse(alerts[0]!.detail_json);
+    expect(detail.error_code).toBe("SNAPSHOT_OVERSIZE");
+    expect(detail.payload_bytes).toBeGreaterThan(SNAPSHOT_PAYLOAD_MAX_BYTES);
+    expect(detail.max_bytes).toBe(SNAPSHOT_PAYLOAD_MAX_BYTES);
+  });
+});
+
+// F8 enrichment integration — repository-level coverage already lives in
+// monitoringAlertsRepository.test.ts (10 P0 cases). This single test exercises
+// the end-to-end path through the runner: a `solutie_aparuta` alert exists
+// from a prior tick with empty ruling fields; on the next tick PortalJust
+// republishes the same sedinta with the ruling text now populated; the runner
+// invokes enrichSolutieAlertsForJob inside the snapshot+alerts transaction and
+// the existing alert's detail_json is patched in place.
+describe("dosarSoapRunner — F8 enrichment integration", () => {
+  it("patches existing solutie_aparuta alert when SOAP republishes the sedinta with full ruling text (F8 enrichment integration)", async () => {
+    const job = seedJob();
+
+    // Tick 0: pre-existing alert from a prior run, emitted when the ruling
+    // text was not yet published. detail carries the (data, ora, complet,
+    // solutie) tuple but NOT solutie_sumar / numar_document / data_pronuntare.
+    // Use a stable dedup_key distinct from anything the diff layer would emit
+    // on this tick so insertAlert stays a real insert and the assertion below
+    // can target this specific row.
+    const priorRunId = seedRunningRow(job.id);
+    const seededAlert = insertAlert({
+      ownerId: OWNER,
+      jobId: job.id,
+      runId: priorRunId,
+      kind: "solutie_aparuta",
+      severity: "info",
+      title: "Solutie pronuntata (pre-enrichment)",
+      detail: {
+        data: "2026-04-15",
+        ora: "10:00",
+        complet: "C1",
+        solutie: "Admite",
+      },
+      dedupKey: "solutie_aparuta|test-pre-existing",
+    });
+    expect(seededAlert.inserted).toBe(true);
+    const alertId = seededAlert.row.id;
+    const baselineIsNew = seededAlert.row.is_new;
+    const baselineReadAt = seededAlert.row.read_at;
+    const baselineDismissedAt = seededAlert.row.dismissed_at;
+
+    // SOAP fixture: same numarDosar, same sedinta tuple, but now with the
+    // ruling fields populated (PortalJust published the hotarare in the
+    // window between the two ticks).
+    const sedintaWithRuling = {
+      complet: "C1",
+      data: "2026-04-15",
+      ora: "10:00",
+      solutie: "Admite",
+      solutieSumar: "Admite cererea reclamantului. Hotarare definitiva.",
+      documentSedinta: "",
+      numarDocument: "DOC/123/2026",
+      dataPronuntare: "2026-04-16",
+    };
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [makeDosar("1234/180/2024", [sedintaWithRuling])],
+    });
+
+    const runId = seedRunningRow(job.id);
+    const out = await runner.run({
+      job,
+      runId,
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    expect(out.status).toBe("ok");
+    // F10: surface enrichment patches via the run outcome so the scheduler can
+    // store alerts_patched on monitoring_runs. One alert was patched in place;
+    // no brand-new alerts were emitted for this fixture.
+    expect(out.alertsPatched).toBe(1);
+    expect(out.alertsCreated ?? 0).toBe(0);
+
+    // The pre-existing alert's detail_json now carries the ruling fields,
+    // while the original (data, ora, complet, solutie) tuple is preserved.
+    const patchedRow = getDb()
+      .prepare(
+        `SELECT detail_json, is_new, read_at, dismissed_at
+           FROM monitoring_alerts WHERE id = ?`
+      )
+      .get(alertId) as {
+      detail_json: string;
+      is_new: number;
+      read_at: string | null;
+      dismissed_at: string | null;
+    };
+    const detail = JSON.parse(patchedRow.detail_json) as Record<string, unknown>;
+
+    expect(detail.solutie_sumar).toBe("Admite cererea reclamantului. Hotarare definitiva.");
+    expect(detail.numar_document).toBe("DOC/123/2026");
+    expect(detail.data_pronuntare).toBe("2026-04-16");
+
+    // Original tuple unchanged — enrichment merges, never overwrites.
+    expect(detail.data).toBe("2026-04-15");
+    expect(detail.ora).toBe("10:00");
+    expect(detail.complet).toBe("C1");
+    expect(detail.solutie).toBe("Admite");
+
+    // is_new / read_at / dismissed_at MUST NOT be mutated by the in-place
+    // detail patch — enrichment is a content backfill, not a re-notification.
+    expect(patchedRow.is_new).toBe(baselineIsNew);
+    expect(patchedRow.read_at).toBe(baselineReadAt);
+    expect(patchedRow.dismissed_at).toBe(baselineDismissedAt);
+  });
+});
+
+describe("dosarSoapRunner — selectie sticky multi-instanta (v2.37.1, review cluster 2)", () => {
+  const sedintaApel = {
+    complet: "CA1",
+    data: "2026-05-01",
+    ora: "10:00",
+    solutie: "",
+    solutieSumar: "",
+    documentSedinta: "",
+    numarDocument: "",
+    dataPronuntare: "",
+  };
+
+  function dosarLa(stadiu: string, institutie: string, sedinte: Dosar["sedinte"]): Dosar {
+    return {
+      numar: "1234/180/2024",
+      data: "2024-01-15",
+      institutie,
+      departament: "",
+      categorieCaz: "civil",
+      stadiuProcesual: stadiu,
+      obiect: "test",
+      parti: [],
+      sedinte,
+    };
+  }
+
+  it("pastreaza randul cu stadiul din baseline cand upstream-ul intoarce 2 randuri in alta ordine", async () => {
+    const apel = dosarLa("Apel", "Curtea de Apel X", [sedintaApel]);
+    const fond = dosarLa("Fond", "Judecatoria Test", [{ ...sedintaApel, complet: "F1", data: "2026-06-01" }]);
+
+    let secondTick = false;
+    const runner = createDosarSoapRunner({
+      // tick1: doar randul Apel (baseline cu chei "apel|..."); tick2: upstream
+      // intoarce [Fond, Apel] — fara sticky, dosare[0]=Fond ar fi rotit toate
+      // cheile (termen_new fals + dosar "schimbat").
+      searchDosare: async () => (secondTick ? [fond, apel] : [apel]),
+    });
+
+    const job = seedJob();
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+
+    secondTick = true;
+    const second = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: "2026-04-28T11:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+
+    expect(second.status).toBe("ok");
+    const kinds = getDb()
+      .prepare("SELECT kind FROM monitoring_alerts WHERE job_id = ? ORDER BY id")
+      .all(job.id)
+      .map((r) => (r as { kind: string }).kind);
+    // Sticky => acelasi rand (Apel) ramane urmarit: zero termen_new/termen_changed.
+    // Singura alerta e cea informativa multi-instanta (kind source_partial).
+    expect(kinds).toEqual(["source_partial"]);
+  });
+
+  it("alerta multi-instanta se emite o singura data per set de instante (dedup)", async () => {
+    const apel = dosarLa("Apel", "Curtea de Apel X", [sedintaApel]);
+    const fond = dosarLa("Fond", "Judecatoria Test", []);
+    const runner = createDosarSoapRunner({
+      searchDosare: async () => [fond, apel],
+    });
+
+    const job = seedJob();
+    await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: NOW_ISO,
+      signal: new AbortController().signal,
+    });
+    const second = await runner.run({
+      job,
+      runId: seedRunningRow(job.id),
+      nowIso: "2026-04-28T11:00:00.000Z",
+      signal: new AbortController().signal,
+    });
+
+    expect(second.alertsCreated).toBe(0);
+    const n = (
+      getDb()
+        .prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ? AND kind = 'source_partial'")
+        .get(job.id) as { n: number }
+    ).n;
+    expect(n).toBe(1);
+  });
+});
