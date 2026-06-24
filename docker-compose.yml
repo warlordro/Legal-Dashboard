@@ -12,7 +12,7 @@
 
 services:
   oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine
+    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine@sha256:1a2009d3b05316a5f0a482d8951422cdf100c31fb661fd48f2b4687c87c4ffa1
     restart: unless-stopped
     environment:
       OAUTH2_PROXY_PROVIDER: google
