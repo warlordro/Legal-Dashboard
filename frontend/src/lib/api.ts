@@ -491,6 +491,8 @@ export {
 export {
   me,
   admin,
+  syncWebSession,
+  type SyncSessionResult,
   type UserRole,
   type UserStatus,
   type MeProfile,

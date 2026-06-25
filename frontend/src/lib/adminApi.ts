@@ -255,6 +255,34 @@ export const me = {
   },
 };
 
+export type SyncSessionResult = "ok" | "not_provisioned" | "unavailable" | "error";
+
+// Web-mode session bootstrap. In `auth_mode=web` the session cookie
+// `legal_dashboard_session` is minted ONLY by POST /api/v1/auth/oauth2/sync:
+// oauth2-proxy injects `X-Auth-Request-Email` + the shared-secret `X-Proxy-Auth`
+// on every upstream request, and the backend bridge turns that into our native
+// HS256 cookie (backend/src/routes/auth.ts). The SPA must trigger it once on
+// load — without it every /api call returns 401 "Token de autentificare
+// necesar.". `/auth/refresh` only rotates an already-valid cookie, so it cannot
+// bootstrap a session from scratch. Best-effort: never throws.
+export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionResult> {
+  let res: Response;
+  try {
+    res = await apiFetch("/api/v1/auth/oauth2/sync", {
+      method: "POST",
+      signal: signal ?? AbortSignal.timeout(10_000),
+    });
+  } catch {
+    // Network failure or 10s timeout — transient. Caller renders the app and
+    // lets per-request error states surface; we never hard-block on this.
+    return "error";
+  }
+  if (res.ok) return "ok";
+  if (res.status === 403) return "not_provisioned"; // email not in `users` table
+  if (res.status === 400 || res.status === 503) return "unavailable"; // desktop_only / bridge_disabled
+  return "error";
+}
+
 export const admin = {
   listUsers: async (opts: ListUsersOpts = {}): Promise<PaginatedUsers> => {
     const { signal, ...params } = opts;

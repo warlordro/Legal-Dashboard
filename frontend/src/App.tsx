@@ -19,6 +19,7 @@ import AdminUsage from "@/pages/admin/Usage";
 import AdminKeys from "@/pages/admin/Keys";
 import { AdminGate } from "@/components/AdminGate";
 import { useAuthMode } from "@/hooks/useAuthMode";
+import { useSessionBootstrap } from "@/hooks/useSessionBootstrap";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
@@ -317,7 +318,18 @@ function AppShell({
   );
 }
 
+// Full-screen message shown while the web session bootstraps, or when the
+// handshake hard-fails (account not provisioned / bridge unavailable).
+function AuthBootScreen({ message }: { message: string }) {
+  return (
+    <div className="flex h-screen w-full items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">
+      {message}
+    </div>
+  );
+}
+
 export default function App() {
+  const { ready, status: sessionStatus } = useSessionBootstrap();
   const [dosareState, setDosareState] = useState<DosareState>({
     allDosare: [],
     categorii: [],
@@ -389,6 +401,23 @@ export default function App() {
   const consumeRnpmPendingSearch = () => {
     setRnpmPendingSearch(null);
   };
+
+  // Web-mode session gate. Block the authenticated shell until the cookie
+  // handshake settles so the first /me, search, and SSE calls carry the cookie
+  // instead of racing it into a 401. Desktop: `ready` is true from first render.
+  if (!ready) {
+    return <AuthBootScreen message="Se conecteaza..." />;
+  }
+  if (sessionStatus === "not_provisioned") {
+    return (
+      <AuthBootScreen message="Contul nu este configurat. Contacteaza administratorul pentru a fi adaugat in lista de utilizatori." />
+    );
+  }
+  if (sessionStatus === "unavailable") {
+    return (
+      <AuthBootScreen message="Sesiunea web nu este disponibila: bridge-ul de autentificare (oauth2-proxy) nu este configurat pe server." />
+    );
+  }
 
   return (
     <BrowserRouter>
