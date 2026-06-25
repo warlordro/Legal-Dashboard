@@ -1,5 +1,25 @@
 # Changelog - Legal Dashboard
 
+## v2.39.0 - 2026-06-25
+
+Fix major pentru deploy-ul web: aplicatia nu stabilea niciodata sesiunea proprie dupa login-ul Google, asa ca in mod web fiecare apel `/api` raspundea cu 401 "Token de autentificare necesar" — cautarea, `/me` si panoul de chei erau toate blocate desi login-ul reusea. Plus mecanisme care tin sesiunea vie cat timp aplicatia e deschisa, fara refresh manual. Modul desktop: zero impact (autentificare locala).
+
+### Fix: sesiunea web nu se stabilea (root cause)
+
+In `auth_mode=web` cookie-ul de sesiune `legal_dashboard_session` se minteaza exclusiv prin `POST /api/v1/auth/oauth2/sync` (oauth2-proxy injecteaza `X-Auth-Request-Email` + secretul `X-Proxy-Auth`, iar backend-ul emite JWT-ul HS256 nativ). Frontend-ul nu apela niciodata acel endpoint, deci cookie-ul nu se crea niciodata si toate cererile autentificate intorceau 401. `/auth/refresh` doar roteste un cookie deja valid, deci nu putea face bootstrap. Acum SPA-ul cheama bridge-ul la incarcare (`syncWebSession` + `useSessionBootstrap`) si tine intregul shell autentificat (`AuthedApp`) in spatele unui gate pana cand cookie-ul exista, deci prima cerere (`/me`, search, SSE) poarta cookie-ul in loc sa-l "curse" intr-un 401.
+
+### Sesiune persistenta (never blocked, fara refresh manual)
+
+Keep-alive proactiv (`useSessionKeepAlive`): re-minteste sesiunea la ~50 min (sub TTL-ul de 1h), plus pe `visibilitychange` (revii pe tab) si `online` (revine reteaua), ca tab-urile lasate deschise toata ziua si stream-ul SSE de alerte sa ramana autentificate dupa repaus/throttling de fundal. Recuperare reactiva (interceptor de 401 in `apiFetch`): orice 401 in mod web declanseaza un singur re-mint deduplicat + o reincercare, deci un cookie expirat/lipsa se vindeca transparent in loc sa afiseze eroare. Ambele cai trec prin acelasi `ensureWebSession` deduplicat (un singur POST la bridge la rafale de 401-uri).
+
+### Robustete + mesaje
+
+Guard-ul de auth-endpoint din interceptor normalizeaza `string | URL | Request` la pathname (nu mai foloseste substring pe `String(input)`, gresit pentru `Request` si pentru `/api/v1/auth/` aparut in query string). Ecranele de eroare la handshake esuat sunt largite: `not_provisioned`/`forbidden`/`account_inactive` -> "cont neconfigurat sau inactiv"; `desktop_only`/`missing_identity`/`bridge_disabled` -> "configurare server invalida" (nu mai afirma o singura cauza pe care statusul nu o fixeaza).
+
+### Verificare
+
+Branch `fix/web-session-bootstrap`, review adversarial (advisor + panel multi-model 5 modele + 2 runde CodeRabbit). Teste: bootstrap (desktop/web/not_provisioned/error + StrictMode), `syncWebSession` (maparea statusurilor), interceptor 401 (retry / no-retry-on-failed-mint / skip auth-endpoint / desktop skip / dedupe concurent / normalizare Request+query), keep-alive (interval + wake + cleanup). 256 teste frontend, biome + `tsc --noEmit` + `npm run build` verde.
+
 ## v2.38.0 - 2026-06-14
 
 Refresh de modele AI + eliminarea stack-ului OpenRouter chinezesc + un val de hardening de securitate (~50 commits pe branch, inclusiv remedierea post-review). Tema centrala: aducerea modelelor la zi (Opus 4.8, Gemini 3.5 Flash), simplificarea rutarii AI prin renuntarea la GLM/Kimi/Qwen si inchiderea reziduurilor din auditul adversarial `audit/ADVERSARIAL-REVIEW-2026-06-13.md`.
