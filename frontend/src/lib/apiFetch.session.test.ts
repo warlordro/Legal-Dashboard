@@ -79,4 +79,31 @@ describe("apiFetch 401 session recovery", () => {
     expect(res.status).toBe(200);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("web: normalizes a Request input — auth endpoint is not intercepted", async () => {
+    setDesktop(false);
+    const fetchMock = vi.fn(() => Promise.resolve({ ok: false, status: 401 } as Response));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await apiFetch(new Request("http://localhost/api/v1/auth/refresh", { method: "POST" }));
+
+    expect(res.status).toBe(401);
+    expect(fetchMock).toHaveBeenCalledTimes(1); // skipped via pathname, no re-mint
+  });
+
+  it("web: a non-auth URL with /api/v1/auth/ only in the query is still intercepted", async () => {
+    setDesktop(false);
+    let meCalls = 0;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === SYNC) return Promise.resolve({ ok: true, status: 200 } as Response);
+      meCalls += 1;
+      return Promise.resolve({ ok: meCalls > 1, status: meCalls > 1 ? 200 : 401 } as Response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const res = await apiFetch("/api/v1/me?next=/api/v1/auth/x");
+
+    expect(res.status).toBe(200);
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toContain(SYNC); // pathname is /api/v1/me -> re-mint ran
+  });
 });

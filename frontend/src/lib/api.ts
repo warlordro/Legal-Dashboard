@@ -37,6 +37,19 @@ function isWebRuntime(): boolean {
   return typeof window !== "undefined" && (window as { desktopApi?: unknown }).desktopApi === undefined;
 }
 
+// Normalize string | URL | Request to a pathname so the auth-endpoint guard is
+// correct regardless of input type: String(Request) is "[object Request]" (would
+// wrongly NOT skip an auth call), and a plain substring check would also
+// false-match "/api/v1/auth/" appearing inside a query string.
+function isAuthPath(input: RequestInfo | URL): boolean {
+  const raw = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+  try {
+    return new URL(raw, window.location.origin).pathname.startsWith("/api/v1/auth/");
+  } catch {
+    return String(raw).startsWith("/api/v1/auth/");
+  }
+}
+
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (!headers.has(DESKTOP_HEADER_NAME)) {
@@ -48,11 +61,13 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   // Web-mode session recovery. A 401 means the session cookie expired (TTL ~1h)
   // or was never minted; re-mint once via the oauth2-proxy bridge and retry the
   // request a single time so the user is never blocked mid-session. Skip auth
-  // endpoints (no recursion) and desktop (auth is local, never 401s). The retry
-  // uses raw fetch so it cannot re-enter this interceptor.
-  if (res.status === 401 && isWebRuntime() && !String(input).includes("/api/v1/auth/")) {
-    const outcome = await reSyncSession();
+  // endpoints (no recursion) and desktop (auth is local, never 401s).
+  if (res.status === 401 && isWebRuntime() && !isAuthPath(input)) {
+    const outcome = await ensureWebSession();
     if (outcome === "ok") {
+      // Retry via raw fetch so it cannot re-enter this interceptor. finalInit
+      // (incl. body) must be replayable — every caller uses string URLs + string
+      // bodies, which are.
       return fetch(input, finalInit);
     }
   }
@@ -83,10 +98,12 @@ export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionR
   return "error";
 }
 
-// Dedupe concurrent re-syncs: a burst of requests can 401 at once, but only one
-// bridge POST should be in flight; every retry awaits the same promise.
+// Dedupe concurrent re-mints: a burst of 401s, the keep-alive timer, and a
+// visibility wake can all fire at once, but only one bridge POST should be in
+// flight; every caller awaits the same promise. Shared by the 401 interceptor
+// and useSessionKeepAlive.
 let reSyncInFlight: Promise<SyncSessionResult> | null = null;
-function reSyncSession(): Promise<SyncSessionResult> {
+export function ensureWebSession(): Promise<SyncSessionResult> {
   reSyncInFlight ??= syncWebSession().finally(() => {
     reSyncInFlight = null;
   });

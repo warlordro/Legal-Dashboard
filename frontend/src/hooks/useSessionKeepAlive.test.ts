@@ -5,7 +5,7 @@ import { act, createElement } from "react";
 
 const mockSync = vi.fn();
 vi.mock("@/lib/api", () => ({
-  syncWebSession: (...args: unknown[]) => mockSync(...args),
+  ensureWebSession: (...args: unknown[]) => mockSync(...args),
 }));
 
 import { useSessionKeepAlive } from "./useSessionKeepAlive";
@@ -79,5 +79,17 @@ describe("useSessionKeepAlive", () => {
     const h = mount();
     expect(setSpy).not.toHaveBeenCalled();
     h.unmount();
+  });
+
+  it("web: re-syncs when the tab becomes visible, and stops after unmount", () => {
+    const h = mount();
+    expect(mockSync).not.toHaveBeenCalled();
+
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(mockSync).toHaveBeenCalledTimes(1);
+
+    h.unmount();
+    act(() => document.dispatchEvent(new Event("visibilitychange")));
+    expect(mockSync).toHaveBeenCalledTimes(1); // listener removed on cleanup
   });
 });

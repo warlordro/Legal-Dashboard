@@ -1,20 +1,32 @@
 import { useEffect } from "react";
-import { syncWebSession } from "@/lib/api";
+import { ensureWebSession } from "@/lib/api";
 
-// Keep the web session alive for as long as the app is open. The native cookie
-// TTL is ~1h; re-mint via the oauth2-proxy bridge well before that so a tab left
-// open all day never gets blocked and never needs a manual refresh. The 401
-// interceptor in apiFetch is the reactive safety net (e.g. after the machine
-// sleeps past the interval); this timer is the proactive path that also keeps
-// the alerts SSE stream authenticated. Desktop: no-op (auth is local).
+// Keep the web session alive for as long as the app is open, so a user is never
+// blocked and never has to refresh. Three triggers, all routed through the
+// deduped ensureWebSession():
+//   - interval: re-mint every 50min (< 1h cookie TTL) while the tab is active;
+//   - visibilitychange: re-mint when the tab regains focus (the timer is
+//     unreliable while backgrounded / after the machine sleeps);
+//   - online: re-mint when the network comes back.
+// Re-minting before the next request also lets the alerts SSE stream reconnect
+// with a fresh cookie. Desktop: no-op (auth is local).
 const REFRESH_INTERVAL_MS = 50 * 60 * 1000; // 50 min < 1h cookie TTL
 
 export function useSessionKeepAlive(): void {
   useEffect(() => {
     if (typeof window === "undefined" || window.desktopApi !== undefined) return;
     const id = window.setInterval(() => {
-      void syncWebSession();
+      void ensureWebSession();
     }, REFRESH_INTERVAL_MS);
-    return () => window.clearInterval(id);
+    const wake = () => {
+      if (document.visibilityState === "visible") void ensureWebSession();
+    };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    return () => {
+      window.clearInterval(id);
+      document.removeEventListener("visibilitychange", wake);
+      window.removeEventListener("online", wake);
+    };
   }, []);
 }
