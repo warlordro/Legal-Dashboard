@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
-import { act, createElement, useEffect } from "react";
+import { act, createElement, StrictMode, useEffect } from "react";
 
 // Mock the lib barrel — the hook imports `syncWebSession` from `@/lib/api`.
 const mockSync = vi.fn();
@@ -102,5 +102,33 @@ describe("useSessionBootstrap", () => {
     expect(h.capture.current?.ready).toBe(true);
     expect(h.capture.current?.status).toBe("error");
     h.unmount();
+  });
+
+  it("web runtime: StrictMode double-invoke mints exactly once", async () => {
+    mockSync.mockResolvedValue("ok");
+    const capture: Capture = { current: null };
+    const container = document.createElement("div");
+    document.body.appendChild(container);
+    let root: Root | null = null;
+
+    function Probe() {
+      capture.current = useSessionBootstrap();
+      return null;
+    }
+
+    act(() => {
+      root = createRoot(container);
+      root.render(createElement(StrictMode, null, createElement(Probe)));
+    });
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(mockSync).toHaveBeenCalledTimes(1);
+    expect(capture.current?.ready).toBe(true);
+
+    act(() => root?.unmount());
+    container.remove();
   });
 });

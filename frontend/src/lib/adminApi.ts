@@ -272,9 +272,11 @@ export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionR
       method: "POST",
       signal: signal ?? AbortSignal.timeout(10_000),
     });
-  } catch {
-    // Network failure or 10s timeout — transient. Caller renders the app and
-    // lets per-request error states surface; we never hard-block on this.
+  } catch (err) {
+    // Network failure or 10s timeout — transient. Log it (a stuck "Se
+    // conecteaza..." otherwise leaves no trace), then let the caller render the
+    // app; per-request error states surface the resulting 401s.
+    console.warn("[syncWebSession] bridge sync failed:", err);
     return "error";
   }
   if (res.ok) return "ok";

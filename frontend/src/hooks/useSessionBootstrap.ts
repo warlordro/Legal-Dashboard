@@ -22,7 +22,10 @@ function isDesktopRuntime(): boolean {
 }
 
 export function useSessionBootstrap(): SessionBootstrap {
-  const desktop = isDesktopRuntime();
+  // Desktop-ness is a mount-time invariant (the Electron preload injects
+  // window.desktopApi before the bundle runs); capture it once so a late
+  // mutation can't re-run the effect and desync `ready`.
+  const [desktop] = useState(isDesktopRuntime);
   const [ready, setReady] = useState(desktop);
   const [status, setStatus] = useState<SyncSessionResult>("ok");
   const started = useRef(false);
