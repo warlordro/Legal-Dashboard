@@ -39,6 +39,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.39.0",
+    date: "25 Iunie 2026",
+    subtitle:
+      "Fix major pentru deploy-ul web: dupa login, sesiunea se stabileste automat si ramai logat oricat, fara refresh manual. Inainte, in mod web cautarea si restul aplicatiei dadeau 'Token de autentificare necesar' desi login-ul Google reusea. Modul desktop ramane neschimbat.",
+    icon: <Lock className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Sesiune web stabilita automat",
+        content:
+          "In mod web (deploy pe server cu Google OAuth), aplicatia nu cerea niciodata cookie-ul de sesiune dupa login, asa ca fiecare apel catre server raspundea cu 'Token de autentificare necesar' — cautarea, profilul si cheile nu functionau desi login-ul Google reusea. Acum sesiunea se stabileste automat la incarcare, inainte ca aplicatia sa faca vreo cerere catre server.",
+      },
+      {
+        title: "Ramai logat cat tii aplicatia deschisa",
+        content:
+          "Sesiunea se reinnoieste singura in fundal (la ~50 min, plus cand revii pe tab sau cand revine reteaua), deci nu mai trebuie sa dai refresh ca sa nu te blochezi. Daca totusi cookie-ul expira (de exemplu dupa ce calculatorul a fost in repaus), prima cerere il reface automat si reincearca — fara eroare vizibila.",
+      },
+      {
+        title: "Mesaje de eroare mai clare",
+        content:
+          "Cand contul nu este configurat/activ sau bridge-ul de autentificare de pe server lipseste, vezi un mesaj clar in loc de o eroare tehnica. Modul desktop nu este afectat (autentificare locala, fara cookie).",
+      },
+    ],
+  },
+  {
     version: "v2.38.0",
     date: "14 Iunie 2026",
     subtitle:
