@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { syncWebSession } from "./adminApi";
+import { syncWebSession } from "./api";
 
 // Pass an explicit signal so the default AbortSignal.timeout(10s) timer is never
 // created in tests (avoids dangling handles).

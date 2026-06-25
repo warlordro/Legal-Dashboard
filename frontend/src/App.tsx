@@ -20,6 +20,7 @@ import AdminKeys from "@/pages/admin/Keys";
 import { AdminGate } from "@/components/AdminGate";
 import { useAuthMode } from "@/hooks/useAuthMode";
 import { useSessionBootstrap } from "@/hooks/useSessionBootstrap";
+import { useSessionKeepAlive } from "@/hooks/useSessionKeepAlive";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
@@ -333,6 +334,7 @@ function AuthBootScreen({ message }: { message: string }) {
 // /api/v1/ai/settings on mount, which would otherwise race the mint into a 401.
 // Mounted only once the gate opens (or immediately on desktop).
 function AuthedApp() {
+  useSessionKeepAlive();
   const [dosareState, setDosareState] = useState<DosareState>({
     allDosare: [],
     categorii: [],
