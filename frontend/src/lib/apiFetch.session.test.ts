@@ -91,6 +91,39 @@ describe("apiFetch 401 session recovery", () => {
     expect(fetchMock).toHaveBeenCalledTimes(1); // skipped via pathname, no re-mint
   });
 
+  it("web: concurrent 401s collapse to a single deduped bridge re-mint", async () => {
+    setDesktop(false);
+    let syncCalls = 0;
+    let openSync: (r: Response) => void = () => {};
+    const syncGate = new Promise<Response>((resolve) => {
+      openSync = resolve;
+    });
+    const seen = new Map<string, number>();
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url === SYNC) {
+        syncCalls += 1;
+        return syncGate;
+      }
+      const n = seen.get(url) ?? 0;
+      seen.set(url, n + 1);
+      return Promise.resolve({ ok: n >= 1, status: n >= 1 ? 200 : 401 } as Response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p1 = apiFetch("/api/v1/a");
+    const p2 = apiFetch("/api/v1/b");
+    // Let both initial requests resolve to 401 and both enter the deduped re-mint
+    // before the single bridge POST is allowed to settle.
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    openSync({ ok: true, status: 200 } as Response);
+    const [r1, r2] = await Promise.all([p1, p2]);
+
+    expect(r1.status).toBe(200);
+    expect(r2.status).toBe(200);
+    expect(syncCalls).toBe(1); // one bridge POST shared by both retries
+  });
+
   it("web: a non-auth URL with /api/v1/auth/ only in the query is still intercepted", async () => {
     setDesktop(false);
     let meCalls = 0;
