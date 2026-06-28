@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="ro">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Acces API &amp; MCP — cum va functiona · Legal Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..700&family=Spectral:ital,wght@0,300;0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root {
+    --ink: #0c0d11;
+    --ink-2: #111319;
+    --surface: #15171f;
+    --surface-2: #1b1e28;
+    --line: rgba(201, 162, 75, 0.16);
+    --line-strong: rgba(201, 162, 75, 0.34);
+    --paper: #ece3d0;
+    --paper-dim: #b9b1a0;
+    --muted: #847d6f;
+    --brass: #c9a24b;
+    --brass-bright: #e7c578;
+    --green: #7fcf9a;
+    --green-bg: rgba(127, 207, 154, 0.10);
+    --red: #df6f63;
+    --red-bg: rgba(223, 111, 99, 0.10);
+    --steel: #86acc6;
+    --steel-bg: rgba(134, 172, 198, 0.10);
+    --amber: #e3a948;
+    --radius: 14px;
+    --mono: "JetBrains Mono", ui-monospace, monospace;
+    --display: "Fraunces", Georgia, serif;
+    --body: "Spectral", Georgia, serif;
+  }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--ink);
+    color: var(--paper);
+    font-family: var(--body);
+    font-size: 17px;
+    line-height: 1.65;
+    -webkit-font-smoothing: antialiased;
+    overflow-x: hidden;
+  }
+
+  /* Atmosphere: gold glow + grain */
+  body::before {
+    content: "";
+    position: fixed; inset: 0; z-index: -2;
+    background:
+      radial-gradient(1100px 620px at 78% -8%, rgba(201, 162, 75, 0.13), transparent 60%),
+      radial-gradient(900px 700px at 12% 8%, rgba(134, 172, 198, 0.07), transparent 55%),
+      linear-gradient(180deg, #0c0d11 0%, #0a0b0e 100%);
+  }
+  body::after {
+    content: "";
+    position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    opacity: 0.045;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 0 28px; }
+
+  a { color: var(--brass-bright); }
+
+  /* ---------- Header ---------- */
+  header.top {
+    border-bottom: 1px solid var(--line);
+    background: rgba(12, 13, 17, 0.72);
+    backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 50;
+  }
+  .top-inner { display: flex; align-items: center; justify-content: space-between; padding: 14px 28px; max-width: 1080px; margin: 0 auto; }
+  .seal { display: flex; align-items: center; gap: 12px; }
+  .seal .mark {
+    width: 34px; height: 34px; border-radius: 50%;
+    border: 1.5px solid var(--brass);
+    display: grid; place-items: center;
+    font-family: var(--display); font-weight: 800; color: var(--brass-bright);
+    box-shadow: inset 0 0 14px rgba(201,162,75,0.18);
+  }
+  .seal b { font-family: var(--display); font-weight: 600; letter-spacing: 0.2px; }
+  .seal small { display: block; font-family: var(--mono); font-size: 10px; letter-spacing: 2px; text-transform: uppercase; color: var(--muted); }
+  .top nav { display: flex; gap: 22px; font-family: var(--mono); font-size: 12px; letter-spacing: 1px; text-transform: uppercase; }
+  .top nav a { color: var(--paper-dim); text-decoration: none; transition: color .2s; }
+  .top nav a:hover { color: var(--brass-bright); }
+  @media (max-width: 720px){ .top nav { display: none; } }
+
+  /* ---------- Hero ---------- */
+  .hero { padding: 92px 0 60px; position: relative; }
+  .kicker { font-family: var(--mono); font-size: 12px; letter-spacing: 3px; text-transform: uppercase; color: var(--brass); margin-bottom: 22px; }
+  .hero h1 {
+    font-family: var(--display); font-weight: 600;
+    font-size: clamp(40px, 7vw, 78px); line-height: 1.02; margin: 0 0 22px;
+    letter-spacing: -0.5px;
+  }
+  .hero h1 em { font-style: italic; color: var(--brass-bright); font-weight: 500; }
+  .hero p.lead { font-size: clamp(18px, 2.4vw, 23px); color: var(--paper-dim); max-width: 660px; font-weight: 300; }
+  .hero .meta { margin-top: 30px; display: flex; flex-wrap: wrap; gap: 10px; }
+  .pill {
+    font-family: var(--mono); font-size: 11.5px; letter-spacing: 0.5px;
+    border: 1px solid var(--line-strong); border-radius: 999px; padding: 6px 13px;
+    color: var(--paper-dim); background: rgba(201,162,75,0.04);
+  }
+  .pill b { color: var(--brass-bright); font-weight: 700; }
+
+  /* ---------- Section scaffolding ---------- */
+  section.block { padding: 56px 0; border-top: 1px solid var(--line); }
+  .sec-head { display: flex; align-items: baseline; gap: 16px; margin-bottom: 30px; }
+  .sec-num { font-family: var(--mono); font-size: 13px; color: var(--brass); letter-spacing: 2px; }
+  .sec-head h2 { font-family: var(--display); font-weight: 600; font-size: clamp(26px, 4vw, 40px); margin: 0; letter-spacing: -0.3px; }
+  .sec-sub { color: var(--muted); font-size: 16px; margin: -16px 0 26px; max-width: 640px; }
+
+  /* ---------- Flow diagram ---------- */
+  .flow {
+    display: grid; grid-template-columns: 1fr auto 1fr auto 1fr; align-items: stretch; gap: 0;
+    border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    background: linear-gradient(180deg, var(--surface), var(--ink-2));
+  }
+  @media (max-width: 860px){ .flow { grid-template-columns: 1fr; } .flow .arrow { transform: rotate(90deg); padding: 6px 0; } }
+  .node { padding: 26px 22px; }
+  .node .ico { font-size: 22px; }
+  .node h4 { font-family: var(--display); font-weight: 600; margin: 12px 0 6px; font-size: 19px; }
+  .node p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.5; }
+  .node.ai h4 { color: var(--steel); }
+  .node.api h4 { color: var(--brass-bright); }
+  .node.data h4 { color: var(--green); }
+  .arrow { display: grid; place-items: center; padding: 0 6px; color: var(--brass); font-family: var(--mono); }
+  .arrow span { animation: pulse 2.4s ease-in-out infinite; }
+  @keyframes pulse { 0%,100%{opacity:.35} 50%{opacity:1} }
+  .flow .node + .node { border-left: 1px solid var(--line); }
+
+  .domain-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip { font-family: var(--mono); font-size: 11px; padding: 4px 9px; border-radius: 6px; border: 1px solid var(--line-strong); color: var(--green); background: var(--green-bg); }
+
+  /* ---------- Stepper ---------- */
+  .steps-nav { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 24px; }
+  .step-tab {
+    flex: 1; min-width: 150px; text-align: left; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px;
+    background: var(--surface); color: var(--paper-dim); transition: all .22s; font-family: inherit;
+  }
+  .step-tab:hover { border-color: var(--line-strong); }
+  .step-tab.active { background: var(--surface-2); border-color: var(--brass); box-shadow: 0 0 0 1px rgba(201,162,75,0.25), 0 10px 30px -16px rgba(201,162,75,0.5); }
+  .step-tab .n { font-family: var(--mono); font-size: 11px; color: var(--brass); letter-spacing: 2px; }
+  .step-tab .t { font-family: var(--display); font-size: 18px; color: var(--paper); margin-top: 4px; }
+  .step-tab.done .n::after { content: " ✓"; color: var(--green); }
+
+  .panel {
+    border: 1px solid var(--line); border-radius: var(--radius);
+    background: linear-gradient(180deg, var(--surface), var(--ink-2));
+    padding: 28px; display: none; animation: rise .4s ease both;
+  }
+  .panel.active { display: block; }
+  @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+  .panel h3 { font-family: var(--display); font-weight: 600; font-size: 23px; margin: 0 0 6px; }
+  .panel .hint { color: var(--muted); font-size: 15px; margin: 0 0 22px; }
+
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  @media (max-width: 760px){ .grid2 { grid-template-columns: 1fr; } }
+
+  label.fld { display: block; font-family: var(--mono); font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--brass); margin: 0 0 9px; }
+  .field { margin-bottom: 20px; }
+  input.txt, select.txt {
+    width: 100%; background: var(--ink); border: 1px solid var(--line-strong); border-radius: 9px;
+    color: var(--paper); font-family: var(--mono); font-size: 14px; padding: 11px 13px;
+  }
+  input.txt:focus, select.txt:focus { outline: none; border-color: var(--brass); }
+
+  .scope-row { display: flex; flex-direction: column; gap: 10px; }
+  .scope {
+    display: flex; align-items: flex-start; gap: 12px; cursor: pointer;
+    border: 1px solid var(--line); border-radius: 10px; padding: 13px 15px; transition: all .18s; background: var(--ink);
+  }
+  .scope:hover { border-color: var(--line-strong); }
+  .scope.on { border-color: var(--green); background: var(--green-bg); }
+  .scope .box { width: 20px; height: 20px; border-radius: 6px; border: 1.5px solid var(--muted); display: grid; place-items: center; flex: none; margin-top: 2px; transition: all .18s; font-size: 13px; color: var(--ink); }
+  .scope.on .box { background: var(--green); border-color: var(--green); }
+  .scope .box::after { content: "✓"; opacity: 0; font-weight: 700; }
+  .scope.on .box::after { opacity: 1; }
+  .scope .sc-name { font-family: var(--mono); font-size: 14px; color: var(--paper); }
+  .scope .sc-desc { font-size: 13.5px; color: var(--muted); }
+
+  .btn {
+    font-family: var(--mono); font-size: 13px; letter-spacing: 0.5px; cursor: pointer;
+    border-radius: 9px; padding: 12px 20px; border: 1px solid var(--brass);
+    background: linear-gradient(180deg, rgba(201,162,75,0.22), rgba(201,162,75,0.10)); color: var(--brass-bright);
+    transition: all .2s;
+  }
+  .btn:hover { background: var(--brass); color: #1a1407; }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.ghost { border-color: var(--line-strong); background: transparent; color: var(--paper-dim); }
+  .btn.ghost:hover { border-color: var(--brass); color: var(--brass-bright); background: transparent; }
+  .btn.danger { border-color: rgba(223,111,99,0.5); color: var(--red); background: var(--red-bg); }
+  .btn.danger:hover { background: var(--red); color: #1a0908; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
+
+  /* terminal / code blocks */
+  .term {
+    background: #08090c; border: 1px solid var(--line); border-radius: 11px; overflow: hidden;
+    font-family: var(--mono); font-size: 13px;
+  }
+  .term .bar { display: flex; align-items: center; gap: 7px; padding: 10px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 11px; letter-spacing: 1px; }
+  .dot { width: 11px; height: 11px; border-radius: 50%; }
+  .dot.r { background: #e06b5e; } .dot.y { background: #e3b34a; } .dot.g { background: #69c98a; }
+  .term .body { padding: 16px 18px; line-height: 1.7; white-space: pre-wrap; word-break: break-word; color: #cfd6cf; }
+  .term .body .k { color: var(--steel); } .term .body .s { color: var(--green); } .term .body .c { color: var(--muted); } .term .body .b { color: var(--brass-bright); }
+
+  .secret-box { display: flex; gap: 10px; align-items: center; background: var(--ink); border: 1px dashed var(--brass); border-radius: 9px; padding: 12px 14px; font-family: var(--mono); font-size: 14px; color: var(--brass-bright); word-break: break-all; }
+  .once { font-family: var(--mono); font-size: 11px; color: var(--red); letter-spacing: 1px; text-transform: uppercase; margin-top: 8px; }
+
+  /* ---------- Ask the AI simulator ---------- */
+  .ask-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 22px; }
+  @media (max-width: 820px){ .ask-grid { grid-template-columns: 1fr; } }
+  .prompts { display: flex; flex-direction: column; gap: 9px; }
+  .prompt {
+    text-align: left; cursor: pointer; font-family: var(--body); font-size: 15px;
+    border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; background: var(--ink); color: var(--paper);
+    transition: all .18s; position: relative;
+  }
+  .prompt:hover { border-color: var(--brass); transform: translateX(3px); }
+  .prompt .tag { display: block; font-family: var(--mono); font-size: 10.5px; letter-spacing: 1px; text-transform: uppercase; margin-top: 5px; }
+  .prompt .tag.ok { color: var(--green); } .prompt .tag.no { color: var(--red); }
+
+  .pipe { background: #08090c; border: 1px solid var(--line); border-radius: 11px; padding: 16px; min-height: 320px; }
+  .stage { display: flex; align-items: center; gap: 11px; padding: 8px 6px; border-radius: 8px; font-family: var(--mono); font-size: 12.5px; color: var(--muted); opacity: .35; transition: all .3s; }
+  .stage .pin { width: 22px; height: 22px; border-radius: 6px; border: 1px solid var(--line-strong); display: grid; place-items: center; flex: none; font-size: 12px; }
+  .stage.live { opacity: 1; color: var(--paper-dim); }
+  .stage.pass .pin { background: var(--green-bg); border-color: var(--green); color: var(--green); }
+  .stage.pass { color: var(--paper); }
+  .stage.fail .pin { background: var(--red-bg); border-color: var(--red); color: var(--red); }
+  .stage.fail { color: var(--red); }
+  .stage small { color: var(--muted); font-size: 11px; }
+  .verdict { margin-top: 14px; border-radius: 9px; padding: 13px 15px; font-family: var(--mono); font-size: 13px; display: none; }
+  .verdict.show { display: block; animation: rise .3s both; }
+  .verdict.ok { background: var(--green-bg); border: 1px solid var(--green); color: var(--green); }
+  .verdict.no { background: var(--red-bg); border: 1px solid var(--red); color: var(--red); }
+  .verdict pre { margin: 10px 0 0; white-space: pre-wrap; color: var(--paper-dim); font-size: 12px; }
+
+  /* auto load-more + rich result */
+  .badge-exact { display:inline-block; font-family:var(--mono); font-size:10px; letter-spacing:1px; text-transform:uppercase; color:#1a1407; background:var(--brass); padding:3px 9px; border-radius:5px; margin-left:8px; }
+  .ld-log { font-family:var(--mono); font-size:12px; margin:12px 0 0; border-left:2px solid var(--line-strong); padding:4px 0 4px 12px; }
+  .ld-line { opacity:0; color:var(--paper-dim); padding:2px 0; animation:rise .3s both; }
+  .ld-line .cap { color:var(--green); } .ld-line .cost { color:var(--amber); }
+  .ld-line.ld-done { color:var(--green); } .ld-line.ld-stop { color:var(--red); }
+  .prompt-once { margin-top:11px; padding:12px 14px; border:1px dashed var(--brass); border-radius:9px; background:rgba(201,162,75,0.05); font-family:var(--body); font-size:14px; color:var(--paper-dim); }
+  .prompt-once .pq { color:var(--brass-bright); }
+  .prompt-once .btn { padding:7px 15px; margin:9px 9px 0 0; }
+  .rtable { width:100%; border-collapse:collapse; }
+  .rtable td { padding:7px 9px; border-bottom:1px solid var(--line); font-family:var(--mono); font-size:12px; color:var(--paper-dim); }
+  .rtable td.dn { color:var(--paper); }
+  .role { font-family:var(--mono); font-size:10px; letter-spacing:.5px; padding:3px 9px; border-radius:5px; white-space:nowrap; border:1px solid var(--line-strong); color:var(--muted); }
+  .role.reclamant, .role.recurent { color:var(--green); background:var(--green-bg); border-color:var(--green); }
+  .role.parat, .role.intimat { color:var(--amber); background:rgba(227,169,72,0.10); border-color:var(--amber); }
+  .role.inculpat { color:var(--red); background:var(--red-bg); border-color:var(--red); }
+  .role.intervenient { color:var(--steel); background:var(--steel-bg); border-color:var(--steel); }
+  .role.debitor, .role.creditor { color:var(--brass-bright); background:rgba(201,162,75,0.08); border-color:var(--line-strong); }
+  .captcha-meter { font-family:var(--mono); font-size:11.5px; color:var(--muted); margin-top:10px; padding-top:8px; border-top:1px solid var(--line); }
+  .captcha-meter b { color:var(--amber); }
+
+  /* ---------- Management ---------- */
+  .tk-list { display: flex; flex-direction: column; gap: 10px; }
+  .tk {
+    display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    border: 1px solid var(--line); border-radius: 11px; padding: 14px 16px; background: var(--ink);
+  }
+  .tk.revoked { opacity: .45; }
+  .tk .id { font-family: var(--mono); font-size: 13px; color: var(--brass-bright); }
+  .tk .sub { font-family: var(--mono); font-size: 11px; color: var(--muted); margin-top: 3px; }
+  .tk .sub b { color: var(--paper-dim); font-weight: 500; }
+  .tk-badge { font-family: var(--mono); font-size: 10px; padding: 3px 8px; border-radius: 5px; border: 1px solid var(--line-strong); color: var(--green); background: var(--green-bg); }
+  .tk-badge.rv { color: var(--red); background: var(--red-bg); border-color: rgba(223,111,99,0.4); }
+
+  .audit { margin-top: 22px; }
+  .audit table { width: 100%; border-collapse: collapse; font-family: var(--mono); font-size: 12px; }
+  .audit th { text-align: left; color: var(--brass); font-weight: 500; letter-spacing: 1px; text-transform: uppercase; font-size: 10px; padding: 8px 10px; border-bottom: 1px solid var(--line-strong); }
+  .audit td { padding: 8px 10px; border-bottom: 1px solid var(--line); color: var(--paper-dim); }
+  .audit td.ev-use { color: var(--steel); } .audit td.r-ok { color: var(--green); } .audit td.r-deny { color: var(--red); }
+  .audit .empty { color: var(--muted); padding: 16px; text-align: center; font-style: italic; }
+
+  /* toast */
+  #toasts { position: fixed; right: 22px; bottom: 22px; z-index: 200; display: flex; flex-direction: column; gap: 10px; max-width: 340px; }
+  .toast { border: 1px solid var(--brass); background: var(--surface-2); border-radius: 11px; padding: 13px 15px; font-size: 14px; box-shadow: 0 16px 40px -18px rgba(0,0,0,0.8); animation: rise .3s both; }
+  .toast .th { font-family: var(--mono); font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--brass-bright); margin-bottom: 4px; }
+  .toast.alert { border-color: var(--red); } .toast.alert .th { color: var(--red); }
+
+  /* ---------- Playground (scope matrix) ---------- */
+  .matrix { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; }
+  .matrix .toggles { display: flex; gap: 8px; flex-wrap: wrap; padding: 16px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .tg { cursor: pointer; font-family: var(--mono); font-size: 12px; border: 1px solid var(--line-strong); border-radius: 999px; padding: 7px 14px; color: var(--muted); background: transparent; transition: all .18s; }
+  .tg.on { border-color: var(--green); color: var(--green); background: var(--green-bg); }
+  .route-row { display: grid; grid-template-columns: 120px 1fr auto; gap: 12px; align-items: center; padding: 13px 16px; border-bottom: 1px solid var(--line); font-family: var(--mono); font-size: 13px; }
+  .route-row:last-child { border-bottom: none; }
+  .route-row .m { color: var(--steel); font-size: 11px; }
+  .route-row .pth { color: var(--paper); }
+  .route-row .pth small { display: block; font-family: var(--body); color: var(--muted); font-size: 12.5px; }
+  .res { font-family: var(--mono); font-size: 12px; padding: 5px 11px; border-radius: 6px; white-space: nowrap; }
+  .res.ok { color: var(--green); background: var(--green-bg); border: 1px solid var(--green); }
+  .res.no { color: var(--red); background: var(--red-bg); border: 1px solid var(--red); }
+
+  /* ---------- Controls grid ---------- */
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 16px; }
+  .card { border: 1px solid var(--line); border-radius: 12px; padding: 20px; background: var(--surface); transition: all .2s; }
+  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+  .card .ci { font-size: 20px; }
+  .card h4 { font-family: var(--display); font-weight: 600; font-size: 18px; margin: 12px 0 7px; }
+  .card p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.55; }
+  .card .sev { font-family: var(--mono); font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--brass); margin-top: 11px; display: inline-block; }
+
+  /* decisions */
+  .dec { display: grid; grid-template-columns: 200px 1fr; gap: 4px 22px; padding: 15px 0; border-bottom: 1px solid var(--line); }
+  @media (max-width: 640px){ .dec { grid-template-columns: 1fr; } }
+  .dec dt { font-family: var(--mono); font-size: 12px; color: var(--brass); letter-spacing: 0.5px; }
+  .dec dd { margin: 0; color: var(--paper-dim); font-size: 15px; }
+  .dec dd b { color: var(--paper); font-weight: 600; }
+
+  footer { padding: 50px 0 70px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13px; font-family: var(--mono); }
+  footer b { color: var(--paper-dim); }
+
+  .note-bar { font-family: var(--mono); font-size: 12px; color: var(--muted); border-left: 2px solid var(--brass); padding: 6px 0 6px 14px; margin: 18px 0; }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="top-inner">
+    <div class="seal">
+      <div class="mark">§</div>
+      <div><b>Legal Dashboard</b><small>API &amp; MCP · piesa A</small></div>
+    </div>
+    <nav>
+      <a href="#concept">Concept</a>
+      <a href="#flux">Flux</a>
+      <a href="#poarta">Poarta</a>
+      <a href="#control">Control</a>
+    </nav>
+  </div>
+</header>
+
+<div class="wrap">
+
+  <!-- HERO -->
+  <section class="hero">
+    <div class="kicker">Prezentare interactiva · prototip de design</div>
+    <h1>Lasi un <em>AI extern</em><br/>sa-ti caute dosarele,<br/>fara sa-i dai cheile.</h1>
+    <p class="lead">Un token personal, doar pentru citire, prin care Claude Desktop sau ChatGPT pot interoga dosare, ICCJ si RNPM — exact cat le permiti, nimic mai mult.</p>
+    <div class="meta">
+      <span class="pill"><b>3</b> capabilitati: dosare · iccj · rnpm</span>
+      <span class="pill">doar <b>citire</b></span>
+      <span class="pill"><b>default-deny</b>: restul = 403</span>
+      <span class="pill">revocare <b>instant</b></span>
+    </div>
+    <p class="note-bar">Tot ce vezi mai jos e simulat in browser, ca sa intelegi fluxul. Nu apeleaza serverul real — e o macheta a designului din spec.</p>
+  </section>
+
+  <!-- CONCEPT -->
+  <section class="block" id="concept">
+    <div class="sec-head"><span class="sec-num">01</span><h2>Ideea, dintr-o privire</h2></div>
+    <p class="sec-sub">AI-ul extern nu primeste parola ta si nu intra in cont. Primeste un token ingust care vorbeste cu API-ul prin MCP si poate doar sa <em>citeasca</em> cele trei surse.</p>
+    <div class="flow">
+      <div class="node ai">
+        <div class="ico">🤖</div>
+        <h4>AI extern</h4>
+        <p>Claude Desktop, Claude.ai sau ChatGPT. Vrea sa raspunda la o intrebare despre un dosar.</p>
+      </div>
+      <div class="arrow"><span>──▶</span></div>
+      <div class="node api">
+        <div class="ico">🔑</div>
+        <h4>MCP + token</h4>
+        <p>Puntea MCP trimite cererea cu tokenul tau <code>ld_pat_…</code> in antet. Trece prin poarta de securitate.</p>
+      </div>
+      <div class="arrow"><span>──▶</span></div>
+      <div class="node data">
+        <div class="ico">⚖️</div>
+        <h4>Datele tale</h4>
+        <p>Doar citire, doar ce permite tokenul:</p>
+        <div class="domain-chips">
+          <span class="chip">dosare + termene</span>
+          <span class="chip">ICCJ</span>
+          <span class="chip">RNPM</span>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- WALKTHROUGH -->
+  <section class="block" id="flux">
+    <div class="sec-head"><span class="sec-num">02</span><h2>Parcurge fluxul</h2></div>
+    <p class="sec-sub">Patru pasi, in ordine. Tokenul pe care-l creezi la pasul 1 te urmareste pana la pasul 4 — il pui in config, intrebi AI-ul, apoi vezi urma in audit.</p>
+
+    <div class="steps-nav" id="stepsNav">
+      <button class="step-tab active" data-step="0"><span class="n">PAS 01</span><span class="t">Creezi tokenul</span></button>
+      <button class="step-tab" data-step="1"><span class="n">PAS 02</span><span class="t">Il pui in Claude</span></button>
+      <button class="step-tab" data-step="2"><span class="n">PAS 03</span><span class="t">Intrebi AI-ul</span></button>
+      <button class="step-tab" data-step="3"><span class="n">PAS 04</span><span class="t">Audit &amp; revoke</span></button>
+    </div>
+
+    <!-- STEP 1 -->
+    <div class="panel active" data-panel="0">
+      <h3>Creezi un token in Setari → „Acces API”</h3>
+      <p class="hint">Ii dai un nume, alegi ce poate citi, optional o expirare si un plafon de captcha. Secretul apare o singura data.</p>
+      <div class="grid2">
+        <div>
+          <div class="field">
+            <label class="fld">Nume token</label>
+            <input class="txt" id="tkName" value="Claude Desktop — laptop" />
+          </div>
+          <div class="field">
+            <label class="fld">Ce poate citi (scopes)</label>
+            <div class="scope-row" id="scopeRow">
+              <div class="scope on" data-scope="dosare"><div class="box"></div><div><div class="sc-name">dosare</div><div class="sc-desc">Cautare dosare + termene (PortalJust)</div></div></div>
+              <div class="scope on" data-scope="iccj"><div class="box"></div><div><div class="sc-name">iccj</div><div class="sc-desc">Inalta Curte — dosare + sedinte</div></div></div>
+              <div class="scope" data-scope="rnpm"><div class="box"></div><div><div class="sc-name">rnpm</div><div class="sc-desc">Registrul de Publicitate Mobiliara (consuma captcha)</div></div></div>
+            </div>
+          </div>
+        </div>
+        <div>
+          <div class="field">
+            <label class="fld">Expirare (optional)</label>
+            <select class="txt" id="tkExp">
+              <option value="0">Fara expirare (implicit)</option>
+              <option value="30">30 de zile</option>
+              <option value="90">90 de zile</option>
+              <option value="365">365 de zile</option>
+            </select>
+          </div>
+          <div class="field">
+            <label class="fld">Plafon captcha / zi (optional, doar rnpm)</label>
+            <input class="txt" id="tkCap" placeholder="gol = fara limita" />
+          </div>
+          <div class="btn-row">
+            <button class="btn" id="genBtn">Genereaza tokenul</button>
+            <button class="btn ghost" id="resetBtn">Reset</button>
+          </div>
+        </div>
+      </div>
+      <div id="secretWrap" style="display:none; margin-top:24px;">
+        <label class="fld">Secretul tau (copiaza-l acum)</label>
+        <div class="secret-box"><span id="secretVal"></span><button class="btn ghost" id="copyBtn" style="margin-left:auto; padding:7px 13px;">Copiaza</button></div>
+        <div class="once">⚠ Se afiseaza o singura data. Dupa ce inchizi, raman doar prefixul si metadatele.</div>
+      </div>
+    </div>
+
+    <!-- STEP 2 -->
+    <div class="panel" data-panel="1">
+      <h3>Il pui in configul Claude Desktop</h3>
+      <p class="hint">Puntea MCP locala (piesa B) primeste tokenul prin variabila de mediu si vorbeste cu API-ul tau.</p>
+      <div class="term">
+        <div class="bar"><span class="dot r"></span><span class="dot y"></span><span class="dot g"></span>&nbsp; claude_desktop_config.json</div>
+        <div class="body" id="cfgBody"></div>
+      </div>
+      <p class="note-bar">Tokenul circula doar prin HTTPS, e redactat din loguri, si — fiind in antetul <code>Authorization: Bearer</code> — e imun la CSRF (un browser nu-l poate atasa cross-origin).</p>
+    </div>
+
+    <!-- STEP 3 -->
+    <div class="panel" data-panel="2">
+      <h3>Intrebi AI-ul ceva</h3>
+      <p class="hint">Apasa o intrebare. Urmaresti cererea trecand prin poarta, apoi vezi <b>auto-load-more</b>: la dosare AI-ul aduce automat paginile (cu badge exact-match si calitatea fiecarei parti — reclamant/parat/inculpat); la RNPM cheltuie automat captcha pana la plafon. Intrebarile de AI/monitorizare sunt respinse demonstrativ.</p>
+      <div class="ask-grid">
+        <div class="prompts" id="prompts"></div>
+        <div>
+          <div class="pipe" id="pipe"></div>
+          <div class="verdict" id="verdict"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- STEP 4 -->
+    <div class="panel" data-panel="3">
+      <h3>Vezi urma si poti taia oricand</h3>
+      <p class="hint">Fiecare folosire lasa o linie in audit (cine, ce ruta, ce IP). Revocarea e instanta — din secunda aia tokenul e mort.</p>
+      <div class="tk-list" id="tkList"></div>
+      <div class="btn-row" style="margin-top:16px;">
+        <button class="btn ghost" id="simNewIp">Simuleaza folosire din IP nou</button>
+        <button class="btn danger" id="revokeAll">Revoca toate tokenurile</button>
+      </div>
+      <div class="audit">
+        <label class="fld" style="margin-bottom:12px;">Jurnal de audit</label>
+        <table>
+          <thead><tr><th>Ora</th><th>Eveniment</th><th>Ruta</th><th>IP</th><th>Rezultat</th></tr></thead>
+          <tbody id="auditBody"><tr><td colspan="5" class="empty">Inca nimic. Intoarce-te la pasul 3 si pune cateva intrebari.</td></tr></tbody>
+        </table>
+      </div>
+    </div>
+  </section>
+
+  <!-- PLAYGROUND -->
+  <section class="block" id="poarta">
+    <div class="sec-head"><span class="sec-num">03</span><h2>Ce poate, ce nu poate</h2></div>
+    <p class="sec-sub">Comuta scopes-urile tokenului si vezi pe loc ce rute se deschid (verde) si care raman inchise (rosu). Observa ca AI-ul si monitorizarea raman <b>mereu rosii</b> — alea nu se ating cu un token, indiferent ce scopes ii dai.</p>
+    <div class="matrix">
+      <div class="toggles" id="mxToggles">
+        <button class="tg on" data-s="dosare">dosare</button>
+        <button class="tg on" data-s="iccj">iccj</button>
+        <button class="tg" data-s="rnpm">rnpm</button>
+        <span style="margin-left:auto; font-family:var(--mono); font-size:11px; color:var(--muted); align-self:center;">comuta scopes-urile tokenului →</span>
+      </div>
+      <div id="mxRows"></div>
+    </div>
+  </section>
+
+  <!-- CONTROLS -->
+  <section class="block" id="control">
+    <div class="sec-head"><span class="sec-num">04</span><h2>Plasele de siguranta</h2></div>
+    <p class="sec-sub">Pentru ca un agent AI da rafale, nu click-uri, si un token poate sa nu expire — controalele de mai jos sunt portitele inchise din proiectarea sistemului.</p>
+    <div class="cards">
+      <div class="card"><div class="ci">🚧</div><h4>Default-deny pe segment</h4><p>Tokenul ajunge doar pe rutele allowlistate explicit. Match pe granita de segment, ca <code>/api/dosare</code> sa nu deschida din greseala <code>/api/dosare-iccj</code>.</p><span class="sev">Fix CRITICAL din review</span></div>
+      <div class="card"><div class="ci">📖</div><h4>Doar citire</h4><p>Permis pe metoda HTTP: GET + cateva POST-uri de cautare verificate. Orice scriere sub aceleasi rute → refuzata.</p><span class="sev">HIGH</span></div>
+      <div class="card"><div class="ci">🛡️</div><h4>Bearer = fara CSRF</h4><p>Bypass-ul de origine se aplica doar dupa autentificare reusita cu token valid, niciodata pe simpla prezenta a antetului.</p><span class="sev">HIGH</span></div>
+      <div class="card"><div class="ci">⏱️</div><h4>Limita de rata per token</h4><p>Fiecare token are propriul plafon, mai strans decat al unei sesiuni umane. Rafalele sunt taiate.</p><span class="sev">MEDIU</span></div>
+      <div class="card"><div class="ci">💸</div><h4>Plafon captcha</h4><p>Optional per token, cu numaratoare atomica (fara race). RNPM costa bani reali — un token scurs nu goleste portofelul peste un cap setat.</p><span class="sev">decizie ta</span></div>
+      <div class="card"><div class="ci">📜</div><h4>Auto load-more</h4><p>Serverul da un bloc + total/hasMore; AI-ul continua singur. Dosare: auto pana la pragul de fan-out, apoi un singur prompt. RNPM: auto pana la plafon, fara intrebari.</p><span class="sev">decizie ta</span></div>
+      <div class="card"><div class="ci">🔌</div><h4>Siguranta ICCJ</h4><p>Un intrerupator global cu numaratoare separata pe clasa de apelant: un token in bucla nu mai poate pica ICCJ pentru UI si monitorizare.</p><span class="sev">HIGH</span></div>
+      <div class="card"><div class="ci">🧾</div><h4>Audit + alerta IP</h4><p>Creare / folosire / revocare, cu IP si dispozitiv. Folosire dintr-o locatie noua → primesti email.</p><span class="sev">decizie ta</span></div>
+      <div class="card"><div class="ci">🔴</div><h4>Revocare instanta</h4><p>Validare in DB la fiecare cerere, fara cache. Plus buton „revoca toate”. Singurul buton de panica de care ai nevoie.</p><span class="sev">confirmat OK</span></div>
+    </div>
+  </section>
+
+  <!-- DECISIONS -->
+  <section class="block">
+    <div class="sec-head"><span class="sec-num">05</span><h2>Ce s-a decis</h2></div>
+    <dl style="margin:0;">
+      <div class="dec"><dt>Scopes</dt><dd><b>3</b>: dosare (incl. termene), iccj, rnpm</dd></div>
+      <div class="dec"><dt>Expirare</dt><dd><b>Optionala in UI</b> — implicit fara, dar poti alege 30/90/365 zile</dd></div>
+      <div class="dec"><dt>Acces</dt><dd><b>Default-deny + doar citire</b> — restul aplicatiei e 403 pentru token</dd></div>
+      <div class="dec"><dt>Export Excel/PDF</dt><dd><b>Exclus</b> din token; doar date brute, cu pagina plafonata server-side</dd></div>
+      <div class="dec"><dt>Captcha RNPM</dt><dd><b>Nelimitat din start</b> + plafon optional per token (alegerea ta, contra recomandarii panelului)</dd></div>
+      <div class="dec"><dt>Load-more</dt><dd>Dosare: <b>auto pana la prag</b> + 1 prompt, cu exact-match si calitate parte. RNPM: <b>complet automat pana la plafon</b>, fara confirmare (debitor/creditor)</dd></div>
+      <div class="dec"><dt>ICCJ</dt><dd><b>Intrerupator pe clasa de apelant</b> + limita per token, fara cap global de rata</dd></div>
+      <div class="dec"><dt>Audit</dt><dd><b>Da</b> — jurnal append-only + alerta la IP nou + buton revoca-tot</dd></div>
+      <div class="dec"><dt>Verificat adversarial</dt><dd>Panel de <b>5 modele</b> + sinteza Opus; 1 CRITICAL + 5 HIGH incorporate</dd></div>
+    </dl>
+  </section>
+
+  <footer>
+    <div>Macheta de design · <b>piesa A — API + PAT</b> · sursa: <b>docs/superpowers/specs/2026-06-27-api-mcp-integration-design.md</b></div>
+    <div style="margin-top:6px;">Urmatorul pas dupa aprobare: plan de implementare (writing-plans) → migration 0039.</div>
+  </footer>
+</div>
+
+<div id="toasts"></div>
+
+<script>
+(function(){
+  "use strict";
+
+  // ---------- shared state ----------
+  var state = {
+    token: null,         // { name, scopes:[], exp, cap, secret, prefix, id }
+    audit: [],           // { time, event, route, ip, result }
+    seenIps: {},         // ip -> true
+    revoked: false,
+    baseIp: "86.123.214.7",
+    captchaSpent: 0
+  };
+
+  function $(s, r){ return (r||document).querySelector(s); }
+  function $all(s, r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); }
+  function nowStr(){ try { return new Date().toLocaleTimeString("ro-RO"); } catch(e){ return "--:--:--"; } }
+  function randStr(n){ var c="ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_"; var o=""; for(var i=0;i<n;i++) o+=c[Math.floor(Math.random()*c.length)]; return o; }
+
+  function toast(title, msg, alert){
+    var t = document.createElement("div");
+    t.className = "toast" + (alert ? " alert" : "");
+    t.innerHTML = '<div class="th">'+title+'</div><div>'+msg+'</div>';
+    $("#toasts").appendChild(t);
+    setTimeout(function(){ t.style.transition="opacity .4s, transform .4s"; t.style.opacity="0"; t.style.transform="translateY(8px)"; setTimeout(function(){ t.remove(); }, 420); }, 4200);
+  }
+
+  // ---------- stepper ----------
+  $all(".step-tab").forEach(function(tab){
+    tab.addEventListener("click", function(){
+      var step = tab.getAttribute("data-step");
+      $all(".step-tab").forEach(function(t){ t.classList.toggle("active", t===tab); });
+      $all(".panel").forEach(function(p){ p.classList.toggle("active", p.getAttribute("data-panel")===step); });
+    });
+  });
+  function markDone(step){ var t = $('.step-tab[data-step="'+step+'"]'); if(t) t.classList.add("done"); }
+  function gotoStep(step){ var t = $('.step-tab[data-step="'+step+'"]'); if(t) t.click(); }
+
+  // ---------- step 1: scopes + generate ----------
+  $all("#scopeRow .scope").forEach(function(sc){
+    sc.addEventListener("click", function(){ sc.classList.toggle("on"); });
+  });
+
+  function selectedScopes(){
+    return $all("#scopeRow .scope.on").map(function(s){ return s.getAttribute("data-scope"); });
+  }
+
+  $("#genBtn").addEventListener("click", function(){
+    var scopes = selectedScopes();
+    if(scopes.length === 0){ toast("Alege macar un scope", "Tokenul are nevoie de cel putin o capabilitate de citire.", true); return; }
+    var body = randStr(43);
+    var secret = "ld_pat_" + body;
+    var prefix = "ld_pat_" + body.slice(0,4) + "…";
+    var exp = $("#tkExp").value;
+    var capRaw = $("#tkCap").value.trim();
+    var cap = capRaw && !isNaN(+capRaw) ? +capRaw : null;
+    state.token = {
+      name: $("#tkName").value || "Token fara nume",
+      scopes: scopes, exp: exp, cap: cap, secret: secret, prefix: prefix,
+      id: "tok_" + randStr(8).toLowerCase()
+    };
+    state.revoked = false;
+    state.audit = [];
+    state.seenIps = {};
+    state.captchaSpent = 0;
+    pushAudit("create", "—", "sesiune", "ok");
+
+    $("#secretVal").textContent = secret;
+    $("#secretWrap").style.display = "block";
+    markDone(0);
+    renderConfig(); renderTokenList(); renderAudit();
+    toast("Token creat", "Copiaza secretul acum — nu mai apare a doua oara.");
+  });
+
+  $("#resetBtn").addEventListener("click", function(){
+    state.token = null; state.audit = []; state.seenIps = {}; state.revoked = false; state.captchaSpent = 0;
+    $("#secretWrap").style.display = "none";
+    renderConfig(); renderTokenList(); renderAudit();
+  });
+
+  $("#copyBtn").addEventListener("click", function(){
+    if(!state.token) return;
+    var ok = function(){ toast("Copiat", "Secretul e in clipboard."); };
+    if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(state.token.secret).then(ok, ok); }
+    else { ok(); }
+  });
+
+  // ---------- step 2: config ----------
+  function renderConfig(){
+    var tok = state.token ? state.token.secret : "ld_pat_<genereaza-la-pasul-1>";
+    var scopes = state.token ? state.token.scopes.join(", ") : "dosare, iccj";
+    var html =
+      '<span class="c">// pune tokenul ca variabila de mediu pentru puntea MCP</span>\n' +
+      '{\n' +
+      '  <span class="k">"mcpServers"</span>: {\n' +
+      '    <span class="k">"legal-dashboard"</span>: {\n' +
+      '      <span class="k">"command"</span>: <span class="s">"npx"</span>,\n' +
+      '      <span class="k">"args"</span>: [<span class="s">"@legal-dashboard/mcp"</span>],\n' +
+      '      <span class="k">"env"</span>: {\n' +
+      '        <span class="k">"LEGAL_DASHBOARD_URL"</span>: <span class="s">"https://app.exemplu.ro"</span>,\n' +
+      '        <span class="k">"LEGAL_DASHBOARD_TOKEN"</span>: <span class="b">"' + tok + '"</span>\n' +
+      '      }\n' +
+      '    }\n' +
+      '  }\n' +
+      '}\n' +
+      '<span class="c">// scopes active: ' + scopes + '</span>';
+    $("#cfgBody").innerHTML = html;
+  }
+
+  // ---------- step 3: ask-the-AI simulator ----------
+  var MAX_FANOUT_PAGES = 6; // simulat: cap auto-load dosare (proxy pentru MAX_SOAP_FANOUT)
+  var SCENARIOS = [
+    { q:"Arata-mi dosarul 4821/3/2024", tag:"dosare · exact match + roluri", kind:"ok",
+      method:"GET", path:"/api/dosare?numar=4821/3/2024", scope:"dosare",
+      exactMatch:true, total:1, perPage:50,
+      results:[
+        {numar:"4821/3/2024", parte:"ACME SRL", calitate:"Parat"},
+        {numar:"4821/3/2024", parte:"Popescu Ion", calitate:"Reclamant"},
+        {numar:"4821/3/2024", parte:"Min. Finantelor", calitate:"Intervenient"}
+      ] },
+    { q:"Toate dosarele lui Popescu Ion", tag:"dosare · auto load-more + rol dinamic", kind:"ok",
+      method:"GET", path:"/api/dosare?numeParte=Popescu+Ion", scope:"dosare",
+      exactMatch:false, total:137, perPage:50,
+      results:[
+        {numar:"4821/3/2024", parte:"Popescu Ion", calitate:"Reclamant"},
+        {numar:"1190/2/2023", parte:"Popescu Ion", calitate:"Inculpat"},
+        {numar:"77/3/2025", parte:"Popescu Ion", calitate:"Parat"}
+      ] },
+    { q:"Toate dosarele cu numele 'Ion' (foarte general)", tag:"dosare · peste prag → 1 prompt", kind:"ok",
+      method:"GET", path:"/api/dosare?numeParte=Ion", scope:"dosare",
+      exactMatch:false, total:1450, perPage:50,
+      results:[
+        {numar:"5012/3/2024", parte:"Ionescu Maria", calitate:"Reclamant"},
+        {numar:"880/1/2022", parte:"Ion Vasile", calitate:"Parat"}
+      ] },
+    { q:"Cauta la ICCJ recursul lui Popescu", tag:"iccj · POST + roluri", kind:"ok",
+      method:"POST", path:"/api/dosare-iccj", scope:"iccj",
+      exactMatch:false, total:3, perPage:50,
+      results:[
+        {numar:"1123/1/2025", parte:"Popescu Ion", calitate:"Recurent"},
+        {numar:"904/1/2024", parte:"Popescu Ion", calitate:"Intimat"}
+      ] },
+    { q:"Verifica RNPM pentru CUI 12345678 (ca debitor)", tag:"rnpm · auto-spend captcha", kind:"ok",
+      method:"POST", path:"/api/rnpm/search", scope:"rnpm", captcha:true, roleDim:"Debitor",
+      total:180, perPage:50,
+      rnpm:[
+        {desc:"Ipoteca mobiliara — Banca X", rol:"Debitor"},
+        {desc:"Garantie reala mobiliara — Leasing Y", rol:"Debitor"},
+        {desc:"Cesiune de creanta — Fond Z", rol:"Debitor"}
+      ] },
+    { q:"Analizeaza cu AI ultima hotarare", tag:"refuzat · in afara accesului", kind:"deny-domain",
+      method:"POST", path:"/api/ai/analyze",
+      deny:"403 pat_route_forbidden — /api/ai nu e in capabilitatile niciunui token. Analiza AI ramane doar pentru tine, in aplicatie." },
+    { q:"Adauga monitorizare pe dosarul 4821/3/2024", tag:"refuzat · scriere + in afara", kind:"deny-domain",
+      method:"POST", path:"/api/v1/monitoring",
+      deny:"403 pat_route_forbidden — monitorizarea e exclusa din token (scriere + in afara celor 3 domenii)." }
+  ];
+
+  function buildPrompts(){
+    var box = $("#prompts"); box.innerHTML = "";
+    SCENARIOS.forEach(function(sc, i){
+      var b = document.createElement("button");
+      b.className = "prompt";
+      var tagCls = sc.kind === "ok" ? "ok" : "no";
+      b.innerHTML = sc.q + '<span class="tag '+tagCls+'">'+sc.tag+'</span>';
+      b.addEventListener("click", function(){ runScenario(sc); });
+      box.appendChild(b);
+    });
+  }
+
+  function stageEl(label, sub){
+    var d = document.createElement("div");
+    d.className = "stage";
+    d.innerHTML = '<div class="pin"></div><div>'+label+(sub?' <small>'+sub+'</small>':'')+'</div>';
+    return d;
+  }
+
+  function runScenario(sc){
+    if(!state.token){ toast("N-ai token", "Intoarce-te la pasul 1 si genereaza un token intai.", true); gotoStep(0); return; }
+    if(state.revoked){ toast("Token revocat", "Toate tokenurile sunt revocate. Creeaza altul la pasul 1.", true); return; }
+
+    var pipe = $("#pipe"); pipe.innerHTML = "";
+    var v = $("#verdict"); v.className = "verdict"; v.innerHTML = "";
+
+    var hasScope = sc.scope ? state.token.scopes.indexOf(sc.scope) !== -1 : false;
+
+    // determine outcome
+    var outcome; // 'ok' | 'deny-domain' | 'deny-scope'
+    if(sc.kind === "deny-domain") outcome = "deny-domain";
+    else if(!hasScope) outcome = "deny-scope";
+    else outcome = "ok";
+
+    // build gate stages — auto-load-more se intampla DUPA, in stratul MCP
+    var stages = [];
+    stages.push({ el: stageEl("AI extern formuleaza apelul", sc.method+" "+sc.path), res:"pass" });
+    stages.push({ el: stageEl("MCP &rarr; Authorization: Bearer", "ld_pat_…"), res:"pass" });
+    stages.push({ el: stageEl("originGuard", "Bearer valid &rarr; bypass CSRF"), res:"pass" });
+    stages.push({ el: stageEl("Limita de rata per token", "paceaza rafala"), res:"pass" });
+
+    if(outcome === "deny-domain"){
+      stages.push({ el: stageEl("Poarta default-deny", "ruta nu e in PAT_CAPABILITIES"), res:"fail" });
+    } else {
+      stages.push({ el: stageEl("Poarta default-deny", "ruta allowlistata (segment exact)"), res:"pass" });
+      if(outcome === "deny-scope"){
+        stages.push({ el: stageEl("requireScope("+sc.scope+")", "tokenul NU are scope-ul "+sc.scope), res:"fail" });
+      } else {
+        stages.push({ el: stageEl("requireScope("+sc.scope+")", "token are "+sc.scope+" ✓"), res:"pass" });
+        stages.push({ el: stageEl("Handler read-only", "pagina 1"), res:"pass" });
+      }
+    }
+
+    stages.forEach(function(s){ pipe.appendChild(s.el); });
+
+    // animate
+    var i = 0;
+    (function tick(){
+      if(i > 0){ var prev = stages[i-1]; prev.el.classList.remove("live"); prev.el.classList.add(prev.res); }
+      if(i >= stages.length){ finish(); return; }
+      stages[i].el.classList.add("live");
+      i++;
+      setTimeout(tick, 360);
+    })();
+
+    function finish(){
+      var ip = state.baseIp;
+      markDone(2);
+      if(outcome === "deny-domain"){
+        v.className = "verdict show no";
+        v.innerHTML = "✗ "+escapeHtml(sc.deny);
+        pushAudit("use", sc.path, ip, "deny"); renderAudit(); return;
+      }
+      if(outcome === "deny-scope"){
+        v.className = "verdict show no";
+        v.innerHTML = "✗ 403 insufficient_scope — tokenul nu are scope-ul <b>"+sc.scope+"</b>. Adauga-l la creare, sau testeaza in „Ce poate, ce nu poate”.";
+        pushAudit("use", sc.path, ip, "deny"); renderAudit(); return;
+      }
+      renderOk(sc, ip);
+    }
+  }
+
+  // ---------- auto load-more + rich result ----------
+  function logSeq(logEl, lines, delay, onDone){
+    var k = 0;
+    (function step(){
+      if(k >= lines.length){ if(onDone) onDone(); return; }
+      var d = document.createElement("div");
+      d.className = "ld-line"; d.innerHTML = lines[k];
+      logEl.appendChild(d); k++;
+      setTimeout(step, delay);
+    })();
+  }
+  function pageCounts(total, perPage, maxPages){
+    var out = [], left = total, n = 0;
+    while(left > 0 && n < maxPages){ var c = Math.min(perPage, left); out.push(c); left -= c; n++; }
+    return out;
+  }
+  function roleClass(r){ return "role " + String(r||"").toLowerCase().replace(/[^a-z]/g,""); }
+  function appendDone(log, txt){ var d=document.createElement("div"); d.className="ld-line ld-done"; d.innerHTML="✓ "+txt; log.appendChild(d); }
+  function appendStop(log, txt){ var d=document.createElement("div"); d.className="ld-line ld-stop"; d.innerHTML="■ "+txt; log.appendChild(d); }
+
+  function renderOk(sc, ip){
+    var v = $("#verdict");
+    v.className = "verdict show ok";
+    var badge = sc.exactMatch ? '<span class="badge-exact">exact match</span>' : '';
+    var title = sc.captcha
+      ? '✓ 200 OK — '+sc.total+' inscrieri RNPM ('+sc.roleDim+')'
+      : '✓ 200 OK — '+sc.total+' rezultate'+badge;
+    v.innerHTML = '<div>'+title+'</div><div class="ld-log" id="ldLog"></div><div id="ldPrompt"></div><div id="ldData"></div>';
+    if(sc.captcha) autoLoadRnpm(sc, ip); else autoLoadDosare(sc, ip);
+  }
+
+  function autoLoadDosare(sc, ip){
+    var log = $("#ldLog");
+    var perPage = sc.perPage || 50;
+    var totalPages = Math.max(1, Math.ceil(sc.total / perPage));
+    var firstCounts = pageCounts(sc.total, perPage, MAX_FANOUT_PAGES);
+    var lines = firstCounts.map(function(c, idx){
+      return 'Pagina '+(idx+1)+' &mdash; <span class="cap">'+c+' rezultate</span> <span style="color:var(--muted)">(auto)</span>';
+    });
+    logSeq(log, lines, 300, function(){
+      var loaded = firstCounts.reduce(function(a,b){return a+b;}, 0);
+      if(totalPages <= MAX_FANOUT_PAGES){
+        appendDone(log, 'Adus automat '+loaded+'/'+sc.total+' ('+firstCounts.length+' pagini)');
+        renderDosareRows(sc); pushAudit("use", sc.path+" (auto "+firstCounts.length+" pag)", ip, "ok"); renderAudit();
+      } else {
+        var pr = $("#ldPrompt");
+        pr.innerHTML = '<div class="prompt-once"><span class="pq">Prag fan-out atins ('+MAX_FANOUT_PAGES+' pagini, '+loaded+'/'+sc.total+' aduse automat).</span> Continui restul?<div><button class="btn" id="ldYes">Da, continua</button><button class="btn ghost" id="ldNo">Nu, ajunge</button></div></div>';
+        $("#ldYes").addEventListener("click", function(){
+          pr.innerHTML = "";
+          var rest = pageCounts(sc.total - loaded, perPage, 999).map(function(c, idx){
+            return 'Pagina '+(MAX_FANOUT_PAGES+idx+1)+' &mdash; <span class="cap">'+c+' rezultate</span> <span style="color:var(--muted)">(auto, dupa confirmare)</span>';
+          });
+          logSeq(log, rest.slice(0, 4).concat(rest.length>4 ? ['… inca '+(rest.length-4)+' pagini'] : []), 200, function(){
+            appendDone(log, 'Adus '+sc.total+'/'+sc.total+' (toate paginile)');
+          });
+          renderDosareRows(sc); pushAudit("use", sc.path+" (auto+confirmat)", ip, "ok"); renderAudit();
+        });
+        $("#ldNo").addEventListener("click", function(){
+          pr.innerHTML = "";
+          appendStop(log, 'Oprit la cererea ta — '+loaded+'/'+sc.total);
+          renderDosareRows(sc); pushAudit("use", sc.path+" (auto, oprit)", ip, "ok"); renderAudit();
+        });
+      }
+    });
+  }
+
+  function autoLoadRnpm(sc, ip){
+    var log = $("#ldLog");
+    var perPage = sc.perPage || 50;
+    var pagesNeeded = Math.max(1, Math.ceil(sc.total / perPage));
+    var cap = state.token.cap;
+    var remaining = (cap === null) ? Infinity : Math.max(0, cap - state.captchaSpent);
+    var toLoad = Math.min(pagesNeeded, remaining);
+
+    if(toLoad <= 0){
+      $("#verdict").className = "verdict show no";
+      appendStop(log, 'Plafon captcha atins ('+state.captchaSpent+'/'+cap+') — 429, niciun captcha nou.');
+      renderCaptchaMeter(); pushAudit("use", sc.path+" (429 plafon)", ip, "deny"); renderAudit();
+      return;
+    }
+
+    var lines = [];
+    for(var k=0;k<toLoad;k++){
+      lines.push('Pagina '+(k+1)+' &mdash; <span class="cost">captcha #'+(state.captchaSpent+k+1)+'</span> consumat <span style="color:var(--muted)">(auto, fara confirmare)</span>');
+    }
+    logSeq(log, lines, 320, function(){
+      state.captchaSpent += toLoad;
+      if(toLoad < pagesNeeded){
+        appendStop(log, 'Plafon captcha atins ('+state.captchaSpent+'/'+cap+') — oprit automat la 429. '+(sc.total - toLoad*perPage)+' inscrieri raman necitite.');
+        pushAudit("use", sc.path+" ("+toLoad+" captcha, plafon)", ip, "ok");
+      } else {
+        appendDone(log, 'Adus automat '+sc.total+'/'+sc.total+' — '+toLoad+' captcha consumate, fara confirmare.');
+        pushAudit("use", sc.path+" ("+toLoad+" captcha)", ip, "ok");
+      }
+      renderRnpmRows(sc); renderCaptchaMeter(); renderAudit(); renderTokenList();
+    });
+  }
+
+  function renderDosareRows(sc){
+    var rows = sc.results.map(function(r){
+      return '<tr><td class="dn">'+escapeHtml(r.numar)+'</td><td>'+escapeHtml(r.parte)+'</td><td><span class="'+roleClass(r.calitate)+'">'+escapeHtml(r.calitate)+'</span></td></tr>';
+    }).join("");
+    $("#ldData").innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:10px 0 4px;">esantion rezultate (calitate parte dinamica):</div><table class="rtable"><tbody>'+rows+'</tbody></table>';
+  }
+  function renderRnpmRows(sc){
+    var rows = sc.rnpm.map(function(r){
+      return '<tr><td class="dn">'+escapeHtml(r.desc)+'</td><td><span class="'+roleClass(r.rol)+'">'+escapeHtml(r.rol)+'</span></td></tr>';
+    }).join("");
+    $("#ldData").innerHTML = '<div style="font-family:var(--mono);font-size:11px;color:var(--muted);margin:10px 0 4px;">esantion inscrieri (rol = dimensiune cautare):</div><table class="rtable"><tbody>'+rows+'</tbody></table>';
+  }
+  function renderCaptchaMeter(){
+    var cap = state.token ? state.token.cap : null;
+    var m = document.createElement("div");
+    m.className = "captcha-meter";
+    m.innerHTML = "captcha consumate (acest token): <b>"+state.captchaSpent+"</b>"+(cap!==null ? " / plafon "+cap : " · fara plafon (doar buget cont)");
+    $("#ldData").appendChild(m);
+  }
+
+  function escapeHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;"); }
+
+  // ---------- audit ----------
+  function pushAudit(event, route, ip, result){
+    if(event === "use" && ip && !state.seenIps[ip]){
+      state.seenIps[ip] = true;
+      if(Object.keys(state.seenIps).length > 1){
+        toast("Alerta securitate", "Token folosit dintr-un IP nou: <b>"+ip+"</b>. Daca nu esti tu, revoca-l.", true);
+      }
+    }
+    state.audit.unshift({ time: nowStr(), event: event, route: route, ip: ip, result: result });
+  }
+
+  function renderAudit(){
+    var tb = $("#auditBody");
+    if(!state.audit.length){ tb.innerHTML = '<tr><td colspan="5" class="empty">Inca nimic. Intoarce-te la pasul 3 si pune cateva intrebari.</td></tr>'; return; }
+    tb.innerHTML = state.audit.map(function(a){
+      var rcls = a.result === "ok" ? "r-ok" : "r-deny";
+      var evcls = a.event === "use" ? "ev-use" : "";
+      return '<tr><td>'+a.time+'</td><td class="'+evcls+'">'+a.event+'</td><td>'+escapeHtml(a.route)+'</td><td>'+a.ip+'</td><td class="'+rcls+'">'+(a.result==="ok"?"200 / OK":"403 / 429")+'</td></tr>';
+    }).join("");
+  }
+
+  // ---------- token list ----------
+  function renderTokenList(){
+    var box = $("#tkList");
+    if(!state.token){ box.innerHTML = '<div class="tk"><div><div class="id">— niciun token —</div><div class="sub">Creeaza unul la pasul 1.</div></div></div>'; return; }
+    var t = state.token;
+    var lastUse = state.audit.filter(function(a){return a.event==="use";})[0];
+    var exp = t.exp === "0" ? "fara expirare" : ("expira in " + t.exp + " zile");
+    var capTxt = t.cap !== null ? (t.cap + " captcha/zi") : "captcha nelimitat";
+    box.innerHTML =
+      '<div class="tk'+(state.revoked?" revoked":"")+'">' +
+        '<div>' +
+          '<div class="id">'+escapeHtml(t.name)+' · '+t.prefix+'</div>' +
+          '<div class="sub">scopes: <b>'+t.scopes.join(", ")+'</b> · '+exp+' · '+capTxt+'</div>' +
+          '<div class="sub">ultima folosire: <b>'+(lastUse?lastUse.time+" din "+lastUse.ip:"—")+'</b></div>' +
+        '</div>' +
+        '<div>'+(state.revoked?'<span class="tk-badge rv">revocat</span>':'<button class="btn danger" id="revokeOne" style="padding:8px 14px;">Revoca</button>')+'</div>' +
+      '</div>';
+    var r1 = $("#revokeOne");
+    if(r1) r1.addEventListener("click", doRevoke);
+  }
+
+  function doRevoke(){
+    if(!state.token || state.revoked) return;
+    state.revoked = true;
+    pushAudit("revoke", "—", "sesiune", "ok");
+    renderTokenList(); renderAudit();
+    toast("Revocat instant", "Tokenul e mort din aceasta secunda — validarea se face in DB la fiecare cerere, fara cache.");
+  }
+
+  $("#revokeAll").addEventListener("click", function(){
+    if(!state.token){ toast("Niciun token", "Nimic de revocat."); return; }
+    if(state.revoked){ toast("Deja revocat", "Tokenul e deja revocat."); return; }
+    doRevoke();
+    toast("Revoca toate", "Butonul de panica: toate tokenurile active au fost revocate.");
+  });
+
+  $("#simNewIp").addEventListener("click", function(){
+    if(!state.token || state.revoked){ toast("N-ai token activ", "Creeaza un token la pasul 1 intai.", true); return; }
+    var newIp = "203.0." + (Math.floor(Math.random()*200)+10) + "." + (Math.floor(Math.random()*200)+10);
+    pushAudit("use", "/api/dosare?q=test", newIp, "ok");
+    renderAudit(); renderTokenList();
+  });
+
+  // ---------- playground matrix ----------
+  var ROUTES = [
+    { m:"GET",  p:"/api/dosare", d:"Cautare dosare + termene", scope:"dosare" },
+    { m:"GET",  p:"/api/termene", d:"Termene pe dosar", scope:"dosare" },
+    { m:"POST", p:"/api/dosare-iccj", d:"Cautare ICCJ (POST)", scope:"iccj" },
+    { m:"POST", p:"/api/rnpm/search", d:"Cautare RNPM (POST, captcha)", scope:"rnpm" },
+    { m:"POST", p:"/api/ai/analyze", d:"Analiza AI", scope:"__never__" },
+    { m:"POST", p:"/api/v1/monitoring", d:"Monitorizare (scriere)", scope:"__never__" },
+    { m:"GET",  p:"/api/v1/me", d:"Profil cont", scope:"__never__" }
+  ];
+  var mxScopes = { dosare:true, iccj:true, rnpm:false };
+
+  $all("#mxToggles .tg").forEach(function(tg){
+    tg.addEventListener("click", function(){
+      var s = tg.getAttribute("data-s");
+      mxScopes[s] = !mxScopes[s];
+      tg.classList.toggle("on", mxScopes[s]);
+      renderMatrix();
+    });
+  });
+
+  function renderMatrix(){
+    var box = $("#mxRows"); box.innerHTML = "";
+    ROUTES.forEach(function(r){
+      var allowed, reason;
+      if(r.scope === "__never__"){ allowed = false; reason = "default-deny (in afara celor 3 domenii)"; }
+      else if(!mxScopes[r.scope]){ allowed = false; reason = "lipseste scope: " + r.scope; }
+      else { allowed = true; reason = "scope " + r.scope + " ✓"; }
+      var row = document.createElement("div");
+      row.className = "route-row";
+      row.innerHTML =
+        '<div class="m">'+r.m+'</div>' +
+        '<div class="pth">'+r.p+'<small>'+r.d+'</small></div>' +
+        '<div class="res '+(allowed?"ok":"no")+'">'+(allowed?"200 permis":"403 blocat")+' · '+reason+'</div>';
+      box.appendChild(row);
+    });
+  }
+
+  // ---------- init ----------
+  buildPrompts();
+  renderConfig();
+  renderTokenList();
+  renderAudit();
+  renderMatrix();
+})();
+</script>
+</body>
+</html>
