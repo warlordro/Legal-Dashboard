@@ -33,6 +33,9 @@ export interface RecordCaptchaUsageInput {
   source: CaptchaUsageSource;
   requestId?: string | null;
   ts?: string;
+  // PAT (piesa A): leaga randul de tokenul care l-a consumat, pentru plafon
+  // per-token (A5.3). NULL/undefined = consum din sesiune JWT/desktop.
+  tokenId?: string | null;
 }
 
 export function recordCaptchaUsage(input: RecordCaptchaUsageInput): CaptchaUsageRow {
@@ -40,11 +43,37 @@ export function recordCaptchaUsage(input: RecordCaptchaUsageInput): CaptchaUsage
   const db = getDb();
   const info = db
     .prepare(
-      `INSERT INTO captcha_usage (owner_id, ts, provider, source, request_id)
-       VALUES (?, ?, ?, ?, ?)`
+      `INSERT INTO captcha_usage (owner_id, ts, provider, source, request_id, token_id)
+       VALUES (?, ?, ?, ?, ?, ?)`
     )
-    .run(input.ownerId, input.ts ?? new Date().toISOString(), input.provider, input.source, input.requestId ?? null);
+    .run(
+      input.ownerId,
+      input.ts ?? new Date().toISOString(),
+      input.provider,
+      input.source,
+      input.requestId ?? null,
+      input.tokenId ?? null
+    );
   return db.prepare("SELECT * FROM captcha_usage WHERE id = ?").get(info.lastInsertRowid) as CaptchaUsageRow;
+}
+
+// Numar de captcha-uri consumate de un PAT intr-o fereastra rolling (A5.3).
+// `captcha_usage.ts` e stocat ISO-Z (recordCaptchaUsage scrie toISOString), deci
+// comparatia lexicografica cu strftime(...Z) e corecta — acelasi pattern ca
+// countTenantCaptchaUsageInWindow.
+export function countTokenCaptchaUsageInWindow(tokenId: string, windowSeconds: number): number {
+  if (!Number.isFinite(windowSeconds) || windowSeconds <= 0) {
+    throw new Error("windowSeconds must be a positive number");
+  }
+  const modifier = `-${Math.floor(windowSeconds)} seconds`;
+  const row = getDb()
+    .prepare(
+      `SELECT COUNT(*) AS n FROM captcha_usage
+        WHERE token_id = ?
+          AND ts > strftime('%Y-%m-%dT%H:%M:%fZ', 'now', ?)`
+    )
+    .get(tokenId, modifier) as { n: number };
+  return row.n;
 }
 
 // Numar de captcha-uri (source='tenant') consumate de owner intr-o fereastra
