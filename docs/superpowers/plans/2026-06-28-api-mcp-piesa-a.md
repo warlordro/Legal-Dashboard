@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-> **Versiune plan: v2.1** — doua runde de review adversarial (agenti specializati ultracode + review-panel multi-model), **toate findings-urile aplicate INLINE in task-uri**. Sectiunea **"## v2 — Corectii din review adversarial"** de la final e acum un changelog + cross-reference (ce s-a schimbat si unde), nu o lista de TODO-uri separate. Implementatorul urmeaza task-urile pas cu pas; nu mai exista cod inline gresit ("v2 drift" rezolvat). Daca totusi gasesti vreun conflict rezidual intre un snippet si apendice, apendicele are prioritate.
+> **Versiune plan: v2.2** — TREI runde de review adversarial (agenti specializati ultracode + review-panel multi-model x2), **toate findings-urile aplicate INLINE in task-uri**. Runda 3 (2026-07-01, pre-implementare) a prins un cluster de mount-ordering Hono (audit/openapi montate dupa gate → audit-ul de 403 si openapi inaccesibile) + forward-deps (Task 7.6 referea module din faze ulterioare) — rezolvate prin **Task 16 (wiring unic web-mode)**, montarea fiind acum scoasa din task-urile individuale. Plus: filtru `outcome='ok'` pe detectia IP-nou, guard `getAuthMode()==="web"` pe dispatch, `no-store` via `c.header()` inainte de `next()`, sweep + reset hooks pe Map-urile module-level. Sectiunile **"## v2 …"** + **"## v2.2 …"** de la final sunt changelog + cross-reference. Daca gasesti vreun conflict rezidual intre un snippet si apendice, apendicele are prioritate.
 
 **Goal:** Expune cautarea dosare+termene / ICCJ / RNPM (doar citire) catre un mediu AI extern printr-un Personal Access Token (PAT) opac cu scopes, in web mode, fara impact pe desktop.
 
@@ -50,7 +50,7 @@
 - `backend/src/services/iccj/iccjClient.ts` — wrap `searchIccj`/`fetchIccjDetail`/`searchSedinteIccj` cu breaker + `callerClass`.
 - monitoring ICCJ runner (ex. `backend/src/services/monitoring/iccjRunner.ts`) — paseaza `callerClass:"monitoring"` la apelurile ICCJ (altfel intra cu greutate "ui" in breaker).
 - `backend/src/routes/dosare.ts` — `exactMatch` in raspuns + page-size cap.
-- `backend/src/index.ts` — mount `patCapabilityGate` (dupa `ownerContext`), `apiTokensRouter`, `openapi`.
+- `backend/src/index.ts` — un singur bloc `if (getAuthMode()==="web")` (Task 16) intre `ownerContext` si `rateLimit`: `patSecurity` → `patUsageAudit` → `openapi` (ruta) → `patCapabilityGate` → `apiTokensRouter` (ruta).
 - `backend/src/util/envelope.ts` — coduri noi (`PAT_ROUTE_FORBIDDEN`, `INSUFFICIENT_SCOPE`, `PAT_CANNOT_MANAGE_TOKENS`, `ICCJ_UNAVAILABLE`). (401 PAT = lowercase `invalid_token` via `AuthenticationError`, NU enum.)
 - `frontend/src/lib/api.ts` — re-export `apiTokensApi` (sau import direct).
 - `frontend/src/components/ApiKeyDialog.tsx` — monteaza `<ApiAccessPanel/>` (web-only, langa `EmailSettingsPanel`).
@@ -104,7 +104,13 @@ ALTER TABLE captcha_usage ADD COLUMN token_id TEXT;
 CREATE INDEX idx_captcha_usage_token_id ON captcha_usage(token_id) WHERE token_id IS NOT NULL;
 
 -- Index pentru detectia "IP nou" pe hot-path-ul PAT (hasPriorTokenUseFromIp) — fix review DB-004.
-CREATE INDEX idx_audit_log_token_use ON audit_log(action, target_id, ip) WHERE action = 'api_token.used';
+-- runda 3: WHERE include `outcome='ok'` (coloana reala in audit_log, CHECK IN ('ok','denied','error')).
+-- Detectia IP-nou trebuie sa numere DOAR folosirile REUSITE; altfel o cerere 403 dintr-un IP nou
+-- (scrisa de patUsageAudit cu outcome='denied' + ip) ar pre-seta un rand care suprima alerta la
+-- urmatorul request reusit din acelasi IP (token furat → lovi intai o ruta forbidden). action+outcome
+-- fiind fixe in WHERE, indexul tine doar (target_id, ip).
+CREATE INDEX idx_audit_log_token_use ON audit_log(target_id, ip)
+  WHERE action = 'api_token.used' AND outcome = 'ok';
 ```
 
 - [ ] **Step 2: Write the down migration**
@@ -489,12 +495,24 @@ export interface AuthenticatedContext {
 // si verificarea `if (!token)`:
 import { resolvePatContext } from "./patProvider.ts";
 import { TOKEN_PREFIX } from "../db/apiTokenRepository.ts";
+import { getAuthMode } from "./config.ts"; // deja folosit in alte module auth; fara ciclu (config.ts nu importa authProvider)
 // ...
     // fix review REL-NO-KILLSWITCH: kill switch operational per-request (ca
     // ICCJ_ROUTES_DISABLED/OPENROUTER_DISABLED). Cand e on, un ld_pat_ cade pe
     // calea JWT si esueaza ca 401 normal; tokenId nu se seteaza → toate gate-urile
     // PAT raman no-op automat. Documenteaza in backend/.env.example.
-    if (token.startsWith(TOKEN_PREFIX) && process.env.LEGAL_DASHBOARD_PAT_DISABLED !== "1") {
+    //
+    // runda 3 (desktop zero-impact, FIX): gate-ul `getAuthMode()==="web"` direct pe
+    // dispatch — NU te baza doar pe ce provider selecteaza `getAuthProvider()`. In
+    // desktop, un `Authorization: Bearer ld_pat_...` NU mai intra niciodata in
+    // resolvePatContext (deci ZERO apeluri DB, T-05 deterministic) chiar daca pe viitor
+    // desktop ar refolosi WebJwtAuthProvider. Belt-and-suspenders peste mount-ul
+    // conditional din Task 16.
+    if (
+      getAuthMode() === "web" &&
+      token.startsWith(TOKEN_PREFIX) &&
+      process.env.LEGAL_DASHBOARD_PAT_DISABLED !== "1"
+    ) {
       return resolvePatContext(c, token);
     }
 // restul (verifyAuthToken JWT) ramane neschimbat.
@@ -534,7 +552,7 @@ git commit -m "feat(auth): PAT dispatch on ld_pat_ prefix (web mode), owner cont
 **Files:**
 - Create: `backend/src/middleware/patCapabilityGate.ts`
 - Test: `backend/src/middleware/patCapabilityGate.test.ts`
-- Modify: `backend/src/index.ts` (mount dupa `ownerContext`), `backend/src/util/envelope.ts` (coduri noi)
+- Modify: `backend/src/util/envelope.ts` (coduri noi). (Montarea in `index.ts` e deferata la Task 16.)
 
 **Interfaces:**
 - Consumes: `c.get("tokenScopes")`, `c.get("tokenId")` (Task 3).
@@ -651,11 +669,15 @@ function pathMatches(path: string, prefix: string): boolean {
 // altfel `?numarDosar=4821%2F3%2F2024` (slash encodat legitim) ar da 403 si ar
 // rupe cazul principal de cautare dosare.
 function isSuspiciousPath(rawUrl: string): boolean {
-  let p = rawUrl;
+  let p: string;
   try {
     p = new URL(rawUrl).pathname;
   } catch {
-    /* rawUrl deja relativ → foloseste-l ca atare */
+    // rawUrl deja relativ (ex. unele harness-uri de test) → DESPRINDE query-string-ul
+    // INAINTE de verificare (fix runda 3). Altfel un `?numarDosar=4821%2F3%2F2024`
+    // legitim ar contine `%2f` si ar da 403 — exact regresia pe care runda 2 a inchis-o
+    // pe happy-path, dar care reaparea pe ramura de catch.
+    p = rawUrl.split("?")[0];
   }
   const lower = p.toLowerCase();
   return lower.includes("%2f") || lower.includes("%2e") || lower.includes("%5c") || p.includes("..");
@@ -679,7 +701,9 @@ export async function patCapabilityGate(c: Context, next: Next): Promise<Respons
   // fix PAT-005/REL-MGMT-GUARD-DEAD: rutele de management tokenuri sunt session-only.
   // Gate-ul (montat pe /api/*) le prinde inaintea router-ului, deci emite AICI codul
   // corect (pat_cannot_manage_tokens), nu PAT_ROUTE_FORBIDDEN generic. Sursa unica.
-  if (normPath(path).startsWith("/api/v1/tokens")) {
+  // runda 3: `pathMatches` (granita de segment), NU `startsWith` brut — consecvent cu
+  // restul gate-ului si fara fals-pozitiv pe un viitor `/api/v1/tokens-public`.
+  if (pathMatches(path, "/api/v1/tokens")) {
     return c.json(fail(ErrorCodes.PAT_CANNOT_MANAGE_TOKENS, "Un token nu poate administra tokenuri.", c), 403);
   }
 
@@ -698,13 +722,9 @@ export async function patCapabilityGate(c: Context, next: Next): Promise<Respons
 // pentru metoda + path + scope (DRY/YAGNI).
 ```
 
-- [ ] **Step 5: Mount the gate after ownerContext**
+- [ ] **Step 5: NU monta inca in index.ts** (runda 3 — forward-deps + ordine)
 
-In `backend/src/index.ts`, imediat dupa `app.use("*", ownerContext);` (linia 233) si inainte de `app.use("/api/*", rateLimit);`:
-```ts
-import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
-app.use("/api/*", patCapabilityGate);
-```
+Montarea gate-ului in `index.ts` se face in **Task 16 (wiring unic web-mode)**, impreuna cu `patSecurity`/`patUsageAudit`/`openapi`/`tokens`, ca tot lantul sa aiba o singura sursa de ordine si ca niciun commit intermediar sa nu importe module inca inexistente. Testele acestui task folosesc o app Hono minimala (`appWith()`), deci NU au nevoie de montarea in `index.ts`. Lasa doar `export`-ul lui `patCapabilityGate` + `PAT_CAPABILITIES`.
 
 - [ ] **Step 6: Run tests + typecheck**
 
@@ -714,7 +734,7 @@ Expected: PASS.
 - [ ] **Step 7: Commit**
 
 ```bash
-git add backend/src/middleware/patCapabilityGate.ts backend/src/middleware/patCapabilityGate.test.ts backend/src/index.ts backend/src/util/envelope.ts
+git add backend/src/middleware/patCapabilityGate.ts backend/src/middleware/patCapabilityGate.test.ts backend/src/util/envelope.ts
 git commit -m "feat(auth): PAT default-deny capability gate (method + segment-boundary path + scope)"
 ```
 
@@ -835,6 +855,7 @@ git commit -m "feat(security): per-token rate limit bucket"
 
 **Files:**
 - Modify: `backend/src/routes/dosare.ts` (si orice ruta PAT cu marime controlata de client)
+- Modify: `backend/src/routes/rnpm.ts` (runda 3 — apare in commit-ul Step 3; confirma `clampPageSize` pe calea PAT)
 - Test: extinde testele de ruta existente
 
 **Interfaces:**
@@ -861,17 +882,16 @@ git commit -m "feat(security): server-side page-size cap on PAT-reachable read r
 
 ---
 
-## Phase 5.5 — Controale PAT obligatorii (no-store, HTTPS-only, mount conditional)
+## Phase 5.5 — Controale PAT obligatorii (no-store, HTTPS-only)
 
 ### Task 7.5: patSecurity middleware (no-store + HTTPS-only)
 
 **Files:**
-- Create: `backend/src/middleware/patSecurity.ts` (+ `.test.ts`)
-- Modify: `backend/src/index.ts` (monteaza `patSecurity` intre `ownerContext` si `patCapabilityGate`)
+- Create: `backend/src/middleware/patSecurity.ts` (+ `.test.ts`). (Montarea in `index.ts` e deferata la Task 16; aici doar middleware + test cu app minimala.)
 
-**De ce intre ownerContext si gate:** are nevoie de `tokenId` (setat de ownerContext) si trebuie sa fie EXTERIOR gate-ului ca `no-store` sa acopere si raspunsurile 403 ale gate-ului (fix review-panel).
+**De ce e outermost in lantul PAT:** are nevoie de `tokenId` (setat de `ownerContext`, care ruleaza inainte) si trebuie sa inveleasca gate-ul ca `no-store` sa acopere si raspunsurile 403/426. In Task 16 e montat primul din bloc.
 
-- [ ] **Step 1: Write the failing tests** — PAT GET → header `Cache-Control: no-store`; JWT/desktop → fara no-store; in `NODE_ENV=production` fara `x-forwarded-proto: https` → 426 (chiar si de pe peer loopback); cu `x-forwarded-proto: https` → trece; un PAT 403-uit de gate tot primeste `no-store`.
+- [ ] **Step 1: Write the failing tests** — pe app Hono minimala (`patSecurity` + un handler fake): PAT GET → header `Cache-Control: no-store`; JWT/desktop → fara no-store; in `NODE_ENV=production` fara `x-forwarded-proto: https` → 426 (chiar si de pe peer loopback); cu `x-forwarded-proto: https` → trece; un handler fake care intoarce `c.json(..., 403)` tot primeste `no-store` (demonstreaza propagarea pe raspunsul final). Ordinea reala fata de gate-ul montat se asserteaza in Task 16.
 
 - [ ] **Step 2: Implement**
 ```ts
@@ -880,59 +900,54 @@ import { ErrorCodes, fail } from "../util/envelope.ts";
 
 export async function patSecurity(c: Context, next: Next): Promise<Response | undefined> {
   const isPat = !!c.get("tokenId");
+  if (isPat) {
+    // runda 3 (FIX no-store): seteaza headerele INAINTE de `next()` via `c.header()` —
+    // idiomul codebase-ului ([dosare.ts:88](../../../backend/src/routes/dosare.ts#L88),
+    // [rnpm.ts:1033](../../../backend/src/routes/rnpm.ts#L1033)). Hono propaga headerele
+    // setate pe context in raspunsul FINAL, inclusiv cand un middleware din aval (gate)
+    // returneaza `c.json(..., 403)`. Evita `c.res.headers.set(...)` DUPA `next()`, care
+    // poate arunca pe un Response cu headere imutabile sau poate sa nu prinda raspunsul nou.
+    c.header("Cache-Control", "no-store");
+    c.header("Pragma", "no-cache");
+  }
   // HTTPS-only in productie (fix review-panel): cere x-forwarded-proto https; NU
   // permite bypass pe peer loopback in prod (un reverse-proxy local cu proto=http
   // ar ocoli). Dev/loopback se controleaza explicit cu LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1.
+  // 426-ul mosteneste no-store-ul setat mai sus (c.json merge-uie headerele de context).
   if (isPat && process.env.NODE_ENV === "production" && process.env.LEGAL_DASHBOARD_PAT_ALLOW_HTTP !== "1") {
     if (c.req.header("x-forwarded-proto") !== "https") {
       return c.json(fail(ErrorCodes.PAT_ROUTE_FORBIDDEN, "PAT necesita HTTPS.", c), 426);
     }
   }
   await next();
-  if (isPat) {
-    // mutat pe raspunsul final → acopera si 403-ul gate-ului care ruleaza dupa.
-    c.res.headers.set("Cache-Control", "no-store");
-    c.res.headers.set("Pragma", "no-cache");
-  }
   return;
 }
 ```
 
 - [ ] **Step 3: Commit**
 ```bash
-git add backend/src/middleware/patSecurity.ts backend/src/middleware/patSecurity.test.ts backend/src/index.ts
+git add backend/src/middleware/patSecurity.ts backend/src/middleware/patSecurity.test.ts
 git commit -m "feat(security): PAT no-store + HTTPS-only middleware"
 ```
 
-### Task 7.6: Mount conditional (web-mode) + teste desktop/kill-switch/timing
+### Task 7.6: Teste desktop zero-impact / kill-switch / 401 contract
+
+> **runda 3:** montarea conditionata (fostul Step 1) a fost MUTATA in **Task 16 (wiring unic web-mode)** — referea `patUsageAudit`/`apiTokensRouter`/`openapiRouter` care nu exista inca la acest commit (forward-deps → `tsc --noEmit` ar pica). Testele de mai jos exercita DOAR calea de auth (dispatch in `authProvider`), care exista deja din Task 3, deci nu au nevoie de bloc.
 
 **Files:**
-- Modify: `backend/src/index.ts` (mount conditional)
-- Test: `backend/src/auth/authProvider.test.ts` / `backend/src/index.test.ts`
+- Test: `backend/src/auth/authProvider.test.ts` / `backend/src/patProvider.test.ts`
+- Modify: `backend/.env.example` (documenteaza `LEGAL_DASHBOARD_PAT_DISABLED`)
 
-- [ ] **Step 1: Conditional mount (fix REL-CONDITIONAL-MOUNT)** — monteaza suprafata PAT DOAR in web mode (pattern `MONITORING_ENABLED` din index.ts:341), ca desktop sa nu expuna deloc token-mgmt/OpenAPI/gate:
-```ts
-import { getAuthMode } from "./auth/config.ts";
-if (getAuthMode() === "web") {
-  app.use("/api/*", patSecurity);
-  app.use("/api/*", patCapabilityGate);
-  app.use("/api/*", patUsageAudit);
-  app.route("/api/v1/openapi.json", openapiRouter); // inainte de gate ca discovery
-  app.route("/api/v1/tokens", apiTokensRouter);
-}
-```
-(Ordinea relativa: `ownerContext` (existent) → `patSecurity` → `patCapabilityGate` → `patUsageAudit` → `rateLimit`/`originGuard` existente. OpenAPI montat inaintea gate-ului.)
+- [ ] **Step 1: Desktop zero-impact test (T-05)** — `LEGAL_DASHBOARD_AUTH_MODE=desktop` + header `Authorization: Bearer ld_pat_anything`: `getAuthProvider().authenticate(c)` → `tokenId`/`tokenScopes` undefined, `ownerId==="local"`, si spy pe `findActiveTokenByHash` confirma ZERO apeluri DB (PAT-shaped header ignorat complet — garantat acum de guard-ul `getAuthMode()==="web"` direct pe dispatch, Task 3 Step 4).
 
-- [ ] **Step 2: Desktop zero-impact test (T-05)** — `LEGAL_DASHBOARD_AUTH_MODE=desktop` + header `Authorization: Bearer ld_pat_anything`: `getAuthProvider().authenticate(c)` → `tokenId`/`tokenScopes` undefined, `ownerId==="local"`, si spy pe `findActiveTokenByHash` confirma ZERO apeluri DB (PAT-shaped header ignorat complet).
+- [ ] **Step 2: Kill-switch per-request test** — `LEGAL_DASHBOARD_PAT_DISABLED=1` + token `ld_pat_` valid (in web mode) → 401 (cade pe calea JWT); fara env → rezolva. Citit per-request (env verificat in `authenticate`, care ruleaza per cerere). Documenteaza in `backend/.env.example`.
 
-- [ ] **Step 3: Kill-switch per-request test** — `LEGAL_DASHBOARD_PAT_DISABLED=1` + token `ld_pat_` valid → 401 (cade pe calea JWT); fara env → rezolva. Citit per-request (env verificat in `authenticate`, care ruleaza per cerere). Documenteaza in `backend/.env.example`.
+- [ ] **Step 3: 401 contract test (A8, fara timing)** — `resolvePatContext` intoarce acelasi 401 generic (status `401` + cod `invalid_token` + mesaj identic) si pentru token inexistent, si pentru user inactiv. (runda 3) Testeaza DOAR status+cod+mesaj identice, **NU latimea de timp**: pe un token de 256-bit brute-force-ul offline e infezabil, deci o ramificare observabila (o interogare pentru token inexistent vs doua pentru user inactiv) NU e exploatabila — claim-ul "timing constant" e moot si un test pe timing ar fi flaky. Documenteaza asta in test.
 
-- [ ] **Step 4: Timing-401 test (A8)** — `resolvePatContext` intoarce acelasi 401 generic `invalid_token` si pentru token inexistent, si pentru user inactiv (fara ramificare observabila pe existenta randului). Blocheaza comportamentul cu un test.
-
-- [ ] **Step 5: Commit**
+- [ ] **Step 4: Commit**
 ```bash
-git add backend/src/index.ts backend/src/auth/authProvider.test.ts backend/src/index.test.ts backend/.env.example
-git commit -m "feat(security): web-mode conditional mount + desktop/kill-switch/timing tests"
+git add backend/src/auth/authProvider.test.ts backend/src/auth/patProvider.test.ts backend/.env.example
+git commit -m "test(auth): desktop zero-impact + kill-switch + 401 contract (PAT)"
 ```
 
 ---
@@ -1064,7 +1079,9 @@ export class IccjBreakerOpenError extends Error {
   constructor() { super("ICCJ temporar indisponibil (circuit breaker deschis)."); this.name = "IccjBreakerOpenError"; }
 }
 
-const BREAKER_THRESHOLD = Number(process.env.ICCJ_BREAKER_THRESHOLD) || 8; // esecuri distres / fereastra
+// runda 3: EXPORTAT — testul (Step 1) bucleaza pana la `BREAKER_THRESHOLD`; un `const` local
+// l-ar lasa neimportabil si testul nu ar compila.
+export const BREAKER_THRESHOLD = Number(process.env.ICCJ_BREAKER_THRESHOLD) || 8; // esecuri distres / fereastra
 const BREAKER_WINDOW_MS = 60_000;
 const BREAKER_COOLDOWN_MS = Number(process.env.ICCJ_BREAKER_COOLDOWN_MS) || 30_000;
 
@@ -1144,6 +1161,8 @@ In `backend/src/services/iccj/iccjClient.ts`: adauga `callerClass?: IccjCaller` 
 
 In rutele ICCJ (`dosare-iccj`, `termene-iccj`): prinde `IccjBreakerOpenError` → `c.json(fail(ErrorCodes.ICCJ_UNAVAILABLE, err.message, c), 503)`.
 
+> **runda 3 (contract eroare ICCJ):** acest 503 e SINGURA eroare ICCJ care emite envelope-ul standard `{ data, error:{code,message}, requestId }`; restul erorilor de pe rutele ICCJ raman forma legacy `{ error: string }` (vezi PAT-002, Task 13). E o exceptie constienta — documenteaz-o explicit in `API.md`/OpenAPI ca un consumator sa stie ca pe ICCJ trebuie sa citeasca `error` ca `string | {code,message}` si sa ramifice pe status HTTP, nu pe forma corpului.
+
 - [ ] **Step 5: Run tests + Commit**
 
 ```bash
@@ -1159,8 +1178,7 @@ git commit -m "feat(reliability): global ICCJ circuit-breaker with per-caller-cl
 
 **Files:**
 - Create: `backend/src/routes/apiTokens.ts`
-- Test: `backend/src/routes/apiTokens.test.ts`
-- Modify: `backend/src/index.ts` (mount `/api/v1/tokens`)
+- Test: `backend/src/routes/apiTokens.test.ts`. (Montarea in `index.ts` e deferata la Task 16; testul foloseste o app de test cu `ownerContext` montat local.)
 
 **Interfaces:**
 - Consumes: `createApiToken`, `listTokensByOwner`, `revokeToken`, `revokeAllTokens` (Task 2); `getOwnerId` ([owner.ts](../../../backend/src/middleware/owner.ts)); `ok`/`fail` (envelope).
@@ -1263,36 +1281,41 @@ apiTokensRouter.post("/revoke-all", (c) => {
 });
 ```
 
-- [ ] **Step 3: Mount** — in `backend/src/index.ts`: `import { apiTokensRouter } from "./routes/apiTokens.ts"; app.route("/api/v1/tokens", apiTokensRouter);`
+- [ ] **Step 3: Montare deferata la Task 16** (runda 3) — NU monta `apiTokensRouter` in `index.ts` aici; intra in blocul unic web-mode din Task 16, DUPA `patCapabilityGate` (gate-ul respinge PAT-urile pe `/api/v1/tokens`, sesiunile trec). Testul acestui task verifica router-ul cu o app de test locala (cu `ownerContext`), nu prin `index.ts`.
 
 - [ ] **Step 4: Run tests + Commit**
 
 ```bash
-git add backend/src/routes/apiTokens.ts backend/src/routes/apiTokens.test.ts backend/src/index.ts
+git add backend/src/routes/apiTokens.ts backend/src/routes/apiTokens.test.ts
 git commit -m "feat(api): token management routes (session-only, anti-escalation)"
 ```
 
 ### Task 11: Audit on PAT use + new-IP alert
 
 **Files:**
-- Create: `backend/src/middleware/patUsageAudit.ts` (+ `.test.ts`) — middleware POST-gate care emite audit + new-IP.
+- Create: `backend/src/middleware/patUsageAudit.ts` (+ `.test.ts`) — middleware care INVELESTE gate-ul + rateLimit-ul si emite audit + new-IP pe statusul final.
 - Create: `backend/src/services/tokenAlerts.ts` — `notifyTokenNewIp` (peste mailer-ul existent).
-- Modify: `backend/src/db/auditRepository.ts` (`hasPriorTokenUseFromIp`)
-- Modify: `backend/src/index.ts` (monteaza `patUsageAudit` DUPA `patCapabilityGate`)
+- Modify: `backend/src/db/auditRepository.ts` (`hasPriorTokenUseFromIp`). (Montarea in `index.ts` e deferata la Task 16.)
 
 **Interfaces:**
 - Consumes: `touchLastUsed` (Task 2), `recordAudit`, mailer (`isMailerConfigured` + send) din infra existenta.
-- Produces: `hasPriorTokenUseFromIp(tokenId, ip): boolean`; `patUsageAudit` middleware; `notifyTokenNewIp(c, tokenId, ip): Promise<void>`.
+- Produces: `hasPriorTokenUseFromIp(tokenId, ip): boolean`; `patUsageAudit` middleware; `_resetPatAuditForTest()`; `notifyTokenNewIp(c, tokenId, ip): Promise<void>`; `_resetTokenAlertsForTest()`.
 
-**De ce middleware separat post-gate (fix R07/REL-ALERT-BEFORE-AUTHZ):** `ownerContext` ruleaza INAINTE de `patCapabilityGate`, deci emiterea de acolo ar loga `outcome:"ok"` + ar trimite email pentru cereri ce vor fi 403. Acest middleware ruleaza dupa gate si ramifica pe statusul final.
+**De ce middleware care INVELESTE gate-ul (fix R07/REL-ALERT-BEFORE-AUTHZ + runda 3):** emiterea din `ownerContext` (care ruleaza INAINTE de gate) ar loga `outcome:"ok"` + ar trimite email pentru cereri ce vor fi 403. Solutia: `patUsageAudit` se inregistreaza **INAINTE** de `patCapabilityGate` (si de `rateLimit`), face `await next()` si abia apoi ramifica pe `c.res.status`. In modelul Hono, gate-ul ruleaza INAUNTRUL lui `next()`, deci `patUsageAudit` ii vede 403-ul (si 429-ul rate-limit-ului) pe ramura de unwind. ATENTIE — montat DUPA gate (cum era in v2.1) NU ar functiona: gate-ul face `return c.json(403)` fara `next()`, deci un middleware inregistrat dupa el nu ruleaza niciodata. Ordinea canonica e fixata in Task 16.
 
 - [ ] **Step 1: Add audit query**
 
-In `backend/src/db/auditRepository.ts` (coloanele `action`/`target_id`/`ip` exista in `audit_log` — confirmat in auditRepository.ts; index partial `idx_audit_log_token_use` din migration 0039 acopera acest query):
+In `backend/src/db/auditRepository.ts` (coloanele `action`/`target_id`/`ip`/`outcome` exista in `audit_log` — confirmat in `migrations/0002_users_sessions_audit.up.sql`: `outcome TEXT NOT NULL DEFAULT 'ok' CHECK(outcome IN ('ok','denied','error'))`; index partial `idx_audit_log_token_use` din migration 0039 acopera acest query):
 ```ts
 export function hasPriorTokenUseFromIp(tokenId: string, ip: string): boolean {
+  // runda 3 (FIX bypass alerta): filtreaza pe outcome='ok'. Numara DOAR folosirile
+  // REUSITE din acel IP. Altfel un atacator cu token furat poate suprima alerta de IP nou
+  // lovind intai o ruta forbidden (403 → patUsageAudit scrie un rand cu outcome='denied' +
+  // ip), care apoi ar face newIp=false la prima cerere reusita. Indexul partial match-uieste
+  // exact `action='api_token.used' AND outcome='ok'`.
   return getDb().prepare(
-    `SELECT 1 FROM audit_log WHERE action = 'api_token.used' AND target_id = ? AND ip = ? LIMIT 1`
+    `SELECT 1 FROM audit_log
+       WHERE action = 'api_token.used' AND target_id = ? AND ip = ? AND outcome = 'ok' LIMIT 1`
   ).get(tokenId, ip) !== undefined;
 }
 ```
@@ -1300,26 +1323,29 @@ Retentie: evenimentele `api_token.*` sunt purjate de `purgeOldAuditLog(90)` exis
 
 - [ ] **Step 2: notifyTokenNewIp helper**
 
-`backend/src/services/tokenAlerts.ts` — subtire peste mailer; no-op daca SMTP nu e configurat; dedup in-proces per `(tokenId, ip)` pe fereastra (un email, nu un flood la burst multi-IP):
+`backend/src/services/tokenAlerts.ts` — subtire peste mailer; no-op daca SMTP nu e configurat; dedup in-proces per `(tokenId, ip)` pe fereastra (un email, nu un flood la burst multi-IP). (runda 3) Calea reala a mailer-ului e `../services/email/mailer.ts` (`isMailerConfigured` + `sendComposedEmail`, folosit deja de `budgetWarningService.ts`) — NU placeholder. Map-ul `sentRecently` e curatat pe acces (altfel creste nelimitat intr-un proces web long-lived) si are reset hook pentru izolarea testelor:
 ```ts
 import type { Context } from "hono";
-import { isMailerConfigured /*, sendMail */ } from "<mailer-existent>";
+import { isMailerConfigured, sendComposedEmail } from "../services/email/mailer.ts";
 const sentRecently = new Map<string, number>(); // `${tokenId}|${ip}` -> ts
 const DEDUP_MS = 60 * 60 * 1000;
+export function _resetTokenAlertsForTest(): void { sentRecently.clear(); } // T-13 izolare
 export async function notifyTokenNewIp(c: Context, tokenId: string, ip: string): Promise<void> {
   if (!isMailerConfigured()) return;
+  const now = Date.now();
+  // sweep on access: arunca intrarile expirate ca harta sa nu creasca nemarginit (fix runda 3).
+  for (const [k, t] of sentRecently) { if (now - t >= DEDUP_MS) sentRecently.delete(k); }
   const key = `${tokenId}|${ip}`;
   const last = sentRecently.get(key);
-  const now = c.get("requestTs") ?? Date.now(); // sau Date.now() direct in runtime
   if (last && now - last < DEDUP_MS) return;
   sentRecently.set(key, now);
-  // sendMail owner-scoped: subiect "Token API folosit din IP nou", corp cu tokenId scurt + ip.
+  // sendComposedEmail owner-scoped: subiect "Token API folosit din IP nou", corp cu tokenId scurt + ip.
 }
 ```
 
 - [ ] **Step 3: patUsageAudit middleware (post-gate)**
 
-`backend/src/middleware/patUsageAudit.ts` — montat DUPA `patCapabilityGate`. Ruleaza `await next()`, apoi ramifica pe status:
+`backend/src/middleware/patUsageAudit.ts` — montat **INAINTE** de `patCapabilityGate` (il inveleste). Ruleaza `await next()`, apoi ramifica pe `c.res.status`:
 ```ts
 import type { Context, Next } from "hono";
 import { getConnInfo } from "@hono/node-server/conninfo";
@@ -1329,6 +1355,7 @@ import { notifyTokenNewIp } from "../services/tokenAlerts.ts";
 
 // Esantionare: o folosire auditata per (token, ip) per zi (nu 1 INSERT + 1 SELECT/request).
 const auditedToday = new Map<string, string>(); // `${tokenId}|${ip}` -> YYYY-MM-DD
+export function _resetPatAuditForTest(): void { auditedToday.clear(); } // runda 3: izolare teste
 
 export async function patUsageAudit(c: Context, next: Next): Promise<void> {
   const tokenId = c.get("tokenId");
@@ -1337,8 +1364,10 @@ export async function patUsageAudit(c: Context, next: Next): Promise<void> {
   let ip: string | null = null;
   try { ip = getConnInfo(c).remote.address ?? null; } catch { ip = null; }
   const ua = c.req.header("user-agent") ?? null;
-  const denied = c.res.status >= 400; // gate-ul a respins (403) → audit denied, fara email
+  const denied = c.res.status >= 400; // gate-ul a respins (403/429) → audit denied, fara email
   const day = new Date().toISOString().slice(0, 10);
+  // runda 3: prune cross-day → harta nu creste nemarginit intr-un proces web long-lived.
+  for (const [k, d] of auditedToday) { if (d !== day) auditedToday.delete(k); }
   const key = `${tokenId}|${ip ?? "?"}`;
   try {
     if (denied) {
@@ -1359,15 +1388,15 @@ export async function patUsageAudit(c: Context, next: Next): Promise<void> {
   }
 }
 ```
-Monteaza in `index.ts` DUPA `patCapabilityGate`: `app.use("/api/*", patUsageAudit);`
+Montarea in `index.ts` e deferata la **Task 16**, unde `patUsageAudit` intra in bloc **INAINTE** de `patCapabilityGate` (si de `rateLimit`), nu dupa. Aici doar middleware + test cu app minimala.
 
-- [ ] **Step 4: Tests** — (T-13) mailer arunca → audit-ul tot se scrie, raspunsul tot 200, fara exceptie; al doilea request din acelasi IP/zi NU re-trimite email si NU re-scrie audit (esantionare); un IP nou → email o data; o cerere 403 (PAT pe `/api/ai`) → audit `outcome:"denied"`, FARA email.
+- [ ] **Step 4: Tests** — pe app Hono minimala (`patUsageAudit` + un handler/gate fake; `beforeEach(_resetPatAuditForTest)` + `_resetTokenAlertsForTest`): (T-13) mailer arunca → audit-ul tot se scrie, raspunsul tot 200, fara exceptie; al doilea request din acelasi IP/zi NU re-trimite email si NU re-scrie audit (esantionare); un IP nou → email o data; un handler fake care intoarce 403 → audit `outcome:"denied"`, FARA email (demonstreaza ramificarea pe status; ordinea reala fata de gate-ul montat se asserteaza in Task 16).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add backend/src/middleware/patUsageAudit.ts backend/src/middleware/patUsageAudit.test.ts backend/src/services/tokenAlerts.ts backend/src/db/auditRepository.ts backend/src/index.ts
-git commit -m "feat(security): post-gate PAT usage audit + sampled new-IP alert"
+git add backend/src/middleware/patUsageAudit.ts backend/src/middleware/patUsageAudit.test.ts backend/src/services/tokenAlerts.ts backend/src/db/auditRepository.ts
+git commit -m "feat(security): PAT usage audit (wraps gate) + sampled new-IP alert"
 ```
 
 ---
@@ -1416,10 +1445,10 @@ git commit -m "feat(api): exactMatch flag on dosare search (A5.6)"
 ### Task 13: OpenAPI 3.1 + API.md
 
 **Files:**
-- Create: `backend/src/routes/openapi.ts` (+ mount `/api/v1/openapi.json`)
+- Create: `backend/src/routes/openapi.ts` (+ `openapi.test.ts`). (Montarea `/api/v1/openapi.json` e deferata la Task 16.)
 - Create: `API.md`
 
-- [ ] **Step 1: Implement openapi.json (reachable)** — handler ce intoarce OpenAPI 3.1 static (obiect JS) din `PAT_CAPABILITIES` (importat, nu duplicat): securitate `bearerAuth`, metoda corecta per ruta (ICCJ = **GET**), paginare PER ENDPOINT (vezi Step 2), campuri imbogatite (`exactMatch` doar pe numar dosar; `parti[].calitateParte`), rute tokenuri. **Reachability (fix review-panel):** monteaza ruta `/api/v1/openapi.json` INAINTE de `patCapabilityGate` (e doc de discovery; altfel gate-ul ar da 403 unui PAT care isi citeste propriul spec).
+- [ ] **Step 1: Implement openapi.json** — handler ce intoarce OpenAPI 3.1 static (obiect JS) din `PAT_CAPABILITIES` (importat, nu duplicat): securitate `bearerAuth`, metoda corecta per ruta (ICCJ = **GET**), paginare PER ENDPOINT (vezi Step 2), campuri imbogatite (`exactMatch` doar pe numar dosar; `parti[].calitateParte`), rute tokenuri. **Reachability (runda 3):** montarea (`/api/v1/openapi.json` INAINTE de `patCapabilityGate`, ca un PAT sa-si poata citi propriul spec fara 403) se face in **Task 16** — aici doar handler-ul + un unit test ca obiectul intors e un spec 3.1 valid (`openapi` incepe cu "3.", `paths` nevid).
 
 - [ ] **Step 2: Write API.md** — sectiuni:
   - Obtinere PAT (UI Setari → Acces API), folosire (`Authorization: Bearer`, **HTTPS-only in productie**).
@@ -1429,12 +1458,12 @@ git commit -m "feat(api): exactMatch flag on dosare search (A5.6)"
   - Coduri eroare: **401 `invalid_token`** (lowercase — fix PAT-003, NU `INVALID_TOKEN`), 403 `PAT_ROUTE_FORBIDDEN`/`INSUFFICIENT_SCOPE`/`PAT_CANNOT_MANAGE_TOKENS`, 429 `rate_limited`/`QUOTA_EXCEEDED`, 503 `ICCJ_UNAVAILABLE`/captcha-retry. Nota: 401 e lowercase by design (house style `AuthenticationError`), 403/429 uppercase (`ErrorCodes`) — split intentionat.
   - Exemple curl + nota: `Authorization` nu apare in loguri (logger logheaza doar method/path/status).
 
-- [ ] **Step 3: Smoke test (T-15)** — `GET /api/v1/openapi.json` → 200, `Content-Type: application/json`, `body.openapi` incepe cu "3.", `paths` contine cel putin o ruta PAT; reachable de un PAT (montat inainte de gate).
+- [ ] **Step 3: Unit test (handler)** — `openapiRouter` intors de handler: `body.openapi` incepe cu "3.", `Content-Type: application/json`, `paths` contine cel putin o ruta PAT. (Smoke-ul T-15 de **reachability prin gate** — un PAT primeste 200, nu 403 — se face in Task 16, unde lantul e montat.)
 
 - [ ] **Step 4: Commit**
 
 ```bash
-git add backend/src/routes/openapi.ts backend/src/routes/openapi.test.ts backend/src/index.ts API.md
+git add backend/src/routes/openapi.ts backend/src/routes/openapi.test.ts API.md
 git commit -m "docs(api): OpenAPI 3.1 spec + API.md consumer guide"
 ```
 
@@ -1474,6 +1503,63 @@ export async function revokeAllApiTokens() { await apiFetch("/api/v1/tokens/revo
 cd frontend && npx tsc --noEmit && npm run build
 git add frontend/src/lib/apiTokensApi.ts frontend/src/components/ApiAccessPanel.tsx frontend/src/components/ApiKeyDialog.tsx
 git commit -m "feat(ui): Acces API token management panel"
+```
+
+---
+
+## Phase 11.5 — Web-mode mount wiring (runda 3)
+
+### Task 16: Bloc unic de montare web-mode + test de integrare pe ordine
+
+> **De ce un task separat (runda 3):** montarea suprafetei PAT a fost scoasa din Tasks 4/7.5/7.6/10/11/13 si consolidata aici. Doua motive: (1) **forward-deps** — blocul refera `patUsageAudit`/`apiTokensRouter`/`openapiRouter`, deci nu poate exista pana nu exista toate (Tasks 1-13); montat in Phase 5.5 ar fi rupt `tsc --noEmit`/build pe commit-ul intermediar. (2) **o singura sursa de ordine** — lantul de middleware are dependente de ordine load-bearing (audit inveleste gate-ul, openapi inainte de gate); o singura definitie + un singur test de integrare elimina driftul. Numerotat 16 fiindca a fost adaugat in runda 3; depinde DOAR de Tasks 1-13 (nu de frontend-ul Task 14) si ruleaza inaintea release-ului Task 15.
+
+**Files:**
+- Modify: `backend/src/index.ts` (blocul unic conditionat web-mode)
+- Test: `backend/src/index.test.ts` (integrare pe stack-ul real Hono)
+
+**Interfaces:**
+- Consumes: `getAuthMode` (deja importat, index.ts:16), `patSecurity` (Task 7.5), `patUsageAudit` (Task 11), `openapiRouter` (Task 13), `patCapabilityGate` (Task 4), `apiTokensRouter` (Task 10).
+
+- [ ] **Step 1: Write the failing integration tests** (`backend/src/index.test.ts`, `app.request(...)` pe app-ul real, cu un user activ + token seed):
+  - PAT pe `/api/ai/analyze` (forbidden) → **403** SI exact un rand audit `api_token.used` cu `outcome='denied'`, FARA email (proba ca `patUsageAudit` inveleste gate-ul si vede 403-ul).
+  - PAT peste `TOKEN_RATE_LIMIT` pe `/api/dosare` → **429** SI cererea e auditata (proba ca `patUsageAudit` inveleste si `rateLimit`-ul global).
+  - `GET /api/v1/openapi.json` cu PAT valid → **200** (reachable, NU 403 — montat inainte de gate).
+  - PAT pe `/api/v1/tokens` → **403 `PAT_CANNOT_MANAGE_TOKENS`**; sesiune (fara `tokenId`) pe `/api/v1/tokens` → **200** (manage).
+  - PAT pe `/api/dosare` (allowed, scope corect) → **200** cu header `Cache-Control: no-store`.
+  - `LEGAL_DASHBOARD_AUTH_MODE=desktop`: blocul NU se monteaza → `GET /api/v1/tokens` → **404** (ruta inexistenta), niciun middleware PAT activ.
+
+- [ ] **Step 2: Add the single web-mode block**
+
+In `backend/src/index.ts`, imediat dupa `app.use("*", ownerContext);` (index.ts:233) si **INAINTE** de `app.use("/api/*", rateLimit);` (index.ts:240):
+```ts
+// getAuthMode deja importat (index.ts:16). Suprafata PAT DOAR in web mode (desktop ZERO impact).
+// Ordine load-bearing — NU reordona:
+if (getAuthMode() === "web") {
+  app.use("/api/*", patSecurity);                    // 1. outermost: HTTPS-only + no-store pe raspunsul FINAL (incl 403/426/429)
+  app.use("/api/*", patUsageAudit);                  // 2. inveleste gate + rateLimit → vede statusul final, auditeaza ok/denied
+  app.route("/api/v1/openapi.json", openapiRouter);  // 3. terminal, INAINTE de gate → discovery reachable de PAT (fara 403)
+  app.use("/api/*", patCapabilityGate);              // 4. default-deny gate
+  app.route("/api/v1/tokens", apiTokensRouter);      // 5. session-only (gate-ul de mai sus respinge PAT pe /api/v1/tokens)
+}
+```
+De ce aceasta ordine:
+- `patSecurity` primul → `no-store` setat via `c.header()` inainte de `next()` ajunge pe ORICE raspuns PAT (200/403/426/429), iar HTTPS-reject-ul prinde inaintea oricarui efect.
+- `patUsageAudit` inainte de gate SI de `rateLimit` → face `await next()`, gate-ul + rateLimit-ul ruleaza inauntru, iar el ramifica pe `c.res.status` la unwind. Montat dupa gate (ca in v2.1) NU ar vedea 403-ul (gate-ul face `return` fara `next()`).
+- `openapi` ruta terminala inainte de gate → un PAT isi citeste specul fara 403; tot e auditat (sub `patUsageAudit`) si primeste `no-store` (sub `patSecurity`).
+- `tokens` dupa gate → gate-ul emite `PAT_CANNOT_MANAGE_TOKENS` pentru PAT; sesiunile (fara `tokenId`) trec prin gate (no-op) si ajung la router.
+
+> **Reziduu acceptat (#6 review-panel, MEDIUM):** o cerere PAT pe o ruta forbidden e respinsa de gate (linia 4) INAINTE sa ajunga la `rateLimit` (index.ts:240), deci 403-urile pe rute forbidden NU sunt numarate de bucket-ul per-token. Acceptat: refuzul gate-ului e fara DB (spec A5.0), iar `preAuthRateLimit` (IP, 60/min, index.ts:228) plafoneaza deja flood-ul. Rate-limit-ul per-token se aplica integral traficului PERMIS. Daca pe viitor se cere numararea si a refuzurilor, muta bucket-ul per-token inaintea gate-ului (necesita extragerea lui din `rateLimit`-ul global).
+
+- [ ] **Step 3: Run tests + typecheck + build**
+
+Run: `cd backend && npx vitest run src/index.test.ts && npx tsc --noEmit -p tsconfig.json && cd .. && npm run build`
+Expected: PASS + bundle curat.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add backend/src/index.ts backend/src/index.test.ts
+git commit -m "feat(api): single web-mode PAT mount block (audit wraps gate, openapi reachable)"
 ```
 
 ---
@@ -1547,13 +1633,42 @@ Plan v2 trecut prin review-panel multi-model (Opus 4.8 / GPT-5.5 / Kimi K2.7 / G
 
 **Verdict:** toate findings-urile din ambele runde sunt acum INLINE in task-uri. Nu mai exista "v2 drift" — un implementator care urmeaza checkbox-urile obtine varianta corecta. Banner-ul autoritar ramane ca centura de siguranta.
 
+## v2.2 — Review-panel runda 3 (2026-07-01, pre-implementare)
+
+A treia runda `review-panel` (Opus 4.8 / GPT-5.5 / Kimi K2.7 / GLM-5.2 / Qwen3.7 + sinteza Opus) pe plan v2.1, urmata de grounding pe codul real (5 agenti) inainte de a aplica orice fix — ca sa nu pliem in plan o afirmatie a panel-ului care nu se verifica in cod. Toate corectiile sunt acum INLINE in task-uri.
+
+**HIGH — cluster mount-ordering Hono (rezolvat prin Task 16):**
+1. `patUsageAudit` montat DUPA `patCapabilityGate` (v2.1, Task 7.6) → gate-ul face `return c.json(403)` fara `next()`, deci auditul de 403 nu rula niciodata si testul "403 → audit denied" era nesatisfacibil. FIX: `patUsageAudit` INVELESTE gate-ul (montat inaintea lui, ramifica pe status dupa `next()`).
+2. `openapiRouter` montat dupa gate → un PAT primea 403 inainte sa-si citeasca specul (PAT_CAPABILITIES nu include `/api/v1/openapi.json`). FIX: ruta terminala inaintea gate-ului.
+3. Forward-deps: Task 7.6 (Phase 5.5) importa module din Tasks 10/11/13 → commit-ul intermediar nu compila. FIX: montarea scoasa din task-urile individuale, consolidata in **Task 16** (dupa ce toate piesele exista).
+4. Mount-uri neconditionate imprastiate in Tasks 4/7.5/10/13 (risc dublu-mount / stale mount care rupe desktop zero-impact). FIX: o singura definitie in Task 16, restul task-urilor doar creeaza + testeaza cu app minimala.
+
+**HIGH/MEDIUM — securitate:**
+5. **Desktop bypass** (Task 3 Step 4): dispatch-ul verifica doar `LEGAL_DASHBOARD_PAT_DISABLED`, nu `getAuthMode()==="web"` → in desktop un `Bearer ld_pat_` atingea DB-ul (contrazice T-05 "ZERO DB calls"). FIX: guard `getAuthMode()==="web"` direct pe dispatch.
+6. **Alerta IP-nou ocolibila** (Task 11): `hasPriorTokenUseFromIp` nu filtra `outcome` → ramura `denied` scrie un rand cu IP, deci un token furat putea suprima alerta lovind intai o ruta forbidden. FIX: `AND outcome='ok'` pe query + pe indexul partial 0039 (coloana `outcome` confirmata reala in `audit_log`).
+7. **JWT↔PAT parity** — **non-issue confirmat prin grounding:** calea JWT (`WebJwtAuthProvider.authenticate`) gate-uieste user-ul DOAR pe existenta + `status==="active"`; `UserRow` nu are `emailVerified`/`bannedAt`/`role`-gate (enum-ul `status` consolideaza suspended/deleted). `resolvePatContext` replica exact, iar `findActiveTokenByHash` acopera integritate (hash)/expirare (`expires_at`)/revocare (`revoked_at`) — echivalente PAT-native pentru sig/exp/jti-denylist JWT. Paritate completa; documentata in Self-Review, fara cod nou.
+
+**MEDIUM:**
+8. `no-store` (Task 7.5): `c.res.headers.set(...)` dupa `next()` putea arunca pe headere imutabile / sa nu prinda raspunsul nou. FIX: `c.header("Cache-Control","no-store")` INAINTE de `next()` (idiomul codebase-ului — `dosare.ts:88`/`rnpm.ts:1033`; Hono propaga in raspunsul final, incl. 403).
+9. Map-uri module-level fara sweep + fara reset (Task 11): `sentRecently`/`auditedToday` cresteau nemarginit si poluau testele. FIX: prune pe acces (cross-day / DEDUP_MS) + `_resetTokenAlertsForTest`/`_resetPatAuditForTest`.
+
+**LOW (aplicate):** `isSuspiciousPath` strip query pe ramura de catch (altfel `%2f` din `numarDosar` reaparea 403 in unele harness-uri de test); `PAT_CANNOT_MANAGE_TOKENS` via `pathMatches` (granita de segment); `export const BREAKER_THRESHOLD` (testul nu compila altfel); 503-ul ICCJ breaker = singura eroare ICCJ pe envelope (documentat ca exceptie in API.md); `rnpm.ts` adaugat in Files Task 7; claim "timing constant 401" inmuiat la "status+cod+mesaj identice" (moot pe token 256-bit); placeholder mailer `<mailer-existent>` → `../services/email/mailer.ts` (`isMailerConfigured`+`sendComposedEmail`).
+
+**MEDIUM — non-issue confirmat prin grounding (fara schimbare):** body-limit pe rute PAT — `/api/rnpm/search` are deja `limitSearch`=64KB (`rnpm.ts:198`); restul rutelor PAT sunt GET. `fail()` in `rnpmGuards.ts` — deja importat global corect din `util/envelope.ts` (linia 13, exemplu linia 106).
+
+**Drops corecte ale panelului (auto-corectate la grounding):** `strftime('%f')` = 3 zecimale (ms), se potriveste cu `toISOString()` (NU 6); `better-sqlite3 external` deja configurat in bundle-ul existent.
+
 ## Self-Review
 
 > **Nota onestitate (fix REL-DROPPED-CONTROLS):** prima versiune a planului afirma fals acoperire completa A5/A8. Real: controalele no-store / HTTPS-only / timing-401 NU erau in task-uri (acum in apendicele v2, faza 5.5); A8 are goluri de teste enumerate in apendice (T-02/03/05/07/09/10/11/12/13/15). Codul critic e complet DOAR dupa aplicarea apendicelui v2.
 
-**Spec coverage:** A1 (scop, desktop zero-impact) → Task 3/15. A2 (model token + audit) → Task 1/2/11. A3 (cusatura auth, fara cache pozitiv, 401/403 contract) → Task 3/4. A4 (scope + metoda read-only) → Task 4. A5.0 (default-deny segment) → Task 4. A5.1 (originGuard Bearer) → Task 5. A5.2 (rate-limit per-token) → Task 6. A5.3 (captcha cap atomic) → Task 8. A5.4 (ICCJ breaker per-clasa) → Task 9. A5.5 (page-size cap) → Task 7. A5.6 (load-more + exactMatch + calitate) → Task 12 (+ nota: auto-continuare = piesa B). A6 (rute + UI + revoke-all + new-IP) → Task 10/11/14. A7 (OpenAPI + API.md) → Task 13. A8 (teste) → distribuite per task. A9 (out of scope) — respectat (export exclus, fara store partajat multi-instanta, fara re-auth).
+> **Nota onestitate v2.2 (runda 3):** v2.1 avea montarea suprafetei PAT imprastiata in 6 task-uri, cu ordine gresita (audit/openapi dupa gate) si forward-deps care rupeau commit-urile intermediare. Acum montarea e un singur task (Task 16) cu un test de integrare pe ordine; task-urile individuale doar creeaza + testeaza middleware-urile cu app-uri minimale. Smoke-urile de reachability/ordine (T-15 + 403-audit + 429-audit) traiesc in Task 16, unde lantul real e montat. T-05 (desktop ZERO DB) e acum garantat de guard-ul `getAuthMode()==="web"` pe dispatch, nu doar de selectia de provider.
+
+**Spec coverage:** A1 (scop, desktop zero-impact) → Task 3 (guard dispatch) / 7.6 (teste) / 16 (mount conditional) / 15. A2 (model token + audit) → Task 1/2/11. A3 (cusatura auth, fara cache pozitiv, 401/403 contract) → Task 3/4. A4 (scope + metoda read-only) → Task 4. A5.0 (default-deny segment) → Task 4. A5.1 (originGuard Bearer) → Task 5. A5.2 (rate-limit per-token) → Task 6. A5.3 (captcha cap atomic) → Task 8. A5.4 (ICCJ breaker per-clasa) → Task 9. A5.5 (page-size cap) → Task 7. A5.6 (load-more + exactMatch + calitate) → Task 12 (+ nota: auto-continuare = piesa B). A6 (rute + UI + revoke-all + new-IP) → Task 10/11/14. A7 (OpenAPI + API.md) → Task 13. A8 (teste) → distribuite per task + integrare in Task 16. A9 (out of scope) — respectat (export exclus, fara store partajat multi-instanta, fara re-auth). **Montare/ordine middleware → Task 16 (sursa unica).**
 
 **Divergente fata de spec (de validat la review):** (1) audit-ul reuseste `audit_log`/`recordAudit` in loc de o tabela noua `api_token_audit_events` (DRY; detectia IP nou via query pe `audit_log`; retentia de 90 zile e acoperita de `purgeOldAuditLog` existent care purja TOT `audit_log`, deci nu se pierde). (2) `requireScope` per-router a fost ELIMINAT (dead code) — `PAT_CAPABILITIES` + gate-ul global sunt sursa unica.
+
+**Paritate JWT↔PAT (spec A3/A8) — confirmata prin grounding pe cod (runda 3):** calea JWT (`WebJwtAuthProvider.authenticate`, [authProvider.ts:63-132](../../../backend/src/auth/authProvider.ts#L63-L132)) face, dupa rezolvarea tokenului: verificari de token JWT (`verifyAuthToken`: structura/semnatura HS256/`exp`/`nbf`/`iss`/`aud`/`sub`) → **jti denylist** (`isJtiRevoked`) → `getUserById(sub)` → `user === null` ? 401 → `user.status !== "active"` ? 401. La nivel de USER gate-uieste DOAR existenta + `status==="active"` — `UserRow` ([userRepository.ts:14-23](../../../backend/src/db/userRepository.ts#L14-L23)) nu are `emailVerified`/`bannedAt`; `status` (`active|suspended|deleted`) consolideaza ban/suspend. `resolvePatContext` replica exact (null-check + status), iar la nivel de TOKEN, `findActiveTokenByHash` ofera echivalentele PAT-native: integritate = match pe hash SHA-256 indexat, expirare = `expires_at`, revocare = `revoked_at` (per-request, fara cache pozitiv → revoke instant; mai strict decat jti-denylist). `nbf`/`iss`/`aud` nu se aplica unui PAT opac. **Concluzie: nicio verificare din calea JWT nu e ocolita tacit de PAT.** Daca pe viitor calea JWT adauga un gate nou pe user (ex. `emailVerified`), trebuie oglindit in `resolvePatContext` — verifica la fiecare schimbare in `authenticate`.
 
 **Placeholder scan:** fara TBD/„add error handling”; codul critic e complet. Partile frontend/OpenAPI dau structura + cod cheie + pattern citat (nu placeholder).
 
