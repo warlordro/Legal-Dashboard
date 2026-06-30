@@ -7,6 +7,8 @@ import { recordAudit } from "../db/auditRepository.ts";
 import { isJtiRevoked } from "../db/jwtDenylistRepository.ts";
 import { getUserById, type UserRow } from "../db/userRepository.ts";
 import { getRequestId } from "../middleware/requestId.ts";
+import { resolvePatContext } from "./patProvider.ts";
+import { TOKEN_PREFIX } from "../db/apiTokenRepository.ts";
 
 export const AUTH_COOKIE_NAME = "legal_dashboard_session";
 
@@ -15,6 +17,10 @@ export interface AuthenticatedContext {
   actorId: string;
   user: UserRow | null;
   tokenPayload?: AuthJwtPayload;
+  // PAT (piesa A): setate doar pe calea Personal Access Token. Pe JWT/desktop
+  // raman undefined -> toate gate-urile PAT noi sunt no-op.
+  tokenScopes?: string[];
+  tokenId?: string;
 }
 
 interface AuthProvider {
@@ -64,6 +70,15 @@ export class WebJwtAuthProvider implements AuthProvider {
     const token = readRequestToken(c);
     if (!token) {
       throw new AuthenticationError(401, "unauthorized", "Token de autentificare necesar.");
+    }
+
+    // PAT dispatch (piesa A): un `ld_pat_` cade pe calea PAT in web mode. Guard pe
+    // getAuthMode()==="web" (belt-and-suspenders: aceasta clasa ruleaza doar in web,
+    // dar guard-ul face desktop zero-impact deterministic — ZERO apeluri DB). Kill
+    // switch operational LEGAL_DASHBOARD_PAT_DISABLED=1 il scoate per-request (cade pe
+    // calea JWT si esueaza 401 normal). getAuthMode importat mai sus.
+    if (getAuthMode() === "web" && token.startsWith(TOKEN_PREFIX) && process.env.LEGAL_DASHBOARD_PAT_DISABLED !== "1") {
+      return resolvePatContext(c, token);
     }
 
     let payload: AuthJwtPayload;

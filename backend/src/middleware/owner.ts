@@ -14,6 +14,10 @@ declare module "hono" {
     ownerId: string;
     actorId: string;
     authUser: AuthenticatedContext["user"];
+    // PAT (piesa A): definite doar pe calea Personal Access Token; undefined pe
+    // JWT/desktop -> gate-urile PAT raman no-op.
+    tokenScopes: string[] | undefined;
+    tokenId: string | undefined;
   }
 }
 
@@ -83,6 +87,8 @@ export async function ownerContext(c: Context, next: Next): Promise<Response | u
     c.set("ownerId", authenticated.ownerId);
     c.set("actorId", authenticated.actorId);
     c.set("authUser", authenticated.user);
+    c.set("tokenScopes", authenticated.tokenScopes);
+    c.set("tokenId", authenticated.tokenId);
     await next();
   } catch (err) {
     if (err instanceof AuthenticationError) return writeAuthError(c, err);
