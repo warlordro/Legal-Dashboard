@@ -39,6 +39,12 @@ export const ErrorCodes = {
   DESKTOP_ONLY: "DESKTOP_ONLY",
   NOT_FOUND: "NOT_FOUND",
   INTERNAL_ERROR: "INTERNAL_ERROR",
+  // PAT (piesa A). NB: 401-ul PAT emite lowercase `invalid_token` prin
+  // AuthenticationError (house style), NU un cod din acest enum. 403/429 = uppercase aici.
+  PAT_ROUTE_FORBIDDEN: "PAT_ROUTE_FORBIDDEN",
+  INSUFFICIENT_SCOPE: "INSUFFICIENT_SCOPE",
+  PAT_CANNOT_MANAGE_TOKENS: "PAT_CANNOT_MANAGE_TOKENS",
+  ICCJ_UNAVAILABLE: "ICCJ_UNAVAILABLE",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

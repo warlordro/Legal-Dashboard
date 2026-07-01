@@ -207,3 +207,85 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 });
+
+// Task 16 (PAT piesa A) — bloc unic de montare web-mode + ordine load-bearing.
+// Booteaza app-ul REAL (index.ts) in web mode, seed-uieste un PAT prin graful de module al
+// app-ului (aceeasi conexiune DB), apoi conduce cereri HTTP reale.
+describe("PAT surface — web-mode mount ordering (Task 16)", () => {
+  const WEB = {
+    LEGAL_DASHBOARD_AUTH_MODE: "web",
+    LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+    LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+    LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+  } as const;
+
+  async function bootWebWithPat(port: number, scopes: string[]): Promise<{ secret: string }> {
+    await importFreshIndex({ LEGAL_DASHBOARD_PORT: String(port), LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(), ...WEB });
+    await waitForHealth(port);
+    // Seed prin graful de module deja incarcat (aceeasi conexiune DB ca app-ul).
+    const { insertUser } = await import("./db/userRepository.ts");
+    const { createApiToken } = await import("./db/apiTokenRepository.ts");
+    insertUser({ id: "alice", email: "alice@example.com", displayName: "Alice", status: "active" });
+    const { secret } = createApiToken({
+      ownerId: "alice",
+      name: "mcp",
+      scopes,
+      captchaDailyCap: null,
+      expiresAt: null,
+    });
+    return { secret };
+  }
+
+  it(
+    "default-denies a PAT on non-capability routes but allows its scoped route + reachable openapi",
+    { timeout: 25_000 },
+    async () => {
+      const port = randomPort();
+      const { secret } = await bootWebWithPat(port, ["rnpm"]);
+      const h = { authorization: `Bearer ${secret}` };
+      const base = `http://127.0.0.1:${port}`;
+
+      // default-deny (403) pe rute in afara capabilitatilor
+      expect((await fetch(`${base}/api/ai/models`, { headers: h })).status).toBe(403);
+      expect((await fetch(`${base}/api/v1/me`, { headers: h })).status).toBe(403);
+      expect((await fetch(`${base}/api/v1/admin/users`, { headers: h })).status).toBe(403);
+
+      // management tokenuri: PAT respins cu cod dedicat
+      const tokensRes = await fetch(`${base}/api/v1/tokens`, { headers: h });
+      expect(tokensRes.status).toBe(403);
+      expect(((await tokensRes.json()) as { error: { code: string } }).error.code).toBe("PAT_CANNOT_MANAGE_TOKENS");
+
+      // ruta permisa (scope rnpm, citire locala) trece gate-ul + primeste no-store
+      const saved = await fetch(`${base}/api/rnpm/saved`, { headers: h });
+      expect(saved.status).toBe(200);
+      expect(saved.headers.get("cache-control")).toBe("no-store");
+
+      // openapi reachable de un PAT (montat inaintea gate-ului) — NU 403
+      const spec = await fetch(`${base}/api/v1/openapi.json`, { headers: h });
+      expect(spec.status).toBe(200);
+      expect(((await spec.json()) as { openapi: string }).openapi).toMatch(/^3\./);
+
+      // patUsageAudit inveleste gate-ul: cererea 403 a fost auditata ca denied
+      const { getDb } = await import("./db/schema.ts");
+      const denied = (
+        getDb()
+          .prepare("SELECT COUNT(*) AS n FROM audit_log WHERE action='api_token.used' AND outcome='denied'")
+          .get() as { n: number }
+      ).n;
+      expect(denied).toBeGreaterThan(0);
+    }
+  );
+
+  it("does NOT mount the PAT surface in desktop mode (openapi + tokens are 404)", { timeout: 25_000 }, async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+    });
+    await waitForHealth(port);
+    const base = `http://127.0.0.1:${port}`;
+    expect((await fetch(`${base}/api/v1/openapi.json`)).status).toBe(404);
+    expect((await fetch(`${base}/api/v1/tokens`)).status).toBe(404);
+  });
+});

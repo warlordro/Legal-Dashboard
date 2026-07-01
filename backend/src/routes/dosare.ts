@@ -173,7 +173,12 @@ dosareRouter.get("/", async (c) => {
         413
       );
     }
-    return c.json({ data: dosare, total: dosare.length });
+    // PAT (piesa A, A5.6): exactMatch DOAR pe numar dosar (documentat in API.md — match pe
+    // nume normalizat e deferat). Extensie a raspunsului: `data`/`total` raman identice (fix
+    // PAT-012), campul ajuta stratul MCP sa decida daca mai continua load-more.
+    const q = (numarDosar ?? "").trim();
+    const exactMatch = q.length > 0 && dosare.some((d) => d.numar === q);
+    return c.json({ data: dosare, total: dosare.length, exactMatch });
   } catch (err) {
     console.error("Eroare cautare dosare:", err);
     if (err instanceof SoapResponseTooLargeError) {
