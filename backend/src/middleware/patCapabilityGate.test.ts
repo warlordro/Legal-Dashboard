@@ -28,7 +28,7 @@ describe("patCapabilityGate", () => {
   it("default-denies a PAT on /api/ai", async () => {
     const res = await appWith(["dosare", "iccj", "rnpm"], "tok1").request("/api/ai/analyze", { method: "POST" });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("PAT_ROUTE_FORBIDDEN");
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("PAT_ROUTE_FORBIDDEN");
   });
 
   it("is a no-op for non-PAT sessions (no tokenId)", async () => {
@@ -55,14 +55,14 @@ describe("patCapabilityGate", () => {
     // route matches iccj cap by method+path, but ["dosare"] lacks "iccj" → INSUFFICIENT_SCOPE
     const res = await appWith(["dosare"], "tok1").request("/api/dosare-iccj");
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("INSUFFICIENT_SCOPE");
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("INSUFFICIENT_SCOPE");
   });
 
   it("returns insufficient_scope when path/method match but scope is absent", async () => {
     // iccj route matches by method+path, but token lacks iccj scope
     const res = await appWith(["dosare", "rnpm"], "tok1").request("/api/dosare-iccj");
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("INSUFFICIENT_SCOPE");
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("INSUFFICIENT_SCOPE");
   });
 
   it("denies an unknown subroute under an allowed prefix (DELETE /api/rnpm/saved/abc)", async () => {
@@ -73,7 +73,7 @@ describe("patCapabilityGate", () => {
   it("returns pat_cannot_manage_tokens for a PAT on /api/v1/tokens", async () => {
     const res = await appWith(["dosare"], "tok1").request("/api/v1/tokens", { method: "POST" });
     expect(res.status).toBe(403);
-    expect((await res.json()).error.code).toBe("PAT_CANNOT_MANAGE_TOKENS");
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("PAT_CANNOT_MANAGE_TOKENS");
   });
 
   it("does not let /api/dosare cap leak into /api/dosare-iccj", async () => {
