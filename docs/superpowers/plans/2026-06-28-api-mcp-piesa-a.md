@@ -1326,20 +1326,36 @@ Retentie: evenimentele `api_token.*` sunt purjate de `purgeOldAuditLog(90)` exis
 `backend/src/services/tokenAlerts.ts` — subtire peste mailer; no-op daca SMTP nu e configurat; dedup in-proces per `(tokenId, ip)` pe fereastra (un email, nu un flood la burst multi-IP). (runda 3) Calea reala a mailer-ului e `../services/email/mailer.ts` (`isMailerConfigured` + `sendComposedEmail`, folosit deja de `budgetWarningService.ts`) — NU placeholder. Map-ul `sentRecently` e curatat pe acces (altfel creste nelimitat intr-un proces web long-lived) si are reset hook pentru izolarea testelor:
 ```ts
 import type { Context } from "hono";
-import { isMailerConfigured, sendComposedEmail } from "../services/email/mailer.ts";
+import { isMailerConfigured, sendComposedEmail } from "./email/mailer.ts";
+import { getEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 const sentRecently = new Map<string, number>(); // `${tokenId}|${ip}` -> ts
 const DEDUP_MS = 60 * 60 * 1000;
 export function _resetTokenAlertsForTest(): void { sentRecently.clear(); } // T-13 izolare
 export async function notifyTokenNewIp(c: Context, tokenId: string, ip: string): Promise<void> {
   if (!isMailerConfigured()) return;
+  // Destinatar = adresa configurata a owner-ului (owner_email_settings, ca alertEmailDispatcher).
+  // ownerId vine din context (setat de ownerContext; PAT deriva ownerId = user.id). Fara adresa
+  // configurata nu avem unde trimite -> return. Alerta de securitate: nu o gate-uim pe flag-ul de
+  // monitoring `enabled` (e o notificare de securitate distincta), doar pe existenta adresei.
+  const ownerId = c.get("ownerId");
+  if (!ownerId) return;
+  const to = getEmailSettings(ownerId)?.toAddress;
+  if (!to) return;
   const now = Date.now();
   // sweep on access: arunca intrarile expirate ca harta sa nu creasca nemarginit (fix runda 3).
   for (const [k, t] of sentRecently) { if (now - t >= DEDUP_MS) sentRecently.delete(k); }
   const key = `${tokenId}|${ip}`;
   const last = sentRecently.get(key);
   if (last && now - last < DEDUP_MS) return;
-  sentRecently.set(key, now);
-  // sendComposedEmail owner-scoped: subiect "Token API folosit din IP nou", corp cu tokenId scurt + ip.
+  sentRecently.set(key, now); // mark inainte de send: anti-flood la burst pe acelasi (token, ip)
+  // FIX (review 2026-07-01): APELEAZA efectiv mailer-ul — inainte era doar un comentariu, deci
+  // alerta facea dedup dar nu trimitea niciodata. Best-effort: caller-ul face .catch(()=>{}).
+  const shortId = tokenId.slice(0, 8);
+  await sendComposedEmail(to, {
+    subject: "Token API folosit dintr-un IP nou",
+    text: `Un token API (${shortId}...) a fost folosit dintr-un IP nou: ${ip}.\nDaca nu recunosti activitatea, revoca tokenul din Setari -> Acces API.`,
+    html: `<p>Un token API (<code>${shortId}…</code>) a fost folosit dintr-un IP nou: <strong>${ip}</strong>.</p><p>Daca nu recunosti activitatea, revoca tokenul din Setari &rarr; Acces API.</p>`,
+  });
 }
 ```
 
