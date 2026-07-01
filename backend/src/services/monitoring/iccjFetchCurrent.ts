@@ -32,12 +32,12 @@ export function makeIccjFetchCurrentDosar(deps: IccjFetchCurrentDeps) {
     // docket-ul cu markeri `*`/`**`, deci match-ul exact pe string produce
     // false "not found" (Codex F1). Detail-ul care arunca (IccjParseError) e
     // tratat de runner ca source error, niciodata "disparut".
-    if (iccjId) return deps.fetchIccjDetail(iccjId, { signal });
+    if (iccjId) return deps.fetchIccjDetail(iccjId, { signal, callerClass: "monitoring" });
     // Fallback (joburi legacy fara id): cautam cu numarul NORMALIZAT — inainte
     // trimiteam string-ul decorat ("107/213/2017**") si un match literal pe
     // scj.ro putea intoarce 0 randuri => baseline fals "absent".
     const wanted = normalizeIccjNumar(numarDosar);
-    const res = await deps.searchIccj({ numarDosar: wanted }, { signal });
+    const res = await deps.searchIccj({ numarDosar: wanted }, { signal, callerClass: "monitoring" });
     const matches = res.dosare.filter((d) => normalizeIccjNumar(d.numar) === wanted);
     if (matches.length === 0) return null;
     if (matches.length > 1) {
@@ -45,6 +45,6 @@ export function makeIccjFetchCurrentDosar(deps: IccjFetchCurrentDeps) {
       // urmari silentios dosarul gresit sau am emite dosar_disappeared fals.
       throw new IccjSourceError(`ambiguous ICCJ match for "${numarDosar}" (${matches.length} dosare)`);
     }
-    return deps.fetchIccjDetail(matches[0].iccjId, { signal });
+    return deps.fetchIccjDetail(matches[0].iccjId, { signal, callerClass: "monitoring" });
   };
 }

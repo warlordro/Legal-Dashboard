@@ -26,6 +26,8 @@ function searchReturning(dosare: IccjDosar[]) {
 }
 
 const SIGNAL = { signal: new AbortController().signal };
+// Optiunile propagate downstream: monitoring adauga callerClass pentru breaker (piesa A).
+const MON_OPTS = { ...SIGNAL, callerClass: "monitoring" as const };
 
 describe("normalizeIccjNumar", () => {
   it("strip-uieste markerii trailing si mid-string, dar nu alte caractere", () => {
@@ -50,7 +52,7 @@ describe("makeIccjFetchCurrentDosar", () => {
 
     expect(out).toBe(detail);
     expect(searchIccj).not.toHaveBeenCalled();
-    expect(fetchIccjDetail).toHaveBeenCalledWith("42", SIGNAL);
+    expect(fetchIccjDetail).toHaveBeenCalledWith("42", MON_OPTS);
   });
 
   it("fallback id-less: query-ul pleaca NORMALIZAT si match-ul tolereaza sufixul **", async () => {
@@ -64,8 +66,8 @@ describe("makeIccjFetchCurrentDosar", () => {
 
     const out = await fetchCurrent({ numarDosar: "107/213/2017**" }, SIGNAL);
 
-    expect(searchIccj).toHaveBeenCalledWith({ numarDosar: "107/213/2017" }, SIGNAL);
-    expect(fetchIccjDetail).toHaveBeenCalledWith("77", SIGNAL);
+    expect(searchIccj).toHaveBeenCalledWith({ numarDosar: "107/213/2017" }, MON_OPTS);
+    expect(fetchIccjDetail).toHaveBeenCalledWith("77", MON_OPTS);
     expect(out).toBe(row);
   });
 
