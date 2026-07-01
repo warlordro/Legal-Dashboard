@@ -76,6 +76,38 @@ export function countTokenCaptchaUsageInWindow(tokenId: string, windowSeconds: n
   return row.n;
 }
 
+// Rezervare atomica per-token (A5.3). count-then-insert sub un singur lock
+// (BEGIN IMMEDIATE) — nicio fereastra de race intre citirea contorului si insert.
+// Returneaza `true` daca a rezervat (a inserat un rand), `false` daca plafonul e
+// atins (cap===0 sau used>=cap). Arunca pe esec de tranzactie (ex. SQLITE_BUSY) ->
+// caller-ul fail-closes (503), NU accepta peste plafon. SQL raw ramane in db/**
+// (review 2026-07-01: mutat din routes/rnpmGuards.ts ca sa respecte repository-only).
+export function reserveTokenCaptcha(input: {
+  ownerId: string;
+  tokenId: string;
+  provider: CaptchaUsageProvider;
+  requestId?: string | null;
+  cap: number;
+  windowSeconds: number;
+}): boolean {
+  let reserved = false;
+  getDb()
+    .transaction(() => {
+      const used = countTokenCaptchaUsageInWindow(input.tokenId, input.windowSeconds);
+      if (input.cap === 0 || used >= input.cap) return;
+      recordCaptchaUsage({
+        ownerId: input.ownerId,
+        provider: input.provider,
+        source: "tenant",
+        requestId: input.requestId ?? null,
+        tokenId: input.tokenId,
+      });
+      reserved = true;
+    })
+    .immediate();
+  return reserved;
+}
+
 // Numar de captcha-uri (source='tenant') consumate de owner intr-o fereastra
 // rolling. Doar tenant-source intra in cap; BYOK desktop e contorizat separat
 // pentru audit dar nu se incarca pe wallet-ul firmei.

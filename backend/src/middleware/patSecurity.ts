@@ -7,10 +7,17 @@ import { ErrorCodes, fail } from "../util/envelope.ts";
 //     next(): Hono propaga headerul in raspunsul final, inclusiv pe 403/426/429 generate
 //     de middleware-uri din aval (gate). Evita c.res.headers.set(...) dupa next(), care
 //     poate arunca pe headere imutabile sau poate sa nu prinda raspunsul nou.
-//   - HTTPS-only in productie: respinge PAT peste non-TLS (426). Nu permite bypass pe peer
-//     loopback in prod; dev/loopback se controleaza explicit cu LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1.
-// Outermost in lantul PAT (montat inaintea gate-ului in Task 16) — vezi has nevoie de tokenId
-// (setat de ownerContext, care ruleaza inainte).
+//   - HTTPS hint in productie: respinge PAT cand `x-forwarded-proto` != "https" (426).
+//     IMPORTANT (review 2026-07-01): `x-forwarded-proto` e un header PROXY, NU dovada
+//     criptografica de TLS si NU o poate verifica aplicatia (TLS e terminat la proxy, deci
+//     socket-ul vede plain HTTP). E setabil de client => spoofabil daca reverse-proxy-ul NU
+//     strip-uieste valoarea venita de la client. Deci acest check e DEFENSE-IN-DEPTH impotriva
+//     folosirii accidentale in plaintext de catre un client legitim; NU o granita de securitate.
+//     Garantia reala de HTTPS = reverse-proxy-ul care termina TLS (si care TREBUIE configurat sa
+//     rescrie `x-forwarded-proto` din conexiunea reala, ignorand orice valoare client) + HSTS.
+//     Vezi DEPLOY-SERVER.md. Dev/loopback: LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1.
+// Outermost in lantul PAT (montat inaintea gate-ului) — are nevoie de tokenId (setat de
+// ownerContext, care ruleaza inainte).
 export async function patSecurity(c: Context, next: Next): Promise<Response | undefined> {
   const isPat = !!c.get("tokenId");
   if (isPat) {

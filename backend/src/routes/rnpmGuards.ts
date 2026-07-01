@@ -4,11 +4,10 @@ import { getAuthMode } from "../auth/config.ts";
 import { getTokenCaptchaCap } from "../db/apiTokenRepository.ts";
 import {
   countTenantCaptchaUsageInWindow,
-  countTokenCaptchaUsageInWindow,
   earliestTenantCaptchaTsInWindow,
   recordCaptchaUsage,
+  reserveTokenCaptcha,
 } from "../db/captchaUsageRepository.ts";
-import { getDb } from "../db/schema.ts";
 import { getTenantKeys, type CaptchaMode, type CaptchaProvider } from "../db/tenantKeysRepository.ts";
 import { type QuotaPeriod, getOverride } from "../db/userQuotaRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
@@ -127,24 +126,19 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
     if (tokenId) {
       const cap = getTokenCaptchaCap(tokenId);
       if (cap !== null) {
-        let blocked = false;
+        // Rezervarea atomica (BEGIN IMMEDIATE + count + insert) traieste in repository
+        // (captchaUsageRepository.reserveTokenCaptcha) — SQL raw ramane in db/**. Aici doar
+        // maparea rezultatului la raspuns HTTP: throw => fail-CLOSED 503; false => 429 cap atins.
+        let reserved: boolean;
         try {
-          getDb()
-            .transaction(() => {
-              const used = countTokenCaptchaUsageInWindow(tokenId, 86_400);
-              if (cap === 0 || used >= cap) {
-                blocked = true;
-                return;
-              }
-              recordCaptchaUsage({
-                ownerId,
-                provider: resolved.provider,
-                source: "tenant",
-                requestId: getRequestId(c),
-                tokenId,
-              });
-            })
-            .immediate();
+          reserved = reserveTokenCaptcha({
+            ownerId,
+            tokenId,
+            provider: resolved.provider,
+            requestId: getRequestId(c),
+            cap,
+            windowSeconds: 86_400,
+          });
         } catch (err) {
           console.error("[rnpm.guards] token captcha reservation failed", err);
           c.header("Retry-After", "5");
@@ -159,7 +153,7 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
             ),
           };
         }
-        if (blocked) {
+        if (!reserved) {
           c.header("Retry-After", "86400");
           return {
             ok: false,
