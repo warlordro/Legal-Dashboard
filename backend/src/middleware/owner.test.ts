@@ -132,7 +132,22 @@ describe("ownerContext auth seam", () => {
       method: "GET",
       code: "unauthorized",
       status: 401,
+      isPatShaped: false, // fara Authorization: Bearer ld_pat_* -> esec JWT/cookie, nu PAT
     });
+  });
+
+  it("flags isPatShaped=true in the auth.denied audit for a revoked/unknown ld_pat_ bearer", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", {
+      headers: { authorization: "Bearer ld_pat_does_not_exist" },
+    });
+
+    expect(res.status).toBe(401);
+    const events = getAuditEvents({ ownerId: null, action: "auth.denied" });
+    expect(JSON.parse(events[0].detail_json).isPatShaped).toBe(true);
   });
 
   it("still returns auth errors when auth.denied audit persistence fails", async () => {

@@ -5,6 +5,14 @@ import { recordAudit } from "../db/auditRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { fail } from "../util/envelope.ts";
 import { getRequestId } from "./requestId.ts";
+import { TOKEN_PREFIX } from "../db/apiTokenRepository.ts";
+
+// Bearer-ul e in forma de PAT (ld_pat_*)? Folosit doar pentru atribuire in auditul de
+// auth.denied — un replay de PAT revocat/expirat devine separabil de un esec JWT.
+function isPatShapedBearer(c: Context): boolean {
+  const m = /^Bearer\s+(.+)$/i.exec((c.req.header("authorization") ?? "").trim());
+  return (m?.[1] ?? "").startsWith(TOKEN_PREFIX);
+}
 
 // Type-augment Hono so c.get("ownerId") is typed string instead of unknown.
 // Single source of truth for the variable name; route handlers and repositories
@@ -58,6 +66,9 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
         method: c.req.method,
         code: err.code,
         status: err.status,
+        // audit (fix): separa replay-urile de PAT revocat/expirat de esecurile JWT in log,
+        // fara lookup DB pe calea de esec (anti-enumerare/timing). true = Bearer ld_pat_*.
+        isPatShaped: isPatShapedBearer(c),
       },
     });
   } catch (auditErr) {

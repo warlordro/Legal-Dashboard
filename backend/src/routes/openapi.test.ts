@@ -34,4 +34,14 @@ describe("openapi.json", () => {
     // token management routes are documented too
     expect(spec.paths["/api/v1/tokens"]).toBeDefined();
   });
+
+  it("documents all query params the /api/dosare route accepts (institutie, dataStart, dataStop)", async () => {
+    const spec = (await (await app().request("/api/v1/openapi.json")).json()) as {
+      paths: Record<string, { get?: { parameters?: Array<{ name: string }> } }>;
+    };
+    const names = (spec.paths["/api/dosare"]?.get?.parameters ?? []).map((p) => p.name);
+    expect(names).toEqual(
+      expect.arrayContaining(["numarDosar", "numeParte", "obiectDosar", "institutie", "dataStart", "dataStop"])
+    );
+  });
 });

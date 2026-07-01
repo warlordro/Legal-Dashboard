@@ -29,6 +29,9 @@ export function ApiAccessPanel() {
   const [scopes, setScopes] = useState<Array<"dosare" | "iccj" | "rnpm">>([]);
   const [expiresInDays, setExpiresInDays] = useState<"" | "30" | "90" | "365">("");
   const [captchaCap, setCaptchaCap] = useState("");
+  // Serializeaza mutatiile: cat o creare/revocare + refresh sunt in curs, butoanele sunt
+  // dezactivate (fix audit: evita refresh-uri suprapuse care rezolva out-of-order).
+  const [busy, setBusy] = useState(false);
 
   async function refresh() {
     setLoading(true);
@@ -52,6 +55,8 @@ export function ApiAccessPanel() {
   }
 
   async function submitCreate() {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     const body: CreateApiTokenInput = {
       name: name.trim(),
@@ -70,23 +75,52 @@ export function ApiAccessPanel() {
       await refresh();
     } catch {
       setError("Creare esuata. Verifica numele si scope-urile.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function onRevoke(id: string) {
-    await revokeApiToken(id);
-    await refresh();
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await revokeApiToken(id);
+      await refresh();
+    } catch {
+      setError("Revocare esuata. Reincearca.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function onRevokeAll() {
-    await revokeAllApiTokens();
-    await refresh();
+    if (busy) return;
+    if (
+      !window.confirm("Revoci TOATE tokenurile? Actiunea e ireversibila si va rupe orice integrare care le foloseste.")
+    ) {
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await revokeAllApiTokens();
+      await refresh();
+    } catch {
+      setError("Revocare esuata. Reincearca.");
+    } finally {
+      setBusy(false);
+    }
   }
 
-  function copySecret() {
+  async function copySecret() {
     if (!newSecret) return;
-    void navigator.clipboard?.writeText(newSecret);
-    setCopied(true);
+    try {
+      await navigator.clipboard.writeText(newSecret);
+      setCopied(true);
+    } catch {
+      setError("Nu am putut copia in clipboard. Selecteaza si copiaza manual din campul de mai sus.");
+    }
   }
 
   return (
@@ -100,7 +134,8 @@ export function ApiAccessPanel() {
             <button
               type="button"
               onClick={onRevokeAll}
-              className="rounded-md border border-border px-2 py-1 text-[11px] text-red-600 hover:bg-muted"
+              disabled={busy}
+              className="rounded-md border border-border px-2 py-1 text-[11px] text-red-600 hover:bg-muted disabled:opacity-50"
             >
               Revoca toate
             </button>
@@ -191,7 +226,7 @@ export function ApiAccessPanel() {
           <button
             type="button"
             onClick={submitCreate}
-            disabled={name.trim() === "" || scopes.length === 0}
+            disabled={busy || name.trim() === "" || scopes.length === 0}
             className="rounded-md bg-primary px-3 py-1 text-[12px] text-primary-foreground disabled:opacity-50"
           >
             Creeaza
@@ -225,8 +260,9 @@ export function ApiAccessPanel() {
                 <button
                   type="button"
                   onClick={() => onRevoke(t.id)}
+                  disabled={busy}
                   aria-label={`Revoca ${t.name}`}
-                  className="rounded-md border border-border p-1 text-red-600 hover:bg-muted"
+                  className="rounded-md border border-border p-1 text-red-600 hover:bg-muted disabled:opacity-50"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>

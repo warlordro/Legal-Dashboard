@@ -15,10 +15,17 @@ export class IccjBreakerOpenError extends Error {
   }
 }
 
+// Clamp defensiv (audit): `Number(env) || fallback` lasa treaca valori negative (truthy: -1 || 8 => -1),
+// exact bug-class-ul fixat in rate-limit.ts / envPositiveInt din iccjClient.ts. Un THRESHOLD negativ ar
+// deschide breaker-ul global la primul distres (outage auto-provocat); un COOLDOWN negativ l-ar face sa
+// iasa instant din cooldown (nu mai protejeaza scj.ro). Respinge non-finit / <= 0.
+export function clampPositiveIntEnv(raw: number, fallback: number): number {
+  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+}
 // Exportat (review): testul bucleaza pana la prag; un `const` local nu ar fi importabil.
-export const BREAKER_THRESHOLD = Number(process.env.ICCJ_BREAKER_THRESHOLD) || 8; // esecuri distres / fereastra
+export const BREAKER_THRESHOLD = clampPositiveIntEnv(Number(process.env.ICCJ_BREAKER_THRESHOLD), 8); // esecuri distres / fereastra
 const BREAKER_WINDOW_MS = 60_000;
-const BREAKER_COOLDOWN_MS = Number(process.env.ICCJ_BREAKER_COOLDOWN_MS) || 30_000;
+const BREAKER_COOLDOWN_MS = clampPositiveIntEnv(Number(process.env.ICCJ_BREAKER_COOLDOWN_MS), 30_000);
 
 // PAT induce 0.25 din greutatea unui esec UI/monitoring; contributia totala PAT e
 // plafonata la BREAKER_THRESHOLD-1 (mai jos), deci PAT singur nu deschide breaker-ul.

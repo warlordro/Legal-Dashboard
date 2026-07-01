@@ -31,6 +31,16 @@ function paramsFor(prefix: string): unknown[] {
       { name: "numarDosar", in: "query", schema: { type: "string" } },
       { name: "numeParte", in: "query", schema: { type: "string" } },
       { name: "obiectDosar", in: "query", schema: { type: "string" } },
+      { name: "dataStart", in: "query", schema: { type: "string", format: "date" } },
+      { name: "dataStop", in: "query", schema: { type: "string", format: "date" } },
+      // Repetabil (?institutie=A&institutie=B); ruta citeste c.req.queries("institutie").
+      {
+        name: "institutie",
+        in: "query",
+        style: "form",
+        explode: true,
+        schema: { type: "array", items: { type: "string" } },
+      },
     ];
   }
   return [];

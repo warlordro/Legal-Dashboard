@@ -1,7 +1,26 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { BREAKER_THRESHOLD, IccjBreakerOpenError, _resetBreakerForTest, withBreaker } from "./iccjBreaker.ts";
+import {
+  BREAKER_THRESHOLD,
+  IccjBreakerOpenError,
+  _resetBreakerForTest,
+  clampPositiveIntEnv,
+  withBreaker,
+} from "./iccjBreaker.ts";
 
 beforeEach(() => _resetBreakerForTest());
+
+describe("clampPositiveIntEnv (breaker env guard)", () => {
+  it("rejects negative / NaN / zero and keeps a positive value", () => {
+    expect(clampPositiveIntEnv(-1, 8)).toBe(8); // negativul e truthy in Number(env)||fallback -> bug fixat
+    expect(clampPositiveIntEnv(Number.NaN, 8)).toBe(8);
+    expect(clampPositiveIntEnv(0, 8)).toBe(8);
+    expect(clampPositiveIntEnv(5, 8)).toBe(5);
+  });
+  it("the exported BREAKER_THRESHOLD is a finite positive number", () => {
+    expect(Number.isFinite(BREAKER_THRESHOLD)).toBe(true);
+    expect(BREAKER_THRESHOLD).toBeGreaterThan(0);
+  });
+});
 
 const distress = () => new Error("ICCJ source error: HTTP 503");
 const parseErr = () => new Error("ICCJ parse error: unexpected markup");
