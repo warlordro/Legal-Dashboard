@@ -33,7 +33,7 @@ const DESKTOP_HEADER_NAME = "X-Legal-Dashboard-Desktop";
 const DESKTOP_HEADER_VALUE = "1";
 const SYNC_PATH = "/api/v1/auth/oauth2/sync";
 
-function isWebRuntime(): boolean {
+export function isWebRuntime(): boolean {
   return typeof window !== "undefined" && (window as { desktopApi?: unknown }).desktopApi === undefined;
 }
 

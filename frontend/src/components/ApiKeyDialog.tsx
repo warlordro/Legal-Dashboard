@@ -1,8 +1,10 @@
 import { useState } from "react";
 import { Key, X } from "lucide-react";
 import { AIUsagePanel } from "@/components/AIUsagePanel";
+import { ApiAccessPanel } from "@/components/ApiAccessPanel";
 import { EmailSettingsPanel } from "@/components/EmailSettingsPanel";
 import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
+import { isWebRuntime } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
 import { useAuthMode } from "@/hooks/useAuthMode";
@@ -115,6 +117,8 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
         <AIUsagePanel />
         <NotificationStatusPanel />
         <EmailSettingsPanel />
+        {/* Acces API (PAT) — doar web mode; desktop pastreaza BYOK in acest modal. */}
+        {isWebRuntime() && <ApiAccessPanel />}
 
         {/* AI config zone: routing + provider keys grouped vizual */}
         <div className="mb-3 rounded-lg border border-border p-3">
