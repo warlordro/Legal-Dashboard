@@ -15,6 +15,7 @@ import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
 import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
 import { patSecurity } from "./middleware/patSecurity.ts";
+import { apiTokensRouter } from "./routes/apiTokens.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
 import { getUserById, updateUserRole } from "./db/userRepository.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
@@ -243,6 +244,9 @@ app.use("*", ownerContext);
 if (getAuthMode() === "web") {
   app.use("/api/*", patSecurity);
   app.use("/api/*", patCapabilityGate);
+  // Session-only (gate-ul de mai sus respinge PAT-urile pe /api/v1/tokens). Task 16 va
+  // insera patUsageAudit + openapi INAINTE de gate, pastrand tokens dupa gate.
+  app.route("/api/v1/tokens", apiTokensRouter);
 }
 
 // F2 audit hardening (2026-04-30): CSRF defense on state-changing routes when
