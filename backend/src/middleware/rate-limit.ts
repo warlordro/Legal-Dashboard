@@ -10,14 +10,14 @@ import { readClientIp } from "../util/proxyIp.ts";
 export const RATE_LIMIT = 120;
 const RATE_WINDOW = 60000;
 
-// PAT (piesa A): plafon per-token, mai strans decat per-owner, aplicat doar pe
-// calea PAT (dupa rezolvarea tokenId). Configurabil prin env.
+// PAT per-token request ceiling, stricter than the per-owner limit, applied only on the
+// PAT path (after tokenId resolution). Configurable via env.
 //
-// Clamp defensiv (review 2026-07-01): `Number(env) || 60` lasa treaca valori toxice —
-// o valoare NEGATIVA e truthy (`-5 || 60` => -5) => `count > -5` mereu adevarat => ORICE
-// cerere PAT ar da 429 (DoS prin misconfig). Non-finit/<=0 => default 60; non-integer =>
-// floor; peste plafonul per-owner => cap la RATE_LIMIT (per-token nu poate fi mai laxa
-// decat per-owner, altfel e inutila).
+// Defensive clamp (review 2026-07-01): `Number(env) || 60` lets toxic values through — a
+// NEGATIVE value is truthy (`-5 || 60` => -5), so `count > -5` is always true and EVERY PAT
+// request would 429 (DoS by misconfiguration). Non-finite / <= 0 => default 60; non-integer
+// => floored; above the per-owner ceiling => capped at RATE_LIMIT (a per-token limit looser
+// than the per-owner one is pointless).
 export function clampTokenRateLimit(raw: number, ceiling: number = RATE_LIMIT): number {
   if (!Number.isFinite(raw) || raw <= 0) return Math.min(60, ceiling);
   return Math.min(Math.floor(raw), ceiling);
