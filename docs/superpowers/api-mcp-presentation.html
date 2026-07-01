@@ -344,7 +344,7 @@
 
   <!-- HERO -->
   <section class="hero">
-    <div class="kicker">Prezentare interactiva · prototip de design</div>
+    <div class="kicker">Prezentare interactiva · <b>modul implementat</b> (piesa A)</div>
     <h1>Lasi un <em>AI extern</em><br/>sa-ti caute dosarele,<br/>fara sa-i dai cheile.</h1>
     <p class="lead">Un token personal, doar pentru citire, prin care Claude Desktop sau ChatGPT pot interoga dosare, ICCJ si RNPM — exact cat le permiti, nimic mai mult.</p>
     <div class="meta">
@@ -352,8 +352,10 @@
       <span class="pill">doar <b>citire</b></span>
       <span class="pill"><b>default-deny</b>: restul = 403</span>
       <span class="pill">revocare <b>instant</b></span>
+      <span class="pill"><b>OpenAPI 3.1</b> auto-descriere</span>
+      <span class="pill">web mode · <b>desktop zero-impact</b></span>
     </div>
-    <p class="note-bar">Tot ce vezi mai jos e simulat in browser, ca sa intelegi fluxul. Nu apeleaza serverul real — e o macheta a designului din spec.</p>
+    <p class="note-bar"><b>Stare: implementat.</b> Backend + frontend livrate TDD pe branch <code>feat/api-mcp-piesa-a</code> (16 taskuri, ~1850 teste verzi, 5 runde de review adversarial). Macheta de mai jos ramane o <em>simulare in browser</em> a fluxului — nu apeleaza serverul real — dar reflecta comportamentul construit.</p>
   </section>
 
   <!-- CONCEPT -->
@@ -505,17 +507,20 @@
   <!-- CONTROLS -->
   <section class="block" id="control">
     <div class="sec-head"><span class="sec-num">04</span><h2>Plasele de siguranta</h2></div>
-    <p class="sec-sub">Pentru ca un agent AI da rafale, nu click-uri, si un token poate sa nu expire — controalele de mai jos sunt portitele inchise din proiectarea sistemului.</p>
+    <p class="sec-sub">Pentru ca un agent AI da rafale, nu click-uri, si un token poate sa nu expire — controalele de mai jos sunt <b>implementate si intarite prin 5 runde de review</b> (2× panel multi-model + agenti + audit adversarial complet).</p>
     <div class="cards">
-      <div class="card"><div class="ci">🚧</div><h4>Default-deny pe segment</h4><p>Tokenul ajunge doar pe rutele allowlistate explicit. Match pe granita de segment, ca <code>/api/dosare</code> sa nu deschida din greseala <code>/api/dosare-iccj</code>.</p><span class="sev">Fix CRITICAL din review</span></div>
-      <div class="card"><div class="ci">📖</div><h4>Doar citire</h4><p>Permis pe metoda HTTP: GET + cateva POST-uri de cautare verificate. Orice scriere sub aceleasi rute → refuzata.</p><span class="sev">HIGH</span></div>
-      <div class="card"><div class="ci">🛡️</div><h4>Bearer = fara CSRF</h4><p>Bypass-ul de origine se aplica doar dupa autentificare reusita cu token valid, niciodata pe simpla prezenta a antetului.</p><span class="sev">HIGH</span></div>
-      <div class="card"><div class="ci">⏱️</div><h4>Limita de rata per token</h4><p>Fiecare token are propriul plafon, mai strans decat al unei sesiuni umane. Rafalele sunt taiate.</p><span class="sev">MEDIU</span></div>
-      <div class="card"><div class="ci">💸</div><h4>Plafon captcha</h4><p>Optional per token, cu numaratoare atomica (fara race). RNPM costa bani reali — un token scurs nu goleste portofelul peste un cap setat.</p><span class="sev">decizie ta</span></div>
-      <div class="card"><div class="ci">📜</div><h4>Auto load-more</h4><p>Serverul da un bloc + total/hasMore; AI-ul continua singur. Dosare: auto pana la pragul de fan-out, apoi un singur prompt. RNPM: auto pana la plafon, fara intrebari.</p><span class="sev">decizie ta</span></div>
-      <div class="card"><div class="ci">🔌</div><h4>Siguranta ICCJ</h4><p>Un intrerupator global cu numaratoare separata pe clasa de apelant: un token in bucla nu mai poate pica ICCJ pentru UI si monitorizare.</p><span class="sev">HIGH</span></div>
-      <div class="card"><div class="ci">🧾</div><h4>Audit + alerta IP</h4><p>Creare / folosire / revocare, cu IP si dispozitiv. Folosire dintr-o locatie noua → primesti email.</p><span class="sev">decizie ta</span></div>
-      <div class="card"><div class="ci">🔴</div><h4>Revocare instanta</h4><p>Validare in DB la fiecare cerere, fara cache. Plus buton „revoca toate”. Singurul buton de panica de care ai nevoie.</p><span class="sev">confirmat OK</span></div>
+      <div class="card"><div class="ci">🚧</div><h4>Default-deny pe segment</h4><p>Tokenul ajunge doar pe rutele allowlistate explicit. Match pe granita de segment, ca <code>/api/dosare</code> sa nu deschida din greseala <code>/api/dosare-iccj</code>; encoding-ul ambigu (<code>%2f</code>/<code>..</code>) e respins inainte de matching.</p><span class="sev">Fix CRITICAL din review</span></div>
+      <div class="card"><div class="ci">📖</div><h4>Doar citire, pe metoda</h4><p>Permis pe metoda HTTP: GET + un singur POST de cautare (RNPM), <b>exact-match</b> ca sa nu prinda sub-rute. Orice scriere sub aceleasi prefixe → refuzata.</p><span class="sev">HIGH</span></div>
+      <div class="card"><div class="ci">🛡️</div><h4>Bearer = fara CSRF</h4><p>Tokenul se accepta DOAR din antetul <code>Authorization: Bearer</code>, niciodata din cookie. Bypass-ul de origine se aplica doar dupa autentificare reusita cu token valid.</p><span class="sev">HIGH</span></div>
+      <div class="card"><div class="ci">🚫</div><h4>Fara cache · HTTPS-only</h4><p><code>Cache-Control: no-store</code> pe orice raspuns de token (secretul one-time la creare nu ajunge in cache-uri). In productie tokenul cere HTTPS, altfel 426.</p><span class="sev">review</span></div>
+      <div class="card"><div class="ci">👤</div><h4>Management doar sesiune</h4><p>Crearea / revocarea tokenurilor e session-only si trece prin verificarea de origine (anti-CSRF pe mutatii); un token <b>nu poate administra tokenuri</b>.</p><span class="sev">Fix HIGH runda 4</span></div>
+      <div class="card"><div class="ci">⏱️</div><h4>Limita de rata per token</h4><p>Fiecare token are propriul plafon, mai strans decat al unei sesiuni umane, aplicat <b>inaintea portii</b> (si rafalele pe rute interzise sunt numarate). Env-ul e clampat (fara valori toxice).</p><span class="sev">MEDIU</span></div>
+      <div class="card"><div class="ci">💸</div><h4>Plafon captcha atomic</h4><p>Optional per token, cu rezervare atomica (<code>BEGIN IMMEDIATE</code>, fara race) si <b>fail-closed</b> pe valori invalide. RNPM costa bani reali — un token scurs nu depaseste plafonul.</p><span class="sev">decizie ta</span></div>
+      <div class="card"><div class="ci">📜</div><h4>Auto load-more</h4><p>Serverul da un bloc + total/hasMore; AI-ul continua singur. Dosare: auto pana la pragul de fan-out, apoi un singur prompt, cu <code>exactMatch</code> + calitate parte. RNPM: auto pana la plafon.</p><span class="sev">decizie ta</span></div>
+      <div class="card"><div class="ci">🔌</div><h4>Siguranta ICCJ</h4><p>Un intrerupator global cu numaratoare <b>ponderata pe clasa de apelant</b> (token = 0.25, plafonat sub prag): un token in bucla nu mai poate pica ICCJ pentru UI si monitorizare. 503 cu Retry-After aliniat la cooldown.</p><span class="sev">HIGH</span></div>
+      <div class="card"><div class="ci">🧾</div><h4>Audit + alerta IP nou</h4><p>Folosire (inclusiv 403/429) + creare + revocare, cu IP <b>proxy-aware</b>. Prima folosire dintr-un IP nou (doar reusite) → email prin infra existenta.</p><span class="sev">decizie ta</span></div>
+      <div class="card"><div class="ci">🗺️</div><h4>Auto-descriere OpenAPI</h4><p><code>GET /api/v1/openapi.json</code> descrie rutele, scopes si formele de raspuns; reachable de un token (inaintea portii), fara sa expuna nimic in plus.</p><span class="sev">nou</span></div>
+      <div class="card"><div class="ci">🔴</div><h4>Revocare instanta</h4><p>Validare in DB la fiecare cerere, fara cache. Plus buton „revoca toate” (cu confirmare). Singurul buton de panica de care ai nevoie.</p><span class="sev">confirmat OK</span></div>
     </div>
   </section>
 
@@ -531,13 +536,15 @@
       <div class="dec"><dt>Load-more</dt><dd>Dosare: <b>auto pana la prag</b> + 1 prompt, cu exact-match si calitate parte. RNPM: <b>complet automat pana la plafon</b>, fara confirmare (debitor/creditor)</dd></div>
       <div class="dec"><dt>ICCJ</dt><dd><b>Intrerupator pe clasa de apelant</b> + limita per token, fara cap global de rata</dd></div>
       <div class="dec"><dt>Audit</dt><dd><b>Da</b> — jurnal append-only + alerta la IP nou + buton revoca-tot</dd></div>
-      <div class="dec"><dt>Verificat adversarial</dt><dd>Panel de <b>5 modele</b> + sinteza Opus; 1 CRITICAL + 5 HIGH incorporate</dd></div>
+      <div class="dec"><dt>Implementare</dt><dd><b>Livrata TDD</b> — 16 taskuri (migration 0039 → wiring web-mode), branch <code>feat/api-mcp-piesa-a</code></dd></div>
+      <div class="dec"><dt>Verificat adversarial</dt><dd><b>5 runde</b>: 2× panel multi-model + agenti specializati + comentarii inline + <b>audit complet</b> (7 revieweri pe dimensiuni). 1 CRITICAL + toate HIGH/MEDIUM/LOW incorporate</dd></div>
+      <div class="dec"><dt>Teste</dt><dd><b>~1850 verzi</b> (backend + frontend + electron); lint + typecheck + build curate</dd></div>
     </dl>
   </section>
 
   <footer>
-    <div>Macheta de design · <b>piesa A — API + PAT</b> · sursa: <b>docs/superpowers/specs/2026-06-27-api-mcp-integration-design.md</b></div>
-    <div style="margin-top:6px;">Urmatorul pas dupa aprobare: plan de implementare (writing-plans) → migration 0039.</div>
+    <div><b>piesa A — API + PAT · implementat</b> · spec: <b>docs/superpowers/specs/2026-06-27-api-mcp-integration-design.md</b> · plan v2.2: <b>docs/superpowers/plans/2026-06-28-api-mcp-piesa-a.md</b> · ghid consumatori: <b>API.md</b></div>
+    <div style="margin-top:6px;">Urmatorii pasi: release (PR + version bump) · piesa B (server MCP stdio, adaptor peste API) · piesa C (MCP remote + OAuth 2.1).</div>
   </footer>
 </div>
 
@@ -678,8 +685,8 @@
         {numar:"5012/3/2024", parte:"Ionescu Maria", calitate:"Reclamant"},
         {numar:"880/1/2022", parte:"Ion Vasile", calitate:"Parat"}
       ] },
-    { q:"Cauta la ICCJ recursul lui Popescu", tag:"iccj · POST + roluri", kind:"ok",
-      method:"POST", path:"/api/dosare-iccj", scope:"iccj",
+    { q:"Cauta la ICCJ recursul lui Popescu", tag:"iccj · GET + roluri", kind:"ok",
+      method:"GET", path:"/api/dosare-iccj?numeParte=Popescu", scope:"iccj",
       exactMatch:false, total:3, perPage:50,
       results:[
         {numar:"1123/1/2025", parte:"Popescu Ion", calitate:"Recurent"},
@@ -971,10 +978,14 @@
   var ROUTES = [
     { m:"GET",  p:"/api/dosare", d:"Cautare dosare + termene", scope:"dosare" },
     { m:"GET",  p:"/api/termene", d:"Termene pe dosar", scope:"dosare" },
-    { m:"POST", p:"/api/dosare-iccj", d:"Cautare ICCJ (POST)", scope:"iccj" },
+    { m:"GET",  p:"/api/dosare-iccj", d:"Cautare ICCJ (GET)", scope:"iccj" },
+    { m:"GET",  p:"/api/termene-iccj", d:"Termene ICCJ (GET)", scope:"iccj" },
     { m:"POST", p:"/api/rnpm/search", d:"Cautare RNPM (POST, captcha)", scope:"rnpm" },
+    { m:"GET",  p:"/api/rnpm/saved", d:"Cautari RNPM salvate", scope:"rnpm" },
+    { m:"POST", p:"/api/rnpm/search/:id/filter", d:"Filtru pe sesiune (nu e cautare)", scope:"__never__" },
     { m:"POST", p:"/api/ai/analyze", d:"Analiza AI", scope:"__never__" },
     { m:"POST", p:"/api/v1/monitoring", d:"Monitorizare (scriere)", scope:"__never__" },
+    { m:"POST", p:"/api/v1/tokens", d:"Management tokenuri (sesiune)", scope:"__never__" },
     { m:"GET",  p:"/api/v1/me", d:"Profil cont", scope:"__never__" }
   ];
   var mxScopes = { dosare:true, iccj:true, rnpm:false };
