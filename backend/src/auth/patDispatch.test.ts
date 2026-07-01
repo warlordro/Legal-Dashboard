@@ -63,6 +63,7 @@ describe("PAT dispatch — kill switch + resolve (web mode)", () => {
   it("resolves a valid PAT to its owner when the kill switch is off", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
     process.env.LEGAL_DASHBOARD_JWT_SECRET = WEB_SECRET;
+    // biome-ignore lint/performance/noDelete: env trebuie unset real (= undefined ar seta string-ul)
     delete process.env.LEGAL_DASHBOARD_PAT_DISABLED;
     insertUser({ id: "alice", email: "alice@example.com", displayName: "Alice", status: "active" });
     const { secret } = createApiToken({

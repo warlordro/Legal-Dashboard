@@ -42,6 +42,7 @@ describe("patSecurity", () => {
 
   it("rejects a PAT over non-HTTPS in production with 426", async () => {
     process.env.NODE_ENV = "production";
+    // biome-ignore lint/performance/noDelete: env trebuie unset real (= undefined ar seta string-ul)
     delete process.env.LEGAL_DASHBOARD_PAT_ALLOW_HTTP;
     const res = await appWith("tok1").request("/api/dosare"); // no x-forwarded-proto
     expect(res.status).toBe(426);
@@ -49,6 +50,7 @@ describe("patSecurity", () => {
 
   it("allows a PAT over HTTPS in production", async () => {
     process.env.NODE_ENV = "production";
+    // biome-ignore lint/performance/noDelete: env trebuie unset real (= undefined ar seta string-ul)
     delete process.env.LEGAL_DASHBOARD_PAT_ALLOW_HTTP;
     const res = await appWith("tok1").request("/api/dosare", {
       headers: { "x-forwarded-proto": "https" },
@@ -66,6 +68,7 @@ describe("patSecurity", () => {
 
   it("does not enforce HTTPS for non-PAT requests in production", async () => {
     process.env.NODE_ENV = "production";
+    // biome-ignore lint/performance/noDelete: env trebuie unset real (= undefined ar seta string-ul)
     delete process.env.LEGAL_DASHBOARD_PAT_ALLOW_HTTP;
     const res = await appWith(undefined).request("/api/dosare");
     expect(res.status).toBe(200);
