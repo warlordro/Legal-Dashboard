@@ -5,12 +5,17 @@ import { ErrorCodes, fail } from "../util/envelope.ts";
 // Doar citire: GET + POST-urile de cautare verificate. ATENTIE (fix review PAT-001):
 // RNPM search e POST; ICCJ search (dosare-iccj/termene-iccj) e GET. Revizuieste la
 // FIECARE ruta noua.
-export const PAT_CAPABILITIES: ReadonlyArray<{ method: string; prefix: string; scope: string }> = [
+// `exact: true` = potrivire pe path EXACT (nu prefix de segment). GET-urile raman prefix
+// (ca sa acopere sub-rute read-only de detaliu, ex. /dosare-iccj/detaliu/:id, /rnpm/saved/:id).
+export const PAT_CAPABILITIES: ReadonlyArray<{ method: string; prefix: string; scope: string; exact?: boolean }> = [
   { method: "GET", prefix: "/api/dosare", scope: "dosare" },
   { method: "GET", prefix: "/api/termene", scope: "dosare" },
   { method: "GET", prefix: "/api/dosare-iccj", scope: "iccj" },
   { method: "GET", prefix: "/api/termene-iccj", scope: "iccj" },
-  { method: "POST", prefix: "/api/rnpm/search", scope: "rnpm" },
+  // runda 4: exact — POST se potriveste DOAR pe ruta de cautare, NU pe sub-rute (ex.
+  // POST /api/rnpm/search/:searchId/filter, care opereaza pe o sesiune de cautare existenta,
+  // nu e endpoint-ul de cautare intentionat). Fara exact, un PAT rnpm ar ajunge la ele.
+  { method: "POST", prefix: "/api/rnpm/search", scope: "rnpm", exact: true },
   { method: "GET", prefix: "/api/rnpm/saved", scope: "rnpm" },
 ];
 
@@ -63,7 +68,9 @@ export async function patCapabilityGate(c: Context, next: Next): Promise<Respons
     return c.json(fail(ErrorCodes.PAT_CANNOT_MANAGE_TOKENS, "Un token nu poate administra tokenuri.", c), 403);
   }
 
-  const cap = PAT_CAPABILITIES.find((x) => x.method === method && pathMatches(path, x.prefix));
+  const cap = PAT_CAPABILITIES.find(
+    (x) => x.method === method && (x.exact ? normPath(path) === normPath(x.prefix) : pathMatches(path, x.prefix))
+  );
   if (!cap) {
     return c.json(fail(ErrorCodes.PAT_ROUTE_FORBIDDEN, "Tokenul nu are acces la aceasta ruta.", c), 403);
   }

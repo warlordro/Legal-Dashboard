@@ -77,8 +77,18 @@ export class WebJwtAuthProvider implements AuthProvider {
     // dar guard-ul face desktop zero-impact deterministic — ZERO apeluri DB). Kill
     // switch operational LEGAL_DASHBOARD_PAT_DISABLED=1 il scoate per-request (cade pe
     // calea JWT si esueaza 401 normal). getAuthMode importat mai sus.
-    if (getAuthMode() === "web" && token.startsWith(TOKEN_PREFIX) && process.env.LEGAL_DASHBOARD_PAT_DISABLED !== "1") {
-      return resolvePatContext(c, token);
+    //
+    // runda 4 (hardening): dispecerizeaza PAT DOAR din `Authorization: Bearer`, NU din cookie.
+    // Un `ld_pat_` strecurat in cookie ar deveni credential AMBIENT si ar ocoli originGuard
+    // (care face bypass pe tokenId) -> CSRF. Cookie-ul ramane exclusiv pentru sesiuni JWT: un
+    // ld_pat_ in cookie cade pe verificarea JWT si esueaza 401.
+    const bearer = readBearerToken(c);
+    if (
+      getAuthMode() === "web" &&
+      bearer?.startsWith(TOKEN_PREFIX) &&
+      process.env.LEGAL_DASHBOARD_PAT_DISABLED !== "1"
+    ) {
+      return resolvePatContext(c, bearer);
     }
 
     let payload: AuthJwtPayload;

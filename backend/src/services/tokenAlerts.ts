@@ -23,9 +23,12 @@ export async function notifyTokenNewIp(c: Context, tokenId: string, ip: string):
   if (!to) return;
 
   const now = Date.now();
-  // sweep on access: harta nu creste nemarginit intr-un proces web long-lived.
-  for (const [k, t] of sentRecently) {
-    if (now - t >= DEDUP_MS) sentRecently.delete(k);
+  // sweep DOAR cand harta a crescut (nu O(N) pe fiecare alerta — fix runda 4); intrarile
+  // expirate se curata la burst, nu la fiecare apel.
+  if (sentRecently.size > 500) {
+    for (const [k, t] of sentRecently) {
+      if (now - t >= DEDUP_MS) sentRecently.delete(k);
+    }
   }
   const key = `${tokenId}|${ip}`;
   const last = sentRecently.get(key);

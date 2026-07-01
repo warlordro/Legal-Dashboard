@@ -46,6 +46,11 @@ describe("patCapabilityGate", () => {
     expect(res.status).toBe(200);
   });
 
+  it("exact-matches POST /api/rnpm/search: a sub-route (search/:id/filter) is default-denied", async () => {
+    const res = await appWith(["rnpm"], "tok1").request("/api/rnpm/search/abc/filter", { method: "POST" });
+    expect(res.status).toBe(403);
+  });
+
   it("blocks a write method under a GET-only allowed prefix", async () => {
     const res = await appWith(["dosare"], "tok1").request("/api/dosare", { method: "POST" });
     expect(res.status).toBe(403);

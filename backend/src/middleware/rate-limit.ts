@@ -189,9 +189,12 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
 
   await next();
 
-  // Doar path-urile autentificate cu succes elibereaza bucket-ul pre-auth.
-  // 3xx/4xx/5xx raman consumate ca sa nu poata fi folosite pentru bypass.
-  if (c.res.status >= 200 && c.res.status < 300) {
+  // Elibereaza bucket-ul pre-auth cand AUTENTIFICAREA a reusit (ownerId setat de ownerContext,
+  // care ruleaza in interiorul next()), indiferent de statusul final. Altfel un caller autentificat
+  // care primeste 403/429 (ex. un PAT scurs care spameaza rute forbidden) ar epuiza bucketul IP-only
+  // partajat si ar bloca TOT traficul din spatele acelui NAT/proxy (fix runda 4). Doar tentativele
+  // NEautentificate (auth esuata / token lipsa) raman consumate — exact scopul acestui limiter.
+  if (c.get("ownerId") || (c.res.status >= 200 && c.res.status < 300)) {
     releasePreAuthAttempt(key);
   }
 
