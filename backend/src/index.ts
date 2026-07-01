@@ -17,6 +17,7 @@ import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
 import { patSecurity } from "./middleware/patSecurity.ts";
 import { patUsageAudit } from "./middleware/patUsageAudit.ts";
 import { apiTokensRouter } from "./routes/apiTokens.ts";
+import { openapiRouter } from "./routes/openapi.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
 import { getUserById, updateUserRole } from "./db/userRepository.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
@@ -247,6 +248,8 @@ app.use("*", ownerContext);
 if (getAuthMode() === "web") {
   app.use("/api/*", patSecurity);
   app.use("/api/*", patUsageAudit);
+  // Ruta terminala de discovery, INAINTE de gate: un PAT isi poate citi propriul spec fara 403.
+  app.route("/api/v1/openapi.json", openapiRouter);
   app.use("/api/*", patCapabilityGate);
   app.route("/api/v1/tokens", apiTokensRouter);
 }
