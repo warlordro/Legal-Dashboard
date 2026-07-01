@@ -11,6 +11,7 @@ import {
   CalendarSearch,
   FileText,
   FileSpreadsheet,
+  KeyRound,
   Lock,
   Wrench,
   Activity,
@@ -38,6 +39,37 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.40.0",
+    date: "2 Iulie 2026",
+    subtitle:
+      "API programatic doar-citire prin Personal Access Tokens (doar web): dosare + termene, ICCJ si RNPM devin accesibile din scripturi si integrari externe (inclusiv server MCP). Tokenurile se creeaza si se revoca din Setari -> Acces API. Modul desktop ramane neschimbat.",
+    icon: <KeyRound className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Tokenuri de acces personal (PAT)",
+        content:
+          "Din Setari -> Acces API (doar in mod web) creezi tokenuri cu nume, drepturi granulare (dosare, ICCJ, RNPM) si optional expirare (30/90/365 zile) + plafon zilnic de captcha. Secretul e afisat o singura data la creare — pe server se pastreaza doar amprenta lui criptografica. Revocarea (individuala sau 'Revoca toate') are efect instant.",
+      },
+      {
+        title: "Acces doar-citire, refuzat implicit",
+        content:
+          "Un token ajunge DOAR pe rutele de cautare permise explicit pentru drepturile lui; orice altceva (AI, administrare, monitorizare, managementul tokenurilor) e refuzat. In productie tokenurile functioneaza doar peste HTTPS, au limita de rata proprie si plafon de captcha rezervat atomic — un token nu poate consuma bugetul altcuiva.",
+      },
+      {
+        title: "Audit si alerte",
+        content:
+          "Fiecare folosire a unui token e inregistrata in jurnalul de audit (inclusiv incercarile refuzate). Cand un token e folosit prima data de pe un IP nou primesti automat un email de alerta, ca sa poti revoca imediat un token compromis.",
+      },
+      {
+        title: "Pentru integratori",
+        content:
+          "Specificatie OpenAPI 3.1 la /api/v1/openapi.json + ghid de consum API.md (scopes, paginare per endpoint, coduri de eroare). Cautarea de dosare raspunde acum si cu indicatorul exactMatch (potrivire exacta pe numar dosar). Apelurile externe catre ICCJ sunt protejate de un intrerupator automat care prioritizeaza utilizatorii aplicatiei fata de tokenurile agresive.",
+      },
+    ],
+  },
   {
     version: "v2.39.0",
     date: "25 Iunie 2026",

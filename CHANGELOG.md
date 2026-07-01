@@ -1,5 +1,29 @@
 # Changelog - Legal Dashboard
 
+## v2.40.0 - 2026-07-02
+
+API programatic doar-citire (Piesa A din planul API + MCP): dosare + termene (PortalJust), ICCJ si RNPM devin accesibile din afara aplicatiei (scripturi, integrari, server MCP) prin Personal Access Tokens. Suprafata exista EXCLUSIV in web mode (`LEGAL_DASHBOARD_AUTH_MODE=web`); pe desktop nu se monteaza nimic — zero impact pe fluxul BYOK.
+
+### Personal Access Tokens (PAT)
+
+Token opac `ld_pat_...` creat din UI (Setari -> Acces API, doar web) cu nume, scopes si optional expirare (30/90/365 zile) + plafon zilnic de captcha. Secretul e afisat o singura data; in DB se pastreaza doar hash-ul SHA-256 (migratia 0039: tabela `api_tokens`, `captcha_usage.token_id`, index partial pe `audit_log`). Dispatch DOAR din header-ul `Authorization: Bearer` (niciodata din cookie) si doar in web mode; validare per-request direct din DB, deci revocarea are efect instant. Kill switch operational: `LEGAL_DASHBOARD_PAT_DISABLED=1`.
+
+### Gate default-deny + scopes
+
+Un PAT ajunge DOAR pe tuple `(metoda, path, scope)` explicit permise (`PAT_CAPABILITIES`): GET match pe prefix la granita de segment, POST match exact, slash encodat respins; orice alta ruta (AI, `/me`, admin, monitoring) raspunde 403 `PAT_ROUTE_FORBIDDEN`, iar ruta permisa fara scope-ul necesar 403 `INSUFFICIENT_SCOPE`. Scopes: `dosare` (GET /api/dosare + /api/termene), `iccj` (GET /api/dosare-iccj + /api/termene-iccj), `rnpm` (POST /api/rnpm/search + GET /api/rnpm/saved). Managementul tokenurilor (`/api/v1/tokens*`) e session-only — un PAT primeste 403 `PAT_CANNOT_MANAGE_TOKENS`; rutele sunt montate dupa originGuard (protectie CSRF).
+
+### Protectii pe suprafata noua
+
+HTTPS-only in productie (426 fara `x-forwarded-proto: https`; override dev `LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1`) + `Cache-Control: no-store` pe raspunsurile PAT. Rate-limit dedicat per-token, aplicat inaintea gate-ului. Plafon captcha per-token cu rezervare atomica fail-closed (`BEGIN IMMEDIATE`; cap invalid = refuz, depasire = 429 `QUOTA_EXCEEDED` + `Retry-After`). Fiecare folosire de PAT e auditata (ok/denied, IP proxy-aware); la primul IP nou per token se trimite email de alerta (daca owner-ul are adresa configurata). Circuit breaker global pe ICCJ cu ponderare pe clasa de caller (PAT = 0.25, plafonat sub prag) — un token agresiv nu poate deschide breaker-ul si bloca UI-ul legitim; breaker deschis raspunde 503 `ICCJ_UNAVAILABLE` + `Retry-After`, praguri configurabile (`ICCJ_BREAKER_THRESHOLD`, `ICCJ_BREAKER_COOLDOWN_MS`).
+
+### Self-description + UI + imbogatiri
+
+`GET /api/v1/openapi.json` (OpenAPI 3.1, generat din `PAT_CAPABILITIES`, scheme de securitate separate bearer/sessionCookie) + ghid consumator `API.md`. Panou React "Acces API" in dialogul de chei (doar web): creare cu scopes/expirare/plafon, listare cu ultima folosire (IP + data), revocare individuala si "Revoca toate" cu confirmare, guard sincron anti-double-submit. `GET /api/dosare` imbogatit cu `exactMatch` (match exact pe numar dosar).
+
+### Verificare
+
+Implementare TDD pas cu pas (red-green per componenta) + review adversarial dupa fiecare pas. Doua runde review-panel multi-model pe wiring (runda 3: mount ordering; runda 4: CSRF pe rutele de tokenuri) cu fixuri aplicate. Audit adversarial complet pe 7 dimensiuni (workflow multi-agent): 19 findings brute -> 8 confirmate (0 critical/high dupa verificare: 3 medium, 5 low), toate 8 remediate; 11 refuzate. Plus 4 batch-uri CodeRabbit verificate si aplicate. Biome + `tsc --noEmit` backend/frontend + `npm run build` + suite complete de teste verzi.
+
 ## v2.39.0 - 2026-06-25
 
 Fix major pentru deploy-ul web: aplicatia nu stabilea niciodata sesiunea proprie dupa login-ul Google, asa ca in mod web fiecare apel `/api` raspundea cu 401 "Token de autentificare necesar" — cautarea, `/me` si panoul de chei erau toate blocate desi login-ul reusea. Plus mecanisme care tin sesiunea vie cat timp aplicatia e deschisa, fara refresh manual. Modul desktop: zero impact (autentificare locala).
