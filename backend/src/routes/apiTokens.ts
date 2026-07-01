@@ -16,6 +16,10 @@ export const apiTokensRouter = new Hono();
 // Session-only: un PAT NU poate crea/lista/revoca tokenuri (anti-escaladare).
 // Belt-and-suspenders peste gate-ul global (care emite acelasi cod pe /api/v1/tokens).
 apiTokensRouter.use("*", async (c, next) => {
+  // Raspunsurile de management contin date sensibile one-time (secretul la creare, prefixe +
+  // ultima folosire la listare) -> nu se cacheaza de intermediari/browser (CodeRabbit). patSecurity
+  // pune no-store doar pe calea PAT; aici caile sunt de sesiune, deci il setam explicit aici.
+  c.header("Cache-Control", "no-store");
   if (c.get("tokenId")) {
     return c.json(fail(ErrorCodes.PAT_CANNOT_MANAGE_TOKENS, "Un token nu poate administra tokenuri.", c), 403);
   }

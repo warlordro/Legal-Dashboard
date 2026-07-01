@@ -75,24 +75,40 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
 
 function tokenManagementPaths(): Record<string, Record<string, unknown>> {
   const sessionNote = "Session-only (cookie/JWT). Un PAT primeste 403 PAT_CANNOT_MANAGE_TOKENS.";
+  // Override-uieste security-ul global bearerAuth (CodeRabbit): rutele de management NU accepta
+  // un PAT (Bearer) — se autentifica DOAR prin sesiune (cookie). Altfel specul ar sugera gresit
+  // ca un PAT poate crea/revoca tokenuri.
+  const sessionAuth = [{ sessionCookie: [] }];
   return {
     "/api/v1/tokens": {
       post: {
         summary: "Creeaza un PAT. Secretul e afisat O SINGURA DATA.",
         description: sessionNote,
         tags: ["tokens"],
+        security: sessionAuth,
       },
       get: {
         summary: "Listeaza tokenurile owner-ului (fara secret/hash).",
         description: sessionNote,
         tags: ["tokens"],
+        security: sessionAuth,
       },
     },
     "/api/v1/tokens/{id}": {
-      delete: { summary: "Revoca un token (idempotent).", description: sessionNote, tags: ["tokens"] },
+      delete: {
+        summary: "Revoca un token (idempotent).",
+        description: sessionNote,
+        tags: ["tokens"],
+        security: sessionAuth,
+      },
     },
     "/api/v1/tokens/revoke-all": {
-      post: { summary: "Revoca toate tokenurile active ale owner-ului.", description: sessionNote, tags: ["tokens"] },
+      post: {
+        summary: "Revoca toate tokenurile active ale owner-ului.",
+        description: sessionNote,
+        tags: ["tokens"],
+        security: sessionAuth,
+      },
     },
   };
 }
@@ -116,6 +132,8 @@ export function buildOpenApiSpec(): Record<string, unknown> {
     components: {
       securitySchemes: {
         bearerAuth: { type: "http", scheme: "bearer", description: "Authorization: Bearer ld_pat_..." },
+        // Rutele de management tokenuri (/api/v1/tokens*) se autentifica prin sesiune, nu PAT.
+        sessionCookie: { type: "apiKey", in: "cookie", name: "legal_dashboard_session" },
       },
     },
     security: [{ bearerAuth: [] }],

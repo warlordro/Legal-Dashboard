@@ -90,11 +90,15 @@ export function reserveTokenCaptcha(input: {
   cap: number;
   windowSeconds: number;
 }): boolean {
+  // Fail-closed pe cap invalid (CodeRabbit): un cap non-finit (NaN/Infinity) ar face
+  // `used >= cap` mereu fals si ar rezerva la nesfarsit. Orice cap care nu e un intreg
+  // pozitiv => blocheaza (nu rezerva). cap<=0 e deja "block hard".
+  if (!Number.isFinite(input.cap) || input.cap <= 0) return false;
   let reserved = false;
   getDb()
     .transaction(() => {
       const used = countTokenCaptchaUsageInWindow(input.tokenId, input.windowSeconds);
-      if (input.cap === 0 || used >= input.cap) return;
+      if (used >= input.cap) return;
       recordCaptchaUsage({
         ownerId: input.ownerId,
         provider: input.provider,

@@ -25,8 +25,9 @@ vi.mock("@/lib/apiTokensApi", () => ({
 }));
 
 import { ApiAccessPanel } from "./ApiAccessPanel";
-import { revokeAllApiTokens, revokeApiToken } from "@/lib/apiTokensApi";
+import { listApiTokens, revokeAllApiTokens, revokeApiToken } from "@/lib/apiTokensApi";
 
+const mockedList = vi.mocked(listApiTokens);
 const mockedRevoke = vi.mocked(revokeApiToken);
 const mockedRevokeAll = vi.mocked(revokeAllApiTokens);
 
@@ -88,6 +89,16 @@ describe("ApiAccessPanel", () => {
     });
     await flush();
     expect(container.textContent).toContain("Revocare esuata");
+  });
+
+  it("does NOT show the empty-state copy after a failed initial load", async () => {
+    mockedList.mockRejectedValueOnce(new Error("network"));
+    await act(async () => {
+      root.render(<ApiAccessPanel />);
+    });
+    await flush();
+    expect(container.textContent).not.toContain("Niciun token");
+    expect(container.textContent).toContain("Nu am putut incarca");
   });
 
   it("does NOT revoke-all when the confirmation is cancelled", async () => {

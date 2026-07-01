@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
 import {
   type ApiTokenSummary,
@@ -20,6 +20,7 @@ const SCOPES: Array<{ value: "dosare" | "iccj" | "rnpm"; label: string }> = [
 export function ApiAccessPanel() {
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadOk, setLoadOk] = useState(false); // ultima incarcare a reusit? (empty-state doar daca da)
   const [error, setError] = useState<string | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [newSecret, setNewSecret] = useState<string | null>(null);
@@ -30,16 +31,21 @@ export function ApiAccessPanel() {
   const [expiresInDays, setExpiresInDays] = useState<"" | "30" | "90" | "365">("");
   const [captchaCap, setCaptchaCap] = useState("");
   // Serializeaza mutatiile: cat o creare/revocare + refresh sunt in curs, butoanele sunt
-  // dezactivate (fix audit: evita refresh-uri suprapuse care rezolva out-of-order).
+  // dezactivate (busy = UI). busyRef = sursa SINCRONA de adevar pentru guard (state-ul React e
+  // async, deci doua click-uri rapide ar putea trece de `if (busy)` inainte de re-render -> ref-ul
+  // inchide cursa complet: previne double-create pe UI, CodeRabbit).
   const [busy, setBusy] = useState(false);
+  const busyRef = useRef(false);
 
   async function refresh() {
     setLoading(true);
     setError(null);
     try {
       setTokens(await listApiTokens());
+      setLoadOk(true);
     } catch {
       setError("Nu am putut incarca tokenurile.");
+      setLoadOk(false);
     } finally {
       setLoading(false);
     }
@@ -55,7 +61,8 @@ export function ApiAccessPanel() {
   }
 
   async function submitCreate() {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     const body: CreateApiTokenInput = {
@@ -76,12 +83,14 @@ export function ApiAccessPanel() {
     } catch {
       setError("Creare esuata. Verifica numele si scope-urile.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function onRevoke(id: string) {
-    if (busy) return;
+    if (busyRef.current) return;
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -90,17 +99,19 @@ export function ApiAccessPanel() {
     } catch {
       setError("Revocare esuata. Reincearca.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
 
   async function onRevokeAll() {
-    if (busy) return;
+    if (busyRef.current) return;
     if (
       !window.confirm("Revoci TOATE tokenurile? Actiunea e ireversibila si va rupe orice integrare care le foloseste.")
     ) {
       return;
     }
+    busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
@@ -109,6 +120,7 @@ export function ApiAccessPanel() {
     } catch {
       setError("Revocare esuata. Reincearca.");
     } finally {
+      busyRef.current = false;
       setBusy(false);
     }
   }
@@ -236,6 +248,10 @@ export function ApiAccessPanel() {
 
       {loading ? (
         <p className="text-[12px] text-muted-foreground">Se incarca…</p>
+      ) : !loadOk ? (
+        // Load esuat: NU arata empty-state ("Niciun token") — ar fi inselator; mesajul de eroare
+        // e afisat sus. (CodeRabbit)
+        <p className="text-[12px] text-muted-foreground">Reincarca dialogul pentru a reincerca.</p>
       ) : tokens.length === 0 ? (
         <p className="text-[12px] text-muted-foreground">Niciun token. Creeaza unul pentru acces programatic.</p>
       ) : (

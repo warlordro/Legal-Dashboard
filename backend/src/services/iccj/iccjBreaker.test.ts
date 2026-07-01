@@ -14,6 +14,8 @@ describe("clampPositiveIntEnv (breaker env guard)", () => {
     expect(clampPositiveIntEnv(-1, 8)).toBe(8); // negativul e truthy in Number(env)||fallback -> bug fixat
     expect(clampPositiveIntEnv(Number.NaN, 8)).toBe(8);
     expect(clampPositiveIntEnv(0, 8)).toBe(8);
+    expect(clampPositiveIntEnv(8.5, 8)).toBe(8); // fractionar -> fallback
+    expect(clampPositiveIntEnv(Number.POSITIVE_INFINITY, 8)).toBe(8);
     expect(clampPositiveIntEnv(5, 8)).toBe(5);
   });
   it("the exported BREAKER_THRESHOLD is a finite positive number", () => {

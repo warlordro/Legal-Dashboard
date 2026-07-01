@@ -53,13 +53,17 @@ Suprafata mixa doua contracte; ramifica pe **status HTTP** + `Retry-After` (unif
 ca `string | { code, message }`:
 
 - **Rute legacy** (`/api/dosare`, `/api/termene`, ICCJ search): succes `{ data, total[, page] }`;
-  eroare **`{ error: "<string>" }`** (fara `code`/`requestId`). Exceptie: **503 breaker ICCJ** tot
-  forma legacy `{ error }`.
+  eroare **`{ error: "<string>" }`** (fara `code`/`requestId`), INCLUSIV pe 503-ul breaker-ului ICCJ.
+  Nota OpenAPI: descrierile de raspuns din `openapi.json` (ex. `ICCJ_UNAVAILABLE` pe 503) sunt coduri
+  INDICATIVE pentru consumator; corpul REAL pe rutele ICCJ ramane forma legacy `{ error }`, nu envelope-ul.
 - **`/api/dosare`** e imbogatit: `{ data, total, exactMatch }`. `exactMatch` e **doar pe numar dosar**
   (match pe nume normalizat e deferat); `parti[].calitateParte` da rolul (reclamant/parat/...).
 - **`/api/rnpm/saved`**: obiect paginat brut.
 - **`/api/rnpm/search`**: rol = dimensiunea de cautare **debitor/creditor**.
-- **`/api/v1/*` + token-management**: garanteaza envelope-ul `{ data, error: { code, message }, requestId }`.
+- **Rutele `/api/v1/*` care folosesc `ok()`/`fail()`** (token-management + celelalte v1 cu envelope)
+  garanteaza `{ data, error: { code, message }, requestId }`. **Exceptii in `/api/v1/*`:**
+  `GET /api/v1/openapi.json` intoarce specul OpenAPI brut (NU envelope), iar rutele de export
+  (`/api/v1/dosare/export.xlsx` etc.) intorc binar/stream — deci „`/api/v1/*` = envelope" NU e universal.
 
 ## 6. Coduri de eroare
 

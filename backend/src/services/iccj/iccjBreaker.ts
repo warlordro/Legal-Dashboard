@@ -20,7 +20,9 @@ export class IccjBreakerOpenError extends Error {
 // deschide breaker-ul global la primul distres (outage auto-provocat); un COOLDOWN negativ l-ar face sa
 // iasa instant din cooldown (nu mai protejeaza scj.ro). Respinge non-finit / <= 0.
 export function clampPositiveIntEnv(raw: number, fallback: number): number {
-  return Number.isFinite(raw) && raw > 0 ? raw : fallback;
+  // Cere un INTREG pozitiv (CodeRabbit): o valoare fractionara (8.5) e o misconfig,
+  // nu o valoare valida pentru un contor / prag; cade pe fallback.
+  return Number.isInteger(raw) && raw > 0 ? raw : fallback;
 }
 // Exportat (review): testul bucleaza pana la prag; un `const` local nu ar fi importabil.
 export const BREAKER_THRESHOLD = clampPositiveIntEnv(Number(process.env.ICCJ_BREAKER_THRESHOLD), 8); // esecuri distres / fereastra

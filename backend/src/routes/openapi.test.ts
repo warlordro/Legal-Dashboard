@@ -44,4 +44,14 @@ describe("openapi.json", () => {
       expect.arrayContaining(["numarDosar", "numeParte", "obiectDosar", "institutie", "dataStart", "dataStop"])
     );
   });
+
+  it("overrides bearer auth with session-cookie auth on token-management routes", async () => {
+    const spec = (await (await app().request("/api/v1/openapi.json")).json()) as {
+      components: { securitySchemes: Record<string, unknown> };
+      paths: Record<string, Record<string, { security?: Array<Record<string, unknown>> }>>;
+    };
+    expect(spec.components.securitySchemes.sessionCookie).toBeDefined();
+    expect(spec.paths["/api/v1/tokens"].post.security).toEqual([{ sessionCookie: [] }]);
+    expect(spec.paths["/api/v1/tokens/revoke-all"].post.security).toEqual([{ sessionCookie: [] }]);
+  });
 });
