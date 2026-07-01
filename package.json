@@ -104,7 +104,7 @@
     }
   },
   "dependencies": {
-    "better-sqlite3": "^12.9.0"
+    "better-sqlite3": "^12.11.1"
   },
   "overrides": {
     "jspdf": "^4.2.1",
@@ -113,10 +113,10 @@
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",
     "electron": "^41.5.0",
-    "electron-builder": "^26.8.1",
+    "electron-builder": "^26.15.3",
     "esbuild": "^0.28.0",
     "png-to-ico": "^3.0.1",
-    "sharp": "^0.34.5"
+    "sharp": "^0.35.3"
   },
   "optionalDependencies": {
     "macos-notification-state": "^3.0.0",
