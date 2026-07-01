@@ -33,6 +33,10 @@ const mockedRevokeAll = vi.mocked(revokeAllApiTokens);
 
 let container: HTMLDivElement;
 let root: Root;
+// vi.clearAllMocks() sterge doar istoricul, NU anuleaza vi.spyOn — restauram explicit spy-ul de
+// window.confirm ca sa nu curga in testele urmatoare (CodeRabbit). NU folosim restoreAllMocks:
+// ar sterge si implementarile vi.fn() din factory-ul vi.mock (ex. default-ul listApiTokens).
+let confirmSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -42,6 +46,8 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
+  confirmSpy?.mockRestore();
+  confirmSpy = undefined;
   vi.clearAllMocks();
 });
 
@@ -102,7 +108,7 @@ describe("ApiAccessPanel", () => {
   });
 
   it("does NOT revoke-all when the confirmation is cancelled", async () => {
-    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
+    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     await act(async () => {
       root.render(<ApiAccessPanel />);
     });
