@@ -151,6 +151,22 @@ export interface AuditRow {
   request_id: string | null;
 }
 
+// PAT (piesa A): a existat o folosire REUSITA a acestui token din acest IP?
+// Filtreaza pe outcome='ok' (fix runda 3): o cerere 403 (outcome='denied') scrisa de
+// patUsageAudit cu acelasi IP NU trebuie sa suprime alerta de IP nou la urmatorul request
+// reusit (altfel un token furat ar pre-empta alerta lovind intai o ruta forbidden). Indexul
+// partial idx_audit_log_token_use (migration 0039) acopera exact acest query.
+export function hasPriorTokenUseFromIp(tokenId: string, ip: string): boolean {
+  return (
+    getDb()
+      .prepare(
+        `SELECT 1 FROM audit_log
+          WHERE action = 'api_token.used' AND target_id = ? AND ip = ? AND outcome = 'ok' LIMIT 1`
+      )
+      .get(tokenId, ip) !== undefined
+  );
+}
+
 export function getAuditEvents(
   opts: {
     ownerId?: string | null;

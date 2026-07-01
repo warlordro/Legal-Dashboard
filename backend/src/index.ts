@@ -15,6 +15,7 @@ import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
 import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
 import { patSecurity } from "./middleware/patSecurity.ts";
+import { patUsageAudit } from "./middleware/patUsageAudit.ts";
 import { apiTokensRouter } from "./routes/apiTokens.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
 import { getUserById, updateUserRole } from "./db/userRepository.ts";
@@ -237,15 +238,16 @@ app.use("*", ownerContext);
 
 // PAT (piesa A) — suprafata PAT montata DOAR in web mode (desktop ZERO impact).
 // Plasata imediat dupa ownerContext (care seteaza tokenId) si INAINTE de rateLimit.
-// SECURITATE (review 2026-07-01): gate-ul default-deny e montat AICI, nu deferat — nu
-// lasa PAT auth "on" fara boundary de scope. Task 16 va COMPLETA blocul cu patUsageAudit
-// (inainte de gate) + openapi (inainte de gate) + apiTokensRouter (dupa gate), in ordinea
-// canonica. Deocamdata: patSecurity (no-store + HTTPS) apoi patCapabilityGate (default-deny).
+// Ordine load-bearing:
+//   patSecurity   = outermost: no-store + HTTPS pe raspunsul FINAL (incl 403/426/429)
+//   patUsageAudit = INVELESTE gate-ul + rateLimit -> vede statusul final, auditeaza ok/denied
+//   patCapabilityGate = default-deny (nu lasa PAT auth "on" fara boundary de scope)
+//   apiTokensRouter   = session-only (gate-ul respinge PAT pe /api/v1/tokens)
+// Task 16 va insera doar `openapi` (ruta terminala) INAINTE de gate + testul de integrare.
 if (getAuthMode() === "web") {
   app.use("/api/*", patSecurity);
+  app.use("/api/*", patUsageAudit);
   app.use("/api/*", patCapabilityGate);
-  // Session-only (gate-ul de mai sus respinge PAT-urile pe /api/v1/tokens). Task 16 va
-  // insera patUsageAudit + openapi INAINTE de gate, pastrand tokens dupa gate.
   app.route("/api/v1/tokens", apiTokensRouter);
 }
 
