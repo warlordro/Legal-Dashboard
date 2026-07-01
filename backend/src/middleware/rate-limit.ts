@@ -10,7 +10,12 @@ import { readClientIp } from "../util/proxyIp.ts";
 export const RATE_LIMIT = 120;
 const RATE_WINDOW = 60000;
 
+// PAT (piesa A): plafon per-token, mai strans decat per-owner, aplicat doar pe
+// calea PAT (dupa rezolvarea tokenId). Configurabil prin env.
+export const TOKEN_RATE_LIMIT = Number(process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT) || 60;
+
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const tokenRateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 // Standard envelope for limiter failures (503 fail-closed, 429 throttle).
 // Inlined in fiecare loc inseamna o copie de envelope per branch (4x) — sub un singur helper se vede mai usor cand schema evolueaza.
@@ -35,8 +40,27 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
     return fail(c, 503, "origin_unavailable", "Origine indisponibila.");
   }
   const now = Date.now();
-  // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit
-  if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved")) {
+
+  // PAT (piesa A): bucket per-token, aplicat DUPA rezolvarea PAT (tokenId setat de
+  // ownerContext). Rulat INAINTE de scutirea /api/rnpm/saved ca un PAT sa NU scape
+  // neplafonat pe ruta exceptata (fix R05). Flood-urile cu token invalid sunt deja
+  // oprite de preAuthRateLimit (IP) inainte de lookup DB.
+  const tokenId = c.get("tokenId");
+  if (tokenId) {
+    const tkey = `tok|${tokenId}`;
+    const tentry = tokenRateLimitMap.get(tkey);
+    if (!tentry || now > tentry.resetTime) {
+      tokenRateLimitMap.set(tkey, { count: 1, resetTime: now + RATE_WINDOW });
+    } else {
+      tentry.count += 1;
+      if (tentry.count > TOKEN_RATE_LIMIT) {
+        return fail(c, 429, "rate_limited", "Prea multe cereri pentru acest token.");
+      }
+    }
+  }
+
+  // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit — DOAR non-PAT (fix R05).
+  if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved") && !tokenId) {
     await next();
     return undefined;
   }
@@ -79,6 +103,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
 // flags it as "do not call from production code".
 export function _resetRateLimitForTest(): void {
   rateLimitMap.clear();
+  tokenRateLimitMap.clear();
 }
 
 // v2.20.8: periodic sweep ca sa nu acumulam entries pe procese long-running
@@ -90,6 +115,9 @@ let sweepTimer: ReturnType<typeof setInterval> | null = null;
 function sweepExpiredEntries(now: number): void {
   for (const [k, v] of rateLimitMap) {
     if (now > v.resetTime) rateLimitMap.delete(k);
+  }
+  for (const [k, v] of tokenRateLimitMap) {
+    if (now > v.resetTime) tokenRateLimitMap.delete(k);
   }
   for (const [k, v] of preAuthMap) {
     if (now > v.resetTime) preAuthMap.delete(k);
