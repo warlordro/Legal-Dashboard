@@ -13,6 +13,8 @@ import { aiRouter } from "./routes/ai.ts";
 import { preAuthRateLimit, rateLimit, startRateLimitSweeper, stopRateLimitSweeper } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
+import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
+import { patSecurity } from "./middleware/patSecurity.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
 import { getUserById, updateUserRole } from "./db/userRepository.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
@@ -231,6 +233,17 @@ app.use("/api/*", preAuthRateLimit);
 // Desktop remains "local"; PR-9 web mode swaps for JWT-derived user id and
 // fails closed for API calls.
 app.use("*", ownerContext);
+
+// PAT (piesa A) — suprafata PAT montata DOAR in web mode (desktop ZERO impact).
+// Plasata imediat dupa ownerContext (care seteaza tokenId) si INAINTE de rateLimit.
+// SECURITATE (review 2026-07-01): gate-ul default-deny e montat AICI, nu deferat — nu
+// lasa PAT auth "on" fara boundary de scope. Task 16 va COMPLETA blocul cu patUsageAudit
+// (inainte de gate) + openapi (inainte de gate) + apiTokensRouter (dupa gate), in ordinea
+// canonica. Deocamdata: patSecurity (no-store + HTTPS) apoi patCapabilityGate (default-deny).
+if (getAuthMode() === "web") {
+  app.use("/api/*", patSecurity);
+  app.use("/api/*", patCapabilityGate);
+}
 
 // F2 audit hardening (2026-04-30): CSRF defense on state-changing routes when
 // the backend is bound to a non-loopback interface. Mounted unconditionally —

@@ -12,7 +12,17 @@ const RATE_WINDOW = 60000;
 
 // PAT (piesa A): plafon per-token, mai strans decat per-owner, aplicat doar pe
 // calea PAT (dupa rezolvarea tokenId). Configurabil prin env.
-export const TOKEN_RATE_LIMIT = Number(process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT) || 60;
+//
+// Clamp defensiv (review 2026-07-01): `Number(env) || 60` lasa treaca valori toxice —
+// o valoare NEGATIVA e truthy (`-5 || 60` => -5) => `count > -5` mereu adevarat => ORICE
+// cerere PAT ar da 429 (DoS prin misconfig). Non-finit/<=0 => default 60; non-integer =>
+// floor; peste plafonul per-owner => cap la RATE_LIMIT (per-token nu poate fi mai laxa
+// decat per-owner, altfel e inutila).
+export function clampTokenRateLimit(raw: number, ceiling: number = RATE_LIMIT): number {
+  if (!Number.isFinite(raw) || raw <= 0) return Math.min(60, ceiling);
+  return Math.min(Math.floor(raw), ceiling);
+}
+export const TOKEN_RATE_LIMIT = clampTokenRateLimit(Number(process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT));
 
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const tokenRateLimitMap = new Map<string, { count: number; resetTime: number }>();

@@ -28,6 +28,18 @@ export function hashToken(secret: string): string {
   return createHash("sha256").update(secret).digest("hex");
 }
 
+// Normalize sau REJECT expiresAt inainte de insert (review 2026-07-01). findActiveTokenByHash
+// compara `expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')` LEXICOGRAFIC — corect DOAR daca
+// valoarea stocata e ISO-Z canonic. Un `expiresAt` non-ISO (fara Z, alt format) ar rupe
+// comparatia silent (token tratat gresit ca expirat / neexpirat). Re-serializam prin Date ->
+// toISOString() (canonic, comparabil) si aruncam pe input invalid (fail-closed la granita DB).
+function normalizeExpiresAt(expiresAt: string | null): string | null {
+  if (expiresAt === null) return null;
+  const ms = Date.parse(expiresAt);
+  if (Number.isNaN(ms)) throw new Error(`createApiToken: invalid expiresAt (not a parseable date): ${expiresAt}`);
+  return new Date(ms).toISOString();
+}
+
 // Token = ld_pat_ + 32 bytes base64url (256-bit). Prefix afisat DOAR la inceput
 // (review: nu head+tail) — destul pentru identificare, fara a reduce entropia.
 export function generateToken(): { secret: string; prefix: string; hash: string } {
@@ -52,7 +64,16 @@ export function createApiToken(input: {
     `INSERT INTO api_tokens
        (id, owner_id, name, token_hash, token_prefix, scopes, captcha_daily_cap, expires_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(id, input.ownerId, input.name, hash, prefix, input.scopes.join(","), input.captchaDailyCap, input.expiresAt);
+  ).run(
+    id,
+    input.ownerId,
+    input.name,
+    hash,
+    prefix,
+    input.scopes.join(","),
+    input.captchaDailyCap,
+    normalizeExpiresAt(input.expiresAt)
+  );
   const row = db.prepare("SELECT * FROM api_tokens WHERE id = ?").get(id) as ApiTokenRow;
   return { row, secret };
 }

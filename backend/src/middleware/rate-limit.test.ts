@@ -8,6 +8,7 @@ import {
   _sweepRateLimitNowForTest,
   RATE_LIMIT,
   TOKEN_RATE_LIMIT,
+  clampTokenRateLimit,
 } from "./rate-limit.ts";
 import { requestIdContext } from "./requestId.ts";
 
@@ -59,6 +60,30 @@ function buildAppWithToken(): Hono {
   app.get("/api/rnpm/saved", (c) => c.json({ ok: true }));
   return app;
 }
+
+describe("clampTokenRateLimit — defensive env parsing", () => {
+  it("defaults to 60 for non-finite / non-positive input", () => {
+    expect(clampTokenRateLimit(Number.NaN)).toBe(60);
+    expect(clampTokenRateLimit(Number.POSITIVE_INFINITY)).toBe(60);
+    expect(clampTokenRateLimit(0)).toBe(60);
+  });
+  it("never returns a negative limit (a negative would 429 every request)", () => {
+    expect(clampTokenRateLimit(-5)).toBe(60);
+    expect(clampTokenRateLimit(-5)).toBeGreaterThan(0);
+  });
+  it("floors non-integer values", () => {
+    expect(clampTokenRateLimit(60.9)).toBe(60);
+  });
+  it("caps at the per-owner ceiling (per-token cannot be looser than per-owner)", () => {
+    expect(clampTokenRateLimit(1_000_000, 120)).toBe(120);
+    expect(clampTokenRateLimit(90, 120)).toBe(90);
+  });
+  it("the exported TOKEN_RATE_LIMIT is a finite positive integer <= RATE_LIMIT", () => {
+    expect(Number.isInteger(TOKEN_RATE_LIMIT)).toBe(true);
+    expect(TOKEN_RATE_LIMIT).toBeGreaterThan(0);
+    expect(TOKEN_RATE_LIMIT).toBeLessThanOrEqual(RATE_LIMIT);
+  });
+});
 
 describe("rateLimit — per-token (PAT)", () => {
   it("throttles per-token below the per-owner ceiling", async () => {

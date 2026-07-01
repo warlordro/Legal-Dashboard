@@ -138,6 +138,26 @@ describe("apiTokenRepository", () => {
     expect(after.last_used_at).not.toBeNull();
   });
 
+  it("normalizes a non-canonical expiresAt to ISO-Z before insert (lexicographic comparability)", () => {
+    // input fara milisecunde / fara Z explicit -> stocat canonic ...Z
+    const { row } = createApiToken({
+      ownerId: "heidi",
+      name: "t",
+      scopes: ["dosare"],
+      captchaDailyCap: null,
+      expiresAt: "2999-01-02T03:04:05Z",
+    });
+    expect(row.expires_at).toBe("2999-01-02T03:04:05.000Z");
+    // valoarea canonica se compara corect: tokenul e activ (expira in 2999)
+    expect(findActiveTokenByHash(row.token_hash)).not.toBeNull();
+  });
+
+  it("rejects an unparseable expiresAt", () => {
+    expect(() =>
+      createApiToken({ ownerId: "ivan", name: "t", scopes: ["dosare"], captchaDailyCap: null, expiresAt: "not-a-date" })
+    ).toThrowError(/invalid expiresAt/);
+  });
+
   it("counts token-scoped captcha usage in the window (token_id) separately from JWT rows", () => {
     recordCaptchaUsage({ ownerId: "grace", provider: "2captcha", source: "tenant", tokenId: "tokX" });
     recordCaptchaUsage({ ownerId: "grace", provider: "2captcha", source: "tenant", tokenId: "tokX" });
