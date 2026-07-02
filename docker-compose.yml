@@ -37,7 +37,14 @@ services:
       OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
       OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
-      OAUTH2_PROXY_INJECT_REQUEST_HEADERS: "X-Proxy-Auth=${PROXY_BRIDGE_SECRET}"
+      # Fix 2026-07-02: OAUTH2_PROXY_INJECT_REQUEST_HEADERS nu exista ca flag in
+      # oauth2-proxy v7.7.1 (confirmat din --help in container: absent). Mecanismul
+      # real, standard, pentru a trece un secret static la upstream e pass-basic-auth
+      # (default true) + basic-auth-password -> Authorization: Basic base64(user:secret).
+      # Backend-ul (auth.ts) accepta secretul din Authorization:Basic ca alternativa
+      # la X-Proxy-Auth (vezi extractBasicAuthPassword).
+      OAUTH2_PROXY_PASS_BASIC_AUTH: "true"
+      OAUTH2_PROXY_BASIC_AUTH_PASSWORD: ${PROXY_BRIDGE_SECRET}
     depends_on:
       - backend
     networks:

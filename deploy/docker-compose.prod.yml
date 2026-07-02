@@ -62,11 +62,14 @@ services:
       OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
       OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
-      # Inject shared secret in EVERY upstream request — backend rejects calls
-      # to /api/v1/auth/oauth2/sync without it. Provided headers on all upstream
-      # paths are harmless: only the bridge endpoint reads X-Proxy-Auth, and
-      # legacy routes ignore unknown headers.
-      OAUTH2_PROXY_INJECT_REQUEST_HEADERS: "X-Proxy-Auth=${PROXY_BRIDGE_SECRET}"
+      # Fix 2026-07-02: OAUTH2_PROXY_INJECT_REQUEST_HEADERS nu exista ca flag in
+      # oauth2-proxy v7.7.1 (confirmat din --help: absent). Nu a functionat
+      # niciodata. Mecanismul real, standard, e pass-basic-auth (default true) +
+      # basic-auth-password -> Authorization: Basic base64(user:secret). Backend-ul
+      # (auth.ts) accepta secretul din Authorization:Basic ca alternativa la
+      # X-Proxy-Auth (vezi extractBasicAuthPassword).
+      OAUTH2_PROXY_PASS_BASIC_AUTH: "true"
+      OAUTH2_PROXY_BASIC_AUTH_PASSWORD: ${PROXY_BRIDGE_SECRET}
     depends_on:
       - backend
     networks:

@@ -168,6 +168,29 @@ function constantTimeStringEquals(a: string, b: string): boolean {
   return timingSafeEqual(left, right);
 }
 
+// Fix 2026-07-02: OAUTH2_PROXY_INJECT_REQUEST_HEADERS nu exista ca flag in
+// oauth2-proxy v7.7.1 (verificat direct din `oauth2-proxy --help` in container
+// — absent din output). Mecanismul original cu X-Proxy-Auth injectat de
+// oauth2-proxy nu a functionat NICIODATA in productie (niciun request real nu
+// a trecut de acest check). Mecanismul real, standard oauth2-proxy pentru a
+// trece un secret static la upstream e `--pass-basic-auth` (default true) +
+// `--basic-auth-password`, care seteaza `Authorization: Basic
+// base64(user:secret)`. Acceptam secretul din ORICARE sursa (X-Proxy-Auth
+// ramane valid daca cineva il configureaza corect pe viitor via alpha-config;
+// Authorization:Basic e calea care functioneaza cu env vars simple).
+function extractBasicAuthPassword(c: Context): string | null {
+  const header = c.req.header("authorization") ?? "";
+  if (!header.toLowerCase().startsWith("basic ")) return null;
+  try {
+    const decoded = Buffer.from(header.slice(6).trim(), "base64").toString("utf8");
+    const sep = decoded.indexOf(":");
+    if (sep === -1) return null;
+    return decoded.slice(sep + 1);
+  } catch {
+    return null;
+  }
+}
+
 authRouter.post("/oauth2/sync", (c) => {
   if (getAuthMode() !== "web") {
     return c.json(fail("desktop_only", "Bridge oauth2-proxy nu este disponibil in mod desktop.", c), 400);
@@ -178,7 +201,7 @@ authRouter.post("/oauth2/sync", (c) => {
     return c.json(fail("bridge_disabled", "Bridge oauth2-proxy neconfigurat.", c), 503);
   }
 
-  const provided = c.req.header("x-proxy-auth") ?? "";
+  const provided = c.req.header("x-proxy-auth") ?? extractBasicAuthPassword(c) ?? "";
   if (!constantTimeStringEquals(expected, provided)) {
     recordAudit(null, "auth.oauth2.sync", {
       outcome: "denied",
