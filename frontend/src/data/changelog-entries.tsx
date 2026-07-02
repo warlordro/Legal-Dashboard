@@ -40,6 +40,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.40.1",
+    date: "2 Iulie 2026",
+    subtitle:
+      "Doua reparatii pentru instalarea pe server (web): imaginea Docker se construieste acum direct din codul sursa, iar autentificarea Google prin oauth2-proxy foloseste mecanismele reale ale proxy-ului. Ambele probleme au fost descoperite la primul deploy de productie. Modul desktop ramane neschimbat.",
+    icon: <Rocket className="h-5 w-5" />,
+    borderColor: "border-l-orange-500",
+    badgeClass: "bg-orange-100 text-orange-900 dark:bg-orange-900/30 dark:text-orange-300",
+    sections: [
+      {
+        title: "Instalare pe server fara pasi manuali",
+        content:
+          "Imaginea Docker isi compileaza singura aplicatia la construire — platformele care fac build direct din git (Dokploy, Coolify) functioneaza acum fara pre-compilare locala. Baza de date sta implicit pe un volum persistent, deci nu se mai pierde la redeploy, iar scriptul de provisionare a primului admin e inclus in imagine.",
+      },
+      {
+        title: "Autentificarea web functioneaza cap-coada",
+        content:
+          "Puntea dintre oauth2-proxy si aplicatie folosea doua setari care nu exista in configuratia reala a proxy-ului, deci login-ul de productie esua intotdeauna. Acum secretul comun circula ca parola Basic Auth si identitatea ca X-Forwarded-Email — mecanismele pe care oauth2-proxy chiar le implementeaza — cu compatibilitate pastrata pentru setup-uri nginx auth_request.",
+      },
+      {
+        title: "API-ul programatic (tokenuri) accesibil prin fata publica",
+        content:
+          "Tokenurile de acces personal (v2.40.0) nu puteau traversa poarta de login Google a serverului. Acum cererile programatice cu token sunt rutate direct catre aplicatie printr-o ruta dedicata si securizata la nivelul proxy-ului public, cu toate protectiile existente (drepturi granulare, limite de rata, audit, alerta la IP nou) neatinse. Scripturile de verificare a instalarii testeaza automat si aceasta ruta.",
+      },
+    ],
+  },
+  {
     version: "v2.40.0",
     date: "2 Iulie 2026",
     subtitle:

@@ -22,6 +22,13 @@ curl -H "Authorization: Bearer ld_pat_XXXXXXXX..." \
   "https://<host>/api/dosare?numarDosar=4821/3/2024"
 ```
 
+**Forma canonica a header-ului (importanta pe stack-ul de referinta):** exact `Authorization: Bearer ld_pat_...` —
+`Bearer` cu B mare si UN singur spatiu ASCII. Pe deploy-ul de referinta (Caddy + oauth2-proxy, v2.40.1+),
+ruta directa de ingress face match pe prefixul exact al valorii; variantele (`bearer` lowercase, tab,
+spatii multiple) cad in fluxul de login browser si primesc **302 redirect catre Google**, nu 401.
+Daca primesti 302 in loc de raspuns JSON: verifica forma header-ului si ca serverul ruleaza v2.40.1+
+(ruta `@pat` din `deploy/Caddyfile`).
+
 **HTTPS-only in productie:** o cerere PAT peste HTTP (fara `x-forwarded-proto: https` de la reverse-proxy)
 e respinsa cu **426**. Raspunsurile PAT au `Cache-Control: no-store`. Header-ul `Authorization` nu apare
 in loguri (logger-ul scrie doar method/path/status).

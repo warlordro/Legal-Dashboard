@@ -26,19 +26,25 @@ node_modules
 .npm
 .pnpm-store
 
-# Build artifacts not needed inside the image (we COPY dist-* explicitly).
-# Keep package manifests available for the deps stage so Docker can use the
-# workspace lockfile with `npm ci --workspace=backend`.
+# Local build artifacts. The image compiles its own dist-backend/dist-frontend
+# in the `build` stage (see Dockerfile), so stale host builds must NOT leak in.
+dist-backend
+dist-frontend
+frontend/dist
 release
 server-release
 build
-frontend/*
-!frontend/package.json
-backend/src
-electron
-scripts
 *.log
 *.tsbuildinfo
+
+# Not needed inside the image
+electron
+deploy
+docs
+audit
+*.md
+*.pdf
+*.html
 
 # OS noise
 .DS_Store

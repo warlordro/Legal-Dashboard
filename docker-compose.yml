@@ -4,22 +4,22 @@
 ##   - Image build + healthcheck + restart policy.
 ##   - Host port forward 127.0.0.1:3002 → container 3002 (loopback only).
 ##   - .env passthrough (SMTP_*, MONITORING_*, etc.).
+##   - Persistent SQLite volume (`ld_data` → /data). The DB survives
+##     `docker compose down` / image rebuilds / redeploys. Before v2.40.1 the
+##     DB lived in the container filesystem and every redeploy wiped it.
 ##
 ## What it does NOT give you (intentional):
 ##   - Web auth (JWT, multi-tenant). The default seeded user is "local" and any
 ##     request without a token is treated as that user. Do not expose this
 ##     compose to the LAN/internet without overriding env to web mode and adding
 ##     a TLS-terminating reverse proxy.
-##   - Backups off-host: only /app inside the container is persisted by Docker
-##     volumes you mount yourself (none below).
+##   - Backups off-host: the named volume lives on this host only.
 ##
 ## To make this deployable as web mode (multi-tenant, JWT auth):
-##   1. Mount a persistent SQLite volume (LEGAL_DASHBOARD_DB_PATH) so DB survives
-##      `docker compose down`.
-##   2. Use docker-compose.web.example.yml as an override (see that file's
+##   1. Use docker-compose.web.example.yml as an override (see that file's
 ##      header for the env contract: HOST=0.0.0.0, LEGAL_DASHBOARD_ALLOW_REMOTE=1,
 ##      LEGAL_DASHBOARD_AUTH_MODE=web, JWT secret/issuer/audience).
-##   3. Run scripts/smoke-deploy.sh (Linux/macOS) or scripts/smoke-deploy.ps1
+##   2. Run scripts/smoke-deploy.sh (Linux/macOS) or scripts/smoke-deploy.ps1
 ##      (Windows) from the host AFTER bringing the stack up — the container
 ##      healthcheck only proves intra-container reachability; it does not
 ##      confirm the host port-forward actually wires through.
@@ -37,6 +37,12 @@ services:
       - "127.0.0.1:3002:3002"
     env_file:
       - .env
+    environment:
+      # Persistent DB path on the named volume below. Interpolation reads .env,
+      # so an explicit LEGAL_DASHBOARD_DB_PATH there still wins over the default.
+      LEGAL_DASHBOARD_DB_PATH: ${LEGAL_DASHBOARD_DB_PATH:-/data/legal-dashboard.db}
+    volumes:
+      - ld_data:/data
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
@@ -44,3 +50,6 @@ services:
       timeout: 10s
       start_period: 120s
       retries: 3
+
+volumes:
+  ld_data:
