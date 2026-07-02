@@ -5,10 +5,19 @@
 #     → backend (3002, expose only — NEVER ports)
 #
 # Backend is bind-loopback inside the container network: only oauth2-proxy can
-# reach it. oauth2-proxy verifies the Google OAuth session, then injects
-# `X-Proxy-Auth: <shared secret>` + `X-Auth-Request-Email` headers. Backend
-# accepts the headers EXCLUSIVELY on POST /api/v1/auth/oauth2/sync (the bridge
-# endpoint) which mints the native HS256 JWT and sets the session cookie.
+# reach it. oauth2-proxy verifies the Google OAuth session, then forwards the
+# request upstream with `Authorization: Basic base64(<user>:<shared secret>)`
+# (via `basic-auth-password` + `pass-basic-auth`) and `X-Forwarded-Email` (via
+# `pass-user-headers`). Backend reads them EXCLUSIVELY on POST
+# /api/v1/auth/oauth2/sync (the bridge endpoint) which mints the native HS256
+# JWT and sets the session cookie.
+#
+# v2.40.1 NOTE — why Basic Auth + X-Forwarded-Email: the original design used
+# `OAUTH2_PROXY_INJECT_REQUEST_HEADERS` (exists ONLY in alpha config, silently
+# ignored as an env var) and `X-Auth-Request-Email` (a RESPONSE header for
+# nginx auth_request mode, never sent upstream). Neither ever reached the
+# backend, so the bridge always denied. This stack now uses the mechanisms
+# oauth2-proxy actually implements in legacy config.
 #
 # Start: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d
 # Stop:  docker compose -f deploy/docker-compose.prod.yml down
@@ -55,18 +64,25 @@ services:
       OAUTH2_PROXY_REDIRECT_URL: https://${DOMAIN}/oauth2/callback
       OAUTH2_PROXY_WHITELIST_DOMAINS: .${DOMAIN}
       OAUTH2_PROXY_EMAIL_DOMAINS: ${OAUTH2_PROXY_EMAIL_DOMAINS}
+      # WARNING: keep PASS_AUTHORIZATION_HEADER=false while PASS_BASIC_AUTH is
+      # on. Enabling both makes oauth2-proxy emit two Authorization values
+      # upstream (Bearer id-token + Basic) — merged/duplicated headers break the
+      # bridge's `Basic` parsing and would leak the Google id-token backend-side.
       OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
+      # `pass-user-headers` sends X-Forwarded-User/Email/Preferred-Username on
+      # EVERY upstream request; only the bridge endpoint reads X-Forwarded-Email
+      # (after validating the shared secret), all other routes ignore it.
       OAUTH2_PROXY_PASS_USER_HEADERS: "true"
-      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
-      # Inject shared secret in EVERY upstream request — backend rejects calls
-      # to /api/v1/auth/oauth2/sync without it. Provided headers on all upstream
-      # paths are harmless: only the bridge endpoint reads X-Proxy-Auth, and
-      # legacy routes ignore unknown headers.
-      OAUTH2_PROXY_INJECT_REQUEST_HEADERS: "X-Proxy-Auth=${PROXY_BRIDGE_SECRET}"
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$"
+      # Shared secret to upstream as `Authorization: Basic base64(<user>:<secret>)`
+      # on every proxied request. The backend bridge validates the password part
+      # timing-safe; authProvider only parses `Bearer`, so the Basic header is
+      # inert on all other routes.
+      OAUTH2_PROXY_PASS_BASIC_AUTH: "true"
+      OAUTH2_PROXY_BASIC_AUTH_PASSWORD: "${PROXY_BRIDGE_SECRET}"
     depends_on:
       - backend
     networks:
@@ -78,7 +94,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:-2.39.0}
+    image: legal-dashboard:${APP_VERSION:-2.40.1}
     restart: unless-stopped
     expose:
       # IMPORTANT: NEVER replace with `ports:` — backend must remain reachable

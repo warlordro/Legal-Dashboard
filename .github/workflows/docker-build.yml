@@ -36,9 +36,10 @@ jobs:
           node-version: '22'
           cache: 'npm'
 
-      # Dockerfile expects dist-backend/ + dist-frontend/ to be present in the
-      # build context (see comments at the top of the Dockerfile). Build them
-      # locally before invoking docker build.
+      # Since v2.40.1 the Dockerfile compiles dist-backend/dist-frontend in its
+      # own `build` stage (build-from-git platforms like Dokploy need that).
+      # The npm ci + build steps below stay as fast-fail CI validation with
+      # readable logs — the docker build no longer consumes their output.
       - name: Install dependencies
         run: npm ci
 
