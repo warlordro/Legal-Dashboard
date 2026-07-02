@@ -39,10 +39,12 @@ function Get-Status($url, $headers) {
     # both exception types expose .Response with a .StatusCode, so a single
     # generic catch reads the status uniformly. -MaximumRedirection 0 keeps a
     # 302 observable instead of silently following the OAuth redirect chain.
-    $args = @{ Uri = $url; TimeoutSec = $TimeoutSec; Method = 'GET'; UseBasicParsing = $true; MaximumRedirection = 0 }
-    if ($headers) { $args.Headers = $headers }
+    # $requestArgs, nu $args: $args e variabila automata rezervata in PowerShell
+    # (unbound arguments) — shadowing-ul ei e flagged de PSScriptAnalyzer.
+    $requestArgs = @{ Uri = $url; TimeoutSec = $TimeoutSec; Method = 'GET'; UseBasicParsing = $true; MaximumRedirection = 0 }
+    if ($headers) { $requestArgs.Headers = $headers }
     try {
-        $resp = Invoke-WebRequest @args
+        $resp = Invoke-WebRequest @requestArgs
         return [int]$resp.StatusCode
     } catch {
         $response = $_.Exception.Response
