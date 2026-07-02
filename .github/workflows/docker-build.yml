@@ -60,6 +60,18 @@ jobs:
       - name: Build Docker image
         run: docker build -t legal-dashboard:ci .
 
+      # v2.40.1: the deploy edge config gained a second handle (PAT ingress).
+      # A stray brace in deploy/Caddyfile only fails at container start (edge
+      # down, no TLS), so validate it in CI. Same digest-pinned image as
+      # deploy/docker-compose.prod.yml.
+      - name: Validate deploy Caddyfile
+        run: |
+          docker run --rm \
+            -e DOMAIN=ci.example.com -e ACME_EMAIL=ci@example.com \
+            -v "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" \
+            caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17 \
+            caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
       - name: Smoke test — node available in image
         run: docker run --rm legal-dashboard:ci node -e "console.log('node', process.version)"
 

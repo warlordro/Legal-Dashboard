@@ -58,6 +58,11 @@ export const versions: VersionEntry[] = [
         content:
           "Puntea dintre oauth2-proxy si aplicatie folosea doua setari care nu exista in configuratia reala a proxy-ului, deci login-ul de productie esua intotdeauna. Acum secretul comun circula ca parola Basic Auth si identitatea ca X-Forwarded-Email — mecanismele pe care oauth2-proxy chiar le implementeaza — cu compatibilitate pastrata pentru setup-uri nginx auth_request.",
       },
+      {
+        title: "API-ul programatic (tokenuri) accesibil prin fata publica",
+        content:
+          "Tokenurile de acces personal (v2.40.0) nu puteau traversa poarta de login Google a serverului. Acum cererile programatice cu token sunt rutate direct catre aplicatie printr-o ruta dedicata si securizata la nivelul proxy-ului public, cu toate protectiile existente (drepturi granulare, limite de rata, audit, alerta la IP nou) neatinse. Scripturile de verificare a instalarii testeaza automat si aceasta ruta.",
+      },
     ],
   },
   {

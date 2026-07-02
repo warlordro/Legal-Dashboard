@@ -1,8 +1,11 @@
 # Legal Dashboard — server deployment stack (v2.31.0+)
 #
-# Layout:
-#   internet → caddy (80/443, TLS via Let's Encrypt) → oauth2-proxy (4180)
-#     → backend (3002, expose only — NEVER ports)
+# Layout — two ingress paths since v2.40.1 (see deploy/Caddyfile):
+#   browser:  internet → caddy (80/443, TLS) → oauth2-proxy (4180) → backend (3002)
+#   PAT API:  internet → caddy (@pat: Authorization Bearer ld_pat_* on /api/*,
+#             identity headers + Cookie stripped) → backend (3002) direct
+#   backend stays expose-only — NEVER ports; only caddy + oauth2-proxy reach it
+#   inside ld_net.
 #
 # Backend is bind-loopback inside the container network: only oauth2-proxy can
 # reach it. oauth2-proxy verifies the Google OAuth session, then forwards the
@@ -98,8 +101,9 @@ services:
     restart: unless-stopped
     expose:
       # IMPORTANT: NEVER replace with `ports:` — backend must remain reachable
-      # only from the oauth2-proxy via the internal docker network. Direct
-      # exposure bypasses the OAuth gate entirely.
+      # only from inside ld_net (oauth2-proxy for browser traffic, caddy for the
+      # @pat PAT route). Direct host exposure bypasses the OAuth gate AND the
+      # edge header-stripping that the oauth2 bridge relies on.
       - "3002"
     environment:
       HOST: 0.0.0.0
