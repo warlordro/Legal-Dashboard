@@ -121,6 +121,45 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(body.error.code).toBe("forbidden");
   });
 
+  it("accepta secretul din Authorization: Basic (fix 2026-07-02, oauth2-proxy pass-basic-auth)", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    const basic = Buffer.from(`alice@example.test:${PROXY_SECRET}`).toString("base64");
+
+    const res = await syncRequest({
+      authorization: `Basic ${basic}`,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("respinge Authorization: Basic cu parola gresita", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    const basic = Buffer.from("alice@example.test:parola-gresita").toString("base64");
+
+    const res = await syncRequest({
+      authorization: `Basic ${basic}`,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("forbidden");
+  });
+
+  it("prefera X-Proxy-Auth peste Authorization: Basic cand ambele sunt prezente", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    const basicGresit = Buffer.from("alice@example.test:parola-gresita").toString("base64");
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      authorization: `Basic ${basicGresit}`,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(200);
+  });
+
   it("returneaza 400 missing_identity cand header-ele email lipsesc", async () => {
     const res = await syncRequest({ "x-proxy-auth": PROXY_SECRET });
 
