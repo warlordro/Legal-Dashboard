@@ -1,122 +1,46 @@
-# Legal Dashboard — Dokploy-native deployment (A1: Caddy dropped, Dokploy Traefik = ingress/TLS)
-#
-# Topology on Dokploy:
-#   Cloudflare Zero Trust (final layer) → Dokploy Traefik (TLS + header-strip) → oauth2-proxy (4180) → backend (3002)
-#
-# Caddy removed: Dokploy's Traefik terminates TLS and routes the domain.
-# The auth-critical inbound header strip that Caddy did is REPLICATED here as a
-# Traefik middleware (legal-secure) — without it, a client could spoof
-# X-Proxy-Auth / X-Auth-Request-Email and bypass the OAuth bridge entirely.
-#
-# Service type in Dokploy: COMPOSE (not Application). Build context = repo root.
-
+## Default profile: DESKTOP-ON-DOCKER smoke / single-tenant lab.
+##
+## What this file gives you:
+##   - Image build + healthcheck + restart policy.
+##   - Host port forward 127.0.0.1:3002 → container 3002 (loopback only).
+##   - .env passthrough (SMTP_*, MONITORING_*, etc.).
+##
+## What it does NOT give you (intentional):
+##   - Web auth (JWT, multi-tenant). The default seeded user is "local" and any
+##     request without a token is treated as that user. Do not expose this
+##     compose to the LAN/internet without overriding env to web mode and adding
+##     a TLS-terminating reverse proxy.
+##   - Backups off-host: only /app inside the container is persisted by Docker
+##     volumes you mount yourself (none below).
+##
+## To make this deployable as web mode (multi-tenant, JWT auth):
+##   1. Mount a persistent SQLite volume (LEGAL_DASHBOARD_DB_PATH) so DB survives
+##      `docker compose down`.
+##   2. Use docker-compose.web.example.yml as an override (see that file's
+##      header for the env contract: HOST=0.0.0.0, LEGAL_DASHBOARD_ALLOW_REMOTE=1,
+##      LEGAL_DASHBOARD_AUTH_MODE=web, JWT secret/issuer/audience).
+##   3. Run scripts/smoke-deploy.sh (Linux/macOS) or scripts/smoke-deploy.ps1
+##      (Windows) from the host AFTER bringing the stack up — the container
+##      healthcheck only proves intra-container reachability; it does not
+##      confirm the host port-forward actually wires through.
+##
+## SECURITY: do not flip the host port to 0.0.0.0:3002 in this file. If you need
+## LAN/internet exposure, terminate TLS + auth at a reverse proxy (nginx, Caddy,
+## Traefik) and have it forward to this container; the override file documents
+## the env-side requirements for that scenario.
 services:
-  oauth2-proxy:
-    image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine@sha256:1a2009d3b05316a5f0a482d8951422cdf100c31fb661fd48f2b4687c87c4ffa1
+  portaljust:
+    build: .
+    # Loopback-only host bind. Override via docker-compose.web.example.yml when
+    # deploying behind a reverse proxy.
+    ports:
+      - "127.0.0.1:3002:3002"
+    env_file:
+      - .env
     restart: unless-stopped
-    environment:
-      OAUTH2_PROXY_PROVIDER: google
-      OAUTH2_PROXY_CLIENT_ID: ${GOOGLE_CLIENT_ID}
-      OAUTH2_PROXY_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET}
-      OAUTH2_PROXY_COOKIE_SECRET: ${OAUTH2_PROXY_COOKIE_SECRET}
-      OAUTH2_PROXY_COOKIE_DOMAINS: ${DOMAIN}
-      OAUTH2_PROXY_COOKIE_SECURE: "true"
-      OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
-      OAUTH2_PROXY_COOKIE_SAMESITE: lax
-      OAUTH2_PROXY_COOKIE_EXPIRE: 168h
-      OAUTH2_PROXY_REVERSE_PROXY: "true"          # trust X-Forwarded-* from Traefik
-      OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
-      OAUTH2_PROXY_UPSTREAMS: http://backend:3002/
-      OAUTH2_PROXY_REDIRECT_URL: https://${DOMAIN}/oauth2/callback
-      OAUTH2_PROXY_WHITELIST_DOMAINS: .${DOMAIN}
-      OAUTH2_PROXY_EMAIL_DOMAINS: ${OAUTH2_PROXY_EMAIL_DOMAINS}   # set to instantfactoring.com
-      OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
-      OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
-      OAUTH2_PROXY_PASS_USER_HEADERS: "true"
-      OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
-      OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
-      OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
-      OAUTH2_PROXY_INJECT_REQUEST_HEADERS: "X-Proxy-Auth=${PROXY_BRIDGE_SECRET}"
-    depends_on:
-      - backend
-    networks:
-      - ld_net
-      - dokploy-network
-    labels:
-      - "traefik.enable=true"
-      - "traefik.docker.network=dokploy-network"
-      # ── Router: domeniu + TLS (verifică entrypoint/certresolver în Dokploy → Traefik File System) ──
-      - "traefik.http.routers.legal.rule=Host(`${DOMAIN}`)"
-      - "traefik.http.routers.legal.entrypoints=websecure"
-      - "traefik.http.routers.legal.tls=true"
-      - "traefik.http.routers.legal.tls.certresolver=letsencrypt"
-      - "traefik.http.routers.legal.service=legal"
-      - "traefik.http.routers.legal.middlewares=legal-secure"
-      - "traefik.http.services.legal.loadbalancer.server.port=4180"
-      # ── Middleware legal-secure: strip headere identitate spoofabile (AUTH-BYPASS GUARD, fost în Caddy) ──
-      - "traefik.http.middlewares.legal-secure.headers.customRequestHeaders.X-Proxy-Auth="
-      - "traefik.http.middlewares.legal-secure.headers.customRequestHeaders.X-Auth-Request-Email="
-      - "traefik.http.middlewares.legal-secure.headers.customRequestHeaders.X-Forwarded-Email="
-      - "traefik.http.middlewares.legal-secure.headers.customRequestHeaders.X-Forwarded-User="
-      - "traefik.http.middlewares.legal-secure.headers.customRequestHeaders.Authorization="
-      # ── + security response headers (paritate cu Caddy; complementar Hono secureHeaders) ──
-      - "traefik.http.middlewares.legal-secure.headers.stsSeconds=63072000"
-      - "traefik.http.middlewares.legal-secure.headers.stsIncludeSubdomains=true"
-      - "traefik.http.middlewares.legal-secure.headers.stsPreload=true"
-      - "traefik.http.middlewares.legal-secure.headers.frameDeny=true"
-      - "traefik.http.middlewares.legal-secure.headers.contentTypeNosniff=true"
-      - "traefik.http.middlewares.legal-secure.headers.referrerPolicy=no-referrer"
-
-  backend:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:-2.38.0}
-    restart: unless-stopped
-    expose:
-      # NEVER `ports:` — backend reachable ONLY from oauth2-proxy via ld_net.
-      - "3002"
-    environment:
-      HOST: 0.0.0.0
-      NODE_ENV: production
-      LEGAL_DASHBOARD_PORT: 3002
-      LEGAL_DASHBOARD_AUTH_MODE: web
-      LEGAL_DASHBOARD_ALLOW_REMOTE: "1"
-      LEGAL_DASHBOARD_JWT_SECRET: ${JWT_SECRET}
-      LEGAL_DASHBOARD_JWT_ISSUER: ${JWT_ISSUER:-legal-dashboard-prod}
-      LEGAL_DASHBOARD_JWT_AUDIENCE: ${JWT_AUDIENCE:-legal-dashboard-prod}
-      LEGAL_DASHBOARD_JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
-      LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET: ${PROXY_BRIDGE_SECRET}
-      LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: ${LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR:-172.16.0.0/12}
-      TENANT_KEY_ENCRYPTION_SECRET: ${TENANT_KEY_SECRET}
-      LEGAL_DASHBOARD_DB_PATH: /data/legal-dashboard.db
-      MONITORING_DISABLED_KINDS: ${MONITORING_DISABLED_KINDS:-}
-      RNPM_RUNTIME_VALIDATION_DISABLED: ${RNPM_RUNTIME_VALIDATION_DISABLED:-}
-      FX_PLAUSIBLE_EUR_USD_MIN: ${FX_PLAUSIBLE_EUR_USD_MIN:-}
-      FX_PLAUSIBLE_EUR_USD_MAX: ${FX_PLAUSIBLE_EUR_USD_MAX:-}
-      SMTP_HOST: ${SMTP_HOST:-}
-      SMTP_PORT: ${SMTP_PORT:-}
-      SMTP_USER: ${SMTP_USER:-}
-      SMTP_PASS: ${SMTP_PASS:-}
-      SMTP_FROM: ${SMTP_FROM:-}
-      SMTP_SECURE: ${SMTP_SECURE:-}
-    volumes:
-      - ld_data:/data
-    networks:
-      - ld_net
     healthcheck:
       test: ["CMD", "wget", "-qO-", "http://localhost:3002/health"]
       interval: 30s
       timeout: 10s
       start_period: 120s
       retries: 3
-
-volumes:
-  ld_data:
-
-networks:
-  ld_net:
-    driver: bridge
-  dokploy-network:
-    external: true

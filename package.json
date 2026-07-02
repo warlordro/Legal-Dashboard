@@ -1,6 +1,6 @@
 {
   "name": "legal-dashboard",
-  "version": "2.38.0",
+  "version": "2.40.0",
   "private": true,
   "main": "electron/main.js",
   "workspaces": ["backend", "frontend"],
@@ -108,7 +108,7 @@
   },
   "overrides": {
     "jspdf": "^4.2.1",
-    "dompurify": "^3.4.1"
+    "dompurify": "^3.4.11"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

@@ -55,6 +55,16 @@ export async function originGuard(c: Context, next: Next): Promise<Response | un
     return;
   }
 
+  // PAT (piesa A): un Bearer/PAT nu e credential ambient -> imun la CSRF. Gate pe
+  // AUTH PAT REUSIT (tokenId setat de ownerContext, care ruleaza inainte), NU pe
+  // simpla prezenta a header-ului Authorization: un `Bearer garbage` esueaza la auth
+  // (401) inainte sa ajunga aici, deci nu poate ocoli originGuard. Cookie-ul JWT ramane
+  // origin-checked (fara tokenId -> cade pe verificarea de mai jos).
+  if (c.get("tokenId")) {
+    await next();
+    return;
+  }
+
   const hostHeader = c.req.header("host") ?? "";
   if (!hostHeader) {
     return c.json(fail("csrf_origin_mismatch", "Cerere refuzata: Host header lipseste.", c), 403);

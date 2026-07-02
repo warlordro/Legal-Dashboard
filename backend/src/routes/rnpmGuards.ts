@@ -1,10 +1,12 @@
 import type { Context } from "hono";
 
 import { getAuthMode } from "../auth/config.ts";
+import { getTokenCaptchaCap } from "../db/apiTokenRepository.ts";
 import {
   countTenantCaptchaUsageInWindow,
   earliestTenantCaptchaTsInWindow,
   recordCaptchaUsage,
+  reserveTokenCaptcha,
 } from "../db/captchaUsageRepository.ts";
 import { getTenantKeys, type CaptchaMode, type CaptchaProvider } from "../db/tenantKeysRepository.ts";
 import { type QuotaPeriod, getOverride } from "../db/userQuotaRepository.ts";
@@ -116,17 +118,80 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
       }
     }
 
+    // PAT (piesa A, A5.3): plafon captcha per-token, SUB bugetul per-user de mai sus.
+    // Token CU plafon => fail-CLOSED (rezervare atomica: daca tranzactia pica, respinge
+    // 503 retry — NU accepta peste plafon, NU 500). Token FARA plafon (sau fara tokenId)
+    // => calea record-and-accept de mai jos (fail-OPEN, "overcount, never undercount").
+    const tokenId = c.get("tokenId");
+    if (tokenId) {
+      const cap = getTokenCaptchaCap(tokenId);
+      if (cap !== null) {
+        // Rezervarea atomica (BEGIN IMMEDIATE + count + insert) traieste in repository
+        // (captchaUsageRepository.reserveTokenCaptcha) — SQL raw ramane in db/**. Aici doar
+        // maparea rezultatului la raspuns HTTP: throw => fail-CLOSED 503; false => 429 cap atins.
+        let reserved: boolean;
+        try {
+          reserved = reserveTokenCaptcha({
+            ownerId,
+            tokenId,
+            provider: resolved.provider,
+            requestId: getRequestId(c),
+            cap,
+            windowSeconds: 86_400,
+          });
+        } catch (err) {
+          console.error("[rnpm.guards] token captcha reservation failed", err);
+          c.header("Retry-After", "5");
+          return {
+            ok: false,
+            response: c.json(
+              fail(ErrorCodes.QUOTA_EXCEEDED, "Rezervare captcha indisponibila, reincearca.", c, {
+                feature: "captcha.token",
+                retry: true,
+              }),
+              503
+            ),
+          };
+        }
+        if (!reserved) {
+          c.header("Retry-After", "86400");
+          return {
+            ok: false,
+            response: c.json(
+              fail(ErrorCodes.QUOTA_EXCEEDED, "Plafonul de captcha al tokenului a fost atins.", c, {
+                feature: "captcha.token",
+                cap,
+              }),
+              429
+            ),
+          };
+        }
+        // Captcha-ul a fost deja inregistrat in tranzactie (cu token_id); sari peste
+        // record-and-accept-ul de mai jos pentru calea cu tokenId + cap.
+        return {
+          ok: true,
+          source: "tenant",
+          body: body as Record<string, unknown>,
+          captchaKey: resolved.captchaKey,
+          captchaProvider: resolved.provider,
+          captchaMode: resolved.mode,
+        };
+      }
+    }
+
     // Record-and-accept: contam captcha-ul ca "intent-based" (1 row per request
     // acceptat de guard). Daca SOAP-ul ulterior nu mai consuma cheia (timeout
     // / abort), riscul e overcount, niciodata undercount — exact semantica pe
     // care o vrem la un cap operational. requestId leaga randul de auditul
-    // existent (`rnpm.captcha.consume`).
+    // existent (`rnpm.captcha.consume`). tokenId ?? null: calea FARA plafon
+    // (sau JWT/desktop) tot tag-uieste randul cu tokenul, daca exista.
     try {
       recordCaptchaUsage({
         ownerId,
         provider: resolved.provider,
         source: "tenant",
         requestId: getRequestId(c),
+        tokenId: tokenId ?? null,
       });
     } catch (err) {
       console.error("[rnpm.guards] captcha usage record failed", err);

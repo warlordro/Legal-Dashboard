@@ -8,6 +8,7 @@ import { ApiKeyDialog } from "./ApiKeyDialog";
 import type { AiMode } from "./dosare-ai-config";
 
 vi.mock("@/components/AIUsagePanel", () => ({ AIUsagePanel: () => <div /> }));
+vi.mock("@/components/ApiAccessPanel", () => ({ ApiAccessPanel: () => <div /> }));
 vi.mock("@/components/EmailSettingsPanel", () => ({ EmailSettingsPanel: () => <div /> }));
 vi.mock("@/components/NotificationStatusPanel", () => ({ NotificationStatusPanel: () => <div /> }));
 vi.mock("@/hooks/useAuthMode", () => ({ useAuthMode: vi.fn(() => "desktop") }));

@@ -17,6 +17,7 @@
 //   - results are sorted date-DESC and paginated (?page=N), ~50/page, cap 1000.
 
 import { readResponseTextWithCap, ResponseTooLargeSignal } from "../../util/streamCap.ts";
+import { type IccjCaller, withBreaker } from "./iccjBreaker.ts";
 
 const ICCJ_ORIGIN = "https://www.scj.ro";
 const SEARCH_PAGE = `${ICCJ_ORIGIN}/738/Cautare-dosare-si-parti`;
@@ -141,6 +142,9 @@ export interface IccjSedinteParams {
 export interface IccjRequestOptions {
   signal?: AbortSignal;
   page?: number;
+  // Clasa de apelant pentru circuit-breaker-ul global (piesa A). Default "ui".
+  // Rutele PAT paseaza "pat" (pondere mica); iccjRunner (monitoring) paseaza "monitoring".
+  callerClass?: IccjCaller;
 }
 
 // Source/markup failures MUST NOT be confused with "0 results" — otherwise
@@ -549,6 +553,9 @@ async function postSearch(
 // options.page; UI shows page-by-page (caller derives "more" from cumulative loaded vs
 // total), never auto-sweeps all 1000.
 export async function searchIccj(params: IccjSearchParams, options?: IccjRequestOptions): Promise<IccjSearchResult> {
+  return withBreaker(options?.callerClass ?? "ui", () => searchIccjInner(params, options));
+}
+async function searchIccjInner(params: IccjSearchParams, options?: IccjRequestOptions): Promise<IccjSearchResult> {
   const page = Math.max(1, options?.page ?? 1);
   const signal = combineSignals(options?.signal);
 
@@ -584,6 +591,9 @@ export async function searchIccj(params: IccjSearchParams, options?: IccjRequest
 // SESSION_TTL, so a mid-run session expiry self-heals here. Shared by enrich, the
 // monitoring iccjRunner, and DosareTable row-expand.
 export async function fetchIccjDetail(iccjId: string, options?: IccjRequestOptions): Promise<IccjDosar> {
+  return withBreaker(options?.callerClass ?? "ui", () => fetchIccjDetailInner(iccjId, options));
+}
+async function fetchIccjDetailInner(iccjId: string, options?: IccjRequestOptions): Promise<IccjDosar> {
   if (!/^\d+$/.test(iccjId)) throw new IccjSourceError("invalid iccjId");
   const signal = combineSignals(options?.signal);
   const url = `${DETAIL_URL}?customQuery%5B0%5D.Key=id&customQuery%5B0%5D.Value=${iccjId}`;
@@ -701,6 +711,9 @@ export async function searchSedinteIccj(
   params: IccjSedinteParams,
   options?: IccjRequestOptions
 ): Promise<IccjTermen[]> {
+  return withBreaker(options?.callerClass ?? "ui", () => searchSedinteIccjInner(params, options));
+}
+async function searchSedinteIccjInner(params: IccjSedinteParams, options?: IccjRequestOptions): Promise<IccjTermen[]> {
   const signal = combineSignals(options?.signal);
   const cookie = await getSession(signal);
 
@@ -764,7 +777,7 @@ export async function searchTermeneByDosarIccj(
   params: IccjSearchParams,
   options?: IccjRequestOptions
 ): Promise<IccjTermeneResult> {
-  const found = await searchIccj(params, { signal: options?.signal, page: 1 });
+  const found = await searchIccj(params, { signal: options?.signal, page: 1, callerClass: options?.callerClass });
   const dosare = found.dosare.slice(0, MAX_TERMENE_DOSARE);
   // truncated = more dosare matched than we collected termene for. found.dosare is the
   // full page-1 set; `found.total > found.dosare.length` means further pages exist.
@@ -779,7 +792,7 @@ export async function searchTermeneByDosarIccj(
     const batch = dosare.slice(i, i + TERMENE_DETAIL_CONCURRENCY);
     const details = await Promise.all(
       batch.map((d) =>
-        fetchIccjDetail(d.iccjId, { signal: options?.signal }).catch((err) => {
+        fetchIccjDetail(d.iccjId, { signal: options?.signal, callerClass: options?.callerClass }).catch((err) => {
           // Only a TRUE caller abort tears down the batch; a per-item timeout is isolated.
           if (options?.signal?.aborted) throw err;
           console.warn(`[iccj] termene: detaliu esuat pentru dosar ${d.iccjId}:`, err);
@@ -855,7 +868,7 @@ export async function searchIccjEnriched(
     const slice = enriched.slice(i, i + TERMENE_DETAIL_CONCURRENCY);
     const details = await Promise.all(
       slice.map((d) =>
-        fetchIccjDetail(d.iccjId, { signal: enrichSignal }).catch((err) => {
+        fetchIccjDetail(d.iccjId, { signal: enrichSignal, callerClass: options?.callerClass }).catch((err) => {
           // Only a TRUE caller abort tears down the batch. A per-item TIMEOUT (the
           // budget/per-fetch AbortSignal.timeout firing) surfaces as an AbortError too
           // — isolate it as a skipped row instead of failing the whole search (Codex F3).

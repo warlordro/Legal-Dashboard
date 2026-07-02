@@ -78,7 +78,7 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:-2.38.0}
+    image: legal-dashboard:${APP_VERSION:-2.39.0}
     restart: unless-stopped
     expose:
       # IMPORTANT: NEVER replace with `ports:` — backend must remain reachable

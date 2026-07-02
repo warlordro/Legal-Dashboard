@@ -29,6 +29,7 @@ import { getAuthMode } from "../auth/config.ts";
 import { getTenantKeys } from "../db/tenantKeysRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { upsertOverride } from "../db/userQuotaRepository.ts";
+import { createApiToken } from "../db/apiTokenRepository.ts";
 import { withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
 const mockedGetAuthMode = vi.mocked(getAuthMode);
@@ -227,5 +228,79 @@ describe("withRnpmCaptchaGuards captcha quota (P1-4)", () => {
 
     const count = (getDb().prepare("SELECT COUNT(*) AS n FROM captcha_usage").get() as { n: number }).n;
     expect(count).toBe(0);
+  });
+});
+
+// Task 8 (PAT piesa A) — plafon captcha per-token, SUB bugetul per-user. better-sqlite3
+// e sincron, apelurile se serializeaza; atomicitatea cross-writer e data de BEGIN IMMEDIATE
+// la nivel SQLite (moot sub single-instance, spec A9). Test secvential.
+function buildAppWithToken(tokenId: string) {
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    c.set("ownerId", TEST_OWNER);
+    c.set("requestId", "req-test");
+    c.set("tokenId", tokenId);
+    await next();
+  });
+  app.post("/", async (c) => {
+    const guard = await withRnpmCaptchaGuards(c);
+    if (!guard.ok) return guard.response;
+    return c.json({ ok: true, source: guard.source });
+  });
+  return app;
+}
+
+describe("withRnpmCaptchaGuards per-token captcha cap (A5.3)", () => {
+  it("per-token cap 2 => 2 ok, 3rd 429, exactly 2 rows tagged with token_id", async () => {
+    const { row } = createApiToken({
+      ownerId: TEST_OWNER,
+      name: "t",
+      scopes: ["rnpm"],
+      captchaDailyCap: 2,
+      expiresAt: null,
+    });
+    const app = buildAppWithToken(row.id);
+    for (let i = 0; i < 2; i += 1) {
+      const res = await app.request("/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "ipoteci" }),
+      });
+      expect(res.status).toBe(200);
+    }
+    const blocked = await app.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+    expect(blocked.status).toBe(429);
+    expect(((await blocked.json()) as { error: { code: string } }).error.code).toBe("QUOTA_EXCEEDED");
+    const tokenRows = (
+      getDb().prepare("SELECT COUNT(*) AS n FROM captcha_usage WHERE token_id = ?").get(row.id) as { n: number }
+    ).n;
+    expect(tokenRows).toBe(2); // exactly one row per accept, no double-record (R02)
+  });
+
+  it("per-token cap null => uncapped path still tags the row with token_id", async () => {
+    const { row } = createApiToken({
+      ownerId: TEST_OWNER,
+      name: "t",
+      scopes: ["rnpm"],
+      captchaDailyCap: null,
+      expiresAt: null,
+    });
+    const app = buildAppWithToken(row.id);
+    for (let i = 0; i < 3; i += 1) {
+      const res = await app.request("/", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "ipoteci" }),
+      });
+      expect(res.status).toBe(200);
+    }
+    const tokenRows = (
+      getDb().prepare("SELECT COUNT(*) AS n FROM captcha_usage WHERE token_id = ?").get(row.id) as { n: number }
+    ).n;
+    expect(tokenRows).toBe(3);
   });
 });

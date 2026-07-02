@@ -10,7 +10,22 @@ import { readClientIp } from "../util/proxyIp.ts";
 export const RATE_LIMIT = 120;
 const RATE_WINDOW = 60000;
 
+// PAT per-token request ceiling, stricter than the per-owner limit, applied only on the
+// PAT path (after tokenId resolution). Configurable via env.
+//
+// Defensive clamp (review 2026-07-01): `Number(env) || 60` lets toxic values through — a
+// NEGATIVE value is truthy (`-5 || 60` => -5), so `count > -5` is always true and EVERY PAT
+// request would 429 (DoS by misconfiguration). Non-finite / <= 0 => default 60; non-integer
+// => floored; above the per-owner ceiling => capped at RATE_LIMIT (a per-token limit looser
+// than the per-owner one is pointless).
+export function clampTokenRateLimit(raw: number, ceiling: number = RATE_LIMIT): number {
+  if (!Number.isFinite(raw) || raw <= 0) return Math.min(60, ceiling);
+  return Math.min(Math.floor(raw), ceiling);
+}
+export const TOKEN_RATE_LIMIT = clampTokenRateLimit(Number(process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT));
+
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
+const tokenRateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
 // Standard envelope for limiter failures (503 fail-closed, 429 throttle).
 // Inlined in fiecare loc inseamna o copie de envelope per branch (4x) — sub un singur helper se vede mai usor cand schema evolueaza.
@@ -35,8 +50,27 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
     return fail(c, 503, "origin_unavailable", "Origine indisponibila.");
   }
   const now = Date.now();
-  // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit
-  if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved")) {
+
+  // PAT (piesa A): bucket per-token, aplicat DUPA rezolvarea PAT (tokenId setat de
+  // ownerContext). Rulat INAINTE de scutirea /api/rnpm/saved ca un PAT sa NU scape
+  // neplafonat pe ruta exceptata (fix R05). Flood-urile cu token invalid sunt deja
+  // oprite de preAuthRateLimit (IP) inainte de lookup DB.
+  const tokenId = c.get("tokenId");
+  if (tokenId) {
+    const tkey = `tok|${tokenId}`;
+    const tentry = tokenRateLimitMap.get(tkey);
+    if (!tentry || now > tentry.resetTime) {
+      tokenRateLimitMap.set(tkey, { count: 1, resetTime: now + RATE_WINDOW });
+    } else {
+      tentry.count += 1;
+      if (tentry.count > TOKEN_RATE_LIMIT) {
+        return fail(c, 429, "rate_limited", "Prea multe cereri pentru acest token.");
+      }
+    }
+  }
+
+  // Local DB reads (RNPM saved/* GETs) bypass upstream rate limit — DOAR non-PAT (fix R05).
+  if (c.req.method === "GET" && c.req.path.startsWith("/api/rnpm/saved") && !tokenId) {
     await next();
     return undefined;
   }
@@ -79,6 +113,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
 // flags it as "do not call from production code".
 export function _resetRateLimitForTest(): void {
   rateLimitMap.clear();
+  tokenRateLimitMap.clear();
 }
 
 // v2.20.8: periodic sweep ca sa nu acumulam entries pe procese long-running
@@ -90,6 +125,9 @@ let sweepTimer: ReturnType<typeof setInterval> | null = null;
 function sweepExpiredEntries(now: number): void {
   for (const [k, v] of rateLimitMap) {
     if (now > v.resetTime) rateLimitMap.delete(k);
+  }
+  for (const [k, v] of tokenRateLimitMap) {
+    if (now > v.resetTime) tokenRateLimitMap.delete(k);
   }
   for (const [k, v] of preAuthMap) {
     if (now > v.resetTime) preAuthMap.delete(k);
@@ -151,9 +189,12 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
 
   await next();
 
-  // Doar path-urile autentificate cu succes elibereaza bucket-ul pre-auth.
-  // 3xx/4xx/5xx raman consumate ca sa nu poata fi folosite pentru bypass.
-  if (c.res.status >= 200 && c.res.status < 300) {
+  // Elibereaza bucket-ul pre-auth cand AUTENTIFICAREA a reusit (ownerId setat de ownerContext,
+  // care ruleaza in interiorul next()), indiferent de statusul final. Altfel un caller autentificat
+  // care primeste 403/429 (ex. un PAT scurs care spameaza rute forbidden) ar epuiza bucketul IP-only
+  // partajat si ar bloca TOT traficul din spatele acelui NAT/proxy (fix runda 4). Doar tentativele
+  // NEautentificate (auth esuata / token lipsa) raman consumate — exact scopul acestui limiter.
+  if (c.get("ownerId") || (c.res.status >= 200 && c.res.status < 300)) {
     releasePreAuthAttempt(key);
   }
 

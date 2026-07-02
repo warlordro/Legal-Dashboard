@@ -13,6 +13,11 @@ import { aiRouter } from "./routes/ai.ts";
 import { preAuthRateLimit, rateLimit, startRateLimitSweeper, stopRateLimitSweeper } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
+import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
+import { patSecurity } from "./middleware/patSecurity.ts";
+import { patUsageAudit } from "./middleware/patUsageAudit.ts";
+import { apiTokensRouter } from "./routes/apiTokens.ts";
+import { openapiRouter } from "./routes/openapi.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
 import { getUserById, updateUserRole } from "./db/userRepository.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
@@ -232,13 +237,43 @@ app.use("/api/*", preAuthRateLimit);
 // fails closed for API calls.
 app.use("*", ownerContext);
 
+// PAT (piesa A) — suprafata montata DOAR in web mode (desktop ZERO impact). Ordinea e
+// INTERLEAVED cu rateLimit + originGuard (globale) ca sa fie corecta la nivel de securitate
+// (review-panel runda 4):
+//   patUsageAudit (outermost) -> auditeaza ORICE raspuns PAT, inclusiv 426/403/429.
+//   patSecurity   -> no-store + HTTPS-only (426).
+//   rateLimit     -> per-token + per-owner INAINTE de gate: bucketul per-token numara si
+//                    cererile forbidden (un token scurs nu poate spama rute forbidden nelimitat);
+//                    openapi devine si el rate-limited.
+//   openapi(ruta) -> discovery terminal, INAINTE de gate (reachable de un PAT).
+//   patCapabilityGate -> default-deny.
+//   originGuard   -> CSRF pe mutatii (global).
+//   apiTokensRouter -> DUPA originGuard: mutatiile de tokenuri (create/revoke/revoke-all) sunt
+//                    Origin-checked pentru sesiuni; gate-ul deja a respins PAT-urile mai sus.
+if (getAuthMode() === "web") {
+  app.use("/api/*", patUsageAudit);
+  app.use("/api/*", patSecurity);
+}
+
+app.use("/api/*", rateLimit);
+
+if (getAuthMode() === "web") {
+  app.route("/api/v1/openapi.json", openapiRouter);
+  app.use("/api/*", patCapabilityGate);
+}
+
 // F2 audit hardening (2026-04-30): CSRF defense on state-changing routes when
 // the backend is bound to a non-loopback interface. Mounted unconditionally —
 // the middleware itself short-circuits for safe methods + loopback peers, so
 // the desktop loopback path stays unchanged. Host/Origin parsing happens only
 // for cross-LAN POST/PUT/PATCH/DELETE.
-app.use("/api/*", rateLimit);
 app.use("/api/*", originGuard);
+
+// Token-management DUPA originGuard (CSRF) + rateLimit. Gate-ul de mai sus deja respinge
+// PAT-urile pe /api/v1/tokens (PAT_CANNOT_MANAGE_TOKENS), deci sesiunile ajung aici Origin-checked.
+if (getAuthMode() === "web") {
+  app.route("/api/v1/tokens", apiTokensRouter);
+}
 
 // Readiness flag: schema migrations + prewarm run before serve(), but if the DB
 // is locked by another tool or temporarily inaccessible we keep /health serving
