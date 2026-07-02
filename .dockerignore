@@ -26,15 +26,17 @@ node_modules
 .npm
 .pnpm-store
 
-# Output dirs / artifacts not needed in the image. NOTE: the `builder` stage
-# compiles dist-frontend/ + dist-backend/ from source (scripts/build.js), so the
-# app source (scripts/, frontend/, backend/src) MUST stay in the build context.
+# Build artifacts not needed inside the image (we COPY dist-* explicitly).
+# Keep package manifests available for the deps stage so Docker can use the
+# workspace lockfile with `npm ci --workspace=backend`.
 release
 server-release
 build
-dist-frontend
-dist-backend
+frontend/*
+!frontend/package.json
+backend/src
 electron
+scripts
 *.log
 *.tsbuildinfo
 

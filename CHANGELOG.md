@@ -1,5 +1,49 @@
 # Changelog - Legal Dashboard
 
+## v2.40.0 - 2026-07-02
+
+API programatic doar-citire (Piesa A din planul API + MCP): dosare + termene (PortalJust), ICCJ si RNPM devin accesibile din afara aplicatiei (scripturi, integrari, server MCP) prin Personal Access Tokens. Suprafata exista EXCLUSIV in web mode (`LEGAL_DASHBOARD_AUTH_MODE=web`); pe desktop nu se monteaza nimic — zero impact pe fluxul BYOK.
+
+### Personal Access Tokens (PAT)
+
+Token opac `ld_pat_...` creat din UI (Setari -> Acces API, doar web) cu nume, scopes si optional expirare (30/90/365 zile) + plafon zilnic de captcha. Secretul e afisat o singura data; in DB se pastreaza doar hash-ul SHA-256 (migratia 0039: tabela `api_tokens`, `captcha_usage.token_id`, index partial pe `audit_log`). Dispatch DOAR din header-ul `Authorization: Bearer` (niciodata din cookie) si doar in web mode; validare per-request direct din DB, deci revocarea are efect instant. Kill switch operational: `LEGAL_DASHBOARD_PAT_DISABLED=1`.
+
+### Gate default-deny + scopes
+
+Un PAT ajunge DOAR pe tuple `(metoda, path, scope)` explicit permise (`PAT_CAPABILITIES`): GET match pe prefix la granita de segment, POST match exact, slash encodat respins; orice alta ruta (AI, `/me`, admin, monitoring) raspunde 403 `PAT_ROUTE_FORBIDDEN`, iar ruta permisa fara scope-ul necesar 403 `INSUFFICIENT_SCOPE`. Scopes: `dosare` (GET /api/dosare + /api/termene), `iccj` (GET /api/dosare-iccj + /api/termene-iccj), `rnpm` (POST /api/rnpm/search + GET /api/rnpm/saved). Managementul tokenurilor (`/api/v1/tokens*`) e session-only — un PAT primeste 403 `PAT_CANNOT_MANAGE_TOKENS`; rutele sunt montate dupa originGuard (protectie CSRF).
+
+### Protectii pe suprafata noua
+
+HTTPS-only in productie (426 fara `x-forwarded-proto: https`; override dev `LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1`) + `Cache-Control: no-store` pe raspunsurile PAT. Rate-limit dedicat per-token, aplicat inaintea gate-ului. Plafon captcha per-token cu rezervare atomica fail-closed (`BEGIN IMMEDIATE`; cap invalid = refuz, depasire = 429 `QUOTA_EXCEEDED` + `Retry-After`). Fiecare folosire de PAT e auditata (ok/denied, IP proxy-aware); la primul IP nou per token se trimite email de alerta (daca owner-ul are adresa configurata). Circuit breaker global pe ICCJ cu ponderare pe clasa de caller (PAT = 0.25, plafonat sub prag) — un token agresiv nu poate deschide breaker-ul si bloca UI-ul legitim; breaker deschis raspunde 503 `ICCJ_UNAVAILABLE` + `Retry-After`, praguri configurabile (`ICCJ_BREAKER_THRESHOLD`, `ICCJ_BREAKER_COOLDOWN_MS`).
+
+### Self-description + UI + imbogatiri
+
+`GET /api/v1/openapi.json` (OpenAPI 3.1, generat din `PAT_CAPABILITIES`, scheme de securitate separate bearer/sessionCookie) + ghid consumator `API.md`. Panou React "Acces API" in dialogul de chei (doar web): creare cu scopes/expirare/plafon, listare cu ultima folosire (IP + data), revocare individuala si "Revoca toate" cu confirmare, guard sincron anti-double-submit. `GET /api/dosare` imbogatit cu `exactMatch` (match exact pe numar dosar).
+
+### Verificare
+
+Implementare TDD pas cu pas (red-green per componenta) + review adversarial dupa fiecare pas. Doua runde review-panel multi-model pe wiring (runda 3: mount ordering; runda 4: CSRF pe rutele de tokenuri) cu fixuri aplicate. Audit adversarial complet pe 7 dimensiuni (workflow multi-agent): 19 findings brute -> 8 confirmate (0 critical/high dupa verificare: 3 medium, 5 low), toate 8 remediate; 11 refuzate. Plus 4 batch-uri CodeRabbit verificate si aplicate. Biome + `tsc --noEmit` backend/frontend + `npm run build` + suite complete de teste verzi.
+
+## v2.39.0 - 2026-06-25
+
+Fix major pentru deploy-ul web: aplicatia nu stabilea niciodata sesiunea proprie dupa login-ul Google, asa ca in mod web fiecare apel `/api` raspundea cu 401 "Token de autentificare necesar" — cautarea, `/me` si panoul de chei erau toate blocate desi login-ul reusea. Plus mecanisme care tin sesiunea vie cat timp aplicatia e deschisa, fara refresh manual. Modul desktop: zero impact (autentificare locala).
+
+### Fix: sesiunea web nu se stabilea (root cause)
+
+In `auth_mode=web` cookie-ul de sesiune `legal_dashboard_session` se minteaza exclusiv prin `POST /api/v1/auth/oauth2/sync` (oauth2-proxy injecteaza `X-Auth-Request-Email` + secretul `X-Proxy-Auth`, iar backend-ul emite JWT-ul HS256 nativ). Frontend-ul nu apela niciodata acel endpoint, deci cookie-ul nu se crea niciodata si toate cererile autentificate intorceau 401. `/auth/refresh` doar roteste un cookie deja valid, deci nu putea face bootstrap. Acum SPA-ul cheama bridge-ul la incarcare (`syncWebSession` + `useSessionBootstrap`) si tine intregul shell autentificat (`AuthedApp`) in spatele unui gate pana cand cookie-ul exista, deci prima cerere (`/me`, search, SSE) poarta cookie-ul in loc sa-l "curse" intr-un 401.
+
+### Sesiune persistenta (never blocked, fara refresh manual)
+
+Keep-alive proactiv (`useSessionKeepAlive`): re-minteste sesiunea la ~50 min (sub TTL-ul de 1h), plus pe `visibilitychange` (revii pe tab) si `online` (revine reteaua), ca tab-urile lasate deschise toata ziua si stream-ul SSE de alerte sa ramana autentificate dupa repaus/throttling de fundal. Recuperare reactiva (interceptor de 401 in `apiFetch`): orice 401 in mod web declanseaza un singur re-mint deduplicat + o reincercare, deci un cookie expirat/lipsa se vindeca transparent in loc sa afiseze eroare. Ambele cai trec prin acelasi `ensureWebSession` deduplicat (un singur POST la bridge la rafale de 401-uri).
+
+### Robustete + mesaje
+
+Guard-ul de auth-endpoint din interceptor normalizeaza `string | URL | Request` la pathname (nu mai foloseste substring pe `String(input)`, gresit pentru `Request` si pentru `/api/v1/auth/` aparut in query string). Ecranele de eroare la handshake esuat sunt largite: `not_provisioned`/`forbidden`/`account_inactive` -> "cont neconfigurat sau inactiv"; `desktop_only`/`missing_identity`/`bridge_disabled` -> "configurare server invalida" (nu mai afirma o singura cauza pe care statusul nu o fixeaza).
+
+### Verificare
+
+Branch `fix/web-session-bootstrap`, review adversarial (advisor + panel multi-model 5 modele + 2 runde CodeRabbit). Teste: bootstrap (desktop/web/not_provisioned/error + StrictMode), `syncWebSession` (maparea statusurilor), interceptor 401 (retry / no-retry-on-failed-mint / skip auth-endpoint / desktop skip / dedupe concurent / normalizare Request+query), keep-alive (interval + wake + cleanup). 256 teste frontend, biome + `tsc --noEmit` + `npm run build` verde.
+
 ## v2.38.0 - 2026-06-14
 
 Refresh de modele AI + eliminarea stack-ului OpenRouter chinezesc + un val de hardening de securitate (~50 commits pe branch, inclusiv remedierea post-review). Tema centrala: aducerea modelelor la zi (Opus 4.8, Gemini 3.5 Flash), simplificarea rutarii AI prin renuntarea la GLM/Kimi/Qwen si inchiderea reziduurilor din auditul adversarial `audit/ADVERSARIAL-REVIEW-2026-06-13.md`.

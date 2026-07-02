@@ -19,6 +19,8 @@ import AdminUsage from "@/pages/admin/Usage";
 import AdminKeys from "@/pages/admin/Keys";
 import { AdminGate } from "@/components/AdminGate";
 import { useAuthMode } from "@/hooks/useAuthMode";
+import { useSessionBootstrap } from "@/hooks/useSessionBootstrap";
+import { useSessionKeepAlive } from "@/hooks/useSessionKeepAlive";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
@@ -317,7 +319,22 @@ function AppShell({
   );
 }
 
-export default function App() {
+// Full-screen message shown while the web session bootstraps, or when the
+// handshake hard-fails (account not provisioned / bridge unavailable).
+function AuthBootScreen({ message }: { message: string }) {
+  return (
+    <div className="flex h-screen w-full items-center justify-center bg-background px-6 text-center text-sm text-muted-foreground">
+      {message}
+    </div>
+  );
+}
+
+// All data hooks + the authenticated shell live here so NOTHING fetches before
+// App's session gate has established the web cookie — e.g. useAiSettings fetches
+// /api/v1/ai/settings on mount, which would otherwise race the mint into a 401.
+// Mounted only once the gate opens (or immediately on desktop).
+function AuthedApp() {
+  useSessionKeepAlive();
   const [dosareState, setDosareState] = useState<DosareState>({
     allDosare: [],
     categorii: [],
@@ -446,4 +463,34 @@ export default function App() {
       </ConfirmProvider>
     </BrowserRouter>
   );
+}
+
+export default function App() {
+  const { ready, status } = useSessionBootstrap();
+
+  // Web-mode session gate. Hold the ENTIRE authenticated app (including data
+  // hooks that fetch on mount, e.g. useAiSettings) until the cookie handshake
+  // settles, so the first /api call carries the cookie instead of racing it
+  // into a 401 "Token de autentificare necesar.". Desktop: `ready` is true from
+  // first render, so this is a pass-through with no fetch.
+  if (!ready) {
+    return <AuthBootScreen message="Se conecteaza..." />;
+  }
+  // 403: not provisioned / inactive / forbidden — all "your account can't get a
+  // session". 400|503: desktop_only / missing_identity / bridge_disabled — all
+  // "server-side web auth is misconfigured". Messages stay broad on purpose so
+  // they don't assert a single cause the status doesn't pin down.
+  if (status === "not_provisioned") {
+    return (
+      <AuthBootScreen message="Acces refuzat. Contul nu este configurat sau este inactiv — contacteaza administratorul." />
+    );
+  }
+  if (status === "unavailable") {
+    return (
+      <AuthBootScreen message="Sesiunea web nu a putut fi initializata (configurare server invalida). Contacteaza administratorul." />
+    );
+  }
+  // "ok" and transient "error" render the app; per-request error states surface
+  // any lingering 401s rather than locking the user out on a network blip.
+  return <AuthedApp />;
 }

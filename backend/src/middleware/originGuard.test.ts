@@ -259,3 +259,42 @@ describe("originGuard — F11-F1 edge case characterization", () => {
     expect(res.status).toBe(403);
   });
 });
+
+// PAT (piesa A): un Personal Access Token autentificat cu succes (tokenId setat de
+// ownerContext, care ruleaza inaintea originGuard) e Bearer-based -> imun la CSRF
+// (nu e credential ambient). Bypass-ul se face pe tokenId, NU pe prezenta header-ului
+// Authorization: un `Bearer garbage` esueaza la auth (401) inainte sa ajunga aici.
+describe("originGuard — PAT bypass", () => {
+  function buildTokenApp(tokenId?: string): Hono {
+    const app = new Hono();
+    app.use("/api/*", async (c, next) => {
+      if (tokenId) c.set("tokenId", tokenId);
+      await next();
+    });
+    app.use("/api/*", originGuard);
+    app.post("/api/rnpm/search", (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it("bypasses the origin check for a successfully-authenticated PAT (cross-origin, non-loopback)", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.5" },
+    } as ReturnType<typeof getConnInfo>);
+    const res = await buildTokenApp("tok1").request("/api/rnpm/search", {
+      method: "POST",
+      headers: { host: "dashboard.lan", origin: "http://attacker.example" },
+    });
+    expect(res.status).toBe(200);
+  });
+
+  it("still rejects a non-loopback cookie POST with no Origin when there is no tokenId", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.5" },
+    } as ReturnType<typeof getConnInfo>);
+    const res = await buildTokenApp(undefined).request("/api/rnpm/search", {
+      method: "POST",
+      headers: { host: "dashboard.lan" },
+    });
+    expect(res.status).toBe(403);
+  });
+});

@@ -31,13 +31,83 @@ export function extractErrorMessage(data: unknown, fallback: string): string {
 // existent.
 const DESKTOP_HEADER_NAME = "X-Legal-Dashboard-Desktop";
 const DESKTOP_HEADER_VALUE = "1";
+const SYNC_PATH = "/api/v1/auth/oauth2/sync";
 
-export function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export function isWebRuntime(): boolean {
+  return typeof window !== "undefined" && (window as { desktopApi?: unknown }).desktopApi === undefined;
+}
+
+// Normalize string | URL | Request to a pathname so the auth-endpoint guard is
+// correct regardless of input type: String(Request) is "[object Request]" (would
+// wrongly NOT skip an auth call), and a plain substring check would also
+// false-match "/api/v1/auth/" appearing inside a query string.
+function isAuthPath(input: RequestInfo | URL): boolean {
+  const raw = input instanceof Request ? input.url : input instanceof URL ? input.href : input;
+  try {
+    return new URL(raw, window.location.origin).pathname.startsWith("/api/v1/auth/");
+  } catch {
+    return String(raw).startsWith("/api/v1/auth/");
+  }
+}
+
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (!headers.has(DESKTOP_HEADER_NAME)) {
     headers.set(DESKTOP_HEADER_NAME, DESKTOP_HEADER_VALUE);
   }
-  return fetch(input, { ...init, headers });
+  const finalInit: RequestInit = { ...init, headers };
+  const res = await fetch(input, finalInit);
+
+  // Web-mode session recovery. A 401 means the session cookie expired (TTL ~1h)
+  // or was never minted; re-mint once via the oauth2-proxy bridge and retry the
+  // request a single time so the user is never blocked mid-session. Skip auth
+  // endpoints (no recursion) and desktop (auth is local, never 401s).
+  if (res.status === 401 && isWebRuntime() && !isAuthPath(input)) {
+    const outcome = await ensureWebSession();
+    if (outcome === "ok") {
+      // Retry via raw fetch so it cannot re-enter this interceptor. finalInit
+      // (incl. body) must be replayable — every caller uses string URLs + string
+      // bodies, which are.
+      return fetch(input, finalInit);
+    }
+  }
+  return res;
+}
+
+export type SyncSessionResult = "ok" | "not_provisioned" | "unavailable" | "error";
+
+// Web-mode session bridge. In auth_mode=web the cookie legal_dashboard_session
+// is minted ONLY by POST /api/v1/auth/oauth2/sync: oauth2-proxy injects
+// X-Auth-Request-Email + the shared-secret X-Proxy-Auth on every upstream
+// request, and the backend turns that into our native HS256 cookie. Called on
+// app bootstrap, on the periodic keep-alive (cookie TTL is ~1h), and on 401
+// recovery above. Best-effort: never throws. /auth/refresh only rotates an
+// already-valid cookie, so it cannot bootstrap — the bridge always can, as long
+// as the oauth2-proxy Google session is alive (~7 days).
+export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionResult> {
+  let res: Response;
+  try {
+    res = await apiFetch(SYNC_PATH, { method: "POST", signal: signal ?? AbortSignal.timeout(10_000) });
+  } catch (err) {
+    console.warn("[syncWebSession] bridge sync failed:", err);
+    return "error";
+  }
+  if (res.ok) return "ok";
+  if (res.status === 403) return "not_provisioned"; // not_provisioned / forbidden / account_inactive
+  if (res.status === 400 || res.status === 503) return "unavailable"; // desktop_only / missing_identity / bridge_disabled
+  return "error";
+}
+
+// Dedupe concurrent re-mints: a burst of 401s, the keep-alive timer, and a
+// visibility wake can all fire at once, but only one bridge POST should be in
+// flight; every caller awaits the same promise. Shared by the 401 interceptor
+// and useSessionKeepAlive.
+let reSyncInFlight: Promise<SyncSessionResult> | null = null;
+export function ensureWebSession(): Promise<SyncSessionResult> {
+  reSyncInFlight ??= syncWebSession().finally(() => {
+    reSyncInFlight = null;
+  });
+  return reSyncInFlight;
 }
 
 async function get<T>(url: string, params: Record<string, string | string[] | undefined>): Promise<T> {

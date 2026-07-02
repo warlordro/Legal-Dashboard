@@ -7,6 +7,8 @@ import {
   _resetRateLimitForTest,
   _sweepRateLimitNowForTest,
   RATE_LIMIT,
+  TOKEN_RATE_LIMIT,
+  clampTokenRateLimit,
 } from "./rate-limit.ts";
 import { requestIdContext } from "./requestId.ts";
 
@@ -43,6 +45,83 @@ function buildAppWithOwner(): Hono {
   app.get("/api/ping", (c) => c.json({ ok: true }));
   return app;
 }
+
+// Stand-in ownerContext care seteaza si tokenId (PAT) din header, pentru testele per-token.
+function buildAppWithToken(): Hono {
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    c.set("ownerId", c.req.header("x-test-owner") ?? "local");
+    const t = c.req.header("x-test-token");
+    if (t) c.set("tokenId", t);
+    await next();
+  });
+  app.use("/api/*", rateLimit);
+  app.get("/api/ping", (c) => c.json({ ok: true }));
+  app.get("/api/rnpm/saved", (c) => c.json({ ok: true }));
+  return app;
+}
+
+describe("clampTokenRateLimit — defensive env parsing", () => {
+  it("defaults to 60 for non-finite / non-positive input", () => {
+    expect(clampTokenRateLimit(Number.NaN)).toBe(60);
+    expect(clampTokenRateLimit(Number.POSITIVE_INFINITY)).toBe(60);
+    expect(clampTokenRateLimit(0)).toBe(60);
+  });
+  it("never returns a negative limit (a negative would 429 every request)", () => {
+    expect(clampTokenRateLimit(-5)).toBe(60);
+    expect(clampTokenRateLimit(-5)).toBeGreaterThan(0);
+  });
+  it("floors non-integer values", () => {
+    expect(clampTokenRateLimit(60.9)).toBe(60);
+  });
+  it("caps at the per-owner ceiling (per-token cannot be looser than per-owner)", () => {
+    expect(clampTokenRateLimit(1_000_000, 120)).toBe(120);
+    expect(clampTokenRateLimit(90, 120)).toBe(90);
+  });
+  it("the exported TOKEN_RATE_LIMIT is a finite positive integer <= RATE_LIMIT", () => {
+    expect(Number.isInteger(TOKEN_RATE_LIMIT)).toBe(true);
+    expect(TOKEN_RATE_LIMIT).toBeGreaterThan(0);
+    expect(TOKEN_RATE_LIMIT).toBeLessThanOrEqual(RATE_LIMIT);
+  });
+});
+
+describe("rateLimit — per-token (PAT)", () => {
+  it("throttles per-token below the per-owner ceiling", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.9" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithToken();
+    let last = 200;
+    // TOKEN_RATE_LIMIT (60) < RATE_LIMIT (120): tokenul e blocat inainte ca bucket-ul
+    // per-owner sa atinga plafonul.
+    for (let i = 0; i < TOKEN_RATE_LIMIT + 1; i++) {
+      const res = await app.request("/api/ping", { headers: { "x-test-token": "tokA" } });
+      last = res.status;
+    }
+    expect(last).toBe(429);
+    expect(TOKEN_RATE_LIMIT).toBeLessThan(RATE_LIMIT);
+  });
+
+  it("rate-limits a PAT even on GET /api/rnpm/saved (fix R05 — no bypass for PATs)", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.10" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithToken();
+    let last = 200;
+    for (let i = 0; i < TOKEN_RATE_LIMIT + 1; i++) {
+      const res = await app.request("/api/rnpm/saved", { headers: { "x-test-token": "tokB" } });
+      last = res.status;
+    }
+    expect(last).toBe(429);
+  });
+
+  it("still exempts a non-PAT GET /api/rnpm/saved from the per-owner limit", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.11" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithToken();
+    let last = 200;
+    for (let i = 0; i < RATE_LIMIT + 5; i++) {
+      const res = await app.request("/api/rnpm/saved"); // fara token → exceptat ca inainte
+      last = res.status;
+    }
+    expect(last).toBe(200);
+  });
+});
 
 describe("rateLimit — fail-closed semantics", () => {
   it("rejects with 503 when the runtime cannot surface a remote address", async () => {

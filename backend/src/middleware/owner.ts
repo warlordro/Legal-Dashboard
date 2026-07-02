@@ -5,6 +5,14 @@ import { recordAudit } from "../db/auditRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { fail } from "../util/envelope.ts";
 import { getRequestId } from "./requestId.ts";
+import { TOKEN_PREFIX } from "../db/apiTokenRepository.ts";
+
+// Bearer-ul e in forma de PAT (ld_pat_*)? Folosit doar pentru atribuire in auditul de
+// auth.denied — un replay de PAT revocat/expirat devine separabil de un esec JWT.
+function isPatShapedBearer(c: Context): boolean {
+  const m = /^Bearer\s+(.+)$/i.exec((c.req.header("authorization") ?? "").trim());
+  return (m?.[1] ?? "").startsWith(TOKEN_PREFIX);
+}
 
 // Type-augment Hono so c.get("ownerId") is typed string instead of unknown.
 // Single source of truth for the variable name; route handlers and repositories
@@ -14,6 +22,10 @@ declare module "hono" {
     ownerId: string;
     actorId: string;
     authUser: AuthenticatedContext["user"];
+    // PAT (piesa A): definite doar pe calea Personal Access Token; undefined pe
+    // JWT/desktop -> gate-urile PAT raman no-op.
+    tokenScopes: string[] | undefined;
+    tokenId: string | undefined;
   }
 }
 
@@ -54,6 +66,9 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
         method: c.req.method,
         code: err.code,
         status: err.status,
+        // audit (fix): separa replay-urile de PAT revocat/expirat de esecurile JWT in log,
+        // fara lookup DB pe calea de esec (anti-enumerare/timing). true = Bearer ld_pat_*.
+        isPatShaped: isPatShapedBearer(c),
       },
     });
   } catch (auditErr) {
@@ -83,6 +98,8 @@ export async function ownerContext(c: Context, next: Next): Promise<Response | u
     c.set("ownerId", authenticated.ownerId);
     c.set("actorId", authenticated.actorId);
     c.set("authUser", authenticated.user);
+    c.set("tokenScopes", authenticated.tokenScopes);
+    c.set("tokenId", authenticated.tokenId);
     await next();
   } catch (err) {
     if (err instanceof AuthenticationError) return writeAuthError(c, err);

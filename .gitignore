@@ -59,9 +59,3 @@ backend/rnpm-dumps/
 
 # Worktrees temporare create de tooling (audit/composr)
 .worktrees/
-
-# Dokploy deploy — never commit secrets
-.env
-.env.prod
-.env.prod.dokploy
-deploy/.env.prod

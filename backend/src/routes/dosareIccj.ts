@@ -6,6 +6,7 @@ import {
   searchIccjEnriched,
   searchTermeneByDosarIccj,
 } from "../services/iccj/iccjClient.ts";
+import { IccjBreakerOpenError } from "../services/iccj/iccjBreaker.ts";
 import { ICCJ_SECTII_IDS } from "../services/iccj/iccjSectiiIds.ts";
 import { isValidDate } from "../util/validation.ts";
 
@@ -32,6 +33,9 @@ const ICCJ_DISABLED_HEADERS = { "Retry-After": "300" } as const;
 // retry e mult mai scurta (60s pentru un upstream lent vs 300s pentru dezactivare
 // deliberata), ca sa nu lasam consumatorii fara semantica de retry pe 504.
 const ICCJ_TIMEOUT_HEADERS = { "Retry-After": "60" } as const;
+// 503 breaker: retry aliniat cu cooldown-ul breaker-ului (~30s), nu cu fereastra de 60s a
+// timeout-ului upstream (CodeRabbit) — un consumator care asteapta 60s ar pierde ~30s.
+const ICCJ_BREAKER_HEADERS = { "Retry-After": "30" } as const;
 dosareIccjRouter.use("*", async (c, next) => {
   if (iccjRoutesDisabled()) return c.json(ICCJ_DISABLED_BODY, 503, ICCJ_DISABLED_HEADERS);
   await next();
@@ -57,7 +61,15 @@ function badSectie(v: string | undefined): boolean {
   return v !== undefined && !ICCJ_SECTII_IDS.has(v);
 }
 
-function mapError(err: unknown): { status: 502 | 504 | 500; message: string } {
+function mapError(err: unknown): { status: 502 | 503 | 504 | 500; message: string } {
+  // PAT (piesa A): circuit-breaker global deschis -> 503 retryabil. Forma legacy
+  // { error } ca restul erorilor ICCJ (contract uniform pe ruta, vezi API.md PAT-002).
+  if (err instanceof IccjBreakerOpenError) {
+    return {
+      status: 503,
+      message: "Serviciul ICCJ (scj.ro) e temporar indisponibil (prea multe erori consecutive). Reincercati in curand.",
+    };
+  }
   if (err instanceof IccjSourceError) {
     return { status: 502, message: "Serviciul ICCJ (scj.ro) nu a raspuns corect. Incercati din nou." };
   }
@@ -102,7 +114,7 @@ dosareIccjRouter.get("/", async (c) => {
     // no separate enrichment step/UI. Slower for broad result pages, bounded by concurrency.
     const result = await searchIccjEnriched(
       { numarDosar, obiectDosar, numeParte, sectie, dataStart, dataStop },
-      { signal: c.req.raw.signal, page: pageNum }
+      { signal: c.req.raw.signal, page: pageNum, callerClass: c.get("tokenId") ? "pat" : "ui" }
     );
     // No `hasMore`: the frontend derives it from cumulative loaded count vs `total`
     // (a fixed page-size guess was wrong on partial last pages). See IccjSearchResult.
@@ -115,6 +127,7 @@ dosareIccjRouter.get("/", async (c) => {
     // Client plecat (abort) => nu e o eroare de upstream; nu polua stderr.
     if (!c.req.raw.signal.aborted) console.error("Eroare cautare ICCJ:", err);
     const { status, message } = mapError(err);
+    if (status === 503) return c.json({ error: message }, status, ICCJ_BREAKER_HEADERS);
     if (status === 504) return c.json({ error: message }, status, ICCJ_TIMEOUT_HEADERS);
     return c.json({ error: message }, status);
   }
@@ -128,11 +141,15 @@ dosareIccjRouter.get("/detaliu/:id", async (c) => {
     return c.json({ error: "Id dosar invalid." }, 400);
   }
   try {
-    const dosar = await fetchIccjDetail(id, { signal: c.req.raw.signal });
+    const dosar = await fetchIccjDetail(id, {
+      signal: c.req.raw.signal,
+      callerClass: c.get("tokenId") ? "pat" : "ui",
+    });
     return c.json({ data: dosar });
   } catch (err) {
     if (!c.req.raw.signal.aborted) console.error("Eroare detaliu ICCJ:", err);
     const { status, message } = mapError(err);
+    if (status === 503) return c.json({ error: message }, status, ICCJ_BREAKER_HEADERS);
     if (status === 504) return c.json({ error: message }, status, ICCJ_TIMEOUT_HEADERS);
     return c.json({ error: message }, status);
   }
@@ -170,7 +187,7 @@ termeneIccjRouter.get("/", async (c) => {
   try {
     const res = await searchTermeneByDosarIccj(
       { numarDosar, numeParte, obiectDosar, sectie },
-      { signal: c.req.raw.signal }
+      { signal: c.req.raw.signal, callerClass: c.get("tokenId") ? "pat" : "ui" }
     );
     let termene = res.termene;
     // Optional date-range filter on the hearing date. termen.data is ISO (YYYY-MM-DD)
@@ -186,6 +203,7 @@ termeneIccjRouter.get("/", async (c) => {
   } catch (err) {
     if (!c.req.raw.signal.aborted) console.error("Eroare termene ICCJ:", err);
     const { status, message } = mapError(err);
+    if (status === 503) return c.json({ error: message }, status, ICCJ_BREAKER_HEADERS);
     if (status === 504) return c.json({ error: message }, status, ICCJ_TIMEOUT_HEADERS);
     return c.json({ error: message }, status);
   }
