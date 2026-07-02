@@ -275,13 +275,14 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(res.status).toBe(200);
   });
 
-  // v2.34.0 P0-4-edit: fallback-ul pe X-Forwarded-Email a fost ELIMINAT. Daca
-  // Caddy uita sa setze X-Auth-Request-Email (mis-config) sau cineva expune
-  // direct backend-ul si seteaza doar X-Forwarded-Email, bridge-ul respinge
-  // requestul cu missing_identity. Caddyfile (deploy/Caddyfile) deja
-  // strip-uieste ambele headers inbound, deci aceasta nu poate fi forjat
-  // legitim.
-  it("respinge cand DOAR X-Forwarded-Email e prezent (fallback eliminat in v2.34.0)", async () => {
+  // Fix 2026-07-02: fallback-ul pe X-Forwarded-Email, eliminat in v2.34.0, a
+  // fost REINTRODUS. Motiv: --set-xauthrequest (X-Auth-Request-Email) e header
+  // de raspuns in oauth2-proxy, nu ajunge la upstream in modul --upstreams;
+  // --pass-user-headers (X-Forwarded-Email) e mecanismul care chiar
+  // functioneaza. Ramane sigur: Traefik `legal-secure` strip-uieste ambele
+  // headere la perimetrul public (docker-compose.yml), un client extern nu le
+  // poate injecta.
+  it("accepta X-Forwarded-Email cand X-Auth-Request-Email lipseste (mecanismul real de pass-user-headers)", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
 
     const res = await syncRequest({
@@ -289,9 +290,23 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
       "x-forwarded-email": "alice@example.test",
     });
 
-    expect(res.status).toBe(400);
-    const body = (await res.json()) as EnvelopeErrorBody;
-    expect(body.error.code).toBe("missing_identity");
+    expect(res.status).toBe(200);
+  });
+
+  it("prefera X-Auth-Request-Email peste X-Forwarded-Email cand ambele sunt prezente", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    insertUser({ id: "bob", email: "bob@example.test", displayName: "Bob", role: "user" });
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "alice@example.test",
+      "x-forwarded-email": "bob@example.test",
+    });
+
+    expect(res.status).toBe(200);
+    const audits = getAuditEvents({ action: "auth.oauth2.sync" });
+    const success = audits.find((a) => a.outcome === "ok");
+    expect(success?.target_id).toBe("alice");
   });
 
   it("audit-ul de succes contine targetId=user.id si NU plaintext email", async () => {

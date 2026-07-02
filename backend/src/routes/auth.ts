@@ -212,13 +212,19 @@ authRouter.post("/oauth2/sync", (c) => {
     return c.json(fail("forbidden", "Acces interzis.", c), 403);
   }
 
-  // v2.34.0 P0-4-edit: am eliminat fallback-ul pe `x-forwarded-email`. Caddy-ul
-  // public-facing strip-uieste ambele headers inainte de oauth2-proxy si le
-  // re-injecteaza din variabilele oauth2-proxy (vezi deploy/Caddyfile). Daca
-  // Caddy e misconfigurat sau cineva expune direct backend-ul (port 3002 in
-  // afara enclavei), fallback-ul devine bypass. Acceptam doar header-ul
-  // canonical setat de oauth2-proxy, dupa shared-secret check.
-  const rawEmail = c.req.header("x-auth-request-email") ?? "";
+  // Fix 2026-07-02: `--set-xauthrequest` (care produce X-Auth-Request-Email) e
+  // documentat de oauth2-proxy ca header de RASPUNS pentru modul nginx
+  // auth_request — verificat empiric (audit_log real: missing_identity pe
+  // 100% din request-urile prin oauth2-proxy) ca NU e forward-uit catre
+  // upstream cand oauth2-proxy ruleaza ca reverse-proxy propriu (--upstreams,
+  // cazul nostru). Mecanismul care CHIAR ajunge la upstream e
+  // --pass-user-headers (default true, confirmat din --help), care produce
+  // X-Forwarded-Email. Refacem fallback-ul eliminat in v2.34.0 (P0-4-edit):
+  // ramane sigur pentru ca perimetrul public (Traefik middleware
+  // `legal-secure` in docker-compose.yml) strip-uieste ambele headere
+  // (X-Auth-Request-Email SI X-Forwarded-Email) inainte sa ajunga la
+  // oauth2-proxy — un client extern nu poate injecta niciunul.
+  const rawEmail = c.req.header("x-auth-request-email") ?? c.req.header("x-forwarded-email") ?? "";
   const email = rawEmail.trim().toLowerCase();
   if (!email || !email.includes("@") || email.length > 254) {
     recordAudit(null, "auth.oauth2.sync", {
