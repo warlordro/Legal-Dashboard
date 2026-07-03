@@ -6,17 +6,22 @@ const STORAGE_KEY = "portaljust-font-size";
 // Flag-ul marcheaza resetul one-time pe web ca noul default (16px) sa se aplice.
 const WEB_MIGRATION_KEY = "portaljust-font-size-migrated-v241";
 const STEPS = [
+  { label: "Foarte mic", value: 14 },
   { label: "Mic", value: 16 },
   { label: "Normal", value: 18 },
   { label: "Mare", value: 20 },
   { label: "Extra", value: 22 },
 ];
 
+// Pre-v2.41.0 preferinta se stoca drept INDEX in vechiul array [16,18,20,22].
+// Acum se stocheaza valoarea px — imun la modificari viitoare ale listei.
+const LEGACY_INDEX_PX = [16, 18, 20, 22];
+
 const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
 
 // Desktop: Normal (18px) — compensat vizual de zoom-ul 0.9 aplicat de Electron
 // la primul launch (main.js). Web: Mic (16px) — baseline browser, fara zoom.
-const DEFAULT_STEP = isDesktop ? 1 : 0;
+const DEFAULT_STEP = STEPS.findIndex((s) => s.value === (isDesktop ? 18 : 16));
 
 function migrateWebAutoPersistedValue() {
   if (isDesktop) return;
@@ -37,7 +42,14 @@ function loadStep(): number {
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved !== null) {
       const n = Number(saved);
-      if (Number.isInteger(n) && n >= 0 && n < STEPS.length) return n;
+      // Format curent: valoare px (14/16/18/20/22).
+      const byValue = STEPS.findIndex((s) => s.value === n);
+      if (byValue >= 0) return byValue;
+      // Format legacy: index 0..3 in vechiul array — mapat la px-ul de atunci,
+      // ca "Normal 18px" salvat pe desktop sa ramana 18px si dupa extinderea listei.
+      if (Number.isInteger(n) && n >= 0 && n < LEGACY_INDEX_PX.length) {
+        return STEPS.findIndex((s) => s.value === LEGACY_INDEX_PX[n]);
+      }
     }
   } catch {
     /* localStorage unavailable (private mode / quota); use default */
@@ -59,7 +71,8 @@ export function useFontSize() {
     applyFontSize(step);
     if (!userChangedRef.current) return;
     try {
-      localStorage.setItem(STORAGE_KEY, String(step));
+      // Se stocheaza px-ul, nu indexul (vezi LEGACY_INDEX_PX).
+      localStorage.setItem(STORAGE_KEY, String(STEPS[step].value));
     } catch {
       /* quota / private mode — ramane doar in memorie */
     }

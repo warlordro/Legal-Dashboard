@@ -92,6 +92,22 @@ export interface QuotaListResult {
   overrides: QuotaOverride[];
 }
 
+// v2.41.0: vedere globala — override-urile tuturor userilor, cu identitate.
+export interface QuotaOverrideWithUser {
+  userId: string;
+  userEmail: string | null;
+  userDisplayName: string | null;
+  feature: string;
+  period: QuotaPeriod;
+  limitUsdMilli: number | null;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
+export interface QuotaOverviewResult {
+  overrides: QuotaOverrideWithUser[];
+}
+
 export interface QuotaGrant {
   id: number;
   userId: string;
@@ -289,6 +305,11 @@ export const admin = {
     const { signal, ...params } = opts;
     const res = await apiFetch(`/api/v1/admin/audit${adminQs(params)}`, { signal });
     return unwrapMonitoring<PaginatedAudit>(res);
+  },
+
+  listQuotaOverview: async (signal?: AbortSignal): Promise<QuotaOverviewResult> => {
+    const res = await apiFetch("/api/v1/admin/quota/overrides", { signal });
+    return unwrapMonitoring<QuotaOverviewResult>(res);
   },
 
   listQuota: async (userId: string, signal?: AbortSignal): Promise<QuotaListResult> => {

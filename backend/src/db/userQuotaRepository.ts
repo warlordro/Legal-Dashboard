@@ -61,6 +61,27 @@ export function listOverridesForUser(userId: string, limit = 200): QuotaOverride
     .all(userId, boundedLimit) as QuotaOverrideRow[];
 }
 
+// v2.41.0: vedere globala pentru pagina admin Cote — toate override-urile
+// active, cu identitatea userului atasata (fara sa fie nevoie de cautare).
+export interface QuotaOverrideWithUserRow extends QuotaOverrideRow {
+  user_email: string | null;
+  user_display_name: string | null;
+}
+
+export function listAllOverrides(limit = 500): QuotaOverrideWithUserRow[] {
+  const boundedLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  return getDb()
+    .prepare(
+      `SELECT o.user_id, o.feature, o.period, o.limit_usd_milli, o.updated_at, o.updated_by,
+              u.email AS user_email, u.display_name AS user_display_name
+       FROM user_quota_overrides o
+       LEFT JOIN users u ON u.id = o.user_id
+       ORDER BY o.updated_at DESC
+       LIMIT ?`
+    )
+    .all(boundedLimit) as QuotaOverrideWithUserRow[];
+}
+
 export function getOverride(userId: string, feature: string): QuotaOverrideRow | null {
   const row = getDb()
     .prepare(

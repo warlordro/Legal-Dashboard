@@ -91,7 +91,7 @@ describe("migrarea one-time pe web", () => {
   it("nu ruleaza a doua oara: alegerea explicita post-migrare e respectata", async () => {
     setDesktop(false);
     localStorage.setItem(MIGRATION_KEY, "1");
-    localStorage.setItem(STORAGE_KEY, "2"); // aleasa explicit dupa migrare
+    localStorage.setItem(STORAGE_KEY, "20"); // px ales explicit dupa migrare
     const { capture, cleanup } = await renderHook();
     expect(capture.current?.value).toBe(20);
     cleanup();
@@ -99,10 +99,18 @@ describe("migrarea one-time pe web", () => {
 
   it("nu atinge storage-ul pe desktop", async () => {
     setDesktop(true);
-    localStorage.setItem(STORAGE_KEY, "2");
+    localStorage.setItem(STORAGE_KEY, "20");
     const { capture, cleanup } = await renderHook();
     expect(capture.current?.value).toBe(20);
     expect(localStorage.getItem(MIGRATION_KEY)).toBeNull();
+    cleanup();
+  });
+
+  it("desktop: indexul legacy pastreaza px-ul de atunci dupa extinderea listei", async () => {
+    setDesktop(true);
+    localStorage.setItem(STORAGE_KEY, "1"); // legacy index 1 = 18px (Normal)
+    const { capture, cleanup } = await renderHook();
+    expect(capture.current?.value).toBe(18);
     cleanup();
   });
 });
@@ -115,12 +123,22 @@ describe("persistenta doar la alegere explicita", () => {
     cleanup();
   });
 
-  it("increase() persista valoarea aleasa", async () => {
+  it("increase() persista valoarea aleasa ca px", async () => {
     setDesktop(false);
     const { capture, cleanup } = await renderHook();
     act(() => capture.current?.increase());
     expect(capture.current?.value).toBe(18);
-    expect(localStorage.getItem(STORAGE_KEY)).toBe("1");
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("18");
+    cleanup();
+  });
+
+  it("web: exista o treapta sub 16px (Foarte mic, 14px)", async () => {
+    setDesktop(false);
+    const { capture, cleanup } = await renderHook();
+    expect(capture.current?.canDecrease).toBe(true);
+    act(() => capture.current?.decrease());
+    expect(capture.current?.value).toBe(14);
+    expect(document.documentElement.style.fontSize).toBe("14px");
     cleanup();
   });
 });
@@ -134,7 +152,7 @@ describe("validarea valorii stocate", () => {
     cleanup();
   });
 
-  it("respinge out-of-range", async () => {
+  it("respinge valori care nu sunt nici px valid, nici index legacy", async () => {
     setDesktop(true);
     localStorage.setItem(STORAGE_KEY, "9");
     const { capture, cleanup } = await renderHook();

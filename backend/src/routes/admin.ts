@@ -40,7 +40,13 @@ import {
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
-import { deleteOverride, listOverridesForUser, upsertOverride, type QuotaPeriod } from "../db/userQuotaRepository.ts";
+import {
+  deleteOverride,
+  listAllOverrides,
+  listOverridesForUser,
+  upsertOverride,
+  type QuotaPeriod,
+} from "../db/userQuotaRepository.ts";
 import {
   createGrant,
   getGrant,
@@ -468,6 +474,23 @@ adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
 });
 
 // ---------- Quota ----------
+
+// v2.41.0: vedere globala — toate override-urile active, cu identitatea
+// userului, ca pagina admin Cote sa le arate direct la deschidere (fara
+// cautarea prealabila a unui user).
+adminRouter.get("/quota/overrides", (c) => {
+  const rows = listAllOverrides().map((r) => ({
+    userId: r.user_id,
+    userEmail: r.user_email,
+    userDisplayName: r.user_display_name,
+    feature: r.feature,
+    period: r.period,
+    limitUsdMilli: r.limit_usd_milli,
+    updatedAt: r.updated_at,
+    updatedBy: r.updated_by,
+  }));
+  return c.json(ok({ overrides: rows }, c), 200);
+});
 
 adminRouter.get("/users/:id/quota", (c) => {
   const id = c.req.param("id");

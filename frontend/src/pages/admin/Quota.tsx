@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, type AdminUser, type QuotaOverride, type QuotaPeriod } from "@/lib/api";
+import { admin, type AdminUser, type QuotaOverride, type QuotaOverrideWithUser, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
@@ -75,6 +75,35 @@ export default function AdminQuota() {
   const [limitUsd, setLimitUsd] = useState("");
   const [unlimited, setUnlimited] = useState(false);
   const [busyFeature, setBusyFeature] = useState<string | null>(null);
+  // v2.41.0: vedere globala la deschidere — cotele active ale tuturor userilor,
+  // fara sa fie nevoie de cautarea prealabila a unui user.
+  const [overview, setOverview] = useState<QuotaOverrideWithUser[]>([]);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+
+  const loadOverview = useCallback(async () => {
+    setOverviewLoading(true);
+    try {
+      const result = await admin.listQuotaOverview();
+      setOverview(result.overrides);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor active.");
+    } finally {
+      setOverviewLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadOverview();
+  }, [loadOverview]);
+
+  const selectFromOverview = async (userId: string) => {
+    try {
+      const user = await admin.getUser(userId);
+      onSelect(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorului.");
+    }
+  };
 
   const search = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -150,6 +179,7 @@ export default function AdminQuota() {
         limitUsdMilli,
       });
       await loadOverrides(selected.id);
+      void loadOverview();
       setFeature(DEFAULT_FEATURE);
       setLimitUsd("");
       setPeriod("day");
@@ -182,6 +212,7 @@ export default function AdminQuota() {
     try {
       await admin.deleteQuota(selected.id, override.feature);
       await loadOverrides(selected.id);
+      void loadOverview();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la stergerea cotei.");
     } finally {
@@ -269,6 +300,76 @@ export default function AdminQuota() {
             )}
           </CardContent>
         </Card>
+
+        {!selected && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+                <span className="flex items-center gap-2">
+                  <Gauge className="h-4 w-4" />
+                  Cote active
+                </span>
+                <Button variant="outline" size="sm" onClick={() => loadOverview()} disabled={overviewLoading}>
+                  <RefreshCw className={cn("h-4 w-4", overviewLoading && "animate-spin")} />
+                  Refresh
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {overview.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  {overviewLoading
+                    ? "Se incarca cotele active..."
+                    : "Nu exista override-uri active. Toti userii folosesc limitele default."}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="px-3 py-2 font-semibold">Utilizator</th>
+                        <th className="px-3 py-2 font-semibold">Feature</th>
+                        <th className="px-3 py-2 font-semibold">Perioada</th>
+                        <th className="px-3 py-2 font-semibold">Limita</th>
+                        <th className="px-3 py-2 font-semibold">Actualizat</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {overview.map((row) => (
+                        <tr key={`${row.userId}:${row.feature}`}>
+                          <td className="px-3 py-2 align-top">
+                            <p className="font-mono text-xs">{row.userEmail ?? row.userId}</p>
+                            {row.userDisplayName && (
+                              <p className="text-xs text-muted-foreground">{row.userDisplayName}</p>
+                            )}
+                          </td>
+                          <td className="px-3 py-2 align-top">
+                            {FEATURE_OPTIONS.find((o) => o.value === row.feature)?.label ?? row.feature}
+                          </td>
+                          <td className="px-3 py-2 align-top">{PERIOD_LABELS[row.period]}</td>
+                          <td className="px-3 py-2 align-top">
+                            {row.limitUsdMilli === null
+                              ? "Nelimitat"
+                              : `${formatStoredValue(row.feature, row.limitUsdMilli)} ${limitUnitLabel(row.feature)}`}
+                          </td>
+                          <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                            {new Date(row.updatedAt).toLocaleString("ro-RO")}
+                          </td>
+                          <td className="px-3 py-2 align-top text-right">
+                            <Button size="sm" variant="outline" onClick={() => selectFromOverview(row.userId)}>
+                              Editeaza
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {selected && (
           <Card>

@@ -366,6 +366,34 @@ describe("/api/v1/admin/users/:id/quota", () => {
     expect(body.data).toEqual({ userId: "u-1", overrides: [] });
   });
 
+  it("GET /quota/overrides returneaza vederea globala cu identitatea userului", async () => {
+    const app = buildApp();
+    await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "captcha.rnpm", period: "day", limitUsdMilli: 25 }),
+    });
+    const res = await app.request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data.overrides).toHaveLength(1);
+    expect(body.data.overrides[0]).toMatchObject({
+      userId: "u-1",
+      userEmail: "a@x",
+      userDisplayName: "A",
+      feature: "captcha.rnpm",
+      period: "day",
+      limitUsdMilli: 25,
+    });
+  });
+
+  it("GET /quota/overrides returneaza lista goala fara override-uri", async () => {
+    const res = await buildApp().request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toEqual({ overrides: [] });
+  });
+
   it("PUT upserts an override + records audit", async () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/users/u-1/quota", {

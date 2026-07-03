@@ -574,6 +574,8 @@ export {
   type PaginatedAudit,
   type QuotaOverride,
   type QuotaListResult,
+  type QuotaOverrideWithUser,
+  type QuotaOverviewResult,
   type QuotaPeriod,
   type QuotaGrant,
   type QuotaGrantListResult,
