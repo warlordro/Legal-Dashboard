@@ -287,11 +287,16 @@ export default function AdminUsers() {
                         </td>
                         <td className="px-4 py-2 align-top">{row.displayName || "-"}</td>
                         <td className="px-4 py-2 align-top">
+                          {/* Latimi fixe pe badge + select: altfel eticheta variabila a
+                              rolului ("Admin" vs "Utilizator") impinge select-urile la
+                              offset-uri diferite intre randuri. */}
                           <div className="flex items-center gap-2">
-                            <Badge variant={roleVariant(row.role)}>{roleLabel(row.role)}</Badge>
+                            <Badge variant={roleVariant(row.role)} className="w-24 justify-center">
+                              {roleLabel(row.role)}
+                            </Badge>
                             <Select value={row.role} onValueChange={(v) => handleRoleChange(row, v as UserRole)}>
                               <SelectTrigger
-                                className="h-7 px-2 text-xs w-auto min-w-[110px]"
+                                className="h-7 px-2 text-xs w-[130px]"
                                 disabled={busyId === row.id || loading}
                               >
                                 <SelectValue placeholder="Rol" />
@@ -308,10 +313,12 @@ export default function AdminUsers() {
                         </td>
                         <td className="px-4 py-2 align-top">
                           <div className="flex items-center gap-2">
-                            <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
+                            <Badge variant={statusVariant(row.status)} className="w-24 justify-center">
+                              {statusLabel(row.status)}
+                            </Badge>
                             <Select value={row.status} onValueChange={(v) => handleStatusChange(row, v as UserStatus)}>
                               <SelectTrigger
-                                className="h-7 px-2 text-xs w-auto min-w-[110px]"
+                                className="h-7 px-2 text-xs w-[130px]"
                                 disabled={busyId === row.id || loading}
                               >
                                 <SelectValue placeholder="Status" />

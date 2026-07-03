@@ -108,6 +108,16 @@ export interface QuotaOverviewResult {
   overrides: QuotaOverrideWithUser[];
 }
 
+// v2.41.0: vedere globala granturi active, cu identitatea userului.
+export interface QuotaGrantWithUser extends QuotaGrant {
+  userEmail: string | null;
+  userDisplayName: string | null;
+}
+
+export interface ActiveGrantsResult {
+  grants: QuotaGrantWithUser[];
+}
+
 export interface QuotaGrant {
   id: number;
   userId: string;
@@ -339,6 +349,11 @@ export const admin = {
       { method: "DELETE" }
     );
     return unwrapMonitoring<{ feature: string; removed: boolean }>(res);
+  },
+
+  listActiveGrants: async (signal?: AbortSignal): Promise<ActiveGrantsResult> => {
+    const res = await apiFetch("/api/v1/admin/grants/active", { signal });
+    return unwrapMonitoring<ActiveGrantsResult>(res);
   },
 
   listGrants: async (userId: string, signal?: AbortSignal): Promise<QuotaGrantListResult> => {

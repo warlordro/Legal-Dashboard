@@ -578,6 +578,8 @@ export {
   type QuotaOverviewResult,
   type QuotaPeriod,
   type QuotaGrant,
+  type QuotaGrantWithUser,
+  type ActiveGrantsResult,
   type QuotaGrantListResult,
   type CreateGrantInput,
   type TenantKeyField,

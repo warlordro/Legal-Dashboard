@@ -48,10 +48,26 @@ const server = http.createServer((req, res) => {
     }
   );
   upstream.on("error", (err) => {
+    // Upstream cazut MID-stream (ex. backend repornit sub un SSE activ):
+    // header-ele au plecat deja — writeHead ar arunca ERR_HTTP_HEADERS_SENT
+    // si ar omori procesul. Inchidem socketul si mergem mai departe.
+    if (res.headersSent) {
+      res.destroy();
+      return;
+    }
     res.writeHead(502, { "content-type": "text/plain" });
     res.end(`dev-web-proxy: upstream indisponibil (${err.message})`);
   });
+  // Clientul poate inchide oricand (refresh, tab inchis) — nu lasa erorile de
+  // socket sa devina exceptii negestionate.
+  req.on("error", () => upstream.destroy());
+  res.on("error", () => upstream.destroy());
   req.pipe(upstream);
+});
+
+// Backstop: un edge-case neacoperit nu trebuie sa omoare proxy-ul de dev.
+process.on("uncaughtException", (err) => {
+  console.error("[dev-web-proxy] uncaught:", err.message);
 });
 
 server.listen(listenPort, "127.0.0.1", () => {

@@ -147,7 +147,7 @@ export function ApiAccessPanel() {
               type="button"
               onClick={onRevokeAll}
               disabled={busy}
-              className="rounded-md border border-border px-2 py-1 text-[11px] text-red-600 hover:bg-muted disabled:opacity-50"
+              className="rounded-md border border-border px-2 py-1 text-sm text-red-600 hover:bg-muted disabled:opacity-50"
             >
               Revoca toate
             </button>
@@ -155,20 +155,20 @@ export function ApiAccessPanel() {
           <button
             type="button"
             onClick={() => setShowCreate((v) => !v)}
-            className="rounded-md bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90"
+            className="rounded-md bg-primary px-2.5 py-1 text-sm text-primary-foreground hover:opacity-90"
           >
             Creeaza token
           </button>
         </div>
       </div>
 
-      {error && <p className="mb-2 text-[11px] text-red-600">{error}</p>}
+      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {newSecret && (
-        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-[12px]">
+        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-sm">
           <p className="mb-1 font-medium">Copiaza tokenul acum — nu mai poate fi afisat.</p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-white px-2 py-1 font-mono text-[11px]">{newSecret}</code>
+            <code className="flex-1 truncate rounded bg-white px-2 py-1 font-mono text-xs">{newSecret}</code>
             <button
               type="button"
               onClick={copySecret}
@@ -183,7 +183,7 @@ export function ApiAccessPanel() {
                 setNewSecret(null);
                 setCopied(false);
               }}
-              className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-muted"
+              className="rounded-md border border-border px-2 py-1 text-sm hover:bg-muted"
             >
               Am copiat
             </button>
@@ -202,13 +202,13 @@ export function ApiAccessPanel() {
           />
           <div className="flex flex-wrap gap-3">
             {SCOPES.map((s) => (
-              <label key={s.value} className="flex items-center gap-1 text-[12px]">
+              <label key={s.value} className="flex items-center gap-1 text-sm">
                 <input type="checkbox" checked={scopes.includes(s.value)} onChange={() => toggleScope(s.value)} />
                 {s.label}
               </label>
             ))}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-[12px]">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
             <label className="flex items-center gap-1">
               Expira in
               <select
@@ -239,7 +239,7 @@ export function ApiAccessPanel() {
             type="button"
             onClick={submitCreate}
             disabled={busy || name.trim() === "" || scopes.length === 0}
-            className="rounded-md bg-primary px-3 py-1 text-[12px] text-primary-foreground disabled:opacity-50"
+            className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground disabled:opacity-50"
           >
             Creeaza
           </button>
@@ -247,23 +247,23 @@ export function ApiAccessPanel() {
       )}
 
       {loading ? (
-        <p className="text-[12px] text-muted-foreground">Se incarca…</p>
+        <p className="text-sm text-muted-foreground">Se incarca…</p>
       ) : !loadOk ? (
         // Load esuat: NU arata empty-state ("Niciun token") — ar fi inselator; mesajul de eroare
         // e afisat sus. (CodeRabbit)
-        <p className="text-[12px] text-muted-foreground">Reincarca dialogul pentru a reincerca.</p>
+        <p className="text-sm text-muted-foreground">Reincarca dialogul pentru a reincerca.</p>
       ) : tokens.length === 0 ? (
-        <p className="text-[12px] text-muted-foreground">Niciun token. Creeaza unul pentru acces programatic.</p>
+        <p className="text-sm text-muted-foreground">Niciun token. Creeaza unul pentru acces programatic.</p>
       ) : (
         <ul className="space-y-1">
           {tokens.map((t) => (
             <li
               key={t.id}
-              className="flex items-center justify-between rounded-md border border-border px-2 py-1 text-[12px]"
+              className="flex items-center justify-between rounded-md border border-border px-2 py-1 text-sm"
             >
               <div className="min-w-0">
                 <span className="font-medium">{t.name}</span>{" "}
-                <code className="font-mono text-[11px] text-muted-foreground">{t.tokenPrefix}…</code>
+                <code className="font-mono text-xs text-muted-foreground">{t.tokenPrefix}…</code>
                 <span className="ml-1 text-muted-foreground">[{t.scopes.join(", ")}]</span>
                 {t.revokedAt && <span className="ml-1 text-red-600">revocat</span>}
                 {t.lastUsedAt && (

@@ -50,6 +50,7 @@ import {
 import {
   createGrant,
   getGrant,
+  listAllActiveGrants,
   listGrantsForUser,
   revokeGrant,
   type QuotaGrantRow,
@@ -586,6 +587,17 @@ adminRouter.delete("/users/:id/quota/:feature", (c) => {
 });
 
 // ---------- Grants ----------
+
+// v2.41.0: vedere globala — granturile active ale tuturor userilor, cu
+// identitatea atasata (pandant la GET /quota/overrides).
+adminRouter.get("/grants/active", (c) => {
+  const rows = listAllActiveGrants().map((r) => ({
+    ...toGrantDto(r),
+    userEmail: r.user_email,
+    userDisplayName: r.user_display_name,
+  }));
+  return c.json(ok({ grants: rows }, c), 200);
+});
 
 adminRouter.get("/users/:id/grants", (c) => {
   const id = c.req.param("id");

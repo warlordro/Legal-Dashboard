@@ -4,7 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, type AdminUser, type QuotaGrant } from "@/lib/api";
+import { admin, type AdminUser, type QuotaGrant, type QuotaGrantWithUser } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
@@ -56,6 +56,35 @@ export default function AdminGrants() {
   const [expiresAtLocal, setExpiresAtLocal] = useState("");
   const [reason, setReason] = useState("");
   const [busyId, setBusyId] = useState<number | "create" | null>(null);
+  // v2.41.0: vedere globala la deschidere — granturile active ale tuturor
+  // userilor, fara cautarea prealabila a unui user (pandant la pagina Cote).
+  const [activeGrants, setActiveGrants] = useState<QuotaGrantWithUser[]>([]);
+  const [activeLoading, setActiveLoading] = useState(false);
+
+  const loadActiveGrants = useCallback(async () => {
+    setActiveLoading(true);
+    try {
+      const result = await admin.listActiveGrants();
+      setActiveGrants(result.grants);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea granturilor active.");
+    } finally {
+      setActiveLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadActiveGrants();
+  }, [loadActiveGrants]);
+
+  const selectFromActive = async (userId: string) => {
+    try {
+      const user = await admin.getUser(userId);
+      onSelect(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorului.");
+    }
+  };
 
   const search = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -132,6 +161,7 @@ export default function AdminGrants() {
         reason: reason.trim() || null,
       });
       await loadGrants(selected.id);
+      void loadActiveGrants();
       setExtraUsd("");
       setExpiresAtLocal("");
       setReason("");
@@ -155,6 +185,7 @@ export default function AdminGrants() {
     try {
       await admin.revokeGrant(grant.id, null);
       if (selected) await loadGrants(selected.id);
+      void loadActiveGrants();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la revocarea grant-ului.");
     } finally {
@@ -229,6 +260,66 @@ export default function AdminGrants() {
             )}
           </CardContent>
         </Card>
+
+        {!selected && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+                <span className="flex items-center gap-2">
+                  <Gift className="h-4 w-4" />
+                  Granturi active
+                </span>
+                <Button variant="outline" size="sm" onClick={() => loadActiveGrants()} disabled={activeLoading}>
+                  <RefreshCw className={cn("h-4 w-4", activeLoading && "animate-spin")} />
+                  Refresh
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {activeGrants.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  {activeLoading ? "Se incarca granturile active..." : "Nu exista granturi active."}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="px-3 py-2 font-semibold">Utilizator</th>
+                        <th className="px-3 py-2 font-semibold">Feature</th>
+                        <th className="px-3 py-2 font-semibold">Extra</th>
+                        <th className="px-3 py-2 font-semibold">Expira</th>
+                        <th className="px-3 py-2 font-semibold">Motiv</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {activeGrants.map((g) => (
+                        <tr key={g.id}>
+                          <td className="px-3 py-2 align-top">
+                            <p className="font-mono text-xs">{g.userEmail ?? g.userId}</p>
+                            {g.userDisplayName && <p className="text-xs text-muted-foreground">{g.userDisplayName}</p>}
+                          </td>
+                          <td className="px-3 py-2 align-top font-mono text-xs">{g.feature}</td>
+                          <td className="px-3 py-2 align-top">{milliToUsd(g.extraUsdMilli)} $</td>
+                          <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                            {formatIsoDateTime(g.expiresAt)}
+                          </td>
+                          <td className="px-3 py-2 align-top text-xs text-muted-foreground">{g.reason ?? "—"}</td>
+                          <td className="px-3 py-2 align-top text-right">
+                            <Button size="sm" variant="outline" onClick={() => selectFromActive(g.userId)}>
+                              Editeaza
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {selected && (
           <Card>

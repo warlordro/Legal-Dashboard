@@ -53,6 +53,31 @@ function assertIsoString(label: string, value: string): void {
   }
 }
 
+// v2.41.0: vedere globala pentru pagina admin Granturi — toate granturile
+// ACTIVE (nerevocate, neexpirate), cu identitatea userului atasata, ca pagina
+// sa le arate la deschidere fara cautarea prealabila a unui user.
+export interface QuotaGrantWithUserRow extends QuotaGrantRow {
+  user_email: string | null;
+  user_display_name: string | null;
+}
+
+export function listAllActiveGrants(limit = 500): QuotaGrantWithUserRow[] {
+  const boundedLimit = Math.max(1, Math.min(500, Math.floor(limit)));
+  return getDb()
+    .prepare(
+      `SELECT g.id, g.user_id, g.feature, g.extra_usd_milli, g.expires_at, g.reason,
+              g.granted_at, g.granted_by, g.revoked_at, g.revoked_by, g.revoked_reason,
+              u.email AS user_email, u.display_name AS user_display_name
+       FROM user_quota_grants g
+       LEFT JOIN users u ON u.id = g.user_id
+       WHERE g.revoked_at IS NULL
+         AND g.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       ORDER BY g.expires_at ASC, g.id ASC
+       LIMIT ?`
+    )
+    .all(boundedLimit) as QuotaGrantWithUserRow[];
+}
+
 export function listGrantsForUser(userId: string, limit = 200): QuotaGrantRow[] {
   const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
   return getDb()

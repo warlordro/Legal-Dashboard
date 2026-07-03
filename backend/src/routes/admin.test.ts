@@ -375,9 +375,9 @@ describe("/api/v1/admin/users/:id/quota", () => {
     });
     const res = await app.request("/api/v1/admin/quota/overrides");
     expect(res.status).toBe(200);
-    const body = await jsonOf(res);
-    expect(body.data.overrides).toHaveLength(1);
-    expect(body.data.overrides[0]).toMatchObject({
+    const data = (await jsonOf(res)).data as { overrides: Array<Record<string, unknown>> };
+    expect(data.overrides).toHaveLength(1);
+    expect(data.overrides[0]).toMatchObject({
       userId: "u-1",
       userEmail: "a@x",
       userDisplayName: "A",
@@ -591,6 +591,43 @@ describe("/api/v1/admin/users/:id/grants", () => {
     expect(sumActiveExtraMilli("u-1", "ai.single")).toBe(2500);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_create" });
     expect(events).toHaveLength(1);
+  });
+
+  it("GET /grants/active returneaza vederea globala cu identitatea userului", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+    });
+    const res = await app.request("/api/v1/admin/grants/active");
+    expect(res.status).toBe(200);
+    const data = (await jsonOf(res)).data as { grants: Array<Record<string, unknown>> };
+    expect(data.grants).toHaveLength(1);
+    expect(data.grants[0]).toMatchObject({
+      userId: "u-1",
+      userEmail: "a@x",
+      userDisplayName: "A",
+      feature: "ai.single",
+      extraUsdMilli: 2500,
+      revokedAt: null,
+    });
+  });
+
+  it("GET /grants/active exclude granturile revocate", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+    });
+    const grantId = ((await jsonOf(createRes)) as { data: { id: number } }).data.id;
+    await app.request(`/api/v1/admin/grants/${grantId}`, { method: "DELETE" });
+    const res = await app.request("/api/v1/admin/grants/active");
+    const data = (await jsonOf(res)).data as { grants: unknown[] };
+    expect(data.grants).toHaveLength(0);
   });
 
   it("POST rejects expiresAt in the past with 400", async () => {
