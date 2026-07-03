@@ -50,6 +50,7 @@ function buildApp() {
       captchaKey: guard.captchaKey,
       captchaProvider: guard.captchaProvider,
       captchaMode: guard.captchaMode,
+      fallback2CaptchaKey: guard.fallback2CaptchaKey ?? null,
     });
   });
   return app;
@@ -106,7 +107,7 @@ describe("withRnpmCaptchaGuards", () => {
     });
   });
 
-  it("in web mode ignora captchaKey din body si foloseste cheia tenantului", async () => {
+  it("in web mode ignora captchaKey din body, il elimina din body si foloseste cheia tenantului", async () => {
     mockedGetAuthMode.mockReturnValue("web");
     mockedGetTenantKeys.mockReturnValue({
       anthropic: "",
@@ -128,13 +129,159 @@ describe("withRnpmCaptchaGuards", () => {
     });
 
     expect(res.status).toBe(200);
-    await expect(res.json()).resolves.toMatchObject({
+    const json = (await res.json()) as { body: Record<string, unknown>; captchaKey: string };
+    // v2.41.0: body-ul forwarded e sanitizat — campurile captcha client dispar.
+    expect(json.body).toEqual({ type: "ipoteci" });
+    expect(json).toMatchObject({
       ok: true,
-      body: { captchaKey: "body-key-should-not-win", type: "ipoteci" },
       captchaKey: "tenant-capsolver-key",
       captchaProvider: "capsolver",
       captchaMode: "race",
     });
+  });
+
+  it("race mode: fallback simetric capsolver->2captcha din cheile tenant", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "capsolver",
+      captchaMode: "race",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      captchaKey: "tenant-capsolver-key",
+      fallback2CaptchaKey: "tenant-2captcha-key",
+    });
+  });
+
+  it("race mode: fallback simetric 2captcha->capsolver din cheile tenant", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "2captcha",
+      captchaMode: "race",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      captchaKey: "tenant-2captcha-key",
+      fallback2CaptchaKey: "tenant-capsolver-key",
+    });
+  });
+
+  it("sequential + capsolver primary: fallback uman 2captcha (paritate desktop)", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "capsolver",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      captchaKey: "tenant-capsolver-key",
+      fallback2CaptchaKey: "tenant-2captcha-key",
+    });
+  });
+
+  it("sequential + 2captcha primary: fara fallback (paritate desktop)", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      captchaKey: "tenant-2captcha-key",
+      fallback2CaptchaKey: null,
+    });
+  });
+
+  it("in web mode body.fallback2CaptchaKey al clientului e eliminat, nu preluat", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "ipoteci",
+        fallback2CaptchaKey: "client-fallback-should-die",
+        captchaProvider: "capsolver",
+        captchaMode: "race",
+      }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as { body: Record<string, unknown>; fallback2CaptchaKey: string | null };
+    expect(json.body).toEqual({ type: "ipoteci" });
+    expect(json.fallback2CaptchaKey).toBeNull();
   });
 
   it("respinge body JSON invalid cu 400", async () => {

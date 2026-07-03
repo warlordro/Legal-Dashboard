@@ -262,8 +262,10 @@ export default function AdminGrants() {
                     onChange={(e) => setFeature(e.target.value)}
                     className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                   >
-                    <option value="ai.single">ai.single</option>
-                    <option value="ai.multi">ai.multi</option>
+                    {/* Grants raman AI-only: granturile sunt denominate USD, iar guard-ul
+                        captcha nu aplica extra-grant logic — o optiune captcha ar fi inerta. */}
+                    <option value="ai.single">AI — analiza individuala (ai.single)</option>
+                    <option value="ai.multi">AI — analiza multipla (ai.multi)</option>
                   </select>
                 </div>
                 <div>

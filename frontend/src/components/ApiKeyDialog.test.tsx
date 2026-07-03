@@ -8,10 +8,10 @@ import { ApiKeyDialog } from "./ApiKeyDialog";
 import type { AiMode } from "./dosare-ai-config";
 
 vi.mock("@/components/AIUsagePanel", () => ({ AIUsagePanel: () => <div /> }));
-vi.mock("@/components/ApiAccessPanel", () => ({ ApiAccessPanel: () => <div /> }));
+vi.mock("@/components/ApiAccessPanel", () => ({ ApiAccessPanel: () => <div data-testid="pat-panel" /> }));
 vi.mock("@/components/EmailSettingsPanel", () => ({ EmailSettingsPanel: () => <div /> }));
 vi.mock("@/components/NotificationStatusPanel", () => ({ NotificationStatusPanel: () => <div /> }));
-vi.mock("@/hooks/useAuthMode", () => ({ useAuthMode: vi.fn(() => "desktop") }));
+vi.mock("react-router-dom", () => ({ useNavigate: () => vi.fn() }));
 vi.mock("@/hooks/useCurrentUser", () => ({
   useCurrentUser: vi.fn(() => ({
     user: {
@@ -29,11 +29,43 @@ vi.mock("@/hooks/useCurrentUser", () => ({
   })),
 }));
 
-import { useAuthMode } from "@/hooks/useAuthMode";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
+import type { TenantKeys, TenantKeysConfigured } from "@/hooks/useTenantKeyStatus";
 
-const useAuthModeMock = vi.mocked(useAuthMode);
 const useCurrentUserMock = vi.mocked(useCurrentUser);
+
+// Desktop: fara fetch, politica BYOK — echivalentul useTenantKeyStatus in Electron.
+function tenantDesktop(): TenantKeys {
+  return {
+    status: { state: "desktop" },
+    tenantMode: false,
+    hasTenantAiKey: false,
+    tenantCaptchaMissing: false,
+    tenantAiKeysMissing: false,
+    refresh: vi.fn(),
+  };
+}
+
+// Web tenant mode confirmat de server, cu combinatia de chei configurate data.
+function tenantReady(configured: Partial<TenantKeysConfigured> = {}): TenantKeys {
+  const cfg: TenantKeysConfigured = {
+    anthropic: false,
+    openai: false,
+    google: false,
+    openrouter: false,
+    captcha: false,
+    ...configured,
+  };
+  const hasAi = cfg.anthropic || cfg.openai || cfg.google || cfg.openrouter;
+  return {
+    status: { state: "ready", serverAuthMode: "web", configured: cfg },
+    tenantMode: true,
+    hasTenantAiKey: hasAi,
+    tenantCaptchaMissing: !cfg.captcha,
+    tenantAiKeysMissing: !hasAi,
+    refresh: vi.fn(),
+  };
+}
 
 let host: HTMLDivElement;
 let root: Root;
@@ -84,6 +116,7 @@ function changeInput(input: HTMLInputElement, value: string) {
 function props(mode: AiMode) {
   return {
     onClose: vi.fn(),
+    tenantKeys: tenantDesktop(),
     apiKey: {
       setKey: vi.fn(),
       clearKey: vi.fn(),
@@ -119,7 +152,6 @@ describe("ApiKeyDialog OpenRouter mode", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    useAuthModeMock.mockReturnValue("desktop");
     useCurrentUserMock.mockReturnValue({
       user: {
         id: "local",
@@ -136,8 +168,7 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     });
   });
 
-  it("hides in web mode for non-admin users", () => {
-    useAuthModeMock.mockReturnValue("web");
+  it("tenant mode: non-adminul vede statusul read-only, fara BYOK, fara buton admin, fara PAT", () => {
     useCurrentUserMock.mockReturnValue({
       user: {
         id: "u-1",
@@ -153,31 +184,48 @@ describe("ApiKeyDialog OpenRouter mode", () => {
       refresh: vi.fn(),
     });
 
-    render(<ApiKeyDialog {...props("native")} />);
+    render(<ApiKeyDialog {...props("native")} tenantKeys={tenantReady({ anthropic: true, captcha: true })} />);
 
-    expect(textContent(host)).toBe("");
+    const text = textContent(host);
+    expect(text).toContain("Chei API — nivel tenant");
+    expect(text).toContain("gestionate de administratorul tenantului");
+    // Fara formular BYOK: niciun input de cheie si niciun buton Salveaza.
+    expect(host.querySelectorAll("input").length).toBe(0);
+    expect(text).not.toContain("Salveaza");
+    expect(text).not.toContain("Gestioneaza in Administrare");
+    expect(host.querySelector("[data-testid='pat-panel']")).toBeNull();
   });
 
-  it("shows in web mode for admin users", () => {
-    useAuthModeMock.mockReturnValue("web");
-    useCurrentUserMock.mockReturnValue({
-      user: {
-        id: "admin",
-        email: "admin@firma.ro",
-        displayName: "Admin",
-        role: "admin",
-        status: "active",
-        createdAt: "2026-05-19T00:00:00.000Z",
-        lastLoginAt: null,
-      },
-      loading: false,
-      error: null,
+  it("browser cu key-status error: panou neutru cu Reincearca, NICIODATA formularul BYOK", () => {
+    const tenantErr: TenantKeys = {
+      status: { state: "error" },
+      tenantMode: false,
+      hasTenantAiKey: false,
+      tenantCaptchaMissing: false,
+      tenantAiKeysMissing: false,
       refresh: vi.fn(),
-    });
+    };
+    render(<ApiKeyDialog {...props("native")} tenantKeys={tenantErr} />);
 
-    render(<ApiKeyDialog {...props("native")} />);
+    const text = textContent(host);
+    expect(text).toContain("Starea cheilor nu a putut fi incarcata");
+    expect(text).toContain("Reincearca");
+    // Invariant F3.4: pe web nu se randeaza BYOK nici pe stari tranzitorii —
+    // formularul ar minti ca salveaza local si ar tine chei in state.
+    expect(host.querySelectorAll("input").length).toBe(0);
+    expect(text).not.toContain("Salveaza");
+  });
 
-    expect(textContent(host)).toContain("Configurare Chei API");
+  it("tenant mode: adminul vede butonul spre Administrare si panoul PAT, tot fara BYOK", () => {
+    render(<ApiKeyDialog {...props("native")} tenantKeys={tenantReady({ openai: true })} />);
+
+    const text = textContent(host);
+    expect(text).toContain("Gestioneaza in Administrare");
+    expect(host.querySelector("[data-testid='pat-panel']")).not.toBeNull();
+    expect(host.querySelectorAll("input").length).toBe(0);
+    // Statusul per cheie reflecta raspunsul serverului.
+    expect(text).toContain("OpenAI");
+    expect(text).toContain("Configurata");
   });
 
   it("renders the three native slots in native mode", () => {

@@ -1,5 +1,37 @@
 # Changelog - Legal Dashboard
 
+## v2.41.0 - 2026-07-04
+
+Etapa 1 din corectiile post-testare web (PLAN-web-ux-fixes.md): layout-ul in browser, conectarea frontend-ului la cheile tenant si UX-ul paginii de cote. Diagnostic prin doua workflow-uri multi-agent cu verificare in cod; planul a trecut printr-un review adversarial multi-model (review-panel: Opus 4.8 + GPT-5.5 + Kimi K2.7 + Qwen3.7, sinteza Fable 5) — 3 findings High + 8 Medium integrate inainte de implementare. Zero schimbari Docker/Caddy/oauth2-proxy; desktop-ul ramane identic.
+
+### Fix: layout web (banda alba, scala 112.5%, sidebar taiat)
+
+Trei cauze independente, trei fix-uri gated pe `window.desktopApi`: (1) drag strip-ul de 32px + `pt-8` (compensatii pentru `titleBarOverlay` Electron) nu se mai randeaza in browser — banda alba de sus dispare; (2) font-size-ul root porneste pe web de la 16px (baseline browser) in loc de 18px — valoarea desktop era mascata de `setZoomLevel(0.9)` aplicat de Electron, compensare inexistenta in browser, deci web-ul randa la 112.5% si cerea zoom-out manual; migrare one-time a valorii auto-persistate in localStorage (rulata INAINTE de orice persist — altfel vechiul default o suprascria) + persistenta doar la alegerea explicita a userului + validare `Number.isInteger` pe valoarea stocata; (3) navigatia + istoricul din sidebar primesc scroll intern in modul expandat (footer-ul ramane pinned; in modul colapsat fara overflow, ca popover-urile de istoric sa nu fie clip-uite), cu `min-h-40` pe sectiunea de istoric deschisa ca lista sa nu colapseze la 0 pe viewport-uri scunde.
+
+### Fix: cheile tenant ajung in sfarsit la frontend-ul web
+
+Backend-ul rezolva corect cheile din `tenant_api_keys` inca din v2.34.0, dar frontend-ul citea cheile EXCLUSIV prin `window.desktopApi` (inexistent in browser) si bloca request-urile client-side inainte sa plece — cautarile RNPM si analizele AI pareau moarte desi adminul configurase totul. Hook nou `useTenantKeyStatus` consuma `GET /api/v1/me/key-status` (endpoint existent, zero consumatori pana acum), cu stare cvadrivalenta (desktop/loading/ready/error), politica fail-open pe starile tranzitorii (backend-ul e sursa de adevar), refetch la window focus si semnal de platforma din raspunsul serverului (`authMode` real, nu detectia de browser — combinatia dev "browser + backend desktop" ramane BYOK). Guard-urile RNPM devin web-aware in toate punctele: `runSearch`, `runSplit`, **`loadNextBatch` (paginarea "Incarca tot" — ar fi ramas no-op silentios)** si bulk; badge-ul "Setari API" arata starea cheilor tenant (neutru pe loading, nu "Neconfigurat" fals); `useDosareAi` isi deriva listele de modele din cheile tenant si nu mai trimite `apiKeys` in body (care declansa 501). Body-urile RNPM omit campurile captcha in tenant mode.
+
+### Fix: dialogul "Setari API" in web + PAT admin-only
+
+In tenant mode dialogul se deschide pentru TOTI userii (non-adminii primeau un no-op silentios), dar formularul BYOK nu se mai randeaza niciodata in web — salvarea safeStorage esua silentios, footerul afirma fals "cheile se salveaza local", iar cheile ramase in state ajungeau in body si declansau 501 pe AI. In locul lui: panou read-only cu starea per cheie din `/me/key-status` + textul "gestionate de administratorul tenantului"; adminii au buton direct catre Administrare -> Chei API. Sectiunea de notificari native (Electron-only) dispare din browser, iar managementul token-urilor PAT devine admin-only in web — atat in UI cat si server-side (`requireRole("admin")` pe `/api/v1/tokens*` cand `auth_mode=web`; desktop neafectat).
+
+### Fix: fallback captcha simetric pe ramura tenant + "tenant key wins" integral
+
+`resolveCaptchaKeyForRoute` deriva acum `fallback2CaptchaKey` din cheile tenant cu paritate desktop: race -> cheia celuilalt provider (ambele directii), sequential + CapSolver primary -> fallback uman 2Captcha. Body-ul forwarded pe ramura tenant e sanitizat (campurile `captchaKey/captchaProvider/captchaMode/fallback2CaptchaKey` din client sunt eliminate) — inainte, `rnpm.ts` cadea pe `body.fallback2CaptchaKey` ales de client chiar in web mode. Functia orfana `rejectCaptchaKeyInWebMode` (zero call-sites) stearsa; sectiunea stale "Web-mode 501 gate" din CLAUDE.md rescrisa pe mecanismul real. Teste noi: ambele directii de fallback, sanitizarea body-ului, sequential cu/fara fallback.
+
+### Fix: pagina Cote fara token-uri interne
+
+Campul text liber pentru feature (enum inchis de 3 valori, validat cu `z.enum` — "RNPM" tastat producea "Body invalid" generic) devine select cu etichete umane; unitatea limitei (USD vs captcha-uri) si helper text-ul se actualizeaza din selectie. Edit-ul unui rand legacy cu feature in afara enum-ului round-trip-uieste corect (optiune disabled-but-selected). Grants: relabel pe cele doua optiuni AI existente; ramane explicit AI-only (granturile sunt denominate USD, guard-ul captcha nu aplica extra-grant logic).
+
+### Tooling: mediu web local de test
+
+`scripts/dev-web-local.ps1` ridica un server web local complet fara Docker/Caddy: backend in `auth_mode=web` cu DB izolata (`.dev-web-local/`, git-ignored), seed admin si mint de sesiune prin `POST /api/v1/auth/oauth2/sync` — exact request-ul oauth2-proxy din productie. Smoke-ul v2.41.0 a rulat pe el: bridge -> sesiune -> key-status -> RNPM pe ramura tenant (501 `CAPTCHA_NOT_CONFIGURED` corect fara cheie; validare reala a cheilor la setare in `/admin/keys`).
+
+### Verificare
+
+Plan reviewed adversarial INAINTE de cod (15 findings adoptate, 3 respinse ca false dupa verificare in sursa, 1 escaladat la decizie de produs). Teste noi: `useFontSize` (9 — defaults per platforma, migrare cu ordinea corecta, persist doar la alegere), `useTenantKeyStatus` (5 — fail-open, dev combo, refetch la focus), `ApiKeyDialog` (rework web), `rnpmGuards` (+6 — fallback ambele directii, sanitizare). Biome + `tsc --noEmit` backend/frontend + `npm run build` + suitele complete (1599 backend, 279 frontend, 2 electron) verzi. Smoke web local end-to-end + review deep-code-reviewer pe diff inainte de merge.
+
 ## v2.40.1 - 2026-07-02
 
 Doua fixuri de deploy web, ambele descoperite la primul deploy real pe platforma Dokploy (build direct din git clone): imaginea Docker nu se putea construi fara build local prealabil, iar puntea de autentificare oauth2-proxy -> backend folosea mecanisme care nu exista in oauth2-proxy legacy config si nu a functionat niciodata in productie. Desktop: zero impact.

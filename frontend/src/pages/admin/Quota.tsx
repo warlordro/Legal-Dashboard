@@ -47,6 +47,20 @@ function limitUnitLabel(feature: string): string {
   return isCountFeature(feature) ? "captcha-uri" : "USD";
 }
 
+// Oglinda QUOTA_FEATURES din backend (quotaGuard.ts) — enum inchis, validat cu
+// z.enum in admin.ts. Text liber aici insemna "Body invalid" generic la orice
+// token gresit (v2.40.x); select-ul face eroarea imposibila.
+const FEATURE_OPTIONS = [
+  { value: "ai.single", label: "AI — analiza individuala (ai.single)" },
+  { value: "ai.multi", label: "AI — analiza multipla (ai.multi)" },
+  { value: "captcha.rnpm", label: "Captcha RNPM (captcha.rnpm)" },
+] as const;
+const DEFAULT_FEATURE = FEATURE_OPTIONS[0].value;
+
+function isKnownFeature(feature: string): boolean {
+  return FEATURE_OPTIONS.some((o) => o.value === feature);
+}
+
 export default function AdminQuota() {
   const confirm = useConfirm();
   const [searchInput, setSearchInput] = useState("");
@@ -56,7 +70,7 @@ export default function AdminQuota() {
   const [overrides, setOverrides] = useState<QuotaOverride[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [feature, setFeature] = useState("");
+  const [feature, setFeature] = useState<string>(DEFAULT_FEATURE);
   const [period, setPeriod] = useState<QuotaPeriod>("day");
   const [limitUsd, setLimitUsd] = useState("");
   const [unlimited, setUnlimited] = useState(false);
@@ -99,7 +113,7 @@ export default function AdminQuota() {
   const onSelect = (user: AdminUser) => {
     setSelected(user);
     setCandidates([]);
-    setFeature("");
+    setFeature(DEFAULT_FEATURE);
     setPeriod("day");
     setLimitUsd("");
     setUnlimited(false);
@@ -136,7 +150,7 @@ export default function AdminQuota() {
         limitUsdMilli,
       });
       await loadOverrides(selected.id);
-      setFeature("");
+      setFeature(DEFAULT_FEATURE);
       setLimitUsd("");
       setPeriod("day");
       setUnlimited(false);
@@ -282,14 +296,31 @@ export default function AdminQuota() {
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-feature">
                     Feature
                   </label>
-                  <input
+                  <select
                     id="quota-feature"
-                    type="text"
                     value={feature}
                     onChange={(e) => setFeature(e.target.value)}
-                    placeholder="ex: ai.single, ai.multi, captcha.rnpm"
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  />
+                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                  >
+                    {/* Rand legacy (feature in afara enum-ului, ex. pre-v2.32): il pastram
+                        selectabil doar cat e valoarea curenta (edit round-trip corect),
+                        fara sa-l oferim ca optiune noua. */}
+                    {feature && !isKnownFeature(feature) && (
+                      <option value={feature} disabled>
+                        {feature} (legacy)
+                      </option>
+                    )}
+                    {FEATURE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    {isCountFeature(feature)
+                      ? "Limita = numar de captcha-uri pe fereastra rolling."
+                      : "Limita = cost USD pe fereastra rolling."}
+                  </p>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-period">
@@ -325,7 +356,15 @@ export default function AdminQuota() {
                     )}
                   />
                 </div>
-                <Button type="submit" disabled={busyFeature !== null}>
+                <Button
+                  type="submit"
+                  disabled={busyFeature !== null || !isKnownFeature(feature)}
+                  title={
+                    !isKnownFeature(feature)
+                      ? "Feature legacy in afara enum-ului — backend-ul l-ar respinge; poate fi doar sters."
+                      : undefined
+                  }
+                >
                   <Plus className="h-4 w-4" />
                   Salveaza
                 </Button>

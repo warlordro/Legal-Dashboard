@@ -137,7 +137,10 @@ export async function rnpmSearch(
   const res = await apiFetch(`${BASE}/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ type, params, captchaKey, ...opts }),
+    // In tenant mode (web) captchaKey soseste gol — il omitem din body cu totul:
+    // backend-ul il ignora oricum pe ramura tenant, dar orice valoare non-goala
+    // genereaza warning server-side, iar pe ramura BYOK cheia e mereu non-goala.
+    body: JSON.stringify({ type, params, ...(captchaKey ? { captchaKey } : {}), ...opts }),
     signal,
   });
   // Special-case 400 + code:"LIMIT_EXCEEDED" — escape din jsonOrThrow inainte de a colapsa eroarea.
@@ -192,7 +195,9 @@ export async function rnpmSplitSearch(
       type,
       baseParams,
       subTypeLabels,
-      captchaKey,
+      // Tenant mode: cheia goala se omite (vezi rnpmSearch); undefined-urile
+      // pentru provider/fallback/mode sunt eliminate implicit de JSON.stringify.
+      ...(captchaKey ? { captchaKey } : {}),
       captchaProvider,
       fallback2CaptchaKey,
       captchaMode,
@@ -509,7 +514,13 @@ export async function rnpmBulkSearch(
   const res = await apiFetch(`${BASE}/bulk`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ items, captchaKey, captchaProvider, fallback2CaptchaKey, captchaMode }),
+    body: JSON.stringify({
+      items,
+      ...(captchaKey ? { captchaKey } : {}),
+      captchaProvider,
+      fallback2CaptchaKey,
+      captchaMode,
+    }),
     signal,
   });
   if (!res.ok || !res.body) {

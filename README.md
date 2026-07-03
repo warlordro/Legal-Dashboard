@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.40.1**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.41.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.40.1** - doua fixuri pentru deploy-ul web de productie: Dockerfile-ul compileaza aplicatia intr-un stage de build (docker build functioneaza direct din git clone — Dokploy/Coolify — fara pre-compilare locala), baza de date sta pe volum persistent by default, iar bridge-ul oauth2-proxy foloseste mecanismele reale ale proxy-ului (secret ca parola Basic Auth prin `basic-auth-password`, identitate prin `X-Forwarded-Email` din `pass-user-headers`) in locul unor optiuni care nu exista in legacy config si blocau login-ul de productie. Predecesor **v2.40.0** - API programatic doar-citire prin Personal Access Tokens (Piesa A din planul API + MCP, doar web mode): tokenuri opace `ld_pat_...`, gate default-deny pe `(metoda, path, scope)`, rate-limit si plafon captcha per-token, audit + alerta email la IP nou, OpenAPI 3.1 + [API.md](API.md).
+Ultimul release **v2.41.0** - primul val de corectii dupa testarea reala a aplicatiei web: layout-ul se afiseaza corect in browser (fara banda alba, fara zoom-out manual, sidebar derulabil), cautarile RNPM si analizele AI folosesc cheile tenant configurate de administrator (frontend-ul consuma in sfarsit `GET /me/key-status`; guard-urile client devin web-aware, inclusiv paginarea), dialogul "Setari API" arata in web starea cheilor read-only in loc de formularul BYOK desktop, token-urile PAT devin admin-only in web (UI + `requireRole` server-side), fallback-ul captcha e derivat simetric din cheile tenant, iar pagina Cote foloseste select cu denumiri clare in loc de token-uri interne tastate manual. Plus `scripts/dev-web-local.ps1` — mediu web local complet de test, fara Docker/Caddy. Predecesor **v2.40.1** - fixuri deploy web de productie (Docker build-from-git, bridge oauth2-proxy pe mecanismele reale, ruta ingress PAT prin Caddy).
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 

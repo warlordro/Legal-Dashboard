@@ -7,7 +7,9 @@ import { Button } from "./ui/button";
 export interface SidebarFooterProps {
   collapsed: boolean;
   onToggleCollapsed: () => void;
-  hasApiKey?: boolean;
+  // null = stare tranzitorie in web (key-status loading/error) — badge neutru,
+  // nu afisam "Neconfigurat" fals pana nu stim starea cheilor tenant.
+  hasApiKey?: boolean | null;
   onConfigureApiKey?: () => void;
 }
 
@@ -88,11 +90,11 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
               <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                 Activ
               </span>
-            ) : (
+            ) : hasApiKey === false ? (
               <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
                 Neconfigurat
               </span>
-            )}
+            ) : null}
           </span>
         )}
       </Button>

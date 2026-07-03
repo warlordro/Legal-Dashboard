@@ -11,6 +11,7 @@ import type { LoadMoreProgress } from "@/lib/api";
 import { exportDosareExcel, exportDosarePDF } from "@/lib/export-dosare";
 import type { Dosar, DosarSource, SearchParams } from "@/types";
 import type { ApiKeys } from "@/hooks/useApiKey";
+import type { TenantKeys } from "@/hooks/useTenantKeyStatus";
 import type { AiMode } from "@/components/dosare-ai-config";
 import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
 import { dropLegalFormTokens } from "@/lib/legalSuffix";
@@ -109,6 +110,7 @@ interface DosareProps {
   consumePendingSearch?: () => void;
   apiKeys?: ApiKeys;
   aiSettings: { mode: AiMode };
+  tenantKeys?: TenantKeys;
   onConfigureApiKey?: () => void;
   showBudgetIndicator?: boolean;
 }
@@ -121,6 +123,7 @@ export default function Dosare({
   consumePendingSearch,
   apiKeys,
   aiSettings,
+  tenantKeys,
   onConfigureApiKey,
   showBudgetIndicator = false,
 }: DosareProps) {
@@ -512,6 +515,7 @@ export default function Dosare({
           onExportPDF={(sel) => exportDosarePDF(sel || dosare)}
           searchedName={state.searchedName}
           apiKeys={apiKeys}
+          tenantKeys={tenantKeys}
           aiSettings={aiSettings}
           onConfigureApiKey={onConfigureApiKey}
         />

@@ -40,6 +40,41 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.41.0",
+    date: "4 Iulie 2026",
+    subtitle:
+      "Primul val de corectii dupa testarea reala a aplicatiei web: pagina se afiseaza corect in browser fara zoom manual, cautarile RNPM si analizele AI folosesc cheile configurate de administrator, iar pagina de cote nu mai cere coduri tehnice tastate de mana. Modul desktop ramane neschimbat.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Afisare corecta in browser",
+        content:
+          "Banda alba din partea de sus (rezervata barei de titlu din aplicatia desktop) nu mai apare pe web, textul porneste de la marimea standard a browserului (fara sa mai fie nevoie de zoom-out), iar meniul lateral devine derulabil cand nu incape pe ecran — toate modulele, inclusiv sectiunea de administrare si istoricul, raman accesibile.",
+      },
+      {
+        title: "Cheile administratorului functioneaza peste tot",
+        content:
+          "Pana acum browserul cauta cheile API doar in seiful local al aplicatiei desktop, care nu exista pe web — cautarile RNPM si analizele AI pareau blocate desi administratorul configurase totul. Acum aplicatia web citeste starea cheilor de la server: cautarile pornesc, paginarea functioneaza, iar modelele AI disponibile reflecta cheile setate de administrator.",
+      },
+      {
+        title: "Fereastra Setari API adaptata pentru web",
+        content:
+          "Utilizatorii web nu mai vad formularul de chei personale (care oricum nu putea salva nimic in browser). In locul lui: starea cheilor configurate de administrator, cu buton direct catre pagina de administrare pentru admini. Tokenurile de acces programatic se administreaza doar de admin, iar sectiunea de notificari de sistem (specifica desktop-ului) dispare de pe web.",
+        bullets: [
+          "Fallback-ul intre providerii de captcha (2Captcha/CapSolver) functioneaza acum si pe web, derivat automat din cheile administratorului",
+          "Mesajele de eroare indica administratorul cand o cheie lipseste, in loc sa ceara configurare locala",
+        ],
+      },
+      {
+        title: "Cote fara coduri tehnice",
+        content:
+          "Pagina Cote cerea tastarea exacta a unor coduri interne (ai.single, captcha.rnpm) si raspundea cu 'Body invalid' la orice greseala. Acum feature-ul se alege dintr-o lista cu denumiri clare, iar unitatea limitei (dolari sau numar de captcha-uri) se afiseaza automat in functie de selectie.",
+      },
+    ],
+  },
+  {
     version: "v2.40.1",
     date: "2 Iulie 2026",
     subtitle:

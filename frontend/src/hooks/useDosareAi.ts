@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { AI_MODELS, type AiMode, JUDGE_MODELS_LIST } from "@/components/dosare-ai-config";
+import type { TenantKeys } from "@/hooks/useTenantKeyStatus";
 import type { Dosar } from "@/types";
 
 interface ApiKeys {
@@ -9,6 +10,11 @@ interface ApiKeys {
   google: string;
   openrouter: string;
 }
+
+// Marker de truthiness pentru cheile tenant (server-side). Nu paraseste
+// niciodata clientul: in tenant mode body-ul NU contine apiKeys (bodyKeys
+// devine undefined), sentinelul guverneaza doar disponibilitatea UI.
+const TENANT_KEY_SENTINEL = "__tenant__";
 
 interface MultiResultPayload {
   analyses: {
@@ -54,6 +60,9 @@ export interface MultiBundle {
 export interface UseDosareAiArgs {
   apiKeys: ApiKeys | undefined;
   aiSettings: { mode: AiMode };
+  // Starea cheilor tenant (web mode). Optional pentru compatibilitate cu
+  // call-site-uri desktop-only; absenta = comportament BYOK istoric.
+  tenantKeys?: TenantKeys;
 }
 
 export interface UseDosareAiResult {
@@ -63,7 +72,41 @@ export interface UseDosareAiResult {
   multiForRow: (numar: string) => MultiBundle;
 }
 
-export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosareAiResult {
+export function useDosareAi({ apiKeys, aiSettings, tenantKeys }: UseDosareAiArgs): UseDosareAiResult {
+  // BYOK = desktop Electron sau dev "browser + backend desktop-auth": cheile
+  // locale guverneaza si se trimit in body. In tenant mode (server a confirmat
+  // auth_mode=web) disponibilitatea vine din /me/key-status, iar body-ul nu
+  // contine chei (backend-ul le rezolva singur; chei in body => 501).
+  const byokMode =
+    !tenantKeys ||
+    tenantKeys.status.state === "desktop" ||
+    (tenantKeys.status.state === "ready" && !tenantKeys.tenantMode);
+
+  // Guverneaza DOAR disponibilitatea UI (hasAnyKey + listele de modele).
+  // Pe loading/error in browser: fail-open — toate modelele raman selectabile,
+  // backend-ul e sursa de adevar si intoarce el eroarea corecta.
+  const effectiveKeys: ApiKeys | undefined = useMemo(() => {
+    if (byokMode) return apiKeys;
+    if (tenantKeys && tenantKeys.status.state === "ready") {
+      const cfg = tenantKeys.status.configured;
+      return {
+        anthropic: cfg.anthropic ? TENANT_KEY_SENTINEL : "",
+        openai: cfg.openai ? TENANT_KEY_SENTINEL : "",
+        google: cfg.google ? TENANT_KEY_SENTINEL : "",
+        openrouter: cfg.openrouter ? TENANT_KEY_SENTINEL : "",
+      };
+    }
+    return {
+      anthropic: TENANT_KEY_SENTINEL,
+      openai: TENANT_KEY_SENTINEL,
+      google: TENANT_KEY_SENTINEL,
+      openrouter: TENANT_KEY_SENTINEL,
+    };
+  }, [byokMode, apiKeys, tenantKeys]);
+
+  // Body-ul primeste chei doar pe calea BYOK reala.
+  const bodyKeys = byokMode ? apiKeys : undefined;
+
   const [aiAnalysis, setAiAnalysis] = useState<Record<string, string>>({});
   const [aiLoading, setAiLoading] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -81,8 +124,8 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
 
   const hasAnyKey =
     aiSettings.mode === "openrouter"
-      ? Boolean(apiKeys?.openrouter)
-      : Boolean(apiKeys && (apiKeys.anthropic || apiKeys.openai || apiKeys.google));
+      ? Boolean(effectiveKeys?.openrouter)
+      : Boolean(effectiveKeys && (effectiveKeys.anthropic || effectiveKeys.openai || effectiveKeys.google));
 
   const stackModels = AI_MODELS;
   const stackJudgeModels = JUDGE_MODELS_LIST;
@@ -90,31 +133,45 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
   const availableModels = useMemo(
     () =>
       aiSettings.mode === "openrouter"
-        ? apiKeys?.openrouter
+        ? effectiveKeys?.openrouter
           ? stackModels
           : []
         : stackModels.filter((m) => {
-            if (m.provider === "anthropic") return apiKeys?.anthropic;
-            if (m.provider === "openai") return apiKeys?.openai;
-            if (m.provider === "google") return apiKeys?.google;
+            if (m.provider === "anthropic") return effectiveKeys?.anthropic;
+            if (m.provider === "openai") return effectiveKeys?.openai;
+            if (m.provider === "google") return effectiveKeys?.google;
             return false;
           }),
-    [aiSettings.mode, apiKeys?.anthropic, apiKeys?.openai, apiKeys?.google, apiKeys?.openrouter, stackModels]
+    [
+      aiSettings.mode,
+      effectiveKeys?.anthropic,
+      effectiveKeys?.openai,
+      effectiveKeys?.google,
+      effectiveKeys?.openrouter,
+      stackModels,
+    ]
   );
 
   const availableJudgeModels = useMemo(
     () =>
       aiSettings.mode === "openrouter"
-        ? apiKeys?.openrouter
+        ? effectiveKeys?.openrouter
           ? stackJudgeModels
           : []
         : stackJudgeModels.filter((m) => {
-            if (m.provider === "anthropic") return apiKeys?.anthropic;
-            if (m.provider === "openai") return apiKeys?.openai;
-            if (m.provider === "google") return apiKeys?.google;
+            if (m.provider === "anthropic") return effectiveKeys?.anthropic;
+            if (m.provider === "openai") return effectiveKeys?.openai;
+            if (m.provider === "google") return effectiveKeys?.google;
             return false;
           }),
-    [aiSettings.mode, apiKeys?.anthropic, apiKeys?.openai, apiKeys?.google, apiKeys?.openrouter, stackJudgeModels]
+    [
+      aiSettings.mode,
+      effectiveKeys?.anthropic,
+      effectiveKeys?.openai,
+      effectiveKeys?.google,
+      effectiveKeys?.openrouter,
+      stackJudgeModels,
+    ]
   );
 
   const providerGroups = useMemo(
@@ -189,7 +246,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
       setAiLoading(key);
       setAiError(null);
       try {
-        const result = await api.ai.analyze(dosar, aiModel, apiKeys);
+        const result = await api.ai.analyze(dosar, aiModel, bodyKeys);
         setAiAnalysis((prev) => ({ ...prev, [key]: result.analysis }));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Eroare la analiza AI";
@@ -202,7 +259,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         setAiLoading(null);
       }
     },
-    [aiModel, apiKeys, availableModels, hasAnyKey]
+    [aiModel, bodyKeys, availableModels, hasAnyKey]
   );
 
   const handleMultiAnalyze = useCallback(
@@ -211,9 +268,11 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         setShowKeyPrompt(true);
         return;
       }
+      // In tenant mode mesajul indica adminul (userul nu are ce configura local).
+      const missingKeySuffix = byokMode ? "" : " — contacteaza administratorul";
       if (aiSettings.mode === "openrouter") {
-        if (!apiKeys?.openrouter) {
-          setMultiError("Lipseste cheia API pentru OpenRouter");
+        if (!effectiveKeys?.openrouter) {
+          setMultiError(`Lipseste cheia API pentru OpenRouter${missingKeySuffix}`);
           return;
         }
       } else {
@@ -223,16 +282,16 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
           if (modelDef) neededProviders.add(modelDef.provider);
         }
         for (const provider of neededProviders) {
-          if (provider === "anthropic" && !apiKeys?.anthropic) {
-            setMultiError("Lipseste cheia API pentru Anthropic (Claude)");
+          if (provider === "anthropic" && !effectiveKeys?.anthropic) {
+            setMultiError(`Lipseste cheia API pentru Anthropic (Claude)${missingKeySuffix}`);
             return;
           }
-          if (provider === "openai" && !apiKeys?.openai) {
-            setMultiError("Lipseste cheia API pentru OpenAI (GPT)");
+          if (provider === "openai" && !effectiveKeys?.openai) {
+            setMultiError(`Lipseste cheia API pentru OpenAI (GPT)${missingKeySuffix}`);
             return;
           }
-          if (provider === "google" && !apiKeys?.google) {
-            setMultiError("Lipseste cheia API pentru Google (Gemini)");
+          if (provider === "google" && !effectiveKeys?.google) {
+            setMultiError(`Lipseste cheia API pentru Google (Gemini)${missingKeySuffix}`);
             return;
           }
         }
@@ -241,7 +300,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
       setMultiError(null);
       setMultiPhase((prev) => ({ ...prev, [dosar.numar]: new Set() }));
       try {
-        const result = await api.ai.analyzeMulti(dosar, multiAnalysts, multiJudge, apiKeys, (phase) => {
+        const result = await api.ai.analyzeMulti(dosar, multiAnalysts, multiJudge, bodyKeys, (phase) => {
           setMultiPhase((prev) => {
             const next = new Set(prev[dosar.numar] ?? []);
             next.add(phase);
@@ -259,7 +318,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         });
       }
     },
-    [aiSettings.mode, apiKeys, hasAnyKey, multiAnalysts, multiJudge]
+    [aiSettings.mode, byokMode, bodyKeys, effectiveKeys, hasAnyKey, multiAnalysts, multiJudge]
   );
 
   const multiForRow = useCallback(

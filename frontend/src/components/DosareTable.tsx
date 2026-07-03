@@ -36,6 +36,7 @@ import { useViewedDosareSession } from "@/hooks/useViewedDosareSession";
 import { useDosareSelection } from "@/hooks/useDosareSelection";
 import { useMonitorRowState } from "@/hooks/useMonitorRowState";
 import { useDosareAi } from "@/hooks/useDosareAi";
+import type { TenantKeys } from "@/hooks/useTenantKeyStatus";
 
 interface ApiKeys {
   anthropic: string;
@@ -51,6 +52,7 @@ interface DosareTableProps {
   searchedName?: string;
   apiKeys?: ApiKeys;
   aiSettings: { mode: AiMode };
+  tenantKeys?: TenantKeys;
   onConfigureApiKey?: () => void;
 }
 
@@ -63,6 +65,7 @@ export function DosareTable({
   searchedName,
   apiKeys,
   aiSettings,
+  tenantKeys,
   onConfigureApiKey: _onConfigureApiKey,
 }: DosareTableProps) {
   const [expandedIdx, setExpandedIdx] = useState<number | null>(null);
@@ -96,7 +99,7 @@ export function DosareTable({
 
   const { monitorState, handleMonitor } = useMonitorRowState();
   const { viewedDosare, markAsViewed } = useViewedDosareSession();
-  const { ai, multiForRow } = useDosareAi({ apiKeys, aiSettings });
+  const { ai, multiForRow } = useDosareAi({ apiKeys, aiSettings, tenantKeys });
 
   // Auto-scroll to expanded row details
   useEffect(() => {
