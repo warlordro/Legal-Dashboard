@@ -98,26 +98,28 @@ $env:SEED_ADMIN_DISPLAY_NAME = $DisplayName
 node scripts/seed-admin.mjs
 if ($LASTEXITCODE -ne 0) { Fail "seed-admin a esuat (vezi mesajul de mai sus)." }
 
-# 7. Minteaza sesiunea — exact request-ul oauth2-proxy din productie.
-$basic = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("oauth2:$($secrets.proxy)"))
+# 7. Porneste mini-proxy-ul care simuleaza oauth2-proxy (injecteaza Basic +
+#    X-Forwarded-Email pe fiecare request). SPA-ul isi minteaza sesiunea singur
+#    la bootstrap prin POST /auth/oauth2/sync — fara proxy, bridge-ul refuza
+#    403 si aplicatia arata "Acces refuzat" (login-ul NU merge doar cu cookie).
+$proxyPort = $Port + 1
+$env:DEV_WEB_PROXY_SECRET = $secrets.proxy
+$env:DEV_WEB_PROXY_EMAIL = $Email
+$proxy = Start-Process node -ArgumentList "scripts/dev-web-proxy.mjs", "$proxyPort", "$Port" -PassThru -WindowStyle Hidden `
+    -RedirectStandardOutput (Join-Path $dataDir "proxy.log") -RedirectStandardError (Join-Path $dataDir "proxy.err.log")
+Start-Sleep -Seconds 1
+
+# 8. Verifica bridge-ul prin proxy (fara header-e client — exact ca browserul).
 try {
-    $resp = Invoke-WebRequest -Uri "$base/api/v1/auth/oauth2/sync" -Method POST -UseBasicParsing `
-        -Headers @{ Authorization = "Basic $basic"; "X-Forwarded-Email" = $Email }
+    $sync = Invoke-WebRequest -Uri "http://127.0.0.1:$proxyPort/api/v1/auth/oauth2/sync" -Method POST -UseBasicParsing
+    if ($sync.StatusCode -ne 200) { Fail "bridge-ul prin proxy a raspuns $($sync.StatusCode)." }
 } catch {
-    Fail "oauth2/sync a esuat: $($_.Exception.Message)"
+    Fail "bridge-ul prin proxy a esuat: $($_.Exception.Message)"
 }
-$setCookie = $resp.Headers["Set-Cookie"]
-if (-not $setCookie) { Fail "oauth2/sync nu a intors Set-Cookie." }
-$cookie = ($setCookie -split ";")[0]
 
 Write-Host ""
 Write-Host "=== Web local gata ===" -ForegroundColor Green
-Write-Host "URL:    $base"
-Write-Host "User:   $Email (admin)"
-Write-Host "Cookie: $cookie"
+Write-Host "Deschide:  http://127.0.0.1:$proxyPort   (login automat ca $Email, admin)"
+Write-Host "Backend:   $base (PID $($backend.Id))  |  Proxy: PID $($proxy.Id)"
 Write-Host ""
-Write-Host "In browser: deschide $base, apoi DevTools > Console si ruleaza:"
-Write-Host "  document.cookie = `"$cookie; path=/`""
-Write-Host "apoi da refresh. (Cookie-ul expira ~1h; ruleaza scriptul din nou cu -SkipBuild pentru unul nou.)"
-Write-Host ""
-Write-Host "Stop server: Stop-Process -Id $($backend.Id)"
+Write-Host "Stop: Stop-Process -Id $($backend.Id), $($proxy.Id)"
