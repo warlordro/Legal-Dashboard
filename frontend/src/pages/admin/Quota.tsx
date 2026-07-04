@@ -243,8 +243,9 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
             </h1>
           )}
           <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
-            Override-uri pe rolling window (zi / saptamana / luna). Pentru `ai.*` limita e in USD (stocata milli),
-            pentru `captcha.*` e numar de captcha-uri / fereastra. Bifeaza "Nelimitat" pentru a scoate capul.
+            Limitele de cheltuiala per utilizator, pe fereastra rulanta (zi / saptamana / luna): pentru analizele AI
+            limita e cost in USD, pentru Captcha RNPM e numar de captcha-uri. Un user fara limita setata are buget
+            nelimitat; "Nelimitat" bifat scoate explicit plafonul.
           </p>
         </div>
 
@@ -322,7 +323,8 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                 <p className="py-4 text-center text-sm text-muted-foreground">
                   {overviewLoading
                     ? "Se incarca cotele active..."
-                    : "Nu exista override-uri active. Toti userii folosesc limitele default."}
+                    : "Nicio limita setata — toti userii au buget NELIMITAT (AI si captcha). " +
+                      "Ca sa plafonezi costurile unui user, cauta-l mai sus si seteaza-i o limita pe feature."}
                 </p>
               ) : (
                 <div className="overflow-x-auto">
