@@ -43,8 +43,8 @@ function getSnapshot(): Snapshot {
   return snapshot;
 }
 
-function fetchMe(): Promise<void> {
-  inflight ??= me
+function doFetch(): Promise<void> {
+  return me
     .get()
     .then((u) => {
       emit({ user: u, error: null, loading: false });
@@ -53,16 +53,32 @@ function fetchMe(): Promise<void> {
       // 401 / network / etc — surface message but don't throw. Consumatorii
       // trateaza user === null gratios (Sidebar ascunde, AdminGate afiseaza 403).
       emit({ user: null, error: e instanceof Error ? e.message : "Eroare la /me", loading: false });
-    })
-    .finally(() => {
-      inflight = null;
     });
+}
+
+// Dedup pentru rafalele de mount: toate instantele asteapta ACELASI fetch.
+function fetchMe(): Promise<void> {
+  inflight ??= doFetch().finally(() => {
+    inflight = null;
+  });
   return inflight;
 }
 
+// Refresh = date PROASPETE garantat (CodeRabbit: reutilizarea fetch-ului
+// in-flight putea servi raspunsul de dinaintea mutatiei, ex. schimbarea
+// propriului rol). Daca exista un fetch in curs, il asteptam si pornim unul
+// nou dupa; noul promise devine inflight ca mount-urile ulterioare sa se
+// agate de cel proaspat.
 function refresh(): void {
   emit({ loading: true });
-  void fetchMe();
+  const guarded: Promise<void> = (inflight ?? Promise.resolve())
+    .then(() => doFetch())
+    .finally(() => {
+      // Curata doar daca intre timp nu a pornit alt refresh (care a
+      // suprascris inflight cu propriul promise).
+      if (inflight === guarded) inflight = null;
+    });
+  inflight = guarded;
 }
 
 // Doar pentru teste: reseteaza store-ul intre cazuri (module state persista).

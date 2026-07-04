@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
-import { Gauge, RefreshCw, Search, Trash2, Plus, ShieldAlert } from "lucide-react";
+import { Gauge, RefreshCw, Trash2, Plus, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { UserPicker } from "@/components/admin/UserPicker";
 import { admin, type AdminUser, type QuotaOverride, type QuotaOverrideWithUser, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
@@ -63,9 +64,6 @@ function isKnownFeature(feature: string): boolean {
 
 export default function AdminQuota({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
-  const [searchInput, setSearchInput] = useState("");
-  const [candidates, setCandidates] = useState<AdminUser[]>([]);
-  const [searching, setSearching] = useState(false);
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [overrides, setOverrides] = useState<QuotaOverride[]>([]);
   const [loading, setLoading] = useState(false);
@@ -105,22 +103,6 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     }
   };
 
-  const search = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = searchInput.trim();
-    if (!q) return;
-    setSearching(true);
-    setError(null);
-    try {
-      const result = await admin.listUsers({ search: q, pageSize: 25 });
-      setCandidates(result.rows);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la cautare.");
-    } finally {
-      setSearching(false);
-    }
-  };
-
   const loadOverrides = useCallback(async (userId: string) => {
     setLoading(true);
     setError(null);
@@ -141,7 +123,6 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
 
   const onSelect = (user: AdminUser) => {
     setSelected(user);
-    setCandidates([]);
     setFeature(DEFAULT_FEATURE);
     setPeriod("day");
     setLimitUsd("");
@@ -263,46 +244,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
           </div>
         )}
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Search className="h-4 w-4" />
-              Selecteaza utilizator
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form onSubmit={search} className="flex gap-2">
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Cauta dupa email sau nume"
-                className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-              />
-              <Button type="submit" disabled={searching}>
-                <Search className={cn("h-4 w-4", searching && "animate-pulse")} />
-                Cauta
-              </Button>
-            </form>
-            {candidates.length > 0 && (
-              <ul className="divide-y divide-border rounded-md border border-border">
-                {candidates.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-mono">{c.email}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {c.displayName} · {c.role} · {c.status}
-                      </p>
-                    </div>
-                    <Button size="sm" variant="outline" onClick={() => onSelect(c)}>
-                      Selecteaza
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+        <UserPicker selectedId={selected?.id ?? null} onSelect={onSelect} />
 
         {!selected && (
           <Card>
