@@ -35,16 +35,24 @@ function toDomain(row: OwnerAiSettings): OwnerAiSettings {
 }
 
 export function getSettings(ownerId: string): OwnerAiSettings {
-  const row = getDb().prepare(`SELECT ${COLUMNS} FROM owner_ai_settings WHERE owner_id = ?`).get(ownerId) as
-    | OwnerAiSettings
-    | undefined;
-
-  if (row) return toDomain(row);
+  const row = getExplicitSettings(ownerId);
+  if (row) return row;
   return {
     owner_id: ownerId,
     mode: "native",
     updated_at: 0,
   };
+}
+
+// v2.42.0: distinge "userul a ALES un mod" (rand in DB) de default-ul fabricat.
+// In web, fara alegere explicita, rutarea AI se deduce din cheile tenant
+// (vezi resolveEffectiveAiMode in routes/ai.ts) — default-ul hardcodat "native"
+// facea AI-ul inutilizabil pentru tenantii doar-cu-OpenRouter.
+export function getExplicitSettings(ownerId: string): OwnerAiSettings | null {
+  const row = getDb().prepare(`SELECT ${COLUMNS} FROM owner_ai_settings WHERE owner_id = ?`).get(ownerId) as
+    | OwnerAiSettings
+    | undefined;
+  return row ? toDomain(row) : null;
 }
 
 export function upsertSettings(ownerId: string, input: UpsertOwnerAiSettingsInput): OwnerAiSettings {
