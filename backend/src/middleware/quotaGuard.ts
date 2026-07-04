@@ -25,9 +25,16 @@ declare module "hono" {
 // `quotaGuard()` ramane AI-only (cite ai_usage); captcha quota se aplica in
 // `withRnpmCaptchaGuards` care citeste din `captcha_usage` cu acelasi tabel
 // `user_quota_overrides`.
-export const QUOTA_FEATURES = ["ai.single", "ai.multi", "captcha.rnpm"] as const;
+//
+// v2.42.0 (decizie user): limita AI e UNICA — feature-ul de cota "ai" acopera
+// toate analizele (single + multi) intr-un singur pool; migration 0041
+// consolideaza override-urile/granturile legacy ai.single/ai.multi.
+export const QUOTA_FEATURES = ["ai", "captcha.rnpm"] as const;
 export type QuotaFeature = (typeof QUOTA_FEATURES)[number];
-export type AiQuotaFeature = Extract<QuotaFeature, "ai.single" | "ai.multi">;
+// Feature-ul CONCRET al apelului (ramane pe randurile ai_usage + costuri
+// estimate diferite per tip de analiza); limita se verifica mereu pe "ai".
+export type AiQuotaFeature = "ai.single" | "ai.multi";
+const AI_POOL_FEATURE = "ai";
 
 // v2.32.0 rolling window seconds per period. Locked in D15 — operatorul nu
 // alege secundele, doar perioada (day/week/month). 24h/7d/30d.
@@ -71,12 +78,14 @@ function readDefaultQuotaMilli(): number | null {
   return parsed;
 }
 
-export function quotaGuard(feature: AiQuotaFeature) {
+// Parametrul ramane in semnatura (documenteaza tipul apelului la ruta), dar
+// limita se verifica mereu pe pool-ul unic "ai".
+export function quotaGuard(_feature: AiQuotaFeature) {
   return async (c: Context, next: Next) => {
     if (getAuthMode() !== "web") return next();
-    c.set("quotaFeature", feature);
+    c.set("quotaFeature", AI_POOL_FEATURE);
     const ownerId = getOwnerId(c);
-    const override = getOverride(ownerId, feature);
+    const override = getOverride(ownerId, AI_POOL_FEATURE);
     const defaultMilli = readDefaultQuotaMilli();
 
     // Period selection: override.period > default 'day'. Defaults sunt mereu
@@ -93,24 +102,25 @@ export function quotaGuard(feature: AiQuotaFeature) {
     // Grants active la baza limitei: append-only, fiecare grant adauga
     // extra_usd_milli pana la expirare. NU se aplica pe windowSeconds — sunt
     // grants pe FEATURE per user, valabile pana la expires_at.
-    const extraFromGrants = sumActiveExtraMilli(ownerId, feature);
+    const extraFromGrants = sumActiveExtraMilli(ownerId, AI_POOL_FEATURE);
     const effectiveLimit = baseLimit + extraFromGrants;
 
-    const usedMilli = sumAiUsageMilliInWindow(ownerId, feature, windowSeconds);
+    // Pool unic: consumul insumeaza TOATE apelurile AI (single + multi).
+    const usedMilli = sumAiUsageMilliInWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
     // Explicit limit=0 always blocks (admin opt-in to deny-all). Otherwise we
     // block when spend equals or exceeds the cap. Grants nu pot "unblock" un
     // limit=0 fara grant: baseLimit=0+extra raman caz numeric normal.
     if (effectiveLimit === 0 || usedMilli >= effectiveLimit) {
-      const retryAfter = retryAfterSecondsForWindow(ownerId, feature, windowSeconds);
+      const retryAfter = retryAfterSecondsForWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
       c.header("Retry-After", String(retryAfter));
       return c.json(
-        fail(ErrorCodes.QUOTA_EXCEEDED, `Bugetul pentru ${feature} a fost depasit. Contacteaza adminul.`, c, {
+        fail(ErrorCodes.QUOTA_EXCEEDED, "Bugetul AI a fost depasit. Contacteaza adminul.", c, {
           usedMilli,
           limitMilli: effectiveLimit,
           baseLimitMilli: baseLimit,
           extraFromGrantsMilli: extraFromGrants,
           period,
-          feature,
+          feature: AI_POOL_FEATURE,
           source: override ? "override" : "default",
         }),
         429
@@ -129,14 +139,14 @@ export function reserveQuotaBudget(
   if (getAuthMode() !== "web") return { ok: true, reservationId: null };
 
   const ownerId = getOwnerId(c);
-  const override = getOverride(ownerId, feature);
+  const override = getOverride(ownerId, AI_POOL_FEATURE);
   const defaultMilli = readDefaultQuotaMilli();
   const period: QuotaPeriod = override?.period ?? "day";
   const windowSeconds = PERIOD_SECONDS[period];
   const baseLimit = override ? override.limit_usd_milli : defaultMilli;
   if (baseLimit === null) return { ok: true, reservationId: null };
 
-  const extraFromGrants = sumActiveExtraMilli(ownerId, feature);
+  const extraFromGrants = sumActiveExtraMilli(ownerId, AI_POOL_FEATURE);
   const effectiveLimit = baseLimit + extraFromGrants;
   const estimatedCost = estimatedCostMilli(feature);
   let reservationId: number | null = null;
@@ -145,7 +155,7 @@ export function reserveQuotaBudget(
 
   getDb()
     .transaction(() => {
-      usedMilli = sumAiUsageMilliInWindow(ownerId, feature, windowSeconds);
+      usedMilli = sumAiUsageMilliInWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
       if (effectiveLimit === 0 || usedMilli + estimatedCost > effectiveLimit) {
         blocked = true;
         return;
@@ -161,19 +171,19 @@ export function reserveQuotaBudget(
     .immediate();
 
   if (blocked) {
-    const retryAfter = retryAfterSecondsForWindow(ownerId, feature, windowSeconds);
+    const retryAfter = retryAfterSecondsForWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
     c.header("Retry-After", String(retryAfter));
     return {
       ok: false,
       response: c.json(
-        fail(ErrorCodes.QUOTA_EXCEEDED, `Bugetul pentru ${feature} a fost depasit. Contacteaza adminul.`, c, {
+        fail(ErrorCodes.QUOTA_EXCEEDED, "Bugetul AI a fost depasit. Contacteaza adminul.", c, {
           usedMilli,
           reservedMilli: estimatedCost,
           limitMilli: effectiveLimit,
           baseLimitMilli: baseLimit,
           extraFromGrantsMilli: extraFromGrants,
           period,
-          feature,
+          feature: AI_POOL_FEATURE,
           source: override ? "override" : "default",
         }),
         429
@@ -190,7 +200,7 @@ export function reserveQuotaBudget(
 // e goala (improbabil daca am ajuns la blocaj), fallback la windowSeconds.
 function retryAfterSecondsForWindow(
   ownerId: string,
-  feature: AiQuotaFeature,
+  feature: string,
   windowSeconds: number,
   now: Date = new Date()
 ): number {

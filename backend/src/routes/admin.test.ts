@@ -400,7 +400,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 5000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 5000 }),
     });
     expect(res.status).toBe(200);
     const stored = listOverridesForUser("u-1");
@@ -417,12 +417,12 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "week", limitUsdMilli: 25000 }),
+      body: JSON.stringify({ feature: "ai", period: "week", limitUsdMilli: 25000 }),
     });
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({
-      feature: "ai.single",
+      feature: "ai",
       period: "week",
       limitUsdMilli: 25000,
       dailyLimitUsdMilli: null,
@@ -437,12 +437,12 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "day", limitUsdMilli: null }),
+      body: JSON.stringify({ feature: "ai", period: "day", limitUsdMilli: null }),
     });
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({
-      feature: "ai.single",
+      feature: "ai",
       period: "day",
       limitUsdMilli: null,
       dailyLimitUsdMilli: null,
@@ -456,7 +456,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "day" }),
+      body: JSON.stringify({ feature: "ai", period: "day" }),
     });
     expect(res.status).toBe(400);
   });
@@ -466,7 +466,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "week", limitUsdMilli: 25000 }),
+      body: JSON.stringify({ feature: "ai", period: "week", limitUsdMilli: 25000 }),
     });
     const res = await app.request("/api/v1/admin/users/u-1/quota");
     const body = await jsonOf(res);
@@ -482,12 +482,12 @@ describe("/api/v1/admin/users/:id/quota", () => {
     await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 1000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 1000 }),
     });
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 7500 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 7500 }),
     });
     expect(res.status).toBe(200);
     const stored = listOverridesForUser("u-1");
@@ -500,7 +500,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: -1 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: -1 }),
     });
     expect(res.status).toBe(400);
   });
@@ -510,7 +510,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/ghost/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 1000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 1000 }),
     });
     expect(res.status).toBe(404);
   });
@@ -520,14 +520,14 @@ describe("/api/v1/admin/users/:id/quota", () => {
     await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 1000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 1000 }),
     });
-    const res = await app.request("/api/v1/admin/users/u-1/quota/ai.single", {
+    const res = await app.request("/api/v1/admin/users/u-1/quota/ai", {
       method: "DELETE",
     });
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
-    expect(body.data).toMatchObject({ feature: "ai.single", removed: true });
+    expect(body.data).toMatchObject({ feature: "ai", removed: true });
     expect(listOverridesForUser("u-1")).toEqual([]);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.quota_delete" });
     expect(events).toHaveLength(1);
@@ -535,7 +535,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
 
   it("DELETE is idempotent (no row → no audit, still 200)", async () => {
     const app = buildApp();
-    const res = await app.request("/api/v1/admin/users/u-1/quota/ai.single", {
+    const res = await app.request("/api/v1/admin/users/u-1/quota/ai", {
       method: "DELETE",
     });
     expect(res.status).toBe(200);
@@ -555,7 +555,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     updateUserRole("local", "admin");
     insertUser({ id: "u-1", email: "a@x", displayName: "A" });
     // v2.42.0: grant si nelimitat se exclud — grantul cere o limita existenta.
-    upsertOverride({ userId: "u-1", feature: "ai.single", period: "day", limitUsdMilli: 10_000 });
+    upsertOverride({ userId: "u-1", feature: "ai", period: "day", limitUsdMilli: 10_000 });
   });
 
   it("refuza grantul cu 422 cand bugetul pe feature e nelimitat (fara override)", async () => {
@@ -565,7 +565,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const res = await app.request("/api/v1/admin/users/u-unlim/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 2500, expiresAt }),
     });
     expect(res.status).toBe(422);
     expect((await jsonOf(res)).error?.code).toBe("unlimited_budget");
@@ -574,13 +574,13 @@ describe("/api/v1/admin/users/:id/grants", () => {
 
   it("refuza grantul cu 422 si cand override-ul e explicit NULL (nelimitat)", async () => {
     insertUser({ id: "u-null", email: "null@x", displayName: "N" });
-    upsertOverride({ userId: "u-null", feature: "ai.single", period: "day", limitUsdMilli: null });
+    upsertOverride({ userId: "u-null", feature: "ai", period: "day", limitUsdMilli: null });
     const app = buildApp();
     const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
     const res = await app.request("/api/v1/admin/users/u-null/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 2500, expiresAt }),
     });
     expect(res.status).toBe(422);
     expect((await jsonOf(res)).error?.code).toBe("unlimited_budget");
@@ -601,7 +601,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        feature: "ai.single",
+        feature: "ai",
         extraUsdMilli: 2500,
         expiresAt,
         reason: "boost vineri",
@@ -611,7 +611,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({
       userId: "u-1",
-      feature: "ai.single",
+      feature: "ai",
       extraUsdMilli: 2500,
       expiresAt,
       reason: "boost vineri",
@@ -619,7 +619,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     });
     const stored = listGrantsForUser("u-1");
     expect(stored).toHaveLength(1);
-    expect(sumActiveExtraMilli("u-1", "ai.single")).toBe(2500);
+    expect(sumActiveExtraMilli("u-1", "ai")).toBe(2500);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_create" });
     expect(events).toHaveLength(1);
   });
@@ -630,7 +630,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 2500, expiresAt }),
     });
     const res = await app.request("/api/v1/admin/grants/active");
     expect(res.status).toBe(200);
@@ -640,7 +640,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
       userId: "u-1",
       userEmail: "a@x",
       userDisplayName: "A",
-      feature: "ai.single",
+      feature: "ai",
       extraUsdMilli: 2500,
       revokedAt: null,
     });
@@ -652,7 +652,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 2500, expiresAt }),
     });
     const grantId = ((await jsonOf(createRes)) as { data: { id: number } }).data.id;
     await app.request(`/api/v1/admin/grants/${grantId}`, { method: "DELETE" });
@@ -667,7 +667,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const res = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 1000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt }),
     });
     expect(res.status).toBe(400);
   });
@@ -678,7 +678,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const res = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 0, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 0, expiresAt }),
     });
     expect(res.status).toBe(400);
   });
@@ -689,7 +689,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const res = await app.request("/api/v1/admin/users/ghost/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 1000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt }),
     });
     expect(res.status).toBe(404);
   });
@@ -700,7 +700,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 3000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 3000, expiresAt }),
     });
     const { data } = await jsonOf(createRes);
     const grantId = (data as { id: number }).id;
@@ -712,7 +712,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({ id: grantId, revoked: true });
-    expect(sumActiveExtraMilli("u-1", "ai.single")).toBe(0);
+    expect(sumActiveExtraMilli("u-1", "ai")).toBe(0);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_revoke" });
     expect(events).toHaveLength(1);
   });
@@ -723,7 +723,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 3000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 3000, expiresAt }),
     });
     const { data } = await jsonOf(createRes);
     const grantId = (data as { id: number }).id;

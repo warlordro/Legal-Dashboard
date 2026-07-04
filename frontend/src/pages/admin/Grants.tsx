@@ -49,7 +49,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
   const [grants, setGrants] = useState<QuotaGrant[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [feature, setFeature] = useState("ai.single");
+  const [feature, setFeature] = useState("ai");
   const [extraUsd, setExtraUsd] = useState("");
   const [expiresAtLocal, setExpiresAtLocal] = useState("");
   const [reason, setReason] = useState("");
@@ -64,6 +64,9 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     try {
       const result = await admin.listActiveGrants();
       setActiveGrants(result.grants);
+      // CodeRabbit (confirmat): fara clear, un banner de eroare de la un load
+      // esuat anterior persista si dupa un refresh reusit.
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea granturilor active.");
     } finally {
@@ -112,7 +115,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
 
   const onSelect = (user: AdminUser) => {
     setSelected(user);
-    setFeature("ai.single");
+    setFeature("ai");
     setExtraUsd("");
     setExpiresAtLocal("");
     setReason("");
@@ -307,10 +310,9 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                     onChange={(e) => setFeature(e.target.value)}
                     className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                   >
-                    {/* Grants raman AI-only: granturile sunt denominate USD, iar guard-ul
-                        captcha nu aplica extra-grant logic — o optiune captcha ar fi inerta. */}
-                    <option value="ai.single">AI — analiza individuala (ai.single)</option>
-                    <option value="ai.multi">AI — analiza multipla (ai.multi)</option>
+                    {/* v2.42.0: limita AI e un pool unic — grantul se adauga
+                        peste el. Captcha nu are granturi (alta unitate). */}
+                    <option value="ai">AI — toate analizele (limita unica)</option>
                   </select>
                 </div>
                 <div>

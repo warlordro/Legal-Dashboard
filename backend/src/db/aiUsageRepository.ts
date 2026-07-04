@@ -353,6 +353,12 @@ export function earliestAiUsageTsInWindow(ownerId: string, feature: string, wind
 }
 
 function quotaFeatureAliases(feature: string): string[] {
+  // v2.42.0: "ai" = POOL unic peste toate apelurile AI (decizie user: o
+  // singura limita, indiferent ca analiza e single sau multi-agent).
+  // Randurile de usage raman inregistrate pe feature-ul concret al apelului.
+  if (feature === "ai") {
+    return ["ai.single", "dosar_summary", "ai.multi", "dosar_multi_analyst", "dosar_multi_judge"];
+  }
   if (feature === "ai.single") return ["ai.single", "dosar_summary"];
   if (feature === "ai.multi") return ["ai.multi", "dosar_multi_analyst", "dosar_multi_judge"];
   return [feature];

@@ -122,6 +122,11 @@ export function createGrant(input: CreateGrantInput): QuotaGrantRow {
   if (!input.grantedBy || input.grantedBy.length === 0) {
     throw new Error("invalid granted_by: must be non-empty string");
   }
+  // CodeRabbit (confirmat): schema API accepta ISO cu offset (+02:00), dar
+  // predicatele de "grant activ" compara stringuri cu boundary UTC — un
+  // offset ne-normalizat ar strica comparatia lexicografica. Stocam mereu
+  // forma UTC canonica.
+  const expiresAtUtc = new Date(input.expiresAt).toISOString();
   const db = getDb();
   const info = db
     .prepare(
@@ -129,7 +134,7 @@ export function createGrant(input: CreateGrantInput): QuotaGrantRow {
          (user_id, feature, extra_usd_milli, expires_at, reason, granted_at, granted_by)
        VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`
     )
-    .run(input.userId, input.feature, input.extraUsdMilli, input.expiresAt, input.reason ?? null, input.grantedBy);
+    .run(input.userId, input.feature, input.extraUsdMilli, expiresAtUtc, input.reason ?? null, input.grantedBy);
   return getGrant(Number(info.lastInsertRowid)) as QuotaGrantRow;
 }
 

@@ -116,7 +116,16 @@ function missingApiKey(c: Context, provider: string) {
 function resolveEffectiveAiMode(ownerId: string): AiProviderMode {
   const explicit = getExplicitSettings(ownerId);
   if (explicit) return explicit.mode;
-  if (getAuthMode() === "web" && Boolean(getDecryptedKey("openrouter"))) return "openrouter";
+  if (getAuthMode() === "web") {
+    // Defensive (CodeRabbit): in web mode secretul de criptare e garantat de
+    // boot (lipsa lui opreste pornirea), dar un throw aici ar face /ai/settings
+    // sa dea 500 — fallback la native e mai util decat o eroare opaca.
+    try {
+      if (getDecryptedKey("openrouter")) return "openrouter";
+    } catch {
+      return "native";
+    }
+  }
   return "native";
 }
 

@@ -164,7 +164,9 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                     <li key={item.feature} className="space-y-2 rounded-md border border-border p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm">{item.feature}</span>
+                          <span className="font-mono text-sm">
+                            {item.feature === "ai" ? "AI — toate analizele" : item.feature}
+                          </span>
                           <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
                           {item.effectiveLimitMilli === null && <Badge variant="success">Nelimitat</Badge>}
                           {/* Grant inert (buget nelimitat) NU se afiseaza: nu contribuie

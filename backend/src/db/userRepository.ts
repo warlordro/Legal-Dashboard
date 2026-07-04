@@ -200,7 +200,12 @@ export function insertUsersBulk(rows: InsertUserInput[]): void {
   const run = db.transaction((batch: InsertUserInput[]) => {
     for (const r of batch) {
       const role: UserRole = r.role ?? "user";
-      if (!USER_ROLES.includes(role)) throw new Error(`invalid role: ${role}`);
+      // CodeRabbit (confirmat): importul creeaza DOAR roluri din whitelist —
+      // validarea pe USER_ROLES complet ar fi lasat support/readonly sa
+      // treaca daca ruta ar scapa vreodata validarea de schema.
+      if (!(CREATABLE_USER_ROLES as readonly UserRole[]).includes(role)) {
+        throw new Error(`invalid role: ${role}`);
+      }
       stmt.run(r.id, r.email, r.displayName, role);
     }
   });

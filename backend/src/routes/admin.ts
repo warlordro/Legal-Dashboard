@@ -156,7 +156,9 @@ const UpsertQuotaSchema = z
 // effect, doar audit noise).
 const CreateGrantSchema = z
   .object({
-    feature: z.enum(QUOTA_FEATURES),
+    // Granturile sunt AI-only (denominate USD); pool-ul unic "ai" e singura
+    // tinta valida din v2.42.0.
+    feature: z.enum(["ai"]),
     extraUsdMilli: z.number().int().min(1).max(1_000_000_000),
     expiresAt: z.string().datetime({ offset: true }),
     reason: z.string().trim().max(200).optional(),

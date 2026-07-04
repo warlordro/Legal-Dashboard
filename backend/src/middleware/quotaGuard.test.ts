@@ -57,7 +57,7 @@ function buildApp(ownerId = "alice") {
 describe("quotaGuard", () => {
   it("bypasses enforcement in desktop mode", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "desktop";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 0 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 0 });
 
     const res = await buildApp().request("/probe", { method: "POST" });
 
@@ -74,7 +74,7 @@ describe("quotaGuard", () => {
 
   it("allows web requests below the daily limit", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 10 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 10 });
     insertAiUsage({
       ownerId: "alice",
       provider: "openai",
@@ -91,7 +91,7 @@ describe("quotaGuard", () => {
 
   it("returns 429 and Retry-After when the daily limit is reached", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 10 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 10 });
     insertAiUsage({
       ownerId: "alice",
       provider: "openai",
@@ -145,7 +145,7 @@ describe("quotaGuard", () => {
 
   it("blocks every web request when override.limit_usd_milli is 0 (deny-all)", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 0 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 0 });
 
     const res = await buildApp().request("/probe", { method: "POST" });
     const body = (await res.json()) as { error: { code: string; details: { limitMilli: number } } };
@@ -166,7 +166,7 @@ describe("quotaGuard", () => {
 
   it("treats limit_usd_milli=NULL as unlimited (bypass)", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: null });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: null });
     // Insert a lot of usage to confirm the gate doesn't fire.
     insertAiUsage({
       ownerId: "alice",
@@ -184,7 +184,7 @@ describe("quotaGuard", () => {
 
   it("uses rolling 7-day window when period=week", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "week", limitUsdMilli: 100 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "week", limitUsdMilli: 100 });
     const now = Date.now();
     // 5 days ago: inside the 7-day rolling window.
     insertAiUsage({
@@ -205,7 +205,7 @@ describe("quotaGuard", () => {
 
   it("does not count usage older than the rolling window (week)", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "week", limitUsdMilli: 100 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "week", limitUsdMilli: 100 });
     const now = Date.now();
     // 10 days ago: outside the 7-day window.
     insertAiUsage({
@@ -224,11 +224,11 @@ describe("quotaGuard", () => {
 
   it("adds active grants to the effective limit", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 50 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 50 });
     // Grant adds +30 -> effective limit = 80. Usage 70 < 80 -> pass.
     createGrant({
       userId: "alice",
-      feature: "ai.single",
+      feature: "ai",
       extraUsdMilli: 30,
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
       reason: "test",
@@ -250,10 +250,10 @@ describe("quotaGuard", () => {
 
   it("emits effective vs base limit and grants extra in the error envelope", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 50 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 50 });
     createGrant({
       userId: "alice",
-      feature: "ai.single",
+      feature: "ai",
       extraUsdMilli: 20,
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
       reason: "boost",
@@ -283,7 +283,7 @@ describe("quotaGuard", () => {
 
   it("computes Retry-After from earliest usage ts + window", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    upsertOverride({ userId: "alice", feature: "ai.single", period: "day", limitUsdMilli: 10 });
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 10 });
     // Usage 1h ago -> Retry-After ~ 23h.
     insertAiUsage({
       ownerId: "alice",

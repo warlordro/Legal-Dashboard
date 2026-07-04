@@ -24,8 +24,15 @@ $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 Set-Location $root
 
+# Procesele pornite de script — oprite la orice Fail, ca esecurile sa nu lase
+# orfani pe porturile 3002/3003 (CodeRabbit).
+$script:startedPids = @()
+
 function Fail($msg) {
     Write-Host "FAIL: $msg" -ForegroundColor Red
+    foreach ($procId in $script:startedPids) {
+        try { Stop-Process -Id $procId -Force -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+    }
     exit 1
 }
 
@@ -77,6 +84,7 @@ $env:LEGAL_DASHBOARD_PORT = "$Port"
 # 4. Porneste backend-ul (bind loopback — nu necesita ALLOW_REMOTE).
 Write-Host "[dev-web] pornesc backend-ul pe http://127.0.0.1:$Port ..."
 $backend = Start-Process node -ArgumentList "dist-backend/index.cjs" -PassThru -NoNewWindow
+$script:startedPids += $backend.Id
 
 # 5. Asteapta /health (migrations la primul boot pot dura).
 $base = "http://127.0.0.1:$Port"
@@ -107,6 +115,7 @@ $env:DEV_WEB_PROXY_SECRET = $secrets.proxy
 $env:DEV_WEB_PROXY_EMAIL = $Email
 $proxy = Start-Process node -ArgumentList "scripts/dev-web-proxy.mjs", "$proxyPort", "$Port" -PassThru -WindowStyle Hidden `
     -RedirectStandardOutput (Join-Path $dataDir "proxy.log") -RedirectStandardError (Join-Path $dataDir "proxy.err.log")
+$script:startedPids += $proxy.Id
 Start-Sleep -Seconds 1
 
 # 8. Verifica bridge-ul prin proxy (fara header-e client — exact ca browserul).

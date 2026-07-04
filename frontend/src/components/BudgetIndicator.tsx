@@ -4,12 +4,13 @@ import { me, type MeBudgetItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface BudgetIndicatorProps {
-  feature?: "ai.single" | "ai.multi";
+  // v2.42.0: bugetul AI e un pool unic ("ai") peste toate analizele.
+  feature?: "ai";
   enabled?: boolean;
   className?: string;
 }
 
-export function BudgetIndicator({ feature = "ai.single", enabled = true, className }: BudgetIndicatorProps) {
+export function BudgetIndicator({ feature = "ai", enabled = true, className }: BudgetIndicatorProps) {
   const [item, setItem] = useState<MeBudgetItem | null>(null);
 
   useEffect(() => {

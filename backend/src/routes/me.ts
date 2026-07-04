@@ -151,7 +151,8 @@ meRouter.get("/budget", (c) => {
   // null cand e unlimited sau lipsa).
   const overrides = listOverridesForUser(ownerId);
   const overrideByFeature = new Map(overrides.map((row) => [row.feature, row]));
-  const features = Array.from(new Set(["ai.single", "ai.multi", ...overrideByFeature.keys()])).sort();
+  // v2.42.0: bugetul AI e un POOL unic ("ai" insumeaza toate analizele).
+  const features = Array.from(new Set(["ai", ...overrideByFeature.keys()])).sort();
   const fx = getLatestFxRate("USD/EUR");
   const fxStale =
     fx === null ? true : Date.now() - Date.parse(`${fx.rate_date}T00:00:00Z`) > FX_STALE_THRESHOLD_HOURS * 3_600_000;
@@ -196,7 +197,7 @@ meRouter.get("/budget", (c) => {
 // State e per (user, feature, threshold_pct=80) — vezi budget_notifications.
 meRouter.get("/budget-warnings", (c) => {
   const ownerId = getOwnerId(c);
-  const features: QuotaFeature[] = ["ai.single", "ai.multi"];
+  const features: QuotaFeature[] = ["ai"];
   const items = features
     .map((feature) => {
       const state = getBudgetWarningState(ownerId, feature, 80);

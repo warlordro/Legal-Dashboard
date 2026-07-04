@@ -49,12 +49,11 @@ function limitUnitLabel(feature: string): string {
 }
 
 // Oglinda QUOTA_FEATURES din backend (quotaGuard.ts) — enum inchis, validat cu
-// z.enum in admin.ts. Text liber aici insemna "Body invalid" generic la orice
-// token gresit (v2.40.x); select-ul face eroarea imposibila.
+// z.enum in admin.ts. v2.42.0: limita AI e UNICA (pool peste analizele single
+// si multi-agent — decizie user); captcha ramane separat (alta unitate).
 const FEATURE_OPTIONS = [
-  { value: "ai.single", label: "AI — analiza individuala (ai.single)" },
-  { value: "ai.multi", label: "AI — analiza multipla (ai.multi)" },
-  { value: "captcha.rnpm", label: "Captcha RNPM (captcha.rnpm)" },
+  { value: "ai", label: "AI — toate analizele (limita unica)" },
+  { value: "captcha.rnpm", label: "Captcha RNPM" },
 ] as const;
 const DEFAULT_FEATURE = FEATURE_OPTIONS[0].value;
 
@@ -83,6 +82,9 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     try {
       const result = await admin.listQuotaOverview();
       setOverview(result.overrides);
+      // CodeRabbit (confirmat): fara clear, un banner de eroare de la un load
+      // esuat anterior persista si dupa un refresh reusit.
+      setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor active.");
     } finally {
