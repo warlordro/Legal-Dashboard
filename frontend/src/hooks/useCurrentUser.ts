@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useSyncExternalStore } from "react";
 import { me, type MeProfile } from "@/lib/api";
 
 export interface UseCurrentUserResult {
@@ -8,54 +8,84 @@ export interface UseCurrentUserResult {
   refresh: () => void;
 }
 
-// PR-8 hook used by:
-//   - Sidebar (decides whether to render the Admin section)
-//   - App.tsx (gates /admin/* routes; shows 403 placeholder otherwise)
-//   - Future: header area showing the signed-in user
-//
-// The fetch happens once on mount + on demand via refresh(). On desktop the
-// answer is essentially static (always the seeded `local` user, role updates
-// via DB writes), but we still fetch over HTTP so the same hook works
-// unchanged in PR-9 web mode where the answer depends on the JWT.
+// PR-8 hook, refacut in v2.42.0 ca STORE PARTAJAT la nivel de modul: hook-ul e
+// consumat din multe locuri (Sidebar, AdminGate per tab/pagina, Setari, dialog),
+// iar varianta veche facea cate un fetch /me la FIECARE montare — cu tab-urile
+// mount-on-demand din /setari, cateva click-uri loveau rate limiter-ul si un
+// 429 se afisa ca "403 Acces interzis" pentru un admin real (incident testare
+// 2026-07-04; problema era notata in SESSION-HANDOFF ca risc cunoscut).
+// Acum: UN fetch la primul consumator, toate instantele impart snapshotul;
+// refresh() forteaza refetch si actualizeaza toti abonatii (ex. schimbarea
+// propriului rol updateaza si Sidebar-ul, nu doar pagina curenta).
+
+interface Snapshot {
+  user: MeProfile | null;
+  loading: boolean;
+  error: string | null;
+}
+
+let snapshot: Snapshot = { user: null, loading: true, error: null };
+const listeners = new Set<() => void>();
+let started = false;
+let inflight: Promise<void> | null = null;
+
+function emit(next: Partial<Snapshot>): void {
+  snapshot = { ...snapshot, ...next };
+  for (const listener of listeners) listener();
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  return () => listeners.delete(listener);
+}
+
+function getSnapshot(): Snapshot {
+  return snapshot;
+}
+
+function fetchMe(): Promise<void> {
+  inflight ??= me
+    .get()
+    .then((u) => {
+      emit({ user: u, error: null, loading: false });
+    })
+    .catch((e: unknown) => {
+      // 401 / network / etc — surface message but don't throw. Consumatorii
+      // trateaza user === null gratios (Sidebar ascunde, AdminGate afiseaza 403).
+      emit({ user: null, error: e instanceof Error ? e.message : "Eroare la /me", loading: false });
+    })
+    .finally(() => {
+      inflight = null;
+    });
+  return inflight;
+}
+
+function refresh(): void {
+  emit({ loading: true });
+  void fetchMe();
+}
+
+// Doar pentru teste: reseteaza store-ul intre cazuri (module state persista).
+export function __resetCurrentUserStoreForTests(): void {
+  snapshot = { user: null, loading: true, error: null };
+  started = false;
+  inflight = null;
+}
 
 export function useCurrentUser(): UseCurrentUserResult {
-  const [user, setUser] = useState<MeProfile | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [tick, setTick] = useState(0);
+  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: tick este trigger explicit pentru refresh, iar me.get este import stabil la nivel de modul.
   useEffect(() => {
-    const ac = new AbortController();
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-    me.get(ac.signal)
-      .then((u) => {
-        if (cancelled) return;
-        setUser(u);
-      })
-      .catch((e: unknown) => {
-        if (cancelled) return;
-        // 401 / network / etc — surface message but don't throw. Sidebar +
-        // App both handle user === null gracefully.
-        const msg = e instanceof Error ? e.message : "Eroare la /me";
-        setError(msg);
-        setUser(null);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [tick]);
+    if (!started) {
+      started = true;
+      void fetchMe();
+    }
+  }, []);
 
   return {
-    user,
-    loading,
-    error,
-    refresh: () => setTick((t) => t + 1),
+    user: snap.user,
+    loading: snap.loading,
+    error: snap.error,
+    refresh,
   };
 }
