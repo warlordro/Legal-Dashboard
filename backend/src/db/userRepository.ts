@@ -79,6 +79,13 @@ function buildWhere(opts: ListUsersOpts): { sql: string; params: (string | numbe
   if (opts.status) {
     where.push("status = ?");
     params.push(opts.status);
+  } else {
+    // v2.42.0: fara filtru explicit, userii stersi (soft delete) NU apar —
+    // raman in DB pentru audit/cote si se vad doar cerand status=deleted.
+    // Efect secundar corect: guard-ul "ultimul admin" nu mai numara adminii
+    // stersi ca admini ramasi (inainte, un rand deleted putea debloca gresit
+    // demotarea ultimului admin real).
+    where.push("status != 'deleted'");
   }
   return {
     sql: where.length > 0 ? `WHERE ${where.join(" AND ")}` : "",

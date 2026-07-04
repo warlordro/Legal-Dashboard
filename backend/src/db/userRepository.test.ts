@@ -89,6 +89,16 @@ describe("userRepository — list filters", () => {
     expect(r.rows.map((x) => x.id)).toEqual(["u-supp"]);
   });
 
+  it("default-ul exclude userii stersi; apar doar cu status=deleted explicit", () => {
+    insertUser({ id: "u-del", email: "dan@firma.ro", displayName: "Dan Sters" });
+    updateUserStatus("u-del", "deleted");
+    const def = listUsers();
+    expect(def.rows.map((x) => x.id)).not.toContain("u-del");
+    expect(def.total).toBe(4); // local + 3 din beforeEach, fara cel sters
+    const deleted = listUsers({ status: "deleted" });
+    expect(deleted.rows.map((x) => x.id)).toEqual(["u-del"]);
+  });
+
   it("limit + offset paginate without dropping total", () => {
     const page1 = listUsers({ limit: 2, offset: 0 });
     const page2 = listUsers({ limit: 2, offset: 2 });

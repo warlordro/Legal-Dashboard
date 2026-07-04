@@ -60,7 +60,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
     try {
       const [b, w] = await Promise.all([me.budget(), me.budgetWarnings()]);
       setBudget(b);
-      setWarnings(w.warnings);
+      setWarnings(w.items ?? []);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea bugetului.");
     } finally {
@@ -117,7 +117,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                   <li key={`${w.feature}:${w.thresholdPct}`} className="flex flex-wrap items-center gap-2">
                     <Badge variant="warning">{w.feature}</Badge>
                     <span>
-                      peste {w.thresholdPct}% — episod activ din {formatIsoDateTime(w.aboveThresholdSince)}
+                      peste {w.thresholdPct}% — episod activ din {formatIsoDateTime(w.aboveSince)}
                     </span>
                     {w.emailSentAt && (
                       <span className="text-xs text-muted-foreground">

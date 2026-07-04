@@ -433,7 +433,9 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Toate statusurile</SelectItem>
+                  {/* Default-ul exclude userii stersi (soft delete) — ei apar
+                      doar cu filtrul explicit "Sters". */}
+                  <SelectItem value="all">Toate (fara stersi)</SelectItem>
                   {STATUS_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
                       {o.label}

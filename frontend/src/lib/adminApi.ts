@@ -192,11 +192,15 @@ export interface MeBudgetWarning {
   thresholdPct: number;
   firedAt: string;
   emailSentAt: string | null;
-  aboveThresholdSince: string;
+  aboveSince: string;
 }
 
+// v2.42.0: aliniat la raspunsul REAL al backend-ului (me.ts /budget-warnings
+// emite `items` + `aboveSince`, consecvent cu /budget). Tipul vechi
+// (`warnings` + `aboveThresholdSince`) nu a coincis niciodata cu serverul —
+// pagina Consum crapa cu TypeError la primul render in web.
 export interface MeBudgetWarningsResult {
-  warnings: MeBudgetWarning[];
+  items: MeBudgetWarning[];
 }
 
 export interface ListUsersOpts {
