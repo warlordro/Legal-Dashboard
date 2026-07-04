@@ -202,7 +202,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     const periodLabel = PERIOD_LABELS[override.period].toLowerCase();
     const ok = await confirm({
       title: "Sterge cota",
-      message: `Sterge override-ul pentru "${override.feature}" (${limitLabel} / ${periodLabel})? Userul va reveni la limita default.`,
+      message: `Sterge limita pentru "${override.feature}" (${limitLabel} / ${periodLabel})? Userul revine la buget nelimitat.`,
       destructive: true,
       confirmLabel: "Sterge",
     });
@@ -421,11 +421,6 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                       </option>
                     ))}
                   </select>
-                  <p className="mt-1 text-[11px] text-muted-foreground">
-                    {isCountFeature(feature)
-                      ? "Limita = numar de captcha-uri pe fereastra rolling."
-                      : "Limita = cost USD pe fereastra rolling."}
-                  </p>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-period">
@@ -473,6 +468,14 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                   <Plus className="h-4 w-4" />
                   Salveaza
                 </Button>
+                {/* Randuri full-width sub grid — helper text-ul NU sta in coloana
+                    Feature: cu items-end, inaltimea extra ar defaza selectul fata
+                    de restul campurilor. */}
+                <p className="col-span-full text-xs text-muted-foreground">
+                  {isCountFeature(feature)
+                    ? "Limita = numar de captcha-uri pe fereastra aleasa."
+                    : "Limita = cost in USD pe fereastra aleasa."}
+                </p>
                 <label className="col-span-full flex items-center gap-2 text-xs text-muted-foreground">
                   <input
                     type="checkbox"
@@ -480,7 +483,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     onChange={(e) => setUnlimited(e.target.checked)}
                     className="h-3.5 w-3.5"
                   />
-                  <span>Nelimitat (limita NULL — pass-through fara cap)</span>
+                  <span>Nelimitat (fara plafon pe acest feature)</span>
                 </label>
               </form>
 
@@ -500,7 +503,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     {overrides.length === 0 && !loading && (
                       <tr>
                         <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
-                          Nu exista override-uri. Userul foloseste limita default.
+                          Nicio limita setata pentru acest user — buget nelimitat. Seteaza una cu formularul de mai sus.
                         </td>
                       </tr>
                     )}
