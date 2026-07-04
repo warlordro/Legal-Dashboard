@@ -14,6 +14,24 @@ export function TenantKeyStatusPanel({
   isAdmin: boolean;
   onManageKeys?: () => void;
 }) {
+  // Userul normal nu administreaza chei — inventarul per provider e zgomot
+  // (feedback testare). El vede DOAR un avertisment cand o capabilitate e
+  // indisponibila; cand totul e configurat, nu vede nimic.
+  if (!isAdmin) {
+    if (tenantKeys.status.state !== "ready") return null; // loading/error: fail-open, fara zgomot
+    const cfg = tenantKeys.status.configured;
+    const missing: string[] = [];
+    if (!(cfg.anthropic || cfg.openai || cfg.google || cfg.openrouter)) missing.push("analizele AI");
+    if (!cfg.captcha) missing.push("cautarile RNPM");
+    if (missing.length === 0) return null;
+    return (
+      <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
+        Cheile API nu sunt configurate — {missing.join(" si ")} sunt indisponibile momentan. Contacteaza
+        administratorul.
+      </div>
+    );
+  }
+
   return (
     <div className="mb-3 rounded-lg border border-border p-3">
       <div className="mb-2 flex items-center justify-between">

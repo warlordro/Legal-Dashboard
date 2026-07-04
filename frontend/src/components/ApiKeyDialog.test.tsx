@@ -168,7 +168,7 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     });
   });
 
-  it("tenant mode: non-adminul vede statusul read-only, fara BYOK, fara buton admin, fara PAT", () => {
+  it("tenant mode: non-adminul cu chei configurate NU vede inventarul de chei (nici BYOK, nici PAT)", () => {
     useCurrentUserMock.mockReturnValue({
       user: {
         id: "u-1",
@@ -187,13 +187,37 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     render(<ApiKeyDialog {...props("native")} tenantKeys={tenantReady({ anthropic: true, captcha: true })} />);
 
     const text = textContent(host);
-    expect(text).toContain("Chei API — nivel tenant");
-    expect(text).toContain("gestionate de administratorul tenantului");
-    // Fara formular BYOK: niciun input de cheie si niciun buton Salveaza.
+    // v2.42.0 (feedback user): inventarul per provider e doar pentru admin —
+    // userul normal nu vede nimic cand totul e configurat.
+    expect(text).not.toContain("Chei API — nivel tenant");
     expect(host.querySelectorAll("input").length).toBe(0);
     expect(text).not.toContain("Salveaza");
     expect(text).not.toContain("Gestioneaza cheile");
     expect(host.querySelector("[data-testid='pat-panel']")).toBeNull();
+  });
+
+  it("tenant mode: non-adminul vede DOAR avertisment cand lipsesc chei (contacteaza adminul)", () => {
+    useCurrentUserMock.mockReturnValue({
+      user: {
+        id: "u-1",
+        email: "u@firma.ro",
+        displayName: "User",
+        role: "user",
+        status: "active",
+        createdAt: "2026-05-19T00:00:00.000Z",
+        lastLoginAt: null,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    render(<ApiKeyDialog {...props("native")} tenantKeys={tenantReady({ openrouter: true, captcha: false })} />);
+
+    const text = textContent(host);
+    expect(text).toContain("cautarile RNPM");
+    expect(text).toContain("Contacteaza");
+    expect(text).not.toContain("Chei API — nivel tenant");
   });
 
   it("browser cu key-status error: panou neutru cu Reincearca, NICIODATA formularul BYOK", () => {
