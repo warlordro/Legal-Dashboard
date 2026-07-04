@@ -52,6 +52,7 @@ export function UserPicker({
       <CardContent className="space-y-2">
         {error && <p className="text-sm text-red-600">{error}</p>}
         <select
+          aria-label="Selecteaza utilizatorul"
           value={selectedId ?? ""}
           onChange={(e) => {
             const user = users.find((u) => u.id === e.target.value);

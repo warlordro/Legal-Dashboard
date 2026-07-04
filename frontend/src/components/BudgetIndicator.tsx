@@ -4,13 +4,15 @@ import { me, type MeBudgetItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface BudgetIndicatorProps {
-  // v2.42.0: bugetul AI e un pool unic ("ai") peste toate analizele.
-  feature?: "ai";
   enabled?: boolean;
   className?: string;
 }
 
-export function BudgetIndicator({ feature = "ai", enabled = true, className }: BudgetIndicatorProps) {
+// v2.42.0: bugetul AI e un pool unic ("ai") peste toate analizele — nu mai
+// exista alt feature de afisat, deci nu mai e prop.
+const FEATURE = "ai";
+
+export function BudgetIndicator({ enabled = true, className }: BudgetIndicatorProps) {
   const [item, setItem] = useState<MeBudgetItem | null>(null);
 
   useEffect(() => {
@@ -21,7 +23,7 @@ export function BudgetIndicator({ feature = "ai", enabled = true, className }: B
       try {
         const budget = await me.budget(ac.signal);
         if (cancelled) return;
-        setItem(budget.items.find((row) => row.feature === feature) ?? null);
+        setItem(budget.items.find((row) => row.feature === FEATURE) ?? null);
       } catch {
         if (!cancelled) setItem(null);
       }
@@ -33,7 +35,7 @@ export function BudgetIndicator({ feature = "ai", enabled = true, className }: B
       ac.abort();
       window.clearInterval(interval);
     };
-  }, [enabled, feature]);
+  }, [enabled]);
 
   if (!enabled || !item || item.limitMilli === null) return null;
 
