@@ -57,7 +57,11 @@ export interface AuditEvent {
   id: number;
   ts: string;
   ownerId: string | null;
+  // v2.42.0: emailul rezolvat server-side (null pt evenimente system / useri
+  // inexistenti) — UUID-ul brut e ilizibil in tabel.
+  ownerEmail: string | null;
   actorId: string | null;
+  actorEmail: string | null;
   action: string;
   targetKind: string | null;
   targetId: string | null;

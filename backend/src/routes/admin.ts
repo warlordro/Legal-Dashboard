@@ -549,6 +549,15 @@ adminRouter.get("/audit", (c) => {
       },
     });
   }
+  // v2.42.0: ID-urile de owner/actor sunt UUID-uri ilizibile in tabelul din
+  // pagina — atasam emailul (lookup per ID unic din pagina curenta, <=200 randuri).
+  const emailById = new Map<string, string | null>();
+  for (const r of result.rows) {
+    for (const id of [r.owner_id, r.actor_id]) {
+      if (id === null || emailById.has(id)) continue;
+      emailById.set(id, getUserById(id)?.email ?? null);
+    }
+  }
   return c.json(
     ok(
       {
@@ -556,7 +565,9 @@ adminRouter.get("/audit", (c) => {
           id: r.id,
           ts: r.ts,
           ownerId: r.owner_id,
+          ownerEmail: r.owner_id === null ? null : (emailById.get(r.owner_id) ?? null),
           actorId: r.actor_id,
+          actorEmail: r.actor_id === null ? null : (emailById.get(r.actor_id) ?? null),
           action: r.action,
           targetKind: r.target_kind,
           targetId: r.target_id,

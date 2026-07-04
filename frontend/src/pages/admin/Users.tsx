@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { TablePagination } from "@/components/table-pagination";
 import {
   admin,
   MonitoringApiError,
@@ -68,6 +69,8 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // v2.42.0: paginare completa (numere + marime pagina), ca la Dosare.
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
   // v2.42.0: creare user individual + import bulk din xlsx.
   const [newEmail, setNewEmail] = useState("");
   const [newName, setNewName] = useState("");
@@ -78,7 +81,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
   const [importReport, setImportReport] = useState<UserImportReport | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -86,7 +89,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
     try {
       const result = await admin.listUsers({
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         search: search || undefined,
         role: roleFilter === "all" ? undefined : roleFilter,
         status: statusFilter === "all" ? undefined : statusFilter,
@@ -98,7 +101,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
     } finally {
       setLoading(false);
     }
-  }, [page, roleFilter, search, statusFilter]);
+  }, [page, pageSize, roleFilter, search, statusFilter]);
 
   useEffect(() => {
     load();
@@ -574,21 +577,18 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
           </CardContent>
         </Card>
 
-        <div className="flex items-center justify-between">
-          <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
-            Inapoi
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Pagina {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Inainte
-          </Button>
-        </div>
+        <TablePagination
+          page={page - 1}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={(p) => setPage(p + 1)}
+          onPageSizeChange={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+          pageSizes={[20, 50, 100]}
+          disabled={loading}
+        />
       </div>
     </div>
   );

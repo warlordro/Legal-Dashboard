@@ -785,6 +785,18 @@ describe("GET /api/v1/admin/audit/export", () => {
     expect(foundHumanActor).toBe(true);
   });
 
+  it("listarea audit ataseaza emailul owner/actor (rezolvat server-side)", async () => {
+    const app = buildApp();
+    await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "lista@firma.ro", displayName: "Lista", role: "user" }),
+    });
+    const res = await app.request("/api/v1/admin/audit?action=admin.users.create");
+    const data = (await jsonOf(res)).data as { rows: Array<{ actorEmail: string | null }> };
+    expect(data.rows[0].actorEmail).toBe("local@desktop");
+  });
+
   it("interval fara evenimente: raport valid (gol), nu eroare", async () => {
     const res = await buildApp().request("/api/v1/admin/audit/export?until=2000-01-01T00:00:00.000Z");
     expect(res.status).toBe(200);

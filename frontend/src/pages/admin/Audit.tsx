@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { admin, type AuditEvent } from "@/lib/api";
+import { TablePagination } from "@/components/table-pagination";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
@@ -84,7 +85,9 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     }
   };
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // v2.42.0: paginare completa (numere de pagina + marime pagina), ca la Dosare.
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   const loadAudit = async (filters: {
     page: number;
@@ -101,7 +104,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     try {
       const result = await admin.listAudit({
         page: filters.page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         // actionLike supports prefix/substring matching (admin.users.*); plain
         // `action` requires an exact value, which is rarely what an auditor wants.
         actionLike: filters.action || undefined,
@@ -129,7 +132,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     admin
       .listAudit({
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         // actionLike supports prefix/substring matching (admin.users.*); plain
         // `action` requires an exact value, which is rarely what an auditor wants.
         actionLike: action || undefined,
@@ -148,7 +151,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
         setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
       })
       .finally(() => setLoading(false));
-  }, [action, actorId, from, outcome, ownerId, page, targetKind, to]);
+  }, [action, actorId, from, outcome, ownerId, page, pageSize, targetKind, to]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii si expanded depinde explicit de filtrele vizibile.
   useEffect(() => {
@@ -339,8 +342,13 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                           <td className="px-3 py-2 align-top">
                             <Badge variant={outcomeVariant(row.outcome)}>{row.outcome}</Badge>
                           </td>
-                          <td className="px-3 py-2 align-top font-mono text-xs">{row.ownerId ?? "-"}</td>
-                          <td className="px-3 py-2 align-top font-mono text-xs">{row.actorId ?? "-"}</td>
+                          {/* Email cand exista (lizibil); ID-ul ramane in title pentru copy/filtru. */}
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.ownerId ?? undefined}>
+                            {row.ownerEmail ?? row.ownerId ?? "-"}
+                          </td>
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.actorId ?? undefined}>
+                            {row.actorEmail ?? row.actorId ?? "-"}
+                          </td>
                           <td className="px-3 py-2 align-top text-xs">
                             {row.targetKind ? (
                               <span className="font-mono">
@@ -392,21 +400,18 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
           </CardContent>
         </Card>
 
-        <div className="flex items-center justify-between">
-          <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
-            Inapoi
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Pagina {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Inainte
-          </Button>
-        </div>
+        <TablePagination
+          page={page - 1}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={(p) => setPage(p + 1)}
+          onPageSizeChange={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+          pageSizes={[25, 50, 100, 200]}
+          disabled={loading}
+        />
       </div>
     </div>
   );
