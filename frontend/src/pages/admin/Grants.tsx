@@ -299,7 +299,9 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={onCreate} className="grid gap-3 md:grid-cols-[140px_140px_220px_1fr_auto] md:items-end">
+              {/* Feature-ul are o singura optiune cu text lung ("AI — toate analizele
+                  (limita unica)") — coloana lui e lata, Motivul preia doar restul. */}
+              <form onSubmit={onCreate} className="grid gap-3 md:grid-cols-[260px_140px_220px_1fr_auto] md:items-end">
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="grant-feature">
                     Feature
