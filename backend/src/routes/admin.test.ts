@@ -15,6 +15,7 @@ import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
 import { insertAiUsage } from "../db/aiUsageRepository.ts";
+import { recordCaptchaUsage } from "../db/captchaUsageRepository.ts";
 import { listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
 import { listGrantsForUser, sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
@@ -400,6 +401,30 @@ describe("GET /api/v1/admin/usage/overview", () => {
   it("este gated pe rol admin", async () => {
     const res = await buildApp("u-1").request("/api/v1/admin/usage/overview");
     expect(res.status).toBe(403);
+  });
+
+  it("include consumul captcha (count, doar source=tenant) cu limita din override", async () => {
+    recordCaptchaUsage({ ownerId: "u-1", provider: "2captcha", source: "tenant" });
+    recordCaptchaUsage({ ownerId: "u-1", provider: "2captcha", source: "tenant" });
+    // BYOK desktop (source=body) nu intra in cap — nu trebuie numarat.
+    recordCaptchaUsage({ ownerId: "u-1", provider: "2captcha", source: "body" });
+    upsertOverride({ userId: "u-1", feature: "captcha.rnpm", period: "day", limitUsdMilli: 50, updatedBy: "local" });
+
+    const res = await buildApp().request("/api/v1/admin/usage/overview");
+    const data = (await jsonOf(res)).data as { captcha: Array<Record<string, unknown>> };
+    expect(data.captcha[0]).toMatchObject({
+      userId: "u-1",
+      period: "day",
+      usedCount: 2,
+      limitCount: 50,
+      limitSource: "override",
+    });
+    // Fara override si fara default env: nelimitat.
+    expect(data.captcha.find((i) => i.userId === "u-2")).toMatchObject({
+      usedCount: 0,
+      limitCount: null,
+      limitSource: "none",
+    });
   });
 });
 

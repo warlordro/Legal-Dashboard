@@ -127,8 +127,22 @@ export interface UsageOverviewItem {
   limitSource: "override" | "default" | "none";
 }
 
+// Captcha RNPM: unitatea e NUMAR de captcha-uri pe fereastra, nu USD.
+export interface UsageCaptchaItem {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  role: string;
+  feature: "captcha.rnpm";
+  period: QuotaPeriod;
+  usedCount: number;
+  limitCount: number | null;
+  limitSource: "override" | "default" | "none";
+}
+
 export interface UsageOverviewResult {
   items: UsageOverviewItem[];
+  captcha: UsageCaptchaItem[];
   truncated: boolean;
 }
 

@@ -32,6 +32,8 @@ import {
 import { requireRole } from "../middleware/requireRole.ts";
 import { PERIOD_SECONDS, QUOTA_FEATURES, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
 import { sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
+import { countTenantCaptchaUsageInWindow } from "../db/captchaUsageRepository.ts";
+import { readDefaultCaptchaQuota } from "./rnpmGuards.ts";
 import {
   getUserByEmail,
   getUserById,
@@ -737,7 +739,34 @@ adminRouter.get("/usage/overview", (c) => {
     })
     .sort((a, b) => b.usedMilli - a.usedMilli || a.email.localeCompare(b.email));
 
-  return c.json(ok({ items, truncated: users.length < total }, c), 200);
+  // Captcha RNPM — mirror al withRnpmCaptchaGuards: cap = NUMAR de captcha-uri
+  // (nu USD), consum = randuri captcha_usage source='tenant' in fereastra.
+  const defaultCaptcha = readDefaultCaptchaQuota();
+  const captcha = users
+    .map((u) => {
+      const override = getOverride(u.id, "captcha.rnpm");
+      const period: QuotaPeriod = override?.period ?? "day";
+      const limitCount = override ? override.limit_usd_milli : defaultCaptcha;
+      const usedCount = countTenantCaptchaUsageInWindow(u.id, PERIOD_SECONDS[period]);
+      return {
+        userId: u.id,
+        email: u.email,
+        displayName: u.display_name,
+        role: u.role,
+        feature: "captcha.rnpm" as const,
+        period,
+        usedCount,
+        limitCount,
+        limitSource: override
+          ? ("override" as const)
+          : defaultCaptcha !== null
+            ? ("default" as const)
+            : ("none" as const),
+      };
+    })
+    .sort((a, b) => b.usedCount - a.usedCount || a.email.localeCompare(b.email));
+
+  return c.json(ok({ items, captcha, truncated: users.length < total }, c), 200);
 });
 
 // ---------- Quota ----------

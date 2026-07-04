@@ -3,7 +3,7 @@ import { Activity, AlertTriangle, RefreshCw, ShieldAlert, Users } from "lucide-r
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { admin, type UsageOverviewItem } from "@/lib/adminApi";
+import { admin, type UsageCaptchaItem, type UsageOverviewItem } from "@/lib/adminApi";
 import {
   me,
   type MeBudgetItem,
@@ -53,6 +53,8 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
   const [budget, setBudget] = useState<MeBudgetResult | null>(null);
   const [warnings, setWarnings] = useState<MeBudgetWarning[]>([]);
   const [overview, setOverview] = useState<UsageOverviewItem[] | null>(null);
+  const [overviewCaptcha, setOverviewCaptcha] = useState<UsageCaptchaItem[]>([]);
+  const [overviewTab, setOverviewTab] = useState<"ai" | "captcha">("ai");
   const [overviewTruncated, setOverviewTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +67,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
       setBudget(b);
       setWarnings(w.items ?? []);
       setOverview(o.items ?? []);
+      setOverviewCaptcha(o.captcha ?? []);
       setOverviewTruncated(o.truncated === true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea bugetului.");
@@ -138,9 +141,27 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-4 w-4 text-primary" />
-              Consum per utilizator
+            <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+              <span className="flex items-center gap-2">
+                <Users className="h-4 w-4 text-primary" />
+                Consum per utilizator
+              </span>
+              <span className="flex items-center gap-1">
+                <Button
+                  variant={overviewTab === "ai" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setOverviewTab("ai")}
+                >
+                  AI
+                </Button>
+                <Button
+                  variant={overviewTab === "captcha" ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setOverviewTab("captcha")}
+                >
+                  Captcha RNPM
+                </Button>
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent>
@@ -148,6 +169,63 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
               <p className="px-4 py-6 text-center text-muted-foreground">Se incarca…</p>
             ) : overview.length === 0 ? (
               <p className="px-4 py-6 text-center text-muted-foreground">Nu exista utilizatori activi.</p>
+            ) : overviewTab === "captcha" ? (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="px-2 py-2 font-medium">Utilizator</th>
+                      <th className="px-2 py-2 font-medium">Perioada</th>
+                      <th className="px-2 py-2 text-right font-medium">Captcha rezolvate</th>
+                      <th className="w-1/3 px-2 py-2 font-medium">Utilizare</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overviewCaptcha.map((item) => {
+                      const pct =
+                        item.limitCount === null || item.limitCount === 0
+                          ? null
+                          : Math.min(100, Math.round((item.usedCount / item.limitCount) * 100));
+                      return (
+                        <tr key={item.userId} className="border-b border-border/60 last:border-0">
+                          <td className="px-2 py-2">
+                            <span className="font-medium">{item.email}</span>
+                            {item.role === "admin" && (
+                              <Badge variant="outline" className="ml-2">
+                                admin
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-2 py-2">
+                            <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 text-right font-mono">
+                            {item.usedCount}
+                            {item.limitCount !== null ? (
+                              <span className="text-muted-foreground"> / {item.limitCount}</span>
+                            ) : (
+                              <Badge variant="success" className="ml-2">
+                                Nelimitat
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className={cn("h-full transition-all", barColor(pct))}
+                                  style={{ width: pct === null ? "100%" : `${pct}%` }}
+                                />
+                              </div>
+                              {pct !== null && <span className="w-10 text-right text-xs font-semibold">{pct}%</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">

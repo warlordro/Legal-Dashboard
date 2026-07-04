@@ -70,7 +70,6 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
   const [feature, setFeature] = useState<string>(DEFAULT_FEATURE);
   const [period, setPeriod] = useState<QuotaPeriod>("day");
   const [limitUsd, setLimitUsd] = useState("");
-  const [unlimited, setUnlimited] = useState(false);
   const [busyFeature, setBusyFeature] = useState<string | null>(null);
   // v2.41.0: vedere globala la deschidere — cotele active ale tuturor userilor,
   // fara sa fie nevoie de cautarea prealabila a unui user.
@@ -128,7 +127,6 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     setFeature(DEFAULT_FEATURE);
     setPeriod("day");
     setLimitUsd("");
-    setUnlimited(false);
   };
 
   const onUpsert = async (e: React.FormEvent) => {
@@ -139,20 +137,15 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
       setError("Introdu un nume pentru feature.");
       return;
     }
-    let limitUsdMilli: number | null;
-    if (unlimited) {
-      limitUsdMilli = null;
-    } else {
-      const parsed = parseInputToStored(featureKey, limitUsd);
-      if (parsed === "invalid") {
-        const hint = isCountFeature(featureKey)
-          ? "Introdu un numar intreg >= 0 sau bifeaza 'Nelimitat'."
-          : "Introdu o limita valida (>= 0) sau bifeaza 'Nelimitat'.";
-        setError(hint);
-        return;
-      }
-      limitUsdMilli = parsed;
+    // v2.42.0 (feedback user): fara checkbox "Nelimitat" — starea nelimitata e
+    // absenta limitei (sterge randul din lista), nu un override explicit NULL.
+    const parsed = parseInputToStored(featureKey, limitUsd);
+    if (parsed === "invalid") {
+      const hint = isCountFeature(featureKey) ? "Introdu un numar intreg >= 0." : "Introdu o limita valida (>= 0).";
+      setError(hint);
+      return;
     }
+    const limitUsdMilli = parsed;
     setBusyFeature(featureKey);
     setError(null);
     try {
@@ -166,7 +159,6 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
       setFeature(DEFAULT_FEATURE);
       setLimitUsd("");
       setPeriod("day");
-      setUnlimited(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la salvarea cotei.");
     } finally {
@@ -206,13 +198,9 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
   const startEdit = (override: QuotaOverride) => {
     setFeature(override.feature);
     setPeriod(override.period);
-    if (override.limitUsdMilli === null) {
-      setUnlimited(true);
-      setLimitUsd("");
-    } else {
-      setUnlimited(false);
-      setLimitUsd(formatStoredValue(override.feature, override.limitUsdMilli));
-    }
+    // Rand legacy nelimitat (override NULL): campul porneste gol — salvarea
+    // cere un numar; revenirea la nelimitat se face cu Sterge.
+    setLimitUsd(override.limitUsdMilli === null ? "" : formatStoredValue(override.feature, override.limitUsdMilli));
   };
 
   return (
@@ -228,7 +216,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
           <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
             Limitele de cheltuiala per utilizator, pe fereastra rulanta (zi / saptamana / luna): pentru analizele AI
             limita e cost in USD, pentru Captcha RNPM e numar de captcha-uri. Un user fara limita setata are buget
-            nelimitat; "Nelimitat" bifat scoate explicit plafonul.
+            nelimitat; ca sa scoti un plafon existent, sterge-l din lista.
           </p>
         </div>
 
@@ -393,11 +381,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     value={limitUsd}
                     onChange={(e) => setLimitUsd(e.target.value)}
                     placeholder={isCountFeature(feature) ? "ex: 50" : "ex: 25"}
-                    disabled={unlimited}
-                    className={cn(
-                      "h-9 w-full rounded-md border border-input bg-background px-3 text-sm",
-                      unlimited && "opacity-50"
-                    )}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </div>
                 <Button
@@ -420,15 +404,6 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     ? "Limita = numar de captcha-uri pe fereastra aleasa."
                     : "Limita = cost in USD pe fereastra aleasa."}
                 </p>
-                <label className="col-span-full flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={unlimited}
-                    onChange={(e) => setUnlimited(e.target.checked)}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span>Nelimitat (fara plafon pe acest feature)</span>
-                </label>
               </form>
 
               <div className="overflow-x-auto">

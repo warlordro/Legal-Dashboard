@@ -27,7 +27,8 @@ const CAPTCHA_PERIOD_SECONDS: Record<QuotaPeriod, number> = {
 // Default cap pe captcha-uri / fereastra rolling pentru useri fara override.
 // Format: integer non-negativ (numar de captcha-uri). Unset = pass-through
 // (backward compatible: niciun cap). 0 = block hard pe orice user fara override.
-function readDefaultCaptchaQuota(): number | null {
+// Exportat in v2.42.0 pentru GET /admin/usage/overview (aceeasi regula de default).
+export function readDefaultCaptchaQuota(): number | null {
   const raw = process.env.LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA;
   if (raw === undefined || raw === "") return null;
   const parsed = Number(raw);
