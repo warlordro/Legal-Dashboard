@@ -843,6 +843,33 @@ describe("GET /api/v1/admin/users/import-template + POST /users/import", () => {
     expect(getAuditEvents({ ownerId: "local", action: "admin.users.import" })).toHaveLength(1);
   });
 
+  it("accepta etichetele umane de rol din template (Utilizator/Admin, case-insensitive)", async () => {
+    const app = buildApp();
+    const buf = await xlsxOf([
+      ["eticheta1@firma.ro", "Eticheta Unu", "Utilizator"],
+      ["eticheta2@firma.ro", "Eticheta Doi", "ADMIN"],
+    ]);
+    const res = await postImport(app, buf);
+    expect(res.status).toBe(200);
+    const data = (await jsonOf(res)).data as { summary: { created: number; invalid: number } };
+    expect(data.summary).toMatchObject({ created: 2, invalid: 0 });
+    const rows = (await jsonOf(await app.request("/api/v1/admin/users?search=eticheta2"))).data as {
+      rows: Array<{ role: string }>;
+    };
+    expect(rows.rows[0].role).toBe("admin");
+  });
+
+  it("template-ul are dropdown de rol (data validation lista) pe coloana C", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/import-template");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(Buffer.from(await res.arrayBuffer()) as unknown as ArrayBuffer);
+    const dv = wb.getWorksheet("Utilizatori")?.getCell("C2").dataValidation;
+    expect(dv?.type).toBe("list");
+    expect(String(dv?.formulae?.[0])).toContain("Utilizator");
+    expect(String(dv?.formulae?.[0])).toContain("Admin");
+  });
+
   it("respinge non-xlsx cu 400 (magic bytes), nu 500", async () => {
     const app = buildApp();
     const res = await postImport(app, Buffer.from("email,nume,rol\nana@firma.ro,Ana,user\n", "utf8"));

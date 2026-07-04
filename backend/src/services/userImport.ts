@@ -35,6 +35,28 @@ export const CreateUserSchema = z
 
 export type CreateUserInput = z.infer<typeof CreateUserSchema>;
 
+// UI-ul afiseaza rolurile ca "Utilizator"/"Admin" — template-ul si importul
+// vorbesc aceeasi limba: acceptam si etichetele umane, si token-urile interne
+// (case-insensitive), gol = Utilizator. Dropdown-ul din template foloseste
+// etichetele umane.
+export const ROLE_LABELS: Record<(typeof CREATABLE_USER_ROLES)[number], string> = {
+  user: "Utilizator",
+  admin: "Admin",
+};
+
+const ROLE_ALIASES: Record<string, UserRole> = {
+  user: "user",
+  utilizator: "user",
+  admin: "admin",
+  administrator: "admin",
+};
+
+export function parseRoleInput(raw: string): UserRole | null {
+  const key = canonicalizeEmail(raw); // trim + lowercase (refolosim normalizatorul)
+  if (key === "") return "user";
+  return ROLE_ALIASES[key] ?? null;
+}
+
 export class UserImportError extends Error {
   readonly code: "invalid_file" | "too_many_rows" | "empty_file";
   constructor(code: "invalid_file" | "too_many_rows" | "empty_file", message: string) {
@@ -77,15 +99,31 @@ export async function buildUserImportTemplate(): Promise<Buffer> {
   ];
   data.getRow(1).font = { bold: true };
 
+  // Dropdown blocat pe coloana Rol (data validation tip lista, stop pe valori
+  // din afara listei) — userul alege dintre etichetele umane, nu tasteaza
+  // token-uri interne. Acoperim toate randurile posibile (cap + header).
+  const roleList = `"${Object.values(ROLE_LABELS).join(",")}"`;
+  for (let r = 2; r <= MAX_IMPORT_ROWS + 1; r++) {
+    data.getCell(`C${r}`).dataValidation = {
+      type: "list",
+      allowBlank: true,
+      formulae: [roleList],
+      showErrorMessage: true,
+      errorStyle: "stop",
+      errorTitle: "Rol invalid",
+      error: "Alege din lista: Utilizator sau Admin (gol = Utilizator).",
+    };
+  }
+
   const instr = wb.addWorksheet(INSTRUCTIONS_SHEET);
   instr.columns = [{ width: 100 }];
   instr.addRows([
     ["Completeaza sheet-ul 'Utilizatori' incepand cu randul 2. Acest sheet ('Instructiuni') este ignorat la import."],
     ["Email: adresa Google cu care utilizatorul se va loga (obligatoriu)."],
     ["Nume afisat: numele vizibil in aplicatie (obligatoriu)."],
-    ['Rol: "user" sau "admin". Lasat gol = user.'],
+    ['Rol: alege din lista "Utilizator" sau "Admin". Lasat gol = Utilizator.'],
     [""],
-    ["Exemplu de rand:  ana@firma.ro  |  Ana Pop  |  user"],
+    ["Exemplu de rand:  ana@firma.ro  |  Ana Pop  |  Utilizator"],
     [`Limita: maximum ${MAX_IMPORT_ROWS} de randuri per fisier.`],
   ]);
 
@@ -172,19 +210,19 @@ export async function parseUserImportFile(buf: Buffer): Promise<ParsedImport> {
   for (const { rowNumber, cells } of dataRows) {
     const emailRaw = cells[0] ?? "";
     const displayNameRaw = cells[1] ?? "";
-    const roleRaw = canonicalizeEmail(cells[2] ?? "") || "user"; // trim+lowercase; gol => user
+    const role = parseRoleInput(cells[2] ?? ""); // accepta "Utilizator"/"Admin" si "user"/"admin"; gol => user
     const emailForReport = canonicalizeEmail(emailRaw);
 
-    if (!(CREATABLE_USER_ROLES as readonly string[]).includes(roleRaw)) {
+    if (role === null) {
       issues.push({
         rowNumber,
         email: emailForReport,
         status: "invalid",
-        reason: `Rol necunoscut "${cells[2]?.trim()}" — valorile valide sunt: ${CREATABLE_USER_ROLES.join(", ")} (gol = user).`,
+        reason: `Rol necunoscut "${cells[2]?.trim()}" — valorile valide sunt: ${Object.values(ROLE_LABELS).join(", ")} (gol = Utilizator).`,
       });
       continue;
     }
-    const parsed = CreateUserSchema.safeParse({ email: emailRaw, displayName: displayNameRaw, role: roleRaw });
+    const parsed = CreateUserSchema.safeParse({ email: emailRaw, displayName: displayNameRaw, role });
     if (!parsed.success) {
       issues.push({
         rowNumber,
