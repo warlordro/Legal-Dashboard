@@ -12,8 +12,13 @@ const DETAIL_CELL_MAX = 500;
 
 export async function buildAuditReportXlsx(
   rows: AuditRow[],
-  meta: { since?: string; until?: string }
+  meta: { since?: string; until?: string },
+  // id user -> eticheta umana ("email — Nume"); ID-urile brute (UUID) sunt
+  // inutile intr-un raport citit de om. Fallback: ID-ul, pentru useri stersi
+  // fizic sau evenimente system.
+  userLabels: Map<string, string> = new Map()
 ): Promise<Buffer> {
+  const labelOf = (id: string | null): string => (id === null ? "system" : (userLabels.get(id) ?? id));
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Audit");
   ws.columns = [
@@ -35,8 +40,8 @@ export async function buildAuditReportXlsx(
       ts: r.ts,
       action: r.action,
       outcome: r.outcome,
-      owner: r.owner_id ?? "system",
-      actor: r.actor_id ?? "",
+      owner: labelOf(r.owner_id),
+      actor: r.actor_id === null ? "" : labelOf(r.actor_id),
       target: [r.target_kind, r.target_id].filter(Boolean).join(" / "),
       ip: r.ip ?? "",
       requestId: r.request_id ?? "",

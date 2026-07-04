@@ -480,7 +480,16 @@ adminRouter.get("/audit/export", async (c) => {
   recordAudit(c, "admin.audit.export", {
     detail: { rows: result.rows.length, since: since ?? null, until: until ?? null },
   });
-  const buf = await buildAuditReportXlsx(result.rows, { since, until });
+  // Rezolva ID-urile de owner/actor la "email — Nume" (raport citit de om).
+  const userLabels = new Map<string, string>();
+  for (const r of result.rows) {
+    for (const id of [r.owner_id, r.actor_id]) {
+      if (id === null || userLabels.has(id)) continue;
+      const u = getUserById(id);
+      userLabels.set(id, u === null ? id : `${u.email} — ${u.display_name}`);
+    }
+  }
+  const buf = await buildAuditReportXlsx(result.rows, { since, until }, userLabels);
   const stamp = new Date().toISOString().slice(0, 10);
   c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   c.header("Content-Disposition", `attachment; filename="raport-audit-${stamp}.xlsx"`);

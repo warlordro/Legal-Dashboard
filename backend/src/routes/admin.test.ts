@@ -773,6 +773,16 @@ describe("GET /api/v1/admin/audit/export", () => {
     const buf = Buffer.from(await res.arrayBuffer());
     expect(buf.subarray(0, 2).toString("latin1")).toBe("PK");
     expect(getAuditEvents({ ownerId: "local", action: "admin.audit.export" })).toHaveLength(1);
+    // Actorul apare cu eticheta umana (email — nume), nu cu ID-ul brut.
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const ws = wb.getWorksheet("Audit");
+    let foundHumanActor = false;
+    ws?.eachRow((row) => {
+      const actor = String(row.getCell(5).value ?? "");
+      if (actor.includes("local@desktop")) foundHumanActor = true;
+    });
+    expect(foundHumanActor).toBe(true);
   });
 
   it("interval fara evenimente: raport valid (gol), nu eroare", async () => {
