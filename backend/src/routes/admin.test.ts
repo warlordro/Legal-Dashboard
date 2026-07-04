@@ -14,6 +14,7 @@ import { ownerContext } from "../middleware/owner.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
+import { insertAiUsage } from "../db/aiUsageRepository.ts";
 import { listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
 import { listGrantsForUser, sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
@@ -346,6 +347,59 @@ describe("/api/v1/admin/audit", () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/audit?since=not-a-date");
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// usage overview
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/admin/usage/overview", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+    insertUser({ id: "u-1", email: "a@x", displayName: "A" });
+    insertUser({ id: "u-2", email: "b@x", displayName: "B" });
+  });
+
+  it("returneaza consumul per user activ, sortat descrescator dupa consum", async () => {
+    insertAiUsage({ ownerId: "u-2", provider: "anthropic", model: "m", feature: "ai.single", costUsdMilli: 300 });
+    insertAiUsage({ ownerId: "u-2", provider: "anthropic", model: "m", feature: "ai.multi", costUsdMilli: 700 });
+    insertAiUsage({ ownerId: "u-1", provider: "openai", model: "m", feature: "ai.single", costUsdMilli: 100 });
+    upsertOverride({ userId: "u-2", feature: "ai", period: "week", limitUsdMilli: 5000, updatedBy: "local" });
+
+    const res = await buildApp().request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(200);
+    const data = (await jsonOf(res)).data as { items: Array<Record<string, unknown>>; truncated: boolean };
+    expect(data.truncated).toBe(false);
+    // u-2 (1000) > u-1 (100) > local (0). Pool unic: single + multi insumate.
+    expect(data.items.map((i) => i.userId)).toEqual(["u-2", "u-1", "local"]);
+    expect(data.items[0]).toMatchObject({
+      email: "b@x",
+      period: "week",
+      usedMilli: 1000,
+      baseLimitMilli: 5000,
+      effectiveLimitMilli: 5000,
+      limitSource: "override",
+    });
+    // Fara override si fara default env: pass-through, limita nula.
+    expect(data.items[1]).toMatchObject({ usedMilli: 100, effectiveLimitMilli: null, limitSource: "none" });
+  });
+
+  it("exclude userii inactivi si consumul din afara ferestrei", async () => {
+    updateUserStatus("u-2", "suspended");
+    // In afara ferestrei zilnice (25h in urma) — nu conteaza in fereastra day.
+    const old = new Date(Date.now() - 25 * 3600 * 1000).toISOString();
+    insertAiUsage({ ownerId: "u-1", provider: "openai", model: "m", feature: "ai.single", costUsdMilli: 900, ts: old });
+
+    const res = await buildApp().request("/api/v1/admin/usage/overview");
+    const data = (await jsonOf(res)).data as { items: Array<{ userId: string; usedMilli: number }> };
+    expect(data.items.find((i) => i.userId === "u-2")).toBeUndefined();
+    expect(data.items.find((i) => i.userId === "u-1")?.usedMilli).toBe(0);
+  });
+
+  it("este gated pe rol admin", async () => {
+    const res = await buildApp("u-1").request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(403);
   });
 });
 

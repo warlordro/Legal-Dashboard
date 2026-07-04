@@ -30,7 +30,8 @@ import {
   type TenantKeyField,
 } from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
-import { QUOTA_FEATURES } from "../middleware/quotaGuard.ts";
+import { PERIOD_SECONDS, QUOTA_FEATURES, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
+import { sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
 import {
   getUserByEmail,
   getUserById,
@@ -67,6 +68,7 @@ import {
   listAllActiveGrants,
   listGrantsForUser,
   revokeGrant,
+  sumActiveExtraMilli,
   type QuotaGrantRow,
 } from "../db/userQuotaGrantsRepository.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
@@ -685,6 +687,57 @@ adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
     detail,
   });
   return c.json(ok({ field, ...toKeyStatus(after), validationSkipped: validation.validationSkipped === true }, c), 200);
+});
+
+// ---------- Usage overview ----------
+
+// v2.42.0 (feedback testare): consumul AI per user, vizibil oricand in tabul
+// admin Consum. Pentru fiecare user activ aplicam EXACT regulile quotaGuard:
+// perioada din override (altfel zilnica), limita din override (altfel default
+// env), granturile active peste baza — ca cifrele afisate sa coincida cu
+// enforcement-ul. Pool unic "ai" (single + multi insumate).
+adminRouter.get("/usage/overview", (c) => {
+  const defaultMilli = readDefaultQuotaMilli();
+  // Userii activi, paginat pana la capat (cap defensiv 2000 — tenantul e o
+  // firma, nu o platforma; peste cap raportam trunchierea in loc sa mintim).
+  const users = [];
+  let offset = 0;
+  let total = 0;
+  do {
+    const page = listUsers({ status: "active", limit: 200, offset });
+    users.push(...page.rows);
+    total = page.total;
+    offset += 200;
+  } while (users.length < total && offset < 2000);
+
+  const items = users
+    .map((u) => {
+      const override = getOverride(u.id, "ai");
+      const period: QuotaPeriod = override?.period ?? "day";
+      const baseLimit = override ? override.limit_usd_milli : defaultMilli;
+      const extraFromGrants = sumActiveExtraMilli(u.id, "ai");
+      const usedMilli = sumAiUsageMilliInWindow(u.id, "ai", PERIOD_SECONDS[period]);
+      return {
+        userId: u.id,
+        email: u.email,
+        displayName: u.display_name,
+        role: u.role,
+        feature: "ai" as const,
+        period,
+        usedMilli,
+        baseLimitMilli: baseLimit,
+        extraFromGrantsMilli: extraFromGrants,
+        effectiveLimitMilli: baseLimit === null ? null : baseLimit + extraFromGrants,
+        limitSource: override
+          ? ("override" as const)
+          : defaultMilli !== null
+            ? ("default" as const)
+            : ("none" as const),
+      };
+    })
+    .sort((a, b) => b.usedMilli - a.usedMilli || a.email.localeCompare(b.email));
+
+  return c.json(ok({ items, truncated: users.length < total }, c), 200);
 });
 
 // ---------- Quota ----------

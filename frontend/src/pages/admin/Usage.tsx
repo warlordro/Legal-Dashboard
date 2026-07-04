@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Activity, AlertTriangle, RefreshCw, ShieldAlert } from "lucide-react";
+import { Activity, AlertTriangle, RefreshCw, ShieldAlert, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { admin, type UsageOverviewItem } from "@/lib/adminApi";
 import {
   me,
   type MeBudgetItem,
@@ -51,6 +52,8 @@ function barColor(pct: number | null): string {
 export default function UsagePage({ embedded = false }: { embedded?: boolean } = {}) {
   const [budget, setBudget] = useState<MeBudgetResult | null>(null);
   const [warnings, setWarnings] = useState<MeBudgetWarning[]>([]);
+  const [overview, setOverview] = useState<UsageOverviewItem[] | null>(null);
+  const [overviewTruncated, setOverviewTruncated] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -58,9 +61,11 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
     setLoading(true);
     setError(null);
     try {
-      const [b, w] = await Promise.all([me.budget(), me.budgetWarnings()]);
+      const [b, w, o] = await Promise.all([me.budget(), me.budgetWarnings(), admin.listUsageOverview()]);
       setBudget(b);
       setWarnings(w.items ?? []);
+      setOverview(o.items ?? []);
+      setOverviewTruncated(o.truncated === true);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea bugetului.");
     } finally {
@@ -133,8 +138,86 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
 
         <Card>
           <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Users className="h-4 w-4 text-primary" />
+              Consum per utilizator
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {overview === null ? (
+              <p className="px-4 py-6 text-center text-muted-foreground">Se incarca…</p>
+            ) : overview.length === 0 ? (
+              <p className="px-4 py-6 text-center text-muted-foreground">Nu exista utilizatori activi.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                      <th className="px-2 py-2 font-medium">Utilizator</th>
+                      <th className="px-2 py-2 font-medium">Perioada</th>
+                      <th className="px-2 py-2 text-right font-medium">Consum AI</th>
+                      <th className="w-1/3 px-2 py-2 font-medium">Utilizare</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {overview.map((item) => {
+                      const pct =
+                        item.effectiveLimitMilli === null || item.effectiveLimitMilli === 0
+                          ? null
+                          : Math.min(100, Math.round((item.usedMilli / item.effectiveLimitMilli) * 100));
+                      return (
+                        <tr key={item.userId} className="border-b border-border/60 last:border-0">
+                          <td className="px-2 py-2">
+                            <span className="font-medium">{item.email}</span>
+                            {item.role === "admin" && (
+                              <Badge variant="outline" className="ml-2">
+                                admin
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-2 py-2">
+                            <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
+                          </td>
+                          <td className="whitespace-nowrap px-2 py-2 text-right font-mono">
+                            {milliToUsd(item.usedMilli)}
+                            {item.effectiveLimitMilli !== null ? (
+                              <span className="text-muted-foreground"> / {milliToUsd(item.effectiveLimitMilli)}</span>
+                            ) : (
+                              <Badge variant="success" className="ml-2">
+                                Nelimitat
+                              </Badge>
+                            )}
+                          </td>
+                          <td className="px-2 py-2">
+                            <div className="flex items-center gap-2">
+                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
+                                <div
+                                  className={cn("h-full transition-all", barColor(pct))}
+                                  style={{ width: pct === null ? "100%" : `${pct}%` }}
+                                />
+                              </div>
+                              {pct !== null && <span className="w-10 text-right text-xs font-semibold">{pct}%</span>}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+                {overviewTruncated && (
+                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                    Lista a fost trunchiata — exista mai multi utilizatori decat pot fi afisati.
+                  </p>
+                )}
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-base">
-              <span>Buget per feature</span>
+              <span>Bugetul tau (contul curent)</span>
               <span className="flex items-center gap-2 text-xs text-muted-foreground">
                 <span>Curs USD/EUR:</span>
                 {fx.rate === null ? (

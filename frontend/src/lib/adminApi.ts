@@ -112,6 +112,26 @@ export interface QuotaOverviewResult {
   overrides: QuotaOverrideWithUser[];
 }
 
+// v2.42.0: consumul AI per user activ (fereastra curenta), pentru tabul Consum.
+export interface UsageOverviewItem {
+  userId: string;
+  email: string;
+  displayName: string | null;
+  role: string;
+  feature: "ai";
+  period: QuotaPeriod;
+  usedMilli: number;
+  baseLimitMilli: number | null;
+  extraFromGrantsMilli: number;
+  effectiveLimitMilli: number | null;
+  limitSource: "override" | "default" | "none";
+}
+
+export interface UsageOverviewResult {
+  items: UsageOverviewItem[];
+  truncated: boolean;
+}
+
 // v2.41.0: vedere globala granturi active, cu identitatea userului.
 export interface QuotaGrantWithUser extends QuotaGrant {
   userEmail: string | null;
@@ -380,6 +400,11 @@ export const admin = {
   listQuotaOverview: async (signal?: AbortSignal): Promise<QuotaOverviewResult> => {
     const res = await apiFetch("/api/v1/admin/quota/overrides", { signal });
     return unwrapMonitoring<QuotaOverviewResult>(res);
+  },
+
+  listUsageOverview: async (signal?: AbortSignal): Promise<UsageOverviewResult> => {
+    const res = await apiFetch("/api/v1/admin/usage/overview", { signal });
+    return unwrapMonitoring<UsageOverviewResult>(res);
   },
 
   listQuota: async (userId: string, signal?: AbortSignal): Promise<QuotaListResult> => {

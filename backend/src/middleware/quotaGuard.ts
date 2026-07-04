@@ -38,7 +38,8 @@ const AI_POOL_FEATURE = "ai";
 
 // v2.32.0 rolling window seconds per period. Locked in D15 — operatorul nu
 // alege secundele, doar perioada (day/week/month). 24h/7d/30d.
-const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
+// Exportat in v2.42.0 pentru GET /admin/usage/overview (aceeasi fereastra).
+export const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
   day: 86_400,
   week: 604_800,
   month: 2_592_000,
@@ -70,7 +71,9 @@ function estimatedCostMilli(feature: AiQuotaFeature): number {
 // Multi-agent overshoot: this guard runs once per HTTP request; analyze-multi
 // can spend up to (N_analysts + 1) * max_call_cost above the limit before the
 // next request observes the new sum. PLAN §12 accepted tradeoff.
-function readDefaultQuotaMilli(): number | null {
+// Exportat in v2.42.0: /admin/usage/overview aplica ACEEASI regula de limita
+// implicita ca guard-ul, ca cifrele din UI sa coincida cu enforcement-ul.
+export function readDefaultQuotaMilli(): number | null {
   const raw = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
   if (raw === undefined || raw === "") return null;
   const parsed = Number(raw);
