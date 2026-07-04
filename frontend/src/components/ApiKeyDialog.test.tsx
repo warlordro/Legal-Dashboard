@@ -192,7 +192,7 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     // Fara formular BYOK: niciun input de cheie si niciun buton Salveaza.
     expect(host.querySelectorAll("input").length).toBe(0);
     expect(text).not.toContain("Salveaza");
-    expect(text).not.toContain("Gestioneaza in Administrare");
+    expect(text).not.toContain("Gestioneaza cheile");
     expect(host.querySelector("[data-testid='pat-panel']")).toBeNull();
   });
 
@@ -220,7 +220,7 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     render(<ApiKeyDialog {...props("native")} tenantKeys={tenantReady({ openai: true })} />);
 
     const text = textContent(host);
-    expect(text).toContain("Gestioneaza in Administrare");
+    expect(text).toContain("Gestioneaza cheile");
     expect(host.querySelector("[data-testid='pat-panel']")).not.toBeNull();
     expect(host.querySelectorAll("input").length).toBe(0);
     // Statusul per cheie reflecta raspunsul serverului.

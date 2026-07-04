@@ -281,7 +281,41 @@ export const me = {
   },
 };
 
+// v2.42.0: creare useri din UI (individual + import bulk din xlsx).
+export type CreatableUserRole = "user" | "admin";
+
+export interface UserImportReport {
+  created: Array<{ rowNumber: number; email: string; role: string }>;
+  issues: Array<{
+    rowNumber: number;
+    email: string;
+    status: "duplicate_in_file" | "duplicate_in_db" | "invalid";
+    reason: string;
+  }>;
+  summary: { created: number; duplicates: number; invalid: number };
+}
+
+export const USER_IMPORT_TEMPLATE_URL = "/api/v1/admin/users/import-template";
+
 export const admin = {
+  createUser: async (input: { email: string; displayName: string; role: CreatableUserRole }): Promise<AdminUser> => {
+    const res = await apiFetch("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return unwrapMonitoring<AdminUser>(res);
+  },
+
+  importUsers: async (file: ArrayBuffer): Promise<UserImportReport> => {
+    const res = await apiFetch("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    return unwrapMonitoring<UserImportReport>(res);
+  },
+
   listUsers: async (opts: ListUsersOpts = {}): Promise<PaginatedUsers> => {
     const { signal, ...params } = opts;
     const res = await apiFetch(`/api/v1/admin/users${adminQs(params)}`, { signal });

@@ -1,11 +1,20 @@
-import { useCallback, useEffect, useState } from "react";
-import { Users as UsersIcon, RefreshCw, ShieldAlert, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Users as UsersIcon, RefreshCw, ShieldAlert, Search, UserPlus, Download, Upload } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, MonitoringApiError, type AdminUser, type UserRole, type UserStatus } from "@/lib/api";
+import {
+  admin,
+  MonitoringApiError,
+  USER_IMPORT_TEMPLATE_URL,
+  type AdminUser,
+  type CreatableUserRole,
+  type UserImportReport,
+  type UserRole,
+  type UserStatus,
+} from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
@@ -40,7 +49,7 @@ function roleVariant(role: UserRole): "default" | "secondary" | "outline" {
   return "outline";
 }
 
-export default function AdminUsers() {
+export default function AdminUsers({ embedded = false }: { embedded?: boolean } = {}) {
   const { user: me, refresh: refreshMe } = useCurrentUser();
   const confirm = useConfirm();
   const [rows, setRows] = useState<AdminUser[]>([]);
@@ -53,6 +62,15 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // v2.42.0: creare user individual + import bulk din xlsx.
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState<CreatableUserRole>("user");
+  const [creating, setCreating] = useState(false);
+  const [createMsg, setCreateMsg] = useState<string | null>(null);
+  const [importBusy, setImportBusy] = useState(false);
+  const [importReport, setImportReport] = useState<UserImportReport | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -88,6 +106,48 @@ export default function AdminUsers() {
   const onSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSearch(searchInput.trim());
+  };
+
+  const onCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = newEmail.trim();
+    const displayName = newName.trim();
+    if (!email || !displayName) {
+      setError("Completeaza emailul si numele afisat.");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    setCreateMsg(null);
+    try {
+      const created = await admin.createUser({ email, displayName, role: newRole });
+      setCreateMsg(`Utilizator creat — se poate loga cu contul Google ${created.email}.`);
+      setNewEmail("");
+      setNewName("");
+      setNewRole("user");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la crearea utilizatorului.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onImportFile = async (file: File) => {
+    setImportBusy(true);
+    setError(null);
+    setImportReport(null);
+    try {
+      const report = await admin.importUsers(await file.arrayBuffer());
+      setImportReport(report);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la importul fisierului.");
+    } finally {
+      setImportBusy(false);
+      // Acelasi fisier reselectat trebuie sa re-declanseze onChange.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   // Server-side guards (last_admin, self_deactivation) are the source of truth;
@@ -172,21 +232,172 @@ export default function AdminUsers() {
   })();
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className={embedded ? "" : "min-h-full bg-background p-6"}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-7xl")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <UsersIcon className="h-6 w-6 text-primary" />
-              Utilizatori
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
+            {!embedded && (
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <UsersIcon className="h-6 w-6 text-primary" />
+                Utilizatori
+              </h1>
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>{summary}</p>
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             Refresh
           </Button>
         </div>
+
+        {/* v2.42.0: provisionare useri din UI — individual + import bulk din xlsx.
+            Bridge-ul oauth2 e fail-closed: userul se poate loga imediat ce exista
+            aici cu status active. */}
+        <Card>
+          <CardHeader className="pb-3">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <UserPlus className="h-4 w-4" />
+              Adauga utilizator
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {createMsg && (
+              <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-300">
+                {createMsg}
+              </div>
+            )}
+            <form onSubmit={onCreateUser} className="grid gap-3 md:grid-cols-[2fr_2fr_140px_auto] md:items-end">
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-email">
+                  Email (contul Google)
+                </label>
+                <input
+                  id="new-user-email"
+                  type="email"
+                  value={newEmail}
+                  onChange={(e) => setNewEmail(e.target.value)}
+                  placeholder="ana@firma.ro"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-name">
+                  Nume afisat
+                </label>
+                <input
+                  id="new-user-name"
+                  type="text"
+                  value={newName}
+                  onChange={(e) => setNewName(e.target.value)}
+                  placeholder="Ana Pop"
+                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-role">
+                  Rol
+                </label>
+                <select
+                  id="new-user-role"
+                  value={newRole}
+                  onChange={(e) => setNewRole(e.target.value as CreatableUserRole)}
+                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                >
+                  <option value="user">Utilizator</option>
+                  <option value="admin">Admin</option>
+                </select>
+              </div>
+              <Button type="submit" disabled={creating}>
+                <UserPlus className="h-4 w-4" />
+                Adauga
+              </Button>
+            </form>
+
+            <div className="border-t border-border pt-3">
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Import din Excel
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    // Content-Disposition: attachment => browserul descarca fara navigare.
+                    window.location.assign(USER_IMPORT_TEMPLATE_URL);
+                  }}
+                >
+                  <Download className="h-4 w-4" />
+                  Descarca template
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) void onImportFile(f);
+                  }}
+                />
+                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importBusy}>
+                  <Upload className={cn("h-4 w-4", importBusy && "animate-pulse")} />
+                  {importBusy ? "Se importa..." : "Incarca fisier completat"}
+                </Button>
+                <span className="text-xs text-muted-foreground">
+                  Completeaza template-ul (max 500 randuri) si incarca-l — raportul apare mai jos.
+                </span>
+              </div>
+
+              {importReport && (
+                <div className="mt-3 space-y-2">
+                  <p className="text-sm">
+                    <span className="font-medium text-green-700 dark:text-green-400">
+                      {importReport.summary.created} creati
+                    </span>
+                    {" · "}
+                    <span className="text-muted-foreground">{importReport.summary.duplicates} duplicate</span>
+                    {" · "}
+                    <span className={importReport.summary.invalid > 0 ? "text-red-600" : "text-muted-foreground"}>
+                      {importReport.summary.invalid} invalide
+                    </span>
+                  </p>
+                  {importReport.issues.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                            <th className="px-3 py-1.5 font-semibold">Rand</th>
+                            <th className="px-3 py-1.5 font-semibold">Email</th>
+                            <th className="px-3 py-1.5 font-semibold">Status</th>
+                            <th className="px-3 py-1.5 font-semibold">Motiv</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {importReport.issues.map((issue) => (
+                            <tr key={`${issue.rowNumber}:${issue.email}`}>
+                              <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">{issue.rowNumber}</td>
+                              <td className="px-3 py-1.5 align-top font-mono text-xs">{issue.email || "—"}</td>
+                              <td className="px-3 py-1.5 align-top">
+                                <Badge variant={issue.status === "invalid" ? "warning" : "secondary"}>
+                                  {issue.status === "invalid"
+                                    ? "Invalid"
+                                    : issue.status === "duplicate_in_db"
+                                      ? "Exista deja"
+                                      : "Duplicat in fisier"}
+                                </Badge>
+                              </td>
+                              <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">{issue.reason}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader className="pb-3">

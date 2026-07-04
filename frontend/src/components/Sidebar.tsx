@@ -13,12 +13,6 @@ import {
   ChevronRight,
   Activity,
   Bell,
-  Users as UsersIcon,
-  ClipboardList,
-  Gauge,
-  Gift,
-  ShieldCheck,
-  KeyRound,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
@@ -34,15 +28,6 @@ const navItems = [
   { to: "/rnpm", label: "Cautare RNPM", icon: FileLock2 },
   { to: "/monitorizare", label: "Monitorizare", icon: Activity },
   { to: "/alerte", label: "Alerte", icon: Bell },
-];
-
-const adminNavItems = [
-  { to: "/admin/users", label: "Utilizatori", icon: UsersIcon },
-  { to: "/admin/audit", label: "Audit", icon: ClipboardList },
-  { to: "/admin/quota", label: "Cote", icon: Gauge },
-  { to: "/admin/grants", label: "Granturi", icon: Gift },
-  { to: "/admin/usage", label: "Consum", icon: Activity },
-  { to: "/admin/keys", label: "Chei API", icon: KeyRound },
 ];
 
 interface SidebarProps {
@@ -95,15 +80,9 @@ export function Sidebar({
   const popoverRef = useRef<HTMLDivElement>(null);
   const popoverBtnRef = useRef<HTMLButtonElement>(null);
   const navigate = useNavigate();
-  const { user } = useCurrentUser();
-  // v2.18.1: in desktop mode utilizatorul `local` e auto-promovat la admin la
-  // boot (vezi backend/src/index.ts), strict pentru a putea folosi rutele
-  // /api/v1/admin/* din modalul "Info baza locala" (sterge tot, compact, backups).
-  // Nu vrem sa expunem si UI-ul multi-tenant (Utilizatori/Audit/Cote) pentru
-  // single-user desktop — e zgomot vizual fara valoare. Ascundem sectiunea cand
-  // window.desktopApi e prezent (= rulam in Electron).
+  // Semnal de chrome: in web intrarea din footer se cheama "Setari" (pagina cu
+  // tab-uri, v2.42.0); pe desktop ramane "Setari API" (dialogul BYOK).
   const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
-  const isAdmin = user?.role === "admin" && !isDesktop;
 
   const handleEntryClick = (entry: SearchHistoryEntry) => {
     setPopoverSection(null);
@@ -203,38 +182,9 @@ export function Sidebar({
           })}
         </nav>
 
-        {/* Admin section — gated on role; hidden completely otherwise so non-admins
-          never see the entries. The same role is re-checked server-side on every
-          /api/v1/admin/* call, so this is purely cosmetic. */}
-        {isAdmin && (
-          <nav className="space-y-1 border-t border-border p-2">
-            {!collapsed && (
-              <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-                <ShieldCheck className="h-3 w-3" />
-                Administrare
-              </div>
-            )}
-            {adminNavItems.map(({ to, label, icon: Icon }) => (
-              <NavLink
-                key={to}
-                to={to}
-                title={collapsed ? label : undefined}
-                className={({ isActive }) =>
-                  cn(
-                    "relative flex items-center rounded-lg text-sm font-medium transition-colors",
-                    collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
-                    isActive
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                  )
-                }
-              >
-                <Icon className="h-4 w-4 shrink-0" />
-                {!collapsed && <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>}
-              </NavLink>
-            ))}
-          </nav>
-        )}
+        {/* v2.42.0: sectiunea Administrare a fost mutata in pagina /setari
+            (tab-uri pe rol, doar in web) — sidebar-ul ramane doar cu navigatia
+            de lucru; intrarea "Setari" din footer e poarta canonica. */}
 
         {/* History accordion: only one section open at a time */}
         {!collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
@@ -464,6 +414,7 @@ export function Sidebar({
         onToggleCollapsed={() => setCollapsed(!collapsed)}
         hasApiKey={hasApiKey}
         onConfigureApiKey={onConfigureApiKey}
+        settingsLabel={isDesktop ? "Setari API" : "Setari"}
       />
     </aside>
   );

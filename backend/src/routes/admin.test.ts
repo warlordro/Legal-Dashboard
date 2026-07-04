@@ -7,6 +7,7 @@ import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import ExcelJS from "exceljs";
 import { adminRouter } from "./admin.ts";
 import { meRouter } from "./me.ts";
 import { ownerContext } from "../middleware/owner.ts";
@@ -716,5 +717,165 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/grants/not-a-number", { method: "DELETE" });
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 — creare useri (individual + import bulk din xlsx)
+// ---------------------------------------------------------------------------
+
+async function xlsxOf(rows: Array<Array<string>>, sheetName = "Utilizatori"): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet(sheetName);
+  ws.addRow(["Email", "Nume afisat", "Rol"]);
+  for (const r of rows) ws.addRow(r);
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out as unknown as ArrayBuffer);
+}
+
+function postImport(app: Hono, buf: Buffer) {
+  return app.request("/api/v1/admin/users/import", {
+    method: "POST",
+    headers: { "content-type": "application/octet-stream" },
+    body: new Uint8Array(buf),
+  });
+}
+
+describe("POST /api/v1/admin/users (individual)", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("creeaza userul (email canonicalizat), 201 + audit cu targetId", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "  Ana@Firma.RO ", displayName: "Ana Pop", role: "user" }),
+    });
+    expect(res.status).toBe(201);
+    const data = (await jsonOf(res)).data as { id: string; email: string };
+    expect(data.email).toBe("ana@firma.ro");
+    const events = getAuditEvents({ ownerId: "local", action: "admin.users.create" });
+    expect(events).toHaveLength(1);
+    expect(events[0].target_id).toBe(data.id);
+  });
+
+  it("refuza duplicatul cu 409 si include statusul existent (mixed-case inclus)", async () => {
+    insertUser({ id: "u-dup", email: "ana@firma.ro", displayName: "Ana", status: "suspended" });
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "ANA@FIRMA.RO", displayName: "Ana 2", role: "user" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("email_exists");
+    expect(String(body.error?.message)).toContain("suspended");
+  });
+
+  it("respinge rol necreabil (readonly/support) si body invalid cu 400", async () => {
+    const app = buildApp();
+    for (const role of ["readonly", "support", "bogus"]) {
+      const res = await app.request("/api/v1/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "x@y.ro", displayName: "X", role }),
+      });
+      expect(res.status).toBe(400);
+    }
+  });
+
+  it("indexul unique 0040 respinge dublura case-different la nivel de DB", async () => {
+    insertUser({ id: "u-1", email: "dublu@firma.ro", displayName: "A" });
+    expect(() => insertUser({ id: "u-2", email: "DUBLU@firma.ro", displayName: "B" })).toThrowError(/UNIQUE/i);
+  });
+});
+
+describe("GET /api/v1/admin/users/import-template + POST /users/import", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("template-ul e xlsx valid, header-only pe sheet-ul de date", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/import-template");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("spreadsheetml");
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.subarray(0, 2).toString("latin1")).toBe("PK");
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const data = wb.getWorksheet("Utilizatori");
+    expect(data).toBeDefined();
+    expect(data?.actualRowCount).toBe(1); // doar header — fara rand exemplu importabil
+    expect(wb.getWorksheet("Instructiuni")).toBeDefined();
+  });
+
+  it("importa randurile valide si claseaza restul (invalid / dup-fisier / dup-db)", async () => {
+    insertUser({ id: "u-db", email: "existent@firma.ro", displayName: "Vechi" });
+    const app = buildApp();
+    const buf = await xlsxOf([
+      ["ana@firma.ro", "Ana Pop", "user"],
+      ["Dan@Firma.ro", "Dan Ion", ""], // rol gol => user; email canonicalizat
+      ["ana@firma.ro", "Ana Dublura", "user"], // duplicate_in_file
+      ["existent@firma.ro", "Exista", "user"], // duplicate_in_db
+      ["fara-arond", "Nume", "user"], // invalid email
+      ["rol@firma.ro", "Rol Gresit", "readonly"], // rol necreabil => invalid
+    ]);
+    const res = await postImport(app, buf);
+    expect(res.status).toBe(200);
+    const data = (await jsonOf(res)).data as {
+      created: Array<{ email: string }>;
+      issues: Array<{ status: string; email: string }>;
+      summary: { created: number; duplicates: number; invalid: number };
+    };
+    expect(data.summary).toEqual({ created: 2, duplicates: 2, invalid: 2 });
+    expect(data.created.map((c) => c.email).sort()).toEqual(["ana@firma.ro", "dan@firma.ro"]);
+    // Userii chiar exista si sunt logabili prin bridge (status active).
+    const dan = (await jsonOf(await app.request("/api/v1/admin/users?search=dan%40firma.ro"))).data as {
+      rows: Array<{ email: string; status: string }>;
+    };
+    expect(dan.rows[0]).toMatchObject({ email: "dan@firma.ro", status: "active" });
+    // Audit: 2 x create + 1 x import summary.
+    expect(getAuditEvents({ ownerId: "local", action: "admin.users.create" })).toHaveLength(2);
+    expect(getAuditEvents({ ownerId: "local", action: "admin.users.import" })).toHaveLength(1);
+  });
+
+  it("respinge non-xlsx cu 400 (magic bytes), nu 500", async () => {
+    const app = buildApp();
+    const res = await postImport(app, Buffer.from("email,nume,rol\nana@firma.ro,Ana,user\n", "utf8"));
+    expect(res.status).toBe(400);
+    expect((await jsonOf(res)).error?.code).toBe("invalid_file");
+  });
+
+  it("respinge fisierul fara randuri de date cu 400", async () => {
+    const app = buildApp();
+    const res = await postImport(app, await xlsxOf([]));
+    expect(res.status).toBe(400);
+    expect((await jsonOf(res)).error?.code).toBe("empty_file");
+  });
+
+  it("respinge peste 500 de randuri cu 413", async () => {
+    const app = buildApp();
+    const rows = Array.from({ length: 501 }, (_, i) => [`u${i}@firma.ro`, `User ${i}`, "user"]);
+    const res = await postImport(app, await xlsxOf(rows));
+    expect(res.status).toBe(413);
+    expect((await jsonOf(res)).error?.code).toBe("too_many_rows");
+  });
+
+  it("sheet-ul Instructiuni e ignorat cand exista sheet-ul Utilizatori", async () => {
+    const app = buildApp();
+    const wb = new ExcelJS.Workbook();
+    const instr = wb.addWorksheet("Instructiuni");
+    instr.addRow(["exemplu@firma.ro", "Exemplu", "user"]);
+    const data = wb.addWorksheet("Utilizatori");
+    data.addRow(["Email", "Nume afisat", "Rol"]);
+    data.addRow(["real@firma.ro", "Real", "user"]);
+    const buf = Buffer.from((await wb.xlsx.writeBuffer()) as unknown as ArrayBuffer);
+    const res = await postImport(app, buf);
+    const parsed = (await jsonOf(res)).data as { created: Array<{ email: string }> };
+    expect(parsed.created.map((c) => c.email)).toEqual(["real@firma.ro"]);
   });
 });

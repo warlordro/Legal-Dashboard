@@ -1,7 +1,8 @@
 import { useState } from "react";
-import { CheckCircle2, Key, MinusCircle, X } from "lucide-react";
+import { Key, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { AIUsagePanel } from "@/components/AIUsagePanel";
+import { TenantKeyStatusPanel } from "@/components/TenantKeyStatusPanel";
 import { ApiAccessPanel } from "@/components/ApiAccessPanel";
 import { EmailSettingsPanel } from "@/components/EmailSettingsPanel";
 import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
@@ -153,60 +154,14 @@ export function ApiKeyDialog({ onClose, tenantKeys, apiKey }: Props) {
             )}
           </div>
         ) : tenantMode ? (
-          <div className="mb-3 rounded-lg border border-border p-3">
-            <div className="mb-2 flex items-center justify-between">
-              <span className="text-sm font-medium">Chei API — nivel tenant</span>
-              {isAdmin && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    onClose();
-                    navigate("/admin/keys");
-                  }}
-                >
-                  Gestioneaza in Administrare → Chei API
-                </Button>
-              )}
-            </div>
-            {tenantKeys.status.state === "ready" ? (
-              <ul className="space-y-1.5">
-                {(
-                  [
-                    ["Anthropic", tenantKeys.status.configured.anthropic],
-                    ["OpenAI", tenantKeys.status.configured.openai],
-                    ["Google", tenantKeys.status.configured.google],
-                    ["OpenRouter", tenantKeys.status.configured.openrouter],
-                    ["Captcha RNPM (provider activ)", tenantKeys.status.configured.captcha],
-                  ] as const
-                ).map(([label, configured]) => (
-                  <li key={label} className="flex items-center gap-2 text-sm">
-                    {configured ? (
-                      <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
-                    ) : (
-                      <MinusCircle className="h-4 w-4 shrink-0 text-muted-foreground" />
-                    )}
-                    <span>{label}</span>
-                    <span className={configured ? "text-[11px] text-green-600" : "text-[11px] text-muted-foreground"}>
-                      {configured ? "Configurata" : "Neconfigurata"}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            ) : tenantKeys.status.state === "error" ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                Starea cheilor nu a putut fi incarcata.
-                <Button variant="outline" size="sm" onClick={tenantKeys.refresh}>
-                  Reincearca
-                </Button>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Se verifica starea cheilor...</p>
-            )}
-            <p className="mt-2 text-[11px] text-muted-foreground">
-              Cheile sunt gestionate de administratorul tenantului si nu parasesc serverul.
-            </p>
-          </div>
+          <TenantKeyStatusPanel
+            tenantKeys={tenantKeys}
+            isAdmin={isAdmin}
+            onManageKeys={() => {
+              onClose();
+              navigate("/setari?tab=chei");
+            }}
+          />
         ) : (
           <>
             {/* AI config zone: routing + provider keys grouped vizual */}

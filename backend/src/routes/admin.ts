@@ -31,7 +31,11 @@ import {
 import { requireRole } from "../middleware/requireRole.ts";
 import { QUOTA_FEATURES } from "../middleware/quotaGuard.ts";
 import {
+  getUserByEmail,
   getUserById,
+  insertUser,
+  insertUsersBulk,
+  isUniqueEmailViolation,
   listUsers,
   updateUserRole,
   updateUserStatus,
@@ -40,6 +44,14 @@ import {
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
+import {
+  buildUserImportTemplate,
+  CreateUserSchema,
+  MAX_IMPORT_BYTES,
+  parseUserImportFile,
+  UserImportError,
+  type ImportRowIssue,
+} from "../services/userImport.ts";
 import {
   deleteOverride,
   listAllOverrides,
@@ -65,6 +77,14 @@ const ADMIN_BODY_LIMIT = 4096;
 const limitAdminBody = bodyLimit({
   maxSize: ADMIN_BODY_LIMIT,
   onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+
+// v2.42.0: importul de utilizatori primeste fisier xlsx raw — limita dedicata
+// (limitAdminBody de 4KB ar respinge orice fisier real; 512KB ajunge pentru
+// sute de randuri — nameListParser accepta 10MB, dar aici capul e 500 randuri).
+const limitImportBody = bodyLimit({
+  maxSize: MAX_IMPORT_BYTES,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Fisier prea mare (max 512KB)", c), 413),
 });
 
 const ListUsersQuerySchema = z
@@ -202,6 +222,136 @@ adminRouter.get("/users", (c) => {
         page,
         pageSize,
         total: result.total,
+      },
+      c
+    ),
+    200
+  );
+});
+
+// v2.42.0 (E2-A1): creare user individual. Identitatea vine de la Google prin
+// oauth2-proxy — aici doar provisionam randul pe care bridge-ul fail-closed il
+// cauta la login. password_hash ramane NULL (nu exista login cu parola).
+adminRouter.post("/users", limitAdminBody, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = CreateUserSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+  const { email, displayName, role } = parsed.data;
+  const existing = getUserByEmail(email);
+  if (existing !== null) {
+    // Include statusul randului existent: un email suspendat NU e fundatura —
+    // actiunea corecta e reactivarea din tabel, nu un al doilea rand.
+    return c.json(
+      fail("email_exists", `Emailul exista deja (status: ${existing.status}).`, c, { status: existing.status }),
+      409
+    );
+  }
+  const id = crypto.randomUUID();
+  try {
+    insertUser({ id, email, displayName, role });
+  } catch (err) {
+    // Race intre doua request-uri concurente: indexul unique 0040 castiga.
+    if (isUniqueEmailViolation(err)) {
+      return c.json(fail("email_exists", "Emailul exista deja.", c), 409);
+    }
+    throw err;
+  }
+  recordAudit(c, "admin.users.create", {
+    targetKind: "user",
+    targetId: id,
+    detail: { email, role },
+  });
+  const row = getUserById(id);
+  return c.json(ok(row === null ? { id, email, displayName, role } : toUserDto(row), c), 201);
+});
+
+// v2.42.0 (E2-A2): template xlsx descarcabil pentru importul de utilizatori.
+adminRouter.get("/users/import-template", async (c) => {
+  const buf = await buildUserImportTemplate();
+  c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  c.header("Content-Disposition", 'attachment; filename="template-utilizatori.xlsx"');
+  c.header("Cache-Control", "no-store");
+  return c.body(new Uint8Array(buf));
+});
+
+// v2.42.0 (E2-A2): import bulk din xlsx. Pipeline: parse server-side (timeout +
+// magic bytes) -> validare pe schema comuna -> dedup in-fisier -> check DB ->
+// insert-urile valide intr-O tranzactie (rollback complet la orice eroare).
+adminRouter.post("/users/import", limitImportBody, async (c) => {
+  const raw = await c.req.arrayBuffer().catch(() => null);
+  if (raw === null || raw.byteLength === 0) {
+    return c.json(fail("invalid_body", "Fisier lipsa.", c), 400);
+  }
+  let parsedFile: Awaited<ReturnType<typeof parseUserImportFile>>;
+  try {
+    parsedFile = await parseUserImportFile(Buffer.from(raw));
+  } catch (err) {
+    if (err instanceof UserImportError) {
+      const status = err.code === "too_many_rows" ? 413 : 400;
+      return c.json(fail(err.code, err.message, c), status);
+    }
+    throw err;
+  }
+
+  const issues: ImportRowIssue[] = [...parsedFile.issues];
+  const toCreate: Array<{ id: string; email: string; displayName: string; role: UserRole; rowNumber: number }> = [];
+  for (const row of parsedFile.valid) {
+    const existing = getUserByEmail(row.email);
+    if (existing !== null) {
+      issues.push({
+        rowNumber: row.rowNumber,
+        email: row.email,
+        status: "duplicate_in_db",
+        reason: `Emailul exista deja (status: ${existing.status}).`,
+      });
+      continue;
+    }
+    toCreate.push({ id: crypto.randomUUID(), ...row });
+  }
+
+  try {
+    insertUsersBulk(toCreate);
+  } catch (err) {
+    // Rollback complet — raportul nu contine `created` mintit. Race concurent
+    // pe un email => acelasi tratament ca fisier reincarcat: userul reia.
+    const reason = isUniqueEmailViolation(err)
+      ? "Un email din fisier a fost creat in paralel de alt request. Reincarca fisierul."
+      : "Eroare la scrierea in baza de date. Niciun user nu a fost creat.";
+    return c.json(fail("import_failed", reason, c), 409);
+  }
+
+  // Audit: sumar + cate un eveniment per user creat (calea care provisioneaza
+  // mai multe login-uri nu inregistreaza mai putina identitate decat cea
+  // individuala — review-panel).
+  for (const u of toCreate) {
+    recordAudit(c, "admin.users.create", {
+      targetKind: "user",
+      targetId: u.id,
+      detail: { email: u.email, role: u.role, source: "import" },
+    });
+  }
+  recordAudit(c, "admin.users.import", {
+    targetKind: "user",
+    detail: {
+      created: toCreate.length,
+      duplicates: issues.filter((i) => String(i.status).startsWith("duplicate")).length,
+      invalid: issues.filter((i) => i.status === "invalid").length,
+      total: parsedFile.valid.length + parsedFile.issues.length,
+    },
+  });
+
+  return c.json(
+    ok(
+      {
+        created: toCreate.map((u) => ({ rowNumber: u.rowNumber, email: u.email, role: u.role })),
+        issues: issues.sort((a, b) => a.rowNumber - b.rowNumber),
+        summary: {
+          created: toCreate.length,
+          duplicates: issues.filter((i) => String(i.status).startsWith("duplicate")).length,
+          invalid: issues.filter((i) => i.status === "invalid").length,
+        },
       },
       c
     ),

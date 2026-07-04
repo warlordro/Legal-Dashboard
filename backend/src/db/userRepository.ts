@@ -11,6 +11,18 @@ export type UserStatus = "active" | "suspended" | "deleted";
 export const USER_ROLES: readonly UserRole[] = ["user", "admin", "support", "readonly"];
 export const USER_STATUSES: readonly UserStatus[] = ["active", "suspended", "deleted"];
 
+// v2.42.0: rolurile care pot fi CREATE din UI (individual + import bulk).
+// support/readonly exista in enum dar nu au consumatori la creare — un rand de
+// import cu alt rol e respins ca invalid, nu acceptat silentios.
+export const CREATABLE_USER_ROLES = ["user", "admin"] as const satisfies readonly UserRole[];
+
+// Canonicalizatorul UNIC de email — folosit identic la creare (individual +
+// import), la seed si in lookup-ul bridge-ului oauth2. Divergenta intre cai ar
+// insemna useri creati corect care nu se pot loga.
+export function canonicalizeEmail(raw: string): string {
+  return raw.trim().toLowerCase();
+}
+
 export interface UserRow {
   id: string;
   email: string;
@@ -99,7 +111,11 @@ export function getUserById(id: string): UserRow | null {
 }
 
 export function getUserByEmail(email: string): UserRow | null {
-  const row = getDb().prepare(`SELECT ${COLUMNS} FROM users WHERE email = ?`).get(email) as UserRow | undefined;
+  // COLLATE NOCASE: defense-in-depth peste canonicalizeEmail — un rand istoric
+  // mixed-case nu poate ocoli lookup-ul (indexul unique 0040 e tot NOCASE).
+  const row = getDb().prepare(`SELECT ${COLUMNS} FROM users WHERE email = ? COLLATE NOCASE`).get(email) as
+    | UserRow
+    | undefined;
   return row ?? null;
 }
 
@@ -152,4 +168,34 @@ export function insertUser(input: InsertUserInput): UserRow {
     )
     .run(input.id, input.email, input.passwordHash ?? null, input.displayName, role, status);
   return getUserById(input.id) as UserRow;
+}
+
+// v2.42.0: violarea indexului unique 0040 (email NOCASE) — folosita de rutele
+// de creare ca sa mapeze race-ul concurent la "duplicat" (409), nu la 500.
+export function isUniqueEmailViolation(err: unknown): boolean {
+  return (
+    err instanceof Error &&
+    "code" in err &&
+    (err as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE" &&
+    err.message.includes("users.email")
+  );
+}
+
+// v2.42.0: insert bulk pentru importul din xlsx — O SINGURA tranzactie
+// sincrona (fara await inauntru). Orice eroare (inclusiv UNIQUE pe un race
+// concurent) face rollback complet: raportul nu minte cu `created` partial.
+export function insertUsersBulk(rows: InsertUserInput[]): void {
+  const db = getDb();
+  const stmt = db.prepare(
+    `INSERT INTO users (id, email, password_hash, display_name, role, status)
+     VALUES (?, ?, NULL, ?, ?, 'active')`
+  );
+  const run = db.transaction((batch: InsertUserInput[]) => {
+    for (const r of batch) {
+      const role: UserRole = r.role ?? "user";
+      if (!USER_ROLES.includes(role)) throw new Error(`invalid role: ${role}`);
+      stmt.run(r.id, r.email, r.displayName, role);
+    }
+  });
+  run(rows);
 }

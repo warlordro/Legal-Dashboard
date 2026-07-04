@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { BrowserRouter, useLocation } from "react-router-dom";
+import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
@@ -11,6 +11,7 @@ import Termene from "@/pages/Termene";
 import RnpmSearchPage from "@/pages/RnpmSearch";
 import Monitorizare from "@/pages/Monitorizare";
 import Alerts from "@/pages/Alerts";
+import SettingsPage from "@/pages/Settings";
 import AdminUsers from "@/pages/admin/Users";
 import AdminAudit from "@/pages/admin/Audit";
 import AdminQuota from "@/pages/admin/Quota";
@@ -112,6 +113,7 @@ function AppShell({
   tenantKeys: TenantKeys;
 }) {
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const authMode = useAuthMode();
   const mainRef = useRef<HTMLElement>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
@@ -146,6 +148,18 @@ function AppShell({
     if (!el) return;
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
+
+  // v2.42.0: in browser, "configureaza cheile/setarile" duce la pagina /setari
+  // (care gestioneaza toate starile — tenant, dev combo, loading); dialogul
+  // BYOK ramane doar suprafata desktop. Decizie de chrome, nu de politica de
+  // chei — vezi invariantul din PLAN-web-ux-fixes.md.
+  const openConfigure = useCallback(() => {
+    if (isDesktop) {
+      handleOpenKeyDialog();
+      return;
+    }
+    navigate("/setari");
+  }, [handleOpenKeyDialog, navigate]);
 
   // Badge-ul "Setari API" din sidebar. Desktop: cheile BYOK locale (comportament
   // istoric, AI-only). Tenant mode: cheile AI ale tenantului. null = stare
@@ -183,7 +197,7 @@ function AppShell({
           onRemoveEntry={removeEntry}
           onClearHistory={clearHistory}
           hasApiKey={sidebarApiKeyState}
-          onConfigureApiKey={handleOpenKeyDialog}
+          onConfigureApiKey={openConfigure}
           rnpmHistory={rnpmHistory}
           onRnpmHistoryClick={handleRnpmHistoryClick}
           onRnpmRemoveEntry={removeRnpmEntry}
@@ -219,7 +233,7 @@ function AppShell({
               apiKeys={keys}
               aiSettings={{ mode: aiSettings.mode }}
               tenantKeys={tenantKeys}
-              onConfigureApiKey={handleOpenKeyDialog}
+              onConfigureApiKey={openConfigure}
               showBudgetIndicator={pathname === "/dosare" && authMode === "web"}
             />
           </PageBoundary>
@@ -294,6 +308,13 @@ function AppShell({
             </AdminGate>
           </PageBoundary>
         )}
+        {/* v2.42.0: pagina Setari — web-only (desktop pastreaza dialogul BYOK
+            si nu are nimic care sa navigheze aici). */}
+        {pathname === "/setari" && !isDesktop && (
+          <PageBoundary label="Setari">
+            <SettingsPage tenantKeys={tenantKeys} />
+          </PageBoundary>
+        )}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>
           <PageBoundary label="Cautare RNPM">
             <RnpmSearchPage
@@ -310,7 +331,7 @@ function AppShell({
                     : undefined
               }
               captchaMode={captchaMode}
-              onConfigureKey={handleOpenKeyDialog}
+              onConfigureKey={openConfigure}
               onSearchComplete={addRnpmEntry}
               pendingSearch={rnpmPendingSearch}
               consumePendingSearch={consumeRnpmPendingSearch}

@@ -44,7 +44,7 @@ function detailToString(detail: unknown): string {
   }
 }
 
-export default function AdminAudit() {
+export default function AdminAudit({ embedded = false }: { embedded?: boolean } = {}) {
   const [rows, setRows] = useState<AuditEvent[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -151,15 +151,17 @@ export default function AdminAudit() {
   })();
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className={embedded ? "" : "min-h-full bg-background p-6"}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-7xl")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <ClipboardList className="h-6 w-6 text-primary" />
-              Audit
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
+            {!embedded && (
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <ClipboardList className="h-6 w-6 text-primary" />
+                Audit
+              </h1>
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>{summary}</p>
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />

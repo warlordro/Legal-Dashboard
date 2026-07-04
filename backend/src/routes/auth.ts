@@ -16,7 +16,7 @@ import {
 import { signAuthToken, verifyAuthToken } from "../auth/jwt.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { revokeJti } from "../db/jwtDenylistRepository.ts";
-import { getUserByEmail, getUserById } from "../db/userRepository.ts";
+import { canonicalizeEmail, getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import { hashEmail } from "../util/auditSanitize.ts";
@@ -249,7 +249,9 @@ authRouter.post("/oauth2/sync", (c) => {
     return c.json(fail("missing_identity", "Identitate ambigua in header-ele proxy.", c), 400);
   }
   const rawEmail = forwardedEmail ?? authRequestEmail ?? "";
-  const email = rawEmail.trim().toLowerCase();
+  // Acelasi canonicalizator ca la crearea userilor (individual + import) — o
+  // divergenta aici ar insemna useri creati corect care nu se pot loga.
+  const email = canonicalizeEmail(rawEmail);
   if (!email || !email.includes("@") || email.length > 254) {
     recordAudit(null, "auth.oauth2.sync", {
       outcome: "denied",

@@ -11,9 +11,17 @@ export interface SidebarFooterProps {
   // nu afisam "Neconfigurat" fals pana nu stim starea cheilor tenant.
   hasApiKey?: boolean | null;
   onConfigureApiKey?: () => void;
+  // "Setari API" (desktop, dialog BYOK) vs "Setari" (web, pagina cu tab-uri).
+  settingsLabel?: string;
 }
 
-export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfigureApiKey }: SidebarFooterProps) {
+export function SidebarFooter({
+  collapsed,
+  onToggleCollapsed,
+  hasApiKey,
+  onConfigureApiKey,
+  settingsLabel = "Setari API",
+}: SidebarFooterProps) {
   const { theme, toggle } = useTheme();
   const fontSize = useFontSize();
 
@@ -73,7 +81,7 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         variant="ghost"
         size="sm"
         onClick={onConfigureApiKey}
-        title={collapsed ? "Setari API" : undefined}
+        title={collapsed ? settingsLabel : undefined}
         className={cn("w-full text-muted-foreground", collapsed ? "justify-center p-2 h-10" : "justify-start gap-3")}
       >
         <Bot
@@ -85,7 +93,7 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         />
         {!collapsed && (
           <span className="flex items-center gap-2">
-            Setari API
+            {settingsLabel}
             {hasApiKey ? (
               <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                 Activ

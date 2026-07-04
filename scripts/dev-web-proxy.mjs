@@ -28,13 +28,13 @@ if (!secret || !email) {
 const basic = Buffer.from(`oauth2:${secret}`, "utf8").toString("base64");
 
 const server = http.createServer((req, res) => {
-  const headers = { ...req.headers };
   // Simuleaza Caddy: header-ele de identitate venite de la client se arunca —
   // doar proxy-ul are voie sa le seteze.
-  delete headers.authorization;
-  delete headers["x-forwarded-email"];
-  delete headers["x-auth-request-email"];
-  delete headers["x-proxy-auth"];
+  const STRIPPED = new Set(["authorization", "x-forwarded-email", "x-auth-request-email", "x-proxy-auth"]);
+  const headers = {};
+  for (const [k, v] of Object.entries(req.headers)) {
+    if (!STRIPPED.has(k)) headers[k] = v;
+  }
   // Simuleaza oauth2-proxy: secret + identitate pe fiecare request upstream.
   headers.authorization = `Basic ${basic}`;
   headers["x-forwarded-email"] = email;

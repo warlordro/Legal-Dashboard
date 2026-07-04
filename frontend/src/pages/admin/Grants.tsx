@@ -42,7 +42,7 @@ function grantState(grant: QuotaGrant): { label: string; variant: "success" | "w
   return { label: "Activ", variant: "success" };
 }
 
-export default function AdminGrants() {
+export default function AdminGrants({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const [searchInput, setSearchInput] = useState("");
   const [candidates, setCandidates] = useState<AdminUser[]>([]);
@@ -194,14 +194,16 @@ export default function AdminGrants() {
   };
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <div className={embedded ? "" : "min-h-full bg-background p-6"}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Gift className="h-6 w-6 text-primary" />
-            Granturi extra buget
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
+          {!embedded && (
+            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+              <Gift className="h-6 w-6 text-primary" />
+              Granturi extra buget
+            </h1>
+          )}
+          <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
             One-shot extra peste limita de baza, cu expirare. Effective limit = baseLimit + suma grant-urilor active.
           </p>
         </div>
