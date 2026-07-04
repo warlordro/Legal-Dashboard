@@ -167,9 +167,19 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                           <span className="font-mono text-sm">{item.feature}</span>
                           <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
                           {item.effectiveLimitMilli === null && <Badge variant="success">Nelimitat</Badge>}
-                          {item.extraFromGrantsMilli > 0 && (
-                            <Badge variant="success">+grant {milliToUsd(item.extraFromGrantsMilli)}</Badge>
-                          )}
+                          {item.extraFromGrantsMilli > 0 &&
+                            (item.effectiveLimitMilli === null ? (
+                              // Grant peste buget nelimitat = inert: nu are peste ce
+                              // sa se adune. Il aratam ca fapt, nu ca beneficiu.
+                              <Badge
+                                variant="secondary"
+                                title="Grantul exista, dar nu are efect cat timp bugetul e nelimitat — devine activ doar daca setezi o limita in Cote."
+                              >
+                                grant {milliToUsd(item.extraFromGrantsMilli)} — fara efect
+                              </Badge>
+                            ) : (
+                              <Badge variant="success">+grant {milliToUsd(item.extraFromGrantsMilli)}</Badge>
+                            ))}
                         </div>
                         <span className="text-sm text-muted-foreground">
                           {milliToUsd(item.usedMilli)} ({milliToEur(item.usedMilli, fx)})

@@ -205,6 +205,8 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
           )}
           <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
             One-shot extra peste limita de baza, cu expirare. Effective limit = baseLimit + suma grant-urilor active.
+            Atentie: daca userul nu are o limita setata pe feature (buget nelimitat), grantul nu are niciun efect —
+            seteaza intai cota in tab-ul Cote.
           </p>
         </div>
 
