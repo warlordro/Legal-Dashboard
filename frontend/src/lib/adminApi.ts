@@ -355,6 +355,24 @@ export const admin = {
     return unwrapMonitoring<PaginatedAudit>(res);
   },
 
+  // v2.42.0: raport audit xlsx (interval optional; fara parametri = toata baza).
+  // Fetch + blob (nu navigare) ca erorile 413/400 sa fie afisabile in pagina.
+  exportAuditReport: async (params: { since?: string; until?: string } = {}): Promise<Blob> => {
+    const qs = new URLSearchParams();
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    const res = await apiFetch(`/api/v1/admin/audit/export${qs.size > 0 ? `?${qs}` : ""}`);
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      const msg =
+        body && typeof body === "object" && (body as { error?: { message?: string } }).error?.message
+          ? String((body as { error: { message: string } }).error.message)
+          : `Eroare la export (${res.status})`;
+      throw new Error(msg);
+    }
+    return res.blob();
+  },
+
   listQuotaOverview: async (signal?: AbortSignal): Promise<QuotaOverviewResult> => {
     const res = await apiFetch("/api/v1/admin/quota/overrides", { signal });
     return unwrapMonitoring<QuotaOverviewResult>(res);

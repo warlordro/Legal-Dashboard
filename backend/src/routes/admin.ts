@@ -18,7 +18,8 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
 import { recordAudit } from "../db/auditRepository.ts";
-import { listAuditEvents } from "../db/auditRepository.ts";
+import { AUDIT_EXPORT_MAX_ROWS, listAuditEvents, listAuditEventsForExport } from "../db/auditRepository.ts";
+import { buildAuditReportXlsx } from "../services/auditExport.ts";
 import {
   getTenantKeys,
   isTenantKeyField,
@@ -54,6 +55,7 @@ import {
 } from "../services/userImport.ts";
 import {
   deleteOverride,
+  getOverride,
   listAllOverrides,
   listOverridesForUser,
   upsertOverride,
@@ -447,6 +449,45 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
 
 // ---------- Audit ----------
 
+// v2.42.0: raport audit descarcabil (xlsx) — pe interval sau toata baza.
+// Audit-ul e append-only: NU exista stergere; retention-ul automat (90 zile,
+// scheduler) e singura curatare. Exportul insusi lasa urma in audit.
+const AuditExportQuerySchema = z
+  .object({
+    since: z.string().datetime({ offset: true }).optional(),
+    until: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict();
+
+adminRouter.get("/audit/export", async (c) => {
+  const parsed = AuditExportQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
+  if (!parsed.success) {
+    return c.json(fail("invalid_query", "Query invalid", c, parsed.error.issues), 400);
+  }
+  const { since, until } = parsed.data;
+  const result = listAuditEventsForExport({ since, until });
+  if (result.total > AUDIT_EXPORT_MAX_ROWS) {
+    return c.json(
+      fail(
+        "too_many_rows",
+        `Intervalul contine ${result.total} evenimente (max ${AUDIT_EXPORT_MAX_ROWS}). Ingusteaza intervalul.`,
+        c,
+        { total: result.total, max: AUDIT_EXPORT_MAX_ROWS }
+      ),
+      413
+    );
+  }
+  recordAudit(c, "admin.audit.export", {
+    detail: { rows: result.rows.length, since: since ?? null, until: until ?? null },
+  });
+  const buf = await buildAuditReportXlsx(result.rows, { since, until });
+  const stamp = new Date().toISOString().slice(0, 10);
+  c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  c.header("Content-Disposition", `attachment; filename="raport-audit-${stamp}.xlsx"`);
+  c.header("Cache-Control", "no-store");
+  return c.body(new Uint8Array(buf));
+});
+
 adminRouter.get("/audit", (c) => {
   const parsed = ListAuditQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
   if (!parsed.success) {
@@ -769,6 +810,21 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
   const parsed = CreateGrantSchema.safeParse(body);
   if (!parsed.success) {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+  // v2.42.0 (decizie user): grant si buget nelimitat se exclud reciproc.
+  // Fara override pe feature (pass-through) sau cu override NULL (nelimitat
+  // explicit), grantul nu ar avea peste ce sa se adune — refuzam cu actiunea
+  // corecta in mesaj in loc sa cream un rand inert.
+  const override = getOverride(id, parsed.data.feature);
+  if (override === null || override.limit_usd_milli === null) {
+    return c.json(
+      fail(
+        "unlimited_budget",
+        `Bugetul pe "${parsed.data.feature}" este nelimitat — grantul nu ar avea efect. Seteaza intai o cota (limita) pentru acest user in pagina Cote.`,
+        c
+      ),
+      422
+    );
   }
   const adminId = getOwnerId(c);
   const row = createGrant({

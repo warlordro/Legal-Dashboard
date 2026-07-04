@@ -321,6 +321,28 @@ export function purgeOldAuditLog(retentionDays = 90): number {
   return total;
 }
 
+// v2.42.0: raport exportabil (pagina admin Audit) — interval sau toata baza.
+// Cap dur pe randuri: peste, caller-ul raspunde 413 cu totalul (adminul
+// ingusteaza intervalul). Ordinea e CRONOLOGICA (ASC) — e un raport, nu un feed.
+export const AUDIT_EXPORT_MAX_ROWS = 10_000;
+
+export function listAuditEventsForExport(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {
+  const db = getDb();
+  const { sql: whereSql, params } = buildAuditWhere(opts);
+  const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`).get(...params) as { n: number };
+  if (totalRow.n > AUDIT_EXPORT_MAX_ROWS) {
+    return { rows: [], total: totalRow.n };
+  }
+  const rows = db
+    .prepare(
+      `SELECT * FROM audit_log ${whereSql}
+       ORDER BY ts ASC, id ASC
+       LIMIT ?`
+    )
+    .all(...params, AUDIT_EXPORT_MAX_ROWS) as AuditRow[];
+  return { rows, total: totalRow.n };
+}
+
 export function listAuditEvents(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {
   const db = getDb();
   const { sql: whereSql, params } = buildAuditWhere(opts);

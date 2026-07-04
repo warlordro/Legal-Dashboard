@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from "react";
-import { ClipboardList, RefreshCw, Filter, ChevronDown, ChevronRight } from "lucide-react";
+import { ClipboardList, RefreshCw, Filter, ChevronDown, ChevronRight, Download } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -58,6 +58,31 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [exporting, setExporting] = useState(false);
+
+  // v2.42.0: raport xlsx pe intervalul din filtrele De la / Pana la (ambele
+  // goale = toata baza). Audit-ul e append-only — raportul e calea de a lua
+  // datele; stergere manuala nu exista (retention automat 90 zile).
+  const onExportReport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const blob = await admin.exportAuditReport({
+        since: localDateInputToIso(from, false),
+        until: localDateInputToIso(to, true),
+      });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `raport-audit-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la generarea raportului.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -163,10 +188,21 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
             )}
             <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>{summary}</p>
           </div>
-          <Button variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              onClick={onExportReport}
+              disabled={exporting}
+              title="Genereaza raport xlsx pe intervalul din filtrele De la / Pana la (goale = toata baza; max 10000 evenimente)"
+            >
+              <Download className={cn("h-4 w-4", exporting && "animate-pulse")} />
+              {exporting ? "Se genereaza..." : "Descarca raport"}
+            </Button>
+            <Button variant="outline" onClick={load} disabled={loading}>
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              Refresh
+            </Button>
+          </div>
         </div>
 
         <Card>

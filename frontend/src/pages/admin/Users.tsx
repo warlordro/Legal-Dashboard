@@ -28,6 +28,12 @@ const ROLE_OPTIONS: ReadonlyArray<{ value: UserRole; label: string }> = [
   { value: "readonly", label: "Read-only" },
 ];
 
+// v2.42.0 (decizie user): support/readonly exista in schema din PR-8 dar nu au
+// NICIO regula wired (singura verificare e requireRole("admin")) — un user
+// "Read-only" se comporta identic cu unul normal. Nu le mai oferim la
+// asignare; raman afisabile pentru randuri istorice (optiune disabled).
+const ASSIGNABLE_ROLE_OPTIONS = ROLE_OPTIONS.filter((o) => o.value === "user" || o.value === "admin");
+
 const STATUS_OPTIONS: ReadonlyArray<{ value: UserStatus; label: string }> = [
   { value: "active", label: "Activ" },
   { value: "suspended", label: "Suspendat" },
@@ -515,7 +521,14 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                                 <SelectValue placeholder="Rol" />
                               </SelectTrigger>
                               <SelectContent>
-                                {ROLE_OPTIONS.map((o) => (
+                                {/* Rand istoric cu rol in afara celor asignabile: vizibil,
+                                    dar nu re-selectabil. */}
+                                {!ASSIGNABLE_ROLE_OPTIONS.some((o) => o.value === row.role) && (
+                                  <SelectItem value={row.role} disabled>
+                                    {roleLabel(row.role)}
+                                  </SelectItem>
+                                )}
+                                {ASSIGNABLE_ROLE_OPTIONS.map((o) => (
                                   <SelectItem key={o.value} value={o.value}>
                                     {o.label}
                                   </SelectItem>

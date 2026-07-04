@@ -14,7 +14,7 @@ import { ownerContext } from "../middleware/owner.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
-import { listOverridesForUser } from "../db/userQuotaRepository.ts";
+import { listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
 import { listGrantsForUser, sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
 
@@ -554,6 +554,36 @@ describe("/api/v1/admin/users/:id/grants", () => {
   beforeEach(() => {
     updateUserRole("local", "admin");
     insertUser({ id: "u-1", email: "a@x", displayName: "A" });
+    // v2.42.0: grant si nelimitat se exclud — grantul cere o limita existenta.
+    upsertOverride({ userId: "u-1", feature: "ai.single", period: "day", limitUsdMilli: 10_000 });
+  });
+
+  it("refuza grantul cu 422 cand bugetul pe feature e nelimitat (fara override)", async () => {
+    insertUser({ id: "u-unlim", email: "unlim@x", displayName: "U" });
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-unlim/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+    });
+    expect(res.status).toBe(422);
+    expect((await jsonOf(res)).error?.code).toBe("unlimited_budget");
+    expect(listGrantsForUser("u-unlim")).toHaveLength(0);
+  });
+
+  it("refuza grantul cu 422 si cand override-ul e explicit NULL (nelimitat)", async () => {
+    insertUser({ id: "u-null", email: "null@x", displayName: "N" });
+    upsertOverride({ userId: "u-null", feature: "ai.single", period: "day", limitUsdMilli: null });
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-null/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt }),
+    });
+    expect(res.status).toBe(422);
+    expect((await jsonOf(res)).error?.code).toBe("unlimited_budget");
   });
 
   it("GET returns empty list initially", async () => {
@@ -716,6 +746,42 @@ describe("/api/v1/admin/users/:id/grants", () => {
   it("DELETE rejects non-numeric id with 400", async () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/grants/not-a-number", { method: "DELETE" });
+    expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 — raport audit exportabil (xlsx)
+// ---------------------------------------------------------------------------
+
+describe("GET /api/v1/admin/audit/export", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("genereaza xlsx valid si inregistreaza exportul in audit", async () => {
+    const app = buildApp();
+    // Produce macar un eveniment auditat inainte de export.
+    await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "audit@firma.ro", displayName: "Audit", role: "user" }),
+    });
+    const res = await app.request("/api/v1/admin/audit/export");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("spreadsheetml");
+    const buf = Buffer.from(await res.arrayBuffer());
+    expect(buf.subarray(0, 2).toString("latin1")).toBe("PK");
+    expect(getAuditEvents({ ownerId: "local", action: "admin.audit.export" })).toHaveLength(1);
+  });
+
+  it("interval fara evenimente: raport valid (gol), nu eroare", async () => {
+    const res = await buildApp().request("/api/v1/admin/audit/export?until=2000-01-01T00:00:00.000Z");
+    expect(res.status).toBe(200);
+  });
+
+  it("query invalid => 400", async () => {
+    const res = await buildApp().request("/api/v1/admin/audit/export?since=nu-e-data");
     expect(res.status).toBe(400);
   });
 });

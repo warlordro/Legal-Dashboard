@@ -102,12 +102,20 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     }
   };
 
+  // v2.42.0: grant si buget nelimitat se exclud (serverul refuza cu 422) —
+  // UI-ul stie limitele userului selectat ca sa blocheze formularul cu
+  // explicatie, nu sa lase submit-ul sa esueze.
+  const [limitsByFeature, setLimitsByFeature] = useState<Record<string, number | null>>({});
+
   const loadGrants = useCallback(async (userId: string) => {
     setLoading(true);
     setError(null);
     try {
-      const result = await admin.listGrants(userId);
+      const [result, quota] = await Promise.all([admin.listGrants(userId), admin.listQuota(userId)]);
       setGrants(result.grants);
+      const limits: Record<string, number | null> = {};
+      for (const o of quota.overrides) limits[o.feature] = o.limitUsdMilli;
+      setLimitsByFeature(limits);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea grant-urilor.");
     } finally {
@@ -404,11 +412,27 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </div>
-                <Button type="submit" disabled={busyId !== null}>
+                <Button
+                  type="submit"
+                  disabled={
+                    busyId !== null || limitsByFeature[feature] === undefined || limitsByFeature[feature] === null
+                  }
+                  title={
+                    limitsByFeature[feature] === undefined || limitsByFeature[feature] === null
+                      ? "Bugetul pe acest feature e nelimitat — grantul nu ar avea efect."
+                      : undefined
+                  }
+                >
                   <Plus className="h-4 w-4" />
                   Adauga
                 </Button>
               </form>
+              {(limitsByFeature[feature] === undefined || limitsByFeature[feature] === null) && (
+                <p className="text-sm text-amber-700 dark:text-amber-400">
+                  Bugetul pe {feature} este nelimitat pentru acest user — grantul si nelimitatul se exclud reciproc.
+                  Seteaza intai o limita in tab-ul Cote, apoi acorda grantul.
+                </p>
+              )}
 
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
