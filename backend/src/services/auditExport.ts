@@ -49,8 +49,10 @@ export async function buildAuditReportXlsx(
       ts: r.ts,
       action: safeCell(r.action),
       outcome: r.outcome,
+      // Placeholder UNIC pentru owner/actor null: "system" — identic cu UI-ul
+      // (CodeRabbit: exportul avea "system"/gol, pagina avea "-").
       owner: safeCell(labelOf(r.owner_id)),
-      actor: r.actor_id === null ? "" : safeCell(labelOf(r.actor_id)),
+      actor: safeCell(labelOf(r.actor_id)),
       target: safeCell([r.target_kind, r.target_id].filter(Boolean).join(" / ")),
       ip: safeCell(r.ip ?? ""),
       requestId: safeCell(r.request_id ?? ""),

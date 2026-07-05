@@ -389,12 +389,13 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                           <td className="px-3 py-2 align-top">
                             <Badge variant={outcomeVariant(row.outcome)}>{outcomeLabel(row.outcome)}</Badge>
                           </td>
-                          {/* Email cand exista (lizibil); ID-ul ramane in title pentru copy/filtru. */}
+                          {/* Email cand exista (lizibil); ID-ul ramane in title pentru copy/filtru.
+                              null = eveniment de sistem — acelasi placeholder ca raportul xlsx. */}
                           <td className="px-3 py-2 align-top font-mono text-xs" title={row.ownerId ?? undefined}>
-                            {row.ownerEmail ?? row.ownerId ?? "-"}
+                            {row.ownerEmail ?? row.ownerId ?? "system"}
                           </td>
                           <td className="px-3 py-2 align-top font-mono text-xs" title={row.actorId ?? undefined}>
-                            {row.actorEmail ?? row.actorId ?? "-"}
+                            {row.actorEmail ?? row.actorId ?? "system"}
                           </td>
                           <td className="px-3 py-2 align-top text-xs">
                             {row.targetKind ? (

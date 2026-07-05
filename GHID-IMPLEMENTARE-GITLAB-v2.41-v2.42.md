@@ -435,7 +435,8 @@ Cardul propriu de buget ramane sub el, redenumit "Bugetul tau (contul curent)".
 
 ### 5.4 Audit utilizabil
 - Pagina: coloane Owner/Actor afiseaza EMAIL (enrichment in ruta GET /audit prin
-  getUserById, ID-ul ramane in title), outcome tradus (OK/Refuzat/Eroare),
+  getUserById, ID-ul ramane in title; owner/actor NULL = "system" — ACELASI
+  placeholder in pagina si in raportul xlsx), outcome tradus (OK/Refuzat/Eroare),
   filtre text cu debounce 300ms + AbortController pe fetch + reset pagina INLINE
   in onChange-ul filtrelor (NU intr-un efect paralel — dubla fetch-ul si lasa
   raspunsuri stale sa suprascrie; vezi 6.7), buton Reincarca printr-un
