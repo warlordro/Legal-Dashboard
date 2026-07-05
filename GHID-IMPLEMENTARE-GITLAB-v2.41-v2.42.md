@@ -366,7 +366,10 @@ existent in mesaj. Audit `admin.users.create`.
 ## 5. v2.42.0 Etapa 2B — Setari pe roluri, cota unica, consum, audit, AI
 
 ### 5.1 P4 — pagina /setari
-`frontend/src/pages/Settings.tsx`: taburi via query `?tab=`
+`frontend/src/pages/Settings.tsx`: TenantKeyStatusPanel din tab-ul General se
+randeaza DOAR cand `tenantKeys.tenantMode` (acelasi gating ca ApiKeyDialog —
+in dev-combo, browser pe backend desktop, inventarul tenant ar minti). Taburi
+via query `?tab=`
 (general|utilizatori|chei|cote|granturi|consum|audit). "General" pentru toti:
 TenantKeyStatusPanel + AIUsagePanel + EmailSettingsPanel (+ ApiAccessPanel doar
 admin). Taburile admin: componentele de pagina existente refolosite cu prop
@@ -532,7 +535,8 @@ cele scoase; dismiss-ul manual curata timerul propriu. Montare in App inauntrul
 ConfirmProvider. ADOPTARE pe mutatii: Keys (cheie salvata/stearsa, captcha
 salvat — doar pe succes; erorile raman in banner), Users (rol/status schimbat),
 Quota (limita salvata/stearsa), Grants (acordat/revocat cu sume), Alerts
-(inchisa / N inchise cu count-ul REAL din raspuns), ApiAccessPanel (revocari),
+(inchisa / N inchise cu count-ul REAL din raspuns; count 0 = toast INFO
+"nicio alerta noua de inchis", nu succes), ApiAccessPanel (revocari),
 exporturile PDF din Changelog si Manual (toast de EROARE — inainte esuau complet
 silentios).
 
@@ -727,9 +731,10 @@ _schema_versions WHERE version = 40;`
 
 ### 10.2 Migration 0041 (up) — consolidarea pool-ului "ai"
 ```sql
--- 1. Override-uri: promoveaza randul ai.* CEL MAI RESTRICTIV la 'ai'
---    (limita numerica cea mai mica; NULL=nelimitat PIERDE in fata oricarei
---    limite) — cand consolidezi plafoane, nu largesti accidental bugetul.
+-- 1. Override-uri: promoveaza randul ai.* CEL MAI RESTRICTIV la 'ai'.
+--    Restrictivitatea se compara pe RATA ZILNICA (limita/zilele perioadei:
+--    day=1, week=7, month=30), NU pe numarul brut — altfel "900/luna" ar
+--    castiga in fata lui "1000/zi" desi e mult mai LARG. NULL pierde mereu.
 INSERT INTO user_quota_overrides (user_id, feature, period, limit_usd_milli, updated_at, updated_by)
 SELECT o.user_id, 'ai', o.period, o.limit_usd_milli, o.updated_at, o.updated_by
 FROM user_quota_overrides o
@@ -740,7 +745,10 @@ WHERE o.feature IN ('ai.single', 'ai.multi')
   AND o.rowid = (
     SELECT y.rowid FROM user_quota_overrides y
     WHERE y.user_id = o.user_id AND y.feature IN ('ai.single', 'ai.multi')
-    ORDER BY (y.limit_usd_milli IS NULL) ASC, y.limit_usd_milli ASC, y.rowid ASC
+    ORDER BY (y.limit_usd_milli IS NULL) ASC,
+             (CAST(y.limit_usd_milli AS REAL) /
+               CASE y.period WHEN 'day' THEN 1 WHEN 'week' THEN 7 ELSE 30 END) ASC,
+             y.rowid ASC
     LIMIT 1
   );
 DELETE FROM user_quota_overrides WHERE feature IN ('ai.single', 'ai.multi');
@@ -750,8 +758,10 @@ UPDATE user_quota_grants SET feature = 'ai' WHERE feature IN ('ai.single', 'ai.m
 --    warning-ul se rearma la urmatorul apel AI daca pool-ul e peste prag.
 DELETE FROM budget_notifications WHERE feature IN ('ai.single', 'ai.multi');
 ```
-down (pragmatic): recreeaza ai.single + ai.multi cu ACEEASI limita din 'ai',
-muta granturile pe ai.single, sterge notificarile 'ai', sterge versiunea 41.
+down (pragmatic): recreeaza ai.single + ai.multi cu ACEEASI limita din 'ai';
+granturile se DUPLICA pe ambele feature-uri legacy (pre-0041 pool-urile erau
+separate — maparea doar pe ai.single ar pierde extra-ul de pe multi); sterge
+notificarile 'ai' si versiunea 41.
 
 ### 10.2b Migration 0042 (up) — backfill expires_at la UTC
 `createGrant` normalizeaza la scriere DIN acest sprint, dar randurile legacy

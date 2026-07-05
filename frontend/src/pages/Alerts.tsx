@@ -331,6 +331,12 @@ export default function Alerts({
   // (Escape/Enter/focus), nu prin modalul hand-rolled de dinainte; rezultatul
   // se anunta cu toast (count real din raspunsul serverului).
   const toastBulkResult = (result: AlertDismissBulkResult) => {
+    // CodeRabbit: "0 alerte au fost inchise" ca succes e derutant — cand
+    // totul era deja inchis spunem exact asta, informativ.
+    if (result.dismissedCount === 0) {
+      toast("Nicio alerta noua de inchis — erau deja inchise.", { variant: "info" });
+      return;
+    }
     toast(
       result.dismissedCount === 1 ? "O alerta a fost inchisa." : `${result.dismissedCount} alerte au fost inchise.`,
       {

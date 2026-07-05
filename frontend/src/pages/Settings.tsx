@@ -84,11 +84,16 @@ export default function SettingsPage({ tenantKeys }: { tenantKeys: TenantKeys })
             eager pe toate paginile admin la deschiderea Setarilor. */}
         {tab === "general" && (
           <div className="max-w-5xl">
-            <TenantKeyStatusPanel
-              tenantKeys={tenantKeys}
-              isAdmin={isAdmin === true}
-              onManageKeys={() => selectTab("chei")}
-            />
+            {/* Panoul de chei tenant DOAR in tenant mode (CodeRabbit) — acelasi
+                gating ca ApiKeyDialog. In dev-combo (browser pe backend
+                desktop) cheile sunt BYOK, inventarul tenant ar minti. */}
+            {tenantKeys.tenantMode && (
+              <TenantKeyStatusPanel
+                tenantKeys={tenantKeys}
+                isAdmin={isAdmin === true}
+                onManageKeys={() => selectTab("chei")}
+              />
+            )}
             <AIUsagePanel />
             <EmailSettingsPanel />
             {isAdmin && <ApiAccessPanel />}
