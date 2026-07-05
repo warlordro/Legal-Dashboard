@@ -331,12 +331,13 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                     })}
                   </tbody>
                 </table>
-                {overviewTruncated && (
-                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                    Lista a fost trunchiata — exista mai multi utilizatori decat pot fi afisati.
-                  </p>
-                )}
               </div>
+            )}
+            {/* Nota de trunchiere e comuna AMBELOR taburi (CodeRabbit). */}
+            {overview !== null && overviewTruncated && (
+              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                Lista a fost trunchiata — exista mai multi utilizatori decat pot fi afisati.
+              </p>
             )}
             {overview !== null && userTotalPages > 1 && (
               <TablePagination

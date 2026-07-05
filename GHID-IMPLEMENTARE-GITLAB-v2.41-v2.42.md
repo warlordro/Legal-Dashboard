@@ -199,7 +199,8 @@ serveasca dist-frontend); (2) genereaza/citeste secrete persistente git-ignored 
 (DB izolata!), port 3002; (4) porneste backend, asteapta `/health`; (5) seed admin
 (`scripts/seed-admin.mjs` cu SEED_ADMIN_EMAIL); (6) porneste proxy-ul pe port+1;
 (7) verifica bridge-ul prin proxy. Orice `Fail()` opreste procesele pornite
-(track PID-uri) inainte de exit.
+(track PID-uri) inainte de exit, iar un esec de oprire se RAPORTEAZA cu PID-ul
+(nu silentios — userul trebuie sa stie ce a ramas orfan).
 
 ### 2.3 Capcana cookie-urilor intre porturi (memoreaza!)
 Pentru DOI useri simultan (admin 3003 + user normal 3004): cookie-urile browserului
@@ -283,8 +284,9 @@ necesita restart.
   mount-on-demand loveau rate-limiter-ul → 429 afisat ca "403 Acces interzis").
   Spec: dedup inflight; `refresh(): Promise<void>` care ASTEAPTA fetch-ul curent
   si porneste unul proaspat (nu reutiliza in-flight-ul — poate fi de dinaintea
-  mutatiei); retry la mount daca starea anterioara e eroare; reset de test care
-  curata si `listeners`.
+  mutatiei); retry la mount daca starea anterioara e eroare, CU
+  `emit({loading:true, error:null})` la retry (altfel UI-ul arata eroarea veche
+  fara indiciu de reincarcare); reset de test care curata si `listeners`.
 
 ---
 
@@ -318,8 +320,10 @@ existent in mesaj. Audit `admin.users.create`.
 - **Template**: `GET /api/v1/admin/users/import-template` — xlsx generat
   server-side (exceljs): sheet "Utilizatori" cu header Email / Nume afisat / Rol,
   dataValidation LIST pe coloana Rol (C2:C501) cu etichetele umane
-  "Utilizator,Admin", sheet "Instructiuni". Frontend: descarcare prin
-  `window.location.assign(url)` (nu `<Button asChild>` — nu e suportat).
+  "Utilizator,Admin", sheet "Instructiuni". Frontend: descarcare prin fetch +
+  blob printr-un helper COMUN cu exportul de audit (`fetchBlobOrThrow`) — NU
+  prin `window.location.assign` (o eroare 4xx/5xx ar naviga browserul pe un
+  JSON in loc sa apara in pagina).
 - **Parsare** `backend/src/services/userImport.ts` — TOATA server-side:
   1. magic bytes ZIP (`PK\x03\x04`) altfel `invalid_file`;
   2. cap body 512KB (`MAX_IMPORT_BYTES`, bodyLimit dedicat pe ruta);
@@ -422,7 +426,8 @@ de useri = risc acceptat (raport-instantaneu).
 **UI** (tab Consum): card "Consum per utilizator" cu sub-taburi AI / Captcha RNPM,
 sortare client-side pe tot setul, paginare client-side (25/pagina,
 TablePagination, clamp + sincronizare state la schimbarea totalului — vezi 6.9),
-empty-state pe TAB-UL ACTIV (nu pe lista AI!), bare de procent, badge Nelimitat.
+empty-state pe TAB-UL ACTIV (nu pe lista AI!), nota de trunchiere vizibila pe
+AMBELE taburi (in afara ternarului de tab), bare de procent, badge Nelimitat.
 Cardul propriu de buget ramane sub el, redenumit "Bugetul tau (contul curent)".
 
 ### 5.4 Audit utilizabil
@@ -448,7 +453,8 @@ Cardul propriu de buget ramane sub el, redenumit "Bugetul tau (contul curent)".
 ### 5.5 UserPicker (Cote + Granturi)
 Selectia userului = dropdown cu TOTI userii activi (listUsers status=active,
 pageSize 100, sortati pe email, nota cand totalul depaseste), cu aria-label pe
-select — NU cautare dupa email. La selectarea din vederea globala se face
+select — NU cautare dupa email. Eticheta rolului din optiuni vine din
+`userRoleLabel` (acopera si support/readonly istorice, nu ternar admin/user). La selectarea din vederea globala se face
 `admin.getUser(id)` si se intra in modul editare.
 
 ### 5.6 AI: Sonnet 5 + prompturi
@@ -803,7 +809,7 @@ Toate sub `requireRole("admin")` daca nu se spune altfel; envelope standard.
 
 | Metoda + ruta | Body/Query | Succes | Erori specifice |
 |---|---|---|---|
-| GET `/api/v1/me/key-status` (orice user) | — | `{authMode, tenantKeysConfigured:{5x bool}}` | — |
+| GET `/api/v1/me/key-status` (orice user) | — | in envelope: `data:{authMode:"web"\|"desktop", tenantKeysConfigured:{anthropic,openai,google,openrouter,captcha}}` — frontend-ul citeste EXACT aceste nume | — |
 | POST `/api/v1/admin/users` | CreateUserSchema (4KB) | 201 user DTO | 409 `email_exists` |
 | GET `/api/v1/admin/users/import-template` | — | xlsx attachment | — |
 | POST `/api/v1/admin/users/import` | xlsx raw (512KB) | 200 `{created[],issues[],summary}` | 400/413 parse, 409 `import_failed` |

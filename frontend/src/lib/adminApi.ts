@@ -342,6 +342,22 @@ export interface UserImportReport {
 
 export const USER_IMPORT_TEMPLATE_URL = "/api/v1/admin/users/import-template";
 
+// Descarcari binare: fetch + blob (nu navigare) ca erorile 4xx/5xx sa fie
+// afisabile in pagina cu mesajul din envelope — pattern comun pentru raportul
+// de audit si template-ul de import (CodeRabbit: era duplicat/inconsistent).
+async function fetchBlobOrThrow(path: string, fallbackMsg: string): Promise<Blob> {
+  const res = await apiFetch(path);
+  if (!res.ok) {
+    const body = await res.json().catch(() => null);
+    const msg =
+      body && typeof body === "object" && (body as { error?: { message?: string } }).error?.message
+        ? String((body as { error: { message: string } }).error.message)
+        : `${fallbackMsg} (${res.status})`;
+    throw new Error(msg);
+  }
+  return res.blob();
+}
+
 export const admin = {
   createUser: async (input: { email: string; displayName: string; role: CreatableUserRole }): Promise<AdminUser> => {
     const res = await apiFetch("/api/v1/admin/users", {
@@ -397,21 +413,15 @@ export const admin = {
   },
 
   // v2.42.0: raport audit xlsx (interval optional; fara parametri = toata baza).
-  // Fetch + blob (nu navigare) ca erorile 413/400 sa fie afisabile in pagina.
   exportAuditReport: async (params: { since?: string; until?: string } = {}): Promise<Blob> => {
     const qs = new URLSearchParams();
     if (params.since) qs.set("since", params.since);
     if (params.until) qs.set("until", params.until);
-    const res = await apiFetch(`/api/v1/admin/audit/export${qs.size > 0 ? `?${qs}` : ""}`);
-    if (!res.ok) {
-      const body = await res.json().catch(() => null);
-      const msg =
-        body && typeof body === "object" && (body as { error?: { message?: string } }).error?.message
-          ? String((body as { error: { message: string } }).error.message)
-          : `Eroare la export (${res.status})`;
-      throw new Error(msg);
-    }
-    return res.blob();
+    return fetchBlobOrThrow(`/api/v1/admin/audit/export${qs.size > 0 ? `?${qs}` : ""}`, "Eroare la export");
+  },
+
+  downloadImportTemplate: async (): Promise<Blob> => {
+    return fetchBlobOrThrow(USER_IMPORT_TEMPLATE_URL, "Eroare la descarcarea template-ului");
   },
 
   listQuotaOverview: async (signal?: AbortSignal): Promise<QuotaOverviewResult> => {

@@ -8,13 +8,10 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { SortableTh } from "@/components/ui/sortable-th";
 import { useToast } from "@/components/ui/toast";
 import { useClientSort } from "@/hooks/useClientSort";
-
-const SORT_SCOPE_NOTE = "Sorteaza pagina curenta";
 import { TablePagination } from "@/components/table-pagination";
 import {
   admin,
   MonitoringApiError,
-  USER_IMPORT_TEMPLATE_URL,
   type AdminUser,
   type CreatableUserRole,
   type UserImportReport,
@@ -26,6 +23,7 @@ import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
+const SORT_SCOPE_NOTE = "Sorteaza pagina curenta";
 
 const ROLE_OPTIONS: ReadonlyArray<{ value: UserRole; label: string }> = [
   { value: "user", label: "Utilizator" },
@@ -348,9 +346,20 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    // Content-Disposition: attachment => browserul descarca fara navigare.
-                    window.location.assign(USER_IMPORT_TEMPLATE_URL);
+                  onClick={async () => {
+                    // Fetch + blob (nu navigare): o eroare 4xx/5xx ramane in
+                    // pagina cu mesaj, nu duce browserul pe un JSON (CodeRabbit).
+                    try {
+                      const blob = await admin.downloadImportTemplate();
+                      const url = URL.createObjectURL(blob);
+                      const a = document.createElement("a");
+                      a.href = url;
+                      a.download = "template-import-utilizatori.xlsx";
+                      a.click();
+                      URL.revokeObjectURL(url);
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Eroare la descarcarea template-ului.");
+                    }
                   }}
                 >
                   <Download className="h-4 w-4" />

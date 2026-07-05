@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Users as UsersIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { admin, type AdminUser } from "@/lib/api";
+import { userRoleLabel } from "@/lib/userLabels";
 
 // v2.42.0 (feedback testare): selectia userului in paginile Cote/Granturi e un
 // dropdown cu TOTI userii activi, nu cautare dupa email. Tenantii sunt mici
@@ -66,7 +67,7 @@ export function UserPicker({
           </option>
           {users.map((u) => (
             <option key={u.id} value={u.id}>
-              {u.email} — {u.displayName || u.email} ({u.role === "admin" ? "Admin" : "Utilizator"})
+              {u.email} — {u.displayName || u.email} ({userRoleLabel(u.role)})
             </option>
           ))}
         </select>

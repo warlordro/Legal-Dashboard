@@ -31,7 +31,13 @@ $script:startedPids = @()
 function Fail($msg) {
     Write-Host "FAIL: $msg" -ForegroundColor Red
     foreach ($procId in $script:startedPids) {
-        try { Stop-Process -Id $procId -Force -Confirm:$false -ErrorAction SilentlyContinue } catch {}
+        try {
+            Stop-Process -Id $procId -Force -Confirm:$false -ErrorAction Stop
+        } catch {
+            # CodeRabbit: esecul de cleanup nu mai e tacut — userul afla ce PID
+            # a ramas orfan si il poate opri manual.
+            Write-Host "WARN: nu am putut opri procesul PID $procId ($($_.Exception.Message)) — opreste-l manual." -ForegroundColor Yellow
+        }
     }
     exit 1
 }

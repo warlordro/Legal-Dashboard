@@ -98,8 +98,11 @@ export function useCurrentUser(): UseCurrentUserResult {
   useEffect(() => {
     // Retry la montare daca fetch-ul initial a ESUAT (review-panel: `started`
     // ramanea true si eroarea devenea permanenta pana la un refresh manual).
+    // La retry semnalam loading (CodeRabbit: altfel UI-ul arata in continuare
+    // eroarea veche, fara niciun indiciu ca se reincearca).
     if (!started || (snapshot.error !== null && inflight === null)) {
       started = true;
+      emit({ loading: true, error: null });
       void fetchMe();
     }
   }, []);
