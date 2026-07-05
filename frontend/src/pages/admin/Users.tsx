@@ -29,7 +29,7 @@ const ROLE_OPTIONS: ReadonlyArray<{ value: UserRole; label: string }> = [
   { value: "user", label: "Utilizator" },
   { value: "admin", label: "Admin" },
   { value: "support", label: "Suport" },
-  { value: "readonly", label: "Read-only" },
+  { value: "readonly", label: "Doar citire" },
 ];
 
 // v2.42.0 (decizie user): support/readonly exista in schema din PR-8 dar nu au

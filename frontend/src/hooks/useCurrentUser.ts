@@ -57,10 +57,16 @@ function doFetch(): Promise<void> {
 }
 
 // Dedup pentru rafalele de mount: toate instantele asteapta ACELASI fetch.
+// Cleanup-ul e GARDAT ca la refresh (CodeRabbit): fara guard, finally-ul unui
+// fetch de mount care se termina in timpul unui refresh suprapus ar fi sters
+// inflight-ul refresh-ului si urmatorul mount ar fi pornit un fetch duplicat.
 function fetchMe(): Promise<void> {
-  inflight ??= doFetch().finally(() => {
-    inflight = null;
-  });
+  if (inflight === null) {
+    const startedFetch: Promise<void> = doFetch().finally(() => {
+      if (inflight === startedFetch) inflight = null;
+    });
+    inflight = startedFetch;
+  }
   return inflight;
 }
 

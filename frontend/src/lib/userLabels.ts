@@ -6,7 +6,7 @@ const ROLE_LABELS: Record<string, string> = {
   user: "Utilizator",
   admin: "Admin",
   support: "Suport",
-  readonly: "Read-only",
+  readonly: "Doar citire",
 };
 
 const STATUS_LABELS: Record<string, string> = {

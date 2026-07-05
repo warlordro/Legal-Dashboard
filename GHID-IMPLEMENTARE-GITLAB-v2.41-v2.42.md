@@ -282,7 +282,10 @@ necesita restart.
 - `useCurrentUser` = STORE PARTAJAT la nivel de modul (`useSyncExternalStore`):
   un singur fetch `/me` pentru toate instantele (Sidebar + AdminGate-uri + tab-uri
   mount-on-demand loveau rate-limiter-ul → 429 afisat ca "403 Acces interzis").
-  Spec: dedup inflight; `refresh(): Promise<void>` care ASTEAPTA fetch-ul curent
+  Spec: dedup inflight cu cleanup GARDAT peste tot (si in fetchMe, si in
+  refresh: `finally(() => { if (inflight === alMeu) inflight = null })` — un
+  finally negardat sterge inflight-ul unui refresh suprapus si sparge dedup-ul);
+  `refresh(): Promise<void>` care ASTEAPTA fetch-ul curent
   si porneste unul proaspat (nu reutiliza in-flight-ul — poate fi de dinaintea
   mutatiei); retry la mount daca starea anterioara e eroare, CU
   `emit({loading:true, error:null})` la retry (altfel UI-ul arata eroarea veche
@@ -549,7 +552,9 @@ silentios).
 ### 6.5 Etichete umane peste tot (conventie cross-stack)
 Enum backend → helper de traducere in `frontend/src/lib/` + test. De creat:
 `monitoringRunStatus.ts` (ok→OK, partial→Partial, error→Eroare, skipped→Omis,
-fallback token), `userLabels.ts` (roluri/statusuri), `quotaFeatureLabels.ts`
+fallback token), `userLabels.ts` (roluri/statusuri: user→Utilizator, admin→Admin,
+support→Suport, readonly→"Doar citire" — NU "Read-only"; statusuri:
+Activ/Suspendat/Sters), `quotaFeatureLabels.ts`
 (ai → "AI — toate analizele (limita unica)", captcha.rnpm → "Captcha RNPM") —
 SURSA UNICA importata de Cote+Granturi+Consum (nu duplica map-uri locale).
 De aplicat: outcome-ul din Audit (badge SI sumar), last_status Monitorizare,
