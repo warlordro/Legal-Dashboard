@@ -8,6 +8,7 @@ import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/admin/UserPicker";
 import { admin, type AdminUser, type QuotaOverride, type QuotaOverrideWithUser, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { quotaFeatureLabel } from "@/lib/quotaFeatureLabels";
 import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
@@ -53,19 +54,18 @@ function limitUnitLabel(feature: string): string {
 // Oglinda QUOTA_FEATURES din backend (quotaGuard.ts) — enum inchis, validat cu
 // z.enum in admin.ts. v2.42.0: limita AI e UNICA (pool peste analizele single
 // si multi-agent — decizie user); captcha ramane separat (alta unitate).
-const FEATURE_OPTIONS = [
-  { value: "ai", label: "AI — toate analizele (limita unica)" },
-  { value: "captcha.rnpm", label: "Captcha RNPM" },
-] as const;
+// Etichetele vin din vocabularul partajat (CodeRabbit: era duplicat cu Grants).
+const FEATURE_OPTIONS = (["ai", "captcha.rnpm"] as const).map((value) => ({
+  value,
+  label: quotaFeatureLabel(value),
+}));
 const DEFAULT_FEATURE = FEATURE_OPTIONS[0].value;
 
 function isKnownFeature(feature: string): boolean {
   return FEATURE_OPTIONS.some((o) => o.value === feature);
 }
 
-function featureLabel(feature: string): string {
-  return FEATURE_OPTIONS.find((o) => o.value === feature)?.label ?? feature;
-}
+const featureLabel = quotaFeatureLabel;
 
 export default function AdminQuota({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();

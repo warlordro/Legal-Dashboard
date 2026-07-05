@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -52,29 +52,54 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const nextId = useRef(1);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
-  const dismiss = useCallback((id: number) => {
+  const clearTimer = useCallback((id: number) => {
     const timer = timers.current.get(id);
     if (timer) {
       clearTimeout(timer);
       timers.current.delete(id);
     }
-    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const dismiss = useCallback(
+    (id: number) => {
+      clearTimer(id);
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+    },
+    [clearTimer]
+  );
 
   const toast = useCallback<ToastFn>(
     (message, opts) => {
       const variant = opts?.variant ?? "info";
       const id = nextId.current++;
-      // Cap defensiv: pastram doar ultimele MAX_VISIBLE (cele vechi dispar).
-      setToasts((prev) => [...prev.slice(-(MAX_VISIBLE - 1)), { id, message, variant }]);
+      // Cap defensiv: pastram doar ultimele MAX_VISIBLE; timerele celor
+      // evacuate se curata (review-panel: altfel ramaneau in Map pana la fire).
+      // clearTimer e idempotent, deci dubla invocare a updater-ului in
+      // StrictMode (dev) e inofensiva.
+      setToasts((prev) => {
+        const next = [...prev, { id, message, variant }];
+        const evicted = next.length > MAX_VISIBLE ? next.splice(0, next.length - MAX_VISIBLE) : [];
+        for (const t of evicted) clearTimer(t.id);
+        return next;
+      });
       const duration = opts?.durationMs ?? (variant === "error" ? ERROR_DURATION_MS : DEFAULT_DURATION_MS);
       timers.current.set(
         id,
         setTimeout(() => dismiss(id), duration)
       );
     },
-    [dismiss]
+    [dismiss, clearTimer]
   );
+
+  // Review-panel: fara cleanup, timerele pendinte trageau setToasts pe un
+  // provider demontat (teste/HMR).
+  useEffect(() => {
+    const map = timers.current;
+    return () => {
+      for (const timer of map.values()) clearTimeout(timer);
+      map.clear();
+    };
+  }, []);
 
   return (
     <ToastContext.Provider value={toast}>
@@ -85,9 +110,8 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           className="pointer-events-none fixed bottom-4 right-4 z-[110] flex w-full max-w-sm flex-col gap-2"
         >
           {toasts.map((t) => (
-            <div
+            <output
               key={t.id}
-              role="status"
               className={cn(
                 "pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
                 VARIANT_STYLES[t.variant]
@@ -103,7 +127,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
               >
                 <X className="h-3.5 w-3.5" />
               </button>
-            </div>
+            </output>
           ))}
         </div>
       )}

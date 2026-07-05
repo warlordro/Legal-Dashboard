@@ -33,6 +33,10 @@ function modeLabel(mode: TenantCaptchaMode): string {
   return MODES.find((m) => m.value === mode)?.label ?? mode;
 }
 
+function providerLabel(provider: TenantCaptchaProvider): string {
+  return PROVIDERS.find((p) => p.value === provider)?.label ?? provider;
+}
+
 export default function AdminKeys({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const toast = useToast();
@@ -192,7 +196,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   </button>
                 ))}
               </div>
-              <Badge variant="outline">{currentProvider}</Badge>
+              <Badge variant="outline">{providerLabel(currentProvider)}</Badge>
             </div>
             <div className="flex flex-wrap items-center gap-3">
               <span className="w-24 text-sm font-medium">Mod</span>

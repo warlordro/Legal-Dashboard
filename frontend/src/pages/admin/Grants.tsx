@@ -8,14 +8,11 @@ import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/admin/UserPicker";
 import { admin, type AdminUser, type QuotaGrant, type QuotaGrantWithUser } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { quotaFeatureLabel as featureLabel } from "@/lib/quotaFeatureLabels";
 import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const MILLI = 1000;
-
-// Acelasi vocabular ca FEATURE_OPTIONS din Cote — nu aratam cheia interna.
-const FEATURE_LABELS: Record<string, string> = { ai: "AI — toate analizele (limita unica)" };
-const featureLabel = (feature: string) => FEATURE_LABELS[feature] ?? feature;
 
 function milliToUsd(milli: number): string {
   return (milli / MILLI).toFixed(3);

@@ -96,6 +96,7 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via focus trap intern. */}
       <div
         ref={dialogRef}
+        tabIndex={-1}
         className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
         // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
         role="dialog"

@@ -86,6 +86,11 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
   const safeUserPage = Math.min(userPage, userTotalPages - 1);
   const pageSlice = <T,>(items: T[]): T[] =>
     items.slice(safeUserPage * userPageSize, (safeUserPage + 1) * userPageSize);
+  // Review-panel: sincronizeaza si STATE-ul, nu doar derivata — altfel, dupa
+  // ce totalul scade si creste la loc, userul "sarea" inapoi pe pagina veche.
+  useEffect(() => {
+    setUserPage((p) => Math.min(p, userTotalPages - 1));
+  }, [userTotalPages]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -197,7 +202,9 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
           <CardContent>
             {overview === null ? (
               <p className="px-4 py-6 text-center text-muted-foreground">Se incarca…</p>
-            ) : overview.length === 0 ? (
+            ) : activeCount === 0 ? (
+              // Review-panel: empty-state pe TAB-ul activ, nu pe lista AI —
+              // altfel tabul Captcha aparea gol cu mesaj inselator.
               <p className="px-4 py-6 text-center text-muted-foreground">Nu exista utilizatori activi.</p>
             ) : overviewTab === "captcha" ? (
               <div className="overflow-x-auto">
@@ -331,7 +338,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                 )}
               </div>
             )}
-            {overview !== null && activeCount > 10 && (
+            {overview !== null && userTotalPages > 1 && (
               <TablePagination
                 page={safeUserPage}
                 totalPages={userTotalPages}

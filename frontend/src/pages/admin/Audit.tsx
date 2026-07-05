@@ -115,42 +115,11 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
   const [pageSize, setPageSize] = useState(PAGE_SIZE);
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  const loadAudit = async (filters: {
-    page: number;
-    action: string;
-    ownerId: string;
-    actorId: string;
-    targetKind: string;
-    outcome: "all" | "ok" | "denied" | "error";
-    from: string;
-    to: string;
-  }) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await admin.listAudit({
-        page: filters.page,
-        pageSize,
-        // actionLike supports prefix/substring matching (admin.users.*); plain
-        // `action` requires an exact value, which is rarely what an auditor wants.
-        actionLike: filters.action || undefined,
-        ownerId: filters.ownerId || undefined,
-        actorId: filters.actorId || undefined,
-        targetKind: filters.targetKind || undefined,
-        outcome: filters.outcome === "all" ? undefined : filters.outcome,
-        since: localDateInputToIso(filters.from, false),
-        until: localDateInputToIso(filters.to, true),
-      });
-      setRows(result.rows);
-      setTotal(result.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const load = () => loadAudit({ page, action, ownerId, actorId, targetKind, outcome, from, to });
+  // Reincarcarea manuala re-declanseaza ACELASI efect de fetch (CodeRabbit:
+  // logica era duplicata intre un loadAudit separat si efect) — un tick in
+  // deps in loc de a doua implementare.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const load = () => setRefreshTick((t) => t + 1);
 
   useEffect(() => {
     // Review-panel: fara abort, un raspuns lent (pagina veche) putea ateriza
@@ -186,7 +155,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
         if (!ac.signal.aborted) setLoading(false);
       });
     return () => ac.abort();
-  }, [action, actorId, from, outcome, ownerId, page, pageSize, targetKind, to]);
+  }, [action, actorId, from, outcome, ownerId, page, pageSize, targetKind, to, refreshTick]);
 
   // Resetarea paginii se face inline in handler-ele filtrelor (nu intr-un efect
   // pe aceleasi dependinte ca fetch-ul): efectul dubla fetch-ul cand pagina era

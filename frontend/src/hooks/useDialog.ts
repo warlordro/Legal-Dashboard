@@ -8,6 +8,14 @@ const FOCUSABLE_SELECTOR =
 // ref so the caller can attach it to the dialog root.
 export function useDialog<T extends HTMLElement = HTMLDivElement>(open: boolean, onClose: () => void) {
   const ref = useRef<T | null>(null);
+  // Review-panel (Nivel 2): onClose e aproape mereu o closure recreata la
+  // fiecare render al caller-ului; cu onClose in deps, efectul se demonta si
+  // remonta la fiecare tasta apasata in dialog — cleanup-ul restaura focusul
+  // in pagina, apoi setup-ul il smulgea inapoi pe primul element focusabil
+  // (inputurile de date deveneau inutilizabile). Ref-ul decupleaza identitatea
+  // functiei de ciclul de viata al efectului: efectul depinde DOAR de `open`.
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -30,7 +38,7 @@ export function useDialog<T extends HTMLElement = HTMLDivElement>(open: boolean,
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (e.key !== "Tab") return;
@@ -76,7 +84,7 @@ export function useDialog<T extends HTMLElement = HTMLDivElement>(open: boolean,
       document.body.style.overflow = previousOverflow;
       previousFocus?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
 
   return ref;
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 // v2.42.0 (Nivel 2 UX): sortare client-side pe coloane pentru tabelele care nu
 // au sortare server-side. Pe tabelele paginate pe server sorteaza PAGINA
@@ -33,6 +33,12 @@ export function useClientSort<T, K extends string>(
 ): { sorted: T[] } & ClientSort<K> {
   const [sortKey, setSortKey] = useState<K | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("asc");
+  // Review-panel: caller-ele paseaza obiecte inline (identitate noua la fiecare
+  // render). Ref-ul tine mereu ultima versiune fara sa intre in deps — memo-ul
+  // ramane pe [rows, sortKey, sortDir] si nu re-sorteaza degeaba, dar nici nu
+  // poate folosi accessors "inghetati".
+  const accessorsRef = useRef(accessors);
+  accessorsRef.current = accessors;
 
   // Ciclu: neactiv -> asc -> desc -> neactiv (revine la ordinea serverului).
   const toggle = (key: K) => {
@@ -49,22 +55,22 @@ export function useClientSort<T, K extends string>(
 
   const sorted = useMemo(() => {
     if (!sortKey) return rows;
-    const accessor = accessors[sortKey];
+    const accessor = accessorsRef.current[sortKey];
     if (!accessor) return rows;
     const dir = sortDir === "asc" ? 1 : -1;
+    const isMissing = (v: string | number | null | undefined) => v === null || v === undefined || v === "";
     // Sort stabil: la egalitate pastreaza ordinea venita de la server.
+    // Valoarea se extrage O SINGURA data per rand (review-panel: accessor-ul
+    // era apelat de pana la 8 ori per comparatie).
     return rows
-      .map((row, i) => [row, i] as const)
-      .sort(([a, ai], [b, bi]) => {
-        const cmp = compareValues(accessor(a), accessor(b));
+      .map((row, i) => [accessor(row), row, i] as const)
+      .sort(([av, , ai], [bv, , bi]) => {
+        const cmp = compareValues(av, bv);
         // Lipsurile raman la coada si pe desc: cmp-ul lor nu se inverseaza.
-        const aMissing = accessor(a) === null || accessor(a) === undefined || accessor(a) === "";
-        const bMissing = accessor(b) === null || accessor(b) === undefined || accessor(b) === "";
-        if (aMissing || bMissing) return cmp !== 0 ? cmp : ai - bi;
+        if (isMissing(av) || isMissing(bv)) return cmp !== 0 ? cmp : ai - bi;
         return cmp !== 0 ? cmp * dir : ai - bi;
       })
-      .map(([row]) => row);
-    // biome-ignore lint/correctness/useExhaustiveDependencies: accessors e un literal stabil la call-site; includerea lui ar re-sorta la fiecare render.
+      .map(([, row]) => row);
   }, [rows, sortKey, sortDir]);
 
   return { sorted, sortKey, sortDir, toggle };

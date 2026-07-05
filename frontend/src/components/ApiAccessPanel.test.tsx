@@ -145,8 +145,12 @@ describe("ApiAccessPanel", () => {
       revokeAllBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
-    const confirmBtn = Array.from(container.querySelectorAll("button")).find(
-      (b) => b.textContent === "Revoca toate" && b !== revokeAllBtn
+    // Cauta in dialogul de confirmare, nu prin inegalitate de referinta cu
+    // butonul din pagina (CodeRabbit): scoping-ul pe rol e neambiguu.
+    const dialog = container.querySelector('[role="alertdialog"]');
+    expect(dialog).toBeTruthy();
+    const confirmBtn = Array.from(dialog?.querySelectorAll("button") ?? []).find(
+      (b) => b.textContent === "Revoca toate"
     );
     expect(confirmBtn).toBeTruthy();
     await act(async () => {
