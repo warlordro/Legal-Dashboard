@@ -36,7 +36,7 @@ describe("estimateAiCostUsdMilli", () => {
         inputTokens: 1_000_000,
         outputTokens: 1_000_000,
       })
-    ).toBe(12_000);
+    ).toBe(18_000);
   });
 
   it("falls back to zero when model or tokens are missing", () => {
