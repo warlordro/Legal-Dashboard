@@ -95,13 +95,58 @@ review adversarial INAINTE de implementare.
 
 ## 2. Etapa 0 — mediu de testare web local (prerechizit pentru orice altceva)
 
-### 2.0 PRECONDITIE BASELINE: clona GitLab e la v2.40.0 — adu intai bridge-ul v2.40.1
+### 2.0 MR 0 — AUDITUL BASELINE-ULUI (obligatoriu; NU presupune nimic despre main)
 
-Delta de COD v2.40.0 → v2.40.1 e mica dar critica (restul v2.40.1 a fost
-Docker/Caddy — in afara scope-ului): **bridge-ul oauth2-proxy din
-`backend/src/routes/auth.ts`** (+ testele `auth.oauth2.test.ts`). Fara el,
-NIMIC din web mode nu functioneaza (SPA-ul primeste "Acces refuzat" la
-bootstrap). Acesta e **MR 0** si se face PRIMUL.
+Main-ul GitLab NU e garantat la v2.40.x — utilizatorul raporteaza ca acolo
+nici PAT-urile (cheile API pentru MCP extern) nu functioneaza. **Primul pas
+este un audit, nu cod:** ruleaza sondele de mai jos pe clona, scrie rezultatul
+in `BASELINE-DELTA.md` (comis in repo) si porteaza DOAR ce lipseste, in
+ordinea tabelului, ca sub-MR-uri 0a/0b/... Abia cand toate sondele sunt verzi
+incepi MR 1.
+
+| # | Capabilitate (versiunea de origine) | Sonda (cum verifici) | Daca lipseste |
+|---|--------------------------------------|----------------------|---------------|
+| A | Nucleu web auth: `LEGAL_DASHBOARD_AUTH_MODE=web`, ownerContext fail-closed, login/logout JWT | porneste backend-ul cu env-ul din 2.2; `GET /api/v1/me` fara cookie → 401 envelope | STOP — baseline-ul e mult mai vechi decat presupus; cere instructiuni utilizatorului inainte de orice |
+| B | JWT `jti` + denylist la logout (v2.38, migration 0038) | `SELECT MAX(version) FROM _schema_versions` >= 38; tabela `jwt_denylist` exista | porteaza migration 0038 + revoke la logout (contract in SECURITY.md al reponului GitHub) |
+| C | Chei tenant criptate (`tenant_api_keys`, AES-256-GCM) + rute `GET/PUT /api/v1/admin/keys` | tabela exista; PUT /keys/anthropic cu Bearer admin → 200 | porteaza tenantKeysRepository + rutele admin/keys; fara el MR 3 nu are pe ce sta |
+| D | **Subsistem PAT** (v2.40.0) — vezi contractul 2.0.1 | tabela `api_tokens`; `POST /api/v1/tokens` ca admin → 201 cu secret `ld_pat_...`; apel `GET /api/dosare?...` cu Bearer PAT → 200/403 dupa scope | porteaza per 2.0.1 (utilizatorul confirma ca AICI e stricat/absent pe GitLab) |
+| E | Bridge oauth2-proxy (v2.40.1) — contract mai jos | `POST /api/v1/auth/oauth2/sync` cu Basic+X-Forwarded-Email → 200 + Set-Cookie | porteaza per contractul de mai jos |
+| F | Rate limiting pre-auth + per-owner pe `/api/*`; secureHeaders; LAN bind opt-in | prezenta middleware-urilor in `backend/src/index.ts` | porteaza-le inainte de rutele noi (rutele admin conteaza pe ele) |
+
+Regula generala: pentru orice capabilitate absenta, sursa de adevar e repo-ul
+GitHub (branch `feat/v2.42.0-users-settings` contine totul); daca ai acces la
+el, cherry-pick/adapteaza; daca nu, reimplementeaza din contractele de aici.
+
+#### 2.0.1 Contractul subsistemului PAT (Personal Access Tokens / "MCP extern")
+- **Format:** secret `ld_pat_<random>`, afisat O SINGURA DATA la creare; in DB
+  se stocheaza doar hash-ul + prefixul afisabil. Campuri: name, scopes
+  (subset din `dosare|iccj|rnpm`), expiresAt optional (30/90/365 zile),
+  captchaDailyCap optional (int), createdAt, lastUsedAt/lastUsedIp, revokedAt.
+- **Autentificare:** `Authorization: Bearer ld_pat_...` → patProvider rezolva
+  ownerul tokenului; seteaza `tokenId` + `tokenScopes` in context. Token
+  revocat/expirat → 401 + audit `auth.denied` cu flag isPatShaped.
+- **Autorizare:** `patCapabilityGate` montat pe `/api/*` — DEFAULT-DENY cu
+  lista alba (GET dosare/termene/dosare-iccj/termene-iccj; POST
+  /api/rnpm/search EXACT; GET /api/rnpm/saved prefix); scope-ul cerut per
+  intrare; path-uri suspecte (%2f, %2e, %5c, ..) → 403; orice ruta
+  `/api/v1/tokens*` cu PAT → 403 `pat_cannot_manage_tokens` (managementul e
+  session-only). Rutele `/api/v1/admin/*` NU intra in lista.
+- **Management** (session JWT, si — din v2.41 — DOAR admin in web mode):
+  `GET /api/v1/tokens` (lista fara secrete), `POST /api/v1/tokens` (201, secret
+  o data), `DELETE /api/v1/tokens/:id` (revoke), `POST /api/v1/tokens/revoke-all`.
+- **Captcha per token:** rezervare atomica in tranzactie
+  (`reserveTokenCaptcha`: count in fereastra + insert, fail-closed pe cap
+  invalid), cap zilnic per token independent de cota userului.
+- **Audit/alerte:** usage per token (patUsageAudit) + alerta best-effort la IP
+  nou; esecul alertei nu darama requestul.
+- **Frontend:** `ApiAccessPanel` (creare cu nume/scopes/expirare/cap, lista,
+  revocare cu confirmare prin dialogul aplicatiei, banner cu secretul nou +
+  copy) — in /setari (web, admin) si in dialogul de chei desktop NU (e
+  web-only).
+- **Rate limit:** bucket per-token inainte de gate (tokenul numara si
+  cererile respinse).
+
+#### 2.0.2 Contractul bridge-ului oauth2-proxy (v2.40.1)
 
 Contract `POST /api/v1/auth/oauth2/sync` (exclus din autentificarea
 ownerContext — se gardeaza singur):
@@ -127,7 +172,9 @@ ownerContext — se gardeaza singur):
    `legal_dashboard_session` (HttpOnly, Secure, SameSite=Strict, Path=/,
    Max-Age=TTL) + 200.
 
-Fara asta nu poti verifica nimic din web mode. Doua piese in `scripts/`:
+### 2.1+ Mediul local propriu-zis
+
+Fara el nu poti verifica nimic din web mode. Doua piese in `scripts/`:
 
 ### 2.1 `scripts/dev-web-proxy.mjs`
 Mini-proxy Node care simuleaza oauth2-proxy: asculta pe `127.0.0.1:<port>` si
@@ -622,7 +669,7 @@ ordinea de mai jos (fiecare cu gate-urile 0.3 + review 0.4 la finalul lui):
 
 | MR | Branch sugerat | Continut | Sectiuni |
 |----|----------------|----------|----------|
-| 0 | `feat/oauth2-bridge-v2401` | bridge-ul oauth2-proxy (baseline-ul GitLab e v2.40.0!) + teste | 2.0 |
+| 0 | `feat/baseline-audit` | AUDIT main GitLab (sondele A-F) → BASELINE-DELTA.md + porteaza ce lipseste ca 0a/0b/... (utilizatorul confirma ca minim PAT-urile si probabil bridge-ul lipsesc/nu merg) | 2.0 |
 | 1 | `feat/dev-web-local` | proxy + script local + seed | 2 |
 | 2 | `fix/web-layout-fonts` | layout browser + useFontSize + migrare | 3.1 |
 | 3 | `feat/tenant-keys-frontend` | key-status endpoint + useTenantKeyStatus + ApiKeyDialog/TenantKeyStatusPanel + rutare AI implicita + RNPM tenant-key-wins | 3.2 |
