@@ -26,6 +26,7 @@ vi.mock("@/lib/apiTokensApi", () => ({
 
 import { ApiAccessPanel } from "./ApiAccessPanel";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { listApiTokens, revokeAllApiTokens, revokeApiToken } from "@/lib/apiTokensApi";
 
 const mockedList = vi.mocked(listApiTokens);
@@ -40,7 +41,9 @@ let root: Root;
 function panelUi() {
   return (
     <ConfirmProvider>
-      <ApiAccessPanel />
+      <ToastProvider>
+        <ApiAccessPanel />
+      </ToastProvider>
     </ConfirmProvider>
   );
 }

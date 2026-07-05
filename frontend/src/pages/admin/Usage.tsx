@@ -4,6 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { admin, type UsageCaptchaItem, type UsageOverviewItem } from "@/lib/adminApi";
+import { useClientSort } from "@/hooks/useClientSort";
+import { SortableTh } from "@/components/ui/sortable-th";
+import { TablePagination } from "@/components/table-pagination";
 import {
   me,
   type MeBudgetItem,
@@ -56,6 +59,33 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
   const [overviewCaptcha, setOverviewCaptcha] = useState<UsageCaptchaItem[]>([]);
   const [overviewTab, setOverviewTab] = useState<"ai" | "captcha">("ai");
   const [overviewTruncated, setOverviewTruncated] = useState(false);
+  // v2.42.0 (Nivel 2): datele sunt complete pe client — sortarea acopera TOTI
+  // userii, iar paginarea e client-side (review: lista lunga era doar taiata).
+  const [userPage, setUserPage] = useState(0);
+  const [userPageSize, setUserPageSize] = useState(25);
+  const switchTab = (tab: "ai" | "captcha") => {
+    setOverviewTab(tab);
+    setUserPage(0);
+  };
+  const { sorted: sortedAi, ...aiSort } = useClientSort(overview ?? [], {
+    email: (r) => r.email,
+    period: (r) => PERIOD_LABELS[r.period],
+    used: (r) => r.usedMilli,
+    limit: (r) => r.effectiveLimitMilli,
+  });
+  const { sorted: sortedCaptcha, ...captchaSort } = useClientSort(overviewCaptcha, {
+    email: (r) => r.email,
+    period: (r) => PERIOD_LABELS[r.period],
+    used: (r) => r.usedCount,
+    limit: (r) => r.limitCount,
+  });
+  const activeCount = overviewTab === "ai" ? sortedAi.length : sortedCaptcha.length;
+  const userTotalPages = Math.max(1, Math.ceil(activeCount / userPageSize));
+  // Clamp: dupa schimbarea pageSize / refresh cu mai putini useri, pagina
+  // curenta poate depasi noul total — altfel tabelul ar ramane gol.
+  const safeUserPage = Math.min(userPage, userTotalPages - 1);
+  const pageSlice = <T,>(items: T[]): T[] =>
+    items.slice(safeUserPage * userPageSize, (safeUserPage + 1) * userPageSize);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -150,14 +180,14 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                 <Button
                   variant={overviewTab === "ai" ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setOverviewTab("ai")}
+                  onClick={() => switchTab("ai")}
                 >
                   AI
                 </Button>
                 <Button
                   variant={overviewTab === "captcha" ? "default" : "outline"}
                   size="sm"
-                  onClick={() => setOverviewTab("captcha")}
+                  onClick={() => switchTab("captcha")}
                 >
                   Captcha RNPM
                 </Button>
@@ -174,14 +204,20 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Utilizator</th>
-                      <th className="px-2 py-2 font-medium">Perioada</th>
-                      <th className="px-2 py-2 text-right font-medium">Captcha rezolvate</th>
+                      <SortableTh sort={captchaSort} sortKeyName="email" className="px-2">
+                        Utilizator
+                      </SortableTh>
+                      <SortableTh sort={captchaSort} sortKeyName="period" className="px-2">
+                        Perioada
+                      </SortableTh>
+                      <SortableTh sort={captchaSort} sortKeyName="used" className="px-2 text-right">
+                        Captcha rezolvate
+                      </SortableTh>
                       <th className="w-1/3 px-2 py-2 font-medium">Utilizare</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {overviewCaptcha.map((item) => {
+                    {pageSlice(sortedCaptcha).map((item) => {
                       const pct =
                         item.limitCount === null || item.limitCount === 0
                           ? null
@@ -231,14 +267,20 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <th className="px-2 py-2 font-medium">Utilizator</th>
-                      <th className="px-2 py-2 font-medium">Perioada</th>
-                      <th className="px-2 py-2 text-right font-medium">Consum AI</th>
+                      <SortableTh sort={aiSort} sortKeyName="email" className="px-2">
+                        Utilizator
+                      </SortableTh>
+                      <SortableTh sort={aiSort} sortKeyName="period" className="px-2">
+                        Perioada
+                      </SortableTh>
+                      <SortableTh sort={aiSort} sortKeyName="used" className="px-2 text-right">
+                        Consum AI
+                      </SortableTh>
                       <th className="w-1/3 px-2 py-2 font-medium">Utilizare</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {overview.map((item) => {
+                    {pageSlice(sortedAi).map((item) => {
                       const pct =
                         item.effectiveLimitMilli === null || item.effectiveLimitMilli === 0
                           ? null
@@ -288,6 +330,18 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                   </p>
                 )}
               </div>
+            )}
+            {overview !== null && activeCount > 10 && (
+              <TablePagination
+                page={safeUserPage}
+                totalPages={userTotalPages}
+                pageSize={userPageSize}
+                onPageChange={setUserPage}
+                onPageSizeChange={(size) => {
+                  setUserPageSize(size);
+                  setUserPage(0);
+                }}
+              />
             )}
           </CardContent>
         </Card>

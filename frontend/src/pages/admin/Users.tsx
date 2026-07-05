@@ -5,6 +5,11 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { SortableTh } from "@/components/ui/sortable-th";
+import { useToast } from "@/components/ui/toast";
+import { useClientSort } from "@/hooks/useClientSort";
+
+const SORT_SCOPE_NOTE = "Sorteaza pagina curenta";
 import { TablePagination } from "@/components/table-pagination";
 import {
   admin,
@@ -59,7 +64,18 @@ function roleVariant(role: UserRole): "default" | "secondary" | "outline" {
 export default function AdminUsers({ embedded = false }: { embedded?: boolean } = {}) {
   const { user: me, refresh: refreshMe } = useCurrentUser();
   const confirm = useConfirm();
+  const toast = useToast();
   const [rows, setRows] = useState<AdminUser[]>([]);
+  // v2.42.0 (Nivel 2): sortare client-side pe pagina curenta (paginarea ramane
+  // pe server, deci sortarea NU traverseaza paginile — title-ul o spune).
+  const { sorted: sortedRows, ...sort } = useClientSort(rows, {
+    email: (r) => r.email,
+    displayName: (r) => r.displayName,
+    role: (r) => roleLabel(r.role),
+    status: (r) => statusLabel(r.status),
+    lastLoginAt: (r) => r.lastLoginAt,
+    createdAt: (r) => r.createdAt,
+  });
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -184,6 +200,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
     try {
       await admin.updateRole(target.id, nextRole);
       await load();
+      toast(`Rolul lui ${target.email} este acum "${roleLabel(nextRole)}".`, { variant: "success" });
       // If the caller changed their own role, refresh /me so the sidebar
       // reflects the new role (e.g., admin → user hides the Admin section).
       if (target.id === me?.id) refreshMe();
@@ -219,6 +236,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
     try {
       await admin.updateStatus(target.id, nextStatus);
       await load();
+      toast(`Statusul lui ${target.email} este acum "${statusLabel(nextStatus)}".`, { variant: "success" });
     } catch (err) {
       const msg =
         err instanceof MonitoringApiError && err.code === "self_deactivation"
@@ -479,12 +497,24 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
               <table className="w-full text-sm">
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-2 font-semibold">Email</th>
-                    <th className="px-4 py-2 font-semibold">Nume afisat</th>
-                    <th className="px-4 py-2 font-semibold">Rol</th>
-                    <th className="px-4 py-2 font-semibold">Status</th>
-                    <th className="px-4 py-2 font-semibold">Ultimul login</th>
-                    <th className="px-4 py-2 font-semibold">Creat</th>
+                    <SortableTh sort={sort} sortKeyName="email" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Email
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="displayName" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Nume afisat
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="role" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Rol
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="status" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Status
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="lastLoginAt" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Ultimul login
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="createdAt" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Creat
+                    </SortableTh>
                   </tr>
                 </thead>
                 <tbody>
@@ -495,7 +525,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                       </td>
                     </tr>
                   )}
-                  {rows.map((row) => {
+                  {sortedRows.map((row) => {
                     const isSelf = row.id === me?.id;
                     return (
                       <tr key={row.id} className="border-b border-border last:border-b-0 hover:bg-muted/30">

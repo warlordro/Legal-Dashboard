@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import {
   type ApiTokenSummary,
   type CreateApiTokenInput,
@@ -20,6 +21,7 @@ const SCOPES: Array<{ value: "dosare" | "iccj" | "rnpm"; label: string }> = [
 // de caller-ul din ApiKeyDialog (isWebRuntime()); desktop pastreaza BYOK in modalul existent.
 export function ApiAccessPanel() {
   const confirm = useConfirm();
+  const toast = useToast();
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadOk, setLoadOk] = useState(false); // ultima incarcare a reusit? (empty-state doar daca da)
@@ -98,6 +100,7 @@ export function ApiAccessPanel() {
     try {
       await revokeApiToken(id);
       await refresh();
+      toast("Tokenul a fost revocat.", { variant: "success" });
     } catch {
       setError("Revocare esuata. Reincearca.");
     } finally {
@@ -124,6 +127,7 @@ export function ApiAccessPanel() {
     try {
       await revokeAllApiTokens();
       await refresh();
+      toast("Toate tokenurile au fost revocate.", { variant: "success" });
     } catch {
       setError("Revocare esuata. Reincearca.");
     } finally {

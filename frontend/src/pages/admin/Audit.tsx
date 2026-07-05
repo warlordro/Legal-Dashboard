@@ -5,8 +5,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { admin, type AuditEvent } from "@/lib/api";
+import { useClientSort } from "@/hooks/useClientSort";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { SortableTh } from "@/components/ui/sortable-th";
 import { TablePagination } from "@/components/table-pagination";
+
+const SORT_SCOPE_NOTE = "Sorteaza pagina curenta";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
@@ -53,6 +57,15 @@ function detailToString(detail: unknown): string {
 
 export default function AdminAudit({ embedded = false }: { embedded?: boolean } = {}) {
   const [rows, setRows] = useState<AuditEvent[]>([]);
+  // v2.42.0 (Nivel 2): sortare client-side pe pagina curenta (server-ul
+  // pastreaza ordinea cronologica; sortarea nu traverseaza paginile).
+  const { sorted: sortedRows, ...sort } = useClientSort(rows, {
+    ts: (r) => r.ts,
+    action: (r) => r.action,
+    outcome: (r) => outcomeLabel(r.outcome),
+    owner: (r) => r.ownerEmail ?? r.ownerId,
+    actor: (r) => r.actorEmail ?? r.actorId,
+  });
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [actionInput, setActionInput] = useState("");
@@ -358,11 +371,21 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="w-8 px-2 py-2" />
-                    <th className="px-3 py-2 font-semibold">Cand</th>
-                    <th className="px-3 py-2 font-semibold">Actiune</th>
-                    <th className="px-3 py-2 font-semibold">Rezultat</th>
-                    <th className="px-3 py-2 font-semibold">Owner</th>
-                    <th className="px-3 py-2 font-semibold">Actor</th>
+                    <SortableTh sort={sort} sortKeyName="ts" scopeNote={SORT_SCOPE_NOTE}>
+                      Cand
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="action" scopeNote={SORT_SCOPE_NOTE}>
+                      Actiune
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="outcome" scopeNote={SORT_SCOPE_NOTE}>
+                      Rezultat
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="owner" scopeNote={SORT_SCOPE_NOTE}>
+                      Owner
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="actor" scopeNote={SORT_SCOPE_NOTE}>
+                      Actor
+                    </SortableTh>
                     <th className="px-3 py-2 font-semibold">Tinta</th>
                     <th className="px-3 py-2 font-semibold">IP</th>
                   </tr>
@@ -375,7 +398,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                       </td>
                     </tr>
                   )}
-                  {rows.map((row) => {
+                  {sortedRows.map((row) => {
                     const isOpen = expanded.has(row.id);
                     return (
                       <Fragment key={row.id}>

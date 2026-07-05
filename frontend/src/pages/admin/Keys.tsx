@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 import type { TenantCaptchaMode, TenantCaptchaProvider, TenantKeyField } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -34,6 +35,7 @@ function modeLabel(mode: TenantCaptchaMode): string {
 
 export default function AdminKeys({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
+  const toast = useToast();
   const { data, loading, error, savingField, refresh, saveKey, saveCaptchaSettings } = useTenantKeys();
   const [inputs, setInputs] = useState<Record<TenantKeyField, string>>({
     anthropic: "",
@@ -55,9 +57,14 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
     setMode(data.captcha.mode);
   }, [data]);
 
-  const onSaveKey = async (field: TenantKeyField) => {
-    await saveKey(field, inputs[field]);
+  const onSaveKey = async (field: TenantKeyField, label: string) => {
+    try {
+      await saveKey(field, inputs[field]);
+    } catch {
+      return; // eroarea e deja afisata in bannerul hook-ului
+    }
     setInputs((prev) => ({ ...prev, [field]: "" }));
+    toast(`Cheia ${label} a fost salvata.`, { variant: "success" });
   };
 
   // Stergerea unei chei opreste instant functionalitatea (AI/RNPM) pentru TOTI
@@ -71,11 +78,21 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
       confirmLabel: "Sterge",
     });
     if (!ok) return;
-    await saveKey(field, "");
+    try {
+      await saveKey(field, "");
+    } catch {
+      return;
+    }
+    toast(`Cheia ${label} a fost stearsa.`, { variant: "success" });
   };
 
   const onSaveCaptcha = async () => {
-    await saveCaptchaSettings(provider, mode);
+    try {
+      await saveCaptchaSettings(provider, mode);
+    } catch {
+      return;
+    }
+    toast("Setarile captcha au fost salvate.", { variant: "success" });
   };
 
   return (
@@ -133,7 +150,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                     className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" onClick={() => onSaveKey(field)} disabled={busy || !inputs[field].trim()}>
+                    <Button size="sm" onClick={() => onSaveKey(field, label)} disabled={busy || !inputs[field].trim()}>
                       <Save className="h-4 w-4" />
                       Salveaza
                     </Button>

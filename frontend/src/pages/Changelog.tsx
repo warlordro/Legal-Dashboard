@@ -3,10 +3,12 @@ import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollText, Download } from "lucide-react";
+import { useToast } from "@/components/ui/toast";
 import { versions } from "@/data/changelog-entries";
 import { exportChangelogPdf } from "@/lib/changelog-pdf";
 
 export default function Changelog() {
+  const toast = useToast();
   const [exporting, setExporting] = useState(false);
 
   const handleExport = async () => {
@@ -14,7 +16,10 @@ export default function Changelog() {
     try {
       await exportChangelogPdf();
     } catch (e) {
+      // Inainte, esecul era doar in consola — userul apasa butonul si nu se
+      // intampla nimic vizibil (review UX Nivel 2).
       console.error("[changelog] export pdf failed:", e);
+      toast("Exportul PDF a esuat. Reincearca.", { variant: "error" });
     } finally {
       setExporting(false);
     }

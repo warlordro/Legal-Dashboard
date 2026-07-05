@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/Sidebar";
 import { ApiKeyDialog } from "@/components/ApiKeyDialog";
@@ -463,58 +464,60 @@ function AuthedApp() {
   return (
     <BrowserRouter>
       <ConfirmProvider>
-        <AppShell
-          dosareState={dosareState}
-          setDosareState={setDosareState}
-          termeneState={termeneState}
-          setTermeneState={setTermeneState}
-          history={history}
-          addEntry={addEntry}
-          removeEntry={removeEntry}
-          clearHistory={clearHistory}
-          keys={keys}
-          aiSettings={aiSettings}
-          hasKey={hasKey}
-          handleOpenKeyDialog={handleOpenKeyDialog}
-          activeCaptchaKey={activeCaptchaKey}
-          captchaProvider={captchaProvider}
-          captchaMode={captchaMode}
-          pendingSearch={pendingSearch}
-          handleHistoryClick={handleHistoryClick}
-          consumePendingSearch={consumePendingSearch}
-          rnpmHistory={rnpmHistory}
-          addRnpmEntry={addRnpmEntry}
-          removeRnpmEntry={removeRnpmEntry}
-          clearRnpmHistory={clearRnpmHistory}
-          rnpmPendingSearch={rnpmPendingSearch}
-          handleRnpmHistoryClick={handleRnpmHistoryClick}
-          consumeRnpmPendingSearch={consumeRnpmPendingSearch}
-          tenantKeys={tenantKeys}
-        />
-        {showKeyDialog && (
-          <ErrorBoundary variant="page" label="Configurare chei API">
-            <ApiKeyDialog
-              onClose={closeKeyDialog}
-              tenantKeys={tenantKeys}
-              apiKey={{
-                setKey,
-                clearKey,
-                hasKey,
-                hasAnthropic,
-                hasOpenai,
-                hasGoogle,
-                hasOpenrouter,
-                hasTwoCaptcha,
-                hasCapSolver,
-                captchaProvider,
-                setCaptchaProvider,
-                captchaMode,
-                setCaptchaMode,
-                aiSettings,
-              }}
-            />
-          </ErrorBoundary>
-        )}
+        <ToastProvider>
+          <AppShell
+            dosareState={dosareState}
+            setDosareState={setDosareState}
+            termeneState={termeneState}
+            setTermeneState={setTermeneState}
+            history={history}
+            addEntry={addEntry}
+            removeEntry={removeEntry}
+            clearHistory={clearHistory}
+            keys={keys}
+            aiSettings={aiSettings}
+            hasKey={hasKey}
+            handleOpenKeyDialog={handleOpenKeyDialog}
+            activeCaptchaKey={activeCaptchaKey}
+            captchaProvider={captchaProvider}
+            captchaMode={captchaMode}
+            pendingSearch={pendingSearch}
+            handleHistoryClick={handleHistoryClick}
+            consumePendingSearch={consumePendingSearch}
+            rnpmHistory={rnpmHistory}
+            addRnpmEntry={addRnpmEntry}
+            removeRnpmEntry={removeRnpmEntry}
+            clearRnpmHistory={clearRnpmHistory}
+            rnpmPendingSearch={rnpmPendingSearch}
+            handleRnpmHistoryClick={handleRnpmHistoryClick}
+            consumeRnpmPendingSearch={consumeRnpmPendingSearch}
+            tenantKeys={tenantKeys}
+          />
+          {showKeyDialog && (
+            <ErrorBoundary variant="page" label="Configurare chei API">
+              <ApiKeyDialog
+                onClose={closeKeyDialog}
+                tenantKeys={tenantKeys}
+                apiKey={{
+                  setKey,
+                  clearKey,
+                  hasKey,
+                  hasAnthropic,
+                  hasOpenai,
+                  hasGoogle,
+                  hasOpenrouter,
+                  hasTwoCaptcha,
+                  hasCapSolver,
+                  captchaProvider,
+                  setCaptchaProvider,
+                  captchaMode,
+                  setCaptchaMode,
+                  aiSettings,
+                }}
+              />
+            </ErrorBoundary>
+          )}
+        </ToastProvider>
       </ConfirmProvider>
     </BrowserRouter>
   );

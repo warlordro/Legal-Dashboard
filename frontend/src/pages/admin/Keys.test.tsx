@@ -6,6 +6,7 @@ import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminKeys from "./Keys";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 
 vi.mock("@/hooks/useTenantKeys", () => ({
@@ -48,8 +49,12 @@ async function render(ui: React.ReactNode) {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    // useConfirm cere providerul montat — identic cu App.tsx.
-    root.render(<ConfirmProvider>{ui}</ConfirmProvider>);
+    // useConfirm/useToast cer providerii montati — identic cu App.tsx.
+    root.render(
+      <ConfirmProvider>
+        <ToastProvider>{ui}</ToastProvider>
+      </ConfirmProvider>
+    );
     await Promise.resolve();
   });
 }

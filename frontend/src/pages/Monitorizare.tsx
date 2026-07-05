@@ -33,6 +33,8 @@ import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export-monitoring";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { runStatusLabel } from "@/lib/monitoringRunStatus";
+import { useClientSort } from "@/hooks/useClientSort";
+import { SortableTh } from "@/components/ui/sortable-th";
 import { cn } from "@/lib/utils";
 import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";
 import { useMonitoringMasterSwitch } from "@/hooks/useMonitoringMasterSwitch";
@@ -76,6 +78,14 @@ export default function Monitorizare({
     setError,
     setJobs,
   } = useMonitoringJobs();
+  // v2.42.0 (Nivel 2): sortare client-side pe pagina curenta de joburi.
+  const { sorted: sortedJobs, ...jobSort } = useClientSort(jobs, {
+    target: (j) => formatMonitoringTarget(j),
+    cadence: (j) => j.cadence_sec,
+    lastRun: (j) => j.last_run_at,
+    nextRun: (j) => j.next_run_at,
+    status: (j) => `${j.active ? "activ" : "pauza"} ${j.last_status ? runStatusLabel(j.last_status) : ""}`,
+  });
   const masterSwitch = useMonitoringMasterSwitch();
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -502,17 +512,27 @@ export default function Monitorizare({
                             title={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
                           />
                         </th>
-                        <th className="px-3 py-2">Tinta</th>
+                        <SortableTh sort={jobSort} sortKeyName="target" scopeNote="Sorteaza pagina curenta">
+                          Tinta
+                        </SortableTh>
                         {showDetailsColumn && <th className="px-3 py-2 text-center">Detalii</th>}
-                        <th className="px-3 py-2">Cadenta</th>
-                        <th className="px-3 py-2">Ultima rulare</th>
-                        <th className="px-3 py-2">Urmatoarea verif.</th>
-                        <th className="px-3 py-2">Status</th>
+                        <SortableTh sort={jobSort} sortKeyName="cadence" scopeNote="Sorteaza pagina curenta">
+                          Cadenta
+                        </SortableTh>
+                        <SortableTh sort={jobSort} sortKeyName="lastRun" scopeNote="Sorteaza pagina curenta">
+                          Ultima rulare
+                        </SortableTh>
+                        <SortableTh sort={jobSort} sortKeyName="nextRun" scopeNote="Sorteaza pagina curenta">
+                          Urmatoarea verif.
+                        </SortableTh>
+                        <SortableTh sort={jobSort} sortKeyName="status" scopeNote="Sorteaza pagina curenta">
+                          Status
+                        </SortableTh>
                         <th className="px-3 py-2 text-right">Actiuni</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {jobs.map((job) => {
+                      {sortedJobs.map((job) => {
                         const target = formatMonitoringTarget(job);
                         const iccjId = getIccjId(job);
                         const isDosar = job.kind === "dosar_soap";

@@ -11,6 +11,7 @@
 // catre portal.just.ro pe coloana Dosar.
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useDialog } from "@/hooks/useDialog";
 import { FileSpreadsheet, FileText, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
@@ -92,19 +93,6 @@ export function AlertsExportModal({
   }, [open, selectedIds.length]);
 
   useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) {
-        e.preventDefault();
-        handleClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open, busy]);
-
-  useEffect(() => {
     return () => {
       abortRef.current?.abort();
     };
@@ -116,6 +104,12 @@ export function AlertsExportModal({
     abortRef.current = null;
     onClose();
   }
+
+  // v2.42.0 (Nivel 2): focus trap + Escape + scroll lock + focus restore prin
+  // hook-ul partajat (inainte avea doar un keydown ad-hoc pe Escape).
+  // handleClose pastreaza guard-ul pe busy, deci Escape in timpul exportului
+  // nu inchide modalul.
+  const dialogRef = useDialog<HTMLDivElement>(open, handleClose);
 
   const contextLabel = useMemo(() => {
     if (mode === "ids") return `Selectie (${selectedIds.length})`;
@@ -184,6 +178,7 @@ export function AlertsExportModal({
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via focus trap intern. */}
       <div
+        ref={dialogRef}
         className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
         // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
         role="dialog"

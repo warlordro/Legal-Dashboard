@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/admin/UserPicker";
 import { admin, type AdminUser, type QuotaGrant, type QuotaGrantWithUser } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -50,6 +51,7 @@ function grantState(grant: QuotaGrant): { label: string; variant: "success" | "w
 
 export default function AdminGrants({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
+  const toast = useToast();
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [grants, setGrants] = useState<QuotaGrant[]>([]);
   const [loading, setLoading] = useState(false);
@@ -162,6 +164,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
       setExtraUsd("");
       setExpiresAtLocal("");
       setReason("");
+      toast(`Grant de ${milliToUsd(extraMilli)} $ acordat lui ${selected.email}.`, { variant: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la crearea grant-ului.");
     } finally {
@@ -183,6 +186,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
       await admin.revokeGrant(grant.id, null);
       if (selected) await loadGrants(selected.id);
       void loadActiveGrants();
+      toast(`Grantul de ${milliToUsd(grant.extraUsdMilli)} $ a fost revocat.`, { variant: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la revocarea grant-ului.");
     } finally {

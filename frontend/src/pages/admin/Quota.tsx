@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/admin/UserPicker";
 import { admin, type AdminUser, type QuotaOverride, type QuotaOverrideWithUser, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -68,6 +69,7 @@ function featureLabel(feature: string): string {
 
 export default function AdminQuota({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
+  const toast = useToast();
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [overrides, setOverrides] = useState<QuotaOverride[]>([]);
   const [loading, setLoading] = useState(false);
@@ -164,6 +166,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
       setFeature(DEFAULT_FEATURE);
       setLimitUsd("");
       setPeriod("day");
+      toast(`Limita pentru "${featureLabel(featureKey)}" a fost salvata.`, { variant: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la salvarea cotei.");
     } finally {
@@ -193,6 +196,9 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
       await admin.deleteQuota(selected.id, override.feature);
       await loadOverrides(selected.id);
       void loadOverview();
+      toast(`Limita pentru "${featureLabel(override.feature)}" a fost stearsa — buget nelimitat.`, {
+        variant: "success",
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la stergerea cotei.");
     } finally {
