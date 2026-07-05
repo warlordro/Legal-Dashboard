@@ -259,7 +259,12 @@ export default function RnpmSearchPage({
     // ("Incarca tot" + auto-loop) ar deveni altfel no-op silentios dupa prima
     // pagina (review-panel High #2).
     if (!result || result.nextRnpmPage == null || loading) return;
-    if (!ensureCaptchaReady()) return;
+    if (!ensureCaptchaReady()) {
+      // CodeRabbit (PR #65): fara clear, auto-loop-ul ramanea blocat pe
+      // "Opreste incarcarea" fara niciun request in zbor.
+      setAutoLoading(false);
+      return;
+    }
     if (abortRef.current) return;
     const ctl = new AbortController();
     abortRef.current = ctl;

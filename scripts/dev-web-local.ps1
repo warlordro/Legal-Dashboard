@@ -53,8 +53,12 @@ $secretsPath = Join-Path $root ".dev-web-local.secrets.json"
 if (Test-Path $secretsPath) {
     $secrets = Get-Content $secretsPath -Raw | ConvertFrom-Json
 } else {
+    # CodeRabbit (PR #65): TOATE secretele din RNG criptografic - Get-Random nu
+    # e potrivit nici macar pentru secrete de dev care semneaza sesiuni.
     function New-Secret {
-        -join ((1..48) | ForEach-Object { [char](Get-Random -InputObject ([int[]]([char]'a'..[char]'z') + [int[]]([char]'0'..[char]'9'))) })
+        $bytes = [byte[]]::new(36)
+        [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+        ([Convert]::ToBase64String($bytes)) -replace '\+', 'a' -replace '/', 'b' -replace '=', ''
     }
     # TENANT_KEY_ENCRYPTION_SECRET trebuie sa fie base64 strict care decodeaza la
     # exact 32 de bytes (AES-256-GCM master key) — vezi tenantKeysRepository.

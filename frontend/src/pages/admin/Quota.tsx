@@ -81,6 +81,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
   // v2.41.0: vedere globala la deschidere — cotele active ale tuturor userilor,
   // fara sa fie nevoie de cautarea prealabila a unui user.
   const [overview, setOverview] = useState<QuotaOverrideWithUser[]>([]);
+  const [overviewTruncated, setOverviewTruncated] = useState(false);
   const [overviewLoading, setOverviewLoading] = useState(false);
 
   const loadOverview = useCallback(async () => {
@@ -88,6 +89,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     try {
       const result = await admin.listQuotaOverview();
       setOverview(result.overrides);
+      setOverviewTruncated(result.truncated === true);
       // CodeRabbit (confirmat): fara clear, un banner de eroare de la un load
       // esuat anterior persista si dupa un refresh reusit.
       setError(null);
@@ -312,6 +314,11 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                       ))}
                     </tbody>
                   </table>
+                  {overviewTruncated && (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      Lista arata primele 500 de limite — exista mai multe; cauta userul direct pentru restul.
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>
@@ -417,6 +424,14 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     ? "Limita = numar de captcha-uri pe fereastra aleasa."
                     : "Limita = cost in USD pe fereastra aleasa."}
                 </p>
+                {!isKnownFeature(feature) && (
+                  // CodeRabbit (PR #65): motivul blocarii era doar in title-ul
+                  // butonului disabled — invizibil in majoritatea browserelor.
+                  <p className="col-span-full text-xs text-amber-700 dark:text-amber-400">
+                    Feature vechi ("{feature}") — nu mai poate fi salvat; limita lui poate fi doar stearsa din lista de
+                    mai jos.
+                  </p>
+                )}
               </form>
 
               <div className="overflow-x-auto">

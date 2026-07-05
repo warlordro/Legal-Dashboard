@@ -487,7 +487,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await buildApp().request("/api/v1/admin/quota/overrides");
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
-    expect(body.data).toEqual({ overrides: [] });
+    expect(body.data).toEqual({ overrides: [], truncated: false });
   });
 
   it("PUT upserts an override + records audit", async () => {

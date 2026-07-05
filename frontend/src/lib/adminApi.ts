@@ -110,6 +110,8 @@ export interface QuotaOverrideWithUser {
 
 export interface QuotaOverviewResult {
   overrides: QuotaOverrideWithUser[];
+  // Repository-ul taie la 500 — true cand lista poate fi partiala.
+  truncated?: boolean;
 }
 
 // v2.42.0: consumul AI per user activ (fereastra curenta), pentru tabul Consum.
@@ -154,6 +156,7 @@ export interface QuotaGrantWithUser extends QuotaGrant {
 
 export interface ActiveGrantsResult {
   grants: QuotaGrantWithUser[];
+  truncated?: boolean;
 }
 
 export interface QuotaGrant {

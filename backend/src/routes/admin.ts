@@ -807,7 +807,9 @@ adminRouter.get("/quota/overrides", (c) => {
     updatedAt: r.updated_at,
     updatedBy: r.updated_by,
   }));
-  return c.json(ok({ overrides: rows }, c), 200);
+  // CodeRabbit (PR #65): repository-ul taie la 500 — declaram trunchierea in
+  // loc sa lasam UI-ul sa para complet cand nu e.
+  return c.json(ok({ overrides: rows, truncated: rows.length >= 500 }, c), 200);
 });
 
 adminRouter.get("/users/:id/quota", (c) => {
@@ -913,7 +915,7 @@ adminRouter.get("/grants/active", (c) => {
     userEmail: r.user_email,
     userDisplayName: r.user_display_name,
   }));
-  return c.json(ok({ grants: rows }, c), 200);
+  return c.json(ok({ grants: rows, truncated: rows.length >= 500 }, c), 200);
 });
 
 adminRouter.get("/users/:id/grants", (c) => {

@@ -27,7 +27,13 @@ function migrateWebAutoPersistedValue() {
   if (isDesktop) return;
   try {
     if (localStorage.getItem(WEB_MIGRATION_KEY) !== null) return;
-    localStorage.removeItem(STORAGE_KEY);
+    // CodeRabbit (PR #65): sterge DOAR valoarea auto-persistata de vechiul
+    // default (index legacy "1" = 18px). Orice alta valoare inseamna ca userul
+    // a ales explicit alta treapta (Mic/Mare/Extra) — alegerea se pastreaza.
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved === "1" || saved === "18") {
+      localStorage.removeItem(STORAGE_KEY);
+    }
     localStorage.setItem(WEB_MIGRATION_KEY, "1");
   } catch {
     /* localStorage unavailable — nothing to migrate */

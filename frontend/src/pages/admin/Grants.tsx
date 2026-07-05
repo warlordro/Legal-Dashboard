@@ -61,6 +61,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
   // v2.41.0: vedere globala la deschidere — granturile active ale tuturor
   // userilor, fara cautarea prealabila a unui user (pandant la pagina Cote).
   const [activeGrants, setActiveGrants] = useState<QuotaGrantWithUser[]>([]);
+  const [activeTruncated, setActiveTruncated] = useState(false);
   const [activeLoading, setActiveLoading] = useState(false);
 
   const loadActiveGrants = useCallback(async () => {
@@ -68,6 +69,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     try {
       const result = await admin.listActiveGrants();
       setActiveGrants(result.grants);
+      setActiveTruncated(result.truncated === true);
       // CodeRabbit (confirmat): fara clear, un banner de eroare de la un load
       // esuat anterior persista si dupa un refresh reusit.
       setError(null);
@@ -278,6 +280,11 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                       ))}
                     </tbody>
                   </table>
+                  {activeTruncated && (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      Lista arata primele 500 de granturi active — exista mai multe; cauta userul direct pentru restul.
+                    </p>
+                  )}
                 </div>
               )}
             </CardContent>
