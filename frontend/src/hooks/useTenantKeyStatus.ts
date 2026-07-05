@@ -90,10 +90,18 @@ export function useTenantKeyStatus(): TenantKeys {
 
   // Refetch la focus: adminul poate schimba cheile in alt tab (/admin/keys);
   // statusul stale nu trebuie sa blocheze sau sa arate "Activ" fals la revenire.
+  // Throttle 5s (review-panel): alt-tab rapid nu are voie sa spameze
+  // /me/key-status — seq guard-ul protejeaza doar starea, nu si reteaua.
+  const lastFocusRefreshAt = useRef(0);
   useEffect(() => {
     if (isDesktopRuntime()) return;
     refresh();
-    const onFocus = () => refresh();
+    const onFocus = () => {
+      const now = Date.now();
+      if (now - lastFocusRefreshAt.current < 5000) return;
+      lastFocusRefreshAt.current = now;
+      refresh();
+    };
     window.addEventListener("focus", onFocus);
     return () => window.removeEventListener("focus", onFocus);
   }, [refresh]);

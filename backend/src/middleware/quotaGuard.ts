@@ -73,11 +73,22 @@ function estimatedCostMilli(feature: AiQuotaFeature): number {
 // next request observes the new sum. PLAN §12 accepted tradeoff.
 // Exportat in v2.42.0: /admin/usage/overview aplica ACEEASI regula de limita
 // implicita ca guard-ul, ca cifrele din UI sa coincida cu enforcement-ul.
+let warnedInvalidDefaultQuota = false;
 export function readDefaultQuotaMilli(): number | null {
   const raw = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
   if (raw === undefined || raw === "") return null;
   const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) return null;
+  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
+    // Review-panel: un typo in env colapsa TACIT la "nelimitat" — operatorul
+    // credea ca are plafon si nu avea. Warn o singura data per proces.
+    if (!warnedInvalidDefaultQuota) {
+      warnedInvalidDefaultQuota = true;
+      console.warn(
+        `[quota] LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI="${raw}" invalid (astept integer >= 0) — tratat ca NELIMITAT`
+      );
+    }
+    return null;
+  }
   return parsed;
 }
 

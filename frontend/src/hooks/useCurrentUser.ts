@@ -5,7 +5,7 @@ export interface UseCurrentUserResult {
   user: MeProfile | null;
   loading: boolean;
   error: string | null;
-  refresh: () => void;
+  refresh: () => Promise<void>;
 }
 
 // PR-8 hook, refacut in v2.42.0 ca STORE PARTAJAT la nivel de modul: hook-ul e
@@ -69,7 +69,9 @@ function fetchMe(): Promise<void> {
 // propriului rol). Daca exista un fetch in curs, il asteptam si pornim unul
 // nou dupa; noul promise devine inflight ca mount-urile ulterioare sa se
 // agate de cel proaspat.
-function refresh(): void {
+// Returneaza promise-ul (review-panel): caller-ii care fac o mutatie pot
+// astepta refetch-ul inainte sa navigheze/afiseze confirmarea.
+function refresh(): Promise<void> {
   emit({ loading: true });
   const guarded: Promise<void> = (inflight ?? Promise.resolve())
     .then(() => doFetch())
@@ -79,6 +81,7 @@ function refresh(): void {
       if (inflight === guarded) inflight = null;
     });
   inflight = guarded;
+  return guarded;
 }
 
 // Doar pentru teste: reseteaza store-ul intre cazuri (module state persista).
@@ -86,13 +89,16 @@ export function __resetCurrentUserStoreForTests(): void {
   snapshot = { user: null, loading: true, error: null };
   started = false;
   inflight = null;
+  listeners.clear(); // altfel callback-uri din testele precedente raman abonate
 }
 
 export function useCurrentUser(): UseCurrentUserResult {
   const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
 
   useEffect(() => {
-    if (!started) {
+    // Retry la montare daca fetch-ul initial a ESUAT (review-panel: `started`
+    // ramanea true si eroarea devenea permanenta pana la un refresh manual).
+    if (!started || (snapshot.error !== null && inflight === null)) {
       started = true;
       void fetchMe();
     }

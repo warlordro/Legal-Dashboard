@@ -261,6 +261,22 @@ describe("PATCH /users/:id/role", () => {
     expect(res.status).toBe(200);
     expect(getUserById("local")?.role).toBe("user");
   });
+
+  it("blocks self-demotion when the only other admin is SUSPENDED (review-panel)", async () => {
+    updateUserRole("local", "admin");
+    insertUser({ id: "u-1", email: "a@x", displayName: "A", role: "admin" });
+    updateUserStatus("u-1", "suspended");
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/local/role", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role: "user" }),
+    });
+    // Un admin suspendat nu se poate loga — demotarea ar lasa org-ul blocat.
+    expect(res.status).toBe(409);
+    expect((await jsonOf(res)).error?.code).toBe("last_admin");
+    expect(getUserById("local")?.role).toBe("admin");
+  });
 });
 
 describe("PATCH /users/:id/status", () => {
@@ -663,6 +679,26 @@ describe("/api/v1/admin/users/:id/grants", () => {
     });
     expect(res.status).toBe(422);
     expect((await jsonOf(res)).error?.code).toBe("unlimited_budget");
+  });
+
+  it("permite grantul FARA override cand exista limita default din env (review-panel)", async () => {
+    insertUser({ id: "u-def", email: "def@x", displayName: "D" });
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "5000";
+    try {
+      const app = buildApp();
+      const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+      const res = await app.request("/api/v1/admin/users/u-def/grants", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feature: "ai", extraUsdMilli: 2500, expiresAt }),
+      });
+      // baseLimit vine din env (aceeasi regula ca quotaGuard) — grantul are efect.
+      expect(res.status).toBe(201);
+      expect(listGrantsForUser("u-def")).toHaveLength(1);
+    } finally {
+      // biome-ignore lint/performance/noDelete: process.env trebuie unset real.
+      delete process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
+    }
   });
 
   it("GET returns empty list initially", async () => {

@@ -332,23 +332,29 @@ adminRouter.post("/users/import", limitImportBody, async (c) => {
 
   // Audit: sumar + cate un eveniment per user creat (calea care provisioneaza
   // mai multe login-uri nu inregistreaza mai putina identitate decat cea
-  // individuala — review-panel).
-  for (const u of toCreate) {
-    recordAudit(c, "admin.users.create", {
+  // individuala — review-panel). Userii sunt DEJA creati (tranzactia a
+  // commis) — un esec de audit nu trebuie sa intoarca 500 si sa ascunda
+  // raportul; il logam si continuam (review-panel).
+  try {
+    for (const u of toCreate) {
+      recordAudit(c, "admin.users.create", {
+        targetKind: "user",
+        targetId: u.id,
+        detail: { email: u.email, role: u.role, source: "import" },
+      });
+    }
+    recordAudit(c, "admin.users.import", {
       targetKind: "user",
-      targetId: u.id,
-      detail: { email: u.email, role: u.role, source: "import" },
+      detail: {
+        created: toCreate.length,
+        duplicates: issues.filter((i) => String(i.status).startsWith("duplicate")).length,
+        invalid: issues.filter((i) => i.status === "invalid").length,
+        total: parsedFile.valid.length + parsedFile.issues.length,
+      },
     });
+  } catch (auditErr) {
+    console.error("[admin.users.import] audit write failed (users already created):", auditErr);
   }
-  recordAudit(c, "admin.users.import", {
-    targetKind: "user",
-    detail: {
-      created: toCreate.length,
-      duplicates: issues.filter((i) => String(i.status).startsWith("duplicate")).length,
-      invalid: issues.filter((i) => i.status === "invalid").length,
-      total: parsedFile.valid.length + parsedFile.issues.length,
-    },
-  });
 
   return c.json(
     ok(
@@ -394,7 +400,9 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
   // admin surfaces. If multiple admins exist the demotion is allowed because
   // the org still has at least one admin.
   if (id === getOwnerId(c) && before.role === "admin" && parsed.data.role !== "admin") {
-    const otherAdmins = listUsers({ role: "admin" }).rows.filter((u) => u.id !== id);
+    // Review-panel: doar adminii ACTIVI conteaza ca "admini ramasi" — unul
+    // suspendat nu se poate loga, deci demotarea ar lasa org-ul fara admin.
+    const otherAdmins = listUsers({ role: "admin", status: "active" }).rows.filter((u) => u.id !== id);
     if (otherAdmins.length === 0) {
       recordAudit(c, "admin.users.demote_blocked", {
         outcome: "denied",
@@ -483,9 +491,6 @@ adminRouter.get("/audit/export", async (c) => {
       413
     );
   }
-  recordAudit(c, "admin.audit.export", {
-    detail: { rows: result.rows.length, since: since ?? null, until: until ?? null },
-  });
   // Rezolva ID-urile de owner/actor la "email — Nume" (raport citit de om).
   const userLabels = new Map<string, string>();
   for (const r of result.rows) {
@@ -496,6 +501,11 @@ adminRouter.get("/audit/export", async (c) => {
     }
   }
   const buf = await buildAuditReportXlsx(result.rows, { since, until }, userLabels);
+  // Auditam DUPA generarea reusita — altfel un throw in builder lasa in trail
+  // un export "reusit" care nu a existat (review-panel).
+  recordAudit(c, "admin.audit.export", {
+    detail: { rows: result.rows.length, since: since ?? null, until: until ?? null },
+  });
   const stamp = new Date().toISOString().slice(0, 10);
   c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   c.header("Content-Disposition", `attachment; filename="raport-audit-${stamp}.xlsx"`);
@@ -649,7 +659,15 @@ adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
   return c.json(ok({ provider: parsed.data.provider, mode: parsed.data.mode }, c), 200);
 });
 
-adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
+// Limita dedicata: schema accepta chei de pana la 4096 caractere, dar
+// limitAdminBody (4KB) numara TOT body-ul JSON — o cheie aproape de maxim era
+// respinsa cu 413 inainte de validare (review-panel). 8KB acopera confortabil.
+const limitKeyBody = bodyLimit({
+  maxSize: 8 * 1024,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+
+adminRouter.put("/keys/:field", limitKeyBody, async (c) => {
   const field = c.req.param("field");
   if (!isTenantKeyField(field)) {
     return c.json(fail("invalid_field", "Camp cheie invalid", c), 404);
@@ -920,11 +938,13 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
   }
   // v2.42.0 (decizie user): grant si buget nelimitat se exclud reciproc.
-  // Fara override pe feature (pass-through) sau cu override NULL (nelimitat
-  // explicit), grantul nu ar avea peste ce sa se adune — refuzam cu actiunea
-  // corecta in mesaj in loc sa cream un rand inert.
+  // Review-panel: "nelimitat" se decide cu ACEEASI regula ca quotaGuard —
+  // baza e override-ul SAU limita default din env; refuzam doar cand niciuna
+  // nu exista (pass-through real). Inainte, un tenant care folosea doar
+  // LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI nu putea acorda granturi deloc.
   const override = getOverride(id, parsed.data.feature);
-  if (override === null || override.limit_usd_milli === null) {
+  const baseLimit = override ? override.limit_usd_milli : readDefaultQuotaMilli();
+  if (baseLimit === null) {
     return c.json(
       fail(
         "unlimited_budget",

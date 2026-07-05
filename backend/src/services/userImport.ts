@@ -136,8 +136,11 @@ async function loadWorkbook(buf: Buffer): Promise<ExcelJS.Workbook> {
     throw new UserImportError("invalid_file", "Fisierul nu este .xlsx. Foloseste template-ul descarcat din aplicatie.");
   }
   const wb = new ExcelJS.Workbook();
-  // Timeout safety belt (zip-bomb): exceljs nu expune cancellation, dar capul
-  // de 30s evita blocarea handler-ului; memoria e limitata de MAX_IMPORT_BYTES.
+  // Timeout safety belt: elibereaza HANDLER-UL dupa 30s, dar NU opreste
+  // parsarea exceljs din fundal (Promise.race nu anuleaza; review-panel) —
+  // un zip patologic poate continua sa consume CPU pana termina. Apararea
+  // reala e MAX_IMPORT_BYTES (512KB) + ruta admin-only; izolarea in worker
+  // terminabil nu-si justifica complexitatea la aceasta suprafata.
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
     timer = setTimeout(
@@ -162,7 +165,10 @@ async function loadWorkbook(buf: Buffer): Promise<ExcelJS.Workbook> {
 }
 
 function looksLikeHeader(cells: string[]): boolean {
-  return canonicalizeEmail(cells[0] ?? "").includes("email");
+  // Potrivire EXACTA pe eticheta de header — .includes("email") trata ca
+  // header (si arunca silentios) un prim rand de DATE al carui email continea
+  // substringul, ex. "contact@email.com" (review-panel, consens 5/5).
+  return canonicalizeEmail(cells[0] ?? "") === "email";
 }
 
 // Pipeline determinist (plan E2-A2): citire -> canonicalizare -> validare pe

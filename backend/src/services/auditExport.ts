@@ -52,7 +52,7 @@ export async function buildAuditReportXlsx(
       owner: safeCell(labelOf(r.owner_id)),
       actor: r.actor_id === null ? "" : safeCell(labelOf(r.actor_id)),
       target: safeCell([r.target_kind, r.target_id].filter(Boolean).join(" / ")),
-      ip: r.ip ?? "",
+      ip: safeCell(r.ip ?? ""),
       requestId: safeCell(r.request_id ?? ""),
       detail: safeCell(detail.length > DETAIL_CELL_MAX ? `${detail.slice(0, DETAIL_CELL_MAX)}…` : detail),
     });
