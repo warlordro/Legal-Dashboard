@@ -10,6 +10,15 @@ import type { AuditRow } from "../db/auditRepository.ts";
 // randare ca celula sa ramana lizibila in Excel.
 const DETAIL_CELL_MAX = 500;
 
+// Aceeasi conventie ca alertsExportXlsx/dosareExportXlsx/rnpmExportXlsx:
+// celulele care incep cu caractere de formula primesc prefixul ' (aparare in
+// adancime — exceljs le scrie oricum ca text, dar o trecere viitoare la CSV
+// sau alta librarie nu trebuie sa redeschida vectorul).
+const FORMULA_PREFIX = /^[=+\-@\t\r]/;
+function safeCell(value: string): string {
+  return FORMULA_PREFIX.test(value) ? `'${value}` : value;
+}
+
 export async function buildAuditReportXlsx(
   rows: AuditRow[],
   meta: { since?: string; until?: string },
@@ -38,14 +47,14 @@ export async function buildAuditReportXlsx(
     const detail = r.detail_json ?? "";
     ws.addRow({
       ts: r.ts,
-      action: r.action,
+      action: safeCell(r.action),
       outcome: r.outcome,
-      owner: labelOf(r.owner_id),
-      actor: r.actor_id === null ? "" : labelOf(r.actor_id),
-      target: [r.target_kind, r.target_id].filter(Boolean).join(" / "),
+      owner: safeCell(labelOf(r.owner_id)),
+      actor: r.actor_id === null ? "" : safeCell(labelOf(r.actor_id)),
+      target: safeCell([r.target_kind, r.target_id].filter(Boolean).join(" / ")),
       ip: r.ip ?? "",
-      requestId: r.request_id ?? "",
-      detail: detail.length > DETAIL_CELL_MAX ? `${detail.slice(0, DETAIL_CELL_MAX)}…` : detail,
+      requestId: safeCell(r.request_id ?? ""),
+      detail: safeCell(detail.length > DETAIL_CELL_MAX ? `${detail.slice(0, DETAIL_CELL_MAX)}…` : detail),
     });
   }
 
