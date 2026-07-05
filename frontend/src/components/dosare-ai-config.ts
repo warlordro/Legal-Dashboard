@@ -13,7 +13,7 @@ export const AI_MODELS: AiModelDef[] = [
   { key: "claude-haiku", label: "Haiku 4.5", provider: "anthropic", desc: "Rapid", color: "violet" },
   {
     key: "claude-sonnet",
-    label: "Sonnet 4.6",
+    label: "Sonnet 5",
     provider: "anthropic",
     desc: "Echilibrat",
     color: "violet",

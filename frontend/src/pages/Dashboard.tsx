@@ -219,8 +219,8 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
                 <span className="text-xs text-muted-foreground">AI Enabled</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude 4.6 /
-                Gemini 3.x / GPT-5.4) si audit de securitate — cheile API pastrate in OS keystore, backend legat pe
+                Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude Sonnet
+                5 / Gemini 3.x / GPT-5.4) si audit de securitate — cheile API pastrate in OS keystore, backend legat pe
                 loopback si protectie formula injection la export.
               </p>
               <div className="flex gap-2">

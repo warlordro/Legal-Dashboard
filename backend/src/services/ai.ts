@@ -16,7 +16,7 @@ export type AiRouting = { mode: "native" | "openrouter" };
 export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: string }> = {
   // Anthropic
   "claude-haiku": { provider: "anthropic", modelId: "claude-haiku-4-5-20251001" },
-  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-4-6" },
+  "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-5" },
   "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-8" },
   // OpenAI
   "gpt-5.4-nano": { provider: "openai", modelId: "gpt-5.4-nano" },
@@ -32,7 +32,7 @@ export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3"];
 
 export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "claude-haiku": "anthropic/claude-haiku-4.5",
-  "claude-sonnet": "anthropic/claude-sonnet-4.6",
+  "claude-sonnet": "anthropic/claude-sonnet-5",
   "claude-opus": "anthropic/claude-opus-4.8",
   "gpt-5.4-nano": "openai/gpt-5.4-nano",
   "gpt-5.4-mini": "openai/gpt-5.4-mini",

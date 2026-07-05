@@ -32,11 +32,11 @@ describe("estimateAiCostUsdMilli", () => {
     expect(
       estimateAiCostUsdMilli({
         provider: "anthropic",
-        model: "claude-sonnet-4-6",
+        model: "claude-sonnet-5",
         inputTokens: 1_000_000,
         outputTokens: 1_000_000,
       })
-    ).toBe(18_000);
+    ).toBe(12_000);
   });
 
   it("falls back to zero when model or tokens are missing", () => {
