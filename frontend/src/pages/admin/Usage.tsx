@@ -100,7 +100,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
           </div>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            Reincarca
           </Button>
         </div>
 
@@ -123,7 +123,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
               <ul className="space-y-2 text-sm">
                 {warnings.map((w) => (
                   <li key={`${w.feature}:${w.thresholdPct}`} className="flex flex-wrap items-center gap-2">
-                    <Badge variant="warning">{w.feature}</Badge>
+                    <Badge variant="warning">{w.feature === "ai" ? "AI — toate analizele" : w.feature}</Badge>
                     <span>
                       peste {w.thresholdPct}% — episod activ din {formatIsoDateTime(w.aboveSince)}
                     </span>

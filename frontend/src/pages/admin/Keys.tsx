@@ -3,6 +3,7 @@ import { KeyRound, RefreshCw, Save, Trash2, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 import type { TenantCaptchaMode, TenantCaptchaProvider, TenantKeyField } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -23,11 +24,16 @@ const PROVIDERS: Array<{ value: TenantCaptchaProvider; label: string }> = [
 ];
 
 const MODES: Array<{ value: TenantCaptchaMode; label: string }> = [
-  { value: "sequential", label: "Sequential" },
-  { value: "race", label: "Race" },
+  { value: "sequential", label: "Secvential" },
+  { value: "race", label: "Race (in paralel)" },
 ];
 
+function modeLabel(mode: TenantCaptchaMode): string {
+  return MODES.find((m) => m.value === mode)?.label ?? mode;
+}
+
 export default function AdminKeys({ embedded = false }: { embedded?: boolean } = {}) {
+  const confirm = useConfirm();
   const { data, loading, error, savingField, refresh, saveKey, saveCaptchaSettings } = useTenantKeys();
   const [inputs, setInputs] = useState<Record<TenantKeyField, string>>({
     anthropic: "",
@@ -54,7 +60,17 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
     setInputs((prev) => ({ ...prev, [field]: "" }));
   };
 
-  const onClearKey = async (field: TenantKeyField) => {
+  // Stergerea unei chei opreste instant functionalitatea (AI/RNPM) pentru TOTI
+  // userii tenantului si valoarea nu poate fi recuperata din server — confirm
+  // obligatoriu, la fel ca celelalte actiuni distructive din admin.
+  const onClearKey = async (field: TenantKeyField, label: string) => {
+    const ok = await confirm({
+      title: "Sterge cheia",
+      message: `Stergi cheia ${label}? Functionalitatile care o folosesc devin indisponibile pentru toti utilizatorii pana la introducerea unei chei noi.`,
+      destructive: true,
+      confirmLabel: "Sterge",
+    });
+    if (!ok) return;
     await saveKey(field, "");
   };
 
@@ -79,7 +95,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
           </div>
           <Button variant="outline" size="sm" onClick={() => refresh()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            Reincarca
           </Button>
         </div>
 
@@ -92,7 +108,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Provider keys</CardTitle>
+            <CardTitle className="text-base">Chei per provider</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {KEY_FIELDS.map(({ field, label, placeholder }) => {
@@ -106,7 +122,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{label}</span>
                     <Badge variant={status?.set ? "success" : "outline"}>
-                      {status?.set ? `set *${status.last4}` : "unset"}
+                      {status?.set ? `Configurata *${status.last4}` : "Neconfigurata"}
                     </Badge>
                   </div>
                   <input
@@ -124,7 +140,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => onClearKey(field)}
+                      onClick={() => onClearKey(field, label)}
                       disabled={busy || !status?.set}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -162,7 +178,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
               <Badge variant="outline">{currentProvider}</Badge>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="w-24 text-sm font-medium">Mode</span>
+              <span className="w-24 text-sm font-medium">Mod</span>
               <div className="flex rounded-md border border-border p-1">
                 {MODES.map((item) => (
                   <button
@@ -178,7 +194,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   </button>
                 ))}
               </div>
-              <Badge variant="outline">{currentMode}</Badge>
+              <Badge variant="outline">{modeLabel(currentMode)}</Badge>
             </div>
             <Button onClick={onSaveCaptcha} disabled={savingField === "captcha"}>
               <Save className="h-4 w-4" />

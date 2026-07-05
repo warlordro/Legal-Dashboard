@@ -255,7 +255,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            Reincarca
           </Button>
         </div>
 

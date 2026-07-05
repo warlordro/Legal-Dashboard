@@ -694,7 +694,11 @@ adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
 // ---------- Usage overview ----------
 
 // v2.42.0 (feedback testare): consumul AI per user, vizibil oricand in tabul
-// admin Consum. Pentru fiecare user activ aplicam EXACT regulile quotaGuard:
+// admin Consum. Deliberat O(n) cu ~5 query-uri/user (AI + captcha): SQLite
+// in-proces cu indecsi pe owner raspunde in microsecunde, iar tenantul e o
+// firma (zeci de useri, cap 2000) — batching pe grupuri de perioade ar
+// complica codul fara castig masurabil. Pentru fiecare user aplicam EXACT
+// regulile quotaGuard:
 // perioada din override (altfel zilnica), limita din override (altfel default
 // env), granturile active peste baza — ca cifrele afisate sa coincida cu
 // enforcement-ul. Pool unic "ai" (single + multi insumate).

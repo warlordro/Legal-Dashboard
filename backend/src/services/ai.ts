@@ -136,6 +136,13 @@ function splitPrompt(prompt: AiPromptInput): { system: string | undefined; user:
   return { system: prompt.system, user: prompt.user };
 }
 
+// Mesajele chat.completions comune (fallback-ul OpenAI + OpenRouter). GPT-5.x
+// accepta rolul "system" pe chat.completions (mapat intern la "developer"
+// pentru modelele de reasoning), deci nu e nevoie de tratament special.
+function toChatMessages(system: string | undefined, user: string) {
+  return [...(system ? [{ role: "system" as const, content: system }] : []), { role: "user" as const, content: user }];
+}
+
 export const AI_ANALYSIS_SYSTEM = `Esti un asistent juridic specializat pe dreptul romanesc. Explici dosare de pe portalul instantelor de judecata pe intelesul unui non-specialist, clar si concis, cu limbaj accesibil dar precis juridic.
 
 Reguli stricte:
@@ -527,10 +534,7 @@ async function callOpenAI(
         const completion = await client.chat.completions.create(
           {
             model: modelId,
-            messages: [
-              ...(system ? [{ role: "system" as const, content: system }] : []),
-              { role: "user" as const, content: user },
-            ],
+            messages: toChatMessages(system, user),
             max_completion_tokens: AI_MAX_TOKENS,
           },
           { signal: fallbackSignal }
@@ -619,10 +623,7 @@ export async function callOpenRouter(
       const completion = await client.chat.completions.create(
         {
           model: slug,
-          messages: [
-            ...(system ? [{ role: "system" as const, content: system }] : []),
-            { role: "user" as const, content: user },
-          ],
+          messages: toChatMessages(system, user),
           max_tokens: AI_MAX_TOKENS,
           // @ts-expect-error OpenRouter extension for returning real per-call cost.
           extra_body: { usage: { include: true } },

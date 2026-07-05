@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   type ApiTokenSummary,
   type CreateApiTokenInput,
@@ -18,6 +19,7 @@ const SCOPES: Array<{ value: "dosare" | "iccj" | "rnpm"; label: string }> = [
 // Sectiune "Acces API" — management Personal Access Tokens (doar web mode). Gate-uita
 // de caller-ul din ApiKeyDialog (isWebRuntime()); desktop pastreaza BYOK in modalul existent.
 export function ApiAccessPanel() {
+  const confirm = useConfirm();
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadOk, setLoadOk] = useState(false); // ultima incarcare a reusit? (empty-state doar daca da)
@@ -106,11 +108,16 @@ export function ApiAccessPanel() {
 
   async function onRevokeAll() {
     if (busyRef.current) return;
-    if (
-      !window.confirm("Revoci TOATE tokenurile? Actiunea e ireversibila si va rupe orice integrare care le foloseste.")
-    ) {
-      return;
-    }
+    // Dialogul aplicatiei (nu window.confirm nativ) — acelasi pattern ca restul
+    // actiunilor distructive din admin.
+    const ok = await confirm({
+      title: "Revoca toate tokenurile",
+      message: "Revoci TOATE tokenurile? Actiunea e ireversibila si va rupe orice integrare care le foloseste.",
+      destructive: true,
+      confirmLabel: "Revoca toate",
+    });
+    if (!ok) return;
+    if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
@@ -165,10 +172,10 @@ export function ApiAccessPanel() {
       {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
 
       {newSecret && (
-        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-sm">
+        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-sm dark:border-amber-700 dark:bg-amber-900/20">
           <p className="mb-1 font-medium">Copiaza tokenul acum — nu mai poate fi afisat.</p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-white px-2 py-1 font-mono text-xs">{newSecret}</code>
+            <code className="flex-1 truncate rounded bg-background px-2 py-1 font-mono text-xs">{newSecret}</code>
             <button
               type="button"
               onClick={copySecret}

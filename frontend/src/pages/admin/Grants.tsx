@@ -7,9 +7,14 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { UserPicker } from "@/components/admin/UserPicker";
 import { admin, type AdminUser, type QuotaGrant, type QuotaGrantWithUser } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const MILLI = 1000;
+
+// Acelasi vocabular ca FEATURE_OPTIONS din Cote — nu aratam cheia interna.
+const FEATURE_LABELS: Record<string, string> = { ai: "AI — toate analizele (limita unica)" };
+const featureLabel = (feature: string) => FEATURE_LABELS[feature] ?? feature;
 
 function milliToUsd(milli: number): string {
   return (milli / MILLI).toFixed(3);
@@ -167,7 +172,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
   const onRevoke = async (grant: QuotaGrant) => {
     const ok = await confirm({
       title: "Revoca grant",
-      message: `Revoca grant-ul de ${milliToUsd(grant.extraUsdMilli)} $ pentru "${grant.feature}"? Effective limit va scadea imediat.`,
+      message: `Revoca grant-ul de ${milliToUsd(grant.extraUsdMilli)} $ pentru "${featureLabel(grant.feature)}"? Limita efectiva va scadea imediat.`,
       destructive: true,
       confirmLabel: "Revoca",
     });
@@ -196,9 +201,9 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
             </h1>
           )}
           <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
-            One-shot extra peste limita de baza, cu expirare. Effective limit = baseLimit + suma grant-urilor active.
-            Atentie: daca userul nu are o limita setata pe feature (buget nelimitat), grantul nu are niciun efect —
-            seteaza intai cota in tab-ul Cote.
+            Extra acordat o singura data peste limita de baza, cu expirare. Limita efectiva = limita de baza + suma
+            grant-urilor active. Atentie: daca userul nu are o limita setata (buget nelimitat), grantul nu are niciun
+            efect — seteaza intai cota in tab-ul Cote.
           </p>
         </div>
 
@@ -228,7 +233,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                 </span>
                 <Button variant="outline" size="sm" onClick={() => loadActiveGrants()} disabled={activeLoading}>
                   <RefreshCw className={cn("h-4 w-4", activeLoading && "animate-spin")} />
-                  Refresh
+                  Reincarca
                 </Button>
               </CardTitle>
             </CardHeader>
@@ -257,7 +262,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                             <p className="font-mono text-xs">{g.userEmail ?? g.userId}</p>
                             {g.userDisplayName && <p className="text-xs text-muted-foreground">{g.userDisplayName}</p>}
                           </td>
-                          <td className="px-3 py-2 align-top font-mono text-xs">{g.feature}</td>
+                          <td className="px-3 py-2 align-top text-xs">{featureLabel(g.feature)}</td>
                           <td className="px-3 py-2 align-top">{milliToUsd(g.extraUsdMilli)} $</td>
                           <td className="px-3 py-2 align-top text-xs text-muted-foreground">
                             {formatIsoDateTime(g.expiresAt)}
@@ -284,13 +289,15 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
               <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
                 <span className="flex items-center gap-2">
                   <span className="font-mono text-sm">{selected.email}</span>
-                  <Badge variant="outline">{selected.role}</Badge>
-                  <Badge variant={selected.status === "active" ? "success" : "warning"}>{selected.status}</Badge>
+                  <Badge variant="outline">{userRoleLabel(selected.role)}</Badge>
+                  <Badge variant={selected.status === "active" ? "success" : "warning"}>
+                    {userStatusLabel(selected.status)}
+                  </Badge>
                 </span>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => loadGrants(selected.id)} disabled={loading}>
                     <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-                    Refresh
+                    Reincarca
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
                     Schimba utilizatorul
@@ -407,7 +414,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                       const expired = isExpired(g);
                       return (
                         <tr key={g.id} className="border-b border-border last:border-b-0 hover:bg-muted/30">
-                          <td className="px-3 py-2 align-top font-mono text-xs">{g.feature}</td>
+                          <td className="px-3 py-2 align-top text-xs">{featureLabel(g.feature)}</td>
                           <td className="px-3 py-2 align-top font-mono">${milliToUsd(g.extraUsdMilli)}</td>
                           <td className="px-3 py-2 align-top">
                             <Badge variant={state.variant}>{state.label}</Badge>

@@ -7,6 +7,7 @@ import { useConfirm } from "@/components/ui/confirm-dialog";
 import { UserPicker } from "@/components/admin/UserPicker";
 import { admin, type AdminUser, type QuotaOverride, type QuotaOverrideWithUser, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 // Daily limits are stored as integer milli-USD ($0.001 = 1 milli) to match the
@@ -246,7 +247,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                 </span>
                 <Button variant="outline" size="sm" onClick={() => loadOverview()} disabled={overviewLoading}>
                   <RefreshCw className={cn("h-4 w-4", overviewLoading && "animate-spin")} />
-                  Refresh
+                  Reincarca
                 </Button>
               </CardTitle>
             </CardHeader>
@@ -313,13 +314,15 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
               <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
                 <span className="flex items-center gap-2">
                   <span className="font-mono text-sm">{selected.email}</span>
-                  <Badge variant="outline">{selected.role}</Badge>
-                  <Badge variant={selected.status === "active" ? "success" : "warning"}>{selected.status}</Badge>
+                  <Badge variant="outline">{userRoleLabel(selected.role)}</Badge>
+                  <Badge variant={selected.status === "active" ? "success" : "warning"}>
+                    {userStatusLabel(selected.status)}
+                  </Badge>
                 </span>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={() => loadOverrides(selected.id)} disabled={loading}>
                     <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-                    Refresh
+                    Reincarca
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
                     Schimba utilizatorul
@@ -428,7 +431,9 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     )}
                     {overrides.map((row) => (
                       <tr key={row.feature} className="border-b border-border last:border-b-0 hover:bg-muted/30">
-                        <td className="px-3 py-2 align-top font-mono text-xs">{row.feature}</td>
+                        <td className="px-3 py-2 align-top text-xs">
+                          {FEATURE_OPTIONS.find((o) => o.value === row.feature)?.label ?? row.feature}
+                        </td>
                         <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[row.period]}</td>
                         <td className="px-3 py-2 align-top">
                           {row.limitUsdMilli === null ? (

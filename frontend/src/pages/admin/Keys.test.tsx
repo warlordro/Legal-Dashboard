@@ -5,6 +5,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminKeys from "./Keys";
+import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 
 vi.mock("@/hooks/useTenantKeys", () => ({
@@ -47,7 +48,8 @@ async function render(ui: React.ReactNode) {
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root.render(ui);
+    // useConfirm cere providerul montat — identic cu App.tsx.
+    root.render(<ConfirmProvider>{ui}</ConfirmProvider>);
     await Promise.resolve();
   });
 }
@@ -56,8 +58,8 @@ function textContent(element: Element): string {
   return element.textContent ?? "";
 }
 
-function buttonByText(pattern: RegExp): HTMLButtonElement {
-  const button = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((candidate) =>
+function buttonByText(pattern: RegExp, scope: ParentNode = host): HTMLButtonElement {
+  const button = Array.from(scope.querySelectorAll<HTMLButtonElement>("button")).find((candidate) =>
     pattern.test(textContent(candidate))
   );
   if (!button) throw new Error(`Button missing: ${String(pattern)}`);
@@ -102,7 +104,7 @@ describe("AdminKeys", () => {
     await render(<AdminKeys />);
 
     expect(textContent(host)).toContain("Chei API");
-    expect(textContent(host)).toContain("set *abcd");
+    expect(textContent(host)).toContain("Configurata *abcd");
     expect(textContent(host)).not.toContain("sk-");
   });
 
@@ -115,19 +117,35 @@ describe("AdminKeys", () => {
     expect(saveKeyMock).toHaveBeenCalledWith("anthropic", "sk-new");
   });
 
-  it("clears an existing key", async () => {
+  it("clears an existing key only after confirmation", async () => {
     await render(<AdminKeys />);
 
-    await click(buttonByText(/Sterge/i));
+    await click(buttonByText(/^Sterge$/i));
+    // v2.42.0: stergerea cere confirmare — nu se apeleaza nimic inainte.
+    expect(saveKeyMock).not.toHaveBeenCalled();
+    const dialog = document.querySelector('[role="alertdialog"]');
+    if (!dialog) throw new Error("Dialogul de confirmare nu s-a deschis");
+    await click(buttonByText(/^Sterge$/i, dialog));
 
     expect(saveKeyMock).toHaveBeenCalledWith("anthropic", "");
+  });
+
+  it("does NOT clear the key when the confirmation is cancelled", async () => {
+    await render(<AdminKeys />);
+
+    await click(buttonByText(/^Sterge$/i));
+    const dialog = document.querySelector('[role="alertdialog"]');
+    if (!dialog) throw new Error("Dialogul de confirmare nu s-a deschis");
+    await click(buttonByText(/Anuleaza/i, dialog));
+
+    expect(saveKeyMock).not.toHaveBeenCalled();
   });
 
   it("saves captcha settings", async () => {
     await render(<AdminKeys />);
 
     await click(buttonByText(/CapSolver/i));
-    await click(buttonByText(/^Race$/i));
+    await click(buttonByText(/^Race/i));
     await click(buttonByText(/Salveaza captcha/i));
 
     expect(saveCaptchaSettingsMock).toHaveBeenCalledWith("capsolver", "race");

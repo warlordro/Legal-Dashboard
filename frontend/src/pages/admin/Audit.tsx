@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { admin, type AuditEvent } from "@/lib/api";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { TablePagination } from "@/components/table-pagination";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
@@ -36,6 +37,11 @@ function outcomeVariant(outcome: AuditEvent["outcome"]): "success" | "warning" |
   return "destructive";
 }
 
+// Acelasi vocabular ca in dropdown-ul de filtre — nu aratam token-ul intern.
+function outcomeLabel(outcome: AuditEvent["outcome"]): string {
+  return OUTCOME_OPTIONS.find((o) => o.value === outcome)?.label ?? outcome;
+}
+
 function detailToString(detail: unknown): string {
   if (detail === null || detail === undefined) return "{}";
   try {
@@ -49,10 +55,16 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
   const [rows, setRows] = useState<AuditEvent[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
-  const [action, setAction] = useState("");
-  const [ownerId, setOwnerId] = useState("");
-  const [actorId, setActorId] = useState("");
-  const [targetKind, setTargetKind] = useState("");
+  const [actionInput, setActionInput] = useState("");
+  const [ownerIdInput, setOwnerIdInput] = useState("");
+  const [actorIdInput, setActorIdInput] = useState("");
+  const [targetKindInput, setTargetKindInput] = useState("");
+  // Filtrele text declanseaza fetch abia dupa 300ms de liniste — altfel fiecare
+  // tasta apasata trimitea un request (pattern identic cu Alerts).
+  const [action] = useDebouncedValue(actionInput.trim(), 300);
+  const [ownerId] = useDebouncedValue(ownerIdInput.trim(), 300);
+  const [actorId] = useDebouncedValue(actorIdInput.trim(), 300);
+  const [targetKind] = useDebouncedValue(targetKindInput.trim(), 300);
   const [outcome, setOutcome] = useState<"all" | "ok" | "denied" | "error">("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -203,7 +215,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
             </Button>
             <Button variant="outline" onClick={load} disabled={loading}>
               <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-              Refresh
+              Reincarca
             </Button>
           </div>
         </div>
@@ -219,29 +231,29 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
             <div className="grid gap-3 md:grid-cols-4">
               <input
                 type="text"
-                value={action}
-                onChange={(e) => setAction(e.target.value)}
+                value={actionInput}
+                onChange={(e) => setActionInput(e.target.value)}
                 placeholder="Actiune (ex: admin.users)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
-                value={ownerId}
-                onChange={(e) => setOwnerId(e.target.value)}
+                value={ownerIdInput}
+                onChange={(e) => setOwnerIdInput(e.target.value)}
                 placeholder="Owner ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
-                value={actorId}
-                onChange={(e) => setActorId(e.target.value)}
+                value={actorIdInput}
+                onChange={(e) => setActorIdInput(e.target.value)}
                 placeholder="Actor ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
-                value={targetKind}
-                onChange={(e) => setTargetKind(e.target.value)}
+                value={targetKindInput}
+                onChange={(e) => setTargetKindInput(e.target.value)}
                 placeholder="Tip tinta (ex: user)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
@@ -274,10 +286,10 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
               <Button
                 variant="ghost"
                 onClick={() => {
-                  setAction("");
-                  setOwnerId("");
-                  setActorId("");
-                  setTargetKind("");
+                  setActionInput("");
+                  setOwnerIdInput("");
+                  setActorIdInput("");
+                  setTargetKindInput("");
                   setOutcome("all");
                   setFrom("");
                   setTo("");
@@ -340,7 +352,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                           </td>
                           <td className="px-3 py-2 align-top font-mono text-xs">{row.action}</td>
                           <td className="px-3 py-2 align-top">
-                            <Badge variant={outcomeVariant(row.outcome)}>{row.outcome}</Badge>
+                            <Badge variant={outcomeVariant(row.outcome)}>{outcomeLabel(row.outcome)}</Badge>
                           </td>
                           {/* Email cand exista (lizibil); ID-ul ramane in title pentru copy/filtru. */}
                           <td className="px-3 py-2 align-top font-mono text-xs" title={row.ownerId ?? undefined}>
