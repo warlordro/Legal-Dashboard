@@ -382,8 +382,8 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
               </form>
               {(limitsByFeature[feature] === undefined || limitsByFeature[feature] === null) && (
                 <p className="text-sm text-amber-700 dark:text-amber-400">
-                  Bugetul pe {feature} este nelimitat pentru acest user — grantul si nelimitatul se exclud reciproc.
-                  Seteaza intai o limita in tab-ul Cote, apoi acorda grantul.
+                  Bugetul pe "{featureLabel(feature)}" este nelimitat pentru acest user — grantul si nelimitatul se
+                  exclud reciproc. Seteaza intai o limita in tab-ul Cote, apoi acorda grantul.
                 </p>
               )}
 

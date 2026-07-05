@@ -60,11 +60,12 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
   const [actorIdInput, setActorIdInput] = useState("");
   const [targetKindInput, setTargetKindInput] = useState("");
   // Filtrele text declanseaza fetch abia dupa 300ms de liniste — altfel fiecare
-  // tasta apasata trimitea un request (pattern identic cu Alerts).
-  const [action] = useDebouncedValue(actionInput.trim(), 300);
-  const [ownerId] = useDebouncedValue(ownerIdInput.trim(), 300);
-  const [actorId] = useDebouncedValue(actorIdInput.trim(), 300);
-  const [targetKind] = useDebouncedValue(targetKindInput.trim(), 300);
+  // tasta apasata trimitea un request (pattern identic cu Alerts). Flush-urile
+  // sunt folosite de Reseteaza ca sa nu ramana un fetch cu filtrele vechi.
+  const [action, flushAction] = useDebouncedValue(actionInput.trim(), 300);
+  const [ownerId, flushOwnerId] = useDebouncedValue(ownerIdInput.trim(), 300);
+  const [actorId, flushActorId] = useDebouncedValue(actorIdInput.trim(), 300);
+  const [targetKind, flushTargetKind] = useDebouncedValue(targetKindInput.trim(), 300);
   const [outcome, setOutcome] = useState<"all" | "ok" | "denied" | "error">("all");
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
@@ -139,6 +140,9 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
   const load = () => loadAudit({ page, action, ownerId, actorId, targetKind, outcome, from, to });
 
   useEffect(() => {
+    // Review-panel: fara abort, un raspuns lent (pagina veche) putea ateriza
+    // dupa cel proaspat si suprascrie tabelul — same pattern ca Alerts.
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
     admin
@@ -154,22 +158,30 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
         outcome: outcome === "all" ? undefined : outcome,
         since: localDateInputToIso(from, false),
         until: localDateInputToIso(to, true),
+        signal: ac.signal,
       })
       .then((result) => {
+        if (ac.signal.aborted) return;
         setRows(result.rows);
         setTotal(result.total);
       })
       .catch((err: unknown) => {
+        if (ac.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
   }, [action, actorId, from, outcome, ownerId, page, pageSize, targetKind, to]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii si expanded depinde explicit de filtrele vizibile.
-  useEffect(() => {
+  // Resetarea paginii se face inline in handler-ele filtrelor (nu intr-un efect
+  // pe aceleasi dependinte ca fetch-ul): efectul dubla fetch-ul cand pagina era
+  // >1 — o data cu pagina veche, apoi cu pagina 1 (review-panel).
+  const resetPagination = () => {
     setPage(1);
     setExpanded(new Set());
-  }, [action, actorId, from, outcome, ownerId, targetKind, to]);
+  };
 
   const toggleExpand = (id: number) => {
     setExpanded((prev) => {
@@ -186,7 +198,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     if (ownerId) parts.push(`owner=${ownerId}`);
     if (actorId) parts.push(`actor=${actorId}`);
     if (targetKind) parts.push(`tinta=${targetKind}`);
-    if (outcome !== "all") parts.push(`rezultat=${outcome}`);
+    if (outcome !== "all") parts.push(`rezultat=${outcomeLabel(outcome)}`);
     return parts.join(" · ");
   })();
 
@@ -232,32 +244,50 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
               <input
                 type="text"
                 value={actionInput}
-                onChange={(e) => setActionInput(e.target.value)}
+                onChange={(e) => {
+                  setActionInput(e.target.value);
+                  resetPagination();
+                }}
                 placeholder="Actiune (ex: admin.users)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={ownerIdInput}
-                onChange={(e) => setOwnerIdInput(e.target.value)}
+                onChange={(e) => {
+                  setOwnerIdInput(e.target.value);
+                  resetPagination();
+                }}
                 placeholder="Owner ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={actorIdInput}
-                onChange={(e) => setActorIdInput(e.target.value)}
+                onChange={(e) => {
+                  setActorIdInput(e.target.value);
+                  resetPagination();
+                }}
                 placeholder="Actor ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={targetKindInput}
-                onChange={(e) => setTargetKindInput(e.target.value)}
+                onChange={(e) => {
+                  setTargetKindInput(e.target.value);
+                  resetPagination();
+                }}
                 placeholder="Tip tinta (ex: user)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
-              <Select value={outcome} onValueChange={(v) => setOutcome(v as typeof outcome)}>
+              <Select
+                value={outcome}
+                onValueChange={(v) => {
+                  setOutcome(v as typeof outcome);
+                  resetPagination();
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Rezultat" />
                 </SelectTrigger>
@@ -272,14 +302,20 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
               <input
                 type="date"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  resetPagination();
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 title="De la (inclusiv)"
               />
               <input
                 type="date"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  resetPagination();
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 title="Pana la (inclusiv)"
               />
@@ -290,9 +326,16 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                   setOwnerIdInput("");
                   setActorIdInput("");
                   setTargetKindInput("");
+                  // Flush: fara el, fetch-ul imediat (outcome/from/to) pleca cu
+                  // filtrele text VECHI inca 300ms (review-panel).
+                  flushAction("");
+                  flushOwnerId("");
+                  flushActorId("");
+                  flushTargetKind("");
                   setOutcome("all");
                   setFrom("");
                   setTo("");
+                  resetPagination();
                 }}
                 className="md:col-span-1"
               >

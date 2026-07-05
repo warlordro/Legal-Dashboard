@@ -62,6 +62,10 @@ function isKnownFeature(feature: string): boolean {
   return FEATURE_OPTIONS.some((o) => o.value === feature);
 }
 
+function featureLabel(feature: string): string {
+  return FEATURE_OPTIONS.find((o) => o.value === feature)?.label ?? feature;
+}
+
 export default function AdminQuota({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const [selected, setSelected] = useState<AdminUser | null>(null);
@@ -178,7 +182,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     const periodLabel = PERIOD_LABELS[override.period].toLowerCase();
     const ok = await confirm({
       title: "Sterge cota",
-      message: `Sterge limita pentru "${override.feature}" (${limitLabel} / ${periodLabel})? Userul revine la buget nelimitat.`,
+      message: `Sterge limita pentru "${featureLabel(override.feature)}" (${limitLabel} / ${periodLabel})? Userul revine la buget nelimitat.`,
       destructive: true,
       confirmLabel: "Sterge",
     });
@@ -431,9 +435,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     )}
                     {overrides.map((row) => (
                       <tr key={row.feature} className="border-b border-border last:border-b-0 hover:bg-muted/30">
-                        <td className="px-3 py-2 align-top text-xs">
-                          {FEATURE_OPTIONS.find((o) => o.value === row.feature)?.label ?? row.feature}
-                        </td>
+                        <td className="px-3 py-2 align-top text-xs">{featureLabel(row.feature)}</td>
                         <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[row.period]}</td>
                         <td className="px-3 py-2 align-top">
                           {row.limitUsdMilli === null ? (

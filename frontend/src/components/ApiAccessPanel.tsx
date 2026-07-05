@@ -205,7 +205,7 @@ export function ApiAccessPanel() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Nume token (ex. mcp-desktop)"
             aria-label="Nume token"
-            className="w-full rounded-md border border-border px-2 py-1 text-sm"
+            className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
           />
           <div className="flex flex-wrap gap-3">
             {SCOPES.map((s) => (
@@ -222,7 +222,7 @@ export function ApiAccessPanel() {
                 value={expiresInDays}
                 onChange={(e) => setExpiresInDays(e.target.value as "" | "30" | "90" | "365")}
                 aria-label="Expirare"
-                className="rounded-md border border-border px-1 py-0.5"
+                className="rounded-md border border-input bg-background px-1 py-0.5"
               >
                 <option value="">fara</option>
                 <option value="30">30 zile</option>
@@ -238,7 +238,7 @@ export function ApiAccessPanel() {
                 placeholder="fara"
                 aria-label="Plafon captcha zilnic"
                 inputMode="numeric"
-                className="w-16 rounded-md border border-border px-1 py-0.5"
+                className="w-16 rounded-md border border-input bg-background px-1 py-0.5"
               />
             </label>
           </div>

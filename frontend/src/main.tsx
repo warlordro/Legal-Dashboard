@@ -13,9 +13,16 @@ import App from "./App.tsx";
 const CHUNK_RELOAD_KEY = "portaljust-chunk-reload-at";
 const CHUNK_RELOAD_MIN_INTERVAL_MS = 60_000;
 window.addEventListener("vite:preloadError", (event) => {
-  const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? 0);
-  if (Date.now() - last < CHUNK_RELOAD_MIN_INTERVAL_MS) return; // lasa eroarea sa ajunga la ErrorBoundary
-  sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  // Review-panel: fara sessionStorage functional (privacy/hardened mode) nu
+  // putem garanta anti-bucla peste reload — NU reincarcam automat, lasam
+  // eroarea la ErrorBoundary (buton manual "Reincarca").
+  try {
+    const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? 0);
+    if (Date.now() - last < CHUNK_RELOAD_MIN_INTERVAL_MS) return; // lasa eroarea la ErrorBoundary
+    sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
+  } catch {
+    return;
+  }
   event.preventDefault();
   window.location.reload();
 });
