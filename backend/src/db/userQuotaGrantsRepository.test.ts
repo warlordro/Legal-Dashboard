@@ -45,6 +45,30 @@ function past(hoursBehind: number): string {
   return new Date(Date.now() - hoursBehind * 3_600_000).toISOString();
 }
 
+describe("migration 0042 — backfill expires_at la UTC", () => {
+  it("normalizeaza randurile legacy cu offset la acelasi instant in Z", () => {
+    const db = getDb();
+    // Simuleaza un rand legacy (pre-normalizare la scriere): offset +03:00.
+    db.prepare(
+      `INSERT INTO user_quota_grants (user_id, feature, extra_usd_milli, expires_at, granted_at, granted_by)
+       VALUES ('u-1', 'ai', 1000, '2026-07-06T04:00:00+03:00', '2026-07-01T00:00:00.000Z', 'admin')`
+    ).run();
+    // Aplica EXACT statement-ul din 0042 (idempotent — pe DB proaspat a rulat
+    // deja la boot, dar fara randuri legacy de convertit).
+    db.prepare(
+      `UPDATE user_quota_grants
+       SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', expires_at)
+       WHERE expires_at NOT LIKE '%Z'
+         AND strftime('%Y-%m-%dT%H:%M:%fZ', expires_at) IS NOT NULL`
+    ).run();
+    const row = db.prepare("SELECT expires_at FROM user_quota_grants WHERE user_id = 'u-1'").get() as {
+      expires_at: string;
+    };
+    // +03:00 → acelasi instant in UTC.
+    expect(row.expires_at).toBe("2026-07-06T01:00:00.000Z");
+  });
+});
+
 describe("userQuotaGrantsRepository", () => {
   it("createGrant inserts a row and echoes it", () => {
     const row = createGrant({

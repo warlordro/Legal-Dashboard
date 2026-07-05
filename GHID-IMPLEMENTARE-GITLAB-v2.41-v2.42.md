@@ -688,7 +688,7 @@ ordinea de mai jos (fiecare cu gate-urile 0.3 + review 0.4 la finalul lui):
 | 4 | `feat/quota-ux-v1` | vederi globale cote/granturi + truncated + formular fara Nelimitat + UserPicker | 3.3, 5.5 |
 | 5 | `feat/users-management` | migration 0040 + canonicalize + POST /users + import xlsx + template + guards + pagina Users | 4 |
 | 6 | `feat/settings-tabs` | /setari pe roluri + embedded + useCurrentUser store | 5.1, 3.4 |
-| 7 | `feat/unified-ai-quota` | migration 0041 + quotaGuard pool + grants exclusiv + me/budget | 5.2 |
+| 7 | `feat/unified-ai-quota` | migration 0041 + 0042 (backfill expires_at UTC) + quotaGuard pool + grants exclusiv + me/budget | 5.2, 10.2b |
 | 8 | `feat/usage-overview` | usage/overview AI+captcha + tab Consum + paginare/sortare | 5.3, 6.8-6.9 |
 | 9 | `feat/audit-report` | enrichment email + export xlsx + filtre corecte | 5.4, 6.7 |
 | 10 | `feat/ai-sonnet5-prompts` | model + pricing standard + prompturi system/user | 5.6 |
@@ -752,6 +752,20 @@ DELETE FROM budget_notifications WHERE feature IN ('ai.single', 'ai.multi');
 ```
 down (pragmatic): recreeaza ai.single + ai.multi cu ACEEASI limita din 'ai',
 muta granturile pe ai.single, sterge notificarile 'ai', sterge versiunea 41.
+
+### 10.2b Migration 0042 (up) — backfill expires_at la UTC
+`createGrant` normalizeaza la scriere DIN acest sprint, dar randurile legacy
+(granturi din v2.32+) pot avea ISO cu offset stocat brut, iar predicatele de
+"grant activ" compara TEXT cu boundary `...Z` — misclasificare in fereastra
+offsetului. Backfill idempotent:
+```sql
+UPDATE user_quota_grants
+SET expires_at = strftime('%Y-%m-%dT%H:%M:%fZ', expires_at)
+WHERE expires_at NOT LIKE '%Z'
+  AND strftime('%Y-%m-%dT%H:%M:%fZ', expires_at) IS NOT NULL;
+```
+down: doar `DELETE FROM _schema_versions WHERE version = 42;` (offsetul
+original nu se poate reconstitui; valorile UTC raman corecte semantic).
 
 ### 10.3 System prompts AI (verbatim; nu parafraza)
 ```ts
