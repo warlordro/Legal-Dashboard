@@ -95,6 +95,38 @@ review adversarial INAINTE de implementare.
 
 ## 2. Etapa 0 — mediu de testare web local (prerechizit pentru orice altceva)
 
+### 2.0 PRECONDITIE BASELINE: clona GitLab e la v2.40.0 — adu intai bridge-ul v2.40.1
+
+Delta de COD v2.40.0 → v2.40.1 e mica dar critica (restul v2.40.1 a fost
+Docker/Caddy — in afara scope-ului): **bridge-ul oauth2-proxy din
+`backend/src/routes/auth.ts`** (+ testele `auth.oauth2.test.ts`). Fara el,
+NIMIC din web mode nu functioneaza (SPA-ul primeste "Acces refuzat" la
+bootstrap). Acesta e **MR 0** si se face PRIMUL.
+
+Contract `POST /api/v1/auth/oauth2/sync` (exclus din autentificarea
+ownerContext — se gardeaza singur):
+1. `getAuthMode() !== "web"` → 400 `desktop_only`.
+2. Secretul partajat lipseste din env → 503 `bridge_disabled`.
+3. `Authorization: Basic <LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET>` verificat cu
+   comparatie constant-time; gresit → 403 `forbidden` + audit
+   `auth.oauth2.sync` outcome denied, reason `bad_proxy_secret`.
+4. Identitatea: header `x-forwarded-email` (cel REAL trimis de oauth2-proxy cu
+   `pass-user-headers`); `x-auth-request-email` acceptat ca fallback. AMBELE se
+   accepta DOAR aici, dupa check-ul de secret (in productie Caddy le
+   strip-uieste inbound, deci nu pot fi forjate). **Fail-closed pe
+   ambiguitate:** daca ambele sosesc cu valori diferite → 400
+   `missing_identity` + audit reason `conflicting_identity_headers`.
+5. Email gol/fara @/peste 254 → 400 `missing_identity`. (La baseline lookup-ul
+   e pe email brut trim/lowercase local; in MR 5 treci pe `canonicalizeEmail`
+   partajat — nu uita sa actualizezi si bridge-ul atunci.)
+6. User inexistent → 403 `not_provisioned` (mesaj: contacteaza adminul), audit
+   cu `emailHash` (NU emailul in clar). Status != active → 403
+   `account_inactive`.
+7. Succes: JWT `{sub: user.id, jti: randomUUID(), email, name, iat, exp, iss,
+   aud}` semnat cu `LEGAL_DASHBOARD_JWT_SECRET`, TTL standard, in cookie
+   `legal_dashboard_session` (HttpOnly, Secure, SameSite=Strict, Path=/,
+   Max-Age=TTL) + 200.
+
 Fara asta nu poti verifica nimic din web mode. Doua piese in `scripts/`:
 
 ### 2.1 `scripts/dev-web-proxy.mjs`
@@ -590,6 +622,7 @@ ordinea de mai jos (fiecare cu gate-urile 0.3 + review 0.4 la finalul lui):
 
 | MR | Branch sugerat | Continut | Sectiuni |
 |----|----------------|----------|----------|
+| 0 | `feat/oauth2-bridge-v2401` | bridge-ul oauth2-proxy (baseline-ul GitLab e v2.40.0!) + teste | 2.0 |
 | 1 | `feat/dev-web-local` | proxy + script local + seed | 2 |
 | 2 | `fix/web-layout-fonts` | layout browser + useFontSize + migrare | 3.1 |
 | 3 | `feat/tenant-keys-frontend` | key-status endpoint + useTenantKeyStatus + ApiKeyDialog/TenantKeyStatusPanel + rutare AI implicita + RNPM tenant-key-wins | 3.2 |
