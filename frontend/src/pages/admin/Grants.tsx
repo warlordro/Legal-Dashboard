@@ -25,7 +25,10 @@ function parseUsdInputToMilli(value: string): number | null {
   if (!trimmed) return null;
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * MILLI);
+  const milli = Math.round(n * MILLI);
+  // Sub 0.001 USD se rotunjeste la 0 milli — invalid (backend cere min 1),
+  // altfel guard-ul client lasa sa treaca un request destinat esecului.
+  return milli >= 1 ? milli : null;
 }
 
 // Converteste un input datetime-local (YYYY-MM-DDTHH:mm fara timezone) la ISO
@@ -80,26 +83,36 @@ export default function AdminGrants() {
     loadGlobal();
   }, [loadGlobal]);
 
-  const loadGrants = useCallback(async (userId: string) => {
+  // Fetch-ul per-user traieste in efect cu AbortController + guards (pattern
+  // 6.7): golirea sincrona a listei NU anuleaza un fetch in zbor — un raspuns
+  // lent pentru userul A ar ateriza dupa selectarea lui B si ar afisa (si
+  // permite revocarea) granturilor lui A sub identitatea lui B (finding
+  // review-panel confirmat). refreshTick = reincarcare manuala/post-mutatie.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const refreshGrants = useCallback(() => setRefreshTick((t) => t + 1), []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick este trigger explicit de reincarcare (pattern 6.7), nu e citit in corp.
+  useEffect(() => {
+    setGrants([]);
+    if (!selected) return;
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
-    try {
-      const result = await admin.listGrants(userId);
-      setGrants(result.grants);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea grant-urilor.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Goleste lista la schimbarea userului INAINTE de fetch — altfel granturile
-    // userului precedent raman afisate sub identitatea celui nou cat dureaza
-    // incarcarea (finding CodeRabbit confirmat).
-    setGrants([]);
-    if (selected) loadGrants(selected.id);
-  }, [loadGrants, selected]);
+    admin
+      .listGrants(selected.id, ac.signal)
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        setGrants(result.grants);
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Eroare la incarcarea grant-urilor.");
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [selected, refreshTick]);
 
   const onSelectUser = (user: AdminUser) => {
     setSelected(user);
@@ -146,7 +159,8 @@ export default function AdminGrants() {
         expiresAt: isoExpires,
         reason: reason.trim() || null,
       });
-      await Promise.all([loadGrants(selected.id), loadGlobal()]);
+      refreshGrants();
+      await loadGlobal();
       setExtraUsd("");
       setExpiresAtLocal("");
       setReason("");
@@ -169,7 +183,8 @@ export default function AdminGrants() {
     setError(null);
     try {
       await admin.revokeGrant(grant.id, null);
-      await Promise.all([selected ? loadGrants(selected.id) : Promise.resolve(), loadGlobal()]);
+      if (selected) refreshGrants();
+      await loadGlobal();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la revocarea grant-ului.");
     } finally {
@@ -307,7 +322,7 @@ export default function AdminGrants() {
                       {userStatusLabel(selected.status)}
                     </Badge>
                   </span>
-                  <Button variant="outline" size="sm" onClick={() => loadGrants(selected.id)} disabled={loading}>
+                  <Button variant="outline" size="sm" onClick={refreshGrants} disabled={loading}>
                     <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
                     Reincarca
                   </Button>
@@ -368,7 +383,7 @@ export default function AdminGrants() {
                       value={reason}
                       onChange={(e) => setReason(e.target.value)}
                       placeholder="ex: boost sprint final"
-                      maxLength={500}
+                      maxLength={200}
                       className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                     />
                   </div>

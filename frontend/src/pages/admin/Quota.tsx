@@ -94,26 +94,36 @@ export default function AdminQuota() {
     loadGlobal();
   }, [loadGlobal]);
 
-  const loadOverrides = useCallback(async (userId: string) => {
+  // Fetch-ul per-user traieste in efect cu AbortController + guards (pattern
+  // 6.7): golirea sincrona a listei NU anuleaza un fetch in zbor — un raspuns
+  // lent pentru userul A ar ateriza dupa selectarea lui B si ar afisa (si
+  // permite stergerea) plafoanelor lui A sub identitatea lui B (finding
+  // review-panel confirmat). refreshTick = reincarcare manuala/post-mutatie.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const refreshOverrides = useCallback(() => setRefreshTick((t) => t + 1), []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick este trigger explicit de reincarcare (pattern 6.7), nu e citit in corp.
+  useEffect(() => {
+    setOverrides([]);
+    if (!selected) return;
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
-    try {
-      const result = await admin.listQuota(userId);
-      setOverrides(result.overrides);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    // Goleste lista la schimbarea userului INAINTE de fetch — altfel plafoanele
-    // userului precedent raman afisate sub identitatea celui nou cat dureaza
-    // incarcarea (finding CodeRabbit confirmat).
-    setOverrides([]);
-    if (selected) loadOverrides(selected.id);
-  }, [loadOverrides, selected]);
+    admin
+      .listQuota(selected.id, ac.signal)
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        setOverrides(result.overrides);
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor.");
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [selected, refreshTick]);
 
   const resetForm = () => {
     setFeature(QUOTA_FEATURES[0]);
@@ -167,7 +177,8 @@ export default function AdminQuota() {
     setError(null);
     try {
       await admin.upsertQuota(selected.id, { feature, period, limitUsdMilli: parsed });
-      await Promise.all([loadOverrides(selected.id), loadGlobal()]);
+      refreshOverrides();
+      await loadGlobal();
       resetForm();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la salvarea cotei.");
@@ -196,7 +207,8 @@ export default function AdminQuota() {
     setError(null);
     try {
       await admin.deleteQuota(selected.id, row.feature);
-      await Promise.all([loadOverrides(selected.id), loadGlobal()]);
+      refreshOverrides();
+      await loadGlobal();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la stergerea cotei.");
     } finally {
@@ -322,7 +334,7 @@ export default function AdminQuota() {
                       {userStatusLabel(selected.status)}
                     </Badge>
                   </span>
-                  <Button variant="outline" size="sm" onClick={() => loadOverrides(selected.id)} disabled={loading}>
+                  <Button variant="outline" size="sm" onClick={refreshOverrides} disabled={loading}>
                     <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
                     Reincarca
                   </Button>

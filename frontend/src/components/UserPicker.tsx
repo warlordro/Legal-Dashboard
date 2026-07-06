@@ -68,7 +68,8 @@ export function UserPicker({ value, onSelect, disabled, ariaLabel }: UserPickerP
       {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
       {!loading && total > users.length && (
         <p className="mt-1 text-xs text-muted-foreground">
-          Se afiseaza primii {users.length} din {total} utilizatori activi (sortati pe email).
+          Se afiseaza {users.length} din {total} utilizatori activi — lista e incompleta, unii utilizatori pot lipsi din
+          dropdown.
         </p>
       )}
     </div>

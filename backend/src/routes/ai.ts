@@ -109,10 +109,12 @@ function missingApiKey(c: Context, provider: string) {
 
 // v2.41.0 (P3): rutare AI implicita. Setarea explicita a ownerului (rand in
 // owner_ai_settings — updated_at > 0) are prioritate. Fara alegere explicita,
-// in web mode auto-detectam cheia OpenRouter a tenantului: un tenant care a
-// configurat DOAR OpenRouter nu trebuie sa primeasca MISSING_API_KEY pe
-// default-ul "native". Try/catch: o cheie tenant nedecriptabila (secret
-// rotit/corupt) nu darama ruta — cade pe "native".
+// in web mode auto-detectam pe PREZENTA cheii OpenRouter a tenantului (nu pe
+// absenta cheilor native — decizie de spec: motivatia e tenantul care a
+// configurat doar OpenRouter si ar primi MISSING_API_KEY pe default-ul
+// "native"; un tenant cu ambele tipuri de chei isi alege explicit modul din
+// UI). Try/catch: o cheie tenant nedecriptabila (secret rotit/corupt) nu
+// darama ruta — cade pe "native".
 function resolveEffectiveAiMode(ownerId: string): AiProviderMode {
   const settings = getSettings(ownerId);
   if (settings.updated_at > 0) return settings.mode;
