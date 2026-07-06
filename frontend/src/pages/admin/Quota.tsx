@@ -344,7 +344,14 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                   <select
                     id="quota-feature"
                     value={feature}
-                    onChange={(e) => setFeature(e.target.value)}
+                    onChange={(e) => {
+                      // Unitati diferite (USD vs captcha-uri): la schimbarea
+                      // feature-ului, perioada si limita revin la default —
+                      // valorile tastate pentru AI nu se preiau la captcha.
+                      setFeature(e.target.value);
+                      setPeriod("day");
+                      setLimitInput("");
+                    }}
                     className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                   >
                     {/* Rand legacy (feature in afara enum-ului, ex. pre-consolidare): il

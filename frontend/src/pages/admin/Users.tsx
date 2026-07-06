@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Users as UsersIcon, Download, RefreshCw, ShieldAlert, Search, Upload, UserPlus } from "lucide-react";
+import { Users as UsersIcon, Download, FileUp, RefreshCw, ShieldAlert, Search, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -251,7 +251,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
     setError(null);
     try {
       const blob = await admin.downloadUsersImportTemplate();
-      triggerBlobDownload(blob, "template-import-utilizatori.xlsx");
+      triggerBlobDownload(blob, "model-import-utilizatori.xlsx");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la descarcarea template-ului.");
     }
@@ -300,152 +300,6 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
             Reincarca
           </Button>
         </div>
-
-        {/* v2.42.0: provisionare useri din UI — individual + import bulk din xlsx.
-            Bridge-ul oauth2 e fail-closed: userul se poate loga imediat ce exista
-            aici cu status active. */}
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <UserPlus className="h-4 w-4" />
-              Adauga utilizator
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            {createMsg && (
-              <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-300">
-                {createMsg}
-              </div>
-            )}
-            <form onSubmit={onCreate} className="grid gap-3 md:grid-cols-[2fr_2fr_140px_auto] md:items-end">
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-email">
-                  Email (contul Google)
-                </label>
-                <input
-                  id="new-user-email"
-                  type="email"
-                  value={newEmail}
-                  onChange={(e) => setNewEmail(e.target.value)}
-                  placeholder="ana@firma.ro"
-                  maxLength={254}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-name">
-                  Nume afisat
-                </label>
-                <input
-                  id="new-user-name"
-                  type="text"
-                  value={newName}
-                  onChange={(e) => setNewName(e.target.value)}
-                  placeholder="Ana Pop"
-                  maxLength={120}
-                  className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-role">
-                  Rol
-                </label>
-                <select
-                  id="new-user-role"
-                  value={newRole}
-                  onChange={(e) => setNewRole(e.target.value as "user" | "admin")}
-                  className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                >
-                  {ASSIGNABLE_ROLE_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <Button type="submit" disabled={creating}>
-                <UserPlus className="h-4 w-4" />
-                Adauga
-              </Button>
-            </form>
-
-            <div className="border-t border-border pt-3">
-              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Import din Excel
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Button variant="outline" size="sm" onClick={onDownloadTemplate} disabled={importing}>
-                  <Download className="h-4 w-4" />
-                  Descarca template
-                </Button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".xlsx"
-                  className="hidden"
-                  onChange={(e) => {
-                    const file = e.target.files?.[0];
-                    if (file) void onImportFile(file);
-                  }}
-                />
-                <Button variant="outline" size="sm" onClick={() => fileInputRef.current?.click()} disabled={importing}>
-                  <Upload className={cn("h-4 w-4", importing && "animate-pulse")} />
-                  {importing ? "Se importa..." : "Incarca fisier completat"}
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  Completeaza template-ul (max 500 randuri) si incarca-l — raportul apare mai jos.
-                </span>
-              </div>
-
-              {importResult && (
-                <div className="mt-3 space-y-2">
-                  <p className="text-sm">
-                    <span className="font-medium text-green-700 dark:text-green-400">
-                      {importResult.summary.created} creati
-                    </span>
-                    {" · "}
-                    <span className="text-muted-foreground">{importResult.summary.duplicates} duplicate</span>
-                    {" · "}
-                    <span className={importResult.summary.invalid > 0 ? "text-red-600" : "text-muted-foreground"}>
-                      {importResult.summary.invalid} invalide
-                    </span>
-                  </p>
-                  {importResult.issues.length > 0 && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-sm">
-                        <thead>
-                          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                            <th className="px-3 py-1.5 font-semibold">Rand</th>
-                            <th className="px-3 py-1.5 font-semibold">Email</th>
-                            <th className="px-3 py-1.5 font-semibold">Status</th>
-                            <th className="px-3 py-1.5 font-semibold">Motiv</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-border">
-                          {importResult.issues.map((issue) => {
-                            const badge = importIssueBadge(issue);
-                            return (
-                              <tr key={`${issue.rowNumber}:${issue.code}:${issue.email ?? ""}`}>
-                                <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">
-                                  {issue.rowNumber}
-                                </td>
-                                <td className="px-3 py-1.5 align-top font-mono text-xs">{issue.email || "—"}</td>
-                                <td className="px-3 py-1.5 align-top">
-                                  <Badge variant={badge.variant}>{badge.label}</Badge>
-                                </td>
-                                <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">{issue.message}</td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          </CardContent>
-        </Card>
 
         <Card>
           <CardHeader className="pb-3">
@@ -511,6 +365,163 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
             </button>
           </div>
         )}
+
+        {/* v2.42.0: provisionare useri din UI — individual + import bulk din
+            xlsx, in doua carduri alaturate (layout pastrat la cererea userului;
+            referinta le comaseaza intr-un singur card orizontal). Bridge-ul
+            oauth2 e fail-closed: userul se poate loga imediat ce exista aici
+            cu status active. */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <UserPlus className="h-4 w-4" />
+                Adauga utilizator
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={onCreate} className="space-y-3">
+                {createMsg && (
+                  <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-300">
+                    {createMsg}
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-email">
+                    Email (contul Google)
+                  </label>
+                  <input
+                    id="new-user-email"
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="ana@firma.ro"
+                    maxLength={254}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-name">
+                    Nume afisat
+                  </label>
+                  <input
+                    id="new-user-name"
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Ana Pop"
+                    maxLength={120}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-role">
+                      Rol
+                    </label>
+                    <select
+                      id="new-user-role"
+                      value={newRole}
+                      onChange={(e) => setNewRole(e.target.value as "user" | "admin")}
+                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                    >
+                      {ASSIGNABLE_ROLE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button type="submit" disabled={creating}>
+                    <UserPlus className="h-4 w-4" />
+                    {creating ? "Se creeaza..." : "Creeaza"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileUp className="h-4 w-4" />
+                Import din Excel
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Descarca modelul, completeaza un rand per utilizator (rol: Utilizator sau Admin) si incarca fisierul.
+                Maxim 500 de randuri / 512KB.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={onDownloadTemplate} disabled={importing}>
+                  <Download className="h-4 w-4" />
+                  Descarca modelul
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} disabled={importing}>
+                  <FileUp className={cn("h-4 w-4", importing && "animate-pulse")} />
+                  {importing ? "Se importa..." : "Incarca fisierul"}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void onImportFile(file);
+                  }}
+                />
+              </div>
+              {importResult && (
+                <div className="space-y-2">
+                  <p className="text-sm">
+                    <span className="font-medium text-green-700 dark:text-green-400">
+                      {importResult.summary.created} creati
+                    </span>
+                    {" · "}
+                    <span className="text-muted-foreground">{importResult.summary.duplicates} duplicate</span>
+                    {" · "}
+                    <span className={importResult.summary.invalid > 0 ? "text-red-600" : "text-muted-foreground"}>
+                      {importResult.summary.invalid} invalide
+                    </span>
+                  </p>
+                  {importResult.issues.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                            <th className="px-3 py-1.5 font-semibold">Rand</th>
+                            <th className="px-3 py-1.5 font-semibold">Email</th>
+                            <th className="px-3 py-1.5 font-semibold">Status</th>
+                            <th className="px-3 py-1.5 font-semibold">Motiv</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {importResult.issues.map((issue) => {
+                            const badge = importIssueBadge(issue);
+                            return (
+                              <tr key={`${issue.rowNumber}:${issue.code}:${issue.email ?? ""}`}>
+                                <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">
+                                  {issue.rowNumber}
+                                </td>
+                                <td className="px-3 py-1.5 align-top font-mono text-xs">{issue.email || "—"}</td>
+                                <td className="px-3 py-1.5 align-top">
+                                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                                </td>
+                                <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">{issue.message}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardContent className="p-0">
