@@ -99,7 +99,10 @@ export default function SettingsPage() {
           <div className="max-w-5xl">
             <TenantKeyStatusPanel onManageKeys={() => selectTab("chei")} />
             <AIUsagePanel />
-            <NotificationStatusPanel />
+            {/* Notificarile sistem sunt un feature al aplicatiei DESKTOP (IPC
+                nativ) — in browser panoul ar afisa doar "Indisponibil", zgomot
+                fara actiune posibila. */}
+            {typeof window !== "undefined" && !!window.desktopApi && <NotificationStatusPanel />}
             <EmailSettingsPanel />
             {isAdmin && <ApiAccessPanel />}
           </div>
