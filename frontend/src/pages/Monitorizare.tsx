@@ -540,8 +540,9 @@ export default function Monitorizare({
                         const iccjId = getIccjId(job);
                         const isDosar = job.kind === "dosar_soap";
                         // Source badge (parity across kinds): PortalJust rows get "PJ", ICCJ rows "ICCJ".
+                        // Culoare proprie (nu muted-pe-muted — ilizibil pe dark) + 10px, pereche cu ICCJ.
                         const pjBadge = (
-                          <span className="shrink-0 rounded border border-border bg-muted px-1 text-[9px] font-semibold uppercase leading-tight text-muted-foreground">
+                          <span className="shrink-0 rounded border border-sky-300 bg-sky-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-sky-700 dark:border-sky-700 dark:bg-sky-900/20 dark:text-sky-400">
                             PJ
                           </span>
                         );
@@ -642,7 +643,7 @@ export default function Monitorizare({
                               ) : job.kind === "iccj" ? (
                                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
                                   <span className="inline-flex min-w-0 items-center gap-1.5">
-                                    <span className="shrink-0 rounded border border-amber-300 bg-amber-50 px-1 text-[9px] font-semibold uppercase leading-tight text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                    <span className="shrink-0 rounded border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
                                       ICCJ
                                     </span>
                                     {iccjId ? (
