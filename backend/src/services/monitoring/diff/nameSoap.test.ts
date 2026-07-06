@@ -369,9 +369,9 @@ describe("diffNameSoap dedup anchor per baseline (v2.37.1, review cluster 1)", (
 
 describe("diffNameSoap title — monitored name vs found dossier number", () => {
   // The ${numar} in the title is the FOUND dossier, not the search term. With a
-  // known monitored name we show it in «…»; without it we mark the source so the
-  // number is not mistaken for the name. Mirrors the real case (dosar 2109/3/2023
-  // with a future sedinta => dosar_new fires).
+  // known monitored name we show it in plain quotes; without it we mark the
+  // source so the number is not mistaken for the name. Mirrors the real case
+  // (dosar 2109/3/2023 with a future sedinta => dosar_new fires).
   it("dosar_new: includes the monitored name when provided", () => {
     const out = diffNameSoap({
       prevSnapshot: null,
@@ -383,7 +383,7 @@ describe("diffNameSoap title — monitored name vs found dossier number", () => 
       nameNormalized: "EURO ASFALT SRL",
     });
     expect(out.alerts.find((x) => x.kind === "dosar_new")?.title).toBe(
-      "Dosar nou gasit pentru «EURO ASFALT SRL»: 2109/3/2023"
+      'Dosar nou gasit pentru "EURO ASFALT SRL": 2109/3/2023'
     );
   });
 
@@ -412,7 +412,7 @@ describe("diffNameSoap title — monitored name vs found dossier number", () => 
       nameNormalized: "EURO ASFALT SRL",
     });
     expect(out.alerts.find((x) => x.kind === "dosar_disappeared")?.title).toBe(
-      "Dosarul nu mai apare pentru «EURO ASFALT SRL»: 2109/3/2023"
+      'Dosarul nu mai apare pentru "EURO ASFALT SRL": 2109/3/2023'
     );
   });
 });
