@@ -30,6 +30,7 @@ import { api, monitoring } from "@/lib/api";
 vi.mock("@/lib/api", () => ({
   api: { ai: { analyze: vi.fn(), analyzeMulti: vi.fn() } },
   monitoring: { createDosar: vi.fn() },
+  me: { keyStatus: vi.fn().mockResolvedValue({ authMode: "desktop", tenantKeysConfigured: {} }) },
   MonitoringApiError: class MonitoringApiError extends Error {
     code: string;
     status?: number;
@@ -195,9 +196,14 @@ function findButtonByText(text: string): HTMLButtonElement {
 beforeEach(() => {
   sessionStorage.clear();
   scrollIntoViewMock.mockClear();
+  // Aceste teste caracterizeaza comportamentul BYOK (desktop): useTenantKeyStatus
+  // trebuie sa raporteze runtime desktop ca disponibilitatea AI sa vina din
+  // cheile locale pasate prin props, nu din /me/key-status.
+  (window as unknown as { desktopApi?: unknown }).desktopApi = {};
 });
 
 afterEach(() => {
+  (window as unknown as { desktopApi?: unknown }).desktopApi = undefined;
   unmount();
   // resetAllMocks limpezeste si implementation-urile mockResolvedValue lasate
   // de la testul precedent — fiecare test isi configureaza propriul comportament.

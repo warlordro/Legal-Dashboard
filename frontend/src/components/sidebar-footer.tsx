@@ -2,6 +2,7 @@ import { Moon, Sun, PanelLeftClose, PanelLeftOpen, Type, AArrowUp, AArrowDown, B
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import { useFontSize } from "@/hooks/useFontSize";
+import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import { Button } from "./ui/button";
 
 export interface SidebarFooterProps {
@@ -14,6 +15,12 @@ export interface SidebarFooterProps {
 export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfigureApiKey }: SidebarFooterProps) {
   const { theme, toggle } = useTheme();
   const fontSize = useFontSize();
+  const tenant = useTenantKeyStatus();
+  // Badge-ul de chei: pe desktop reflecta cheile locale (hasApiKey); in web
+  // reflecta cheile tenant (server). Loading/error -> fail-open ca sa nu aratam
+  // "Neconfigurat" fals cat timp starea se rezolva.
+  const effectiveHasKey =
+    tenant.state.state === "ready" ? tenant.hasTenantAiKey : tenant.state.state === "desktop" ? hasApiKey : true;
 
   return (
     <div className="border-t border-border p-2 space-y-1">
@@ -78,13 +85,13 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
           className={cn(
             "shrink-0",
             collapsed ? "h-[18px] w-[18px]" : "h-4 w-4",
-            hasApiKey ? "text-green-500" : "text-muted-foreground"
+            effectiveHasKey ? "text-green-500" : "text-muted-foreground"
           )}
         />
         {!collapsed && (
           <span className="flex items-center gap-2">
             Setari API
-            {hasApiKey ? (
+            {effectiveHasKey ? (
               <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
                 Activ
               </span>

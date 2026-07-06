@@ -221,6 +221,9 @@ const FIELDS_BY_CATEGORY: Record<RnpmSearchType, FieldSpec[]> = {
 
 export interface RnpmBulkSearchProps {
   captchaKey: string;
+  // Blocaj de captcha calculat de parinte (respecta tenant keys in web mode);
+  // in desktop = !captchaKey. Sursa unica de politica pentru toata pagina RNPM.
+  captchaBlocked: boolean;
   captchaProvider?: CaptchaProvider;
   fallback2CaptchaKey?: string;
   captchaMode?: CaptchaMode;
@@ -230,6 +233,7 @@ export interface RnpmBulkSearchProps {
 
 export function RnpmBulkSearch({
   captchaKey,
+  captchaBlocked,
   captchaProvider,
   fallback2CaptchaKey,
   captchaMode,
@@ -276,7 +280,7 @@ export function RnpmBulkSearch({
   };
 
   const handleStart = async () => {
-    if (!captchaKey) {
+    if (captchaBlocked) {
       onConfigureKey();
       return;
     }

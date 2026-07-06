@@ -44,6 +44,22 @@ export type TestEmailResult =
   | { ok: true }
   | { ok: false; reason: "mailer_disabled" | "no_recipient" | "send_failed" | string };
 
+// GET /api/v1/me/key-status — flag-uri boolean per cheie tenant (NU valorile).
+// `captcha` reflecta cheia PROVIDER-ULUI ACTIV al tenantului (2captcha SAU
+// capsolver, dupa captchaProvider), aliniat cu resolveCaptchaKeyForRoute.
+export interface TenantKeysConfigured {
+  anthropic: boolean;
+  openai: boolean;
+  google: boolean;
+  openrouter: boolean;
+  captcha: boolean;
+}
+
+export interface KeyStatusResult {
+  authMode: "web" | "desktop";
+  tenantKeysConfigured: TenantKeysConfigured;
+}
+
 export interface AdminUser extends MeProfile {}
 
 export interface PaginatedUsers {
@@ -252,6 +268,11 @@ export const me = {
   fxUsdEur: async (signal?: AbortSignal): Promise<MeFxRate> => {
     const res = await apiFetch("/api/v1/me/fx/usd-eur", { signal });
     return unwrapMonitoring<MeFxRate>(res);
+  },
+
+  keyStatus: async (signal?: AbortSignal): Promise<KeyStatusResult> => {
+    const res = await apiFetch("/api/v1/me/key-status", { signal });
+    return unwrapMonitoring<KeyStatusResult>(res);
   },
 };
 

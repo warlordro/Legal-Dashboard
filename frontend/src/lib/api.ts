@@ -583,6 +583,8 @@ export {
   type TenantCaptchaMode,
   type TenantKeyStatus,
   type TenantKeysResult,
+  type TenantKeysConfigured,
+  type KeyStatusResult,
   type MeBudgetItem,
   type MeBudgetResult,
   type MeFxRate,
