@@ -131,6 +131,10 @@ describe("rutare AI implicita (resolveEffectiveAiMode, v2.41.0)", () => {
   });
 
   it("desktop nu auto-detecteaza (ramane native fara alegere)", async () => {
+    // Cheia OpenRouter tenant EXISTA — testul demonstreaza ca desktop-ul o
+    // ignora (fara seed, testul ar trece si daca verificarea de mod ar lipsi).
+    enableTenantOpenrouter();
+
     const res = await buildApp().request("/api/v1/ai/settings");
     expect(await res.json()).toEqual({ mode: "native" });
   });

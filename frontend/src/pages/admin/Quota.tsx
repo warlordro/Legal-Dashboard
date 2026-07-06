@@ -340,7 +340,10 @@ export default function AdminQuota() {
                   </Button>
                 </div>
 
-                <form onSubmit={onUpsert} className="grid gap-3 md:grid-cols-[260px_140px_160px_auto] md:items-end">
+                {/* Limita = 1fr (absoarbe spatiul liber); coloana butonului
+                    ramane auto si se strange pe continut — altfel butonul
+                    Salveaza se intindea pe tot restul randului. */}
+                <form onSubmit={onUpsert} className="grid gap-3 md:grid-cols-[260px_140px_1fr_auto] md:items-end">
                   <div>
                     <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-feature">
                       Feature

@@ -210,16 +210,20 @@ export interface MeBudgetResult {
   fx: MeFxRate;
 }
 
+// Contract EXACT cu GET /api/v1/me/budget-warnings (backend/src/routes/me.ts):
+// { items: [{ feature, thresholdPct, firedAt, aboveSince, emailSentAt }] }.
+// Vechiul shape { warnings, aboveThresholdSince } nu a existat niciodata pe
+// backend si crapa pagina Consum (undefined.length in render).
 export interface MeBudgetWarning {
   feature: string;
   thresholdPct: number;
   firedAt: string;
+  aboveSince: string;
   emailSentAt: string | null;
-  aboveThresholdSince: string;
 }
 
 export interface MeBudgetWarningsResult {
-  warnings: MeBudgetWarning[];
+  items: MeBudgetWarning[];
 }
 
 export interface ListUsersOpts {
