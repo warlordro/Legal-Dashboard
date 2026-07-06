@@ -40,6 +40,42 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.42.0",
+    date: "7 Iulie 2026",
+    subtitle:
+      "Administrare completa a utilizatorilor din aplicatie (creare, import Excel, roluri, cote si granturi pe un buget AI unic), pagina Setari reorganizata pe taburi, consum per utilizator, audit exportabil si un val de finisaje UX: notificari toast, confirmari unificate, sortare pe coloane si dark mode fara scapari. Modul desktop ramane neschimbat.",
+    icon: <UsersIcon className="h-5 w-5" />,
+    borderColor: "border-l-indigo-500",
+    badgeClass: "bg-indigo-100 text-indigo-900 dark:bg-indigo-900/30 dark:text-indigo-300",
+    sections: [
+      {
+        title: "Utilizatori: creare, import si reactivare",
+        content:
+          "Adminul creeaza utilizatori direct din Setari -> Utilizatori (email + nume + rol) sau ii importa in masa dintr-un fisier Excel (template descarcabil, raport detaliat pe fiecare rand). Emailul e unic indiferent de majuscule; un cont sters se reactiveaza automat la re-adaugare, cu istoricul pastrat. Rolurile si statusurile se schimba din tabel, cu confirmare si cu protectie impotriva ramanerii fara niciun admin activ.",
+      },
+      {
+        title: "Setari pe taburi + buget AI unic",
+        content:
+          "Pagina Setari aduna totul intr-un singur loc: General, Utilizatori, Chei API, Cote, Granturi, Consum si Audit (taburile de administrare apar doar pentru admini). Limita de cheltuiala AI devine un buget unic per utilizator (analiza simpla si multi-model consuma din acelasi plafon), cu granturi extra temporare peste limita de baza si vedere globala a tuturor plafoanelor si granturilor active.",
+      },
+      {
+        title: "Consum per utilizator si audit exportabil",
+        content:
+          "Tabul Consum arata cheltuiala AI si captcha per utilizator, pe aceleasi cifre pe care le foloseste si limitarea efectiva, cu avertizari active si bugetul contului curent. Jurnalul de audit afiseaza emailul utilizatorilor (nu doar ID-uri), are filtre cu raspuns instant, paginare completa si raport XLSX descarcabil pe intervalul ales.",
+      },
+      {
+        title: "AI: Claude Sonnet 5 si prompturi separate",
+        content:
+          "Claude Sonnet 4.6 -> Sonnet 5 (nativ si pe OpenRouter). Prompturile de analiza au fost rescrise cu instructiuni de sistem separate de datele dosarului, includ caile de atac si campurile ICCJ si limiteaza predictibil volumul trimis catre modele.",
+      },
+      {
+        title: "Finisaje UX pe toata aplicatia",
+        content:
+          "Notificari toast pe operatiile reusite si pe erorile care inainte erau tacute (exporturile PDF din Changelog si Manual), dialoguri de confirmare unificate pentru toate actiunile ireversibile, sortare pe coloane in Utilizatori/Audit/Monitorizare/Consum, dropdown-uri tematizate corect pe dark mode, istoric functional cu bara laterala restransa, embleme PJ/ICCJ lizibile si titluri de alerta fara semne exotice in jurul numelui monitorizat.",
+      },
+    ],
+  },
+  {
     version: "v2.40.0",
     date: "2 Iulie 2026",
     subtitle:

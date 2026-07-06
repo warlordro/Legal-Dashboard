@@ -1,5 +1,37 @@
 # Changelog - Legal Dashboard
 
+## v2.42.0 - 2026-07-07
+
+Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode) si aliniere de design la repo-ul de referinta `fix/v2.41.0-web-ux`. Reimplementare a deltei v2.40.1 -> v2.42.0 dupa `GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`, in 8 MR-uri (MR 5-12) + fixuri post-livrare din testare reala. Modul desktop: zero impact.
+
+### Utilizatori: provisionare din UI (MR 5)
+
+Migratia `0040` adauga index unic NOCASE pe email + `canonicalizeEmail` ca UNIC normalizator (creare, import, seed, bridge oauth2). `POST /users` creeaza utilizatori individual (roluri creabile: doar Utilizator/Admin); import in masa din xlsx cu template generat server-side, parsare server-side (header exact, aliasuri de rol, dedup in fisier, duplicate din DB raportate per rand, cap 500 randuri / 512KB), insert tranzactional totul-sau-nimic. Guard last-admin numai pe adminii ACTIVI (un admin suspendat nu mai conteaza ca fallback). Post-livrare: un cont STERS nu mai blocheaza emailul pe veci — re-adaugarea (create sau import) REACTIVEAZA randul existent (acelasi id, nume/rol din input, password_hash curatat, audit `reactivated: true`); activ/suspendat raman duplicate.
+
+### Setari pe taburi (MR 6) + pool AI unic (MR 7)
+
+Pagina `/setari` pe taburi cu gating pe rol (General pentru toti; Utilizatori/Chei API/Cote/Granturi/Consum/Audit doar admin), tab activ in `?tab=` cu `replace:true`, paginile admin refolosite cu prop `embedded`. `useCurrentUser` rescris ca store partajat (`useSyncExternalStore`). Migratiile `0041` (consolidare `ai.single`+`ai.multi` -> pool unic "ai") si `0042` (backfill expirari legacy la UTC); `quotaGuard` aplica limita pe pool-ul unic (single + multi insumate); granturile si nelimitatul se exclud (422 `unlimited_budget`, baza include default-ul din env); `POST /grants/:id/revoke` + `/me/budget` pe "ai".
+
+### Consum per utilizator (MR 8) + audit utilizabil (MR 9)
+
+`GET /usage/overview` (AI + captcha per utilizator, EXACT aceleasi functii ca guard-urile — cifrele coincid cu enforcementul), tab Consum cu sub-taburi AI/Captcha, sortare client-side (`useClientSort` + `SortableTh`) si paginare client-side cu clamp sincronizat. Audit imbogatit cu emailul owner/actor (ID-ul brut in title, fallback ID/"system"), filtre pe pattern-ul corect (debounce cu flush pe Reseteaza, reset pagina inline, AbortController cu guards, refreshTick), paginare completa 25-200 si raport XLSX pe interval (`GET /audit/export`, 413 peste 10000 randuri, escape formula-injection inclusiv pe IP, nume fisier datat).
+
+### AI: Sonnet 5 + prompturi system/user (MR 10)
+
+Claude Sonnet 4.6 -> Sonnet 5 (`claude-sonnet-5`, OpenRouter `anthropic/claude-sonnet-5`, pricing 3/15 USD per 1M). `AiPrompt { system, user }` separa instructiunile de datele dosarului (fence cu escape pe obiect/parti/sedinte/analize/nume model); helper comun `dosar_data` cu cap 30 sedinte + total declarat, campurile ICCJ si caile de atac (`caiAtac`) incluse.
+
+### Finisaj UX Nivel 1 + 2 (MR 11-12)
+
+Chunk-reload la deploy (sessionStorage in try/catch), confirmari pe TOATE actiunile ireversibile prin `ConfirmProvider` (stergere cheie tenant, inchidere alerta, bulk dismiss cu count real, revoke-all tokens, rol/status, cota, grant — zero `window.confirm`), etichete umane din surse unice (`monitoringRunStatus`, `userLabels`, `quotaFeatureLabels`), dark mode fara scapari, sistem de toast-uri in-house (`ToastProvider`, cap 4 cu evictie FIFO, timere curatate la unmount) adoptat pe toate mutatiile + toast de EROARE pe exporturile PDF Changelog/Manual (inainte esuau silentios), fix critic `useDialog` (onClose in ref, efect doar pe `[open]` — nu mai fura focusul), modalele de export pe `useDialog`, sortare pe coloane in Users/Audit/Monitorizare pe etichetele umane.
+
+### Aliniere design la repo-ul de referinta + fixuri din testare
+
+Paritate vizuala cu `feat/v2.42.0-users-settings` din repo-ul original (taburi pill, structura paginilor Cote/Granturi cu vedere globala doar fara selectie + "Schimba utilizatorul", texte/empty states/confirmari identice), cu 4 extras pastrate deliberat: revocare grant din vederea globala, coloanele Limita efectiva/Sursa in Consum, pre-populare formular la Editeaza in Cote, panoul de chei tenant cu badge-uri. Fixuri: popover-ele de istoric functionale cu sidebar-ul restrans (position:fixed vs clipping), `Cache-Control` explicit pe static (no-cache pe HTML, immutable pe /assets — browserul nu mai serveste bundle-uri vechi dupa rebuild), select-urile native inlocuite cu componenta Select custom (popup tematizat pe dark), reset formular cota la schimbarea feature-ului, badge PJ lizibil (culoare proprie, 10px) si absent pe intrarile RNPM, titluri de alerta fara ghilimele in jurul numelui monitorizat (normalizare si pe titlurile istorice, la afisare), JobKindTabs la aceeasi inaltime cu inputul de cautare, panoul Notificari sistem ascuns in browser, aria-sort + aria-label pe coloanele sortabile.
+
+### Verificare
+
+Gate-uri 0.3 inainte de fiecare commit (biome, tsc backend + frontend, build, teste). 1665 teste backend (+ reactivare useri stersi, usage/overview, quotaGuard pool unic, import, audit export) si 326 teste frontend (+ toast timere, useDialog focus, useClientSort, Keys/ApiAccessPanel cu provideri). Claim-uri CodeRabbit verificate individual (acceptate cu dovezi sau respinse cu argumente); comparatie side-by-side cu repo-ul de referinta rulat local.
+
 ## v2.40.0 - 2026-07-02
 
 API programatic doar-citire (Piesa A din planul API + MCP): dosare + termene (PortalJust), ICCJ si RNPM devin accesibile din afara aplicatiei (scripturi, integrari, server MCP) prin Personal Access Tokens. Suprafata exista EXCLUSIV in web mode (`LEGAL_DASHBOARD_AUTH_MODE=web`); pe desktop nu se monteaza nimic — zero impact pe fluxul BYOK.

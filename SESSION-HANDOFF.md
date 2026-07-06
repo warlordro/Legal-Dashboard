@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.40.0 (2026-07-02)
+**Versiune curenta**: v2.42.0 (2026-07-07)
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -41,12 +41,20 @@ siguranta intrerup des sesiunea pe subiecte de auth/tastatura — continua pe Op
   SortableTh/useClientSort in Users/Audit/Monitorizare pe etichete umane + teste
   (toast timere, useDialog focus, Keys+ApiAccessPanel cu ToastProvider in render).
 
-**URMEAZA (in ordine):** bump v2.42.0 (checklist din CLAUDE.md: package.json root+backend+
-frontend + lockfile, changelog-entries.tsx, CHANGELOG, README, STATUS, DOCUMENTATIE,
-SECURITY entry pentru email unic/pool/last-admin/escape audit) + sanity grep versiune
-veche; apoi smoke local; apoi **review adversarial cu review-panel** pe branch (cerinta
-`/goal` activa). Stare gate-uri la a101e03: biome curat, tsc backend + frontend verzi,
-build ok, 326 teste frontend pass.
+**Post-MR 12 (2026-07-07, testare reala cu userul):** aliniere design la repo-ul de
+referinta (paritate cu `feat/v2.42.0-users-settings` din repo-ul original, cu 4 extras
+pastrate: revocare grant din vederea globala, coloane Limita efectiva/Sursa in Consum,
+pre-populare la Editeaza in Cote, panou chei tenant cu badge-uri) + fixuri din feedback:
+popover istoric pe sidebar colapsat (fixed vs clipping), Cache-Control explicit pe static
+(no-cache HTML / immutable assets — inchide "vad varianta veche" dupa rebuild), select-uri
+custom tematizate (dark mode), reactivare conturi sterse la re-adaugare (create + import),
+reset formular cota la schimbare feature, badge PJ lizibil si absent pe RNPM, titluri
+alerta fara ghilimele, JobKindTabs h-9, NotificationStatusPanel doar pe desktop.
+
+**BUMP v2.42.0 FACUT** (package.json x3 + lockfile, changelog-entries.tsx, CHANGELOG,
+README, STATUS, DOCUMENTATIE, SECURITY entry, CLAUDE.md header, card Versiune Aplicatie
+din Dashboard). **URMEAZA:** smoke local final; apoi **review adversarial cu
+review-panel** pe branch (cerinta `/goal` activa).
 
 ## Kill switches operationale
 
