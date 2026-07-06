@@ -321,6 +321,25 @@ export function purgeOldAuditLog(retentionDays = 90): number {
   return total;
 }
 
+// v2.42.0 (5.4): export xlsx — COUNT intai; peste cap NU incarcam niciun rand
+// (fara OOM pe intervale uriase), altfel randuri ASC cu LIMIT defensiv.
+export const AUDIT_EXPORT_MAX_ROWS = 10_000;
+
+export type AuditExportRows = { ok: true; rows: AuditRow[] } | { ok: false; total: number };
+
+export function listAuditEventsForExport(opts: { since?: string; until?: string } = {}): AuditExportRows {
+  const db = getDb();
+  const { sql: whereSql, params } = buildAuditWhere({ since: opts.since, until: opts.until });
+  const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`).get(...params) as { n: number };
+  if (totalRow.n > AUDIT_EXPORT_MAX_ROWS) {
+    return { ok: false, total: totalRow.n };
+  }
+  const rows = db
+    .prepare(`SELECT * FROM audit_log ${whereSql} ORDER BY ts ASC, id ASC LIMIT ?`)
+    .all(...params, AUDIT_EXPORT_MAX_ROWS) as AuditRow[];
+  return { ok: true, rows };
+}
+
 export function listAuditEvents(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {
   const db = getDb();
   const { sql: whereSql, params } = buildAuditWhere(opts);

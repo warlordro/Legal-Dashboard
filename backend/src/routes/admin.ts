@@ -18,7 +18,8 @@ import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
 import { recordAudit } from "../db/auditRepository.ts";
-import { listAuditEvents } from "../db/auditRepository.ts";
+import { AUDIT_EXPORT_MAX_ROWS, listAuditEvents, listAuditEventsForExport } from "../db/auditRepository.ts";
+import { AUDIT_SYSTEM_PLACEHOLDER, buildAuditXlsx } from "../services/auditExport.ts";
 import {
   getTenantKeys,
   isTenantKeyField,
@@ -534,6 +535,24 @@ adminRouter.get("/audit", (c) => {
       },
     });
   }
+  // v2.42.0 (5.4): enrichment — owner/actor cu EMAIL (lookup batch-uit pe
+  // id-uri distincte; ID-ul brut ramane in raspuns pentru title). NULL =
+  // "system" — acelasi placeholder ca in raportul xlsx.
+  const userIds = new Set<string>();
+  for (const r of result.rows) {
+    if (r.owner_id !== null) userIds.add(r.owner_id);
+    if (r.actor_id !== null) userIds.add(r.actor_id);
+  }
+  const emailById = new Map<string, string>();
+  for (const uid of userIds) {
+    const u = getUserById(uid);
+    if (u !== null) emailById.set(uid, u.email);
+  }
+  const emailOf = (uid: string | null): string => {
+    if (uid === null) return AUDIT_SYSTEM_PLACEHOLDER;
+    return emailById.get(uid) ?? uid;
+  };
+
   return c.json(
     ok(
       {
@@ -542,6 +561,8 @@ adminRouter.get("/audit", (c) => {
           ts: r.ts,
           ownerId: r.owner_id,
           actorId: r.actor_id,
+          ownerEmail: emailOf(r.owner_id),
+          actorEmail: emailOf(r.actor_id),
           action: r.action,
           targetKind: r.target_kind,
           targetId: r.target_id,
@@ -559,6 +580,45 @@ adminRouter.get("/audit", (c) => {
     ),
     200
   );
+});
+
+// v2.42.0 (5.4): raportul xlsx pe intervalul filtrelor. COUNT intai — peste
+// AUDIT_EXPORT_MAX_ROWS raspundem 413 FARA sa incarcam randuri. Evenimentul
+// de audit al exportului se scrie DUPA generarea reusita.
+const AuditExportQuerySchema = z
+  .object({
+    since: z.string().datetime({ offset: true }).optional(),
+    until: z.string().datetime({ offset: true }).optional(),
+  })
+  .strict();
+
+adminRouter.get("/audit/export", async (c) => {
+  const parsed = AuditExportQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
+  if (!parsed.success) {
+    return c.json(fail("invalid_query", "Query invalid", c, parsed.error.issues), 400);
+  }
+  const { since, until } = parsed.data;
+  const collected = listAuditEventsForExport({ since, until });
+  if (!collected.ok) {
+    return c.json(
+      fail(
+        "too_many_rows",
+        `Intervalul contine ${collected.total} randuri; maximul exportabil este ${AUDIT_EXPORT_MAX_ROWS}. Ingusteaza intervalul.`,
+        c
+      ),
+      413
+    );
+  }
+  const buf = await buildAuditXlsx(collected.rows, { since: since ?? null, until: until ?? null });
+  recordAudit(c, "admin.audit.export", {
+    targetKind: "audit_log",
+    detail: { since: since ?? null, until: until ?? null, rows: collected.rows.length },
+  });
+  c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  c.header("Content-Length", String(buf.byteLength));
+  c.header("Content-Disposition", 'attachment; filename="raport-audit.xlsx"');
+  c.header("Cache-Control", "no-store");
+  return c.body(new Uint8Array(buf) as unknown as ArrayBuffer);
 });
 
 // ---------- Tenant API keys ----------

@@ -74,6 +74,10 @@ export interface AuditEvent {
   ts: string;
   ownerId: string | null;
   actorId: string | null;
+  // v2.42.0 (5.4): enrichment server-side — email pentru useri cunoscuti,
+  // "system" pentru NULL, id-ul brut ca fallback.
+  ownerEmail: string;
+  actorEmail: string;
   action: string;
   targetKind: string | null;
   targetId: string | null;

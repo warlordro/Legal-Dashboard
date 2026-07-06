@@ -1,10 +1,12 @@
 import { Fragment, useEffect, useState } from "react";
-import { ClipboardList, RefreshCw, Filter, ChevronDown, ChevronRight } from "lucide-react";
+import { ClipboardList, Download, RefreshCw, Filter, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { admin, type AuditEvent } from "@/lib/api";
+import { TablePagination } from "@/components/table-pagination";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { admin, fetchBlobOrThrow, triggerBlobDownload, type AuditEvent } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
@@ -16,6 +18,11 @@ const OUTCOME_OPTIONS: ReadonlyArray<{ value: "all" | "ok" | "denied" | "error";
   { value: "denied", label: "Refuzat" },
   { value: "error", label: "Eroare" },
 ];
+
+// v2.42.0 (5.4/6.5): outcome-ul se afiseaza tradus, in badge SI in sumar.
+function outcomeLabel(outcome: "ok" | "denied" | "error"): string {
+  return OUTCOME_OPTIONS.find((o) => o.value === outcome)?.label ?? outcome;
+}
 
 // Convert a YYYY-MM-DD date input (interpreted in the user's local timezone)
 // to an ISO string. Matches the convention used by Alerts.tsx so admins
@@ -61,44 +68,29 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const loadAudit = async (filters: {
-    page: number;
-    action: string;
-    ownerId: string;
-    actorId: string;
-    targetKind: string;
-    outcome: "all" | "ok" | "denied" | "error";
-    from: string;
-    to: string;
-  }) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await admin.listAudit({
-        page: filters.page,
-        pageSize: PAGE_SIZE,
-        // actionLike supports prefix/substring matching (admin.users.*); plain
-        // `action` requires an exact value, which is rarely what an auditor wants.
-        actionLike: filters.action || undefined,
-        ownerId: filters.ownerId || undefined,
-        actorId: filters.actorId || undefined,
-        targetKind: filters.targetKind || undefined,
-        outcome: filters.outcome === "all" ? undefined : filters.outcome,
-        since: localDateInputToIso(filters.from, false),
-        until: localDateInputToIso(filters.to, true),
-      });
-      setRows(result.rows);
-      setTotal(result.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
-    } finally {
-      setLoading(false);
-    }
+  // v2.42.0 (6.7): pattern-ul corect de filtre + fetch.
+  //   - inputurile text merg prin debounce 300ms cu FLUSH expus ("Reseteaza"
+  //     publica imediat "" pe toate — altfel fetch-ul pleaca cu filtrele vechi
+  //     inca 300ms);
+  //   - resetarea paginii se face INLINE in handlerele de input, NU intr-un
+  //     efect paralel cu aceleasi deps (dubla fetch-ul si lasa raspunsuri
+  //     stale sa suprascrie);
+  //   - efectul de fetch are AbortController cu cleanup + guards pe
+  //     then/catch/finally — un raspuns lent nu suprascrie unul proaspat;
+  //   - reincarcarea manuala = refreshTick numarat in deps-ul ACELUIASI efect.
+  const [debouncedAction, flushAction] = useDebouncedValue(action);
+  const [debouncedOwnerId, flushOwnerId] = useDebouncedValue(ownerId);
+  const [debouncedActorId, flushActorId] = useDebouncedValue(actorId);
+  const [debouncedTargetKind, flushTargetKind] = useDebouncedValue(targetKind);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const resetPageInline = () => {
+    setPage(1);
+    setExpanded(new Set());
   };
 
-  const load = () => loadAudit({ page, action, ownerId, actorId, targetKind, outcome, from, to });
-
   useEffect(() => {
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
     admin
@@ -107,29 +99,66 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
         pageSize: PAGE_SIZE,
         // actionLike supports prefix/substring matching (admin.users.*); plain
         // `action` requires an exact value, which is rarely what an auditor wants.
-        actionLike: action || undefined,
-        ownerId: ownerId || undefined,
-        actorId: actorId || undefined,
-        targetKind: targetKind || undefined,
+        actionLike: debouncedAction || undefined,
+        ownerId: debouncedOwnerId || undefined,
+        actorId: debouncedActorId || undefined,
+        targetKind: debouncedTargetKind || undefined,
         outcome: outcome === "all" ? undefined : outcome,
         since: localDateInputToIso(from, false),
         until: localDateInputToIso(to, true),
+        signal: ac.signal,
       })
       .then((result) => {
+        if (ac.signal.aborted) return;
         setRows(result.rows);
         setTotal(result.total);
       })
       .catch((err: unknown) => {
+        if (ac.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
       })
-      .finally(() => setLoading(false));
-  }, [action, actorId, from, outcome, ownerId, page, targetKind, to]);
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [debouncedAction, debouncedActorId, debouncedOwnerId, debouncedTargetKind, from, outcome, page, to, refreshTick]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii si expanded depinde explicit de filtrele vizibile.
-  useEffect(() => {
-    setPage(1);
-    setExpanded(new Set());
-  }, [action, actorId, from, outcome, ownerId, targetKind, to]);
+  const onResetFilters = () => {
+    setAction("");
+    setOwnerId("");
+    setActorId("");
+    setTargetKind("");
+    setOutcome("all");
+    setFrom("");
+    setTo("");
+    // Flush: fetch-ul imediat pleaca cu filtrele goale, nu cu cele vechi.
+    flushAction("");
+    flushOwnerId("");
+    flushActorId("");
+    flushTargetKind("");
+    resetPageInline();
+  };
+
+  // v2.42.0 (5.4): raportul xlsx pe intervalul filtrelor curente.
+  const [exporting, setExporting] = useState(false);
+  const onExport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      const since = localDateInputToIso(from, false);
+      const until = localDateInputToIso(to, true);
+      if (since) params.set("since", since);
+      if (until) params.set("until", until);
+      const qs = params.toString();
+      const blob = await fetchBlobOrThrow(`/api/v1/admin/audit/export${qs ? `?${qs}` : ""}`);
+      triggerBlobDownload(blob, "raport-audit.xlsx");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la generarea raportului.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const toggleExpand = (id: number) => {
     setExpanded((prev) => {
@@ -146,7 +175,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     if (ownerId) parts.push(`owner=${ownerId}`);
     if (actorId) parts.push(`actor=${actorId}`);
     if (targetKind) parts.push(`tinta=${targetKind}`);
-    if (outcome !== "all") parts.push(`rezultat=${outcome}`);
+    if (outcome !== "all") parts.push(`rezultat=${outcomeLabel(outcome)}`);
     return parts.join(" · ");
   })();
 
@@ -163,10 +192,16 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
               <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
             </div>
           )}
-          <Button variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={onExport} disabled={exporting || loading}>
+              <Download className="h-4 w-4" />
+              {exporting ? "Se genereaza..." : "Descarca raport"}
+            </Button>
+            <Button variant="outline" onClick={() => setRefreshTick((t) => t + 1)} disabled={loading}>
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              Reincarca
+            </Button>
+          </div>
         </div>
 
         <Card>
@@ -181,32 +216,50 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
               <input
                 type="text"
                 value={action}
-                onChange={(e) => setAction(e.target.value)}
+                onChange={(e) => {
+                  setAction(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Actiune (ex: admin.users)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={ownerId}
-                onChange={(e) => setOwnerId(e.target.value)}
+                onChange={(e) => {
+                  setOwnerId(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Owner ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={actorId}
-                onChange={(e) => setActorId(e.target.value)}
+                onChange={(e) => {
+                  setActorId(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Actor ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={targetKind}
-                onChange={(e) => setTargetKind(e.target.value)}
+                onChange={(e) => {
+                  setTargetKind(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Tip tinta (ex: user)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
-              <Select value={outcome} onValueChange={(v) => setOutcome(v as typeof outcome)}>
+              <Select
+                value={outcome}
+                onValueChange={(v) => {
+                  setOutcome(v as typeof outcome);
+                  resetPageInline();
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Rezultat" />
                 </SelectTrigger>
@@ -221,30 +274,24 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
               <input
                 type="date"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  resetPageInline();
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 title="De la (inclusiv)"
               />
               <input
                 type="date"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  resetPageInline();
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 title="Pana la (inclusiv)"
               />
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setAction("");
-                  setOwnerId("");
-                  setActorId("");
-                  setTargetKind("");
-                  setOutcome("all");
-                  setFrom("");
-                  setTo("");
-                }}
-                className="md:col-span-1"
-              >
+              <Button variant="ghost" onClick={onResetFilters} className="md:col-span-1">
                 Reseteaza
               </Button>
             </div>
@@ -301,10 +348,15 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                           </td>
                           <td className="px-3 py-2 align-top font-mono text-xs">{row.action}</td>
                           <td className="px-3 py-2 align-top">
-                            <Badge variant={outcomeVariant(row.outcome)}>{row.outcome}</Badge>
+                            <Badge variant={outcomeVariant(row.outcome)}>{outcomeLabel(row.outcome)}</Badge>
                           </td>
-                          <td className="px-3 py-2 align-top font-mono text-xs">{row.ownerId ?? "-"}</td>
-                          <td className="px-3 py-2 align-top font-mono text-xs">{row.actorId ?? "-"}</td>
+                          {/* v2.42.0 (5.4): EMAIL vizibil, ID-ul brut in title. */}
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.ownerId ?? "system"}>
+                            {row.ownerEmail}
+                          </td>
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.actorId ?? "system"}>
+                            {row.actorEmail}
+                          </td>
                           <td className="px-3 py-2 align-top text-xs">
                             {row.targetKind ? (
                               <span className="font-mono">
@@ -356,21 +408,20 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
           </CardContent>
         </Card>
 
-        <div className="flex items-center justify-between">
-          <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
-            Inapoi
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Pagina {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Inainte
-          </Button>
-        </div>
+        {/* v2.42.0 (5.4): paginare completa. Componenta e 0-based; state-ul
+            paginii ramane 1-based (contractul API). */}
+        <TablePagination
+          page={page - 1}
+          totalPages={totalPages}
+          pageSize={PAGE_SIZE}
+          onPageChange={(p) => {
+            setPage(p + 1);
+            setExpanded(new Set());
+          }}
+          onPageSizeChange={() => {}}
+          pageSizes={[PAGE_SIZE]}
+          disabled={loading}
+        />
       </div>
     </div>
   );

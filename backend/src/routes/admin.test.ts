@@ -984,6 +984,82 @@ describe("v2.42.0 — import utilizatori (template + upload)", () => {
 });
 
 // ---------------------------------------------------------------------------
+// v2.42.0 (5.4) — audit: enrichment email + export xlsx
+// ---------------------------------------------------------------------------
+
+describe("v2.42.0 (5.4) — audit enrichment + export", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("GET /audit imbogateste owner/actor cu email; NULL devine 'system'", async () => {
+    const app = buildApp();
+    // Un eveniment cu owner cunoscut + unul de sistem.
+    await app.request("/api/v1/admin/users/local/status", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "active" }),
+    });
+    const { recordAudit } = await import("../db/auditRepository.ts");
+    recordAudit(null, "system.test_event", { detail: {} });
+
+    const res = await app.request("/api/v1/admin/audit?pageSize=50");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { rows: Array<{ action: string; ownerEmail: string; actorEmail: string; ownerId: string | null }> };
+    };
+    const known = body.data.rows.find((r) => r.action === "admin.users.update_status");
+    expect(known?.ownerEmail).toBe("local@desktop");
+    const system = body.data.rows.find((r) => r.action === "system.test_event");
+    expect(system?.ownerEmail).toBe("system");
+    expect(system?.ownerId).toBeNull();
+  });
+
+  it("GET /audit/export cu interval invalid -> 400", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export?since=nu-e-data");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /audit/export intoarce xlsx si scrie audit DUPA generare", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("spreadsheetml");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect([bytes[0], bytes[1]]).toEqual([0x50, 0x4b]);
+    expect(getAuditEvents({ action: "admin.audit.export" })).toHaveLength(1);
+  });
+
+  it("GET /audit/export -> 413 too_many_rows peste cap, FARA sa incarce randuri", async () => {
+    // Insert bulk direct — 10_001 randuri intr-o singura tranzactie.
+    const db = getDb();
+    const stmt = db.prepare(
+      `INSERT INTO audit_log (owner_id, actor_id, action, outcome, detail_json)
+       VALUES ('local', 'local', 'bulk.test', 'ok', '{}')`
+    );
+    db.transaction(() => {
+      for (let i = 0; i < 10_001; i++) stmt.run();
+    })();
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export");
+    expect(res.status).toBe(413);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("too_many_rows");
+    // Evenimentul de export NU s-a scris (generarea nu a avut loc).
+    expect(getAuditEvents({ action: "admin.audit.export" })).toHaveLength(0);
+  });
+
+  it("GET /audit/export e gate-uit pe admin (403 pentru user)", async () => {
+    insertUser({ id: "u-audit-plain", email: "ap@x", displayName: "AP" });
+    const app = buildApp("u-audit-plain");
+    const res = await app.request("/api/v1/admin/audit/export");
+    expect(res.status).toBe(403);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // v2.42.0 (5.3) — GET /usage/overview
 // ---------------------------------------------------------------------------
 
