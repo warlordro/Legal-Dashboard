@@ -1,6 +1,7 @@
 // PR-8 admin router — gate, CRUD, audit semantics.
 
 import Database from "better-sqlite3";
+import ExcelJS from "exceljs";
 import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
@@ -12,7 +13,7 @@ import { meRouter } from "./me.ts";
 import { ownerContext } from "../middleware/owner.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
-import { insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
+import { getUserByEmail, insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
 import { listOverridesForUser } from "../db/userQuotaRepository.ts";
 import { listGrantsForUser, sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
@@ -751,5 +752,177 @@ describe("/api/v1/admin/quota/overrides + /grants/active (vederi globale)", () =
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.data).toEqual({ grants: [], truncated: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 (4.2/4.3/4.4) — creare individuala, import xlsx, guard last-admin
+// ---------------------------------------------------------------------------
+
+async function importXlsxOf(rows: (string | null)[][]): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Utilizatori");
+  for (const row of rows) ws.addRow(row);
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out as ArrayBuffer);
+}
+
+describe("v2.42.0 — POST /users (creare individuala)", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("creeaza userul cu email canonicalizat si scrie audit", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "  Alice@Firma.RO ", displayName: "Alice", role: "user" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await jsonOf(res)) as { data: { email: string; role: string; status: string } };
+    expect(body.data).toMatchObject({ email: "alice@firma.ro", role: "user", status: "active" });
+
+    const audits = getAuditEvents({ action: "admin.users.create" });
+    expect(audits.some((a) => a.outcome === "ok")).toBe(true);
+  });
+
+  it("duplicat (chiar cu alt casing) -> 409 email_exists cu statusul contului in mesaj", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-dub", email: "dub@firma.ro", displayName: "Dub" });
+    updateUserStatus("u-dub", "suspended");
+
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "DUB@FIRMA.RO", displayName: "Alt", role: "user" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("email_exists");
+    expect(body.error?.message).toContain("suspendat");
+  });
+
+  it("rolurile necreabile (support) sunt respinse de schema", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "s@firma.ro", displayName: "S", role: "support" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("e gate-uit pe admin (403 pentru user)", async () => {
+    insertUser({ id: "u-plain", email: "plain@firma.ro", displayName: "Plain" });
+    const app = buildApp("u-plain");
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "x@firma.ro", displayName: "X", role: "user" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("v2.42.0 — import utilizatori (template + upload)", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("GET /users/import-template intoarce un xlsx attachment", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/import-template");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("spreadsheetml");
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // xlsx = arhiva ZIP.
+    expect([bytes[0], bytes[1]]).toEqual([0x50, 0x4b]);
+  });
+
+  it("importa randurile valide si raporteaza duplicate din DB + randuri invalide", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-exist", email: "existent@firma.ro", displayName: "Existent" });
+
+    const buf = await importXlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      ["nou1@firma.ro", "Nou 1", "Utilizator"],
+      ["EXISTENT@firma.ro", "Dublura DB", ""],
+      ["nou2@firma.ro", "Nou 2", "Admin"],
+      ["rol-rau@firma.ro", "Rol rau", "sef"],
+    ]);
+    const res = await app.request("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: new Uint8Array(buf),
+    });
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: {
+        created: Array<{ rowNumber: number; email: string; role: string }>;
+        issues: Array<{ rowNumber: number; code: string; message: string }>;
+        summary: { created: number; duplicates: number; invalid: number };
+      };
+    };
+    expect(body.data.summary).toEqual({ created: 2, duplicates: 1, invalid: 1 });
+    expect(body.data.created.map((r) => r.email)).toEqual(["nou1@firma.ro", "nou2@firma.ro"]);
+    // Issues sortate pe rowNumber.
+    expect(body.data.issues.map((i) => [i.rowNumber, i.code])).toEqual([
+      [3, "duplicate_in_db"],
+      [5, "invalid_row"],
+    ]);
+    // Userii chiar exista, cu rolul cerut.
+    expect(getUserByEmail("nou2@firma.ro")?.role).toBe("admin");
+    // Audit: per user creat + sumar.
+    expect(getAuditEvents({ action: "admin.users.create" }).length).toBe(2);
+    expect(getAuditEvents({ action: "admin.users.import" }).length).toBe(1);
+  });
+
+  it("fisier care nu e xlsx -> 400 invalid_file", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: "email,nume\na@b.c,Test",
+    });
+    expect(res.status).toBe(400);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("invalid_file");
+  });
+});
+
+describe("v2.42.0 (4.4) — last-admin numara doar adminii ACTIVI", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("singurul alt admin e suspendat -> self-demote refuzat cu 409 last_admin", async () => {
+    insertUser({ id: "u-adm2", email: "adm2@firma.ro", displayName: "Admin 2", role: "admin" });
+    updateUserStatus("u-adm2", "suspended");
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/local/role", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role: "user" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("last_admin");
+    expect(getUserById("local")?.role).toBe("admin");
+  });
+
+  it("cu un alt admin ACTIV, self-demote e permis", async () => {
+    insertUser({ id: "u-adm2", email: "adm2@firma.ro", displayName: "Admin 2", role: "admin" });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/local/role", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role: "user" }),
+    });
+    expect(res.status).toBe(200);
+    expect(getUserById("local")?.role).toBe("user");
   });
 });

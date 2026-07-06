@@ -31,15 +31,25 @@ import {
 import { requireRole } from "../middleware/requireRole.ts";
 import { QUOTA_FEATURES } from "../middleware/quotaGuard.ts";
 import {
+  canonicalizeEmail,
+  CREATABLE_USER_ROLES,
+  getUserByEmail,
   getUserById,
+  insertUser,
+  insertUsersBulk,
+  isUniqueEmailViolation,
   listUsers,
   updateUserRole,
   updateUserStatus,
   USER_ROLES,
   USER_STATUSES,
+  type BulkUserInput,
+  type CreatableUserRole,
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
+import { buildImportTemplate, MAX_IMPORT_BYTES, parseUserImport, type ImportIssue } from "../services/userImport.ts";
+import { randomUUID } from "node:crypto";
 import {
   ALL_OVERRIDES_CAP,
   deleteOverride,
@@ -84,6 +94,22 @@ const UpdateRoleSchema = z
     role: z.enum(USER_ROLES as readonly [UserRole, ...UserRole[]]),
   })
   .strict();
+
+// v2.42.0 (4.2): creare individuala — email-ul se canonicalizeaza in schema
+// (acelasi normalizator ca importul, seed-ul si bridge-ul oauth2).
+const CreateUserSchema = z
+  .object({
+    email: z.string().trim().max(254).email().transform(canonicalizeEmail),
+    displayName: z.string().trim().min(1).max(120),
+    role: z.enum(CREATABLE_USER_ROLES as readonly [CreatableUserRole, ...CreatableUserRole[]]),
+  })
+  .strict();
+
+const USER_STATUS_RO: Record<UserStatus, string> = {
+  active: "activ",
+  suspended: "suspendat",
+  deleted: "sters",
+};
 
 const UpdateStatusSchema = z
   .object({
@@ -211,6 +237,155 @@ adminRouter.get("/users", (c) => {
   );
 });
 
+// v2.42.0 (4.2): creare individuala. Duplicatul include statusul contului
+// existent in mesaj ca adminul sa inteleaga imediat de ce (ex. cont "sters"
+// care inca ocupa emailul).
+adminRouter.post("/users", limitAdminBody, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  const parsed = CreateUserSchema.safeParse(body);
+  if (!parsed.success) {
+    return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
+  }
+
+  const existing = getUserByEmail(parsed.data.email);
+  if (existing !== null) {
+    recordAudit(c, "admin.users.create", {
+      outcome: "denied",
+      targetKind: "user",
+      targetId: existing.id,
+      detail: { reason: "email_exists", status: existing.status },
+    });
+    return c.json(
+      fail("email_exists", `Exista deja un cont cu acest email (status: ${USER_STATUS_RO[existing.status]}).`, c),
+      409
+    );
+  }
+
+  try {
+    const user = insertUser({
+      id: randomUUID(),
+      email: parsed.data.email,
+      displayName: parsed.data.displayName,
+      role: parsed.data.role,
+    });
+    recordAudit(c, "admin.users.create", {
+      targetKind: "user",
+      targetId: user.id,
+      detail: { email: user.email, role: user.role },
+    });
+    return c.json(ok(toUserDto(user), c), 201);
+  } catch (err) {
+    // Race pe unicitate (alt admin a creat acelasi email intre check si insert).
+    if (isUniqueEmailViolation(err)) {
+      return c.json(fail("email_exists", "Exista deja un cont cu acest email.", c), 409);
+    }
+    throw err;
+  }
+});
+
+// v2.42.0 (4.3): template-ul de import — xlsx generat server-side. Ruta e
+// inregistrata inainte de /users/:id (path static vs dinamic).
+adminRouter.get("/users/import-template", async (c) => {
+  const buf = await buildImportTemplate();
+  c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  c.header("Content-Length", String(buf.byteLength));
+  c.header("Content-Disposition", 'attachment; filename="model-import-utilizatori.xlsx"');
+  c.header("Cache-Control", "no-store");
+  // Uint8Array e BodyInit valid la runtime; tipurile Hono nu il includ in Data.
+  return c.body(new Uint8Array(buf) as unknown as ArrayBuffer);
+});
+
+const limitImportBody = bodyLimit({
+  maxSize: MAX_IMPORT_BYTES,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Fisierul depaseste limita de 512KB", c), 413),
+});
+
+// v2.42.0 (4.3): import xlsx (octet-stream raw). Parsarea e integral in
+// services/userImport.ts; aici: pre-check duplicate in DB, insert tranzactional
+// (totul sau nimic la coliziune concurenta) si audit best-effort.
+adminRouter.post("/users/import", limitImportBody, async (c) => {
+  const buffer = Buffer.from(await c.req.arrayBuffer());
+  const parsedFile = await parseUserImport(buffer);
+  if (!parsedFile.ok) {
+    return c.json(fail(parsedFile.code, parsedFile.message, c), parsedFile.code === "too_many_rows" ? 413 : 400);
+  }
+
+  const issues: ImportIssue[] = [...parsedFile.issues];
+  const toCreate: (BulkUserInput & { rowNumber: number })[] = [];
+  for (const row of parsedFile.rows) {
+    const existing = getUserByEmail(row.email);
+    if (existing !== null) {
+      issues.push({
+        rowNumber: row.rowNumber,
+        email: row.email,
+        code: "duplicate_in_db",
+        message: `Exista deja un cont cu acest email (status: ${USER_STATUS_RO[existing.status]}).`,
+      });
+      continue;
+    }
+    toCreate.push({
+      id: randomUUID(),
+      email: row.email,
+      displayName: row.displayName,
+      role: row.role,
+      rowNumber: row.rowNumber,
+    });
+  }
+
+  if (toCreate.length > 0) {
+    try {
+      insertUsersBulk(toCreate);
+    } catch (err) {
+      // Coliziune concurenta pe unicitate: tranzactia a facut rollback complet,
+      // deci raportul nu minte — nimic nu a fost creat.
+      if (isUniqueEmailViolation(err)) {
+        return c.json(
+          fail("import_failed", "Coliziune de email in timpul importului — nimic nu a fost creat. Reincearca.", c),
+          409
+        );
+      }
+      throw err;
+    }
+  }
+
+  const summary = {
+    created: toCreate.length,
+    duplicates: issues.filter((i) => i.code === "duplicate_in_file" || i.code === "duplicate_in_db").length,
+    invalid: issues.filter((i) => i.code === "invalid_row").length,
+  };
+
+  // Userii sunt DEJA creati — un esec de audit nu are voie sa intoarca 500.
+  try {
+    for (const row of toCreate) {
+      recordAudit(c, "admin.users.create", {
+        targetKind: "user",
+        targetId: row.id,
+        detail: { email: row.email, role: row.role, source: "import" },
+      });
+    }
+    recordAudit(c, "admin.users.import", {
+      targetKind: "user",
+      targetId: "bulk",
+      detail: summary,
+    });
+  } catch (err) {
+    console.error("[userImport] audit failed after successful import:", err);
+  }
+
+  issues.sort((a, b) => a.rowNumber - b.rowNumber);
+  return c.json(
+    ok(
+      {
+        created: toCreate.map((row) => ({ rowNumber: row.rowNumber, email: row.email, role: row.role })),
+        issues,
+        summary,
+      },
+      c
+    ),
+    200
+  );
+});
+
 adminRouter.get("/users/:id", (c) => {
   const id = c.req.param("id");
   const user = getUserById(id);
@@ -235,10 +410,11 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
 
   // Self-demotion guardrail: refuse to remove the last admin's own role. Avoids
   // the foot-gun where an admin demotes themselves and locks the org out of
-  // admin surfaces. If multiple admins exist the demotion is allowed because
-  // the org still has at least one admin.
+  // admin surfaces. v2.42.0 (4.4): conteaza DOAR adminii ACTIVI — un admin
+  // suspendat nu poate prelua administrarea, deci a-l numara ar permite
+  // lockout total.
   if (id === getOwnerId(c) && before.role === "admin" && parsed.data.role !== "admin") {
-    const otherAdmins = listUsers({ role: "admin" }).rows.filter((u) => u.id !== id);
+    const otherAdmins = listUsers({ role: "admin", status: "active" }).rows.filter((u) => u.id !== id);
     if (otherAdmins.length === 0) {
       recordAudit(c, "admin.users.demote_blocked", {
         outcome: "denied",

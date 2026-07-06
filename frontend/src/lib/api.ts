@@ -561,6 +561,11 @@ export {
 export {
   me,
   admin,
+  fetchBlobOrThrow,
+  triggerBlobDownload,
+  type CreateUserInput,
+  type UserImportIssue,
+  type ImportUsersResult,
   type UserRole,
   type UserStatus,
   type MeProfile,

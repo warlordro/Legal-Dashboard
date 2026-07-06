@@ -16,7 +16,7 @@ import {
 import { signAuthToken, verifyAuthToken } from "../auth/jwt.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { revokeJti } from "../db/jwtDenylistRepository.ts";
-import { getUserByEmail, getUserById } from "../db/userRepository.ts";
+import { canonicalizeEmail, getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import { hashEmail } from "../util/auditSanitize.ts";
@@ -230,8 +230,10 @@ authRouter.post("/oauth2/sync", (c) => {
   // fallback. Fail-closed pe ambiguitate: daca ambele sosesc cu valori
   // diferite (dupa trim/lowercase), refuzam — o divergenta intre ele inseamna
   // proxy misconfigurat sau request forjat, nu o identitate de incredere.
-  const forwardedEmail = (c.req.header("x-forwarded-email") ?? "").trim().toLowerCase();
-  const authRequestEmail = (c.req.header("x-auth-request-email") ?? "").trim().toLowerCase();
+  // v2.42.0 (4.1): acelasi canonicalizator ca la creare/import/seed — o
+  // divergenta intre cai ar produce useri care nu se pot loga.
+  const forwardedEmail = canonicalizeEmail(c.req.header("x-forwarded-email") ?? "");
+  const authRequestEmail = canonicalizeEmail(c.req.header("x-auth-request-email") ?? "");
   if (forwardedEmail !== "" && authRequestEmail !== "" && forwardedEmail !== authRequestEmail) {
     recordAudit(null, "auth.oauth2.sync", {
       outcome: "denied",

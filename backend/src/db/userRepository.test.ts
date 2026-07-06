@@ -7,9 +7,12 @@ import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  canonicalizeEmail,
   getUserByEmail,
   getUserById,
   insertUser,
+  insertUsersBulk,
+  isUniqueEmailViolation,
   listUsers,
   updateUserRole,
   updateUserStatus,
@@ -135,5 +138,97 @@ describe("userRepository — write paths", () => {
     expect(() => insertUser({ id: "u-2", email: "x@y", displayName: "X", role: "owner" as never })).toThrow(
       /invalid role/
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 (4.1) — email canonic unic + bulk insert
+// ---------------------------------------------------------------------------
+
+describe("userRepository — canonicalizeEmail", () => {
+  it("face trim + lowercase", () => {
+    expect(canonicalizeEmail("  Alice@Example.TEST  ")).toBe("alice@example.test");
+  });
+
+  it("e idempotent", () => {
+    expect(canonicalizeEmail(canonicalizeEmail("A@B.C"))).toBe("a@b.c");
+  });
+});
+
+describe("userRepository — unicitate case-insensitive (0040)", () => {
+  it("getUserByEmail gaseste indiferent de casing", () => {
+    insertUser({ id: "u-1", email: "alice@firma.ro", displayName: "Alice" });
+    expect(getUserByEmail("ALICE@FIRMA.RO")?.id).toBe("u-1");
+    expect(getUserByEmail("Alice@Firma.Ro")?.id).toBe("u-1");
+  });
+
+  it("indexul unic respinge dublura care difera doar prin casing", () => {
+    insertUser({ id: "u-1", email: "alice@firma.ro", displayName: "Alice" });
+    let caught: unknown = null;
+    try {
+      insertUser({ id: "u-2", email: "ALICE@firma.ro", displayName: "Alice 2" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeNull();
+    expect(isUniqueEmailViolation(caught)).toBe(true);
+  });
+
+  it("isUniqueEmailViolation nu se declanseaza pe erori nelegate", () => {
+    expect(isUniqueEmailViolation(new Error("boom"))).toBe(false);
+    expect(isUniqueEmailViolation(null)).toBe(false);
+  });
+});
+
+describe("userRepository — insertUsersBulk", () => {
+  it("insereaza toate randurile intr-o tranzactie, cu email canonicalizat", () => {
+    const created = insertUsersBulk([
+      { id: "b-1", email: "  X@Firma.RO ", displayName: "X", role: "user" },
+      { id: "b-2", email: "y@firma.ro", displayName: "Y", role: "admin" },
+    ]);
+    expect(created).toHaveLength(2);
+    expect(created[0].email).toBe("x@firma.ro");
+    expect(created[1].role).toBe("admin");
+    expect(created.every((u) => u.status === "active")).toBe(true);
+  });
+
+  it("rollback complet: o coliziune de email anuleaza TOT batch-ul", () => {
+    insertUser({ id: "u-1", email: "dublura@firma.ro", displayName: "Existent" });
+    expect(() =>
+      insertUsersBulk([
+        { id: "b-1", email: "nou@firma.ro", displayName: "Nou", role: "user" },
+        { id: "b-2", email: "DUBLURA@firma.ro", displayName: "Coliziune", role: "user" },
+      ])
+    ).toThrow();
+    // Primul rand din batch NU a ramas in DB.
+    expect(getUserByEmail("nou@firma.ro")).toBeNull();
+  });
+
+  it("respinge rolurile necreabile (support/readonly)", () => {
+    expect(() =>
+      insertUsersBulk([{ id: "b-1", email: "s@firma.ro", displayName: "S", role: "support" as never }])
+    ).toThrow(/invalid creatable role/);
+  });
+});
+
+describe("userRepository — soft-deleted exclusi din listari (4.1)", () => {
+  beforeEach(() => {
+    insertUser({ id: "u-del", email: "sters@firma.ro", displayName: "Sters" });
+    updateUserStatus("u-del", "deleted");
+  });
+
+  it("listUsers fara filtru de status NU intoarce userii stersi", () => {
+    const r = listUsers();
+    expect(r.rows.map((u) => u.id)).not.toContain("u-del");
+    expect(r.total).toBe(1); // doar seed-ul 'local'
+  });
+
+  it("filtrul explicit status=deleted ii intoarce (audit/debug)", () => {
+    const r = listUsers({ status: "deleted" });
+    expect(r.rows.map((u) => u.id)).toEqual(["u-del"]);
+  });
+
+  it("getUserByEmail ii vede in continuare (emailul ramane ocupat)", () => {
+    expect(getUserByEmail("sters@firma.ro")?.id).toBe("u-del");
   });
 });

@@ -226,6 +226,26 @@ export interface MeBudgetWarningsResult {
   items: MeBudgetWarning[];
 }
 
+// v2.42.0 (4.2/4.3): creare individuala + import Excel.
+export interface CreateUserInput {
+  email: string;
+  displayName: string;
+  role: "user" | "admin";
+}
+
+export interface UserImportIssue {
+  rowNumber: number;
+  email: string | null;
+  code: "invalid_row" | "duplicate_in_file" | "duplicate_in_db";
+  message: string;
+}
+
+export interface ImportUsersResult {
+  created: Array<{ rowNumber: number; email: string; role: string }>;
+  issues: UserImportIssue[];
+  summary: { created: number; duplicates: number; invalid: number };
+}
+
 export interface ListUsersOpts {
   page?: number;
   pageSize?: number;
@@ -249,6 +269,41 @@ export interface ListAuditOpts {
   since?: string;
   until?: string;
   signal?: AbortSignal;
+}
+
+// v2.42.0 (4.3): descarcari de atasamente (template import, raport audit) prin
+// fetch + blob — NU window.location.assign: o eroare 4xx/5xx ar naviga
+// browserul pe un JSON brut in loc sa apara in pagina.
+export async function fetchBlobOrThrow(path: string, init?: RequestInit): Promise<Blob> {
+  const res = await apiFetch(path, init);
+  if (!res.ok) {
+    let code = "download_failed";
+    let message = `Descarcare esuata (HTTP ${res.status}).`;
+    let requestId: string | undefined;
+    try {
+      const body = (await res.json()) as { error?: { code?: string; message?: string }; requestId?: string };
+      if (body?.error?.message) {
+        message = body.error.message;
+        code = body.error.code ?? code;
+        requestId = body.requestId;
+      }
+    } catch {
+      // corp non-JSON — pastram mesajul generic
+    }
+    throw new MonitoringApiError(code, message, res.status, undefined, requestId);
+  }
+  return await res.blob();
+}
+
+export function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function adminQs(params: Record<string, string | number | undefined | null>): string {
@@ -341,6 +396,28 @@ export const admin = {
       body: JSON.stringify({ status }),
     });
     return unwrapMonitoring<AdminUser>(res);
+  },
+
+  createUser: async (input: CreateUserInput): Promise<AdminUser> => {
+    const res = await apiFetch("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return unwrapMonitoring<AdminUser>(res);
+  },
+
+  downloadUsersImportTemplate: async (): Promise<Blob> => {
+    return fetchBlobOrThrow("/api/v1/admin/users/import-template");
+  },
+
+  importUsers: async (file: ArrayBuffer): Promise<ImportUsersResult> => {
+    const res = await apiFetch("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    return unwrapMonitoring<ImportUsersResult>(res);
   },
 
   listAudit: async (opts: ListAuditOpts = {}): Promise<PaginatedAudit> => {

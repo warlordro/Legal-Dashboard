@@ -1,11 +1,19 @@
-import { useCallback, useEffect, useState } from "react";
-import { Users as UsersIcon, RefreshCw, ShieldAlert, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Users as UsersIcon, Download, FileUp, RefreshCw, ShieldAlert, Search, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, MonitoringApiError, type AdminUser, type UserRole, type UserStatus } from "@/lib/api";
+import {
+  admin,
+  MonitoringApiError,
+  triggerBlobDownload,
+  type AdminUser,
+  type ImportUsersResult,
+  type UserRole,
+  type UserStatus,
+} from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
@@ -40,6 +48,13 @@ function roleVariant(role: UserRole): "default" | "secondary" | "outline" {
   return "outline";
 }
 
+// v2.42.0 (4.1): din UI se pot CREA doar Utilizator/Admin — support/readonly
+// raman valide istoric dar nu sunt creabile.
+const CREATABLE_ROLE_OPTIONS: ReadonlyArray<{ value: "user" | "admin"; label: string }> = [
+  { value: "user", label: "Utilizator" },
+  { value: "admin", label: "Admin" },
+];
+
 export default function AdminUsers() {
   const { user: me, refresh: refreshMe } = useCurrentUser();
   const confirm = useConfirm();
@@ -53,6 +68,17 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  // Creare individuala (4.2).
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState<"user" | "admin">("user");
+  const [creating, setCreating] = useState(false);
+
+  // Import Excel (4.3).
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportUsersResult | null>(null);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
@@ -163,6 +189,56 @@ export default function AdminUsers() {
     }
   };
 
+  const onCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = newEmail.trim();
+    const displayName = newName.trim();
+    if (!email || !displayName) {
+      setError("Completeaza emailul si numele afisat.");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    try {
+      await admin.createUser({ email, displayName, role: newRole });
+      setNewEmail("");
+      setNewName("");
+      setNewRole("user");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la crearea utilizatorului.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onDownloadTemplate = async () => {
+    setError(null);
+    try {
+      const blob = await admin.downloadUsersImportTemplate();
+      triggerBlobDownload(blob, "model-import-utilizatori.xlsx");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la descarcarea modelului.");
+    }
+  };
+
+  const onImportFile = async (file: File) => {
+    setImporting(true);
+    setError(null);
+    setImportResult(null);
+    try {
+      const result = await admin.importUsers(await file.arrayBuffer());
+      setImportResult(result);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la importul fisierului.");
+    } finally {
+      setImporting(false);
+      // Acelasi fisier poate fi re-selectat dupa o corectie.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const summary = (() => {
     const parts = [`${total} total`];
     if (search) parts.push(`filtru: "${search}"`);
@@ -250,6 +326,126 @@ export default function AdminUsers() {
             </button>
           </div>
         )}
+
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <UserPlus className="h-4 w-4" />
+                Adauga utilizator
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={onCreate} className="space-y-3">
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-email">
+                    Email
+                  </label>
+                  <input
+                    id="new-user-email"
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="nume@firma.ro"
+                    maxLength={254}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-name">
+                    Nume afisat
+                  </label>
+                  <input
+                    id="new-user-name"
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Prenume Nume"
+                    maxLength={120}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-role">
+                      Rol
+                    </label>
+                    <select
+                      id="new-user-role"
+                      value={newRole}
+                      onChange={(e) => setNewRole(e.target.value as "user" | "admin")}
+                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+                    >
+                      {CREATABLE_ROLE_OPTIONS.map((o) => (
+                        <option key={o.value} value={o.value}>
+                          {o.label}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <Button type="submit" disabled={creating}>
+                    <UserPlus className="h-4 w-4" />
+                    {creating ? "Se creeaza..." : "Creeaza"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileUp className="h-4 w-4" />
+                Import din Excel
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Descarca modelul, completeaza un rand per utilizator (rol: Utilizator sau Admin) si incarca fisierul.
+                Maxim 500 de randuri / 512KB.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={onDownloadTemplate} disabled={importing}>
+                  <Download className="h-4 w-4" />
+                  Descarca modelul
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} disabled={importing}>
+                  <FileUp className="h-4 w-4" />
+                  {importing ? "Se importa..." : "Incarca fisierul"}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) onImportFile(file);
+                  }}
+                />
+              </div>
+              {importResult && (
+                <div className="space-y-2 rounded-md border border-border p-3 text-sm">
+                  <p>
+                    <span className="font-semibold">{importResult.summary.created}</span> creati ·{" "}
+                    <span className="font-semibold">{importResult.summary.duplicates}</span> duplicate ·{" "}
+                    <span className="font-semibold">{importResult.summary.invalid}</span> invalide
+                  </p>
+                  {importResult.issues.length > 0 && (
+                    <ul className="max-h-40 space-y-1 overflow-y-auto text-xs text-muted-foreground">
+                      {importResult.issues.map((issue) => (
+                        <li key={`${issue.rowNumber}-${issue.code}`}>
+                          Rand {issue.rowNumber}
+                          {issue.email ? ` (${issue.email})` : ""}: {issue.message}
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
 
         <Card>
           <CardContent className="p-0">
