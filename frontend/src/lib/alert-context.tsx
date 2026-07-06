@@ -35,10 +35,11 @@ function asString(value: unknown): string | undefined {
 // Idempotent on already-humanized titles (the regex requires the ISO prefix
 // shape, so "04.05.2026" is left untouched).
 // Acelasi tratament render-time si pentru ghilimelele «» din titlurile
-// istorice de monitorizare pe nume (pre-v2.42) — normalizate la ghilimele
-// simple; titlurile noi vin deja cu ghilimele simple din backend.
+// istorice de monitorizare pe nume (pre-v2.42) — eliminate la afisare
+// (decizie user: numele monitorizat apare fara ghilimele); titlurile noi
+// vin deja fara ghilimele din backend.
 export function humanizeAlertTitleDates(title: string): string {
-  return title.replace(/(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}:\d{2})?/g, "$3.$2.$1").replace(/[«»]/g, '"');
+  return title.replace(/(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}:\d{2})?/g, "$3.$2.$1").replace(/[«»]/g, "");
 }
 
 function formatSedintaDate(value: unknown): string | undefined {
