@@ -187,28 +187,41 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardContent className="pt-5">
-            <h3 className="mb-3 text-sm font-semibold">Informatii API</h3>
+            <h3 className="mb-3 text-sm font-semibold">Surse de date & API</h3>
             <div className="space-y-2 text-xs text-muted-foreground">
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-green-500" />
+              <div className="flex items-start gap-2">
+                <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-green-500" />
                 <span>
-                  Web Service SOAP: <code className="text-foreground">http://portalquery.just.ro/query.asmx</code>
+                  <span className="font-medium text-foreground">PortalJust</span> (dosare + termene, toate instantele):
+                  web service SOAP public <code className="text-foreground">portalquery.just.ro/query.asmx</code>,
+                  metodele <code className="text-foreground">CautareDosare</code> /{" "}
+                  <code className="text-foreground">CautareTermene</code>, max. 1000 inregistrari per cerere, fara
+                  autentificare
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-blue-500" />
+              <div className="flex items-start gap-2">
+                <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-blue-500" />
                 <span>
-                  Metode disponibile: <code className="text-foreground">CautareDosare</code>,{" "}
-                  <code className="text-foreground">CautareTermene</code>
+                  <span className="font-medium text-foreground">ICCJ</span> (Inalta Curte):{" "}
+                  <code className="text-foreground">www.scj.ro</code> — cautare si monitorizare dosare, cu intrerupator
+                  automat de protectie cand site-ul e supraincarcat
                 </span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-purple-500" />
-                <span>Limita rezultate: max. 1000 inregistrari per cerere</span>
+              <div className="flex items-start gap-2">
+                <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-purple-500" />
+                <span>
+                  <span className="font-medium text-foreground">RNPM</span> (Registrul National de Publicitate
+                  Mobiliara): <code className="text-foreground">mj.rnpm.ro</code> — avize cu creditori, debitori, bunuri
+                  si istoric; captcha rezolvat automat (2Captcha / CapSolver)
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <div className="h-2 w-2 rounded-full bg-amber-500" />
-                <span>Autentificare: nu este necesara (API public)</span>
+              <div className="flex items-start gap-2">
+                <div className="mt-1 h-2 w-2 shrink-0 rounded-full bg-amber-500" />
+                <span>
+                  <span className="font-medium text-foreground">API propriu</span> (doar web): acces programatic
+                  doar-citire prin tokenuri personale (Setari → Acces API), specificatie OpenAPI 3.1 la{" "}
+                  <code className="text-foreground">/api/v1/openapi.json</code>
+                </span>
               </div>
             </div>
           </CardContent>
