@@ -94,8 +94,11 @@ export default function AdminGrants() {
   }, []);
 
   useEffect(() => {
+    // Goleste lista la schimbarea userului INAINTE de fetch — altfel granturile
+    // userului precedent raman afisate sub identitatea celui nou cat dureaza
+    // incarcarea (finding CodeRabbit confirmat).
+    setGrants([]);
     if (selected) loadGrants(selected.id);
-    else setGrants([]);
   }, [loadGrants, selected]);
 
   const onSelectUser = (user: AdminUser) => {
@@ -267,6 +270,8 @@ export default function AdminGrants() {
                             variant="ghost"
                             onClick={() => onRevoke(g, g.email)}
                             disabled={busyId === g.id}
+                            aria-label={`Revoca grantul pentru ${g.email}`}
+                            title="Revoca grantul"
                             className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                           >
                             <Trash2 className="h-4 w-4" />
@@ -429,6 +434,8 @@ export default function AdminGrants() {
                                   variant="ghost"
                                   onClick={() => onRevoke(g)}
                                   disabled={busyId === g.id}
+                                  aria-label="Revoca grantul"
+                                  title="Revoca grantul"
                                   className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                                 >
                                   <Trash2 className="h-4 w-4" />

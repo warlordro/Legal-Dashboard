@@ -108,8 +108,11 @@ export default function AdminQuota() {
   }, []);
 
   useEffect(() => {
+    // Goleste lista la schimbarea userului INAINTE de fetch — altfel plafoanele
+    // userului precedent raman afisate sub identitatea celui nou cat dureaza
+    // incarcarea (finding CodeRabbit confirmat).
+    setOverrides([]);
     if (selected) loadOverrides(selected.id);
-    else setOverrides([]);
   }, [loadOverrides, selected]);
 
   const resetForm = () => {
@@ -430,6 +433,8 @@ export default function AdminQuota() {
                                 variant="ghost"
                                 onClick={() => onDelete(row)}
                                 disabled={busyFeature === row.feature}
+                                aria-label={`Sterge plafonul ${quotaFeatureLabel(row.feature)}`}
+                                title="Sterge plafonul"
                                 className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                               >
                                 <Trash2 className="h-4 w-4" />
