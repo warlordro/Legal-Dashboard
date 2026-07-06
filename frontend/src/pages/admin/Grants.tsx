@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { UserPicker } from "@/components/UserPicker";
-import { admin, type AdminUser, type GlobalQuotaGrant, type QuotaGrant } from "@/lib/api";
+import { admin, MonitoringApiError, type AdminUser, type GlobalQuotaGrant, type QuotaGrant } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { quotaFeatureLabel } from "@/lib/quotaFeatureLabels";
 import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
@@ -14,7 +14,8 @@ import { cn } from "@/lib/utils";
 const MILLI = 1000;
 
 // Granturile sunt bugete AI extra — captcha nu are granturi (cap fix per user).
-const GRANTABLE_FEATURES = ["ai.single", "ai.multi"] as const;
+// v2.42.0 (5.2): pool AI unic — granturile exista doar pe "ai".
+const GRANTABLE_FEATURES = ["ai"] as const;
 
 function milliToUsd(milli: number): string {
   return (milli / MILLI).toFixed(3);
@@ -167,7 +168,15 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
       setExpiresAtLocal("");
       setReason("");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la crearea grant-ului.");
+      // v2.42.0 (5.2): grant vs nelimitat se exclud — serverul e autoritatea
+      // (baza include si default-ul din env, invizibil clientului).
+      const msg =
+        err instanceof MonitoringApiError && err.code === "unlimited_budget"
+          ? "Utilizatorul are buget AI nelimitat — granturile nu au efect. Seteaza intai o limita de baza in Cote."
+          : err instanceof Error
+            ? err.message
+            : "Eroare la crearea grant-ului.";
+      setError(msg);
     } finally {
       setBusyId(null);
     }

@@ -14,14 +14,17 @@ describe("quotaFeatureLabels", () => {
       expect(label).not.toBe(f);
       expect(label.length).toBeGreaterThan(0);
     }
-    expect(quotaFeatureLabel("ai.single")).toBe("AI — analiza simpla");
+    // v2.42.0 (5.2): pool AI unic in enum; legacy raman etichete lizibile.
+    expect(quotaFeatureLabel("ai")).toBe("AI — toate analizele (limita unica)");
     expect(quotaFeatureLabel("captcha.rnpm")).toBe("Captcha RNPM");
+    expect(quotaFeatureLabel("ai.single")).toBe("AI — analiza simpla (vechi)");
   });
 
   it("feature necunoscut: fallback pe token si isKnown=false", () => {
     expect(quotaFeatureLabel("dosar_summary")).toBe("dosar_summary");
     expect(isKnownQuotaFeature("dosar_summary")).toBe(false);
-    expect(isKnownQuotaFeature("ai.single")).toBe(true);
+    expect(isKnownQuotaFeature("ai.single")).toBe(false); // legacy, iesit din enum
+    expect(isKnownQuotaFeature("ai")).toBe(true);
   });
 
   it("unitatea limitei: USD pentru ai.*, captcha-uri pentru captcha.*", () => {

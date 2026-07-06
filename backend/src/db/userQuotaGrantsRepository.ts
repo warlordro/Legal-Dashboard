@@ -126,6 +126,10 @@ export function createGrant(input: CreateGrantInput): QuotaGrantRow {
   if (!input.grantedBy || input.grantedBy.length === 0) {
     throw new Error("invalid granted_by: must be non-empty string");
   }
+  // v2.42.0 (10.2b): normalizare la UTC LA SCRIERE. Predicatele de "grant
+  // activ" compara TEXT cu boundary `...Z`; un ISO cu offset stocat brut ar fi
+  // misclasificat in fereastra offsetului. Randurile legacy: migration 0042.
+  const expiresAtUtc = new Date(Date.parse(input.expiresAt)).toISOString();
   const db = getDb();
   const info = db
     .prepare(
@@ -133,7 +137,7 @@ export function createGrant(input: CreateGrantInput): QuotaGrantRow {
          (user_id, feature, extra_usd_milli, expires_at, reason, granted_at, granted_by)
        VALUES (?, ?, ?, ?, ?, datetime('now'), ?)`
     )
-    .run(input.userId, input.feature, input.extraUsdMilli, input.expiresAt, input.reason ?? null, input.grantedBy);
+    .run(input.userId, input.feature, input.extraUsdMilli, expiresAtUtc, input.reason ?? null, input.grantedBy);
   return getGrant(Number(info.lastInsertRowid)) as QuotaGrantRow;
 }
 

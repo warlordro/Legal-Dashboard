@@ -352,7 +352,12 @@ export function earliestAiUsageTsInWindow(ownerId: string, feature: string, wind
   return row.earliest ?? null;
 }
 
-function quotaFeatureAliases(feature: string): string[] {
+// v2.42.0 (5.2): exportat — pool-ul "ai" acopera TOATE feature-urile istorice
+// de usage AI, ca sumele sa includa si istoricul scris inainte de consolidare.
+export function quotaFeatureAliases(feature: string): string[] {
+  if (feature === "ai") {
+    return ["ai.single", "ai.multi", "dosar_summary", "dosar_multi_analyst", "dosar_multi_judge"];
+  }
   if (feature === "ai.single") return ["ai.single", "dosar_summary"];
   if (feature === "ai.multi") return ["ai.multi", "dosar_multi_analyst", "dosar_multi_judge"];
   return [feature];

@@ -13,7 +13,7 @@
 //     `before/after` diff in detail_json so an auditor can see exactly what
 //     the admin changed without re-running queries.
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
@@ -29,7 +29,7 @@ import {
   type TenantKeyField,
 } from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
-import { QUOTA_FEATURES } from "../middleware/quotaGuard.ts";
+import { QUOTA_FEATURES, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
 import {
   canonicalizeEmail,
   CREATABLE_USER_ROLES,
@@ -53,6 +53,7 @@ import { randomUUID } from "node:crypto";
 import {
   ALL_OVERRIDES_CAP,
   deleteOverride,
+  getOverride,
   listAllOverrides,
   listOverridesForUser,
   upsertOverride,
@@ -162,7 +163,9 @@ const UpsertQuotaSchema = z
 // effect, doar audit noise).
 const CreateGrantSchema = z
   .object({
-    feature: z.enum(QUOTA_FEATURES),
+    // v2.42.0 (5.2): granturile exista DOAR pe pool-ul "ai" — captcha are cap
+    // fix per user, fara extra one-shot.
+    feature: z.enum(["ai"]),
     extraUsdMilli: z.number().int().min(1).max(1_000_000_000),
     expiresAt: z.string().datetime({ offset: true }),
     reason: z.string().trim().max(200).optional(),
@@ -804,6 +807,25 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
   if (!parsed.success) {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
   }
+
+  // v2.42.0 (5.2): grant vs nelimitat se exclud. Baza se calculeaza cu ACEEASI
+  // regula ca guard-ul (override ? limit : default env) — altfel tenantii care
+  // folosesc doar env-ul default nu ar putea acorda granturi deloc (fix High
+  // din review). Baza NULL = buget nelimitat: un extra peste infinit e no-op
+  // derutant, refuzam explicit.
+  const baseOverride = getOverride(id, "ai");
+  const baseLimit = baseOverride ? baseOverride.limit_usd_milli : readDefaultQuotaMilli();
+  if (baseLimit === null) {
+    return c.json(
+      fail(
+        "unlimited_budget",
+        "Utilizatorul are buget AI nelimitat — granturile nu au efect. Seteaza intai o limita de baza.",
+        c
+      ),
+      422
+    );
+  }
+
   const adminId = getOwnerId(c);
   const row = createGrant({
     userId: id,
@@ -827,7 +849,9 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
   return c.json(ok(toGrantDto(row), c), 201);
 });
 
-adminRouter.delete("/grants/:id", limitAdminBody, async (c) => {
+// v2.42.0 (sectiunea 11): POST /grants/:id/revoke — acelasi comportament ca
+// DELETE /grants/:id (pastrat pentru compatibilitate), cu {reason?} in body.
+async function handleGrantRevoke(c: Context): Promise<Response> {
   const rawId = c.req.param("id");
   const grantId = Number(rawId);
   if (!Number.isInteger(grantId) || grantId <= 0) {
@@ -865,7 +889,10 @@ adminRouter.delete("/grants/:id", limitAdminBody, async (c) => {
   // 200 in both cases (idempotent at HTTP) so the admin UI nu trebuie sa
   // discrimineze "deja revocat" vs "tocmai revocat".
   return c.json(ok({ id: grantId, revoked }, c), 200);
-});
+}
+
+adminRouter.delete("/grants/:id", limitAdminBody, (c) => handleGrantRevoke(c));
+adminRouter.post("/grants/:id/revoke", limitAdminBody, (c) => handleGrantRevoke(c));
 
 // ---------- helpers ----------
 
