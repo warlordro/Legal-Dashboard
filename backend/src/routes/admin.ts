@@ -29,7 +29,10 @@ import {
   type TenantKeyField,
 } from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
-import { QUOTA_FEATURES, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
+import { PERIOD_SECONDS, QUOTA_FEATURES, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
+import { sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
+import { countTenantCaptchaUsageInWindow } from "../db/captchaUsageRepository.ts";
+import { readDefaultCaptchaQuota } from "./rnpmGuards.ts";
 import {
   canonicalizeEmail,
   CREATABLE_USER_ROLES,
@@ -64,6 +67,7 @@ import {
   createGrant,
   getGrant,
   listAllActiveGrants,
+  sumActiveExtraMilli,
   listGrantsForUser,
   revokeGrant,
   type QuotaGrantRow,
@@ -893,6 +897,93 @@ async function handleGrantRevoke(c: Context): Promise<Response> {
 
 adminRouter.delete("/grants/:id", limitAdminBody, (c) => handleGrantRevoke(c));
 adminRouter.post("/grants/:id/revoke", limitAdminBody, (c) => handleGrantRevoke(c));
+
+// ---------- usage overview (v2.42.0, 5.3) ----------
+
+// Consum per utilizator, pentru FIECARE user activ. Cifrele TREBUIE sa vina
+// din ACELEASI functii/constante ca guard-urile (PERIOD_SECONDS, getOverride,
+// sumActiveExtraMilli, sumAiUsageMilliInWindow, readDefaultQuotaMilli /
+// readDefaultCaptchaQuota) — altfel raportul ar diverge de enforcement.
+// Design O(n) cu ~5 query-uri/user ACCEPTAT deliberat: SQLite in-proces,
+// tenant = o singura firma (zeci de useri, nu mii). Drift-ul de paginare la
+// churn concurent de useri = risc acceptat (raport instantaneu).
+const USAGE_OVERVIEW_PAGE = 200;
+const USAGE_OVERVIEW_CAP = 2000;
+
+adminRouter.get("/usage/overview", (c) => {
+  const users: ReturnType<typeof listUsers>["rows"] = [];
+  let offset = 0;
+  let truncated = false;
+  for (;;) {
+    const page = listUsers({ status: "active", limit: USAGE_OVERVIEW_PAGE, offset });
+    users.push(...page.rows);
+    offset += page.rows.length;
+    if (users.length >= USAGE_OVERVIEW_CAP && offset < page.total) {
+      truncated = true;
+      users.length = USAGE_OVERVIEW_CAP;
+      break;
+    }
+    if (page.rows.length === 0 || offset >= page.total) break;
+  }
+
+  const defaultAiMilli = readDefaultQuotaMilli();
+  const defaultCaptchaCount = readDefaultCaptchaQuota();
+
+  const items = users.map((u) => {
+    const override = getOverride(u.id, "ai");
+    const period: QuotaPeriod = override?.period ?? "day";
+    const baseLimit = override ? override.limit_usd_milli : defaultAiMilli;
+    const extraFromGrants = sumActiveExtraMilli(u.id, "ai");
+    const usedMilli = sumAiUsageMilliInWindow(u.id, "ai", PERIOD_SECONDS[period]);
+    return {
+      userId: u.id,
+      email: u.email,
+      displayName: u.display_name,
+      role: u.role,
+      feature: "ai" as const,
+      period,
+      usedMilli,
+      baseLimitMilli: baseLimit,
+      extraFromGrantsMilli: extraFromGrants,
+      effectiveLimitMilli: baseLimit === null ? null : baseLimit + extraFromGrants,
+      limitSource: override
+        ? ("override" as const)
+        : defaultAiMilli !== null
+          ? ("default" as const)
+          : ("none" as const),
+    };
+  });
+  items.sort((a, b) => b.usedMilli - a.usedMilli || a.email.localeCompare(b.email));
+
+  // Mirror pe captcha.rnpm: unitate NUMAR (doar source='tenant' — BYOK desktop
+  // nu consuma bugetul tenantului). Captcha nu are granturi (cap fix).
+  const captcha = users.map((u) => {
+    const override = getOverride(u.id, "captcha.rnpm");
+    const period: QuotaPeriod = override?.period ?? "day";
+    const baseLimit = override ? override.limit_usd_milli : defaultCaptchaCount;
+    const usedCount = countTenantCaptchaUsageInWindow(u.id, PERIOD_SECONDS[period]);
+    return {
+      userId: u.id,
+      email: u.email,
+      displayName: u.display_name,
+      role: u.role,
+      feature: "captcha.rnpm" as const,
+      period,
+      usedCount,
+      baseLimitCount: baseLimit,
+      effectiveLimitCount: baseLimit,
+      limitSource:
+        override !== null
+          ? ("override" as const)
+          : defaultCaptchaCount !== null
+            ? ("default" as const)
+            : ("none" as const),
+    };
+  });
+  captcha.sort((a, b) => b.usedCount - a.usedCount || a.email.localeCompare(b.email));
+
+  return c.json(ok({ items, captcha, truncated }, c), 200);
+});
 
 // ---------- helpers ----------
 

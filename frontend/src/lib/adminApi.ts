@@ -167,6 +167,43 @@ export interface GlobalActiveGrantsResult {
   truncated: boolean;
 }
 
+// v2.42.0 (5.3): consum per utilizator — cifrele vin din aceleasi functii ca
+// guard-urile de cota (limitSource: override/default env/none).
+export type UsageLimitSource = "override" | "default" | "none";
+
+export interface UsageOverviewAiItem {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  feature: "ai";
+  period: QuotaPeriod;
+  usedMilli: number;
+  baseLimitMilli: number | null;
+  extraFromGrantsMilli: number;
+  effectiveLimitMilli: number | null;
+  limitSource: UsageLimitSource;
+}
+
+export interface UsageOverviewCaptchaItem {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  feature: "captcha.rnpm";
+  period: QuotaPeriod;
+  usedCount: number;
+  baseLimitCount: number | null;
+  effectiveLimitCount: number | null;
+  limitSource: UsageLimitSource;
+}
+
+export interface UsageOverviewResult {
+  items: UsageOverviewAiItem[];
+  captcha: UsageOverviewCaptchaItem[];
+  truncated: boolean;
+}
+
 export type TenantKeyField = "anthropic" | "openai" | "google" | "openrouter" | "twocaptcha" | "capsolver";
 export type TenantCaptchaProvider = "2captcha" | "capsolver";
 export type TenantCaptchaMode = "sequential" | "race";
@@ -409,6 +446,11 @@ export const admin = {
 
   downloadUsersImportTemplate: async (): Promise<Blob> => {
     return fetchBlobOrThrow("/api/v1/admin/users/import-template");
+  },
+
+  usageOverview: async (signal?: AbortSignal): Promise<UsageOverviewResult> => {
+    const res = await apiFetch("/api/v1/admin/usage/overview", { signal });
+    return unwrapMonitoring<UsageOverviewResult>(res);
   },
 
   importUsers: async (file: ArrayBuffer): Promise<ImportUsersResult> => {

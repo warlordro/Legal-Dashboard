@@ -15,6 +15,8 @@ import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { getUserByEmail, insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
 import { listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
+import { insertAiUsage } from "../db/aiUsageRepository.ts";
+import { recordCaptchaUsage } from "../db/captchaUsageRepository.ts";
 import { listGrantsForUser, sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
 
@@ -978,6 +980,109 @@ describe("v2.42.0 — import utilizatori (template + upload)", () => {
     expect(res.status).toBe(400);
     const body = await jsonOf(res);
     expect(body.error?.code).toBe("invalid_file");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 (5.3) — GET /usage/overview
+// ---------------------------------------------------------------------------
+
+describe("v2.42.0 (5.3) — GET /usage/overview", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+    insertUser({ id: "uo-1", email: "b@x", displayName: "B" });
+    insertUser({ id: "uo-2", email: "a@x", displayName: "A" });
+  });
+
+  it("itemele AI sunt sortate desc dupa consum, cu limitSource corect", async () => {
+    upsertOverride({ userId: "uo-1", feature: "ai", period: "day", limitUsdMilli: 5000 });
+    insertAiUsage({
+      ownerId: "uo-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 100,
+      ts: new Date().toISOString(),
+    });
+    insertAiUsage({
+      ownerId: "uo-2",
+      provider: "anthropic",
+      model: "claude-sonnet",
+      feature: "ai.multi",
+      costUsdMilli: 900,
+      ts: new Date().toISOString(),
+    });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { items: Array<Record<string, unknown>>; captcha: Array<Record<string, unknown>>; truncated: boolean };
+    };
+    expect(body.data.truncated).toBe(false);
+    // Sortare desc dupa consum: uo-2 (900) inaintea lui uo-1 (100).
+    const idx2 = body.data.items.findIndex((i) => i.userId === "uo-2");
+    const idx1 = body.data.items.findIndex((i) => i.userId === "uo-1");
+    expect(idx2).toBeGreaterThanOrEqual(0);
+    expect(idx2).toBeLessThan(idx1);
+    expect(body.data.items[idx2]).toMatchObject({
+      email: "a@x",
+      feature: "ai",
+      usedMilli: 900,
+      limitSource: "none",
+      effectiveLimitMilli: null,
+    });
+    expect(body.data.items[idx1]).toMatchObject({
+      usedMilli: 100,
+      baseLimitMilli: 5000,
+      limitSource: "override",
+      effectiveLimitMilli: 5000,
+    });
+  });
+
+  it("fereastra corecta: consum de acum 25h nu apare pe period=day", async () => {
+    insertAiUsage({
+      ownerId: "uo-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 777,
+      ts: new Date(Date.now() - 25 * 3_600_000).toISOString(),
+    });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    const body = (await jsonOf(res)) as { data: { items: Array<{ userId: string; usedMilli: number }> } };
+    const row = body.data.items.find((i) => i.userId === "uo-1");
+    expect(row?.usedMilli).toBe(0);
+  });
+
+  it("userii inactivi (suspendati) nu apar", async () => {
+    updateUserStatus("uo-2", "suspended");
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    const body = (await jsonOf(res)) as { data: { items: Array<{ userId: string }> } };
+    expect(body.data.items.map((i) => i.userId)).not.toContain("uo-2");
+  });
+
+  it("captcha: numara doar source='tenant' (BYOK desktop nu intra)", async () => {
+    recordCaptchaUsage({ ownerId: "uo-1", provider: "2captcha", source: "tenant" });
+    recordCaptchaUsage({ ownerId: "uo-1", provider: "2captcha", source: "tenant" });
+    recordCaptchaUsage({ ownerId: "uo-1", provider: "2captcha", source: "body" });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    const body = (await jsonOf(res)) as { data: { captcha: Array<{ userId: string; usedCount: number }> } };
+    const row = body.data.captcha.find((i) => i.userId === "uo-1");
+    expect(row?.usedCount).toBe(2);
+  });
+
+  it("e gate-uit pe admin (403 pentru user)", async () => {
+    insertUser({ id: "uo-plain", email: "plain2@x", displayName: "Plain" });
+    const app = buildApp("uo-plain");
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(403);
   });
 });
 
