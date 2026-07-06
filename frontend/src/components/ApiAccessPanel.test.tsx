@@ -26,6 +26,7 @@ vi.mock("@/lib/apiTokensApi", () => ({
 
 import { ApiAccessPanel } from "./ApiAccessPanel";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { listApiTokens, revokeAllApiTokens, revokeApiToken } from "@/lib/apiTokensApi";
 
 const mockedList = vi.mocked(listApiTokens);
@@ -53,11 +54,14 @@ async function flush() {
   });
 }
 
-// v2.42.0 (6.2): panoul foloseste useConfirm — ConfirmProvider obligatoriu.
+// v2.42.0 (6.2/6.3): panoul foloseste useConfirm SI useToast — ambii provideri
+// obligatorii.
 function panel() {
   return (
     <ConfirmProvider>
-      <ApiAccessPanel />
+      <ToastProvider>
+        <ApiAccessPanel />
+      </ToastProvider>
     </ConfirmProvider>
   );
 }

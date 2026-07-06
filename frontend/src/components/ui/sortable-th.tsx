@@ -24,7 +24,7 @@ export function SortableTh({ sort, sortKeyName, children, scopeNote, className }
         type="button"
         onClick={() => sort.toggle(sortKeyName)}
         title={scopeNote}
-        aria-label={`Sorteaza dupa coloana`}
+        aria-label="Sorteaza dupa coloana"
         className="inline-flex items-center gap-1 uppercase tracking-wider hover:text-foreground"
       >
         {children}

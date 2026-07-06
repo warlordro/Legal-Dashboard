@@ -6,6 +6,7 @@ import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminKeys from "./Keys";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 
 vi.mock("@/hooks/useTenantKeys", () => ({
@@ -43,14 +44,18 @@ function hookValue(overrides: Partial<ReturnType<typeof useTenantKeys>> = {}) {
   };
 }
 
-// v2.42.0 (6.2): pagina foloseste useConfirm — ConfirmProvider OBLIGATORIU in
-// render, altfel hook-ul arunca.
+// v2.42.0 (6.2/6.3): pagina foloseste useConfirm SI useToast — ambii provideri
+// OBLIGATORII in render, altfel hook-urile arunca.
 async function render(ui: React.ReactNode) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root.render(<ConfirmProvider>{ui}</ConfirmProvider>);
+    root.render(
+      <ConfirmProvider>
+        <ToastProvider>{ui}</ToastProvider>
+      </ConfirmProvider>
+    );
     await Promise.resolve();
   });
 }

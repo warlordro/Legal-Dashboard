@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/UserPicker";
 import { admin, MonitoringApiError, type AdminUser, type GlobalQuotaGrant, type QuotaGrant } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -54,6 +55,7 @@ function grantState(grant: QuotaGrant): { label: string; variant: "success" | "w
 
 export default function AdminGrants({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
+  const toast = useToast();
   const [globalGrants, setGlobalGrants] = useState<GlobalQuotaGrant[]>([]);
   const [globalTruncated, setGlobalTruncated] = useState(false);
   const [globalLoading, setGlobalLoading] = useState(false);
@@ -162,6 +164,8 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
         expiresAt: isoExpires,
         reason: reason.trim() || null,
       });
+      // v2.42.0 (6.3): toast cu suma reala; erorile raman in banner.
+      toast(`Grant de ${milliToUsd(extraMilli)} $ acordat pentru ${selected.email}.`, { variant: "success" });
       refreshGrants();
       await loadGlobal();
       setExtraUsd("");
@@ -194,6 +198,10 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     setError(null);
     try {
       await admin.revokeGrant(grant.id, null);
+      toast(
+        `Grantul de ${milliToUsd(grant.extraUsdMilli)} $${ownerLabel ? ` pentru ${ownerLabel}` : ""} a fost revocat.`,
+        { variant: "success" }
+      );
       if (selected) refreshGrants();
       await loadGlobal();
     } catch (err) {

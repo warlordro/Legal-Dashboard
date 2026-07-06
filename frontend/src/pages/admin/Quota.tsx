@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/UserPicker";
 import { admin, type AdminUser, type GlobalQuotaOverride, type QuotaOverride, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -62,6 +63,7 @@ function limitCellContent(feature: string, limitUsdMilli: number | null) {
 
 export default function AdminQuota({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
+  const toast = useToast();
   const [globalRows, setGlobalRows] = useState<GlobalQuotaOverride[]>([]);
   const [globalTruncated, setGlobalTruncated] = useState(false);
   const [globalLoading, setGlobalLoading] = useState(false);
@@ -177,6 +179,10 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     setError(null);
     try {
       await admin.upsertQuota(selected.id, { feature, period, limitUsdMilli: parsed });
+      // v2.42.0 (6.3): toast doar pe succes; erorile raman in banner.
+      toast(`Plafonul "${quotaFeatureLabel(feature)}" a fost salvat pentru ${selected.email}.`, {
+        variant: "success",
+      });
       refreshOverrides();
       await loadGlobal();
       resetForm();
@@ -207,6 +213,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     setError(null);
     try {
       await admin.deleteQuota(selected.id, row.feature);
+      toast(`Plafonul "${quotaFeatureLabel(row.feature)}" a fost sters.`, { variant: "success" });
       refreshOverrides();
       await loadGlobal();
     } catch (err) {

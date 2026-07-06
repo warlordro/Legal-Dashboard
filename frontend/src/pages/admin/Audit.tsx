@@ -4,7 +4,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SortableTh } from "@/components/ui/sortable-th";
 import { TablePagination } from "@/components/table-pagination";
+import { useClientSort } from "@/hooks/useClientSort";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { admin, fetchBlobOrThrow, triggerBlobDownload, type AuditEvent } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -68,6 +70,17 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // v2.42.0 (6.8): sortare client-side pe pagina curenta. Rezultatul se
+  // sorteaza pe eticheta UMANA (OK/Refuzat/Eroare), ca ordinea sa urmeze ce
+  // vede userul in badge.
+  const sort = useClientSort(rows, {
+    ts: (r) => r.ts,
+    action: (r) => r.action,
+    outcome: (r) => outcomeLabel(r.outcome),
+    owner: (r) => r.ownerEmail,
+    actor: (r) => r.actorEmail,
+  });
+
   // v2.42.0 (6.7): pattern-ul corect de filtre + fetch.
   //   - inputurile text merg prin debounce 300ms cu FLUSH expus ("Reseteaza"
   //     publica imediat "" pe toate — altfel fetch-ul pleaca cu filtrele vechi
@@ -89,6 +102,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     setExpanded(new Set());
   };
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick este trigger explicit de reincarcare (pattern 6.7), nu e citit in corp.
   useEffect(() => {
     const ac = new AbortController();
     setLoading(true);
@@ -311,11 +325,21 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="w-8 px-2 py-2" />
-                    <th className="px-3 py-2 font-semibold">Cand</th>
-                    <th className="px-3 py-2 font-semibold">Actiune</th>
-                    <th className="px-3 py-2 font-semibold">Rezultat</th>
-                    <th className="px-3 py-2 font-semibold">Owner</th>
-                    <th className="px-3 py-2 font-semibold">Actor</th>
+                    <SortableTh sort={sort} sortKeyName="ts" scopeNote="Sorteaza pagina curenta">
+                      Cand
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="action" scopeNote="Sorteaza pagina curenta">
+                      Actiune
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="outcome" scopeNote="Sorteaza pagina curenta">
+                      Rezultat
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="owner" scopeNote="Sorteaza pagina curenta">
+                      Owner
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="actor" scopeNote="Sorteaza pagina curenta">
+                      Actor
+                    </SortableTh>
                     <th className="px-3 py-2 font-semibold">Tinta</th>
                     <th className="px-3 py-2 font-semibold">IP</th>
                   </tr>
@@ -328,7 +352,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                       </td>
                     </tr>
                   )}
-                  {rows.map((row) => {
+                  {sort.sorted.map((row) => {
                     const isOpen = expanded.has(row.id);
                     return (
                       <Fragment key={row.id}>

@@ -6,6 +6,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
+import { SortableTh } from "@/components/ui/sortable-th";
+import { useClientSort } from "@/hooks/useClientSort";
 import {
   admin,
   MonitoringApiError,
@@ -89,6 +91,17 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  // v2.42.0 (6.8): sortare client-side pe pagina curenta. Rol/status se
+  // sorteaza pe etichetele UMANE, ca ordinea sa urmeze ce vede userul.
+  const sort = useClientSort(rows, {
+    email: (r) => r.email,
+    name: (r) => r.displayName,
+    role: (r) => roleLabel(r.role),
+    status: (r) => statusLabel(r.status),
+    login: (r) => r.lastLoginAt,
+    created: (r) => r.createdAt,
+  });
+
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
@@ -147,6 +160,8 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
     setError(null);
     try {
       await admin.updateRole(target.id, nextRole);
+      // v2.42.0 (6.3): toast doar pe succes; erorile raman in banner.
+      toast(`Rolul lui ${target.email} a fost schimbat in "${roleLabel(nextRole)}".`, { variant: "success" });
       await load();
       // If the caller changed their own role, refresh /me so the sidebar
       // reflects the new role (e.g., admin → user hides the Admin section).
@@ -182,6 +197,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
     setError(null);
     try {
       await admin.updateStatus(target.id, nextStatus);
+      toast(`Statusul lui ${target.email} a fost schimbat in "${statusLabel(nextStatus)}".`, { variant: "success" });
       await load();
     } catch (err) {
       const msg =
@@ -462,12 +478,24 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
               <table className="w-full text-sm">
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-2 font-semibold">Email</th>
-                    <th className="px-4 py-2 font-semibold">Nume afisat</th>
-                    <th className="px-4 py-2 font-semibold">Rol</th>
-                    <th className="px-4 py-2 font-semibold">Status</th>
-                    <th className="px-4 py-2 font-semibold">Ultimul login</th>
-                    <th className="px-4 py-2 font-semibold">Creat</th>
+                    <SortableTh sort={sort} sortKeyName="email" scopeNote="Sorteaza pagina curenta" className="px-4">
+                      Email
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="name" scopeNote="Sorteaza pagina curenta" className="px-4">
+                      Nume afisat
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="role" scopeNote="Sorteaza pagina curenta" className="px-4">
+                      Rol
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="status" scopeNote="Sorteaza pagina curenta" className="px-4">
+                      Status
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="login" scopeNote="Sorteaza pagina curenta" className="px-4">
+                      Ultimul login
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="created" scopeNote="Sorteaza pagina curenta" className="px-4">
+                      Creat
+                    </SortableTh>
                   </tr>
                 </thead>
                 <tbody>
@@ -478,7 +506,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                       </td>
                     </tr>
                   )}
-                  {rows.map((row) => {
+                  {sort.sorted.map((row) => {
                     const isSelf = row.id === me?.id;
                     return (
                       <tr key={row.id} className="border-b border-border last:border-b-0 hover:bg-muted/30">

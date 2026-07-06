@@ -426,56 +426,56 @@ function AuthedApp() {
     <BrowserRouter>
       <ConfirmProvider>
         <ToastProvider>
-        <AppShell
-          dosareState={dosareState}
-          setDosareState={setDosareState}
-          termeneState={termeneState}
-          setTermeneState={setTermeneState}
-          history={history}
-          addEntry={addEntry}
-          removeEntry={removeEntry}
-          clearHistory={clearHistory}
-          keys={keys}
-          aiSettings={aiSettings}
-          hasKey={hasKey}
-          handleOpenKeyDialog={handleOpenKeyDialog}
-          activeCaptchaKey={activeCaptchaKey}
-          captchaProvider={captchaProvider}
-          captchaMode={captchaMode}
-          pendingSearch={pendingSearch}
-          handleHistoryClick={handleHistoryClick}
-          consumePendingSearch={consumePendingSearch}
-          rnpmHistory={rnpmHistory}
-          addRnpmEntry={addRnpmEntry}
-          removeRnpmEntry={removeRnpmEntry}
-          clearRnpmHistory={clearRnpmHistory}
-          rnpmPendingSearch={rnpmPendingSearch}
-          handleRnpmHistoryClick={handleRnpmHistoryClick}
-          consumeRnpmPendingSearch={consumeRnpmPendingSearch}
-        />
-        {showKeyDialog && (
-          <ErrorBoundary variant="page" label="Configurare chei API">
-            <ApiKeyDialog
-              onClose={closeKeyDialog}
-              apiKey={{
-                setKey,
-                clearKey,
-                hasKey,
-                hasAnthropic,
-                hasOpenai,
-                hasGoogle,
-                hasOpenrouter,
-                hasTwoCaptcha,
-                hasCapSolver,
-                captchaProvider,
-                setCaptchaProvider,
-                captchaMode,
-                setCaptchaMode,
-                aiSettings,
-              }}
-            />
-          </ErrorBoundary>
-        )}
+          <AppShell
+            dosareState={dosareState}
+            setDosareState={setDosareState}
+            termeneState={termeneState}
+            setTermeneState={setTermeneState}
+            history={history}
+            addEntry={addEntry}
+            removeEntry={removeEntry}
+            clearHistory={clearHistory}
+            keys={keys}
+            aiSettings={aiSettings}
+            hasKey={hasKey}
+            handleOpenKeyDialog={handleOpenKeyDialog}
+            activeCaptchaKey={activeCaptchaKey}
+            captchaProvider={captchaProvider}
+            captchaMode={captchaMode}
+            pendingSearch={pendingSearch}
+            handleHistoryClick={handleHistoryClick}
+            consumePendingSearch={consumePendingSearch}
+            rnpmHistory={rnpmHistory}
+            addRnpmEntry={addRnpmEntry}
+            removeRnpmEntry={removeRnpmEntry}
+            clearRnpmHistory={clearRnpmHistory}
+            rnpmPendingSearch={rnpmPendingSearch}
+            handleRnpmHistoryClick={handleRnpmHistoryClick}
+            consumeRnpmPendingSearch={consumeRnpmPendingSearch}
+          />
+          {showKeyDialog && (
+            <ErrorBoundary variant="page" label="Configurare chei API">
+              <ApiKeyDialog
+                onClose={closeKeyDialog}
+                apiKey={{
+                  setKey,
+                  clearKey,
+                  hasKey,
+                  hasAnthropic,
+                  hasOpenai,
+                  hasGoogle,
+                  hasOpenrouter,
+                  hasTwoCaptcha,
+                  hasCapSolver,
+                  captchaProvider,
+                  setCaptchaProvider,
+                  captchaMode,
+                  setCaptchaMode,
+                  aiSettings,
+                }}
+              />
+            </ErrorBoundary>
+          )}
         </ToastProvider>
       </ConfirmProvider>
     </BrowserRouter>

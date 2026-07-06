@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SortableTh } from "@/components/ui/sortable-th";
 import { TablePagination } from "@/components/table-pagination";
 import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
@@ -34,6 +35,7 @@ import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export-monitor
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
 import { monitoringRunStatusLabel } from "@/lib/monitoringRunStatus";
 import { cn } from "@/lib/utils";
+import { useClientSort } from "@/hooks/useClientSort";
 import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";
 import { useMonitoringMasterSwitch } from "@/hooks/useMonitoringMasterSwitch";
 import { getIccjUrl, getPortalJustUrl } from "@/components/dosare-table-helpers";
@@ -119,6 +121,17 @@ export default function Monitorizare({
       return changed ? next : prev;
     });
   }, [jobs]);
+
+  // v2.42.0 (6.8): sortare client-side pe pagina curenta. Status se sorteaza
+  // pe textul UMAN vizibil (activ/pauza + eticheta ultimei rulari).
+  const sort = useClientSort(jobs, {
+    target: (j) => formatMonitoringTarget(j),
+    cadence: (j) => j.cadence_sec,
+    last: (j) => j.last_run_at,
+    next: (j) => j.next_run_at,
+    status: (j) =>
+      `${j.active ? "activ" : "pauza"}${j.last_status ? ` ${monitoringRunStatusLabel(j.last_status)}` : ""}`,
+  });
 
   const allSelected = jobs.length > 0 && jobs.every((j) => selectedIds.has(j.id));
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -502,17 +515,27 @@ export default function Monitorizare({
                             title={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
                           />
                         </th>
-                        <th className="px-3 py-2">Tinta</th>
+                        <SortableTh sort={sort} sortKeyName="target" scopeNote="Sorteaza pagina curenta">
+                          Tinta
+                        </SortableTh>
                         {showDetailsColumn && <th className="px-3 py-2 text-center">Detalii</th>}
-                        <th className="px-3 py-2">Cadenta</th>
-                        <th className="px-3 py-2">Ultima rulare</th>
-                        <th className="px-3 py-2">Urmatoarea verif.</th>
-                        <th className="px-3 py-2">Status</th>
+                        <SortableTh sort={sort} sortKeyName="cadence" scopeNote="Sorteaza pagina curenta">
+                          Cadenta
+                        </SortableTh>
+                        <SortableTh sort={sort} sortKeyName="last" scopeNote="Sorteaza pagina curenta">
+                          Ultima rulare
+                        </SortableTh>
+                        <SortableTh sort={sort} sortKeyName="next" scopeNote="Sorteaza pagina curenta">
+                          Urmatoarea verif.
+                        </SortableTh>
+                        <SortableTh sort={sort} sortKeyName="status" scopeNote="Sorteaza pagina curenta">
+                          Status
+                        </SortableTh>
                         <th className="px-3 py-2 text-right">Actiuni</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {jobs.map((job) => {
+                      {sort.sorted.map((job) => {
                         const target = formatMonitoringTarget(job);
                         const iccjId = getIccjId(job);
                         const isDosar = job.kind === "dosar_soap";

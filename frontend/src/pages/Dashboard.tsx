@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
+import { useToast } from "@/components/ui/toast";
 import type { Dosar, SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry } from "@/types/rnpm";
 import { LastDosareCard, LastRnpmCard } from "./dashboard-summary-cards";
@@ -57,6 +58,7 @@ function getUniqueInstitutii(dosare: Dosar[]): number {
 
 export default function Dashboard({ dosareState, rnpmHistory, history, onHistoryClick }: DashboardProps) {
   const navigate = useNavigate();
+  const toast = useToast();
   const [showChangelog, setShowChangelog] = useState(false);
   const [showManual, setShowManual] = useState(false);
   const [isDownloadingManual, setIsDownloadingManual] = useState(false);
@@ -136,6 +138,10 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
       // Dynamic import keeps jspdf/xlsx out of the initial Dashboard chunk.
       const { exportManualPDF } = await import("@/lib/export-manual");
       await exportManualPDF();
+    } catch (e) {
+      // v2.42.0 (6.3): inainte esecul era complet silentios (fara catch).
+      console.error("[manual] export pdf failed:", e);
+      toast("Generarea PDF-ului manualului a esuat. Reincearca.", { variant: "error" });
     } finally {
       setIsDownloadingManual(false);
     }
