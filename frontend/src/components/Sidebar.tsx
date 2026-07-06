@@ -141,7 +141,7 @@ export function Sidebar({
       )}
     >
       {/* Header: Logo */}
-      <div className="flex items-center border-b border-border px-3 py-4">
+      <div className="flex shrink-0 items-center border-b border-border px-3 py-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Scale className="h-5 w-5" />
         </div>
@@ -153,114 +153,249 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Navigation */}
-      <nav className="space-y-1 p-2">
-        {navItems.map(({ to, label, icon: Icon, end }) => {
-          const showBadge = to === "/alerte" && unreadAlerts > 0;
-          const badgeText = unreadAlerts > 99 ? "99+" : String(unreadAlerts);
-          return (
-            <NavLink
-              key={to}
-              to={to}
-              end={end}
-              title={collapsed ? label : undefined}
-              className={({ isActive }) =>
-                cn(
-                  "relative flex items-center rounded-lg text-sm font-medium transition-colors",
-                  collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                )
-              }
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && (
-                <>
-                  <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
-                  {showBadge && (
-                    <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
-                      {badgeText}
-                    </span>
-                  )}
-                </>
-              )}
-              {collapsed && showBadge && (
-                <span className="absolute right-0 top-0 inline-flex min-w-4 translate-x-0.5 -translate-y-0.5 items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
-                  {badgeText}
-                </span>
-              )}
-            </NavLink>
-          );
-        })}
-      </nav>
+      {/* Zona de mijloc scrollabila: nav + admin + istoric. Cand continutul
+          depaseste inaltimea ferestrei (ex. sectiunea Administrare + font mare),
+          mijlocul scroll-uieste iar footer-ul ramane mereu vizibil — inainte,
+          footer-ul era impins in afara paginii (overflow-hidden pe root). */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
+        {/* Navigation */}
+        <nav className="space-y-1 p-2">
+          {navItems.map(({ to, label, icon: Icon, end }) => {
+            const showBadge = to === "/alerte" && unreadAlerts > 0;
+            const badgeText = unreadAlerts > 99 ? "99+" : String(unreadAlerts);
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                end={end}
+                title={collapsed ? label : undefined}
+                className={({ isActive }) =>
+                  cn(
+                    "relative flex items-center rounded-lg text-sm font-medium transition-colors",
+                    collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )
+                }
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && (
+                  <>
+                    <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>
+                    {showBadge && (
+                      <span className="ml-auto inline-flex min-w-5 items-center justify-center rounded-full bg-red-600 px-1.5 py-0.5 text-[10px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
+                        {badgeText}
+                      </span>
+                    )}
+                  </>
+                )}
+                {collapsed && showBadge && (
+                  <span className="absolute right-0 top-0 inline-flex min-w-4 translate-x-0.5 -translate-y-0.5 items-center justify-center rounded-full bg-red-600 px-1 py-0.5 text-[9px] font-bold leading-none text-white shadow-sm ring-2 ring-card">
+                    {badgeText}
+                  </span>
+                )}
+              </NavLink>
+            );
+          })}
+        </nav>
 
-      {/* Admin section — gated on role; hidden completely otherwise so non-admins
+        {/* Admin section — gated on role; hidden completely otherwise so non-admins
           never see the entries. The same role is re-checked server-side on every
           /api/v1/admin/* call, so this is purely cosmetic. */}
-      {isAdmin && (
-        <nav className="space-y-1 border-t border-border p-2">
-          {!collapsed && (
-            <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-              <ShieldCheck className="h-3 w-3" />
-              Administrare
-            </div>
-          )}
-          {adminNavItems.map(({ to, label, icon: Icon }) => (
-            <NavLink
-              key={to}
-              to={to}
-              title={collapsed ? label : undefined}
-              className={({ isActive }) =>
-                cn(
-                  "relative flex items-center rounded-lg text-sm font-medium transition-colors",
-                  collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
-                  isActive
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                )
-              }
-            >
-              <Icon className="h-4 w-4 shrink-0" />
-              {!collapsed && <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>}
-            </NavLink>
-          ))}
-        </nav>
-      )}
+        {isAdmin && (
+          <nav className="space-y-1 border-t border-border p-2">
+            {!collapsed && (
+              <div className="flex items-center gap-1.5 px-3 pt-1 pb-2 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+                <ShieldCheck className="h-3 w-3" />
+                Administrare
+              </div>
+            )}
+            {adminNavItems.map(({ to, label, icon: Icon }) => (
+              <NavLink
+                key={to}
+                to={to}
+                title={collapsed ? label : undefined}
+                className={({ isActive }) =>
+                  cn(
+                    "relative flex items-center rounded-lg text-sm font-medium transition-colors",
+                    collapsed ? "justify-center px-2 py-2.5" : "gap-3 px-3 py-2.5",
+                    isActive
+                      ? "bg-primary text-primary-foreground"
+                      : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                  )
+                }
+              >
+                <Icon className="h-4 w-4 shrink-0" />
+                {!collapsed && <span className="min-w-0 flex-1 whitespace-nowrap overflow-hidden">{label}</span>}
+              </NavLink>
+            ))}
+          </nav>
+        )}
 
-      {/* History accordion: only one section open at a time */}
-      {!collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
-        <div className="flex flex-1 flex-col overflow-hidden border-t border-border">
-          {/* Cautari section */}
-          {history.length > 0 && (
-            <div className={cn("flex flex-col overflow-hidden", openHistory === "cautari" && "flex-1")}>
-              <div className="flex items-center justify-between px-3 pt-3 pb-1">
-                <button
-                  type="button"
-                  onClick={() => setOpenHistory(openHistory === "cautari" ? null : "cautari")}
-                  className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {openHistory === "cautari" ? (
-                    <ChevronDown className="h-3 w-3" />
-                  ) : (
-                    <ChevronRight className="h-3 w-3" />
-                  )}
-                  <History className="h-3 w-3" />
-                  Istoric Cautari
-                </button>
-                {openHistory === "cautari" && (
+        {/* History accordion: only one section open at a time */}
+        {!collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
+          <div className="flex flex-1 flex-col overflow-hidden border-t border-border">
+            {/* Cautari section */}
+            {history.length > 0 && (
+              <div className={cn("flex flex-col overflow-hidden", openHistory === "cautari" && "flex-1")}>
+                <div className="flex items-center justify-between px-3 pt-3 pb-1">
                   <button
                     type="button"
-                    onClick={onClearHistory}
+                    onClick={() => setOpenHistory(openHistory === "cautari" ? null : "cautari")}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {openHistory === "cautari" ? (
+                      <ChevronDown className="h-3 w-3" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3" />
+                    )}
+                    <History className="h-3 w-3" />
+                    Istoric Cautari
+                  </button>
+                  {openHistory === "cautari" && (
+                    <button
+                      type="button"
+                      onClick={onClearHistory}
+                      title="Sterge istoricul"
+                      className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                {openHistory === "cautari" && (
+                  <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
+                    {history.map((entry) => (
+                      <HistoryEntryRow
+                        key={entry.id}
+                        icon={cautariIcon(entry.type)}
+                        label={entry.label}
+                        resultCount={entry.resultCount}
+                        timestamp={entry.timestamp}
+                        source={entry.params.source}
+                        onClick={() => handleEntryClick(entry)}
+                        onRemove={() => onRemoveEntry(entry.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* RNPM section */}
+            {rnpmHistory.length > 0 && (
+              <div
+                className={cn(
+                  "flex flex-col overflow-hidden border-t border-border",
+                  openHistory === "rnpm" && "flex-1"
+                )}
+              >
+                <div className="flex items-center justify-between px-3 pt-3 pb-1">
+                  <button
+                    type="button"
+                    onClick={() => setOpenHistory(openHistory === "rnpm" ? null : "rnpm")}
+                    className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
+                  >
+                    {openHistory === "rnpm" ? (
+                      <ChevronDown className="h-3 w-3" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3" />
+                    )}
+                    <History className="h-3 w-3" />
+                    Istoric RNPM
+                  </button>
+                  {openHistory === "rnpm" && (
+                    <button
+                      type="button"
+                      onClick={onRnpmClearHistory}
+                      title="Sterge istoricul RNPM"
+                      className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
+                  )}
+                </div>
+                {openHistory === "rnpm" && (
+                  <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
+                    {rnpmHistory.map((entry) => (
+                      <HistoryEntryRow
+                        key={entry.id}
+                        icon={rnpmIcon}
+                        label={entry.label}
+                        resultCount={entry.resultCount}
+                        timestamp={entry.timestamp}
+                        onClick={() => handleRnpmEntryClick(entry)}
+                        onRemove={() => onRnpmRemoveEntry(entry.id)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Collapsed: history popovers (Cautari + RNPM) */}
+        {collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
+          <div className="relative flex-1 flex flex-col items-center gap-1 pt-2 border-t border-border">
+            {history.length > 0 && (
+              <button
+                ref={popoverSection === "cautari" ? popoverBtnRef : null}
+                type="button"
+                onClick={() => setPopoverSection(popoverSection === "cautari" ? null : "cautari")}
+                title="Istoric cautari"
+                className={cn(
+                  "rounded-lg p-2 transition-colors",
+                  popoverSection === "cautari"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+              >
+                <History className="h-4 w-4" />
+              </button>
+            )}
+
+            {rnpmHistory.length > 0 && (
+              <button
+                ref={popoverSection === "rnpm" ? popoverBtnRef : null}
+                type="button"
+                onClick={() => setPopoverSection(popoverSection === "rnpm" ? null : "rnpm")}
+                title="Istoric RNPM"
+                className={cn(
+                  "rounded-lg p-2 transition-colors",
+                  popoverSection === "rnpm"
+                    ? "bg-primary text-primary-foreground"
+                    : "text-muted-foreground hover:bg-accent hover:text-foreground"
+                )}
+              >
+                <FileLock2 className="h-4 w-4" />
+              </button>
+            )}
+
+            {popoverSection === "cautari" && (
+              <div
+                ref={popoverRef}
+                className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
+              >
+                <div className="flex items-center justify-between px-3 pt-3 pb-1">
+                  <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <History className="h-3 w-3" />
+                    Istoric Cautari
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onClearHistory();
+                      setPopoverSection(null);
+                    }}
                     title="Sterge istoricul"
                     className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
-                )}
-              </div>
-              {openHistory === "cautari" && (
-                <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
+                </div>
+                <div className="overflow-y-auto scrollbar-thin px-2 pb-2" style={{ maxHeight: "60vh" }}>
                   {history.map((entry) => (
                     <HistoryEntryRow
                       key={entry.id}
@@ -274,38 +409,32 @@ export function Sidebar({
                     />
                   ))}
                 </div>
-              )}
-            </div>
-          )}
+              </div>
+            )}
 
-          {/* RNPM section */}
-          {rnpmHistory.length > 0 && (
-            <div
-              className={cn("flex flex-col overflow-hidden border-t border-border", openHistory === "rnpm" && "flex-1")}
-            >
-              <div className="flex items-center justify-between px-3 pt-3 pb-1">
-                <button
-                  type="button"
-                  onClick={() => setOpenHistory(openHistory === "rnpm" ? null : "rnpm")}
-                  className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground transition-colors hover:text-foreground"
-                >
-                  {openHistory === "rnpm" ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-                  <History className="h-3 w-3" />
-                  Istoric RNPM
-                </button>
-                {openHistory === "rnpm" && (
+            {popoverSection === "rnpm" && (
+              <div
+                ref={popoverRef}
+                className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
+              >
+                <div className="flex items-center justify-between px-3 pt-3 pb-1">
+                  <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
+                    <History className="h-3 w-3" />
+                    Istoric RNPM
+                  </span>
                   <button
                     type="button"
-                    onClick={onRnpmClearHistory}
+                    onClick={() => {
+                      onRnpmClearHistory();
+                      setPopoverSection(null);
+                    }}
                     title="Sterge istoricul RNPM"
                     className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
-                )}
-              </div>
-              {openHistory === "rnpm" && (
-                <div className="flex-1 overflow-y-auto scrollbar-thin px-2 pb-2">
+                </div>
+                <div className="overflow-y-auto scrollbar-thin px-2 pb-2" style={{ maxHeight: "60vh" }}>
                   {rnpmHistory.map((entry) => (
                     <HistoryEntryRow
                       key={entry.id}
@@ -318,130 +447,14 @@ export function Sidebar({
                     />
                   ))}
                 </div>
-              )}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Collapsed: history popovers (Cautari + RNPM) */}
-      {collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
-        <div className="relative flex-1 flex flex-col items-center gap-1 pt-2 border-t border-border">
-          {history.length > 0 && (
-            <button
-              ref={popoverSection === "cautari" ? popoverBtnRef : null}
-              type="button"
-              onClick={() => setPopoverSection(popoverSection === "cautari" ? null : "cautari")}
-              title="Istoric cautari"
-              className={cn(
-                "rounded-lg p-2 transition-colors",
-                popoverSection === "cautari"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )}
-            >
-              <History className="h-4 w-4" />
-            </button>
-          )}
-
-          {rnpmHistory.length > 0 && (
-            <button
-              ref={popoverSection === "rnpm" ? popoverBtnRef : null}
-              type="button"
-              onClick={() => setPopoverSection(popoverSection === "rnpm" ? null : "rnpm")}
-              title="Istoric RNPM"
-              className={cn(
-                "rounded-lg p-2 transition-colors",
-                popoverSection === "rnpm"
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
-              )}
-            >
-              <FileLock2 className="h-4 w-4" />
-            </button>
-          )}
-
-          {popoverSection === "cautari" && (
-            <div
-              ref={popoverRef}
-              className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
-            >
-              <div className="flex items-center justify-between px-3 pt-3 pb-1">
-                <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <History className="h-3 w-3" />
-                  Istoric Cautari
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onClearHistory();
-                    setPopoverSection(null);
-                  }}
-                  title="Sterge istoricul"
-                  className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
               </div>
-              <div className="overflow-y-auto scrollbar-thin px-2 pb-2" style={{ maxHeight: "60vh" }}>
-                {history.map((entry) => (
-                  <HistoryEntryRow
-                    key={entry.id}
-                    icon={cautariIcon(entry.type)}
-                    label={entry.label}
-                    resultCount={entry.resultCount}
-                    timestamp={entry.timestamp}
-                    source={entry.params.source}
-                    onClick={() => handleEntryClick(entry)}
-                    onRemove={() => onRemoveEntry(entry.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
+            )}
+          </div>
+        )}
 
-          {popoverSection === "rnpm" && (
-            <div
-              ref={popoverRef}
-              className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
-            >
-              <div className="flex items-center justify-between px-3 pt-3 pb-1">
-                <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  <History className="h-3 w-3" />
-                  Istoric RNPM
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onRnpmClearHistory();
-                    setPopoverSection(null);
-                  }}
-                  title="Sterge istoricul RNPM"
-                  className="rounded p-0.5 text-muted-foreground/50 transition-colors hover:text-red-500"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </button>
-              </div>
-              <div className="overflow-y-auto scrollbar-thin px-2 pb-2" style={{ maxHeight: "60vh" }}>
-                {rnpmHistory.map((entry) => (
-                  <HistoryEntryRow
-                    key={entry.id}
-                    icon={rnpmIcon}
-                    label={entry.label}
-                    resultCount={entry.resultCount}
-                    timestamp={entry.timestamp}
-                    onClick={() => handleRnpmEntryClick(entry)}
-                    onRemove={() => onRnpmRemoveEntry(entry.id)}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Spacer when no history */}
-      {history.length === 0 && rnpmHistory.length === 0 && <div className="flex-1" />}
+        {/* Spacer when no history */}
+        {history.length === 0 && rnpmHistory.length === 0 && <div className="flex-1" />}
+      </div>
 
       <SidebarFooter
         collapsed={collapsed}

@@ -17,13 +17,14 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
   const fontSize = useFontSize();
   const tenant = useTenantKeyStatus();
   // Badge-ul de chei: pe desktop reflecta cheile locale (hasApiKey); in web
-  // reflecta cheile tenant (server). Loading/error -> fail-open ca sa nu aratam
-  // "Neconfigurat" fals cat timp starea se rezolva.
-  const effectiveHasKey =
-    tenant.state.state === "ready" ? tenant.hasTenantAiKey : tenant.state.state === "desktop" ? hasApiKey : true;
+  // reflecta cheile tenant (server). Cat timp starea e loading/error NU
+  // afirmam nimic (nici "Activ" fals care ar masca o eroare persistenta,
+  // nici "Neconfigurat" fals care ar alarma degeaba) — badge-ul lipseste.
+  const keyStateKnown = tenant.state.state === "desktop" || tenant.state.state === "ready";
+  const effectiveHasKey = tenant.state.state === "ready" ? tenant.hasTenantAiKey : hasApiKey;
 
   return (
-    <div className="border-t border-border p-2 space-y-1">
+    <div className="shrink-0 border-t border-border p-2 space-y-1">
       {/* Font size control */}
       {collapsed ? (
         <Button
@@ -85,21 +86,22 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
           className={cn(
             "shrink-0",
             collapsed ? "h-[18px] w-[18px]" : "h-4 w-4",
-            effectiveHasKey ? "text-green-500" : "text-muted-foreground"
+            keyStateKnown && effectiveHasKey ? "text-green-500" : "text-muted-foreground"
           )}
         />
         {!collapsed && (
           <span className="flex items-center gap-2">
             Setari API
-            {effectiveHasKey ? (
-              <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                Activ
-              </span>
-            ) : (
-              <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-                Neconfigurat
-              </span>
-            )}
+            {keyStateKnown &&
+              (effectiveHasKey ? (
+                <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                  Activ
+                </span>
+              ) : (
+                <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+                  Neconfigurat
+                </span>
+              ))}
           </span>
         )}
       </Button>

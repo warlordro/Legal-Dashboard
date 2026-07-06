@@ -64,9 +64,11 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
   const dialogRef = useDialog<HTMLDivElement>(true, onClose);
 
   // In web mode cheile sunt ale tenantului (server-side); dialogul NU arata
-  // niciodata inputuri BYOK. Doar adminul deschide dialogul in web.
+  // niciodata inputuri BYOK. Non-adminul vede panourile personale (consum AI,
+  // notificari, email) + bannerul de chei lipsa — inainte primea un dialog
+  // complet gol (return null) desi butonul "Setari API" era clickabil.
   const isWeb = authMode === "web";
-  if (isWeb && user?.role !== "admin") return null;
+  const isWebAdmin = isWeb && user?.role === "admin";
 
   const handleSaveKeys = () => {
     if (keyInputs.anthropic.trim()) setKey("anthropic", keyInputs.anthropic);
@@ -123,10 +125,12 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
         <AIUsagePanel />
         <NotificationStatusPanel />
         <EmailSettingsPanel />
-        {/* Web: statusul cheilor tenant (inventar admin), NICIODATA BYOK. */}
+        {/* Web: statusul cheilor tenant (inventar pentru admin, banner pentru
+            non-admin cand lipsesc chei), NICIODATA BYOK. */}
         {isWeb && <TenantKeyStatusPanel />}
-        {/* Acces API (PAT) — doar web mode; desktop pastreaza BYOK in acest modal. */}
-        {isWebRuntime() && <ApiAccessPanel />}
+        {/* Acces API (PAT) — web-only; management DOAR admin in web mode (v2.41).
+            In dev-combo (browser + backend desktop) ramane vizibil ca inainte. */}
+        {isWebRuntime() && (!isWeb || isWebAdmin) && <ApiAccessPanel />}
 
         {/* AI config zone: routing + provider keys grouped vizual */}
         <div className="mb-3 rounded-lg border border-border p-3">

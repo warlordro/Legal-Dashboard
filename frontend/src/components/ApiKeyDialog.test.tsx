@@ -8,7 +8,7 @@ import { ApiKeyDialog } from "./ApiKeyDialog";
 import type { AiMode } from "./dosare-ai-config";
 
 vi.mock("@/components/AIUsagePanel", () => ({ AIUsagePanel: () => <div /> }));
-vi.mock("@/components/ApiAccessPanel", () => ({ ApiAccessPanel: () => <div /> }));
+vi.mock("@/components/ApiAccessPanel", () => ({ ApiAccessPanel: () => <div>ApiAccessPanelMock</div> }));
 vi.mock("@/components/EmailSettingsPanel", () => ({ EmailSettingsPanel: () => <div /> }));
 vi.mock("@/components/NotificationStatusPanel", () => ({ NotificationStatusPanel: () => <div /> }));
 vi.mock("@/hooks/useAuthMode", () => ({ useAuthMode: vi.fn(() => "desktop") }));
@@ -136,7 +136,7 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     });
   });
 
-  it("hides in web mode for non-admin users", () => {
+  it("web non-admin: dialogul se deschide cu panourile personale, fara BYOK si fara management PAT", () => {
     useAuthModeMock.mockReturnValue("web");
     useCurrentUserMock.mockReturnValue({
       user: {
@@ -155,7 +155,14 @@ describe("ApiKeyDialog OpenRouter mode", () => {
 
     render(<ApiKeyDialog {...props("native")} />);
 
-    expect(textContent(host)).toBe("");
+    const text = textContent(host);
+    // Dialogul NU mai e gol (inainte: return null => butonul "Setari API" parea mort).
+    expect(text).toContain("Configurare Chei API");
+    expect(text).toContain("configurate de administrator");
+    // Fara inputuri BYOK, fara buton de salvare, fara management PAT.
+    expect(host.querySelectorAll("input[type=password]").length).toBe(0);
+    expect(text).not.toContain("Salveaza");
+    expect(text).not.toContain("ApiAccessPanelMock");
   });
 
   it("shows in web mode for admin users", () => {
