@@ -60,7 +60,7 @@ function limitCellContent(feature: string, limitUsdMilli: number | null) {
   return <span className="font-mono">${formatStoredValue(feature, limitUsdMilli)}</span>;
 }
 
-export default function AdminQuota() {
+export default function AdminQuota({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const [globalRows, setGlobalRows] = useState<GlobalQuotaOverride[]>([]);
   const [globalTruncated, setGlobalTruncated] = useState(false);
@@ -217,9 +217,9 @@ export default function AdminQuota() {
   };
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
-        <div>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
+        <div className={cn(embedded && "hidden")}>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <Gauge className="h-6 w-6 text-primary" />
             Cote utilizatori

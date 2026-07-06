@@ -16,6 +16,10 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
   const { theme, toggle } = useTheme();
   const fontSize = useFontSize();
   const tenant = useTenantKeyStatus();
+  // v2.42.0 (5.1): in web intrarea se numeste "Setari" si duce la /setari
+  // (handler-ul vine din Sidebar); pe desktop ramane "Setari API" + dialog BYOK.
+  const isWeb = typeof window !== "undefined" && !window.desktopApi;
+  const settingsLabel = isWeb ? "Setari" : "Setari API";
   // Badge-ul de chei: pe desktop reflecta cheile locale (hasApiKey); in web
   // reflecta cheile tenant (server). Cat timp starea e loading/error NU
   // afirmam nimic (nici "Activ" fals care ar masca o eroare persistenta,
@@ -79,7 +83,7 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         variant="ghost"
         size="sm"
         onClick={onConfigureApiKey}
-        title={collapsed ? "Setari API" : undefined}
+        title={collapsed ? settingsLabel : undefined}
         className={cn("w-full text-muted-foreground", collapsed ? "justify-center p-2 h-10" : "justify-start gap-3")}
       >
         <Bot
@@ -91,7 +95,7 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         />
         {!collapsed && (
           <span className="flex items-center gap-2">
-            Setari API
+            {settingsLabel}
             {keyStateKnown &&
               (effectiveHasKey ? (
                 <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">

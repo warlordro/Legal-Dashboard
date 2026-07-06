@@ -48,7 +48,7 @@ function barColor(pct: number | null): string {
   return "bg-primary";
 }
 
-export default function UsagePage() {
+export default function UsagePage({ embedded = false }: { embedded?: boolean } = {}) {
   const [budget, setBudget] = useState<MeBudgetResult | null>(null);
   const [warnings, setWarnings] = useState<MeBudgetWarning[]>([]);
   const [loading, setLoading] = useState(false);
@@ -76,19 +76,21 @@ export default function UsagePage() {
   const fx = budget?.fx ?? { pair: "USD/EUR" as const, rate: null, rateDate: null, stale: true };
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
-        <div className="flex items-start justify-between gap-4">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <Activity className="h-6 w-6 text-primary" />
-              Consum buget
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Rolling window per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi de
-              48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
-            </p>
-          </div>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
+        <div className={cn("flex items-start gap-4", embedded ? "justify-end" : "justify-between")}>
+          {!embedded && (
+            <div>
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <Activity className="h-6 w-6 text-primary" />
+                Consum buget
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Rolling window per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi de
+                48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
+              </p>
+            </div>
+          )}
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             Refresh

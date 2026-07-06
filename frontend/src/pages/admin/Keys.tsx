@@ -27,7 +27,7 @@ const MODES: Array<{ value: TenantCaptchaMode; label: string }> = [
   { value: "race", label: "Race" },
 ];
 
-export default function AdminKeys() {
+export default function AdminKeys({ embedded = false }: { embedded?: boolean } = {}) {
   const { data, loading, error, savingField, refresh, saveKey, saveCaptchaSettings } = useTenantKeys();
   const [inputs, setInputs] = useState<Record<TenantKeyField, string>>({
     anthropic: "",
@@ -63,18 +63,20 @@ export default function AdminKeys() {
   };
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
-        <div className="flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <KeyRound className="h-6 w-6 text-primary" />
-              Chei API
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Chei tenant pentru AI si captcha. Valorile salvate nu se afiseaza inapoi in browser.
-            </p>
-          </div>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
+        <div className={cn("flex flex-wrap items-start gap-3", embedded ? "justify-end" : "justify-between")}>
+          {!embedded && (
+            <div>
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <KeyRound className="h-6 w-6 text-primary" />
+                Chei API
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">
+                Chei tenant pentru AI si captcha. Valorile salvate nu se afiseaza inapoi in browser.
+              </p>
+            </div>
+          )}
           <Button variant="outline" size="sm" onClick={() => refresh()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             Refresh

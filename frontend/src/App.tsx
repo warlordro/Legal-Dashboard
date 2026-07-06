@@ -17,6 +17,7 @@ import AdminQuota from "@/pages/admin/Quota";
 import AdminGrants from "@/pages/admin/Grants";
 import AdminUsage from "@/pages/admin/Usage";
 import AdminKeys from "@/pages/admin/Keys";
+import SettingsPage from "@/pages/Settings";
 import { AdminGate } from "@/components/AdminGate";
 import { useAuthMode } from "@/hooks/useAuthMode";
 import { useSessionBootstrap } from "@/hooks/useSessionBootstrap";
@@ -228,6 +229,13 @@ function AppShell({
               onAlertsChanged={refreshUnreadAlerts}
               onOpenDosar={(numarDosar, source) => handleHistoryClick("dosare", { numarDosar, source })}
             />
+          </PageBoundary>
+        )}
+        {/* v2.42.0 (5.1): /setari — taburi pe roluri; tab-urile admin refolosesc
+            paginile /admin/* cu prop embedded, montate on-demand. */}
+        {pathname === "/setari" && (
+          <PageBoundary label="Setari">
+            <SettingsPage />
           </PageBoundary>
         )}
         {pathname === "/admin/users" && (

@@ -51,7 +51,7 @@ function grantState(grant: QuotaGrant): { label: string; variant: "success" | "w
   return { label: "Activ", variant: "success" };
 }
 
-export default function AdminGrants() {
+export default function AdminGrants({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const [globalGrants, setGlobalGrants] = useState<GlobalQuotaGrant[]>([]);
   const [globalTruncated, setGlobalTruncated] = useState(false);
@@ -195,9 +195,9 @@ export default function AdminGrants() {
   };
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
-        <div>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
+        <div className={cn(embedded && "hidden")}>
           <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
             <Gift className="h-6 w-6 text-primary" />
             Granturi extra buget

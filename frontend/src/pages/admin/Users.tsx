@@ -55,7 +55,9 @@ const CREATABLE_ROLE_OPTIONS: ReadonlyArray<{ value: "user" | "admin"; label: st
   { value: "admin", label: "Admin" },
 ];
 
-export default function AdminUsers() {
+// v2.42.0 (5.1): `embedded` — pagina se randeaza ca tab in /setari, fara
+// shell-ul propriu (padding + h1); actiunile raman.
+export default function AdminUsers({ embedded = false }: { embedded?: boolean } = {}) {
   const { user: me, refresh: refreshMe } = useCurrentUser();
   const confirm = useConfirm();
   const [rows, setRows] = useState<AdminUser[]>([]);
@@ -248,16 +250,18 @@ export default function AdminUsers() {
   })();
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <UsersIcon className="h-6 w-6 text-primary" />
-              Utilizatori
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
-          </div>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-7xl")}>
+        <div className={cn("flex flex-wrap items-center gap-3", embedded ? "justify-end" : "justify-between")}>
+          {!embedded && (
+            <div>
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <UsersIcon className="h-6 w-6 text-primary" />
+                Utilizatori
+              </h1>
+              <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
+            </div>
+          )}
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             Refresh
