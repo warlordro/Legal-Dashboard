@@ -140,15 +140,21 @@ function AppShell({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
+  // Chrome-ul Electron (drag strip + padding compensator pentru titleBarOverlay)
+  // exista DOAR pe desktop; in browser lasa o banda alba moarta sus.
+  const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
+
   return (
-    <div className="flex h-screen overflow-hidden bg-background pt-8">
+    <div className={`flex h-screen overflow-hidden bg-background${isDesktop ? " pt-8" : ""}`}>
       {/* Top 32px drag strip — matches Electron titleBarOverlay height. Windows buttons
           are drawn by the OS on top of this with higher priority, so clicks on them
           still work while the rest of the strip drags the window. */}
-      <div
-        className="fixed top-0 left-0 right-0 h-8 bg-background z-[60]"
-        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-      />
+      {isDesktop && (
+        <div
+          className="fixed top-0 left-0 right-0 h-8 bg-background z-[60]"
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        />
+      )}
       <PageBoundary label="Meniu lateral">
         <Sidebar
           history={history}
