@@ -96,7 +96,7 @@ legal-dashboard/
 - SOAP XML parsat manual (regex, zero dependenta externa XML)
 
 ### AI SDKs
-- **@anthropic-ai/sdk 0.90** — Claude Haiku/Sonnet/Opus 4.x
+- **@anthropic-ai/sdk 0.90** — Claude Haiku/Opus 4.x, Sonnet 5
 - **openai 6.33** — GPT-5.4 via Responses API
 - **@google/generative-ai 0.24** — Gemini 3.x
 
@@ -291,7 +291,7 @@ Vezi sectiunea SQLite pentru schema completa. Filtre:
 | Provider | Model | Key interna | Model ID |
 |---|---|---|---|
 | **Anthropic** | Claude Haiku 4.5 (Rapid) | `claude-haiku` | `claude-haiku-4-5-20251001` |
-| | Claude Sonnet 4.6 (Echilibrat) | `claude-sonnet` | `claude-sonnet-4-6` |
+| | Claude Sonnet 5 (Echilibrat) | `claude-sonnet` | `claude-sonnet-5` |
 | | Claude Opus 4.8 (Premium) | `claude-opus` | `claude-opus-4-8` |
 | **OpenAI** | GPT-5.4 nano (Rapid) | `gpt-5.4-nano` | `gpt-5.4-nano` |
 | | GPT-5.4 mini (Echilibrat) | `gpt-5.4-mini` | `gpt-5.4-mini` |
