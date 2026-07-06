@@ -76,6 +76,37 @@ export const versions: VersionEntry[] = [
     ],
   },
   {
+    version: "v2.41.0",
+    date: "6 Iulie 2026",
+    subtitle:
+      "Fundatia web a sprintului: aplicatia in browser fara chrome-ul de desktop, starea cheilor tenant vizibila pe roluri, vederi globale pentru cote si granturi. Livrat impreuna cu v2.42.0 (fara release separat). Modul desktop ramane neschimbat.",
+    icon: <Layers className="h-5 w-5" />,
+    borderColor: "border-l-cyan-500",
+    badgeClass: "bg-cyan-100 text-cyan-900 dark:bg-cyan-900/30 dark:text-cyan-300",
+    sections: [
+      {
+        title: "Aplicatia in browser, fara chrome de desktop",
+        content:
+          "In mod web, bara de titlu si controalele de fereastra specifice aplicatiei desktop dispar — interfata foloseste tot ecranul browserului, cu trepte de marime a fontului adaptate platformei.",
+      },
+      {
+        title: "Starea cheilor API, vizibila pe roluri",
+        content:
+          "Adminul vede in Setari inventarul cheilor tenant per provider (Configurata cu ultimele 4 caractere / Neconfigurata) si sare direct la administrarea lor. Utilizatorul obisnuit nu vede inventarul — primeste doar un avertisment clar cand o functionalitate (AI sau RNPM) e indisponibila pentru ca cheia lipseste.",
+      },
+      {
+        title: "Vederi globale pentru cote si granturi",
+        content:
+          "Paginile Cote si Granturi arata de la deschidere toate plafoanele si granturile active ale tuturor utilizatorilor, fara sa fie nevoie sa cauti mai intai un utilizator. Selectia utilizatorului se face dintr-un dropdown cu toti userii activi.",
+      },
+      {
+        title: "Fundatie si sigurante pentru web",
+        content:
+          "Identitatea primita de la proxy-ul de autentificare e verificata strict (cereri cu headere de identitate contradictorii sunt respinse), iar rutarea AI foloseste automat cheile potrivite modului de rulare. Plus un set de corectii din review: bara laterala scrollabila, dialogul de chei pentru non-admini, resetarea formularelor la schimbarea utilizatorului.",
+      },
+    ],
+  },
+  {
     version: "v2.40.0",
     date: "2 Iulie 2026",
     subtitle:

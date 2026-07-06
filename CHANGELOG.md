@@ -2,7 +2,7 @@
 
 ## v2.42.0 - 2026-07-07
 
-Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode) si aliniere de design la repo-ul de referinta `fix/v2.41.0-web-ux`. Reimplementare a deltei v2.40.1 -> v2.42.0 dupa `GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`, in 8 MR-uri (MR 5-12) + fixuri post-livrare din testare reala. Modul desktop: zero impact.
+Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode) si aliniere de design la repo-ul de referinta. Partea a doua a reimplementarii deltei v2.40.1 -> v2.42.0 dupa `GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md` (MR 5-12 pe branch-ul `feat/v2.42.0-users-settings`, construit peste `feat/v2.41.0-web-ux` — vezi sectiunea v2.41.0), plus fixuri post-livrare din testare reala. Release-ul consolidat este v2.42.0; v2.41.0 nu a avut artefact propriu. Modul desktop: zero impact.
 
 ### Utilizatori: provisionare din UI (MR 5)
 
@@ -31,6 +31,30 @@ Paritate vizuala cu `feat/v2.42.0-users-settings` din repo-ul original (taburi p
 ### Verificare
 
 Gate-uri 0.3 inainte de fiecare commit (biome, tsc backend + frontend, build, teste). 1665 teste backend (+ reactivare useri stersi, usage/overview, quotaGuard pool unic, import, audit export) si 326 teste frontend (+ toast timere, useDialog focus, useClientSort, Keys/ApiAccessPanel cu provideri). Claim-uri CodeRabbit verificate individual (acceptate cu dovezi sau respinse cu argumente); comparatie side-by-side cu repo-ul de referinta rulat local.
+
+## v2.41.0 - 2026-07-06
+
+Fundatia web a sprintului v2.41-v2.42: mediu local de testare pentru web mode, identitate fail-closed pe bridge-ul oauth2, layout web fara chrome-ul Electron, cheile tenant conectate in frontend si vederile globale pentru cote/granturi. Livrat pe branch-ul `feat/v2.41.0-web-ux` (MR 0-4 + fixuri din review), consolidat ulterior in release-ul v2.42.0 — v2.41.0 nu a avut artefact de release propriu. Modul desktop: zero impact.
+
+### Audit baseline + bridge oauth2 fail-closed (MR 0 / 0a)
+
+Audit al main-ului GitLab cu sonde functionale A-F consemnat in `BASELINE-DELTA.md` (ce exista si functioneaza vs ce trebuie portat din ghid). Bridge-ul oauth2 respinge cererile cu headere de identitate conflictuale (fail-closed pe `X-Forwarded-Email` vs `X-Auth-Request-Email`) in loc sa aleaga tacit unul dintre ele.
+
+### Mediu local de testare web (MR 1)
+
+`scripts/dev-web-local.ps1`: porneste backend-ul in `auth_mode=web` cu DB izolata (git-ignored) si DOUA proxy-uri care simuleaza oauth2-proxy (admin pe 127.0.0.1:3003, user normal pe localhost:3004 — host diferit ca cookie jar-urile sa nu se fure reciproc). Secrete persistente generate exclusiv din RNG criptografic; seed admin idempotent; verificare automata a bridge-ului la pornire. Fix ulterior: compatibilitate PowerShell 5.1 + robustete (cleanup procese orfane la esec).
+
+### Layout web + chei tenant in frontend (MR 2, 3, 3b)
+
+In browser aplicatia nu mai afiseaza chrome-ul Electron (bara de titlu, controale fereastra); trepte de font per platforma. `useTenantKeyStatus` citeste starea cheilor tenant de la server (`GET /me/key-status`) cu politica fail-open pe loading/error; panou de status pe roluri: adminul vede inventarul per provider (Configurata *ultimele4 / Neconfigurata), non-adminul doar un banner cand o capabilitate e indisponibila. Rutarea AI implicita prin `resolveEffectiveAiMode` (env > tenant DB > BYOK desktop).
+
+### Vederi globale cote si granturi (MR 4)
+
+Paginile Cote si Granturi primesc vedere globala la deschidere (toate plafoanele / granturile active ale tuturor userilor, fara cautare prealabila), formular pe enum-ul de feature-uri si `UserPicker` cu dropdown-ul tuturor userilor activi.
+
+### Fixuri din review-uri
+
+Audit adversarial review-panel (5 modele + sinteza) + batch-uri CodeRabbit aplicate: sidebar scrollabil (footer-ul nu mai iese din pagina), dialogul de chei pentru non-admini, badge tri-state pe statusul cheilor, aria-labels pe butoanele icon-only, reset formulare la schimbarea userului, fix crash pe pagina Consum, gating-ul panoului de status pe modul serverului (nu pe runtime-ul browserului).
 
 ## v2.40.0 - 2026-07-02
 
