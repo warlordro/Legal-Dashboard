@@ -6,6 +6,51 @@ Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detal
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
 operational kill switches, riscuri ramase si directii deschise pentru urmatorul agent.
 
+## Sprint activ: v2.42.0 (branch `feat/v2.42.0-users-settings`)
+
+Reimplementare delta v2.40.1 -> v2.42.0 dupa `GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`.
+Reguli: doar branch-uri (nimic pe main), branch-uri minime, gate-uri 0.3 inainte de
+fiecare commit, smoke pe mediul local (2.x). NOTA: pe modelul Fable filtrele de
+siguranta intrerup des sesiunea pe subiecte de auth/tastatura — continua pe Opus.
+
+**LIVRAT + push (commit-uri pe branch):**
+- MR 5 (3e71a6e): migration 0040 email unic NOCASE + canonicalizeEmail + POST
+  /users + import xlsx (template + parse server-side) + guard last-admin activ-only + UI Users.
+- MR 6 (ed8661c): pagina /setari pe taburi + prop embedded pe cele 6 pagini admin
+  + useCurrentUser rescris ca store partajat (useSyncExternalStore).
+- MR 7 (1640731): migrations 0041 (pool "ai" consolidat) + 0042 (backfill UTC) +
+  quotaGuard pe pool unic + grants exclusiv (422 unlimited_budget) + POST /grants/:id/revoke
+  + /me/budget pe "ai".
+- MR 8 (e42e91b): GET /usage/overview (AI + captcha, aceleasi functii ca guard-ul)
+  + useClientSort + SortableTh + tab Consum cu paginare client-side.
+- MR 9 (a0ef7af): audit enrichment email + listAuditEventsForExport (413 peste 10000)
+  + services/auditExport.ts (safeCell inclusiv ip) + GET /audit/export + Audit.tsx pe
+  pattern 6.7 (debounce+flush, AbortController, reset inline, refreshTick).
+- MR 10 (a59d41f): Sonnet 5 (modelId claude-sonnet-5, slug anthropic/claude-sonnet-5,
+  pricing standard $3/$15) + AiPrompt {system,user} + prompturi verbatim 10.3 +
+  helper comun dosar_data (30 sedinte, campuri ICCJ, caiAtac) + validateAiBody caiAtac.
+- MR 11 (2646048): 6.1 chunk-reload in main.tsx; 6.2 confirmari (stergere cheie,
+  revoke-all, inchidere alerta); 6.5 monitoringRunStatus + userLabels sursa unica +
+  Keys in romana + Refresh->Reincarca; 6.6 dark mode; 6.10 autoLoading pe captcha-block.
+
+**MR 12 — PARTIAL, salvat ca WIP (ultimul commit pe branch):**
+- GATA: `components/ui/toast.tsx` (ToastProvider + useToast, cap 4, timere curatate);
+  fix CRITIC useDialog (onClose in ref, efect pe `[open]`); AlertsExportModal mutat
+  pe useDialog (+ tabIndex -1 fallback).
+- RAMAS de facut (in ordine): ReportExportModal pe useDialog (scoate keydown ad-hoc,
+  pastreaza guard pe busy); monteaza `ToastProvider` in App.tsx (inauntrul
+  ConfirmProvider); modalul hand-rolled de bulk-dismiss din Alerts -> useConfirm;
+  adopta toast-uri pe mutatii (Keys, Users, Quota, Grants, Alerts cu count real,
+  ApiAccessPanel, exporturi PDF Changelog+Manual — toast EROARE); sortare pe coloane
+  (SortableTh) in Users/Audit/Monitorizare; teste MR 12 (toast timere, useDialog focus,
+  useClientSort deja are test).
+
+**DUPA MR 12:** bump v2.42.0 (checklist din CLAUDE.md: package.json root+backend+
+frontend + lockfile, changelog-entries.tsx, CHANGELOG, README, STATUS, DOCUMENTATIE,
+SECURITY entry pentru email unic/pool/last-admin/escape audit) + sanity grep versiune
+veche; apoi smoke local; apoi **review adversarial cu review-panel** pe branch (cerinta
+`/goal` activa). Stare gate-uri la ultimul commit livrat: backend + frontend verzi, build ok.
+
 ## Kill switches operationale
 
 | Variabila / mecanism | Effect cand activat | Cand folosesti |
