@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 import type { TenantCaptchaMode, TenantCaptchaProvider, TenantKeyField } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -34,6 +35,7 @@ const providerLabel = (value: TenantCaptchaProvider): string =>
 
 export default function AdminKeys({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
+  const toast = useToast();
   const { data, loading, error, savingField, refresh, saveKey, saveCaptchaSettings } = useTenantKeys();
   const [inputs, setInputs] = useState<Record<TenantKeyField, string>>({
     anthropic: "",
@@ -55,9 +57,16 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
     setMode(data.captcha.mode);
   }, [data]);
 
+  // v2.42.0 (6.3): toast DOAR pe succes; erorile raman in banner (saveKey arunca).
   const onSaveKey = async (field: TenantKeyField) => {
-    await saveKey(field, inputs[field]);
-    setInputs((prev) => ({ ...prev, [field]: "" }));
+    const label = KEY_FIELDS.find((k) => k.field === field)?.label ?? field;
+    try {
+      await saveKey(field, inputs[field]);
+      setInputs((prev) => ({ ...prev, [field]: "" }));
+      toast(`Cheia ${label} a fost salvata.`, { variant: "success" });
+    } catch {
+      /* eroarea e afisata in banner */
+    }
   };
 
   // v2.42.0 (6.2): stergerea unei chei tenant e destructiva pentru TOTI userii
@@ -71,11 +80,21 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
       confirmLabel: "Sterge",
     });
     if (!ok) return;
-    await saveKey(field, "");
+    try {
+      await saveKey(field, "");
+      toast(`Cheia ${label} a fost stearsa.`, { variant: "success" });
+    } catch {
+      /* banner */
+    }
   };
 
   const onSaveCaptcha = async () => {
-    await saveCaptchaSettings(provider, mode);
+    try {
+      await saveCaptchaSettings(provider, mode);
+      toast("Setarile captcha au fost salvate.", { variant: "success" });
+    } catch {
+      /* banner */
+    }
   };
 
   return (

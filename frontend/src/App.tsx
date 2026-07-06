@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { BrowserRouter, useLocation } from "react-router-dom";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/Sidebar";
 import { ApiKeyDialog } from "@/components/ApiKeyDialog";
@@ -424,6 +425,7 @@ function AuthedApp() {
   return (
     <BrowserRouter>
       <ConfirmProvider>
+        <ToastProvider>
         <AppShell
           dosareState={dosareState}
           setDosareState={setDosareState}
@@ -474,6 +476,7 @@ function AuthedApp() {
             />
           </ErrorBoundary>
         )}
+        </ToastProvider>
       </ConfirmProvider>
     </BrowserRouter>
   );

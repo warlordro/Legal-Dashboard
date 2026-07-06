@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import {
   admin,
   MonitoringApiError,
@@ -63,6 +64,7 @@ const CREATABLE_ROLE_OPTIONS: ReadonlyArray<{ value: "user" | "admin"; label: st
 export default function AdminUsers({ embedded = false }: { embedded?: boolean } = {}) {
   const { user: me, refresh: refreshMe } = useCurrentUser();
   const confirm = useConfirm();
+  const toast = useToast();
   const [rows, setRows] = useState<AdminUser[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);

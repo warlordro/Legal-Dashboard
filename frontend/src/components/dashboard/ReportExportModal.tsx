@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { FileSpreadsheet, FileText, Loader2, X } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import { useDialog } from "@/hooks/useDialog";
 import { dashboardApi, type ChartsRange, MonitoringApiError } from "@/lib/api";
 import { exportReportPdf, exportReportXlsx } from "@/lib/export-report";
 import { cn } from "@/lib/utils";
@@ -40,18 +41,9 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
     setFormat("xlsx");
   }, [open]);
 
-  // Escape inchide modalul cand nu e in lucru.
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !busy) {
-        e.preventDefault();
-        handleClose();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [open, busy]);
+  // v2.42.0 (6.4): comportamentul de dialog vine din useDialog; handleClose
+  // pastreaza guard-ul pe busy.
+  const dialogRef = useDialog<HTMLDivElement>(open, handleClose);
 
   // Anuleaza request-ul in curs cand modalul se inchide forced (unmount).
   useEffect(() => {
@@ -102,6 +94,8 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
     >
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: stopPropagation pe div previne click-through pe backdrop; tastatura via focus trap intern. */}
       <div
+        ref={dialogRef}
+        tabIndex={-1}
         className="w-full max-w-md overflow-hidden rounded-xl border border-border bg-card shadow-2xl"
         // biome-ignore lint/a11y/useSemanticElements: <dialog> nativ ar necesita showModal + focus trap nativ, pattern portal cu role="dialog"+aria-modal e standard React.
         role="dialog"
