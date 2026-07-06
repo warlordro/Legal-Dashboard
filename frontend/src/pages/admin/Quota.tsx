@@ -340,10 +340,15 @@ export default function AdminQuota() {
                   </Button>
                 </div>
 
-                {/* Limita = 1fr (absoarbe spatiul liber); coloana butonului
-                    ramane auto si se strange pe continut — altfel butonul
-                    Salveaza se intindea pe tot restul randului. */}
-                <form onSubmit={onUpsert} className="grid gap-3 md:grid-cols-[260px_140px_1fr_auto] md:items-end">
+                {/* Toate coloanele dimensionate pe continut: in CSS Grid,
+                    track-urile `auto` se INTIND ca sa umple spatiul liber
+                    (butonul urias), iar `1fr` il absoarbe si el (inputul
+                    urias). `max-content` pe coloana butonului nu se intinde
+                    niciodata; spatiul ramas ramane gol la dreapta. */}
+                <form
+                  onSubmit={onUpsert}
+                  className="grid gap-3 md:grid-cols-[260px_140px_180px_max-content] md:items-end"
+                >
                   <div>
                     <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-feature">
                       Feature

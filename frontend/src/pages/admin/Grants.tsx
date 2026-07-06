@@ -123,11 +123,13 @@ export default function AdminGrants() {
   };
 
   // Din vederea globala: admin.getUser(id) + intrare in modul editare (5.5).
+  // Trece prin onSelectUser ca formularul de creare sa fie golit — altfel
+  // valorile tastate pentru userul anterior raman si pot fi trimise gresit.
   const onOpenFromGlobal = async (row: GlobalQuotaGrant) => {
     setError(null);
     try {
       const user = await admin.getUser(row.userId);
-      setSelected(user);
+      onSelectUser(user);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorului.");
     }
