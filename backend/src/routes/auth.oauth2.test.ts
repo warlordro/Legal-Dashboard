@@ -293,7 +293,10 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(res.status).toBe(200);
   });
 
-  it("prefera X-Auth-Request-Email peste X-Forwarded-Email cand ambele sunt prezente", async () => {
+  // MR 0a (contract v2.40.1): fail-closed pe ambiguitate — daca ambele headere
+  // de identitate sosesc cu valori diferite, refuzam (proxy misconfigurat sau
+  // request forjat). Cand coincid (dupa normalizare), cererea trece.
+  it("respinge cu missing_identity cand headerele de identitate au valori diferite", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
     insertUser({ id: "bob", email: "bob@example.test", displayName: "Bob", role: "user" });
 
@@ -301,6 +304,23 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
       "x-proxy-auth": PROXY_SECRET,
       "x-auth-request-email": "alice@example.test",
       "x-forwarded-email": "bob@example.test",
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("missing_identity");
+    const audits = getAuditEvents({ action: "auth.oauth2.sync" });
+    const denied = audits.find((a) => a.outcome === "denied");
+    expect(denied?.detail_json).toContain("conflicting_identity_headers");
+  });
+
+  it("accepta ambele headere de identitate cand valorile coincid dupa normalizare", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-auth-request-email": "  Alice@Example.Test  ",
+      "x-forwarded-email": "alice@example.test",
     });
 
     expect(res.status).toBe(200);

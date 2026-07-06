@@ -224,8 +224,24 @@ authRouter.post("/oauth2/sync", (c) => {
   // `legal-secure` in docker-compose.yml) strip-uieste ambele headere
   // (X-Auth-Request-Email SI X-Forwarded-Email) inainte sa ajunga la
   // oauth2-proxy — un client extern nu poate injecta niciunul.
-  const rawEmail = c.req.header("x-auth-request-email") ?? c.req.header("x-forwarded-email") ?? "";
-  const email = rawEmail.trim().toLowerCase();
+  //
+  // MR 0a (2026-07-06, contract v2.40.1): X-Forwarded-Email e sursa PRIMARA
+  // (mecanismul real --pass-user-headers); X-Auth-Request-Email ramane
+  // fallback. Fail-closed pe ambiguitate: daca ambele sosesc cu valori
+  // diferite (dupa trim/lowercase), refuzam — o divergenta intre ele inseamna
+  // proxy misconfigurat sau request forjat, nu o identitate de incredere.
+  const forwardedEmail = (c.req.header("x-forwarded-email") ?? "").trim().toLowerCase();
+  const authRequestEmail = (c.req.header("x-auth-request-email") ?? "").trim().toLowerCase();
+  if (forwardedEmail !== "" && authRequestEmail !== "" && forwardedEmail !== authRequestEmail) {
+    recordAudit(null, "auth.oauth2.sync", {
+      outcome: "denied",
+      targetKind: "http_request",
+      targetId: c.req.path,
+      detail: { reason: "conflicting_identity_headers" },
+    });
+    return c.json(fail("missing_identity", "Identitate lipsa in header-ele proxy.", c), 400);
+  }
+  const email = forwardedEmail !== "" ? forwardedEmail : authRequestEmail;
   if (!email || !email.includes("@") || email.length > 254) {
     recordAudit(null, "auth.oauth2.sync", {
       outcome: "denied",
