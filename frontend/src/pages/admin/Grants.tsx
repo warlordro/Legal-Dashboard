@@ -3,6 +3,7 @@ import { Gift, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/UserPicker";
@@ -354,18 +355,18 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="grant-feature">
                     Feature
                   </label>
-                  <select
-                    id="grant-feature"
-                    value={feature}
-                    onChange={(e) => setFeature(e.target.value)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    {GRANTABLE_FEATURES.map((f) => (
-                      <option key={f} value={f}>
-                        {quotaFeatureLabel(f)}
-                      </option>
-                    ))}
-                  </select>
+                  <Select value={feature} onValueChange={setFeature}>
+                    <SelectTrigger id="grant-feature">
+                      <SelectValue placeholder="Feature" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GRANTABLE_FEATURES.map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {quotaFeatureLabel(f)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="grant-extra">

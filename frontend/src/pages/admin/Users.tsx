@@ -419,18 +419,18 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                     <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-role">
                       Rol
                     </label>
-                    <select
-                      id="new-user-role"
-                      value={newRole}
-                      onChange={(e) => setNewRole(e.target.value as "user" | "admin")}
-                      className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                    >
-                      {ASSIGNABLE_ROLE_OPTIONS.map((o) => (
-                        <option key={o.value} value={o.value}>
-                          {o.label}
-                        </option>
-                      ))}
-                    </select>
+                    <Select value={newRole} onValueChange={(v) => setNewRole(v as "user" | "admin")}>
+                      <SelectTrigger id="new-user-role">
+                        <SelectValue placeholder="Rol" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ASSIGNABLE_ROLE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <Button type="submit" disabled={creating}>
                     <UserPlus className="h-4 w-4" />

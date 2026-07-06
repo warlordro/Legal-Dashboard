@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Users as UsersIcon } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { admin, type AdminUser } from "@/lib/api";
 import { userRoleLabel } from "@/lib/userLabels";
 
@@ -57,25 +58,26 @@ export function UserPicker({ value, onSelect, disabled, ariaLabel }: UserPickerP
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-2">
-        <select
-          aria-label={ariaLabel}
+        {/* Select-ul custom (nu <select> nativ): popup-ul nativ e desenat de
+            browser si iese din tema pe dark mode (feedback user). */}
+        <Select
           value={value}
-          disabled={disabled || loading}
-          onChange={(e) => {
-            const user = users.find((u) => u.id === e.target.value);
+          onValueChange={(v) => {
+            const user = users.find((u) => u.id === v);
             if (user) onSelect(user);
           }}
-          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
         >
-          <option value="" disabled>
-            {loading ? "Se incarca utilizatorii..." : "Alege un utilizator"}
-          </option>
-          {users.map((u) => (
-            <option key={u.id} value={u.id}>
-              {u.email} — {u.displayName} ({userRoleLabel(u.role)})
-            </option>
-          ))}
-        </select>
+          <SelectTrigger aria-label={ariaLabel} disabled={disabled || loading} className="w-full">
+            <SelectValue placeholder={loading ? "Se incarca utilizatorii..." : "Alege un utilizator"} />
+          </SelectTrigger>
+          <SelectContent>
+            {users.map((u) => (
+              <SelectItem key={u.id} value={u.id}>
+                {`${u.email} — ${u.displayName} (${userRoleLabel(u.role)})`}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
         {error && <p className="text-xs text-red-600">{error}</p>}
         {!loading && total > users.length && (
           <p className="text-xs text-muted-foreground">

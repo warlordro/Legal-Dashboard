@@ -3,6 +3,7 @@ import { Gauge, RefreshCw, Trash2, Plus, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
 import { UserPicker } from "@/components/UserPicker";
@@ -341,48 +342,51 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-feature">
                     Feature
                   </label>
-                  <select
-                    id="quota-feature"
+                  <Select
                     value={feature}
-                    onChange={(e) => {
+                    onValueChange={(v) => {
                       // Unitati diferite (USD vs captcha-uri): la schimbarea
                       // feature-ului, perioada si limita revin la default —
                       // valorile tastate pentru AI nu se preiau la captcha.
-                      setFeature(e.target.value);
+                      setFeature(v);
                       setPeriod("day");
                       setLimitInput("");
                     }}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
                   >
-                    {/* Rand legacy (feature in afara enum-ului, ex. pre-consolidare): il
-                        pastram selectabil doar cat e valoarea curenta (edit round-trip
-                        corect), fara sa-l oferim ca optiune noua. */}
-                    {feature && !isKnownQuotaFeature(feature) && (
-                      <option value={feature} disabled>
-                        {quotaFeatureLabel(feature)}
-                      </option>
-                    )}
-                    {QUOTA_FEATURES.map((f) => (
-                      <option key={f} value={f}>
-                        {quotaFeatureLabel(f)}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="quota-feature">
+                      <SelectValue placeholder="Feature" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* Rand legacy (feature in afara enum-ului, ex. pre-consolidare): il
+                          pastram selectabil doar cat e valoarea curenta (edit round-trip
+                          corect), fara sa-l oferim ca optiune noua. */}
+                      {feature && !isKnownQuotaFeature(feature) && (
+                        <SelectItem value={feature} disabled>
+                          {quotaFeatureLabel(feature)}
+                        </SelectItem>
+                      )}
+                      {QUOTA_FEATURES.map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {quotaFeatureLabel(f)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-period">
                     Perioada
                   </label>
-                  <select
-                    id="quota-period"
-                    value={period}
-                    onChange={(e) => setPeriod(e.target.value as QuotaPeriod)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    <option value="day">Zilnic</option>
-                    <option value="week">Saptamanal</option>
-                    <option value="month">Lunar</option>
-                  </select>
+                  <Select value={period} onValueChange={(v) => setPeriod(v as QuotaPeriod)}>
+                    <SelectTrigger id="quota-period">
+                      <SelectValue placeholder="Perioada" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="day">Zilnic</SelectItem>
+                      <SelectItem value="week">Saptamanal</SelectItem>
+                      <SelectItem value="month">Lunar</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-limit">
