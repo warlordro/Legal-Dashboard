@@ -260,21 +260,27 @@ adminRouter.post("/users", limitAdminBody, async (c) => {
 
   const existing = getUserByEmail(parsed.data.email);
   if (existing !== null && existing.status === "deleted") {
+    let reactivated: ReturnType<typeof reactivateDeletedUser> | null = null;
     try {
-      const user = reactivateDeletedUser({
+      reactivated = reactivateDeletedUser({
         id: existing.id,
         displayName: parsed.data.displayName,
         role: parsed.data.role,
       });
+    } catch (err) {
+      // DOAR cursa asteptata (statusul s-a schimbat intre check si update —
+      // alt admin l-a reactivat deja) cade pe raspunsul de duplicat de mai
+      // jos; orice alta eroare (I/O, constraint) ramane 500 — un catch-all
+      // ar masca-o intr-un 409 mincinos (CodeRabbit, confirmat).
+      if (!(err instanceof Error && err.message.startsWith("user not deleted"))) throw err;
+    }
+    if (reactivated !== null) {
       recordAudit(c, "admin.users.create", {
         targetKind: "user",
-        targetId: user.id,
-        detail: { email: user.email, role: user.role, reactivated: true },
+        targetId: reactivated.id,
+        detail: { email: reactivated.email, role: reactivated.role, reactivated: true },
       });
-      return c.json(ok(toUserDto(user), c), 201);
-    } catch {
-      // Statusul s-a schimbat concurent (alt admin l-a reactivat deja) —
-      // cade pe raspunsul standard de duplicat de mai jos.
+      return c.json(ok(toUserDto(reactivated), c), 201);
     }
   }
   if (existing !== null) {
