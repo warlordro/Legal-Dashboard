@@ -75,8 +75,28 @@ export function Sidebar({
     return latestRnpm > latestCautari ? "rnpm" : "cautari";
   });
   const [popoverSection, setPopoverSection] = useState<"cautari" | "rnpm" | null>(null);
+  // Popover-ele de istoric din modul colapsat sunt position:fixed, ancorate pe
+  // butonul apasat: containerul de mijloc are overflow-y-auto (fix-ul de
+  // footer), iar un absolute pozitionat lateral in afara barei de 64px era
+  // taiat de overflow — butonul se activa, dar meniul nu aparea niciodata.
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const popoverBtnRef = useRef<HTMLButtonElement>(null);
+
+  const togglePopover = (section: "cautari" | "rnpm") => (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (popoverSection === section) {
+      setPopoverSection(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPopoverPos({
+      left: rect.right + 8,
+      // Continutul are maxHeight 60vh: clamp pe top ca lista sa nu iasa pe
+      // sub marginea ferestrei cand butonul e jos.
+      top: Math.max(8, Math.min(rect.top, window.innerHeight * 0.35)),
+    });
+    setPopoverSection(section);
+  };
   const navigate = useNavigate();
   // v2.42.0 (5.1): pe web, intrarea din footer duce la /setari (taburi pe
   // roluri); pe desktop ramane dialogul BYOK (invariant 0.1: desktop identic).
@@ -286,12 +306,12 @@ export function Sidebar({
 
         {/* Collapsed: history popovers (Cautari + RNPM) */}
         {collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
-          <div className="relative flex-1 flex flex-col items-center gap-1 pt-2 border-t border-border">
+          <div className="flex-1 flex flex-col items-center gap-1 pt-2 border-t border-border">
             {history.length > 0 && (
               <button
                 ref={popoverSection === "cautari" ? popoverBtnRef : null}
                 type="button"
-                onClick={() => setPopoverSection(popoverSection === "cautari" ? null : "cautari")}
+                onClick={togglePopover("cautari")}
                 title="Istoric cautari"
                 className={cn(
                   "rounded-lg p-2 transition-colors",
@@ -308,7 +328,7 @@ export function Sidebar({
               <button
                 ref={popoverSection === "rnpm" ? popoverBtnRef : null}
                 type="button"
-                onClick={() => setPopoverSection(popoverSection === "rnpm" ? null : "rnpm")}
+                onClick={togglePopover("rnpm")}
                 title="Istoric RNPM"
                 className={cn(
                   "rounded-lg p-2 transition-colors",
@@ -324,7 +344,8 @@ export function Sidebar({
             {popoverSection === "cautari" && (
               <div
                 ref={popoverRef}
-                className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
+                style={{ top: popoverPos?.top, left: popoverPos?.left }}
+                className="fixed z-50 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
               >
                 <div className="flex items-center justify-between px-3 pt-3 pb-1">
                   <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -363,7 +384,8 @@ export function Sidebar({
             {popoverSection === "rnpm" && (
               <div
                 ref={popoverRef}
-                className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
+                style={{ top: popoverPos?.top, left: popoverPos?.left }}
+                className="fixed z-50 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
               >
                 <div className="flex items-center justify-between px-3 pt-3 pb-1">
                   <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
