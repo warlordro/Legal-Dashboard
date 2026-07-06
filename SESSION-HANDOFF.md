@@ -33,23 +33,20 @@ siguranta intrerup des sesiunea pe subiecte de auth/tastatura — continua pe Op
   revoke-all, inchidere alerta); 6.5 monitoringRunStatus + userLabels sursa unica +
   Keys in romana + Refresh->Reincarca; 6.6 dark mode; 6.10 autoLoading pe captcha-block.
 
-**MR 12 — PARTIAL, salvat ca WIP (ultimul commit pe branch):**
-- GATA: `components/ui/toast.tsx` (ToastProvider + useToast, cap 4, timere curatate);
-  fix CRITIC useDialog (onClose in ref, efect pe `[open]`); AlertsExportModal mutat
-  pe useDialog (+ tabIndex -1 fallback).
-- RAMAS de facut (in ordine): ReportExportModal pe useDialog (scoate keydown ad-hoc,
-  pastreaza guard pe busy); monteaza `ToastProvider` in App.tsx (inauntrul
-  ConfirmProvider); modalul hand-rolled de bulk-dismiss din Alerts -> useConfirm;
-  adopta toast-uri pe mutatii (Keys, Users, Quota, Grants, Alerts cu count real,
-  ApiAccessPanel, exporturi PDF Changelog+Manual — toast EROARE); sortare pe coloane
-  (SortableTh) in Users/Audit/Monitorizare; teste MR 12 (toast timere, useDialog focus,
-  useClientSort deja are test).
+- MR 12 (5e5c275 + 99fca23 + a101e03): toast.tsx (ToastProvider + useToast, cap 4,
+  timere curatate) + fix CRITIC useDialog (onClose in ref, efect pe `[open]`) +
+  AlertsExportModal/ReportExportModal pe useDialog + bulk-dismiss Alerts pe useConfirm
+  cu toast pe dismissedCount REAL (0 = info) + toast-uri pe mutatii (Keys, Users,
+  Quota, Grants, ApiAccessPanel, exporturi PDF Changelog+Manual cu toast EROARE) +
+  SortableTh/useClientSort in Users/Audit/Monitorizare pe etichete umane + teste
+  (toast timere, useDialog focus, Keys+ApiAccessPanel cu ToastProvider in render).
 
-**DUPA MR 12:** bump v2.42.0 (checklist din CLAUDE.md: package.json root+backend+
+**URMEAZA (in ordine):** bump v2.42.0 (checklist din CLAUDE.md: package.json root+backend+
 frontend + lockfile, changelog-entries.tsx, CHANGELOG, README, STATUS, DOCUMENTATIE,
 SECURITY entry pentru email unic/pool/last-admin/escape audit) + sanity grep versiune
 veche; apoi smoke local; apoi **review adversarial cu review-panel** pe branch (cerinta
-`/goal` activa). Stare gate-uri la ultimul commit livrat: backend + frontend verzi, build ok.
+`/goal` activa). Stare gate-uri la a101e03: biome curat, tsc backend + frontend verzi,
+build ok, 326 teste frontend pass.
 
 ## Kill switches operationale
 
