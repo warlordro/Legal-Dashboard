@@ -66,6 +66,9 @@ const STRIPPED_REQUEST_HEADERS = new Set([
   "upgrade",
   "te",
   "trailer",
+  // Framing-ul cererii il rescrie Node la pipe; un transfer-encoding copiat
+  // de la client ar putea produce framing dublu pe body-uri chunked.
+  "transfer-encoding",
 ]);
 
 // Framing-ul raspunsului il gestioneaza Node (chunked automat la pipe);

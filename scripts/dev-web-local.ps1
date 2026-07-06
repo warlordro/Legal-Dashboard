@@ -61,7 +61,15 @@ function Fail([string]$message) {
 function New-RandomBase64([int]$byteCount) {
   $bytes = [byte[]]::new($byteCount)
   # RNG criptografic — NU Get-Random (predictibil, nepotrivit pentru secrete).
-  [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+  # Create()/GetBytes() in loc de ::Fill(): Fill exista doar in .NET Core 3+,
+  # iar `powershell.exe` (Windows PowerShell 5.1, .NET Framework) crapa pe el
+  # cu "does not contain a method named 'Fill'" — exact la primul run.
+  $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+  try {
+    $rng.GetBytes($bytes)
+  } finally {
+    $rng.Dispose()
+  }
   return [Convert]::ToBase64String($bytes)
 }
 
@@ -92,8 +100,13 @@ if (-not (Test-Path (Join-Path $root "dist-backend\index.cjs"))) {
 
 # --- 2. Secrete persistente (git-ignored) ------------------------------------
 if (Test-Path $secretsPath) {
-  $secrets = Get-Content $secretsPath -Raw | ConvertFrom-Json
-  $tenantBytes = [Convert]::FromBase64String($secrets.tenantKeySecret)
+  # Fisier corupt/legacy -> mesaj ghidat, nu stack trace brut ($ErrorActionPreference=Stop).
+  try {
+    $secrets = Get-Content $secretsPath -Raw | ConvertFrom-Json
+    $tenantBytes = [Convert]::FromBase64String([string]$secrets.tenantKeySecret)
+  } catch {
+    Fail "Nu pot citi secretele din $secretsPath ($($_.Exception.Message)). Pentru reset: sterge $secretsPath SI $stateDir, apoi ruleaza din nou."
+  }
   if ($tenantBytes.Length -ne 32) {
     # NU regeneram silentios: cheia tenant cripteaza chei deja salvate in DB-ul
     # local; o cheie noua le-ar face ilizibile fara niciun mesaj.
