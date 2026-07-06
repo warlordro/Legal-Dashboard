@@ -38,16 +38,20 @@ export function HistoryEntryRow({
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-1.5">
             <p className="truncate text-[13px] font-medium text-foreground group-hover:text-primary">{label}</p>
-            {/* PJ cu culoare proprie (nu muted-pe-muted — ilizibil pe dark) + 10px, pereche cu ICCJ. */}
-            <span
-              className={
-                source === "iccj"
-                  ? "shrink-0 rounded border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
-                  : "shrink-0 rounded border border-sky-300 bg-sky-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-sky-700 dark:border-sky-700 dark:bg-sky-900/20 dark:text-sky-400"
-              }
-            >
-              {source === "iccj" ? "ICCJ" : "PJ"}
-            </span>
+            {/* Badge de sursa DOAR cand sursa exista (cautari PortalJust/ICCJ) —
+                intrarile RNPM nu au sursa si nu primesc badge (PJ pe RNPM ar
+                minti). PJ cu culoare proprie + 10px, pereche cu ICCJ. */}
+            {source && (
+              <span
+                className={
+                  source === "iccj"
+                    ? "shrink-0 rounded border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400"
+                    : "shrink-0 rounded border border-sky-300 bg-sky-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-sky-700 dark:border-sky-700 dark:bg-sky-900/20 dark:text-sky-400"
+                }
+              >
+                {source === "iccj" ? "ICCJ" : "PJ"}
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
             <span>{resultCount} rez.</span>

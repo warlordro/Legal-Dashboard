@@ -241,7 +241,7 @@ export function Sidebar({
                         label={entry.label}
                         resultCount={entry.resultCount}
                         timestamp={entry.timestamp}
-                        source={entry.params.source}
+                        source={entry.params.source ?? "portaljust"}
                         onClick={() => handleEntryClick(entry)}
                         onRemove={() => onRemoveEntry(entry.id)}
                       />
@@ -372,7 +372,7 @@ export function Sidebar({
                       label={entry.label}
                       resultCount={entry.resultCount}
                       timestamp={entry.timestamp}
-                      source={entry.params.source}
+                      source={entry.params.source ?? "portaljust"}
                       onClick={() => handleEntryClick(entry)}
                       onRemove={() => onRemoveEntry(entry.id)}
                     />
