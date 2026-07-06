@@ -113,7 +113,17 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
 
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
+  // Pattern 6.7 (audit v2.42.0, finding #1): abort pe fetch-ul in zbor +
+  // resetarea paginii INLINE in handlerele de filtru, NU intr-un efect paralel
+  // cu aceleasi deps — altfel schimbarea unui filtru pe pagina > 1 lanseaza
+  // doua fetch-uri (page vechi + page 1), iar cel lent poate suprascrie
+  // randurile corecte sub un indice de pagina gresit.
+  const listAbortRef = useRef<AbortController | null>(null);
+
   const load = useCallback(async () => {
+    listAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    listAbortRef.current = ctrl;
     setLoading(true);
     setError(null);
     try {
@@ -123,28 +133,36 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
         search: search || undefined,
         role: roleFilter === "all" ? undefined : roleFilter,
         status: statusFilter === "all" ? undefined : statusFilter,
+        signal: ctrl.signal,
       });
+      if (ctrl.signal.aborted) return;
       setRows(result.rows);
       setTotal(result.total);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
+      if (ctrl.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorilor.");
     } finally {
-      setLoading(false);
+      if (listAbortRef.current === ctrl) {
+        setLoading(false);
+        listAbortRef.current = null;
+      }
     }
   }, [page, pageSize, roleFilter, search, statusFilter]);
 
   useEffect(() => {
     load();
+    return () => {
+      listAbortRef.current?.abort();
+      listAbortRef.current = null;
+    };
   }, [load]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii depinde explicit de filtrele vizibile.
-  useEffect(() => {
-    setPage(1);
-  }, [roleFilter, search, statusFilter]);
 
   const onSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSearch(searchInput.trim());
+    setPage(1);
   };
 
   // Server-side guards (last_admin, self_deactivation) are the source of truth;
@@ -317,7 +335,13 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                 placeholder="Cauta dupa email sau nume"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm md:col-span-2"
               />
-              <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as UserRole | "all")}>
+              <Select
+                value={roleFilter}
+                onValueChange={(v) => {
+                  setRoleFilter(v as UserRole | "all");
+                  setPage(1);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Rol" />
                 </SelectTrigger>
@@ -330,7 +354,13 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as UserStatus | "all")}>
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => {
+                  setStatusFilter(v as UserStatus | "all");
+                  setPage(1);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>

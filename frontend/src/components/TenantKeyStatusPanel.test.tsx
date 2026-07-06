@@ -3,6 +3,7 @@
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetTenantKeyStatusStoreForTests } from "@/hooks/useTenantKeyStatus";
 
 const mockKeyStatus = vi.fn();
 const mockGetTenantKeys = vi.fn();
@@ -77,6 +78,7 @@ function text(): string {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  __resetTenantKeyStatusStoreForTests();
   mockUseCurrentUser.mockReturnValue(currentUser("user"));
   mockGetTenantKeys.mockResolvedValue(TENANT_KEYS_RESULT);
   (window as unknown as { desktopApi?: unknown }).desktopApi = undefined;

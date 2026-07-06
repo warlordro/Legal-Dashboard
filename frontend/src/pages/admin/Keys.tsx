@@ -47,15 +47,21 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
   });
   const [provider, setProvider] = useState<TenantCaptchaProvider>("2captcha");
   const [mode, setMode] = useState<TenantCaptchaMode>("sequential");
+  // Selectia NESALVATA a toggle-urilor nu are voie sa fie suprascrisa de un
+  // refresh fara legatura (ex. salvarea unei chei AI re-fetch-uieste `data`,
+  // iar sincronizarea reseta toggle-ul pe valoarea din server — userul alegea
+  // CapSolver si se trezea inapoi pe 2Captcha). Sincronizam din server doar
+  // cat timp userul nu a atins toggle-urile; dupa "Salveaza captcha" reluam.
+  const [captchaDirty, setCaptchaDirty] = useState(false);
 
   const currentProvider = data?.captcha.provider ?? provider;
   const currentMode = data?.captcha.mode ?? mode;
 
   useEffect(() => {
-    if (!data) return;
+    if (!data || captchaDirty) return;
     setProvider(data.captcha.provider);
     setMode(data.captcha.mode);
-  }, [data]);
+  }, [data, captchaDirty]);
 
   // v2.42.0 (6.3): toast DOAR pe succes; erorile raman in banner (saveKey arunca).
   const onSaveKey = async (field: TenantKeyField) => {
@@ -91,6 +97,8 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
   const onSaveCaptcha = async () => {
     try {
       await saveCaptchaSettings(provider, mode);
+      // Salvat -> valoarea locala coincide cu serverul; reluam sincronizarea.
+      setCaptchaDirty(false);
       toast("Setarile captcha au fost salvate.", { variant: "success" });
     } catch {
       /* banner */
@@ -184,7 +192,10 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   <button
                     key={item.value}
                     type="button"
-                    onClick={() => setProvider(item.value)}
+                    onClick={() => {
+                      setProvider(item.value);
+                      setCaptchaDirty(true);
+                    }}
                     className={cn(
                       "rounded px-3 py-1.5 text-sm transition-colors",
                       provider === item.value ? "bg-primary text-primary-foreground" : "text-muted-foreground"
@@ -203,7 +214,10 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   <button
                     key={item.value}
                     type="button"
-                    onClick={() => setMode(item.value)}
+                    onClick={() => {
+                      setMode(item.value);
+                      setCaptchaDirty(true);
+                    }}
                     className={cn(
                       "rounded px-3 py-1.5 text-sm transition-colors",
                       mode === item.value ? "bg-primary text-primary-foreground" : "text-muted-foreground"

@@ -127,8 +127,20 @@ export function Sidebar({
         setPopoverSection(null);
       }
     };
+    // Pozitia e capturata la click (position:fixed); daca ancora se misca
+    // (scroll in zona de mijloc a sidebar-ului, resize), popover-ul ar ramane
+    // desprins de buton — il inchidem, ca dropdown-urile native (audit
+    // v2.42.0, finding #4). `capture: true` prinde si scroll-urile din
+    // containerele interioare (scroll nu face bubble).
+    const close = () => setPopoverSection(null);
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", close);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
   }, [popoverSection]);
 
   return (

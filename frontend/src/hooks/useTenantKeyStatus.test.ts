@@ -8,7 +8,11 @@ vi.mock("@/lib/api", () => ({
   me: { keyStatus: (...args: unknown[]) => mockKeyStatus(...args) },
 }));
 
-import { useTenantKeyStatus, type UseTenantKeyStatusResult } from "./useTenantKeyStatus";
+import {
+  __resetTenantKeyStatusStoreForTests,
+  useTenantKeyStatus,
+  type UseTenantKeyStatusResult,
+} from "./useTenantKeyStatus";
 
 function setDesktop(on: boolean): void {
   const w = window as unknown as { desktopApi?: unknown };
@@ -53,6 +57,9 @@ async function flush() {
 beforeEach(() => {
   mockKeyStatus.mockReset();
   setDesktop(false);
+  // Store partajat la nivel de modul — fara reset, starea unui test se scurge
+  // in urmatorul.
+  __resetTenantKeyStatusStoreForTests();
 });
 
 afterEach(() => {
@@ -161,6 +168,20 @@ describe("useTenantKeyStatus", () => {
     expect(h.api.state.state).toBe("ready");
     expect(h.api.hasTenantAiKey).toBe(true); // starea proaspata a ramas
     h.unmount();
+  });
+
+  it("store partajat: doua instante montate simultan = UN singur fetch", async () => {
+    mockKeyStatus.mockResolvedValue({ authMode: "web", tenantKeysConfigured: CONFIGURED_ALL });
+    const h1 = mount();
+    const h2 = mount();
+    await flush();
+    expect(mockKeyStatus).toHaveBeenCalledTimes(1);
+    // Ambele instante vad aceeasi stare din store.
+    expect(h1.api.state.state).toBe("ready");
+    expect(h2.api.state.state).toBe("ready");
+    expect(h2.api.hasTenantAiKey).toBe(true);
+    h1.unmount();
+    h2.unmount();
   });
 
   it("refetch la focus, cu throttle 5s intre fetch-uri", async () => {

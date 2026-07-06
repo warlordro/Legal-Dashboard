@@ -4,6 +4,7 @@ import type React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetTenantKeyStatusStoreForTests } from "@/hooks/useTenantKeyStatus";
 import { ApiKeyDialog } from "./ApiKeyDialog";
 import type { AiMode } from "./dosare-ai-config";
 
@@ -137,6 +138,7 @@ describe("ApiKeyDialog OpenRouter mode", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetTenantKeyStatusStoreForTests();
     mockKeyStatus.mockResolvedValue({
       authMode: "web",
       tenantKeysConfigured: { anthropic: true, openai: true, google: true, openrouter: true, captcha: true },
