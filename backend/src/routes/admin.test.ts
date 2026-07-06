@@ -653,3 +653,103 @@ describe("/api/v1/admin/users/:id/grants", () => {
     expect(res.status).toBe(400);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Vederi globale (v2.41.0): GET /quota/overrides + GET /grants/active
+// ---------------------------------------------------------------------------
+
+describe("/api/v1/admin/quota/overrides + /grants/active (vederi globale)", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+    insertUser({ id: "u-1", email: "b@x", displayName: "B" });
+    insertUser({ id: "u-2", email: "a@x", displayName: "A" });
+  });
+
+  it("GET /quota/overrides pe gol -> lista goala si truncated:false", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toEqual({ overrides: [], truncated: false });
+  });
+
+  it("GET /quota/overrides intoarce toate override-urile cu identitate user, sortate pe email", async () => {
+    const app = buildApp();
+    await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", period: "day", limitUsdMilli: 5000 }),
+    });
+    await app.request("/api/v1/admin/users/u-2/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "captcha.rnpm", period: "week", limitUsdMilli: 50 }),
+    });
+
+    const res = await app.request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { overrides: Array<Record<string, unknown>>; truncated: boolean };
+    };
+    expect(body.data.truncated).toBe(false);
+    expect(body.data.overrides).toHaveLength(2);
+    // Sortare pe email: a@x (u-2) inaintea lui b@x (u-1).
+    expect(body.data.overrides[0]).toMatchObject({
+      userId: "u-2",
+      email: "a@x",
+      displayName: "A",
+      feature: "captcha.rnpm",
+      period: "week",
+      limitUsdMilli: 50,
+    });
+    expect(body.data.overrides[1]).toMatchObject({ userId: "u-1", email: "b@x", feature: "ai.single" });
+  });
+
+  it("GET /quota/overrides este gate-uit pe admin (403 pentru user)", async () => {
+    const app = buildApp("u-1");
+    const res = await app.request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /grants/active intoarce doar granturile active, cu identitate user", async () => {
+    const app = buildApp();
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    // Grant activ pe u-2.
+    await app.request("/api/v1/admin/users/u-2/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 2500, expiresAt: future }),
+    });
+    // Grant revocat pe u-1 (creat, apoi revocat) — nu trebuie sa apara.
+    const created = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai.multi", extraUsdMilli: 1000, expiresAt: future }),
+    });
+    const createdBody = (await jsonOf(created)) as { data: { id: number } };
+    await app.request(`/api/v1/admin/grants/${createdBody.data.id}`, { method: "DELETE" });
+
+    const res = await app.request("/api/v1/admin/grants/active");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { grants: Array<Record<string, unknown>>; truncated: boolean };
+    };
+    expect(body.data.truncated).toBe(false);
+    expect(body.data.grants).toHaveLength(1);
+    expect(body.data.grants[0]).toMatchObject({
+      userId: "u-2",
+      email: "a@x",
+      displayName: "A",
+      feature: "ai.single",
+      extraUsdMilli: 2500,
+    });
+  });
+
+  it("GET /grants/active pe gol -> lista goala si truncated:false", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/grants/active");
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toEqual({ grants: [], truncated: false });
+  });
+});

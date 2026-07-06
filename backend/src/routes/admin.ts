@@ -40,10 +40,19 @@ import {
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
-import { deleteOverride, listOverridesForUser, upsertOverride, type QuotaPeriod } from "../db/userQuotaRepository.ts";
 import {
+  ALL_OVERRIDES_CAP,
+  deleteOverride,
+  listAllOverrides,
+  listOverridesForUser,
+  upsertOverride,
+  type QuotaPeriod,
+} from "../db/userQuotaRepository.ts";
+import {
+  ALL_ACTIVE_GRANTS_CAP,
   createGrant,
   getGrant,
+  listAllActiveGrants,
   listGrantsForUser,
   revokeGrant,
   type QuotaGrantRow,
@@ -469,6 +478,26 @@ adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
 
 // ---------- Quota ----------
 
+// v2.41.0 (P5): vederea globala a paginii Cote — toate override-urile cu
+// identitate user, fara selectie prealabila. `truncated` semnaleaza atingerea
+// capului (500); UI-ul afiseaza o nota vizibila in acest caz.
+adminRouter.get("/quota/overrides", (c) => {
+  const rows = listAllOverrides();
+  const overrides = rows.map((r) => ({
+    userId: r.user_id,
+    email: r.email,
+    displayName: r.display_name,
+    role: r.role,
+    status: r.status,
+    feature: r.feature,
+    period: r.period,
+    limitUsdMilli: r.limit_usd_milli,
+    updatedAt: r.updated_at,
+    updatedBy: r.updated_by,
+  }));
+  return c.json(ok({ overrides, truncated: rows.length >= ALL_OVERRIDES_CAP }, c), 200);
+});
+
 adminRouter.get("/users/:id/quota", (c) => {
   const id = c.req.param("id");
   const user = getUserById(id);
@@ -563,6 +592,20 @@ adminRouter.delete("/users/:id/quota/:feature", (c) => {
 });
 
 // ---------- Grants ----------
+
+// v2.41.0 (P5): pandantul vederii globale pentru Granturi — doar granturile
+// ACTIVE (nerevocate, neexpirate), cu identitate user + truncated la cap.
+adminRouter.get("/grants/active", (c) => {
+  const rows = listAllActiveGrants();
+  const grants = rows.map((r) => ({
+    ...toGrantDto(r),
+    email: r.email,
+    displayName: r.display_name,
+    role: r.role,
+    status: r.status,
+  }));
+  return c.json(ok({ grants, truncated: rows.length >= ALL_ACTIVE_GRANTS_CAP }, c), 200);
+});
 
 adminRouter.get("/users/:id/grants", (c) => {
   const id = c.req.param("id");

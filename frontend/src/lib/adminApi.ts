@@ -134,6 +134,39 @@ export interface CreateGrantInput {
   reason?: string | null;
 }
 
+// v2.41.0: vederile globale (toate override-urile / granturile active, cu
+// identitate user). `truncated` = capul de 500 randuri a fost atins.
+// Fara alias-ul legacy dailyLimitUsdMilli — endpointul global e post-v2.32.
+export interface GlobalQuotaOverride {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  status: UserStatus;
+  feature: string;
+  period: QuotaPeriod;
+  limitUsdMilli: number | null;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
+export interface GlobalQuotaOverridesResult {
+  overrides: GlobalQuotaOverride[];
+  truncated: boolean;
+}
+
+export interface GlobalQuotaGrant extends QuotaGrant {
+  email: string;
+  displayName: string;
+  role: UserRole;
+  status: UserStatus;
+}
+
+export interface GlobalActiveGrantsResult {
+  grants: GlobalQuotaGrant[];
+  truncated: boolean;
+}
+
 export type TenantKeyField = "anthropic" | "openai" | "google" | "openrouter" | "twocaptcha" | "capsolver";
 export type TenantCaptchaProvider = "2captcha" | "capsolver";
 export type TenantCaptchaMode = "sequential" | "race";
@@ -339,6 +372,16 @@ export const admin = {
       { method: "DELETE" }
     );
     return unwrapMonitoring<{ feature: string; removed: boolean }>(res);
+  },
+
+  listAllQuotaOverrides: async (signal?: AbortSignal): Promise<GlobalQuotaOverridesResult> => {
+    const res = await apiFetch("/api/v1/admin/quota/overrides", { signal });
+    return unwrapMonitoring<GlobalQuotaOverridesResult>(res);
+  },
+
+  listActiveGrants: async (signal?: AbortSignal): Promise<GlobalActiveGrantsResult> => {
+    const res = await apiFetch("/api/v1/admin/grants/active", { signal });
+    return unwrapMonitoring<GlobalActiveGrantsResult>(res);
   },
 
   listGrants: async (userId: string, signal?: AbortSignal): Promise<QuotaGrantListResult> => {

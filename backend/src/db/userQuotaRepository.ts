@@ -61,6 +61,32 @@ export function listOverridesForUser(userId: string, limit = 200): QuotaOverride
     .all(userId, boundedLimit) as QuotaOverrideRow[];
 }
 
+// v2.41.0 (P5): vederea globala din pagina Cote — toate override-urile cu
+// identitatea userului, fara selectie prealabila. Cap 500 randuri (un tenant =
+// o firma; peste cap raportam truncated in ruta, nu paginam).
+export const ALL_OVERRIDES_CAP = 500;
+
+export interface QuotaOverrideWithUserRow extends QuotaOverrideRow {
+  email: string;
+  display_name: string;
+  role: string;
+  status: string;
+}
+
+export function listAllOverrides(limit = ALL_OVERRIDES_CAP): QuotaOverrideWithUserRow[] {
+  const boundedLimit = Math.max(1, Math.min(ALL_OVERRIDES_CAP, Math.floor(limit)));
+  return getDb()
+    .prepare(
+      `SELECT o.user_id, o.feature, o.period, o.limit_usd_milli, o.updated_at, o.updated_by,
+              u.email, u.display_name, u.role, u.status
+       FROM user_quota_overrides o
+       JOIN users u ON u.id = o.user_id
+       ORDER BY u.email ASC, o.feature ASC
+       LIMIT ?`
+    )
+    .all(boundedLimit) as QuotaOverrideWithUserRow[];
+}
+
 export function getOverride(userId: string, feature: string): QuotaOverrideRow | null {
   const row = getDb()
     .prepare(
