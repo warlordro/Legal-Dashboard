@@ -240,7 +240,14 @@ export default function RnpmSearchPage({
   };
 
   const loadNextBatch = async () => {
-    if (!result || captchaBlocked || result.nextRnpmPage == null || loading) return;
+    // v2.42.0 (6.10): cand captcha nu e disponibil, STINGE autoLoading inainte
+    // de return — altfel UI-ul ramane pe "Opreste incarcarea" fara niciun
+    // request in zbor.
+    if (captchaBlocked) {
+      setAutoLoading(false);
+      return;
+    }
+    if (!result || result.nextRnpmPage == null || loading) return;
     if (abortRef.current) return;
     const ctl = new AbortController();
     abortRef.current = ctl;

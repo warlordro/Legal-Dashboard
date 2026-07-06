@@ -17,6 +17,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -106,6 +107,7 @@ export default function Alerts({
   onOpenDosar?: (numarDosar: string, source?: "portaljust" | "iccj") => void;
 }) {
   const navigate = useNavigate();
+  const confirm = useConfirm();
   const [rows, setRows] = useState<MonitoringAlert[]>([]);
   const [page, setPage] = useState(0);
   const [pageSize, setPageSize] = useState(25);
@@ -236,6 +238,14 @@ export default function Alerts({
   };
 
   const dismiss = async (alert: MonitoringAlert) => {
+    // v2.42.0 (6.2): inchiderea e ireversibila — confirmare obligatorie.
+    const ok = await confirm({
+      title: "Inchide alerta",
+      message: "Inchizi aceasta alerta? Actiunea este ireversibila.",
+      destructive: true,
+      confirmLabel: "Inchide",
+    });
+    if (!ok) return;
     setBusyId(alert.id);
     setError(null);
     try {
@@ -596,7 +606,7 @@ export default function Alerts({
           <div className="flex items-center gap-2">
             <Button size="sm" variant="outline" onClick={load} disabled={loading}>
               <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-              Refresh
+              Reincarca
             </Button>
             <Button
               size="sm"

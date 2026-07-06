@@ -32,6 +32,7 @@ import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, getIccjId, t
 import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export-monitoring";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
+import { monitoringRunStatusLabel } from "@/lib/monitoringRunStatus";
 import { cn } from "@/lib/utils";
 import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";
 import { useMonitoringMasterSwitch } from "@/hooks/useMonitoringMasterSwitch";
@@ -756,7 +757,7 @@ export default function Monitorizare({
                                       "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                                   )}
                                 >
-                                  {job.last_status}
+                                  {monitoringRunStatusLabel(job.last_status)}
                                 </span>
                               )}
                             </td>

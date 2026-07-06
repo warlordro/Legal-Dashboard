@@ -16,25 +16,28 @@ import {
 } from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
 
+// v2.42.0 (6.5): etichetele vin din sursa unica userLabels (nu map local —
+// "Doar citire", nu "Read-only").
 const ROLE_OPTIONS: ReadonlyArray<{ value: UserRole; label: string }> = [
-  { value: "user", label: "Utilizator" },
-  { value: "admin", label: "Admin" },
-  { value: "support", label: "Suport" },
-  { value: "readonly", label: "Read-only" },
+  { value: "user", label: userRoleLabel("user") },
+  { value: "admin", label: userRoleLabel("admin") },
+  { value: "support", label: userRoleLabel("support") },
+  { value: "readonly", label: userRoleLabel("readonly") },
 ];
 
 const STATUS_OPTIONS: ReadonlyArray<{ value: UserStatus; label: string }> = [
-  { value: "active", label: "Activ" },
-  { value: "suspended", label: "Suspendat" },
-  { value: "deleted", label: "Sters" },
+  { value: "active", label: userStatusLabel("active") },
+  { value: "suspended", label: userStatusLabel("suspended") },
+  { value: "deleted", label: userStatusLabel("deleted") },
 ];
 
-const roleLabel = (role: UserRole) => ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
-const statusLabel = (status: UserStatus) => STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
+const roleLabel = (role: UserRole) => userRoleLabel(role);
+const statusLabel = (status: UserStatus) => userStatusLabel(status);
 
 function statusVariant(status: UserStatus): "success" | "warning" | "destructive" {
   if (status === "active") return "success";
@@ -264,7 +267,7 @@ export default function AdminUsers({ embedded = false }: { embedded?: boolean } 
           )}
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            Reincarca
           </Button>
         </div>
 
