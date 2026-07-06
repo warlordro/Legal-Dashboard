@@ -40,15 +40,17 @@ import {
   getUserByEmail,
   getUserById,
   insertUser,
-  insertUsersBulk,
   isUniqueEmailViolation,
   listUsers,
+  provisionUsersBulk,
+  reactivateDeletedUser,
   updateUserRole,
   updateUserStatus,
   USER_ROLES,
   USER_STATUSES,
   type BulkUserInput,
   type CreatableUserRole,
+  type ReactivateUserInput,
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
@@ -246,8 +248,9 @@ adminRouter.get("/users", (c) => {
 });
 
 // v2.42.0 (4.2): creare individuala. Duplicatul include statusul contului
-// existent in mesaj ca adminul sa inteleaga imediat de ce (ex. cont "sters"
-// care inca ocupa emailul).
+// existent in mesaj ca adminul sa inteleaga imediat de ce. Un cont "sters"
+// NU e duplicat: soft-delete inseamna ca emailul poate fi re-provisionat —
+// randul existent se reactiveaza (acelasi id, nume/rol din request).
 adminRouter.post("/users", limitAdminBody, async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = CreateUserSchema.safeParse(body);
@@ -256,6 +259,24 @@ adminRouter.post("/users", limitAdminBody, async (c) => {
   }
 
   const existing = getUserByEmail(parsed.data.email);
+  if (existing !== null && existing.status === "deleted") {
+    try {
+      const user = reactivateDeletedUser({
+        id: existing.id,
+        displayName: parsed.data.displayName,
+        role: parsed.data.role,
+      });
+      recordAudit(c, "admin.users.create", {
+        targetKind: "user",
+        targetId: user.id,
+        detail: { email: user.email, role: user.role, reactivated: true },
+      });
+      return c.json(ok(toUserDto(user), c), 201);
+    } catch {
+      // Statusul s-a schimbat concurent (alt admin l-a reactivat deja) —
+      // cade pe raspunsul standard de duplicat de mai jos.
+    }
+  }
   if (existing !== null) {
     recordAudit(c, "admin.users.create", {
       outcome: "denied",
@@ -320,8 +341,21 @@ adminRouter.post("/users/import", limitImportBody, async (c) => {
 
   const issues: ImportIssue[] = [...parsedFile.issues];
   const toCreate: (BulkUserInput & { rowNumber: number })[] = [];
+  // Conturile "sterse" nu sunt duplicate: emailul se re-provisioneaza prin
+  // reactivarea randului existent (acelasi id). Doar activ/suspendat blocheaza.
+  const toReactivate: (ReactivateUserInput & { rowNumber: number; email: string })[] = [];
   for (const row of parsedFile.rows) {
     const existing = getUserByEmail(row.email);
+    if (existing !== null && existing.status === "deleted") {
+      toReactivate.push({
+        id: existing.id,
+        email: row.email,
+        displayName: row.displayName,
+        role: row.role,
+        rowNumber: row.rowNumber,
+      });
+      continue;
+    }
     if (existing !== null) {
       issues.push({
         rowNumber: row.rowNumber,
@@ -340,13 +374,14 @@ adminRouter.post("/users/import", limitImportBody, async (c) => {
     });
   }
 
-  if (toCreate.length > 0) {
+  if (toCreate.length > 0 || toReactivate.length > 0) {
     try {
-      insertUsersBulk(toCreate);
+      provisionUsersBulk({ inserts: toCreate, reactivations: toReactivate });
     } catch (err) {
-      // Coliziune concurenta pe unicitate: tranzactia a facut rollback complet,
-      // deci raportul nu minte — nimic nu a fost creat.
-      if (isUniqueEmailViolation(err)) {
+      // Coliziune concurenta (unicitate sau status schimbat intre check si
+      // update): tranzactia a facut rollback complet, deci raportul nu minte —
+      // nimic nu a fost creat sau reactivat.
+      if (isUniqueEmailViolation(err) || (err instanceof Error && err.message.startsWith("user not deleted"))) {
         return c.json(
           fail("import_failed", "Coliziune de email in timpul importului — nimic nu a fost creat. Reincearca.", c),
           409
@@ -356,8 +391,9 @@ adminRouter.post("/users/import", limitImportBody, async (c) => {
     }
   }
 
+  const provisioned = [...toCreate, ...toReactivate];
   const summary = {
-    created: toCreate.length,
+    created: provisioned.length,
     duplicates: issues.filter((i) => i.code === "duplicate_in_file" || i.code === "duplicate_in_db").length,
     invalid: issues.filter((i) => i.code === "invalid_row").length,
   };
@@ -369,6 +405,13 @@ adminRouter.post("/users/import", limitImportBody, async (c) => {
         targetKind: "user",
         targetId: row.id,
         detail: { email: row.email, role: row.role, source: "import" },
+      });
+    }
+    for (const row of toReactivate) {
+      recordAudit(c, "admin.users.create", {
+        targetKind: "user",
+        targetId: row.id,
+        detail: { email: row.email, role: row.role, source: "import", reactivated: true },
       });
     }
     recordAudit(c, "admin.users.import", {
@@ -384,7 +427,9 @@ adminRouter.post("/users/import", limitImportBody, async (c) => {
   return c.json(
     ok(
       {
-        created: toCreate.map((row) => ({ rowNumber: row.rowNumber, email: row.email, role: row.role })),
+        created: provisioned
+          .map((row) => ({ rowNumber: row.rowNumber, email: row.email, role: row.role }))
+          .sort((a, b) => a.rowNumber - b.rowNumber),
         issues,
         summary,
       },

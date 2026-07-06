@@ -894,6 +894,26 @@ describe("v2.42.0 — POST /users (creare individuala)", () => {
     expect(body.error?.message).toContain("suspendat");
   });
 
+  it("email STERS se reactiveaza: 201, acelasi id, nume/rol din request, status activ", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-del", email: "del@firma.ro", displayName: "Vechi" });
+    updateUserStatus("u-del", "deleted");
+
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "DEL@FIRMA.RO", displayName: "Nou Nume", role: "admin" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await jsonOf(res)) as { data: { id: string; role: string; status: string; displayName: string } };
+    expect(body.data).toMatchObject({ id: "u-del", role: "admin", status: "active", displayName: "Nou Nume" });
+
+    const after = getUserByEmail("del@firma.ro");
+    expect(after?.status).toBe("active");
+    const audits = getAuditEvents({ action: "admin.users.create" });
+    expect(audits.some((a) => a.outcome === "ok")).toBe(true);
+  });
+
   it("rolurile necreabile (support) sunt respinse de schema", async () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/users", {
@@ -968,6 +988,36 @@ describe("v2.42.0 — import utilizatori (template + upload)", () => {
     // Audit: per user creat + sumar.
     expect(getAuditEvents({ action: "admin.users.create" }).length).toBe(2);
     expect(getAuditEvents({ action: "admin.users.import" }).length).toBe(1);
+  });
+
+  it("email STERS din fisier se reactiveaza si intra la creati, nu la duplicate", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-del2", email: "sters@firma.ro", displayName: "Sters" });
+    updateUserStatus("u-del2", "deleted");
+
+    const buf = await importXlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      ["STERS@firma.ro", "Revenit", "Utilizator"],
+      ["nou3@firma.ro", "Nou 3", "Admin"],
+    ]);
+    const res = await app.request("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: new Uint8Array(buf),
+    });
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: {
+        created: Array<{ rowNumber: number; email: string; role: string }>;
+        issues: Array<{ rowNumber: number; code: string }>;
+        summary: { created: number; duplicates: number; invalid: number };
+      };
+    };
+    expect(body.data.summary).toEqual({ created: 2, duplicates: 0, invalid: 0 });
+    expect(body.data.issues).toEqual([]);
+    // Reactivat: acelasi id, nume/rol din fisier, status activ.
+    const revived = getUserByEmail("sters@firma.ro");
+    expect(revived).toMatchObject({ id: "u-del2", display_name: "Revenit", role: "user", status: "active" });
   });
 
   it("fisier care nu e xlsx -> 400 invalid_file", async () => {

@@ -203,6 +203,66 @@ export function insertUsersBulk(rows: readonly BulkUserInput[]): UserRow[] {
   return rows.map((row) => getUserById(row.id) as UserRow);
 }
 
+// v2.42.0: soft-delete NU blocheaza re-provisionarea. Indexul unic NOCASE
+// interzice un rand nou cu acelasi email, deci "re-adaugarea" unui email sters
+// = reactivarea randului existent (status -> active, nume/rol din input,
+// password_hash curatat — fara credentiale vechi reziduale). Identitatea (id)
+// se pastreaza, deci istoricul de audit/cote/granturi ramane legat de cont.
+// Statusurile activ/suspendat raman duplicate — doar "sters" e re-provisionabil.
+export interface ReactivateUserInput {
+  id: string;
+  displayName: string;
+  role: CreatableUserRole;
+}
+
+const REACTIVATE_SQL = `UPDATE users SET status = 'active', display_name = ?, role = ?, password_hash = NULL
+   WHERE id = ? AND status = 'deleted'`;
+
+export function reactivateDeletedUser(input: ReactivateUserInput): UserRow {
+  if (!CREATABLE_USER_ROLES.includes(input.role)) {
+    throw new Error(`invalid creatable role: ${input.role}`);
+  }
+  const result = getDb().prepare(REACTIVATE_SQL).run(input.displayName, input.role, input.id);
+  if (result.changes === 0) {
+    // Statusul s-a schimbat intre check si update (alt admin) — apelantul
+    // trateaza ca duplicat.
+    throw new Error(`user not deleted: ${input.id}`);
+  }
+  return getUserById(input.id) as UserRow;
+}
+
+// Import: insert-urile si reactivarile intr-O SINGURA tranzactie — ori intra
+// tot raportul, ori nimic (promisiunea rutei la coliziune concurenta).
+export function provisionUsersBulk(input: {
+  inserts: readonly BulkUserInput[];
+  reactivations: readonly ReactivateUserInput[];
+}): void {
+  const db = getDb();
+  const insertStmt = db.prepare(
+    `INSERT INTO users (id, email, password_hash, display_name, role, status)
+     VALUES (?, ?, NULL, ?, ?, 'active')`
+  );
+  const reactivateStmt = db.prepare(REACTIVATE_SQL);
+  const runAll = db.transaction(() => {
+    for (const row of input.inserts) {
+      if (!CREATABLE_USER_ROLES.includes(row.role)) {
+        throw new Error(`invalid creatable role: ${row.role}`);
+      }
+      insertStmt.run(row.id, canonicalizeEmail(row.email), row.displayName, row.role);
+    }
+    for (const row of input.reactivations) {
+      if (!CREATABLE_USER_ROLES.includes(row.role)) {
+        throw new Error(`invalid creatable role: ${row.role}`);
+      }
+      const result = reactivateStmt.run(row.displayName, row.role, row.id);
+      if (result.changes === 0) {
+        throw new Error(`user not deleted: ${row.id}`);
+      }
+    }
+  });
+  runAll();
+}
+
 // Colisiune pe unicitatea emailului — apelantul o mapeaza pe 409. Doua surse:
 // UNIQUE-ul case-sensitive din DDL-ul tabelei (0002, "users.email") si indexul
 // case-insensitive idx_users_email_nocase (0040).
