@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { Users as UsersIcon } from "lucide-react";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { admin, type AdminUser } from "@/lib/api";
 import { userRoleLabel } from "@/lib/userLabels";
 
@@ -44,34 +46,44 @@ export function UserPicker({ value, onSelect, disabled, ariaLabel }: UserPickerP
     return () => ac.abort();
   }, []);
 
+  // Card cu titlu, nu select gol pe fundalul paginii — altfel controlul se
+  // pierde vizual (feedback user, Cote + Granturi).
   return (
-    <div>
-      <select
-        aria-label={ariaLabel}
-        value={value}
-        disabled={disabled || loading}
-        onChange={(e) => {
-          const user = users.find((u) => u.id === e.target.value);
-          if (user) onSelect(user);
-        }}
-        className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-      >
-        <option value="" disabled>
-          {loading ? "Se incarca utilizatorii..." : "Alege un utilizator"}
-        </option>
-        {users.map((u) => (
-          <option key={u.id} value={u.id}>
-            {u.email} — {u.displayName} ({userRoleLabel(u.role)})
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="flex items-center gap-2 text-base">
+          <UsersIcon className="h-4 w-4" />
+          Selecteaza utilizator
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2">
+        <select
+          aria-label={ariaLabel}
+          value={value}
+          disabled={disabled || loading}
+          onChange={(e) => {
+            const user = users.find((u) => u.id === e.target.value);
+            if (user) onSelect(user);
+          }}
+          className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+        >
+          <option value="" disabled>
+            {loading ? "Se incarca utilizatorii..." : "Alege un utilizator"}
           </option>
-        ))}
-      </select>
-      {error && <p className="mt-1 text-xs text-red-600">{error}</p>}
-      {!loading && total > users.length && (
-        <p className="mt-1 text-xs text-muted-foreground">
-          Se afiseaza {users.length} din {total} utilizatori activi — lista e incompleta, unii utilizatori pot lipsi din
-          dropdown.
-        </p>
-      )}
-    </div>
+          {users.map((u) => (
+            <option key={u.id} value={u.id}>
+              {u.email} — {u.displayName} ({userRoleLabel(u.role)})
+            </option>
+          ))}
+        </select>
+        {error && <p className="text-xs text-red-600">{error}</p>}
+        {!loading && total > users.length && (
+          <p className="text-xs text-muted-foreground">
+            Se afiseaza {users.length} din {total} utilizatori activi — lista e incompleta, unii utilizatori pot lipsi
+            din dropdown.
+          </p>
+        )}
+      </CardContent>
+    </Card>
   );
 }
