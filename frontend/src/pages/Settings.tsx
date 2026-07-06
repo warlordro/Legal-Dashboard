@@ -52,8 +52,10 @@ export default function SettingsPage() {
 
   const visibleTabs = TABS.filter((t) => !t.adminOnly || isAdmin);
 
+  // replace:true — schimbarea tabului nu adauga intrari in istoricul
+  // browserului (Back iese din Setari, nu plimba prin taburi).
   const selectTab = (key: TabKey) => {
-    setSearchParams(key === "general" ? {} : { tab: key }, { replace: false });
+    setSearchParams(key === "general" ? {} : { tab: key }, { replace: true });
   };
 
   const fallback = <p className="px-4 py-8 text-center text-sm text-muted-foreground">Se incarca…</p>;
@@ -67,7 +69,9 @@ export default function SettingsPage() {
             Setari
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Setarile contului{isAdmin ? " si administrarea aplicatiei" : ""}.
+            {isAdmin
+              ? "Setarile tale si administrarea aplicatiei, intr-un singur loc."
+              : "Setarile contului tau. Cheile API sunt gestionate de administrator."}
           </p>
         </div>
 
@@ -80,10 +84,10 @@ export default function SettingsPage() {
               aria-selected={activeTab === tab.key}
               onClick={() => selectTab(tab.key)}
               className={cn(
-                "rounded-t-md px-4 py-2 text-sm font-medium transition-colors",
+                "rounded-t-lg px-4 py-2 text-sm font-medium transition-colors",
                 activeTab === tab.key
-                  ? "border-b-2 border-primary text-foreground"
-                  : "text-muted-foreground hover:text-foreground"
+                  ? "bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:bg-accent hover:text-foreground"
               )}
             >
               {tab.label}
@@ -92,8 +96,8 @@ export default function SettingsPage() {
         </div>
 
         {activeTab === "general" && (
-          <div className="max-w-3xl space-y-4">
-            <TenantKeyStatusPanel />
+          <div className="max-w-5xl">
+            <TenantKeyStatusPanel onManageKeys={() => selectTab("chei")} />
             <AIUsagePanel />
             <NotificationStatusPanel />
             <EmailSettingsPanel />

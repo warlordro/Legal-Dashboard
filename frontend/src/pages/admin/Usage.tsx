@@ -89,7 +89,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
       setWarnings(w.items ?? []);
       setOverview(o);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea consumului.");
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea bugetului.");
     } finally {
       setLoading(false);
     }
@@ -105,17 +105,19 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
   const captchaRows = overview?.captcha ?? [];
 
   // Sortare client-side pe TOT setul (6.8) — cate un hook per tab.
+  // Perioada se sorteaza pe eticheta UMANA (Zilnic/Saptamanal/Lunar), nu pe
+  // token — ordinea urmeaza ce vede userul in celula.
   const aiSort = useClientSort(aiRows, {
     email: (r) => r.email,
     used: (r) => r.usedMilli,
     limit: (r) => r.effectiveLimitMilli,
-    period: (r) => r.period,
+    period: (r) => PERIOD_LABELS[r.period],
   });
   const captchaSort = useClientSort(captchaRows, {
     email: (r) => r.email,
     used: (r) => r.usedCount,
     limit: (r) => r.effectiveLimitCount,
-    period: (r) => r.period,
+    period: (r) => PERIOD_LABELS[r.period],
   });
 
   const activeSorted = tab === "ai" ? aiSort.sorted : captchaSort.sorted;
@@ -137,19 +139,19 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
   return (
     <div className={cn(!embedded && "min-h-full bg-background p-6")}>
       <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
-        <div className={cn("flex items-start gap-4", embedded ? "justify-end" : "justify-between")}>
-          {!embedded && (
-            <div>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            {!embedded && (
               <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
                 <Activity className="h-6 w-6 text-primary" />
                 Consum buget
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Rolling window per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi de
-                48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
-              </p>
-            </div>
-          )}
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
+              Rolling window per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi de
+              48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
+            </p>
+          </div>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             Reincarca
@@ -163,59 +165,63 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
           </div>
         )}
 
+        {warnings.length > 0 && (
+          <Card className="border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base text-amber-800 dark:text-amber-200">
+                <AlertTriangle className="h-4 w-4" />
+                Avertizari active
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ul className="space-y-2 text-sm">
+                {warnings.map((w) => (
+                  <li key={`${w.feature}:${w.thresholdPct}`} className="flex flex-wrap items-center gap-2">
+                    <Badge variant="warning">{quotaFeatureLabel(w.feature)}</Badge>
+                    <span>
+                      peste {w.thresholdPct}% — episod activ din {formatIsoDateTime(w.aboveSince)}
+                    </span>
+                    {w.emailSentAt && (
+                      <span className="text-xs text-muted-foreground">
+                        · email trimis {formatIsoDateTime(w.emailSentAt)}
+                      </span>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        )}
+
         {/* v2.42.0 (5.3): consum per utilizator — cifrele vin din aceleasi
             functii ca guard-urile, deci coincid cu enforcementul (429). */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Users className="h-4 w-4" />
-              Consum per utilizator
+            <CardTitle className="flex items-center justify-between gap-2 text-base">
+              <span className="flex items-center gap-2">
+                <Users className="h-4 w-4" />
+                Consum per utilizator
+              </span>
+              <span className="flex gap-1">
+                <Button size="sm" variant={tab === "ai" ? "default" : "outline"} onClick={() => switchTab("ai")}>
+                  AI
+                </Button>
+                <Button
+                  size="sm"
+                  variant={tab === "captcha" ? "default" : "outline"}
+                  onClick={() => switchTab("captcha")}
+                >
+                  Captcha RNPM
+                </Button>
+              </span>
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
-            <div className="flex gap-1 border-b border-border" role="tablist" aria-label="Tip consum">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "ai"}
-                onClick={() => switchTab("ai")}
-                className={cn(
-                  "rounded-t-md px-4 py-2 text-sm font-medium transition-colors",
-                  tab === "ai" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground"
-                )}
-              >
-                {quotaFeatureLabel("ai")}
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={tab === "captcha"}
-                onClick={() => switchTab("captcha")}
-                className={cn(
-                  "rounded-t-md px-4 py-2 text-sm font-medium transition-colors",
-                  tab === "captcha" ? "border-b-2 border-primary text-foreground" : "text-muted-foreground"
-                )}
-              >
-                {quotaFeatureLabel("captcha.rnpm")}
-              </button>
-            </div>
-
-            {/* Nota de trunchiere: in AFARA ternarului de tab — vizibila pe ambele. */}
-            {overview?.truncated && (
-              <p className="rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-300">
-                Lista e trunchiata la primii 2000 de utilizatori activi.
-              </p>
-            )}
-
-            {!overview && !loading && <p className="px-4 py-6 text-center text-muted-foreground">Se incarca…</p>}
+            {!overview && <p className="px-4 py-6 text-center text-muted-foreground">Se incarca…</p>}
 
             {/* Empty-state pe TAB-UL ACTIV, nu pe lista AI. */}
             {overview && activeSorted.length === 0 && (
-              <p className="px-4 py-6 text-center text-muted-foreground">
-                {tab === "ai"
-                  ? "Niciun utilizator activ cu date de consum AI."
-                  : "Niciun utilizator activ cu date de consum captcha."}
-              </p>
+              <p className="px-4 py-6 text-center text-muted-foreground">Nu exista utilizatori activi.</p>
             )}
 
             {overview && activeSorted.length > 0 && (
@@ -341,6 +347,12 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                         })}
                   </tbody>
                 </table>
+                {/* Nota de trunchiere: sub tabel, vizibila pe ambele taburi. */}
+                {overview?.truncated && (
+                  <p className="px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    Lista a fost trunchiata — exista mai multi utilizatori decat pot fi afisati.
+                  </p>
+                )}
                 {/* Bara doar cand exista mai multe pagini (6.9). */}
                 {userTotalPages > 1 && (
                   <TablePagination
@@ -352,41 +364,12 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                       setUserPageSize(size);
                       setUserPage(0);
                     }}
-                    pageSizes={[25, 50, 100]}
                   />
                 )}
               </div>
             )}
           </CardContent>
         </Card>
-
-        {warnings.length > 0 && (
-          <Card className="border-amber-300 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base text-amber-800 dark:text-amber-200">
-                <AlertTriangle className="h-4 w-4" />
-                Avertizari active
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ul className="space-y-2 text-sm">
-                {warnings.map((w) => (
-                  <li key={`${w.feature}:${w.thresholdPct}`} className="flex flex-wrap items-center gap-2">
-                    <Badge variant="warning">{quotaFeatureLabel(w.feature)}</Badge>
-                    <span>
-                      peste {w.thresholdPct}% — episod activ din {formatIsoDateTime(w.aboveSince)}
-                    </span>
-                    {w.emailSentAt && (
-                      <span className="text-xs text-muted-foreground">
-                        · email trimis {formatIsoDateTime(w.emailSentAt)}
-                      </span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        )}
 
         <Card>
           <CardHeader className="pb-3">
@@ -424,7 +407,8 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                           <span className="text-sm">{quotaFeatureLabel(item.feature)}</span>
                           <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
                           {item.effectiveLimitMilli === null && <Badge variant="success">Nelimitat</Badge>}
-                          {item.extraFromGrantsMilli > 0 && (
+                          {/* +grant doar pe bugete limitate — pe nelimitat grantul nu are efect. */}
+                          {item.effectiveLimitMilli !== null && item.extraFromGrantsMilli > 0 && (
                             <Badge variant="success">+grant {milliToUsd(item.extraFromGrantsMilli)}</Badge>
                           )}
                         </div>

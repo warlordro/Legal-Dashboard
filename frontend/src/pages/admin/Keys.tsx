@@ -75,7 +75,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
     const label = KEY_FIELDS.find((k) => k.field === field)?.label ?? field;
     const ok = await confirm({
       title: "Sterge cheia",
-      message: `Sterge cheia ${label}? Functionalitatile care depind de ea devin indisponibile pentru TOTI utilizatorii pana la configurarea uneia noi.`,
+      message: `Stergi cheia ${label}? Functionalitatile care o folosesc devin indisponibile pentru toti utilizatorii pana la introducerea unei chei noi.`,
       destructive: true,
       confirmLabel: "Sterge",
     });
@@ -100,18 +100,18 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
   return (
     <div className={cn(!embedded && "min-h-full bg-background p-6")}>
       <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
-        <div className={cn("flex flex-wrap items-start gap-3", embedded ? "justify-end" : "justify-between")}>
-          {!embedded && (
-            <div>
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            {!embedded && (
               <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
                 <KeyRound className="h-6 w-6 text-primary" />
                 Chei API
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Chei tenant pentru AI si captcha. Valorile salvate nu se afiseaza inapoi in browser.
-              </p>
-            </div>
-          )}
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
+              Chei tenant pentru AI si captcha. Valorile salvate nu se afiseaza inapoi in browser.
+            </p>
+          </div>
           <Button variant="outline" size="sm" onClick={() => refresh()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
             Reincarca

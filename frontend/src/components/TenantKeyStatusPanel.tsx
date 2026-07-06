@@ -22,7 +22,9 @@ const PROVIDER_LABELS: { key: "anthropic" | "openai" | "google" | "openrouter" |
   { key: "captcha", label: "Captcha RNPM" },
 ];
 
-export function TenantKeyStatusPanel() {
+// `onManageKeys`: cand e dat (pagina /setari), butonul comuta pe tabul de chei
+// in loc sa navigheze la /admin/keys — adminul ramane in Setari.
+export function TenantKeyStatusPanel({ onManageKeys }: { onManageKeys?: () => void } = {}) {
   const tenant = useTenantKeyStatus();
   const { user } = useCurrentUser();
   const isAdmin = user?.role === "admin";
@@ -102,11 +104,17 @@ export function TenantKeyStatusPanel() {
           <KeyRound className="h-4 w-4 text-violet-600" />
           Chei API tenant
         </span>
-        <a href="/admin/keys">
-          <Button variant="outline" size="sm">
+        {onManageKeys ? (
+          <Button variant="outline" size="sm" onClick={onManageKeys}>
             Gestioneaza cheile
           </Button>
-        </a>
+        ) : (
+          <a href="/admin/keys">
+            <Button variant="outline" size="sm">
+              Gestioneaza cheile
+            </Button>
+          </a>
+        )}
       </div>
       <ul className="space-y-1">
         {PROVIDER_LABELS.map(({ key, label }) => (

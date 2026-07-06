@@ -1,5 +1,5 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Info, X, XCircle } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 // v2.42.0 (6.3): sistem de toast-uri in-house, fara dependenta, pe pattern-ul
@@ -42,15 +42,14 @@ const DURATION_MS = 4000;
 const DURATION_ERROR_MS = 7000;
 
 const VARIANT_STYLES: Record<ToastVariant, string> = {
-  success:
-    "border-green-300 bg-green-50 text-green-800 dark:border-green-900/50 dark:bg-green-950/80 dark:text-green-200",
-  error: "border-red-300 bg-red-50 text-red-800 dark:border-red-900/50 dark:bg-red-950/80 dark:text-red-200",
+  success: "border-green-300 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/60 dark:text-green-300",
+  error: "border-red-300 bg-red-50 text-red-800 dark:border-red-800 dark:bg-red-950/60 dark:text-red-300",
   info: "border-border bg-card text-foreground",
 };
 
 const VARIANT_ICONS: Record<ToastVariant, typeof Info> = {
   success: CheckCircle2,
-  error: XCircle,
+  error: AlertTriangle,
   info: Info,
 };
 
@@ -122,7 +121,7 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
               )}
             >
               <Icon className="mt-0.5 h-4 w-4 shrink-0" />
-              <span className="flex-1">{t.message}</span>
+              <span className="flex-1 whitespace-pre-line">{t.message}</span>
               <button
                 type="button"
                 onClick={() => dismiss(t.id)}

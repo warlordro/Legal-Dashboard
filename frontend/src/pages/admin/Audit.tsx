@@ -12,7 +12,7 @@ import { admin, fetchBlobOrThrow, triggerBlobDownload, type AuditEvent } from "@
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 25;
 
 const OUTCOME_OPTIONS: ReadonlyArray<{ value: "all" | "ok" | "denied" | "error"; label: string }> = [
   { value: "all", label: "Toate rezultatele" },
@@ -67,8 +67,9 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
   // v2.42.0 (6.8): sortare client-side pe pagina curenta. Rezultatul se
   // sorteaza pe eticheta UMANA (OK/Refuzat/Eroare), ca ordinea sa urmeze ce
@@ -77,8 +78,8 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     ts: (r) => r.ts,
     action: (r) => r.action,
     outcome: (r) => outcomeLabel(r.outcome),
-    owner: (r) => r.ownerEmail,
-    actor: (r) => r.actorEmail,
+    owner: (r) => r.ownerEmail ?? r.ownerId,
+    actor: (r) => r.actorEmail ?? r.actorId,
   });
 
   // v2.42.0 (6.7): pattern-ul corect de filtre + fetch.
@@ -110,7 +111,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     admin
       .listAudit({
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         // actionLike supports prefix/substring matching (admin.users.*); plain
         // `action` requires an exact value, which is rarely what an auditor wants.
         actionLike: debouncedAction || undefined,
@@ -135,7 +136,18 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
         if (!ac.signal.aborted) setLoading(false);
       });
     return () => ac.abort();
-  }, [debouncedAction, debouncedActorId, debouncedOwnerId, debouncedTargetKind, from, outcome, page, to, refreshTick]);
+  }, [
+    debouncedAction,
+    debouncedActorId,
+    debouncedOwnerId,
+    debouncedTargetKind,
+    from,
+    outcome,
+    page,
+    pageSize,
+    to,
+    refreshTick,
+  ]);
 
   const onResetFilters = () => {
     setAction("");
@@ -166,7 +178,7 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
       if (until) params.set("until", until);
       const qs = params.toString();
       const blob = await fetchBlobOrThrow(`/api/v1/admin/audit/export${qs ? `?${qs}` : ""}`);
-      triggerBlobDownload(blob, "raport-audit.xlsx");
+      triggerBlobDownload(blob, `raport-audit-${new Date().toISOString().slice(0, 10)}.xlsx`);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la generarea raportului.");
     } finally {
@@ -196,19 +208,24 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
   return (
     <div className={cn(!embedded && "min-h-full bg-background p-6")}>
       <div className={cn("space-y-5", !embedded && "mx-auto max-w-7xl")}>
-        <div className={cn("flex flex-wrap items-center gap-3", embedded ? "justify-end" : "justify-between")}>
-          {!embedded && (
-            <div>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            {!embedded && (
               <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
                 <ClipboardList className="h-6 w-6 text-primary" />
                 Audit
               </h1>
-              <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
-            </div>
-          )}
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>{summary}</p>
+          </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onExport} disabled={exporting || loading}>
-              <Download className="h-4 w-4" />
+            <Button
+              variant="outline"
+              onClick={onExport}
+              disabled={exporting}
+              title="Genereaza raport xlsx pe intervalul din filtrele De la / Pana la (goale = toata baza; max 10000 evenimente)"
+            >
+              <Download className={cn("h-4 w-4", exporting && "animate-pulse")} />
               {exporting ? "Se genereaza..." : "Descarca raport"}
             </Button>
             <Button variant="outline" onClick={() => setRefreshTick((t) => t + 1)} disabled={loading}>
@@ -374,12 +391,13 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                           <td className="px-3 py-2 align-top">
                             <Badge variant={outcomeVariant(row.outcome)}>{outcomeLabel(row.outcome)}</Badge>
                           </td>
-                          {/* v2.42.0 (5.4): EMAIL vizibil, ID-ul brut in title. */}
-                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.ownerId ?? "system"}>
-                            {row.ownerEmail}
+                          {/* v2.42.0 (5.4): EMAIL vizibil cu fallback pe ID / "system"
+                              (evenimente de sistem fara owner); ID-ul brut in title. */}
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.ownerId ?? undefined}>
+                            {row.ownerEmail ?? row.ownerId ?? "system"}
                           </td>
-                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.actorId ?? "system"}>
-                            {row.actorEmail}
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.actorId ?? undefined}>
+                            {row.actorEmail ?? row.actorId ?? "system"}
                           </td>
                           <td className="px-3 py-2 align-top text-xs">
                             {row.targetKind ? (
@@ -433,17 +451,18 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
         </Card>
 
         {/* v2.42.0 (5.4): paginare completa. Componenta e 0-based; state-ul
-            paginii ramane 1-based (contractul API). */}
+            paginii ramane 1-based (contractul API). Randurile expandate raman
+            deschise la schimbarea paginii (id-urile nu se suprapun intre pagini). */}
         <TablePagination
           page={page - 1}
           totalPages={totalPages}
-          pageSize={PAGE_SIZE}
-          onPageChange={(p) => {
-            setPage(p + 1);
-            setExpanded(new Set());
+          pageSize={pageSize}
+          onPageChange={(p) => setPage(p + 1)}
+          onPageSizeChange={(s) => {
+            setPageSize(s);
+            setPage(1);
           }}
-          onPageSizeChange={() => {}}
-          pageSizes={[PAGE_SIZE]}
+          pageSizes={[25, 50, 100, 200]}
           disabled={loading}
         />
       </div>
