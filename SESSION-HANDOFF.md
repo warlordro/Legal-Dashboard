@@ -51,6 +51,11 @@ operational kill switches, riscuri ramase si directii deschise pentru urmatorul 
 
 ## Probleme/riscuri ramase
 
+- **De rezolvat in v2.42.0 (audit v2.41.0 vs ghid)**: `GET /api/v1/ai/settings`
+  (si `PUT`-ul pereche) raspund cu forma legacy `{ mode }` in loc de envelope-ul
+  standard `{ data, error, requestId }` (invariant 0.2 din ghid). Mostenire de
+  pe main, nu regresie v2.41; fix-ul cere schimbare coordonata backend
+  (`ok()` in `routes/ai.ts`) + frontend (`useAiSettings` citeste `data.mode`).
 - `useCurrentUser` se apeleaza din mai multe locuri (Sidebar + AdminGate per
   pagina admin). Pe desktop call-ul este local si rapid; daca devine vizibil in
   load tests pe web mode, va fi lift-ed in context shared (sau cache-uit).

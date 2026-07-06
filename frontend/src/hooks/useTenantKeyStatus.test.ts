@@ -137,4 +137,62 @@ describe("useTenantKeyStatus", () => {
     expect(h.api.hasTenantAiKey).toBe(true);
     h.unmount();
   });
+
+  it("guard de secventa: raspunsul stale sosit tarziu NU suprascrie unul proaspat", async () => {
+    // Request 1 (mount) ramane in zbor; request 2 (refresh) se rezolva primul.
+    let resolveFirst: (value: unknown) => void = () => {};
+    mockKeyStatus.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          resolveFirst = resolve;
+        })
+    );
+    const h = mount();
+    expect(h.api.state.state).toBe("loading");
+
+    mockKeyStatus.mockResolvedValueOnce({ authMode: "web", tenantKeysConfigured: CONFIGURED_ALL });
+    act(() => h.api.refresh());
+    await flush();
+    expect(h.api.hasTenantAiKey).toBe(true);
+
+    // Raspunsul stale al primului request aterizeaza acum, cu flag-uri opuse.
+    act(() => resolveFirst({ authMode: "web", tenantKeysConfigured: CONFIGURED_NONE }));
+    await flush();
+    expect(h.api.state.state).toBe("ready");
+    expect(h.api.hasTenantAiKey).toBe(true); // starea proaspata a ramas
+    h.unmount();
+  });
+
+  it("refetch la focus, cu throttle 5s intre fetch-uri", async () => {
+    mockKeyStatus.mockResolvedValue({ authMode: "web", tenantKeysConfigured: CONFIGURED_ALL });
+    const t0 = 1_000_000_000;
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(t0);
+    const h = mount();
+    await flush();
+    expect(mockKeyStatus).toHaveBeenCalledTimes(1);
+
+    // Primul focus: fetch.
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await flush();
+    expect(mockKeyStatus).toHaveBeenCalledTimes(2);
+
+    // Al doilea focus sub 5s: throttled, fara fetch.
+    nowSpy.mockReturnValue(t0 + 1000);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await flush();
+    expect(mockKeyStatus).toHaveBeenCalledTimes(2);
+
+    // Dupa fereastra de 5s: fetch din nou.
+    nowSpy.mockReturnValue(t0 + 5001);
+    act(() => {
+      window.dispatchEvent(new Event("focus"));
+    });
+    await flush();
+    expect(mockKeyStatus).toHaveBeenCalledTimes(3);
+    h.unmount();
+  });
 });

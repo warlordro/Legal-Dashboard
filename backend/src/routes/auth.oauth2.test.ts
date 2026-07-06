@@ -168,6 +168,30 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(body.error.code).toBe("missing_identity");
   });
 
+  it("returneaza 400 missing_identity cand emailul nu contine @", async () => {
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-forwarded-email": "fara-arond.example.test",
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("missing_identity");
+  });
+
+  it("returneaza 400 missing_identity cand emailul depaseste 254 de caractere", async () => {
+    const email = `${"a".repeat(250)}@example.test`; // 263 chars > 254
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-forwarded-email": email,
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("missing_identity");
+  });
+
   it("returneaza 403 not_provisioned cand user-ul nu exista in DB", async () => {
     const res = await syncRequest({
       "x-proxy-auth": PROXY_SECRET,
