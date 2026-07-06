@@ -53,8 +53,53 @@ alerta fara ghilimele, JobKindTabs h-9, NotificationStatusPanel doar pe desktop.
 
 **BUMP v2.42.0 FACUT** (package.json x3 + lockfile, changelog-entries.tsx, CHANGELOG,
 README, STATUS, DOCUMENTATIE, SECURITY entry, CLAUDE.md header, card Versiune Aplicatie
-din Dashboard). **URMEAZA:** smoke local final; apoi **review adversarial cu
-review-panel** pe branch (cerinta `/goal` activa).
+din Dashboard) + sectiune v2.41.0 in CHANGELOG si changelog-ul in-app (branch-ul
+`feat/v2.41.0-web-ux` cu MR 0-4 e baza integrala a v2.42; fara artefact propriu).
+Smoke local FACUT (health, gate auth 401, cache-control, bundle 2.42.0, proxies).
+
+**Post-bump (2026-07-07, sesiunea 2):**
+- Card Dashboard "Surse de date & API" (PortalJust + ICCJ + RNPM + API propriu).
+- Claim-uri CodeRabbit verificate: aiUsageRepository aliasuri (RESPINS cu dovezi —
+  niciun writer nu scrie feature='ai' in ai_usage; nu adauga aliasul defensiv, ar
+  masca bug-uri viitoare); catch-all reactivare (CONFIRMAT, reparat — catch ingustat
+  pe "user not deleted", audit + 201 scoase din try); clientRequestId pe mutatiile
+  admin (AMANAT — singura ne-idempotenta e POST /grants, low-stakes).
+- **Audit frontend bugs v2.41+v2.42** (4 agenti paraleli, toata delta): 1 mediu +
+  4 low, TOATE reparate in ba43867: Users abort+reset inline (pattern 6.7);
+  alert-context strip «» doar pe segmentul "pentru «NUME»"; useTenantKeyStatus
+  STORE PARTAJAT la nivel de modul (model useCurrentUser, __resetTenantKeyStatusStoreForTests
+  in 3 fisiere de test + test dedup nou); Sidebar popover inchis la scroll/resize;
+  Keys dirty flag pe toggle captcha (CapSolver nu mai e revertit de refresh).
+- Alte fixuri din testare: reactivare conturi sterse la re-adaugare (create+import,
+  tranzactional), Cache-Control pe static (no-cache HTML / immutable assets),
+  select-uri custom peste tot (dark mode), titluri alerta fara ghilimele la numele
+  monitorizat, badge PJ/ICCJ lizibile + PJ absent pe RNPM, JobKindTabs h-9,
+  NotificationStatusPanel doar desktop, popover istoric functional pe sidebar colapsat.
+- Stare gate-uri la ba43867: biome curat, tsc backend+frontend verzi, build ok,
+  327 teste frontend + 1665 backend.
+
+**URMEAZA (pasul imediat al sesiunii noi):** review amanuntit pe DELTA BACKEND
+main...HEAD (fisierele: routes/admin.ts, routes/me.ts, routes/ai.ts, routes/auth.ts,
+middleware/quotaGuard.ts, middleware/static-frontend.ts, db/userRepository.ts,
+db/userQuotaRepository.ts, db/userQuotaGrantsRepository.ts, db/aiUsageRepository.ts,
+db/auditRepository.ts, services/userImport.ts, services/auditExport.ts,
+services/aiUsage.ts, services/ai.ts, services/budgetWarningService.ts,
+migrations 0040-0042, scripts/dev-web-local.ps1 + dev-web-proxy.mjs).
+Frontend-ul a fost deja acoperit de auditul de bugs; backend-ul NU inca.
+PROMPT RECOMANDAT (formulare neutra — vocabularul "audit de securitate/atac/bypass"
+declanseaza filtrele Fable; vezi nota de la inceputul sectiunii):
+
+> Executa un deep code review cu agenti paraleli pe delta backend
+> main...feat/v2.42.0-users-settings (lista fisierelor in SESSION-HANDOFF).
+> Focus: corectitudine functionala si robustete — izolarea datelor per owner_id,
+> validarea inputului pe rutele admin noi (users, import xlsx, quota, grants,
+> usage/overview, audit export), atomicitatea tranzactiilor si a rezervarilor de
+> buget, consecventa gate-urilor de rol, comportamentul migratiilor 0040-0042
+> (up + down), tratarea valorilor neasteptate din fisierele importate si limitele
+> de marime. Findings cu fisier:linie, scenariu concret de esec si severitate;
+> verificare inainte de raportare; fara observatii de stil.
+
+Dupa review: fixurile confirmate, apoi **review-panel** (audit separat, decis de user).
 
 ## Kill switches operationale
 
