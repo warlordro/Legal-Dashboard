@@ -1043,7 +1043,14 @@ adminRouter.post("/grants/:id/revoke", limitAdminBody, (c) => handleGrantRevoke(
 // tenant = o singura firma (zeci de useri, nu mii). Drift-ul de paginare la
 // churn concurent de useri = risc acceptat (raport instantaneu).
 const USAGE_OVERVIEW_PAGE = 200;
-const USAGE_OVERVIEW_CAP = 2000;
+// Cap aliniat la asumptia de design de mai sus ("zeci de useri"): 500 useri x
+// ~5 query-uri sincrone = worst-case tolerabil pe event loop. 2000 permitea
+// ~10k query-uri blocante intr-un singur handler. ATENTIE la semantica
+// truncarii: taierea se face pe ordinea listUsers (created_at DESC) INAINTE de
+// sortarea pe consum — peste cap, consumatori mari cu conturi vechi pot lipsi
+// din raport; `truncated: true` semnaleaza asta in UI. Fix real la scara:
+// agregare set-based (amanata deliberat).
+const USAGE_OVERVIEW_CAP = 500;
 
 adminRouter.get("/usage/overview", (c) => {
   const users: ReturnType<typeof listUsers>["rows"] = [];
