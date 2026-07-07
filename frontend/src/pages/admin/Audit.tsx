@@ -9,22 +9,11 @@ import { TablePagination } from "@/components/table-pagination";
 import { useClientSort } from "@/hooks/useClientSort";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { admin, fetchBlobOrThrow, triggerBlobDownload, type AuditEvent } from "@/lib/api";
+import { OUTCOME_OPTIONS, outcomeLabel } from "@/lib/auditOutcome";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 25;
-
-const OUTCOME_OPTIONS: ReadonlyArray<{ value: "all" | "ok" | "denied" | "error"; label: string }> = [
-  { value: "all", label: "Toate rezultatele" },
-  { value: "ok", label: "OK" },
-  { value: "denied", label: "Refuzat" },
-  { value: "error", label: "Eroare" },
-];
-
-// v2.42.0 (5.4/6.5): outcome-ul se afiseaza tradus, in badge SI in sumar.
-function outcomeLabel(outcome: "ok" | "denied" | "error"): string {
-  return OUTCOME_OPTIONS.find((o) => o.value === outcome)?.label ?? outcome;
-}
 
 // Convert a YYYY-MM-DD date input (interpreted in the user's local timezone)
 // to an ISO string. Matches the convention used by Alerts.tsx so admins

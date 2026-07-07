@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Gift, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -71,20 +71,30 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
   const [activeGrants, setActiveGrants] = useState<GlobalQuotaGrant[]>([]);
   const [activeTruncated, setActiveTruncated] = useState(false);
   const [activeLoading, setActiveLoading] = useState(false);
+  // AbortController + staleness guard (pattern 6.7, ca la fetch-ul per-user
+  // de mai jos): un raspuns lent pornit inainte de o revocare ar ateriza dupa
+  // reload-ul post-revocare si ar suprascrie lista cu starea veche (grantul
+  // revocat ar reaparea activ).
+  const activeGrantsAcRef = useRef<AbortController | null>(null);
 
   const loadActiveGrants = useCallback(async () => {
+    activeGrantsAcRef.current?.abort();
+    const ac = new AbortController();
+    activeGrantsAcRef.current = ac;
     setActiveLoading(true);
     try {
-      const result = await admin.listActiveGrants();
+      const result = await admin.listActiveGrants(ac.signal);
+      if (ac.signal.aborted) return;
       setActiveGrants(result.grants);
       setActiveTruncated(result.truncated === true);
       // Fara clear, un banner de eroare de la un load esuat anterior persista
       // si dupa un refresh reusit.
       setError(null);
     } catch (err) {
+      if (ac.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea granturilor active.");
     } finally {
-      setActiveLoading(false);
+      if (!ac.signal.aborted) setActiveLoading(false);
     }
   }, []);
 

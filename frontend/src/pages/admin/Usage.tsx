@@ -33,7 +33,7 @@ const PERIOD_LABELS: Record<QuotaPeriod, string> = {
 
 const LIMIT_SOURCE_LABELS: Record<"override" | "default" | "none", string> = {
   override: "Cota setata",
-  default: "Default tenant",
+  default: "Implicit tenant",
   none: "Fara limita",
 };
 
@@ -50,13 +50,17 @@ function milliToEur(milli: number | null, fx: MeFxRate): string {
   return `€${((milli / MILLI) * fx.rate).toFixed(3)}`;
 }
 
+// Limita 0 = blocat total, nu "nelimitat" — trebuie sa umple bara (100%), nu
+// s-o goleasca. `null` ramane exclusiv marcajul de nelimitat.
 function pctOf(item: MeBudgetItem): number | null {
-  if (item.effectiveLimitMilli === null || item.effectiveLimitMilli === 0) return null;
+  if (item.effectiveLimitMilli === null) return null;
+  if (item.effectiveLimitMilli === 0) return 100;
   return Math.min(100, Math.round((item.usedMilli / item.effectiveLimitMilli) * 100));
 }
 
 function pctOfPair(used: number, limit: number | null): number | null {
-  if (limit === null || limit === 0) return null;
+  if (limit === null) return null;
+  if (limit === 0) return 100;
   return Math.min(100, Math.round((used / limit) * 100));
 }
 
@@ -148,8 +152,8 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
               </h1>
             )}
             <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
-              Rolling window per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi de
-              48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
+              Fereastra glisanta per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi
+              de 48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -302,7 +306,11 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                                     style={{ width: pct === null ? "100%" : `${pct}%` }}
                                   />
                                 </div>
-                                {pct !== null && <span className="text-xs text-muted-foreground">{pct}%</span>}
+                                {pct !== null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {r.effectiveLimitMilli === 0 ? "Blocat" : `${pct}%`}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2 align-top text-xs text-muted-foreground">
                                 {LIMIT_SOURCE_LABELS[r.limitSource]}
@@ -337,7 +345,11 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                                     style={{ width: pct === null ? "100%" : `${pct}%` }}
                                   />
                                 </div>
-                                {pct !== null && <span className="text-xs text-muted-foreground">{pct}%</span>}
+                                {pct !== null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {r.effectiveLimitCount === 0 ? "Blocat" : `${pct}%`}
+                                  </span>
+                                )}
                               </td>
                               <td className="px-3 py-2 align-top text-xs text-muted-foreground">
                                 {LIMIT_SOURCE_LABELS[r.limitSource]}
@@ -383,7 +395,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                   <>
                     <span className="font-mono">€{fx.rate.toFixed(4)}</span>
                     {fx.rateDate && <span>· {fx.rateDate}</span>}
-                    {fx.stale && <Badge variant="warning">stale &gt; {FX_STALE_BADGE_HOURS}h</Badge>}
+                    {fx.stale && <Badge variant="warning">invechit &gt; {FX_STALE_BADGE_HOURS}h</Badge>}
                   </>
                 )}
               </span>
@@ -420,7 +432,11 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                               / {milliToUsd(item.effectiveLimitMilli)} ({milliToEur(item.effectiveLimitMilli, fx)})
                             </>
                           )}
-                          {pct !== null && <span className="ml-2 font-semibold">{pct}%</span>}
+                          {pct !== null && (
+                            <span className="ml-2 font-semibold">
+                              {item.effectiveLimitMilli === 0 ? "Blocat" : `${pct}%`}
+                            </span>
+                          )}
                         </span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-muted">

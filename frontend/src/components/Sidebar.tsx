@@ -131,15 +131,21 @@ export function Sidebar({
     // (scroll in zona de mijloc a sidebar-ului, resize), popover-ul ar ramane
     // desprins de buton — il inchidem, ca dropdown-urile native (audit
     // v2.42.0, finding #4). `capture: true` prinde si scroll-urile din
-    // containerele interioare (scroll nu face bubble).
-    const close = () => setPopoverSection(null);
+    // containerele interioare (scroll nu face bubble). Exceptie: scroll-ul
+    // DIN INTERIORUL popover-ului (lista de istoric proprie, overflow-y-auto)
+    // nu trebuie sa-l inchida — altfel orice scroll in lista il stinge instant.
+    const close = (e: Event) => {
+      if (e.target instanceof Node && popoverRef.current?.contains(e.target)) return;
+      setPopoverSection(null);
+    };
+    const closeOnResize = () => setPopoverSection(null);
     document.addEventListener("mousedown", handler);
     window.addEventListener("scroll", close, true);
-    window.addEventListener("resize", close);
+    window.addEventListener("resize", closeOnResize);
     return () => {
       document.removeEventListener("mousedown", handler);
       window.removeEventListener("scroll", close, true);
-      window.removeEventListener("resize", close);
+      window.removeEventListener("resize", closeOnResize);
     };
   }, [popoverSection]);
 

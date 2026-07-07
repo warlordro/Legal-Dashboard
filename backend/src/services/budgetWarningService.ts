@@ -43,6 +43,10 @@ const EMAIL_COOLDOWN_SECONDS = 3600;
 // mapeaza pe pool-ul "ai".
 export function quotaFeatureOf(usageFeature: string): QuotaFeature | null {
   if (
+    // "ai" = feature-ul de quota deja normalizat, asa cum e stocat in
+    // budget_notifications — retry-ul de email (index.ts) paseaza item.feature
+    // citit din acel tabel, nu un usage feature brut.
+    usageFeature === "ai" ||
     usageFeature === "ai.single" ||
     usageFeature === "ai.multi" ||
     usageFeature === "dosar_summary" ||

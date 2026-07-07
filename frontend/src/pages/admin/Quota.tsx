@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Gauge, RefreshCw, Trash2, Plus, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -68,20 +68,30 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
   const [overview, setOverview] = useState<GlobalQuotaOverride[]>([]);
   const [overviewTruncated, setOverviewTruncated] = useState(false);
   const [overviewLoading, setOverviewLoading] = useState(false);
+  // AbortController + staleness guard (pattern 6.7, ca la fetch-ul per-user de
+  // mai jos): un raspuns lent pornit inainte de o stergere ar ateriza dupa
+  // reload-ul post-stergere si ar suprascrie lista cu starea veche (cota
+  // stearsa ar reaparea activa).
+  const overviewAcRef = useRef<AbortController | null>(null);
 
   const loadOverview = useCallback(async () => {
+    overviewAcRef.current?.abort();
+    const ac = new AbortController();
+    overviewAcRef.current = ac;
     setOverviewLoading(true);
     try {
-      const result = await admin.listAllQuotaOverrides();
+      const result = await admin.listAllQuotaOverrides(ac.signal);
+      if (ac.signal.aborted) return;
       setOverview(result.overrides);
       setOverviewTruncated(result.truncated === true);
       // Fara clear, un banner de eroare de la un load esuat anterior persista
       // si dupa un refresh reusit.
       setError(null);
     } catch (err) {
+      if (ac.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor active.");
     } finally {
-      setOverviewLoading(false);
+      if (!ac.signal.aborted) setOverviewLoading(false);
     }
   }, []);
 

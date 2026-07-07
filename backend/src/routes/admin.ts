@@ -409,30 +409,28 @@ adminRouter.post("/users/import", limitImportBody, async (c) => {
     invalid: issues.filter((i) => i.code === "invalid_row").length,
   };
 
-  // Userii sunt DEJA creati — un esec de audit nu are voie sa intoarca 500.
-  try {
-    for (const row of toCreate) {
-      recordAudit(c, "admin.users.create", {
-        targetKind: "user",
-        targetId: row.id,
-        detail: { email: row.email, role: row.role, source: "import" },
-      });
-    }
-    for (const row of toReactivate) {
-      recordAudit(c, "admin.users.create", {
-        targetKind: "user",
-        targetId: row.id,
-        detail: { email: row.email, role: row.role, source: "import", reactivated: true },
-      });
-    }
-    recordAudit(c, "admin.users.import", {
+  // Userii sunt DEJA creati — un esec de audit nu are voie sa intoarca 500,
+  // si un esec izolat nu are voie sa le piarda silentios pe urmatoarele
+  // (recordAuditSafe per apel, nu un try/catch unic in jurul tuturor).
+  for (const row of toCreate) {
+    recordAuditSafe(c, "admin.users.create", {
       targetKind: "user",
-      targetId: "bulk",
-      detail: summary,
+      targetId: row.id,
+      detail: { email: row.email, role: row.role, source: "import" },
     });
-  } catch (err) {
-    console.error("[userImport] audit failed after successful import:", err);
   }
+  for (const row of toReactivate) {
+    recordAuditSafe(c, "admin.users.create", {
+      targetKind: "user",
+      targetId: row.id,
+      detail: { email: row.email, role: row.role, source: "import", reactivated: true },
+    });
+  }
+  recordAuditSafe(c, "admin.users.import", {
+    targetKind: "user",
+    targetId: "bulk",
+    detail: summary,
+  });
 
   issues.sort((a, b) => a.rowNumber - b.rowNumber);
   return c.json(
