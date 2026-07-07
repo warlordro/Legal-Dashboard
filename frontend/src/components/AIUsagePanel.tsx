@@ -358,15 +358,18 @@ function QuotaCard({ budget }: { budget: MeBudgetItem | null }) {
   const unlimited = limit === null;
   // Limita 0 (cota epuizata / blocata) nu e "0% consumat" — e blocaj total.
   const blocked = limit !== null && limit <= 0;
-  const percent = unlimited || blocked || !limit ? 0 : Math.min(100, Math.max(0, (budget.usedMilli / limit) * 100));
-  const tone = blocked ? "red" : percent >= 90 ? "amber" : "sky";
+  // rawPct = procentul REAL, poate depasi 100% (overshoot multi-agent, vezi
+  // quotaGuard.ts). Textul afiseaza rawPct; DOAR bara e clamp-uita la 100%.
+  const rawPct = unlimited || blocked || !limit ? 0 : Math.max(0, (budget.usedMilli / limit) * 100);
+  const barPct = Math.min(100, rawPct);
+  const tone = blocked || rawPct >= 90 ? "red" : rawPct >= 75 ? "amber" : "emerald";
   const badgeToneClass =
     tone === "red"
       ? "bg-red-500/10 text-red-600 dark:text-red-400"
       : tone === "amber"
         ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
-        : "bg-sky-500/10 text-sky-600 dark:text-sky-400";
-  const barToneClass = tone === "red" ? "bg-red-500" : tone === "amber" ? "bg-amber-500" : "bg-sky-500";
+        : "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400";
+  const barToneClass = tone === "red" ? "bg-red-500" : tone === "amber" ? "bg-amber-500" : "bg-emerald-500";
 
   return (
     <div className="mb-3 rounded-lg border border-border bg-card p-3">
@@ -375,7 +378,7 @@ function QuotaCard({ budget }: { budget: MeBudgetItem | null }) {
           Cota AI &middot; {PERIOD_RO[budget.period]}
         </h5>
         <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", badgeToneClass)}>
-          {unlimited ? "Nelimitata" : blocked ? "Blocata — cota epuizata" : `${Math.round(percent)}% consumat`}
+          {unlimited ? "Nelimitata" : blocked ? "Blocata — cota epuizata" : `${Math.round(rawPct)}% consumat`}
         </span>
       </div>
       <p className="text-sm">
@@ -384,7 +387,7 @@ function QuotaCard({ budget }: { budget: MeBudgetItem | null }) {
       </p>
       {!unlimited && (
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
-          <div className={cn("h-full transition-all", barToneClass)} style={{ width: `${blocked ? 100 : percent}%` }} />
+          <div className={cn("h-full transition-all", barToneClass)} style={{ width: `${blocked ? 100 : barPct}%` }} />
         </div>
       )}
     </div>

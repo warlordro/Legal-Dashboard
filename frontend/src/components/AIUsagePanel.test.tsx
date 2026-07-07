@@ -117,6 +117,21 @@ describe("AIUsagePanel", () => {
     expect(textContent()).not.toContain("0% consumat");
   });
 
+  it("la overshoot textul arata procentul real (150%), dar bara e clamp-uita la 100%", async () => {
+    vi.mocked(aiUsageApi.summary).mockResolvedValue(EMPTY_SUMMARY);
+    vi.mocked(me.budget).mockResolvedValue(
+      budgetResult({ effectiveLimitMilli: 10000, usedMilli: 15000, limitSource: "override" })
+    );
+
+    render(<AIUsagePanel />);
+    await flush();
+
+    expect(textContent()).toContain("150% consumat");
+    const bar = host.querySelector<HTMLDivElement>(".h-full.transition-all");
+    expect(bar).not.toBeNull();
+    expect(bar?.style.width).toBe("100%");
+  });
+
   it("daca /me/budget esueaza, panoul de cost ramane intact si fara cardul de cota", async () => {
     vi.mocked(aiUsageApi.summary).mockResolvedValue({
       summary24h: { costUsd: 1.5, calls: 3, inputTokens: 100, outputTokens: 200 },
