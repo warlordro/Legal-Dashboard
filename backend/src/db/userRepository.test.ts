@@ -213,6 +213,18 @@ describe("userRepository — provisionUsersBulk", () => {
     expect(getUserByEmail("nou@firma.ro")).toBeNull();
   });
 
+  it("rollback complet: o reactivare care tinteste un cont ne-sters anuleaza TOT batch-ul", () => {
+    insertUser({ id: "activ-1", email: "activ@x.ro", displayName: "Activ" }); // status active (default)
+    expect(() =>
+      provisionUsersBulk({
+        inserts: [{ id: "nou-1", email: "nou@x.ro", displayName: "Nou", role: "user" }],
+        reactivations: [{ id: "activ-1", displayName: "X", role: "user" }],
+      })
+    ).toThrow(/user not deleted/);
+    // Insertul valid NU a ramas comis — totul sau nimic.
+    expect(getUserById("nou-1")).toBeNull();
+  });
+
   it("respinge rolurile necreabile (support/readonly)", () => {
     expect(() =>
       provisionUsersBulk({
