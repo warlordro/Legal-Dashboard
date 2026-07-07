@@ -40,9 +40,12 @@ const DEFAULT_EUR_USD_MAX = 2.0;
 // stabila de la 1999 si nu are namespace-uri impredictibile in nodul Cube.
 export function parseEcbFeed(xml: string): { rateDate: string; eurUsdRate: number } | null {
   if (typeof xml !== "string" || xml.length === 0) return null;
-  const timeMatch = xml.match(/<Cube\s+time="(\d{4}-\d{2}-\d{2})"/);
+  // Feed-ul live ECB foloseste apostrofuri pe atribute (time='...'); XML-ul
+  // permite ambele stiluri, deci acceptam ["'] — cu ghilimele-only parserul
+  // intorcea null si UI-ul ramanea permanent pe "EUR indisponibil".
+  const timeMatch = xml.match(/<Cube\s+time=["'](\d{4}-\d{2}-\d{2})["']/);
   if (!timeMatch) return null;
-  const usdMatch = xml.match(/<Cube\s+currency="USD"\s+rate="([\d.]+)"/);
+  const usdMatch = xml.match(/<Cube\s+currency=["']USD["']\s+rate=["']([\d.]+)["']/);
   if (!usdMatch) return null;
   const eurUsdRate = Number(usdMatch[1]);
   if (!Number.isFinite(eurUsdRate) || eurUsdRate <= 0) return null;
