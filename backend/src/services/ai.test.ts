@@ -220,6 +220,17 @@ describe("validateAiBody", () => {
       })
     ).toBeNull();
   });
+
+  it("respinge un element non-obiect din caiAtac (previne TypeError -> 500)", () => {
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", caiAtac: [null] } })).toMatch(/caiAtac/);
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", caiAtac: ["text"] } })).toMatch(/caiAtac/);
+  });
+
+  it("respinge caiAtac peste limita de elemente", () => {
+    // MAX_AI_LIST_ITEMS din services/ai.ts = 500 (nu e exportata; valoare literala + cap+1).
+    const many = Array.from({ length: 501 }, () => ({}));
+    expect(validateAiBody({ dosar: { numar: "1/2/2026", caiAtac: many } })).toBeTruthy();
+  });
 });
 
 describe("callOpenAI — chat.completions fallback timeout budget", () => {

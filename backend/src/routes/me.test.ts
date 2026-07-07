@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getAuditEvents } from "../db/auditRepository.ts";
 import { insertAiUsage } from "../db/aiUsageRepository.ts";
+import { clearWarning, fireWarning } from "../db/budgetNotificationsRepository.ts";
 import { getEmailSettings, upsertEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { invalidateCache, setCaptchaSettings, setTenantKey } from "../db/tenantKeysRepository.ts";
@@ -206,6 +207,37 @@ describe("/api/v1/me/budget", () => {
     const body = await jsonOf(res);
     const single = body.data.items.find((it: { feature: string }) => it.feature === "ai");
     expect(single).toMatchObject({ period: "week", usedMilli: 30, baseLimitMilli: 100 });
+  });
+});
+
+describe("GET /api/v1/me/budget-warnings", () => {
+  it("returneaza warning-ul activ pe pool-ul ai", async () => {
+    insertUser({ id: "alice", email: "alice@firma.ro", displayName: "Alice" });
+    fireWarning({ userId: "alice", feature: "ai", thresholdPct: 80 });
+    const res = await buildApp("alice").request("/api/v1/me/budget-warnings");
+    const body = await jsonOf(res);
+    expect(res.status).toBe(200);
+    expect(body.data.items).toHaveLength(1);
+    expect(body.data.items[0].feature).toBe("ai");
+    expect(body.data.items[0].thresholdPct).toBe(80);
+  });
+
+  it("nu returneaza warning-ul altui owner (izolare)", async () => {
+    insertUser({ id: "alice", email: "alice@firma.ro", displayName: "Alice" });
+    insertUser({ id: "bob", email: "bob@firma.ro", displayName: "Bob" });
+    fireWarning({ userId: "alice", feature: "ai", thresholdPct: 80 });
+    const res = await buildApp("bob").request("/api/v1/me/budget-warnings");
+    const body = await jsonOf(res);
+    expect(body.data.items).toEqual([]);
+  });
+
+  it("un warning curatat nu mai apare", async () => {
+    insertUser({ id: "alice", email: "alice@firma.ro", displayName: "Alice" });
+    fireWarning({ userId: "alice", feature: "ai", thresholdPct: 80 });
+    clearWarning("alice", "ai", 80);
+    const res = await buildApp("alice").request("/api/v1/me/budget-warnings");
+    const body = await jsonOf(res);
+    expect(body.data.items).toEqual([]);
   });
 });
 

@@ -131,4 +131,69 @@ describe("parseUserImport", () => {
     expect(res.rows).toHaveLength(0);
     expect(res.issues).toHaveLength(0);
   });
+
+  it("celula hyperlink cu text: textul afisat castiga (contractul cellToString)", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Utilizatori");
+    ws.addRow(["email", "nume", "rol"]);
+    const row = ws.addRow([]);
+    row.getCell(1).value = { text: "ana@firma.ro", hyperlink: "mailto:altceva@firma.ro" };
+    row.getCell(2).value = "Ana Pop";
+    row.getCell(3).value = "user";
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const result = await parseUserImport(buffer);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].email).toBe("ana@firma.ro");
+    }
+  });
+
+  it("celula hyperlink FARA text: se extrage adresa din mailto (branch-ul hyperlink)", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Utilizatori");
+    ws.addRow(["email", "nume", "rol"]);
+    const row = ws.addRow([]);
+    const cell = row.getCell(1);
+    // ExcelJS.Cell.value= detecteaza tipul Hyperlink doar cand `text` E SETAT
+    // ("value.text && value.hyperlink" in Value.getType) — fara text, valoarea
+    // e serializata generic si relatia de hyperlink se pierde la scriere.
+    // Setarea directa pe `.model` ocoleste heuristica si produce un xlsx real
+    // cu hyperlink pe o celula fara text afisat (cazul pe care userImport.ts
+    // il trateaza defensiv).
+    cell.model = {
+      address: cell.address,
+      type: ExcelJS.ValueType.Hyperlink,
+      hyperlink: "mailto:ana@firma.ro",
+    } as unknown as ExcelJS.CellModel;
+    row.getCell(2).value = "Ana Pop";
+    row.getCell(3).value = "user";
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const result = await parseUserImport(buffer);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.rows).toHaveLength(1);
+      expect(result.rows[0].email).toBe("ana@firma.ro");
+    }
+  });
+
+  it("celula Date pe coloana de nume nu arunca si nu produce [object Object]", async () => {
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet("Utilizatori");
+    ws.addRow(["email", "nume", "rol"]);
+    ws.addRow(["d@firma.ro", new Date("2026-01-15T00:00:00Z"), "user"]);
+    const buffer = Buffer.from(await wb.xlsx.writeBuffer());
+
+    const result = await parseUserImport(buffer);
+
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      // Data devine string ISO — rand valid (nume ne-gol), fara crash.
+      expect(result.rows[0]?.displayName).toContain("2026-01-15");
+    }
+  });
 });
