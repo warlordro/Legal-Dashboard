@@ -1107,6 +1107,28 @@ describe("v2.42.0 (5.4) — audit enrichment + export", () => {
     const res = await app.request("/api/v1/admin/audit/export");
     expect(res.status).toBe(403);
   });
+
+  it("exportul respecta filtrul actorId, nu doar intervalul de date", async () => {
+    const { recordAudit } = await import("../db/auditRepository.ts");
+    recordAudit(null, "test.export_filter", { actorId: "user-a", ownerId: "user-a" });
+    recordAudit(null, "test.export_filter", { actorId: "user-b", ownerId: "user-b" });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export?actorId=user-a");
+    expect(res.status).toBe(200);
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const sheet = wb.getWorksheet("Audit");
+    const values: string[][] = [];
+    sheet?.eachRow((row) => {
+      values.push((row.values as unknown[]).map((v) => String(v ?? "")));
+    });
+    const filterRows = values.filter((row) => row.some((cell) => cell.includes("test.export_filter")));
+    expect(filterRows).toHaveLength(1);
+    expect(filterRows[0].some((cell) => cell.includes("user-a"))).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------

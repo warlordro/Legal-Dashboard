@@ -657,12 +657,9 @@ adminRouter.get("/audit", (c) => {
 // v2.42.0 (5.4): raportul xlsx pe intervalul filtrelor. COUNT intai — peste
 // AUDIT_EXPORT_MAX_ROWS raspundem 413 FARA sa incarcam randuri. Evenimentul
 // de audit al exportului se scrie DUPA generarea reusita.
-const AuditExportQuerySchema = z
-  .object({
-    since: z.string().datetime({ offset: true }).optional(),
-    until: z.string().datetime({ offset: true }).optional(),
-  })
-  .strict();
+// Paritate 1:1 cu filtrele GET /audit — exportul reflecta exact ce vede
+// adminul in pagina; doar page/pageSize nu au sens la export.
+const AuditExportQuerySchema = ListAuditQuerySchema.omit({ page: true, pageSize: true });
 
 adminRouter.get("/audit/export", async (c) => {
   const parsed = AuditExportQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
@@ -670,7 +667,7 @@ adminRouter.get("/audit/export", async (c) => {
     return c.json(fail("invalid_query", "Query invalid", c, parsed.error.issues), 400);
   }
   const { since, until } = parsed.data;
-  const collected = listAuditEventsForExport({ since, until });
+  const collected = listAuditEventsForExport(parsed.data);
   if (!collected.ok) {
     return c.json(
       fail(
@@ -684,7 +681,19 @@ adminRouter.get("/audit/export", async (c) => {
   const buf = await buildAuditXlsx(collected.rows, { since: since ?? null, until: until ?? null });
   recordAuditSafe(c, "admin.audit.export", {
     targetKind: "audit_log",
-    detail: { since: since ?? null, until: until ?? null, rows: collected.rows.length },
+    detail: {
+      since: since ?? null,
+      until: until ?? null,
+      ownerId: parsed.data.ownerId ?? null,
+      actorId: parsed.data.actorId ?? null,
+      action: parsed.data.action ?? null,
+      actionLike: parsed.data.actionLike ?? null,
+      targetKind: parsed.data.targetKind ?? null,
+      targetId: parsed.data.targetId ?? null,
+      outcome: parsed.data.outcome ?? null,
+      requestId: parsed.data.requestId ?? null,
+      rows: collected.rows.length,
+    },
   });
   c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
   c.header("Content-Length", String(buf.byteLength));

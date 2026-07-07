@@ -172,6 +172,13 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
     setError(null);
     try {
       const params = new URLSearchParams();
+      // Aceleasi filtre ca fetch-ul listei (valorile debounced, nu cele live),
+      // ca exportul sa contina exact ce vede adminul in tabel.
+      if (debouncedAction) params.set("actionLike", debouncedAction);
+      if (debouncedOwnerId) params.set("ownerId", debouncedOwnerId);
+      if (debouncedActorId) params.set("actorId", debouncedActorId);
+      if (debouncedTargetKind) params.set("targetKind", debouncedTargetKind);
+      if (outcome !== "all") params.set("outcome", outcome);
       const since = localDateInputToIso(from, false);
       const until = localDateInputToIso(to, true);
       if (since) params.set("since", since);

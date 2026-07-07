@@ -340,9 +340,9 @@ export const AUDIT_EXPORT_MAX_ROWS = 10_000;
 
 export type AuditExportRows = { ok: true; rows: AuditRow[] } | { ok: false; total: number };
 
-export function listAuditEventsForExport(opts: { since?: string; until?: string } = {}): AuditExportRows {
+export function listAuditEventsForExport(opts: Omit<ListAuditEventsOpts, "limit" | "offset"> = {}): AuditExportRows {
   const db = getDb();
-  const { sql: whereSql, params } = buildAuditWhere({ since: opts.since, until: opts.until });
+  const { sql: whereSql, params } = buildAuditWhere(opts);
   const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`).get(...params) as { n: number };
   if (totalRow.n > AUDIT_EXPORT_MAX_ROWS) {
     return { ok: false, total: totalRow.n };
