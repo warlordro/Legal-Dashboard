@@ -234,6 +234,9 @@ export interface MeBudgetItem {
   baseLimitMilli: number | null;
   extraFromGrantsMilli: number;
   effectiveLimitMilli: number | null;
+  // v2.42.0 (Task 15): de unde vine limita afisata — override per utilizator,
+  // default din env (doar "ai" in web mode) sau none (nelimitat).
+  limitSource: UsageLimitSource;
   // Legacy alias mentinut pentru BudgetIndicator + clienti vechi. Egal cu
   // effectiveLimitMilli; null = unlimited.
   limitMilli: number | null;

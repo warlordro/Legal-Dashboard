@@ -4,6 +4,7 @@ import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YA
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { aiUsageApi, type AiUsageDailyPoint, type AiUsageSummaryResult } from "@/lib/aiUsageApi";
+import { me, type MeBudgetItem } from "@/lib/api";
 import { CHART_FILLS } from "@/lib/chart-colors";
 import { cn } from "@/lib/utils";
 
@@ -76,6 +77,7 @@ function UsageTooltip({
 export function AIUsagePanel() {
   const [state, setState] = useState<LoadState>("loading");
   const [data, setData] = useState<AiUsageSummaryResult | null>(null);
+  const [budget, setBudget] = useState<MeBudgetItem | null>(null);
   const [error, setError] = useState<string | null>(null);
   // The active fetch's controller. Refresh and unmount both abort it so an
   // in-flight summary cannot land after a newer request started or after the
@@ -89,13 +91,25 @@ export function AIUsagePanel() {
     setState("loading");
     setError(null);
     try {
-      const result = await aiUsageApi.summary(controller.signal);
+      // Bugetul (cota alocata) e informativ si nu trebuie sa strice panoul de
+      // costuri daca /me/budget pica — de aceea allSettled, nu Promise.all.
+      const [summaryResult, budgetResult] = await Promise.allSettled([
+        aiUsageApi.summary(controller.signal),
+        me.budget(controller.signal),
+      ]);
       if (controller.signal.aborted) return;
-      setData(result);
+      if (summaryResult.status === "rejected") throw summaryResult.reason;
+      setData(summaryResult.value);
+      setBudget(
+        budgetResult.status === "fulfilled"
+          ? (budgetResult.value.items.find((item) => item.feature === "ai") ?? null)
+          : null
+      );
       setState("ready");
     } catch (err) {
       if (controller.signal.aborted) return;
       setData(null);
+      setBudget(null);
       setError(err instanceof Error ? err.message : "Eroare la incarcarea usage-ului AI.");
       setState("error");
     } finally {
@@ -157,6 +171,8 @@ export function AIUsagePanel() {
           Se incarca usage-ul AI...
         </div>
       )}
+
+      {state === "ready" && <QuotaCard budget={budget} />}
 
       {state === "error" && (
         <div className="flex min-h-32 items-start gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
@@ -322,6 +338,55 @@ function MetricRow({ label, value }: { label: string; value: string }) {
     <div className="flex items-center justify-between gap-3 border-t border-border py-2 first:border-t-0 first:pt-0 last:pb-0">
       <span className="text-xs text-muted-foreground">{label}</span>
       <span className="text-sm font-medium">{value}</span>
+    </div>
+  );
+}
+
+const PERIOD_RO: Record<MeBudgetItem["period"], string> = {
+  day: "zilnic (24h)",
+  week: "saptamanal",
+  month: "lunar",
+};
+
+// v2.42.0 (Task 15): cota alocata + consumul curent, aliniate 1:1 cu
+// /me/budget (aceeasi regula ca guard-ul de enforcement). Randat mereu cand
+// state === "ready" (chiar si fara apeluri AI inregistrate) — un user cu
+// cota alocata si zero consum tot trebuie sa-si vada cota.
+function QuotaCard({ budget }: { budget: MeBudgetItem | null }) {
+  if (!budget) return null;
+  const limit = budget.effectiveLimitMilli;
+  const unlimited = limit === null;
+  // Limita 0 (cota epuizata / blocata) nu e "0% consumat" — e blocaj total.
+  const blocked = limit !== null && limit <= 0;
+  const percent = unlimited || blocked || !limit ? 0 : Math.min(100, Math.max(0, (budget.usedMilli / limit) * 100));
+  const tone = blocked ? "red" : percent >= 90 ? "amber" : "sky";
+  const badgeToneClass =
+    tone === "red"
+      ? "bg-red-500/10 text-red-600 dark:text-red-400"
+      : tone === "amber"
+        ? "bg-amber-500/10 text-amber-600 dark:text-amber-400"
+        : "bg-sky-500/10 text-sky-600 dark:text-sky-400";
+  const barToneClass = tone === "red" ? "bg-red-500" : tone === "amber" ? "bg-amber-500" : "bg-sky-500";
+
+  return (
+    <div className="mb-3 rounded-lg border border-border bg-card p-3">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+        <h5 className="text-xs font-semibold uppercase text-muted-foreground">
+          Cota AI &middot; {PERIOD_RO[budget.period]}
+        </h5>
+        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", badgeToneClass)}>
+          {unlimited ? "Nelimitata" : blocked ? "Blocata — cota epuizata" : `${Math.round(percent)}% consumat`}
+        </span>
+      </div>
+      <p className="text-sm">
+        {formatUsd(budget.usedMilli / 1000)}
+        {!unlimited && <span className="text-muted-foreground"> / {formatUsd((limit ?? 0) / 1000)}</span>}
+      </p>
+      {!unlimited && (
+        <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
+          <div className={cn("h-full transition-all", barToneClass)} style={{ width: `${blocked ? 100 : percent}%` }} />
+        </div>
+      )}
     </div>
   );
 }

@@ -15,18 +15,12 @@ import { getTenantKeys } from "../db/tenantKeysRepository.ts";
 import { getUserById } from "../db/userRepository.ts";
 import { sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { type QuotaPeriod, listOverridesForUser } from "../db/userQuotaRepository.ts";
-import type { QuotaFeature } from "../middleware/quotaGuard.ts";
+import { PERIOD_SECONDS, readDefaultQuotaMilli, type QuotaFeature } from "../middleware/quotaGuard.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { isMailerConfigured, sendTestEmail } from "../services/email/mailer.ts";
 import { buildEmailSettingsAuditDetail } from "../util/auditSanitize.ts";
 import { fail, ok } from "../util/envelope.ts";
-
-const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
-  day: 86_400,
-  week: 604_800,
-  month: 2_592_000,
-};
 
 // D14 fail-closed: dupa 48h fara update consideram rate-ul stale; UI afiseaza
 // "EUR indisponibil" in loc sa randeze un numar potential nefolositor.
@@ -165,13 +159,23 @@ meRouter.get("/budget", (c) => {
         items: features.map((feature) => {
           const override = overrideByFeature.get(feature) ?? null;
           const period: QuotaPeriod = override?.period ?? "day";
-          const baseLimit = override?.limit_usd_milli ?? null;
+          // v2.42.0 (Task 15): default-ul din env (readDefaultQuotaMilli) e
+          // aplicat DOAR pentru "ai" si DOAR in web mode — aliniat exact cu
+          // regula de enforcement din quotaGuard.ts (guard-ul nu enforce-uieste
+          // acest default pe desktop, deci nici /me/budget nu trebuie sa-l arate).
+          const defaultForFeature = feature === "ai" && getAuthMode() === "web" ? readDefaultQuotaMilli() : null;
+          const baseLimit = override ? override.limit_usd_milli : defaultForFeature;
           const extraFromGrants = sumActiveExtraMilli(ownerId, feature);
           const effectiveLimit = baseLimit === null ? null : baseLimit + extraFromGrants;
+          // Consumul pentru "ai" e mereu pe fereastra rolling (aliniat cu
+          // guard-ul); celelalte feature-uri pastreaza semantica istorica
+          // zi-calendaristica pentru period === "day".
           const usedMilli =
-            period === "day"
-              ? sumAiUsageMilliToday(ownerId, feature)
-              : sumAiUsageMilliInWindow(ownerId, feature, PERIOD_SECONDS[period]);
+            feature === "ai"
+              ? sumAiUsageMilliInWindow(ownerId, feature, PERIOD_SECONDS[period])
+              : period === "day"
+                ? sumAiUsageMilliToday(ownerId, feature)
+                : sumAiUsageMilliInWindow(ownerId, feature, PERIOD_SECONDS[period]);
           return {
             feature,
             period,
@@ -179,6 +183,11 @@ meRouter.get("/budget", (c) => {
             baseLimitMilli: baseLimit,
             extraFromGrantsMilli: extraFromGrants,
             effectiveLimitMilli: effectiveLimit,
+            limitSource: override
+              ? ("override" as const)
+              : baseLimit !== null
+                ? ("default" as const)
+                : ("none" as const),
             // Legacy alias for old clients — equals effectiveLimitMilli.
             limitMilli: effectiveLimit,
           };
