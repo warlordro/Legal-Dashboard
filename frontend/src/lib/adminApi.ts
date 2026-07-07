@@ -175,6 +175,14 @@ export interface GlobalActiveGrantsResult {
 // guard-urile de cota (limitSource: override/default env/none).
 export type UsageLimitSource = "override" | "default" | "none";
 
+// v2.42.0: totaluri rolling (24h/7 zile) + tot istoricul, din acelasi query
+// set-based (sumAiUsageWindowsByOwner) folosit si pentru tenantTotals.
+export interface AiUsageWindows {
+  dayMilli: number;
+  weekMilli: number;
+  totalMilli: number;
+}
+
 export interface UsageOverviewAiItem {
   userId: string;
   email: string;
@@ -187,6 +195,7 @@ export interface UsageOverviewAiItem {
   extraFromGrantsMilli: number;
   effectiveLimitMilli: number | null;
   limitSource: UsageLimitSource;
+  windows: AiUsageWindows;
 }
 
 export interface UsageOverviewCaptchaItem {
@@ -206,6 +215,9 @@ export interface UsageOverviewResult {
   items: UsageOverviewAiItem[];
   captcha: UsageOverviewCaptchaItem[];
   truncated: boolean;
+  // Agregat pe tot tenantul (TOTI ownerii cu istoric in ai_usage, inclusiv
+  // conturi inactive care nu mai apar in `items`).
+  tenantTotals: AiUsageWindows;
 }
 
 export type TenantKeyField = "anthropic" | "openai" | "google" | "openrouter" | "twocaptcha" | "capsolver";

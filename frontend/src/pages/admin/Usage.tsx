@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import { Activity, AlertTriangle, RefreshCw, ShieldAlert, Users } from "lucide-react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { Activity, AlertTriangle, ChevronDown, ChevronUp, RefreshCw, ShieldAlert, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -82,6 +82,18 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
   const [tab, setTab] = useState<"ai" | "captcha">("ai");
   const [userPage, setUserPage] = useState(0);
   const [userPageSize, setUserPageSize] = useState(USER_PAGE_SIZE_DEFAULT);
+
+  // Rand expandabil per userId, doar pe tabelul AI: detaliaza windows
+  // (day/week/total) sub randul de sinteza "Consum".
+  const [expandedAi, setExpandedAi] = useState<Set<string>>(new Set());
+  const toggleAiExpand = (userId: string) => {
+    setExpandedAi((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -275,47 +287,78 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                       ? pageRows.map((row) => {
                           const r = row as (typeof aiRows)[number];
                           const pct = pctOfPair(r.usedMilli, r.effectiveLimitMilli);
+                          const isOpen = expandedAi.has(r.userId);
                           return (
-                            <tr key={r.userId} className="border-b border-border last:border-b-0 hover:bg-muted/30">
-                              <td className="px-3 py-2 align-top">
-                                <p className="font-mono text-xs">{r.email}</p>
-                                <p className="text-xs text-muted-foreground">
-                                  {r.displayName} · {userRoleLabel(r.role)}
-                                </p>
-                              </td>
-                              <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[r.period]}</td>
-                              <td className="px-3 py-2 align-top font-mono text-xs">{milliToUsd(r.usedMilli)}</td>
-                              <td className="px-3 py-2 align-top text-xs">
-                                {r.effectiveLimitMilli === null ? (
-                                  <Badge variant="success">Nelimitat</Badge>
-                                ) : (
-                                  <span className="font-mono">
-                                    {milliToUsd(r.effectiveLimitMilli)}
-                                    {r.extraFromGrantsMilli > 0 && (
-                                      <span className="ml-1 text-muted-foreground">
-                                        (+grant {milliToUsd(r.extraFromGrantsMilli)})
-                                      </span>
-                                    )}
+                            <Fragment key={r.userId}>
+                              <tr className="border-b border-border last:border-b-0 hover:bg-muted/30">
+                                <td className="px-3 py-2 align-top">
+                                  <p className="font-mono text-xs">{r.email}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {r.displayName} · {userRoleLabel(r.role)}
+                                  </p>
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[r.period]}</td>
+                                <td className="px-3 py-2 align-top font-mono text-xs">
+                                  <span className="inline-flex items-center gap-1">
+                                    {milliToUsd(r.usedMilli)}
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleAiExpand(r.userId)}
+                                      aria-expanded={isOpen}
+                                      aria-label={`Detalii consum pentru ${r.email}`}
+                                      className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    >
+                                      {isOpen ? (
+                                        <ChevronUp className="h-3.5 w-3.5" />
+                                      ) : (
+                                        <ChevronDown className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
                                   </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 align-top">
-                                <div className="h-2 w-24 overflow-hidden rounded-full bg-muted">
-                                  <div
-                                    className={cn("h-full", barColor(pct))}
-                                    style={{ width: pct === null ? "100%" : `${pct}%` }}
-                                  />
-                                </div>
-                                {pct !== null && (
-                                  <span className="text-xs text-muted-foreground">
-                                    {r.effectiveLimitMilli === 0 ? "Blocat" : `${pct}%`}
-                                  </span>
-                                )}
-                              </td>
-                              <td className="px-3 py-2 align-top text-xs text-muted-foreground">
-                                {LIMIT_SOURCE_LABELS[r.limitSource]}
-                              </td>
-                            </tr>
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs">
+                                  {r.effectiveLimitMilli === null ? (
+                                    <Badge variant="success">Nelimitat</Badge>
+                                  ) : (
+                                    <span className="font-mono">
+                                      {milliToUsd(r.effectiveLimitMilli)}
+                                      {r.extraFromGrantsMilli > 0 && (
+                                        <span className="ml-1 text-muted-foreground">
+                                          (+grant {milliToUsd(r.extraFromGrantsMilli)})
+                                        </span>
+                                      )}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="h-2 w-24 overflow-hidden rounded-full bg-muted">
+                                    <div
+                                      className={cn("h-full", barColor(pct))}
+                                      style={{ width: pct === null ? "100%" : `${pct}%` }}
+                                    />
+                                  </div>
+                                  {pct !== null && (
+                                    <span className="text-xs text-muted-foreground">
+                                      {r.effectiveLimitMilli === 0 ? "Blocat" : `${pct}%`}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                                  {LIMIT_SOURCE_LABELS[r.limitSource]}
+                                </td>
+                              </tr>
+                              {isOpen && (
+                                <tr className="border-b border-border bg-muted/20">
+                                  <td colSpan={6} className="px-4 py-2 text-xs text-muted-foreground">
+                                    Zilnic (24h): {milliToUsd(r.windows.dayMilli)} ({milliToEur(r.windows.dayMilli, fx)}
+                                    ){" · "}
+                                    Saptamanal (7 zile): {milliToUsd(r.windows.weekMilli)} (
+                                    {milliToEur(r.windows.weekMilli, fx)}){" · "}
+                                    Total: {milliToUsd(r.windows.totalMilli)} ({milliToEur(r.windows.totalMilli, fx)})
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
                           );
                         })
                       : pageRows.map((row) => {
@@ -379,6 +422,18 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                   />
                 )}
               </div>
+            )}
+
+            {/* Sinteza pe tot tenantul — include si consumul ownerilor fara cont
+                activ (suspendati/stersi), care nu apar in randurile de mai sus. */}
+            {tab === "ai" && overview && (
+              <p className="border-t border-border px-1 pt-2 text-xs text-muted-foreground">
+                Total tenant (toti userii, inclusiv conturi inactive): Zilnic (24h){" "}
+                {milliToUsd(overview.tenantTotals.dayMilli)} ({milliToEur(overview.tenantTotals.dayMilli, fx)}) ·
+                Saptamanal (7 zile) {milliToUsd(overview.tenantTotals.weekMilli)} (
+                {milliToEur(overview.tenantTotals.weekMilli, fx)}) · Total{" "}
+                {milliToUsd(overview.tenantTotals.totalMilli)} ({milliToEur(overview.tenantTotals.totalMilli, fx)})
+              </p>
             )}
           </CardContent>
         </Card>

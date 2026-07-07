@@ -1237,6 +1237,40 @@ describe("v2.42.0 (5.3) — GET /usage/overview", () => {
     const res = await app.request("/api/v1/admin/usage/overview");
     expect(res.status).toBe(403);
   });
+
+  it("itemele AI au windows (day/week/total) + tenantTotals corecte pe 2 useri", async () => {
+    insertAiUsage({
+      ownerId: "uo-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 100,
+      ts: new Date().toISOString(),
+    });
+    insertAiUsage({
+      ownerId: "uo-2",
+      provider: "anthropic",
+      model: "claude-sonnet",
+      feature: "ai.multi",
+      costUsdMilli: 900,
+      ts: new Date().toISOString(),
+    });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: {
+        items: Array<{ userId: string; windows: { dayMilli: number; weekMilli: number; totalMilli: number } }>;
+        tenantTotals: { dayMilli: number; weekMilli: number; totalMilli: number };
+      };
+    };
+    const row1 = body.data.items.find((i) => i.userId === "uo-1");
+    const row2 = body.data.items.find((i) => i.userId === "uo-2");
+    expect(row1?.windows).toEqual({ dayMilli: 100, weekMilli: 100, totalMilli: 100 });
+    expect(row2?.windows).toEqual({ dayMilli: 900, weekMilli: 900, totalMilli: 900 });
+    expect(body.data.tenantTotals).toEqual({ dayMilli: 1000, weekMilli: 1000, totalMilli: 1000 });
+  });
 });
 
 describe("v2.42.0 (4.4) — last-admin numara doar adminii ACTIVI", () => {

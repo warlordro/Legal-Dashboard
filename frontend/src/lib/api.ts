@@ -567,6 +567,7 @@ export {
   type UserImportIssue,
   type ImportUsersResult,
   type UsageLimitSource,
+  type AiUsageWindows,
   type UsageOverviewAiItem,
   type UsageOverviewCaptchaItem,
   type UsageOverviewResult,

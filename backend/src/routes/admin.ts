@@ -31,7 +31,7 @@ import {
 } from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { PERIOD_SECONDS, QUOTA_FEATURES, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
-import { sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
+import { sumAiUsageMilliInWindow, sumAiUsageWindowsByOwner, sumAiUsageWindowsTenant } from "../db/aiUsageRepository.ts";
 import { countTenantCaptchaUsageInWindow } from "../db/captchaUsageRepository.ts";
 import { readDefaultCaptchaQuota } from "./rnpmGuards.ts";
 import {
@@ -1078,6 +1078,11 @@ adminRouter.get("/usage/overview", (c) => {
   const defaultAiMilli = readDefaultQuotaMilli();
   const defaultCaptchaCount = readDefaultCaptchaQuota();
 
+  // Set-based: un singur query pentru totalurile day/week/total ale TUTUROR
+  // ownerilor, in loc de N query-uri per user (vezi sumAiUsageWindowsByOwner).
+  const usageWindowsByOwner = sumAiUsageWindowsByOwner("ai");
+  const ZERO_WINDOWS = { dayMilli: 0, weekMilli: 0, totalMilli: 0 };
+
   const items = users.map((u) => {
     const override = getOverride(u.id, "ai");
     const period: QuotaPeriod = override?.period ?? "day";
@@ -1100,6 +1105,7 @@ adminRouter.get("/usage/overview", (c) => {
         : defaultAiMilli !== null
           ? ("default" as const)
           : ("none" as const),
+      windows: usageWindowsByOwner.get(u.id) ?? ZERO_WINDOWS,
     };
   });
   items.sort((a, b) => b.usedMilli - a.usedMilli || a.email.localeCompare(b.email));
@@ -1131,7 +1137,11 @@ adminRouter.get("/usage/overview", (c) => {
   });
   captcha.sort((a, b) => b.usedCount - a.usedCount || a.email.localeCompare(b.email));
 
-  return c.json(ok({ items, captcha, truncated }, c), 200);
+  // tenantTotals include TOTI ownerii cu istoric in ai_usage, inclusiv useri
+  // stersi/suspendati care nu mai apar in `items` (filtrat pe status='active').
+  const tenantTotals = sumAiUsageWindowsTenant("ai");
+
+  return c.json(ok({ items, captcha, truncated, tenantTotals }, c), 200);
 });
 
 // ---------- helpers ----------
