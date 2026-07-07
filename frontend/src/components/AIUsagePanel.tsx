@@ -3,6 +3,7 @@ import { AlertCircle, BarChart3, Bot, Clock3, RefreshCw, Zap } from "lucide-reac
 import { Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import { aiUsageApi, type AiUsageDailyPoint, type AiUsageSummaryResult } from "@/lib/aiUsageApi";
 import { me, type MeBudgetItem } from "@/lib/api";
 import { CHART_FILLS } from "@/lib/chart-colors";
@@ -79,6 +80,10 @@ export function AIUsagePanel() {
   const [data, setData] = useState<AiUsageSummaryResult | null>(null);
   const [budget, setBudget] = useState<MeBudgetItem | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Cardul de cota apare DOAR cand serverul e in web mode (quotaGuard
+  // enforce-uieste doar acolo). Pe desktop guard-ul e bypass, deci cardul ar
+  // fi redundant ("Nelimitata") sau fals ("Blocata" dintr-un override rezidual).
+  const { tenantMode } = useTenantKeyStatus();
   // The active fetch's controller. Refresh and unmount both abort it so an
   // in-flight summary cannot land after a newer request started or after the
   // panel went away (which would otherwise call setState on an unmounted tree).
@@ -172,7 +177,7 @@ export function AIUsagePanel() {
         </div>
       )}
 
-      {state === "ready" && <QuotaCard budget={budget} />}
+      {state === "ready" && tenantMode && <QuotaCard budget={budget} />}
 
       {state === "error" && (
         <div className="flex min-h-32 items-start gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
@@ -343,7 +348,7 @@ function MetricRow({ label, value }: { label: string; value: string }) {
 }
 
 const PERIOD_RO: Record<MeBudgetItem["period"], string> = {
-  day: "zilnic (24h)",
+  day: "in ultimele 24h",
   week: "saptamanal",
   month: "lunar",
 };
@@ -360,7 +365,7 @@ function QuotaCard({ budget }: { budget: MeBudgetItem | null }) {
   const blocked = limit !== null && limit <= 0;
   // rawPct = procentul REAL, poate depasi 100% (overshoot multi-agent, vezi
   // quotaGuard.ts). Textul afiseaza rawPct; DOAR bara e clamp-uita la 100%.
-  const rawPct = unlimited || blocked || !limit ? 0 : Math.max(0, (budget.usedMilli / limit) * 100);
+  const rawPct = unlimited || blocked ? 0 : Math.max(0, (budget.usedMilli / limit) * 100);
   const barPct = Math.min(100, rawPct);
   const tone = blocked || rawPct >= 90 ? "red" : rawPct >= 75 ? "amber" : "emerald";
   const badgeToneClass =

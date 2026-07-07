@@ -16,6 +16,14 @@ vi.mock("@/lib/api", () => ({
   me: { budget: vi.fn() },
 }));
 
+// Cardul de cota e gate-uit pe modul web al serverului (tenantMode). Mock
+// direct pe hook: evita store-ul partajat la nivel de modul din
+// useTenantKeyStatus (care ar cere me.keyStatus + reset intre teste).
+const mockTenantMode = vi.fn<() => boolean>(() => true);
+vi.mock("@/hooks/useTenantKeyStatus", () => ({
+  useTenantKeyStatus: () => ({ tenantMode: mockTenantMode() }),
+}));
+
 const EMPTY_SUMMARY = {
   summary24h: { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0 },
   summary30d: { costUsd: 0, calls: 0, inputTokens: 0, outputTokens: 0 },
@@ -71,6 +79,9 @@ describe("AIUsagePanel", () => {
   beforeEach(() => {
     vi.mocked(aiUsageApi.summary).mockReset();
     vi.mocked(me.budget).mockReset();
+    // Default: server in web mode — testele de card presupun quota enforce activ.
+    mockTenantMode.mockReset();
+    mockTenantMode.mockReturnValue(true);
   });
 
   afterEach(() => {
@@ -130,6 +141,26 @@ describe("AIUsagePanel", () => {
     const bar = host.querySelector<HTMLDivElement>(".h-full.transition-all");
     expect(bar).not.toBeNull();
     expect(bar?.style.width).toBe("100%");
+  });
+
+  it("pe desktop (non-web) cardul de cota NU apare, panoul de cost ramane intact", async () => {
+    mockTenantMode.mockReturnValue(false);
+    vi.mocked(aiUsageApi.summary).mockResolvedValue({
+      summary24h: { costUsd: 1.5, calls: 3, inputTokens: 100, outputTokens: 200 },
+      summary30d: { costUsd: 10, calls: 20, inputTokens: 1000, outputTokens: 2000 },
+      daily: [],
+    });
+    vi.mocked(me.budget).mockResolvedValue(
+      budgetResult({ effectiveLimitMilli: 0, usedMilli: 0, limitSource: "override" })
+    );
+
+    render(<AIUsagePanel />);
+    await flush();
+
+    expect(textContent()).toContain("Cost ultimele 24h");
+    // Chiar cu un override rezidual "blocat" in DB, pe desktop nu afisam cota.
+    expect(textContent()).not.toContain("Cota AI");
+    expect(textContent()).not.toContain("Blocata");
   });
 
   it("daca /me/budget esueaza, panoul de cost ramane intact si fara cardul de cota", async () => {

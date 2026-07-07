@@ -1127,7 +1127,12 @@ describe("v2.42.0 (5.4) — audit enrichment + export", () => {
     });
     const filterRows = values.filter((row) => row.some((cell) => cell.includes("test.export_filter")));
     expect(filterRows).toHaveLength(1);
-    expect(filterRows[0].some((cell) => cell.includes("user-a"))).toBe(true);
+    // Asertie stransa pe coloana de ACTOR exact (nu `some` pe tot randul, care
+    // ar trece si daca doar coloana Owner ar contine user-a).
+    const headerRow = values[0];
+    const actorCol = headerRow.indexOf("Actor");
+    expect(actorCol).toBeGreaterThan(-1);
+    expect(filterRows[0][actorCol]).toBe("user-a");
   });
 });
 
