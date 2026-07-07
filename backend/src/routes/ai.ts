@@ -300,9 +300,14 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
     const routing = getRouting(c);
     const reserveProvider = routing.mode === "openrouter" ? "openrouter" : AI_MODELS[judge]?.provider;
     if (!reserveProvider) return modelError(c, "Model judecator necunoscut.");
+    // buildPrompt INAINTE de rezervare: intre reserveQuotaBudget si intrarea in
+    // streamSSE nu mai exista niciun apel care poate arunca, deci un throw aici
+    // nu mai poate lasa o rezervare pending orfana (release-ul traieste doar in
+    // finally-ul stream-ului). Pandantul patternului reservationToRelease din
+    // /analyze.
+    const prompt = buildPrompt(dosar);
     const quotaReservation = reserveQuotaBudget(c, "ai.multi", reserveProvider);
     if (!quotaReservation.ok) return quotaReservation.response;
-    const prompt = buildPrompt(dosar);
     const trackingBase = {
       ownerId: getOwnerId(c),
       requestId: getRequestId(c),
