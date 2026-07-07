@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import { aiUsageApi, type AiUsageDailyPoint, type AiUsageSummaryResult } from "@/lib/aiUsageApi";
-import { me, type MeBudgetItem } from "@/lib/api";
+import { me, type MeBudgetItem, type MeFxRate } from "@/lib/api";
 import { CHART_FILLS } from "@/lib/chart-colors";
 import { cn } from "@/lib/utils";
 
@@ -23,6 +23,20 @@ const numberFormatter = new Intl.NumberFormat("ro-RO");
 function formatUsd(value: number): string {
   if (!Number.isFinite(value)) return "$0.00";
   return usdFormatter.format(value);
+}
+
+const eurFormatter = new Intl.NumberFormat("en-US", {
+  style: "currency",
+  currency: "EUR",
+  minimumFractionDigits: 2,
+  maximumFractionDigits: 4,
+});
+
+// Fail-closed pe EUR (acelasi pattern ca "Bugetul tau" din Usage.tsx): fara
+// curs sau cu curs stale nu afisam o valoare numerica potential gresita.
+function formatEur(usdValue: number, fx: MeFxRate | null): string {
+  if (!fx || fx.rate === null || fx.stale || !Number.isFinite(usdValue)) return "EUR indisponibil";
+  return eurFormatter.format(usdValue * fx.rate);
 }
 
 // Backend buckets days at UTC midnight (`substr(ts, 1, 10)`), so the label
@@ -79,6 +93,7 @@ export function AIUsagePanel() {
   const [state, setState] = useState<LoadState>("loading");
   const [data, setData] = useState<AiUsageSummaryResult | null>(null);
   const [budget, setBudget] = useState<MeBudgetItem | null>(null);
+  const [fx, setFx] = useState<MeFxRate | null>(null);
   const [error, setError] = useState<string | null>(null);
   // Cardul de cota apare DOAR cand serverul e in web mode (quotaGuard
   // enforce-uieste doar acolo). Pe desktop guard-ul e bypass, deci cardul ar
@@ -110,11 +125,13 @@ export function AIUsagePanel() {
           ? (budgetResult.value.items.find((item) => item.feature === "ai") ?? null)
           : null
       );
+      setFx(budgetResult.status === "fulfilled" ? budgetResult.value.fx : null);
       setState("ready");
     } catch (err) {
       if (controller.signal.aborted) return;
       setData(null);
       setBudget(null);
+      setFx(null);
       setError(err instanceof Error ? err.message : "Eroare la incarcarea usage-ului AI.");
       setState("error");
     } finally {
@@ -177,7 +194,7 @@ export function AIUsagePanel() {
         </div>
       )}
 
-      {state === "ready" && tenantMode && <QuotaCard budget={budget} />}
+      {state === "ready" && tenantMode && <QuotaCard budget={budget} fx={fx} />}
 
       {state === "error" && (
         <div className="flex min-h-32 items-start gap-3 rounded-md border border-red-200 bg-red-50 px-3 py-3 text-sm text-red-700 dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-300">
@@ -357,7 +374,7 @@ const PERIOD_RO: Record<MeBudgetItem["period"], string> = {
 // /me/budget (aceeasi regula ca guard-ul de enforcement). Randat mereu cand
 // state === "ready" (chiar si fara apeluri AI inregistrate) — un user cu
 // cota alocata si zero consum tot trebuie sa-si vada cota.
-function QuotaCard({ budget }: { budget: MeBudgetItem | null }) {
+function QuotaCard({ budget, fx }: { budget: MeBudgetItem | null; fx: MeFxRate | null }) {
   if (!budget) return null;
   const limit = budget.effectiveLimitMilli;
   const unlimited = limit === null;
@@ -378,18 +395,28 @@ function QuotaCard({ budget }: { budget: MeBudgetItem | null }) {
 
   return (
     <div className="mb-3 rounded-lg border border-border bg-card p-3">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+      {/* Un singur rand (pattern-ul "Bugetul tau" din Usage.tsx): eticheta in
+          stanga, sumele USD + echivalent EUR + badge-ul de procent in dreapta. */}
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <h5 className="text-xs font-semibold uppercase text-muted-foreground">
           Cota AI &middot; {PERIOD_RO[budget.period]}
         </h5>
-        <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", badgeToneClass)}>
-          {unlimited ? "Nelimitata" : blocked ? "Blocata — cota epuizata" : `${Math.round(rawPct)}% consumat`}
+        <span className="flex flex-wrap items-center gap-2">
+          <span className="text-sm">
+            {formatUsd(budget.usedMilli / 1000)}
+            <span className="text-muted-foreground"> ({formatEur(budget.usedMilli / 1000, fx)})</span>
+            {!unlimited && (
+              <span className="text-muted-foreground">
+                {" "}
+                / {formatUsd((limit ?? 0) / 1000)} ({formatEur((limit ?? 0) / 1000, fx)})
+              </span>
+            )}
+          </span>
+          <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", badgeToneClass)}>
+            {unlimited ? "Nelimitata" : blocked ? "Blocata — cota epuizata" : `${Math.round(rawPct)}% consumat`}
+          </span>
         </span>
       </div>
-      <p className="text-sm">
-        {formatUsd(budget.usedMilli / 1000)}
-        {!unlimited && <span className="text-muted-foreground"> / {formatUsd((limit ?? 0) / 1000)}</span>}
-      </p>
       {!unlimited && (
         <div className="mt-2 h-2 overflow-hidden rounded-full bg-muted">
           <div className={cn("h-full transition-all", barToneClass)} style={{ width: `${blocked ? 100 : barPct}%` }} />

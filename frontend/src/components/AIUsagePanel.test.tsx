@@ -30,11 +30,14 @@ const EMPTY_SUMMARY = {
   daily: [],
 };
 
-function budgetResult(item: {
-  effectiveLimitMilli: number | null;
-  usedMilli: number;
-  limitSource: "override" | "default" | "none";
-}) {
+function budgetResult(
+  item: {
+    effectiveLimitMilli: number | null;
+    usedMilli: number;
+    limitSource: "override" | "default" | "none";
+  },
+  fx?: { rate: number | null; rateDate: string | null; stale: boolean }
+) {
   return {
     items: [
       {
@@ -48,7 +51,7 @@ function budgetResult(item: {
         limitMilli: item.effectiveLimitMilli,
       },
     ],
-    fx: { pair: "USD/EUR" as const, rate: null, rateDate: null, stale: true },
+    fx: { pair: "USD/EUR" as const, ...(fx ?? { rate: null, rateDate: null, stale: true }) },
   };
 }
 
@@ -101,6 +104,39 @@ describe("AIUsagePanel", () => {
     expect(textContent()).toContain("Cota AI");
     expect(textContent()).toContain("0% consumat");
     expect(textContent()).toContain("Nu exista apeluri AI inregistrate");
+  });
+
+  it("afiseaza echivalentul EUR cand cursul e disponibil si proaspat", async () => {
+    vi.mocked(aiUsageApi.summary).mockResolvedValue(EMPTY_SUMMARY);
+    vi.mocked(me.budget).mockResolvedValue(
+      budgetResult(
+        { effectiveLimitMilli: 5000, usedMilli: 1000, limitSource: "default" },
+        { rate: 0.876, rateDate: "2026-07-06", stale: false }
+      )
+    );
+
+    render(<AIUsagePanel />);
+    await flush();
+
+    // $1.00 * 0.876 = €0.876; $5.00 * 0.876 = €4.38
+    expect(textContent()).toContain("(€0.876)");
+    expect(textContent()).toContain("(€4.38)");
+  });
+
+  it("afiseaza EUR indisponibil pe curs lipsa sau stale (fail-closed)", async () => {
+    vi.mocked(aiUsageApi.summary).mockResolvedValue(EMPTY_SUMMARY);
+    vi.mocked(me.budget).mockResolvedValue(
+      budgetResult(
+        { effectiveLimitMilli: 5000, usedMilli: 1000, limitSource: "default" },
+        { rate: 0.876, rateDate: "2026-07-01", stale: true }
+      )
+    );
+
+    render(<AIUsagePanel />);
+    await flush();
+
+    expect(textContent()).toContain("(EUR indisponibil)");
+    expect(textContent()).not.toContain("€0.876");
   });
 
   it("afiseaza cota nelimitata cand effectiveLimitMilli e null", async () => {
