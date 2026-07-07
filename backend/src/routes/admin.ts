@@ -853,7 +853,10 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
     : (parsed.data.limitUsdMilli as number | null);
   const period: QuotaPeriod = parsed.data.period ?? (usedLegacyAlias ? "day" : "day");
 
-  const adminId = getOwnerId(c);
+  // getActorId, nu getOwnerId: sub un token de acces actorul != owner, iar
+  // updatedBy/grantedBy + audit-ul trebuie sa atribuie cine a executat efectiv.
+  // Aliniat cu rutele de chei (PUT /keys/*).
+  const adminId = getActorId(c);
   const row = upsertOverride({
     userId: id,
     feature: parsed.data.feature,
@@ -962,7 +965,7 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
     );
   }
 
-  const adminId = getOwnerId(c);
+  const adminId = getActorId(c);
   const row = createGrant({
     userId: id,
     feature: parsed.data.feature,
@@ -1008,7 +1011,7 @@ async function handleGrantRevoke(c: Context): Promise<Response> {
     }
     reason = parsed.data.reason ?? null;
   }
-  const adminId = getOwnerId(c);
+  const adminId = getActorId(c);
   const revoked = revokeGrant(grantId, adminId, reason);
   if (revoked) {
     recordAuditSafe(c, "admin.users.grant_revoke", {
