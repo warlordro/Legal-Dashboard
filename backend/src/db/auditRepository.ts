@@ -132,6 +132,19 @@ export function recordAudit(c: Context | null, action: string, options: AuditOpt
     );
 }
 
+// Varianta pentru site-urile POST-mutatie: mutatia e deja comisa in DB, deci
+// un esec al scrierii de audit nu are voie sa transforme succesul intr-un 500
+// mincinos (clientul ar retria o operatie deja reusita). Logam structurat si
+// continuam. Pentru audit-urile pre-raspuns (denied/blocked) ramane
+// recordAudit — acolo nu exista mutatie comisa de protejat.
+export function recordAuditSafe(c: Context | null, action: string, options: AuditOptions = {}): void {
+  try {
+    recordAudit(c, action, options);
+  } catch (err) {
+    console.error(`[audit] write failed for ${action}:`, err instanceof Error ? err.message : err);
+  }
+}
+
 // Read helpers — used by tests today, by future admin UI later. Owner-scoped
 // by default; `null` ownerId returns system-level events (matches DDL where
 // owner_id is nullable for system events like 'system.boot').

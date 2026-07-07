@@ -16,7 +16,7 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   AUDIT_DETAIL_MAX_BYTES,
@@ -24,6 +24,7 @@ import {
   listAuditEvents,
   purgeOldAuditLog,
   recordAudit,
+  recordAuditSafe,
   type AuditOutcome,
 } from "./auditRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
@@ -507,5 +508,27 @@ describe("v2.20.3 — purgeOldAuditLog retention", () => {
     // adaugam complexitate — 0 zile e suficient pentru contractul SQL.)
     const deleted = purgeOldAuditLog(0);
     expect(deleted).toBeGreaterThanOrEqual(2);
+  });
+});
+
+describe("recordAuditSafe", () => {
+  it("nu arunca si logheaza cand scrierea de audit esueaza", () => {
+    const db = getDb();
+    const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    const prepareSpy = vi.spyOn(db, "prepare").mockImplementation(() => {
+      throw new Error("SQLITE_BUSY: database is locked");
+    });
+    try {
+      expect(() => recordAuditSafe(null, "test.safe_write")).not.toThrow();
+      expect(errSpy).toHaveBeenCalledWith(
+        expect.stringContaining("[audit] write failed for test.safe_write"),
+        expect.anything()
+      );
+      // Contrast: recordAudit propaga aceeasi eroare (contractul existent).
+      expect(() => recordAudit(null, "test.safe_write")).toThrow("SQLITE_BUSY");
+    } finally {
+      prepareSpy.mockRestore();
+      errSpy.mockRestore();
+    }
   });
 });

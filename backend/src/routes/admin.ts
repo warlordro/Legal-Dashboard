@@ -17,7 +17,7 @@ import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
-import { recordAudit } from "../db/auditRepository.ts";
+import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
 import { AUDIT_EXPORT_MAX_ROWS, listAuditEvents, listAuditEventsForExport } from "../db/auditRepository.ts";
 import { AUDIT_SYSTEM_PLACEHOLDER, buildAuditXlsx } from "../services/auditExport.ts";
 import {
@@ -275,7 +275,7 @@ adminRouter.post("/users", limitAdminBody, async (c) => {
       if (!(err instanceof Error && err.message.startsWith("user not deleted"))) throw err;
     }
     if (reactivated !== null) {
-      recordAudit(c, "admin.users.create", {
+      recordAuditSafe(c, "admin.users.create", {
         targetKind: "user",
         targetId: reactivated.id,
         detail: { email: reactivated.email, role: reactivated.role, reactivated: true },
@@ -303,7 +303,7 @@ adminRouter.post("/users", limitAdminBody, async (c) => {
       displayName: parsed.data.displayName,
       role: parsed.data.role,
     });
-    recordAudit(c, "admin.users.create", {
+    recordAuditSafe(c, "admin.users.create", {
       targetKind: "user",
       targetId: user.id,
       detail: { email: user.email, role: user.role },
@@ -489,7 +489,7 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
   }
 
   const updated = updateUserRole(id, parsed.data.role);
-  recordAudit(c, "admin.users.update_role", {
+  recordAuditSafe(c, "admin.users.update_role", {
     targetKind: "user",
     targetId: id,
     detail: { before: before.role, after: updated.role },
@@ -524,7 +524,7 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
   }
 
   const updated = updateUserStatus(id, parsed.data.status);
-  recordAudit(c, "admin.users.update_status", {
+  recordAuditSafe(c, "admin.users.update_status", {
     targetKind: "user",
     targetId: id,
     detail: { before: before.status, after: updated.status },
@@ -661,7 +661,7 @@ adminRouter.get("/audit/export", async (c) => {
     );
   }
   const buf = await buildAuditXlsx(collected.rows, { since: since ?? null, until: until ?? null });
-  recordAudit(c, "admin.audit.export", {
+  recordAuditSafe(c, "admin.audit.export", {
     targetKind: "audit_log",
     detail: { since: since ?? null, until: until ?? null, rows: collected.rows.length },
   });
@@ -716,7 +716,7 @@ adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
     mode: parsed.data.mode as CaptchaMode,
     updatedBy: adminId,
   });
-  recordAudit(c, "admin.tenantKeys.captchaSettings.update", {
+  recordAuditSafe(c, "admin.tenantKeys.captchaSettings.update", {
     targetKind: "tenant_keys",
     targetId: "captcha",
     detail: {
@@ -762,7 +762,7 @@ adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
     detail.validationSkipped = true;
     if (validation.reason) detail.validationSkipReason = validation.reason;
   }
-  recordAudit(c, "admin.tenantKeys.update", {
+  recordAuditSafe(c, "admin.tenantKeys.update", {
     targetKind: "tenant_keys",
     targetId: field,
     detail,
@@ -840,7 +840,7 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
     limitUsdMilli,
     updatedBy: adminId,
   });
-  recordAudit(c, "admin.users.quota_upsert", {
+  recordAuditSafe(c, "admin.users.quota_upsert", {
     targetKind: "user",
     targetId: id,
     detail: {
@@ -876,7 +876,7 @@ adminRouter.delete("/users/:id/quota/:feature", (c) => {
   // Idempotent at HTTP layer: returning 200 either way keeps the admin UI
   // simple. Audit only records when something actually changed.
   if (removed) {
-    recordAudit(c, "admin.users.quota_delete", {
+    recordAuditSafe(c, "admin.users.quota_delete", {
       targetKind: "user",
       targetId: id,
       detail: { feature },
@@ -950,7 +950,7 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
     reason: parsed.data.reason ?? null,
     grantedBy: adminId,
   });
-  recordAudit(c, "admin.users.grant_create", {
+  recordAuditSafe(c, "admin.users.grant_create", {
     targetKind: "user",
     targetId: id,
     detail: {
@@ -990,7 +990,7 @@ async function handleGrantRevoke(c: Context): Promise<Response> {
   const adminId = getOwnerId(c);
   const revoked = revokeGrant(grantId, adminId, reason);
   if (revoked) {
-    recordAudit(c, "admin.users.grant_revoke", {
+    recordAuditSafe(c, "admin.users.grant_revoke", {
       targetKind: "user",
       targetId: before.user_id,
       detail: {
