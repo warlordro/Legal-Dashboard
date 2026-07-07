@@ -235,24 +235,6 @@ export interface BulkUserInput {
   role: CreatableUserRole;
 }
 
-export function insertUsersBulk(rows: readonly BulkUserInput[]): UserRow[] {
-  const db = getDb();
-  const stmt = db.prepare(
-    `INSERT INTO users (id, email, password_hash, display_name, role, status)
-     VALUES (?, ?, NULL, ?, ?, 'active')`
-  );
-  const runAll = db.transaction((batch: readonly BulkUserInput[]) => {
-    for (const row of batch) {
-      if (!CREATABLE_USER_ROLES.includes(row.role)) {
-        throw new Error(`invalid creatable role: ${row.role}`);
-      }
-      stmt.run(row.id, canonicalizeEmail(row.email), row.displayName, row.role);
-    }
-  });
-  runAll(rows);
-  return rows.map((row) => getUserById(row.id) as UserRow);
-}
-
 // v2.42.0: soft-delete NU blocheaza re-provisionarea. Indexul unic NOCASE
 // interzice un rand nou cu acelasi email, deci "re-adaugarea" unui email sters
 // = reactivarea randului existent (status -> active, nume/rol din input,

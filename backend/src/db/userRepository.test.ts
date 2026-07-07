@@ -11,10 +11,10 @@ import {
   getUserByEmail,
   getUserById,
   insertUser,
-  insertUsersBulk,
   isUniqueEmailViolation,
   LastAdminError,
   listUsers,
+  provisionUsersBulk,
   updateUserRole,
   updateUserRoleChecked,
   updateUserStatus,
@@ -183,25 +183,31 @@ describe("userRepository — unicitate case-insensitive (0040)", () => {
   });
 });
 
-describe("userRepository — insertUsersBulk", () => {
+describe("userRepository — provisionUsersBulk", () => {
   it("insereaza toate randurile intr-o tranzactie, cu email canonicalizat", () => {
-    const created = insertUsersBulk([
-      { id: "b-1", email: "  X@Firma.RO ", displayName: "X", role: "user" },
-      { id: "b-2", email: "y@firma.ro", displayName: "Y", role: "admin" },
-    ]);
-    expect(created).toHaveLength(2);
-    expect(created[0].email).toBe("x@firma.ro");
-    expect(created[1].role).toBe("admin");
-    expect(created.every((u) => u.status === "active")).toBe(true);
+    provisionUsersBulk({
+      inserts: [
+        { id: "b-1", email: "  X@Firma.RO ", displayName: "X", role: "user" },
+        { id: "b-2", email: "y@firma.ro", displayName: "Y", role: "admin" },
+      ],
+      reactivations: [],
+    });
+    expect(getUserById("b-1")?.email).toBe("x@firma.ro");
+    expect(getUserById("b-2")?.role).toBe("admin");
+    expect(getUserById("b-1")?.status).toBe("active");
+    expect(getUserById("b-2")?.status).toBe("active");
   });
 
   it("rollback complet: o coliziune de email anuleaza TOT batch-ul", () => {
     insertUser({ id: "u-1", email: "dublura@firma.ro", displayName: "Existent" });
     expect(() =>
-      insertUsersBulk([
-        { id: "b-1", email: "nou@firma.ro", displayName: "Nou", role: "user" },
-        { id: "b-2", email: "DUBLURA@firma.ro", displayName: "Coliziune", role: "user" },
-      ])
+      provisionUsersBulk({
+        inserts: [
+          { id: "b-1", email: "nou@firma.ro", displayName: "Nou", role: "user" },
+          { id: "b-2", email: "DUBLURA@firma.ro", displayName: "Coliziune", role: "user" },
+        ],
+        reactivations: [],
+      })
     ).toThrow();
     // Primul rand din batch NU a ramas in DB.
     expect(getUserByEmail("nou@firma.ro")).toBeNull();
@@ -209,7 +215,10 @@ describe("userRepository — insertUsersBulk", () => {
 
   it("respinge rolurile necreabile (support/readonly)", () => {
     expect(() =>
-      insertUsersBulk([{ id: "b-1", email: "s@firma.ro", displayName: "S", role: "support" as never }])
+      provisionUsersBulk({
+        inserts: [{ id: "b-1", email: "s@firma.ro", displayName: "S", role: "support" as never }],
+        reactivations: [],
+      })
     ).toThrow(/invalid creatable role/);
   });
 });
