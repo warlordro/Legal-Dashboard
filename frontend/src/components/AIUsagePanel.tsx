@@ -398,18 +398,15 @@ function QuotaCard({ budget, fx }: { budget: MeBudgetItem | null; fx: MeFxRate |
       {/* Un singur rand (pattern-ul "Bugetul tau" din Usage.tsx): eticheta in
           stanga, sumele USD + echivalent EUR + badge-ul de procent in dreapta. */}
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h5 className="text-xs font-semibold uppercase text-muted-foreground">
-          Cota AI &middot; {PERIOD_RO[budget.period]}
-        </h5>
+        <h5 className="text-xs font-semibold uppercase text-foreground">Cota AI &middot; {PERIOD_RO[budget.period]}</h5>
         <span className="flex flex-wrap items-center gap-2">
-          <span className="text-sm">
-            {formatUsd(budget.usedMilli / 1000)}
-            <span className="text-muted-foreground"> ({formatEur(budget.usedMilli / 1000, fx)})</span>
+          <span className="text-sm text-foreground">
+            {formatUsd(budget.usedMilli / 1000)} ({formatEur(budget.usedMilli / 1000, fx)})
             {!unlimited && (
-              <span className="text-muted-foreground">
+              <>
                 {" "}
                 / {formatUsd((limit ?? 0) / 1000)} ({formatEur((limit ?? 0) / 1000, fx)})
-              </span>
+              </>
             )}
           </span>
           <span className={cn("rounded px-1.5 py-0.5 text-[11px] font-medium", badgeToneClass)}>

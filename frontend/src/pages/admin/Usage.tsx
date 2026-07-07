@@ -90,7 +90,7 @@ function WindowsBreakdown({
     <div className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-3">
       {cells.map((cell) => (
         <div key={cell.label} className="rounded-md border border-border bg-card px-3 py-2">
-          <p className="text-[11px] uppercase text-muted-foreground">{cell.label}</p>
+          <p className="text-[11px] uppercase text-foreground">{cell.label}</p>
           <p className="text-sm font-semibold">{milliToUsd(cell.milli)}</p>
           <p className="text-[11px] text-muted-foreground">{milliToEur(cell.milli, fx)}</p>
         </div>
@@ -271,7 +271,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
             {overview && activeSorted.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="border-b border-border bg-muted/50 text-left text-xs text-muted-foreground">
+                  <thead className="border-b border-border bg-muted/50 text-left text-xs text-foreground">
                     <tr>
                       {tab === "ai" ? (
                         <>
@@ -452,7 +452,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                 activ (suspendati/stersi), care nu apar in randurile de mai sus. */}
             {tab === "ai" && overview && (
               <div className="border-t border-border px-1 pt-3">
-                <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+                <p className="mb-2 text-xs font-semibold uppercase text-foreground">
                   Total general — toti utilizatorii
                   <span className="ml-1 font-normal normal-case">(inclusiv conturile dezactivate sau sterse)</span>
                 </p>
@@ -466,7 +466,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-base">
               <span>Bugetul tau (contul curent)</span>
-              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-2 text-xs text-foreground">
                 <span>Curs USD/EUR:</span>
                 {fx.rate === null ? (
                   <Badge variant="warning">indisponibil</Badge>
@@ -503,7 +503,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                             <Badge variant="success">+grant {milliToUsd(item.extraFromGrantsMilli)}</Badge>
                           )}
                         </div>
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-sm text-foreground">
                           {milliToUsd(item.usedMilli)} ({milliToEur(item.usedMilli, fx)})
                           {item.effectiveLimitMilli !== null && (
                             <>
