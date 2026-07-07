@@ -33,7 +33,7 @@ const PERIOD_LABELS: Record<QuotaPeriod, string> = {
 
 const LIMIT_SOURCE_LABELS: Record<"override" | "default" | "none", string> = {
   override: "Cota setata",
-  default: "Implicit tenant",
+  default: "Limita implicita",
   none: "Fara limita",
 };
 
@@ -69,6 +69,34 @@ function barColor(pct: number | null): string {
   if (pct >= 100) return "bg-red-500";
   if (pct >= 80) return "bg-amber-500";
   return "bg-primary";
+}
+
+// Cele 3 ferestre de consum ca mini-celule (eticheta sus, USD proeminent, EUR
+// dedesubt) — mult mai usor de scanat decat insiruirea pe un singur rand cu
+// separatori (feedback user, v2.42.0).
+function WindowsBreakdown({
+  windows,
+  fx,
+}: {
+  windows: { dayMilli: number; weekMilli: number; totalMilli: number };
+  fx: MeFxRate;
+}) {
+  const cells = [
+    { label: "Zilnic (ultimele 24h)", milli: windows.dayMilli },
+    { label: "Saptamanal (7 zile)", milli: windows.weekMilli },
+    { label: "Total istoric", milli: windows.totalMilli },
+  ];
+  return (
+    <div className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-3">
+      {cells.map((cell) => (
+        <div key={cell.label} className="rounded-md border border-border bg-card px-3 py-2">
+          <p className="text-[11px] uppercase text-muted-foreground">{cell.label}</p>
+          <p className="text-sm font-semibold">{milliToUsd(cell.milli)}</p>
+          <p className="text-[11px] text-muted-foreground">{milliToEur(cell.milli, fx)}</p>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 export default function UsagePage({ embedded = false }: { embedded?: boolean } = {}) {
@@ -349,12 +377,8 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                               </tr>
                               {isOpen && (
                                 <tr className="border-b border-border bg-muted/20">
-                                  <td colSpan={6} className="px-4 py-2 text-xs text-muted-foreground">
-                                    Zilnic (24h): {milliToUsd(r.windows.dayMilli)} ({milliToEur(r.windows.dayMilli, fx)}
-                                    ){" · "}
-                                    Saptamanal (7 zile): {milliToUsd(r.windows.weekMilli)} (
-                                    {milliToEur(r.windows.weekMilli, fx)}){" · "}
-                                    Total: {milliToUsd(r.windows.totalMilli)} ({milliToEur(r.windows.totalMilli, fx)})
+                                  <td colSpan={6} className="px-4 py-3">
+                                    <WindowsBreakdown windows={r.windows} fx={fx} />
                                   </td>
                                 </tr>
                               )}
@@ -424,16 +448,16 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
               </div>
             )}
 
-            {/* Sinteza pe tot tenantul — include si consumul ownerilor fara cont
+            {/* Sinteza generala — include si consumul ownerilor fara cont
                 activ (suspendati/stersi), care nu apar in randurile de mai sus. */}
             {tab === "ai" && overview && (
-              <p className="border-t border-border px-1 pt-2 text-xs text-muted-foreground">
-                Total tenant (toti userii, inclusiv conturi inactive): Zilnic (24h){" "}
-                {milliToUsd(overview.tenantTotals.dayMilli)} ({milliToEur(overview.tenantTotals.dayMilli, fx)}) ·
-                Saptamanal (7 zile) {milliToUsd(overview.tenantTotals.weekMilli)} (
-                {milliToEur(overview.tenantTotals.weekMilli, fx)}) · Total{" "}
-                {milliToUsd(overview.tenantTotals.totalMilli)} ({milliToEur(overview.tenantTotals.totalMilli, fx)})
-              </p>
+              <div className="border-t border-border px-1 pt-3">
+                <p className="mb-2 text-xs font-semibold uppercase text-muted-foreground">
+                  Total general — toti utilizatorii
+                  <span className="ml-1 font-normal normal-case">(inclusiv conturile dezactivate sau sterse)</span>
+                </p>
+                <WindowsBreakdown windows={overview.tenantTotals} fx={fx} />
+              </div>
             )}
           </CardContent>
         </Card>
