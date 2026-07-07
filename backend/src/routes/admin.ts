@@ -41,11 +41,12 @@ import {
   getUserById,
   insertUser,
   isUniqueEmailViolation,
+  LastAdminError,
   listUsers,
   provisionUsersBulk,
   reactivateDeletedUser,
-  updateUserRole,
-  updateUserStatus,
+  updateUserRoleChecked,
+  updateUserStatusChecked,
   USER_ROLES,
   USER_STATUSES,
   type BulkUserInput,
@@ -467,28 +468,27 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
     return c.json(fail("not_found", "Utilizatorul nu exista", c), 404);
   }
 
-  // Self-demotion guardrail: refuse to remove the last admin's own role. Avoids
-  // the foot-gun where an admin demotes themselves and locks the org out of
-  // admin surfaces. v2.42.0 (4.4): conteaza DOAR adminii ACTIVI — un admin
-  // suspendat nu poate prelua administrarea, deci a-l numara ar permite
-  // lockout total.
-  if (id === getOwnerId(c) && before.role === "admin" && parsed.data.role !== "admin") {
-    const otherAdmins = listUsers({ role: "admin", status: "active" }).rows.filter((u) => u.id !== id);
-    if (otherAdmins.length === 0) {
+  let updated: ReturnType<typeof updateUserRoleChecked>;
+  try {
+    updated = updateUserRoleChecked(id, parsed.data.role);
+  } catch (err) {
+    if (err instanceof LastAdminError) {
+      // Mesaj identic cu cel istoric pe self-demotion (testele + UI il asteapta);
+      // formulare generica pe cazul cross-admin (atins doar sub cursa).
+      const message =
+        id === getOwnerId(c)
+          ? "Nu te poti demota — esti singurul admin. Promoveaza un alt utilizator inainte."
+          : "Este singurul admin activ — operatiunea ar lasa organizatia fara admin. Promoveaza un alt utilizator inainte.";
       recordAudit(c, "admin.users.demote_blocked", {
         outcome: "denied",
         targetKind: "user",
         targetId: id,
         detail: { reason: "last_admin", from: before.role, to: parsed.data.role },
       });
-      return c.json(
-        fail("last_admin", "Nu te poti demota — esti singurul admin. Promoveaza un alt utilizator inainte.", c),
-        409
-      );
+      return c.json(fail("last_admin", message, c), 409);
     }
+    throw err;
   }
-
-  const updated = updateUserRole(id, parsed.data.role);
   recordAuditSafe(c, "admin.users.update_role", {
     targetKind: "user",
     targetId: id,
@@ -523,7 +523,24 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
     return c.json(fail("self_deactivation", "Nu iti poti dezactiva propriul cont", c), 409);
   }
 
-  const updated = updateUserStatus(id, parsed.data.status);
+  let updated: ReturnType<typeof updateUserStatusChecked>;
+  try {
+    updated = updateUserStatusChecked(id, parsed.data.status);
+  } catch (err) {
+    if (err instanceof LastAdminError) {
+      recordAudit(c, "admin.users.deactivate_blocked", {
+        outcome: "denied",
+        targetKind: "user",
+        targetId: id,
+        detail: { reason: "last_admin", from: before.status, to: parsed.data.status },
+      });
+      return c.json(
+        fail("last_admin", "Este singurul admin activ — operatiunea ar lasa organizatia fara admin.", c),
+        409
+      );
+    }
+    throw err;
+  }
   recordAuditSafe(c, "admin.users.update_status", {
     targetKind: "user",
     targetId: id,

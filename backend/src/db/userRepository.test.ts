@@ -13,9 +13,12 @@ import {
   insertUser,
   insertUsersBulk,
   isUniqueEmailViolation,
+  LastAdminError,
   listUsers,
   updateUserRole,
+  updateUserRoleChecked,
   updateUserStatus,
+  updateUserStatusChecked,
 } from "./userRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
@@ -230,5 +233,48 @@ describe("userRepository — soft-deleted exclusi din listari (4.1)", () => {
 
   it("getUserByEmail ii vede in continuare (emailul ramane ocupat)", () => {
     expect(getUserByEmail("sters@firma.ro")?.id).toBe("u-del");
+  });
+});
+
+describe("invariantul ultimul admin activ (checked updates)", () => {
+  it("blocheaza demotarea singurului admin activ", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    expect(() => updateUserRoleChecked("a1", "user")).toThrow(LastAdminError);
+  });
+
+  it("blocheaza suspendarea singurului admin activ", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    expect(() => updateUserStatusChecked("a1", "suspended")).toThrow(LastAdminError);
+  });
+
+  it("permite demotarea cand ramane alt admin activ", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin" });
+    expect(updateUserRoleChecked("a2", "user").role).toBe("user");
+  });
+
+  it("un admin suspendat NU conteaza ca activ la numaratoare", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin", status: "suspended" });
+    expect(() => updateUserRoleChecked("a1", "user")).toThrow(LastAdminError);
+  });
+
+  it("suspendarea secventiala a doi admini: primul trece, al doilea e blocat", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin" });
+    updateUserStatusChecked("a2", "suspended");
+    expect(() => updateUserStatusChecked("a1", "suspended")).toThrow(LastAdminError);
+  });
+
+  it("demotarea unui admin deja suspendat nu e blocata (nu reduce numarul activ)", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin", status: "suspended" });
+    expect(updateUserRoleChecked("a2", "user").role).toBe("user");
+  });
+
+  it("mutatiile pe non-admin nu sunt afectate", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "u1", email: "u1@x.ro", displayName: "U1" });
+    expect(updateUserStatusChecked("u1", "suspended").status).toBe("suspended");
   });
 });

@@ -150,6 +150,56 @@ export function updateUserStatus(id: string, status: UserStatus): UserRow {
   return getUserById(id) as UserRow;
 }
 
+// Fix review v2.42.0: invariantul ">=1 admin activ" se verifica IN ACEEASI
+// tranzactie cu write-ul si acopera ORICE admin, nu doar self. Guard-ul vechi
+// de ruta avea doua lipsuri: (1) nu exista deloc check pe actiunile cross-admin
+// si (2) intre requireRole (autorizarea actorului) si write sta await-ul de
+// body — doua cereri reciproce (A suspenda B, B suspenda A) treceau amandoua
+// de autorizare cand ambii erau inca activi si comiteau ambele write-uri =>
+// 0 admini activi (lockout pe toata suprafata admin). Numaratoarea in
+// tranzactie sincrona better-sqlite3 inchide ambele.
+export class LastAdminError extends Error {
+  constructor(id: string) {
+    super(`last active admin: ${id}`);
+    this.name = "LastAdminError";
+  }
+}
+
+function assertNotLastActiveAdmin(id: string): void {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active' AND id != ?")
+    .get(id) as { n: number };
+  if (row.n === 0) throw new LastAdminError(id);
+}
+
+export function updateUserRoleChecked(id: string, role: UserRole): UserRow {
+  if (!USER_ROLES.includes(role)) throw new Error(`invalid role: ${role}`);
+  const db = getDb();
+  db.transaction(() => {
+    const before = getUserById(id);
+    if (before === null) throw new Error(`user not found: ${id}`);
+    if (before.role === "admin" && before.status === "active" && role !== "admin") {
+      assertNotLastActiveAdmin(id);
+    }
+    db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
+  }).immediate();
+  return getUserById(id) as UserRow;
+}
+
+export function updateUserStatusChecked(id: string, status: UserStatus): UserRow {
+  if (!USER_STATUSES.includes(status)) throw new Error(`invalid status: ${status}`);
+  const db = getDb();
+  db.transaction(() => {
+    const before = getUserById(id);
+    if (before === null) throw new Error(`user not found: ${id}`);
+    if (before.role === "admin" && before.status === "active" && status !== "active") {
+      assertNotLastActiveAdmin(id);
+    }
+    db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, id);
+  }).immediate();
+  return getUserById(id) as UserRow;
+}
+
 // Convenience for tests / first-login flows. Caller is responsible for ID
 // generation policy (today: 'local' on desktop; PR-9 will mint UUIDs).
 export interface InsertUserInput {
