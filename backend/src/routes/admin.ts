@@ -285,14 +285,18 @@ adminRouter.post("/users", limitAdminBody, async (c) => {
     }
   }
   if (existing !== null) {
+    // Cursa de reactivare: snapshot-ul `existing` e citit inainte ca alt admin
+    // sa fi castigat reactivarea — statusul "deleted" din el poate fi deja
+    // "active". Refetch, altfel si raspunsul si randul de audit mint permanent.
+    const current = getUserById(existing.id) ?? existing;
     recordAudit(c, "admin.users.create", {
       outcome: "denied",
       targetKind: "user",
-      targetId: existing.id,
-      detail: { reason: "email_exists", status: existing.status },
+      targetId: current.id,
+      detail: { reason: "email_exists", status: current.status },
     });
     return c.json(
-      fail("email_exists", `Exista deja un cont cu acest email (status: ${USER_STATUS_RO[existing.status]}).`, c),
+      fail("email_exists", `Exista deja un cont cu acest email (status: ${USER_STATUS_RO[current.status]}).`, c),
       409
     );
   }
