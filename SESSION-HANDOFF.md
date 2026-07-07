@@ -107,9 +107,18 @@ in fereastra 23:00-24:00 (nu da fals-negativ); re-check ieftin de buget inainte
 de faza judge in analyze-multi (candidat HARDENING.md); agregare set-based pe
 usage/overview la scara.
 
-**URMEAZA:** smoke pe mediul local web (`scripts/dev-web-local.ps1`) + decizia
-de merge (user). Optional: review-panel pe diff-ul final daca userul vrea inca
-un audit extern.
+**SPRINT INCHIS (2026-07-07):** userul a incheiat lucrul la proiect. Livrari
+finale post-review: fix parser ECB (curs USD/EUR functional), cota AI vizibila
+in panoul AI Usage (single-row + EUR), batch CodeRabbit (7 fixuri confirmate,
+inclusiv retry-ul de email de warning reparat — quotaFeatureOf accepta "ai"),
+totaluri consum per user + total general in tab-ul Consum (mini-celule, copy
+integral romana, text-foreground), smoke functional pe tokenurile API (emitere/
+folosire/scope/revocare OK; `LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1` adaugat in
+dev-web-local.ps1 — folosirea PAT era blocata local de cerinta HTTPS).
+Decizie merge: MR UNIC `feat/v2.42.0-users-settings` -> `main` (branch-ul
+contine integral baseline-audit si v2.41.0-web-ux — lant liniar, verificat cu
+merge-base); dupa merge, branch-urile vechi se pot sterge; fara squash.
+Pre-flight-ul 0040 nu se aplica (nu exista date reale pre-v2.42).
 
 ## Kill switches operationale
 
