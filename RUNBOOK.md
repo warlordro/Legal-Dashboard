@@ -642,3 +642,30 @@ sqlite3 $DB_PATH "
 
 **Issue tracker**: GitHub Issues - https://github.com/<org>/legal-dashboard/issues
 **Dev contact**: cdragos@gmail.com
+
+---
+
+## Rollback si pre-flight pentru migratiile v2.42.0 (0040-0042)
+
+**Pre-flight OBLIGATORIU inainte de upgrade pe un tenant web** (migration 0040
+adauga index unic case-insensitive pe users.email si BLOCHEAZA boot-ul daca
+exista duplicate istorice):
+
+    SELECT lower(email) AS e, COUNT(*) AS n FROM users GROUP BY e HAVING n > 1;
+
+Zero randuri = upgrade sigur. Randuri gasite = rezolva manual duplicatele
+(pastreaza contul corect, marcheaza-l pe celalalt cu email placeholder unic)
+INAINTE de a porni versiunea noua.
+
+**Rollback = restore din backup, NU reinstalare de build vechi.** Runner-ul de
+migratii refuza boot-ul cand DB-ul are versiune de schema mai mare decat
+fisierele de pe disc, deci un downgrade de aplicatie dupa 0040-0042 nu porneste.
+Procedura corecta: opreste aplicatia, restaureaza
+`backups/legal-dashboard.pre-schema-upgrade-*.db` (generat automat inainte de
+migrare), apoi porneste versiunea veche.
+
+**0041 down.sql este best-effort, NU inversa fidela**: valorile per-pool
+originale (ai.single vs ai.multi) sunt pierdute la consolidare, iar granturile
+se duplica pe ambele pool-uri legacy la down. Nu rula down-ul decat daca
+backup-ul nu exista; nu rula up dupa down fara sa cureti intai
+user_quota_grants.

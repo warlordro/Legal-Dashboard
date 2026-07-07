@@ -32,6 +32,16 @@ Paritate vizuala cu `feat/v2.42.0-users-settings` din repo-ul original (taburi p
 
 Gate-uri 0.3 inainte de fiecare commit (biome, tsc backend + frontend, build, teste). 1665 teste backend (+ reactivare useri stersi, usage/overview, quotaGuard pool unic, import, audit export) si 326 teste frontend (+ toast timere, useDialog focus, useClientSort, Keys/ApiAccessPanel cu provideri). Claim-uri CodeRabbit verificate individual (acceptate cu dovezi sau respinse cu argumente); comparatie side-by-side cu repo-ul de referinta rulat local.
 
+### Note de upgrade
+
+Consolidarea cotelor AI (migration 0041) pastreaza RATA CEA MAI RESTRICTIVA
+dintre ai.single si ai.multi ca limita a pool-ului unic "ai". Utilizatorii care
+aveau limite asimetrice (ex. multi mult peste single) pot vedea 429 pe analiza
+multi-agent dupa upgrade — adminul trebuie sa revada limitele in pagina Cote si
+sa le reaseze la valorile dorite. Inainte de upgrade pe un tenant web, ruleaza
+pre-flight-ul de duplicate de email din RUNBOOK (migration 0040 opreste boot-ul
+pe duplicate istorice case-insensitive).
+
 ## v2.41.0 - 2026-07-06
 
 Fundatia web a sprintului v2.41-v2.42: mediu local de testare pentru web mode, identitate fail-closed pe bridge-ul oauth2, layout web fara chrome-ul Electron, cheile tenant conectate in frontend si vederile globale pentru cote/granturi. Livrat pe branch-ul `feat/v2.41.0-web-ux` (MR 0-4 + fixuri din review), consolidat ulterior in release-ul v2.42.0 — v2.41.0 nu a avut artefact de release propriu. Modul desktop: zero impact.
