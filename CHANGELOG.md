@@ -46,7 +46,7 @@ Audit al main-ului GitLab cu sonde functionale A-F consemnat in `BASELINE-DELTA.
 
 ### Layout web + chei tenant in frontend (MR 2, 3, 3b)
 
-In browser aplicatia nu mai afiseaza chrome-ul Electron (bara de titlu, controale fereastra); trepte de font per platforma. `useTenantKeyStatus` citeste starea cheilor tenant de la server (`GET /me/key-status`) cu politica fail-open pe loading/error; panou de status pe roluri: adminul vede inventarul per provider (Configurata *ultimele4 / Neconfigurata), non-adminul doar un banner cand o capabilitate e indisponibila. Rutarea AI implicita prin `resolveEffectiveAiMode` (env > tenant DB > BYOK desktop).
+In browser aplicatia nu mai afiseaza chrome-ul Electron (bara de titlu, controale fereastra); trepte de font per platforma. `useTenantKeyStatus` citeste starea cheilor tenant de la server (`GET /me/key-status`) cu politica fail-open pe loading/error; panou de status pe roluri: adminul vede inventarul per provider (Configurata, cu ultimele 4 caractere ale cheii / Neconfigurata), non-adminul doar un banner cand o capabilitate e indisponibila. Rutarea AI implicita prin `resolveEffectiveAiMode` (env > tenant DB > BYOK desktop).
 
 ### Vederi globale cote si granturi (MR 4)
 
