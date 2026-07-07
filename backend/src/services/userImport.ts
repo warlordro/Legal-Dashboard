@@ -83,7 +83,10 @@ export async function parseUserImport(buffer: Buffer): Promise<ParseImportResult
       workbook.xlsx.load(buffer as unknown as ArrayBuffer),
       new Promise<never>((_, reject) => setTimeout(() => reject(new Error("parse timeout")), PARSE_TIMEOUT_MS)),
     ]);
-  } catch {
+  } catch (err) {
+    // O linie de diagnostic server-side — altfel "user a trimis junk" si
+    // "regresie de parser" sunt indistinguibile din raspunsul sanitizat.
+    console.error("[userImport] xlsx parse failed:", err instanceof Error ? err.message : err);
     return { ok: false, code: "invalid_file", message: "Fisierul nu a putut fi citit ca .xlsx." };
   }
 
