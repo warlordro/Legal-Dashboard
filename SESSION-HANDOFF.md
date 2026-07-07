@@ -78,28 +78,38 @@ Smoke local FACUT (health, gate auth 401, cache-control, bundle 2.42.0, proxies)
 - Stare gate-uri la ba43867: biome curat, tsc backend+frontend verzi, build ok,
   327 teste frontend + 1665 backend.
 
-**URMEAZA (pasul imediat al sesiunii noi):** review amanuntit pe DELTA BACKEND
-main...HEAD (fisierele: routes/admin.ts, routes/me.ts, routes/ai.ts, routes/auth.ts,
-middleware/quotaGuard.ts, middleware/static-frontend.ts, db/userRepository.ts,
-db/userQuotaRepository.ts, db/userQuotaGrantsRepository.ts, db/aiUsageRepository.ts,
-db/auditRepository.ts, services/userImport.ts, services/auditExport.ts,
-services/aiUsage.ts, services/ai.ts, services/budgetWarningService.ts,
-migrations 0040-0042, scripts/dev-web-local.ps1 + dev-web-proxy.mjs).
-Frontend-ul a fost deja acoperit de auditul de bugs; backend-ul NU inca.
-PROMPT RECOMANDAT (formulare neutra — vocabularul "audit de securitate/atac/bypass"
-declanseaza filtrele Fable; vezi nota de la inceputul sectiunii):
+**Review backend FACUT (2026-07-07, sesiunea 3):** 5 agenti paraleli pe delta
+main...HEAD (deep review, fiabilitate, teste, release readiness, conformitate
+CLAUDE.md) — zero CRITICAL. Planul de fixes a trecut prin review-panel adversarial
+(5 modele + sinteza) inainte de executie, apoi a fost executat integral
+subagent-driven (implementer + task reviewer pe task-urile grele, review final
+whole-branch pe tot diff-ul, CONFIRMED ready-to-merge). Plan complet:
+`docs/superpowers/plans/2026-07-07-fixes-review-backend-v2.42.md`.
 
-> Executa un deep code review cu agenti paraleli pe delta backend
-> main...feat/v2.42.0-users-settings (lista fisierelor in SESSION-HANDOFF).
-> Focus: corectitudine functionala si robustete — izolarea datelor per owner_id,
-> validarea inputului pe rutele admin noi (users, import xlsx, quota, grants,
-> usage/overview, audit export), atomicitatea tranzactiilor si a rezervarilor de
-> buget, consecventa gate-urilor de rol, comportamentul migratiilor 0040-0042
-> (up + down), tratarea valorilor neasteptate din fisierele importate si limitele
-> de marime. Findings cu fisier:linie, scenariu concret de esec si severitate;
-> verificare inainte de raportare; fara observatii de stil.
+**LIVRAT (17 commit-uri, 7a0ea6d..ffea12d):** recordAuditSafe pe site-urile
+post-mutatie; invariant last-admin atomic in repository (role + status, orice
+admin); buildPrompt inainte de rezervarea de cota in analyze-multi; refetch la
+409 pe cursa de reactivare; getActorId pe quota/grants; log parse-fail xlsx;
+stergere insertUsersBulk (mort); USAGE_OVERVIEW_CAP 500; export audit cu toate
+filtrele paginii; teste P0+P1 noi (cost-aware reservation, rollback bulk, down
+migrations 0040/0042, budget-warnings cu izolare owner, celule xlsx, caiAtac);
+RUNBOOK pre-flight 0040 + rollback prin backup + note upgrade cota; feature nou:
+cota AI alocata + consum in panoul AI Usage (QuotaCard doar in web mode,
+/me/budget aliniat la regula guard-ului: default env web-only + rolling window
+pe pool-ul "ai" + limitSource).
 
-Dupa review: fixurile confirmate, apoi **review-panel** (audit separat, decis de user).
+**Stare gate-uri la ffea12d:** npm run check verde (biome + typecheck + 1691
+backend + 333 frontend + electron), npm run build curat.
+
+**Backlog triat de review-ul final (nu blocheaza):** fixture ExcelJS via
+cell.model fragil la upgrade major; testul rolling-window pierde discriminarea
+in fereastra 23:00-24:00 (nu da fals-negativ); re-check ieftin de buget inainte
+de faza judge in analyze-multi (candidat HARDENING.md); agregare set-based pe
+usage/overview la scara.
+
+**URMEAZA:** smoke pe mediul local web (`scripts/dev-web-local.ps1`) + decizia
+de merge (user). Optional: review-panel pe diff-ul final daca userul vrea inca
+un audit extern.
 
 ## Kill switches operationale
 
