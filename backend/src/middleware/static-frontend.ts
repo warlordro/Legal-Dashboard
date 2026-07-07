@@ -64,9 +64,7 @@ export function mountStaticFrontend(app: Hono, baseDir: string): void {
       // Fara Cache-Control, browserul cache-uia euristic index.html si servea
       // bundle-uri vechi dupa rebuild ("vad varianta dinainte"). Asset-urile
       // Vite au hash in nume => imutabile; HTML-ul se revalideaza mereu.
-      const cacheControl = decodedPath.startsWith("/assets/")
-        ? "public, max-age=31536000, immutable"
-        : "no-cache";
+      const cacheControl = decodedPath.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache";
       return c.body(content, 200, { "Content-Type": mime, "Cache-Control": cacheControl });
     } catch {
       // SPA fallback
