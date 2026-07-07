@@ -132,6 +132,10 @@ $env:LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET = $secrets.proxySecret
 $env:TENANT_KEY_ENCRYPTION_SECRET = $secrets.tenantKeySecret
 $env:LEGAL_DASHBOARD_DB_PATH = Join-Path $stateDir "legal-dashboard.db"
 $env:NODE_ENV = "production"
+# PAT-urile cer HTTPS in productie (patSecurity, 426); mediul local ruleaza pe
+# HTTP simplu, deci fara flag-ul de mai jos orice folosire de token ar fi
+# respinsa. Escape hatch documentat in patSecurity.ts pentru dev/loopback.
+$env:LEGAL_DASHBOARD_PAT_ALLOW_HTTP = "1"
 $env:PORT = "$BackendPort"
 
 # --- 4. Backend ----------------------------------------------------------------
