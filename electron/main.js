@@ -118,8 +118,13 @@ app.on("before-quit", (event) => {
 
 let mainWindow;
 let backendStarted = false;
+let bootNonce = null;
 
-const IS_DEV = process.env.NODE_ENV !== "production";
+// SECURITY: process.env.NODE_ENV is only forced to "production" inside startBackend(),
+// which runs after this module-level evaluation — in packaged installs NODE_ENV is
+// unset at this point, so a check against it would leave DevTools + debug menu on.
+// app.isPackaged is set by Electron itself and is reliable at load time.
+const IS_DEV = !app.isPackaged;
 
 function buildAppMenu() {
   const isDev = IS_DEV;
@@ -222,6 +227,12 @@ function startBackend() {
     process.env.MONITORING_ENABLED = "1";
   }
 
+  // SECURITY: boot nonce — proves the /health response on BACKEND_PORT actually came
+  // from the backend we just spawned, not from another process squatting the port.
+  // The backend echoes this back in body.boot when the env var is set.
+  bootNonce = require("node:crypto").randomBytes(16).toString("hex");
+  process.env.LEGAL_DASHBOARD_BOOT_NONCE = bootNonce;
+
   try {
     require(path.join(__dirname, "..", "dist-backend", "index.cjs"));
   } catch (err) {
@@ -243,8 +254,11 @@ function startBackend() {
       fetch(`http://localhost:${BACKEND_PORT}/health`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((body) => {
-          // SECURITY: Verify response identity to prevent port hijacking
-          if (body && body.service === "Legal Dashboard API") {
+          // SECURITY: Verify response identity to prevent port hijacking.
+          // body.boot must echo the nonce we generated for this launch — a
+          // service-name string alone is trivially spoofable by anything
+          // squatting the port.
+          if (body && body.service === "Legal Dashboard API" && body.boot === bootNonce) {
             backendStarted = true;
             resolve();
           } else {
@@ -272,10 +286,22 @@ function startBackend() {
 const MAX_PLAINTEXT = 8 * 1024;
 const MAX_CIPHERTEXT_B64 = 16 * 1024;
 
-function registerSafeStorageIpc() {
-  ipcMain.handle("safeStorage:available", () => safeStorage.isEncryptionAvailable());
+// SECURITY: only the app's own renderer may drive safeStorage — reject IPC calls
+// from any other sender (e.g. a devtools-injected or otherwise unexpected webContents).
+// mainWindow is not created yet when registerSafeStorageIpc() runs, so null-safe
+// comparison means "no window yet" is treated as untrusted rather than throwing.
+function isTrustedIpcSender(event) {
+  return !!mainWindow && event.sender === mainWindow.webContents;
+}
 
-  ipcMain.handle("safeStorage:encrypt", (_event, plaintext) => {
+function registerSafeStorageIpc() {
+  ipcMain.handle("safeStorage:available", (event) => {
+    if (!isTrustedIpcSender(event)) return false;
+    return safeStorage.isEncryptionAvailable();
+  });
+
+  ipcMain.handle("safeStorage:encrypt", (event, plaintext) => {
+    if (!isTrustedIpcSender(event)) return null;
     if (typeof plaintext !== "string" || plaintext.length > MAX_PLAINTEXT) return null;
     if (!safeStorage.isEncryptionAvailable()) return null;
     try {
@@ -285,7 +311,8 @@ function registerSafeStorageIpc() {
     }
   });
 
-  ipcMain.handle("safeStorage:decrypt", (_event, ciphertextB64) => {
+  ipcMain.handle("safeStorage:decrypt", (event, ciphertextB64) => {
+    if (!isTrustedIpcSender(event)) return null;
     if (typeof ciphertextB64 !== "string" || ciphertextB64.length > MAX_CIPHERTEXT_B64) return null;
     if (!safeStorage.isEncryptionAvailable()) return null;
     try {
@@ -297,7 +324,8 @@ function registerSafeStorageIpc() {
 
   // Sync renderer theme toggle with the native Windows title bar overlay.
   // Without this, the custom title bar overlay stays frozen at its creation-time color.
-  ipcMain.handle("window:setTheme", (_event, theme) => {
+  ipcMain.handle("window:setTheme", (event, theme) => {
+    if (!isTrustedIpcSender(event)) return;
     if (theme !== "dark" && theme !== "light" && theme !== "system") return;
     nativeTheme.themeSource = theme;
     const effective = theme === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : theme;

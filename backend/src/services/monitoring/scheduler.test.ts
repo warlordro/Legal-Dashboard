@@ -1460,3 +1460,134 @@ describe("Scheduler — per-owner master switch", () => {
     expect(bRuns.n).toBe(0);
   });
 });
+
+// Hardening fix: finalize() returns false when the run row was already
+// terminal (e.g. a concurrent crash-recovery flip). Ignoring that return
+// value used to let applyJobOutcome advance fail_streak/next_run_at and
+// possibly emit a source_error alert for an outcome that was never actually
+// the run's own terminal write.
+describe("Scheduler — finalize() return value gates applyJobOutcome", () => {
+  it("finalize no-op (run already terminal) skips applyJobOutcome and source_error", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-28T09:00:00.000Z",
+      failStreak: 4, // one more failure would normally trip source_error at streak 5
+    });
+    // Runner sabotages its own run row out-of-band before the scheduler's
+    // own finalize executes — simulates a concurrent finalizer (crash
+    // recovery / duplicate finalize) winning the race.
+    const sabotageRunner: JobRunner = {
+      run: async (input) => {
+        getDb()
+          .prepare("UPDATE monitoring_runs SET status = 'aborted', ended_at = ? WHERE id = ?")
+          .run(T0, input.runId);
+        return { status: "error", errorCode: "TEST_FAIL", errorMessage: "boom" };
+      },
+    };
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runners: { dosar_soap: sabotageRunner },
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    const origWarn = console.warn;
+    const warnCalls: unknown[][] = [];
+    console.warn = (...args: unknown[]) => {
+      warnCalls.push(args);
+    };
+
+    try {
+      await sch.start();
+      await sch.tickOnce();
+      await sch.stop();
+    } finally {
+      console.warn = origWarn;
+    }
+
+    // Job state must be untouched — applyJobOutcome never ran.
+    const job = readJob(jobId);
+    expect(job.fail_streak).toBe(4);
+    expect(job.last_status).toBeNull();
+    expect(job.last_run_at).toBeNull();
+
+    // No source_error alert emitted despite the outcome being an "error" at
+    // what would have been the 4 → 5 fail_streak transition.
+    const alertCount = (
+      getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?").get(jobId) as { n: number }
+    ).n;
+    expect(alertCount).toBe(0);
+
+    // The run row stays exactly as the runner left it — untouched by finalize.
+    const run = getDb().prepare("SELECT status, error_code FROM monitoring_runs WHERE job_id = ?").get(jobId) as {
+      status: string;
+      error_code: string | null;
+    };
+    expect(run.status).toBe("aborted");
+    expect(run.error_code).toBeNull();
+
+    expect(warnCalls.some((args) => String(args[0]).includes("finalize_noop"))).toBe(true);
+  });
+});
+
+// Hardening fix: the runJobNow catch (runOne rejects synchronously, e.g. a
+// throw inside the finalize transaction) used to hardcode durationMs: 0
+// regardless of how much wallclock time had actually elapsed since claim.
+describe("Scheduler — runJobNow catch computes real durationMs", () => {
+  it("finalizes with non-zero durationMs when time passes between claim and throw", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-29T00:00:00.000Z",
+    });
+    const clock = new FakeClock(T0_DATE);
+    const advancingRunner: JobRunner = {
+      run: async () => {
+        // Simulate wallclock time passing while the job "runs".
+        await clock.advance(5_000);
+        // Sabotage monitoring_jobs so applyJobOutcome's markJobOutcome
+        // throws INSIDE the finalize transaction (after insertRunning has
+        // already succeeded), rolling it back and forcing runOne's own
+        // async work promise to reject — the exact path that lands in
+        // runJobNow's `.catch()`. Renaming the column (not dropping the
+        // table) avoids monitoring_runs' `ON DELETE CASCADE` FK, which would
+        // make this throw synchronously here and get swallowed by runOne's
+        // own runner.run() try/catch instead of reaching the finalize
+        // transaction.
+        getDb().exec("ALTER TABLE monitoring_jobs RENAME COLUMN next_run_at TO next_run_at_x");
+        return { status: "ok", alertsCreated: 0 };
+      },
+    };
+    const sch = new Scheduler({
+      clock,
+      runners: { dosar_soap: advancingRunner },
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    const job = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(jobId) as ScheduledJob;
+
+    const origError = console.error;
+    console.error = () => {};
+
+    let runId: number;
+    try {
+      ({ runId } = await sch.runJobNow(job));
+      // runJobNow is fire-and-forget past insertRunning; drain microtasks so
+      // the rejected runOne promise's .catch() handler (incl. its own
+      // finalize call) has run to completion.
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+    } finally {
+      console.error = origError;
+    }
+
+    const run = getDb()
+      .prepare("SELECT status, duration_ms, error_code FROM monitoring_runs WHERE id = ?")
+      .get(runId) as { status: string; duration_ms: number; error_code: string | null };
+    expect(run.status).toBe("error");
+    expect(run.error_code).toBe("RUNONE_THREW");
+    expect(run.duration_ms).toBeGreaterThanOrEqual(5_000);
+  });
+});

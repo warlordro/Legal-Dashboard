@@ -40,6 +40,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.42.1",
+    date: "8 Iulie 2026",
+    subtitle:
+      "Patch de securitate si robustete rezultat din auditul complet post-v2.42.0: inchidere DevTools in build-urile instalate, limitare corecta a apelurilor AI pe toate rutele, izolare mai stricta a datelor per utilizator in modul web si fixuri de acuratete in monitorizare. Fara features noi.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Securitate desktop",
+        content:
+          "Consola de developer (DevTools) si meniul de debug nu mai sunt accesibile in aplicatia instalata — erau active din cauza unei evaluari premature a modului de rulare. Canalele interne prin care aplicatia cripteaza si decripteaza cheile API valideaza acum sursa fiecarui apel, iar la pornire backend-ul este verificat printr-un cod unic de sesiune, nu doar dupa nume.",
+      },
+      {
+        title: "Limitare corecta a apelurilor AI",
+        content:
+          "Analiza multi-model consuma acum 3 unitati de rate limit pe toate rutele (o varianta de ruta permitea de ~3 ori mai multe apeluri decat limita intentionata) si ponderarea se aplica si pe tokenurile API. Cererile mai mari de 1MB sunt respinse global, ca plasa de siguranta.",
+      },
+      {
+        title: "Izolare date si monitorizare",
+        content:
+          "Functiile de acces la datele RNPM si istoricul cautarilor cer acum explicit identitatea utilizatorului — nu mai exista fallback implicit, eliminand riscul latent de amestec de date intre conturi in modul web. Scheduler-ul de monitorizare nu mai poate numara dublu esecurile unui job deja finalizat, iar duratele rulate manual se raporteaza corect.",
+      },
+    ],
+  },
+  {
     version: "v2.42.0",
     date: "7 Iulie 2026",
     subtitle:

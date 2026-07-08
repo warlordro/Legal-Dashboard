@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
@@ -53,6 +54,7 @@ import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
+import { ErrorCodes, fail } from "./util/envelope.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -221,10 +223,14 @@ app.use("*", requestIdContext);
 // pentru probe externe / load balancer / Electron splash. Detaliile
 // operationale (authMode, monitoring scheduler state, emailConfigured) leakuiau
 // telemetry intern catre orice client neautentificat in mod web. Mutate la
-// `/health/detail`, accesibil:
-//   - de pe loopback (desktop in-proc + container-internal probes), sau
-//   - cu rol `admin` (web cutover: ops loggat).
-// Restul publicului primeste 403 fara informatii operationale.
+// `/health/detail`, accesibil doar de pe loopback (desktop in-proc +
+// container-internal probes).
+//
+// R07 hardening: in mod web, loopback singur nu mai e suficient — un reverse
+// proxy pe acelasi host ar putea atinge ruta ca "loopback". /health/detail
+// intoarce 403 neconditionat in web mode; ops foloseste plain /health
+// (200/503) pentru liveness. Nu exista in prezent un endpoint admin dedicat
+// de health detaliat in web mode.
 app.get("/health", publicHealthHandler);
 app.get("/health/detail", detailedHealthHandler);
 
@@ -286,11 +292,22 @@ const HEALTH_LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1
 // `service`. Probele externe (LB, container orchestrator) au tot ce le trebuie:
 // 200=ok, 503=starting. Telemetry-ul operational (authMode, monitoring,
 // emailConfigured) e disponibil pe `/health/detail` filtrat prin loopback.
+// Boot-nonce identity check (Electron only): main.js seteaza
+// LEGAL_DASHBOARD_BOOT_NONCE inainte de a incarca backend-ul in-proc si
+// verifica ca /health raspunde cu acelasi nonce, ca protectie impotriva unui
+// alt proces care a apucat portul intre timp. Absent in server/web mode —
+// camp omis complet, nu doar undefined, ca sa nu apara telemetrie noua in
+// raspunsul public.
+const BOOT_NONCE = process.env.LEGAL_DASHBOARD_BOOT_NONCE;
+
 function publicHealthHandler(c: Context): Response {
   if (!ready) {
-    return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
+    return c.json(
+      { status: "starting", service: "Legal Dashboard API", ...(BOOT_NONCE ? { boot: BOOT_NONCE } : {}) },
+      503
+    );
   }
-  return c.json({ status: "ok", service: "Legal Dashboard API" });
+  return c.json({ status: "ok", service: "Legal Dashboard API", ...(BOOT_NONCE ? { boot: BOOT_NONCE } : {}) });
 }
 
 function isLoopbackPeer(c: Context): boolean {
@@ -308,10 +325,16 @@ function detailedHealthHandler(c: Context): Response {
   if (!ready) {
     return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
   }
+  // R07 hardening: in web mode, un reverse proxy pe acelasi host ar putea atinge
+  // aceasta ruta ca "loopback" — telemetry-ul operational (monitoring, email) nu e
+  // pentru consum public, deci gate-ul e neconditionat aici, chiar si de pe loopback.
+  // Ops in web mode foloseste plain /health (200/503) pentru liveness.
+  if (getAuthMode() === "web") {
+    return c.json({ error: { code: "forbidden", message: "not available in web mode" } }, 403);
+  }
   // Loopback gate: desktop in-proc (Electron renderer pe 127.0.0.1) si probele
   // container-internal pot accesa fara auth; orice apel cross-LAN intoarce 403
-  // fara informatii operationale. In mod web, admin loggat acceseaza via
-  // /api/v1/admin/health (mount-uit dupa ownerContext) — vezi adminRouter.
+  // fara informatii operationale.
   if (!isLoopbackPeer(c)) {
     return c.json({ error: { code: "forbidden", message: "loopback required" } }, 403);
   }
@@ -345,6 +368,20 @@ function detailedHealthHandler(c: Context): Response {
     emailConfigured,
   });
 }
+
+// R07 hardening: global 1MB safety net on /api/*, mounted before the routers.
+// Existing per-route limits (64KB search, 512KB bulk, etc. — see rnpm.ts and
+// friends) are all under this ceiling and stay unaffected; this only catches
+// future routes that forget to set their own tighter limit. Same envelope
+// shape as the per-route limiters.
+const GLOBAL_BODY_LIMIT = 1024 * 1024;
+app.use(
+  "/api/*",
+  bodyLimit({
+    maxSize: GLOBAL_BODY_LIMIT,
+    onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+  })
+);
 
 app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
@@ -460,7 +497,7 @@ try {
   // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
   getAvize({ ownerId: "local", pageSize: 1 });
   flushPendingReclaimAudit();
-  getAvizStats();
+  getAvizStats("local");
   if (getAuthMode() === "web") {
     getMasterKey();
     // Round-trip probe: encrypt + decrypt a non-secret sentinel so a

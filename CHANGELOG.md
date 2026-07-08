@@ -1,5 +1,33 @@
 # Changelog - Legal Dashboard
 
+## v2.42.1 - 2026-07-08
+
+Patch de hardening rezultat din auditul full-project post-v2.42.0 (multi-agent + multi-model). Zero features noi; 10 fixuri de securitate si robustete pe findings confirmate individual pe cod, cu prioritate pe suprafata web. Branch `fix/v2.42.1-web-hardening`.
+
+### Securitate desktop (Electron)
+
+DevTools si meniul de debug erau active in build-urile instalate: `IS_DEV` se evalua din `NODE_ENV` la module load, inainte ca `startBackend()` sa-l seteze — acum deriva din `!app.isPackaged` (inchide expunerea `desktopApi.decryptKeys` din consola). Handler-ele IPC safeStorage (`available`/`encrypt`/`decrypt`) plus `window:setTheme` valideaza `event.sender` contra `mainWindow.webContents`. Health-check-ul de boot nu mai accepta doar string-ul `service` ca identitate: main genereaza un boot nonce (`LEGAL_DASHBOARD_BOOT_NONCE`), backend-ul il ecou in `/health` doar cand env-ul e setat, main verifica egalitatea — un proces local care fura portul 3002 nu mai trece drept backend.
+
+### Securitate si robustete web (backend)
+
+Weight-ul 3x pe rate limit se aplica acum pe AMBELE mount-uri ale `analyze-multi` (`/api/ai` + `/api/v1/ai` — ruta v1 primea weight 1) si pe bucket-ul per-token PAT (numara si el ponderat). Release-ul bucket-ului pre-auth a fost mutat in `finally` (o exceptie downstream nu mai consuma bugetul IP-ului pentru callerii autentificati). Body limit global de 1MB pe `/api/*` ca plasa de siguranta pentru rute viitoare (limitele per-ruta existente raman neschimbate). `/health/detail` intoarce 403 neconditionat in web mode — loopback-ul singur nu mai e suficient in spatele unui reverse proxy same-host; ops foloseste `/health` pentru liveness.
+
+### Monitoring scheduler
+
+`applyJobOutcome` ruleaza doar daca `finalize()` chiar a tranzitionat run-ul din `running` (return-ul boolean era ignorat — un run deja terminal putea corupe `fail_streak` si emite alerte `source_error` false); no-op-ul se logheaza. `durationMs` din catch-ul `runJobNow` se calculeaza din timestamp-ul de claim in loc de 0 hardcodat.
+
+### Tenant isolation (web-readiness)
+
+`ownerId` a devenit parametru obligatoriu (fara default `"local"`) in 9 functii din `avizRepository` + `searchRepository`. Audit-ul call site-urilor a confirmat ca rutele pasau deja ownerId-ul din context — niciun bug activ de tenant isolation; fix-ul inchide riscul latent (un call site viitor care omite parametrul nu mai compileaza). Singurul consumator al default-ului era prewarm-ul de boot (desktop-only), acum explicit.
+
+### Fara fix (justificat)
+
+Heartbeat-ul instance lock NU esueaza silent (throw-ul devine `uncaughtException` -> dialog + exit) — claim-ul de audit era inexact. Drain-ul `stop()` fara timeout propriu ramane acceptat: e deja marginit de `SHUTDOWN_DRAIN_MS` (30s) si de hard timeout-ul Electron `before-quit`.
+
+### Verificare
+
+Biome, tsc backend + frontend, build si suita completa: 1706 teste backend trecute (+ regresii noi: weight pe `/api/v1/ai/analyze-multi`, weight pe bucket token, release pre-auth pe exceptie, 413 global body limit, nonce prezent/absent in `/health`, 403 `/health/detail` web mode, finalize no-op fara `applyJobOutcome`, durationMs real pe throw).
+
 ## v2.42.0 - 2026-07-08
 
 Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode). Etapa 2 din corectiile post-testare web (PLAN-web-ux-etapa2.md), pe branch-ul `feat/v2.42.0-users-settings`. Starea finala e sincronizata din implementarea paralela de pe GitLab (`GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`), care a inclus si fixuri post-livrare din testarea reala pe deployment-ul web. Modul desktop: zero impact.
