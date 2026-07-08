@@ -27,6 +27,10 @@ export const TOKEN_RATE_LIMIT = clampTokenRateLimit(Number(process.env.LEGAL_DAS
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const tokenRateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
+// aiRouter is mounted on both /api/ai and /api/v1/ai (legacy + v1 paths) — see index.ts.
+// Exact match on both, not endsWith(), to avoid matching an unrelated route sharing the suffix.
+const ANALYZE_MULTI_PATHS = new Set(["/api/ai/analyze-multi", "/api/v1/ai/analyze-multi"]);
+
 // Standard envelope for limiter failures (503 fail-closed, 429 throttle).
 // Inlined in fiecare loc inseamna o copie de envelope per branch (4x) — sub un singur helper se vede mai usor cand schema evolueaza.
 function fail(c: Context, status: 429 | 503, code: string, message: string): Response {
@@ -51,6 +55,12 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   }
   const now = Date.now();
 
+  // SECURITY: Multi-agent endpoint consumes 3 rate limit units (3 AI calls). aiRouter is
+  // mounted on BOTH /api/ai and /api/v1/ai (index.ts) — match both exact paths, computed
+  // once here so it applies to the per-token bucket below AND the per-owner bucket further
+  // down. endsWith() would be wrong (could match an unrelated route sharing the suffix).
+  const weight = ANALYZE_MULTI_PATHS.has(c.req.path) ? 3 : 1;
+
   // PAT (piesa A): bucket per-token, aplicat DUPA rezolvarea PAT (tokenId setat de
   // ownerContext). Rulat INAINTE de scutirea /api/rnpm/saved ca un PAT sa NU scape
   // neplafonat pe ruta exceptata (fix R05). Flood-urile cu token invalid sunt deja
@@ -60,9 +70,9 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
     const tkey = `tok|${tokenId}`;
     const tentry = tokenRateLimitMap.get(tkey);
     if (!tentry || now > tentry.resetTime) {
-      tokenRateLimitMap.set(tkey, { count: 1, resetTime: now + RATE_WINDOW });
+      tokenRateLimitMap.set(tkey, { count: weight, resetTime: now + RATE_WINDOW });
     } else {
-      tentry.count += 1;
+      tentry.count += weight;
       if (tentry.count > TOKEN_RATE_LIMIT) {
         return fail(c, 429, "rate_limited", "Prea multe cereri pentru acest token.");
       }
@@ -85,9 +95,6 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   const ownerId = c.get("ownerId") ?? "local";
   const key = `${ip}|${ownerId}`;
   const entry = rateLimitMap.get(key);
-
-  // SECURITY: Multi-agent endpoint consumes 3 rate limit units (3 AI calls)
-  const weight = c.req.path === "/api/ai/analyze-multi" ? 3 : 1;
 
   if (!entry || now > entry.resetTime) {
     rateLimitMap.set(key, { count: weight, resetTime: now + RATE_WINDOW });
@@ -187,20 +194,25 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
     }
   }
 
-  await next();
+  try {
+    await next();
+  } finally {
+    // Elibereaza bucket-ul pre-auth cand AUTENTIFICAREA a reusit (ownerId setat de ownerContext,
+    // care ruleaza in interiorul next()), indiferent de statusul final. Altfel un caller autentificat
+    // care primeste 403/429 (ex. un PAT scurs care spameaza rute forbidden) ar epuiza bucketul IP-only
+    // partajat si ar bloca TOT traficul din spatele acelui NAT/proxy (fix runda 4). Doar tentativele
+    // NEautentificate (auth esuata / token lipsa) raman consumate — exact scopul acestui limiter.
+    // In finally ca un downstream throw (exceptie neprinsa dupa autentificare reusita) sa nu ramana
+    // blocat cu bucket-ul pre-auth consumat pe nedrept (fix R06). c.res poate fi unset pe calea de
+    // exceptie — ownerId ramane semnalul primar ca autentificarea a reusit.
+    if (c.get("ownerId") || (c.res && c.res.status >= 200 && c.res.status < 300)) {
+      releasePreAuthAttempt(key);
+    }
 
-  // Elibereaza bucket-ul pre-auth cand AUTENTIFICAREA a reusit (ownerId setat de ownerContext,
-  // care ruleaza in interiorul next()), indiferent de statusul final. Altfel un caller autentificat
-  // care primeste 403/429 (ex. un PAT scurs care spameaza rute forbidden) ar epuiza bucketul IP-only
-  // partajat si ar bloca TOT traficul din spatele acelui NAT/proxy (fix runda 4). Doar tentativele
-  // NEautentificate (auth esuata / token lipsa) raman consumate — exact scopul acestui limiter.
-  if (c.get("ownerId") || (c.res.status >= 200 && c.res.status < 300)) {
-    releasePreAuthAttempt(key);
-  }
-
-  if (preAuthMap.size > 1000) {
-    for (const [k, v] of preAuthMap) {
-      if (now > v.resetTime) preAuthMap.delete(k);
+    if (preAuthMap.size > 1000) {
+      for (const [k, v] of preAuthMap) {
+        if (now > v.resetTime) preAuthMap.delete(k);
+      }
     }
   }
 }

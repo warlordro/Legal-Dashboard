@@ -88,34 +88,27 @@ describe("PR-9 index boot/auth boundaries", () => {
 
   // F15 audit hardening (v2.28.4): /health public expune doar status + service.
   // Detalii operationale (authMode, emailConfigured, monitoring) sunt mutate la
-  // /health/detail, accesibil doar de pe loopback. Probele de mai jos verifica
-  // ca /health/detail intoarce telemetry-ul corect cand sunt apelate local.
-  it(
-    "/health/detail exposes emailConfigured=false when SMTP_* env vars are missing (Batch 2.3)",
-    { timeout: 20_000 },
-    async () => {
-      const port = randomPort();
-      await importFreshIndex({
-        LEGAL_DASHBOARD_PORT: String(port),
-        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-        LEGAL_DASHBOARD_AUTH_MODE: "web",
-        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
-        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
-        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
-        SMTP_HOST: "",
-        SMTP_PORT: "",
-        SMTP_USER: "",
-        SMTP_PASS: "",
-        SMTP_FROM: "",
-      });
+  // /health/detail, accesibil doar de pe loopback si NICIODATA in web mode
+  // (R07 hardening: un reverse proxy pe acelasi host ar putea atinge ruta ca
+  // "loopback"). Probele de mai jos verifica ambele comportamente.
+  it("/health/detail returns 403 in web mode even from loopback (R07 hardening)", { timeout: 20_000 }, async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "web",
+      LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+    });
 
-      await waitForHealth(port);
-      const detail = await fetch(`http://127.0.0.1:${port}/health/detail`);
-      expect(detail.status).toBe(200);
-      const body = (await detail.json()) as { emailConfigured: boolean };
-      expect(body.emailConfigured).toBe(false);
-    }
-  );
+    await waitForHealth(port);
+    // Request comes from 127.0.0.1 (loopback) — web mode must still deny.
+    const detail = await fetch(`http://127.0.0.1:${port}/health/detail`);
+    expect(detail.status).toBe(403);
+    const body = (await detail.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("forbidden");
+  });
 
   it(
     "/health/detail exposes authMode + loginAvailable=false while preserving Electron splash contract",
@@ -136,26 +129,26 @@ describe("PR-9 index boot/auth boundaries", () => {
         service: string;
         authMode: string;
         loginAvailable: boolean;
+        emailConfigured: boolean;
       };
       expect(body.status).toBe("ok");
       expect(body.service).toBe("Legal Dashboard API");
       expect(body.authMode).toBe("desktop");
       expect(body.loginAvailable).toBe(false);
+      // No SMTP_* env vars set above — emailConfigured=false (Batch 2.3 coverage).
+      expect(body.emailConfigured).toBe(false);
     }
   );
 
   it(
-    "/health/detail exposes emailConfigured=true with full SMTP_* config (Batch 2.3)",
+    "/health/detail exposes emailConfigured=true with full SMTP_* config on desktop (Batch 2.3)",
     { timeout: 20_000 },
     async () => {
       const port = randomPort();
       await importFreshIndex({
         LEGAL_DASHBOARD_PORT: String(port),
         LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-        LEGAL_DASHBOARD_AUTH_MODE: "web",
-        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
-        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
-        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
         SMTP_HOST: "smtp.example.test",
         SMTP_PORT: "587",
         SMTP_USER: "user",
@@ -188,6 +181,71 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(body.monitoring).toBeUndefined();
     expect(body.emailConfigured).toBeUndefined();
     expect(body.loginAvailable).toBeUndefined();
+  });
+
+  // FIX 6: Electron sets LEGAL_DASHBOARD_BOOT_NONCE before requiring the backend
+  // in-process and verifies /health echoes it back, as a defense against another
+  // process having grabbed the port in between. Server/web mode never sets this
+  // env var, so the field must not appear at all (not just be undefined).
+  it(
+    "/health echoes LEGAL_DASHBOARD_BOOT_NONCE when set (Electron boot identity check)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      const nonce = "test-boot-nonce-abc123";
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+        LEGAL_DASHBOARD_BOOT_NONCE: nonce,
+      });
+
+      const health = await waitForHealth(port);
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as { boot?: string };
+      expect(body.boot).toBe(nonce);
+    }
+  );
+
+  it(
+    "/health omits boot field when LEGAL_DASHBOARD_BOOT_NONCE is unset (server/web mode)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+      });
+
+      const health = await waitForHealth(port);
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as Record<string, unknown>;
+      expect("boot" in body).toBe(false);
+    }
+  );
+
+  // FIX 4: global 1MB safety net on /api/*, mounted before the routers. Existing
+  // per-route limits (all <1MB) stay unaffected; this only catches routes with no
+  // limit of their own — simulated here via a path that matches no router.
+  it("global 1MB body limit returns 413 for routes without their own limit", { timeout: 20_000 }, async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+    });
+    await waitForHealth(port);
+
+    const oversized = Buffer.alloc(1024 * 1024 + 1, "a");
+    const res = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: oversized,
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
   it("fails boot when remote bind is enabled in desktop auth mode", { timeout: 20_000 }, async () => {

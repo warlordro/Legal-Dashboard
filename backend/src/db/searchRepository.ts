@@ -65,7 +65,7 @@ export function getSearches(opts: GetSearchesOptions): CursorPage<SearchRecord> 
   return { items, nextCursor: hasMore ? items[items.length - 1].id : null };
 }
 
-export function updateSearchTotal(id: number, totalResults: number, ownerId = "local"): boolean {
+export function updateSearchTotal(id: number, totalResults: number, ownerId: string): boolean {
   assertOwnerIdForMutation(ownerId, "updateSearchTotal");
   const db = getDb();
   const res = db
@@ -74,7 +74,7 @@ export function updateSearchTotal(id: number, totalResults: number, ownerId = "l
   return res.changes > 0;
 }
 
-export function deleteSearch(id: number, ownerId = "local"): boolean {
+export function deleteSearch(id: number, ownerId: string): boolean {
   assertOwnerIdForMutation(ownerId, "deleteSearch");
   const db = getDb();
   const res = db.prepare("DELETE FROM rnpm_searches WHERE id = ? AND owner_id = ?").run(id, ownerId);

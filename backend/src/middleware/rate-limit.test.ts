@@ -61,6 +61,88 @@ function buildAppWithToken(): Hono {
   return app;
 }
 
+// Stand-in ownerContext + AI routes registered on BOTH mounted paths, mirroring
+// index.ts's dual app.route("/api/ai", aiRouter) / app.route("/api/v1/ai", aiRouter).
+function buildAppWithAiRoutes(): Hono {
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    c.set("ownerId", c.req.header("x-test-owner") ?? "local");
+    const t = c.req.header("x-test-token");
+    if (t) c.set("tokenId", t);
+    await next();
+  });
+  app.use("/api/*", rateLimit);
+  app.post("/api/ai/analyze-multi", (c) => c.json({ ok: true }));
+  app.post("/api/v1/ai/analyze-multi", (c) => c.json({ ok: true }));
+  return app;
+}
+
+// FIX 1 (HIGH): weight-3 must apply on BOTH mounted paths. Pre-fix, the exact-match
+// check only covered /api/ai/analyze-multi, so aiRouter's other mount point
+// (/api/v1/ai — index.ts) let the multi-agent endpoint through at weight 1.
+describe("rateLimit — FIX 1: analyze-multi weight applies on both mounted paths", () => {
+  it("consumes weight 3 per request on /api/v1/ai/analyze-multi (regression: dual mount)", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.70" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithAiRoutes();
+    const maxRequests = Math.floor(RATE_LIMIT / 3);
+
+    for (let i = 0; i < maxRequests; i++) {
+      const res = await app.request("/api/v1/ai/analyze-multi", {
+        method: "POST",
+        headers: { "x-test-owner": "alice" },
+      });
+      expect(res.status).toBe(200);
+    }
+    const limited = await app.request("/api/v1/ai/analyze-multi", {
+      method: "POST",
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(limited.status).toBe(429);
+  });
+
+  it("also applies weight 3 on the legacy /api/ai/analyze-multi path", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.71" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithAiRoutes();
+    const maxRequests = Math.floor(RATE_LIMIT / 3);
+
+    for (let i = 0; i < maxRequests; i++) {
+      const res = await app.request("/api/ai/analyze-multi", {
+        method: "POST",
+        headers: { "x-test-owner": "alice" },
+      });
+      expect(res.status).toBe(200);
+    }
+    const limited = await app.request("/api/ai/analyze-multi", {
+      method: "POST",
+      headers: { "x-test-owner": "alice" },
+    });
+    expect(limited.status).toBe(429);
+  });
+});
+
+// FIX 2 (MEDIUM): the per-token (PAT) bucket must also burn `weight` units, not a
+// flat 1 — pre-fix, a PAT hammering analyze-multi only counted as 1 unit/call there.
+describe("rateLimit — FIX 2: weight applies to the per-token (PAT) bucket", () => {
+  it("burns TOKEN_RATE_LIMIT in 1/3 as many requests on the weighted endpoint", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.72" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithAiRoutes();
+    const maxRequests = Math.floor(TOKEN_RATE_LIMIT / 3);
+
+    for (let i = 0; i < maxRequests; i++) {
+      const res = await app.request("/api/v1/ai/analyze-multi", {
+        method: "POST",
+        headers: { "x-test-token": "tokC" },
+      });
+      expect(res.status).toBe(200);
+    }
+    const limited = await app.request("/api/v1/ai/analyze-multi", {
+      method: "POST",
+      headers: { "x-test-token": "tokC" },
+    });
+    expect(limited.status).toBe(429);
+  });
+});
+
 describe("clampTokenRateLimit — defensive env parsing", () => {
   it("defaults to 60 for non-finite / non-positive input", () => {
     expect(clampTokenRateLimit(Number.NaN)).toBe(60);
@@ -461,6 +543,31 @@ describe("PR-9 fix B2 - pre-auth rate limit", () => {
         headers: { authorization: "Bearer valid-token-shape" },
       });
       expect(res.status).toBe(200);
+    }
+  });
+
+  // FIX 3 (MEDIUM): release must run in `finally`. Pre-fix, `await next()` was
+  // followed by a bare conditional release — if the downstream handler threw AFTER
+  // ownerContext set ownerId, the release line never ran, and the pre-auth bucket
+  // (shared per-IP) silently accumulated toward PRE_AUTH_LIMIT.
+  it("releases the pre-auth bucket even when the downstream handler throws after auth succeeds", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.55" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.get("/api/boom-auth", (c) => {
+      c.set("ownerId", "alice"); // simulates ownerContext having authenticated successfully
+      throw new Error("downstream boom");
+    });
+
+    // Pre-fix, the leaked bucket would exhaust by request #61 and this loop would
+    // see a spurious 429 instead of Hono's default 500 for the thrown error.
+    for (let i = 0; i < 100; i++) {
+      const res = await app.request("/api/boom-auth");
+      expect(res.status).toBe(500);
     }
   });
 });

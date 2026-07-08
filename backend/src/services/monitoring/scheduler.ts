@@ -311,10 +311,11 @@ export class Scheduler {
       this.inflight.delete(job.id);
       try {
         const endIso = this.opts.clock.now().toISOString();
+        const durationMs = Math.max(0, Date.parse(endIso) - Date.parse(nowIso));
         finalize(runId, {
           status: "error",
           endedAt: endIso,
-          durationMs: 0,
+          durationMs,
           errorCode: "RUNONE_THREW",
           errorMessage: err instanceof Error ? err.message : String(err),
           alertsCreated: 0,
@@ -545,7 +546,7 @@ export class Scheduler {
       let sourceErrorResult: InsertAlertResult | null = null;
       await withMaintenanceRead(async () => {
         getDb().transaction(() => {
-          finalize(runId, {
+          const didFinalize = finalize(runId, {
             status: outcome.status,
             endedAt: endIso,
             durationMs,
@@ -555,6 +556,22 @@ export class Scheduler {
             alertsCreated: outcome.alertsCreated ?? 0,
             alertsPatched: outcome.alertsPatched ?? 0,
           });
+
+          if (!didFinalize) {
+            // Run row was already terminal (e.g. crash recovery flipped it to
+            // 'aborted' concurrently, or a duplicate finalize call). Advancing
+            // fail_streak/next_run_at here would double-apply an outcome that
+            // was never actually observed by this run — skip and just log.
+            console.warn(
+              JSON.stringify({
+                action: "monitoring.finalize_noop",
+                job_id: job.id,
+                run_id: runId,
+                ts: endIso,
+              })
+            );
+            return;
+          }
 
           // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
           // state (fail_streak, next_run_at, last_*) untouched so the next boot
