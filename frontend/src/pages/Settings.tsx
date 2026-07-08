@@ -1,51 +1,64 @@
-import { Settings as SettingsIcon } from "lucide-react";
+import { lazy, Suspense } from "react";
 import { useSearchParams } from "react-router-dom";
-import { AIUsagePanel } from "@/components/AIUsagePanel";
+import { Settings as SettingsIcon } from "lucide-react";
 import { AdminGate } from "@/components/AdminGate";
+import { AIUsagePanel } from "@/components/AIUsagePanel";
 import { ApiAccessPanel } from "@/components/ApiAccessPanel";
 import { EmailSettingsPanel } from "@/components/EmailSettingsPanel";
+import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
 import { TenantKeyStatusPanel } from "@/components/TenantKeyStatusPanel";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
-import type { TenantKeys } from "@/hooks/useTenantKeyStatus";
 import { cn } from "@/lib/utils";
-import AdminAudit from "@/pages/admin/Audit";
-import AdminGrants from "@/pages/admin/Grants";
-import AdminKeys from "@/pages/admin/Keys";
-import AdminQuota from "@/pages/admin/Quota";
-import AdminUsage from "@/pages/admin/Usage";
-import AdminUsers from "@/pages/admin/Users";
 
-// v2.42.0 (PLAN-web-ux-etapa2.md, E2-B): pagina "Setari" — web-only, tab-uri pe
-// rol. Sectiunea Administrare dispare din sidebar; totul sta aici. Desktop nu
-// monteaza ruta (pastreaza dialogul BYOK). Tab-ul activ traieste in ?tab= ca
-// deep-link-urile si refresh-ul sa pastreze starea.
+// v2.42.0 (5.1): pagina /setari pe roluri, cu taburi via query `?tab=`.
+// "General" e pentru toti; taburile admin refolosesc componentele de pagina
+// existente cu prop `embedded` (fara shell/h1 propriu), montate ON-DEMAND
+// (doar tabul activ exista in DOM) si impachetate in AdminGate. Rutele
+// /admin/* raman functionale, doar nu mai apar in sidebar (web).
 
-type TabId = "general" | "utilizatori" | "chei" | "cote" | "granturi" | "consum" | "audit";
+const AdminUsers = lazy(() => import("@/pages/admin/Users"));
+const AdminKeys = lazy(() => import("@/pages/admin/Keys"));
+const AdminQuota = lazy(() => import("@/pages/admin/Quota"));
+const AdminGrants = lazy(() => import("@/pages/admin/Grants"));
+const AdminUsage = lazy(() => import("@/pages/admin/Usage"));
+const AdminAudit = lazy(() => import("@/pages/admin/Audit"));
 
-const TABS: Array<{ id: TabId; label: string; adminOnly: boolean }> = [
-  { id: "general", label: "General", adminOnly: false },
-  { id: "utilizatori", label: "Utilizatori", adminOnly: true },
-  { id: "chei", label: "Chei API", adminOnly: true },
-  { id: "cote", label: "Cote", adminOnly: true },
-  { id: "granturi", label: "Granturi", adminOnly: true },
-  { id: "consum", label: "Consum", adminOnly: true },
-  { id: "audit", label: "Audit", adminOnly: true },
-];
+const TABS = [
+  { key: "general", label: "General", adminOnly: false },
+  { key: "utilizatori", label: "Utilizatori", adminOnly: true },
+  { key: "chei", label: "Chei API", adminOnly: true },
+  { key: "cote", label: "Cote", adminOnly: true },
+  { key: "granturi", label: "Granturi", adminOnly: true },
+  { key: "consum", label: "Consum", adminOnly: true },
+  { key: "audit", label: "Audit", adminOnly: true },
+] as const;
 
-export default function SettingsPage({ tenantKeys }: { tenantKeys: TenantKeys }) {
+type TabKey = (typeof TABS)[number]["key"];
+
+function isTabKey(v: string | null): v is TabKey {
+  return TABS.some((t) => t.key === v);
+}
+
+export default function SettingsPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useCurrentUser();
   const isAdmin = user?.role === "admin";
-  const [searchParams, setSearchParams] = useSearchParams();
 
-  const requested = searchParams.get("tab") as TabId | null;
+  const rawTab = searchParams.get("tab");
+  const requested: TabKey = isTabKey(rawTab) ? rawTab : "general";
+  // Non-adminul nu poate ateriza pe un tab admin din URL — cade pe General
+  // (gate-ul serverului ramane autoritatea; asta e doar UX).
+  const activeTab: TabKey = !isAdmin && requested !== "general" ? "general" : requested;
+
   const visibleTabs = TABS.filter((t) => !t.adminOnly || isAdmin);
-  // Non-adminul cu un deep-link spre un tab admin cade pe General (serverul
-  // ramane oricum autoritativ — AdminGate + requireRole).
-  const tab: TabId = visibleTabs.some((t) => t.id === requested) ? (requested as TabId) : "general";
 
-  const selectTab = (id: TabId) => {
-    setSearchParams(id === "general" ? {} : { tab: id }, { replace: true });
+  // replace:true — schimbarea tabului nu adauga intrari in istoricul
+  // browserului (Back iese din Setari, nu plimba prin taburi).
+  const selectTab = (key: TabKey) => {
+    setSearchParams(key === "general" ? {} : { tab: key }, { replace: true });
   };
+
+  const fallback = <p className="px-4 py-8 text-center text-sm text-muted-foreground">Se incarca…</p>;
 
   return (
     <div className="min-h-full bg-background p-6">
@@ -62,71 +75,79 @@ export default function SettingsPage({ tenantKeys }: { tenantKeys: TenantKeys })
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-1 border-b border-border">
-          {visibleTabs.map(({ id, label }) => (
+        <div className="flex flex-wrap gap-1 border-b border-border" role="tablist" aria-label="Sectiuni de setari">
+          {visibleTabs.map((tab) => (
             <button
-              key={id}
+              key={tab.key}
               type="button"
-              onClick={() => selectTab(id)}
+              role="tab"
+              aria-selected={activeTab === tab.key}
+              onClick={() => selectTab(tab.key)}
               className={cn(
                 "rounded-t-lg px-4 py-2 text-sm font-medium transition-colors",
-                tab === id
+                activeTab === tab.key
                   ? "bg-primary text-primary-foreground"
                   : "text-muted-foreground hover:bg-accent hover:text-foreground"
               )}
             >
-              {label}
+              {tab.label}
             </button>
           ))}
         </div>
 
-        {/* Se randeaza DOAR tab-ul activ (mount-on-demand) — fara fetch-uri
-            eager pe toate paginile admin la deschiderea Setarilor. */}
-        {tab === "general" && (
+        {activeTab === "general" && (
           <div className="max-w-5xl">
-            {/* Panoul de chei tenant DOAR in tenant mode (CodeRabbit) — acelasi
-                gating ca ApiKeyDialog. In dev-combo (browser pe backend
-                desktop) cheile sunt BYOK, inventarul tenant ar minti. */}
-            {tenantKeys.tenantMode && (
-              <TenantKeyStatusPanel
-                tenantKeys={tenantKeys}
-                isAdmin={isAdmin === true}
-                onManageKeys={() => selectTab("chei")}
-              />
-            )}
+            <TenantKeyStatusPanel onManageKeys={() => selectTab("chei")} />
             <AIUsagePanel />
+            {/* Notificarile sistem sunt un feature al aplicatiei DESKTOP (IPC
+                nativ) — in browser panoul ar afisa doar "Indisponibil", zgomot
+                fara actiune posibila. */}
+            {typeof window !== "undefined" && !!window.desktopApi && <NotificationStatusPanel />}
             <EmailSettingsPanel />
             {isAdmin && <ApiAccessPanel />}
           </div>
         )}
-        {tab === "utilizatori" && (
+
+        {activeTab === "utilizatori" && (
           <AdminGate>
-            <AdminUsers embedded />
+            <Suspense fallback={fallback}>
+              <AdminUsers embedded />
+            </Suspense>
           </AdminGate>
         )}
-        {tab === "chei" && (
+        {activeTab === "chei" && (
           <AdminGate>
-            <AdminKeys embedded />
+            <Suspense fallback={fallback}>
+              <AdminKeys embedded />
+            </Suspense>
           </AdminGate>
         )}
-        {tab === "cote" && (
+        {activeTab === "cote" && (
           <AdminGate>
-            <AdminQuota embedded />
+            <Suspense fallback={fallback}>
+              <AdminQuota embedded />
+            </Suspense>
           </AdminGate>
         )}
-        {tab === "granturi" && (
+        {activeTab === "granturi" && (
           <AdminGate>
-            <AdminGrants embedded />
+            <Suspense fallback={fallback}>
+              <AdminGrants embedded />
+            </Suspense>
           </AdminGate>
         )}
-        {tab === "consum" && (
+        {activeTab === "consum" && (
           <AdminGate>
-            <AdminUsage embedded />
+            <Suspense fallback={fallback}>
+              <AdminUsage embedded />
+            </Suspense>
           </AdminGate>
         )}
-        {tab === "audit" && (
+        {activeTab === "audit" && (
           <AdminGate>
-            <AdminAudit embedded />
+            <Suspense fallback={fallback}>
+              <AdminAudit embedded />
+            </Suspense>
           </AdminGate>
         )}
       </div>

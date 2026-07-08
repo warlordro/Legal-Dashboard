@@ -10,6 +10,7 @@ import { RnpmSavedData } from "@/components/rnpm/RnpmSavedData";
 import { RnpmSavedStats } from "@/components/rnpm/RnpmSavedStats";
 import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
 import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
+import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
 import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
 import { describeNestedPhase, describeSplitPhase, formatSplitProgress } from "@/lib/rnpmProgressPhase";
@@ -21,14 +22,12 @@ import type {
   RnpmSplitProgress,
 } from "@/types/rnpm";
 import type { CaptchaProvider, CaptchaMode } from "@/lib/rnpmApi";
-import type { TenantKeys } from "@/hooks/useTenantKeyStatus";
 
 type Tab = "search" | "bulk" | "saved";
 
 const BATCH_SIZE = 25;
 
 export interface RnpmSearchPageProps {
-  tenantKeys: TenantKeys;
   captchaKey: string;
   captchaProvider: CaptchaProvider;
   fallback2CaptchaKey?: string;
@@ -65,7 +64,6 @@ interface PendingSplit {
 }
 
 export default function RnpmSearchPage({
-  tenantKeys,
   captchaKey,
   captchaProvider,
   fallback2CaptchaKey,
@@ -93,50 +91,28 @@ export default function RnpmSearchPage({
   const [splitProgress, setSplitProgress] = useState<RnpmSplitProgress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Politica de captcha dupa runtime:
+  //   desktop  -> cheia BYOK locala (captchaKey)
+  //   web ready-> cheia tenant a providerului activ (server-side)
+  //   web loading/error -> fail-open: nu blocam pe client, serverul respinge
+  //     cu 501 CAPTCHA_NOT_CONFIGURED daca lipseste cheia tenant.
+  const tenant = useTenantKeyStatus();
+  const captchaBlocked =
+    tenant.state.state === "desktop"
+      ? !captchaKey
+      : tenant.state.state === "ready"
+        ? tenant.tenantCaptchaMissing
+        : false;
+
   const isAbort = (e: unknown): boolean => e instanceof DOMException && e.name === "AbortError";
 
   const stoppedRef = useRef(false);
 
-  // Sursa cheii captcha (invariantul din PLAN-web-ux-fixes.md):
-  // - "byok": Electron sau dev browser+backend desktop — cheia locala e obligatorie.
-  // - "tenant": serverul a confirmat web mode — cheia e a tenantului, backend-ul decide.
-  // - "unknown": key-status loading/error — FAIL-OPEN, request-ul pleaca si
-  //   backend-ul intoarce el eroarea corecta (501/429) daca e cazul.
-  const captchaSource: "byok" | "tenant" | "unknown" =
-    tenantKeys.status.state === "desktop"
-      ? "byok"
-      : tenantKeys.status.state === "ready"
-        ? tenantKeys.tenantMode
-          ? "tenant"
-          : "byok"
-        : "unknown";
-  const tenantCaptchaMissing = tenantKeys.tenantCaptchaMissing;
-  // In afara BYOK nu trimitem material de cheie/config captcha in body —
-  // backend-ul le ignora oricum pe ramura tenant (tenant key wins).
-  const sendByok = captchaSource === "byok";
-  const byokOpts: { captchaProvider?: CaptchaProvider; fallback2CaptchaKey?: string; captchaMode?: CaptchaMode } =
-    sendByok ? { captchaProvider, fallback2CaptchaKey, captchaMode } : {};
-  const byokKey = sendByok ? captchaKey : "";
-
-  // Gate comun pentru toate operatiile care consuma captcha. Intoarce false cand
-  // operatia NU trebuie sa porneasca (si afiseaza actiunea corecta pe platforma).
-  const ensureCaptchaReady = (): boolean => {
-    if (captchaSource === "byok") {
-      if (!captchaKey) {
-        onConfigureKey();
-        return false;
-      }
-      return true;
-    }
-    if (tenantCaptchaMissing) {
-      setError("Cheia captcha nu e configurata de administrator. Contacteaza adminul.");
-      return false;
-    }
-    return true;
-  };
-
   const runSearch = async (type: RnpmSearchType, params: RnpmSearchParams) => {
-    if (!ensureCaptchaReady()) return;
+    if (captchaBlocked) {
+      onConfigureKey();
+      return;
+    }
     if (abortRef.current) return;
     const ctl = new AbortController();
     abortRef.current = ctl;
@@ -152,7 +128,13 @@ export default function RnpmSearchPage({
     const startTs = performance.now();
     try {
       setPhase("Interogare RNPM...");
-      const res = await rnpmSearch(type, params, byokKey, { batchSize: BATCH_SIZE, ...byokOpts }, ctl.signal);
+      const res = await rnpmSearch(
+        type,
+        params,
+        captchaKey,
+        { batchSize: BATCH_SIZE, captchaProvider, fallback2CaptchaKey, captchaMode },
+        ctl.signal
+      );
       if (stoppedRef.current || ctl.signal.aborted) return;
       setElapsedMs(Math.round(performance.now() - startTs));
       setPhase("Salvare in baza locala...");
@@ -188,7 +170,10 @@ export default function RnpmSearchPage({
 
   const runSplit = async (subTypeLabels: string[]) => {
     if (!pendingSplit) return;
-    if (!ensureCaptchaReady()) return;
+    if (captchaBlocked) {
+      onConfigureKey();
+      return;
+    }
     if (abortRef.current) return;
     const { type, params } = pendingSplit;
     setPendingSplit(null);
@@ -215,15 +200,15 @@ export default function RnpmSearchPage({
         type,
         params,
         subTypeLabels,
-        byokKey,
+        captchaKey,
         (p) => {
           setSplitProgress(p);
           setPhase(formatSplitProgress(p));
         },
         ctl.signal,
-        byokOpts.captchaProvider,
-        byokOpts.fallback2CaptchaKey,
-        byokOpts.captchaMode
+        captchaProvider,
+        fallback2CaptchaKey,
+        captchaMode
       );
       if (stoppedRef.current || ctl.signal.aborted) return;
       setElapsedMs(Math.round(performance.now() - startTs));
@@ -255,16 +240,14 @@ export default function RnpmSearchPage({
   };
 
   const loadNextBatch = async () => {
-    // Web-aware: NU conditiona pe cheia locala — in tenant mode paginarea
-    // ("Incarca tot" + auto-loop) ar deveni altfel no-op silentios dupa prima
-    // pagina (review-panel High #2).
-    if (!result || result.nextRnpmPage == null || loading) return;
-    if (!ensureCaptchaReady()) {
-      // CodeRabbit (PR #65): fara clear, auto-loop-ul ramanea blocat pe
-      // "Opreste incarcarea" fara niciun request in zbor.
+    // v2.42.0 (6.10): cand captcha nu e disponibil, STINGE autoLoading inainte
+    // de return — altfel UI-ul ramane pe "Opreste incarcarea" fara niciun
+    // request in zbor.
+    if (captchaBlocked) {
       setAutoLoading(false);
       return;
     }
+    if (!result || result.nextRnpmPage == null || loading) return;
     if (abortRef.current) return;
     const ctl = new AbortController();
     abortRef.current = ctl;
@@ -277,13 +260,15 @@ export default function RnpmSearchPage({
       const res = await rnpmSearch(
         lastType,
         lastParams,
-        byokKey,
+        captchaKey,
         {
           startRnpmPage: result.nextRnpmPage,
           batchSize: BATCH_SIZE,
           gcode: result.gcode,
           searchId: result.searchId,
-          ...byokOpts,
+          captchaProvider,
+          fallback2CaptchaKey,
+          captchaMode,
         },
         ctl.signal
       );
@@ -365,21 +350,12 @@ export default function RnpmSearchPage({
             Registrul National de Publicitate Mobiliara — cautari cu rezolvare captcha automata
           </p>
         </div>
-        {captchaSource === "byok" && !captchaKey && (
+        {captchaBlocked && (
           <Button variant="outline" size="sm" onClick={onConfigureKey}>
             <Key className="h-4 w-4" /> Configureaza 2Captcha
           </Button>
         )}
       </div>
-
-      {/* Tenant mode fara cheie captcha: administrarea e server-side, butonul BYOK
-          nu are sens — banner informativ in loc (oglinda mesajului 501 backend). */}
-      {tenantCaptchaMissing && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-300">
-          Cheia captcha nu e configurata de administrator. Cautarile RNPM sunt indisponibile pana la configurare in
-          Administrare → Chei API.
-        </div>
-      )}
 
       <div className="flex items-end justify-between border-b border-border">
         <div className="flex gap-1">
@@ -557,12 +533,11 @@ export default function RnpmSearchPage({
           aborts ctl on real navigation away from RnpmSearch. */}
       <div className={tab === "bulk" ? "" : "hidden"}>
         <RnpmBulkSearch
-          captchaKey={byokKey}
-          captchaProvider={byokOpts.captchaProvider}
-          fallback2CaptchaKey={byokOpts.fallback2CaptchaKey}
-          captchaMode={byokOpts.captchaMode}
-          captchaSource={captchaSource}
-          tenantCaptchaMissing={tenantCaptchaMissing}
+          captchaKey={captchaKey}
+          captchaBlocked={captchaBlocked}
+          captchaProvider={captchaProvider}
+          fallback2CaptchaKey={fallback2CaptchaKey}
+          captchaMode={captchaMode}
           onConfigureKey={onConfigureKey}
           onItemSaved={() => setSavedRefreshKey((k) => k + 1)}
         />

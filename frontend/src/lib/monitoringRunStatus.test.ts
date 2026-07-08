@@ -1,15 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { runStatusLabel } from "./monitoringRunStatus";
+import { monitoringRunStatusLabel } from "./monitoringRunStatus";
 
-describe("runStatusLabel", () => {
-  it("traduce toate statusurile cunoscute", () => {
-    expect(runStatusLabel("ok")).toBe("OK");
-    expect(runStatusLabel("partial")).toBe("Partial");
-    expect(runStatusLabel("error")).toBe("Eroare");
-    expect(runStatusLabel("skipped")).toBe("Omis");
+describe("monitoringRunStatusLabel", () => {
+  it("traduce statusurile cunoscute", () => {
+    expect(monitoringRunStatusLabel("ok")).toBe("OK");
+    expect(monitoringRunStatusLabel("partial")).toBe("Partial");
+    expect(monitoringRunStatusLabel("error")).toBe("Eroare");
+    expect(monitoringRunStatusLabel("skipped")).toBe("Omis");
   });
 
-  it("fallback la token pentru statusuri necunoscute (drift backend)", () => {
-    expect(runStatusLabel("something_new")).toBe("something_new");
+  it("fallback pe token pentru necunoscute si — pentru lipsa", () => {
+    expect(monitoringRunStatusLabel("weird")).toBe("weird");
+    expect(monitoringRunStatusLabel(null)).toBe("—");
+    expect(monitoringRunStatusLabel(undefined)).toBe("—");
   });
 });

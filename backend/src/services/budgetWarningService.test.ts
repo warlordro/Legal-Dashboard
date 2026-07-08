@@ -5,13 +5,13 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { insertAiUsage } from "../db/aiUsageRepository.ts";
-import { isWarningActive } from "../db/budgetNotificationsRepository.ts";
+import { fireWarning, isWarningActive } from "../db/budgetNotificationsRepository.ts";
 import { upsertEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { createGrant } from "../db/userQuotaGrantsRepository.ts";
 import { upsertOverride } from "../db/userQuotaRepository.ts";
 import { insertUser } from "../db/userRepository.ts";
-import { checkBudgetWarning, quotaFeatureOf } from "./budgetWarningService.ts";
+import { checkBudgetWarning, checkBudgetWarningRetry, quotaFeatureOf } from "./budgetWarningService.ts";
 
 let tmpRoot: string;
 const originalDbPath = process.env.LEGAL_DASHBOARD_DB_PATH;
@@ -44,6 +44,7 @@ afterEach(async () => {
 });
 
 describe("quotaFeatureOf", () => {
+  // v2.42.0 (5.2): toate usage-urile AI se mapeaza pe pool-ul unic "ai".
   it("maps usage feature codes to quota features", () => {
     expect(quotaFeatureOf("dosar_summary")).toBe("ai");
     expect(quotaFeatureOf("ai.single")).toBe("ai");
@@ -55,6 +56,32 @@ describe("quotaFeatureOf", () => {
   it("returns null for unknown features", () => {
     expect(quotaFeatureOf("rnpm_search")).toBeNull();
     expect(quotaFeatureOf("")).toBeNull();
+  });
+
+  // v2.42.0 (5.2): retry-ul de email (index.ts) paseaza item.feature citit din
+  // budget_notifications, care stocheaza deja quota feature-ul normalizat.
+  it("accepts the already-normalized quota feature 'ai'", () => {
+    expect(quotaFeatureOf("ai")).toBe("ai");
+  });
+});
+
+describe("checkBudgetWarningRetry", () => {
+  it("does not skip a fired episode stored with feature 'ai'", async () => {
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 100 });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 85,
+      ts: new Date().toISOString(),
+    });
+    // Arm the episode directly (fired, email not yet sent) — same shape a real
+    // retry candidate from selectPendingEmailRetries would have.
+    fireWarning({ userId: "alice", feature: "ai", thresholdPct: 80 });
+    const sendEmail = vi.fn().mockResolvedValue({ ok: true });
+    const result = await checkBudgetWarningRetry("alice", "ai", 80, { sendEmail });
+    expect(result).not.toEqual({ state: "skipped", reason: "not_quota_feature" });
   });
 });
 

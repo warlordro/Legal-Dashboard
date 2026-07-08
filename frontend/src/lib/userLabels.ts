@@ -1,7 +1,7 @@
-// Etichete RO pentru enum-urile backend `users.role` / `users.status` —
-// folosite in paginile admin care afiseaza identitatea unui user (Cote,
-// Granturi). Users.tsx isi tine propriile liste de optiuni pentru select-uri;
-// vocabularul de aici e identic cu al lor.
+// v2.41.0: etichete umane pentru rolurile si statusurile de utilizator.
+// Acopera si rolurile istorice (support/readonly) care nu mai sunt creabile
+// dar pot exista in DB — fallback pe token daca apare o valoare necunoscuta.
+
 const ROLE_LABELS: Record<string, string> = {
   user: "Utilizator",
   admin: "Admin",

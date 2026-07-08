@@ -13,13 +13,13 @@
 //     `before/after` diff in detail_json so an auditor can see exactly what
 //     the admin changed without re-running queries.
 
-import { Hono } from "hono";
+import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
-import { recordAudit } from "../db/auditRepository.ts";
+import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
 import { AUDIT_EXPORT_MAX_ROWS, listAuditEvents, listAuditEventsForExport } from "../db/auditRepository.ts";
-import { buildAuditReportXlsx } from "../services/auditExport.ts";
+import { AUDIT_SYSTEM_PLACEHOLDER, buildAuditXlsx } from "../services/auditExport.ts";
 import {
   getTenantKeys,
   isTenantKeyField,
@@ -31,32 +31,34 @@ import {
 } from "../db/tenantKeysRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { PERIOD_SECONDS, QUOTA_FEATURES, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
-import { sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
+import { sumAiUsageMilliInWindow, sumAiUsageWindowsByOwner, sumAiUsageWindowsTenant } from "../db/aiUsageRepository.ts";
 import { countTenantCaptchaUsageInWindow } from "../db/captchaUsageRepository.ts";
 import { readDefaultCaptchaQuota } from "./rnpmGuards.ts";
 import {
+  canonicalizeEmail,
+  CREATABLE_USER_ROLES,
   getUserByEmail,
   getUserById,
   insertUser,
-  insertUsersBulk,
   isUniqueEmailViolation,
+  LastAdminError,
   listUsers,
-  updateUserRole,
-  updateUserStatus,
+  provisionUsersBulk,
+  reactivateDeletedUser,
+  updateUserRoleChecked,
+  updateUserStatusChecked,
   USER_ROLES,
   USER_STATUSES,
+  type BulkUserInput,
+  type CreatableUserRole,
+  type ReactivateUserInput,
   type UserRole,
   type UserStatus,
 } from "../db/userRepository.ts";
+import { buildImportTemplate, MAX_IMPORT_BYTES, parseUserImport, type ImportIssue } from "../services/userImport.ts";
+import { randomUUID } from "node:crypto";
 import {
-  buildUserImportTemplate,
-  CreateUserSchema,
-  MAX_IMPORT_BYTES,
-  parseUserImportFile,
-  UserImportError,
-  type ImportRowIssue,
-} from "../services/userImport.ts";
-import {
+  ALL_OVERRIDES_CAP,
   deleteOverride,
   getOverride,
   listAllOverrides,
@@ -65,12 +67,13 @@ import {
   type QuotaPeriod,
 } from "../db/userQuotaRepository.ts";
 import {
+  ALL_ACTIVE_GRANTS_CAP,
   createGrant,
   getGrant,
   listAllActiveGrants,
+  sumActiveExtraMilli,
   listGrantsForUser,
   revokeGrant,
-  sumActiveExtraMilli,
   type QuotaGrantRow,
 } from "../db/userQuotaGrantsRepository.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
@@ -83,14 +86,6 @@ const ADMIN_BODY_LIMIT = 4096;
 const limitAdminBody = bodyLimit({
   maxSize: ADMIN_BODY_LIMIT,
   onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
-});
-
-// v2.42.0: importul de utilizatori primeste fisier xlsx raw — limita dedicata
-// (limitAdminBody de 4KB ar respinge orice fisier real; 512KB ajunge pentru
-// sute de randuri — nameListParser accepta 10MB, dar aici capul e 500 randuri).
-const limitImportBody = bodyLimit({
-  maxSize: MAX_IMPORT_BYTES,
-  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Fisier prea mare (max 512KB)", c), 413),
 });
 
 const ListUsersQuerySchema = z
@@ -108,6 +103,22 @@ const UpdateRoleSchema = z
     role: z.enum(USER_ROLES as readonly [UserRole, ...UserRole[]]),
   })
   .strict();
+
+// v2.42.0 (4.2): creare individuala — email-ul se canonicalizeaza in schema
+// (acelasi normalizator ca importul, seed-ul si bridge-ul oauth2).
+const CreateUserSchema = z
+  .object({
+    email: z.string().trim().max(254).email().transform(canonicalizeEmail),
+    displayName: z.string().trim().min(1).max(120),
+    role: z.enum(CREATABLE_USER_ROLES as readonly [CreatableUserRole, ...CreatableUserRole[]]),
+  })
+  .strict();
+
+const USER_STATUS_RO: Record<UserStatus, string> = {
+  active: "activ",
+  suspended: "suspendat",
+  deleted: "sters",
+};
 
 const UpdateStatusSchema = z
   .object({
@@ -160,8 +171,8 @@ const UpsertQuotaSchema = z
 // effect, doar audit noise).
 const CreateGrantSchema = z
   .object({
-    // Granturile sunt AI-only (denominate USD); pool-ul unic "ai" e singura
-    // tinta valida din v2.42.0.
+    // v2.42.0 (5.2): granturile exista DOAR pe pool-ul "ai" — captcha are cap
+    // fix per user, fara extra one-shot.
     feature: z.enum(["ai"]),
     extraUsdMilli: z.number().int().min(1).max(1_000_000_000),
     expiresAt: z.string().datetime({ offset: true }),
@@ -237,135 +248,199 @@ adminRouter.get("/users", (c) => {
   );
 });
 
-// v2.42.0 (E2-A1): creare user individual. Identitatea vine de la Google prin
-// oauth2-proxy — aici doar provisionam randul pe care bridge-ul fail-closed il
-// cauta la login. password_hash ramane NULL (nu exista login cu parola).
+// v2.42.0 (4.2): creare individuala. Duplicatul include statusul contului
+// existent in mesaj ca adminul sa inteleaga imediat de ce. Un cont "sters"
+// NU e duplicat: soft-delete inseamna ca emailul poate fi re-provisionat —
+// randul existent se reactiveaza (acelasi id, nume/rol din request).
 adminRouter.post("/users", limitAdminBody, async (c) => {
   const body = await c.req.json().catch(() => null);
   const parsed = CreateUserSchema.safeParse(body);
   if (!parsed.success) {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
   }
-  const { email, displayName, role } = parsed.data;
-  const existing = getUserByEmail(email);
+
+  const existing = getUserByEmail(parsed.data.email);
+  if (existing !== null && existing.status === "deleted") {
+    let reactivated: ReturnType<typeof reactivateDeletedUser> | null = null;
+    try {
+      reactivated = reactivateDeletedUser({
+        id: existing.id,
+        displayName: parsed.data.displayName,
+        role: parsed.data.role,
+      });
+    } catch (err) {
+      // DOAR cursa asteptata (statusul s-a schimbat intre check si update —
+      // alt admin l-a reactivat deja) cade pe raspunsul de duplicat de mai
+      // jos; orice alta eroare (I/O, constraint) ramane 500 — un catch-all
+      // ar masca-o intr-un 409 mincinos (CodeRabbit, confirmat).
+      if (!(err instanceof Error && err.message.startsWith("user not deleted"))) throw err;
+    }
+    if (reactivated !== null) {
+      recordAuditSafe(c, "admin.users.create", {
+        targetKind: "user",
+        targetId: reactivated.id,
+        detail: { email: reactivated.email, role: reactivated.role, reactivated: true },
+      });
+      return c.json(ok(toUserDto(reactivated), c), 201);
+    }
+  }
   if (existing !== null) {
-    // Include statusul randului existent: un email suspendat NU e fundatura —
-    // actiunea corecta e reactivarea din tabel, nu un al doilea rand.
+    // Cursa de reactivare: snapshot-ul `existing` e citit inainte ca alt admin
+    // sa fi castigat reactivarea — statusul "deleted" din el poate fi deja
+    // "active". Refetch, altfel si raspunsul si randul de audit mint permanent.
+    const current = getUserById(existing.id) ?? existing;
+    recordAudit(c, "admin.users.create", {
+      outcome: "denied",
+      targetKind: "user",
+      targetId: current.id,
+      detail: { reason: "email_exists", status: current.status },
+    });
     return c.json(
-      fail("email_exists", `Emailul exista deja (status: ${existing.status}).`, c, { status: existing.status }),
+      fail("email_exists", `Exista deja un cont cu acest email (status: ${USER_STATUS_RO[current.status]}).`, c),
       409
     );
   }
-  const id = crypto.randomUUID();
+
   try {
-    insertUser({ id, email, displayName, role });
+    const user = insertUser({
+      id: randomUUID(),
+      email: parsed.data.email,
+      displayName: parsed.data.displayName,
+      role: parsed.data.role,
+    });
+    recordAuditSafe(c, "admin.users.create", {
+      targetKind: "user",
+      targetId: user.id,
+      detail: { email: user.email, role: user.role },
+    });
+    return c.json(ok(toUserDto(user), c), 201);
   } catch (err) {
-    // Race intre doua request-uri concurente: indexul unique 0040 castiga.
+    // Race pe unicitate (alt admin a creat acelasi email intre check si insert).
     if (isUniqueEmailViolation(err)) {
-      return c.json(fail("email_exists", "Emailul exista deja.", c), 409);
+      return c.json(fail("email_exists", "Exista deja un cont cu acest email.", c), 409);
     }
     throw err;
   }
-  recordAudit(c, "admin.users.create", {
-    targetKind: "user",
-    targetId: id,
-    detail: { email, role },
-  });
-  const row = getUserById(id);
-  return c.json(ok(row === null ? { id, email, displayName, role } : toUserDto(row), c), 201);
 });
 
-// v2.42.0 (E2-A2): template xlsx descarcabil pentru importul de utilizatori.
+// v2.42.0 (4.3): template-ul de import — xlsx generat server-side. Ruta e
+// inregistrata inainte de /users/:id (path static vs dinamic).
 adminRouter.get("/users/import-template", async (c) => {
-  const buf = await buildUserImportTemplate();
+  const buf = await buildImportTemplate();
   c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  c.header("Content-Disposition", 'attachment; filename="template-utilizatori.xlsx"');
+  c.header("Content-Length", String(buf.byteLength));
+  c.header("Content-Disposition", 'attachment; filename="model-import-utilizatori.xlsx"');
   c.header("Cache-Control", "no-store");
-  return c.body(new Uint8Array(buf));
+  // Uint8Array e BodyInit valid la runtime; tipurile Hono nu il includ in Data.
+  return c.body(new Uint8Array(buf) as unknown as ArrayBuffer);
 });
 
-// v2.42.0 (E2-A2): import bulk din xlsx. Pipeline: parse server-side (timeout +
-// magic bytes) -> validare pe schema comuna -> dedup in-fisier -> check DB ->
-// insert-urile valide intr-O tranzactie (rollback complet la orice eroare).
+const limitImportBody = bodyLimit({
+  maxSize: MAX_IMPORT_BYTES,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Fisierul depaseste limita de 512KB", c), 413),
+});
+
+// v2.42.0 (4.3): import xlsx (octet-stream raw). Parsarea e integral in
+// services/userImport.ts; aici: pre-check duplicate in DB, insert tranzactional
+// (totul sau nimic la coliziune concurenta) si audit best-effort.
 adminRouter.post("/users/import", limitImportBody, async (c) => {
-  const raw = await c.req.arrayBuffer().catch(() => null);
-  if (raw === null || raw.byteLength === 0) {
-    return c.json(fail("invalid_body", "Fisier lipsa.", c), 400);
-  }
-  let parsedFile: Awaited<ReturnType<typeof parseUserImportFile>>;
-  try {
-    parsedFile = await parseUserImportFile(Buffer.from(raw));
-  } catch (err) {
-    if (err instanceof UserImportError) {
-      const status = err.code === "too_many_rows" ? 413 : 400;
-      return c.json(fail(err.code, err.message, c), status);
-    }
-    throw err;
+  const buffer = Buffer.from(await c.req.arrayBuffer());
+  const parsedFile = await parseUserImport(buffer);
+  if (!parsedFile.ok) {
+    return c.json(fail(parsedFile.code, parsedFile.message, c), parsedFile.code === "too_many_rows" ? 413 : 400);
   }
 
-  const issues: ImportRowIssue[] = [...parsedFile.issues];
-  const toCreate: Array<{ id: string; email: string; displayName: string; role: UserRole; rowNumber: number }> = [];
-  for (const row of parsedFile.valid) {
+  const issues: ImportIssue[] = [...parsedFile.issues];
+  const toCreate: (BulkUserInput & { rowNumber: number })[] = [];
+  // Conturile "sterse" nu sunt duplicate: emailul se re-provisioneaza prin
+  // reactivarea randului existent (acelasi id). Doar activ/suspendat blocheaza.
+  const toReactivate: (ReactivateUserInput & { rowNumber: number; email: string })[] = [];
+  for (const row of parsedFile.rows) {
     const existing = getUserByEmail(row.email);
+    if (existing !== null && existing.status === "deleted") {
+      toReactivate.push({
+        id: existing.id,
+        email: row.email,
+        displayName: row.displayName,
+        role: row.role,
+        rowNumber: row.rowNumber,
+      });
+      continue;
+    }
     if (existing !== null) {
       issues.push({
         rowNumber: row.rowNumber,
         email: row.email,
-        status: "duplicate_in_db",
-        reason: `Emailul exista deja (status: ${existing.status}).`,
+        code: "duplicate_in_db",
+        message: `Exista deja un cont cu acest email (status: ${USER_STATUS_RO[existing.status]}).`,
       });
       continue;
     }
-    toCreate.push({ id: crypto.randomUUID(), ...row });
-  }
-
-  try {
-    insertUsersBulk(toCreate);
-  } catch (err) {
-    // Rollback complet — raportul nu contine `created` mintit. Race concurent
-    // pe un email => acelasi tratament ca fisier reincarcat: userul reia.
-    const reason = isUniqueEmailViolation(err)
-      ? "Un email din fisier a fost creat in paralel de alt request. Reincarca fisierul."
-      : "Eroare la scrierea in baza de date. Niciun user nu a fost creat.";
-    return c.json(fail("import_failed", reason, c), 409);
-  }
-
-  // Audit: sumar + cate un eveniment per user creat (calea care provisioneaza
-  // mai multe login-uri nu inregistreaza mai putina identitate decat cea
-  // individuala — review-panel). Userii sunt DEJA creati (tranzactia a
-  // commis) — un esec de audit nu trebuie sa intoarca 500 si sa ascunda
-  // raportul; il logam si continuam (review-panel).
-  try {
-    for (const u of toCreate) {
-      recordAudit(c, "admin.users.create", {
-        targetKind: "user",
-        targetId: u.id,
-        detail: { email: u.email, role: u.role, source: "import" },
-      });
-    }
-    recordAudit(c, "admin.users.import", {
-      targetKind: "user",
-      detail: {
-        created: toCreate.length,
-        duplicates: issues.filter((i) => String(i.status).startsWith("duplicate")).length,
-        invalid: issues.filter((i) => i.status === "invalid").length,
-        total: parsedFile.valid.length + parsedFile.issues.length,
-      },
+    toCreate.push({
+      id: randomUUID(),
+      email: row.email,
+      displayName: row.displayName,
+      role: row.role,
+      rowNumber: row.rowNumber,
     });
-  } catch (auditErr) {
-    console.error("[admin.users.import] audit write failed (users already created):", auditErr);
   }
 
+  if (toCreate.length > 0 || toReactivate.length > 0) {
+    try {
+      provisionUsersBulk({ inserts: toCreate, reactivations: toReactivate });
+    } catch (err) {
+      // Coliziune concurenta (unicitate sau status schimbat intre check si
+      // update): tranzactia a facut rollback complet, deci raportul nu minte —
+      // nimic nu a fost creat sau reactivat.
+      if (isUniqueEmailViolation(err) || (err instanceof Error && err.message.startsWith("user not deleted"))) {
+        return c.json(
+          fail("import_failed", "Coliziune de email in timpul importului — nimic nu a fost creat. Reincearca.", c),
+          409
+        );
+      }
+      throw err;
+    }
+  }
+
+  const provisioned = [...toCreate, ...toReactivate];
+  const summary = {
+    created: provisioned.length,
+    duplicates: issues.filter((i) => i.code === "duplicate_in_file" || i.code === "duplicate_in_db").length,
+    invalid: issues.filter((i) => i.code === "invalid_row").length,
+  };
+
+  // Userii sunt DEJA creati — un esec de audit nu are voie sa intoarca 500,
+  // si un esec izolat nu are voie sa le piarda silentios pe urmatoarele
+  // (recordAuditSafe per apel, nu un try/catch unic in jurul tuturor).
+  for (const row of toCreate) {
+    recordAuditSafe(c, "admin.users.create", {
+      targetKind: "user",
+      targetId: row.id,
+      detail: { email: row.email, role: row.role, source: "import" },
+    });
+  }
+  for (const row of toReactivate) {
+    recordAuditSafe(c, "admin.users.create", {
+      targetKind: "user",
+      targetId: row.id,
+      detail: { email: row.email, role: row.role, source: "import", reactivated: true },
+    });
+  }
+  recordAuditSafe(c, "admin.users.import", {
+    targetKind: "user",
+    targetId: "bulk",
+    detail: summary,
+  });
+
+  issues.sort((a, b) => a.rowNumber - b.rowNumber);
   return c.json(
     ok(
       {
-        created: toCreate.map((u) => ({ rowNumber: u.rowNumber, email: u.email, role: u.role })),
-        issues: issues.sort((a, b) => a.rowNumber - b.rowNumber),
-        summary: {
-          created: toCreate.length,
-          duplicates: issues.filter((i) => String(i.status).startsWith("duplicate")).length,
-          invalid: issues.filter((i) => i.status === "invalid").length,
-        },
+        created: provisioned
+          .map((row) => ({ rowNumber: row.rowNumber, email: row.email, role: row.role }))
+          .sort((a, b) => a.rowNumber - b.rowNumber),
+        issues,
+        summary,
       },
       c
     ),
@@ -395,30 +470,28 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
     return c.json(fail("not_found", "Utilizatorul nu exista", c), 404);
   }
 
-  // Self-demotion guardrail: refuse to remove the last admin's own role. Avoids
-  // the foot-gun where an admin demotes themselves and locks the org out of
-  // admin surfaces. If multiple admins exist the demotion is allowed because
-  // the org still has at least one admin.
-  if (id === getOwnerId(c) && before.role === "admin" && parsed.data.role !== "admin") {
-    // Review-panel: doar adminii ACTIVI conteaza ca "admini ramasi" — unul
-    // suspendat nu se poate loga, deci demotarea ar lasa org-ul fara admin.
-    const otherAdmins = listUsers({ role: "admin", status: "active" }).rows.filter((u) => u.id !== id);
-    if (otherAdmins.length === 0) {
+  let updated: ReturnType<typeof updateUserRoleChecked>;
+  try {
+    updated = updateUserRoleChecked(id, parsed.data.role);
+  } catch (err) {
+    if (err instanceof LastAdminError) {
+      // Mesaj identic cu cel istoric pe self-demotion (testele + UI il asteapta);
+      // formulare generica pe cazul cross-admin (atins doar sub cursa).
+      const message =
+        id === getOwnerId(c)
+          ? "Nu te poti demota — esti singurul admin. Promoveaza un alt utilizator inainte."
+          : "Este singurul admin activ — operatiunea ar lasa organizatia fara admin. Promoveaza un alt utilizator inainte.";
       recordAudit(c, "admin.users.demote_blocked", {
         outcome: "denied",
         targetKind: "user",
         targetId: id,
         detail: { reason: "last_admin", from: before.role, to: parsed.data.role },
       });
-      return c.json(
-        fail("last_admin", "Nu te poti demota — esti singurul admin. Promoveaza un alt utilizator inainte.", c),
-        409
-      );
+      return c.json(fail("last_admin", message, c), 409);
     }
+    throw err;
   }
-
-  const updated = updateUserRole(id, parsed.data.role);
-  recordAudit(c, "admin.users.update_role", {
+  recordAuditSafe(c, "admin.users.update_role", {
     targetKind: "user",
     targetId: id,
     detail: { before: before.role, after: updated.role },
@@ -452,8 +525,25 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
     return c.json(fail("self_deactivation", "Nu iti poti dezactiva propriul cont", c), 409);
   }
 
-  const updated = updateUserStatus(id, parsed.data.status);
-  recordAudit(c, "admin.users.update_status", {
+  let updated: ReturnType<typeof updateUserStatusChecked>;
+  try {
+    updated = updateUserStatusChecked(id, parsed.data.status);
+  } catch (err) {
+    if (err instanceof LastAdminError) {
+      recordAudit(c, "admin.users.deactivate_blocked", {
+        outcome: "denied",
+        targetKind: "user",
+        targetId: id,
+        detail: { reason: "last_admin", from: before.status, to: parsed.data.status },
+      });
+      return c.json(
+        fail("last_admin", "Este singurul admin activ — operatiunea ar lasa organizatia fara admin.", c),
+        409
+      );
+    }
+    throw err;
+  }
+  recordAuditSafe(c, "admin.users.update_status", {
     targetKind: "user",
     targetId: id,
     detail: { before: before.status, after: updated.status },
@@ -462,56 +552,6 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
 });
 
 // ---------- Audit ----------
-
-// v2.42.0: raport audit descarcabil (xlsx) — pe interval sau toata baza.
-// Audit-ul e append-only: NU exista stergere; retention-ul automat (90 zile,
-// scheduler) e singura curatare. Exportul insusi lasa urma in audit.
-const AuditExportQuerySchema = z
-  .object({
-    since: z.string().datetime({ offset: true }).optional(),
-    until: z.string().datetime({ offset: true }).optional(),
-  })
-  .strict();
-
-adminRouter.get("/audit/export", async (c) => {
-  const parsed = AuditExportQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
-  if (!parsed.success) {
-    return c.json(fail("invalid_query", "Query invalid", c, parsed.error.issues), 400);
-  }
-  const { since, until } = parsed.data;
-  const result = listAuditEventsForExport({ since, until });
-  if (result.total > AUDIT_EXPORT_MAX_ROWS) {
-    return c.json(
-      fail(
-        "too_many_rows",
-        `Intervalul contine ${result.total} evenimente (max ${AUDIT_EXPORT_MAX_ROWS}). Ingusteaza intervalul.`,
-        c,
-        { total: result.total, max: AUDIT_EXPORT_MAX_ROWS }
-      ),
-      413
-    );
-  }
-  // Rezolva ID-urile de owner/actor la "email — Nume" (raport citit de om).
-  const userLabels = new Map<string, string>();
-  for (const r of result.rows) {
-    for (const id of [r.owner_id, r.actor_id]) {
-      if (id === null || userLabels.has(id)) continue;
-      const u = getUserById(id);
-      userLabels.set(id, u === null ? id : `${u.email} — ${u.display_name}`);
-    }
-  }
-  const buf = await buildAuditReportXlsx(result.rows, { since, until }, userLabels);
-  // Auditam DUPA generarea reusita — altfel un throw in builder lasa in trail
-  // un export "reusit" care nu a existat (review-panel).
-  recordAudit(c, "admin.audit.export", {
-    detail: { rows: result.rows.length, since: since ?? null, until: until ?? null },
-  });
-  const stamp = new Date().toISOString().slice(0, 10);
-  c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
-  c.header("Content-Disposition", `attachment; filename="raport-audit-${stamp}.xlsx"`);
-  c.header("Cache-Control", "no-store");
-  return c.body(new Uint8Array(buf));
-});
 
 adminRouter.get("/audit", (c) => {
   const parsed = ListAuditQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
@@ -565,15 +605,24 @@ adminRouter.get("/audit", (c) => {
       },
     });
   }
-  // v2.42.0: ID-urile de owner/actor sunt UUID-uri ilizibile in tabelul din
-  // pagina — atasam emailul (lookup per ID unic din pagina curenta, <=200 randuri).
-  const emailById = new Map<string, string | null>();
+  // v2.42.0 (5.4): enrichment — owner/actor cu EMAIL (lookup batch-uit pe
+  // id-uri distincte; ID-ul brut ramane in raspuns pentru title). NULL =
+  // "system" — acelasi placeholder ca in raportul xlsx.
+  const userIds = new Set<string>();
   for (const r of result.rows) {
-    for (const id of [r.owner_id, r.actor_id]) {
-      if (id === null || emailById.has(id)) continue;
-      emailById.set(id, getUserById(id)?.email ?? null);
-    }
+    if (r.owner_id !== null) userIds.add(r.owner_id);
+    if (r.actor_id !== null) userIds.add(r.actor_id);
   }
+  const emailById = new Map<string, string>();
+  for (const uid of userIds) {
+    const u = getUserById(uid);
+    if (u !== null) emailById.set(uid, u.email);
+  }
+  const emailOf = (uid: string | null): string => {
+    if (uid === null) return AUDIT_SYSTEM_PLACEHOLDER;
+    return emailById.get(uid) ?? uid;
+  };
+
   return c.json(
     ok(
       {
@@ -581,9 +630,9 @@ adminRouter.get("/audit", (c) => {
           id: r.id,
           ts: r.ts,
           ownerId: r.owner_id,
-          ownerEmail: r.owner_id === null ? null : (emailById.get(r.owner_id) ?? null),
           actorId: r.actor_id,
-          actorEmail: r.actor_id === null ? null : (emailById.get(r.actor_id) ?? null),
+          ownerEmail: emailOf(r.owner_id),
+          actorEmail: emailOf(r.actor_id),
           action: r.action,
           targetKind: r.target_kind,
           targetId: r.target_id,
@@ -601,6 +650,54 @@ adminRouter.get("/audit", (c) => {
     ),
     200
   );
+});
+
+// v2.42.0 (5.4): raportul xlsx pe intervalul filtrelor. COUNT intai — peste
+// AUDIT_EXPORT_MAX_ROWS raspundem 413 FARA sa incarcam randuri. Evenimentul
+// de audit al exportului se scrie DUPA generarea reusita.
+// Paritate 1:1 cu filtrele GET /audit — exportul reflecta exact ce vede
+// adminul in pagina; doar page/pageSize nu au sens la export.
+const AuditExportQuerySchema = ListAuditQuerySchema.omit({ page: true, pageSize: true });
+
+adminRouter.get("/audit/export", async (c) => {
+  const parsed = AuditExportQuerySchema.safeParse(Object.fromEntries(new URL(c.req.url).searchParams.entries()));
+  if (!parsed.success) {
+    return c.json(fail("invalid_query", "Query invalid", c, parsed.error.issues), 400);
+  }
+  const { since, until } = parsed.data;
+  const collected = listAuditEventsForExport(parsed.data);
+  if (!collected.ok) {
+    return c.json(
+      fail(
+        "too_many_rows",
+        `Intervalul contine ${collected.total} randuri; maximul exportabil este ${AUDIT_EXPORT_MAX_ROWS}. Ingusteaza intervalul.`,
+        c
+      ),
+      413
+    );
+  }
+  const buf = await buildAuditXlsx(collected.rows, { since: since ?? null, until: until ?? null });
+  recordAuditSafe(c, "admin.audit.export", {
+    targetKind: "audit_log",
+    detail: {
+      since: since ?? null,
+      until: until ?? null,
+      ownerId: parsed.data.ownerId ?? null,
+      actorId: parsed.data.actorId ?? null,
+      action: parsed.data.action ?? null,
+      actionLike: parsed.data.actionLike ?? null,
+      targetKind: parsed.data.targetKind ?? null,
+      targetId: parsed.data.targetId ?? null,
+      outcome: parsed.data.outcome ?? null,
+      requestId: parsed.data.requestId ?? null,
+      rows: collected.rows.length,
+    },
+  });
+  c.header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  c.header("Content-Length", String(buf.byteLength));
+  c.header("Content-Disposition", 'attachment; filename="raport-audit.xlsx"');
+  c.header("Cache-Control", "no-store");
+  return c.body(new Uint8Array(buf) as unknown as ArrayBuffer);
 });
 
 // ---------- Tenant API keys ----------
@@ -647,7 +744,7 @@ adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
     mode: parsed.data.mode as CaptchaMode,
     updatedBy: adminId,
   });
-  recordAudit(c, "admin.tenantKeys.captchaSettings.update", {
+  recordAuditSafe(c, "admin.tenantKeys.captchaSettings.update", {
     targetKind: "tenant_keys",
     targetId: "captcha",
     detail: {
@@ -659,15 +756,7 @@ adminRouter.put("/keys/captcha", limitAdminBody, async (c) => {
   return c.json(ok({ provider: parsed.data.provider, mode: parsed.data.mode }, c), 200);
 });
 
-// Limita dedicata: schema accepta chei de pana la 4096 caractere, dar
-// limitAdminBody (4KB) numara TOT body-ul JSON — o cheie aproape de maxim era
-// respinsa cu 413 inainte de validare (review-panel). 8KB acopera confortabil.
-const limitKeyBody = bodyLimit({
-  maxSize: 8 * 1024,
-  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
-});
-
-adminRouter.put("/keys/:field", limitKeyBody, async (c) => {
+adminRouter.put("/keys/:field", limitAdminBody, async (c) => {
   const field = c.req.param("field");
   if (!isTenantKeyField(field)) {
     return c.json(fail("invalid_field", "Camp cheie invalid", c), 404);
@@ -701,7 +790,7 @@ adminRouter.put("/keys/:field", limitKeyBody, async (c) => {
     detail.validationSkipped = true;
     if (validation.reason) detail.validationSkipReason = validation.reason;
   }
-  recordAudit(c, "admin.tenantKeys.update", {
+  recordAuditSafe(c, "admin.tenantKeys.update", {
     targetKind: "tenant_keys",
     targetId: field,
     detail,
@@ -709,107 +798,26 @@ adminRouter.put("/keys/:field", limitKeyBody, async (c) => {
   return c.json(ok({ field, ...toKeyStatus(after), validationSkipped: validation.validationSkipped === true }, c), 200);
 });
 
-// ---------- Usage overview ----------
-
-// v2.42.0 (feedback testare): consumul AI per user, vizibil oricand in tabul
-// admin Consum. Deliberat O(n) cu ~5 query-uri/user (AI + captcha): SQLite
-// in-proces cu indecsi pe owner raspunde in microsecunde, iar tenantul e o
-// firma (zeci de useri, cap 2000) — batching pe grupuri de perioade ar
-// complica codul fara castig masurabil. Pentru fiecare user aplicam EXACT
-// regulile quotaGuard:
-// perioada din override (altfel zilnica), limita din override (altfel default
-// env), granturile active peste baza — ca cifrele afisate sa coincida cu
-// enforcement-ul. Pool unic "ai" (single + multi insumate).
-adminRouter.get("/usage/overview", (c) => {
-  const defaultMilli = readDefaultQuotaMilli();
-  // Userii activi, paginat pana la capat (cap defensiv 2000 — tenantul e o
-  // firma, nu o platforma; peste cap raportam trunchierea in loc sa mintim).
-  const users = [];
-  let offset = 0;
-  let total = 0;
-  do {
-    const page = listUsers({ status: "active", limit: 200, offset });
-    users.push(...page.rows);
-    total = page.total;
-    offset += 200;
-  } while (users.length < total && offset < 2000);
-
-  const items = users
-    .map((u) => {
-      const override = getOverride(u.id, "ai");
-      const period: QuotaPeriod = override?.period ?? "day";
-      const baseLimit = override ? override.limit_usd_milli : defaultMilli;
-      const extraFromGrants = sumActiveExtraMilli(u.id, "ai");
-      const usedMilli = sumAiUsageMilliInWindow(u.id, "ai", PERIOD_SECONDS[period]);
-      return {
-        userId: u.id,
-        email: u.email,
-        displayName: u.display_name,
-        role: u.role,
-        feature: "ai" as const,
-        period,
-        usedMilli,
-        baseLimitMilli: baseLimit,
-        extraFromGrantsMilli: extraFromGrants,
-        effectiveLimitMilli: baseLimit === null ? null : baseLimit + extraFromGrants,
-        limitSource: override
-          ? ("override" as const)
-          : defaultMilli !== null
-            ? ("default" as const)
-            : ("none" as const),
-      };
-    })
-    .sort((a, b) => b.usedMilli - a.usedMilli || a.email.localeCompare(b.email));
-
-  // Captcha RNPM — mirror al withRnpmCaptchaGuards: cap = NUMAR de captcha-uri
-  // (nu USD), consum = randuri captcha_usage source='tenant' in fereastra.
-  const defaultCaptcha = readDefaultCaptchaQuota();
-  const captcha = users
-    .map((u) => {
-      const override = getOverride(u.id, "captcha.rnpm");
-      const period: QuotaPeriod = override?.period ?? "day";
-      const limitCount = override ? override.limit_usd_milli : defaultCaptcha;
-      const usedCount = countTenantCaptchaUsageInWindow(u.id, PERIOD_SECONDS[period]);
-      return {
-        userId: u.id,
-        email: u.email,
-        displayName: u.display_name,
-        role: u.role,
-        feature: "captcha.rnpm" as const,
-        period,
-        usedCount,
-        limitCount,
-        limitSource: override
-          ? ("override" as const)
-          : defaultCaptcha !== null
-            ? ("default" as const)
-            : ("none" as const),
-      };
-    })
-    .sort((a, b) => b.usedCount - a.usedCount || a.email.localeCompare(b.email));
-
-  return c.json(ok({ items, captcha, truncated: users.length < total }, c), 200);
-});
-
 // ---------- Quota ----------
 
-// v2.41.0: vedere globala — toate override-urile active, cu identitatea
-// userului, ca pagina admin Cote sa le arate direct la deschidere (fara
-// cautarea prealabila a unui user).
+// v2.41.0 (P5): vederea globala a paginii Cote — toate override-urile cu
+// identitate user, fara selectie prealabila. `truncated` semnaleaza atingerea
+// capului (500); UI-ul afiseaza o nota vizibila in acest caz.
 adminRouter.get("/quota/overrides", (c) => {
-  const rows = listAllOverrides().map((r) => ({
+  const rows = listAllOverrides();
+  const overrides = rows.map((r) => ({
     userId: r.user_id,
-    userEmail: r.user_email,
-    userDisplayName: r.user_display_name,
+    email: r.email,
+    displayName: r.display_name,
+    role: r.role,
+    status: r.status,
     feature: r.feature,
     period: r.period,
     limitUsdMilli: r.limit_usd_milli,
     updatedAt: r.updated_at,
     updatedBy: r.updated_by,
   }));
-  // CodeRabbit (PR #65): repository-ul taie la 500 — declaram trunchierea in
-  // loc sa lasam UI-ul sa para complet cand nu e.
-  return c.json(ok({ overrides: rows, truncated: rows.length >= 500 }, c), 200);
+  return c.json(ok({ overrides, truncated: rows.length >= ALL_OVERRIDES_CAP }, c), 200);
 });
 
 adminRouter.get("/users/:id/quota", (c) => {
@@ -852,7 +860,10 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
     : (parsed.data.limitUsdMilli as number | null);
   const period: QuotaPeriod = parsed.data.period ?? (usedLegacyAlias ? "day" : "day");
 
-  const adminId = getOwnerId(c);
+  // getActorId, nu getOwnerId: sub un token de acces actorul != owner, iar
+  // updatedBy/grantedBy + audit-ul trebuie sa atribuie cine a executat efectiv.
+  // Aliniat cu rutele de chei (PUT /keys/*).
+  const adminId = getActorId(c);
   const row = upsertOverride({
     userId: id,
     feature: parsed.data.feature,
@@ -860,7 +871,7 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
     limitUsdMilli,
     updatedBy: adminId,
   });
-  recordAudit(c, "admin.users.quota_upsert", {
+  recordAuditSafe(c, "admin.users.quota_upsert", {
     targetKind: "user",
     targetId: id,
     detail: {
@@ -896,7 +907,7 @@ adminRouter.delete("/users/:id/quota/:feature", (c) => {
   // Idempotent at HTTP layer: returning 200 either way keeps the admin UI
   // simple. Audit only records when something actually changed.
   if (removed) {
-    recordAudit(c, "admin.users.quota_delete", {
+    recordAuditSafe(c, "admin.users.quota_delete", {
       targetKind: "user",
       targetId: id,
       detail: { feature },
@@ -907,15 +918,18 @@ adminRouter.delete("/users/:id/quota/:feature", (c) => {
 
 // ---------- Grants ----------
 
-// v2.41.0: vedere globala — granturile active ale tuturor userilor, cu
-// identitatea atasata (pandant la GET /quota/overrides).
+// v2.41.0 (P5): pandantul vederii globale pentru Granturi — doar granturile
+// ACTIVE (nerevocate, neexpirate), cu identitate user + truncated la cap.
 adminRouter.get("/grants/active", (c) => {
-  const rows = listAllActiveGrants().map((r) => ({
+  const rows = listAllActiveGrants();
+  const grants = rows.map((r) => ({
     ...toGrantDto(r),
-    userEmail: r.user_email,
-    userDisplayName: r.user_display_name,
+    email: r.email,
+    displayName: r.display_name,
+    role: r.role,
+    status: r.status,
   }));
-  return c.json(ok({ grants: rows, truncated: rows.length >= 500 }, c), 200);
+  return c.json(ok({ grants, truncated: rows.length >= ALL_ACTIVE_GRANTS_CAP }, c), 200);
 });
 
 adminRouter.get("/users/:id/grants", (c) => {
@@ -939,24 +953,26 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
   if (!parsed.success) {
     return c.json(fail("invalid_body", "Body invalid", c, parsed.error.issues), 400);
   }
-  // v2.42.0 (decizie user): grant si buget nelimitat se exclud reciproc.
-  // Review-panel: "nelimitat" se decide cu ACEEASI regula ca quotaGuard —
-  // baza e override-ul SAU limita default din env; refuzam doar cand niciuna
-  // nu exista (pass-through real). Inainte, un tenant care folosea doar
-  // LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI nu putea acorda granturi deloc.
-  const override = getOverride(id, parsed.data.feature);
-  const baseLimit = override ? override.limit_usd_milli : readDefaultQuotaMilli();
+
+  // v2.42.0 (5.2): grant vs nelimitat se exclud. Baza se calculeaza cu ACEEASI
+  // regula ca guard-ul (override ? limit : default env) — altfel tenantii care
+  // folosesc doar env-ul default nu ar putea acorda granturi deloc (fix High
+  // din review). Baza NULL = buget nelimitat: un extra peste infinit e no-op
+  // derutant, refuzam explicit.
+  const baseOverride = getOverride(id, "ai");
+  const baseLimit = baseOverride ? baseOverride.limit_usd_milli : readDefaultQuotaMilli();
   if (baseLimit === null) {
     return c.json(
       fail(
         "unlimited_budget",
-        `Bugetul pe "${parsed.data.feature}" este nelimitat — grantul nu ar avea efect. Seteaza intai o cota (limita) pentru acest user in pagina Cote.`,
+        "Utilizatorul are buget AI nelimitat — granturile nu au efect. Seteaza intai o limita de baza.",
         c
       ),
       422
     );
   }
-  const adminId = getOwnerId(c);
+
+  const adminId = getActorId(c);
   const row = createGrant({
     userId: id,
     feature: parsed.data.feature,
@@ -965,7 +981,7 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
     reason: parsed.data.reason ?? null,
     grantedBy: adminId,
   });
-  recordAudit(c, "admin.users.grant_create", {
+  recordAuditSafe(c, "admin.users.grant_create", {
     targetKind: "user",
     targetId: id,
     detail: {
@@ -979,7 +995,9 @@ adminRouter.post("/users/:id/grants", limitAdminBody, async (c) => {
   return c.json(ok(toGrantDto(row), c), 201);
 });
 
-adminRouter.delete("/grants/:id", limitAdminBody, async (c) => {
+// v2.42.0 (sectiunea 11): POST /grants/:id/revoke — acelasi comportament ca
+// DELETE /grants/:id (pastrat pentru compatibilitate), cu {reason?} in body.
+async function handleGrantRevoke(c: Context): Promise<Response> {
   const rawId = c.req.param("id");
   const grantId = Number(rawId);
   if (!Number.isInteger(grantId) || grantId <= 0) {
@@ -1000,10 +1018,10 @@ adminRouter.delete("/grants/:id", limitAdminBody, async (c) => {
     }
     reason = parsed.data.reason ?? null;
   }
-  const adminId = getOwnerId(c);
+  const adminId = getActorId(c);
   const revoked = revokeGrant(grantId, adminId, reason);
   if (revoked) {
-    recordAudit(c, "admin.users.grant_revoke", {
+    recordAuditSafe(c, "admin.users.grant_revoke", {
       targetKind: "user",
       targetId: before.user_id,
       detail: {
@@ -1017,6 +1035,113 @@ adminRouter.delete("/grants/:id", limitAdminBody, async (c) => {
   // 200 in both cases (idempotent at HTTP) so the admin UI nu trebuie sa
   // discrimineze "deja revocat" vs "tocmai revocat".
   return c.json(ok({ id: grantId, revoked }, c), 200);
+}
+
+adminRouter.delete("/grants/:id", limitAdminBody, (c) => handleGrantRevoke(c));
+adminRouter.post("/grants/:id/revoke", limitAdminBody, (c) => handleGrantRevoke(c));
+
+// ---------- usage overview (v2.42.0, 5.3) ----------
+
+// Consum per utilizator, pentru FIECARE user activ. Cifrele TREBUIE sa vina
+// din ACELEASI functii/constante ca guard-urile (PERIOD_SECONDS, getOverride,
+// sumActiveExtraMilli, sumAiUsageMilliInWindow, readDefaultQuotaMilli /
+// readDefaultCaptchaQuota) — altfel raportul ar diverge de enforcement.
+// Design O(n) cu ~5 query-uri/user ACCEPTAT deliberat: SQLite in-proces,
+// tenant = o singura firma (zeci de useri, nu mii). Drift-ul de paginare la
+// churn concurent de useri = risc acceptat (raport instantaneu).
+const USAGE_OVERVIEW_PAGE = 200;
+// Cap aliniat la asumptia de design de mai sus ("zeci de useri"): 500 useri x
+// ~5 query-uri sincrone = worst-case tolerabil pe event loop. 2000 permitea
+// ~10k query-uri blocante intr-un singur handler. ATENTIE la semantica
+// truncarii: taierea se face pe ordinea listUsers (created_at DESC) INAINTE de
+// sortarea pe consum — peste cap, consumatori mari cu conturi vechi pot lipsi
+// din raport; `truncated: true` semnaleaza asta in UI. Fix real la scara:
+// agregare set-based (amanata deliberat).
+const USAGE_OVERVIEW_CAP = 500;
+
+adminRouter.get("/usage/overview", (c) => {
+  const users: ReturnType<typeof listUsers>["rows"] = [];
+  let offset = 0;
+  let truncated = false;
+  for (;;) {
+    const page = listUsers({ status: "active", limit: USAGE_OVERVIEW_PAGE, offset });
+    users.push(...page.rows);
+    offset += page.rows.length;
+    if (users.length >= USAGE_OVERVIEW_CAP && offset < page.total) {
+      truncated = true;
+      users.length = USAGE_OVERVIEW_CAP;
+      break;
+    }
+    if (page.rows.length === 0 || offset >= page.total) break;
+  }
+
+  const defaultAiMilli = readDefaultQuotaMilli();
+  const defaultCaptchaCount = readDefaultCaptchaQuota();
+
+  // Set-based: un singur query pentru totalurile day/week/total ale TUTUROR
+  // ownerilor, in loc de N query-uri per user (vezi sumAiUsageWindowsByOwner).
+  const usageWindowsByOwner = sumAiUsageWindowsByOwner("ai");
+  const ZERO_WINDOWS = { dayMilli: 0, weekMilli: 0, totalMilli: 0 };
+
+  const items = users.map((u) => {
+    const override = getOverride(u.id, "ai");
+    const period: QuotaPeriod = override?.period ?? "day";
+    const baseLimit = override ? override.limit_usd_milli : defaultAiMilli;
+    const extraFromGrants = sumActiveExtraMilli(u.id, "ai");
+    const usedMilli = sumAiUsageMilliInWindow(u.id, "ai", PERIOD_SECONDS[period]);
+    return {
+      userId: u.id,
+      email: u.email,
+      displayName: u.display_name,
+      role: u.role,
+      feature: "ai" as const,
+      period,
+      usedMilli,
+      baseLimitMilli: baseLimit,
+      extraFromGrantsMilli: extraFromGrants,
+      effectiveLimitMilli: baseLimit === null ? null : baseLimit + extraFromGrants,
+      limitSource: override
+        ? ("override" as const)
+        : defaultAiMilli !== null
+          ? ("default" as const)
+          : ("none" as const),
+      windows: usageWindowsByOwner.get(u.id) ?? ZERO_WINDOWS,
+    };
+  });
+  items.sort((a, b) => b.usedMilli - a.usedMilli || a.email.localeCompare(b.email));
+
+  // Mirror pe captcha.rnpm: unitate NUMAR (doar source='tenant' — BYOK desktop
+  // nu consuma bugetul tenantului). Captcha nu are granturi (cap fix).
+  const captcha = users.map((u) => {
+    const override = getOverride(u.id, "captcha.rnpm");
+    const period: QuotaPeriod = override?.period ?? "day";
+    const baseLimit = override ? override.limit_usd_milli : defaultCaptchaCount;
+    const usedCount = countTenantCaptchaUsageInWindow(u.id, PERIOD_SECONDS[period]);
+    return {
+      userId: u.id,
+      email: u.email,
+      displayName: u.display_name,
+      role: u.role,
+      feature: "captcha.rnpm" as const,
+      period,
+      usedCount,
+      baseLimitCount: baseLimit,
+      effectiveLimitCount: baseLimit,
+      limitSource:
+        override !== null
+          ? ("override" as const)
+          : defaultCaptchaCount !== null
+            ? ("default" as const)
+            : ("none" as const),
+    };
+  });
+  captcha.sort((a, b) => b.usedCount - a.usedCount || a.email.localeCompare(b.email));
+
+  // tenantTotals include TOTI ownerii cu istoric in ai_usage, inclusiv useri
+  // stersi/suspendati care nu mai apar in `items` (filtrat pe status='active').
+  const tenantTotals = sumAiUsageWindowsTenant("ai");
+
+  return c.json(ok({ items, captcha, truncated, tenantTotals }, c), 200);
 });
 
 // ---------- helpers ----------

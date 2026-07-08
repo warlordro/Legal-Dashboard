@@ -1,18 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Gift, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { useToast } from "@/components/ui/toast";
-import { UserPicker } from "@/components/admin/UserPicker";
-import { admin, type AdminUser, type QuotaGrant, type QuotaGrantWithUser } from "@/lib/api";
+import { UserPicker } from "@/components/UserPicker";
+import { admin, MonitoringApiError, type AdminUser, type GlobalQuotaGrant, type QuotaGrant } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
-import { quotaFeatureLabel as featureLabel } from "@/lib/quotaFeatureLabels";
+import { quotaFeatureLabel } from "@/lib/quotaFeatureLabels";
 import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const MILLI = 1000;
+
+// Granturile sunt bugete AI extra — captcha nu are granturi (cap fix per user).
+// v2.42.0 (5.2): pool AI unic — granturile exista doar pe "ai".
+const GRANTABLE_FEATURES = ["ai"] as const;
 
 function milliToUsd(milli: number): string {
   return (milli / MILLI).toFixed(3);
@@ -23,7 +28,10 @@ function parseUsdInputToMilli(value: string): number | null {
   if (!trimmed) return null;
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * MILLI);
+  // Sub 0.001 USD se rotunjeste la 0 milli — invalid (backend cere min 1),
+  // altfel guard-ul client lasa sa treaca un request destinat esecului.
+  const milli = Math.round(n * MILLI);
+  return milli >= 1 ? milli : null;
 }
 
 // Converteste un input datetime-local (YYYY-MM-DDTHH:mm fara timezone) la ISO
@@ -53,30 +61,40 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
   const [grants, setGrants] = useState<QuotaGrant[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [feature, setFeature] = useState("ai");
+  const [feature, setFeature] = useState<string>(GRANTABLE_FEATURES[0]);
   const [extraUsd, setExtraUsd] = useState("");
   const [expiresAtLocal, setExpiresAtLocal] = useState("");
   const [reason, setReason] = useState("");
   const [busyId, setBusyId] = useState<number | "create" | null>(null);
   // v2.41.0: vedere globala la deschidere — granturile active ale tuturor
   // userilor, fara cautarea prealabila a unui user (pandant la pagina Cote).
-  const [activeGrants, setActiveGrants] = useState<QuotaGrantWithUser[]>([]);
+  const [activeGrants, setActiveGrants] = useState<GlobalQuotaGrant[]>([]);
   const [activeTruncated, setActiveTruncated] = useState(false);
   const [activeLoading, setActiveLoading] = useState(false);
+  // AbortController + staleness guard (pattern 6.7, ca la fetch-ul per-user
+  // de mai jos): un raspuns lent pornit inainte de o revocare ar ateriza dupa
+  // reload-ul post-revocare si ar suprascrie lista cu starea veche (grantul
+  // revocat ar reaparea activ).
+  const activeGrantsAcRef = useRef<AbortController | null>(null);
 
   const loadActiveGrants = useCallback(async () => {
+    activeGrantsAcRef.current?.abort();
+    const ac = new AbortController();
+    activeGrantsAcRef.current = ac;
     setActiveLoading(true);
     try {
-      const result = await admin.listActiveGrants();
+      const result = await admin.listActiveGrants(ac.signal);
+      if (ac.signal.aborted) return;
       setActiveGrants(result.grants);
       setActiveTruncated(result.truncated === true);
-      // CodeRabbit (confirmat): fara clear, un banner de eroare de la un load
-      // esuat anterior persista si dupa un refresh reusit.
+      // Fara clear, un banner de eroare de la un load esuat anterior persista
+      // si dupa un refresh reusit.
       setError(null);
     } catch (err) {
+      if (ac.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea granturilor active.");
     } finally {
-      setActiveLoading(false);
+      if (!ac.signal.aborted) setActiveLoading(false);
     }
   }, []);
 
@@ -84,7 +102,47 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     loadActiveGrants();
   }, [loadActiveGrants]);
 
+  // Fetch-ul per-user traieste in efect cu AbortController + guards (pattern
+  // 6.7): golirea sincrona a listei NU anuleaza un fetch in zbor — un raspuns
+  // lent pentru userul A ar ateriza dupa selectarea lui B si ar afisa (si
+  // permite revocarea) granturilor lui A sub identitatea lui B (finding
+  // review-panel confirmat). refreshTick = reincarcare manuala/post-mutatie.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const refreshGrants = useCallback(() => setRefreshTick((t) => t + 1), []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick este trigger explicit de reincarcare (pattern 6.7), nu e citit in corp.
+  useEffect(() => {
+    setGrants([]);
+    if (!selected) return;
+    const ac = new AbortController();
+    setLoading(true);
+    setError(null);
+    admin
+      .listGrants(selected.id, ac.signal)
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        setGrants(result.grants);
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Eroare la incarcarea grant-urilor.");
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [selected, refreshTick]);
+
+  const onSelect = (user: AdminUser) => {
+    setSelected(user);
+    setFeature(GRANTABLE_FEATURES[0]);
+    setExtraUsd("");
+    setExpiresAtLocal("");
+    setReason("");
+  };
+
   const selectFromActive = async (userId: string) => {
+    setError(null);
     try {
       const user = await admin.getUser(userId);
       onSelect(user);
@@ -93,48 +151,9 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     }
   };
 
-  // v2.42.0: grant si buget nelimitat se exclud (serverul refuza cu 422) —
-  // UI-ul stie limitele userului selectat ca sa blocheze formularul cu
-  // explicatie, nu sa lase submit-ul sa esueze.
-  const [limitsByFeature, setLimitsByFeature] = useState<Record<string, number | null>>({});
-
-  const loadGrants = useCallback(async (userId: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [result, quota] = await Promise.all([admin.listGrants(userId), admin.listQuota(userId)]);
-      setGrants(result.grants);
-      const limits: Record<string, number | null> = {};
-      for (const o of quota.overrides) limits[o.feature] = o.limitUsdMilli;
-      setLimitsByFeature(limits);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea grant-urilor.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (selected) loadGrants(selected.id);
-    else setGrants([]);
-  }, [loadGrants, selected]);
-
-  const onSelect = (user: AdminUser) => {
-    setSelected(user);
-    setFeature("ai");
-    setExtraUsd("");
-    setExpiresAtLocal("");
-    setReason("");
-  };
-
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
-    const featureKey = feature.trim();
-    if (!featureKey) {
-      setError("Introdu un feature.");
-      return;
-    }
     const extraMilli = parseUsdInputToMilli(extraUsd);
     if (extraMilli === null) {
       setError("Introdu un extra valid (> 0 USD).");
@@ -153,28 +172,38 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     setError(null);
     try {
       await admin.createGrant(selected.id, {
-        feature: featureKey,
+        feature,
         extraUsdMilli: extraMilli,
         expiresAt: isoExpires,
         reason: reason.trim() || null,
       });
-      await loadGrants(selected.id);
+      refreshGrants();
       void loadActiveGrants();
       setExtraUsd("");
       setExpiresAtLocal("");
       setReason("");
       toast(`Grant de ${milliToUsd(extraMilli)} $ acordat lui ${selected.email}.`, { variant: "success" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la crearea grant-ului.");
+      // v2.42.0 (5.2): grant vs nelimitat se exclud — serverul e autoritatea.
+      // Gating-ul ramane REACTIV (nu proactiv ca in referinta): baza include si
+      // default-ul din env, invizibil clientului — un buton dezactivat pe
+      // absenta override-ului ar bloca fals granturile valide pe acel default.
+      const msg =
+        err instanceof MonitoringApiError && err.code === "unlimited_budget"
+          ? "Utilizatorul are buget AI nelimitat — granturile nu au efect. Seteaza intai o limita de baza in Cote."
+          : err instanceof Error
+            ? err.message
+            : "Eroare la crearea grant-ului.";
+      setError(msg);
     } finally {
       setBusyId(null);
     }
   };
 
-  const onRevoke = async (grant: QuotaGrant) => {
+  const onRevoke = async (grant: Pick<QuotaGrant, "id" | "extraUsdMilli" | "feature">, ownerLabel?: string) => {
     const ok = await confirm({
       title: "Revoca grant",
-      message: `Revoca grant-ul de ${milliToUsd(grant.extraUsdMilli)} $ pentru "${featureLabel(grant.feature)}"? Limita efectiva va scadea imediat.`,
+      message: `Revoca grant-ul de ${milliToUsd(grant.extraUsdMilli)} $ pentru "${quotaFeatureLabel(grant.feature)}"${ownerLabel ? ` (${ownerLabel})` : ""}? Limita efectiva va scadea imediat.`,
       destructive: true,
       confirmLabel: "Revoca",
     });
@@ -183,7 +212,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     setError(null);
     try {
       await admin.revokeGrant(grant.id, null);
-      if (selected) await loadGrants(selected.id);
+      if (selected) refreshGrants();
       void loadActiveGrants();
       toast(`Grantul de ${milliToUsd(grant.extraUsdMilli)} $ a fost revocat.`, { variant: "success" });
     } catch (err) {
@@ -194,7 +223,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
   };
 
   return (
-    <div className={embedded ? "" : "min-h-full bg-background p-6"}>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
       <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
         <div>
           {!embedded && (
@@ -224,7 +253,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
           </div>
         )}
 
-        <UserPicker selectedId={selected?.id ?? null} onSelect={onSelect} />
+        <UserPicker value={selected?.id ?? ""} onSelect={onSelect} ariaLabel="Alege utilizatorul pentru grant" />
 
         {!selected && (
           <Card>
@@ -262,19 +291,34 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                       {activeGrants.map((g) => (
                         <tr key={g.id}>
                           <td className="px-3 py-2 align-top">
-                            <p className="font-mono text-xs">{g.userEmail ?? g.userId}</p>
-                            {g.userDisplayName && <p className="text-xs text-muted-foreground">{g.userDisplayName}</p>}
+                            <p className="font-mono text-xs">{g.email}</p>
+                            {g.displayName && <p className="text-xs text-muted-foreground">{g.displayName}</p>}
                           </td>
-                          <td className="px-3 py-2 align-top text-xs">{featureLabel(g.feature)}</td>
+                          <td className="px-3 py-2 align-top text-xs">{quotaFeatureLabel(g.feature)}</td>
                           <td className="px-3 py-2 align-top">{milliToUsd(g.extraUsdMilli)} $</td>
                           <td className="px-3 py-2 align-top text-xs text-muted-foreground">
                             {formatIsoDateTime(g.expiresAt)}
                           </td>
                           <td className="px-3 py-2 align-top text-xs text-muted-foreground">{g.reason ?? "—"}</td>
                           <td className="px-3 py-2 align-top text-right">
-                            <Button size="sm" variant="outline" onClick={() => selectFromActive(g.userId)}>
-                              Editeaza
-                            </Button>
+                            <div className="flex justify-end gap-1">
+                              <Button size="sm" variant="outline" onClick={() => selectFromActive(g.userId)}>
+                                Editeaza
+                              </Button>
+                              {/* Extra pastrat fata de referinta: revocare direct din
+                                  vederea globala, fara selectarea prealabila a userului. */}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => onRevoke(g, g.email)}
+                                disabled={busyId === g.id}
+                                aria-label={`Revoca grantul pentru ${g.email}`}
+                                title="Revoca grantul"
+                                className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
                           </td>
                         </tr>
                       ))}
@@ -303,7 +347,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                   </Badge>
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => loadGrants(selected.id)} disabled={loading}>
+                  <Button variant="outline" size="sm" onClick={refreshGrants} disabled={loading}>
                     <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
                     Reincarca
                   </Button>
@@ -321,16 +365,18 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="grant-feature">
                     Feature
                   </label>
-                  <select
-                    id="grant-feature"
-                    value={feature}
-                    onChange={(e) => setFeature(e.target.value)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    {/* v2.42.0: limita AI e un pool unic — grantul se adauga
-                        peste el. Captcha nu are granturi (alta unitate). */}
-                    <option value="ai">AI — toate analizele (limita unica)</option>
-                  </select>
+                  <Select value={feature} onValueChange={setFeature}>
+                    <SelectTrigger id="grant-feature">
+                      <SelectValue placeholder="Feature" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GRANTABLE_FEATURES.map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {quotaFeatureLabel(f)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="grant-extra">
@@ -373,27 +419,11 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </div>
-                <Button
-                  type="submit"
-                  disabled={
-                    busyId !== null || limitsByFeature[feature] === undefined || limitsByFeature[feature] === null
-                  }
-                  title={
-                    limitsByFeature[feature] === undefined || limitsByFeature[feature] === null
-                      ? "Bugetul pe acest feature e nelimitat — grantul nu ar avea efect."
-                      : undefined
-                  }
-                >
+                <Button type="submit" disabled={busyId !== null}>
                   <Plus className="h-4 w-4" />
                   Adauga
                 </Button>
               </form>
-              {(limitsByFeature[feature] === undefined || limitsByFeature[feature] === null) && (
-                <p className="text-sm text-amber-700 dark:text-amber-400">
-                  Bugetul pe "{featureLabel(feature)}" este nelimitat pentru acest user — grantul si nelimitatul se
-                  exclud reciproc. Seteaza intai o limita in tab-ul Cote, apoi acorda grantul.
-                </p>
-              )}
 
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -422,7 +452,7 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                       const expired = isExpired(g);
                       return (
                         <tr key={g.id} className="border-b border-border last:border-b-0 hover:bg-muted/30">
-                          <td className="px-3 py-2 align-top text-xs">{featureLabel(g.feature)}</td>
+                          <td className="px-3 py-2 align-top text-xs">{quotaFeatureLabel(g.feature)}</td>
                           <td className="px-3 py-2 align-top font-mono">${milliToUsd(g.extraUsdMilli)}</td>
                           <td className="px-3 py-2 align-top">
                             <Badge variant={state.variant}>{state.label}</Badge>
@@ -451,6 +481,8 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
                                 variant="ghost"
                                 onClick={() => onRevoke(g)}
                                 disabled={busyId === g.id}
+                                aria-label="Revoca grantul"
+                                title="Revoca grantul"
                                 className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                               >
                                 <Trash2 className="h-4 w-4" />

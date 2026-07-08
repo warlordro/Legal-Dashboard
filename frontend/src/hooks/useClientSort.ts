@@ -1,77 +1,75 @@
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 
-// v2.42.0 (Nivel 2 UX): sortare client-side pe coloane pentru tabelele care nu
-// au sortare server-side. Pe tabelele paginate pe server sorteaza PAGINA
-// CURENTA (header-ul o spune in title); pe seturile incarcate complet
-// (ex. Consum per utilizator) sorteaza tot setul.
+// v2.42.0 (6.8): sortare client-side pe coloane. Ciclu: neactiv -> asc ->
+// desc -> neactiv (revine la ordinea serverului). null/undefined/"" MEREU la
+// coada, indiferent de directie. Sort stabil prin index.
 //
-// Accessors: per cheie de coloana, o functie care extrage valoarea comparabila
-// (string | number | null). null/undefined se aseaza mereu la coada, indiferent
-// de directie. Stringurile se compara cu localeCompare (ro diacritics-safe).
+// Capcane inchise din review:
+//   - accessors se tin intr-un REF actualizat la fiecare render — memo-ul
+//     ramane pe [rows, sort] fara biome-ignore fragil, iar closure-ul folosit
+//     la sortare e mereu cel proaspat;
+//   - valoarea se extrage O DATA per rand (pre-map [valoare, rand, index]),
+//     nu de ~8x per comparatie.
 
 export type SortDir = "asc" | "desc";
 
-export interface ClientSort<K extends string> {
-  sortKey: K | null;
-  sortDir: SortDir;
-  toggle: (key: K) => void;
+export interface UseClientSortResult<T> {
+  sorted: T[];
+  sortKey: string | null;
+  sortDir: SortDir | null;
+  toggle: (key: string) => void;
 }
 
-function compareValues(a: string | number | null | undefined, b: string | number | null | undefined): number {
-  const aMissing = a === null || a === undefined || a === "";
-  const bMissing = b === null || b === undefined || b === "";
-  if (aMissing && bMissing) return 0;
-  if (aMissing) return 1; // lipsurile la coada
-  if (bMissing) return -1;
-  if (typeof a === "number" && typeof b === "number") return a - b;
-  return String(a).localeCompare(String(b), "ro", { numeric: true, sensitivity: "base" });
+function isEmptyValue(v: unknown): boolean {
+  return v === null || v === undefined || v === "";
 }
 
-export function useClientSort<T, K extends string>(
-  rows: T[],
-  accessors: Record<K, (row: T) => string | number | null | undefined>
-): { sorted: T[] } & ClientSort<K> {
-  const [sortKey, setSortKey] = useState<K | null>(null);
-  const [sortDir, setSortDir] = useState<SortDir>("asc");
-  // Review-panel: caller-ele paseaza obiecte inline (identitate noua la fiecare
-  // render). Ref-ul tine mereu ultima versiune fara sa intre in deps — memo-ul
-  // ramane pe [rows, sortKey, sortDir] si nu re-sorteaza degeaba, dar nici nu
-  // poate folosi accessors "inghetati".
+export function useClientSort<T>(
+  rows: readonly T[],
+  accessors: Record<string, (row: T) => unknown>
+): UseClientSortResult<T> {
+  const [sort, setSort] = useState<{ key: string; dir: SortDir } | null>(null);
+
   const accessorsRef = useRef(accessors);
   accessorsRef.current = accessors;
 
-  // Ciclu: neactiv -> asc -> desc -> neactiv (revine la ordinea serverului).
-  const toggle = (key: K) => {
-    if (sortKey !== key) {
-      setSortKey(key);
-      setSortDir("asc");
-    } else if (sortDir === "asc") {
-      setSortDir("desc");
-    } else {
-      setSortKey(null);
-      setSortDir("asc");
-    }
-  };
+  const toggle = useCallback((key: string) => {
+    setSort((prev) => {
+      if (prev === null || prev.key !== key) return { key, dir: "asc" };
+      if (prev.dir === "asc") return { key, dir: "desc" };
+      return null;
+    });
+  }, []);
 
   const sorted = useMemo(() => {
-    if (!sortKey) return rows;
-    const accessor = accessorsRef.current[sortKey];
-    if (!accessor) return rows;
-    const dir = sortDir === "asc" ? 1 : -1;
-    const isMissing = (v: string | number | null | undefined) => v === null || v === undefined || v === "";
-    // Sort stabil: la egalitate pastreaza ordinea venita de la server.
-    // Valoarea se extrage O SINGURA data per rand (review-panel: accessor-ul
-    // era apelat de pana la 8 ori per comparatie).
-    return rows
-      .map((row, i) => [accessor(row), row, i] as const)
-      .sort(([av, , ai], [bv, , bi]) => {
-        const cmp = compareValues(av, bv);
-        // Lipsurile raman la coada si pe desc: cmp-ul lor nu se inverseaza.
-        if (isMissing(av) || isMissing(bv)) return cmp !== 0 ? cmp : ai - bi;
-        return cmp !== 0 ? cmp * dir : ai - bi;
-      })
-      .map(([, row]) => row);
-  }, [rows, sortKey, sortDir]);
+    if (sort === null) return [...rows];
+    const accessor = accessorsRef.current[sort.key];
+    if (!accessor) return [...rows];
 
-  return { sorted, sortKey, sortDir, toggle };
+    const collator = new Intl.Collator("ro", { numeric: true, sensitivity: "base" });
+    const decorated = rows.map((row, index) => [accessor(row), row, index] as const);
+    decorated.sort((a, b) => {
+      const aEmpty = isEmptyValue(a[0]);
+      const bEmpty = isEmptyValue(b[0]);
+      if (aEmpty && bEmpty) return a[2] - b[2];
+      if (aEmpty) return 1;
+      if (bEmpty) return -1;
+      let cmp: number;
+      if (typeof a[0] === "number" && typeof b[0] === "number") {
+        cmp = a[0] - b[0];
+      } else {
+        cmp = collator.compare(String(a[0]), String(b[0]));
+      }
+      const oriented = sort.dir === "asc" ? cmp : -cmp;
+      return oriented !== 0 ? oriented : a[2] - b[2];
+    });
+    return decorated.map((d) => d[1]);
+  }, [rows, sort]);
+
+  return {
+    sorted,
+    sortKey: sort?.key ?? null,
+    sortDir: sort?.dir ?? null,
+    toggle,
+  };
 }

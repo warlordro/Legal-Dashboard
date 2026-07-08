@@ -20,37 +20,37 @@ declare module "hono" {
   }
 }
 
-// v2.34.0 P1-4: `captcha.rnpm` is also valid for `user_quota_overrides` but
-// uses count semantics (cap = numar de captcha-uri / fereastra), nu cost milli-USD.
-// `quotaGuard()` ramane AI-only (cite ai_usage); captcha quota se aplica in
-// `withRnpmCaptchaGuards` care citeste din `captcha_usage` cu acelasi tabel
-// `user_quota_overrides`.
-//
-// v2.42.0 (decizie user): limita AI e UNICA — feature-ul de cota "ai" acopera
-// toate analizele (single + multi) intr-un singur pool; migration 0041
-// consolideaza override-urile/granturile legacy ai.single/ai.multi.
+// v2.42.0 (5.2): pool AI UNIC. `user_quota_overrides` are un singur rand "ai"
+// per user; TIPUL apelului (ai.single/ai.multi) ramane doar pe randurile de
+// consum din `ai_usage` (cost estimat diferit), dar LIMITA se verifica mereu
+// pe pool-ul "ai" — suma acopera toate feature-urile AI istorice prin
+// quotaFeatureAliases("ai"). `captcha.rnpm` ramane cu semantica de count si se
+// aplica in `withRnpmCaptchaGuards`.
 export const QUOTA_FEATURES = ["ai", "captcha.rnpm"] as const;
 export type QuotaFeature = (typeof QUOTA_FEATURES)[number];
-// Feature-ul CONCRET al apelului (ramane pe randurile ai_usage + costuri
-// estimate diferite per tip de analiza); limita se verifica mereu pe "ai".
-export type AiQuotaFeature = "ai.single" | "ai.multi";
-const AI_POOL_FEATURE = "ai";
+// Tipul de apel AI — decide costul estimat si feature-ul randului de consum.
+export type AiCallKind = "ai.single" | "ai.multi";
+// Alias istoric: rutele AI il importa sub numele vechi.
+export type AiQuotaFeature = AiCallKind;
+
+const AI_POOL_FEATURE = "ai" as const;
 
 // v2.32.0 rolling window seconds per period. Locked in D15 — operatorul nu
 // alege secundele, doar perioada (day/week/month). 24h/7d/30d.
-// Exportat in v2.42.0 pentru GET /admin/usage/overview (aceeasi fereastra).
+// Exportat: usage/overview (5.3) TREBUIE sa foloseasca exact aceleasi constante
+// ca guard-ul, altfel cifrele din Consum divergeau de enforcement.
 export const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
   day: 86_400,
   week: 604_800,
   month: 2_592_000,
 };
 
-const FEATURE_ESTIMATED_COST_MILLI: Record<AiQuotaFeature, number> = {
+const FEATURE_ESTIMATED_COST_MILLI: Record<AiCallKind, number> = {
   "ai.single": 2_000,
   "ai.multi": 8_000,
 };
 
-function estimatedCostMilli(feature: AiQuotaFeature): number {
+function estimatedCostMilli(feature: AiCallKind): number {
   const rawMultiplier = process.env.LEGAL_DASHBOARD_QUOTA_ESTIMATE_MULTIPLIER;
   const multiplier =
     rawMultiplier === undefined || rawMultiplier === ""
@@ -71,20 +71,21 @@ function estimatedCostMilli(feature: AiQuotaFeature): number {
 // Multi-agent overshoot: this guard runs once per HTTP request; analyze-multi
 // can spend up to (N_analysts + 1) * max_call_cost above the limit before the
 // next request observes the new sum. PLAN §12 accepted tradeoff.
-// Exportat in v2.42.0: /admin/usage/overview aplica ACEEASI regula de limita
-// implicita ca guard-ul, ca cifrele din UI sa coincida cu enforcement-ul.
+// Exportat: baza grantului (admin.ts) si usage/overview (5.3) folosesc ACEEASI
+// regula — altfel tenantii care merg doar pe env-ul default nu pot acorda
+// granturi, iar cifrele din Consum mint.
 let warnedInvalidDefaultQuota = false;
 export function readDefaultQuotaMilli(): number | null {
   const raw = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
   if (raw === undefined || raw === "") return null;
   const parsed = Number(raw);
   if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) {
-    // Review-panel: un typo in env colapsa TACIT la "nelimitat" — operatorul
-    // credea ca are plafon si nu avea. Warn o singura data per proces.
+    // Env INVALID = warn O DATA per proces + tratat ca nelimitat (ghid 12) —
+    // nu silent: operatorul trebuie sa vada ca valoarea nu a fost aplicata.
     if (!warnedInvalidDefaultQuota) {
       warnedInvalidDefaultQuota = true;
       console.warn(
-        `[quota] LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI="${raw}" invalid (astept integer >= 0) — tratat ca NELIMITAT`
+        `[quotaGuard] LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI invalid ("${raw}") — tratat ca nelimitat (pass-through).`
       );
     }
     return null;
@@ -92,9 +93,10 @@ export function readDefaultQuotaMilli(): number | null {
   return parsed;
 }
 
-// Parametrul ramane in semnatura (documenteaza tipul apelului la ruta), dar
-// limita se verifica mereu pe pool-ul unic "ai".
-export function quotaGuard(_feature: AiQuotaFeature) {
+// v2.42.0 (5.2): guard-ul primeste TIPUL apelului (pentru randul de consum),
+// dar limita se citeste/insumeaza mereu pe pool-ul "ai" — override "ai",
+// granturi "ai", consum insumat pe TOATE feature-urile AI istorice (aliases).
+export function quotaGuard(feature: AiCallKind) {
   return async (c: Context, next: Next) => {
     if (getAuthMode() !== "web") return next();
     c.set("quotaFeature", AI_POOL_FEATURE);
@@ -115,17 +117,16 @@ export function quotaGuard(_feature: AiQuotaFeature) {
 
     // Grants active la baza limitei: append-only, fiecare grant adauga
     // extra_usd_milli pana la expirare. NU se aplica pe windowSeconds — sunt
-    // grants pe FEATURE per user, valabile pana la expires_at.
+    // grants pe pool per user, valabile pana la expires_at.
     const extraFromGrants = sumActiveExtraMilli(ownerId, AI_POOL_FEATURE);
     const effectiveLimit = baseLimit + extraFromGrants;
 
-    // Pool unic: consumul insumeaza TOATE apelurile AI (single + multi).
     const usedMilli = sumAiUsageMilliInWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
     // Explicit limit=0 always blocks (admin opt-in to deny-all). Otherwise we
     // block when spend equals or exceeds the cap. Grants nu pot "unblock" un
     // limit=0 fara grant: baseLimit=0+extra raman caz numeric normal.
     if (effectiveLimit === 0 || usedMilli >= effectiveLimit) {
-      const retryAfter = retryAfterSecondsForWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
+      const retryAfter = retryAfterSecondsForWindow(ownerId, windowSeconds);
       c.header("Retry-After", String(retryAfter));
       return c.json(
         fail(ErrorCodes.QUOTA_EXCEEDED, "Bugetul AI a fost depasit. Contacteaza adminul.", c, {
@@ -135,6 +136,7 @@ export function quotaGuard(_feature: AiQuotaFeature) {
           extraFromGrantsMilli: extraFromGrants,
           period,
           feature: AI_POOL_FEATURE,
+          callKind: feature,
           source: override ? "override" : "default",
         }),
         429
@@ -147,7 +149,7 @@ export function quotaGuard(_feature: AiQuotaFeature) {
 
 export function reserveQuotaBudget(
   c: Context,
-  feature: AiQuotaFeature,
+  feature: AiCallKind,
   provider: AiUsageProvider
 ): { ok: true; reservationId: number | null } | { ok: false; response: Response } {
   if (getAuthMode() !== "web") return { ok: true, reservationId: null };
@@ -174,6 +176,8 @@ export function reserveQuotaBudget(
         blocked = true;
         return;
       }
+      // Randul de consum pastreaza TIPUL apelului (ai.single/ai.multi) —
+      // pool-ul e doar politica de limita, nu granularitatea istoricului.
       reservationId = insertAiUsageReservation({
         ownerId,
         provider,
@@ -185,7 +189,7 @@ export function reserveQuotaBudget(
     .immediate();
 
   if (blocked) {
-    const retryAfter = retryAfterSecondsForWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
+    const retryAfter = retryAfterSecondsForWindow(ownerId, windowSeconds);
     c.header("Retry-After", String(retryAfter));
     return {
       ok: false,
@@ -198,6 +202,7 @@ export function reserveQuotaBudget(
           extraFromGrantsMilli: extraFromGrants,
           period,
           feature: AI_POOL_FEATURE,
+          callKind: feature,
           source: override ? "override" : "default",
         }),
         429
@@ -212,13 +217,8 @@ export function reserveQuotaBudget(
 // Retry-After corect pentru rolling window: cea mai veche ts care contribuie
 // la suma + windowSeconds = momentul cand iese din fereastra. Daca fereastra
 // e goala (improbabil daca am ajuns la blocaj), fallback la windowSeconds.
-function retryAfterSecondsForWindow(
-  ownerId: string,
-  feature: string,
-  windowSeconds: number,
-  now: Date = new Date()
-): number {
-  const earliest = earliestAiUsageTsInWindow(ownerId, feature, windowSeconds);
+function retryAfterSecondsForWindow(ownerId: string, windowSeconds: number, now: Date = new Date()): number {
+  const earliest = earliestAiUsageTsInWindow(ownerId, AI_POOL_FEATURE, windowSeconds);
   if (!earliest) return windowSeconds;
   const earliestMs = Date.parse(earliest);
   if (Number.isNaN(earliestMs)) return windowSeconds;

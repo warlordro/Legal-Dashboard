@@ -362,19 +362,22 @@ export function RnpmResultsTable({
       {result.searchId != null && (
         <div className="mb-3 space-y-2">
           <div className="flex items-center gap-2">
+            {/* v2.42.0 (6.6): tokens tematice in loc de gri hardcodat light. */}
             <input
               type="text"
               value={filterQuery}
               onChange={(e) => setFilterQuery(e.target.value)}
               placeholder="Filtreaza rezultatele (debitor, creditor, descriere bun, identificator...)"
               aria-label="Filtru text peste rezultatele cautarii RNPM"
-              className="w-full max-w-md rounded border border-input bg-background px-3 py-1 text-sm focus:border-primary focus:outline-none disabled:opacity-50"
+              className="w-full max-w-md rounded border border-input bg-background px-3 py-1 text-sm focus:border-primary focus:outline-none disabled:bg-muted"
               disabled={filter.disabled}
               maxLength={200}
             />
             {filter.loading && <span className="text-xs text-muted-foreground">Filtrez...</span>}
-            {filter.error && <span className="text-xs text-red-600">{filter.error}</span>}
-            {filter.disabled && <span className="text-xs text-amber-600">Filtru indisponibil temporar.</span>}
+            {filter.error && <span className="text-xs text-red-600 dark:text-red-400">{filter.error}</span>}
+            {filter.disabled && (
+              <span className="text-xs text-amber-600 dark:text-amber-400">Filtru indisponibil temporar.</span>
+            )}
           </div>
           {filter.data && (
             <div className="text-xs text-muted-foreground">

@@ -1,12 +1,9 @@
--- v2.42.0: limita AI devine POOL unic — feature-ul de cota "ai" acopera toate
--- analizele (single + multi). Consolidam datele legacy:
---
--- 1. Override-uri: daca userul nu are deja un rand 'ai', promovam randul ai.*
---    CEL MAI RESTRICTIV. Restrictivitatea se compara pe RATA ZILNICA
---    (limita / zilele perioadei: day=1, week=7, month=30), nu pe numarul brut
---    — altfel "900/luna" ar castiga in fata lui "1000/zi" desi e mult mai
---    LARG (CodeRabbit). NULL=nelimitat pierde in fata oricarei limite.
---    Principiul: cand consolidezi plafoane, nu largesti accidental bugetul.
+-- v2.42.0 (5.2): consolidarea pool-ului "ai" — o singura limita pentru toate
+-- tipurile de analiza AI.
+-- 1. Override-uri: promoveaza randul ai.* CEL MAI RESTRICTIV la 'ai'.
+--    Restrictivitatea se compara pe RATA ZILNICA (limita/zilele perioadei:
+--    day=1, week=7, month=30), NU pe numarul brut — altfel "900/luna" ar
+--    castiga in fata lui "1000/zi" desi e mult mai LARG. NULL pierde mereu.
 INSERT INTO user_quota_overrides (user_id, feature, period, limit_usd_milli, updated_at, updated_by)
 SELECT o.user_id, 'ai', o.period, o.limit_usd_milli, o.updated_at, o.updated_by
 FROM user_quota_overrides o
@@ -23,13 +20,9 @@ WHERE o.feature IN ('ai.single', 'ai.multi')
              y.rowid ASC
     LIMIT 1
   );
-
 DELETE FROM user_quota_overrides WHERE feature IN ('ai.single', 'ai.multi');
-
--- 2. Granturi: migreaza pe pool-ul unic (extra-ul ramane per grant, se aduna).
+-- 2. Granturi pe pool-ul unic (extra-ul se aduna per grant).
 UPDATE user_quota_grants SET feature = 'ai' WHERE feature IN ('ai.single', 'ai.multi');
-
--- 3. Starea de warning (banner 80% + email): episodele legacy per-feature nu
---    se pot combina deterministic — le stergem; daca pool-ul e inca peste
---    prag, warning-ul se rearma la urmatorul apel AI (fire + email).
+-- 3. Episoadele de warning legacy nu se pot combina deterministic — se sterg;
+--    warning-ul se rearma la urmatorul apel AI daca pool-ul e peste prag.
 DELETE FROM budget_notifications WHERE feature IN ('ai.single', 'ai.multi');

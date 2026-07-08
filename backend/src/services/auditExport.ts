@@ -1,74 +1,97 @@
+// v2.42.0 (5.4): raportul xlsx de audit. TOATE celulele trec prin safeCell
+// (escape de formule, INCLUSIV ip — 10.4c); owner/actor primesc etichete umane
+// "email — Nume" printr-un map batch-uit; detaliul e plafonat la 500 chars.
+
 import ExcelJS from "exceljs";
 import type { AuditRow } from "../db/auditRepository.ts";
+import { getUserById } from "../db/userRepository.ts";
 
-// v2.42.0: raport de audit descarcabil (xlsx) — generat server-side, ca
-// template-ul de import useri. Audit-ul e append-only: raportul e calea
-// legitima de a "lua" datele; stergerea NU exista (retention-ul automat de 90
-// de zile din scheduler ramane singura curatare).
-
-// Detail_json e deja plafonat la scriere (auditSanitize), dar re-plafonam la
-// randare ca celula sa ramana lizibila in Excel.
-const DETAIL_CELL_MAX = 500;
-
-// Aceeasi conventie ca alertsExportXlsx/dosareExportXlsx/rnpmExportXlsx:
-// celulele care incep cu caractere de formula primesc prefixul ' (aparare in
-// adancime — exceljs le scrie oricum ca text, dar o trecere viitoare la CSV
-// sau alta librarie nu trebuie sa redeschida vectorul).
 const FORMULA_PREFIX = /^[=+\-@\t\r]/;
-function safeCell(value: string): string {
-  return FORMULA_PREFIX.test(value) ? `'${value}` : value;
+export function safeCell(v: string): string {
+  return FORMULA_PREFIX.test(v) ? `'${v}` : v;
 }
 
-export async function buildAuditReportXlsx(
-  rows: AuditRow[],
-  meta: { since?: string; until?: string },
-  // id user -> eticheta umana ("email — Nume"); ID-urile brute (UUID) sunt
-  // inutile intr-un raport citit de om. Fallback: ID-ul, pentru useri stersi
-  // fizic sau evenimente system.
-  userLabels: Map<string, string> = new Map()
-): Promise<Buffer> {
-  const labelOf = (id: string | null): string => (id === null ? "system" : (userLabels.get(id) ?? id));
-  const wb = new ExcelJS.Workbook();
-  const ws = wb.addWorksheet("Audit");
-  ws.columns = [
-    { header: "Data (UTC)", key: "ts", width: 22 },
-    { header: "Actiune", key: "action", width: 34 },
-    { header: "Rezultat", key: "outcome", width: 10 },
-    { header: "Owner", key: "owner", width: 30 },
-    { header: "Actor", key: "actor", width: 30 },
-    { header: "Target", key: "target", width: 34 },
-    { header: "IP", key: "ip", width: 16 },
-    { header: "Request ID", key: "requestId", width: 30 },
-    { header: "Detalii", key: "detail", width: 80 },
-  ];
-  ws.getRow(1).font = { bold: true };
+const OUTCOME_RO: Record<string, string> = {
+  ok: "OK",
+  denied: "Refuzat",
+  error: "Eroare",
+};
 
-  for (const r of rows) {
-    const detail = r.detail_json ?? "";
-    ws.addRow({
-      ts: r.ts,
-      action: safeCell(r.action),
-      outcome: r.outcome,
-      // Placeholder UNIC pentru owner/actor null: "system" — identic cu UI-ul
-      // (CodeRabbit: exportul avea "system"/gol, pagina avea "-").
-      owner: safeCell(labelOf(r.owner_id)),
-      actor: safeCell(labelOf(r.actor_id)),
-      target: safeCell([r.target_kind, r.target_id].filter(Boolean).join(" / ")),
-      ip: safeCell(r.ip ?? ""),
-      requestId: safeCell(r.request_id ?? ""),
-      detail: safeCell(detail.length > DETAIL_CELL_MAX ? `${detail.slice(0, DETAIL_CELL_MAX)}…` : detail),
+// ACELASI placeholder ca in pagina de Audit pentru owner/actor NULL.
+export const AUDIT_SYSTEM_PLACEHOLDER = "system";
+const DETAIL_MAX_CHARS = 500;
+
+// Etichete umane batch-uite: un singur lookup per id distinct, nu per rand.
+function buildUserLabelMap(rows: AuditRow[]): Map<string, string> {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    if (row.owner_id !== null) ids.add(row.owner_id);
+    if (row.actor_id !== null) ids.add(row.actor_id);
+  }
+  const map = new Map<string, string>();
+  for (const id of ids) {
+    const user = getUserById(id);
+    map.set(id, user ? `${user.email} — ${user.display_name}` : id);
+  }
+  return map;
+}
+
+function userLabel(id: string | null, labels: Map<string, string>): string {
+  if (id === null) return AUDIT_SYSTEM_PLACEHOLDER;
+  return labels.get(id) ?? id;
+}
+
+function capDetail(detailJson: string): string {
+  if (detailJson.length <= DETAIL_MAX_CHARS) return detailJson;
+  return `${detailJson.slice(0, DETAIL_MAX_CHARS)}…`;
+}
+
+export async function buildAuditXlsx(
+  rows: AuditRow[],
+  interval: { since: string | null; until: string | null }
+): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+  const sheet = workbook.addWorksheet("Audit");
+  sheet.columns = [
+    { header: "Data", key: "ts", width: 24 },
+    { header: "Actiune", key: "action", width: 32 },
+    { header: "Rezultat", key: "outcome", width: 12 },
+    { header: "Owner", key: "owner", width: 36 },
+    { header: "Actor", key: "actor", width: 36 },
+    { header: "Target", key: "target", width: 28 },
+    { header: "IP", key: "ip", width: 16 },
+    { header: "RequestID", key: "requestId", width: 26 },
+    { header: "Detalii", key: "detail", width: 60 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+
+  const labels = buildUserLabelMap(rows);
+  for (const row of rows) {
+    const target =
+      row.target_kind !== null || row.target_id !== null ? `${row.target_kind ?? ""}:${row.target_id ?? ""}` : "";
+    sheet.addRow({
+      ts: safeCell(row.ts),
+      action: safeCell(row.action),
+      outcome: safeCell(OUTCOME_RO[row.outcome] ?? row.outcome),
+      owner: safeCell(userLabel(row.owner_id, labels)),
+      actor: safeCell(userLabel(row.actor_id, labels)),
+      target: safeCell(target),
+      ip: safeCell(row.ip ?? ""),
+      requestId: safeCell(row.request_id ?? ""),
+      detail: safeCell(capDetail(row.detail_json)),
     });
   }
 
-  const info = wb.addWorksheet("Raport");
-  info.columns = [{ width: 60 }];
-  info.addRows([
-    ["Raport audit Legal Dashboard"],
-    [`Interval: ${meta.since ?? "inceputul bazei"} -> ${meta.until ?? "prezent"}`],
-    [`Randuri: ${rows.length}`],
-    ["Nota: audit-ul e append-only; retention automat 90 de zile."],
-  ]);
+  const meta = workbook.addWorksheet("Interval");
+  meta.getColumn(1).width = 24;
+  meta.getColumn(2).width = 36;
+  meta.getCell("A1").value = "De la";
+  meta.getCell("B1").value = safeCell(interval.since ?? "inceput");
+  meta.getCell("A2").value = "Pana la";
+  meta.getCell("B2").value = safeCell(interval.until ?? "acum");
+  meta.getCell("A3").value = "Randuri";
+  meta.getCell("B3").value = rows.length;
 
-  const out = await wb.xlsx.writeBuffer();
-  return Buffer.from(out as unknown as ArrayBuffer);
+  const out = await workbook.xlsx.writeBuffer();
+  return Buffer.from(out as ArrayBuffer);
 }

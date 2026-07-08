@@ -4,9 +4,8 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import crypto from "node:crypto";
 import { closeDb, getDb } from "../db/schema.ts";
-import { setTenantKey } from "../db/tenantKeysRepository.ts";
+import { invalidateCache, setTenantKey } from "../db/tenantKeysRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { aiRouter } from "./ai.ts";
 
@@ -36,6 +35,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  invalidateCache();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
@@ -78,35 +78,6 @@ describe("AI settings routes", () => {
     expect(body.error.code).toBe("INVALID_PARAMS");
   });
 
-  // v2.42.0: fara alegere explicita, in web modul efectiv urmeaza cheile
-  // tenantului — un tenant doar-cu-OpenRouter primeste "openrouter" automat.
-  it("web fara alegere explicita: modul efectiv e openrouter cand tenantul are doar cheia OpenRouter", async () => {
-    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    process.env.TENANT_KEY_ENCRYPTION_SECRET = crypto.randomBytes(32).toString("base64");
-    setTenantKey("openrouter", "sk-or-v1-test-1234567890", "local");
-
-    const res = await buildApp().request("/api/v1/ai/settings");
-    expect(await res.json()).toEqual({ mode: "openrouter" });
-  });
-
-  it("alegerea explicita 'native' castiga peste auto-detect-ul pe cheia tenant", async () => {
-    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    // In web, mutatiile ca ownerul santinela "local" sunt blocate — folosim un owner real.
-    ownerId = "u-web-1";
-    process.env.TENANT_KEY_ENCRYPTION_SECRET = crypto.randomBytes(32).toString("base64");
-    setTenantKey("openrouter", "sk-or-v1-test-1234567890", "local");
-    const put = await buildApp().request("/api/v1/ai/settings", {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ mode: "native" }),
-    });
-    expect(put.status).toBe(200);
-    expect(await put.json()).toEqual({ mode: "native" });
-
-    const res = await buildApp().request("/api/v1/ai/settings");
-    expect(await res.json()).toEqual({ mode: "native" });
-  });
-
   it("keeps settings isolated per owner", async () => {
     await buildApp().request("/api/v1/ai/settings", {
       method: "PUT",
@@ -115,6 +86,55 @@ describe("AI settings routes", () => {
     });
 
     ownerId = "other";
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "native" });
+  });
+});
+
+describe("rutare AI implicita (resolveEffectiveAiMode, v2.41.0)", () => {
+  function enableTenantOpenrouter() {
+    process.env.TENANT_KEY_ENCRYPTION_SECRET = Buffer.alloc(32, 7).toString("base64");
+    invalidateCache();
+    setTenantKey("openrouter", "sk-or-v1-tenant-cheie-de-test", "admin-test");
+  }
+
+  it("web fara alegere explicita + cheie OpenRouter tenant -> mode efectiv openrouter", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    enableTenantOpenrouter();
+
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "openrouter" });
+  });
+
+  it("alegerea explicita native are prioritate peste auto-detect", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    // ownerGuard rezerva "local" pentru desktop; in web scriem ca user real.
+    ownerId = "user-web-1";
+    enableTenantOpenrouter();
+    await buildApp().request("/api/v1/ai/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "native" }),
+    });
+
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "native" });
+  });
+
+  it("web fara cheie OpenRouter tenant -> fallback native", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.TENANT_KEY_ENCRYPTION_SECRET = Buffer.alloc(32, 7).toString("base64");
+    invalidateCache();
+
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "native" });
+  });
+
+  it("desktop nu auto-detecteaza (ramane native fara alegere)", async () => {
+    // Cheia OpenRouter tenant EXISTA — testul demonstreaza ca desktop-ul o
+    // ignora (fara seed, testul ar trece si daca verificarea de mod ar lipsi).
+    enableTenantOpenrouter();
+
     const res = await buildApp().request("/api/v1/ai/settings");
     expect(await res.json()).toEqual({ mode: "native" });
   });

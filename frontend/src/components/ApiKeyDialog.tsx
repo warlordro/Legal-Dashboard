@@ -1,18 +1,17 @@
 import { useState } from "react";
 import { Key, X } from "lucide-react";
-import { useNavigate } from "react-router-dom";
 import { AIUsagePanel } from "@/components/AIUsagePanel";
-import { TenantKeyStatusPanel } from "@/components/TenantKeyStatusPanel";
 import { ApiAccessPanel } from "@/components/ApiAccessPanel";
 import { EmailSettingsPanel } from "@/components/EmailSettingsPanel";
 import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
+import { TenantKeyStatusPanel } from "@/components/TenantKeyStatusPanel";
 import { isWebRuntime } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
+import { useAuthMode } from "@/hooks/useAuthMode";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import type { useApiKey } from "@/hooks/useApiKey";
 import type { useAiSettings } from "@/hooks/useAiSettings";
-import type { TenantKeys } from "@/hooks/useTenantKeyStatus";
 
 type UseApiKey = ReturnType<typeof useApiKey>;
 
@@ -22,7 +21,6 @@ type UseApiKey = ReturnType<typeof useApiKey>;
 // avoiding a one-frame flash of stale input.
 interface Props {
   onClose: () => void;
-  tenantKeys: TenantKeys;
   apiKey: Pick<
     UseApiKey,
     | "setKey"
@@ -43,9 +41,9 @@ interface Props {
 
 const EMPTY = { anthropic: "", openai: "", google: "", openrouter: "", twocaptcha: "", capsolver: "" };
 
-export function ApiKeyDialog({ onClose, tenantKeys, apiKey }: Props) {
+export function ApiKeyDialog({ onClose, apiKey }: Props) {
+  const authMode = useAuthMode();
   const { user } = useCurrentUser();
-  const navigate = useNavigate();
   const {
     setKey,
     clearKey,
@@ -65,22 +63,12 @@ export function ApiKeyDialog({ onClose, tenantKeys, apiKey }: Props) {
   const [keyInputs, setKeyInputs] = useState(EMPTY);
   const dialogRef = useDialog<HTMLDivElement>(true, onClose);
 
-  // Tenant mode (serverul a confirmat auth_mode=web): cheile sunt ale
-  // tenantului — TOTI userii vad dialogul (pana in v2.41.0 non-adminii primeau
-  // un no-op silentios), dar formularul BYOK nu se randeaza niciodata: salvarea
-  // safeStorage nu exista in browser (esua silentios) si cheile ramase in state
-  // ajungeau in body => 501 WEB_MODE_NOT_IMPLEMENTED pe rutele AI.
-  const tenantMode = tenantKeys.tenantMode;
-  const isAdmin = user?.role === "admin";
-  // Notificarile native sunt capabilitate Electron — sectiunea dispare complet
-  // in browser (decizie user 2026-07-03), nu mai afisam "Indisponibil in browser".
-  const isBrowser = isWebRuntime();
-  // In browser cu key-status inca necunoscut (loading/error) NU randam formularul
-  // BYOK: pe un server web real ar contrazice invariantul F3.4 (formular care
-  // minte ca salveaza local), iar noi nu putem distinge inca de dev combo-ul
-  // "browser + backend desktop". Panou neutru pana la un raspuns ready.
-  const tenantStatusUnknown =
-    isBrowser && (tenantKeys.status.state === "loading" || tenantKeys.status.state === "error");
+  // In web mode cheile sunt ale tenantului (server-side); dialogul NU arata
+  // niciodata inputuri BYOK. Non-adminul vede panourile personale (consum AI,
+  // notificari, email) + bannerul de chei lipsa — inainte primea un dialog
+  // complet gol (return null) desi butonul "Setari API" era clickabil.
+  const isWeb = authMode === "web";
+  const isWebAdmin = isWeb && user?.role === "admin";
 
   const handleSaveKeys = () => {
     if (keyInputs.anthropic.trim()) setKey("anthropic", keyInputs.anthropic);
@@ -128,75 +116,57 @@ export function ApiKeyDialog({ onClose, tenantKeys, apiKey }: Props) {
             <X className="h-4 w-4" />
           </button>
         </div>
-        {!tenantMode && !tenantStatusUnknown && (
-          <p className="mb-4 text-sm text-muted-foreground">
-            Introdu cheile API pentru furnizorii AI pe care doresti sa ii folosesti. Poti configura unul sau mai multi.
-          </p>
-        )}
+        <p className="mb-4 text-sm text-muted-foreground">
+          {isWeb
+            ? "Cheile API sunt configurate de administrator la nivel de organizatie. Mai jos vezi ce este disponibil."
+            : "Introdu cheile API pentru furnizorii AI pe care doresti sa ii folosesti. Poti configura unul sau mai multi."}
+        </p>
 
         <AIUsagePanel />
-        {!isBrowser && <NotificationStatusPanel />}
+        <NotificationStatusPanel />
         <EmailSettingsPanel />
-        {/* Acces API (PAT) — web tenant mode, DOAR admin (decizie user 2026-07-03). */}
-        {tenantMode && isAdmin && <ApiAccessPanel />}
+        {/* Web: statusul cheilor tenant (inventar pentru admin, banner pentru
+            non-admin cand lipsesc chei), NICIODATA BYOK. */}
+        {isWeb && <TenantKeyStatusPanel />}
+        {/* Acces API (PAT) — web-only; management DOAR admin in web mode (v2.41).
+            In dev-combo (browser + backend desktop) ramane vizibil ca inainte. */}
+        {isWebRuntime() && (!isWeb || isWebAdmin) && <ApiAccessPanel />}
 
-        {tenantStatusUnknown ? (
-          <div className="mb-3 rounded-lg border border-border p-3">
-            {tenantKeys.status.state === "error" ? (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                Starea cheilor nu a putut fi incarcata.
-                <Button variant="outline" size="sm" onClick={tenantKeys.refresh}>
-                  Reincearca
-                </Button>
-              </div>
-            ) : (
-              <p className="text-sm text-muted-foreground">Se verifica starea cheilor...</p>
-            )}
+        {/* AI config zone: routing + provider keys grouped vizual */}
+        <div className="mb-3 rounded-lg border border-border p-3">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="text-sm font-medium">Rutare AI</span>
+            {aiSettings.error && <span className="text-[11px] text-red-600">{aiSettings.error}</span>}
           </div>
-        ) : tenantMode ? (
-          <TenantKeyStatusPanel
-            tenantKeys={tenantKeys}
-            isAdmin={isAdmin}
-            onManageKeys={() => {
-              onClose();
-              navigate("/setari?tab=chei");
-            }}
-          />
-        ) : (
-          <>
-            {/* AI config zone: routing + provider keys grouped vizual */}
-            <div className="mb-3 rounded-lg border border-border p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="text-sm font-medium">Rutare AI</span>
-                {aiSettings.error && <span className="text-[11px] text-red-600">{aiSettings.error}</span>}
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <button
-                  type="button"
-                  onClick={() => aiSettings.setMode("native")}
-                  className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-                    aiSettings.mode === "native"
-                      ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300"
-                      : "border-border bg-background text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  Native
-                </button>
-                <button
-                  type="button"
-                  onClick={() => aiSettings.setMode("openrouter")}
-                  className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
-                    aiSettings.mode === "openrouter"
-                      ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300"
-                      : "border-border bg-background text-muted-foreground hover:bg-muted"
-                  }`}
-                >
-                  OpenRouter
-                </button>
-              </div>
-            </div>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              onClick={() => aiSettings.setMode("native")}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                aiSettings.mode === "native"
+                  ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              Native
+            </button>
+            <button
+              type="button"
+              onClick={() => aiSettings.setMode("openrouter")}
+              className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
+                aiSettings.mode === "openrouter"
+                  ? "border-violet-500 bg-violet-500/10 text-violet-700 dark:text-violet-300"
+                  : "border-border bg-background text-muted-foreground hover:bg-muted"
+              }`}
+            >
+              OpenRouter
+            </button>
+          </div>
+        </div>
 
-            {/* AI providers — side-by-side */}
+        {/* AI providers + captcha (BYOK) — DOAR desktop; in web cheile sunt tenant. */}
+        {!isWeb && (
+          <>
             {aiSettings.mode === "native" ? (
               <div className="mb-3 grid grid-cols-3 gap-3">
                 <div className="rounded-lg border border-border p-3">
@@ -424,32 +394,28 @@ export function ApiKeyDialog({ onClose, tenantKeys, apiKey }: Props) {
                 <p className="mt-1.5 text-[11px] text-muted-foreground">~$0.0008/captcha, AI-based.</p>
               </div>
             </div>
-
-            <div className="flex gap-2 justify-end mt-4">
-              <Button variant="outline" size="sm" onClick={onClose}>
-                {hasKey ? "Inchide" : "Mai tarziu"}
-              </Button>
-              <Button
-                size="sm"
-                className="bg-violet-600 hover:bg-violet-700 text-white"
-                onClick={handleSaveKeys}
-                disabled={noInput}
-              >
-                Salveaza
-              </Button>
-            </div>
-            <p className="mt-3 text-[11px] text-muted-foreground">
-              Cheile se salveaza doar local pe calculatorul tau si sunt trimise doar catre API-urile respective.
-            </p>
           </>
         )}
 
-        {(tenantMode || tenantStatusUnknown) && (
-          <div className="mt-4 flex justify-end">
-            <Button variant="outline" size="sm" onClick={onClose}>
-              Inchide
+        <div className="flex gap-2 justify-end mt-4">
+          <Button variant="outline" size="sm" onClick={onClose}>
+            {isWeb || hasKey ? "Inchide" : "Mai tarziu"}
+          </Button>
+          {!isWeb && (
+            <Button
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={handleSaveKeys}
+              disabled={noInput}
+            >
+              Salveaza
             </Button>
-          </div>
+          )}
+        </div>
+        {!isWeb && (
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Cheile se salveaza doar local pe calculatorul tau si sunt trimise doar catre API-urile respective.
+          </p>
         )}
       </div>
     </div>

@@ -8,12 +8,10 @@ const FOCUSABLE_SELECTOR =
 // ref so the caller can attach it to the dialog root.
 export function useDialog<T extends HTMLElement = HTMLDivElement>(open: boolean, onClose: () => void) {
   const ref = useRef<T | null>(null);
-  // Review-panel (Nivel 2): onClose e aproape mereu o closure recreata la
-  // fiecare render al caller-ului; cu onClose in deps, efectul se demonta si
-  // remonta la fiecare tasta apasata in dialog — cleanup-ul restaura focusul
-  // in pagina, apoi setup-ul il smulgea inapoi pe primul element focusabil
-  // (inputurile de date deveneau inutilizabile). Ref-ul decupleaza identitatea
-  // functiei de ciclul de viata al efectului: efectul depinde DOAR de `open`.
+
+  // v2.42.0 (6.4/10.4a): onClose sta intr-un ref actualizat la fiecare render,
+  // iar efectul depinde DOAR de [open]. Altfel o closure recreata la render
+  // demonta/remonta efectul la fiecare apasare si muta focusul din inputuri.
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
 

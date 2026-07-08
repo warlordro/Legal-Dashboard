@@ -53,31 +53,6 @@ function assertIsoString(label: string, value: string): void {
   }
 }
 
-// v2.41.0: vedere globala pentru pagina admin Granturi — toate granturile
-// ACTIVE (nerevocate, neexpirate), cu identitatea userului atasata, ca pagina
-// sa le arate la deschidere fara cautarea prealabila a unui user.
-export interface QuotaGrantWithUserRow extends QuotaGrantRow {
-  user_email: string | null;
-  user_display_name: string | null;
-}
-
-export function listAllActiveGrants(limit = 500): QuotaGrantWithUserRow[] {
-  const boundedLimit = Math.max(1, Math.min(500, Math.floor(limit)));
-  return getDb()
-    .prepare(
-      `SELECT g.id, g.user_id, g.feature, g.extra_usd_milli, g.expires_at, g.reason,
-              g.granted_at, g.granted_by, g.revoked_at, g.revoked_by, g.revoked_reason,
-              u.email AS user_email, u.display_name AS user_display_name
-       FROM user_quota_grants g
-       LEFT JOIN users u ON u.id = g.user_id
-       WHERE g.revoked_at IS NULL
-         AND g.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
-       ORDER BY g.expires_at ASC, g.id ASC
-       LIMIT ?`
-    )
-    .all(boundedLimit) as QuotaGrantWithUserRow[];
-}
-
 export function listGrantsForUser(userId: string, limit = 200): QuotaGrantRow[] {
   const boundedLimit = Math.max(1, Math.min(200, Math.floor(limit)));
   return getDb()
@@ -108,6 +83,35 @@ export function listActiveGrants(userId: string, feature: string): QuotaGrantRow
     .all(userId, feature) as QuotaGrantRow[];
 }
 
+// v2.41.0 (P5): vederea globala din pagina Granturi — toate granturile ACTIVE
+// (nerevocate si neexpirate) cu identitatea userului. Cap 500 + truncated in
+// ruta, ca la listAllOverrides. Comparatia de expirare foloseste acelasi
+// strftime ISO ca listActiveGrants (vezi comentariul de mai sus).
+export const ALL_ACTIVE_GRANTS_CAP = 500;
+
+export interface QuotaGrantWithUserRow extends QuotaGrantRow {
+  email: string;
+  display_name: string;
+  role: string;
+  status: string;
+}
+
+export function listAllActiveGrants(limit = ALL_ACTIVE_GRANTS_CAP): QuotaGrantWithUserRow[] {
+  const boundedLimit = Math.max(1, Math.min(ALL_ACTIVE_GRANTS_CAP, Math.floor(limit)));
+  return getDb()
+    .prepare(
+      `SELECT g.${COLUMNS.split(", ").join(", g.")},
+              u.email, u.display_name, u.role, u.status
+       FROM user_quota_grants g
+       JOIN users u ON u.id = g.user_id
+       WHERE g.revoked_at IS NULL
+         AND g.expires_at > strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+       ORDER BY g.expires_at ASC, g.id ASC
+       LIMIT ?`
+    )
+    .all(boundedLimit) as QuotaGrantWithUserRow[];
+}
+
 export function getGrant(id: number): QuotaGrantRow | null {
   const row = getDb().prepare(`SELECT ${COLUMNS} FROM user_quota_grants WHERE id = ?`).get(id) as
     | QuotaGrantRow
@@ -122,11 +126,10 @@ export function createGrant(input: CreateGrantInput): QuotaGrantRow {
   if (!input.grantedBy || input.grantedBy.length === 0) {
     throw new Error("invalid granted_by: must be non-empty string");
   }
-  // CodeRabbit (confirmat): schema API accepta ISO cu offset (+02:00), dar
-  // predicatele de "grant activ" compara stringuri cu boundary UTC — un
-  // offset ne-normalizat ar strica comparatia lexicografica. Stocam mereu
-  // forma UTC canonica.
-  const expiresAtUtc = new Date(input.expiresAt).toISOString();
+  // v2.42.0 (10.2b): normalizare la UTC LA SCRIERE. Predicatele de "grant
+  // activ" compara TEXT cu boundary `...Z`; un ISO cu offset stocat brut ar fi
+  // misclasificat in fereastra offsetului. Randurile legacy: migration 0042.
+  const expiresAtUtc = new Date(Date.parse(input.expiresAt)).toISOString();
   const db = getDb();
   const info = db
     .prepare(

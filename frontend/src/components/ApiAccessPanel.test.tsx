@@ -36,18 +36,6 @@ const mockedRevokeAll = vi.mocked(revokeAllApiTokens);
 let container: HTMLDivElement;
 let root: Root;
 
-// v2.42.0: confirmarea foloseste dialogul aplicatiei (ConfirmProvider), nu
-// window.confirm — testele randeaza cu providerul, ca App.tsx.
-function panelUi() {
-  return (
-    <ConfirmProvider>
-      <ToastProvider>
-        <ApiAccessPanel />
-      </ToastProvider>
-    </ConfirmProvider>
-  );
-}
-
 beforeEach(() => {
   container = document.createElement("div");
   document.body.appendChild(container);
@@ -66,10 +54,34 @@ async function flush() {
   });
 }
 
+// v2.42.0 (6.2/6.3): panoul foloseste useConfirm SI useToast — ambii provideri
+// obligatorii.
+function panel() {
+  return (
+    <ConfirmProvider>
+      <ToastProvider>
+        <ApiAccessPanel />
+      </ToastProvider>
+    </ConfirmProvider>
+  );
+}
+
+// Confirmarea se cauta in [role=alertdialog] — dialogul partajat e randat de
+// provider, NU se compara referinte de functii.
+function confirmDialogButton(pattern: RegExp): HTMLButtonElement {
+  const dialog = document.querySelector('[role="alertdialog"]');
+  if (!dialog) throw new Error("Dialogul de confirmare nu e deschis");
+  const button = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((candidate) =>
+    pattern.test(candidate.textContent ?? "")
+  );
+  if (!button) throw new Error(`Buton lipsa in dialog: ${String(pattern)}`);
+  return button;
+}
+
 describe("ApiAccessPanel", () => {
   it("loads and renders the owner's tokens", async () => {
     await act(async () => {
-      root.render(panelUi());
+      root.render(panel());
     });
     await flush();
     expect(container.textContent).toContain("mcp-token");
@@ -79,7 +91,7 @@ describe("ApiAccessPanel", () => {
 
   it("toggles the create form when the create button is clicked", async () => {
     await act(async () => {
-      root.render(panelUi());
+      root.render(panel());
     });
     await flush();
     const createBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Creeaza token");
@@ -93,7 +105,7 @@ describe("ApiAccessPanel", () => {
   it("shows an error message when a revoke fails (no silent swallow)", async () => {
     mockedRevoke.mockRejectedValueOnce(new Error("network"));
     await act(async () => {
-      root.render(panelUi());
+      root.render(panel());
     });
     await flush();
     const revokeBtn = container.querySelector('[aria-label="Revoca mcp-token"]') as HTMLButtonElement;
@@ -108,7 +120,7 @@ describe("ApiAccessPanel", () => {
   it("does NOT show the empty-state copy after a failed initial load", async () => {
     mockedList.mockRejectedValueOnce(new Error("network"));
     await act(async () => {
-      root.render(panelUi());
+      root.render(panel());
     });
     await flush();
     expect(container.textContent).not.toContain("Niciun token");
@@ -117,7 +129,7 @@ describe("ApiAccessPanel", () => {
 
   it("does NOT revoke-all when the confirmation is cancelled", async () => {
     await act(async () => {
-      root.render(panelUi());
+      root.render(panel());
     });
     await flush();
     const revokeAllBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Revoca toate");
@@ -125,19 +137,16 @@ describe("ApiAccessPanel", () => {
       revokeAllBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
-    // Dialogul aplicatiei e deschis; anularea nu apeleaza API-ul.
-    const cancelBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Anuleaza");
-    expect(cancelBtn).toBeTruthy();
     await act(async () => {
-      cancelBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      confirmDialogButton(/Anuleaza/i).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
     expect(mockedRevokeAll).not.toHaveBeenCalled();
   });
 
-  it("revokes all tokens after the confirmation is accepted", async () => {
+  it("revoke-all ruleaza dupa confirmarea din [role=alertdialog]", async () => {
     await act(async () => {
-      root.render(panelUi());
+      root.render(panel());
     });
     await flush();
     const revokeAllBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Revoca toate");
@@ -145,16 +154,8 @@ describe("ApiAccessPanel", () => {
       revokeAllBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
-    // Cauta in dialogul de confirmare, nu prin inegalitate de referinta cu
-    // butonul din pagina (CodeRabbit): scoping-ul pe rol e neambiguu.
-    const dialog = container.querySelector('[role="alertdialog"]');
-    expect(dialog).toBeTruthy();
-    const confirmBtn = Array.from(dialog?.querySelectorAll("button") ?? []).find(
-      (b) => b.textContent === "Revoca toate"
-    );
-    expect(confirmBtn).toBeTruthy();
     await act(async () => {
-      confirmBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+      confirmDialogButton(/Revoca toate/i).dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
     expect(mockedRevokeAll).toHaveBeenCalledTimes(1);

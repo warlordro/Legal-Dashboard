@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 
+// v2.41.0: stocarea trece de la INDEX de treapta la VALOAREA px — un array de
+// trepte care se schimba intre versiuni invalideaza indexii salvati, dar un px
+// ramane stabil semantic. Valorile legacy 0..3 (vechiul array de 4 trepte) se
+// mapeaza prin LEGACY_INDEX_PX ca alegerile existente sa nu se piarda.
 const STORAGE_KEY = "portaljust-font-size";
-// v2.41.0: pana la acest release effect-ul de mount persista automat step-ul
-// curent, deci userii web au "1" (18px) scris in storage fara sa-l fi ales.
-// Flag-ul marcheaza resetul one-time pe web ca noul default (16px) sa se aplice.
-const WEB_MIGRATION_KEY = "portaljust-font-size-migrated-v241";
+const MIGRATION_KEY = "portaljust-font-size-migrated-v241";
 const STEPS = [
   { label: "Foarte mic", value: 14 },
   { label: "Mic", value: 16 },
@@ -12,55 +13,54 @@ const STEPS = [
   { label: "Mare", value: 20 },
   { label: "Extra", value: 22 },
 ];
-
-// Pre-v2.41.0 preferinta se stoca drept INDEX in vechiul array [16,18,20,22].
-// Acum se stocheaza valoarea px — imun la modificari viitoare ale listei.
 const LEGACY_INDEX_PX = [16, 18, 20, 22];
 
-const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
+function isDesktopRuntime(): boolean {
+  return typeof window !== "undefined" && window.desktopApi !== undefined;
+}
 
-// Desktop: Normal (18px) — compensat vizual de zoom-ul 0.9 aplicat de Electron
-// la primul launch (main.js). Web: Mic (16px) — baseline browser, fara zoom.
-const DEFAULT_STEP = STEPS.findIndex((s) => s.value === (isDesktop ? 18 : 16));
+// Desktop pastreaza default-ul istoric (18px); in browser UI-ul e dimensionat
+// pentru 16px — 18px era una din cauzele "tot UI-ul e marit" raportate pe web.
+function defaultPx(): number {
+  return isDesktopRuntime() ? 18 : 16;
+}
 
-function migrateWebAutoPersistedValue() {
-  if (isDesktop) return;
+// Migrare one-time (web): vechiul hook persista default-ul ("1" = index 18px)
+// la fiecare mount, deci prezenta lui in storage NU inseamna alegere explicita.
+// Stergem DOAR valoarea auto-persistata de vechiul default ("1" sau "18");
+// orice alta valoare e o alegere reala (Mic/Mare/Extra) si SE PASTREAZA.
+function migrateAutoPersistedDefault(): void {
+  if (isDesktopRuntime()) return;
   try {
-    if (localStorage.getItem(WEB_MIGRATION_KEY) !== null) return;
-    // CodeRabbit (PR #65): sterge DOAR valoarea auto-persistata de vechiul
-    // default (index legacy "1" = 18px). Orice alta valoare inseamna ca userul
-    // a ales explicit alta treapta (Mic/Mare/Extra) — alegerea se pastreaza.
+    if (localStorage.getItem(MIGRATION_KEY) !== null) return;
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved === "1" || saved === "18") {
       localStorage.removeItem(STORAGE_KEY);
     }
-    localStorage.setItem(WEB_MIGRATION_KEY, "1");
+    localStorage.setItem(MIGRATION_KEY, "1");
   } catch {
-    /* localStorage unavailable — nothing to migrate */
+    /* localStorage unavailable (private mode / quota); nothing to migrate */
   }
 }
 
-function loadStep(): number {
-  // Ordinea conteaza: migrarea ruleaza inainte de citire, altfel valoarea
-  // auto-persistata veche ar fi onorata inaintea noului default.
-  migrateWebAutoPersistedValue();
+function loadPx(): number {
   try {
+    migrateAutoPersistedDefault();
     const saved = localStorage.getItem(STORAGE_KEY);
     if (saved !== null) {
       const n = Number(saved);
-      // Format curent: valoare px (14/16/18/20/22).
-      const byValue = STEPS.findIndex((s) => s.value === n);
-      if (byValue >= 0) return byValue;
-      // Format legacy: index 0..3 in vechiul array — mapat la px-ul de atunci,
-      // ca "Normal 18px" salvat pe desktop sa ramana 18px si dupa extinderea listei.
-      if (Number.isInteger(n) && n >= 0 && n < LEGACY_INDEX_PX.length) {
-        return STEPS.findIndex((s) => s.value === LEGACY_INDEX_PX[n]);
-      }
+      if (Number.isInteger(n) && n >= 0 && n < LEGACY_INDEX_PX.length) return LEGACY_INDEX_PX[n];
+      if (STEPS.some((s) => s.value === n)) return n;
     }
   } catch {
     /* localStorage unavailable (private mode / quota); use default */
   }
-  return DEFAULT_STEP;
+  return defaultPx();
+}
+
+function pxToStep(px: number): number {
+  const idx = STEPS.findIndex((s) => s.value === px);
+  return idx === -1 ? STEPS.findIndex((s) => s.value === defaultPx()) : idx;
 }
 
 function applyFontSize(step: number) {
@@ -68,30 +68,38 @@ function applyFontSize(step: number) {
 }
 
 export function useFontSize() {
-  const [step, setStepState] = useState(loadStep);
-  // Persistam DOAR alegerile explicite ale userului; default-urile nealese nu
-  // se scriu in storage (auto-persist-ul de mount ingheta vechiul default).
+  const [step, setStepState] = useState(() => pxToStep(loadPx()));
+  // Persistam DOAR la alegere explicita: efectul de mount aplica font-size-ul
+  // dar nu scrie storage — altfel default-ul devine "alegere" si migrarile
+  // viitoare nu mai pot distinge intre ele (exact bug-ul reparat mai sus).
   const userChangedRef = useRef(false);
 
   useEffect(() => {
     applyFontSize(step);
     if (!userChangedRef.current) return;
     try {
-      // Se stocheaza px-ul, nu indexul (vezi LEGACY_INDEX_PX).
       localStorage.setItem(STORAGE_KEY, String(STEPS[step].value));
     } catch {
-      /* quota / private mode — ramane doar in memorie */
+      /* localStorage unavailable; font-size-ul ramane aplicat pe sesiune */
     }
   }, [step]);
 
-  const setStep: typeof setStepState = (value) => {
+  const setStep = (i: number) => {
     userChangedRef.current = true;
-    setStepState(value);
+    setStepState(Math.min(Math.max(i, 0), STEPS.length - 1));
   };
-
-  const increase = () => setStep((s) => Math.min(s + 1, STEPS.length - 1));
-  const decrease = () => setStep((s) => Math.max(s - 1, 0));
-  const cycle = () => setStep((s) => (s + 1) % STEPS.length);
+  const increase = () => {
+    userChangedRef.current = true;
+    setStepState((s) => Math.min(s + 1, STEPS.length - 1));
+  };
+  const decrease = () => {
+    userChangedRef.current = true;
+    setStepState((s) => Math.max(s - 1, 0));
+  };
+  const cycle = () => {
+    userChangedRef.current = true;
+    setStepState((s) => (s + 1) % STEPS.length);
+  };
 
   return {
     step,

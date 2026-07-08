@@ -11,14 +11,14 @@ export type UserStatus = "active" | "suspended" | "deleted";
 export const USER_ROLES: readonly UserRole[] = ["user", "admin", "support", "readonly"];
 export const USER_STATUSES: readonly UserStatus[] = ["active", "suspended", "deleted"];
 
-// v2.42.0: rolurile care pot fi CREATE din UI (individual + import bulk).
-// support/readonly exista in enum dar nu au consumatori la creare — un rand de
-// import cu alt rol e respins ca invalid, nu acceptat silentios.
-export const CREATABLE_USER_ROLES = ["user", "admin"] as const satisfies readonly UserRole[];
+// v2.42.0 (4.1): support/readonly raman in enum (randuri istorice valide) dar
+// NU pot fi create din UI/import.
+export const CREATABLE_USER_ROLES = ["user", "admin"] as const;
+export type CreatableUserRole = (typeof CREATABLE_USER_ROLES)[number];
 
-// Canonicalizatorul UNIC de email — folosit identic la creare (individual +
-// import), la seed si in lookup-ul bridge-ului oauth2. Divergenta intre cai ar
-// insemna useri creati corect care nu se pot loga.
+// UNICUL normalizator de email — folosit IDENTIC la creare individuala, import,
+// seed si in bridge-ul oauth2 (lookup pe X-Forwarded-Email). Divergenta intre
+// cai = useri creati care nu se pot loga.
 export function canonicalizeEmail(raw: string): string {
   return raw.trim().toLowerCase();
 }
@@ -80,11 +80,9 @@ function buildWhere(opts: ListUsersOpts): { sql: string; params: (string | numbe
     where.push("status = ?");
     params.push(opts.status);
   } else {
-    // v2.42.0: fara filtru explicit, userii stersi (soft delete) NU apar —
-    // raman in DB pentru audit/cote si se vad doar cerand status=deleted.
-    // Efect secundar corect: guard-ul "ultimul admin" nu mai numara adminii
-    // stersi ca admini ramasi (inainte, un rand deleted putea debloca gresit
-    // demotarea ultimului admin real).
+    // v2.42.0 (4.1): fara filtru explicit de status, soft-deleted NU apar in
+    // listari (raman in DB pentru audit). Efect corect in lant: guard-ul
+    // "ultimul admin" nu numara adminii stersi.
     where.push("status != 'deleted'");
   }
   return {
@@ -118,8 +116,8 @@ export function getUserById(id: string): UserRow | null {
 }
 
 export function getUserByEmail(email: string): UserRow | null {
-  // COLLATE NOCASE: defense-in-depth peste canonicalizeEmail — un rand istoric
-  // mixed-case nu poate ocoli lookup-ul (indexul unique 0040 e tot NOCASE).
+  // COLLATE NOCASE: aceeasi semantica cu indexul unic idx_users_email_nocase
+  // (0040) — lookup-ul si garantia de unicitate nu pot diverge.
   const row = getDb().prepare(`SELECT ${COLUMNS} FROM users WHERE email = ? COLLATE NOCASE`).get(email) as
     | UserRow
     | undefined;
@@ -152,6 +150,56 @@ export function updateUserStatus(id: string, status: UserStatus): UserRow {
   return getUserById(id) as UserRow;
 }
 
+// Fix review v2.42.0: invariantul ">=1 admin activ" se verifica IN ACEEASI
+// tranzactie cu write-ul si acopera ORICE admin, nu doar self. Guard-ul vechi
+// de ruta avea doua lipsuri: (1) nu exista deloc check pe actiunile cross-admin
+// si (2) intre requireRole (autorizarea actorului) si write sta await-ul de
+// body — doua cereri reciproce (A suspenda B, B suspenda A) treceau amandoua
+// de autorizare cand ambii erau inca activi si comiteau ambele write-uri =>
+// 0 admini activi (lockout pe toata suprafata admin). Numaratoarea in
+// tranzactie sincrona better-sqlite3 inchide ambele.
+export class LastAdminError extends Error {
+  constructor(id: string) {
+    super(`last active admin: ${id}`);
+    this.name = "LastAdminError";
+  }
+}
+
+function assertNotLastActiveAdmin(id: string): void {
+  const row = getDb()
+    .prepare("SELECT COUNT(*) AS n FROM users WHERE role = 'admin' AND status = 'active' AND id != ?")
+    .get(id) as { n: number };
+  if (row.n === 0) throw new LastAdminError(id);
+}
+
+export function updateUserRoleChecked(id: string, role: UserRole): UserRow {
+  if (!USER_ROLES.includes(role)) throw new Error(`invalid role: ${role}`);
+  const db = getDb();
+  db.transaction(() => {
+    const before = getUserById(id);
+    if (before === null) throw new Error(`user not found: ${id}`);
+    if (before.role === "admin" && before.status === "active" && role !== "admin") {
+      assertNotLastActiveAdmin(id);
+    }
+    db.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
+  }).immediate();
+  return getUserById(id) as UserRow;
+}
+
+export function updateUserStatusChecked(id: string, status: UserStatus): UserRow {
+  if (!USER_STATUSES.includes(status)) throw new Error(`invalid status: ${status}`);
+  const db = getDb();
+  db.transaction(() => {
+    const before = getUserById(id);
+    if (before === null) throw new Error(`user not found: ${id}`);
+    if (before.role === "admin" && before.status === "active" && status !== "active") {
+      assertNotLastActiveAdmin(id);
+    }
+    db.prepare("UPDATE users SET status = ? WHERE id = ?").run(status, id);
+  }).immediate();
+  return getUserById(id) as UserRow;
+}
+
 // Convenience for tests / first-login flows. Caller is responsible for ID
 // generation policy (today: 'local' on desktop; PR-9 will mint UUIDs).
 export interface InsertUserInput {
@@ -177,37 +225,84 @@ export function insertUser(input: InsertUserInput): UserRow {
   return getUserById(input.id) as UserRow;
 }
 
-// v2.42.0: violarea indexului unique 0040 (email NOCASE) — folosita de rutele
-// de creare ca sa mapeze race-ul concurent la "duplicat" (409), nu la 500.
-export function isUniqueEmailViolation(err: unknown): boolean {
-  return (
-    err instanceof Error &&
-    "code" in err &&
-    (err as { code?: string }).code === "SQLITE_CONSTRAINT_UNIQUE" &&
-    err.message.includes("users.email")
-  );
+// v2.42.0 (4.1): creare in masa (import Excel) — o singura tranzactie sincrona
+// better-sqlite3: ori intra toate randurile, ori niciunul. Rolul se re-valideaza
+// contra CREATABLE in interior (defensiv fata de orice apelant viitor).
+export interface BulkUserInput {
+  id: string;
+  email: string;
+  displayName: string;
+  role: CreatableUserRole;
 }
 
-// v2.42.0: insert bulk pentru importul din xlsx — O SINGURA tranzactie
-// sincrona (fara await inauntru). Orice eroare (inclusiv UNIQUE pe un race
-// concurent) face rollback complet: raportul nu minte cu `created` partial.
-export function insertUsersBulk(rows: InsertUserInput[]): void {
+// v2.42.0: soft-delete NU blocheaza re-provisionarea. Indexul unic NOCASE
+// interzice un rand nou cu acelasi email, deci "re-adaugarea" unui email sters
+// = reactivarea randului existent (status -> active, nume/rol din input,
+// password_hash curatat — fara credentiale vechi reziduale). Identitatea (id)
+// se pastreaza, deci istoricul de audit/cote/granturi ramane legat de cont.
+// Statusurile activ/suspendat raman duplicate — doar "sters" e re-provisionabil.
+export interface ReactivateUserInput {
+  id: string;
+  displayName: string;
+  role: CreatableUserRole;
+}
+
+const REACTIVATE_SQL = `UPDATE users SET status = 'active', display_name = ?, role = ?, password_hash = NULL
+   WHERE id = ? AND status = 'deleted'`;
+
+export function reactivateDeletedUser(input: ReactivateUserInput): UserRow {
+  if (!CREATABLE_USER_ROLES.includes(input.role)) {
+    throw new Error(`invalid creatable role: ${input.role}`);
+  }
+  const result = getDb().prepare(REACTIVATE_SQL).run(input.displayName, input.role, input.id);
+  if (result.changes === 0) {
+    // Statusul s-a schimbat intre check si update (alt admin) — apelantul
+    // trateaza ca duplicat.
+    throw new Error(`user not deleted: ${input.id}`);
+  }
+  return getUserById(input.id) as UserRow;
+}
+
+// Import: insert-urile si reactivarile intr-O SINGURA tranzactie — ori intra
+// tot raportul, ori nimic (promisiunea rutei la coliziune concurenta).
+export function provisionUsersBulk(input: {
+  inserts: readonly BulkUserInput[];
+  reactivations: readonly ReactivateUserInput[];
+}): void {
   const db = getDb();
-  const stmt = db.prepare(
+  const insertStmt = db.prepare(
     `INSERT INTO users (id, email, password_hash, display_name, role, status)
      VALUES (?, ?, NULL, ?, ?, 'active')`
   );
-  const run = db.transaction((batch: InsertUserInput[]) => {
-    for (const r of batch) {
-      const role: UserRole = r.role ?? "user";
-      // CodeRabbit (confirmat): importul creeaza DOAR roluri din whitelist —
-      // validarea pe USER_ROLES complet ar fi lasat support/readonly sa
-      // treaca daca ruta ar scapa vreodata validarea de schema.
-      if (!(CREATABLE_USER_ROLES as readonly UserRole[]).includes(role)) {
-        throw new Error(`invalid role: ${role}`);
+  const reactivateStmt = db.prepare(REACTIVATE_SQL);
+  const runAll = db.transaction(() => {
+    for (const row of input.inserts) {
+      if (!CREATABLE_USER_ROLES.includes(row.role)) {
+        throw new Error(`invalid creatable role: ${row.role}`);
       }
-      stmt.run(r.id, r.email, r.displayName, role);
+      insertStmt.run(row.id, canonicalizeEmail(row.email), row.displayName, row.role);
+    }
+    for (const row of input.reactivations) {
+      if (!CREATABLE_USER_ROLES.includes(row.role)) {
+        throw new Error(`invalid creatable role: ${row.role}`);
+      }
+      const result = reactivateStmt.run(row.displayName, row.role, row.id);
+      if (result.changes === 0) {
+        throw new Error(`user not deleted: ${row.id}`);
+      }
     }
   });
-  run(rows);
+  runAll();
+}
+
+// Colisiune pe unicitatea emailului — apelantul o mapeaza pe 409. Doua surse:
+// UNIQUE-ul case-sensitive din DDL-ul tabelei (0002, "users.email") si indexul
+// case-insensitive idx_users_email_nocase (0040).
+export function isUniqueEmailViolation(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const code = (err as { code?: string }).code ?? "";
+  return (
+    code.startsWith("SQLITE_CONSTRAINT") &&
+    (err.message.includes("idx_users_email_nocase") || err.message.includes("users.email"))
+  );
 }

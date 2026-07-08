@@ -46,7 +46,9 @@ export function JobKindTabs({
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className="inline-flex rounded-md border border-input bg-background p-0.5"
+      // h-9 = aceeasi inaltime cu Input-ul de langa (bara de filtre) — altfel
+      // grupul iese mai scund decat casuta de cautare.
+      className="inline-flex h-9 items-stretch rounded-md border border-input bg-background p-0.5"
     >
       {TABS.map(({ key, label }, idx) => {
         const active = value === key;
@@ -63,7 +65,7 @@ export function JobKindTabs({
             onClick={() => onChange(key)}
             onKeyDown={(e) => handleKeyDown(e, idx)}
             className={cn(
-              "rounded px-3 py-1 text-xs font-medium transition-colors",
+              "inline-flex items-center rounded px-3 text-xs font-medium transition-colors",
               active
                 ? "bg-primary text-primary-foreground"
                 : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"

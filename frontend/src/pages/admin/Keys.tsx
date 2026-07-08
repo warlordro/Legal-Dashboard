@@ -24,18 +24,14 @@ const PROVIDERS: Array<{ value: TenantCaptchaProvider; label: string }> = [
   { value: "capsolver", label: "CapSolver" },
 ];
 
+// v2.42.0 (6.5): etichete umane — Secvential / Race (in paralel).
 const MODES: Array<{ value: TenantCaptchaMode; label: string }> = [
   { value: "sequential", label: "Secvential" },
   { value: "race", label: "Race (in paralel)" },
 ];
 
-function modeLabel(mode: TenantCaptchaMode): string {
-  return MODES.find((m) => m.value === mode)?.label ?? mode;
-}
-
-function providerLabel(provider: TenantCaptchaProvider): string {
-  return PROVIDERS.find((p) => p.value === provider)?.label ?? provider;
-}
+const providerLabel = (value: TenantCaptchaProvider): string =>
+  PROVIDERS.find((p) => p.value === value)?.label ?? value;
 
 export default function AdminKeys({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
@@ -51,30 +47,38 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
   });
   const [provider, setProvider] = useState<TenantCaptchaProvider>("2captcha");
   const [mode, setMode] = useState<TenantCaptchaMode>("sequential");
+  // Selectia NESALVATA a toggle-urilor nu are voie sa fie suprascrisa de un
+  // refresh fara legatura (ex. salvarea unei chei AI re-fetch-uieste `data`,
+  // iar sincronizarea reseta toggle-ul pe valoarea din server — userul alegea
+  // CapSolver si se trezea inapoi pe 2Captcha). Sincronizam din server doar
+  // cat timp userul nu a atins toggle-urile; dupa "Salveaza captcha" reluam.
+  const [captchaDirty, setCaptchaDirty] = useState(false);
 
   const currentProvider = data?.captcha.provider ?? provider;
   const currentMode = data?.captcha.mode ?? mode;
 
   useEffect(() => {
-    if (!data) return;
+    if (!data || captchaDirty) return;
     setProvider(data.captcha.provider);
     setMode(data.captcha.mode);
-  }, [data]);
+  }, [data, captchaDirty]);
 
-  const onSaveKey = async (field: TenantKeyField, label: string) => {
+  // v2.42.0 (6.3): toast DOAR pe succes; erorile raman in banner (saveKey arunca).
+  const onSaveKey = async (field: TenantKeyField) => {
+    const label = KEY_FIELDS.find((k) => k.field === field)?.label ?? field;
     try {
       await saveKey(field, inputs[field]);
+      setInputs((prev) => ({ ...prev, [field]: "" }));
+      toast(`Cheia ${label} a fost salvata.`, { variant: "success" });
     } catch {
-      return; // eroarea e deja afisata in bannerul hook-ului
+      /* eroarea e afisata in banner */
     }
-    setInputs((prev) => ({ ...prev, [field]: "" }));
-    toast(`Cheia ${label} a fost salvata.`, { variant: "success" });
   };
 
-  // Stergerea unei chei opreste instant functionalitatea (AI/RNPM) pentru TOTI
-  // userii tenantului si valoarea nu poate fi recuperata din server — confirm
-  // obligatoriu, la fel ca celelalte actiuni distructive din admin.
-  const onClearKey = async (field: TenantKeyField, label: string) => {
+  // v2.42.0 (6.2): stergerea unei chei tenant e destructiva pentru TOTI userii
+  // — confirmare obligatorie prin dialogul partajat.
+  const onClearKey = async (field: TenantKeyField) => {
+    const label = KEY_FIELDS.find((k) => k.field === field)?.label ?? field;
     const ok = await confirm({
       title: "Sterge cheia",
       message: `Stergi cheia ${label}? Functionalitatile care o folosesc devin indisponibile pentru toti utilizatorii pana la introducerea unei chei noi.`,
@@ -84,23 +88,25 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
     if (!ok) return;
     try {
       await saveKey(field, "");
+      toast(`Cheia ${label} a fost stearsa.`, { variant: "success" });
     } catch {
-      return;
+      /* banner */
     }
-    toast(`Cheia ${label} a fost stearsa.`, { variant: "success" });
   };
 
   const onSaveCaptcha = async () => {
     try {
       await saveCaptchaSettings(provider, mode);
+      // Salvat -> valoarea locala coincide cu serverul; reluam sincronizarea.
+      setCaptchaDirty(false);
+      toast("Setarile captcha au fost salvate.", { variant: "success" });
     } catch {
-      return;
+      /* banner */
     }
-    toast("Setarile captcha au fost salvate.", { variant: "success" });
   };
 
   return (
-    <div className={embedded ? "" : "min-h-full bg-background p-6"}>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
       <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
@@ -154,14 +160,14 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                     className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                   />
                   <div className="flex items-center gap-2">
-                    <Button size="sm" onClick={() => onSaveKey(field, label)} disabled={busy || !inputs[field].trim()}>
+                    <Button size="sm" onClick={() => onSaveKey(field)} disabled={busy || !inputs[field].trim()}>
                       <Save className="h-4 w-4" />
                       Salveaza
                     </Button>
                     <Button
                       size="sm"
                       variant="outline"
-                      onClick={() => onClearKey(field, label)}
+                      onClick={() => onClearKey(field)}
                       disabled={busy || !status?.set}
                     >
                       <Trash2 className="h-4 w-4" />
@@ -186,7 +192,10 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   <button
                     key={item.value}
                     type="button"
-                    onClick={() => setProvider(item.value)}
+                    onClick={() => {
+                      setProvider(item.value);
+                      setCaptchaDirty(true);
+                    }}
                     className={cn(
                       "rounded px-3 py-1.5 text-sm transition-colors",
                       provider === item.value ? "bg-primary text-primary-foreground" : "text-muted-foreground"
@@ -205,7 +214,10 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   <button
                     key={item.value}
                     type="button"
-                    onClick={() => setMode(item.value)}
+                    onClick={() => {
+                      setMode(item.value);
+                      setCaptchaDirty(true);
+                    }}
                     className={cn(
                       "rounded px-3 py-1.5 text-sm transition-colors",
                       mode === item.value ? "bg-primary text-primary-foreground" : "text-muted-foreground"
@@ -215,7 +227,7 @@ export default function AdminKeys({ embedded = false }: { embedded?: boolean } =
                   </button>
                 ))}
               </div>
-              <Badge variant="outline">{modeLabel(currentMode)}</Badge>
+              <Badge variant="outline">{MODES.find((m) => m.value === currentMode)?.label ?? currentMode}</Badge>
             </div>
             <Button onClick={onSaveCaptcha} disabled={savingField === "captcha"}>
               <Save className="h-4 w-4" />

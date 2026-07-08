@@ -1,5 +1,47 @@
 # Changelog - Legal Dashboard
 
+## v2.42.0 - 2026-07-08
+
+Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode). Etapa 2 din corectiile post-testare web (PLAN-web-ux-etapa2.md), pe branch-ul `feat/v2.42.0-users-settings`. Starea finala e sincronizata din implementarea paralela de pe GitLab (`GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`), care a inclus si fixuri post-livrare din testarea reala pe deployment-ul web. Modul desktop: zero impact.
+
+### Utilizatori: provisionare din UI
+
+Migratia `0040` adauga index unic NOCASE pe email + `canonicalizeEmail` ca UNIC normalizator (creare, import, seed, bridge oauth2). `POST /users` creeaza utilizatori individual (roluri creabile: doar Utilizator/Admin); import in masa din xlsx cu template generat server-side, parsare server-side (header exact, aliasuri de rol, dedup in fisier, duplicate din DB raportate per rand, cap 500 randuri / 512KB), insert tranzactional totul-sau-nimic. Guard last-admin numai pe adminii ACTIVI (un admin suspendat nu mai conteaza ca fallback). Post-livrare: un cont STERS nu mai blocheaza emailul pe veci — re-adaugarea (create sau import) REACTIVEAZA randul existent (acelasi id, nume/rol din input, password_hash curatat, audit `reactivated: true`); activ/suspendat raman duplicate.
+
+### Setari pe taburi + pool AI unic
+
+Pagina `/setari` pe taburi cu gating pe rol (General pentru toti; Utilizatori/Chei API/Cote/Granturi/Consum/Audit doar admin), tab activ in `?tab=` cu `replace:true`, paginile admin refolosite cu prop `embedded`. `useCurrentUser` rescris ca store partajat (`useSyncExternalStore`). Migratiile `0041` (consolidare `ai.single`+`ai.multi` -> pool unic "ai") si `0042` (backfill expirari legacy la UTC); `quotaGuard` aplica limita pe pool-ul unic (single + multi insumate); granturile si nelimitatul se exclud (422 `unlimited_budget`, baza include default-ul din env); `POST /grants/:id/revoke` + `/me/budget` pe "ai".
+
+### Consum per utilizator + audit utilizabil
+
+`GET /usage/overview` (AI + captcha per utilizator, EXACT aceleasi functii ca guard-urile — cifrele coincid cu enforcementul), tab Consum cu sub-taburi AI/Captcha, totaluri per user (zilnic/saptamanal/total) cu rand expandabil + total tenant, QuotaCard cu echivalent EUR (fail-closed pe curs stale; parserul ECB accepta si atribute cu apostrofuri), sortare client-side (`useClientSort` + `SortableTh`) si paginare client-side cu clamp sincronizat. Audit imbogatit cu emailul owner/actor (ID-ul brut in title, fallback ID/"system"), filtre pe pattern-ul corect (debounce cu flush pe Reseteaza, reset pagina inline, AbortController cu guards, refreshTick), paginare completa 25-200 si raport XLSX care respecta TOATE filtrele paginii (`GET /audit/export`, 413 peste 10000 randuri, escape formula-injection inclusiv pe IP, nume fisier datat).
+
+### AI: Sonnet 5 + prompturi system/user
+
+Claude Sonnet 4.6 -> Sonnet 5 (`claude-sonnet-5`, OpenRouter `anthropic/claude-sonnet-5`, pricing 3/15 USD per 1M). `AiPrompt { system, user }` separa instructiunile de datele dosarului (fence cu escape pe obiect/parti/sedinte/analize/nume model); helper comun `dosar_data` cu cap 30 sedinte + total declarat, campurile ICCJ si caile de atac (`caiAtac`) incluse.
+
+### Finisaj UX Nivel 1 + 2
+
+Chunk-reload la deploy (sessionStorage in try/catch), confirmari pe TOATE actiunile ireversibile prin `ConfirmProvider` (stergere cheie tenant, inchidere alerta, bulk dismiss cu count real, revoke-all tokens, rol/status, cota, grant — zero `window.confirm`), etichete umane din surse unice (`monitoringRunStatus`, `userLabels`, `quotaFeatureLabels`, `auditOutcome`), dark mode fara scapari, sistem de toast-uri in-house (`ToastProvider`, cap 4 cu evictie FIFO, timere curatate la unmount) adoptat pe toate mutatiile + toast de EROARE pe exporturile PDF Changelog/Manual (inainte esuau silentios), fix critic `useDialog` (onClose in ref, efect doar pe `[open]` — nu mai fura focusul), modalele de export pe `useDialog`, sortare pe coloane in Users/Audit/Monitorizare pe etichetele umane.
+
+### Fixuri din testarea reala pe web
+
+Popover-ele de istoric functionale cu sidebar-ul restrans (position:fixed vs clipping), `Cache-Control` explicit pe static (no-cache pe HTML, immutable pe /assets — browserul nu mai serveste bundle-uri vechi dupa rebuild), select-urile native inlocuite cu componenta Select custom (popup tematizat pe dark), reset formular cota la schimbarea feature-ului, badge PJ lizibil (culoare proprie, 10px) si absent pe intrarile RNPM, titluri de alerta fara ghilimele in jurul numelui monitorizat (normalizare si pe titlurile istorice, la afisare), JobKindTabs la aceeasi inaltime cu inputul de cautare, panoul Notificari sistem ascuns in browser, aria-sort + aria-label pe coloanele sortabile, `LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1` in mediul local de dev (tokenurile API erau blocate de cerinta HTTPS pe HTTP local).
+
+### Verificare
+
+Gate-uri complete inainte de commit (biome, tsc backend + frontend, build, teste). 1665 teste backend (+ reactivare useri stersi, usage/overview, quotaGuard pool unic, import, audit export, down 0040/0042) si 326 teste frontend (+ toast timere, useDialog focus, useClientSort, Keys/ApiAccessPanel cu provideri). Claim-uri CodeRabbit verificate individual (acceptate cu dovezi sau respinse cu argumente).
+
+### Note de upgrade
+
+Consolidarea cotelor AI (migration 0041) pastreaza RATA CEA MAI RESTRICTIVA
+dintre ai.single si ai.multi ca limita a pool-ului unic "ai". Utilizatorii care
+aveau limite asimetrice (ex. multi mult peste single) pot vedea 429 pe analiza
+multi-agent dupa upgrade — adminul trebuie sa revada limitele in pagina Cote si
+sa le reaseze la valorile dorite. Inainte de upgrade pe un tenant web, ruleaza
+pre-flight-ul de duplicate de email (migration 0040 opreste boot-ul pe
+duplicate istorice case-insensitive).
+
 ## v2.41.0 - 2026-07-04
 
 Etapa 1 din corectiile post-testare web (PLAN-web-ux-fixes.md): layout-ul in browser, conectarea frontend-ului la cheile tenant si UX-ul paginii de cote. Diagnostic prin doua workflow-uri multi-agent cu verificare in cod; planul a trecut printr-un review adversarial multi-model (review-panel: Opus 4.8 + GPT-5.5 + Kimi K2.7 + Qwen3.7, sinteza Fable 5) — 3 findings High + 8 Medium integrate inainte de implementare. Zero schimbari Docker/Caddy/oauth2-proxy; desktop-ul ramane identic.

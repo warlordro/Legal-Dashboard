@@ -132,6 +132,19 @@ export function recordAudit(c: Context | null, action: string, options: AuditOpt
     );
 }
 
+// Varianta pentru site-urile POST-mutatie: mutatia e deja comisa in DB, deci
+// un esec al scrierii de audit nu are voie sa transforme succesul intr-un 500
+// mincinos (clientul ar retria o operatie deja reusita). Logam structurat si
+// continuam. Pentru audit-urile pre-raspuns (denied/blocked) ramane
+// recordAudit — acolo nu exista mutatie comisa de protejat.
+export function recordAuditSafe(c: Context | null, action: string, options: AuditOptions = {}): void {
+  try {
+    recordAudit(c, action, options);
+  } catch (err) {
+    console.error(`[audit] write failed for ${action}:`, err instanceof Error ? err.message : err);
+  }
+}
+
 // Read helpers — used by tests today, by future admin UI later. Owner-scoped
 // by default; `null` ownerId returns system-level events (matches DDL where
 // owner_id is nullable for system events like 'system.boot').
@@ -321,26 +334,23 @@ export function purgeOldAuditLog(retentionDays = 90): number {
   return total;
 }
 
-// v2.42.0: raport exportabil (pagina admin Audit) — interval sau toata baza.
-// Cap dur pe randuri: peste, caller-ul raspunde 413 cu totalul (adminul
-// ingusteaza intervalul). Ordinea e CRONOLOGICA (ASC) — e un raport, nu un feed.
+// v2.42.0 (5.4): export xlsx — COUNT intai; peste cap NU incarcam niciun rand
+// (fara OOM pe intervale uriase), altfel randuri ASC cu LIMIT defensiv.
 export const AUDIT_EXPORT_MAX_ROWS = 10_000;
 
-export function listAuditEventsForExport(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {
+export type AuditExportRows = { ok: true; rows: AuditRow[] } | { ok: false; total: number };
+
+export function listAuditEventsForExport(opts: Omit<ListAuditEventsOpts, "limit" | "offset"> = {}): AuditExportRows {
   const db = getDb();
   const { sql: whereSql, params } = buildAuditWhere(opts);
   const totalRow = db.prepare(`SELECT COUNT(*) AS n FROM audit_log ${whereSql}`).get(...params) as { n: number };
   if (totalRow.n > AUDIT_EXPORT_MAX_ROWS) {
-    return { rows: [], total: totalRow.n };
+    return { ok: false, total: totalRow.n };
   }
   const rows = db
-    .prepare(
-      `SELECT * FROM audit_log ${whereSql}
-       ORDER BY ts ASC, id ASC
-       LIMIT ?`
-    )
+    .prepare(`SELECT * FROM audit_log ${whereSql} ORDER BY ts ASC, id ASC LIMIT ?`)
     .all(...params, AUDIT_EXPORT_MAX_ROWS) as AuditRow[];
-  return { rows, total: totalRow.n };
+  return { ok: true, rows };
 }
 
 export function listAuditEvents(opts: ListAuditEventsOpts = {}): ListAuditEventsResult {

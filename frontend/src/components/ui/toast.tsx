@@ -1,21 +1,23 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Info, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 
-// v2.42.0 (Nivel 2 UX): strat de notificari trecatoare — pana acum succesul
-// mutatiilor era implicit (refetch), iar unele erori fire-and-forget erau
-// complet tacute (doar console.error). Provider propriu pe pattern-ul
-// ConfirmProvider: fara dependenta externa, tematizat, aria-live.
+// v2.42.0 (6.3): sistem de toast-uri in-house, fara dependenta, pe pattern-ul
+// ConfirmProvider. Variante success/error/info; auto-dismiss 4s (7s la error);
+// cap 4 vizibile cu evictie FIFO; container aria-live="polite" bottom-right.
+//
+// Capcane inchise din review:
+//   - TOATE timerele se curata la unmount (cleanup pe Map-ul de timere);
+//   - la evictie prin cap, clearTimeout pe toast-urile scoase;
+//   - dismiss-ul manual curata timerul propriu.
 
 export type ToastVariant = "success" | "error" | "info";
 
 export interface ToastOptions {
   variant?: ToastVariant;
-  /** ms pana la auto-inchidere; erorile stau implicit mai mult */
+  // Suprascrie durata de auto-dismiss (ms). Default: 4000 / 7000 la error.
   durationMs?: number;
 }
-
-type ToastFn = (message: string, opts?: ToastOptions) => void;
 
 interface ToastItem {
   id: number;
@@ -23,17 +25,21 @@ interface ToastItem {
   variant: ToastVariant;
 }
 
+type ToastFn = (message: string, options?: ToastOptions) => void;
+
 const ToastContext = createContext<ToastFn | null>(null);
 
 export function useToast(): ToastFn {
-  const ctx = useContext(ToastContext);
-  if (!ctx) throw new Error("useToast must be used within <ToastProvider>");
-  return ctx;
+  const fn = useContext(ToastContext);
+  if (fn === null) {
+    throw new Error("useToast trebuie apelat sub <ToastProvider>");
+  }
+  return fn;
 }
 
-const DEFAULT_DURATION_MS = 4000;
-const ERROR_DURATION_MS = 7000;
 const MAX_VISIBLE = 4;
+const DURATION_MS = 4000;
+const DURATION_ERROR_MS = 7000;
 
 const VARIANT_STYLES: Record<ToastVariant, string> = {
   success: "border-green-300 bg-green-50 text-green-800 dark:border-green-800 dark:bg-green-950/60 dark:text-green-300",
@@ -41,20 +47,20 @@ const VARIANT_STYLES: Record<ToastVariant, string> = {
   info: "border-border bg-card text-foreground",
 };
 
-function VariantIcon({ variant }: { variant: ToastVariant }) {
-  if (variant === "success") return <CheckCircle2 className="h-4 w-4 shrink-0" />;
-  if (variant === "error") return <AlertTriangle className="h-4 w-4 shrink-0" />;
-  return <Info className="h-4 w-4 shrink-0" />;
-}
+const VARIANT_ICONS: Record<ToastVariant, typeof Info> = {
+  success: CheckCircle2,
+  error: AlertTriangle,
+  info: Info,
+};
 
-export function ToastProvider({ children }: { children: ReactNode }) {
+export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
   const nextId = useRef(1);
   const timers = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
   const clearTimer = useCallback((id: number) => {
     const timer = timers.current.get(id);
-    if (timer) {
+    if (timer !== undefined) {
       clearTimeout(timer);
       timers.current.delete(id);
     }
@@ -69,30 +75,27 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   );
 
   const toast = useCallback<ToastFn>(
-    (message, opts) => {
-      const variant = opts?.variant ?? "info";
+    (message, options = {}) => {
+      const variant = options.variant ?? "info";
       const id = nextId.current++;
-      // Cap defensiv: pastram doar ultimele MAX_VISIBLE; timerele celor
-      // evacuate se curata (review-panel: altfel ramaneau in Map pana la fire).
-      // clearTimer e idempotent, deci dubla invocare a updater-ului in
-      // StrictMode (dev) e inofensiva.
       setToasts((prev) => {
         const next = [...prev, { id, message, variant }];
-        const evicted = next.length > MAX_VISIBLE ? next.splice(0, next.length - MAX_VISIBLE) : [];
+        // Evictie prin cap: cele mai vechi ies — cu timerul curatat.
+        const evicted = next.slice(0, Math.max(0, next.length - MAX_VISIBLE));
         for (const t of evicted) clearTimer(t.id);
-        return next;
+        return next.slice(-MAX_VISIBLE);
       });
-      const duration = opts?.durationMs ?? (variant === "error" ? ERROR_DURATION_MS : DEFAULT_DURATION_MS);
+      const duration = options.durationMs ?? (variant === "error" ? DURATION_ERROR_MS : DURATION_MS);
       timers.current.set(
         id,
         setTimeout(() => dismiss(id), duration)
       );
     },
-    [dismiss, clearTimer]
+    [clearTimer, dismiss]
   );
 
-  // Review-panel: fara cleanup, timerele pendinte trageau setToasts pe un
-  // provider demontat (teste/HMR).
+  // Unmount: curata TOATE timerele — fara el, un setTimeout orfan face
+  // setState pe provider demontat.
   useEffect(() => {
     const map = timers.current;
     return () => {
@@ -101,36 +104,36 @@ export function ToastProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const value = useMemo(() => toast, [toast]);
+
   return (
-    <ToastContext.Provider value={toast}>
+    <ToastContext.Provider value={value}>
       {children}
-      {toasts.length > 0 && (
-        <div
-          aria-live="polite"
-          className="pointer-events-none fixed bottom-4 right-4 z-[110] flex w-full max-w-sm flex-col gap-2"
-        >
-          {toasts.map((t) => (
+      <div aria-live="polite" className="pointer-events-none fixed bottom-4 right-4 z-[110] flex flex-col gap-2">
+        {toasts.map((t) => {
+          const Icon = VARIANT_ICONS[t.variant];
+          return (
             <output
               key={t.id}
               className={cn(
-                "pointer-events-auto flex items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
+                "pointer-events-auto flex max-w-sm items-start gap-2 rounded-lg border px-3 py-2 text-sm shadow-lg",
                 VARIANT_STYLES[t.variant]
               )}
             >
-              <VariantIcon variant={t.variant} />
+              <Icon className="mt-0.5 h-4 w-4 shrink-0" />
               <span className="flex-1 whitespace-pre-line">{t.message}</span>
               <button
                 type="button"
                 onClick={() => dismiss(t.id)}
                 aria-label="Inchide notificarea"
-                className="rounded p-0.5 opacity-60 hover:opacity-100"
+                className="rounded p-0.5 opacity-70 hover:opacity-100"
               >
                 <X className="h-3.5 w-3.5" />
               </button>
             </output>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
     </ToastContext.Provider>
   );
 }

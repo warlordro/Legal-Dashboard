@@ -20,7 +20,7 @@ const SCOPES: Array<{ value: "dosare" | "iccj" | "rnpm"; label: string }> = [
 // Sectiune "Acces API" — management Personal Access Tokens (doar web mode). Gate-uita
 // de caller-ul din ApiKeyDialog (isWebRuntime()); desktop pastreaza BYOK in modalul existent.
 export function ApiAccessPanel() {
-  const confirm = useConfirm();
+  const confirmDialog = useConfirm();
   const toast = useToast();
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -99,8 +99,9 @@ export function ApiAccessPanel() {
     setError(null);
     try {
       await revokeApiToken(id);
-      await refresh();
+      // v2.42.0 (6.3): toast doar pe succes; erorile raman in text sub titlu.
       toast("Tokenul a fost revocat.", { variant: "success" });
+      await refresh();
     } catch {
       setError("Revocare esuata. Reincearca.");
     } finally {
@@ -111,23 +112,21 @@ export function ApiAccessPanel() {
 
   async function onRevokeAll() {
     if (busyRef.current) return;
-    // Dialogul aplicatiei (nu window.confirm nativ) — acelasi pattern ca restul
-    // actiunilor distructive din admin.
-    const ok = await confirm({
+    // v2.42.0 (6.2): dialogul partajat inlocuieste window.confirm.
+    const ok = await confirmDialog({
       title: "Revoca toate tokenurile",
       message: "Revoci TOATE tokenurile? Actiunea e ireversibila si va rupe orice integrare care le foloseste.",
       destructive: true,
       confirmLabel: "Revoca toate",
     });
     if (!ok) return;
-    if (busyRef.current) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
       await revokeAllApiTokens();
-      await refresh();
       toast("Toate tokenurile au fost revocate.", { variant: "success" });
+      await refresh();
     } catch {
       setError("Revocare esuata. Reincearca.");
     } finally {
@@ -158,7 +157,7 @@ export function ApiAccessPanel() {
               type="button"
               onClick={onRevokeAll}
               disabled={busy}
-              className="rounded-md border border-border px-2 py-1 text-sm text-red-600 hover:bg-muted disabled:opacity-50"
+              className="rounded-md border border-border px-2 py-1 text-[11px] text-red-600 hover:bg-muted disabled:opacity-50"
             >
               Revoca toate
             </button>
@@ -166,20 +165,23 @@ export function ApiAccessPanel() {
           <button
             type="button"
             onClick={() => setShowCreate((v) => !v)}
-            className="rounded-md bg-primary px-2.5 py-1 text-sm text-primary-foreground hover:opacity-90"
+            className="rounded-md bg-primary px-2 py-1 text-[11px] text-primary-foreground hover:opacity-90"
           >
             Creeaza token
           </button>
         </div>
       </div>
 
-      {error && <p className="mb-2 text-sm text-red-600">{error}</p>}
+      {error && <p className="mb-2 text-[11px] text-red-600">{error}</p>}
 
+      {/* v2.42.0 (6.6): variante dark pe banda amber + chip-ul de token. */}
       {newSecret && (
-        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-sm dark:border-amber-700 dark:bg-amber-900/20">
+        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-[12px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
           <p className="mb-1 font-medium">Copiaza tokenul acum — nu mai poate fi afisat.</p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-background px-2 py-1 font-mono text-xs">{newSecret}</code>
+            <code className="flex-1 truncate rounded bg-background px-2 py-1 font-mono text-[11px] text-foreground">
+              {newSecret}
+            </code>
             <button
               type="button"
               onClick={copySecret}
@@ -194,7 +196,7 @@ export function ApiAccessPanel() {
                 setNewSecret(null);
                 setCopied(false);
               }}
-              className="rounded-md border border-border px-2 py-1 text-sm hover:bg-muted"
+              className="rounded-md border border-border px-2 py-1 text-[11px] hover:bg-muted"
             >
               Am copiat
             </button>
@@ -213,13 +215,13 @@ export function ApiAccessPanel() {
           />
           <div className="flex flex-wrap gap-3">
             {SCOPES.map((s) => (
-              <label key={s.value} className="flex items-center gap-1 text-sm">
+              <label key={s.value} className="flex items-center gap-1 text-[12px]">
                 <input type="checkbox" checked={scopes.includes(s.value)} onChange={() => toggleScope(s.value)} />
                 {s.label}
               </label>
             ))}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-sm">
+          <div className="flex flex-wrap items-center gap-2 text-[12px]">
             <label className="flex items-center gap-1">
               Expira in
               <select
@@ -250,7 +252,7 @@ export function ApiAccessPanel() {
             type="button"
             onClick={submitCreate}
             disabled={busy || name.trim() === "" || scopes.length === 0}
-            className="rounded-md bg-primary px-3 py-1 text-sm text-primary-foreground disabled:opacity-50"
+            className="rounded-md bg-primary px-3 py-1 text-[12px] text-primary-foreground disabled:opacity-50"
           >
             Creeaza
           </button>
@@ -258,23 +260,23 @@ export function ApiAccessPanel() {
       )}
 
       {loading ? (
-        <p className="text-sm text-muted-foreground">Se incarca…</p>
+        <p className="text-[12px] text-muted-foreground">Se incarca…</p>
       ) : !loadOk ? (
         // Load esuat: NU arata empty-state ("Niciun token") — ar fi inselator; mesajul de eroare
         // e afisat sus. (CodeRabbit)
-        <p className="text-sm text-muted-foreground">Reincarca dialogul pentru a reincerca.</p>
+        <p className="text-[12px] text-muted-foreground">Reincarca dialogul pentru a reincerca.</p>
       ) : tokens.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Niciun token. Creeaza unul pentru acces programatic.</p>
+        <p className="text-[12px] text-muted-foreground">Niciun token. Creeaza unul pentru acces programatic.</p>
       ) : (
         <ul className="space-y-1">
           {tokens.map((t) => (
             <li
               key={t.id}
-              className="flex items-center justify-between rounded-md border border-border px-2 py-1 text-sm"
+              className="flex items-center justify-between rounded-md border border-border px-2 py-1 text-[12px]"
             >
               <div className="min-w-0">
                 <span className="font-medium">{t.name}</span>{" "}
-                <code className="font-mono text-xs text-muted-foreground">{t.tokenPrefix}…</code>
+                <code className="font-mono text-[11px] text-muted-foreground">{t.tokenPrefix}…</code>
                 <span className="ml-1 text-muted-foreground">[{t.scopes.join(", ")}]</span>
                 {t.revokedAt && <span className="ml-1 text-red-600">revocat</span>}
                 {t.lastUsedAt && (

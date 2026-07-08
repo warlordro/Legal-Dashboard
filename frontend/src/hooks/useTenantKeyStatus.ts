@@ -1,126 +1,169 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { apiFetch } from "@/lib/api";
+import { useMemo, useSyncExternalStore } from "react";
+import { me } from "@/lib/api";
+import type { TenantKeysConfigured } from "@/lib/api";
 
-export interface TenantKeysConfigured {
-  anthropic: boolean;
-  openai: boolean;
-  google: boolean;
-  openrouter: boolean;
-  captcha: boolean;
-}
+// v2.41.0 (P3): sursa de adevar pentru politica de chei in web mode. Backend-ul
+// tine cheile tenant criptate; frontend-ul NU are cheile, doar flag-uri boolean
+// prin GET /api/v1/me/key-status. Pe desktop nu se apeleaza endpointul —
+// window.desktopApi = chrome Electron, cheile vin din safeStorage (BYOK).
+//
+// Fail-open pe client: cand starea e loading/error, guardurile de UI NU
+// blocheaza actiuni (serverul e sursa de adevar si respinge el daca lipseste
+// cheia). Vezi consumatorii: useDosareAi, RnpmSearch.
+//
+// v2.42.0 (audit, finding #3): STORE PARTAJAT la nivel de modul, pe modelul
+// useCurrentUser. Hook-ul e consumat din mai multe locuri montate simultan
+// (sidebar-footer + Dosare + RNPM + Setari); cu fetch per instanta, boot-ul
+// lansa 3-4 request-uri identice, iar fiecare instanta avea propriul throttle
+// de focus — un singur re-focus producea o rafala de apeluri duplicate.
+// Acum: UN fetch pentru toate instantele, UN listener de focus per aplicatie.
 
-// Starea cheilor la nivel de tenant, vazuta de userul curent (GET /me/key-status).
-// - "desktop": Electron — BYOK local prin safeStorage, nu se face niciun fetch.
-// - "loading" / "error": browser, raspunsul inca nu a sosit / a esuat. Politica
-//   de consum e FAIL-OPEN: guard-urile client NU blocheaza pe aceste stari;
-//   backend-ul ramane sursa de adevar si intoarce el erorile corecte (501/429).
-// - "ready": serverAuthMode e modul REAL de auth al backend-ului (spre deosebire
-//   de useAuthMode(), care e doar detectie de platforma). In combinatia de dev
-//   "browser + backend desktop-auth" serverAuthMode e "desktop" si politica de
-//   chei ramane BYOK — vezi invariantul din PLAN-web-ux-fixes.md.
-export type TenantKeyStatusState =
+export type TenantKeyState =
   | { state: "desktop" }
   | { state: "loading" }
   | { state: "error" }
-  | { state: "ready"; serverAuthMode: "desktop" | "web"; configured: TenantKeysConfigured };
+  | {
+      state: "ready";
+      serverAuthMode: "web" | "desktop";
+      configured: TenantKeysConfigured;
+    };
 
-export interface TenantKeys {
-  status: TenantKeyStatusState;
-  /** true doar cand serverul a confirmat auth_mode=web (cheile tenant guverneaza). */
+const FOCUS_THROTTLE_MS = 5000;
+
+function isDesktopRuntime(): boolean {
+  return typeof window !== "undefined" && window.desktopApi !== undefined;
+}
+
+let state: TenantKeyState = { state: "loading" };
+// Guard de secventa: doar raspunsul celui mai recent request scrie starea,
+// altfel un fetch lent aterizat tarziu ar suprascrie unul proaspat.
+let requestSeq = 0;
+let inflight = false;
+let lastFocusFetch = 0;
+let bootstrapped = false;
+const listeners = new Set<() => void>();
+
+function emit(next: TenantKeyState): void {
+  state = next;
+  for (const listener of listeners) listener();
+}
+
+function doFetch(): void {
+  const seq = ++requestSeq;
+  inflight = true;
+  // Pastreaza "ready" la refetch (fara flicker de loading peste date valide).
+  if (state.state !== "ready") emit({ state: "loading" });
+  me.keyStatus()
+    .then((res) => {
+      if (seq !== requestSeq) return;
+      inflight = false;
+      emit({
+        state: "ready",
+        serverAuthMode: res.authMode,
+        configured: res.tenantKeysConfigured,
+      });
+    })
+    .catch(() => {
+      if (seq !== requestSeq) return;
+      inflight = false;
+      emit({ state: "error" });
+    });
+}
+
+function onFocus(): void {
+  // Refetch la revenirea in tab (adminul poate seta cheile intre timp), dar
+  // cu throttle GLOBAL 5s: fara el, alt-tab rapid spameaza backend-ul.
+  const now = Date.now();
+  if (now - lastFocusFetch < FOCUS_THROTTLE_MS) return;
+  lastFocusFetch = now;
+  doFetch();
+}
+
+function ensureBootstrapped(): void {
+  if (bootstrapped) return;
+  bootstrapped = true;
+  if (isDesktopRuntime()) {
+    state = { state: "desktop" };
+    return;
+  }
+  doFetch();
+  // Listener unic per aplicatie, atasat la primul abonat si pastrat pe durata
+  // vietii aplicatiei (sidebar-footer e montat permanent, deci store-ul nu
+  // ramane niciodata fara consumatori in practica).
+  window.addEventListener("focus", onFocus);
+}
+
+function subscribe(listener: () => void): () => void {
+  listeners.add(listener);
+  ensureBootstrapped();
+  // Retry la mount daca starea anterioara e eroare — gardat de inflight ca o
+  // rafala de mount-uri simultane sa nu lanseze N fetch-uri.
+  if (state.state === "error" && !inflight) doFetch();
+  return () => listeners.delete(listener);
+}
+
+function getSnapshot(): TenantKeyState {
+  return state;
+}
+
+function refresh(): void {
+  if (isDesktopRuntime()) {
+    emit({ state: "desktop" });
+    return;
+  }
+  doFetch();
+}
+
+// Reset pentru teste: stare initiala + listeners curatati + listener de focus
+// scos (fara el, un test anterior lasa abonati morti si fetch-uri fantoma).
+export function __resetTenantKeyStatusStoreForTests(): void {
+  state = { state: "loading" };
+  requestSeq += 1;
+  inflight = false;
+  lastFocusFetch = 0;
+  if (bootstrapped && typeof window !== "undefined") {
+    window.removeEventListener("focus", onFocus);
+  }
+  bootstrapped = false;
+  listeners.clear();
+}
+
+export interface UseTenantKeyStatusResult {
+  state: TenantKeyState;
+  // ready + serverul e in web mode: politica de chei tenant e activa.
   tenantMode: boolean;
-  /** tenantMode si cel putin o cheie AI tenant setata. */
   hasTenantAiKey: boolean;
-  /** tenantMode si captcha lipsa — singura stare in care UI-ul blocheaza definitiv RNPM. */
-  tenantCaptchaMissing: boolean;
-  /** tenantMode si nicio cheie AI — singura stare in care prompt-ul de chei AI e definitiv. */
   tenantAiKeysMissing: boolean;
+  tenantCaptchaMissing: boolean;
+  configured: TenantKeysConfigured | null;
   refresh: () => void;
 }
 
-function isDesktopRuntime(): boolean {
-  return typeof window !== "undefined" && !!window.desktopApi;
-}
+export function useTenantKeyStatus(): UseTenantKeyStatusResult {
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
 
-export function useTenantKeyStatus(): TenantKeys {
-  const [status, setStatus] = useState<TenantKeyStatusState>(() =>
-    isDesktopRuntime() ? { state: "desktop" } : { state: "loading" }
-  );
-  // Doua fetch-uri suprapuse (mount + focus imediat) pot rezolva in ordine
-  // inversa; doar raspunsul celui mai recent request are voie sa scrie starea.
-  const requestSeq = useRef(0);
+  const tenantMode = snapshot.state === "ready" && snapshot.serverAuthMode === "web";
+  const configured = snapshot.state === "ready" ? snapshot.configured : null;
 
-  const refresh = useCallback(() => {
-    if (isDesktopRuntime()) return;
-    requestSeq.current += 1;
-    const seq = requestSeq.current;
-    const apply = (next: TenantKeyStatusState) => {
-      if (requestSeq.current === seq) setStatus(next);
-    };
-    void (async () => {
-      try {
-        const res = await apiFetch("/api/v1/me/key-status");
-        if (!res.ok) {
-          apply({ state: "error" });
-          return;
-        }
-        const json = (await res.json()) as {
-          data?: { authMode?: unknown; tenantKeysConfigured?: Partial<TenantKeysConfigured> };
-        };
-        const data = json?.data;
-        if (!data || typeof data !== "object") {
-          apply({ state: "error" });
-          return;
-        }
-        apply({
-          state: "ready",
-          serverAuthMode: data.authMode === "web" ? "web" : "desktop",
-          configured: {
-            anthropic: data.tenantKeysConfigured?.anthropic === true,
-            openai: data.tenantKeysConfigured?.openai === true,
-            google: data.tenantKeysConfigured?.google === true,
-            openrouter: data.tenantKeysConfigured?.openrouter === true,
-            captcha: data.tenantKeysConfigured?.captcha === true,
-          },
-        });
-      } catch {
-        apply({ state: "error" });
-      }
-    })();
-  }, []);
-
-  // Refetch la focus: adminul poate schimba cheile in alt tab (/admin/keys);
-  // statusul stale nu trebuie sa blocheze sau sa arate "Activ" fals la revenire.
-  // Throttle 5s (review-panel): alt-tab rapid nu are voie sa spameze
-  // /me/key-status — seq guard-ul protejeaza doar starea, nu si reteaua.
-  const lastFocusRefreshAt = useRef(0);
-  useEffect(() => {
-    if (isDesktopRuntime()) return;
-    refresh();
-    const onFocus = () => {
-      const now = Date.now();
-      if (now - lastFocusRefreshAt.current < 5000) return;
-      lastFocusRefreshAt.current = now;
-      refresh();
-    };
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [refresh]);
-
-  // Referinta stabila per stare — consumatorii (useDosareAi, props memo) nu
-  // primesc un obiect nou la fiecare render.
-  return useMemo(() => {
-    const tenantMode = status.state === "ready" && status.serverAuthMode === "web";
-    const configured = status.state === "ready" && tenantMode ? status.configured : null;
-    const hasTenantAiKey =
-      configured !== null && (configured.anthropic || configured.openai || configured.google || configured.openrouter);
-
+  const derived = useMemo(() => {
+    if (!tenantMode || configured === null) {
+      return { hasTenantAiKey: false, tenantAiKeysMissing: false, tenantCaptchaMissing: false };
+    }
+    const hasTenantAiKey = configured.anthropic || configured.openai || configured.google || configured.openrouter;
     return {
-      status,
-      tenantMode,
       hasTenantAiKey,
-      tenantCaptchaMissing: configured !== null && !configured.captcha,
-      tenantAiKeysMissing: configured !== null && !hasTenantAiKey,
-      refresh,
+      tenantAiKeysMissing: !hasTenantAiKey,
+      tenantCaptchaMissing: !configured.captcha,
     };
-  }, [status, refresh]);
+  }, [tenantMode, configured]);
+
+  return {
+    state: snapshot,
+    tenantMode,
+    hasTenantAiKey: derived.hasTenantAiKey,
+    tenantAiKeysMissing: derived.tenantAiKeysMissing,
+    tenantCaptchaMissing: derived.tenantCaptchaMissing,
+    configured,
+    refresh,
+  };
 }

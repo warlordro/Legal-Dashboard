@@ -16,10 +16,9 @@ export default function Changelog() {
     try {
       await exportChangelogPdf();
     } catch (e) {
-      // Inainte, esecul era doar in consola — userul apasa butonul si nu se
-      // intampla nimic vizibil (review UX Nivel 2).
+      // v2.42.0 (6.3): inainte esecul era doar in consola — user-ul nu afla.
       console.error("[changelog] export pdf failed:", e);
-      toast("Exportul PDF a esuat. Reincearca.", { variant: "error" });
+      toast("Exportul PDF al changelog-ului a esuat. Reincearca.", { variant: "error" });
     } finally {
       setExporting(false);
     }

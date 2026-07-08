@@ -221,25 +221,22 @@ const FIELDS_BY_CATEGORY: Record<RnpmSearchType, FieldSpec[]> = {
 
 export interface RnpmBulkSearchProps {
   captchaKey: string;
+  // Blocaj de captcha calculat de parinte (respecta tenant keys in web mode);
+  // in desktop = !captchaKey. Sursa unica de politica pentru toata pagina RNPM.
+  captchaBlocked: boolean;
   captchaProvider?: CaptchaProvider;
   fallback2CaptchaKey?: string;
   captchaMode?: CaptchaMode;
-  // Sursa cheii captcha (vezi RnpmSearch): "byok" cere cheia locala; "tenant"
-  // lasa backend-ul sa rezolve cheia; "unknown" = fail-open (request pleaca).
-  captchaSource: "byok" | "tenant" | "unknown";
-  // tenant mode cu captcha neconfigurat — blocheaza cu mesaj, fara dialog BYOK.
-  tenantCaptchaMissing: boolean;
   onConfigureKey: () => void;
   onItemSaved?: () => void;
 }
 
 export function RnpmBulkSearch({
   captchaKey,
+  captchaBlocked,
   captchaProvider,
   fallback2CaptchaKey,
   captchaMode,
-  captchaSource,
-  tenantCaptchaMissing,
   onConfigureKey,
   onItemSaved,
 }: RnpmBulkSearchProps) {
@@ -283,23 +280,8 @@ export function RnpmBulkSearch({
   };
 
   const handleStart = async () => {
-    // Web-aware (vezi RnpmSearch.ensureCaptchaReady): BYOK cere cheia locala;
-    // tenant mode blocheaza doar cand serverul a confirmat ca nu exista cheie;
-    // pe loading/error fail-open — backend-ul intoarce eroarea corecta.
-    if (captchaSource === "byok" && !captchaKey) {
+    if (captchaBlocked) {
       onConfigureKey();
-      return;
-    }
-    if (tenantCaptchaMissing) {
-      setProgress([
-        {
-          index: -1,
-          total: values.length,
-          label: "Eroare",
-          phase: "error",
-          error: "Cheia captcha nu e configurata de administrator. Contacteaza adminul.",
-        },
-      ]);
       return;
     }
     if (values.length === 0) return;

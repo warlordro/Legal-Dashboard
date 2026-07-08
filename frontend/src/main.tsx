@@ -4,24 +4,20 @@ import { ErrorBoundary } from "./components/ErrorBoundary.tsx";
 import "./index.css";
 import App from "./App.tsx";
 
-// v2.42.0 (web): dupa un redeploy, chunk-urile lazy vechi (Manual/Changelog/
-// Metrics) nu mai exista pe server si import() esueaza — inainte, userul vedea
-// ErrorBoundary. Vite emite "vite:preloadError" in acest caz; un reload aduce
-// index-ul nou cu hash-urile corecte. Guard pe timestamp (nu flag simplu) ca un
-// tab lasat deschis peste MAI MULTE deploy-uri sa se recupereze de fiecare
-// data, dar fara bucla de reload daca serverul chiar e stricat.
+// v2.42.0 (6.1): auto-recuperare la chunk-uri stale (web, dupa redeploy).
+// Vite emite `vite:preloadError` cand un import dinamic pica (hash-urile vechi
+// nu mai exista pe server dupa un deploy). Reincarcam O DATA, cu guard de 60s
+// in sessionStorage impotriva buclei; daca storage-ul arunca (privacy mode),
+// NU reincarcam — fara guard persistent am risca bucla infinita; lasa eroarea
+// la ErrorBoundary (10.4b).
 const CHUNK_RELOAD_KEY = "portaljust-chunk-reload-at";
-const CHUNK_RELOAD_MIN_INTERVAL_MS = 60_000;
 window.addEventListener("vite:preloadError", (event) => {
-  // Review-panel: fara sessionStorage functional (privacy/hardened mode) nu
-  // putem garanta anti-bucla peste reload — NU reincarcam automat, lasam
-  // eroarea la ErrorBoundary (buton manual "Reincarca").
   try {
     const last = Number(sessionStorage.getItem(CHUNK_RELOAD_KEY) ?? 0);
-    if (Date.now() - last < CHUNK_RELOAD_MIN_INTERVAL_MS) return; // lasa eroarea la ErrorBoundary
+    if (Date.now() - last < 60_000) return; // lasa la ErrorBoundary
     sessionStorage.setItem(CHUNK_RELOAD_KEY, String(Date.now()));
   } catch {
-    return;
+    return; // privacy mode: NU reincarca
   }
   event.preventDefault();
   window.location.reload();

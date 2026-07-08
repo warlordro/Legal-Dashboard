@@ -3,14 +3,14 @@ import { Gauge } from "lucide-react";
 import { me, type MeBudgetItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+// v2.42.0 (5.2): pool AI unic — bara urmareste mereu bugetul "ai"; constanta
+// interna, fara prop (nu mai exista bugete AI separate).
+const BUDGET_FEATURE = "ai";
+
 interface BudgetIndicatorProps {
   enabled?: boolean;
   className?: string;
 }
-
-// v2.42.0: bugetul AI e un pool unic ("ai") peste toate analizele — nu mai
-// exista alt feature de afisat, deci nu mai e prop.
-const FEATURE = "ai";
 
 export function BudgetIndicator({ enabled = true, className }: BudgetIndicatorProps) {
   const [item, setItem] = useState<MeBudgetItem | null>(null);
@@ -23,7 +23,7 @@ export function BudgetIndicator({ enabled = true, className }: BudgetIndicatorPr
       try {
         const budget = await me.budget(ac.signal);
         if (cancelled) return;
-        setItem(budget.items.find((row) => row.feature === FEATURE) ?? null);
+        setItem(budget.items.find((row) => row.feature === BUDGET_FEATURE) ?? null);
       } catch {
         if (!cancelled) setItem(null);
       }

@@ -227,7 +227,7 @@ describe("callOpenRouter", () => {
     await Promise.resolve();
 
     const row = getDb().prepare("SELECT cost_usd_milli FROM ai_usage").get() as { cost_usd_milli: number };
-    expect(row.cost_usd_milli).toBe(3000); // 1M input @ $3/M (Sonnet 5, pret standard)
+    expect(row.cost_usd_milli).toBe(3000);
   });
 });
 

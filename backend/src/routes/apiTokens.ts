@@ -1,8 +1,6 @@
 import { Hono } from "hono";
 import { z } from "zod";
-import { getAuthMode } from "../auth/config.ts";
 import { getOwnerId } from "../middleware/owner.ts";
-import { requireRole } from "../middleware/requireRole.ts";
 import { ErrorCodes, fail, ok } from "../util/envelope.ts";
 import {
   createApiToken,
@@ -26,17 +24,6 @@ apiTokensRouter.use("*", async (c, next) => {
     return c.json(fail(ErrorCodes.PAT_CANNOT_MANAGE_TOKENS, "Un token nu poate administra tokenuri.", c), 403);
   }
   await next();
-});
-
-// v2.41.0 (decizie user): in web mode managementul PAT e admin-only — UI-ul
-// ascunde sectiunea pentru non-admini, iar gate-ul de aici o face reala, nu
-// cosmetica. Desktop ramane fara restrictie (single-user local, auto-admin).
-apiTokensRouter.use("*", async (c, next) => {
-  if (getAuthMode() !== "web") {
-    await next();
-    return;
-  }
-  return requireRole("admin")(c, next);
 });
 
 const SCOPES = ["dosare", "iccj", "rnpm"] as const;

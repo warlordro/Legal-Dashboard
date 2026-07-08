@@ -1,4 +1,4 @@
-import { useEffect, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import { me, type MeProfile } from "@/lib/api";
 
 export interface UseCurrentUserResult {
@@ -8,115 +8,95 @@ export interface UseCurrentUserResult {
   refresh: () => Promise<void>;
 }
 
-// PR-8 hook, refacut in v2.42.0 ca STORE PARTAJAT la nivel de modul: hook-ul e
-// consumat din multe locuri (Sidebar, AdminGate per tab/pagina, Setari, dialog),
-// iar varianta veche facea cate un fetch /me la FIECARE montare — cu tab-urile
-// mount-on-demand din /setari, cateva click-uri loveau rate limiter-ul si un
-// 429 se afisa ca "403 Acces interzis" pentru un admin real (incident testare
-// 2026-07-04; problema era notata in SESSION-HANDOFF ca risc cunoscut).
-// Acum: UN fetch la primul consumator, toate instantele impart snapshotul;
-// refresh() forteaza refetch si actualizeaza toti abonatii (ex. schimbarea
-// propriului rol updateaza si Sidebar-ul, nu doar pagina curenta).
+// v2.42.0 (3.4): STORE PARTAJAT la nivel de modul. Hook-ul e consumat din multe
+// locuri simultan (Sidebar + AdminGate per pagina + tab-urile /setari montate
+// on-demand); cu fetch per instanta, mount-urile in rafala loveau rate-limiter-ul
+// si 429-ul aparea in UI ca "403 Acces interzis". Un singur fetch /me e
+// deduplicat pentru toate instantele prin `inflight`.
 
-interface Snapshot {
+interface StoreState {
   user: MeProfile | null;
   loading: boolean;
   error: string | null;
 }
 
-let snapshot: Snapshot = { user: null, loading: true, error: null };
-const listeners = new Set<() => void>();
-let started = false;
+let state: StoreState = { user: null, loading: true, error: null };
+let fetchedOnce = false;
 let inflight: Promise<void> | null = null;
+const listeners = new Set<() => void>();
 
-function emit(next: Partial<Snapshot>): void {
-  snapshot = { ...snapshot, ...next };
+function emit(next: Partial<StoreState>): void {
+  state = { ...state, ...next };
   for (const listener of listeners) listener();
+}
+
+function fetchMe(): Promise<void> {
+  const run = me
+    .get()
+    .then((u) => {
+      emit({ user: u, loading: false, error: null });
+    })
+    .catch((e: unknown) => {
+      // 401 / network / etc — mesajul e afisat, nu aruncat. Consumatorii
+      // trateaza user === null gratios.
+      emit({ user: null, loading: false, error: e instanceof Error ? e.message : "Eroare la /me" });
+    })
+    .finally(() => {
+      // Cleanup GARDAT: un finally negardat ar sterge inflight-ul unui refresh
+      // suprapus si ar sparge dedup-ul.
+      if (inflight === run) inflight = null;
+    });
+  inflight = run;
+  return run;
+}
+
+function ensureFetched(): void {
+  if (inflight !== null) return;
+  // Retry la mount daca starea anterioara e eroare — cu loading vizibil,
+  // altfel UI-ul arata eroarea veche fara indiciu de reincarcare.
+  if (fetchedOnce && state.error === null) return;
+  if (fetchedOnce && state.error !== null) {
+    emit({ loading: true, error: null });
+  }
+  fetchedOnce = true;
+  void fetchMe();
 }
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);
+  ensureFetched();
   return () => listeners.delete(listener);
 }
 
-function getSnapshot(): Snapshot {
-  return snapshot;
+function getSnapshot(): StoreState {
+  return state;
 }
 
-function doFetch(): Promise<void> {
-  return me
-    .get()
-    .then((u) => {
-      emit({ user: u, error: null, loading: false });
-    })
-    .catch((e: unknown) => {
-      // 401 / network / etc — surface message but don't throw. Consumatorii
-      // trateaza user === null gratios (Sidebar ascunde, AdminGate afiseaza 403).
-      emit({ user: null, error: e instanceof Error ? e.message : "Eroare la /me", loading: false });
-    });
-}
-
-// Dedup pentru rafalele de mount: toate instantele asteapta ACELASI fetch.
-// Cleanup-ul e GARDAT ca la refresh (CodeRabbit): fara guard, finally-ul unui
-// fetch de mount care se termina in timpul unui refresh suprapus ar fi sters
-// inflight-ul refresh-ului si urmatorul mount ar fi pornit un fetch duplicat.
-function fetchMe(): Promise<void> {
-  if (inflight === null) {
-    const startedFetch: Promise<void> = doFetch().finally(() => {
-      if (inflight === startedFetch) inflight = null;
-    });
-    inflight = startedFetch;
+// refresh(): ASTEAPTA fetch-ul curent (poate fi de dinaintea mutatiei — nu-l
+// reutilizam ca rezultat) si porneste unul proaspat.
+async function refresh(): Promise<void> {
+  if (inflight !== null) {
+    await inflight.catch(() => {});
   }
-  return inflight;
+  emit({ loading: true, error: null });
+  await fetchMe();
 }
 
-// Refresh = date PROASPETE garantat (CodeRabbit: reutilizarea fetch-ului
-// in-flight putea servi raspunsul de dinaintea mutatiei, ex. schimbarea
-// propriului rol). Daca exista un fetch in curs, il asteptam si pornim unul
-// nou dupa; noul promise devine inflight ca mount-urile ulterioare sa se
-// agate de cel proaspat.
-// Returneaza promise-ul (review-panel): caller-ii care fac o mutatie pot
-// astepta refetch-ul inainte sa navigheze/afiseze confirmarea.
-function refresh(): Promise<void> {
-  emit({ loading: true });
-  const guarded: Promise<void> = (inflight ?? Promise.resolve())
-    .then(() => doFetch())
-    .finally(() => {
-      // Curata doar daca intre timp nu a pornit alt refresh (care a
-      // suprascris inflight cu propriul promise).
-      if (inflight === guarded) inflight = null;
-    });
-  inflight = guarded;
-  return guarded;
-}
-
-// Doar pentru teste: reseteaza store-ul intre cazuri (module state persista).
+// Reset pentru teste: stare initiala + listeners curatati (fara el, un test
+// anterior lasa abonati morti care primesc emit-uri din testul curent).
 export function __resetCurrentUserStoreForTests(): void {
-  snapshot = { user: null, loading: true, error: null };
-  started = false;
+  state = { user: null, loading: true, error: null };
+  fetchedOnce = false;
   inflight = null;
-  listeners.clear(); // altfel callback-uri din testele precedente raman abonate
+  listeners.clear();
 }
 
 export function useCurrentUser(): UseCurrentUserResult {
-  const snap = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
-
-  useEffect(() => {
-    // Retry la montare daca fetch-ul initial a ESUAT (review-panel: `started`
-    // ramanea true si eroarea devenea permanenta pana la un refresh manual).
-    // La retry semnalam loading (CodeRabbit: altfel UI-ul arata in continuare
-    // eroarea veche, fara niciun indiciu ca se reincearca).
-    if (!started || (snapshot.error !== null && inflight === null)) {
-      started = true;
-      emit({ loading: true, error: null });
-      void fetchMe();
-    }
-  }, []);
-
+  const snapshot = useSyncExternalStore(subscribe, getSnapshot);
   return {
-    user: snap.user,
-    loading: snap.loading,
-    error: snap.error,
+    user: snapshot.user,
+    loading: snapshot.loading,
+    error: snapshot.error,
     refresh,
   };
 }

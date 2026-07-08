@@ -36,10 +36,13 @@ interface ModelPrice {
 const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, ModelPrice>> = {
   anthropic: {
     "claude-haiku-4-5-20251001": { inputUsdPerMillion: 1, outputUsdPerMillion: 5 },
-    // Pret STANDARD (post 31 aug 2026). Lansarea are pret promo $2/$10 pana
-    // atunci — estimam intentionat la pretul normal ca bugetele sa nu fie
-    // calibrate pe o reducere temporara (decizie user 2026-07-05).
+    // v2.42.0 (5.6): Sonnet 5 la tariful STANDARD $3/$15 — NU promo-ul de
+    // lansare $2/$10 valabil doar pana la 31 aug 2026 (decizie user: bugetele
+    // nu se calibreaza pe reduceri temporare). Intrarea 4-6 ramane pentru
+    // retry-uri/cozi in zbor din jurul upgrade-ului; istoricul are costul
+    // stocat la insert.
     "claude-sonnet-5": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
+    "claude-sonnet-4-6": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
     "claude-opus-4-8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
   },
   openai: {
@@ -55,6 +58,7 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
   openrouter: {
     "anthropic/claude-haiku-4.5": { inputUsdPerMillion: 1, outputUsdPerMillion: 5 },
     "anthropic/claude-sonnet-5": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
+    "anthropic/claude-sonnet-4.6": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
     "anthropic/claude-opus-4.8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
     "openai/gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
     "openai/gpt-5.4-mini": { inputUsdPerMillion: 0.25, outputUsdPerMillion: 2 },

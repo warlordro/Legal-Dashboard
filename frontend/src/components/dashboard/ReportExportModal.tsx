@@ -41,6 +41,10 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
     setFormat("xlsx");
   }, [open]);
 
+  // v2.42.0 (6.4): comportamentul de dialog vine din useDialog; handleClose
+  // pastreaza guard-ul pe busy.
+  const dialogRef = useDialog<HTMLDivElement>(open, handleClose);
+
   // Anuleaza request-ul in curs cand modalul se inchide forced (unmount).
   useEffect(() => {
     return () => {
@@ -54,11 +58,6 @@ export function ReportExportModal({ open, onClose }: ReportExportModalProps) {
     abortRef.current = null;
     onClose();
   }
-
-  // v2.42.0 (Nivel 2): Escape + focus trap + scroll lock prin hook-ul partajat
-  // (inainte avea doar keydown ad-hoc pe Escape, fara trap). Guard-ul pe busy
-  // ramane in handleClose.
-  const dialogRef = useDialog<HTMLDivElement>(open, handleClose);
 
   async function handleGenerate() {
     setError(null);

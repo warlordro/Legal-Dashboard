@@ -9,7 +9,6 @@ import {
   EyeOff,
   FileText,
   Filter,
-  Loader2,
   RefreshCw,
   Trash2,
   X,
@@ -26,7 +25,6 @@ import {
   alertKindLabels,
   severityLabels,
   type AlertDismissBulkRequest,
-  type AlertDismissBulkResult,
   type AlertKind,
   type AlertSeverity,
   type MonitoringAlert,
@@ -139,8 +137,9 @@ export default function Alerts({
   // toggle si select-all, si pentru ca ordinea nu conteaza la backend.
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
   const [exportModalOpen, setExportModalOpen] = useState(false);
-  // Busy-ul ramane true pe tot timpul cererii bulk ca butoanele declansatoare
-  // sa fie dezactivate (confirmarea in sine e in dialogul partajat, v2.42.0).
+  // v2.42.0 (6.4): confirmarea bulk dismiss trece prin useConfirm (modalul
+  // hand-rolled a disparut). Busy-ul ramane pe butoanele declansatoare pe tot
+  // timpul cererii ca user-ul sa nu poata sa apese de doua ori.
   const [bulkDismissBusy, setBulkDismissBusy] = useState(false);
 
   // Each alert card renders one step smaller than the user's font slider.
@@ -237,11 +236,10 @@ export default function Alerts({
   };
 
   const dismiss = async (alert: MonitoringAlert) => {
-    // Inchiderea e ireversibila (alertele inchise nu pot fi redeschise) — acelasi
-    // nivel de protectie ca bulk dismiss, care are deja modal de confirmare.
+    // v2.42.0 (6.2): inchiderea e ireversibila — confirmare obligatorie.
     const ok = await confirm({
       title: "Inchide alerta",
-      message: "Inchizi aceasta alerta? Alertele inchise nu mai pot fi redeschise.",
+      message: "Inchizi aceasta alerta? Actiunea este ireversibila.",
       destructive: true,
       confirmLabel: "Inchide",
     });
@@ -250,9 +248,9 @@ export default function Alerts({
     setError(null);
     try {
       await alertsApi.dismiss(alert.id);
+      toast("Alerta a fost inchisa.", { variant: "success" });
       await load();
       onAlertsChanged?.();
-      toast("Alerta a fost inchisa.", { variant: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la inchiderea alertei.");
     } finally {
@@ -293,14 +291,15 @@ export default function Alerts({
     }
   };
 
-  // v2.14.0 — bulk dismiss flow.
+  // v2.14.0 — bulk dismiss flow (v2.42.0: confirmarea trece prin useConfirm).
   //
   // Doua intrari distincte la nivel UI:
   //   - "Inchide selectia" (cand selectedIds.size > 0) → mode "ids"
   //   - "Inchide toate cele filtrate" (fara selectie) → mode "filters"
-  // Ambele caz trec prin acelasi handler `confirmBulkDismiss` ca sa nu
-  // dublam logica. Confirmarea modala arata count-ul real (selectedIds.size
-  // sau filteredTotal) ca user-ul sa stie ce sterge inainte sa apese.
+  // Confirmarea arata count-ul real (selectedIds.size sau total) ca user-ul
+  // sa stie ce inchide inainte sa apese. Toast-ul de dupa foloseste
+  // dismissedCount din raspuns, nu count-ul cerut — 0 inseamna ca alertele
+  // erau deja inchise (toast info, nu succes).
   //
   // `Inchide toate` ramane DEZACTIVAT cand `includeDismissed=true` — nu inchidem
   // alerte deja inchise. Aceeasi regula in backend (selectAlertIdsByFilters
@@ -316,81 +315,60 @@ export default function Alerts({
       if (payload.mode === "ids") {
         setSelectedIds(new Set());
       }
+      if (result.dismissedCount === 0) {
+        toast("Nicio alerta noua de inchis.", { variant: "info" });
+      } else {
+        toast(
+          result.dismissedCount === 1 ? "1 alerta a fost inchisa." : `${result.dismissedCount} alerte au fost inchise.`,
+          { variant: "success" }
+        );
+      }
       await load();
       onAlertsChanged?.();
-      return result;
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la inchiderea alertelor.");
-      throw err;
     } finally {
       setBulkDismissBusy(false);
     }
   };
 
-  // v2.42.0 (Nivel 2): confirmarea bulk trece prin dialogul partajat
-  // (Escape/Enter/focus), nu prin modalul hand-rolled de dinainte; rezultatul
-  // se anunta cu toast (count real din raspunsul serverului).
-  const toastBulkResult = (result: AlertDismissBulkResult) => {
-    // CodeRabbit: "0 alerte au fost inchise" ca succes e derutant — cand
-    // totul era deja inchis spunem exact asta, informativ.
-    if (result.dismissedCount === 0) {
-      toast("Nicio alerta noua de inchis — erau deja inchise.", { variant: "info" });
-      return;
-    }
-    toast(
-      result.dismissedCount === 1 ? "O alerta a fost inchisa." : `${result.dismissedCount} alerte au fost inchise.`,
-      {
-        variant: "success",
-      }
-    );
-  };
-
   const requestBulkDismissSelected = async () => {
     if (selectedIds.size === 0) return;
-    const count = selectedIds.size;
+    const ids = Array.from(selectedIds);
     const ok = await confirm({
-      title: "Inchide alertele selectate",
-      message: `Confirmi inchiderea pentru ${count} ${count === 1 ? "alerta selectata" : "alerte selectate"}? Operatia este definitiva — alertele inchise nu mai pot fi redeschise.`,
+      title: "Inchide alertele selectate?",
+      message: `Confirma inchiderea pentru ${ids.length} ${
+        ids.length === 1 ? "alerta selectata" : "alerte selectate"
+      }. Operatia este definitiva — alertele inchise nu mai pot fi redeschise.`,
       destructive: true,
       confirmLabel: "Inchide",
     });
     if (!ok) return;
-    const ids = Array.from(selectedIds);
-    try {
-      toastBulkResult(await performBulkDismiss({ mode: "ids", ids }));
-    } catch {
-      // Eroarea e deja afisata in bannerul paginii.
-    }
+    await performBulkDismiss({ mode: "ids", ids });
   };
 
   const requestBulkDismissFiltered = async () => {
     if (includeDismissed) return; // guard UI-side; backend nu accepta oricum.
     if (total === 0) return;
     const ok = await confirm({
-      title: "Inchide toate alertele filtrate",
-      message: `Confirmi inchiderea pentru toate cele ${total} alerte care satisfac filtrele active? Operatia este definitiva — alertele inchise nu mai pot fi redeschise.`,
+      title: "Inchide toate alertele filtrate?",
+      message: `Confirma inchiderea pentru toate cele ${total} alerte care satisfac filtrele active. Operatia este definitiva — alertele inchise nu mai pot fi redeschise.`,
       destructive: true,
-      confirmLabel: "Inchide toate",
+      confirmLabel: "Inchide",
     });
     if (!ok) return;
-    try {
-      toastBulkResult(
-        await performBulkDismiss({
-          mode: "filters",
-          filters: {
-            jobKind: jobKind === "all" ? undefined : jobKind,
-            q: debouncedQuery || undefined,
-            kind: kind === "all" ? undefined : kind,
-            severity: severity === "all" ? undefined : severity,
-            onlyUnread: onlyUnread || undefined,
-            from: localDateInputToIso(from, false),
-            to: localDateInputToIso(to, true),
-          },
-        })
-      );
-    } catch {
-      // idem.
-    }
+    await performBulkDismiss({
+      mode: "filters",
+      filters: {
+        jobKind: jobKind === "all" ? undefined : jobKind,
+        q: debouncedQuery || undefined,
+        kind: kind === "all" ? undefined : kind,
+        severity: severity === "all" ? undefined : severity,
+        onlyUnread: onlyUnread || undefined,
+        from: localDateInputToIso(from, false),
+        to: localDateInputToIso(to, true),
+      },
+    });
   };
 
   const visibleIds = useMemo(() => rows.map((r) => r.id), [rows]);

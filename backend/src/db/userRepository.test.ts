@@ -7,12 +7,18 @@ import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  canonicalizeEmail,
   getUserByEmail,
   getUserById,
   insertUser,
+  isUniqueEmailViolation,
+  LastAdminError,
   listUsers,
+  provisionUsersBulk,
   updateUserRole,
+  updateUserRoleChecked,
   updateUserStatus,
+  updateUserStatusChecked,
 } from "./userRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
@@ -89,16 +95,6 @@ describe("userRepository — list filters", () => {
     expect(r.rows.map((x) => x.id)).toEqual(["u-supp"]);
   });
 
-  it("default-ul exclude userii stersi; apar doar cu status=deleted explicit", () => {
-    insertUser({ id: "u-del", email: "dan@firma.ro", displayName: "Dan Sters" });
-    updateUserStatus("u-del", "deleted");
-    const def = listUsers();
-    expect(def.rows.map((x) => x.id)).not.toContain("u-del");
-    expect(def.total).toBe(4); // local + 3 din beforeEach, fara cel sters
-    const deleted = listUsers({ status: "deleted" });
-    expect(deleted.rows.map((x) => x.id)).toEqual(["u-del"]);
-  });
-
   it("limit + offset paginate without dropping total", () => {
     const page1 = listUsers({ limit: 2, offset: 0 });
     const page2 = listUsers({ limit: 2, offset: 2 });
@@ -145,5 +141,161 @@ describe("userRepository — write paths", () => {
     expect(() => insertUser({ id: "u-2", email: "x@y", displayName: "X", role: "owner" as never })).toThrow(
       /invalid role/
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 (4.1) — email canonic unic + bulk insert
+// ---------------------------------------------------------------------------
+
+describe("userRepository — canonicalizeEmail", () => {
+  it("face trim + lowercase", () => {
+    expect(canonicalizeEmail("  Alice@Example.TEST  ")).toBe("alice@example.test");
+  });
+
+  it("e idempotent", () => {
+    expect(canonicalizeEmail(canonicalizeEmail("A@B.C"))).toBe("a@b.c");
+  });
+});
+
+describe("userRepository — unicitate case-insensitive (0040)", () => {
+  it("getUserByEmail gaseste indiferent de casing", () => {
+    insertUser({ id: "u-1", email: "alice@firma.ro", displayName: "Alice" });
+    expect(getUserByEmail("ALICE@FIRMA.RO")?.id).toBe("u-1");
+    expect(getUserByEmail("Alice@Firma.Ro")?.id).toBe("u-1");
+  });
+
+  it("indexul unic respinge dublura care difera doar prin casing", () => {
+    insertUser({ id: "u-1", email: "alice@firma.ro", displayName: "Alice" });
+    let caught: unknown = null;
+    try {
+      insertUser({ id: "u-2", email: "ALICE@firma.ro", displayName: "Alice 2" });
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).not.toBeNull();
+    expect(isUniqueEmailViolation(caught)).toBe(true);
+  });
+
+  it("isUniqueEmailViolation nu se declanseaza pe erori nelegate", () => {
+    expect(isUniqueEmailViolation(new Error("boom"))).toBe(false);
+    expect(isUniqueEmailViolation(null)).toBe(false);
+  });
+});
+
+describe("userRepository — provisionUsersBulk", () => {
+  it("insereaza toate randurile intr-o tranzactie, cu email canonicalizat", () => {
+    provisionUsersBulk({
+      inserts: [
+        { id: "b-1", email: "  X@Firma.RO ", displayName: "X", role: "user" },
+        { id: "b-2", email: "y@firma.ro", displayName: "Y", role: "admin" },
+      ],
+      reactivations: [],
+    });
+    expect(getUserById("b-1")?.email).toBe("x@firma.ro");
+    expect(getUserById("b-2")?.role).toBe("admin");
+    expect(getUserById("b-1")?.status).toBe("active");
+    expect(getUserById("b-2")?.status).toBe("active");
+  });
+
+  it("rollback complet: o coliziune de email anuleaza TOT batch-ul", () => {
+    insertUser({ id: "u-1", email: "dublura@firma.ro", displayName: "Existent" });
+    expect(() =>
+      provisionUsersBulk({
+        inserts: [
+          { id: "b-1", email: "nou@firma.ro", displayName: "Nou", role: "user" },
+          { id: "b-2", email: "DUBLURA@firma.ro", displayName: "Coliziune", role: "user" },
+        ],
+        reactivations: [],
+      })
+    ).toThrow();
+    // Primul rand din batch NU a ramas in DB.
+    expect(getUserByEmail("nou@firma.ro")).toBeNull();
+  });
+
+  it("rollback complet: o reactivare care tinteste un cont ne-sters anuleaza TOT batch-ul", () => {
+    insertUser({ id: "activ-1", email: "activ@x.ro", displayName: "Activ" }); // status active (default)
+    expect(() =>
+      provisionUsersBulk({
+        inserts: [{ id: "nou-1", email: "nou@x.ro", displayName: "Nou", role: "user" }],
+        reactivations: [{ id: "activ-1", displayName: "X", role: "user" }],
+      })
+    ).toThrow(/user not deleted/);
+    // Insertul valid NU a ramas comis — totul sau nimic.
+    expect(getUserById("nou-1")).toBeNull();
+  });
+
+  it("respinge rolurile necreabile (support/readonly)", () => {
+    expect(() =>
+      provisionUsersBulk({
+        inserts: [{ id: "b-1", email: "s@firma.ro", displayName: "S", role: "support" as never }],
+        reactivations: [],
+      })
+    ).toThrow(/invalid creatable role/);
+  });
+});
+
+describe("userRepository — soft-deleted exclusi din listari (4.1)", () => {
+  beforeEach(() => {
+    insertUser({ id: "u-del", email: "sters@firma.ro", displayName: "Sters" });
+    updateUserStatus("u-del", "deleted");
+  });
+
+  it("listUsers fara filtru de status NU intoarce userii stersi", () => {
+    const r = listUsers();
+    expect(r.rows.map((u) => u.id)).not.toContain("u-del");
+    expect(r.total).toBe(1); // doar seed-ul 'local'
+  });
+
+  it("filtrul explicit status=deleted ii intoarce (audit/debug)", () => {
+    const r = listUsers({ status: "deleted" });
+    expect(r.rows.map((u) => u.id)).toEqual(["u-del"]);
+  });
+
+  it("getUserByEmail ii vede in continuare (emailul ramane ocupat)", () => {
+    expect(getUserByEmail("sters@firma.ro")?.id).toBe("u-del");
+  });
+});
+
+describe("invariantul ultimul admin activ (checked updates)", () => {
+  it("blocheaza demotarea singurului admin activ", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    expect(() => updateUserRoleChecked("a1", "user")).toThrow(LastAdminError);
+  });
+
+  it("blocheaza suspendarea singurului admin activ", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    expect(() => updateUserStatusChecked("a1", "suspended")).toThrow(LastAdminError);
+  });
+
+  it("permite demotarea cand ramane alt admin activ", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin" });
+    expect(updateUserRoleChecked("a2", "user").role).toBe("user");
+  });
+
+  it("un admin suspendat NU conteaza ca activ la numaratoare", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin", status: "suspended" });
+    expect(() => updateUserRoleChecked("a1", "user")).toThrow(LastAdminError);
+  });
+
+  it("suspendarea secventiala a doi admini: primul trece, al doilea e blocat", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin" });
+    updateUserStatusChecked("a2", "suspended");
+    expect(() => updateUserStatusChecked("a1", "suspended")).toThrow(LastAdminError);
+  });
+
+  it("demotarea unui admin deja suspendat nu e blocata (nu reduce numarul activ)", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "a2", email: "a2@x.ro", displayName: "A2", role: "admin", status: "suspended" });
+    expect(updateUserRoleChecked("a2", "user").role).toBe("user");
+  });
+
+  it("mutatiile pe non-admin nu sunt afectate", () => {
+    insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
+    insertUser({ id: "u1", email: "u1@x.ro", displayName: "U1" });
+    expect(updateUserStatusChecked("u1", "suspended").status).toBe("suspended");
   });
 });

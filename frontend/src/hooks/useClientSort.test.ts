@@ -1,44 +1,45 @@
 // @vitest-environment jsdom
+
+// v2.42.0 (6.8): sortare client-side — cele 3 cazuri cerute de ghid.
 import { describe, expect, it } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
 import { act, createElement } from "react";
-import { useClientSort } from "./useClientSort";
+import { useClientSort, type UseClientSortResult } from "./useClientSort";
 
-// Acelasi harness minimal ca useDebouncedValue.test — fara @testing-library.
+interface Row {
+  name: string | null;
+  count: number;
+}
 
-type Row = { name: string | null; n: number };
-const rows: Row[] = [
-  { name: "banana", n: 3 },
-  { name: null, n: 1 },
-  { name: "Ana", n: 2 },
+const ROWS: Row[] = [
+  { name: "banana", count: 10 },
+  { name: null, count: 2 },
+  { name: "Ana", count: 30 },
+  { name: "castravete", count: 20 },
 ];
-const accessors = {
-  name: (r: Row) => r.name,
-  n: (r: Row) => r.n,
+
+const ACCESSORS: Record<string, (r: Row) => unknown> = {
+  name: (r) => r.name,
+  count: (r) => r.count,
 };
 
-type HookResult = ReturnType<typeof useClientSort<Row, "name" | "n">>;
-
-function renderSort() {
-  const capture: { current: HookResult | null } = { current: null };
+function mount(rows: Row[]) {
   const container = document.createElement("div");
   document.body.appendChild(container);
   let root: Root | null = null;
-
+  const captured: { current: UseClientSortResult<Row> | null } = { current: null };
   function Probe() {
-    capture.current = useClientSort(rows, accessors);
+    captured.current = useClientSort(rows, ACCESSORS);
     return null;
   }
-
   act(() => {
     root = createRoot(container);
-    root?.render(createElement(Probe));
+    root.render(createElement(Probe));
   });
-
   return {
-    capture,
-    toggle(key: "name" | "n") {
-      act(() => capture.current?.toggle(key));
+    get api(): UseClientSortResult<Row> {
+      if (!captured.current) throw new Error("hook not mounted");
+      return captured.current;
     },
     unmount() {
       act(() => root?.unmount());
@@ -48,30 +49,40 @@ function renderSort() {
 }
 
 describe("useClientSort", () => {
-  it("fara sortKey pastreaza ordinea serverului", () => {
-    const h = renderSort();
-    expect(h.capture.current?.sorted).toEqual(rows);
+  it("neactiv: pastreaza ordinea serverului; al treilea toggle revine la ea", () => {
+    const h = mount(ROWS);
+    expect(h.api.sorted.map((r) => r.count)).toEqual([10, 2, 30, 20]);
+    expect(h.api.sortKey).toBeNull();
+
+    act(() => h.api.toggle("count")); // asc
+    act(() => h.api.toggle("count")); // desc
+    act(() => h.api.toggle("count")); // neactiv
+    expect(h.api.sortKey).toBeNull();
+    expect(h.api.sorted.map((r) => r.count)).toEqual([10, 2, 30, 20]);
     h.unmount();
   });
 
-  it("cicleaza asc -> desc -> neactiv, cu null mereu la coada", () => {
-    const h = renderSort();
-    h.toggle("name");
-    expect(h.capture.current?.sorted.map((r) => r.name)).toEqual(["Ana", "banana", null]);
-    h.toggle("name");
-    expect(h.capture.current?.sorted.map((r) => r.name)).toEqual(["banana", "Ana", null]);
-    h.toggle("name");
-    expect(h.capture.current?.sortKey).toBeNull();
-    expect(h.capture.current?.sorted).toEqual(rows);
+  it("ciclul asc/desc cu null MEREU la coada, indiferent de directie", () => {
+    const h = mount(ROWS);
+    act(() => h.api.toggle("name"));
+    expect(h.api.sortDir).toBe("asc");
+    expect(h.api.sorted.map((r) => r.name)).toEqual(["Ana", "banana", "castravete", null]);
+
+    act(() => h.api.toggle("name"));
+    expect(h.api.sortDir).toBe("desc");
+    expect(h.api.sorted.map((r) => r.name)).toEqual(["castravete", "banana", "Ana", null]);
     h.unmount();
   });
 
-  it("sorteaza numeric si comuta cheia activa direct pe asc", () => {
-    const h = renderSort();
-    h.toggle("name");
-    h.toggle("n");
-    expect(h.capture.current?.sortKey).toBe("n");
-    expect(h.capture.current?.sorted.map((r) => r.n)).toEqual([1, 2, 3]);
+  it("sortare numerica + comutarea cheii reseteaza pe asc", () => {
+    const h = mount(ROWS);
+    act(() => h.api.toggle("count"));
+    expect(h.api.sorted.map((r) => r.count)).toEqual([2, 10, 20, 30]);
+
+    // Comutarea pe alta cheie porneste ciclul de la asc, nu continua desc.
+    act(() => h.api.toggle("name"));
+    expect(h.api.sortKey).toBe("name");
+    expect(h.api.sortDir).toBe("asc");
     h.unmount();
   });
 });

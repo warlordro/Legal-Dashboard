@@ -27,7 +27,7 @@ const CAPTCHA_PERIOD_SECONDS: Record<QuotaPeriod, number> = {
 // Default cap pe captcha-uri / fereastra rolling pentru useri fara override.
 // Format: integer non-negativ (numar de captcha-uri). Unset = pass-through
 // (backward compatible: niciun cap). 0 = block hard pe orice user fara override.
-// Exportat in v2.42.0 pentru GET /admin/usage/overview (aceeasi regula de default).
+// Exportat (5.3): usage/overview foloseste ACELASI reader — nu-l duplica.
 export function readDefaultCaptchaQuota(): number | null {
   const raw = process.env.LEGAL_DASHBOARD_DEFAULT_CAPTCHA_QUOTA;
   if (raw === undefined || raw === "") return null;
@@ -63,14 +63,7 @@ export type RnpmCaptchaGuardResult =
 
 export type CaptchaResolution =
   | { source: "body" }
-  | {
-      source: "tenant";
-      ok: true;
-      captchaKey: string;
-      provider: CaptchaProvider;
-      mode: CaptchaMode;
-      fallback2CaptchaKey?: string;
-    }
+  | { source: "tenant"; ok: true; captchaKey: string; provider: CaptchaProvider; mode: CaptchaMode }
   | { source: "tenant"; ok: false; response: Response };
 
 export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuardResult> {
@@ -85,17 +78,6 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
   const resolved = resolveCaptchaKeyForRoute(c);
   if (resolved.source === "tenant") {
     if (!resolved.ok) return { ok: false, response: resolved.response };
-    // "Tenant key wins" — integral: pe langa ignorarea body.captchaKey (mai jos),
-    // eliminam TOATE campurile captcha venite din client, altfel rutele care
-    // destructureaza body-ul (ex. rnpm.ts fallback2CaptchaKey) ar cadea inapoi
-    // pe valori alese de client in web mode.
-    const {
-      captchaKey: _clientCaptchaKey,
-      captchaProvider: _clientCaptchaProvider,
-      captchaMode: _clientCaptchaMode,
-      fallback2CaptchaKey: _clientFallbackKey,
-      ...sanitizedBody
-    } = body as Record<string, unknown>;
     // Web mode side note: if the request body still ships a `captchaKey`
     // string, we silently ignore it (the tenant key wins) but log a warning
     // so the admin can see that a client tried to BYOK in web mode. Logging
@@ -190,11 +172,10 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
         return {
           ok: true,
           source: "tenant",
-          body: sanitizedBody,
+          body: body as Record<string, unknown>,
           captchaKey: resolved.captchaKey,
           captchaProvider: resolved.provider,
           captchaMode: resolved.mode,
-          fallback2CaptchaKey: resolved.fallback2CaptchaKey,
         };
       }
     }
@@ -220,11 +201,10 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
     return {
       ok: true,
       source: "tenant",
-      body: sanitizedBody,
+      body: body as Record<string, unknown>,
       captchaKey: resolved.captchaKey,
       captchaProvider: resolved.provider,
       captchaMode: resolved.mode,
-      fallback2CaptchaKey: resolved.fallback2CaptchaKey,
     };
   }
 
@@ -263,6 +243,18 @@ export async function parseJsonBody(c: Context): Promise<unknown | null> {
   }
 }
 
+// Web-readiness closure (#12): in `desktop` mode, `captchaKey` vine din
+// safeStorage in renderer si e trimis cu fiecare request - comportament
+// pastrat. In `web` mode browserul nu trebuie sa puna cheia in body
+// (localStorage/inspectabil), asa ca rutele care primesc `captchaKey`
+// raspund 501 pana cand exista per-user server-side storage. Rutele de
+// `/saved`, `/searches`, `/stats`, `/backups/*` raman functionale; doar
+// caile care fac call efectiv la captcha provider sunt blocate.
+export function rejectCaptchaKeyInWebMode(c: Context): Response | null {
+  const resolved = resolveCaptchaKeyForRoute(c);
+  return resolved.source === "tenant" && !resolved.ok ? resolved.response : null;
+}
+
 export function resolveCaptchaKeyForRoute(c: Context): CaptchaResolution {
   if (getAuthMode() !== "web") return { source: "body" };
   const tenant = getTenantKeys();
@@ -278,17 +270,7 @@ export function resolveCaptchaKeyForRoute(c: Context): CaptchaResolution {
       ),
     };
   }
-  // Fallback simetric, paritate cu desktop-ul BYOK (App.tsx): in race mode
-  // cheia celuilalt provider (ambele directii); in sequential doar 2Captcha ca
-  // fallback uman cand primary e CapSolver. Gol => undefined (fara fallback).
-  const sibling = provider === "capsolver" ? tenant.twocaptcha : tenant.capsolver;
-  const fallback2CaptchaKey =
-    tenant.captchaMode === "race"
-      ? sibling || undefined
-      : provider === "capsolver"
-        ? tenant.twocaptcha || undefined
-        : undefined;
-  return { source: "tenant", ok: true, captchaKey: key, provider, mode: tenant.captchaMode, fallback2CaptchaKey };
+  return { source: "tenant", ok: true, captchaKey: key, provider, mode: tenant.captchaMode };
 }
 
 // Captcha key validation predicate: rejects empty / whitespace-only / sub-10-char

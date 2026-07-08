@@ -1,30 +1,40 @@
-import { useCallback, useEffect, useState } from "react";
-import { Activity, AlertTriangle, RefreshCw, ShieldAlert, Users } from "lucide-react";
+import { Fragment, useCallback, useEffect, useState } from "react";
+import { Activity, AlertTriangle, ChevronDown, ChevronUp, RefreshCw, ShieldAlert, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { admin, type UsageCaptchaItem, type UsageOverviewItem } from "@/lib/adminApi";
-import { useClientSort } from "@/hooks/useClientSort";
 import { SortableTh } from "@/components/ui/sortable-th";
 import { TablePagination } from "@/components/table-pagination";
+import { useClientSort } from "@/hooks/useClientSort";
 import {
+  admin,
   me,
   type MeBudgetItem,
   type MeBudgetResult,
   type MeBudgetWarning,
   type MeFxRate,
   type QuotaPeriod,
+  type UsageOverviewResult,
 } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { quotaFeatureLabel } from "@/lib/quotaFeatureLabels";
+import { userRoleLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const MILLI = 1000;
 const FX_STALE_BADGE_HOURS = 48;
+const USER_PAGE_SIZE_DEFAULT = 25;
 
 const PERIOD_LABELS: Record<QuotaPeriod, string> = {
   day: "Zilnic",
   week: "Saptamanal",
   month: "Lunar",
+};
+
+const LIMIT_SOURCE_LABELS: Record<"override" | "default" | "none", string> = {
+  override: "Cota setata",
+  default: "Limita implicita",
+  none: "Fara limita",
 };
 
 function milliToUsd(milli: number | null): string {
@@ -40,9 +50,18 @@ function milliToEur(milli: number | null, fx: MeFxRate): string {
   return `€${((milli / MILLI) * fx.rate).toFixed(3)}`;
 }
 
+// Limita 0 = blocat total, nu "nelimitat" — trebuie sa umple bara (100%), nu
+// s-o goleasca. `null` ramane exclusiv marcajul de nelimitat.
 function pctOf(item: MeBudgetItem): number | null {
-  if (item.effectiveLimitMilli === null || item.effectiveLimitMilli === 0) return null;
+  if (item.effectiveLimitMilli === null) return null;
+  if (item.effectiveLimitMilli === 0) return 100;
   return Math.min(100, Math.round((item.usedMilli / item.effectiveLimitMilli) * 100));
+}
+
+function pctOfPair(used: number, limit: number | null): number | null {
+  if (limit === null) return null;
+  if (limit === 0) return 100;
+  return Math.min(100, Math.round((used / limit) * 100));
 }
 
 function barColor(pct: number | null): string {
@@ -52,58 +71,67 @@ function barColor(pct: number | null): string {
   return "bg-primary";
 }
 
+// Cele 3 ferestre de consum ca mini-celule (eticheta sus, USD proeminent, EUR
+// dedesubt) — mult mai usor de scanat decat insiruirea pe un singur rand cu
+// separatori (feedback user, v2.42.0).
+function WindowsBreakdown({
+  windows,
+  fx,
+}: {
+  windows: { dayMilli: number; weekMilli: number; totalMilli: number };
+  fx: MeFxRate;
+}) {
+  const cells = [
+    { label: "Zilnic (ultimele 24h)", milli: windows.dayMilli },
+    { label: "Saptamanal (7 zile)", milli: windows.weekMilli },
+    { label: "Total istoric", milli: windows.totalMilli },
+  ];
+  return (
+    <div className="grid max-w-xl grid-cols-1 gap-2 sm:grid-cols-3">
+      {cells.map((cell) => (
+        <div key={cell.label} className="rounded-md border border-border bg-card px-3 py-2">
+          <p className="text-[11px] uppercase text-foreground">{cell.label}</p>
+          <p className="text-sm font-semibold">{milliToUsd(cell.milli)}</p>
+          <p className="text-[11px] text-muted-foreground">{milliToEur(cell.milli, fx)}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function UsagePage({ embedded = false }: { embedded?: boolean } = {}) {
   const [budget, setBudget] = useState<MeBudgetResult | null>(null);
   const [warnings, setWarnings] = useState<MeBudgetWarning[]>([]);
-  const [overview, setOverview] = useState<UsageOverviewItem[] | null>(null);
-  const [overviewCaptcha, setOverviewCaptcha] = useState<UsageCaptchaItem[]>([]);
-  const [overviewTab, setOverviewTab] = useState<"ai" | "captcha">("ai");
-  const [overviewTruncated, setOverviewTruncated] = useState(false);
-  // v2.42.0 (Nivel 2): datele sunt complete pe client — sortarea acopera TOTI
-  // userii, iar paginarea e client-side (review: lista lunga era doar taiata).
-  const [userPage, setUserPage] = useState(0);
-  const [userPageSize, setUserPageSize] = useState(25);
-  const switchTab = (tab: "ai" | "captcha") => {
-    setOverviewTab(tab);
-    setUserPage(0);
-  };
-  const { sorted: sortedAi, ...aiSort } = useClientSort(overview ?? [], {
-    email: (r) => r.email,
-    period: (r) => PERIOD_LABELS[r.period],
-    used: (r) => r.usedMilli,
-    limit: (r) => r.effectiveLimitMilli,
-  });
-  const { sorted: sortedCaptcha, ...captchaSort } = useClientSort(overviewCaptcha, {
-    email: (r) => r.email,
-    period: (r) => PERIOD_LABELS[r.period],
-    used: (r) => r.usedCount,
-    limit: (r) => r.limitCount,
-  });
-  const activeCount = overviewTab === "ai" ? sortedAi.length : sortedCaptcha.length;
-  const userTotalPages = Math.max(1, Math.ceil(activeCount / userPageSize));
-  // Clamp: dupa schimbarea pageSize / refresh cu mai putini useri, pagina
-  // curenta poate depasi noul total — altfel tabelul ar ramane gol.
-  const safeUserPage = Math.min(userPage, userTotalPages - 1);
-  const pageSlice = <T,>(items: T[]): T[] =>
-    items.slice(safeUserPage * userPageSize, (safeUserPage + 1) * userPageSize);
-  // Review-panel: sincronizeaza si STATE-ul, nu doar derivata — altfel, dupa
-  // ce totalul scade si creste la loc, userul "sarea" inapoi pe pagina veche.
-  useEffect(() => {
-    setUserPage((p) => Math.min(p, userTotalPages - 1));
-  }, [userTotalPages]);
+  const [overview, setOverview] = useState<UsageOverviewResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // v2.42.0 (5.3): sub-taburi AI / Captcha + paginare client-side (6.9).
+  const [tab, setTab] = useState<"ai" | "captcha">("ai");
+  const [userPage, setUserPage] = useState(0);
+  const [userPageSize, setUserPageSize] = useState(USER_PAGE_SIZE_DEFAULT);
+
+  // Rand expandabil per userId, doar pe tabelul AI: detaliaza windows
+  // (day/week/total) sub randul de sinteza "Consum".
+  const [expandedAi, setExpandedAi] = useState<Set<string>>(new Set());
+  const toggleAiExpand = (userId: string) => {
+    setExpandedAi((prev) => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [b, w, o] = await Promise.all([me.budget(), me.budgetWarnings(), admin.listUsageOverview()]);
+      const [b, w, o] = await Promise.all([me.budget(), me.budgetWarnings(), admin.usageOverview()]);
       setBudget(b);
+      // Contract 3.4: raspunsul e { items }, cu aboveSince (nu { warnings }).
       setWarnings(w.items ?? []);
-      setOverview(o.items ?? []);
-      setOverviewCaptcha(o.captcha ?? []);
-      setOverviewTruncated(o.truncated === true);
+      setOverview(o);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la incarcarea bugetului.");
     } finally {
@@ -117,8 +145,43 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
 
   const fx = budget?.fx ?? { pair: "USD/EUR" as const, rate: null, rateDate: null, stale: true };
 
+  const aiRows = overview?.items ?? [];
+  const captchaRows = overview?.captcha ?? [];
+
+  // Sortare client-side pe TOT setul (6.8) — cate un hook per tab.
+  // Perioada se sorteaza pe eticheta UMANA (Zilnic/Saptamanal/Lunar), nu pe
+  // token — ordinea urmeaza ce vede userul in celula.
+  const aiSort = useClientSort(aiRows, {
+    email: (r) => r.email,
+    used: (r) => r.usedMilli,
+    limit: (r) => r.effectiveLimitMilli,
+    period: (r) => PERIOD_LABELS[r.period],
+  });
+  const captchaSort = useClientSort(captchaRows, {
+    email: (r) => r.email,
+    used: (r) => r.usedCount,
+    limit: (r) => r.effectiveLimitCount,
+    period: (r) => PERIOD_LABELS[r.period],
+  });
+
+  const activeSorted = tab === "ai" ? aiSort.sorted : captchaSort.sorted;
+  const userTotalPages = Math.max(1, Math.ceil(activeSorted.length / userPageSize));
+  // 6.9: clamp DERIVAT + sincronizare de STATE la schimbarea totalului —
+  // altfel "saltul fantoma" inapoi cand totalul creste la loc.
+  const safeUserPage = Math.min(userPage, userTotalPages - 1);
+  useEffect(() => {
+    setUserPage((p) => Math.min(p, userTotalPages - 1));
+  }, [userTotalPages]);
+
+  const pageRows = activeSorted.slice(safeUserPage * userPageSize, (safeUserPage + 1) * userPageSize);
+
+  const switchTab = (next: "ai" | "captcha") => {
+    setTab(next);
+    setUserPage(0);
+  };
+
   return (
-    <div className={embedded ? "" : "min-h-full bg-background p-6"}>
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
       <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -129,8 +192,8 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
               </h1>
             )}
             <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
-              Rolling window per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi de
-              48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
+              Fereastra glisanta per feature (zi / saptamana / luna). Conversie EUR via BCE — daca rate-ul e mai vechi
+              de 48h, afisarea EUR e blocata pana la urmatoarea sincronizare.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={load} disabled={loading}>
@@ -158,7 +221,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
               <ul className="space-y-2 text-sm">
                 {warnings.map((w) => (
                   <li key={`${w.feature}:${w.thresholdPct}`} className="flex flex-wrap items-center gap-2">
-                    <Badge variant="warning">{w.feature === "ai" ? "AI — toate analizele" : w.feature}</Badge>
+                    <Badge variant="warning">{quotaFeatureLabel(w.feature)}</Badge>
                     <span>
                       peste {w.thresholdPct}% — episod activ din {formatIsoDateTime(w.aboveSince)}
                     </span>
@@ -174,24 +237,22 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
           </Card>
         )}
 
+        {/* v2.42.0 (5.3): consum per utilizator — cifrele vin din aceleasi
+            functii ca guard-urile, deci coincid cu enforcementul (429). */}
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+            <CardTitle className="flex items-center justify-between gap-2 text-base">
               <span className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-primary" />
+                <Users className="h-4 w-4" />
                 Consum per utilizator
               </span>
-              <span className="flex items-center gap-1">
-                <Button
-                  variant={overviewTab === "ai" ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => switchTab("ai")}
-                >
+              <span className="flex gap-1">
+                <Button size="sm" variant={tab === "ai" ? "default" : "outline"} onClick={() => switchTab("ai")}>
                   AI
                 </Button>
                 <Button
-                  variant={overviewTab === "captcha" ? "default" : "outline"}
                   size="sm"
+                  variant={tab === "captcha" ? "default" : "outline"}
                   onClick={() => switchTab("captcha")}
                 >
                   Captcha RNPM
@@ -199,157 +260,204 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
               </span>
             </CardTitle>
           </CardHeader>
-          <CardContent>
-            {overview === null ? (
-              <p className="px-4 py-6 text-center text-muted-foreground">Se incarca…</p>
-            ) : activeCount === 0 ? (
-              // Review-panel: empty-state pe TAB-ul activ, nu pe lista AI —
-              // altfel tabul Captcha aparea gol cu mesaj inselator.
+          <CardContent className="space-y-3">
+            {!overview && <p className="px-4 py-6 text-center text-muted-foreground">Se incarca…</p>}
+
+            {/* Empty-state pe TAB-UL ACTIV, nu pe lista AI. */}
+            {overview && activeSorted.length === 0 && (
               <p className="px-4 py-6 text-center text-muted-foreground">Nu exista utilizatori activi.</p>
-            ) : overviewTab === "captcha" ? (
+            )}
+
+            {overview && activeSorted.length > 0 && (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <SortableTh sort={captchaSort} sortKeyName="email" className="px-2">
-                        Utilizator
-                      </SortableTh>
-                      <SortableTh sort={captchaSort} sortKeyName="period" className="px-2">
-                        Perioada
-                      </SortableTh>
-                      <SortableTh sort={captchaSort} sortKeyName="used" className="px-2 text-right">
-                        Captcha rezolvate
-                      </SortableTh>
-                      <th className="w-1/3 px-2 py-2 font-medium">Utilizare</th>
+                  <thead className="border-b border-border bg-muted/50 text-left text-xs text-foreground">
+                    <tr>
+                      {tab === "ai" ? (
+                        <>
+                          <SortableTh sort={aiSort} sortKeyName="email">
+                            Utilizator
+                          </SortableTh>
+                          <SortableTh sort={aiSort} sortKeyName="period">
+                            Perioada
+                          </SortableTh>
+                          <SortableTh sort={aiSort} sortKeyName="used">
+                            Consum
+                          </SortableTh>
+                          <SortableTh sort={aiSort} sortKeyName="limit">
+                            Limita efectiva
+                          </SortableTh>
+                          <th className="px-3 py-2 font-semibold uppercase tracking-wider">Grad</th>
+                          <th className="px-3 py-2 font-semibold uppercase tracking-wider">Sursa</th>
+                        </>
+                      ) : (
+                        <>
+                          <SortableTh sort={captchaSort} sortKeyName="email">
+                            Utilizator
+                          </SortableTh>
+                          <SortableTh sort={captchaSort} sortKeyName="period">
+                            Perioada
+                          </SortableTh>
+                          <SortableTh sort={captchaSort} sortKeyName="used">
+                            Rezolvari
+                          </SortableTh>
+                          <SortableTh sort={captchaSort} sortKeyName="limit">
+                            Limita
+                          </SortableTh>
+                          <th className="px-3 py-2 font-semibold uppercase tracking-wider">Grad</th>
+                          <th className="px-3 py-2 font-semibold uppercase tracking-wider">Sursa</th>
+                        </>
+                      )}
                     </tr>
                   </thead>
                   <tbody>
-                    {pageSlice(sortedCaptcha).map((item) => {
-                      const pct =
-                        item.limitCount === null || item.limitCount === 0
-                          ? null
-                          : Math.min(100, Math.round((item.usedCount / item.limitCount) * 100));
-                      return (
-                        <tr key={item.userId} className="border-b border-border/60 last:border-0">
-                          <td className="px-2 py-2">
-                            <span className="font-medium">{item.email}</span>
-                            {item.role === "admin" && (
-                              <Badge variant="outline" className="ml-2">
-                                admin
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="px-2 py-2">
-                            <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 text-right font-mono">
-                            {item.usedCount}
-                            {item.limitCount !== null ? (
-                              <span className="text-muted-foreground"> / {item.limitCount}</span>
-                            ) : (
-                              <Badge variant="success" className="ml-2">
-                                Nelimitat
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="px-2 py-2">
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                                <div
-                                  className={cn("h-full transition-all", barColor(pct))}
-                                  style={{ width: pct === null ? "100%" : `${pct}%` }}
-                                />
-                              </div>
-                              {pct !== null && <span className="w-10 text-right text-xs font-semibold">{pct}%</span>}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
+                    {tab === "ai"
+                      ? pageRows.map((row) => {
+                          const r = row as (typeof aiRows)[number];
+                          const pct = pctOfPair(r.usedMilli, r.effectiveLimitMilli);
+                          const isOpen = expandedAi.has(r.userId);
+                          return (
+                            <Fragment key={r.userId}>
+                              <tr className="border-b border-border last:border-b-0 hover:bg-muted/30">
+                                <td className="px-3 py-2 align-top">
+                                  <p className="font-mono text-xs">{r.email}</p>
+                                  <p className="text-xs text-muted-foreground">
+                                    {r.displayName} · {userRoleLabel(r.role)}
+                                  </p>
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[r.period]}</td>
+                                <td className="px-3 py-2 align-top font-mono text-xs">
+                                  <span className="inline-flex items-center gap-1">
+                                    {milliToUsd(r.usedMilli)}
+                                    <button
+                                      type="button"
+                                      onClick={() => toggleAiExpand(r.userId)}
+                                      aria-expanded={isOpen}
+                                      aria-label={`Detalii consum pentru ${r.email}`}
+                                      className="rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                                    >
+                                      {isOpen ? (
+                                        <ChevronUp className="h-3.5 w-3.5" />
+                                      ) : (
+                                        <ChevronDown className="h-3.5 w-3.5" />
+                                      )}
+                                    </button>
+                                  </span>
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs">
+                                  {r.effectiveLimitMilli === null ? (
+                                    <Badge variant="success">Nelimitat</Badge>
+                                  ) : (
+                                    <span className="font-mono">
+                                      {milliToUsd(r.effectiveLimitMilli)}
+                                      {r.extraFromGrantsMilli > 0 && (
+                                        <span className="ml-1 text-muted-foreground">
+                                          (+grant {milliToUsd(r.extraFromGrantsMilli)})
+                                        </span>
+                                      )}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top">
+                                  <div className="h-2 w-24 overflow-hidden rounded-full bg-muted">
+                                    <div
+                                      className={cn("h-full", barColor(pct))}
+                                      style={{ width: pct === null ? "100%" : `${pct}%` }}
+                                    />
+                                  </div>
+                                  {pct !== null && (
+                                    <span className="text-xs text-muted-foreground">
+                                      {r.effectiveLimitMilli === 0 ? "Blocat" : `${pct}%`}
+                                    </span>
+                                  )}
+                                </td>
+                                <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                                  {LIMIT_SOURCE_LABELS[r.limitSource]}
+                                </td>
+                              </tr>
+                              {isOpen && (
+                                <tr className="border-b border-border bg-muted/20">
+                                  <td colSpan={6} className="px-4 py-3">
+                                    <WindowsBreakdown windows={r.windows} fx={fx} />
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })
+                      : pageRows.map((row) => {
+                          const r = row as (typeof captchaRows)[number];
+                          const pct = pctOfPair(r.usedCount, r.effectiveLimitCount);
+                          return (
+                            <tr key={r.userId} className="border-b border-border last:border-b-0 hover:bg-muted/30">
+                              <td className="px-3 py-2 align-top">
+                                <p className="font-mono text-xs">{r.email}</p>
+                                <p className="text-xs text-muted-foreground">
+                                  {r.displayName} · {userRoleLabel(r.role)}
+                                </p>
+                              </td>
+                              <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[r.period]}</td>
+                              <td className="px-3 py-2 align-top font-mono text-xs">{r.usedCount}</td>
+                              <td className="px-3 py-2 align-top text-xs">
+                                {r.effectiveLimitCount === null ? (
+                                  <Badge variant="success">Nelimitat</Badge>
+                                ) : (
+                                  <span className="font-mono">{r.effectiveLimitCount} captcha-uri</span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 align-top">
+                                <div className="h-2 w-24 overflow-hidden rounded-full bg-muted">
+                                  <div
+                                    className={cn("h-full", barColor(pct))}
+                                    style={{ width: pct === null ? "100%" : `${pct}%` }}
+                                  />
+                                </div>
+                                {pct !== null && (
+                                  <span className="text-xs text-muted-foreground">
+                                    {r.effectiveLimitCount === 0 ? "Blocat" : `${pct}%`}
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                                {LIMIT_SOURCE_LABELS[r.limitSource]}
+                              </td>
+                            </tr>
+                          );
+                        })}
                   </tbody>
                 </table>
-              </div>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
-                      <SortableTh sort={aiSort} sortKeyName="email" className="px-2">
-                        Utilizator
-                      </SortableTh>
-                      <SortableTh sort={aiSort} sortKeyName="period" className="px-2">
-                        Perioada
-                      </SortableTh>
-                      <SortableTh sort={aiSort} sortKeyName="used" className="px-2 text-right">
-                        Consum AI
-                      </SortableTh>
-                      <th className="w-1/3 px-2 py-2 font-medium">Utilizare</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pageSlice(sortedAi).map((item) => {
-                      const pct =
-                        item.effectiveLimitMilli === null || item.effectiveLimitMilli === 0
-                          ? null
-                          : Math.min(100, Math.round((item.usedMilli / item.effectiveLimitMilli) * 100));
-                      return (
-                        <tr key={item.userId} className="border-b border-border/60 last:border-0">
-                          <td className="px-2 py-2">
-                            <span className="font-medium">{item.email}</span>
-                            {item.role === "admin" && (
-                              <Badge variant="outline" className="ml-2">
-                                admin
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="px-2 py-2">
-                            <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
-                          </td>
-                          <td className="whitespace-nowrap px-2 py-2 text-right font-mono">
-                            {milliToUsd(item.usedMilli)}
-                            {item.effectiveLimitMilli !== null ? (
-                              <span className="text-muted-foreground"> / {milliToUsd(item.effectiveLimitMilli)}</span>
-                            ) : (
-                              <Badge variant="success" className="ml-2">
-                                Nelimitat
-                              </Badge>
-                            )}
-                          </td>
-                          <td className="px-2 py-2">
-                            <div className="flex items-center gap-2">
-                              <div className="h-2 flex-1 overflow-hidden rounded-full bg-muted">
-                                <div
-                                  className={cn("h-full transition-all", barColor(pct))}
-                                  style={{ width: pct === null ? "100%" : `${pct}%` }}
-                                />
-                              </div>
-                              {pct !== null && <span className="w-10 text-right text-xs font-semibold">{pct}%</span>}
-                            </div>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
+                {/* Nota de trunchiere: sub tabel, vizibila pe ambele taburi. */}
+                {overview?.truncated && (
+                  <p className="px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                    Lista a fost trunchiata — exista mai multi utilizatori decat pot fi afisati.
+                  </p>
+                )}
+                {/* Bara doar cand exista mai multe pagini (6.9). */}
+                {userTotalPages > 1 && (
+                  <TablePagination
+                    page={safeUserPage}
+                    totalPages={userTotalPages}
+                    pageSize={userPageSize}
+                    onPageChange={setUserPage}
+                    onPageSizeChange={(size) => {
+                      setUserPageSize(size);
+                      setUserPage(0);
+                    }}
+                  />
+                )}
               </div>
             )}
-            {/* Nota de trunchiere e comuna AMBELOR taburi (CodeRabbit). */}
-            {overview !== null && overviewTruncated && (
-              <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
-                Lista a fost trunchiata — exista mai multi utilizatori decat pot fi afisati.
-              </p>
-            )}
-            {overview !== null && userTotalPages > 1 && (
-              <TablePagination
-                page={safeUserPage}
-                totalPages={userTotalPages}
-                pageSize={userPageSize}
-                onPageChange={setUserPage}
-                onPageSizeChange={(size) => {
-                  setUserPageSize(size);
-                  setUserPage(0);
-                }}
-              />
+
+            {/* Sinteza generala — include si consumul ownerilor fara cont
+                activ (suspendati/stersi), care nu apar in randurile de mai sus. */}
+            {tab === "ai" && overview && (
+              <div className="border-t border-border px-1 pt-3">
+                <p className="mb-2 text-xs font-semibold uppercase text-foreground">
+                  Total general — toti utilizatorii
+                  <span className="ml-1 font-normal normal-case">(inclusiv conturile dezactivate sau sterse)</span>
+                </p>
+                <WindowsBreakdown windows={overview.tenantTotals} fx={fx} />
+              </div>
             )}
           </CardContent>
         </Card>
@@ -358,7 +466,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
           <CardHeader className="pb-3">
             <CardTitle className="flex items-center justify-between text-base">
               <span>Bugetul tau (contul curent)</span>
-              <span className="flex items-center gap-2 text-xs text-muted-foreground">
+              <span className="flex items-center gap-2 text-xs text-foreground">
                 <span>Curs USD/EUR:</span>
                 {fx.rate === null ? (
                   <Badge variant="warning">indisponibil</Badge>
@@ -366,7 +474,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                   <>
                     <span className="font-mono">€{fx.rate.toFixed(4)}</span>
                     {fx.rateDate && <span>· {fx.rateDate}</span>}
-                    {fx.stale && <Badge variant="warning">stale &gt; {FX_STALE_BADGE_HOURS}h</Badge>}
+                    {fx.stale && <Badge variant="warning">invechit &gt; {FX_STALE_BADGE_HOURS}h</Badge>}
                   </>
                 )}
               </span>
@@ -387,20 +495,15 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                     <li key={item.feature} className="space-y-2 rounded-md border border-border p-3">
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
-                          <span className="font-mono text-sm">
-                            {item.feature === "ai" ? "AI — toate analizele" : item.feature}
-                          </span>
+                          <span className="text-sm">{quotaFeatureLabel(item.feature)}</span>
                           <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
                           {item.effectiveLimitMilli === null && <Badge variant="success">Nelimitat</Badge>}
-                          {/* Grant inert (buget nelimitat) NU se afiseaza: nu contribuie
-                              cu nimic la consum, iar starea e oricum interzisa la creare
-                              (grant si nelimitat se exclud). Ramasitele legacy raman
-                              vizibile si revocabile doar in pagina Granturi. */}
-                          {item.extraFromGrantsMilli > 0 && item.effectiveLimitMilli !== null && (
+                          {/* +grant doar pe bugete limitate — pe nelimitat grantul nu are efect. */}
+                          {item.effectiveLimitMilli !== null && item.extraFromGrantsMilli > 0 && (
                             <Badge variant="success">+grant {milliToUsd(item.extraFromGrantsMilli)}</Badge>
                           )}
                         </div>
-                        <span className="text-sm text-muted-foreground">
+                        <span className="text-sm text-foreground">
                           {milliToUsd(item.usedMilli)} ({milliToEur(item.usedMilli, fx)})
                           {item.effectiveLimitMilli !== null && (
                             <>
@@ -408,7 +511,11 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                               / {milliToUsd(item.effectiveLimitMilli)} ({milliToEur(item.effectiveLimitMilli, fx)})
                             </>
                           )}
-                          {pct !== null && <span className="ml-2 font-semibold">{pct}%</span>}
+                          {pct !== null && (
+                            <span className="ml-2 font-semibold">
+                              {item.effectiveLimitMilli === 0 ? "Blocat" : `${pct}%`}
+                            </span>
+                          )}
                         </span>
                       </div>
                       <div className="h-2 overflow-hidden rounded-full bg-muted">

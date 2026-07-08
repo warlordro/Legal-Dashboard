@@ -1,201 +1,128 @@
 // @vitest-environment jsdom
+
+// Testeaza derivarea BYOK-vs-tenant din useDosareAi (ghid 3.2): in web mode
+// cheile personale NU pleaca in body (undefined — serverul rezolva tenant);
+// pe desktop pleaca; fara nicio cheie disponibila se deschide promptul, fara
+// apel API.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot, type Root } from "react-dom/client";
-import { act, createElement, useEffect } from "react";
+import { act, createElement } from "react";
+import type { Dosar } from "@/types";
 
 const mockAnalyze = vi.fn();
-const mockAnalyzeMulti = vi.fn();
 vi.mock("@/lib/api", () => ({
   api: {
     ai: {
       analyze: (...args: unknown[]) => mockAnalyze(...args),
-      analyzeMulti: (...args: unknown[]) => mockAnalyzeMulti(...args),
+      analyzeMulti: vi.fn(),
     },
   },
 }));
 
+const mockTenant = vi.fn();
+vi.mock("@/hooks/useTenantKeyStatus", () => ({
+  useTenantKeyStatus: () => mockTenant(),
+}));
+
 import { useDosareAi, type UseDosareAiResult } from "./useDosareAi";
-import type { TenantKeys, TenantKeysConfigured } from "./useTenantKeyStatus";
-import type { Dosar } from "@/types";
 
-const BYOK_KEYS = { anthropic: "sk-ant-x", openai: "", google: "", openrouter: "" };
+const CONFIGURED_ALL = { anthropic: true, openai: true, google: true, openrouter: true, captcha: true };
+const CONFIGURED_NONE = { anthropic: false, openai: false, google: false, openrouter: false, captcha: false };
 
-function tenantReady(configured: Partial<TenantKeysConfigured> = {}): TenantKeys {
-  const cfg: TenantKeysConfigured = {
-    anthropic: false,
-    openai: false,
-    google: false,
-    openrouter: false,
-    captcha: false,
-    ...configured,
-  };
-  const hasAi = cfg.anthropic || cfg.openai || cfg.google || cfg.openrouter;
+function tenantDesktop() {
   return {
-    status: { state: "ready", serverAuthMode: "web", configured: cfg },
-    tenantMode: true,
-    hasTenantAiKey: hasAi,
-    tenantCaptchaMissing: !cfg.captcha,
-    tenantAiKeysMissing: !hasAi,
-    refresh: vi.fn(),
-  };
-}
-
-function tenantError(): TenantKeys {
-  return {
-    status: { state: "error" },
+    state: { state: "desktop" as const },
     tenantMode: false,
     hasTenantAiKey: false,
-    tenantCaptchaMissing: false,
     tenantAiKeysMissing: false,
+    tenantCaptchaMissing: false,
+    configured: null,
     refresh: vi.fn(),
   };
 }
 
-const DOSAR = { numar: "123/2026", parti: [], sedinte: [] } as unknown as Dosar;
+function tenantWebReady(configured: typeof CONFIGURED_ALL) {
+  return {
+    state: { state: "ready" as const, serverAuthMode: "web" as const, configured },
+    tenantMode: true,
+    hasTenantAiKey: configured.anthropic || configured.openai || configured.google || configured.openrouter,
+    tenantAiKeysMissing: !(configured.anthropic || configured.openai || configured.google || configured.openrouter),
+    tenantCaptchaMissing: !configured.captcha,
+    configured,
+    refresh: vi.fn(),
+  };
+}
 
-function renderHook(args: Parameters<typeof useDosareAi>[0]) {
-  const capture: { current: UseDosareAiResult | null } = { current: null };
+const API_KEYS = { anthropic: "k-ant", openai: "k-oai", google: "k-goo", openrouter: "k-or" };
+const DOSAR = { numar: "123/299/2026" } as unknown as Dosar;
+
+function mount() {
   const container = document.createElement("div");
   document.body.appendChild(container);
   let root: Root | null = null;
-
+  const captured: { current: UseDosareAiResult | null } = { current: null };
   function Probe() {
-    const result = useDosareAi(args);
-    useEffect(() => {
-      capture.current = result;
-    });
-    capture.current = result;
+    captured.current = useDosareAi({ apiKeys: API_KEYS, aiSettings: { mode: "native" } });
     return null;
   }
-
   act(() => {
     root = createRoot(container);
     root.render(createElement(Probe));
   });
-  const cleanup = () => {
-    act(() => root?.unmount());
-    container.remove();
+  return {
+    get api(): UseDosareAiResult {
+      if (!captured.current) throw new Error("hook not mounted");
+      return captured.current;
+    },
+    unmount() {
+      act(() => root?.unmount());
+      container.remove();
+    },
   };
-  return { capture, cleanup };
 }
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  mockAnalyze.mockReset();
   mockAnalyze.mockResolvedValue({ analysis: "ok" });
+  mockTenant.mockReset();
 });
 
 afterEach(() => {
-  vi.clearAllMocks();
+  vi.restoreAllMocks();
 });
 
-describe("useDosareAi — tenant mode (web)", () => {
-  it("deriva modelele disponibile din cheile tenant, nu din cele locale", () => {
-    const { capture, cleanup } = renderHook({
-      apiKeys: { anthropic: "", openai: "", google: "", openrouter: "" },
-      aiSettings: { mode: "native" },
-      tenantKeys: tenantReady({ openai: true }),
+describe("useDosareAi — chei per runtime", () => {
+  it("desktop (BYOK): cheile locale pleaca in body", async () => {
+    mockTenant.mockReturnValue(tenantDesktop());
+    const h = mount();
+    await act(async () => {
+      await h.api.ai.onAnalyze(DOSAR);
     });
-    const providers = new Set(capture.current?.ai.availableModels.map((m) => m.provider));
-    expect(providers).toEqual(new Set(["openai"]));
-    expect(capture.current?.ai.hasAnyKey).toBe(true);
-    cleanup();
+    expect(mockAnalyze).toHaveBeenCalledTimes(1);
+    expect(mockAnalyze.mock.calls[0][2]).toEqual(API_KEYS);
+    h.unmount();
   });
 
-  it("trimite body-ul FARA apiKeys (altfel backend-ul raspunde 501 in web)", async () => {
-    const { capture, cleanup } = renderHook({
-      apiKeys: BYOK_KEYS, // chei locale reziduale — nu au voie sa plece pe fir
-      aiSettings: { mode: "native" },
-      tenantKeys: tenantReady({ anthropic: true }),
-    });
+  it("web ready: body-ul pleaca FARA chei (undefined — serverul rezolva tenant)", async () => {
+    mockTenant.mockReturnValue(tenantWebReady(CONFIGURED_ALL));
+    const h = mount();
     await act(async () => {
-      await capture.current?.ai.onAnalyze(DOSAR);
+      await h.api.ai.onAnalyze(DOSAR);
     });
     expect(mockAnalyze).toHaveBeenCalledTimes(1);
     expect(mockAnalyze.mock.calls[0][2]).toBeUndefined();
-    cleanup();
+    h.unmount();
   });
 
-  it("fara nicio cheie AI tenant: prompt de chei, fara call API", async () => {
-    const { capture, cleanup } = renderHook({
-      apiKeys: BYOK_KEYS,
-      aiSettings: { mode: "native" },
-      tenantKeys: tenantReady({ captcha: true }), // doar captcha, zero AI
-    });
-    expect(capture.current?.ai.hasAnyKey).toBe(false);
-    expect(capture.current?.ai.availableModels).toHaveLength(0);
+  it("web ready fara nicio configurare: prompt de configurare, fara apel API", async () => {
+    mockTenant.mockReturnValue(tenantWebReady(CONFIGURED_NONE));
+    const h = mount();
+    expect(h.api.ai.hasAnyKey).toBe(false);
     await act(async () => {
-      await capture.current?.ai.onAnalyze(DOSAR);
+      await h.api.ai.onAnalyze(DOSAR);
     });
     expect(mockAnalyze).not.toHaveBeenCalled();
-    expect(capture.current?.ai.showKeyPrompt).toBe(true);
-    cleanup();
-  });
-
-  it("loading/error (fail-open): toate modelele raman selectabile si body-ul pleaca fara chei", async () => {
-    const { capture, cleanup } = renderHook({
-      apiKeys: { anthropic: "", openai: "", google: "", openrouter: "" },
-      aiSettings: { mode: "native" },
-      tenantKeys: tenantError(),
-    });
-    // Fail-open: nu stim inca starea cheilor tenant — nu blocam UI-ul.
-    expect(capture.current?.ai.hasAnyKey).toBe(true);
-    expect(capture.current?.ai.availableModels.length).toBeGreaterThan(0);
-    await act(async () => {
-      await capture.current?.ai.onAnalyze(DOSAR);
-    });
-    expect(mockAnalyze).toHaveBeenCalledTimes(1);
-    expect(mockAnalyze.mock.calls[0][2]).toBeUndefined();
-    cleanup();
-  });
-
-  it("openrouter mode: disponibilitatea vine din cheia openrouter tenant", () => {
-    const { capture, cleanup } = renderHook({
-      apiKeys: { anthropic: "", openai: "", google: "", openrouter: "" },
-      aiSettings: { mode: "openrouter" },
-      tenantKeys: tenantReady({ openrouter: true }),
-    });
-    expect(capture.current?.ai.hasAnyKey).toBe(true);
-    expect(capture.current?.ai.availableModels.length).toBeGreaterThan(0);
-    cleanup();
-  });
-});
-
-describe("useDosareAi — BYOK (desktop / fara tenantKeys)", () => {
-  it("fara tenantKeys: comportament istoric — cheile locale guverneaza si pleaca in body", async () => {
-    const { capture, cleanup } = renderHook({
-      apiKeys: BYOK_KEYS,
-      aiSettings: { mode: "native" },
-    });
-    const providers = new Set(capture.current?.ai.availableModels.map((m) => m.provider));
-    expect(providers).toEqual(new Set(["anthropic"]));
-    await act(async () => {
-      await capture.current?.ai.onAnalyze(DOSAR);
-    });
-    expect(mockAnalyze).toHaveBeenCalledTimes(1);
-    expect(mockAnalyze.mock.calls[0][2]).toBe(BYOK_KEYS);
-    cleanup();
-  });
-
-  it("dev combo (browser + backend desktop): serverAuthMode desktop pastreaza BYOK", () => {
-    const devCombo: TenantKeys = {
-      status: {
-        state: "ready",
-        serverAuthMode: "desktop",
-        configured: { anthropic: false, openai: false, google: false, openrouter: false, captcha: false },
-      },
-      tenantMode: false,
-      hasTenantAiKey: false,
-      tenantCaptchaMissing: false,
-      tenantAiKeysMissing: false,
-      refresh: vi.fn(),
-    };
-    const { capture, cleanup } = renderHook({
-      apiKeys: BYOK_KEYS,
-      aiSettings: { mode: "native" },
-      tenantKeys: devCombo,
-    });
-    const providers = new Set(capture.current?.ai.availableModels.map((m) => m.provider));
-    expect(providers).toEqual(new Set(["anthropic"]));
-    cleanup();
+    expect(h.api.ai.showKeyPrompt).toBe(true);
+    h.unmount();
   });
 });

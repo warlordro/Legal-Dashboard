@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { act } from "react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createRoot, type Root } from "react-dom/client";
+import { act, createElement } from "react";
 
-// useFontSize captureaza isDesktop la incarcarea modulului, deci fiecare test
-// seteaza window.desktopApi INAINTE de import si reseteaza registry-ul de module.
+import { useFontSize } from "./useFontSize";
 
 const STORAGE_KEY = "portaljust-font-size";
 const MIGRATION_KEY = "portaljust-font-size-migrated-v241";
@@ -13,44 +13,36 @@ function setDesktop(on: boolean): void {
   w.desktopApi = on ? {} : undefined;
 }
 
-async function importHook() {
-  const mod = await import("./useFontSize");
-  return mod.useFontSize;
-}
+type FontSizeApi = ReturnType<typeof useFontSize>;
 
-async function renderHook() {
-  const useFontSize = await importHook();
-  const { createRoot } = await import("react-dom/client");
-  const { createElement, useEffect } = await import("react");
-  type Result = ReturnType<typeof useFontSize>;
-  const capture: { current: Result | null } = { current: null };
+function mount() {
   const container = document.createElement("div");
   document.body.appendChild(container);
-
+  let root: Root | null = null;
+  const captured: { current: FontSizeApi | null } = { current: null };
   function Probe() {
-    const result = useFontSize();
-    useEffect(() => {
-      capture.current = result;
-    });
-    capture.current = result;
+    captured.current = useFontSize();
     return null;
   }
-
-  let root: ReturnType<typeof createRoot> | null = null;
   act(() => {
     root = createRoot(container);
     root.render(createElement(Probe));
   });
-  const cleanup = () => {
-    act(() => root?.unmount());
-    container.remove();
+  return {
+    get api(): FontSizeApi {
+      if (!captured.current) throw new Error("hook not mounted");
+      return captured.current;
+    },
+    unmount() {
+      act(() => root?.unmount());
+      container.remove();
+    },
   };
-  return { capture, cleanup };
 }
 
 beforeEach(() => {
-  vi.resetModules();
   localStorage.clear();
+  setDesktop(false);
   document.documentElement.style.fontSize = "";
 });
 
@@ -58,105 +50,121 @@ afterEach(() => {
   setDesktop(false);
 });
 
-describe("loadStep defaults per platforma", () => {
-  it("web: default Mic (16px)", async () => {
-    setDesktop(false);
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(16);
+describe("useFontSize — trepte si default per platforma", () => {
+  it("web: default 16px (Mic) fara storage", () => {
+    const h = mount();
+    expect(h.api.value).toBe(16);
+    expect(h.api.label).toBe("Mic");
     expect(document.documentElement.style.fontSize).toBe("16px");
-    cleanup();
+    h.unmount();
   });
 
-  it("desktop: default Normal (18px)", async () => {
+  it("desktop: default 18px (Normal) fara storage", () => {
     setDesktop(true);
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(18);
-    expect(document.documentElement.style.fontSize).toBe("18px");
-    cleanup();
+    const h = mount();
+    expect(h.api.value).toBe(18);
+    expect(h.api.label).toBe("Normal");
+    h.unmount();
   });
-});
 
-describe("migrarea one-time pe web", () => {
-  it("sterge valoarea auto-persistata si aplica noul default 16px", async () => {
-    setDesktop(false);
-    localStorage.setItem(STORAGE_KEY, "1"); // auto-persistat de versiunile vechi
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(16);
-    expect(localStorage.getItem(MIGRATION_KEY)).toBe("1");
-    // Migrarea NU e suprascrisa de vreun persist la mount (ordinea conteaza).
+  it("expune 5 trepte 14..22 cu etichete umane", () => {
+    const h = mount();
+    expect(h.api.steps.map((s) => s.value)).toEqual([14, 16, 18, 20, 22]);
+    expect(h.api.steps.map((s) => s.label)).toEqual(["Foarte mic", "Mic", "Normal", "Mare", "Extra"]);
+    h.unmount();
+  });
+
+  it("mount-ul NU scrie storage (default-ul nu devine alegere)", () => {
+    const h = mount();
     expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-    cleanup();
+    h.unmount();
   });
 
-  it("nu ruleaza a doua oara: alegerea explicita post-migrare e respectata", async () => {
-    setDesktop(false);
-    localStorage.setItem(MIGRATION_KEY, "1");
-    localStorage.setItem(STORAGE_KEY, "20"); // px ales explicit dupa migrare
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(20);
-    cleanup();
-  });
-
-  it("nu atinge storage-ul pe desktop", async () => {
-    setDesktop(true);
-    localStorage.setItem(STORAGE_KEY, "20");
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(20);
-    expect(localStorage.getItem(MIGRATION_KEY)).toBeNull();
-    cleanup();
-  });
-
-  it("desktop: indexul legacy pastreaza px-ul de atunci dupa extinderea listei", async () => {
-    setDesktop(true);
-    localStorage.setItem(STORAGE_KEY, "1"); // legacy index 1 = 18px (Normal)
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(18);
-    cleanup();
-  });
-});
-
-describe("persistenta doar la alegere explicita", () => {
-  it("mount-ul NU scrie default-ul in storage", async () => {
-    setDesktop(false);
-    const { cleanup } = await renderHook();
-    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
-    cleanup();
-  });
-
-  it("increase() persista valoarea aleasa ca px", async () => {
-    setDesktop(false);
-    const { capture, cleanup } = await renderHook();
-    act(() => capture.current?.increase());
-    expect(capture.current?.value).toBe(18);
+  it("increase persista VALOAREA px, nu indexul", () => {
+    const h = mount();
+    act(() => h.api.increase());
+    expect(h.api.value).toBe(18);
     expect(localStorage.getItem(STORAGE_KEY)).toBe("18");
-    cleanup();
+    h.unmount();
   });
 
-  it("web: exista o treapta sub 16px (Foarte mic, 14px)", async () => {
-    setDesktop(false);
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.canDecrease).toBe(true);
-    act(() => capture.current?.decrease());
-    expect(capture.current?.value).toBe(14);
-    expect(document.documentElement.style.fontSize).toBe("14px");
-    cleanup();
+  it("canDecrease/canIncrease respecta capetele", () => {
+    localStorage.setItem(STORAGE_KEY, "14");
+    localStorage.setItem(MIGRATION_KEY, "1");
+    const h = mount();
+    expect(h.api.canDecrease).toBe(false);
+    expect(h.api.canIncrease).toBe(true);
+    h.unmount();
   });
 });
 
-describe("validarea valorii stocate", () => {
-  it("respinge non-intregi (STEPS[1.5] ar fi undefined)", async () => {
-    setDesktop(true);
-    localStorage.setItem(STORAGE_KEY, "1.5");
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(18); // default desktop, nu NaN
-    cleanup();
+describe("useFontSize — compatibilitate legacy si migrare", () => {
+  it("mapeaza indexii legacy 0..3 prin [16,18,20,22]", () => {
+    localStorage.setItem(MIGRATION_KEY, "1"); // migrarea a rulat deja
+    for (const [legacy, px] of [
+      ["0", 16],
+      ["2", 20],
+      ["3", 22],
+    ] as const) {
+      localStorage.setItem(STORAGE_KEY, legacy);
+      const h = mount();
+      expect(h.api.value).toBe(px);
+      h.unmount();
+    }
   });
 
-  it("respinge valori care nu sunt nici px valid, nici index legacy", async () => {
+  it("migrarea web sterge DOAR default-ul auto-persistat ('1') si seteaza flag-ul", () => {
+    localStorage.setItem(STORAGE_KEY, "1");
+    const h = mount();
+    expect(h.api.value).toBe(16); // default web, nu 18-ul auto-persistat
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    expect(localStorage.getItem(MIGRATION_KEY)).toBe("1");
+    h.unmount();
+  });
+
+  it("migrarea web sterge si valoarea px '18' auto-persistata", () => {
+    localStorage.setItem(STORAGE_KEY, "18");
+    const h = mount();
+    expect(h.api.value).toBe(16);
+    expect(localStorage.getItem(STORAGE_KEY)).toBeNull();
+    h.unmount();
+  });
+
+  it("migrarea PASTREAZA alegerile explicite (legacy '3' = Extra)", () => {
+    localStorage.setItem(STORAGE_KEY, "3");
+    const h = mount();
+    expect(h.api.value).toBe(22);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("3"); // neatins de migrare
+    expect(localStorage.getItem(MIGRATION_KEY)).toBe("1");
+    h.unmount();
+  });
+
+  it("migrarea ruleaza O SINGURA data: un '18' salvat explicit dupa migrare ramane", () => {
+    localStorage.setItem(STORAGE_KEY, "1");
+    const first = mount();
+    first.unmount(); // migrarea a rulat, flag setat
+
+    localStorage.setItem(STORAGE_KEY, "18"); // alegere explicita post-migrare
+    const second = mount();
+    expect(second.api.value).toBe(18);
+    expect(localStorage.getItem(STORAGE_KEY)).toBe("18");
+    second.unmount();
+  });
+
+  it("desktop: migrarea NU ruleaza (default-ul 18 ramane valid)", () => {
     setDesktop(true);
-    localStorage.setItem(STORAGE_KEY, "9");
-    const { capture, cleanup } = await renderHook();
-    expect(capture.current?.value).toBe(18);
-    cleanup();
+    localStorage.setItem(STORAGE_KEY, "1");
+    const h = mount();
+    expect(h.api.value).toBe(18);
+    expect(localStorage.getItem(MIGRATION_KEY)).toBeNull();
+    h.unmount();
+  });
+
+  it("valoare corupta in storage cade pe default", () => {
+    localStorage.setItem(MIGRATION_KEY, "1");
+    localStorage.setItem(STORAGE_KEY, "banana");
+    const h = mount();
+    expect(h.api.value).toBe(16);
+    h.unmount();
   });
 });

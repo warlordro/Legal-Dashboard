@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from "react";
-import { BrowserRouter, useLocation, useNavigate } from "react-router-dom";
+import { BrowserRouter, useLocation } from "react-router-dom";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { ToastProvider } from "@/components/ui/toast";
@@ -12,13 +12,13 @@ import Termene from "@/pages/Termene";
 import RnpmSearchPage from "@/pages/RnpmSearch";
 import Monitorizare from "@/pages/Monitorizare";
 import Alerts from "@/pages/Alerts";
-import SettingsPage from "@/pages/Settings";
 import AdminUsers from "@/pages/admin/Users";
 import AdminAudit from "@/pages/admin/Audit";
 import AdminQuota from "@/pages/admin/Quota";
 import AdminGrants from "@/pages/admin/Grants";
 import AdminUsage from "@/pages/admin/Usage";
 import AdminKeys from "@/pages/admin/Keys";
+import SettingsPage from "@/pages/Settings";
 import { AdminGate } from "@/components/AdminGate";
 import { useAuthMode } from "@/hooks/useAuthMode";
 import { useSessionBootstrap } from "@/hooks/useSessionBootstrap";
@@ -26,15 +26,10 @@ import { useSessionKeepAlive } from "@/hooks/useSessionKeepAlive";
 import { useSearchHistory } from "@/hooks/useSearchHistory";
 import { useRnpmHistory } from "@/hooks/useRnpmHistory";
 import { useApiKey } from "@/hooks/useApiKey";
-import { useTenantKeyStatus, type TenantKeys } from "@/hooks/useTenantKeyStatus";
 import { useAiSettings } from "@/hooks/useAiSettings";
 import { useAlertsStream } from "@/hooks/useAlertsStream";
 import type { Dosar, Termen, SearchParams } from "@/types";
 import type { RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
-
-// Electron chrome detection (drag strip, title-bar padding). Politica de chei
-// se decide separat pe authMode — vezi invariantul din PLAN-web-ux-fixes.md.
-const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
 
 interface DosareState {
   allDosare: Dosar[];
@@ -84,7 +79,6 @@ function AppShell({
   rnpmPendingSearch,
   handleRnpmHistoryClick,
   consumeRnpmPendingSearch,
-  tenantKeys,
 }: {
   dosareState: DosareState;
   setDosareState: React.Dispatch<React.SetStateAction<DosareState>>;
@@ -111,10 +105,8 @@ function AppShell({
   rnpmPendingSearch: { type: RnpmSearchType; params: RnpmSearchParams } | null;
   handleRnpmHistoryClick: (type: RnpmSearchType, params: RnpmSearchParams) => void;
   consumeRnpmPendingSearch: () => void;
-  tenantKeys: TenantKeys;
 }) {
   const { pathname } = useLocation();
-  const navigate = useNavigate();
   const authMode = useAuthMode();
   const mainRef = useRef<HTMLElement>(null);
   const [canScrollUp, setCanScrollUp] = useState(false);
@@ -150,41 +142,15 @@ function AppShell({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
-  // v2.42.0: in browser, "configureaza cheile/setarile" duce la pagina /setari
-  // (care gestioneaza toate starile — tenant, dev combo, loading); dialogul
-  // BYOK ramane doar suprafata desktop. Decizie de chrome, nu de politica de
-  // chei — vezi invariantul din PLAN-web-ux-fixes.md.
-  const openConfigure = useCallback(() => {
-    if (isDesktop) {
-      handleOpenKeyDialog();
-      return;
-    }
-    navigate("/setari");
-  }, [handleOpenKeyDialog, navigate]);
-
-  // Badge-ul "Setari API" din sidebar. Desktop: cheile BYOK locale (comportament
-  // istoric, AI-only). Tenant mode: cheile AI ale tenantului. null = stare
-  // tranzitorie (key-status loading/error in browser) — badge neutru, fara
-  // "Neconfigurat" fals.
-  const sidebarApiKeyState: boolean | null =
-    tenantKeys.status.state === "desktop"
-      ? hasKey
-      : tenantKeys.status.state === "ready"
-        ? tenantKeys.tenantMode
-          ? tenantKeys.hasTenantAiKey
-          : hasKey
-        : null;
+  // Chrome-ul Electron (drag strip + padding compensator pentru titleBarOverlay)
+  // exista DOAR pe desktop; in browser lasa o banda alba moarta sus.
+  const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
 
   return (
-    <div
-      className={
-        isDesktop ? "flex h-screen overflow-hidden bg-background pt-8" : "flex h-screen overflow-hidden bg-background"
-      }
-    >
+    <div className={`flex h-screen overflow-hidden bg-background${isDesktop ? " pt-8" : ""}`}>
       {/* Top 32px drag strip — matches Electron titleBarOverlay height. Windows buttons
           are drawn by the OS on top of this with higher priority, so clicks on them
-          still work while the rest of the strip drags the window. In browser there is
-          no title bar overlay, so both the strip and the pt-8 compensation are skipped. */}
+          still work while the rest of the strip drags the window. */}
       {isDesktop && (
         <div
           className="fixed top-0 left-0 right-0 h-8 bg-background z-[60]"
@@ -197,8 +163,8 @@ function AppShell({
           onHistoryClick={handleHistoryClick}
           onRemoveEntry={removeEntry}
           onClearHistory={clearHistory}
-          hasApiKey={sidebarApiKeyState}
-          onConfigureApiKey={openConfigure}
+          hasApiKey={hasKey}
+          onConfigureApiKey={handleOpenKeyDialog}
           rnpmHistory={rnpmHistory}
           onRnpmHistoryClick={handleRnpmHistoryClick}
           onRnpmRemoveEntry={removeRnpmEntry}
@@ -233,8 +199,7 @@ function AppShell({
               consumePendingSearch={consumePendingSearch}
               apiKeys={keys}
               aiSettings={{ mode: aiSettings.mode }}
-              tenantKeys={tenantKeys}
-              onConfigureApiKey={openConfigure}
+              onConfigureApiKey={handleOpenKeyDialog}
               showBudgetIndicator={pathname === "/dosare" && authMode === "web"}
             />
           </PageBoundary>
@@ -265,6 +230,13 @@ function AppShell({
               onAlertsChanged={refreshUnreadAlerts}
               onOpenDosar={(numarDosar, source) => handleHistoryClick("dosare", { numarDosar, source })}
             />
+          </PageBoundary>
+        )}
+        {/* v2.42.0 (5.1): /setari — taburi pe roluri; tab-urile admin refolosesc
+            paginile /admin/* cu prop embedded, montate on-demand. */}
+        {pathname === "/setari" && (
+          <PageBoundary label="Setari">
+            <SettingsPage />
           </PageBoundary>
         )}
         {pathname === "/admin/users" && (
@@ -309,17 +281,9 @@ function AppShell({
             </AdminGate>
           </PageBoundary>
         )}
-        {/* v2.42.0: pagina Setari — web-only (desktop pastreaza dialogul BYOK
-            si nu are nimic care sa navigheze aici). */}
-        {pathname === "/setari" && !isDesktop && (
-          <PageBoundary label="Setari">
-            <SettingsPage tenantKeys={tenantKeys} />
-          </PageBoundary>
-        )}
         <div style={{ display: pathname === "/rnpm" ? undefined : "none" }}>
           <PageBoundary label="Cautare RNPM">
             <RnpmSearchPage
-              tenantKeys={tenantKeys}
               captchaKey={activeCaptchaKey}
               captchaProvider={captchaProvider}
               fallback2CaptchaKey={
@@ -332,7 +296,7 @@ function AppShell({
                     : undefined
               }
               captchaMode={captchaMode}
-              onConfigureKey={openConfigure}
+              onConfigureKey={handleOpenKeyDialog}
               onSearchComplete={addRnpmEntry}
               pendingSearch={rnpmPendingSearch}
               consumePendingSearch={consumeRnpmPendingSearch}
@@ -428,9 +392,6 @@ function AuthedApp() {
     activeCaptchaKey,
   } = useApiKey();
   const aiSettings = useAiSettings();
-  // Instanta unica la nivel de app (un singur fetch /me/key-status), pasata
-  // prin props catre sidebar, RNPM, Dosare si ApiKeyDialog.
-  const tenantKeys = useTenantKeyStatus();
   const [showKeyDialog, setShowKeyDialog] = useState(false);
   const handleOpenKeyDialog = useCallback(() => setShowKeyDialog(true), []);
   const closeKeyDialog = useCallback(() => setShowKeyDialog(false), []);
@@ -491,13 +452,11 @@ function AuthedApp() {
             rnpmPendingSearch={rnpmPendingSearch}
             handleRnpmHistoryClick={handleRnpmHistoryClick}
             consumeRnpmPendingSearch={consumeRnpmPendingSearch}
-            tenantKeys={tenantKeys}
           />
           {showKeyDialog && (
             <ErrorBoundary variant="page" label="Configurare chei API">
               <ApiKeyDialog
                 onClose={closeKeyDialog}
-                tenantKeys={tenantKeys}
                 apiKey={{
                   setKey,
                   clearKey,

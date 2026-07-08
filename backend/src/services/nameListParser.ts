@@ -306,9 +306,7 @@ const XLSX_PARSE_TIMEOUT_MS = 30_000;
 // `raw:false`+`defval:""`: numerele/bool/date devin reprezentarea text a
 // celulei, formula -> rezultatul calculat (sau formula stringificata daca
 // nu e disponibil), rich text -> concatenarea fragmentelor.
-// Exportat din v2.42.0: reutilizat de userImport.ts (importul de utilizatori
-// din xlsx) — aceeasi conversie celula->text, un singur loc de intretinut.
-export function cellToString(value: unknown): string {
+function cellToString(value: unknown): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") {

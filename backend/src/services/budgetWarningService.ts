@@ -27,44 +27,35 @@ import { getEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 import { getUserById } from "../db/userRepository.ts";
 import { sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { type QuotaPeriod, getOverride } from "../db/userQuotaRepository.ts";
+// Aceleasi constante/reguli ca guard-ul (5.2) — fara mirror local care poate
+// diverge.
+import { PERIOD_SECONDS, readDefaultQuotaMilli } from "../middleware/quotaGuard.ts";
 import { sendComposedEmail } from "./email/mailer.ts";
 
-// v2.42.0: limita AI e un POOL unic ("ai") peste toate analizele — warning-ul
-// urmareste acelasi pool ca quotaGuard, nu doua praguri separate.
+// v2.42.0 (5.2): pool AI unic — un singur episod de warning pe "ai".
 export type QuotaFeature = "ai";
 
 const WARNING_THRESHOLD_PCT = 80;
 const EMAIL_COOLDOWN_SECONDS = 3600;
-const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
-  day: 86_400,
-  week: 604_800,
-  month: 2_592_000,
-};
 
 // AI usage feature codes -> quota feature. NULL = nu trigger warning (feature
-// fara cap, e.g. monitoring runs nu pe quota AI).
+// fara cap, e.g. monitoring runs nu pe quota AI). Toate usage-urile AI se
+// mapeaza pe pool-ul "ai".
 export function quotaFeatureOf(usageFeature: string): QuotaFeature | null {
   if (
-    usageFeature === "dosar_summary" ||
+    // "ai" = feature-ul de quota deja normalizat, asa cum e stocat in
+    // budget_notifications — retry-ul de email (index.ts) paseaza item.feature
+    // citit din acel tabel, nu un usage feature brut.
+    usageFeature === "ai" ||
     usageFeature === "ai.single" ||
-    usageFeature === "dosar_multi_analyst" ||
-    usageFeature === "dosar_multi_judge" ||
     usageFeature === "ai.multi" ||
-    usageFeature === "ai"
+    usageFeature === "dosar_summary" ||
+    usageFeature === "dosar_multi_analyst" ||
+    usageFeature === "dosar_multi_judge"
   ) {
     return "ai";
   }
   return null;
-}
-
-// Default cap din env (mirror din quotaGuard). NULL = pass-through pentru
-// useri fara override + fara env => fara warning de calculat.
-function readDefaultQuotaMilli(): number | null {
-  const raw = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
-  if (raw === undefined || raw === "") return null;
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed < 0 || !Number.isInteger(parsed)) return null;
-  return parsed;
 }
 
 export interface CheckBudgetWarningOptions {

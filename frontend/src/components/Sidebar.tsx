@@ -19,7 +19,6 @@ import type { SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
 import { HistoryEntryRow } from "./sidebar-history-entry";
 import { SidebarFooter } from "./sidebar-footer";
-import { useCurrentUser } from "@/hooks/useCurrentUser";
 
 const navItems = [
   { to: "/", label: "Dashboard", icon: BarChart3, end: true },
@@ -35,8 +34,7 @@ interface SidebarProps {
   onHistoryClick: (type: "dosare" | "termene", params: SearchParams) => void;
   onRemoveEntry: (id: string) => void;
   onClearHistory: () => void;
-  // null = stare tranzitorie in web (key-status loading/error) — badge neutru.
-  hasApiKey?: boolean | null;
+  hasApiKey?: boolean;
   onConfigureApiKey?: () => void;
   rnpmHistory: RnpmSearchHistoryEntry[];
   onRnpmHistoryClick: (type: RnpmSearchType, params: RnpmSearchParams) => void;
@@ -77,11 +75,31 @@ export function Sidebar({
     return latestRnpm > latestCautari ? "rnpm" : "cautari";
   });
   const [popoverSection, setPopoverSection] = useState<"cautari" | "rnpm" | null>(null);
+  // Popover-ele de istoric din modul colapsat sunt position:fixed, ancorate pe
+  // butonul apasat: containerul de mijloc are overflow-y-auto (fix-ul de
+  // footer), iar un absolute pozitionat lateral in afara barei de 64px era
+  // taiat de overflow — butonul se activa, dar meniul nu aparea niciodata.
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const popoverBtnRef = useRef<HTMLButtonElement>(null);
+
+  const togglePopover = (section: "cautari" | "rnpm") => (e: React.MouseEvent<HTMLButtonElement>) => {
+    if (popoverSection === section) {
+      setPopoverSection(null);
+      return;
+    }
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPopoverPos({
+      left: rect.right + 8,
+      // Continutul are maxHeight 60vh: clamp pe top ca lista sa nu iasa pe
+      // sub marginea ferestrei cand butonul e jos.
+      top: Math.max(8, Math.min(rect.top, window.innerHeight * 0.35)),
+    });
+    setPopoverSection(section);
+  };
   const navigate = useNavigate();
-  // Semnal de chrome: in web intrarea din footer se cheama "Setari" (pagina cu
-  // tab-uri, v2.42.0); pe desktop ramane "Setari API" (dialogul BYOK).
+  // v2.42.0 (5.1): pe web, intrarea din footer duce la /setari (taburi pe
+  // roluri); pe desktop ramane dialogul BYOK (invariant 0.1: desktop identic).
   const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
 
   const handleEntryClick = (entry: SearchHistoryEntry) => {
@@ -109,8 +127,26 @@ export function Sidebar({
         setPopoverSection(null);
       }
     };
+    // Pozitia e capturata la click (position:fixed); daca ancora se misca
+    // (scroll in zona de mijloc a sidebar-ului, resize), popover-ul ar ramane
+    // desprins de buton — il inchidem, ca dropdown-urile native (audit
+    // v2.42.0, finding #4). `capture: true` prinde si scroll-urile din
+    // containerele interioare (scroll nu face bubble). Exceptie: scroll-ul
+    // DIN INTERIORUL popover-ului (lista de istoric proprie, overflow-y-auto)
+    // nu trebuie sa-l inchida — altfel orice scroll in lista il stinge instant.
+    const close = (e: Event) => {
+      if (e.target instanceof Node && popoverRef.current?.contains(e.target)) return;
+      setPopoverSection(null);
+    };
+    const closeOnResize = () => setPopoverSection(null);
     document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    window.addEventListener("scroll", close, true);
+    window.addEventListener("resize", closeOnResize);
+    return () => {
+      document.removeEventListener("mousedown", handler);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", closeOnResize);
+    };
   }, [popoverSection]);
 
   return (
@@ -121,7 +157,7 @@ export function Sidebar({
       )}
     >
       {/* Header: Logo */}
-      <div className="flex items-center border-b border-border px-3 py-4">
+      <div className="flex shrink-0 items-center border-b border-border px-3 py-4">
         <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary text-primary-foreground">
           <Scale className="h-5 w-5" />
         </div>
@@ -133,13 +169,11 @@ export function Sidebar({
         )}
       </div>
 
-      {/* Scroll region: nav + admin + istoric. In expanded mode continutul care nu
-          incape in viewport (ex. web cu sectiunea Administrare) devine scrollabil in
-          loc sa fie taiat de overflow-hidden-ul din App. In collapsed mode nu punem
-          overflow — popover-urile de istoric ies in afara sidebar-ului (left-full)
-          si ar fi clip-uite de un container cu overflow-y-auto. Footer-ul ramane
-          pinned, in afara acestei zone. */}
-      <div className={cn("flex min-h-0 flex-1 flex-col", !collapsed && "overflow-y-auto scrollbar-thin")}>
+      {/* Zona de mijloc scrollabila: nav + admin + istoric. Cand continutul
+          depaseste inaltimea ferestrei (ex. sectiunea Administrare + font mare),
+          mijlocul scroll-uieste iar footer-ul ramane mereu vizibil — inainte,
+          footer-ul era impins in afara paginii (overflow-hidden pe root). */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto scrollbar-thin">
         {/* Navigation */}
         <nav className="space-y-1 p-2">
           {navItems.map(({ to, label, icon: Icon, end }) => {
@@ -182,16 +216,15 @@ export function Sidebar({
           })}
         </nav>
 
-        {/* v2.42.0: sectiunea Administrare a fost mutata in pagina /setari
-            (tab-uri pe rol, doar in web) — sidebar-ul ramane doar cu navigatia
-            de lucru; intrarea "Setari" din footer e poarta canonica. */}
+        {/* v2.42.0 (5.1): sectiunea Administrare a fost mutata in /setari (taburi
+            pe roluri). Rutele /admin/* raman functionale prin URL direct. */}
 
         {/* History accordion: only one section open at a time */}
         {!collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
           <div className="flex flex-1 flex-col overflow-hidden border-t border-border">
             {/* Cautari section */}
             {history.length > 0 && (
-              <div className={cn("flex flex-col overflow-hidden", openHistory === "cautari" && "min-h-40 flex-1")}>
+              <div className={cn("flex flex-col overflow-hidden", openHistory === "cautari" && "flex-1")}>
                 <div className="flex items-center justify-between px-3 pt-3 pb-1">
                   <button
                     type="button"
@@ -226,7 +259,7 @@ export function Sidebar({
                         label={entry.label}
                         resultCount={entry.resultCount}
                         timestamp={entry.timestamp}
-                        source={entry.params.source}
+                        source={entry.params.source ?? "portaljust"}
                         onClick={() => handleEntryClick(entry)}
                         onRemove={() => onRemoveEntry(entry.id)}
                       />
@@ -241,7 +274,7 @@ export function Sidebar({
               <div
                 className={cn(
                   "flex flex-col overflow-hidden border-t border-border",
-                  openHistory === "rnpm" && "min-h-40 flex-1"
+                  openHistory === "rnpm" && "flex-1"
                 )}
               >
                 <div className="flex items-center justify-between px-3 pt-3 pb-1">
@@ -291,12 +324,12 @@ export function Sidebar({
 
         {/* Collapsed: history popovers (Cautari + RNPM) */}
         {collapsed && (history.length > 0 || rnpmHistory.length > 0) && (
-          <div className="relative flex-1 flex flex-col items-center gap-1 pt-2 border-t border-border">
+          <div className="flex-1 flex flex-col items-center gap-1 pt-2 border-t border-border">
             {history.length > 0 && (
               <button
                 ref={popoverSection === "cautari" ? popoverBtnRef : null}
                 type="button"
-                onClick={() => setPopoverSection(popoverSection === "cautari" ? null : "cautari")}
+                onClick={togglePopover("cautari")}
                 title="Istoric cautari"
                 className={cn(
                   "rounded-lg p-2 transition-colors",
@@ -313,7 +346,7 @@ export function Sidebar({
               <button
                 ref={popoverSection === "rnpm" ? popoverBtnRef : null}
                 type="button"
-                onClick={() => setPopoverSection(popoverSection === "rnpm" ? null : "rnpm")}
+                onClick={togglePopover("rnpm")}
                 title="Istoric RNPM"
                 className={cn(
                   "rounded-lg p-2 transition-colors",
@@ -329,7 +362,8 @@ export function Sidebar({
             {popoverSection === "cautari" && (
               <div
                 ref={popoverRef}
-                className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
+                style={{ top: popoverPos?.top, left: popoverPos?.left }}
+                className="fixed z-50 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
               >
                 <div className="flex items-center justify-between px-3 pt-3 pb-1">
                   <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -356,7 +390,7 @@ export function Sidebar({
                       label={entry.label}
                       resultCount={entry.resultCount}
                       timestamp={entry.timestamp}
-                      source={entry.params.source}
+                      source={entry.params.source ?? "portaljust"}
                       onClick={() => handleEntryClick(entry)}
                       onRemove={() => onRemoveEntry(entry.id)}
                     />
@@ -368,7 +402,8 @@ export function Sidebar({
             {popoverSection === "rnpm" && (
               <div
                 ref={popoverRef}
-                className="absolute left-full top-0 z-50 ml-2 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
+                style={{ top: popoverPos?.top, left: popoverPos?.left }}
+                className="fixed z-50 w-56 rounded-xl border border-border bg-card shadow-xl animate-in fade-in slide-in-from-left-2 duration-200"
               >
                 <div className="flex items-center justify-between px-3 pt-3 pb-1">
                   <span className="flex items-center gap-1.5 text-[12px] font-semibold uppercase tracking-wider text-muted-foreground">
@@ -413,8 +448,7 @@ export function Sidebar({
         collapsed={collapsed}
         onToggleCollapsed={() => setCollapsed(!collapsed)}
         hasApiKey={hasApiKey}
-        onConfigureApiKey={onConfigureApiKey}
-        settingsLabel={isDesktop ? "Setari API" : "Setari"}
+        onConfigureApiKey={isDesktop ? onConfigureApiKey : () => navigate("/setari")}
       />
     </aside>
   );

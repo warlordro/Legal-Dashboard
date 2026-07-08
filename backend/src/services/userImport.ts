@@ -1,255 +1,214 @@
+// v2.42.0 (4.3): parsarea importului de utilizatori din xlsx — TOATA
+// server-side. Fisierul vine raw (octet-stream) pe o ruta admin-only cu
+// bodyLimit dedicat de 512KB; aici validam continutul si intoarcem randuri
+// curate + issues per rand, fara sa atingem DB-ul (pre-check-ul de duplicate
+// in DB si insertul tranzactional raman in ruta).
+
 import ExcelJS from "exceljs";
 import { z } from "zod";
-import { CREATABLE_USER_ROLES, canonicalizeEmail, type UserRole } from "../db/userRepository.ts";
-import { cellToString } from "./nameListParser.ts";
-
-// v2.42.0 (PLAN-web-ux-etapa2.md, E2-A2): template + parsare pentru importul
-// de utilizatori din xlsx. Parsarea e server-side (nu avem incredere in parser
-// client pe fisiere de la useri — acelasi motiv ca nameListParser).
+import { canonicalizeEmail, type CreatableUserRole } from "../db/userRepository.ts";
 
 export const MAX_IMPORT_BYTES = 512 * 1024;
 export const MAX_IMPORT_ROWS = 500;
 const PARSE_TIMEOUT_MS = 30_000;
-const ZIP_MAGIC = Buffer.from([0x50, 0x4b, 0x03, 0x04]);
-const DATA_SHEET = "Utilizatori";
-const INSTRUCTIONS_SHEET = "Instructiuni";
 
-// Schema COMUNA de creare user — folosita de POST /admin/users (individual)
-// si de fiecare rand din import. Un singur loc pentru email/nume/rol.
-export const CreateUserSchema = z
-  .object({
-    email: z
-      .string()
-      .trim()
-      .max(254, "Emailul depaseste 254 de caractere.")
-      .email("Email invalid.")
-      .transform(canonicalizeEmail),
-    displayName: z
-      .string()
-      .trim()
-      .min(1, "Numele afisat este obligatoriu.")
-      .max(120, "Numele depaseste 120 caractere."),
-    role: z.enum(CREATABLE_USER_ROLES),
-  })
-  .strict();
-
-export type CreateUserInput = z.infer<typeof CreateUserSchema>;
-
-// UI-ul afiseaza rolurile ca "Utilizator"/"Admin" — template-ul si importul
-// vorbesc aceeasi limba: acceptam si etichetele umane, si token-urile interne
-// (case-insensitive), gol = Utilizator. Dropdown-ul din template foloseste
-// etichetele umane.
-export const ROLE_LABELS: Record<(typeof CREATABLE_USER_ROLES)[number], string> = {
-  user: "Utilizator",
-  admin: "Admin",
-};
-
-const ROLE_ALIASES: Record<string, UserRole> = {
-  user: "user",
-  utilizator: "user",
-  admin: "admin",
-  administrator: "admin",
-};
-
-export function parseRoleInput(raw: string): UserRole | null {
-  const key = canonicalizeEmail(raw); // trim + lowercase (refolosim normalizatorul)
-  if (key === "") return "user";
-  return ROLE_ALIASES[key] ?? null;
-}
-
-export class UserImportError extends Error {
-  readonly code: "invalid_file" | "too_many_rows" | "empty_file";
-  constructor(code: "invalid_file" | "too_many_rows" | "empty_file", message: string) {
-    super(message);
-    this.name = "UserImportError";
-    this.code = code;
-  }
-}
-
-export interface ImportRowValid {
-  rowNumber: number; // randul din sheet (1-based, asa cum il vede userul in Excel)
+export interface ParsedUserRow {
+  rowNumber: number;
   email: string; // canonic
   displayName: string;
-  role: UserRole;
+  role: CreatableUserRole;
 }
 
-export interface ImportRowIssue {
+export interface ImportIssue {
   rowNumber: number;
-  email: string; // ce s-a putut citi (canonic daca parsabil), pentru raport
-  // duplicate_in_db se adauga la nivel de ruta (check-ul DB nu e treaba parserului).
-  status: "duplicate_in_file" | "duplicate_in_db" | "invalid";
-  reason: string;
+  email: string | null;
+  code: "invalid_row" | "duplicate_in_file" | "duplicate_in_db";
+  message: string;
 }
 
-export interface ParsedImport {
-  valid: ImportRowValid[];
-  issues: ImportRowIssue[];
+export type ParseImportResult =
+  | { ok: true; rows: ParsedUserRow[]; issues: ImportIssue[] }
+  | { ok: false; code: "invalid_file" | "too_many_rows"; message: string };
+
+// Etichete umane SI token-uri, case-insensitive; gol = user. Orice altceva e
+// invalid (nu ghicim — support/readonly nu sunt creabile din import).
+export function parseRoleInput(raw: string): CreatableUserRole | null {
+  const v = raw.trim().toLowerCase();
+  if (v === "" || v === "user" || v === "utilizator") return "user";
+  if (v === "admin" || v === "administrator") return "admin";
+  return null;
 }
 
-// Template descarcabil: sheet-ul de date DOAR cu header (un rand exemplu ar fi
-// importat din greseala — review-panel); exemplul si regulile stau in sheet-ul
-// "Instructiuni", pe care importul il ignora complet.
-export async function buildUserImportTemplate(): Promise<Buffer> {
-  const wb = new ExcelJS.Workbook();
-  const data = wb.addWorksheet(DATA_SHEET);
-  data.columns = [
-    { header: "Email", key: "email", width: 36 },
-    { header: "Nume afisat", key: "displayName", width: 28 },
-    { header: "Rol", key: "role", width: 12 },
-  ];
-  data.getRow(1).font = { bold: true };
+const ImportRowSchema = z.object({
+  email: z.string().trim().max(254).email().transform(canonicalizeEmail),
+  displayName: z.string().trim().min(1).max(120),
+});
 
-  // Dropdown blocat pe coloana Rol (data validation tip lista, stop pe valori
-  // din afara listei) — userul alege dintre etichetele umane, nu tasteaza
-  // token-uri interne. Acoperim toate randurile posibile (cap + header).
-  const roleList = `"${Object.values(ROLE_LABELS).join(",")}"`;
-  for (let r = 2; r <= MAX_IMPORT_ROWS + 1; r++) {
-    data.getCell(`C${r}`).dataValidation = {
-      type: "list",
-      allowBlank: true,
-      formulae: [roleList],
-      showErrorMessage: true,
-      errorStyle: "stop",
-      errorTitle: "Rol invalid",
-      error: "Alege din lista: Utilizator sau Admin (gol = Utilizator).",
+// Celulele exceljs pot fi string, numar, data, richText, hyperlink (mailto pe
+// emailuri lipite din Outlook) sau formula cu result — normalizam totul la text.
+function cellToString(value: ExcelJS.CellValue): string {
+  if (value === null || value === undefined) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (value instanceof Date) return value.toISOString();
+  if (typeof value === "object") {
+    if ("richText" in value && Array.isArray(value.richText)) {
+      return value.richText.map((part) => part.text ?? "").join("");
+    }
+    if ("text" in value && value.text !== undefined) return cellToString(value.text as ExcelJS.CellValue);
+    if ("result" in value && value.result !== undefined) return cellToString(value.result as ExcelJS.CellValue);
+    if ("hyperlink" in value && typeof value.hyperlink === "string") {
+      return value.hyperlink.replace(/^mailto:/i, "");
+    }
+  }
+  return "";
+}
+
+export async function parseUserImport(buffer: Buffer): Promise<ParseImportResult> {
+  // 1. Magic bytes ZIP (xlsx = arhiva ZIP): respinge devreme CSV/HTML/binaruri
+  //    redenumite, inainte sa atingem exceljs.
+  if (buffer.length < 4 || buffer[0] !== 0x50 || buffer[1] !== 0x4b || buffer[2] !== 0x03 || buffer[3] !== 0x04) {
+    return { ok: false, code: "invalid_file", message: "Fisierul nu este un .xlsx valid." };
+  }
+  if (buffer.length > MAX_IMPORT_BYTES) {
+    return { ok: false, code: "invalid_file", message: "Fisierul depaseste limita de 512KB." };
+  }
+
+  const workbook = new ExcelJS.Workbook();
+  try {
+    // Comentariu onest: race-ul elibereaza handlerul HTTP dupa 30s, dar NU
+    // opreste parsarea exceljs pornita in fundal. Apararea reala impotriva
+    // fisierelor ostile e capul de 512KB + ruta admin-only.
+    await Promise.race([
+      workbook.xlsx.load(buffer as unknown as ArrayBuffer),
+      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("parse timeout")), PARSE_TIMEOUT_MS)),
+    ]);
+  } catch (err) {
+    // O linie de diagnostic server-side — altfel "user a trimis junk" si
+    // "regresie de parser" sunt indistinguibile din raspunsul sanitizat.
+    console.error("[userImport] xlsx parse failed:", err instanceof Error ? err.message : err);
+    return { ok: false, code: "invalid_file", message: "Fisierul nu a putut fi citit ca .xlsx." };
+  }
+
+  const sheet = workbook.worksheets[0];
+  if (!sheet) {
+    return { ok: false, code: "invalid_file", message: "Fisierul nu contine niciun sheet." };
+  }
+
+  // Colectam randurile non-goale in ordinea din sheet (eachRow sare peste cele
+  // complet goale), pastrand numarul de rand din Excel pentru raportare.
+  const rawRows: { rowNumber: number; cells: string[] }[] = [];
+  sheet.eachRow((row, rowNumber) => {
+    const cells: string[] = [];
+    for (let col = 1; col <= 3; col++) {
+      cells.push(cellToString(row.getCell(col).value).trim());
+    }
+    if (cells.some((cell) => cell !== "")) {
+      rawRows.push({ rowNumber, cells });
+    }
+  });
+
+  // Detectia headerului: prima celula EXACT egala cu "email" dupa canonicalize.
+  // NU `.includes("email")` — un prim rand de date cu "contact@email.com" ar fi
+  // aruncat silentios (capcana confirmata in review 5/5).
+  const hasHeader = rawRows.length > 0 && canonicalizeEmail(rawRows[0].cells[0]) === "email";
+  const dataRows = hasHeader ? rawRows.slice(1) : rawRows;
+
+  // Cap de randuri DATE — verificat DUPA slice, ca headerul sa nu se numere.
+  if (dataRows.length > MAX_IMPORT_ROWS) {
+    return {
+      ok: false,
+      code: "too_many_rows",
+      message: `Fisierul are ${dataRows.length} randuri de date; maximul este ${MAX_IMPORT_ROWS}.`,
     };
   }
 
-  const instr = wb.addWorksheet(INSTRUCTIONS_SHEET);
-  instr.columns = [{ width: 100 }];
-  instr.addRows([
-    ["Completeaza sheet-ul 'Utilizatori' incepand cu randul 2. Acest sheet ('Instructiuni') este ignorat la import."],
-    ["Email: adresa Google cu care utilizatorul se va loga (obligatoriu)."],
-    ["Nume afisat: numele vizibil in aplicatie (obligatoriu)."],
-    ['Rol: alege din lista "Utilizator" sau "Admin". Lasat gol = Utilizator.'],
-    [""],
-    ["Exemplu de rand:  ana@firma.ro  |  Ana Pop  |  Utilizator"],
-    [`Limita: maximum ${MAX_IMPORT_ROWS} de randuri per fisier.`],
-  ]);
-
-  const out = await wb.xlsx.writeBuffer();
-  return Buffer.from(out as unknown as ArrayBuffer);
-}
-
-async function loadWorkbook(buf: Buffer): Promise<ExcelJS.Workbook> {
-  if (buf.length < ZIP_MAGIC.length || !buf.subarray(0, ZIP_MAGIC.length).equals(ZIP_MAGIC)) {
-    throw new UserImportError("invalid_file", "Fisierul nu este .xlsx. Foloseste template-ul descarcat din aplicatie.");
-  }
-  const wb = new ExcelJS.Workbook();
-  // Timeout safety belt: elibereaza HANDLER-UL dupa 30s, dar NU opreste
-  // parsarea exceljs din fundal (Promise.race nu anuleaza; review-panel) —
-  // un zip patologic poate continua sa consume CPU pana termina. Apararea
-  // reala e MAX_IMPORT_BYTES (512KB) + ruta admin-only; izolarea in worker
-  // terminabil nu-si justifica complexitatea la aceasta suprafata.
-  let timer: NodeJS.Timeout | undefined;
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new UserImportError("invalid_file", "Parsarea fisierului a expirat.")),
-      PARSE_TIMEOUT_MS
-    );
-  });
-  try {
-    await Promise.race([
-      wb.xlsx.load(buf as unknown as ArrayBuffer).catch((e) => {
-        throw new UserImportError(
-          "invalid_file",
-          `Fisier corupt sau format neasteptat: ${e instanceof Error ? e.message : String(e)}`
-        );
-      }),
-      timeout,
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-  return wb;
-}
-
-function looksLikeHeader(cells: string[]): boolean {
-  // Potrivire EXACTA pe eticheta de header — .includes("email") trata ca
-  // header (si arunca silentios) un prim rand de DATE al carui email continea
-  // substringul, ex. "contact@email.com" (review-panel, consens 5/5).
-  return canonicalizeEmail(cells[0] ?? "") === "email";
-}
-
-// Pipeline determinist (plan E2-A2): citire -> canonicalizare -> validare pe
-// schema comuna -> dedup in-fisier. Verificarea vs DB si insertul raman la
-// ruta (repository-only DB access).
-export async function parseUserImportFile(buf: Buffer): Promise<ParsedImport> {
-  const wb = await loadWorkbook(buf);
-  const sheet =
-    wb.getWorksheet(DATA_SHEET) ?? wb.worksheets.find((ws) => ws.name !== INSTRUCTIONS_SHEET) ?? wb.worksheets[0];
-  if (!sheet) {
-    throw new UserImportError("empty_file", "Fisierul nu contine niciun sheet.");
-  }
-
-  const rawRows: Array<{ rowNumber: number; cells: string[] }> = [];
-  let exceeded = false;
-  sheet.eachRow({ includeEmpty: false }, (row, rowNumber) => {
-    if (exceeded) return;
-    // +1 pentru header: capul e pe randurile de DATE.
-    if (rawRows.length > MAX_IMPORT_ROWS) {
-      exceeded = true;
-      return;
-    }
-    const raw = row.values;
-    const cells: string[] = [];
-    if (Array.isArray(raw)) {
-      // row.values e 1-indexed; index 0 e mereu undefined.
-      for (let i = 1; i < raw.length; i++) cells.push(cellToString(raw[i]));
-    }
-    rawRows.push({ rowNumber, cells });
-  });
-
-  // Header-ul (daca exista) nu conteaza la cap.
-  const dataRows = rawRows.length > 0 && looksLikeHeader(rawRows[0].cells) ? rawRows.slice(1) : rawRows;
-  if (exceeded || dataRows.length > MAX_IMPORT_ROWS) {
-    throw new UserImportError("too_many_rows", `Fisierul depaseste limita de ${MAX_IMPORT_ROWS} randuri.`);
-  }
-  if (dataRows.length === 0) {
-    throw new UserImportError("empty_file", "Fisierul nu contine niciun rand de date sub header.");
-  }
-
-  const valid: ImportRowValid[] = [];
-  const issues: ImportRowIssue[] = [];
-  const seen = new Set<string>();
+  const rows: ParsedUserRow[] = [];
+  const issues: ImportIssue[] = [];
+  const seenEmails = new Set<string>();
 
   for (const { rowNumber, cells } of dataRows) {
-    const emailRaw = cells[0] ?? "";
-    const displayNameRaw = cells[1] ?? "";
-    const role = parseRoleInput(cells[2] ?? ""); // accepta "Utilizator"/"Admin" si "user"/"admin"; gol => user
-    const emailForReport = canonicalizeEmail(emailRaw);
+    const [rawEmail, rawName, rawRole] = cells;
 
+    const role = parseRoleInput(rawRole);
     if (role === null) {
       issues.push({
         rowNumber,
-        email: emailForReport,
-        status: "invalid",
-        reason: `Rol necunoscut "${cells[2]?.trim()}" — valorile valide sunt: ${Object.values(ROLE_LABELS).join(", ")} (gol = Utilizator).`,
+        email: rawEmail || null,
+        code: "invalid_row",
+        message: `Rol necunoscut: "${rawRole}". Foloseste "Utilizator" sau "Admin".`,
       });
       continue;
     }
-    const parsed = CreateUserSchema.safeParse({ email: emailRaw, displayName: displayNameRaw, role });
+
+    const parsed = ImportRowSchema.safeParse({ email: rawEmail, displayName: rawName });
     if (!parsed.success) {
+      const firstIssue = parsed.error.issues[0];
+      const field = firstIssue?.path[0] === "displayName" ? "Nume afisat" : "Email";
       issues.push({
         rowNumber,
-        email: emailForReport,
-        status: "invalid",
-        reason: parsed.error.issues.map((i) => i.message).join(" "),
+        email: rawEmail || null,
+        code: "invalid_row",
+        message: `${field} invalid.`,
       });
       continue;
     }
-    if (seen.has(parsed.data.email)) {
+
+    // Dedup in-fisier pe email canonic: primul rand castiga, restul devin issues.
+    if (seenEmails.has(parsed.data.email)) {
       issues.push({
         rowNumber,
         email: parsed.data.email,
-        status: "duplicate_in_file",
-        reason: "Email duplicat in fisier — doar prima aparitie se importa.",
+        code: "duplicate_in_file",
+        message: "Email duplicat in fisier (primul rand a fost pastrat).",
       });
       continue;
     }
-    seen.add(parsed.data.email);
-    valid.push({ rowNumber, ...parsed.data });
+    seenEmails.add(parsed.data.email);
+
+    rows.push({ rowNumber, email: parsed.data.email, displayName: parsed.data.displayName, role });
   }
 
-  return { valid, issues };
+  return { ok: true, rows, issues };
+}
+
+// Template-ul de import: sheet "Utilizatori" cu header + validare LIST pe
+// coloana Rol (etichete umane) si sheet "Instructiuni".
+export async function buildImportTemplate(): Promise<Buffer> {
+  const workbook = new ExcelJS.Workbook();
+
+  const sheet = workbook.addWorksheet("Utilizatori");
+  sheet.columns = [
+    { header: "Email", key: "email", width: 36 },
+    { header: "Nume afisat", key: "displayName", width: 28 },
+    { header: "Rol", key: "role", width: 16 },
+  ];
+  sheet.getRow(1).font = { bold: true };
+  for (let rowNumber = 2; rowNumber <= MAX_IMPORT_ROWS + 1; rowNumber++) {
+    sheet.getCell(`C${rowNumber}`).dataValidation = {
+      type: "list",
+      allowBlank: true,
+      formulae: ['"Utilizator,Admin"'],
+      showErrorMessage: true,
+      errorTitle: "Rol invalid",
+      error: "Alege Utilizator sau Admin.",
+    };
+  }
+
+  const info = workbook.addWorksheet("Instructiuni");
+  info.getColumn(1).width = 90;
+  const lines = [
+    'Completeaza sheet-ul "Utilizatori" — un rand per utilizator.',
+    "Email: adresa Google Workspace cu care utilizatorul se va loga (obligatoriu).",
+    "Nume afisat: numele afisat in aplicatie (obligatoriu, 1-120 caractere).",
+    "Rol: Utilizator sau Admin. Gol = Utilizator.",
+    `Maxim ${MAX_IMPORT_ROWS} randuri de date per fisier; dimensiune maxima 512KB.`,
+    "Emailurile duplicate (in fisier sau deja existente) sunt raportate si sarite.",
+  ];
+  lines.forEach((line, idx) => {
+    info.getCell(`A${idx + 1}`).value = line;
+  });
+
+  const out = await workbook.xlsx.writeBuffer();
+  return Buffer.from(out as ArrayBuffer);
 }
