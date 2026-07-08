@@ -4,11 +4,23 @@ import type React from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { __resetTenantKeyStatusStoreForTests } from "@/hooks/useTenantKeyStatus";
 import { ApiKeyDialog } from "./ApiKeyDialog";
 import type { AiMode } from "./dosare-ai-config";
 
+const mockKeyStatus = vi.fn();
+const mockGetTenantKeys = vi.fn();
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    me: { ...actual.me, keyStatus: (...args: unknown[]) => mockKeyStatus(...args) },
+    admin: { ...actual.admin, getTenantKeys: (...args: unknown[]) => mockGetTenantKeys(...args) },
+  };
+});
+
 vi.mock("@/components/AIUsagePanel", () => ({ AIUsagePanel: () => <div /> }));
-vi.mock("@/components/ApiAccessPanel", () => ({ ApiAccessPanel: () => <div /> }));
+vi.mock("@/components/ApiAccessPanel", () => ({ ApiAccessPanel: () => <div>ApiAccessPanelMock</div> }));
 vi.mock("@/components/EmailSettingsPanel", () => ({ EmailSettingsPanel: () => <div /> }));
 vi.mock("@/components/NotificationStatusPanel", () => ({ NotificationStatusPanel: () => <div /> }));
 vi.mock("@/hooks/useAuthMode", () => ({ useAuthMode: vi.fn(() => "desktop") }));
@@ -49,6 +61,13 @@ function render(ui: React.ReactNode) {
 
 function textContent(element: Element): string {
   return element.textContent ?? "";
+}
+
+async function flush() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
 }
 
 function getButton(name: RegExp): HTMLButtonElement {
@@ -119,6 +138,24 @@ describe("ApiKeyDialog OpenRouter mode", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetTenantKeyStatusStoreForTests();
+    mockKeyStatus.mockResolvedValue({
+      authMode: "web",
+      tenantKeysConfigured: { anthropic: true, openai: true, google: true, openrouter: true, captcha: true },
+    });
+    mockGetTenantKeys.mockResolvedValue({
+      keys: {
+        anthropic: { set: true, last4: "ab12" },
+        openai: { set: true, last4: "oa34" },
+        google: { set: true, last4: "gg56" },
+        openrouter: { set: true, last4: "or78" },
+        twocaptcha: { set: true, last4: "cp90" },
+        capsolver: { set: false, last4: null },
+      },
+      captcha: { provider: "2captcha", mode: "sequential" },
+      updatedAt: "2026-07-06T00:00:00.000Z",
+      updatedBy: null,
+    });
     useAuthModeMock.mockReturnValue("desktop");
     useCurrentUserMock.mockReturnValue({
       user: {
@@ -136,7 +173,7 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     });
   });
 
-  it("hides in web mode for non-admin users", () => {
+  it("web non-admin: dialogul se deschide cu panourile personale, fara BYOK si fara management PAT", () => {
     useAuthModeMock.mockReturnValue("web");
     useCurrentUserMock.mockReturnValue({
       user: {
@@ -155,7 +192,14 @@ describe("ApiKeyDialog OpenRouter mode", () => {
 
     render(<ApiKeyDialog {...props("native")} />);
 
-    expect(textContent(host)).toBe("");
+    const text = textContent(host);
+    // Dialogul NU mai e gol (inainte: return null => butonul "Setari API" parea mort).
+    expect(text).toContain("Configurare Chei API");
+    expect(text).toContain("configurate de administrator");
+    // Fara inputuri BYOK, fara buton de salvare, fara management PAT.
+    expect(host.querySelectorAll("input[type=password]").length).toBe(0);
+    expect(text).not.toContain("Salveaza");
+    expect(text).not.toContain("ApiAccessPanelMock");
   });
 
   it("shows in web mode for admin users", () => {
@@ -178,6 +222,83 @@ describe("ApiKeyDialog OpenRouter mode", () => {
     render(<ApiKeyDialog {...props("native")} />);
 
     expect(textContent(host)).toContain("Configurare Chei API");
+  });
+
+  it("web admin: inventarul tenant apare in dialog, cu ultimele 4 caractere", async () => {
+    useAuthModeMock.mockReturnValue("web");
+
+    render(<ApiKeyDialog {...props("native")} />);
+    await flush();
+
+    const text = textContent(host);
+    expect(text).toContain("Chei API tenant");
+    expect(text).toContain("Gestioneaza cheile");
+    expect(text).toContain("Configurata *ab12");
+  });
+
+  it("web: statusul in eroare arata panou neutru cu Reincearca (nu blocheaza dialogul)", async () => {
+    useAuthModeMock.mockReturnValue("web");
+    mockKeyStatus.mockRejectedValue(new Error("boom"));
+
+    render(<ApiKeyDialog {...props("native")} />);
+    await flush();
+
+    const text = textContent(host);
+    expect(text).toContain("Nu am putut verifica");
+    expect(text).toContain("Reincearca");
+    expect(text).toContain("Configurare Chei API");
+  });
+
+  it("web non-admin: banner DOAR la lipsa — nimic cand totul e configurat", async () => {
+    useAuthModeMock.mockReturnValue("web");
+    useCurrentUserMock.mockReturnValue({
+      user: {
+        id: "u-1",
+        email: "u@firma.ro",
+        displayName: "User",
+        role: "user",
+        status: "active",
+        createdAt: "2026-05-19T00:00:00.000Z",
+        lastLoginAt: null,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    render(<ApiKeyDialog {...props("native")} />);
+    await flush();
+
+    expect(textContent(host)).not.toContain("Contacteaza administratorul");
+  });
+
+  it("web non-admin: banner amber cand lipsesc configurarile, fara inventar", async () => {
+    useAuthModeMock.mockReturnValue("web");
+    mockKeyStatus.mockResolvedValue({
+      authMode: "web",
+      tenantKeysConfigured: { anthropic: false, openai: false, google: false, openrouter: false, captcha: false },
+    });
+    useCurrentUserMock.mockReturnValue({
+      user: {
+        id: "u-1",
+        email: "u@firma.ro",
+        displayName: "User",
+        role: "user",
+        status: "active",
+        createdAt: "2026-05-19T00:00:00.000Z",
+        lastLoginAt: null,
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    render(<ApiKeyDialog {...props("native")} />);
+    await flush();
+
+    const text = textContent(host);
+    expect(text).toContain("Contacteaza administratorul");
+    expect(text).not.toContain("Gestioneaza cheile");
   });
 
   it("renders the three native slots in native mode", () => {

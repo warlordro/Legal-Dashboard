@@ -57,6 +57,22 @@ describe("parseEcbFeed", () => {
     expect(parseEcbFeed(SAMPLE_XML)).toEqual({ rateDate: "2026-05-19", eurUsdRate: 1.0834 });
   });
 
+  it("extracts USD rate from the feed with single-quoted attributes (forma reala ECB)", () => {
+    // Regresie 2026-07-07: feed-ul live ECB foloseste apostrofuri, nu ghilimele
+    // duble — parserul intorcea null => fx.refresh.fail reason=parse_failed
+    // => "EUR indisponibil" permanent in UI.
+    const xml = `<?xml version="1.0" encoding="UTF-8"?>
+<gesmes:Envelope xmlns:gesmes="http://www.gesmes.org/xml/2002-08-01" xmlns="http://www.ecb.int/vocabulary/2002-08-01/eurofxref">
+\t<Cube>
+\t\t<Cube time='2026-07-06'>
+\t\t\t<Cube currency='USD' rate='1.1415'/>
+\t\t\t<Cube currency='JPY' rate='185.31'/>
+\t\t</Cube>
+\t</Cube>
+</gesmes:Envelope>`;
+    expect(parseEcbFeed(xml)).toEqual({ rateDate: "2026-07-06", eurUsdRate: 1.1415 });
+  });
+
   it("returns null when USD is missing", () => {
     const xml = `<Cube><Cube time="2026-05-19"><Cube currency="JPY" rate="166.32"/></Cube></Cube>`;
     expect(parseEcbFeed(xml)).toBeNull();

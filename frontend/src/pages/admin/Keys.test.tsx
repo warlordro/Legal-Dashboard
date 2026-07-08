@@ -5,6 +5,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import AdminKeys from "./Keys";
+import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 
 vi.mock("@/hooks/useTenantKeys", () => ({
@@ -42,14 +44,32 @@ function hookValue(overrides: Partial<ReturnType<typeof useTenantKeys>> = {}) {
   };
 }
 
+// v2.42.0 (6.2/6.3): pagina foloseste useConfirm SI useToast — ambii provideri
+// OBLIGATORII in render, altfel hook-urile arunca.
 async function render(ui: React.ReactNode) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
   await act(async () => {
-    root.render(ui);
+    root.render(
+      <ConfirmProvider>
+        <ToastProvider>{ui}</ToastProvider>
+      </ConfirmProvider>
+    );
     await Promise.resolve();
   });
+}
+
+// Confirmarea se cauta in [role=alertdialog] (dialogul partajat), nu prin
+// referinte — dialogul e randat de provider, in afara componentei testate.
+function confirmDialogButton(pattern: RegExp): HTMLButtonElement {
+  const dialog = document.querySelector('[role="alertdialog"]');
+  if (!dialog) throw new Error("Dialogul de confirmare nu e deschis");
+  const button = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((candidate) =>
+    pattern.test(candidate.textContent ?? "")
+  );
+  if (!button) throw new Error(`Buton lipsa in dialog: ${String(pattern)}`);
+  return button;
 }
 
 function textContent(element: Element): string {
@@ -102,7 +122,8 @@ describe("AdminKeys", () => {
     await render(<AdminKeys />);
 
     expect(textContent(host)).toContain("Chei API");
-    expect(textContent(host)).toContain("set *abcd");
+    // v2.42.0 (6.5): etichete umane — Configurata *last4, nu "set *".
+    expect(textContent(host)).toContain("Configurata *abcd");
     expect(textContent(host)).not.toContain("sk-");
   });
 
@@ -115,19 +136,31 @@ describe("AdminKeys", () => {
     expect(saveKeyMock).toHaveBeenCalledWith("anthropic", "sk-new");
   });
 
-  it("clears an existing key", async () => {
+  // v2.42.0 (6.2): stergerea cere confirmare prin dialogul partajat.
+  it("clears an existing key DOAR dupa confirmare", async () => {
     await render(<AdminKeys />);
 
     await click(buttonByText(/Sterge/i));
+    expect(saveKeyMock).not.toHaveBeenCalled(); // inca nu — dialogul e deschis
+    await click(confirmDialogButton(/Sterge/i));
 
     expect(saveKeyMock).toHaveBeenCalledWith("anthropic", "");
+  });
+
+  it("anularea din dialog NU sterge cheia", async () => {
+    await render(<AdminKeys />);
+
+    await click(buttonByText(/Sterge/i));
+    await click(confirmDialogButton(/Anuleaza/i));
+
+    expect(saveKeyMock).not.toHaveBeenCalled();
   });
 
   it("saves captcha settings", async () => {
     await render(<AdminKeys />);
 
     await click(buttonByText(/CapSolver/i));
-    await click(buttonByText(/^Race$/i));
+    await click(buttonByText(/^Race/i));
     await click(buttonByText(/Salveaza captcha/i));
 
     expect(saveCaptchaSettingsMock).toHaveBeenCalledWith("capsolver", "race");

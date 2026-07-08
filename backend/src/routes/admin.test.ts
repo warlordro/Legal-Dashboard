@@ -1,6 +1,7 @@
 // PR-8 admin router — gate, CRUD, audit semantics.
 
 import Database from "better-sqlite3";
+import ExcelJS from "exceljs";
 import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
@@ -12,8 +13,10 @@ import { meRouter } from "./me.ts";
 import { ownerContext } from "../middleware/owner.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { closeDb, getDb } from "../db/schema.ts";
-import { insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
-import { listOverridesForUser } from "../db/userQuotaRepository.ts";
+import { getUserByEmail, insertUser, updateUserRole, updateUserStatus, getUserById } from "../db/userRepository.ts";
+import { listOverridesForUser, upsertOverride } from "../db/userQuotaRepository.ts";
+import { insertAiUsage } from "../db/aiUsageRepository.ts";
+import { recordCaptchaUsage } from "../db/captchaUsageRepository.ts";
 import { listGrantsForUser, sumActiveExtraMilli } from "../db/userQuotaGrantsRepository.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
 
@@ -371,7 +374,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 5000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 5000 }),
     });
     expect(res.status).toBe(200);
     const stored = listOverridesForUser("u-1");
@@ -388,12 +391,12 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "week", limitUsdMilli: 25000 }),
+      body: JSON.stringify({ feature: "ai", period: "week", limitUsdMilli: 25000 }),
     });
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({
-      feature: "ai.single",
+      feature: "ai",
       period: "week",
       limitUsdMilli: 25000,
       dailyLimitUsdMilli: null,
@@ -408,12 +411,12 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "day", limitUsdMilli: null }),
+      body: JSON.stringify({ feature: "ai", period: "day", limitUsdMilli: null }),
     });
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({
-      feature: "ai.single",
+      feature: "ai",
       period: "day",
       limitUsdMilli: null,
       dailyLimitUsdMilli: null,
@@ -427,7 +430,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "day" }),
+      body: JSON.stringify({ feature: "ai", period: "day" }),
     });
     expect(res.status).toBe(400);
   });
@@ -437,7 +440,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", period: "week", limitUsdMilli: 25000 }),
+      body: JSON.stringify({ feature: "ai", period: "week", limitUsdMilli: 25000 }),
     });
     const res = await app.request("/api/v1/admin/users/u-1/quota");
     const body = await jsonOf(res);
@@ -453,12 +456,12 @@ describe("/api/v1/admin/users/:id/quota", () => {
     await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 1000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 1000 }),
     });
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 7500 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 7500 }),
     });
     expect(res.status).toBe(200);
     const stored = listOverridesForUser("u-1");
@@ -471,7 +474,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: -1 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: -1 }),
     });
     expect(res.status).toBe(400);
   });
@@ -481,7 +484,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
     const res = await app.request("/api/v1/admin/users/ghost/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 1000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 1000 }),
     });
     expect(res.status).toBe(404);
   });
@@ -491,14 +494,14 @@ describe("/api/v1/admin/users/:id/quota", () => {
     await app.request("/api/v1/admin/users/u-1/quota", {
       method: "PUT",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", dailyLimitUsdMilli: 1000 }),
+      body: JSON.stringify({ feature: "ai", dailyLimitUsdMilli: 1000 }),
     });
-    const res = await app.request("/api/v1/admin/users/u-1/quota/ai.single", {
+    const res = await app.request("/api/v1/admin/users/u-1/quota/ai", {
       method: "DELETE",
     });
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
-    expect(body.data).toMatchObject({ feature: "ai.single", removed: true });
+    expect(body.data).toMatchObject({ feature: "ai", removed: true });
     expect(listOverridesForUser("u-1")).toEqual([]);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.quota_delete" });
     expect(events).toHaveLength(1);
@@ -506,7 +509,7 @@ describe("/api/v1/admin/users/:id/quota", () => {
 
   it("DELETE is idempotent (no row → no audit, still 200)", async () => {
     const app = buildApp();
-    const res = await app.request("/api/v1/admin/users/u-1/quota/ai.single", {
+    const res = await app.request("/api/v1/admin/users/u-1/quota/ai", {
       method: "DELETE",
     });
     expect(res.status).toBe(200);
@@ -525,6 +528,8 @@ describe("/api/v1/admin/users/:id/grants", () => {
   beforeEach(() => {
     updateUserRole("local", "admin");
     insertUser({ id: "u-1", email: "a@x", displayName: "A" });
+    // v2.42.0 (5.2): grant vs nelimitat se exclud — grantul cere o baza finita.
+    upsertOverride({ userId: "u-1", feature: "ai", period: "day", limitUsdMilli: 10_000 });
   });
 
   it("GET returns empty list initially", async () => {
@@ -542,7 +547,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
-        feature: "ai.single",
+        feature: "ai",
         extraUsdMilli: 2500,
         expiresAt,
         reason: "boost vineri",
@@ -552,7 +557,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({
       userId: "u-1",
-      feature: "ai.single",
+      feature: "ai",
       extraUsdMilli: 2500,
       expiresAt,
       reason: "boost vineri",
@@ -560,7 +565,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     });
     const stored = listGrantsForUser("u-1");
     expect(stored).toHaveLength(1);
-    expect(sumActiveExtraMilli("u-1", "ai.single")).toBe(2500);
+    expect(sumActiveExtraMilli("u-1", "ai")).toBe(2500);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_create" });
     expect(events).toHaveLength(1);
   });
@@ -571,7 +576,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const res = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 1000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt }),
     });
     expect(res.status).toBe(400);
   });
@@ -582,7 +587,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const res = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 0, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 0, expiresAt }),
     });
     expect(res.status).toBe(400);
   });
@@ -593,7 +598,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const res = await app.request("/api/v1/admin/users/ghost/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 1000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt }),
     });
     expect(res.status).toBe(404);
   });
@@ -604,7 +609,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 3000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 3000, expiresAt }),
     });
     const { data } = await jsonOf(createRes);
     const grantId = (data as { id: number }).id;
@@ -616,7 +621,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     expect(res.status).toBe(200);
     const body = await jsonOf(res);
     expect(body.data).toMatchObject({ id: grantId, revoked: true });
-    expect(sumActiveExtraMilli("u-1", "ai.single")).toBe(0);
+    expect(sumActiveExtraMilli("u-1", "ai")).toBe(0);
     const events = getAuditEvents({ ownerId: "local", action: "admin.users.grant_revoke" });
     expect(events).toHaveLength(1);
   });
@@ -627,7 +632,7 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ feature: "ai.single", extraUsdMilli: 3000, expiresAt }),
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 3000, expiresAt }),
     });
     const { data } = await jsonOf(createRes);
     const grantId = (data as { id: number }).id;
@@ -651,5 +656,654 @@ describe("/api/v1/admin/users/:id/grants", () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/grants/not-a-number", { method: "DELETE" });
     expect(res.status).toBe(400);
+  });
+
+  // v2.42.0 (5.2): grant vs nelimitat se exclud.
+  it("POST -> 422 unlimited_budget cand override-ul e explicit nelimitat (NULL)", async () => {
+    upsertOverride({ userId: "u-1", feature: "ai", period: "day", limitUsdMilli: null });
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt }),
+    });
+    expect(res.status).toBe(422);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("unlimited_budget");
+  });
+
+  it("POST -> 422 unlimited_budget si pe pass-through (fara override, fara env default)", async () => {
+    insertUser({ id: "u-free", email: "free@x", displayName: "Free" });
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-free/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt }),
+    });
+    expect(res.status).toBe(422);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("unlimited_budget");
+  });
+
+  it("POST -> 201 cand baza vine DOAR din env-ul default (fix High din review)", async () => {
+    insertUser({ id: "u-env", email: "env@x", displayName: "Env" });
+    const original = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "5000";
+    try {
+      const app = buildApp();
+      const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+      const res = await app.request("/api/v1/admin/users/u-env/grants", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt }),
+      });
+      expect(res.status).toBe(201);
+    } finally {
+      if (original === undefined) {
+        // biome-ignore lint/performance/noDelete: env-ul trebuie unset real.
+        delete process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
+      } else {
+        process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = original;
+      }
+    }
+  });
+
+  it("POST cu feature captcha.rnpm e respins de schema (granturi doar pe 'ai')", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const res = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "captcha.rnpm", extraUsdMilli: 1000, expiresAt }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("POST /grants/:id/revoke revoca la fel ca DELETE (ruta noua, sectiunea 11)", async () => {
+    const app = buildApp();
+    const expiresAt = new Date(Date.now() + 86_400_000).toISOString();
+    const createRes = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 3000, expiresAt }),
+    });
+    const { data } = await jsonOf(createRes);
+    const grantId = (data as { id: number }).id;
+    const res = await app.request(`/api/v1/admin/grants/${grantId}/revoke`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ reason: "test revoke" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toMatchObject({ id: grantId, revoked: true });
+    expect(sumActiveExtraMilli("u-1", "ai")).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Vederi globale (v2.41.0): GET /quota/overrides + GET /grants/active
+// ---------------------------------------------------------------------------
+
+describe("/api/v1/admin/quota/overrides + /grants/active (vederi globale)", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+    insertUser({ id: "u-1", email: "b@x", displayName: "B" });
+    insertUser({ id: "u-2", email: "a@x", displayName: "A" });
+  });
+
+  it("GET /quota/overrides pe gol -> lista goala si truncated:false", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toEqual({ overrides: [], truncated: false });
+  });
+
+  it("GET /quota/overrides intoarce toate override-urile cu identitate user, sortate pe email", async () => {
+    const app = buildApp();
+    await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai", period: "day", limitUsdMilli: 5000 }),
+    });
+    await app.request("/api/v1/admin/users/u-2/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "captcha.rnpm", period: "week", limitUsdMilli: 50 }),
+    });
+
+    const res = await app.request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { overrides: Array<Record<string, unknown>>; truncated: boolean };
+    };
+    expect(body.data.truncated).toBe(false);
+    expect(body.data.overrides).toHaveLength(2);
+    // Sortare pe email: a@x (u-2) inaintea lui b@x (u-1).
+    expect(body.data.overrides[0]).toMatchObject({
+      userId: "u-2",
+      email: "a@x",
+      displayName: "A",
+      feature: "captcha.rnpm",
+      period: "week",
+      limitUsdMilli: 50,
+    });
+    expect(body.data.overrides[1]).toMatchObject({ userId: "u-1", email: "b@x", feature: "ai" });
+  });
+
+  it("GET /quota/overrides este gate-uit pe admin (403 pentru user)", async () => {
+    const app = buildApp("u-1");
+    const res = await app.request("/api/v1/admin/quota/overrides");
+    expect(res.status).toBe(403);
+  });
+
+  it("GET /grants/active intoarce doar granturile active, cu identitate user", async () => {
+    const app = buildApp();
+    const future = new Date(Date.now() + 86_400_000).toISOString();
+    // Baza finita pe ambii useri (grant vs nelimitat se exclud, 5.2).
+    upsertOverride({ userId: "u-1", feature: "ai", period: "day", limitUsdMilli: 10_000 });
+    upsertOverride({ userId: "u-2", feature: "ai", period: "day", limitUsdMilli: 10_000 });
+    // Grant activ pe u-2.
+    await app.request("/api/v1/admin/users/u-2/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 2500, expiresAt: future }),
+    });
+    // Grant revocat pe u-1 (creat, apoi revocat) — nu trebuie sa apara.
+    const created = await app.request("/api/v1/admin/users/u-1/grants", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "ai", extraUsdMilli: 1000, expiresAt: future }),
+    });
+    const createdBody = (await jsonOf(created)) as { data: { id: number } };
+    await app.request(`/api/v1/admin/grants/${createdBody.data.id}`, { method: "DELETE" });
+
+    const res = await app.request("/api/v1/admin/grants/active");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { grants: Array<Record<string, unknown>>; truncated: boolean };
+    };
+    expect(body.data.truncated).toBe(false);
+    expect(body.data.grants).toHaveLength(1);
+    expect(body.data.grants[0]).toMatchObject({
+      userId: "u-2",
+      email: "a@x",
+      displayName: "A",
+      feature: "ai",
+      extraUsdMilli: 2500,
+    });
+  });
+
+  it("GET /grants/active pe gol -> lista goala si truncated:false", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/grants/active");
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toEqual({ grants: [], truncated: false });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 (4.2/4.3/4.4) — creare individuala, import xlsx, guard last-admin
+// ---------------------------------------------------------------------------
+
+async function importXlsxOf(rows: (string | null)[][]): Promise<Buffer> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("Utilizatori");
+  for (const row of rows) ws.addRow(row);
+  const out = await wb.xlsx.writeBuffer();
+  return Buffer.from(out as ArrayBuffer);
+}
+
+describe("v2.42.0 — POST /users (creare individuala)", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("creeaza userul cu email canonicalizat si scrie audit", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "  Alice@Firma.RO ", displayName: "Alice", role: "user" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await jsonOf(res)) as { data: { email: string; role: string; status: string } };
+    expect(body.data).toMatchObject({ email: "alice@firma.ro", role: "user", status: "active" });
+
+    const audits = getAuditEvents({ action: "admin.users.create" });
+    expect(audits.some((a) => a.outcome === "ok")).toBe(true);
+  });
+
+  it("duplicat (chiar cu alt casing) -> 409 email_exists cu statusul contului in mesaj", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-dub", email: "dub@firma.ro", displayName: "Dub" });
+    updateUserStatus("u-dub", "suspended");
+
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "DUB@FIRMA.RO", displayName: "Alt", role: "user" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("email_exists");
+    expect(body.error?.message).toContain("suspendat");
+  });
+
+  it("email STERS se reactiveaza: 201, acelasi id, nume/rol din request, status activ", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-del", email: "del@firma.ro", displayName: "Vechi" });
+    updateUserStatus("u-del", "deleted");
+
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "DEL@FIRMA.RO", displayName: "Nou Nume", role: "admin" }),
+    });
+    expect(res.status).toBe(201);
+    const body = (await jsonOf(res)) as { data: { id: string; role: string; status: string; displayName: string } };
+    expect(body.data).toMatchObject({ id: "u-del", role: "admin", status: "active", displayName: "Nou Nume" });
+
+    const after = getUserByEmail("del@firma.ro");
+    expect(after?.status).toBe("active");
+    const audits = getAuditEvents({ action: "admin.users.create" });
+    expect(audits.some((a) => a.outcome === "ok")).toBe(true);
+  });
+
+  it("rolurile necreabile (support) sunt respinse de schema", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "s@firma.ro", displayName: "S", role: "support" }),
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("e gate-uit pe admin (403 pentru user)", async () => {
+    insertUser({ id: "u-plain", email: "plain@firma.ro", displayName: "Plain" });
+    const app = buildApp("u-plain");
+    const res = await app.request("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ email: "x@firma.ro", displayName: "X", role: "user" }),
+    });
+    expect(res.status).toBe(403);
+  });
+});
+
+describe("v2.42.0 — import utilizatori (template + upload)", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("GET /users/import-template intoarce un xlsx attachment", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/import-template");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("spreadsheetml");
+    expect(res.headers.get("content-disposition")).toContain("attachment");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    // xlsx = arhiva ZIP.
+    expect([bytes[0], bytes[1]]).toEqual([0x50, 0x4b]);
+  });
+
+  it("importa randurile valide si raporteaza duplicate din DB + randuri invalide", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-exist", email: "existent@firma.ro", displayName: "Existent" });
+
+    const buf = await importXlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      ["nou1@firma.ro", "Nou 1", "Utilizator"],
+      ["EXISTENT@firma.ro", "Dublura DB", ""],
+      ["nou2@firma.ro", "Nou 2", "Admin"],
+      ["rol-rau@firma.ro", "Rol rau", "sef"],
+    ]);
+    const res = await app.request("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: new Uint8Array(buf),
+    });
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: {
+        created: Array<{ rowNumber: number; email: string; role: string }>;
+        issues: Array<{ rowNumber: number; code: string; message: string }>;
+        summary: { created: number; duplicates: number; invalid: number };
+      };
+    };
+    expect(body.data.summary).toEqual({ created: 2, duplicates: 1, invalid: 1 });
+    expect(body.data.created.map((r) => r.email)).toEqual(["nou1@firma.ro", "nou2@firma.ro"]);
+    // Issues sortate pe rowNumber.
+    expect(body.data.issues.map((i) => [i.rowNumber, i.code])).toEqual([
+      [3, "duplicate_in_db"],
+      [5, "invalid_row"],
+    ]);
+    // Userii chiar exista, cu rolul cerut.
+    expect(getUserByEmail("nou2@firma.ro")?.role).toBe("admin");
+    // Audit: per user creat + sumar.
+    expect(getAuditEvents({ action: "admin.users.create" }).length).toBe(2);
+    expect(getAuditEvents({ action: "admin.users.import" }).length).toBe(1);
+  });
+
+  it("email STERS din fisier se reactiveaza si intra la creati, nu la duplicate", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-del2", email: "sters@firma.ro", displayName: "Sters" });
+    updateUserStatus("u-del2", "deleted");
+
+    const buf = await importXlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      ["STERS@firma.ro", "Revenit", "Utilizator"],
+      ["nou3@firma.ro", "Nou 3", "Admin"],
+    ]);
+    const res = await app.request("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: new Uint8Array(buf),
+    });
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: {
+        created: Array<{ rowNumber: number; email: string; role: string }>;
+        issues: Array<{ rowNumber: number; code: string }>;
+        summary: { created: number; duplicates: number; invalid: number };
+      };
+    };
+    expect(body.data.summary).toEqual({ created: 2, duplicates: 0, invalid: 0 });
+    expect(body.data.issues).toEqual([]);
+    // Reactivat: acelasi id, nume/rol din fisier, status activ.
+    const revived = getUserByEmail("sters@firma.ro");
+    expect(revived).toMatchObject({ id: "u-del2", display_name: "Revenit", role: "user", status: "active" });
+  });
+
+  it("fisier care nu e xlsx -> 400 invalid_file", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "content-type": "application/octet-stream" },
+      body: "email,nume\na@b.c,Test",
+    });
+    expect(res.status).toBe(400);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("invalid_file");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 (5.4) — audit: enrichment email + export xlsx
+// ---------------------------------------------------------------------------
+
+describe("v2.42.0 (5.4) — audit enrichment + export", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("GET /audit imbogateste owner/actor cu email; NULL devine 'system'", async () => {
+    const app = buildApp();
+    // Un eveniment cu owner cunoscut + unul de sistem.
+    await app.request("/api/v1/admin/users/local/status", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ status: "active" }),
+    });
+    const { recordAudit } = await import("../db/auditRepository.ts");
+    recordAudit(null, "system.test_event", { detail: {} });
+
+    const res = await app.request("/api/v1/admin/audit?pageSize=50");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { rows: Array<{ action: string; ownerEmail: string; actorEmail: string; ownerId: string | null }> };
+    };
+    const known = body.data.rows.find((r) => r.action === "admin.users.update_status");
+    expect(known?.ownerEmail).toBe("local@desktop");
+    const system = body.data.rows.find((r) => r.action === "system.test_event");
+    expect(system?.ownerEmail).toBe("system");
+    expect(system?.ownerId).toBeNull();
+  });
+
+  it("GET /audit/export cu interval invalid -> 400", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export?since=nu-e-data");
+    expect(res.status).toBe(400);
+  });
+
+  it("GET /audit/export intoarce xlsx si scrie audit DUPA generare", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export");
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toContain("spreadsheetml");
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    expect([bytes[0], bytes[1]]).toEqual([0x50, 0x4b]);
+    expect(getAuditEvents({ action: "admin.audit.export" })).toHaveLength(1);
+  });
+
+  it("GET /audit/export -> 413 too_many_rows peste cap, FARA sa incarce randuri", async () => {
+    // Insert bulk direct — 10_001 randuri intr-o singura tranzactie.
+    const db = getDb();
+    const stmt = db.prepare(
+      `INSERT INTO audit_log (owner_id, actor_id, action, outcome, detail_json)
+       VALUES ('local', 'local', 'bulk.test', 'ok', '{}')`
+    );
+    db.transaction(() => {
+      for (let i = 0; i < 10_001; i++) stmt.run();
+    })();
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export");
+    expect(res.status).toBe(413);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("too_many_rows");
+    // Evenimentul de export NU s-a scris (generarea nu a avut loc).
+    expect(getAuditEvents({ action: "admin.audit.export" })).toHaveLength(0);
+  });
+
+  it("GET /audit/export e gate-uit pe admin (403 pentru user)", async () => {
+    insertUser({ id: "u-audit-plain", email: "ap@x", displayName: "AP" });
+    const app = buildApp("u-audit-plain");
+    const res = await app.request("/api/v1/admin/audit/export");
+    expect(res.status).toBe(403);
+  });
+
+  it("exportul respecta filtrul actorId, nu doar intervalul de date", async () => {
+    const { recordAudit } = await import("../db/auditRepository.ts");
+    recordAudit(null, "test.export_filter", { actorId: "user-a", ownerId: "user-a" });
+    recordAudit(null, "test.export_filter", { actorId: "user-b", ownerId: "user-b" });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/audit/export?actorId=user-a");
+    expect(res.status).toBe(200);
+
+    const buf = Buffer.from(await res.arrayBuffer());
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(buf as unknown as ArrayBuffer);
+    const sheet = wb.getWorksheet("Audit");
+    const values: string[][] = [];
+    sheet?.eachRow((row) => {
+      values.push((row.values as unknown[]).map((v) => String(v ?? "")));
+    });
+    const filterRows = values.filter((row) => row.some((cell) => cell.includes("test.export_filter")));
+    expect(filterRows).toHaveLength(1);
+    // Asertie stransa pe coloana de ACTOR exact (nu `some` pe tot randul, care
+    // ar trece si daca doar coloana Owner ar contine user-a).
+    const headerRow = values[0];
+    const actorCol = headerRow.indexOf("Actor");
+    expect(actorCol).toBeGreaterThan(-1);
+    expect(filterRows[0][actorCol]).toBe("user-a");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// v2.42.0 (5.3) — GET /usage/overview
+// ---------------------------------------------------------------------------
+
+describe("v2.42.0 (5.3) — GET /usage/overview", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+    insertUser({ id: "uo-1", email: "b@x", displayName: "B" });
+    insertUser({ id: "uo-2", email: "a@x", displayName: "A" });
+  });
+
+  it("itemele AI sunt sortate desc dupa consum, cu limitSource corect", async () => {
+    upsertOverride({ userId: "uo-1", feature: "ai", period: "day", limitUsdMilli: 5000 });
+    insertAiUsage({
+      ownerId: "uo-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 100,
+      ts: new Date().toISOString(),
+    });
+    insertAiUsage({
+      ownerId: "uo-2",
+      provider: "anthropic",
+      model: "claude-sonnet",
+      feature: "ai.multi",
+      costUsdMilli: 900,
+      ts: new Date().toISOString(),
+    });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: { items: Array<Record<string, unknown>>; captcha: Array<Record<string, unknown>>; truncated: boolean };
+    };
+    expect(body.data.truncated).toBe(false);
+    // Sortare desc dupa consum: uo-2 (900) inaintea lui uo-1 (100).
+    const idx2 = body.data.items.findIndex((i) => i.userId === "uo-2");
+    const idx1 = body.data.items.findIndex((i) => i.userId === "uo-1");
+    expect(idx2).toBeGreaterThanOrEqual(0);
+    expect(idx2).toBeLessThan(idx1);
+    expect(body.data.items[idx2]).toMatchObject({
+      email: "a@x",
+      feature: "ai",
+      usedMilli: 900,
+      limitSource: "none",
+      effectiveLimitMilli: null,
+    });
+    expect(body.data.items[idx1]).toMatchObject({
+      usedMilli: 100,
+      baseLimitMilli: 5000,
+      limitSource: "override",
+      effectiveLimitMilli: 5000,
+    });
+  });
+
+  it("fereastra corecta: consum de acum 25h nu apare pe period=day", async () => {
+    insertAiUsage({
+      ownerId: "uo-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 777,
+      ts: new Date(Date.now() - 25 * 3_600_000).toISOString(),
+    });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    const body = (await jsonOf(res)) as { data: { items: Array<{ userId: string; usedMilli: number }> } };
+    const row = body.data.items.find((i) => i.userId === "uo-1");
+    expect(row?.usedMilli).toBe(0);
+  });
+
+  it("userii inactivi (suspendati) nu apar", async () => {
+    updateUserStatus("uo-2", "suspended");
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    const body = (await jsonOf(res)) as { data: { items: Array<{ userId: string }> } };
+    expect(body.data.items.map((i) => i.userId)).not.toContain("uo-2");
+  });
+
+  it("captcha: numara doar source='tenant' (BYOK desktop nu intra)", async () => {
+    recordCaptchaUsage({ ownerId: "uo-1", provider: "2captcha", source: "tenant" });
+    recordCaptchaUsage({ ownerId: "uo-1", provider: "2captcha", source: "tenant" });
+    recordCaptchaUsage({ ownerId: "uo-1", provider: "2captcha", source: "body" });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    const body = (await jsonOf(res)) as { data: { captcha: Array<{ userId: string; usedCount: number }> } };
+    const row = body.data.captcha.find((i) => i.userId === "uo-1");
+    expect(row?.usedCount).toBe(2);
+  });
+
+  it("e gate-uit pe admin (403 pentru user)", async () => {
+    insertUser({ id: "uo-plain", email: "plain2@x", displayName: "Plain" });
+    const app = buildApp("uo-plain");
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(403);
+  });
+
+  it("itemele AI au windows (day/week/total) + tenantTotals corecte pe 2 useri", async () => {
+    insertAiUsage({
+      ownerId: "uo-1",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 100,
+      ts: new Date().toISOString(),
+    });
+    insertAiUsage({
+      ownerId: "uo-2",
+      provider: "anthropic",
+      model: "claude-sonnet",
+      feature: "ai.multi",
+      costUsdMilli: 900,
+      ts: new Date().toISOString(),
+    });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as {
+      data: {
+        items: Array<{ userId: string; windows: { dayMilli: number; weekMilli: number; totalMilli: number } }>;
+        tenantTotals: { dayMilli: number; weekMilli: number; totalMilli: number };
+      };
+    };
+    const row1 = body.data.items.find((i) => i.userId === "uo-1");
+    const row2 = body.data.items.find((i) => i.userId === "uo-2");
+    expect(row1?.windows).toEqual({ dayMilli: 100, weekMilli: 100, totalMilli: 100 });
+    expect(row2?.windows).toEqual({ dayMilli: 900, weekMilli: 900, totalMilli: 900 });
+    expect(body.data.tenantTotals).toEqual({ dayMilli: 1000, weekMilli: 1000, totalMilli: 1000 });
+  });
+});
+
+describe("v2.42.0 (4.4) — last-admin numara doar adminii ACTIVI", () => {
+  beforeEach(() => {
+    updateUserRole("local", "admin");
+  });
+
+  it("singurul alt admin e suspendat -> self-demote refuzat cu 409 last_admin", async () => {
+    insertUser({ id: "u-adm2", email: "adm2@firma.ro", displayName: "Admin 2", role: "admin" });
+    updateUserStatus("u-adm2", "suspended");
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/local/role", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role: "user" }),
+    });
+    expect(res.status).toBe(409);
+    const body = await jsonOf(res);
+    expect(body.error?.code).toBe("last_admin");
+    expect(getUserById("local")?.role).toBe("admin");
+  });
+
+  it("cu un alt admin ACTIV, self-demote e permis", async () => {
+    insertUser({ id: "u-adm2", email: "adm2@firma.ro", displayName: "Admin 2", role: "admin" });
+
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/local/role", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ role: "user" }),
+    });
+    expect(res.status).toBe(200);
+    expect(getUserById("local")?.role).toBe("user");
   });
 });

@@ -1,11 +1,22 @@
-import { useCallback, useEffect, useState } from "react";
-import { Gauge, RefreshCw, Search, Trash2, Plus, ShieldAlert } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Gauge, RefreshCw, Trash2, Plus, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, type AdminUser, type QuotaOverride, type QuotaPeriod } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
+import { UserPicker } from "@/components/UserPicker";
+import { admin, type AdminUser, type GlobalQuotaOverride, type QuotaOverride, type QuotaPeriod } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import {
+  QUOTA_FEATURES,
+  isCountFeature,
+  isKnownQuotaFeature,
+  quotaFeatureLabel,
+  quotaLimitUnitLabel,
+} from "@/lib/quotaFeatureLabels";
+import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 // Daily limits are stored as integer milli-USD ($0.001 = 1 milli) to match the
@@ -20,10 +31,6 @@ const PERIOD_LABELS: Record<QuotaPeriod, string> = {
   week: "Saptamanal",
   month: "Lunar",
 };
-
-function isCountFeature(feature: string): boolean {
-  return feature.startsWith("captcha.");
-}
 
 function formatStoredValue(feature: string, stored: number | null): string {
   if (stored === null) return "—";
@@ -43,103 +50,136 @@ function parseInputToStored(feature: string, value: string): number | null | "in
   return Math.round(n * MILLI);
 }
 
-function limitUnitLabel(feature: string): string {
-  return isCountFeature(feature) ? "captcha-uri" : "USD";
-}
+const DEFAULT_FEATURE = QUOTA_FEATURES[0];
 
-export default function AdminQuota() {
+export default function AdminQuota({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
-  const [searchInput, setSearchInput] = useState("");
-  const [candidates, setCandidates] = useState<AdminUser[]>([]);
-  const [searching, setSearching] = useState(false);
+  const toast = useToast();
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [overrides, setOverrides] = useState<QuotaOverride[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [feature, setFeature] = useState("");
+  const [feature, setFeature] = useState<string>(DEFAULT_FEATURE);
   const [period, setPeriod] = useState<QuotaPeriod>("day");
-  const [limitUsd, setLimitUsd] = useState("");
-  const [unlimited, setUnlimited] = useState(false);
+  const [limitInput, setLimitInput] = useState("");
   const [busyFeature, setBusyFeature] = useState<string | null>(null);
+  // v2.41.0: vedere globala la deschidere — cotele active ale tuturor userilor,
+  // fara sa fie nevoie de cautarea prealabila a unui user.
+  const [overview, setOverview] = useState<GlobalQuotaOverride[]>([]);
+  const [overviewTruncated, setOverviewTruncated] = useState(false);
+  const [overviewLoading, setOverviewLoading] = useState(false);
+  // AbortController + staleness guard (pattern 6.7, ca la fetch-ul per-user de
+  // mai jos): un raspuns lent pornit inainte de o stergere ar ateriza dupa
+  // reload-ul post-stergere si ar suprascrie lista cu starea veche (cota
+  // stearsa ar reaparea activa).
+  const overviewAcRef = useRef<AbortController | null>(null);
 
-  const search = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = searchInput.trim();
-    if (!q) return;
-    setSearching(true);
-    setError(null);
+  const loadOverview = useCallback(async () => {
+    overviewAcRef.current?.abort();
+    const ac = new AbortController();
+    overviewAcRef.current = ac;
+    setOverviewLoading(true);
     try {
-      const result = await admin.listUsers({ search: q, pageSize: 25 });
-      setCandidates(result.rows);
+      const result = await admin.listAllQuotaOverrides(ac.signal);
+      if (ac.signal.aborted) return;
+      setOverview(result.overrides);
+      setOverviewTruncated(result.truncated === true);
+      // Fara clear, un banner de eroare de la un load esuat anterior persista
+      // si dupa un refresh reusit.
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la cautare.");
+      if (ac.signal.aborted) return;
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor active.");
     } finally {
-      setSearching(false);
-    }
-  };
-
-  const loadOverrides = useCallback(async (userId: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await admin.listQuota(userId);
-      setOverrides(result.overrides);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor.");
-    } finally {
-      setLoading(false);
+      if (!ac.signal.aborted) setOverviewLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (selected) loadOverrides(selected.id);
-    else setOverrides([]);
-  }, [loadOverrides, selected]);
+    loadOverview();
+  }, [loadOverview]);
+
+  // Fetch-ul per-user traieste in efect cu AbortController + guards (pattern
+  // 6.7): golirea sincrona a listei NU anuleaza un fetch in zbor — un raspuns
+  // lent pentru userul A ar ateriza dupa selectarea lui B si ar afisa (si
+  // permite stergerea) plafoanelor lui A sub identitatea lui B (finding
+  // review-panel confirmat). refreshTick = reincarcare manuala/post-mutatie.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const refreshOverrides = useCallback(() => setRefreshTick((t) => t + 1), []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick este trigger explicit de reincarcare (pattern 6.7), nu e citit in corp.
+  useEffect(() => {
+    setOverrides([]);
+    if (!selected) return;
+    const ac = new AbortController();
+    setLoading(true);
+    setError(null);
+    admin
+      .listQuota(selected.id, ac.signal)
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        setOverrides(result.overrides);
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Eroare la incarcarea cotelor.");
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [selected, refreshTick]);
 
   const onSelect = (user: AdminUser) => {
     setSelected(user);
-    setCandidates([]);
-    setFeature("");
+    setFeature(DEFAULT_FEATURE);
     setPeriod("day");
-    setLimitUsd("");
-    setUnlimited(false);
+    setLimitInput("");
+  };
+
+  const startEdit = (override: Pick<QuotaOverride, "feature" | "period" | "limitUsdMilli">) => {
+    setFeature(override.feature);
+    setPeriod(override.period);
+    // Rand legacy nelimitat (override NULL): campul porneste gol — salvarea
+    // cere un numar; revenirea la nelimitat se face cu Sterge.
+    setLimitInput(override.limitUsdMilli === null ? "" : formatStoredValue(override.feature, override.limitUsdMilli));
+  };
+
+  // Din vederea globala: admin.getUser(id) + intrare in modul editare (5.5,
+  // extra pastrat fata de referinta: formularul se pre-populeaza cu valorile
+  // randului, nu porneste gol).
+  const selectFromOverview = async (row: GlobalQuotaOverride) => {
+    setError(null);
+    try {
+      const user = await admin.getUser(row.userId);
+      setSelected(user);
+      startEdit(row);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorului.");
+    }
   };
 
   const onUpsert = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
-    const featureKey = feature.trim();
-    if (!featureKey) {
-      setError("Introdu un nume pentru feature.");
+    if (!isKnownQuotaFeature(feature)) return; // butonul e disabled; guard si aici
+    // Fara checkbox "Nelimitat" — starea nelimitata e absenta limitei (sterge
+    // randul din lista), nu un override explicit NULL.
+    const parsed = parseInputToStored(feature, limitInput);
+    if (parsed === "invalid") {
+      setError(isCountFeature(feature) ? "Introdu un numar intreg >= 0." : "Introdu o limita valida (>= 0).");
       return;
     }
-    let limitUsdMilli: number | null;
-    if (unlimited) {
-      limitUsdMilli = null;
-    } else {
-      const parsed = parseInputToStored(featureKey, limitUsd);
-      if (parsed === "invalid") {
-        const hint = isCountFeature(featureKey)
-          ? "Introdu un numar intreg >= 0 sau bifeaza 'Nelimitat'."
-          : "Introdu o limita valida (>= 0) sau bifeaza 'Nelimitat'.";
-        setError(hint);
-        return;
-      }
-      limitUsdMilli = parsed;
-    }
-    setBusyFeature(featureKey);
+    setBusyFeature(feature);
     setError(null);
     try {
-      await admin.upsertQuota(selected.id, {
-        feature: featureKey,
-        period,
-        limitUsdMilli,
-      });
-      await loadOverrides(selected.id);
-      setFeature("");
-      setLimitUsd("");
+      await admin.upsertQuota(selected.id, { feature, period, limitUsdMilli: parsed });
+      refreshOverrides();
+      void loadOverview();
+      setFeature(DEFAULT_FEATURE);
+      setLimitInput("");
       setPeriod("day");
-      setUnlimited(false);
+      toast(`Limita pentru "${quotaFeatureLabel(feature)}" a fost salvata.`, { variant: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la salvarea cotei.");
     } finally {
@@ -153,12 +193,12 @@ export default function AdminQuota() {
       override.limitUsdMilli === null
         ? "nelimitat"
         : isCountFeature(override.feature)
-          ? `${override.limitUsdMilli} ${limitUnitLabel(override.feature)}`
+          ? `${override.limitUsdMilli} ${quotaLimitUnitLabel(override.feature)}`
           : `${formatStoredValue(override.feature, override.limitUsdMilli)} $`;
     const periodLabel = PERIOD_LABELS[override.period].toLowerCase();
     const ok = await confirm({
       title: "Sterge cota",
-      message: `Sterge override-ul pentru "${override.feature}" (${limitLabel} / ${periodLabel})? Userul va reveni la limita default.`,
+      message: `Sterge limita pentru "${quotaFeatureLabel(override.feature)}" (${limitLabel} / ${periodLabel})? Userul revine la buget nelimitat.`,
       destructive: true,
       confirmLabel: "Sterge",
     });
@@ -167,7 +207,11 @@ export default function AdminQuota() {
     setError(null);
     try {
       await admin.deleteQuota(selected.id, override.feature);
-      await loadOverrides(selected.id);
+      refreshOverrides();
+      void loadOverview();
+      toast(`Limita pentru "${quotaFeatureLabel(override.feature)}" a fost stearsa — buget nelimitat.`, {
+        variant: "success",
+      });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la stergerea cotei.");
     } finally {
@@ -175,29 +219,20 @@ export default function AdminQuota() {
     }
   };
 
-  const startEdit = (override: QuotaOverride) => {
-    setFeature(override.feature);
-    setPeriod(override.period);
-    if (override.limitUsdMilli === null) {
-      setUnlimited(true);
-      setLimitUsd("");
-    } else {
-      setUnlimited(false);
-      setLimitUsd(formatStoredValue(override.feature, override.limitUsdMilli));
-    }
-  };
-
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Gauge className="h-6 w-6 text-primary" />
-            Cote utilizatori
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Override-uri pe rolling window (zi / saptamana / luna). Pentru `ai.*` limita e in USD (stocata milli),
-            pentru `captcha.*` e numar de captcha-uri / fereastra. Bifeaza "Nelimitat" pentru a scoate capul.
+          {!embedded && (
+            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+              <Gauge className="h-6 w-6 text-primary" />
+              Cote utilizatori
+            </h1>
+          )}
+          <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
+            Limitele de cheltuiala per utilizator, pe fereastra rulanta (zi / saptamana / luna): pentru analizele AI
+            limita e cost in USD, pentru Captcha RNPM e numar de captcha-uri. Un user fara limita setata are buget
+            nelimitat; ca sa scoti un plafon existent, sterge-l din lista.
           </p>
         </div>
 
@@ -215,46 +250,79 @@ export default function AdminQuota() {
           </div>
         )}
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Search className="h-4 w-4" />
-              Selecteaza utilizator
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form onSubmit={search} className="flex gap-2">
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Cauta dupa email sau nume"
-                className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-              />
-              <Button type="submit" disabled={searching}>
-                <Search className={cn("h-4 w-4", searching && "animate-pulse")} />
-                Cauta
-              </Button>
-            </form>
-            {candidates.length > 0 && (
-              <ul className="divide-y divide-border rounded-md border border-border">
-                {candidates.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-mono">{c.email}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {c.displayName} · {c.role} · {c.status}
-                      </p>
-                    </div>
-                    <Button size="sm" variant="outline" onClick={() => onSelect(c)}>
-                      Selecteaza
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+        <UserPicker value={selected?.id ?? ""} onSelect={onSelect} ariaLabel="Alege utilizatorul pentru plafon" />
+
+        {!selected && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+                <span className="flex items-center gap-2">
+                  <Gauge className="h-4 w-4" />
+                  Cote active
+                </span>
+                <Button variant="outline" size="sm" onClick={() => loadOverview()} disabled={overviewLoading}>
+                  <RefreshCw className={cn("h-4 w-4", overviewLoading && "animate-spin")} />
+                  Reincarca
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {overview.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  {overviewLoading
+                    ? "Se incarca cotele active..."
+                    : "Nicio limita setata — toti userii au buget NELIMITAT (AI si captcha). " +
+                      "Ca sa plafonezi costurile unui user, cauta-l mai sus si seteaza-i o limita pe feature."}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="px-3 py-2 font-semibold">Utilizator</th>
+                        <th className="px-3 py-2 font-semibold">Feature</th>
+                        <th className="px-3 py-2 font-semibold">Perioada</th>
+                        <th className="px-3 py-2 font-semibold">Limita</th>
+                        <th className="px-3 py-2 font-semibold">Actualizat</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {overview.map((row) => (
+                        <tr key={`${row.userId}:${row.feature}`}>
+                          <td className="px-3 py-2 align-top">
+                            <p className="font-mono text-xs">{row.email}</p>
+                            {row.displayName && <p className="text-xs text-muted-foreground">{row.displayName}</p>}
+                          </td>
+                          <td className="px-3 py-2 align-top">{quotaFeatureLabel(row.feature)}</td>
+                          <td className="px-3 py-2 align-top">{PERIOD_LABELS[row.period]}</td>
+                          <td className="px-3 py-2 align-top">
+                            {row.limitUsdMilli === null
+                              ? "Nelimitat"
+                              : `${formatStoredValue(row.feature, row.limitUsdMilli)} ${quotaLimitUnitLabel(row.feature)}`}
+                          </td>
+                          <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                            {formatIsoDateTime(row.updatedAt)}
+                          </td>
+                          <td className="px-3 py-2 align-top text-right">
+                            <Button size="sm" variant="outline" onClick={() => selectFromOverview(row)}>
+                              Editeaza
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {overviewTruncated && (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      Lista arata primele 500 de limite — exista mai multe; cauta userul direct pentru restul.
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {selected && (
           <Card>
@@ -262,13 +330,15 @@ export default function AdminQuota() {
               <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
                 <span className="flex items-center gap-2">
                   <span className="font-mono text-sm">{selected.email}</span>
-                  <Badge variant="outline">{selected.role}</Badge>
-                  <Badge variant={selected.status === "active" ? "success" : "warning"}>{selected.status}</Badge>
+                  <Badge variant="outline">{userRoleLabel(selected.role)}</Badge>
+                  <Badge variant={selected.status === "active" ? "success" : "warning"}>
+                    {userStatusLabel(selected.status)}
+                  </Badge>
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => loadOverrides(selected.id)} disabled={loading}>
+                  <Button variant="outline" size="sm" onClick={refreshOverrides} disabled={loading}>
                     <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-                    Refresh
+                    Reincarca
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
                     Schimba utilizatorul
@@ -282,62 +352,93 @@ export default function AdminQuota() {
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-feature">
                     Feature
                   </label>
-                  <input
-                    id="quota-feature"
-                    type="text"
+                  <Select
                     value={feature}
-                    onChange={(e) => setFeature(e.target.value)}
-                    placeholder="ex: ai.single, ai.multi, captcha.rnpm"
-                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
-                  />
+                    onValueChange={(v) => {
+                      // Unitati diferite (USD vs captcha-uri): la schimbarea
+                      // feature-ului, perioada si limita revin la default —
+                      // valorile tastate pentru AI nu se preiau la captcha.
+                      setFeature(v);
+                      setPeriod("day");
+                      setLimitInput("");
+                    }}
+                  >
+                    <SelectTrigger id="quota-feature">
+                      <SelectValue placeholder="Feature" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* Rand legacy (feature in afara enum-ului, ex. pre-consolidare): il
+                          pastram selectabil doar cat e valoarea curenta (edit round-trip
+                          corect), fara sa-l oferim ca optiune noua. */}
+                      {feature && !isKnownQuotaFeature(feature) && (
+                        <SelectItem value={feature} disabled>
+                          {quotaFeatureLabel(feature)}
+                        </SelectItem>
+                      )}
+                      {QUOTA_FEATURES.map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {quotaFeatureLabel(f)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-period">
                     Perioada
                   </label>
-                  <select
-                    id="quota-period"
-                    value={period}
-                    onChange={(e) => setPeriod(e.target.value as QuotaPeriod)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    <option value="day">Zilnic</option>
-                    <option value="week">Saptamanal</option>
-                    <option value="month">Lunar</option>
-                  </select>
+                  <Select value={period} onValueChange={(v) => setPeriod(v as QuotaPeriod)}>
+                    <SelectTrigger id="quota-period">
+                      <SelectValue placeholder="Perioada" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="day">Zilnic</SelectItem>
+                      <SelectItem value="week">Saptamanal</SelectItem>
+                      <SelectItem value="month">Lunar</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-limit">
-                    Limita ({limitUnitLabel(feature)})
+                    Limita ({quotaLimitUnitLabel(feature)})
                   </label>
                   <input
                     id="quota-limit"
                     type="number"
                     step={isCountFeature(feature) ? "1" : "0.001"}
                     min="0"
-                    value={limitUsd}
-                    onChange={(e) => setLimitUsd(e.target.value)}
+                    value={limitInput}
+                    onChange={(e) => setLimitInput(e.target.value)}
                     placeholder={isCountFeature(feature) ? "ex: 50" : "ex: 25"}
-                    disabled={unlimited}
-                    className={cn(
-                      "h-9 w-full rounded-md border border-input bg-background px-3 text-sm",
-                      unlimited && "opacity-50"
-                    )}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </div>
-                <Button type="submit" disabled={busyFeature !== null}>
+                <Button
+                  type="submit"
+                  disabled={busyFeature !== null || !isKnownQuotaFeature(feature)}
+                  title={
+                    !isKnownQuotaFeature(feature)
+                      ? "Feature legacy in afara enum-ului — backend-ul l-ar respinge; poate fi doar sters."
+                      : undefined
+                  }
+                >
                   <Plus className="h-4 w-4" />
                   Salveaza
                 </Button>
-                <label className="col-span-full flex items-center gap-2 text-xs text-muted-foreground">
-                  <input
-                    type="checkbox"
-                    checked={unlimited}
-                    onChange={(e) => setUnlimited(e.target.checked)}
-                    className="h-3.5 w-3.5"
-                  />
-                  <span>Nelimitat (limita NULL — pass-through fara cap)</span>
-                </label>
+                {/* Randuri full-width sub grid — helper text-ul NU sta in coloana
+                    Feature: cu items-end, inaltimea extra ar defaza selectul fata
+                    de restul campurilor. */}
+                <p className="col-span-full text-xs text-muted-foreground">
+                  {isCountFeature(feature)
+                    ? "Limita = numar de captcha-uri pe fereastra aleasa."
+                    : "Limita = cost in USD pe fereastra aleasa."}
+                </p>
+                {!isKnownQuotaFeature(feature) && (
+                  <p className="col-span-full text-xs text-amber-700 dark:text-amber-400">
+                    Feature vechi ("{quotaFeatureLabel(feature)}") — nu mai poate fi salvat; limita lui poate fi doar
+                    stearsa din lista de mai jos.
+                  </p>
+                )}
               </form>
 
               <div className="overflow-x-auto">
@@ -356,20 +457,20 @@ export default function AdminQuota() {
                     {overrides.length === 0 && !loading && (
                       <tr>
                         <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
-                          Nu exista override-uri. Userul foloseste limita default.
+                          Nicio limita setata pentru acest user — buget nelimitat. Seteaza una cu formularul de mai sus.
                         </td>
                       </tr>
                     )}
                     {overrides.map((row) => (
                       <tr key={row.feature} className="border-b border-border last:border-b-0 hover:bg-muted/30">
-                        <td className="px-3 py-2 align-top font-mono text-xs">{row.feature}</td>
+                        <td className="px-3 py-2 align-top text-xs">{quotaFeatureLabel(row.feature)}</td>
                         <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[row.period]}</td>
                         <td className="px-3 py-2 align-top">
                           {row.limitUsdMilli === null ? (
                             <Badge variant="outline">Nelimitat</Badge>
                           ) : isCountFeature(row.feature) ? (
                             <span className="font-mono">
-                              {row.limitUsdMilli} {limitUnitLabel(row.feature)}
+                              {row.limitUsdMilli} {quotaLimitUnitLabel(row.feature)}
                             </span>
                           ) : (
                             <span className="font-mono">${formatStoredValue(row.feature, row.limitUsdMilli)}</span>
@@ -394,6 +495,8 @@ export default function AdminQuota() {
                               variant="ghost"
                               onClick={() => onDelete(row)}
                               disabled={busyFeature === row.feature}
+                              aria-label={`Sterge plafonul ${quotaFeatureLabel(row.feature)}`}
+                              title="Sterge plafonul"
                               className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                             >
                               <Trash2 className="h-4 w-4" />

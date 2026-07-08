@@ -16,6 +16,8 @@ import {
   purgeOldAiUsage,
   sumAiUsageMilliInWindow,
   sumAiUsageMilliToday,
+  sumAiUsageWindowsByOwner,
+  sumAiUsageWindowsTenant,
 } from "./aiUsageRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
@@ -428,5 +430,85 @@ describe("earliestAiUsageTsInWindow", () => {
     const earliest = earliestAiUsageTsInWindow("alice", "ai.single", 3600);
     // SQLite stores ISO strings; lexicographic order matches chronological.
     expect(earliest).toBe(tA);
+  });
+});
+
+describe("sumAiUsageWindowsByOwner / sumAiUsageWindowsTenant", () => {
+  it("calculeaza day/week/total per owner, cu pending numarat la estimat", () => {
+    const now = Date.now();
+    const tsNow = new Date(now).toISOString();
+    const ts2d = new Date(now - 2 * 86_400_000).toISOString(); // in fereastra week, nu day
+    const ts30d = new Date(now - 30 * 86_400_000).toISOString(); // doar in total
+
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 10,
+      ts: tsNow,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_multi_judge",
+      costUsdMilli: 20,
+      ts: ts2d,
+    });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 40,
+      ts: ts30d,
+    });
+
+    insertAiUsage({
+      ownerId: "bob",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 5,
+      ts: tsNow,
+    });
+    insertAiUsage({
+      ownerId: "bob",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_multi_judge",
+      costUsdMilli: 15,
+      ts: ts2d,
+    });
+    insertAiUsage({
+      ownerId: "bob",
+      provider: "openai",
+      model: "x",
+      feature: "dosar_summary",
+      costUsdMilli: 25,
+      ts: ts30d,
+    });
+
+    // O rezervare pending pentru alice, ts=now — trebuie sa conteze la
+    // estimated_cost_usd_milli (17 = 10 + 7), la fel ca sumAiUsageMilliInWindow.
+    insertAiUsageReservation({
+      ownerId: "alice",
+      provider: "openai",
+      feature: "dosar_summary",
+      estimatedCostUsdMilli: 7,
+    });
+
+    const byOwner = sumAiUsageWindowsByOwner("ai");
+    expect(byOwner.get("alice")).toEqual({ dayMilli: 17, weekMilli: 37, totalMilli: 77 });
+    expect(byOwner.get("bob")).toEqual({ dayMilli: 5, weekMilli: 20, totalMilli: 45 });
+
+    const tenant = sumAiUsageWindowsTenant("ai");
+    expect(tenant).toEqual({ dayMilli: 22, weekMilli: 57, totalMilli: 122 });
+  });
+
+  it("returneaza map gol / totaluri zero cand nu exista usage", () => {
+    expect(sumAiUsageWindowsByOwner("ai").size).toBe(0);
+    expect(sumAiUsageWindowsTenant("ai")).toEqual({ dayMilli: 0, weekMilli: 0, totalMilli: 0 });
   });
 });

@@ -1,32 +1,55 @@
-import { useCallback, useEffect, useState } from "react";
-import { Users as UsersIcon, RefreshCw, ShieldAlert, Search } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Users as UsersIcon, Download, FileUp, RefreshCw, ShieldAlert, Search, UserPlus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, MonitoringApiError, type AdminUser, type UserRole, type UserStatus } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
+import { SortableTh } from "@/components/ui/sortable-th";
+import { TablePagination } from "@/components/table-pagination";
+import { useClientSort } from "@/hooks/useClientSort";
+import {
+  admin,
+  MonitoringApiError,
+  triggerBlobDownload,
+  type AdminUser,
+  type ImportUsersResult,
+  type UserImportIssue,
+  type UserRole,
+  type UserStatus,
+} from "@/lib/api";
 import { useCurrentUser } from "@/hooks/useCurrentUser";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const PAGE_SIZE = 20;
+const SORT_SCOPE_NOTE = "Sorteaza pagina curenta";
 
+// v2.42.0 (6.5): etichetele vin din sursa unica userLabels (nu map local —
+// "Doar citire", nu "Read-only").
 const ROLE_OPTIONS: ReadonlyArray<{ value: UserRole; label: string }> = [
-  { value: "user", label: "Utilizator" },
-  { value: "admin", label: "Admin" },
-  { value: "support", label: "Suport" },
-  { value: "readonly", label: "Read-only" },
+  { value: "user", label: userRoleLabel("user") },
+  { value: "admin", label: userRoleLabel("admin") },
+  { value: "support", label: userRoleLabel("support") },
+  { value: "readonly", label: userRoleLabel("readonly") },
 ];
+
+// v2.42.0 (4.1): support/readonly exista in schema dar nu au NICIO regula
+// wired (singura verificare e requireRole("admin")) — un user "Doar citire"
+// s-ar comporta identic cu unul normal. Nu le oferim la creare SAU asignare;
+// raman afisabile pentru randuri istorice (optiune disabled).
+const ASSIGNABLE_ROLE_OPTIONS = ROLE_OPTIONS.filter((o) => o.value === "user" || o.value === "admin");
 
 const STATUS_OPTIONS: ReadonlyArray<{ value: UserStatus; label: string }> = [
-  { value: "active", label: "Activ" },
-  { value: "suspended", label: "Suspendat" },
-  { value: "deleted", label: "Sters" },
+  { value: "active", label: userStatusLabel("active") },
+  { value: "suspended", label: userStatusLabel("suspended") },
+  { value: "deleted", label: userStatusLabel("deleted") },
 ];
 
-const roleLabel = (role: UserRole) => ROLE_OPTIONS.find((o) => o.value === role)?.label ?? role;
-const statusLabel = (status: UserStatus) => STATUS_OPTIONS.find((o) => o.value === status)?.label ?? status;
+const roleLabel = (role: UserRole) => userRoleLabel(role);
+const statusLabel = (status: UserStatus) => userStatusLabel(status);
 
 function statusVariant(status: UserStatus): "success" | "warning" | "destructive" {
   if (status === "active") return "success";
@@ -40,10 +63,30 @@ function roleVariant(role: UserRole): "default" | "secondary" | "outline" {
   return "outline";
 }
 
-export default function AdminUsers() {
+function importIssueBadge(issue: UserImportIssue): { label: string; variant: "warning" | "secondary" } {
+  if (issue.code === "invalid_row") return { label: "Invalid", variant: "warning" };
+  if (issue.code === "duplicate_in_db") return { label: "Exista deja", variant: "secondary" };
+  return { label: "Duplicat in fisier", variant: "secondary" };
+}
+
+// v2.42.0 (5.1): `embedded` — pagina se randeaza ca tab in /setari, fara
+// shell-ul propriu (padding + h1); sumarul si actiunile raman.
+export default function AdminUsers({ embedded = false }: { embedded?: boolean } = {}) {
   const { user: me, refresh: refreshMe } = useCurrentUser();
   const confirm = useConfirm();
+  const toast = useToast();
   const [rows, setRows] = useState<AdminUser[]>([]);
+  // v2.42.0 (6.8): sortare client-side pe pagina curenta (paginarea ramane pe
+  // server, deci sortarea NU traverseaza paginile — title-ul o spune).
+  // Rol/status se sorteaza pe etichetele UMANE, ca ordinea sa urmeze ce vede userul.
+  const { sorted: sortedRows, ...sort } = useClientSort(rows, {
+    email: (r) => r.email,
+    displayName: (r) => r.displayName,
+    role: (r) => roleLabel(r.role),
+    status: (r) => statusLabel(r.status),
+    lastLoginAt: (r) => r.lastLoginAt,
+    createdAt: (r) => r.createdAt,
+  });
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
   const [search, setSearch] = useState("");
@@ -53,41 +96,73 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Paginare completa (numere + marime pagina), ca la Dosare.
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  // Creare individuala (4.2).
+  const [newEmail, setNewEmail] = useState("");
+  const [newName, setNewName] = useState("");
+  const [newRole, setNewRole] = useState<"user" | "admin">("user");
+  const [creating, setCreating] = useState(false);
+  const [createMsg, setCreateMsg] = useState<string | null>(null);
+
+  // Import Excel (4.3).
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<ImportUsersResult | null>(null);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  // Pattern 6.7 (audit v2.42.0, finding #1): abort pe fetch-ul in zbor +
+  // resetarea paginii INLINE in handlerele de filtru, NU intr-un efect paralel
+  // cu aceleasi deps — altfel schimbarea unui filtru pe pagina > 1 lanseaza
+  // doua fetch-uri (page vechi + page 1), iar cel lent poate suprascrie
+  // randurile corecte sub un indice de pagina gresit.
+  const listAbortRef = useRef<AbortController | null>(null);
 
   const load = useCallback(async () => {
+    listAbortRef.current?.abort();
+    const ctrl = new AbortController();
+    listAbortRef.current = ctrl;
     setLoading(true);
     setError(null);
     try {
       const result = await admin.listUsers({
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         search: search || undefined,
         role: roleFilter === "all" ? undefined : roleFilter,
         status: statusFilter === "all" ? undefined : statusFilter,
+        signal: ctrl.signal,
       });
+      if (ctrl.signal.aborted) return;
       setRows(result.rows);
       setTotal(result.total);
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") return;
+      if (err instanceof Error && err.name === "AbortError") return;
+      if (ctrl.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorilor.");
     } finally {
-      setLoading(false);
+      if (listAbortRef.current === ctrl) {
+        setLoading(false);
+        listAbortRef.current = null;
+      }
     }
-  }, [page, roleFilter, search, statusFilter]);
+  }, [page, pageSize, roleFilter, search, statusFilter]);
 
   useEffect(() => {
     load();
+    return () => {
+      listAbortRef.current?.abort();
+      listAbortRef.current = null;
+    };
   }, [load]);
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii depinde explicit de filtrele vizibile.
-  useEffect(() => {
-    setPage(1);
-  }, [roleFilter, search, statusFilter]);
 
   const onSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setSearch(searchInput.trim());
+    setPage(1);
   };
 
   // Server-side guards (last_admin, self_deactivation) are the source of truth;
@@ -115,6 +190,7 @@ export default function AdminUsers() {
     try {
       await admin.updateRole(target.id, nextRole);
       await load();
+      toast(`Rolul lui ${target.email} este acum "${roleLabel(nextRole)}".`, { variant: "success" });
       // If the caller changed their own role, refresh /me so the sidebar
       // reflects the new role (e.g., admin → user hides the Admin section).
       if (target.id === me?.id) refreshMe();
@@ -150,6 +226,7 @@ export default function AdminUsers() {
     try {
       await admin.updateStatus(target.id, nextStatus);
       await load();
+      toast(`Statusul lui ${target.email} este acum "${statusLabel(nextStatus)}".`, { variant: "success" });
     } catch (err) {
       const msg =
         err instanceof MonitoringApiError && err.code === "self_deactivation"
@@ -163,6 +240,58 @@ export default function AdminUsers() {
     }
   };
 
+  const onCreate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const email = newEmail.trim();
+    const displayName = newName.trim();
+    if (!email || !displayName) {
+      setError("Completeaza emailul si numele afisat.");
+      return;
+    }
+    setCreating(true);
+    setError(null);
+    setCreateMsg(null);
+    try {
+      const created = await admin.createUser({ email, displayName, role: newRole });
+      setCreateMsg(`Utilizator creat — se poate loga cu contul Google ${created.email}.`);
+      setNewEmail("");
+      setNewName("");
+      setNewRole("user");
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la crearea utilizatorului.");
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const onDownloadTemplate = async () => {
+    setError(null);
+    try {
+      const blob = await admin.downloadUsersImportTemplate();
+      triggerBlobDownload(blob, "model-import-utilizatori.xlsx");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la descarcarea template-ului.");
+    }
+  };
+
+  const onImportFile = async (file: File) => {
+    setImporting(true);
+    setError(null);
+    setImportResult(null);
+    try {
+      const result = await admin.importUsers(await file.arrayBuffer());
+      setImportResult(result);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la importul fisierului.");
+    } finally {
+      setImporting(false);
+      // Acelasi fisier poate fi re-selectat dupa o corectie.
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
   const summary = (() => {
     const parts = [`${total} total`];
     if (search) parts.push(`filtru: "${search}"`);
@@ -172,19 +301,21 @@ export default function AdminUsers() {
   })();
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-7xl")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <UsersIcon className="h-6 w-6 text-primary" />
-              Utilizatori
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
+            {!embedded && (
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <UsersIcon className="h-6 w-6 text-primary" />
+                Utilizatori
+              </h1>
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>{summary}</p>
           </div>
           <Button variant="outline" onClick={load} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            Reincarca
           </Button>
         </div>
 
@@ -204,7 +335,13 @@ export default function AdminUsers() {
                 placeholder="Cauta dupa email sau nume"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm md:col-span-2"
               />
-              <Select value={roleFilter} onValueChange={(v) => setRoleFilter(v as UserRole | "all")}>
+              <Select
+                value={roleFilter}
+                onValueChange={(v) => {
+                  setRoleFilter(v as UserRole | "all");
+                  setPage(1);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Rol" />
                 </SelectTrigger>
@@ -217,12 +354,20 @@ export default function AdminUsers() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={statusFilter} onValueChange={(v) => setStatusFilter(v as UserStatus | "all")}>
+              <Select
+                value={statusFilter}
+                onValueChange={(v) => {
+                  setStatusFilter(v as UserStatus | "all");
+                  setPage(1);
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">Toate statusurile</SelectItem>
+                  {/* Default-ul exclude userii stersi (soft delete) — ei apar
+                      doar cu filtrul explicit "Sters". */}
+                  <SelectItem value="all">Toate (fara stersi)</SelectItem>
                   {STATUS_OPTIONS.map((o) => (
                     <SelectItem key={o.value} value={o.value}>
                       {o.label}
@@ -251,18 +396,187 @@ export default function AdminUsers() {
           </div>
         )}
 
+        {/* v2.42.0: provisionare useri din UI — individual + import bulk din
+            xlsx, in doua carduri alaturate (layout pastrat la cererea userului;
+            referinta le comaseaza intr-un singur card orizontal). Bridge-ul
+            oauth2 e fail-closed: userul se poate loga imediat ce exista aici
+            cu status active. */}
+        <div className="grid gap-5 lg:grid-cols-2">
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <UserPlus className="h-4 w-4" />
+                Adauga utilizator
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <form onSubmit={onCreate} className="space-y-3">
+                {createMsg && (
+                  <div className="rounded-md border border-green-200 bg-green-50 px-4 py-2 text-sm text-green-700 dark:border-green-900/50 dark:bg-green-950/30 dark:text-green-300">
+                    {createMsg}
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-email">
+                    Email (contul Google)
+                  </label>
+                  <input
+                    id="new-user-email"
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="ana@firma.ro"
+                    maxLength={254}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-name">
+                    Nume afisat
+                  </label>
+                  <input
+                    id="new-user-name"
+                    type="text"
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    placeholder="Ana Pop"
+                    maxLength={120}
+                    className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+                  />
+                </div>
+                <div className="flex items-end gap-3">
+                  <div className="flex-1">
+                    <label className="mb-1 block text-xs text-muted-foreground" htmlFor="new-user-role">
+                      Rol
+                    </label>
+                    <Select value={newRole} onValueChange={(v) => setNewRole(v as "user" | "admin")}>
+                      <SelectTrigger id="new-user-role">
+                        <SelectValue placeholder="Rol" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {ASSIGNABLE_ROLE_OPTIONS.map((o) => (
+                          <SelectItem key={o.value} value={o.value}>
+                            {o.label}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <Button type="submit" disabled={creating}>
+                    <UserPlus className="h-4 w-4" />
+                    {creating ? "Se creeaza..." : "Creeaza"}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <FileUp className="h-4 w-4" />
+                Import din Excel
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-sm text-muted-foreground">
+                Descarca modelul, completeaza un rand per utilizator (rol: Utilizator sau Admin) si incarca fisierul.
+                Maxim 500 de randuri / 512KB.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button variant="outline" onClick={onDownloadTemplate} disabled={importing}>
+                  <Download className="h-4 w-4" />
+                  Descarca modelul
+                </Button>
+                <Button onClick={() => fileInputRef.current?.click()} disabled={importing}>
+                  <FileUp className={cn("h-4 w-4", importing && "animate-pulse")} />
+                  {importing ? "Se importa..." : "Incarca fisierul"}
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept=".xlsx"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void onImportFile(file);
+                  }}
+                />
+              </div>
+              {importResult && (
+                <div className="space-y-2">
+                  <p className="text-sm">
+                    <span className="font-medium text-green-700 dark:text-green-400">
+                      {importResult.summary.created} creati
+                    </span>
+                    {" · "}
+                    <span className="text-muted-foreground">{importResult.summary.duplicates} duplicate</span>
+                    {" · "}
+                    <span className={importResult.summary.invalid > 0 ? "text-red-600" : "text-muted-foreground"}>
+                      {importResult.summary.invalid} invalide
+                    </span>
+                  </p>
+                  {importResult.issues.length > 0 && (
+                    <div className="overflow-x-auto">
+                      <table className="w-full text-sm">
+                        <thead>
+                          <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                            <th className="px-3 py-1.5 font-semibold">Rand</th>
+                            <th className="px-3 py-1.5 font-semibold">Email</th>
+                            <th className="px-3 py-1.5 font-semibold">Status</th>
+                            <th className="px-3 py-1.5 font-semibold">Motiv</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border">
+                          {importResult.issues.map((issue) => {
+                            const badge = importIssueBadge(issue);
+                            return (
+                              <tr key={`${issue.rowNumber}:${issue.code}:${issue.email ?? ""}`}>
+                                <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">
+                                  {issue.rowNumber}
+                                </td>
+                                <td className="px-3 py-1.5 align-top font-mono text-xs">{issue.email || "—"}</td>
+                                <td className="px-3 py-1.5 align-top">
+                                  <Badge variant={badge.variant}>{badge.label}</Badge>
+                                </td>
+                                <td className="px-3 py-1.5 align-top text-xs text-muted-foreground">{issue.message}</td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+
         <Card>
           <CardContent className="p-0">
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
-                    <th className="px-4 py-2 font-semibold">Email</th>
-                    <th className="px-4 py-2 font-semibold">Nume afisat</th>
-                    <th className="px-4 py-2 font-semibold">Rol</th>
-                    <th className="px-4 py-2 font-semibold">Status</th>
-                    <th className="px-4 py-2 font-semibold">Ultimul login</th>
-                    <th className="px-4 py-2 font-semibold">Creat</th>
+                    <SortableTh sort={sort} sortKeyName="email" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Email
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="displayName" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Nume afisat
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="role" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Rol
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="status" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Status
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="lastLoginAt" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Ultimul login
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="createdAt" className="px-4" scopeNote={SORT_SCOPE_NOTE}>
+                      Creat
+                    </SortableTh>
                   </tr>
                 </thead>
                 <tbody>
@@ -273,7 +587,7 @@ export default function AdminUsers() {
                       </td>
                     </tr>
                   )}
-                  {rows.map((row) => {
+                  {sortedRows.map((row) => {
                     const isSelf = row.id === me?.id;
                     return (
                       <tr key={row.id} className="border-b border-border last:border-b-0 hover:bg-muted/30">
@@ -287,17 +601,29 @@ export default function AdminUsers() {
                         </td>
                         <td className="px-4 py-2 align-top">{row.displayName || "-"}</td>
                         <td className="px-4 py-2 align-top">
+                          {/* Latimi fixe pe badge + select: altfel eticheta variabila a
+                              rolului ("Admin" vs "Utilizator") impinge select-urile la
+                              offset-uri diferite intre randuri. */}
                           <div className="flex items-center gap-2">
-                            <Badge variant={roleVariant(row.role)}>{roleLabel(row.role)}</Badge>
+                            <Badge variant={roleVariant(row.role)} className="w-24 justify-center">
+                              {roleLabel(row.role)}
+                            </Badge>
                             <Select value={row.role} onValueChange={(v) => handleRoleChange(row, v as UserRole)}>
                               <SelectTrigger
-                                className="h-7 px-2 text-xs w-auto min-w-[110px]"
+                                className="h-7 px-2 text-xs w-[130px]"
                                 disabled={busyId === row.id || loading}
                               >
                                 <SelectValue placeholder="Rol" />
                               </SelectTrigger>
                               <SelectContent>
-                                {ROLE_OPTIONS.map((o) => (
+                                {/* Rand istoric cu rol in afara celor asignabile: vizibil,
+                                    dar nu re-selectabil. */}
+                                {!ASSIGNABLE_ROLE_OPTIONS.some((o) => o.value === row.role) && (
+                                  <SelectItem value={row.role} disabled>
+                                    {roleLabel(row.role)}
+                                  </SelectItem>
+                                )}
+                                {ASSIGNABLE_ROLE_OPTIONS.map((o) => (
                                   <SelectItem key={o.value} value={o.value}>
                                     {o.label}
                                   </SelectItem>
@@ -308,10 +634,12 @@ export default function AdminUsers() {
                         </td>
                         <td className="px-4 py-2 align-top">
                           <div className="flex items-center gap-2">
-                            <Badge variant={statusVariant(row.status)}>{statusLabel(row.status)}</Badge>
+                            <Badge variant={statusVariant(row.status)} className="w-24 justify-center">
+                              {statusLabel(row.status)}
+                            </Badge>
                             <Select value={row.status} onValueChange={(v) => handleStatusChange(row, v as UserStatus)}>
                               <SelectTrigger
-                                className="h-7 px-2 text-xs w-auto min-w-[110px]"
+                                className="h-7 px-2 text-xs w-[130px]"
                                 disabled={busyId === row.id || loading}
                               >
                                 <SelectValue placeholder="Status" />
@@ -341,21 +669,18 @@ export default function AdminUsers() {
           </CardContent>
         </Card>
 
-        <div className="flex items-center justify-between">
-          <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
-            Inapoi
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Pagina {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Inainte
-          </Button>
-        </div>
+        <TablePagination
+          page={page - 1}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={(p) => setPage(p + 1)}
+          onPageSizeChange={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+          pageSizes={[20, 50, 100]}
+          disabled={loading}
+        />
       </div>
     </div>
   );

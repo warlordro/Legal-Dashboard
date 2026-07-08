@@ -1,5 +1,79 @@
 # Changelog - Legal Dashboard
 
+## v2.42.0 - 2026-07-08
+
+Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode). Etapa 2 din corectiile post-testare web (PLAN-web-ux-etapa2.md), pe branch-ul `feat/v2.42.0-users-settings`. Starea finala e sincronizata din implementarea paralela de pe GitLab (`GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`), care a inclus si fixuri post-livrare din testarea reala pe deployment-ul web. Modul desktop: zero impact.
+
+### Utilizatori: provisionare din UI
+
+Migratia `0040` adauga index unic NOCASE pe email + `canonicalizeEmail` ca UNIC normalizator (creare, import, seed, bridge oauth2). `POST /users` creeaza utilizatori individual (roluri creabile: doar Utilizator/Admin); import in masa din xlsx cu template generat server-side, parsare server-side (header exact, aliasuri de rol, dedup in fisier, duplicate din DB raportate per rand, cap 500 randuri / 512KB), insert tranzactional totul-sau-nimic. Guard last-admin numai pe adminii ACTIVI (un admin suspendat nu mai conteaza ca fallback). Post-livrare: un cont STERS nu mai blocheaza emailul pe veci — re-adaugarea (create sau import) REACTIVEAZA randul existent (acelasi id, nume/rol din input, password_hash curatat, audit `reactivated: true`); activ/suspendat raman duplicate.
+
+### Setari pe taburi + pool AI unic
+
+Pagina `/setari` pe taburi cu gating pe rol (General pentru toti; Utilizatori/Chei API/Cote/Granturi/Consum/Audit doar admin), tab activ in `?tab=` cu `replace:true`, paginile admin refolosite cu prop `embedded`. `useCurrentUser` rescris ca store partajat (`useSyncExternalStore`). Migratiile `0041` (consolidare `ai.single`+`ai.multi` -> pool unic "ai") si `0042` (backfill expirari legacy la UTC); `quotaGuard` aplica limita pe pool-ul unic (single + multi insumate); granturile si nelimitatul se exclud (422 `unlimited_budget`, baza include default-ul din env); `POST /grants/:id/revoke` + `/me/budget` pe "ai".
+
+### Consum per utilizator + audit utilizabil
+
+`GET /usage/overview` (AI + captcha per utilizator, EXACT aceleasi functii ca guard-urile — cifrele coincid cu enforcementul), tab Consum cu sub-taburi AI/Captcha, totaluri per user (zilnic/saptamanal/total) cu rand expandabil + total tenant, QuotaCard cu echivalent EUR (fail-closed pe curs stale; parserul ECB accepta si atribute cu apostrofuri), sortare client-side (`useClientSort` + `SortableTh`) si paginare client-side cu clamp sincronizat. Audit imbogatit cu emailul owner/actor (ID-ul brut in title, fallback ID/"system"), filtre pe pattern-ul corect (debounce cu flush pe Reseteaza, reset pagina inline, AbortController cu guards, refreshTick), paginare completa 25-200 si raport XLSX care respecta TOATE filtrele paginii (`GET /audit/export`, 413 peste 10000 randuri, escape formula-injection inclusiv pe IP, nume fisier datat).
+
+### AI: Sonnet 5 + prompturi system/user
+
+Claude Sonnet 4.6 -> Sonnet 5 (`claude-sonnet-5`, OpenRouter `anthropic/claude-sonnet-5`, pricing 3/15 USD per 1M). `AiPrompt { system, user }` separa instructiunile de datele dosarului (fence cu escape pe obiect/parti/sedinte/analize/nume model); helper comun `dosar_data` cu cap 30 sedinte + total declarat, campurile ICCJ si caile de atac (`caiAtac`) incluse.
+
+### Finisaj UX Nivel 1 + 2
+
+Chunk-reload la deploy (sessionStorage in try/catch), confirmari pe TOATE actiunile ireversibile prin `ConfirmProvider` (stergere cheie tenant, inchidere alerta, bulk dismiss cu count real, revoke-all tokens, rol/status, cota, grant — zero `window.confirm`), etichete umane din surse unice (`monitoringRunStatus`, `userLabels`, `quotaFeatureLabels`, `auditOutcome`), dark mode fara scapari, sistem de toast-uri in-house (`ToastProvider`, cap 4 cu evictie FIFO, timere curatate la unmount) adoptat pe toate mutatiile + toast de EROARE pe exporturile PDF Changelog/Manual (inainte esuau silentios), fix critic `useDialog` (onClose in ref, efect doar pe `[open]` — nu mai fura focusul), modalele de export pe `useDialog`, sortare pe coloane in Users/Audit/Monitorizare pe etichetele umane.
+
+### Fixuri din testarea reala pe web
+
+Popover-ele de istoric functionale cu sidebar-ul restrans (position:fixed vs clipping), `Cache-Control` explicit pe static (no-cache pe HTML, immutable pe /assets — browserul nu mai serveste bundle-uri vechi dupa rebuild), select-urile native inlocuite cu componenta Select custom (popup tematizat pe dark), reset formular cota la schimbarea feature-ului, badge PJ lizibil (culoare proprie, 10px) si absent pe intrarile RNPM, titluri de alerta fara ghilimele in jurul numelui monitorizat (normalizare si pe titlurile istorice, la afisare), JobKindTabs la aceeasi inaltime cu inputul de cautare, panoul Notificari sistem ascuns in browser, aria-sort + aria-label pe coloanele sortabile, `LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1` in mediul local de dev (tokenurile API erau blocate de cerinta HTTPS pe HTTP local).
+
+### Verificare
+
+Gate-uri complete inainte de commit (biome, tsc backend + frontend, build, teste). 1665 teste backend (+ reactivare useri stersi, usage/overview, quotaGuard pool unic, import, audit export, down 0040/0042) si 326 teste frontend (+ toast timere, useDialog focus, useClientSort, Keys/ApiAccessPanel cu provideri). Claim-uri CodeRabbit verificate individual (acceptate cu dovezi sau respinse cu argumente).
+
+### Note de upgrade
+
+Consolidarea cotelor AI (migration 0041) pastreaza RATA CEA MAI RESTRICTIVA
+dintre ai.single si ai.multi ca limita a pool-ului unic "ai". Utilizatorii care
+aveau limite asimetrice (ex. multi mult peste single) pot vedea 429 pe analiza
+multi-agent dupa upgrade — adminul trebuie sa revada limitele in pagina Cote si
+sa le reaseze la valorile dorite. Inainte de upgrade pe un tenant web, ruleaza
+pre-flight-ul de duplicate de email (migration 0040 opreste boot-ul pe
+duplicate istorice case-insensitive).
+
+## v2.41.0 - 2026-07-04
+
+Etapa 1 din corectiile post-testare web (PLAN-web-ux-fixes.md): layout-ul in browser, conectarea frontend-ului la cheile tenant si UX-ul paginii de cote. Diagnostic prin doua workflow-uri multi-agent cu verificare in cod; planul a trecut printr-un review adversarial multi-model (review-panel: Opus 4.8 + GPT-5.5 + Kimi K2.7 + Qwen3.7, sinteza Fable 5) — 3 findings High + 8 Medium integrate inainte de implementare. Zero schimbari Docker/Caddy/oauth2-proxy; desktop-ul ramane identic.
+
+### Fix: layout web (banda alba, scala 112.5%, sidebar taiat)
+
+Trei cauze independente, trei fix-uri gated pe `window.desktopApi`: (1) drag strip-ul de 32px + `pt-8` (compensatii pentru `titleBarOverlay` Electron) nu se mai randeaza in browser — banda alba de sus dispare; (2) font-size-ul root porneste pe web de la 16px (baseline browser) in loc de 18px — valoarea desktop era mascata de `setZoomLevel(0.9)` aplicat de Electron, compensare inexistenta in browser, deci web-ul randa la 112.5% si cerea zoom-out manual; migrare one-time a valorii auto-persistate in localStorage (rulata INAINTE de orice persist — altfel vechiul default o suprascria) + persistenta doar la alegerea explicita a userului + validare `Number.isInteger` pe valoarea stocata; (3) navigatia + istoricul din sidebar primesc scroll intern in modul expandat (footer-ul ramane pinned; in modul colapsat fara overflow, ca popover-urile de istoric sa nu fie clip-uite), cu `min-h-40` pe sectiunea de istoric deschisa ca lista sa nu colapseze la 0 pe viewport-uri scunde.
+
+### Fix: cheile tenant ajung in sfarsit la frontend-ul web
+
+Backend-ul rezolva corect cheile din `tenant_api_keys` inca din v2.34.0, dar frontend-ul citea cheile EXCLUSIV prin `window.desktopApi` (inexistent in browser) si bloca request-urile client-side inainte sa plece — cautarile RNPM si analizele AI pareau moarte desi adminul configurase totul. Hook nou `useTenantKeyStatus` consuma `GET /api/v1/me/key-status` (endpoint existent, zero consumatori pana acum), cu stare cvadrivalenta (desktop/loading/ready/error), politica fail-open pe starile tranzitorii (backend-ul e sursa de adevar), refetch la window focus si semnal de platforma din raspunsul serverului (`authMode` real, nu detectia de browser — combinatia dev "browser + backend desktop" ramane BYOK). Guard-urile RNPM devin web-aware in toate punctele: `runSearch`, `runSplit`, **`loadNextBatch` (paginarea "Incarca tot" — ar fi ramas no-op silentios)** si bulk; badge-ul "Setari API" arata starea cheilor tenant (neutru pe loading, nu "Neconfigurat" fals); `useDosareAi` isi deriva listele de modele din cheile tenant si nu mai trimite `apiKeys` in body (care declansa 501). Body-urile RNPM omit campurile captcha in tenant mode.
+
+### Fix: dialogul "Setari API" in web + PAT admin-only
+
+In tenant mode dialogul se deschide pentru TOTI userii (non-adminii primeau un no-op silentios), dar formularul BYOK nu se mai randeaza niciodata in web — salvarea safeStorage esua silentios, footerul afirma fals "cheile se salveaza local", iar cheile ramase in state ajungeau in body si declansau 501 pe AI. In locul lui: panou read-only cu starea per cheie din `/me/key-status` + textul "gestionate de administratorul tenantului"; adminii au buton direct catre Administrare -> Chei API. Sectiunea de notificari native (Electron-only) dispare din browser, iar managementul token-urilor PAT devine admin-only in web — atat in UI cat si server-side (`requireRole("admin")` pe `/api/v1/tokens*` cand `auth_mode=web`; desktop neafectat).
+
+### Fix: fallback captcha simetric pe ramura tenant + "tenant key wins" integral
+
+`resolveCaptchaKeyForRoute` deriva acum `fallback2CaptchaKey` din cheile tenant cu paritate desktop: race -> cheia celuilalt provider (ambele directii), sequential + CapSolver primary -> fallback uman 2Captcha. Body-ul forwarded pe ramura tenant e sanitizat (campurile `captchaKey/captchaProvider/captchaMode/fallback2CaptchaKey` din client sunt eliminate) — inainte, `rnpm.ts` cadea pe `body.fallback2CaptchaKey` ales de client chiar in web mode. Functia orfana `rejectCaptchaKeyInWebMode` (zero call-sites) stearsa; sectiunea stale "Web-mode 501 gate" din CLAUDE.md rescrisa pe mecanismul real. Teste noi: ambele directii de fallback, sanitizarea body-ului, sequential cu/fara fallback.
+
+### Fix: pagina Cote fara token-uri interne
+
+Campul text liber pentru feature (enum inchis de 3 valori, validat cu `z.enum` — "RNPM" tastat producea "Body invalid" generic) devine select cu etichete umane; unitatea limitei (USD vs captcha-uri) si helper text-ul se actualizeaza din selectie. Edit-ul unui rand legacy cu feature in afara enum-ului round-trip-uieste corect (optiune disabled-but-selected). Grants: relabel pe cele doua optiuni AI existente; ramane explicit AI-only (granturile sunt denominate USD, guard-ul captcha nu aplica extra-grant logic).
+
+### Tooling: mediu web local de test
+
+`scripts/dev-web-local.ps1` ridica un server web local complet fara Docker/Caddy: backend in `auth_mode=web` cu DB izolata (`.dev-web-local/`, git-ignored), seed admin si mint de sesiune prin `POST /api/v1/auth/oauth2/sync` — exact request-ul oauth2-proxy din productie. Smoke-ul v2.41.0 a rulat pe el: bridge -> sesiune -> key-status -> RNPM pe ramura tenant (501 `CAPTCHA_NOT_CONFIGURED` corect fara cheie; validare reala a cheilor la setare in `/admin/keys`).
+
+### Verificare
+
+Plan reviewed adversarial INAINTE de cod (15 findings adoptate, 3 respinse ca false dupa verificare in sursa, 1 escaladat la decizie de produs). Teste noi: `useFontSize` (9 — defaults per platforma, migrare cu ordinea corecta, persist doar la alegere), `useTenantKeyStatus` (5 — fail-open, dev combo, refetch la focus), `ApiKeyDialog` (rework web), `rnpmGuards` (+6 — fallback ambele directii, sanitizare). Biome + `tsc --noEmit` backend/frontend + `npm run build` + suitele complete (1599 backend, 279 frontend, 2 electron) verzi. Smoke web local end-to-end + review deep-code-reviewer pe diff inainte de merge.
+
 ## v2.40.1 - 2026-07-02
 
 Doua fixuri de deploy web, ambele descoperite la primul deploy real pe platforma Dokploy (build direct din git clone): imaginea Docker nu se putea construi fara build local prealabil, iar puntea de autentificare oauth2-proxy -> backend folosea mecanisme care nu exista in oauth2-proxy legacy config si nu a functionat niciodata in productie. Desktop: zero impact.

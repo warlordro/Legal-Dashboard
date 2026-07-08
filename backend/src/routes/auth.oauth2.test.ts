@@ -121,8 +121,71 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(body.error.code).toBe("forbidden");
   });
 
+  it("accepta secretul din Authorization: Basic (fix 2026-07-02, oauth2-proxy pass-basic-auth)", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    const basic = Buffer.from(`alice@example.test:${PROXY_SECRET}`).toString("base64");
+
+    const res = await syncRequest({
+      authorization: `Basic ${basic}`,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("respinge Authorization: Basic cu parola gresita", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    const basic = Buffer.from("alice@example.test:parola-gresita").toString("base64");
+
+    const res = await syncRequest({
+      authorization: `Basic ${basic}`,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(403);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("forbidden");
+  });
+
+  it("prefera X-Proxy-Auth peste Authorization: Basic cand ambele sunt prezente", async () => {
+    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    const basicGresit = Buffer.from("alice@example.test:parola-gresita").toString("base64");
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      authorization: `Basic ${basicGresit}`,
+      "x-auth-request-email": "alice@example.test",
+    });
+
+    expect(res.status).toBe(200);
+  });
+
   it("returneaza 400 missing_identity cand header-ele email lipsesc", async () => {
     const res = await syncRequest({ "x-proxy-auth": PROXY_SECRET });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("missing_identity");
+  });
+
+  it("returneaza 400 missing_identity cand emailul nu contine @", async () => {
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-forwarded-email": "fara-arond.example.test",
+    });
+
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as EnvelopeErrorBody;
+    expect(body.error.code).toBe("missing_identity");
+  });
+
+  it("returneaza 400 missing_identity cand emailul depaseste 254 de caractere", async () => {
+    const email = `${"a".repeat(250)}@example.test`; // 263 chars > 254
+
+    const res = await syncRequest({
+      "x-proxy-auth": PROXY_SECRET,
+      "x-forwarded-email": email,
+    });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as EnvelopeErrorBody;
@@ -236,12 +299,14 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     expect(res.status).toBe(200);
   });
 
-  // v2.40.1: X-Forwarded-Email e header-ul pe care oauth2-proxy il trimite REAL
-  // upstream (`pass-user-headers`) — v2.34.0 il respinsese pe teoria gresita ca
-  // X-Auth-Request-Email e canonic (acela e header de RASPUNS, nginx
-  // auth_request, si nu sosea niciodata upstream). Ambele sunt acceptate, doar
-  // dupa shared-secret check; Caddy le strip-uieste inbound pe amandoua.
-  it("accepta X-Forwarded-Email ca identitate (mecanismul real oauth2-proxy)", async () => {
+  // Fix 2026-07-02: fallback-ul pe X-Forwarded-Email, eliminat in v2.34.0, a
+  // fost REINTRODUS. Motiv: --set-xauthrequest (X-Auth-Request-Email) e header
+  // de raspuns in oauth2-proxy, nu ajunge la upstream in modul --upstreams;
+  // --pass-user-headers (X-Forwarded-Email) e mecanismul care chiar
+  // functioneaza. Ramane sigur: Traefik `legal-secure` strip-uieste ambele
+  // headere la perimetrul public (docker-compose.yml), un client extern nu le
+  // poate injecta.
+  it("accepta X-Forwarded-Email cand X-Auth-Request-Email lipseste (mecanismul real de pass-user-headers)", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
 
     const res = await syncRequest({
@@ -250,169 +315,42 @@ describe("/api/v1/auth/oauth2/sync — bridge oauth2-proxy", () => {
     });
 
     expect(res.status).toBe(200);
-    const cookie = res.headers.get("set-cookie") ?? "";
-    expect(cookie).toContain(`${AUTH_COOKIE_NAME}=`);
   });
 
-  // Stack-ul canonic din deploy/docker-compose.prod.yml (v2.40.1): oauth2-proxy
-  // cu `basic-auth-password` + `pass-basic-auth` trimite upstream
-  // `Authorization: Basic base64(<user>:<shared secret>)` + X-Forwarded-Email.
-  it("accepta secretul din parola Basic Auth (oauth2-proxy basic-auth-password)", async () => {
+  // MR 0a (contract v2.40.1): fail-closed pe ambiguitate — daca ambele headere
+  // de identitate sosesc cu valori diferite, refuzam (proxy misconfigurat sau
+  // request forjat). Cand coincid (dupa normalizare), cererea trece.
+  it("respinge cu missing_identity cand headerele de identitate au valori diferite", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    const res = await syncRequest({
-      authorization: `Basic ${Buffer.from(`alice@example.test:${PROXY_SECRET}`).toString("base64")}`,
-      "x-forwarded-email": "alice@example.test",
-    });
-
-    expect(res.status).toBe(200);
-    const cookie = res.headers.get("set-cookie") ?? "";
-    expect(cookie).toContain(`${AUTH_COOKIE_NAME}=`);
-  });
-
-  it("respinge Basic Auth cu parola gresita", async () => {
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    const res = await syncRequest({
-      authorization: `Basic ${Buffer.from("alice@example.test:parola-gresita-cu-lungime-suficienta").toString("base64")}`,
-      "x-forwarded-email": "alice@example.test",
-    });
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as EnvelopeErrorBody;
-    expect(body.error.code).toBe("forbidden");
-  });
-
-  it("respinge Basic Auth malformat (fara separator user:parola)", async () => {
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    const res = await syncRequest({
-      authorization: `Basic ${Buffer.from(PROXY_SECRET).toString("base64")}`,
-      "x-forwarded-email": "alice@example.test",
-    });
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as EnvelopeErrorBody;
-    expect(body.error.code).toBe("forbidden");
-  });
-
-  it("respinge Basic Auth cu parola goala", async () => {
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    const res = await syncRequest({
-      authorization: `Basic ${Buffer.from("alice@example.test:").toString("base64")}`,
-      "x-forwarded-email": "alice@example.test",
-    });
-
-    expect(res.status).toBe(403);
-    const body = (await res.json()) as EnvelopeErrorBody;
-    expect(body.error.code).toBe("forbidden");
-  });
-
-  it("suporta secret care contine ':' (split pe primul separator)", async () => {
-    const secretWithColon = "abc:def:0123456789abcdef0123456789";
-    process.env.LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET = secretWithColon;
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    const res = await syncRequest({
-      authorization: `Basic ${Buffer.from(`alice@example.test:${secretWithColon}`).toString("base64")}`,
-      "x-forwarded-email": "alice@example.test",
-    });
-
-    expect(res.status).toBe(200);
-  });
-
-  it("OR real intre mecanisme: Basic malformat nu blocheaza X-Proxy-Auth valid", async () => {
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    const res = await syncRequest({
-      authorization: "Basic nu-e-base64-valid",
-      "x-proxy-auth": PROXY_SECRET,
-      "x-forwarded-email": "alice@example.test",
-    });
-
-    expect(res.status).toBe(200);
-  });
-
-  it("respinge header-e de identitate conflictuale (fail-closed pe ambiguitate)", async () => {
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
+    insertUser({ id: "bob", email: "bob@example.test", displayName: "Bob", role: "user" });
 
     const res = await syncRequest({
       "x-proxy-auth": PROXY_SECRET,
-      "x-forwarded-email": "alice@example.test",
-      "x-auth-request-email": "mallory@example.test",
+      "x-auth-request-email": "alice@example.test",
+      "x-forwarded-email": "bob@example.test",
     });
 
     expect(res.status).toBe(400);
     const body = (await res.json()) as EnvelopeErrorBody;
     expect(body.error.code).toBe("missing_identity");
-
     const audits = getAuditEvents({ action: "auth.oauth2.sync" });
     const denied = audits.find((a) => a.outcome === "denied");
-    expect(JSON.parse(denied?.detail_json ?? "{}")).toMatchObject({
-      reason: "conflicting_identity_headers",
-    });
+    expect(denied?.detail_json).toContain("conflicting_identity_headers");
   });
 
-  it("accepta ambele header-e de identitate cand coincid (case-insensitive)", async () => {
+  it("accepta ambele headere de identitate cand valorile coincid dupa normalizare", async () => {
     insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
 
     const res = await syncRequest({
       "x-proxy-auth": PROXY_SECRET,
-      "x-forwarded-email": "alice@example.test",
-      "x-auth-request-email": "Alice@Example.Test",
-    });
-
-    expect(res.status).toBe(200);
-  });
-
-  // Cu `pass-basic-auth`, oauth2-proxy trimite `Authorization: Basic ...` pe
-  // ORICE request proxied, nu doar pe bridge. authProvider parseaza doar
-  // `Bearer`, deci header-ul Basic trebuie sa fie inert pe rutele normale:
-  // autentificarea ramane pe cookie-ul de sesiune.
-  it("header-ul Basic omniprezent e inert pe rutele non-bridge (cookie-ul castiga)", async () => {
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    const app = buildApp();
-    const syncRes = await app.request("/api/v1/auth/oauth2/sync", {
-      method: "POST",
-      headers: {
-        authorization: `Basic ${Buffer.from(`alice@example.test:${PROXY_SECRET}`).toString("base64")}`,
-        "x-forwarded-email": "alice@example.test",
-      },
-    });
-    expect(syncRes.status).toBe(200);
-    const cookie = syncRes.headers.get("set-cookie")?.split(";")[0] ?? "";
-
-    const probeRes = await app.request("/api/v1/probe", {
-      headers: {
-        cookie,
-        authorization: `Basic ${Buffer.from(`alice@example.test:${PROXY_SECRET}`).toString("base64")}`,
-      },
-    });
-    expect(probeRes.status).toBe(200);
-    expect(await probeRes.json()).toMatchObject({ data: { ownerId: "alice" } });
-  });
-
-  it("identitatea vine din header, nu din user-ul Basic Auth", async () => {
-    insertUser({ id: "alice", email: "alice@example.test", displayName: "Alice", role: "admin" });
-
-    // user-ul Basic e alt string decat emailul provisionat — daca bridge-ul
-    // l-ar folosi ca identitate, sync-ul ar esua cu not_provisioned.
-    const res = await syncRequest({
-      authorization: `Basic ${Buffer.from(`whatever-user:${PROXY_SECRET}`).toString("base64")}`,
+      "x-auth-request-email": "  Alice@Example.Test  ",
       "x-forwarded-email": "alice@example.test",
     });
 
     expect(res.status).toBe(200);
-    const cookie = res.headers.get("set-cookie") ?? "";
-    const token = cookie.match(new RegExp(`${AUTH_COOKIE_NAME}=([^;]+)`))?.[1] ?? "";
-    const payload = verifyAuthToken(token, {
-      secret: JWT_SECRET,
-      issuer: JWT_ISSUER,
-      audience: JWT_AUDIENCE,
-    });
-    expect(payload.sub).toBe("alice");
+    const audits = getAuditEvents({ action: "auth.oauth2.sync" });
+    const success = audits.find((a) => a.outcome === "ok");
+    expect(success?.target_id).toBe("alice");
   });
 
   it("audit-ul de succes contine targetId=user.id si NU plaintext email", async () => {

@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getAuditEvents } from "../db/auditRepository.ts";
 import { insertAiUsage } from "../db/aiUsageRepository.ts";
+import { clearWarning, fireWarning } from "../db/budgetNotificationsRepository.ts";
 import { getEmailSettings, upsertEmailSettings } from "../db/ownerEmailSettingsRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { invalidateCache, setCaptchaSettings, setTenantKey } from "../db/tenantKeysRepository.ts";
@@ -30,6 +31,7 @@ let tmpRoot: string;
 const originalDbPath = process.env.LEGAL_DASHBOARD_DB_PATH;
 const originalAuthMode = process.env.LEGAL_DASHBOARD_AUTH_MODE;
 const originalSecret = process.env.TENANT_KEY_ENCRYPTION_SECRET;
+const originalDefaultQuota = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
 
 function buildApp(ownerId = "local") {
   const app = new Hono();
@@ -73,6 +75,7 @@ afterEach(async () => {
   restoreEnv("LEGAL_DASHBOARD_DB_PATH", originalDbPath);
   restoreEnv("LEGAL_DASHBOARD_AUTH_MODE", originalAuthMode);
   restoreEnv("TENANT_KEY_ENCRYPTION_SECRET", originalSecret);
+  restoreEnv("LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI", originalDefaultQuota);
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -128,14 +131,24 @@ describe("/api/v1/me/key-status", () => {
 });
 
 describe("/api/v1/me/budget", () => {
+  // v2.42.0 (5.2): pool AI unic — bugetul se raporteaza pe "ai", iar suma
+  // acopera toate feature-urile de usage AI (aliases).
   it("returns usage plus configured limits for the current user", async () => {
-    upsertOverride({ userId: "local", feature: "ai.single", period: "day", limitUsdMilli: 50, updatedBy: "admin" });
+    upsertOverride({ userId: "local", feature: "ai", period: "day", limitUsdMilli: 50, updatedBy: "admin" });
     insertAiUsage({
       ownerId: "local",
       provider: "openai",
       model: "gpt-5.4",
       feature: "dosar_summary",
       costUsdMilli: 12,
+      ts: new Date().toISOString(),
+    });
+    insertAiUsage({
+      ownerId: "local",
+      provider: "anthropic",
+      model: "claude-sonnet",
+      feature: "dosar_multi_judge",
+      costUsdMilli: 5,
       ts: new Date().toISOString(),
     });
 
@@ -146,22 +159,13 @@ describe("/api/v1/me/budget", () => {
     expect(body.data.items).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
-          feature: "ai.single",
-          usedMilli: 12,
+          feature: "ai",
+          usedMilli: 17,
           limitMilli: 50,
           period: "day",
           baseLimitMilli: 50,
           extraFromGrantsMilli: 0,
           effectiveLimitMilli: 50,
-        }),
-        expect.objectContaining({
-          feature: "ai.multi",
-          usedMilli: 0,
-          limitMilli: null,
-          period: "day",
-          baseLimitMilli: null,
-          extraFromGrantsMilli: 0,
-          effectiveLimitMilli: null,
         }),
       ])
     );
@@ -169,10 +173,10 @@ describe("/api/v1/me/budget", () => {
   });
 
   it("adds active grants into effectiveLimit", async () => {
-    upsertOverride({ userId: "local", feature: "ai.single", period: "day", limitUsdMilli: 50, updatedBy: "admin" });
+    upsertOverride({ userId: "local", feature: "ai", period: "day", limitUsdMilli: 50, updatedBy: "admin" });
     createGrant({
       userId: "local",
-      feature: "ai.single",
+      feature: "ai",
       extraUsdMilli: 30,
       expiresAt: new Date(Date.now() + 86_400_000).toISOString(),
       reason: "test",
@@ -181,7 +185,7 @@ describe("/api/v1/me/budget", () => {
 
     const res = await buildApp().request("/api/v1/me/budget");
     const body = await jsonOf(res);
-    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai.single");
+    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai");
     expect(single).toMatchObject({
       baseLimitMilli: 50,
       extraFromGrantsMilli: 30,
@@ -191,7 +195,7 @@ describe("/api/v1/me/budget", () => {
   });
 
   it("reports rolling-window usage when period=week", async () => {
-    upsertOverride({ userId: "local", feature: "ai.single", period: "week", limitUsdMilli: 100, updatedBy: "admin" });
+    upsertOverride({ userId: "local", feature: "ai", period: "week", limitUsdMilli: 100, updatedBy: "admin" });
     insertAiUsage({
       ownerId: "local",
       provider: "openai",
@@ -203,8 +207,90 @@ describe("/api/v1/me/budget", () => {
 
     const res = await buildApp().request("/api/v1/me/budget");
     const body = await jsonOf(res);
-    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai.single");
+    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai");
     expect(single).toMatchObject({ period: "week", usedMilli: 30, baseLimitMilli: 100 });
+  });
+
+  // Task 15: /me/budget trebuie sa oglindeasca EXACT regula de enforcement
+  // din quotaGuard.ts — default-ul din env se aplica doar pentru "ai" si doar
+  // in web mode; nu trebuie sa "scape" pe desktop unde guard-ul nu-l enforce-uieste.
+  it("in web mode foloseste default-ul din env cand nu exista override pe ai", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "5000";
+
+    const res = await buildApp("alice").request("/api/v1/me/budget");
+    const body = await jsonOf(res);
+    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai");
+    expect(single).toMatchObject({
+      baseLimitMilli: 5000,
+      effectiveLimitMilli: 5000,
+      limitMilli: 5000,
+      limitSource: "default",
+    });
+  });
+
+  it("in desktop mode NU aplica default-ul din env (guard-ul nu-l enforce-uieste)", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "desktop";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "5000";
+
+    const res = await buildApp("alice").request("/api/v1/me/budget");
+    const body = await jsonOf(res);
+    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai");
+    expect(single).toMatchObject({
+      baseLimitMilli: null,
+      effectiveLimitMilli: null,
+      limitMilli: null,
+      limitSource: "none",
+    });
+  });
+
+  it("consumul pe ai e pe fereastra rolling 24h, nu pe ziua calendaristica", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "5000";
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "anthropic",
+      model: "claude-sonnet-5",
+      feature: "dosar_summary",
+      costUsdMilli: 700,
+      ts: new Date(Date.now() - 23 * 3_600_000).toISOString(),
+    });
+
+    const res = await buildApp("alice").request("/api/v1/me/budget");
+    const body = await jsonOf(res);
+    const single = body.data.items.find((it: { feature: string }) => it.feature === "ai");
+    expect(single).toMatchObject({ period: "day", usedMilli: 700 });
+  });
+});
+
+describe("GET /api/v1/me/budget-warnings", () => {
+  it("returneaza warning-ul activ pe pool-ul ai", async () => {
+    insertUser({ id: "alice", email: "alice@firma.ro", displayName: "Alice" });
+    fireWarning({ userId: "alice", feature: "ai", thresholdPct: 80 });
+    const res = await buildApp("alice").request("/api/v1/me/budget-warnings");
+    const body = await jsonOf(res);
+    expect(res.status).toBe(200);
+    expect(body.data.items).toHaveLength(1);
+    expect(body.data.items[0].feature).toBe("ai");
+    expect(body.data.items[0].thresholdPct).toBe(80);
+  });
+
+  it("nu returneaza warning-ul altui owner (izolare)", async () => {
+    insertUser({ id: "alice", email: "alice@firma.ro", displayName: "Alice" });
+    insertUser({ id: "bob", email: "bob@firma.ro", displayName: "Bob" });
+    fireWarning({ userId: "alice", feature: "ai", thresholdPct: 80 });
+    const res = await buildApp("bob").request("/api/v1/me/budget-warnings");
+    const body = await jsonOf(res);
+    expect(body.data.items).toEqual([]);
+  });
+
+  it("un warning curatat nu mai apare", async () => {
+    insertUser({ id: "alice", email: "alice@firma.ro", displayName: "Alice" });
+    fireWarning({ userId: "alice", feature: "ai", thresholdPct: 80 });
+    clearWarning("alice", "ai", 80);
+    const res = await buildApp("alice").request("/api/v1/me/budget-warnings");
+    const body = await jsonOf(res);
+    expect(body.data.items).toEqual([]);
   });
 });
 

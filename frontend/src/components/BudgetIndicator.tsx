@@ -3,13 +3,16 @@ import { Gauge } from "lucide-react";
 import { me, type MeBudgetItem } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
+// v2.42.0 (5.2): pool AI unic — bara urmareste mereu bugetul "ai"; constanta
+// interna, fara prop (nu mai exista bugete AI separate).
+const BUDGET_FEATURE = "ai";
+
 interface BudgetIndicatorProps {
-  feature?: "ai.single" | "ai.multi";
   enabled?: boolean;
   className?: string;
 }
 
-export function BudgetIndicator({ feature = "ai.single", enabled = true, className }: BudgetIndicatorProps) {
+export function BudgetIndicator({ enabled = true, className }: BudgetIndicatorProps) {
   const [item, setItem] = useState<MeBudgetItem | null>(null);
 
   useEffect(() => {
@@ -20,7 +23,7 @@ export function BudgetIndicator({ feature = "ai.single", enabled = true, classNa
       try {
         const budget = await me.budget(ac.signal);
         if (cancelled) return;
-        setItem(budget.items.find((row) => row.feature === feature) ?? null);
+        setItem(budget.items.find((row) => row.feature === BUDGET_FEATURE) ?? null);
       } catch {
         if (!cancelled) setItem(null);
       }
@@ -32,7 +35,7 @@ export function BudgetIndicator({ feature = "ai.single", enabled = true, classNa
       ac.abort();
       window.clearInterval(interval);
     };
-  }, [enabled, feature]);
+  }, [enabled]);
 
   if (!enabled || !item || item.limitMilli === null) return null;
 

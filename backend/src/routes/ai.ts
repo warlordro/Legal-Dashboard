@@ -15,7 +15,8 @@ import {
   type AiRouting,
   validateAiBody,
 } from "../services/ai.ts";
-import { getSettings, upsertSettings } from "../db/ownerAiSettingsRepository.ts";
+import { getSettings, upsertSettings, type AiProviderMode } from "../db/ownerAiSettingsRepository.ts";
+import { getDecryptedKey } from "../db/tenantKeysRepository.ts";
 import { releaseAiUsageReservation } from "../db/aiUsageRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
 import { quotaGuard, reserveQuotaBudget } from "../middleware/quotaGuard.ts";
@@ -106,14 +107,35 @@ function missingApiKey(c: Context, provider: string) {
   return c.json(fail(ErrorCodes.MISSING_API_KEY, "NO_API_KEY", c), 400);
 }
 
+// v2.41.0 (P3): rutare AI implicita. Setarea explicita a ownerului (rand in
+// owner_ai_settings — updated_at > 0) are prioritate. Fara alegere explicita,
+// in web mode auto-detectam pe PREZENTA cheii OpenRouter a tenantului (nu pe
+// absenta cheilor native — decizie de spec: motivatia e tenantul care a
+// configurat doar OpenRouter si ar primi MISSING_API_KEY pe default-ul
+// "native"; un tenant cu ambele tipuri de chei isi alege explicit modul din
+// UI). Try/catch: o cheie tenant nedecriptabila (secret rotit/corupt) nu
+// darama ruta — cade pe "native".
+function resolveEffectiveAiMode(ownerId: string): AiProviderMode {
+  const settings = getSettings(ownerId);
+  if (settings.updated_at > 0) return settings.mode;
+  if (getAuthMode() === "web") {
+    try {
+      if (getDecryptedKey("openrouter")) return "openrouter";
+    } catch {
+      /* cheia tenant indisponibila -> fallback native */
+    }
+  }
+  return "native";
+}
+
 function getRouting(c: Context): AiRouting {
-  const settings = getSettings(getOwnerId(c));
-  return { mode: settings.mode };
+  return { mode: resolveEffectiveAiMode(getOwnerId(c)) };
 }
 
 aiRouter.get("/settings", (c) => {
-  const settings = getSettings(getOwnerId(c));
-  return c.json({ mode: settings.mode });
+  // Intoarce modul EFECTIV (explicit sau auto-detectat) — UI-ul de rutare si
+  // disponibilitatea modelelor din frontend se aliniaza la ce va face serverul.
+  return c.json({ mode: resolveEffectiveAiMode(getOwnerId(c)) });
 });
 
 aiRouter.put("/settings", async (c) => {
@@ -278,9 +300,14 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
     const routing = getRouting(c);
     const reserveProvider = routing.mode === "openrouter" ? "openrouter" : AI_MODELS[judge]?.provider;
     if (!reserveProvider) return modelError(c, "Model judecator necunoscut.");
+    // buildPrompt INAINTE de rezervare: intre reserveQuotaBudget si intrarea in
+    // streamSSE nu mai exista niciun apel care poate arunca, deci un throw aici
+    // nu mai poate lasa o rezervare pending orfana (release-ul traieste doar in
+    // finally-ul stream-ului). Pandantul patternului reservationToRelease din
+    // /analyze.
+    const prompt = buildPrompt(dosar);
     const quotaReservation = reserveQuotaBudget(c, "ai.multi", reserveProvider);
     if (!quotaReservation.ok) return quotaReservation.response;
-    const prompt = buildPrompt(dosar);
     const trackingBase = {
       ownerId: getOwnerId(c),
       requestId: getRequestId(c),

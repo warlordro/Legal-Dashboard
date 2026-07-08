@@ -10,6 +10,7 @@ import { RnpmSavedData } from "@/components/rnpm/RnpmSavedData";
 import { RnpmSavedStats } from "@/components/rnpm/RnpmSavedStats";
 import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
 import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
+import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
 import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
 import { describeNestedPhase, describeSplitPhase, formatSplitProgress } from "@/lib/rnpmProgressPhase";
@@ -90,12 +91,25 @@ export default function RnpmSearchPage({
   const [splitProgress, setSplitProgress] = useState<RnpmSplitProgress | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
+  // Politica de captcha dupa runtime:
+  //   desktop  -> cheia BYOK locala (captchaKey)
+  //   web ready-> cheia tenant a providerului activ (server-side)
+  //   web loading/error -> fail-open: nu blocam pe client, serverul respinge
+  //     cu 501 CAPTCHA_NOT_CONFIGURED daca lipseste cheia tenant.
+  const tenant = useTenantKeyStatus();
+  const captchaBlocked =
+    tenant.state.state === "desktop"
+      ? !captchaKey
+      : tenant.state.state === "ready"
+        ? tenant.tenantCaptchaMissing
+        : false;
+
   const isAbort = (e: unknown): boolean => e instanceof DOMException && e.name === "AbortError";
 
   const stoppedRef = useRef(false);
 
   const runSearch = async (type: RnpmSearchType, params: RnpmSearchParams) => {
-    if (!captchaKey) {
+    if (captchaBlocked) {
       onConfigureKey();
       return;
     }
@@ -156,7 +170,7 @@ export default function RnpmSearchPage({
 
   const runSplit = async (subTypeLabels: string[]) => {
     if (!pendingSplit) return;
-    if (!captchaKey) {
+    if (captchaBlocked) {
       onConfigureKey();
       return;
     }
@@ -226,7 +240,14 @@ export default function RnpmSearchPage({
   };
 
   const loadNextBatch = async () => {
-    if (!result || !captchaKey || result.nextRnpmPage == null || loading) return;
+    // v2.42.0 (6.10): cand captcha nu e disponibil, STINGE autoLoading inainte
+    // de return — altfel UI-ul ramane pe "Opreste incarcarea" fara niciun
+    // request in zbor.
+    if (captchaBlocked) {
+      setAutoLoading(false);
+      return;
+    }
+    if (!result || result.nextRnpmPage == null || loading) return;
     if (abortRef.current) return;
     const ctl = new AbortController();
     abortRef.current = ctl;
@@ -329,7 +350,7 @@ export default function RnpmSearchPage({
             Registrul National de Publicitate Mobiliara — cautari cu rezolvare captcha automata
           </p>
         </div>
-        {!captchaKey && (
+        {captchaBlocked && (
           <Button variant="outline" size="sm" onClick={onConfigureKey}>
             <Key className="h-4 w-4" /> Configureaza 2Captcha
           </Button>
@@ -513,6 +534,7 @@ export default function RnpmSearchPage({
       <div className={tab === "bulk" ? "" : "hidden"}>
         <RnpmBulkSearch
           captchaKey={captchaKey}
+          captchaBlocked={captchaBlocked}
           captchaProvider={captchaProvider}
           fallback2CaptchaKey={fallback2CaptchaKey}
           captchaMode={captchaMode}

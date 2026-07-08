@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy, KeyRound, Trash2 } from "lucide-react";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import {
   type ApiTokenSummary,
   type CreateApiTokenInput,
@@ -18,6 +20,8 @@ const SCOPES: Array<{ value: "dosare" | "iccj" | "rnpm"; label: string }> = [
 // Sectiune "Acces API" — management Personal Access Tokens (doar web mode). Gate-uita
 // de caller-ul din ApiKeyDialog (isWebRuntime()); desktop pastreaza BYOK in modalul existent.
 export function ApiAccessPanel() {
+  const confirmDialog = useConfirm();
+  const toast = useToast();
   const [tokens, setTokens] = useState<ApiTokenSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadOk, setLoadOk] = useState(false); // ultima incarcare a reusit? (empty-state doar daca da)
@@ -95,6 +99,8 @@ export function ApiAccessPanel() {
     setError(null);
     try {
       await revokeApiToken(id);
+      // v2.42.0 (6.3): toast doar pe succes; erorile raman in text sub titlu.
+      toast("Tokenul a fost revocat.", { variant: "success" });
       await refresh();
     } catch {
       setError("Revocare esuata. Reincearca.");
@@ -106,16 +112,20 @@ export function ApiAccessPanel() {
 
   async function onRevokeAll() {
     if (busyRef.current) return;
-    if (
-      !window.confirm("Revoci TOATE tokenurile? Actiunea e ireversibila si va rupe orice integrare care le foloseste.")
-    ) {
-      return;
-    }
+    // v2.42.0 (6.2): dialogul partajat inlocuieste window.confirm.
+    const ok = await confirmDialog({
+      title: "Revoca toate tokenurile",
+      message: "Revoci TOATE tokenurile? Actiunea e ireversibila si va rupe orice integrare care le foloseste.",
+      destructive: true,
+      confirmLabel: "Revoca toate",
+    });
+    if (!ok) return;
     busyRef.current = true;
     setBusy(true);
     setError(null);
     try {
       await revokeAllApiTokens();
+      toast("Toate tokenurile au fost revocate.", { variant: "success" });
       await refresh();
     } catch {
       setError("Revocare esuata. Reincearca.");
@@ -164,11 +174,14 @@ export function ApiAccessPanel() {
 
       {error && <p className="mb-2 text-[11px] text-red-600">{error}</p>}
 
+      {/* v2.42.0 (6.6): variante dark pe banda amber + chip-ul de token. */}
       {newSecret && (
-        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-[12px]">
+        <div className="mb-3 rounded-md border border-amber-400 bg-amber-50 p-2 text-[12px] text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
           <p className="mb-1 font-medium">Copiaza tokenul acum — nu mai poate fi afisat.</p>
           <div className="flex items-center gap-2">
-            <code className="flex-1 truncate rounded bg-white px-2 py-1 font-mono text-[11px]">{newSecret}</code>
+            <code className="flex-1 truncate rounded bg-background px-2 py-1 font-mono text-[11px] text-foreground">
+              {newSecret}
+            </code>
             <button
               type="button"
               onClick={copySecret}
@@ -198,7 +211,7 @@ export function ApiAccessPanel() {
             onChange={(e) => setName(e.target.value)}
             placeholder="Nume token (ex. mcp-desktop)"
             aria-label="Nume token"
-            className="w-full rounded-md border border-border px-2 py-1 text-sm"
+            className="w-full rounded-md border border-input bg-background px-2 py-1 text-sm"
           />
           <div className="flex flex-wrap gap-3">
             {SCOPES.map((s) => (
@@ -215,7 +228,7 @@ export function ApiAccessPanel() {
                 value={expiresInDays}
                 onChange={(e) => setExpiresInDays(e.target.value as "" | "30" | "90" | "365")}
                 aria-label="Expirare"
-                className="rounded-md border border-border px-1 py-0.5"
+                className="rounded-md border border-input bg-background px-1 py-0.5"
               >
                 <option value="">fara</option>
                 <option value="30">30 zile</option>
@@ -231,7 +244,7 @@ export function ApiAccessPanel() {
                 placeholder="fara"
                 aria-label="Plafon captcha zilnic"
                 inputMode="numeric"
-                className="w-16 rounded-md border border-border px-1 py-0.5"
+                className="w-16 rounded-md border border-input bg-background px-1 py-0.5"
               />
             </label>
           </div>

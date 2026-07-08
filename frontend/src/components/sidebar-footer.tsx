@@ -2,6 +2,7 @@ import { Moon, Sun, PanelLeftClose, PanelLeftOpen, Type, AArrowUp, AArrowDown, B
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/useTheme";
 import { useFontSize } from "@/hooks/useFontSize";
+import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import { Button } from "./ui/button";
 
 export interface SidebarFooterProps {
@@ -14,9 +15,20 @@ export interface SidebarFooterProps {
 export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfigureApiKey }: SidebarFooterProps) {
   const { theme, toggle } = useTheme();
   const fontSize = useFontSize();
+  const tenant = useTenantKeyStatus();
+  // v2.42.0 (5.1): in web intrarea se numeste "Setari" si duce la /setari
+  // (handler-ul vine din Sidebar); pe desktop ramane "Setari API" + dialog BYOK.
+  const isWeb = typeof window !== "undefined" && !window.desktopApi;
+  const settingsLabel = isWeb ? "Setari" : "Setari API";
+  // Badge-ul de chei: pe desktop reflecta cheile locale (hasApiKey); in web
+  // reflecta cheile tenant (server). Cat timp starea e loading/error NU
+  // afirmam nimic (nici "Activ" fals care ar masca o eroare persistenta,
+  // nici "Neconfigurat" fals care ar alarma degeaba) — badge-ul lipseste.
+  const keyStateKnown = tenant.state.state === "desktop" || tenant.state.state === "ready";
+  const effectiveHasKey = tenant.state.state === "ready" ? tenant.hasTenantAiKey : hasApiKey;
 
   return (
-    <div className="border-t border-border p-2 space-y-1">
+    <div className="shrink-0 border-t border-border p-2 space-y-1">
       {/* Font size control */}
       {collapsed ? (
         <Button
@@ -71,28 +83,29 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         variant="ghost"
         size="sm"
         onClick={onConfigureApiKey}
-        title={collapsed ? "Setari API" : undefined}
+        title={collapsed ? settingsLabel : undefined}
         className={cn("w-full text-muted-foreground", collapsed ? "justify-center p-2 h-10" : "justify-start gap-3")}
       >
         <Bot
           className={cn(
             "shrink-0",
             collapsed ? "h-[18px] w-[18px]" : "h-4 w-4",
-            hasApiKey ? "text-green-500" : "text-muted-foreground"
+            keyStateKnown && effectiveHasKey ? "text-green-500" : "text-muted-foreground"
           )}
         />
         {!collapsed && (
           <span className="flex items-center gap-2">
-            Setari API
-            {hasApiKey ? (
-              <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
-                Activ
-              </span>
-            ) : (
-              <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
-                Neconfigurat
-              </span>
-            )}
+            {settingsLabel}
+            {keyStateKnown &&
+              (effectiveHasKey ? (
+                <span className="rounded-full bg-green-100 px-1.5 py-0.5 text-[11px] font-medium text-green-700 dark:bg-green-900/30 dark:text-green-400">
+                  Activ
+                </span>
+              ) : (
+                <span className="rounded-full bg-orange-100 px-1.5 py-0.5 text-[11px] font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-400">
+                  Neconfigurat
+                </span>
+              ))}
           </span>
         )}
       </Button>

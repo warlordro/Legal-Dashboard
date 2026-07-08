@@ -503,7 +503,7 @@ export function ManualChapters() {
             <BulletList
               items={[
                 "Claude Haiku 4.5 — Rapid (cea mai rapida analiza)",
-                "Claude Sonnet 4.6 — Echilibrat (balans viteza/calitate)",
+                "Claude Sonnet 5 — Echilibrat (balans viteza/calitate)",
                 "Claude Opus 4.8 — Premium (cel mai detaliat)",
               ]}
             />

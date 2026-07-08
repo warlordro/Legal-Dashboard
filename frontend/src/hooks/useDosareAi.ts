@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { AI_MODELS, type AiMode, JUDGE_MODELS_LIST } from "@/components/dosare-ai-config";
+import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import type { Dosar } from "@/types";
 
 interface ApiKeys {
@@ -79,10 +80,30 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
   const [multiPhase, setMultiPhase] = useState<Record<string, Set<MultiPhase>>>({});
   const [showIndividual, setShowIndividual] = useState<Set<string>>(new Set());
 
+  const tenant = useTenantKeyStatus();
+  // In web mode cheile sunt ale tenantului (server-side). BYOK din body doar pe
+  // desktop; in web trimitem undefined si serverul rezolva cheile tenant.
+  const byokMode = tenant.state.state === "desktop";
+  const bodyKeys = byokMode ? apiKeys : undefined;
+
+  // Prezenta unei chei per provider, dupa runtime:
+  //   desktop  -> cheile locale BYOK
+  //   web ready-> flag-urile tenant din /me/key-status
+  //   web loading/error -> fail-open (true): nu blocam pe client, serverul
+  //     respinge daca chiar lipseste cheia (politica fail-open din contract).
+  const providerHasKey = useCallback(
+    (provider: "anthropic" | "openai" | "google" | "openrouter"): boolean => {
+      if (byokMode) return Boolean(apiKeys?.[provider]);
+      if (tenant.state.state === "ready") return tenant.state.configured[provider];
+      return true; // web loading/error -> fail-open
+    },
+    [byokMode, apiKeys, tenant.state]
+  );
+
   const hasAnyKey =
     aiSettings.mode === "openrouter"
-      ? Boolean(apiKeys?.openrouter)
-      : Boolean(apiKeys && (apiKeys.anthropic || apiKeys.openai || apiKeys.google));
+      ? providerHasKey("openrouter")
+      : providerHasKey("anthropic") || providerHasKey("openai") || providerHasKey("google");
 
   const stackModels = AI_MODELS;
   const stackJudgeModels = JUDGE_MODELS_LIST;
@@ -90,31 +111,31 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
   const availableModels = useMemo(
     () =>
       aiSettings.mode === "openrouter"
-        ? apiKeys?.openrouter
+        ? providerHasKey("openrouter")
           ? stackModels
           : []
         : stackModels.filter((m) => {
-            if (m.provider === "anthropic") return apiKeys?.anthropic;
-            if (m.provider === "openai") return apiKeys?.openai;
-            if (m.provider === "google") return apiKeys?.google;
+            if (m.provider === "anthropic") return providerHasKey("anthropic");
+            if (m.provider === "openai") return providerHasKey("openai");
+            if (m.provider === "google") return providerHasKey("google");
             return false;
           }),
-    [aiSettings.mode, apiKeys?.anthropic, apiKeys?.openai, apiKeys?.google, apiKeys?.openrouter, stackModels]
+    [aiSettings.mode, providerHasKey, stackModels]
   );
 
   const availableJudgeModels = useMemo(
     () =>
       aiSettings.mode === "openrouter"
-        ? apiKeys?.openrouter
+        ? providerHasKey("openrouter")
           ? stackJudgeModels
           : []
         : stackJudgeModels.filter((m) => {
-            if (m.provider === "anthropic") return apiKeys?.anthropic;
-            if (m.provider === "openai") return apiKeys?.openai;
-            if (m.provider === "google") return apiKeys?.google;
+            if (m.provider === "anthropic") return providerHasKey("anthropic");
+            if (m.provider === "openai") return providerHasKey("openai");
+            if (m.provider === "google") return providerHasKey("google");
             return false;
           }),
-    [aiSettings.mode, apiKeys?.anthropic, apiKeys?.openai, apiKeys?.google, apiKeys?.openrouter, stackJudgeModels]
+    [aiSettings.mode, providerHasKey, stackJudgeModels]
   );
 
   const providerGroups = useMemo(
@@ -189,7 +210,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
       setAiLoading(key);
       setAiError(null);
       try {
-        const result = await api.ai.analyze(dosar, aiModel, apiKeys);
+        const result = await api.ai.analyze(dosar, aiModel, bodyKeys);
         setAiAnalysis((prev) => ({ ...prev, [key]: result.analysis }));
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Eroare la analiza AI";
@@ -202,7 +223,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         setAiLoading(null);
       }
     },
-    [aiModel, apiKeys, availableModels, hasAnyKey]
+    [aiModel, bodyKeys, availableModels, hasAnyKey]
   );
 
   const handleMultiAnalyze = useCallback(
@@ -212,7 +233,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         return;
       }
       if (aiSettings.mode === "openrouter") {
-        if (!apiKeys?.openrouter) {
+        if (!providerHasKey("openrouter")) {
           setMultiError("Lipseste cheia API pentru OpenRouter");
           return;
         }
@@ -223,15 +244,15 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
           if (modelDef) neededProviders.add(modelDef.provider);
         }
         for (const provider of neededProviders) {
-          if (provider === "anthropic" && !apiKeys?.anthropic) {
+          if (provider === "anthropic" && !providerHasKey("anthropic")) {
             setMultiError("Lipseste cheia API pentru Anthropic (Claude)");
             return;
           }
-          if (provider === "openai" && !apiKeys?.openai) {
+          if (provider === "openai" && !providerHasKey("openai")) {
             setMultiError("Lipseste cheia API pentru OpenAI (GPT)");
             return;
           }
-          if (provider === "google" && !apiKeys?.google) {
+          if (provider === "google" && !providerHasKey("google")) {
             setMultiError("Lipseste cheia API pentru Google (Gemini)");
             return;
           }
@@ -241,7 +262,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
       setMultiError(null);
       setMultiPhase((prev) => ({ ...prev, [dosar.numar]: new Set() }));
       try {
-        const result = await api.ai.analyzeMulti(dosar, multiAnalysts, multiJudge, apiKeys, (phase) => {
+        const result = await api.ai.analyzeMulti(dosar, multiAnalysts, multiJudge, bodyKeys, (phase) => {
           setMultiPhase((prev) => {
             const next = new Set(prev[dosar.numar] ?? []);
             next.add(phase);
@@ -259,7 +280,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         });
       }
     },
-    [aiSettings.mode, apiKeys, hasAnyKey, multiAnalysts, multiJudge]
+    [aiSettings.mode, bodyKeys, providerHasKey, hasAnyKey, multiAnalysts, multiJudge]
   );
 
   const multiForRow = useCallback(

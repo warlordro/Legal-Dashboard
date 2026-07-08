@@ -44,12 +44,13 @@ describe("BudgetIndicator", () => {
     vi.mocked(me.budget).mockResolvedValue({
       items: [
         {
-          feature: "ai.single",
+          feature: "ai",
           period: "day",
           usedMilli: 1250,
           baseLimitMilli: 5000,
           extraFromGrantsMilli: 0,
           effectiveLimitMilli: 5000,
+          limitSource: "override",
           limitMilli: 5000,
         },
       ],
@@ -66,12 +67,13 @@ describe("BudgetIndicator", () => {
     vi.mocked(me.budget).mockResolvedValue({
       items: [
         {
-          feature: "ai.single",
+          feature: "ai",
           period: "day",
           usedMilli: 1250,
           baseLimitMilli: null,
           extraFromGrantsMilli: 0,
           effectiveLimitMilli: null,
+          limitSource: "none",
           limitMilli: null,
         },
       ],

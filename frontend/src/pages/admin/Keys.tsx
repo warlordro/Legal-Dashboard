@@ -3,6 +3,8 @@ import { KeyRound, RefreshCw, Save, Trash2, ShieldAlert } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { useConfirm } from "@/components/ui/confirm-dialog";
+import { useToast } from "@/components/ui/toast";
 import { useTenantKeys } from "@/hooks/useTenantKeys";
 import type { TenantCaptchaMode, TenantCaptchaProvider, TenantKeyField } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
@@ -22,12 +24,18 @@ const PROVIDERS: Array<{ value: TenantCaptchaProvider; label: string }> = [
   { value: "capsolver", label: "CapSolver" },
 ];
 
+// v2.42.0 (6.5): etichete umane — Secvential / Race (in paralel).
 const MODES: Array<{ value: TenantCaptchaMode; label: string }> = [
-  { value: "sequential", label: "Sequential" },
-  { value: "race", label: "Race" },
+  { value: "sequential", label: "Secvential" },
+  { value: "race", label: "Race (in paralel)" },
 ];
 
-export default function AdminKeys() {
+const providerLabel = (value: TenantCaptchaProvider): string =>
+  PROVIDERS.find((p) => p.value === value)?.label ?? value;
+
+export default function AdminKeys({ embedded = false }: { embedded?: boolean } = {}) {
+  const confirm = useConfirm();
+  const toast = useToast();
   const { data, loading, error, savingField, refresh, saveKey, saveCaptchaSettings } = useTenantKeys();
   const [inputs, setInputs] = useState<Record<TenantKeyField, string>>({
     anthropic: "",
@@ -39,45 +47,82 @@ export default function AdminKeys() {
   });
   const [provider, setProvider] = useState<TenantCaptchaProvider>("2captcha");
   const [mode, setMode] = useState<TenantCaptchaMode>("sequential");
+  // Selectia NESALVATA a toggle-urilor nu are voie sa fie suprascrisa de un
+  // refresh fara legatura (ex. salvarea unei chei AI re-fetch-uieste `data`,
+  // iar sincronizarea reseta toggle-ul pe valoarea din server — userul alegea
+  // CapSolver si se trezea inapoi pe 2Captcha). Sincronizam din server doar
+  // cat timp userul nu a atins toggle-urile; dupa "Salveaza captcha" reluam.
+  const [captchaDirty, setCaptchaDirty] = useState(false);
 
   const currentProvider = data?.captcha.provider ?? provider;
   const currentMode = data?.captcha.mode ?? mode;
 
   useEffect(() => {
-    if (!data) return;
+    if (!data || captchaDirty) return;
     setProvider(data.captcha.provider);
     setMode(data.captcha.mode);
-  }, [data]);
+  }, [data, captchaDirty]);
 
+  // v2.42.0 (6.3): toast DOAR pe succes; erorile raman in banner (saveKey arunca).
   const onSaveKey = async (field: TenantKeyField) => {
-    await saveKey(field, inputs[field]);
-    setInputs((prev) => ({ ...prev, [field]: "" }));
+    const label = KEY_FIELDS.find((k) => k.field === field)?.label ?? field;
+    try {
+      await saveKey(field, inputs[field]);
+      setInputs((prev) => ({ ...prev, [field]: "" }));
+      toast(`Cheia ${label} a fost salvata.`, { variant: "success" });
+    } catch {
+      /* eroarea e afisata in banner */
+    }
   };
 
+  // v2.42.0 (6.2): stergerea unei chei tenant e destructiva pentru TOTI userii
+  // — confirmare obligatorie prin dialogul partajat.
   const onClearKey = async (field: TenantKeyField) => {
-    await saveKey(field, "");
+    const label = KEY_FIELDS.find((k) => k.field === field)?.label ?? field;
+    const ok = await confirm({
+      title: "Sterge cheia",
+      message: `Stergi cheia ${label}? Functionalitatile care o folosesc devin indisponibile pentru toti utilizatorii pana la introducerea unei chei noi.`,
+      destructive: true,
+      confirmLabel: "Sterge",
+    });
+    if (!ok) return;
+    try {
+      await saveKey(field, "");
+      toast(`Cheia ${label} a fost stearsa.`, { variant: "success" });
+    } catch {
+      /* banner */
+    }
   };
 
   const onSaveCaptcha = async () => {
-    await saveCaptchaSettings(provider, mode);
+    try {
+      await saveCaptchaSettings(provider, mode);
+      // Salvat -> valoarea locala coincide cu serverul; reluam sincronizarea.
+      setCaptchaDirty(false);
+      toast("Setarile captcha au fost salvate.", { variant: "success" });
+    } catch {
+      /* banner */
+    }
   };
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <KeyRound className="h-6 w-6 text-primary" />
-              Chei API
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">
+            {!embedded && (
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <KeyRound className="h-6 w-6 text-primary" />
+                Chei API
+              </h1>
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
               Chei tenant pentru AI si captcha. Valorile salvate nu se afiseaza inapoi in browser.
             </p>
           </div>
           <Button variant="outline" size="sm" onClick={() => refresh()} disabled={loading}>
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
+            Reincarca
           </Button>
         </div>
 
@@ -90,7 +135,7 @@ export default function AdminKeys() {
 
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Provider keys</CardTitle>
+            <CardTitle className="text-base">Chei per provider</CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {KEY_FIELDS.map(({ field, label, placeholder }) => {
@@ -104,7 +149,7 @@ export default function AdminKeys() {
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-medium">{label}</span>
                     <Badge variant={status?.set ? "success" : "outline"}>
-                      {status?.set ? `set *${status.last4}` : "unset"}
+                      {status?.set ? `Configurata *${status.last4}` : "Neconfigurata"}
                     </Badge>
                   </div>
                   <input
@@ -147,7 +192,10 @@ export default function AdminKeys() {
                   <button
                     key={item.value}
                     type="button"
-                    onClick={() => setProvider(item.value)}
+                    onClick={() => {
+                      setProvider(item.value);
+                      setCaptchaDirty(true);
+                    }}
                     className={cn(
                       "rounded px-3 py-1.5 text-sm transition-colors",
                       provider === item.value ? "bg-primary text-primary-foreground" : "text-muted-foreground"
@@ -157,16 +205,19 @@ export default function AdminKeys() {
                   </button>
                 ))}
               </div>
-              <Badge variant="outline">{currentProvider}</Badge>
+              <Badge variant="outline">{providerLabel(currentProvider)}</Badge>
             </div>
             <div className="flex flex-wrap items-center gap-3">
-              <span className="w-24 text-sm font-medium">Mode</span>
+              <span className="w-24 text-sm font-medium">Mod</span>
               <div className="flex rounded-md border border-border p-1">
                 {MODES.map((item) => (
                   <button
                     key={item.value}
                     type="button"
-                    onClick={() => setMode(item.value)}
+                    onClick={() => {
+                      setMode(item.value);
+                      setCaptchaDirty(true);
+                    }}
                     className={cn(
                       "rounded px-3 py-1.5 text-sm transition-colors",
                       mode === item.value ? "bg-primary text-primary-foreground" : "text-muted-foreground"
@@ -176,7 +227,7 @@ export default function AdminKeys() {
                   </button>
                 ))}
               </div>
-              <Badge variant="outline">{currentMode}</Badge>
+              <Badge variant="outline">{MODES.find((m) => m.value === currentMode)?.label ?? currentMode}</Badge>
             </div>
             <Button onClick={onSaveCaptcha} disabled={savingField === "captcha"}>
               <Save className="h-4 w-4" />

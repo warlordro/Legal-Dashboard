@@ -44,6 +44,22 @@ export type TestEmailResult =
   | { ok: true }
   | { ok: false; reason: "mailer_disabled" | "no_recipient" | "send_failed" | string };
 
+// GET /api/v1/me/key-status — flag-uri boolean per cheie tenant (NU valorile).
+// `captcha` reflecta cheia PROVIDER-ULUI ACTIV al tenantului (2captcha SAU
+// capsolver, dupa captchaProvider), aliniat cu resolveCaptchaKeyForRoute.
+export interface TenantKeysConfigured {
+  anthropic: boolean;
+  openai: boolean;
+  google: boolean;
+  openrouter: boolean;
+  captcha: boolean;
+}
+
+export interface KeyStatusResult {
+  authMode: "web" | "desktop";
+  tenantKeysConfigured: TenantKeysConfigured;
+}
+
 export interface AdminUser extends MeProfile {}
 
 export interface PaginatedUsers {
@@ -58,6 +74,10 @@ export interface AuditEvent {
   ts: string;
   ownerId: string | null;
   actorId: string | null;
+  // v2.42.0 (5.4): enrichment server-side — email pentru useri cunoscuti,
+  // "system" pentru NULL, id-ul brut ca fallback.
+  ownerEmail: string;
+  actorEmail: string;
   action: string;
   targetKind: string | null;
   targetId: string | null;
@@ -118,6 +138,88 @@ export interface CreateGrantInput {
   reason?: string | null;
 }
 
+// v2.41.0: vederile globale (toate override-urile / granturile active, cu
+// identitate user). `truncated` = capul de 500 randuri a fost atins.
+// Fara alias-ul legacy dailyLimitUsdMilli — endpointul global e post-v2.32.
+export interface GlobalQuotaOverride {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  status: UserStatus;
+  feature: string;
+  period: QuotaPeriod;
+  limitUsdMilli: number | null;
+  updatedAt: string;
+  updatedBy: string | null;
+}
+
+export interface GlobalQuotaOverridesResult {
+  overrides: GlobalQuotaOverride[];
+  truncated: boolean;
+}
+
+export interface GlobalQuotaGrant extends QuotaGrant {
+  email: string;
+  displayName: string;
+  role: UserRole;
+  status: UserStatus;
+}
+
+export interface GlobalActiveGrantsResult {
+  grants: GlobalQuotaGrant[];
+  truncated: boolean;
+}
+
+// v2.42.0 (5.3): consum per utilizator — cifrele vin din aceleasi functii ca
+// guard-urile de cota (limitSource: override/default env/none).
+export type UsageLimitSource = "override" | "default" | "none";
+
+// v2.42.0: totaluri rolling (24h/7 zile) + tot istoricul, din acelasi query
+// set-based (sumAiUsageWindowsByOwner) folosit si pentru tenantTotals.
+export interface AiUsageWindows {
+  dayMilli: number;
+  weekMilli: number;
+  totalMilli: number;
+}
+
+export interface UsageOverviewAiItem {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  feature: "ai";
+  period: QuotaPeriod;
+  usedMilli: number;
+  baseLimitMilli: number | null;
+  extraFromGrantsMilli: number;
+  effectiveLimitMilli: number | null;
+  limitSource: UsageLimitSource;
+  windows: AiUsageWindows;
+}
+
+export interface UsageOverviewCaptchaItem {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: UserRole;
+  feature: "captcha.rnpm";
+  period: QuotaPeriod;
+  usedCount: number;
+  baseLimitCount: number | null;
+  effectiveLimitCount: number | null;
+  limitSource: UsageLimitSource;
+}
+
+export interface UsageOverviewResult {
+  items: UsageOverviewAiItem[];
+  captcha: UsageOverviewCaptchaItem[];
+  truncated: boolean;
+  // Agregat pe tot tenantul (TOTI ownerii cu istoric in ai_usage, inclusiv
+  // conturi inactive care nu mai apar in `items`).
+  tenantTotals: AiUsageWindows;
+}
+
 export type TenantKeyField = "anthropic" | "openai" | "google" | "openrouter" | "twocaptcha" | "capsolver";
 export type TenantCaptchaProvider = "2captcha" | "capsolver";
 export type TenantCaptchaMode = "sequential" | "race";
@@ -144,6 +246,9 @@ export interface MeBudgetItem {
   baseLimitMilli: number | null;
   extraFromGrantsMilli: number;
   effectiveLimitMilli: number | null;
+  // v2.42.0 (Task 15): de unde vine limita afisata — override per utilizator,
+  // default din env (doar "ai" in web mode) sau none (nelimitat).
+  limitSource: UsageLimitSource;
   // Legacy alias mentinut pentru BudgetIndicator + clienti vechi. Egal cu
   // effectiveLimitMilli; null = unlimited.
   limitMilli: number | null;
@@ -161,16 +266,40 @@ export interface MeBudgetResult {
   fx: MeFxRate;
 }
 
+// Contract EXACT cu GET /api/v1/me/budget-warnings (backend/src/routes/me.ts):
+// { items: [{ feature, thresholdPct, firedAt, aboveSince, emailSentAt }] }.
+// Vechiul shape { warnings, aboveThresholdSince } nu a existat niciodata pe
+// backend si crapa pagina Consum (undefined.length in render).
 export interface MeBudgetWarning {
   feature: string;
   thresholdPct: number;
   firedAt: string;
+  aboveSince: string;
   emailSentAt: string | null;
-  aboveThresholdSince: string;
 }
 
 export interface MeBudgetWarningsResult {
-  warnings: MeBudgetWarning[];
+  items: MeBudgetWarning[];
+}
+
+// v2.42.0 (4.2/4.3): creare individuala + import Excel.
+export interface CreateUserInput {
+  email: string;
+  displayName: string;
+  role: "user" | "admin";
+}
+
+export interface UserImportIssue {
+  rowNumber: number;
+  email: string | null;
+  code: "invalid_row" | "duplicate_in_file" | "duplicate_in_db";
+  message: string;
+}
+
+export interface ImportUsersResult {
+  created: Array<{ rowNumber: number; email: string; role: string }>;
+  issues: UserImportIssue[];
+  summary: { created: number; duplicates: number; invalid: number };
 }
 
 export interface ListUsersOpts {
@@ -196,6 +325,41 @@ export interface ListAuditOpts {
   since?: string;
   until?: string;
   signal?: AbortSignal;
+}
+
+// v2.42.0 (4.3): descarcari de atasamente (template import, raport audit) prin
+// fetch + blob — NU window.location.assign: o eroare 4xx/5xx ar naviga
+// browserul pe un JSON brut in loc sa apara in pagina.
+export async function fetchBlobOrThrow(path: string, init?: RequestInit): Promise<Blob> {
+  const res = await apiFetch(path, init);
+  if (!res.ok) {
+    let code = "download_failed";
+    let message = `Descarcare esuata (HTTP ${res.status}).`;
+    let requestId: string | undefined;
+    try {
+      const body = (await res.json()) as { error?: { code?: string; message?: string }; requestId?: string };
+      if (body?.error?.message) {
+        message = body.error.message;
+        code = body.error.code ?? code;
+        requestId = body.requestId;
+      }
+    } catch {
+      // corp non-JSON — pastram mesajul generic
+    }
+    throw new MonitoringApiError(code, message, res.status, undefined, requestId);
+  }
+  return await res.blob();
+}
+
+export function triggerBlobDownload(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 function adminQs(params: Record<string, string | number | undefined | null>): string {
@@ -253,6 +417,11 @@ export const me = {
     const res = await apiFetch("/api/v1/me/fx/usd-eur", { signal });
     return unwrapMonitoring<MeFxRate>(res);
   },
+
+  keyStatus: async (signal?: AbortSignal): Promise<KeyStatusResult> => {
+    const res = await apiFetch("/api/v1/me/key-status", { signal });
+    return unwrapMonitoring<KeyStatusResult>(res);
+  },
 };
 
 export const admin = {
@@ -283,6 +452,33 @@ export const admin = {
       body: JSON.stringify({ status }),
     });
     return unwrapMonitoring<AdminUser>(res);
+  },
+
+  createUser: async (input: CreateUserInput): Promise<AdminUser> => {
+    const res = await apiFetch("/api/v1/admin/users", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(input),
+    });
+    return unwrapMonitoring<AdminUser>(res);
+  },
+
+  downloadUsersImportTemplate: async (): Promise<Blob> => {
+    return fetchBlobOrThrow("/api/v1/admin/users/import-template");
+  },
+
+  usageOverview: async (signal?: AbortSignal): Promise<UsageOverviewResult> => {
+    const res = await apiFetch("/api/v1/admin/usage/overview", { signal });
+    return unwrapMonitoring<UsageOverviewResult>(res);
+  },
+
+  importUsers: async (file: ArrayBuffer): Promise<ImportUsersResult> => {
+    const res = await apiFetch("/api/v1/admin/users/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: file,
+    });
+    return unwrapMonitoring<ImportUsersResult>(res);
   },
 
   listAudit: async (opts: ListAuditOpts = {}): Promise<PaginatedAudit> => {
@@ -318,6 +514,16 @@ export const admin = {
       { method: "DELETE" }
     );
     return unwrapMonitoring<{ feature: string; removed: boolean }>(res);
+  },
+
+  listAllQuotaOverrides: async (signal?: AbortSignal): Promise<GlobalQuotaOverridesResult> => {
+    const res = await apiFetch("/api/v1/admin/quota/overrides", { signal });
+    return unwrapMonitoring<GlobalQuotaOverridesResult>(res);
+  },
+
+  listActiveGrants: async (signal?: AbortSignal): Promise<GlobalActiveGrantsResult> => {
+    const res = await apiFetch("/api/v1/admin/grants/active", { signal });
+    return unwrapMonitoring<GlobalActiveGrantsResult>(res);
   },
 
   listGrants: async (userId: string, signal?: AbortSignal): Promise<QuotaGrantListResult> => {

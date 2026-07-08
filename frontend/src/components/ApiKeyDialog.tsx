@@ -4,6 +4,7 @@ import { AIUsagePanel } from "@/components/AIUsagePanel";
 import { ApiAccessPanel } from "@/components/ApiAccessPanel";
 import { EmailSettingsPanel } from "@/components/EmailSettingsPanel";
 import { NotificationStatusPanel } from "@/components/NotificationStatusPanel";
+import { TenantKeyStatusPanel } from "@/components/TenantKeyStatusPanel";
 import { isWebRuntime } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
@@ -62,7 +63,12 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
   const [keyInputs, setKeyInputs] = useState(EMPTY);
   const dialogRef = useDialog<HTMLDivElement>(true, onClose);
 
-  if (authMode === "web" && user?.role !== "admin") return null;
+  // In web mode cheile sunt ale tenantului (server-side); dialogul NU arata
+  // niciodata inputuri BYOK. Non-adminul vede panourile personale (consum AI,
+  // notificari, email) + bannerul de chei lipsa — inainte primea un dialog
+  // complet gol (return null) desi butonul "Setari API" era clickabil.
+  const isWeb = authMode === "web";
+  const isWebAdmin = isWeb && user?.role === "admin";
 
   const handleSaveKeys = () => {
     if (keyInputs.anthropic.trim()) setKey("anthropic", keyInputs.anthropic);
@@ -111,14 +117,20 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
           </button>
         </div>
         <p className="mb-4 text-sm text-muted-foreground">
-          Introdu cheile API pentru furnizorii AI pe care doresti sa ii folosesti. Poti configura unul sau mai multi.
+          {isWeb
+            ? "Cheile API sunt configurate de administrator la nivel de organizatie. Mai jos vezi ce este disponibil."
+            : "Introdu cheile API pentru furnizorii AI pe care doresti sa ii folosesti. Poti configura unul sau mai multi."}
         </p>
 
         <AIUsagePanel />
         <NotificationStatusPanel />
         <EmailSettingsPanel />
-        {/* Acces API (PAT) — doar web mode; desktop pastreaza BYOK in acest modal. */}
-        {isWebRuntime() && <ApiAccessPanel />}
+        {/* Web: statusul cheilor tenant (inventar pentru admin, banner pentru
+            non-admin cand lipsesc chei), NICIODATA BYOK. */}
+        {isWeb && <TenantKeyStatusPanel />}
+        {/* Acces API (PAT) — web-only; management DOAR admin in web mode (v2.41).
+            In dev-combo (browser + backend desktop) ramane vizibil ca inainte. */}
+        {isWebRuntime() && (!isWeb || isWebAdmin) && <ApiAccessPanel />}
 
         {/* AI config zone: routing + provider keys grouped vizual */}
         <div className="mb-3 rounded-lg border border-border p-3">
@@ -152,250 +164,259 @@ export function ApiKeyDialog({ onClose, apiKey }: Props) {
           </div>
         </div>
 
-        {/* AI providers — side-by-side */}
-        {aiSettings.mode === "native" ? (
-          <div className="mb-3 grid grid-cols-3 gap-3">
-            <div className="rounded-lg border border-border p-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-medium flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
-                  Anthropic
-                </span>
-                {hasAnthropic && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
-              </div>
-              <input
-                type="password"
-                placeholder={hasAnthropic ? "Cheie noua..." : "sk-ant-api03-..."}
-                value={keyInputs.anthropic}
-                onChange={(e) => setKeyInputs({ ...keyInputs, anthropic: e.target.value })}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
-              />
-              {hasAnthropic && (
-                <button
-                  type="button"
-                  className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                  onClick={() => {
-                    clearKey("anthropic");
-                  }}
-                >
-                  Sterge cheia
-                </button>
-              )}
-            </div>
+        {/* AI providers + captcha (BYOK) — DOAR desktop; in web cheile sunt tenant. */}
+        {!isWeb && (
+          <>
+            {aiSettings.mode === "native" ? (
+              <div className="mb-3 grid grid-cols-3 gap-3">
+                <div className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-medium flex items-center gap-1.5">
+                      <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
+                      Anthropic
+                    </span>
+                    {hasAnthropic && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+                  </div>
+                  <input
+                    type="password"
+                    placeholder={hasAnthropic ? "Cheie noua..." : "sk-ant-api03-..."}
+                    value={keyInputs.anthropic}
+                    onChange={(e) => setKeyInputs({ ...keyInputs, anthropic: e.target.value })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                  />
+                  {hasAnthropic && (
+                    <button
+                      type="button"
+                      className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                      onClick={() => {
+                        clearKey("anthropic");
+                      }}
+                    >
+                      Sterge cheia
+                    </button>
+                  )}
+                </div>
 
-            <div className="rounded-lg border border-border p-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-medium flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
-                  OpenAI
-                </span>
-                {hasOpenai && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
-              </div>
-              <input
-                type="password"
-                placeholder={hasOpenai ? "Cheie noua..." : "sk-proj-..."}
-                value={keyInputs.openai}
-                onChange={(e) => setKeyInputs({ ...keyInputs, openai: e.target.value })}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
-              />
-              {hasOpenai && (
-                <button
-                  type="button"
-                  className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                  onClick={() => {
-                    clearKey("openai");
-                  }}
-                >
-                  Sterge cheia
-                </button>
-              )}
-            </div>
+                <div className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-medium flex items-center gap-1.5">
+                      <span className="inline-block h-2 w-2 rounded-full bg-emerald-500" />
+                      OpenAI
+                    </span>
+                    {hasOpenai && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+                  </div>
+                  <input
+                    type="password"
+                    placeholder={hasOpenai ? "Cheie noua..." : "sk-proj-..."}
+                    value={keyInputs.openai}
+                    onChange={(e) => setKeyInputs({ ...keyInputs, openai: e.target.value })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                  />
+                  {hasOpenai && (
+                    <button
+                      type="button"
+                      className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                      onClick={() => {
+                        clearKey("openai");
+                      }}
+                    >
+                      Sterge cheia
+                    </button>
+                  )}
+                </div>
 
-            <div className="rounded-lg border border-border p-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-sm font-medium flex items-center gap-1.5">
-                  <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
-                  Google
-                </span>
-                {hasGoogle && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+                <div className="rounded-lg border border-border p-3">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <span className="text-sm font-medium flex items-center gap-1.5">
+                      <span className="inline-block h-2 w-2 rounded-full bg-blue-500" />
+                      Google
+                    </span>
+                    {hasGoogle && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+                  </div>
+                  <input
+                    type="password"
+                    placeholder={hasGoogle ? "Cheie noua..." : "AIza..."}
+                    value={keyInputs.google}
+                    onChange={(e) => setKeyInputs({ ...keyInputs, google: e.target.value })}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                  />
+                  {hasGoogle && (
+                    <button
+                      type="button"
+                      className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                      onClick={() => {
+                        clearKey("google");
+                      }}
+                    >
+                      Sterge cheia
+                    </button>
+                  )}
+                </div>
               </div>
-              <input
-                type="password"
-                placeholder={hasGoogle ? "Cheie noua..." : "AIza..."}
-                value={keyInputs.google}
-                onChange={(e) => setKeyInputs({ ...keyInputs, google: e.target.value })}
-                className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-              />
-              {hasGoogle && (
-                <button
-                  type="button"
-                  className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                  onClick={() => {
-                    clearKey("google");
-                  }}
-                >
-                  Sterge cheia
-                </button>
-              )}
-            </div>
-          </div>
-        ) : (
-          <div className="mb-3 rounded-lg border border-border p-3">
-            <div className="mb-1.5 flex items-center justify-between">
-              <span className="flex items-center gap-1.5 text-sm font-medium">
-                <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
-                OpenRouter API Key
-              </span>
-              {hasOpenrouter && <span className="text-[11px] font-medium text-green-600">Activa</span>}
-            </div>
-            <input
-              type="password"
-              placeholder={hasOpenrouter ? "Cheie noua..." : "sk-or-v1-..."}
-              value={keyInputs.openrouter}
-              onChange={(e) => setKeyInputs({ ...keyInputs, openrouter: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
-            />
-            {hasOpenrouter && (
-              <button
-                type="button"
-                className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                onClick={() => {
-                  clearKey("openrouter");
-                }}
-              >
-                Sterge cheia
-              </button>
+            ) : (
+              <div className="mb-3 rounded-lg border border-border p-3">
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    <span className="inline-block h-2 w-2 rounded-full bg-violet-500" />
+                    OpenRouter API Key
+                  </span>
+                  {hasOpenrouter && <span className="text-[11px] font-medium text-green-600">Activa</span>}
+                </div>
+                <input
+                  type="password"
+                  placeholder={hasOpenrouter ? "Cheie noua..." : "sk-or-v1-..."}
+                  value={keyInputs.openrouter}
+                  onChange={(e) => setKeyInputs({ ...keyInputs, openrouter: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-violet-500 focus:outline-none focus:ring-2 focus:ring-violet-500/20"
+                />
+                {hasOpenrouter && (
+                  <button
+                    type="button"
+                    className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                    onClick={() => {
+                      clearKey("openrouter");
+                    }}
+                  >
+                    Sterge cheia
+                  </button>
+                )}
+              </div>
             )}
-          </div>
+
+            {/* Captcha provider selector */}
+            <div className="mb-3 rounded-lg border border-border p-3">
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-sm font-medium flex items-center gap-1.5">
+                  <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+                  Captcha RNPM — provider activ
+                </span>
+              </div>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCaptchaProvider("2captcha")}
+                  className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaProvider === "2captcha" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
+                >
+                  2Captcha {hasTwoCaptcha && <span className="ml-1 text-green-600">●</span>}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCaptchaProvider("capsolver")}
+                  className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaProvider === "capsolver" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
+                >
+                  CapSolver {hasCapSolver && <span className="ml-1 text-green-600">●</span>}
+                </button>
+              </div>
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Selecteaza providerul folosit pentru rezolvarea reCAPTCHA la cautarile RNPM.
+              </p>
+              <div className="mt-3 flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setCaptchaMode("sequential")}
+                  className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaMode === "sequential" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
+                >
+                  Secvential (fallback)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCaptchaMode("race")}
+                  disabled={!(hasTwoCaptcha && hasCapSolver)}
+                  title={!(hasTwoCaptcha && hasCapSolver) ? "Necesita ambele chei setate" : undefined}
+                  className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaMode === "race" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"} disabled:opacity-50 disabled:cursor-not-allowed`}
+                >
+                  Paralel (race)
+                </button>
+              </div>
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                Secvential: primary cu fallback daca esueaza. Paralel: porneste ambele, castiga cel mai rapid (cost
+                dublu).
+              </p>
+            </div>
+
+            {/* 2Captcha + CapSolver side-by-side */}
+            <div className="mb-3 grid grid-cols-2 gap-3">
+              <div className="rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+                    2Captcha
+                  </span>
+                  {hasTwoCaptcha && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+                </div>
+                <input
+                  type="password"
+                  placeholder={hasTwoCaptcha ? "Cheie noua..." : "cheia 2captcha.com..."}
+                  value={keyInputs.twocaptcha}
+                  onChange={(e) => setKeyInputs({ ...keyInputs, twocaptcha: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
+                />
+                {hasTwoCaptcha && (
+                  <button
+                    type="button"
+                    className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                    onClick={() => {
+                      clearKey("twocaptcha");
+                    }}
+                  >
+                    Sterge cheia
+                  </button>
+                )}
+                <p className="mt-1.5 text-[11px] text-muted-foreground">~$0.003/captcha, fallback uman.</p>
+              </div>
+
+              <div className="rounded-lg border border-border p-3">
+                <div className="flex items-center justify-between mb-1.5">
+                  <span className="text-sm font-medium flex items-center gap-1.5">
+                    <span className="inline-block h-2 w-2 rounded-full bg-orange-500" />
+                    CapSolver
+                  </span>
+                  {hasCapSolver && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
+                </div>
+                <input
+                  type="password"
+                  placeholder={hasCapSolver ? "Cheie noua..." : "cheia capsolver.com..."}
+                  value={keyInputs.capsolver}
+                  onChange={(e) => setKeyInputs({ ...keyInputs, capsolver: e.target.value })}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
+                />
+                {hasCapSolver && (
+                  <button
+                    type="button"
+                    className="mt-1.5 text-[11px] text-red-500 hover:underline"
+                    onClick={() => {
+                      clearKey("capsolver");
+                    }}
+                  >
+                    Sterge cheia
+                  </button>
+                )}
+                <p className="mt-1.5 text-[11px] text-muted-foreground">~$0.0008/captcha, AI-based.</p>
+              </div>
+            </div>
+          </>
         )}
-
-        {/* Captcha provider selector */}
-        <div className="mb-3 rounded-lg border border-border p-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm font-medium flex items-center gap-1.5">
-              <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-              Captcha RNPM — provider activ
-            </span>
-          </div>
-          <div className="flex gap-2">
-            <button
-              type="button"
-              onClick={() => setCaptchaProvider("2captcha")}
-              className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaProvider === "2captcha" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
-            >
-              2Captcha {hasTwoCaptcha && <span className="ml-1 text-green-600">●</span>}
-            </button>
-            <button
-              type="button"
-              onClick={() => setCaptchaProvider("capsolver")}
-              className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaProvider === "capsolver" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
-            >
-              CapSolver {hasCapSolver && <span className="ml-1 text-green-600">●</span>}
-            </button>
-          </div>
-          <p className="mt-2 text-[11px] text-muted-foreground">
-            Selecteaza providerul folosit pentru rezolvarea reCAPTCHA la cautarile RNPM.
-          </p>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={() => setCaptchaMode("sequential")}
-              className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaMode === "sequential" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"}`}
-            >
-              Secvential (fallback)
-            </button>
-            <button
-              type="button"
-              onClick={() => setCaptchaMode("race")}
-              disabled={!(hasTwoCaptcha && hasCapSolver)}
-              title={!(hasTwoCaptcha && hasCapSolver) ? "Necesita ambele chei setate" : undefined}
-              className={`flex-1 rounded-md border px-3 py-1.5 text-xs font-medium ${captchaMode === "race" ? "border-amber-500 bg-amber-500/10 text-amber-700 dark:text-amber-400" : "border-border bg-background text-muted-foreground hover:bg-muted"} disabled:opacity-50 disabled:cursor-not-allowed`}
-            >
-              Paralel (race)
-            </button>
-          </div>
-          <p className="mt-1.5 text-[11px] text-muted-foreground">
-            Secvential: primary cu fallback daca esueaza. Paralel: porneste ambele, castiga cel mai rapid (cost dublu).
-          </p>
-        </div>
-
-        {/* 2Captcha + CapSolver side-by-side */}
-        <div className="mb-3 grid grid-cols-2 gap-3">
-          <div className="rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm font-medium flex items-center gap-1.5">
-                <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-                2Captcha
-              </span>
-              {hasTwoCaptcha && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
-            </div>
-            <input
-              type="password"
-              placeholder={hasTwoCaptcha ? "Cheie noua..." : "cheia 2captcha.com..."}
-              value={keyInputs.twocaptcha}
-              onChange={(e) => setKeyInputs({ ...keyInputs, twocaptcha: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-amber-500 focus:outline-none focus:ring-2 focus:ring-amber-500/20"
-            />
-            {hasTwoCaptcha && (
-              <button
-                type="button"
-                className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                onClick={() => {
-                  clearKey("twocaptcha");
-                }}
-              >
-                Sterge cheia
-              </button>
-            )}
-            <p className="mt-1.5 text-[11px] text-muted-foreground">~$0.003/captcha, fallback uman.</p>
-          </div>
-
-          <div className="rounded-lg border border-border p-3">
-            <div className="flex items-center justify-between mb-1.5">
-              <span className="text-sm font-medium flex items-center gap-1.5">
-                <span className="inline-block h-2 w-2 rounded-full bg-orange-500" />
-                CapSolver
-              </span>
-              {hasCapSolver && <span className="text-[11px] text-green-600 font-medium">Activa</span>}
-            </div>
-            <input
-              type="password"
-              placeholder={hasCapSolver ? "Cheie noua..." : "cheia capsolver.com..."}
-              value={keyInputs.capsolver}
-              onChange={(e) => setKeyInputs({ ...keyInputs, capsolver: e.target.value })}
-              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm focus:border-orange-500 focus:outline-none focus:ring-2 focus:ring-orange-500/20"
-            />
-            {hasCapSolver && (
-              <button
-                type="button"
-                className="mt-1.5 text-[11px] text-red-500 hover:underline"
-                onClick={() => {
-                  clearKey("capsolver");
-                }}
-              >
-                Sterge cheia
-              </button>
-            )}
-            <p className="mt-1.5 text-[11px] text-muted-foreground">~$0.0008/captcha, AI-based.</p>
-          </div>
-        </div>
 
         <div className="flex gap-2 justify-end mt-4">
           <Button variant="outline" size="sm" onClick={onClose}>
-            {hasKey ? "Inchide" : "Mai tarziu"}
+            {isWeb || hasKey ? "Inchide" : "Mai tarziu"}
           </Button>
-          <Button
-            size="sm"
-            className="bg-violet-600 hover:bg-violet-700 text-white"
-            onClick={handleSaveKeys}
-            disabled={noInput}
-          >
-            Salveaza
-          </Button>
+          {!isWeb && (
+            <Button
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={handleSaveKeys}
+              disabled={noInput}
+            >
+              Salveaza
+            </Button>
+          )}
         </div>
-        <p className="mt-3 text-[11px] text-muted-foreground">
-          Cheile se salveaza doar local pe calculatorul tau si sunt trimise doar catre API-urile respective.
-        </p>
+        {!isWeb && (
+          <p className="mt-3 text-[11px] text-muted-foreground">
+            Cheile se salveaza doar local pe calculatorul tau si sunt trimise doar catre API-urile respective.
+          </p>
+        )}
       </div>
     </div>
   );

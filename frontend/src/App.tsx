@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { BrowserRouter, useLocation } from "react-router-dom";
 import { ArrowUp, ArrowDown } from "lucide-react";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { ErrorBoundary, PageBoundary } from "@/components/ErrorBoundary";
 import { Sidebar } from "@/components/Sidebar";
 import { ApiKeyDialog } from "@/components/ApiKeyDialog";
@@ -17,6 +18,7 @@ import AdminQuota from "@/pages/admin/Quota";
 import AdminGrants from "@/pages/admin/Grants";
 import AdminUsage from "@/pages/admin/Usage";
 import AdminKeys from "@/pages/admin/Keys";
+import SettingsPage from "@/pages/Settings";
 import { AdminGate } from "@/components/AdminGate";
 import { useAuthMode } from "@/hooks/useAuthMode";
 import { useSessionBootstrap } from "@/hooks/useSessionBootstrap";
@@ -140,15 +142,21 @@ function AppShell({
     el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
   }, []);
 
+  // Chrome-ul Electron (drag strip + padding compensator pentru titleBarOverlay)
+  // exista DOAR pe desktop; in browser lasa o banda alba moarta sus.
+  const isDesktop = typeof window !== "undefined" && !!window.desktopApi;
+
   return (
-    <div className="flex h-screen overflow-hidden bg-background pt-8">
+    <div className={`flex h-screen overflow-hidden bg-background${isDesktop ? " pt-8" : ""}`}>
       {/* Top 32px drag strip — matches Electron titleBarOverlay height. Windows buttons
           are drawn by the OS on top of this with higher priority, so clicks on them
           still work while the rest of the strip drags the window. */}
-      <div
-        className="fixed top-0 left-0 right-0 h-8 bg-background z-[60]"
-        style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
-      />
+      {isDesktop && (
+        <div
+          className="fixed top-0 left-0 right-0 h-8 bg-background z-[60]"
+          style={{ WebkitAppRegion: "drag" } as React.CSSProperties}
+        />
+      )}
       <PageBoundary label="Meniu lateral">
         <Sidebar
           history={history}
@@ -222,6 +230,13 @@ function AppShell({
               onAlertsChanged={refreshUnreadAlerts}
               onOpenDosar={(numarDosar, source) => handleHistoryClick("dosare", { numarDosar, source })}
             />
+          </PageBoundary>
+        )}
+        {/* v2.42.0 (5.1): /setari — taburi pe roluri; tab-urile admin refolosesc
+            paginile /admin/* cu prop embedded, montate on-demand. */}
+        {pathname === "/setari" && (
+          <PageBoundary label="Setari">
+            <SettingsPage />
           </PageBoundary>
         )}
         {pathname === "/admin/users" && (
@@ -410,56 +425,58 @@ function AuthedApp() {
   return (
     <BrowserRouter>
       <ConfirmProvider>
-        <AppShell
-          dosareState={dosareState}
-          setDosareState={setDosareState}
-          termeneState={termeneState}
-          setTermeneState={setTermeneState}
-          history={history}
-          addEntry={addEntry}
-          removeEntry={removeEntry}
-          clearHistory={clearHistory}
-          keys={keys}
-          aiSettings={aiSettings}
-          hasKey={hasKey}
-          handleOpenKeyDialog={handleOpenKeyDialog}
-          activeCaptchaKey={activeCaptchaKey}
-          captchaProvider={captchaProvider}
-          captchaMode={captchaMode}
-          pendingSearch={pendingSearch}
-          handleHistoryClick={handleHistoryClick}
-          consumePendingSearch={consumePendingSearch}
-          rnpmHistory={rnpmHistory}
-          addRnpmEntry={addRnpmEntry}
-          removeRnpmEntry={removeRnpmEntry}
-          clearRnpmHistory={clearRnpmHistory}
-          rnpmPendingSearch={rnpmPendingSearch}
-          handleRnpmHistoryClick={handleRnpmHistoryClick}
-          consumeRnpmPendingSearch={consumeRnpmPendingSearch}
-        />
-        {showKeyDialog && (
-          <ErrorBoundary variant="page" label="Configurare chei API">
-            <ApiKeyDialog
-              onClose={closeKeyDialog}
-              apiKey={{
-                setKey,
-                clearKey,
-                hasKey,
-                hasAnthropic,
-                hasOpenai,
-                hasGoogle,
-                hasOpenrouter,
-                hasTwoCaptcha,
-                hasCapSolver,
-                captchaProvider,
-                setCaptchaProvider,
-                captchaMode,
-                setCaptchaMode,
-                aiSettings,
-              }}
-            />
-          </ErrorBoundary>
-        )}
+        <ToastProvider>
+          <AppShell
+            dosareState={dosareState}
+            setDosareState={setDosareState}
+            termeneState={termeneState}
+            setTermeneState={setTermeneState}
+            history={history}
+            addEntry={addEntry}
+            removeEntry={removeEntry}
+            clearHistory={clearHistory}
+            keys={keys}
+            aiSettings={aiSettings}
+            hasKey={hasKey}
+            handleOpenKeyDialog={handleOpenKeyDialog}
+            activeCaptchaKey={activeCaptchaKey}
+            captchaProvider={captchaProvider}
+            captchaMode={captchaMode}
+            pendingSearch={pendingSearch}
+            handleHistoryClick={handleHistoryClick}
+            consumePendingSearch={consumePendingSearch}
+            rnpmHistory={rnpmHistory}
+            addRnpmEntry={addRnpmEntry}
+            removeRnpmEntry={removeRnpmEntry}
+            clearRnpmHistory={clearRnpmHistory}
+            rnpmPendingSearch={rnpmPendingSearch}
+            handleRnpmHistoryClick={handleRnpmHistoryClick}
+            consumeRnpmPendingSearch={consumeRnpmPendingSearch}
+          />
+          {showKeyDialog && (
+            <ErrorBoundary variant="page" label="Configurare chei API">
+              <ApiKeyDialog
+                onClose={closeKeyDialog}
+                apiKey={{
+                  setKey,
+                  clearKey,
+                  hasKey,
+                  hasAnthropic,
+                  hasOpenai,
+                  hasGoogle,
+                  hasOpenrouter,
+                  hasTwoCaptcha,
+                  hasCapSolver,
+                  captchaProvider,
+                  setCaptchaProvider,
+                  captchaMode,
+                  setCaptchaMode,
+                  aiSettings,
+                }}
+              />
+            </ErrorBoundary>
+          )}
+        </ToastProvider>
       </ConfirmProvider>
     </BrowserRouter>
   );

@@ -202,12 +202,13 @@ export function buildNameSoapSnapshot(dosare: Dosar[], fetchedAt: string): NameS
 export function diffNameSoap(input: NameSoapDiffInput): NameSoapDiffOutput {
   const { prevSnapshot, currentSnapshot, alertConfig, now, jobCreatedAt } = input;
   // Titlu pentru alertele de monitorizare pe nume: numarul ${numar} e DOSARUL
-  // GASIT, nu termenul de cautare. Cand stim numele monitorizat il aratam intre
-  // «», altfel marcam explicit ca sursa e monitorizarea pe nume (ca sa nu para
+  // GASIT, nu termenul de cautare. Numele monitorizat apare FARA ghilimele
+  // (decizie user; separatorul ":" delimiteaza oricum numarul de nume),
+  // altfel marcam explicit ca sursa e monitorizarea pe nume (ca sa nu para
   // ca numarul dosarului e numele).
   const nameTrim = input.nameNormalized?.trim();
   const nameWatchTitle = (verb: string, numar: string): string =>
-    nameTrim ? `${verb} pentru «${nameTrim}»: ${numar}` : `${verb} (monitorizare pe nume): ${numar}`;
+    nameTrim ? `${verb} pentru ${nameTrim}: ${numar}` : `${verb} (monitorizare pe nume): ${numar}`;
 
   const prevByNumar = prevSnapshot ? byNumar(prevSnapshot) : new Map<string, NameSoapSnapshotDosar>();
   const currentByNumar = byNumar(currentSnapshot);

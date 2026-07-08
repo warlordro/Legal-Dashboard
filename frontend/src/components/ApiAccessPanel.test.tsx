@@ -25,6 +25,8 @@ vi.mock("@/lib/apiTokensApi", () => ({
 }));
 
 import { ApiAccessPanel } from "./ApiAccessPanel";
+import { ConfirmProvider } from "@/components/ui/confirm-dialog";
+import { ToastProvider } from "@/components/ui/toast";
 import { listApiTokens, revokeAllApiTokens, revokeApiToken } from "@/lib/apiTokensApi";
 
 const mockedList = vi.mocked(listApiTokens);
@@ -33,10 +35,6 @@ const mockedRevokeAll = vi.mocked(revokeAllApiTokens);
 
 let container: HTMLDivElement;
 let root: Root;
-// vi.clearAllMocks() sterge doar istoricul, NU anuleaza vi.spyOn — restauram explicit spy-ul de
-// window.confirm ca sa nu curga in testele urmatoare (CodeRabbit). NU folosim restoreAllMocks:
-// ar sterge si implementarile vi.fn() din factory-ul vi.mock (ex. default-ul listApiTokens).
-let confirmSpy: ReturnType<typeof vi.spyOn> | undefined;
 
 beforeEach(() => {
   container = document.createElement("div");
@@ -46,8 +44,6 @@ beforeEach(() => {
 afterEach(() => {
   act(() => root.unmount());
   container.remove();
-  confirmSpy?.mockRestore();
-  confirmSpy = undefined;
   vi.clearAllMocks();
 });
 
@@ -58,10 +54,34 @@ async function flush() {
   });
 }
 
+// v2.42.0 (6.2/6.3): panoul foloseste useConfirm SI useToast — ambii provideri
+// obligatorii.
+function panel() {
+  return (
+    <ConfirmProvider>
+      <ToastProvider>
+        <ApiAccessPanel />
+      </ToastProvider>
+    </ConfirmProvider>
+  );
+}
+
+// Confirmarea se cauta in [role=alertdialog] — dialogul partajat e randat de
+// provider, NU se compara referinte de functii.
+function confirmDialogButton(pattern: RegExp): HTMLButtonElement {
+  const dialog = document.querySelector('[role="alertdialog"]');
+  if (!dialog) throw new Error("Dialogul de confirmare nu e deschis");
+  const button = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((candidate) =>
+    pattern.test(candidate.textContent ?? "")
+  );
+  if (!button) throw new Error(`Buton lipsa in dialog: ${String(pattern)}`);
+  return button;
+}
+
 describe("ApiAccessPanel", () => {
   it("loads and renders the owner's tokens", async () => {
     await act(async () => {
-      root.render(<ApiAccessPanel />);
+      root.render(panel());
     });
     await flush();
     expect(container.textContent).toContain("mcp-token");
@@ -71,7 +91,7 @@ describe("ApiAccessPanel", () => {
 
   it("toggles the create form when the create button is clicked", async () => {
     await act(async () => {
-      root.render(<ApiAccessPanel />);
+      root.render(panel());
     });
     await flush();
     const createBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Creeaza token");
@@ -85,7 +105,7 @@ describe("ApiAccessPanel", () => {
   it("shows an error message when a revoke fails (no silent swallow)", async () => {
     mockedRevoke.mockRejectedValueOnce(new Error("network"));
     await act(async () => {
-      root.render(<ApiAccessPanel />);
+      root.render(panel());
     });
     await flush();
     const revokeBtn = container.querySelector('[aria-label="Revoca mcp-token"]') as HTMLButtonElement;
@@ -100,7 +120,7 @@ describe("ApiAccessPanel", () => {
   it("does NOT show the empty-state copy after a failed initial load", async () => {
     mockedList.mockRejectedValueOnce(new Error("network"));
     await act(async () => {
-      root.render(<ApiAccessPanel />);
+      root.render(panel());
     });
     await flush();
     expect(container.textContent).not.toContain("Niciun token");
@@ -108,9 +128,8 @@ describe("ApiAccessPanel", () => {
   });
 
   it("does NOT revoke-all when the confirmation is cancelled", async () => {
-    confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(false);
     await act(async () => {
-      root.render(<ApiAccessPanel />);
+      root.render(panel());
     });
     await flush();
     const revokeAllBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Revoca toate");
@@ -118,7 +137,27 @@ describe("ApiAccessPanel", () => {
       revokeAllBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
     });
     await flush();
-    expect(confirmSpy).toHaveBeenCalled();
+    await act(async () => {
+      confirmDialogButton(/Anuleaza/i).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
     expect(mockedRevokeAll).not.toHaveBeenCalled();
+  });
+
+  it("revoke-all ruleaza dupa confirmarea din [role=alertdialog]", async () => {
+    await act(async () => {
+      root.render(panel());
+    });
+    await flush();
+    const revokeAllBtn = Array.from(container.querySelectorAll("button")).find((b) => b.textContent === "Revoca toate");
+    await act(async () => {
+      revokeAllBtn?.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    await act(async () => {
+      confirmDialogButton(/Revoca toate/i).dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    });
+    await flush();
+    expect(mockedRevokeAll).toHaveBeenCalledTimes(1);
   });
 });

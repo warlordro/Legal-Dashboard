@@ -5,6 +5,7 @@ import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, getDb } from "../db/schema.ts";
+import { invalidateCache, setTenantKey } from "../db/tenantKeysRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { aiRouter } from "./ai.ts";
 
@@ -34,10 +35,13 @@ beforeEach(async () => {
 
 afterEach(async () => {
   closeDb();
+  invalidateCache();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_AUTH_MODE;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+  delete process.env.TENANT_KEY_ENCRYPTION_SECRET;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -82,6 +86,55 @@ describe("AI settings routes", () => {
     });
 
     ownerId = "other";
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "native" });
+  });
+});
+
+describe("rutare AI implicita (resolveEffectiveAiMode, v2.41.0)", () => {
+  function enableTenantOpenrouter() {
+    process.env.TENANT_KEY_ENCRYPTION_SECRET = Buffer.alloc(32, 7).toString("base64");
+    invalidateCache();
+    setTenantKey("openrouter", "sk-or-v1-tenant-cheie-de-test", "admin-test");
+  }
+
+  it("web fara alegere explicita + cheie OpenRouter tenant -> mode efectiv openrouter", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    enableTenantOpenrouter();
+
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "openrouter" });
+  });
+
+  it("alegerea explicita native are prioritate peste auto-detect", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    // ownerGuard rezerva "local" pentru desktop; in web scriem ca user real.
+    ownerId = "user-web-1";
+    enableTenantOpenrouter();
+    await buildApp().request("/api/v1/ai/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "native" }),
+    });
+
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "native" });
+  });
+
+  it("web fara cheie OpenRouter tenant -> fallback native", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.TENANT_KEY_ENCRYPTION_SECRET = Buffer.alloc(32, 7).toString("base64");
+    invalidateCache();
+
+    const res = await buildApp().request("/api/v1/ai/settings");
+    expect(await res.json()).toEqual({ mode: "native" });
+  });
+
+  it("desktop nu auto-detecteaza (ramane native fara alegere)", async () => {
+    // Cheia OpenRouter tenant EXISTA — testul demonstreaza ca desktop-ul o
+    // ignora (fara seed, testul ar trece si daca verificarea de mod ar lipsi).
+    enableTenantOpenrouter();
+
     const res = await buildApp().request("/api/v1/ai/settings");
     expect(await res.json()).toEqual({ mode: "native" });
   });

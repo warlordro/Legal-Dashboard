@@ -34,8 +34,17 @@ function asString(value: unknown): string | undefined {
 //   - "yyyy-mm-dd"    → "dd.mm.yyyy"
 // Idempotent on already-humanized titles (the regex requires the ISO prefix
 // shape, so "04.05.2026" is left untouched).
+// Acelasi tratament render-time si pentru ghilimelele «» din titlurile
+// istorice de monitorizare pe nume (pre-v2.42) — eliminate la afisare
+// (decizie user: numele monitorizat apare fara ghilimele); titlurile noi
+// vin deja fara ghilimele din backend. Eliminarea e restransa la segmentul
+// `pentru «NUME»` (audit v2.42.0, finding #2): un strip global ar sterge si
+// citarile legitime «...» din solutiile ICCJ afisate in titlurile de tip
+// solutie_aparuta.
 export function humanizeAlertTitleDates(title: string): string {
-  return title.replace(/(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}:\d{2})?/g, "$3.$2.$1");
+  return title
+    .replace(/(\d{4})-(\d{2})-(\d{2})(?:T\d{2}:\d{2}:\d{2})?/g, "$3.$2.$1")
+    .replace(/pentru «([^»]*)»/g, "pentru $1");
 }
 
 function formatSedintaDate(value: unknown): string | undefined {

@@ -1,4 +1,4 @@
-import { createHash, randomUUID, timingSafeEqual } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context } from "hono";
 import { Hono } from "hono";
@@ -16,7 +16,7 @@ import {
 import { signAuthToken, verifyAuthToken } from "../auth/jwt.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { revokeJti } from "../db/jwtDenylistRepository.ts";
-import { getUserByEmail, getUserById } from "../db/userRepository.ts";
+import { canonicalizeEmail, getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import { hashEmail } from "../util/auditSanitize.ts";
@@ -138,32 +138,16 @@ authRouter.post("/logout", (c) => {
 // productie cu sidecar oauth2-proxy (deploy/docker-compose.prod.yml).
 //
 // Flow: oauth2-proxy verifica sesiunea Google OAuth, apoi face proxy catre
-// backend cu shared secret-ul + identitatea userului. Bridge-ul valideaza
-// shared secret-ul (timing-safe), cauta user-ul dupa email in tabela `users`
-// si mintea JWT-ul HS256 nativ. Asa, restul backend-ului pastreaza SINGURA
-// cale de auth (authProvider.ts) — toate request-urile ulterioare folosesc
-// cookie-ul `legal_dashboard_session` cu JWT semnat de noi.
-//
-// Mecanisme acceptate (v2.40.1 — validate empiric contra oauth2-proxy real):
-//  - Secret: parola din `Authorization: Basic base64(<user>:<secret>)` — ce
-//    trimite oauth2-proxy legacy cu `basic-auth-password` + `pass-basic-auth`
-//    (stack-ul canonic din deploy/) — SAU header-ul `X-Proxy-Auth` pentru
-//    deploy-uri care injecteaza manual header-e (nginx auth_request).
-//  - Identitate: `X-Forwarded-Email` (trimis upstream de `pass-user-headers`)
-//    SAU `X-Auth-Request-Email` (injectat manual in setup-uri auth_request).
-//  Designul original (v2.31–v2.40.0) folosea `OAUTH2_PROXY_INJECT_REQUEST_HEADERS`
-//  (exista doar in alpha config — env var-ul e ignorat silentios) si citea doar
-//  `X-Auth-Request-Email` (header de RASPUNS la oauth2-proxy, nu ajunge
-//  niciodata upstream) — bridge-ul respingea 100% din request-uri in productie.
+// backend cu header-ele `X-Auth-Request-Email` + `X-Proxy-Auth: <shared secret>`.
+// Bridge-ul valideaza shared secret-ul (timing-safe), cauta user-ul dupa email
+// in tabela `users` si mintea JWT-ul HS256 nativ. Asa, restul backend-ului
+// pastreaza SINGURA cale de auth (authProvider.ts) — toate request-urile
+// ulterioare folosesc cookie-ul `legal_dashboard_session` cu JWT semnat de noi.
 //
 // Securitate:
 //  - Shared secret >=32 chars in env `LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET`. Daca
 //    lipseste, endpoint-ul raspunde 503 (bridge_disabled) — nu pretinde ca
 //    accepta orice header.
-//  - Header-ele de identitate sunt citite DOAR dupa validarea shared secret-ului
-//    si DOAR pe acest endpoint; Caddy strip-uieste toate variantele inbound
-//    (Authorization, X-Proxy-Auth, X-Forwarded-Email, X-Auth-Request-Email),
-//    deci un client extern nu le poate forja prin fata publica.
 //  - timingSafeEqual pe shared secret (rezistent la timing attacks).
 //  - User MUST exista in DB cu status="active". Nu provisionam useri pe loc.
 //    Adminul foloseste `scripts/seed-admin.mjs` la primul boot, apoi creeaza
@@ -177,30 +161,34 @@ authRouter.post("/logout", (c) => {
 //    same-origin din SPA; sync-ul oauth2-proxy e server-to-server (header-e);
 //    emailurile de alerta folosesc deep-link `legal-dashboard://` (protocol
 //    custom Electron), nu un GET cross-site catre originea web.
-// Comparatie pe digest SHA-256, nu pe string-urile brute: lungimi mereu egale,
-// deci nu exista early-return care sa scurga lungimea secretului prin timing
-// (review-panel v2.40.1).
 function constantTimeStringEquals(a: string, b: string): boolean {
-  const left = createHash("sha256").update(a).digest();
-  const right = createHash("sha256").update(b).digest();
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  if (left.length !== right.length) return false;
   return timingSafeEqual(left, right);
 }
 
-// Candidatii de secret bridge, din ambele mecanisme reale: parola din Basic
-// Auth (oauth2-proxy `basic-auth-password`) si header-ul explicit `X-Proxy-Auth`
-// (nginx auth_request). OR adevarat — oricare dintre ei care se potriveste
-// valideaza request-ul; un Basic malformat/strain nu blocheaza X-Proxy-Auth.
-function extractBridgeSecretCandidates(c: Context): string[] {
-  const candidates: string[] = [];
-  const authorization = c.req.header("authorization") ?? "";
-  if (/^Basic\s/i.test(authorization)) {
-    const decoded = Buffer.from(authorization.slice(6).trim(), "base64").toString("utf8");
-    const separator = decoded.indexOf(":");
-    if (separator >= 0) candidates.push(decoded.slice(separator + 1));
+// Fix 2026-07-02: OAUTH2_PROXY_INJECT_REQUEST_HEADERS nu exista ca flag in
+// oauth2-proxy v7.7.1 (verificat direct din `oauth2-proxy --help` in container
+// — absent din output). Mecanismul original cu X-Proxy-Auth injectat de
+// oauth2-proxy nu a functionat NICIODATA in productie (niciun request real nu
+// a trecut de acest check). Mecanismul real, standard oauth2-proxy pentru a
+// trece un secret static la upstream e `--pass-basic-auth` (default true) +
+// `--basic-auth-password`, care seteaza `Authorization: Basic
+// base64(user:secret)`. Acceptam secretul din ORICARE sursa (X-Proxy-Auth
+// ramane valid daca cineva il configureaza corect pe viitor via alpha-config;
+// Authorization:Basic e calea care functioneaza cu env vars simple).
+function extractBasicAuthPassword(c: Context): string | null {
+  const header = c.req.header("authorization") ?? "";
+  if (!header.toLowerCase().startsWith("basic ")) return null;
+  try {
+    const decoded = Buffer.from(header.slice(6).trim(), "base64").toString("utf8");
+    const sep = decoded.indexOf(":");
+    if (sep === -1) return null;
+    return decoded.slice(sep + 1);
+  } catch {
+    return null;
   }
-  const xProxyAuth = c.req.header("x-proxy-auth");
-  if (xProxyAuth !== undefined) candidates.push(xProxyAuth);
-  return candidates;
 }
 
 authRouter.post("/oauth2/sync", (c) => {
@@ -213,8 +201,8 @@ authRouter.post("/oauth2/sync", (c) => {
     return c.json(fail("bridge_disabled", "Bridge oauth2-proxy neconfigurat.", c), 503);
   }
 
-  const candidates = extractBridgeSecretCandidates(c);
-  if (!candidates.some((candidate) => constantTimeStringEquals(expected, candidate))) {
+  const provided = c.req.header("x-proxy-auth") ?? extractBasicAuthPassword(c) ?? "";
+  if (!constantTimeStringEquals(expected, provided)) {
     recordAudit(null, "auth.oauth2.sync", {
       outcome: "denied",
       targetKind: "http_request",
@@ -224,32 +212,38 @@ authRouter.post("/oauth2/sync", (c) => {
     return c.json(fail("forbidden", "Acces interzis.", c), 403);
   }
 
-  // v2.40.1: `x-forwarded-email` e header-ul pe care oauth2-proxy il trimite
-  // REAL upstream (`pass-user-headers`); v2.34.0 il eliminase pe teoria ca
-  // `x-auth-request-email` e canonic, dar acela e header de raspuns (nginx
-  // auth_request) si nu sosea niciodata — bridge-ul era mort in productie.
-  // Ambele sunt acceptate DOAR aici, dupa shared-secret check; Caddy le
-  // strip-uieste pe amandoua inbound, deci nu pot fi forjate prin fata publica.
-  // Fail-closed pe ambiguitate: daca ambele sosesc cu valori diferite, nu
-  // alegem in tacere una — configuratia proxy-ului e stricata sau cineva
-  // injecteaza header-e; respingem si auditam (review-panel v2.40.1).
-  const forwardedEmail = c.req.header("x-forwarded-email");
-  const authRequestEmail = c.req.header("x-auth-request-email");
-  if (
-    forwardedEmail !== undefined &&
-    authRequestEmail !== undefined &&
-    forwardedEmail.trim().toLowerCase() !== authRequestEmail.trim().toLowerCase()
-  ) {
+  // Fix 2026-07-02: `--set-xauthrequest` (care produce X-Auth-Request-Email) e
+  // documentat de oauth2-proxy ca header de RASPUNS pentru modul nginx
+  // auth_request — verificat empiric (audit_log real: missing_identity pe
+  // 100% din request-urile prin oauth2-proxy) ca NU e forward-uit catre
+  // upstream cand oauth2-proxy ruleaza ca reverse-proxy propriu (--upstreams,
+  // cazul nostru). Mecanismul care CHIAR ajunge la upstream e
+  // --pass-user-headers (default true, confirmat din --help), care produce
+  // X-Forwarded-Email. Refacem fallback-ul eliminat in v2.34.0 (P0-4-edit):
+  // ramane sigur pentru ca perimetrul public (Traefik middleware
+  // `legal-secure` in docker-compose.yml) strip-uieste ambele headere
+  // (X-Auth-Request-Email SI X-Forwarded-Email) inainte sa ajunga la
+  // oauth2-proxy — un client extern nu poate injecta niciunul.
+  //
+  // MR 0a (2026-07-06, contract v2.40.1): X-Forwarded-Email e sursa PRIMARA
+  // (mecanismul real --pass-user-headers); X-Auth-Request-Email ramane
+  // fallback. Fail-closed pe ambiguitate: daca ambele sosesc cu valori
+  // diferite (dupa trim/lowercase), refuzam — o divergenta intre ele inseamna
+  // proxy misconfigurat sau request forjat, nu o identitate de incredere.
+  // v2.42.0 (4.1): acelasi canonicalizator ca la creare/import/seed — o
+  // divergenta intre cai ar produce useri care nu se pot loga.
+  const forwardedEmail = canonicalizeEmail(c.req.header("x-forwarded-email") ?? "");
+  const authRequestEmail = canonicalizeEmail(c.req.header("x-auth-request-email") ?? "");
+  if (forwardedEmail !== "" && authRequestEmail !== "" && forwardedEmail !== authRequestEmail) {
     recordAudit(null, "auth.oauth2.sync", {
       outcome: "denied",
       targetKind: "http_request",
       targetId: c.req.path,
       detail: { reason: "conflicting_identity_headers" },
     });
-    return c.json(fail("missing_identity", "Identitate ambigua in header-ele proxy.", c), 400);
+    return c.json(fail("missing_identity", "Identitate lipsa in header-ele proxy.", c), 400);
   }
-  const rawEmail = forwardedEmail ?? authRequestEmail ?? "";
-  const email = rawEmail.trim().toLowerCase();
+  const email = forwardedEmail !== "" ? forwardedEmail : authRequestEmail;
   if (!email || !email.includes("@") || email.length > 254) {
     recordAudit(null, "auth.oauth2.sync", {
       outcome: "denied",

@@ -1,14 +1,23 @@
-import { useCallback, useEffect, useState } from "react";
-import { Gift, Plus, RefreshCw, Search, ShieldAlert, Trash2 } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Gift, Plus, RefreshCw, ShieldAlert, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useConfirm } from "@/components/ui/confirm-dialog";
-import { admin, type AdminUser, type QuotaGrant } from "@/lib/api";
+import { useToast } from "@/components/ui/toast";
+import { UserPicker } from "@/components/UserPicker";
+import { admin, MonitoringApiError, type AdminUser, type GlobalQuotaGrant, type QuotaGrant } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
+import { quotaFeatureLabel } from "@/lib/quotaFeatureLabels";
+import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const MILLI = 1000;
+
+// Granturile sunt bugete AI extra — captcha nu are granturi (cap fix per user).
+// v2.42.0 (5.2): pool AI unic — granturile exista doar pe "ai".
+const GRANTABLE_FEATURES = ["ai"] as const;
 
 function milliToUsd(milli: number): string {
   return (milli / MILLI).toFixed(3);
@@ -19,7 +28,10 @@ function parseUsdInputToMilli(value: string): number | null {
   if (!trimmed) return null;
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n <= 0) return null;
-  return Math.round(n * MILLI);
+  // Sub 0.001 USD se rotunjeste la 0 milli — invalid (backend cere min 1),
+  // altfel guard-ul client lasa sa treaca un request destinat esecului.
+  const milli = Math.round(n * MILLI);
+  return milli >= 1 ? milli : null;
 }
 
 // Converteste un input datetime-local (YYYY-MM-DDTHH:mm fara timezone) la ISO
@@ -42,72 +54,106 @@ function grantState(grant: QuotaGrant): { label: string; variant: "success" | "w
   return { label: "Activ", variant: "success" };
 }
 
-export default function AdminGrants() {
+export default function AdminGrants({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
-  const [searchInput, setSearchInput] = useState("");
-  const [candidates, setCandidates] = useState<AdminUser[]>([]);
-  const [searching, setSearching] = useState(false);
+  const toast = useToast();
   const [selected, setSelected] = useState<AdminUser | null>(null);
   const [grants, setGrants] = useState<QuotaGrant[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [feature, setFeature] = useState("ai.single");
+  const [feature, setFeature] = useState<string>(GRANTABLE_FEATURES[0]);
   const [extraUsd, setExtraUsd] = useState("");
   const [expiresAtLocal, setExpiresAtLocal] = useState("");
   const [reason, setReason] = useState("");
   const [busyId, setBusyId] = useState<number | "create" | null>(null);
+  // v2.41.0: vedere globala la deschidere — granturile active ale tuturor
+  // userilor, fara cautarea prealabila a unui user (pandant la pagina Cote).
+  const [activeGrants, setActiveGrants] = useState<GlobalQuotaGrant[]>([]);
+  const [activeTruncated, setActiveTruncated] = useState(false);
+  const [activeLoading, setActiveLoading] = useState(false);
+  // AbortController + staleness guard (pattern 6.7, ca la fetch-ul per-user
+  // de mai jos): un raspuns lent pornit inainte de o revocare ar ateriza dupa
+  // reload-ul post-revocare si ar suprascrie lista cu starea veche (grantul
+  // revocat ar reaparea activ).
+  const activeGrantsAcRef = useRef<AbortController | null>(null);
 
-  const search = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const q = searchInput.trim();
-    if (!q) return;
-    setSearching(true);
-    setError(null);
+  const loadActiveGrants = useCallback(async () => {
+    activeGrantsAcRef.current?.abort();
+    const ac = new AbortController();
+    activeGrantsAcRef.current = ac;
+    setActiveLoading(true);
     try {
-      const result = await admin.listUsers({ search: q, pageSize: 25 });
-      setCandidates(result.rows);
+      const result = await admin.listActiveGrants(ac.signal);
+      if (ac.signal.aborted) return;
+      setActiveGrants(result.grants);
+      setActiveTruncated(result.truncated === true);
+      // Fara clear, un banner de eroare de la un load esuat anterior persista
+      // si dupa un refresh reusit.
+      setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la cautare.");
+      if (ac.signal.aborted) return;
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea granturilor active.");
     } finally {
-      setSearching(false);
-    }
-  };
-
-  const loadGrants = useCallback(async (userId: string) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await admin.listGrants(userId);
-      setGrants(result.grants);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea grant-urilor.");
-    } finally {
-      setLoading(false);
+      if (!ac.signal.aborted) setActiveLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    if (selected) loadGrants(selected.id);
-    else setGrants([]);
-  }, [loadGrants, selected]);
+    loadActiveGrants();
+  }, [loadActiveGrants]);
+
+  // Fetch-ul per-user traieste in efect cu AbortController + guards (pattern
+  // 6.7): golirea sincrona a listei NU anuleaza un fetch in zbor — un raspuns
+  // lent pentru userul A ar ateriza dupa selectarea lui B si ar afisa (si
+  // permite revocarea) granturilor lui A sub identitatea lui B (finding
+  // review-panel confirmat). refreshTick = reincarcare manuala/post-mutatie.
+  const [refreshTick, setRefreshTick] = useState(0);
+  const refreshGrants = useCallback(() => setRefreshTick((t) => t + 1), []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick este trigger explicit de reincarcare (pattern 6.7), nu e citit in corp.
+  useEffect(() => {
+    setGrants([]);
+    if (!selected) return;
+    const ac = new AbortController();
+    setLoading(true);
+    setError(null);
+    admin
+      .listGrants(selected.id, ac.signal)
+      .then((result) => {
+        if (ac.signal.aborted) return;
+        setGrants(result.grants);
+      })
+      .catch((err) => {
+        if (ac.signal.aborted) return;
+        setError(err instanceof Error ? err.message : "Eroare la incarcarea grant-urilor.");
+      })
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [selected, refreshTick]);
 
   const onSelect = (user: AdminUser) => {
     setSelected(user);
-    setCandidates([]);
-    setFeature("ai.single");
+    setFeature(GRANTABLE_FEATURES[0]);
     setExtraUsd("");
     setExpiresAtLocal("");
     setReason("");
   };
 
+  const selectFromActive = async (userId: string) => {
+    setError(null);
+    try {
+      const user = await admin.getUser(userId);
+      onSelect(user);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorului.");
+    }
+  };
+
   const onCreate = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selected) return;
-    const featureKey = feature.trim();
-    if (!featureKey) {
-      setError("Introdu un feature.");
-      return;
-    }
     const extraMilli = parseUsdInputToMilli(extraUsd);
     if (extraMilli === null) {
       setError("Introdu un extra valid (> 0 USD).");
@@ -126,26 +172,38 @@ export default function AdminGrants() {
     setError(null);
     try {
       await admin.createGrant(selected.id, {
-        feature: featureKey,
+        feature,
         extraUsdMilli: extraMilli,
         expiresAt: isoExpires,
         reason: reason.trim() || null,
       });
-      await loadGrants(selected.id);
+      refreshGrants();
+      void loadActiveGrants();
       setExtraUsd("");
       setExpiresAtLocal("");
       setReason("");
+      toast(`Grant de ${milliToUsd(extraMilli)} $ acordat lui ${selected.email}.`, { variant: "success" });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la crearea grant-ului.");
+      // v2.42.0 (5.2): grant vs nelimitat se exclud — serverul e autoritatea.
+      // Gating-ul ramane REACTIV (nu proactiv ca in referinta): baza include si
+      // default-ul din env, invizibil clientului — un buton dezactivat pe
+      // absenta override-ului ar bloca fals granturile valide pe acel default.
+      const msg =
+        err instanceof MonitoringApiError && err.code === "unlimited_budget"
+          ? "Utilizatorul are buget AI nelimitat — granturile nu au efect. Seteaza intai o limita de baza in Cote."
+          : err instanceof Error
+            ? err.message
+            : "Eroare la crearea grant-ului.";
+      setError(msg);
     } finally {
       setBusyId(null);
     }
   };
 
-  const onRevoke = async (grant: QuotaGrant) => {
+  const onRevoke = async (grant: Pick<QuotaGrant, "id" | "extraUsdMilli" | "feature">, ownerLabel?: string) => {
     const ok = await confirm({
       title: "Revoca grant",
-      message: `Revoca grant-ul de ${milliToUsd(grant.extraUsdMilli)} $ pentru "${grant.feature}"? Effective limit va scadea imediat.`,
+      message: `Revoca grant-ul de ${milliToUsd(grant.extraUsdMilli)} $ pentru "${quotaFeatureLabel(grant.feature)}"${ownerLabel ? ` (${ownerLabel})` : ""}? Limita efectiva va scadea imediat.`,
       destructive: true,
       confirmLabel: "Revoca",
     });
@@ -154,7 +212,9 @@ export default function AdminGrants() {
     setError(null);
     try {
       await admin.revokeGrant(grant.id, null);
-      if (selected) await loadGrants(selected.id);
+      if (selected) refreshGrants();
+      void loadActiveGrants();
+      toast(`Grantul de ${milliToUsd(grant.extraUsdMilli)} $ a fost revocat.`, { variant: "success" });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la revocarea grant-ului.");
     } finally {
@@ -163,15 +223,19 @@ export default function AdminGrants() {
   };
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-5xl space-y-5">
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-5xl")}>
         <div>
-          <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-            <Gift className="h-6 w-6 text-primary" />
-            Granturi extra buget
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            One-shot extra peste limita de baza, cu expirare. Effective limit = baseLimit + suma grant-urilor active.
+          {!embedded && (
+            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+              <Gift className="h-6 w-6 text-primary" />
+              Granturi extra buget
+            </h1>
+          )}
+          <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
+            Extra acordat o singura data peste limita de baza, cu expirare. Limita efectiva = limita de baza + suma
+            grant-urilor active. Atentie: daca userul nu are o limita setata (buget nelimitat), grantul nu are niciun
+            efect — seteaza intai cota in tab-ul Cote.
           </p>
         </div>
 
@@ -189,46 +253,87 @@ export default function AdminGrants() {
           </div>
         )}
 
-        <Card>
-          <CardHeader className="pb-3">
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Search className="h-4 w-4" />
-              Selecteaza utilizator
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <form onSubmit={search} className="flex gap-2">
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => setSearchInput(e.target.value)}
-                placeholder="Cauta dupa email sau nume"
-                className="h-9 flex-1 rounded-md border border-input bg-background px-3 text-sm"
-              />
-              <Button type="submit" disabled={searching}>
-                <Search className={cn("h-4 w-4", searching && "animate-pulse")} />
-                Cauta
-              </Button>
-            </form>
-            {candidates.length > 0 && (
-              <ul className="divide-y divide-border rounded-md border border-border">
-                {candidates.map((c) => (
-                  <li key={c.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
-                    <div className="min-w-0 flex-1">
-                      <p className="font-mono">{c.email}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {c.displayName} · {c.role} · {c.status}
-                      </p>
-                    </div>
-                    <Button size="sm" variant="outline" onClick={() => onSelect(c)}>
-                      Selecteaza
-                    </Button>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </CardContent>
-        </Card>
+        <UserPicker value={selected?.id ?? ""} onSelect={onSelect} ariaLabel="Alege utilizatorul pentru grant" />
+
+        {!selected && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
+                <span className="flex items-center gap-2">
+                  <Gift className="h-4 w-4" />
+                  Granturi active
+                </span>
+                <Button variant="outline" size="sm" onClick={() => loadActiveGrants()} disabled={activeLoading}>
+                  <RefreshCw className={cn("h-4 w-4", activeLoading && "animate-spin")} />
+                  Reincarca
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {activeGrants.length === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">
+                  {activeLoading ? "Se incarca granturile active..." : "Nu exista granturi active."}
+                </p>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
+                        <th className="px-3 py-2 font-semibold">Utilizator</th>
+                        <th className="px-3 py-2 font-semibold">Feature</th>
+                        <th className="px-3 py-2 font-semibold">Extra</th>
+                        <th className="px-3 py-2 font-semibold">Expira</th>
+                        <th className="px-3 py-2 font-semibold">Motiv</th>
+                        <th className="px-3 py-2" />
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border">
+                      {activeGrants.map((g) => (
+                        <tr key={g.id}>
+                          <td className="px-3 py-2 align-top">
+                            <p className="font-mono text-xs">{g.email}</p>
+                            {g.displayName && <p className="text-xs text-muted-foreground">{g.displayName}</p>}
+                          </td>
+                          <td className="px-3 py-2 align-top text-xs">{quotaFeatureLabel(g.feature)}</td>
+                          <td className="px-3 py-2 align-top">{milliToUsd(g.extraUsdMilli)} $</td>
+                          <td className="px-3 py-2 align-top text-xs text-muted-foreground">
+                            {formatIsoDateTime(g.expiresAt)}
+                          </td>
+                          <td className="px-3 py-2 align-top text-xs text-muted-foreground">{g.reason ?? "—"}</td>
+                          <td className="px-3 py-2 align-top text-right">
+                            <div className="flex justify-end gap-1">
+                              <Button size="sm" variant="outline" onClick={() => selectFromActive(g.userId)}>
+                                Editeaza
+                              </Button>
+                              {/* Extra pastrat fata de referinta: revocare direct din
+                                  vederea globala, fara selectarea prealabila a userului. */}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                onClick={() => onRevoke(g, g.email)}
+                                disabled={busyId === g.id}
+                                aria-label={`Revoca grantul pentru ${g.email}`}
+                                title="Revoca grantul"
+                                className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
+                              >
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {activeTruncated && (
+                    <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">
+                      Lista arata primele 500 de granturi active — exista mai multe; cauta userul direct pentru restul.
+                    </p>
+                  )}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
 
         {selected && (
           <Card>
@@ -236,13 +341,15 @@ export default function AdminGrants() {
               <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-base">
                 <span className="flex items-center gap-2">
                   <span className="font-mono text-sm">{selected.email}</span>
-                  <Badge variant="outline">{selected.role}</Badge>
-                  <Badge variant={selected.status === "active" ? "success" : "warning"}>{selected.status}</Badge>
+                  <Badge variant="outline">{userRoleLabel(selected.role)}</Badge>
+                  <Badge variant={selected.status === "active" ? "success" : "warning"}>
+                    {userStatusLabel(selected.status)}
+                  </Badge>
                 </span>
                 <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm" onClick={() => loadGrants(selected.id)} disabled={loading}>
+                  <Button variant="outline" size="sm" onClick={refreshGrants} disabled={loading}>
                     <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-                    Refresh
+                    Reincarca
                   </Button>
                   <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
                     Schimba utilizatorul
@@ -251,20 +358,25 @@ export default function AdminGrants() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              <form onSubmit={onCreate} className="grid gap-3 md:grid-cols-[140px_140px_220px_1fr_auto] md:items-end">
+              {/* Feature-ul are o singura optiune cu text lung ("AI — toate analizele
+                  (limita unica)") — coloana lui e lata, Motivul preia doar restul. */}
+              <form onSubmit={onCreate} className="grid gap-3 md:grid-cols-[260px_140px_220px_1fr_auto] md:items-end">
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="grant-feature">
                     Feature
                   </label>
-                  <select
-                    id="grant-feature"
-                    value={feature}
-                    onChange={(e) => setFeature(e.target.value)}
-                    className="h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
-                  >
-                    <option value="ai.single">ai.single</option>
-                    <option value="ai.multi">ai.multi</option>
-                  </select>
+                  <Select value={feature} onValueChange={setFeature}>
+                    <SelectTrigger id="grant-feature">
+                      <SelectValue placeholder="Feature" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {GRANTABLE_FEATURES.map((f) => (
+                        <SelectItem key={f} value={f}>
+                          {quotaFeatureLabel(f)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="grant-extra">
@@ -340,7 +452,7 @@ export default function AdminGrants() {
                       const expired = isExpired(g);
                       return (
                         <tr key={g.id} className="border-b border-border last:border-b-0 hover:bg-muted/30">
-                          <td className="px-3 py-2 align-top font-mono text-xs">{g.feature}</td>
+                          <td className="px-3 py-2 align-top text-xs">{quotaFeatureLabel(g.feature)}</td>
                           <td className="px-3 py-2 align-top font-mono">${milliToUsd(g.extraUsdMilli)}</td>
                           <td className="px-3 py-2 align-top">
                             <Badge variant={state.variant}>{state.label}</Badge>
@@ -369,6 +481,8 @@ export default function AdminGrants() {
                                 variant="ghost"
                                 onClick={() => onRevoke(g)}
                                 disabled={busyId === g.id}
+                                aria-label="Revoca grantul"
+                                title="Revoca grantul"
                                 className="text-red-600 hover:bg-red-50 hover:text-red-700 dark:hover:bg-red-950/30"
                               >
                                 <Trash2 className="h-4 w-4" />

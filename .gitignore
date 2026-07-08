@@ -59,3 +59,7 @@ backend/rnpm-dumps/
 
 # Worktrees temporare create de tooling (audit/composr)
 .worktrees/
+
+# Mediu web local de test (scripts/dev-web-local.ps1) — DB izolata + secrete dev
+.dev-web-local/
+.dev-web-local.secrets.json

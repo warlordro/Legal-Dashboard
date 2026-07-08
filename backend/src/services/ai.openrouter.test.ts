@@ -125,7 +125,7 @@ describe("resolveOpenRouterSlug", () => {
   it("ignora override-uri cu format invalid sau provider neacceptat", () => {
     process.env.OPENROUTER_MODEL_OVERRIDES =
       "claude-sonnet:javascript:alert(1), claude-opus:evil-provider/model, gpt-5.4:openai/custom-gpt";
-    expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/claude-sonnet-4.6"); // fallback static
+    expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/claude-sonnet-5"); // fallback static
     expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-4.8"); // provider respins
     expect(resolveOpenRouterSlug("gpt-5.4")).toBe("openai/custom-gpt"); // valid, trece
   });
@@ -194,7 +194,7 @@ describe("callOpenRouter", () => {
 
     await callOpenRouter(
       "sk-or-v1-test",
-      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-sonnet-5",
       "prompt",
       5000,
       { ownerId: "alice", feature: "dosar_summary", requestId: "req-cost" },
@@ -216,7 +216,7 @@ describe("callOpenRouter", () => {
 
     await callOpenRouter(
       "sk-or-v1-test",
-      "anthropic/claude-sonnet-4.6",
+      "anthropic/claude-sonnet-5",
       "prompt",
       5000,
       { ownerId: "alice", feature: "dosar_summary" },
@@ -299,7 +299,7 @@ describe("callModel OpenRouter routing", () => {
 
     expect(openAiConstructorMock).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "sk-or-v1-env" }));
     expect(openRouterCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "anthropic/claude-sonnet-4.6" }),
+      expect.objectContaining({ model: "anthropic/claude-sonnet-5" }),
       expect.any(Object)
     );
   });
@@ -325,7 +325,7 @@ describe("callModel OpenRouter routing", () => {
 
     expect(openAiConstructorMock).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "sk-or-v1-tenant" }));
     expect(openRouterCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "anthropic/claude-sonnet-4.6" }),
+      expect.objectContaining({ model: "anthropic/claude-sonnet-5" }),
       expect.any(Object)
     );
   });

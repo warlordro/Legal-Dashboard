@@ -352,10 +352,98 @@ export function earliestAiUsageTsInWindow(ownerId: string, feature: string, wind
   return row.earliest ?? null;
 }
 
-function quotaFeatureAliases(feature: string): string[] {
+// v2.42.0 (5.2): exportat — pool-ul "ai" acopera TOATE feature-urile istorice
+// de usage AI, ca sumele sa includa si istoricul scris inainte de consolidare.
+export function quotaFeatureAliases(feature: string): string[] {
+  if (feature === "ai") {
+    return ["ai.single", "ai.multi", "dosar_summary", "dosar_multi_analyst", "dosar_multi_judge"];
+  }
   if (feature === "ai.single") return ["ai.single", "dosar_summary"];
   if (feature === "ai.multi") return ["ai.multi", "dosar_multi_analyst", "dosar_multi_judge"];
   return [feature];
+}
+
+export interface AiUsageWindows {
+  dayMilli: number;
+  weekMilli: number;
+  totalMilli: number;
+}
+
+// Oglindeste EXACT semantica din sumAiUsageMilliInWindow: filtrare pe feature
+// prin quotaFeatureAliases (IN (...)) si CASE pending -> estimated_cost_usd_milli
+// / confirmed -> cost_usd_milli. "day"/"week" sunt ferestre rolling (24h/7 zile,
+// aceleasi secunde ca PERIOD_SECONDS.day / .week din quotaGuard), "total" e tot
+// istoricul din ai_usage (fara filtru pe ts).
+const PENDING_COST_EXPR = `CASE
+         WHEN status = 'pending' THEN COALESCE(estimated_cost_usd_milli, cost_usd_milli, 0)
+         ELSE cost_usd_milli
+       END`;
+
+interface AiUsageWindowsRow {
+  owner_id?: string;
+  day_milli: number | null;
+  week_milli: number | null;
+  total_milli: number | null;
+}
+
+function toAiUsageWindows(row: AiUsageWindowsRow): AiUsageWindows {
+  return {
+    dayMilli: row.day_milli ?? 0,
+    weekMilli: row.week_milli ?? 0,
+    totalMilli: row.total_milli ?? 0,
+  };
+}
+
+// Set-based: un singur query pentru TOTI ownerii, in loc de un query per user
+// (evita N interogari sincrone in usage/overview la tenanti cu multi useri).
+export function sumAiUsageWindowsByOwner(feature: string): Map<string, AiUsageWindows> {
+  const features = quotaFeatureAliases(feature);
+  const placeholders = features.map(() => "?").join(", ");
+  const now = Date.now();
+  const dayCutoff = new Date(now - 86_400_000).toISOString();
+  const weekCutoff = new Date(now - 604_800_000).toISOString();
+
+  const rows = getDb()
+    .prepare(
+      `SELECT
+         owner_id,
+         SUM(CASE WHEN ts >= ? THEN ${PENDING_COST_EXPR} ELSE 0 END) AS day_milli,
+         SUM(CASE WHEN ts >= ? THEN ${PENDING_COST_EXPR} ELSE 0 END) AS week_milli,
+         SUM(${PENDING_COST_EXPR}) AS total_milli
+       FROM ai_usage
+       WHERE feature IN (${placeholders})
+       GROUP BY owner_id`
+    )
+    .all(dayCutoff, weekCutoff, ...features) as Array<AiUsageWindowsRow & { owner_id: string }>;
+
+  const map = new Map<string, AiUsageWindows>();
+  for (const row of rows) {
+    map.set(row.owner_id, toAiUsageWindows(row));
+  }
+  return map;
+}
+
+// Acelasi query, fara GROUP BY — agregat pe tot tenantul (toti ownerii cu
+// istoric in ai_usage, inclusiv useri stersi/suspendati).
+export function sumAiUsageWindowsTenant(feature: string): AiUsageWindows {
+  const features = quotaFeatureAliases(feature);
+  const placeholders = features.map(() => "?").join(", ");
+  const now = Date.now();
+  const dayCutoff = new Date(now - 86_400_000).toISOString();
+  const weekCutoff = new Date(now - 604_800_000).toISOString();
+
+  const row = getDb()
+    .prepare(
+      `SELECT
+         SUM(CASE WHEN ts >= ? THEN ${PENDING_COST_EXPR} ELSE 0 END) AS day_milli,
+         SUM(CASE WHEN ts >= ? THEN ${PENDING_COST_EXPR} ELSE 0 END) AS week_milli,
+         SUM(${PENDING_COST_EXPR}) AS total_milli
+       FROM ai_usage
+       WHERE feature IN (${placeholders})`
+    )
+    .get(dayCutoff, weekCutoff, ...features) as AiUsageWindowsRow;
+
+  return toAiUsageWindows(row);
 }
 
 // Anchor the daily window to UTC-midnight `today − (days − 1)` so the chart's

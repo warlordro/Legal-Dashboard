@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SortableTh } from "@/components/ui/sortable-th";
 import { TablePagination } from "@/components/table-pagination";
 import { JobKindTabs } from "@/components/monitoring/JobKindTabs";
 import { MonitoringAddForm } from "@/components/monitoring/MonitoringAddForm";
@@ -32,7 +33,9 @@ import { monitoring, formatMonitoringTarget, getNameSoapInstitutie, getIccjId, t
 import { getInstitutieLabel } from "@/lib/institutii";
 import { exportMonitoringExcel, exportMonitoringPDF } from "@/lib/export-monitoring";
 import { formatIsoDateTime, formatCadence } from "@/lib/datetime-formatters";
+import { monitoringRunStatusLabel } from "@/lib/monitoringRunStatus";
 import { cn } from "@/lib/utils";
+import { useClientSort } from "@/hooks/useClientSort";
 import { useMonitoringJobs } from "@/hooks/useMonitoringJobs";
 import { useMonitoringMasterSwitch } from "@/hooks/useMonitoringMasterSwitch";
 import { getIccjUrl, getPortalJustUrl } from "@/components/dosare-table-helpers";
@@ -118,6 +121,17 @@ export default function Monitorizare({
       return changed ? next : prev;
     });
   }, [jobs]);
+
+  // v2.42.0 (6.8): sortare client-side pe pagina curenta. Status se sorteaza
+  // pe textul UMAN vizibil (activ/pauza + eticheta ultimei rulari).
+  const sort = useClientSort(jobs, {
+    target: (j) => formatMonitoringTarget(j),
+    cadence: (j) => j.cadence_sec,
+    last: (j) => j.last_run_at,
+    next: (j) => j.next_run_at,
+    status: (j) =>
+      `${j.active ? "activ" : "pauza"}${j.last_status ? ` ${monitoringRunStatusLabel(j.last_status)}` : ""}`,
+  });
 
   const allSelected = jobs.length > 0 && jobs.every((j) => selectedIds.has(j.id));
   const someSelected = selectedIds.size > 0 && !allSelected;
@@ -501,23 +515,34 @@ export default function Monitorizare({
                             title={allSelected ? "Deselecteaza toate" : "Selecteaza toate"}
                           />
                         </th>
-                        <th className="px-3 py-2">Tinta</th>
+                        <SortableTh sort={sort} sortKeyName="target" scopeNote="Sorteaza pagina curenta">
+                          Tinta
+                        </SortableTh>
                         {showDetailsColumn && <th className="px-3 py-2 text-center">Detalii</th>}
-                        <th className="px-3 py-2">Cadenta</th>
-                        <th className="px-3 py-2">Ultima rulare</th>
-                        <th className="px-3 py-2">Urmatoarea verif.</th>
-                        <th className="px-3 py-2">Status</th>
+                        <SortableTh sort={sort} sortKeyName="cadence" scopeNote="Sorteaza pagina curenta">
+                          Cadenta
+                        </SortableTh>
+                        <SortableTh sort={sort} sortKeyName="last" scopeNote="Sorteaza pagina curenta">
+                          Ultima rulare
+                        </SortableTh>
+                        <SortableTh sort={sort} sortKeyName="next" scopeNote="Sorteaza pagina curenta">
+                          Urmatoarea verif.
+                        </SortableTh>
+                        <SortableTh sort={sort} sortKeyName="status" scopeNote="Sorteaza pagina curenta">
+                          Status
+                        </SortableTh>
                         <th className="px-3 py-2 text-right">Actiuni</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {jobs.map((job) => {
+                      {sort.sorted.map((job) => {
                         const target = formatMonitoringTarget(job);
                         const iccjId = getIccjId(job);
                         const isDosar = job.kind === "dosar_soap";
                         // Source badge (parity across kinds): PortalJust rows get "PJ", ICCJ rows "ICCJ".
+                        // Culoare proprie (nu muted-pe-muted — ilizibil pe dark) + 10px, pereche cu ICCJ.
                         const pjBadge = (
-                          <span className="shrink-0 rounded border border-border bg-muted px-1 text-[9px] font-semibold uppercase leading-tight text-muted-foreground">
+                          <span className="shrink-0 rounded border border-sky-300 bg-sky-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-sky-700 dark:border-sky-700 dark:bg-sky-900/20 dark:text-sky-400">
                             PJ
                           </span>
                         );
@@ -618,7 +643,7 @@ export default function Monitorizare({
                               ) : job.kind === "iccj" ? (
                                 <div className="grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-0">
                                   <span className="inline-flex min-w-0 items-center gap-1.5">
-                                    <span className="shrink-0 rounded border border-amber-300 bg-amber-50 px-1 text-[9px] font-semibold uppercase leading-tight text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
+                                    <span className="shrink-0 rounded border border-amber-300 bg-amber-50 px-1.5 text-[10px] font-semibold uppercase leading-tight text-amber-700 dark:border-amber-700 dark:bg-amber-900/20 dark:text-amber-400">
                                       ICCJ
                                     </span>
                                     {iccjId ? (
@@ -756,7 +781,7 @@ export default function Monitorizare({
                                       "bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
                                   )}
                                 >
-                                  {job.last_status}
+                                  {monitoringRunStatusLabel(job.last_status)}
                                 </span>
                               )}
                             </td>

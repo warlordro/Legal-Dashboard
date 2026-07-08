@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.40.1** - 2 Iulie 2026
+**v2.42.0** - 8 Iulie 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -81,7 +81,7 @@ legal-dashboard/
 Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhitecturale cheie:
 - Repository-only DB access: SQL raw doar in `backend/src/db/**`
 - `owner_id` pe toate tabelele (DEFAULT `'local'`)
-- Migrations in `backend/src/db/migrations/` (latest 0038)
+- Migrations in `backend/src/db/migrations/` (latest 0042)
 - Backend bundled CJS (esbuild) - vezi `## Nota Importanta Build`
 - Tabele monitoring: `monitoring_jobs`, `monitoring_runs`, `monitoring_snapshots`, `monitoring_alerts`, `owner_email_settings`
 
@@ -136,7 +136,7 @@ Tabelul complet de kill switches operationale e in [SESSION-HANDOFF.md](SESSION-
 - **Monitoring run retention**: `monitoring_runs` purjat zilnic la 90 zile pentru a limita cresterea istoricului operational
 - **AI usage tracking**: orice call SDK reusit sau pornit si esuat scrie owner-scoped in `ai_usage` dupa call, fara SQLite lock peste I/O extern
 - **Admin guards**: `requireRole("admin")` pe rutele care opereaza pe state global (RNPM `DELETE /saved/all`, `POST /compact`, backup management)
-- **Web-mode 501 gate**: `rejectCaptchaKeyInWebMode()` blocheaza POST `/rnpm/search`/`/bulk`/`/captcha/balance` cand `getAuthMode() === "web"` (necesita per-user key storage server-side)
+- **Web-mode tenant captcha**: in `auth_mode=web`, POST `/rnpm/search`/`/bulk`/`/search-split` rezolva cheia captcha din `tenant_api_keys` ca sursa primara (`resolveCaptchaKeyForRoute`); campurile captcha din body-ul clientului sunt eliminate ("tenant key wins"), fallback-ul race e derivat simetric din cheile tenant, iar 501 `CAPTCHA_NOT_CONFIGURED` apare doar cand cheia providerului activ lipseste
 - **JWT revocation**: claim `jti` + tabela `jwt_denylist` (migration 0038), revoke la logout (cookie + Bearer), `isJtiRevoked` la verify, purge zilnic; tokenele fara `jti` (pre-v2.38.0) expira la TTL
 - **Session cookie SameSite=Strict**: strans de la `Lax` in v2.38.0 (anti-CSRF)
 - **ACK_NO_AUTH gate eliminat**: `LEGAL_DASHBOARD_ACK_NO_AUTH` retras in v2.38.0; web auth (`auth_mode=web` + JWT valid) e gate suficient si mai riguros pentru remote bind

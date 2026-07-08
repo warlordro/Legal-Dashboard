@@ -1,21 +1,19 @@
 import { Fragment, useEffect, useState } from "react";
-import { ClipboardList, RefreshCw, Filter, ChevronDown, ChevronRight } from "lucide-react";
+import { ClipboardList, Download, RefreshCw, Filter, ChevronDown, ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { admin, type AuditEvent } from "@/lib/api";
+import { SortableTh } from "@/components/ui/sortable-th";
+import { TablePagination } from "@/components/table-pagination";
+import { useClientSort } from "@/hooks/useClientSort";
+import { useDebouncedValue } from "@/hooks/useDebouncedValue";
+import { admin, fetchBlobOrThrow, triggerBlobDownload, type AuditEvent } from "@/lib/api";
+import { OUTCOME_OPTIONS, outcomeLabel } from "@/lib/auditOutcome";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { cn } from "@/lib/utils";
 
-const PAGE_SIZE = 50;
-
-const OUTCOME_OPTIONS: ReadonlyArray<{ value: "all" | "ok" | "denied" | "error"; label: string }> = [
-  { value: "all", label: "Toate rezultatele" },
-  { value: "ok", label: "OK" },
-  { value: "denied", label: "Refuzat" },
-  { value: "error", label: "Eroare" },
-];
+const PAGE_SIZE = 25;
 
 // Convert a YYYY-MM-DD date input (interpreted in the user's local timezone)
 // to an ISO string. Matches the convention used by Alerts.tsx so admins
@@ -44,7 +42,7 @@ function detailToString(detail: unknown): string {
   }
 }
 
-export default function AdminAudit() {
+export default function AdminAudit({ embedded = false }: { embedded?: boolean } = {}) {
   const [rows, setRows] = useState<AuditEvent[]>([]);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
@@ -58,78 +56,131 @@ export default function AdminAudit() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
+  const [pageSize, setPageSize] = useState(PAGE_SIZE);
 
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
 
-  const loadAudit = async (filters: {
-    page: number;
-    action: string;
-    ownerId: string;
-    actorId: string;
-    targetKind: string;
-    outcome: "all" | "ok" | "denied" | "error";
-    from: string;
-    to: string;
-  }) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await admin.listAudit({
-        page: filters.page,
-        pageSize: PAGE_SIZE,
-        // actionLike supports prefix/substring matching (admin.users.*); plain
-        // `action` requires an exact value, which is rarely what an auditor wants.
-        actionLike: filters.action || undefined,
-        ownerId: filters.ownerId || undefined,
-        actorId: filters.actorId || undefined,
-        targetKind: filters.targetKind || undefined,
-        outcome: filters.outcome === "all" ? undefined : filters.outcome,
-        since: localDateInputToIso(filters.from, false),
-        until: localDateInputToIso(filters.to, true),
-      });
-      setRows(result.rows);
-      setTotal(result.total);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
-    } finally {
-      setLoading(false);
-    }
+  // v2.42.0 (6.8): sortare client-side pe pagina curenta. Rezultatul se
+  // sorteaza pe eticheta UMANA (OK/Refuzat/Eroare), ca ordinea sa urmeze ce
+  // vede userul in badge.
+  const sort = useClientSort(rows, {
+    ts: (r) => r.ts,
+    action: (r) => r.action,
+    outcome: (r) => outcomeLabel(r.outcome),
+    owner: (r) => r.ownerEmail ?? r.ownerId,
+    actor: (r) => r.actorEmail ?? r.actorId,
+  });
+
+  // v2.42.0 (6.7): pattern-ul corect de filtre + fetch.
+  //   - inputurile text merg prin debounce 300ms cu FLUSH expus ("Reseteaza"
+  //     publica imediat "" pe toate — altfel fetch-ul pleaca cu filtrele vechi
+  //     inca 300ms);
+  //   - resetarea paginii se face INLINE in handlerele de input, NU intr-un
+  //     efect paralel cu aceleasi deps (dubla fetch-ul si lasa raspunsuri
+  //     stale sa suprascrie);
+  //   - efectul de fetch are AbortController cu cleanup + guards pe
+  //     then/catch/finally — un raspuns lent nu suprascrie unul proaspat;
+  //   - reincarcarea manuala = refreshTick numarat in deps-ul ACELUIASI efect.
+  const [debouncedAction, flushAction] = useDebouncedValue(action);
+  const [debouncedOwnerId, flushOwnerId] = useDebouncedValue(ownerId);
+  const [debouncedActorId, flushActorId] = useDebouncedValue(actorId);
+  const [debouncedTargetKind, flushTargetKind] = useDebouncedValue(targetKind);
+  const [refreshTick, setRefreshTick] = useState(0);
+
+  const resetPageInline = () => {
+    setPage(1);
+    setExpanded(new Set());
   };
 
-  const load = () => loadAudit({ page, action, ownerId, actorId, targetKind, outcome, from, to });
-
+  // biome-ignore lint/correctness/useExhaustiveDependencies: refreshTick este trigger explicit de reincarcare (pattern 6.7), nu e citit in corp.
   useEffect(() => {
+    const ac = new AbortController();
     setLoading(true);
     setError(null);
     admin
       .listAudit({
         page,
-        pageSize: PAGE_SIZE,
+        pageSize,
         // actionLike supports prefix/substring matching (admin.users.*); plain
         // `action` requires an exact value, which is rarely what an auditor wants.
-        actionLike: action || undefined,
-        ownerId: ownerId || undefined,
-        actorId: actorId || undefined,
-        targetKind: targetKind || undefined,
+        actionLike: debouncedAction || undefined,
+        ownerId: debouncedOwnerId || undefined,
+        actorId: debouncedActorId || undefined,
+        targetKind: debouncedTargetKind || undefined,
         outcome: outcome === "all" ? undefined : outcome,
         since: localDateInputToIso(from, false),
         until: localDateInputToIso(to, true),
+        signal: ac.signal,
       })
       .then((result) => {
+        if (ac.signal.aborted) return;
         setRows(result.rows);
         setTotal(result.total);
       })
       .catch((err: unknown) => {
+        if (ac.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Eroare la incarcarea jurnalului.");
       })
-      .finally(() => setLoading(false));
-  }, [action, actorId, from, outcome, ownerId, page, targetKind, to]);
+      .finally(() => {
+        if (!ac.signal.aborted) setLoading(false);
+      });
+    return () => ac.abort();
+  }, [
+    debouncedAction,
+    debouncedActorId,
+    debouncedOwnerId,
+    debouncedTargetKind,
+    from,
+    outcome,
+    page,
+    pageSize,
+    to,
+    refreshTick,
+  ]);
 
-  // biome-ignore lint/correctness/useExhaustiveDependencies: resetarea paginii si expanded depinde explicit de filtrele vizibile.
-  useEffect(() => {
-    setPage(1);
-    setExpanded(new Set());
-  }, [action, actorId, from, outcome, ownerId, targetKind, to]);
+  const onResetFilters = () => {
+    setAction("");
+    setOwnerId("");
+    setActorId("");
+    setTargetKind("");
+    setOutcome("all");
+    setFrom("");
+    setTo("");
+    // Flush: fetch-ul imediat pleaca cu filtrele goale, nu cu cele vechi.
+    flushAction("");
+    flushOwnerId("");
+    flushActorId("");
+    flushTargetKind("");
+    resetPageInline();
+  };
+
+  // v2.42.0 (5.4): raportul xlsx pe intervalul filtrelor curente.
+  const [exporting, setExporting] = useState(false);
+  const onExport = async () => {
+    setExporting(true);
+    setError(null);
+    try {
+      const params = new URLSearchParams();
+      // Aceleasi filtre ca fetch-ul listei (valorile debounced, nu cele live),
+      // ca exportul sa contina exact ce vede adminul in tabel.
+      if (debouncedAction) params.set("actionLike", debouncedAction);
+      if (debouncedOwnerId) params.set("ownerId", debouncedOwnerId);
+      if (debouncedActorId) params.set("actorId", debouncedActorId);
+      if (debouncedTargetKind) params.set("targetKind", debouncedTargetKind);
+      if (outcome !== "all") params.set("outcome", outcome);
+      const since = localDateInputToIso(from, false);
+      const until = localDateInputToIso(to, true);
+      if (since) params.set("since", since);
+      if (until) params.set("until", until);
+      const qs = params.toString();
+      const blob = await fetchBlobOrThrow(`/api/v1/admin/audit/export${qs ? `?${qs}` : ""}`);
+      triggerBlobDownload(blob, `raport-audit-${new Date().toISOString().slice(0, 10)}.xlsx`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Eroare la generarea raportului.");
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const toggleExpand = (id: number) => {
     setExpanded((prev) => {
@@ -146,25 +197,38 @@ export default function AdminAudit() {
     if (ownerId) parts.push(`owner=${ownerId}`);
     if (actorId) parts.push(`actor=${actorId}`);
     if (targetKind) parts.push(`tinta=${targetKind}`);
-    if (outcome !== "all") parts.push(`rezultat=${outcome}`);
+    if (outcome !== "all") parts.push(`rezultat=${outcomeLabel(outcome)}`);
     return parts.join(" · ");
   })();
 
   return (
-    <div className="min-h-full bg-background p-6">
-      <div className="mx-auto max-w-7xl space-y-5">
+    <div className={cn(!embedded && "min-h-full bg-background p-6")}>
+      <div className={cn("space-y-5", !embedded && "mx-auto max-w-7xl")}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
-              <ClipboardList className="h-6 w-6 text-primary" />
-              Audit
-            </h1>
-            <p className="mt-1 text-sm text-muted-foreground">{summary}</p>
+            {!embedded && (
+              <h1 className="flex items-center gap-2 text-2xl font-semibold tracking-tight">
+                <ClipboardList className="h-6 w-6 text-primary" />
+                Audit
+              </h1>
+            )}
+            <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>{summary}</p>
           </div>
-          <Button variant="outline" onClick={load} disabled={loading}>
-            <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
-            Refresh
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={onExport}
+              disabled={exporting}
+              title="Genereaza raport xlsx pe intervalul din filtrele De la / Pana la (goale = toata baza; max 10000 evenimente)"
+            >
+              <Download className={cn("h-4 w-4", exporting && "animate-pulse")} />
+              {exporting ? "Se genereaza..." : "Descarca raport"}
+            </Button>
+            <Button variant="outline" onClick={() => setRefreshTick((t) => t + 1)} disabled={loading}>
+              <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
+              Reincarca
+            </Button>
+          </div>
         </div>
 
         <Card>
@@ -179,32 +243,50 @@ export default function AdminAudit() {
               <input
                 type="text"
                 value={action}
-                onChange={(e) => setAction(e.target.value)}
+                onChange={(e) => {
+                  setAction(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Actiune (ex: admin.users)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={ownerId}
-                onChange={(e) => setOwnerId(e.target.value)}
+                onChange={(e) => {
+                  setOwnerId(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Owner ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={actorId}
-                onChange={(e) => setActorId(e.target.value)}
+                onChange={(e) => {
+                  setActorId(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Actor ID"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
               <input
                 type="text"
                 value={targetKind}
-                onChange={(e) => setTargetKind(e.target.value)}
+                onChange={(e) => {
+                  setTargetKind(e.target.value);
+                  resetPageInline();
+                }}
                 placeholder="Tip tinta (ex: user)"
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
               />
-              <Select value={outcome} onValueChange={(v) => setOutcome(v as typeof outcome)}>
+              <Select
+                value={outcome}
+                onValueChange={(v) => {
+                  setOutcome(v as typeof outcome);
+                  resetPageInline();
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Rezultat" />
                 </SelectTrigger>
@@ -219,30 +301,24 @@ export default function AdminAudit() {
               <input
                 type="date"
                 value={from}
-                onChange={(e) => setFrom(e.target.value)}
+                onChange={(e) => {
+                  setFrom(e.target.value);
+                  resetPageInline();
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 title="De la (inclusiv)"
               />
               <input
                 type="date"
                 value={to}
-                onChange={(e) => setTo(e.target.value)}
+                onChange={(e) => {
+                  setTo(e.target.value);
+                  resetPageInline();
+                }}
                 className="h-9 rounded-md border border-input bg-background px-3 text-sm"
                 title="Pana la (inclusiv)"
               />
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setAction("");
-                  setOwnerId("");
-                  setActorId("");
-                  setTargetKind("");
-                  setOutcome("all");
-                  setFrom("");
-                  setTo("");
-                }}
-                className="md:col-span-1"
-              >
+              <Button variant="ghost" onClick={onResetFilters} className="md:col-span-1">
                 Reseteaza
               </Button>
             </div>
@@ -262,11 +338,21 @@ export default function AdminAudit() {
                 <thead className="border-b border-border bg-muted/50 text-left text-xs uppercase tracking-wider text-muted-foreground">
                   <tr>
                     <th className="w-8 px-2 py-2" />
-                    <th className="px-3 py-2 font-semibold">Cand</th>
-                    <th className="px-3 py-2 font-semibold">Actiune</th>
-                    <th className="px-3 py-2 font-semibold">Rezultat</th>
-                    <th className="px-3 py-2 font-semibold">Owner</th>
-                    <th className="px-3 py-2 font-semibold">Actor</th>
+                    <SortableTh sort={sort} sortKeyName="ts" scopeNote="Sorteaza pagina curenta">
+                      Cand
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="action" scopeNote="Sorteaza pagina curenta">
+                      Actiune
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="outcome" scopeNote="Sorteaza pagina curenta">
+                      Rezultat
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="owner" scopeNote="Sorteaza pagina curenta">
+                      Owner
+                    </SortableTh>
+                    <SortableTh sort={sort} sortKeyName="actor" scopeNote="Sorteaza pagina curenta">
+                      Actor
+                    </SortableTh>
                     <th className="px-3 py-2 font-semibold">Tinta</th>
                     <th className="px-3 py-2 font-semibold">IP</th>
                   </tr>
@@ -279,7 +365,7 @@ export default function AdminAudit() {
                       </td>
                     </tr>
                   )}
-                  {rows.map((row) => {
+                  {sort.sorted.map((row) => {
                     const isOpen = expanded.has(row.id);
                     return (
                       <Fragment key={row.id}>
@@ -299,10 +385,16 @@ export default function AdminAudit() {
                           </td>
                           <td className="px-3 py-2 align-top font-mono text-xs">{row.action}</td>
                           <td className="px-3 py-2 align-top">
-                            <Badge variant={outcomeVariant(row.outcome)}>{row.outcome}</Badge>
+                            <Badge variant={outcomeVariant(row.outcome)}>{outcomeLabel(row.outcome)}</Badge>
                           </td>
-                          <td className="px-3 py-2 align-top font-mono text-xs">{row.ownerId ?? "-"}</td>
-                          <td className="px-3 py-2 align-top font-mono text-xs">{row.actorId ?? "-"}</td>
+                          {/* v2.42.0 (5.4): EMAIL vizibil cu fallback pe ID / "system"
+                              (evenimente de sistem fara owner); ID-ul brut in title. */}
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.ownerId ?? undefined}>
+                            {row.ownerEmail ?? row.ownerId ?? "system"}
+                          </td>
+                          <td className="px-3 py-2 align-top font-mono text-xs" title={row.actorId ?? undefined}>
+                            {row.actorEmail ?? row.actorId ?? "system"}
+                          </td>
                           <td className="px-3 py-2 align-top text-xs">
                             {row.targetKind ? (
                               <span className="font-mono">
@@ -354,21 +446,21 @@ export default function AdminAudit() {
           </CardContent>
         </Card>
 
-        <div className="flex items-center justify-between">
-          <Button variant="outline" onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={page <= 1 || loading}>
-            Inapoi
-          </Button>
-          <span className="text-sm text-muted-foreground">
-            Pagina {page} / {totalPages}
-          </span>
-          <Button
-            variant="outline"
-            onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-            disabled={page >= totalPages || loading}
-          >
-            Inainte
-          </Button>
-        </div>
+        {/* v2.42.0 (5.4): paginare completa. Componenta e 0-based; state-ul
+            paginii ramane 1-based (contractul API). Randurile expandate raman
+            deschise la schimbarea paginii (id-urile nu se suprapun intre pagini). */}
+        <TablePagination
+          page={page - 1}
+          totalPages={totalPages}
+          pageSize={pageSize}
+          onPageChange={(p) => setPage(p + 1)}
+          onPageSizeChange={(s) => {
+            setPageSize(s);
+            setPage(1);
+          }}
+          pageSizes={[25, 50, 100, 200]}
+          disabled={loading}
+        />
       </div>
     </div>
   );
