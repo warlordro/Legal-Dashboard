@@ -76,11 +76,17 @@ process.on("unhandledRejection", (reason) => {
 // re-issue app.quit(). The `backendShutdownStarted` flag short-circuits the
 // recursive before-quit fired by the second app.quit().
 //
-// 5s hard cap so a wedged socket can never hang the user's quit indefinitely;
+// Hard cap so a wedged socket can never hang the user's quit indefinitely;
 // scheduler.stop() already propagates AbortSignal into fetch, so reaching the
 // timeout would indicate a runner that swallowed cancellation — log and force.
+// rev. v2.42.2: capul era 5s, mult sub bugetul intern al backend-ului
+// (SHUTDOWN_DRAIN_MS 30s + drainEmailDispatches 5s in index.ts), deci orice
+// quit in timpul unui tick de monitoring taia drain-ul gratios si arunca
+// outcome-ul run-ului in zbor. Capul de aici e doar failsafe-ul EXTERIOR —
+// bugetele interne ale backend-ului guverneaza durata reala (drain-ul se
+// rezolva in ms cand nu e nimic in zbor); 40s > 30s + 5s + marja.
 let backendShutdownStarted = false;
-const BACKEND_SHUTDOWN_TIMEOUT_MS = 5000;
+const BACKEND_SHUTDOWN_TIMEOUT_MS = 40_000;
 app.on("before-quit", (event) => {
   const shutdown = globalThis.__legalDashboardShutdown;
   if (typeof shutdown !== "function") return;
@@ -287,7 +293,10 @@ const MAX_PLAINTEXT = 8 * 1024;
 const MAX_CIPHERTEXT_B64 = 16 * 1024;
 
 // SECURITY: only the app's own renderer may drive safeStorage — reject IPC calls
-// from any other sender (e.g. a devtools-injected or otherwise unexpected webContents).
+// from any OTHER webContents (child window / sub-frame that inherited the preload).
+// Nota (rev. v2.42.2): codul injectat din consola DevTools ruleaza in webContents-ul
+// paginii inspectate, deci trece acest check — vectorul DevTools e mitigat de
+// `devTools: IS_DEV` (dezactivat in productie), nu de comparatia de sender.
 // mainWindow is not created yet when registerSafeStorageIpc() runs, so null-safe
 // comparison means "no window yet" is treated as untrusted rather than throwing.
 function isTrustedIpcSender(event) {

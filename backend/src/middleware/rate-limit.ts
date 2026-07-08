@@ -71,6 +71,12 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
     const tentry = tokenRateLimitMap.get(tkey);
     if (!tentry || now > tentry.resetTime) {
       tokenRateLimitMap.set(tkey, { count: weight, resetTime: now + RATE_WINDOW });
+      // rev. v2.42.2: fereastra proaspata trebuie sa treaca prin acelasi ceiling —
+      // cu TOKEN_RATE_LIMIT configurat sub weight (env clamp permite 1-2), primul
+      // request weighted din fiecare fereastra ar scapa altfel neplafonat.
+      if (weight > TOKEN_RATE_LIMIT) {
+        return fail(c, 429, "rate_limited", "Prea multe cereri pentru acest token.");
+      }
     } else {
       tentry.count += weight;
       if (tentry.count > TOKEN_RATE_LIMIT) {
@@ -98,6 +104,10 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
 
   if (!entry || now > entry.resetTime) {
     rateLimitMap.set(key, { count: weight, resetTime: now + RATE_WINDOW });
+    // rev. v2.42.2: acelasi ceiling si pe fereastra proaspata (vezi bucket-ul per-token).
+    if (weight > RATE_LIMIT) {
+      return fail(c, 429, "rate_limited", "Prea multe cereri. Incercati din nou in cateva momente.");
+    }
   } else {
     entry.count += weight;
     if (entry.count > RATE_LIMIT) {
@@ -203,9 +213,13 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
     // partajat si ar bloca TOT traficul din spatele acelui NAT/proxy (fix runda 4). Doar tentativele
     // NEautentificate (auth esuata / token lipsa) raman consumate — exact scopul acestui limiter.
     // In finally ca un downstream throw (exceptie neprinsa dupa autentificare reusita) sa nu ramana
-    // blocat cu bucket-ul pre-auth consumat pe nedrept (fix R06). c.res poate fi unset pe calea de
-    // exceptie — ownerId ramane semnalul primar ca autentificarea a reusit.
-    if (c.get("ownerId") || (c.res && c.res.status >= 200 && c.res.status < 300)) {
+    // blocat cu bucket-ul pre-auth consumat pe nedrept (fix R06). c.finalized e obligatoriu pe
+    // ramura fara ownerId (rev. v2.42.2): getter-ul lazy c.res instantiaza `new Response(null)`
+    // (status 200) pe calea de exceptie, deci fara guard un throw INAINTE ca ownerId sa fie setat
+    // ar elibera tentativa — exact clasa de cereri neautentificate esuate pe care limiterul
+    // trebuie sa o numere. In timpul throw-unwind c.finalized e false (error handler-ul Hono
+    // ruleaza dupa acest finally), deci esecul ramane consumat.
+    if (c.get("ownerId") || (c.finalized && c.res.status >= 200 && c.res.status < 300)) {
       releasePreAuthAttempt(key);
     }
 

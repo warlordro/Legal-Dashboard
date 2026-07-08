@@ -1,5 +1,25 @@
 # Changelog - Legal Dashboard
 
+## v2.42.2 - 2026-07-09
+
+Patch de corectii pe findings-urile din review-ul post-merge al v2.42.1 (2 agenti paraleli pe diff-ul de cod). Un fix critic de regresie functionala, doua medii si trei minore. Branch `fix/v2.42.2-review-findings`.
+
+### Fix critic: body limit global vs limite per-ruta
+
+Limiterul global de 1MB introdus in v2.42.1 era montat DUPA routerele `/api/*` (deci nu acoperea `POST /api/v1/tokens`, montat mai devreme in web mode — body nelimitat bufferat integral in memorie de un user autentificat) si, prin ordinea de inregistrare Hono, UMBREA limitele per-ruta mai mari de 1MB: exportul xlsx de dosare/termene (limita proprie 25MB) si name-lists preview/commit (10MB/15MB) primeau 413 "Payload prea mare" pe payload-uri normale (~300 dosare selectate depasesc deja 1MB). Fix: limiterul global e inregistrat inaintea TUTUROR routerelor, iar rutele cu payload mare legitim sunt exceptate exact-match si raman guvernate de limitele lor proprii. Regresii noi prin app-ul intreg (nu app-uri izolate per-router): body 1.5MB pe export ajunge la validarea rutei (400, nu 413); body >1MB pe `/api/v1/tokens` cu sesiune valida primeste 413.
+
+### Fixuri medii
+
+Release-ul bucket-ului pre-auth de rate limit e acum gardat pe `c.finalized`: getter-ul lazy `c.res` din Hono instantiaza `Response(null)` cu status 200 pe calea de exceptie, deci un throw INAINTE de autentificare elibera tentativa — exact clasa de cereri neautentificate esuate pe care limiterul trebuie sa o numere (regresie introdusa de mutarea release-ului in `finally` la v2.42.1). Timeout-ul de shutdown din Electron a crescut de la 5s la 40s: era mult sub bugetul intern de drain al backend-ului (30s HTTP/scheduler + 5s email), deci orice inchidere a aplicatiei in timpul unui tick de monitoring taia drain-ul gratios; capul exterior e doar failsafe — cand nu e nimic in zbor, drain-ul se rezolva in milisecunde.
+
+### Fixuri minore
+
+Fereastra proaspata de rate limit trece prin acelasi ceiling ca ramura de increment (cu `LEGAL_DASHBOARD_TOKEN_RATE_LIMIT` sub weight-ul 3x al `analyze-multi`, primul request din fiecare fereastra scapa neplafonat). Comentariul `isTrustedIpcSender` din `electron/main.js` nu mai sustine ca sender check-ul blocheaza consola DevTools (vectorul real e inchis de `devTools: IS_DEV`). Comentariul `finalize_noop` din scheduler documenteaza consecinta de re-claim imediat pe ramura non-duplicate, asumata sub single-writer.
+
+### Verificare
+
+Biome, tsc backend + frontend, build si suitele complete backend + frontend; 4 teste de regresie noi (export 1.5MB nu primeste 413, tokens web mode 413 pe >1MB, bucket pre-auth retinut la throw pre-auth, ceiling pe fereastra proaspata per-token).
+
 ## v2.42.1 - 2026-07-08
 
 Patch de hardening rezultat din auditul full-project post-v2.42.0 (multi-agent + multi-model). Zero features noi; 10 fixuri de securitate si robustete pe findings confirmate individual pe cod, cu prioritate pe suprafata web. Branch `fix/v2.42.1-web-hardening`.

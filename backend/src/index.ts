@@ -275,6 +275,31 @@ if (getAuthMode() === "web") {
 // for cross-LAN POST/PUT/PATCH/DELETE.
 app.use("/api/*", originGuard);
 
+// R07 hardening (rev. v2.42.2): global 1MB safety net pe /api/*. Hono ruleaza
+// middleware-ul in ordinea INREGISTRARII, deci limiterul trebuie montat inaintea
+// ORICARUI router /api — v2.42.1 il monta dupa mount-ul /api/v1/tokens (web mode),
+// ceea ce lasa POST /api/v1/tokens complet fara limita de body. Simetric, montat
+// global inaintea routerelor ar UMBRI limitele per-ruta mai mari de 1MB (Hono
+// bodyLimit intoarce 413 pe Content-Length fara sa apeleze next()), deci rutele
+// cu payload mare legitim sunt exceptate exact-match si raman guvernate de
+// limitele lor proprii: export xlsx dosare/termene (25MB), name-lists
+// preview/commit (10MB/15MB). Restul rutelor cu limite proprii (toate <1MB)
+// primesc doar plafonul suplimentar de siguranta. Same envelope shape as the
+// per-route limiters.
+const GLOBAL_BODY_LIMIT = 1024 * 1024;
+const LARGE_BODY_ROUTES = new Set([
+  "/api/v1/dosare/export.xlsx",
+  "/api/v1/termene/export.xlsx",
+  "/api/v1/name-lists",
+  "/api/v1/name-lists/preview",
+  "/api/v1/name-lists/commit",
+]);
+const globalBodyLimit = bodyLimit({
+  maxSize: GLOBAL_BODY_LIMIT,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+app.use("/api/*", (c, next) => (LARGE_BODY_ROUTES.has(c.req.path) ? next() : globalBodyLimit(c, next)));
+
 // Token-management DUPA originGuard (CSRF) + rateLimit. Gate-ul de mai sus deja respinge
 // PAT-urile pe /api/v1/tokens (PAT_CANNOT_MANAGE_TOKENS), deci sesiunile ajung aici Origin-checked.
 if (getAuthMode() === "web") {
@@ -368,20 +393,6 @@ function detailedHealthHandler(c: Context): Response {
     emailConfigured,
   });
 }
-
-// R07 hardening: global 1MB safety net on /api/*, mounted before the routers.
-// Existing per-route limits (64KB search, 512KB bulk, etc. — see rnpm.ts and
-// friends) are all under this ceiling and stay unaffected; this only catches
-// future routes that forget to set their own tighter limit. Same envelope
-// shape as the per-route limiters.
-const GLOBAL_BODY_LIMIT = 1024 * 1024;
-app.use(
-  "/api/*",
-  bodyLimit({
-    maxSize: GLOBAL_BODY_LIMIT,
-    onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
-  })
-);
 
 app.route("/api/rnpm", rnpmRouter);
 app.route("/api/dosare", dosareRouter);
