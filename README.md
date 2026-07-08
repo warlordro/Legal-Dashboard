@@ -7,7 +7,7 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.41.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.42.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
 Ultimul release **v2.42.0** - administrare completa a utilizatorilor in web mode: creare individuala si import Excel cu template descarcabil (email unic case-insensitive, migratia 0040, reactivare automata a conturilor sterse), pagina Setari reorganizata pe taburi cu gating pe rol, buget AI unic per utilizator (migratiile 0041/0042 consolideaza ai.single+ai.multi intr-un pool "ai" cu granturi temporare), tab Consum per utilizator pe aceleasi cifre ca enforcementul (cu totaluri si echivalent EUR), audit cu emailuri si raport XLSX exportabil, refresh AI (Claude Sonnet 5 + prompturi system/user separate de date) si doua niveluri de finisaj UX (toast-uri, confirmari unificate, sortare pe coloane, dark mode fara scapari). Predecesor **v2.41.0** - primul val de corectii post-testare web (layout browser, chei tenant in frontend, UX cote).
