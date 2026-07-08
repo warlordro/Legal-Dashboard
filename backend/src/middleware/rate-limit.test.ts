@@ -570,4 +570,66 @@ describe("PR-9 fix B2 - pre-auth rate limit", () => {
       expect(res.status).toBe(500);
     }
   });
+
+  // v2.42.2 regression: getter-ul lazy c.res instantiaza `new Response(null)`
+  // (status 200) pe calea de exceptie, deci conditia veche `c.res && c.res.status
+  // < 300` elibera tentativa la un throw INAINTE ca ownerId sa fie setat — exact
+  // clasa de cereri neautentificate esuate pe care limiterul trebuie sa o numere.
+  // Guard-ul pe c.finalized pastreaza consumul: in timpul throw-unwind finalized
+  // e false (error handler-ul Hono ruleaza dupa finally-ul limiterului).
+  it("retine bucket-ul cand handler-ul arunca INAINTE ca autentificarea sa reuseasca", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.56" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.get("/api/boom-preauth", () => {
+      // ownerId ramane nesetat — simuleaza un throw in ownerContext/auth provider
+      // inainte ca autentificarea sa reuseasca.
+      throw new Error("pre-auth boom");
+    });
+
+    for (let i = 0; i < 60; i++) {
+      const res = await app.request("/api/boom-preauth");
+      expect(res.status).toBe(500);
+    }
+
+    // Pre-fix, release-ul eronat golea bucket-ul la fiecare request si flood-ul
+    // nu atingea niciodata 429.
+    const limited = await app.request("/api/boom-preauth");
+    expect(limited.status).toBe(429);
+  });
+
+  // v2.42.2: fereastra proaspata trece prin acelasi ceiling ca ramura de
+  // increment. Cu LEGAL_DASHBOARD_TOKEN_RATE_LIMIT=2 (clamp permite 1-2) si
+  // weight=3 pe analyze-multi, primul request din fiecare fereastra scapa
+  // pre-fix neplafonat (bucket-ul era setat la count=3 fara verificare).
+  it("fereastra proaspata respecta ceiling-ul per-token cand weight > TOKEN_RATE_LIMIT", async () => {
+    vi.resetModules();
+    vi.stubEnv("LEGAL_DASHBOARD_TOKEN_RATE_LIMIT", "2");
+    try {
+      const rl = await import("./rate-limit.ts");
+      const conninfo = await import("@hono/node-server/conninfo");
+      vi.mocked(conninfo.getConnInfo).mockReturnValue({
+        remote: { address: "10.0.0.57" },
+      } as ReturnType<typeof getConnInfo>);
+
+      const app = new Hono();
+      app.use("*", async (c, next) => {
+        c.set("ownerId", "local");
+        c.set("tokenId", "tok-fresh-window");
+        await next();
+      });
+      app.use("/api/*", rl.rateLimit);
+      app.post("/api/ai/analyze-multi", (c) => c.json({ ok: true }));
+
+      const res = await app.request("/api/ai/analyze-multi", { method: "POST" });
+      expect(res.status).toBe(429);
+    } finally {
+      vi.unstubAllEnvs();
+      vi.resetModules();
+    }
+  });
 });

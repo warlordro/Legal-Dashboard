@@ -40,6 +40,27 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.42.2",
+    date: "9 Iulie 2026",
+    subtitle:
+      "Corectii pe constatarile review-ului post-lansare al v2.42.1: exporturile si importurile mari functioneaza din nou (limita globala de 1MB le bloca), limita de marime acopera acum si crearea tokenurilor API, iar inchiderea aplicatiei asteapta finalizarea verificarilor de monitorizare in curs.",
+    icon: <Wrench className="h-5 w-5" />,
+    borderColor: "border-l-amber-500",
+    badgeClass: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
+    sections: [
+      {
+        title: "Export si import de volume mari reparate",
+        content:
+          'Plasa de siguranta de 1MB introdusa in v2.42.1 bloca din greseala si rutele care accepta legitim payload-uri mari: exportul Excel de dosare si termene (pana la 25MB) si importul listelor de nume (10-15MB) primeau eroarea "Payload prea mare" la volume normale de lucru (aproximativ 300 de dosare selectate depaseau deja pragul). Limitele dedicate ale acestor rute guverneaza din nou, iar plasa globala ramane activa pe restul rutelor si acopera acum si crearea tokenurilor API in modul web, care ramasese complet fara limita.',
+      },
+      {
+        title: "Limitare cereri si inchidere aplicatie",
+        content:
+          "Limiterul de cereri neautentificate nu mai ierta incercarile esuate printr-o exceptie aparuta inainte de autentificare, iar prima cerere din fiecare fereastra de limitare trece prin acelasi plafon ca restul. La inchiderea aplicatiei, backend-ul primeste acum timp suficient sa termine verificarea de monitorizare aflata in curs si sa salveze rezultatul, in loc sa fie intrerupt dupa 5 secunde.",
+      },
+    ],
+  },
+  {
     version: "v2.42.1",
     date: "8 Iulie 2026",
     subtitle:

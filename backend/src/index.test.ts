@@ -248,6 +248,36 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(body.error.code).toBe("PAYLOAD_TOO_LARGE");
   });
 
+  // v2.42.2 regression: in v2.42.1 limiterul global de 1MB era montat inaintea
+  // routerelor si UMBREA limitele per-ruta mai mari (export xlsx are 25MB) —
+  // orice export normal peste 1MB primea 413 inainte de orice logica de ruta.
+  // Post-fix, rutele din LARGE_BODY_ROUTES sunt exceptate de limiterul global
+  // si raman guvernate de limitele proprii: un body de ~1.5MB trece de
+  // transport si ajunge la validarea rutei (400 "Lista dosare goala"), nu 413.
+  it(
+    "per-route 25MB limit governs /api/v1/dosare/export.xlsx — 1.5MB body reaches route validation, not 413",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+      });
+      await waitForHealth(port);
+
+      const payload = JSON.stringify({ dosare: [], pad: "a".repeat(1_600_000) });
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/dosare/export.xlsx`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: payload,
+      });
+      expect(res.status).toBe(400);
+      const body = (await res.json()) as { error: string };
+      expect(body.error).toBe("Lista dosare goala");
+    }
+  );
+
   it("fails boot when remote bind is enabled in desktop auth mode", { timeout: 20_000 }, async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
       throw new Error("process.exit called");
@@ -333,6 +363,40 @@ describe("PAT surface — web-mode mount ordering (Task 16)", () => {
       expect(denied).toBeGreaterThan(0);
     }
   );
+
+  // v2.42.2 regression: in v2.42.1 apiTokensRouter era montat INAINTEA limiterului
+  // global de body (linia de mount ruleaza inaintea app.use-ului cu bodyLimit),
+  // deci POST /api/v1/tokens nu avea NICIO limita — un user de sesiune autentificat
+  // putea trimite un body oricat de mare si c.req.json() il buffera integral in
+  // memorie. Post-fix limiterul e inregistrat inaintea tuturor routerelor.
+  it("global body limit covers POST /api/v1/tokens in web mode (413 on >1MB body)", { timeout: 25_000 }, async () => {
+    const port = randomPort();
+    await importFreshIndex({ LEGAL_DASHBOARD_PORT: String(port), LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(), ...WEB });
+    await waitForHealth(port);
+
+    const { insertUser } = await import("./db/userRepository.ts");
+    insertUser({ id: "alice", email: "alice@example.com", displayName: "Alice", status: "active" });
+    const { signAuthToken } = await import("./auth/jwt.ts");
+    const session = signAuthToken(
+      {
+        sub: "alice",
+        exp: Math.floor(Date.now() / 1000) + 3600,
+        iss: "legal-dashboard.test",
+        aud: "legal-dashboard-api",
+      },
+      SECRET
+    );
+
+    const oversized = JSON.stringify({ name: "x".repeat(1024 * 1024 + 64) });
+    const res = await fetch(`http://127.0.0.1:${port}/api/v1/tokens`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${session}`, "content-type": "application/json" },
+      body: oversized,
+    });
+    expect(res.status).toBe(413);
+    const body = (await res.json()) as { error: { code: string } };
+    expect(body.error.code).toBe("PAYLOAD_TOO_LARGE");
+  });
 
   it("does NOT mount the PAT surface in desktop mode (openapi + tokens are 404)", { timeout: 25_000 }, async () => {
     const port = randomPort();

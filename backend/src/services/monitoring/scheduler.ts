@@ -562,6 +562,11 @@ export class Scheduler {
             // 'aborted' concurrently, or a duplicate finalize call). Advancing
             // fail_streak/next_run_at here would double-apply an outcome that
             // was never actually observed by this run — skip and just log.
+            // Consecinta asumata (rev. v2.42.2): pe ramura non-duplicate,
+            // next_run_at ramane in trecut si urmatorul tick re-claimeaza jobul
+            // imediat. Acceptabil sub single-writer (single-instance lock pe
+            // desktop, single-replica pe server); daca apare vreodata
+            // multi-replica, claim-ul are nevoie de ownership distribuit.
             console.warn(
               JSON.stringify({
                 action: "monitoring.finalize_noop",
