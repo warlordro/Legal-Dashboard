@@ -16,11 +16,12 @@ import Database from "better-sqlite3";
 import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { closeDb, getDb } from "../../db/schema.ts";
 import { withMaintenanceWrite } from "../../db/backup.ts";
 import { isJtiRevoked, revokeJti } from "../../db/jwtDenylistRepository.ts";
+import { finalize } from "../../db/monitoringRunsRepository.ts";
 import { setMonitoringEnabled } from "../../db/ownerMonitoringSettingsRepository.ts";
 import { FakeClock } from "./clock.ts";
 import { Scheduler, type JobRunner, type RunOutcome, type ScheduledJob } from "./scheduler.ts";
@@ -255,6 +256,63 @@ describe("Scheduler — tick error path", () => {
     const job = readJob(jobId);
     expect(job.fail_streak).toBe(3);
     expect(job.next_run_at).toBe("2026-04-28T10:08:00.000Z"); // T0 + 480s
+  });
+
+  // Bug 7 (v2.42.1): finalize() intoarce false cand run-ul nu mai e 'running'
+  // (finalizat concurent / recovery), dar return-ul era ignorat —
+  // applyJobOutcome dublu-aplica fail_streak/next_run_at si putea emite alerte
+  // source_error false. Runner-ul de mai jos saboteaza: finalizeaza SINGUR
+  // run-ul ca 'aborted' inainte sa returneze outcome-ul de eroare.
+  it("run deja terminal la finalize: fail_streak neschimbat, status pastrat, log finalize_noop (Bug 7)", async () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const jobId = seedJob({
+        cadenceSec: 600,
+        nextRunAt: "2026-04-28T09:00:00.000Z",
+      });
+      const sabotage: JobRunner = {
+        async run(input) {
+          finalize(input.runId, {
+            status: "aborted",
+            endedAt: input.nowIso,
+            durationMs: 1,
+            alertsCreated: 0,
+            alertsPatched: 0,
+          });
+          return { status: "error", errorCode: "TEST_FAIL", errorMessage: "synthetic failure" };
+        },
+      };
+      const sch = new Scheduler({
+        clock: new FakeClock(T0_DATE),
+        runners: { dosar_soap: sabotage },
+        tickIntervalMs: 60_000,
+        claimLimit: 10,
+        jitterSecMax: 0,
+      });
+
+      await sch.start();
+      await sch.tickOnce();
+      await sch.stop();
+
+      // Outcome-ul NU se aplica pe un run deja terminal: fail_streak ramane 0,
+      // statusul terminal pre-existent nu e suprascris, nicio alerta emisa.
+      const job = readJob(jobId);
+      expect(job.fail_streak).toBe(0);
+      const run = getDb().prepare("SELECT status FROM monitoring_runs WHERE job_id = ?").get(jobId) as {
+        status: string;
+      };
+      expect(run.status).toBe("aborted");
+      const alerts = getDb().prepare("SELECT COUNT(*) AS n FROM monitoring_alerts WHERE job_id = ?").get(jobId) as {
+        n: number;
+      };
+      expect(alerts.n).toBe(0);
+      // Log structurat pentru observabilitate.
+      expect(
+        warnSpy.mock.calls.some((args) => typeof args[0] === "string" && args[0].includes("monitoring.finalize_noop"))
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 
   // 5 consecutive failures = "the source is broken, not transient flake".

@@ -21,25 +21,27 @@ export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: str
   // valide); doar modelId-ul se schimba.
   "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-5" },
   "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-8" },
-  // OpenAI
-  "gpt-5.4-nano": { provider: "openai", modelId: "gpt-5.4-nano" },
-  "gpt-5.4-mini": { provider: "openai", modelId: "gpt-5.4-mini" },
-  "gpt-5.4": { provider: "openai", modelId: "gpt-5.4" },
+  // OpenAI — v2.42.x: familia GPT-5.6 inlocuieste 5.4 (Sol=premium,
+  // Terra=echilibrat, Luna=rapid). Chei interne noi, versionate; cheile 5.4
+  // nu mai exista in catalog — requesturile cu ele primesc 400 UNKNOWN_MODEL.
+  "gpt-5.6-luna": { provider: "openai", modelId: "gpt-5.6-luna" },
+  "gpt-5.6-terra": { provider: "openai", modelId: "gpt-5.6-terra" },
+  "gpt-5.6-sol": { provider: "openai", modelId: "gpt-5.6-sol" },
   // Google
   "gemini-flash-lite-3": { provider: "google", modelId: "gemini-3.1-flash-lite-preview" },
   "gemini-flash-3.5": { provider: "google", modelId: "gemini-3.5-flash" },
   "gemini-pro-3": { provider: "google", modelId: "gemini-3.1-pro-preview" },
 };
 
-export const JUDGE_MODELS = ["claude-opus", "gpt-5.4", "gemini-pro-3"];
+export const JUDGE_MODELS = ["claude-opus", "gpt-5.6-sol", "gemini-pro-3"];
 
 export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "claude-haiku": "anthropic/claude-haiku-4.5",
   "claude-sonnet": "anthropic/claude-sonnet-5",
   "claude-opus": "anthropic/claude-opus-4.8",
-  "gpt-5.4-nano": "openai/gpt-5.4-nano",
-  "gpt-5.4-mini": "openai/gpt-5.4-mini",
-  "gpt-5.4": "openai/gpt-5.4",
+  "gpt-5.6-luna": "openai/gpt-5.6-luna",
+  "gpt-5.6-terra": "openai/gpt-5.6-terra",
+  "gpt-5.6-sol": "openai/gpt-5.6-sol",
   "gemini-flash-lite-3": "google/gemini-3.1-flash-lite-preview",
   "gemini-flash-3.5": "google/gemini-3.5-flash",
   "gemini-pro-3": "google/gemini-3.1-pro-preview",
@@ -540,7 +542,7 @@ async function callOpenAI(
         if (!responsesUnavailable) throw err;
         // Fallback for keys/gateways that expose only /chat/completions.
         // Use max_completion_tokens (not the deprecated max_tokens) — the
-        // configured gpt-5.4 reasoning models reject max_tokens with a 400.
+        // configured gpt-5.6 reasoning models reject max_tokens with a 400.
         // Compose a FRESH signal so the fallback gets a full timeout budget
         // instead of inheriting the leftover window already consumed by the
         // primary `responses.create` attempt above. The external `signal` is

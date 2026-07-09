@@ -2,6 +2,7 @@ import { serve } from "@hono/node-server";
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
@@ -51,6 +52,7 @@ import { recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
+import { ErrorCodes, fail } from "./util/envelope.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
 import { fileURLToPath } from "node:url";
@@ -269,6 +271,39 @@ if (getAuthMode() === "web") {
 // for cross-LAN POST/PUT/PATCH/DELETE.
 app.use("/api/*", originGuard);
 
+// Bug 1a (v2.42.2): plasa globala 1MB pe /api/*, montata inainte de TOATE
+// routerele — POST /api/v1/tokens facea await c.req.json() fara nicio limita
+// (orice sesiune autentificata putea bufera sute de MB in procesul partajat).
+// Rutele cu payload mare legitim raman guvernate de limitele lor per-ruta
+// (25MB export xlsx dosare/termene, 10/15MB name-lists) prin exceptii
+// exact-match: bodyLimit din Hono intoarce 413 pe Content-Length fara sa
+// apeleze next(), deci plasa montata fara exceptii le-ar umbri (regresia
+// v2.42.1 de pe GitHub, Bug 1b — nu o reproduce).
+const GLOBAL_BODY_LIMIT = 1024 * 1024;
+// Audit advers 2026-07-09: rutele exceptate NU trec cu next() gol — primesc un
+// plafon exterior de 25MB (cel mai mare cap per-ruta existent), astfel incat
+// limitele lor proprii raman defense-in-depth, nu singura aparare: un refactor
+// care ar scapa un bodyLimit per-ruta nu reintroduce buffering nelimitat.
+const LARGE_BODY_CEILING = 25 * 1024 * 1024;
+const LARGE_BODY_ROUTES = new Set([
+  "/api/v1/dosare/export.xlsx",
+  "/api/v1/termene/export.xlsx",
+  "/api/v1/name-lists",
+  "/api/v1/name-lists/preview",
+  "/api/v1/name-lists/commit",
+]);
+const globalBodyLimit = bodyLimit({
+  maxSize: GLOBAL_BODY_LIMIT,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+const largeBodyCeiling = bodyLimit({
+  maxSize: LARGE_BODY_CEILING,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+app.use("/api/*", (c, next) =>
+  LARGE_BODY_ROUTES.has(c.req.path) ? largeBodyCeiling(c, next) : globalBodyLimit(c, next)
+);
+
 // Token-management DUPA originGuard (CSRF) + rateLimit. Gate-ul de mai sus deja respinge
 // PAT-urile pe /api/v1/tokens (PAT_CANNOT_MANAGE_TOKENS), deci sesiunile ajung aici Origin-checked.
 if (getAuthMode() === "web") {
@@ -290,7 +325,14 @@ function publicHealthHandler(c: Context): Response {
   if (!ready) {
     return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
   }
-  return c.json({ status: "ok", service: "Legal Dashboard API" });
+  // Bug 9 (v2.42.1): health-check-ul de boot din Electron verifica un nonce
+  // generat de main process (protectie port-squat: un alt proces care a ocupat
+  // portul nu poate ghici nonce-ul). Campul e emis DOAR cand env-ul e setat de
+  // main inainte de require-ul backend-ului in-proc; in web mode e omis
+  // neconditionat (audit advers 2026-07-09) — un env setat accidental pe un
+  // deployment web nu ajunge pe endpoint-ul public.
+  const bootNonce = getAuthMode() !== "web" ? process.env.LEGAL_DASHBOARD_BOOT_NONCE : undefined;
+  return c.json({ status: "ok", service: "Legal Dashboard API", ...(bootNonce ? { bootNonce } : {}) });
 }
 
 function isLoopbackPeer(c: Context): boolean {
@@ -308,10 +350,19 @@ function detailedHealthHandler(c: Context): Response {
   if (!ready) {
     return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
   }
+  // Bug 5 (v2.42.1): in web mode gate-ul de loopback nu e suficient — un
+  // reverse proxy pe acelasi host (Caddy, oauth2-proxy) atinge ruta ca
+  // "loopback" si ar expune telemetrie operationala (authMode, monitoring,
+  // emailConfigured) oricarui client neautentificat. Ops in web mode
+  // foloseste /health (liveness 200/503); un endpoint admin-only pentru
+  // telemetrie (ex. /api/v1/admin/health) e follow-up — vezi triajul F04 din
+  // planul 2026-07-09.
+  if (getAuthMode() === "web") {
+    return c.json({ error: { code: "forbidden", message: "not available in web mode" } }, 403);
+  }
   // Loopback gate: desktop in-proc (Electron renderer pe 127.0.0.1) si probele
   // container-internal pot accesa fara auth; orice apel cross-LAN intoarce 403
-  // fara informatii operationale. In mod web, admin loggat acceseaza via
-  // /api/v1/admin/health (mount-uit dupa ownerContext) — vezi adminRouter.
+  // fara informatii operationale.
   if (!isLoopbackPeer(c)) {
     return c.json({ error: { code: "forbidden", message: "loopback required" } }, 403);
   }
@@ -460,7 +511,9 @@ try {
   // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
   getAvize({ ownerId: "local", pageSize: 1 });
   flushPendingReclaimAudit();
-  getAvizStats();
+  // Bug 6 (v2.42.1): ownerId e acum obligatoriu in repository — prewarm-ul de
+  // boot (desktop-only path) il paseaza explicit.
+  getAvizStats("local");
   if (getAuthMode() === "web") {
     getMasterKey();
     // Round-trip probe: encrypt + decrypt a non-secret sentinel so a

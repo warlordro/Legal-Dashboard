@@ -485,10 +485,19 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     const timeoutHandle = setTimeout(() => controller.abort(), SSE_TIMEOUT_MS);
 
     const send = (p: BulkProgress) =>
-      stream.writeSSE({
-        event: "progress",
-        data: JSON.stringify(p),
-      });
+      stream
+        .writeSSE({
+          event: "progress",
+          data: JSON.stringify(p),
+        })
+        .catch((err) => {
+          // F06 (audit 2026-07-09): call site-urile `void send(p)` nu au await —
+          // un reject aici (client deconectat mid-stream) ar deveni
+          // unhandledRejection => process.exit(1) in server mode (index.ts) si
+          // ar dobori TOT procesul web. Log si continua; fluxul se opreste
+          // oricum prin abort/timeout.
+          console.error("[rnpm] bulk progress writeSSE failed (client disconnected?)", err);
+        });
 
     const bulkRun = executeBulkSearch(
       validItems,
@@ -603,10 +612,15 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
     const timeoutHandle = setTimeout(() => controller.abort(), SSE_SPLIT_TIMEOUT_MS);
 
     const send = (p: SplitSearchProgress) =>
-      stream.writeSSE({
-        event: "progress",
-        data: JSON.stringify(p),
-      });
+      stream
+        .writeSSE({
+          event: "progress",
+          data: JSON.stringify(p),
+        })
+        .catch((err) => {
+          // F06 (audit 2026-07-09): vezi comentariul din bulk — anti proces-kill.
+          console.error("[rnpm] split progress writeSSE failed (client disconnected?)", err);
+        });
 
     // v2.20.3 Grupul K — capture parentSearchId imediat ce e creat, ca abort-ul
     // sau timeout-ul mid-search sa poata emite SSE `aborted`/`timeout` cu
@@ -630,10 +644,15 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
           parentSearchId = sid;
           // Emite "started" SSE imediat ca front-ul sa stie searchId-ul chiar
           // daca user-ul aborteaza inainte de prima sub-cautare.
-          void stream.writeSSE({
-            event: "started",
-            data: JSON.stringify({ searchId: sid }),
-          });
+          void stream
+            .writeSSE({
+              event: "started",
+              data: JSON.stringify({ searchId: sid }),
+            })
+            .catch((err) => {
+              // F06 (audit 2026-07-09): vezi comentariul din bulk — anti proces-kill.
+              console.error("[rnpm] split started writeSSE failed (client disconnected?)", err);
+            });
         },
       },
       (p) => {

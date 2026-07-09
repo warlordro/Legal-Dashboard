@@ -24,6 +24,11 @@ export function clampTokenRateLimit(raw: number, ceiling: number = RATE_LIMIT): 
 }
 export const TOKEN_RATE_LIMIT = clampTokenRateLimit(Number(process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT));
 
+// Bug 3 (v2.42.1): analyze-multi costa 3 apeluri AI; routerul AI e montat dublu
+// (/api/ai si /api/v1/ai), deci weight-ul se aplica exact-match pe AMBELE
+// path-uri si pe AMBELE bucket-uri (per-token si per-owner).
+const ANALYZE_MULTI_PATHS = new Set(["/api/ai/analyze-multi", "/api/v1/ai/analyze-multi"]);
+
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const tokenRateLimitMap = new Map<string, { count: number; resetTime: number }>();
 
@@ -51,6 +56,9 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   }
   const now = Date.now();
 
+  // Weight-ul cererii, calculat O DATA si aplicat pe ambele bucket-uri (Bug 3).
+  const weight = ANALYZE_MULTI_PATHS.has(c.req.path) ? 3 : 1;
+
   // PAT (piesa A): bucket per-token, aplicat DUPA rezolvarea PAT (tokenId setat de
   // ownerContext). Rulat INAINTE de scutirea /api/rnpm/saved ca un PAT sa NU scape
   // neplafonat pe ruta exceptata (fix R05). Flood-urile cu token invalid sunt deja
@@ -60,9 +68,15 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
     const tkey = `tok|${tokenId}`;
     const tentry = tokenRateLimitMap.get(tkey);
     if (!tentry || now > tentry.resetTime) {
-      tokenRateLimitMap.set(tkey, { count: 1, resetTime: now + RATE_WINDOW });
+      tokenRateLimitMap.set(tkey, { count: weight, resetTime: now + RATE_WINDOW });
+      // Bug 4 (v2.42.2): si fereastra proaspata respecta plafonul — cu
+      // LEGAL_DASHBOARD_TOKEN_RATE_LIMIT sub 3, primul request ponderat
+      // dintr-o fereastra noua scapa altfel neplafonat.
+      if (weight > TOKEN_RATE_LIMIT) {
+        return fail(c, 429, "rate_limited", "Prea multe cereri pentru acest token.");
+      }
     } else {
-      tentry.count += 1;
+      tentry.count += weight;
       if (tentry.count > TOKEN_RATE_LIMIT) {
         return fail(c, 429, "rate_limited", "Prea multe cereri pentru acest token.");
       }
@@ -86,11 +100,14 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   const key = `${ip}|${ownerId}`;
   const entry = rateLimitMap.get(key);
 
-  // SECURITY: Multi-agent endpoint consumes 3 rate limit units (3 AI calls)
-  const weight = c.req.path === "/api/ai/analyze-multi" ? 3 : 1;
-
   if (!entry || now > entry.resetTime) {
     rateLimitMap.set(key, { count: weight, resetTime: now + RATE_WINDOW });
+    // Bug 4 (v2.42.2): simetric cu bucket-ul per-token — plafonul se respecta
+    // si pe fereastra proaspata (azi RATE_LIMIT >= 3, ramura e plasa de
+    // siguranta pentru configuri viitoare).
+    if (weight > RATE_LIMIT) {
+      return fail(c, 429, "rate_limited", "Prea multe cereri. Incercati din nou in cateva momente.");
+    }
   } else {
     entry.count += weight;
     if (entry.count > RATE_LIMIT) {
@@ -187,20 +204,29 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
     }
   }
 
-  await next();
+  // Bug 2 (v2.42.2): release-ul ruleaza si pe calea de exceptie (finally), dar
+  // NUMAI cand autentificarea a reusit. Un caller autentificat al carui request
+  // se termina cu un reject real al lui next() (throw non-Error re-aruncat de
+  // compose, error handler cazut) nu trebuie sa consume bucketul IP-only
+  // partajat — ar bloca tot traficul din spatele aceluiasi NAT/proxy (fix runda
+  // 4 + v2.42.2). Flag-ul local `completed` (audit advers 2026-07-09) evita
+  // atat capcana getter-ului lazy c.res (pe throw-unwind Hono instantiaza
+  // Response(null) cu status 200), cat si dependenta de invariantul de
+  // framework `c.finalized`: pe unwind flag-ul ramane false, deci ramura de
+  // status se aplica doar raspunsurilor reale, complet materializate.
+  let completed = false;
+  try {
+    await next();
+    completed = true;
+  } finally {
+    if (c.get("ownerId") || (completed && c.res.status >= 200 && c.res.status < 300)) {
+      releasePreAuthAttempt(key);
+    }
 
-  // Elibereaza bucket-ul pre-auth cand AUTENTIFICAREA a reusit (ownerId setat de ownerContext,
-  // care ruleaza in interiorul next()), indiferent de statusul final. Altfel un caller autentificat
-  // care primeste 403/429 (ex. un PAT scurs care spameaza rute forbidden) ar epuiza bucketul IP-only
-  // partajat si ar bloca TOT traficul din spatele acelui NAT/proxy (fix runda 4). Doar tentativele
-  // NEautentificate (auth esuata / token lipsa) raman consumate — exact scopul acestui limiter.
-  if (c.get("ownerId") || (c.res.status >= 200 && c.res.status < 300)) {
-    releasePreAuthAttempt(key);
-  }
-
-  if (preAuthMap.size > 1000) {
-    for (const [k, v] of preAuthMap) {
-      if (now > v.resetTime) preAuthMap.delete(k);
+    if (preAuthMap.size > 1000) {
+      for (const [k, v] of preAuthMap) {
+        if (now > v.resetTime) preAuthMap.delete(k);
+      }
     }
   }
 }

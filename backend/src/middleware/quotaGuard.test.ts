@@ -59,7 +59,7 @@ function buildApp(ownerId = "alice") {
   return app;
 }
 
-function buildReserveApp(ownerId = "alice") {
+function buildReserveApp(ownerId = "alice", kind: "ai.single" | "ai.multi" = "ai.single") {
   const app = new Hono();
   app.use("*", async (c, next) => {
     c.set("ownerId", ownerId);
@@ -67,7 +67,7 @@ function buildReserveApp(ownerId = "alice") {
   });
   app.use("*", requestIdContext);
   app.post("/reserve", (c) => {
-    const r = reserveQuotaBudget(c, "ai.single", "anthropic");
+    const r = reserveQuotaBudget(c, kind, "anthropic");
     if (!r.ok) return r.response;
     return c.json({ reservationId: r.reservationId });
   });
@@ -378,9 +378,9 @@ describe("quotaGuard", () => {
 describe("reserveQuotaBudget", () => {
   it("blocheaza cand used + costEstimat depaseste limita desi used e sub limita", async () => {
     process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
-    // limita 2500, folosit 1000: guard-ul threshold-only ar lasa sa treaca,
-    // dar 1000 + 2000 (estimat ai.single) > 2500 => rezervarea refuza.
-    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 2500 });
+    // limita 1200, folosit 1000: guard-ul threshold-only ar lasa sa treaca,
+    // dar 1000 + 250 (estimat ai.single) > 1200 => rezervarea refuza.
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 1200 });
     insertAiUsage({
       ownerId: "alice",
       provider: "anthropic",
@@ -405,11 +405,26 @@ describe("reserveQuotaBudget", () => {
     expect(res.status).toBe(200);
     const { reservationId } = (await res.json()) as { reservationId: number };
 
-    // Pending-ul conteaza la estimat (2000) in fereastra...
-    expect(sumAiUsageMilliInWindow("alice", "ai", 86_400)).toBe(2000);
+    // Pending-ul conteaza la estimat (250) in fereastra...
+    expect(sumAiUsageMilliInWindow("alice", "ai", 86_400)).toBe(250);
     // ...iar release (esec de model) il elimina complet — bugetul nu ramane debitat.
     releaseAiUsageReservation(reservationId);
     expect(sumAiUsageMilliInWindow("alice", "ai", 86_400)).toBe(0);
+  });
+
+  // 2026-07-10: estimarile worst-case initiale (single $2 / multi $8) blocau
+  // orice apel multi sub politica reala de cota (~$5/user/zi) desi costul
+  // real observat al unui run multi e ~$0.27. Estimarile realiste trebuie sa
+  // lase multi sa ruleze cu limita de $5.
+  it("estimat realist: rezervarea ai.multi trece cu limita de $5/zi (politica per-user)", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 5_000 });
+
+    const res = await buildReserveApp("alice", "ai.multi").request("/reserve", { method: "POST" });
+
+    expect(res.status).toBe(200);
+    // Pending-ul rezervat e estimatul realist (500 = $0.50), nu vechiul worst-case 8000.
+    expect(sumAiUsageMilliInWindow("alice", "ai", 86_400)).toBe(500);
   });
 
   it("confirm inlocuieste estimatul cu costul real", async () => {

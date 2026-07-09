@@ -120,6 +120,73 @@ contine integral baseline-audit si v2.41.0-web-ux — lant liniar, verificat cu
 merge-base); dupa merge, branch-urile vechi se pot sterge; fara squash.
 Pre-flight-ul 0040 nu se aplica (nu exista date reale pre-v2.42).
 
+## BATCH HARDENING 2026-07-09/10 — INCHIS (commit unic + push 2026-07-10)
+
+**STARE FINALA:** batch-ul e LIVRAT — commit unic pe
+`feat/v2.42.0-users-settings` + push (2026-07-10), dupa testul live al
+userului pe mediul web local (testul a confirmat si a scos 2 probleme reale,
+ambele tratate — vezi mai jos). Mediul local dev-web a fost OPRIT dupa push;
+repornire: `& scripts/dev-web-local.ps1 -SkipBuild` din pwsh 7, NU powershell
+5.1 (parseaza gresit UTF-8). Sprintul e INCHIS; urmeaza merge-ul MR-ului
+`feat/v2.42.0-users-settings` -> `main` (decizie existenta: MR unic, fara
+squash), apoi follow-up-urile din plan pe branch-uri separate.
+
+**Plan executat (sursa unica, cu triaj audit + follow-up):**
+`docs/superpowers/plans/2026-07-09-fixes-v2.42.1-2-gitlab.md`. Continut batch:
+fixurile v2.42.1->v2.42.2 din review-ul GitHub in forma FINALA (Bug 1a plasa
+globala bodyLimit 1MB pe /api/* cu exceptii exact-match + plafon exterior 25MB;
+Bug 2 preAuth release in try/finally cu flag local `completed`; Bug 3 weight 3x
+analyze-multi pe ambele mount-uri + per-token; Bug 4 plafon pe fereastra
+proaspata; Bug 5 /health/detail 403 in web mode; Bug 6 ownerId obligatoriu in
+aviz/searchRepository; Bug 7 scheduler guard finalize() + durationMs real;
+Bug 8-10 electron: IS_DEV din app.isPackaged, IPC sender validation, boot nonce
+in /health doar non-web, shutdown 40s) + F06 catch pe writeSSE rnpm (anti
+proces-kill web) + fix mailto import useri (mailto castiga DOAR cand textul
+afisat nu contine @; decodare RFC 6068) + migrare modele OpenAI GPT-5.4 ->
+GPT-5.6 Sol/Terra/Luna (pricing preview verificat: 5/30, 2.5/15, 1/6 per 1M;
+5.4 ramane in pricing pentru retry-uri) + changelog v2.42.0 extins (in-app +
+CHANGELOG.md, FARA bump de versiune — decizia userului) + quota: estimari
+realiste de rezervare AI in quotaGuard (single $0.25 / multi $0.50, fost
+$2/$8 — decizia userului 2026-07-10 la testul live: politica ~$5/user facea
+multi-model inutilizabil; TDD, costuri reale ~$0.27/run multi, suita 1719
+verde; env LEGAL_DASHBOARD_QUOTA_ESTIMATE_MULTIPLIER ramane knob peste noile
+valori).
+
+**Verificari FACUTE:** TDD per fix (red inainte de implementare); gate complet
+verde la commit (npm run check: biome + tsc backend+frontend + 1719 backend +
+340 frontend + 2 scripts; npm run build curat); smoke pe aplicatia REALA pe
+localhost (login proxy 200, tokens 201, >1MB=413 PAYLOAD_TOO_LARGE, export
+1.5MB=400 nu 413, /health/detail 403, /health fara bootNonce); AUDIT ADVERS
+review-panel (Opus 4.8 + GPT-5.6 Sol + Kimi K2.7 + GLM-5.2, sinteza Fable):
+4 findings reparate PE LOC (plafon 25MB, flag completed, gate web bootNonce,
+decodare mailto), 5 pe follow-up in plan (top: OPS verifica
+`LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` pe Dokploy!), 6 respinse cu dovezi
+(detalii in plan + raportul HTML).
+
+**Iesite din testul live al userului (2026-07-10), pe follow-up (notate si in
+memoria agentului):**
+- Restore-ul din zona RNPM e de fapt WHOLE-DB (nu exista restore per-modul sau
+  per-user/owner_id) — userul a facut restore crezand ca e doar RNPM si a
+  pierdut scrierile post-boot (inclusiv fx_rates proaspat). Follow-up: RUNBOOK
+  sectiune "recuperare selectiva per user din backup" + copy explicit pe
+  modalul de restore (+ eventual mutat din zona RNPM in Setari).
+- Mesajul 429 QUOTA_EXCEEDED e generic desi `details` are toate cifrele —
+  follow-up UX: afiseaza "estimarea ($X) depaseste limita ($Y)" + nota in Cote
+  despre pragul minim pentru multi. (Cauza radacina — estimarile worst-case
+  $2/$8 — a fost REZOLVATA in batch: single $0.25 / multi $0.50.)
+
+**Artefacte sesiune:** raportul final pentru user
+`Legal-Dashboard-v2.42.0-Fixuri-Post-Review.html` (radacina, untracked, NU se
+comite); scriptul de smoke reutilizabil in scratchpad-ul sesiunii vechi
+(`smoke-web-local.mjs` — login prin proxy, API direct pe 3002, cookie doar in
+memorie; clientii Node strica raspunsurile timpurii 413 prin mini-proxy-ul dev,
+de aceea API-ul se testeaza direct pe backend).
+
+**Paritate GitHub (dupa push):** fixurile NOI din acest batch care nu exista pe
+GitHub (F06 catch SSE, mailto import, GPT-5.6, cele 4 intariri de audit, quota
+estimates $0.25/$0.50) se aplica si acolo la urmatorul sync — doar surse, nu
+infra.
+
 ## Kill switches operationale
 
 | Variabila / mecanism | Effect cand activat | Cand folosesti |

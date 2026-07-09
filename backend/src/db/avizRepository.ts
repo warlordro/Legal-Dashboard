@@ -340,7 +340,7 @@ export function saveAvizFull(input: SaveAvizInput): number {
   return run();
 }
 
-export function getAvizById(id: number, ownerId = "local"): AvizFull | null {
+export function getAvizById(id: number, ownerId: string): AvizFull | null {
   const db = getDb();
   const aviz = db.prepare("SELECT * FROM rnpm_avize WHERE id = ? AND owner_id = ?").get(id, ownerId) as
     | AvizRecord
@@ -349,7 +349,7 @@ export function getAvizById(id: number, ownerId = "local"): AvizFull | null {
   return loadAvizChildren(aviz);
 }
 
-export function getAvizByIdentificator(identificator: string, ownerId = "local"): AvizFull | null {
+export function getAvizByIdentificator(identificator: string, ownerId: string): AvizFull | null {
   const db = getDb();
   const aviz = db
     .prepare("SELECT * FROM rnpm_avize WHERE identificator = ? AND owner_id = ?")
@@ -529,7 +529,7 @@ function cleanupOrphanDescrieri(db: ReturnType<typeof getDb>): number {
   return res.changes;
 }
 
-export function deleteAviz(id: number, ownerId = "local"): boolean {
+export function deleteAviz(id: number, ownerId: string): boolean {
   assertOwnerIdForMutation(ownerId, "deleteAviz");
   const db = getDb();
   const deleted = db.transaction(() => {
@@ -542,7 +542,7 @@ export function deleteAviz(id: number, ownerId = "local"): boolean {
   return deleted;
 }
 
-export function deleteAllAvize(ownerId = "local"): number {
+export function deleteAllAvize(ownerId: string): number {
   assertOwnerIdForMutation(ownerId, "deleteAllAvize");
   const db = getDb();
   // Sterge avizele (CASCADE curata creditori/debitori/bunuri/istoric) si metadata din rnpm_searches.
@@ -557,7 +557,7 @@ export function deleteAllAvize(ownerId = "local"): number {
   return changes;
 }
 
-export function deleteAvizeByIds(ids: number[], ownerId = "local"): number {
+export function deleteAvizeByIds(ids: number[], ownerId: string): number {
   if (ids.length === 0) return 0;
   assertOwnerIdForMutation(ownerId, "deleteAvizeByIds");
   const db = getDb();
@@ -582,7 +582,7 @@ export interface AvizStats {
   byType: Record<string, number>;
 }
 
-export function getAvizStats(ownerId = "local"): AvizStats {
+export function getAvizStats(ownerId: string): AvizStats {
   const db = getDb();
   const totals = db
     .prepare(`
@@ -604,7 +604,7 @@ export function getAvizStats(ownerId = "local"): AvizStats {
   return { total: totals.total, activ: totals.activ, inactiv: totals.inactiv, byType };
 }
 
-export function getAvizeByIds(ids: number[], ownerId = "local"): AvizFull[] {
+export function getAvizeByIds(ids: number[], ownerId: string): AvizFull[] {
   if (ids.length === 0) return [];
   const db = getDb();
   const placeholders = ids.map(() => "?").join(",");

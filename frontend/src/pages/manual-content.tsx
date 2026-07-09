@@ -512,7 +512,7 @@ export function ManualChapters() {
                 OpenAI (GPT)
               </Badge>
             </p>
-            <BulletList items={["GPT-5.4 nano — Rapid", "GPT-5.4 mini — Echilibrat", "GPT-5.4 — Premium"]} />
+            <BulletList items={["GPT-5.6 Luna — Rapid", "GPT-5.6 Terra — Echilibrat", "GPT-5.6 Sol — Premium"]} />
             <p>
               <Badge className="bg-blue-100 text-blue-800 dark:bg-blue-900/30 dark:text-blue-400">
                 Google (Gemini)
@@ -563,7 +563,7 @@ export function ManualChapters() {
               'Selecteaza 2 modele "Analist" — acestea analizeaza dosarul independent si in paralel',
               'Selecteaza 1 model "Judecator" — acesta primeste ambele analize si le reconciliaza',
               "Nu se poate selecta acelasi model de doua ori",
-              "Modelele judecator sunt restrictionate la modele premium: Claude Opus 4.8, GPT-5.4 sau Gemini 3.1 Pro",
+              "Modelele judecator sunt restrictionate la modele premium: Claude Opus 4.8, GPT-5.6 Sol sau Gemini 3.1 Pro",
             ]}
           />
         </SubSection>

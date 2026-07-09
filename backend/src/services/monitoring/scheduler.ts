@@ -265,6 +265,9 @@ export class Scheduler {
     }
 
     const nowIso = this.opts.clock.now().toISOString();
+    // Bug 7 (v2.42.1): ancora pentru durata reala in catch-ul de mai jos —
+    // `durationMs: 0` hardcodat ascundea cat a rulat efectiv jobul cazut.
+    const startMs = this.opts.clock.now().getTime();
     let runId = 0;
     await withMaintenanceRead(async () => {
       // Re-check after lock acquires (same reason as tickOnce).
@@ -314,7 +317,7 @@ export class Scheduler {
         finalize(runId, {
           status: "error",
           endedAt: endIso,
-          durationMs: 0,
+          durationMs: this.opts.clock.now().getTime() - startMs,
           errorCode: "RUNONE_THREW",
           errorMessage: err instanceof Error ? err.message : String(err),
           alertsCreated: 0,
@@ -545,7 +548,7 @@ export class Scheduler {
       let sourceErrorResult: InsertAlertResult | null = null;
       await withMaintenanceRead(async () => {
         getDb().transaction(() => {
-          finalize(runId, {
+          const didFinalize = finalize(runId, {
             status: outcome.status,
             endedAt: endIso,
             durationMs,
@@ -555,6 +558,19 @@ export class Scheduler {
             alertsCreated: outcome.alertsCreated ?? 0,
             alertsPatched: outcome.alertsPatched ?? 0,
           });
+          if (!didFinalize) {
+            // Bug 7 (v2.42.1): run deja terminal (finalizat concurent /
+            // recovery) — skip applyJobOutcome ca sa nu dublu-aplicam
+            // fail_streak/next_run_at si sa nu emitem alerte source_error
+            // false. Consecinta asumata: pe ramura non-duplicate, next_run_at
+            // ramane in trecut si urmatorul tick re-claimeaza jobul imediat.
+            // Acceptabil sub single-writer (single-instance lock desktop /
+            // single-replica server).
+            console.warn(
+              JSON.stringify({ action: "monitoring.finalize_noop", job_id: job.id, run_id: runId, ts: endIso })
+            );
+            return;
+          }
 
           // 'aborted' is graceful drain, NOT a retry-able failure. Leave job
           // state (fail_streak, next_run_at, last_*) untouched so the next boot

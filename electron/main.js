@@ -12,6 +12,7 @@ const {
 } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { randomUUID } = require("node:crypto");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 const { registerNotificationIpc } = require(path.join(__dirname, "notifications.js"));
 const { startEventLoopWatchdog } = require(path.join(__dirname, "event-loop-watchdog.js"));
@@ -76,11 +77,14 @@ process.on("unhandledRejection", (reason) => {
 // re-issue app.quit(). The `backendShutdownStarted` flag short-circuits the
 // recursive before-quit fired by the second app.quit().
 //
-// 5s hard cap so a wedged socket can never hang the user's quit indefinitely;
-// scheduler.stop() already propagates AbortSignal into fetch, so reaching the
-// timeout would indicate a runner that swallowed cancellation — log and force.
+// Bug 10 (v2.42.2): capul exterior TREBUIE sa fie peste bugetul intern de
+// drain al backend-ului (SHUTDOWN_DRAIN_MS 30s + drainEmailDispatches 5s) —
+// cu 5s, orice quit in timpul unui tick de monitoring taia drain-ul si arunca
+// outcome-ul run-ului in zbor. Drain-ul se rezolva in milisecunde cand nu e
+// nimic in zbor, deci quit-ul normal ramane instant; 40s e doar plafonul
+// patologic (runner care a inghitit cancellation) — log si force.
 let backendShutdownStarted = false;
-const BACKEND_SHUTDOWN_TIMEOUT_MS = 5000;
+const BACKEND_SHUTDOWN_TIMEOUT_MS = 40_000;
 app.on("before-quit", (event) => {
   const shutdown = globalThis.__legalDashboardShutdown;
   if (typeof shutdown !== "function") return;
@@ -119,7 +123,11 @@ app.on("before-quit", (event) => {
 let mainWindow;
 let backendStarted = false;
 
-const IS_DEV = process.env.NODE_ENV !== "production";
+// Bug 8 (v2.42.1): NODE_ENV se seteaza pe "production" abia in startBackend(),
+// DUPA ce modulul s-a evaluat — build-urile instalate ramaneau cu DevTools +
+// meniul de debug active (expunere desktopApi.decryptKeys din consola).
+// app.isPackaged e adevarul direct al packagerului.
+const IS_DEV = !app.isPackaged;
 
 function buildAppMenu() {
   const isDev = IS_DEV;
@@ -222,6 +230,13 @@ function startBackend() {
     process.env.MONITORING_ENABLED = "1";
   }
 
+  // Bug 9 (v2.42.1): nonce generat de main, ecou in /health — health-check-ul
+  // de boot nu mai poate fi pacalit de un alt proces care a ocupat portul
+  // (port squat) si raspunde cu service-ul asteptat. Setat INAINTE de
+  // require-ul backend-ului in-proc, ca env-ul sa fie vizibil la module load.
+  const bootNonce = randomUUID();
+  process.env.LEGAL_DASHBOARD_BOOT_NONCE = bootNonce;
+
   try {
     require(path.join(__dirname, "..", "dist-backend", "index.cjs"));
   } catch (err) {
@@ -243,8 +258,9 @@ function startBackend() {
       fetch(`http://localhost:${BACKEND_PORT}/health`)
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((body) => {
-          // SECURITY: Verify response identity to prevent port hijacking
-          if (body && body.service === "Legal Dashboard API") {
+          // SECURITY: Verify response identity to prevent port hijacking.
+          // Bug 9 (v2.42.1): numele serviciului e ghicibil — nonce-ul per-boot nu.
+          if (body && body.service === "Legal Dashboard API" && body.bootNonce === bootNonce) {
             backendStarted = true;
             resolve();
           } else {
@@ -272,10 +288,22 @@ function startBackend() {
 const MAX_PLAINTEXT = 8 * 1024;
 const MAX_CIPHERTEXT_B64 = 16 * 1024;
 
-function registerSafeStorageIpc() {
-  ipcMain.handle("safeStorage:available", () => safeStorage.isEncryptionAvailable());
+// Bug 9 (v2.42.1): valideaza ca IPC-ul vine din webContents-ul ferestrei
+// principale. NU blocheaza codul injectat din consola DevTools (acela ruleaza
+// in acelasi webContents si trece check-ul) — mitigarea reala pentru consola e
+// devTools: IS_DEV. Check-ul opreste webContents secundare (webview, popup).
+function isTrustedIpcSender(event) {
+  return Boolean(mainWindow) && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
+}
 
-  ipcMain.handle("safeStorage:encrypt", (_event, plaintext) => {
+function registerSafeStorageIpc() {
+  ipcMain.handle("safeStorage:available", (event) => {
+    if (!isTrustedIpcSender(event)) return false;
+    return safeStorage.isEncryptionAvailable();
+  });
+
+  ipcMain.handle("safeStorage:encrypt", (event, plaintext) => {
+    if (!isTrustedIpcSender(event)) return null;
     if (typeof plaintext !== "string" || plaintext.length > MAX_PLAINTEXT) return null;
     if (!safeStorage.isEncryptionAvailable()) return null;
     try {
@@ -285,7 +313,8 @@ function registerSafeStorageIpc() {
     }
   });
 
-  ipcMain.handle("safeStorage:decrypt", (_event, ciphertextB64) => {
+  ipcMain.handle("safeStorage:decrypt", (event, ciphertextB64) => {
+    if (!isTrustedIpcSender(event)) return null;
     if (typeof ciphertextB64 !== "string" || ciphertextB64.length > MAX_CIPHERTEXT_B64) return null;
     if (!safeStorage.isEncryptionAvailable()) return null;
     try {
@@ -297,7 +326,8 @@ function registerSafeStorageIpc() {
 
   // Sync renderer theme toggle with the native Windows title bar overlay.
   // Without this, the custom title bar overlay stays frozen at its creation-time color.
-  ipcMain.handle("window:setTheme", (_event, theme) => {
+  ipcMain.handle("window:setTheme", (event, theme) => {
+    if (!isTrustedIpcSender(event)) return;
     if (theme !== "dark" && theme !== "light" && theme !== "system") return;
     nativeTheme.themeSource = theme;
     const effective = theme === "system" ? (nativeTheme.shouldUseDarkColors ? "dark" : "light") : theme;

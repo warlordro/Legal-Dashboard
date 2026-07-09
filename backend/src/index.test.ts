@@ -90,6 +90,9 @@ describe("PR-9 index boot/auth boundaries", () => {
   // Detalii operationale (authMode, emailConfigured, monitoring) sunt mutate la
   // /health/detail, accesibil doar de pe loopback. Probele de mai jos verifica
   // ca /health/detail intoarce telemetry-ul corect cand sunt apelate local.
+  // Bug 5 (v2.42.1): in web mode /health/detail e 403 neconditionat, deci
+  // probele de telemetrie SMTP ruleaza pe desktop (detectia configului e
+  // identica intre moduri).
   it(
     "/health/detail exposes emailConfigured=false when SMTP_* env vars are missing (Batch 2.3)",
     { timeout: 20_000 },
@@ -98,10 +101,7 @@ describe("PR-9 index boot/auth boundaries", () => {
       await importFreshIndex({
         LEGAL_DASHBOARD_PORT: String(port),
         LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-        LEGAL_DASHBOARD_AUTH_MODE: "web",
-        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
-        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
-        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
         SMTP_HOST: "",
         SMTP_PORT: "",
         SMTP_USER: "",
@@ -152,10 +152,7 @@ describe("PR-9 index boot/auth boundaries", () => {
       await importFreshIndex({
         LEGAL_DASHBOARD_PORT: String(port),
         LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-        LEGAL_DASHBOARD_AUTH_MODE: "web",
-        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
-        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
-        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
         SMTP_HOST: "smtp.example.test",
         SMTP_PORT: "587",
         SMTP_USER: "user",
@@ -170,6 +167,26 @@ describe("PR-9 index boot/auth boundaries", () => {
       expect(body.emailConfigured).toBe(true);
     }
   );
+
+  it("/health/detail intoarce 403 neconditionat in web mode (Bug 5 v2.42.1)", { timeout: 20_000 }, async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "web",
+      LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+    });
+    await waitForHealth(port);
+
+    // Apel de pe loopback — exact scenariul reverse proxy same-host (Caddy,
+    // oauth2-proxy) care pacalea gate-ul vechi. Web mode = 403 fara
+    // telemetrie, indiferent de peer.
+    const detail = await fetch(`http://127.0.0.1:${port}/health/detail`);
+    expect(detail.status).toBe(403);
+    expect(((await detail.json()) as { error: { code: string } }).error.code).toBe("forbidden");
+  });
 
   it("/health public response strips operational telemetry (F15 audit hardening)", { timeout: 20_000 }, async () => {
     const port = randomPort();
@@ -188,7 +205,49 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(body.monitoring).toBeUndefined();
     expect(body.emailConfigured).toBeUndefined();
     expect(body.loginAvailable).toBeUndefined();
+    // Bug 9 (v2.42.1): fara env-ul de boot nonce campul e omis complet
+    // (server/web mode nu il emite niciodata).
+    expect(body.bootNonce).toBeUndefined();
   });
+
+  it(
+    "/health ecoul bootNonce doar cand LEGAL_DASHBOARD_BOOT_NONCE e setat (Bug 9 v2.42.1)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+        LEGAL_DASHBOARD_BOOT_NONCE: "nonce-test-123",
+      });
+      const health = await waitForHealth(port);
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as { bootNonce?: string };
+      expect(body.bootNonce).toBe("nonce-test-123");
+    }
+  );
+
+  it(
+    "/health NU ecoul bootNonce in web mode, chiar cu env-ul setat (audit 2026-07-09)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "web",
+        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+        LEGAL_DASHBOARD_BOOT_NONCE: "nonce-test-456",
+      });
+      const health = await waitForHealth(port);
+      expect(health.status).toBe(200);
+      const body = (await health.json()) as { bootNonce?: string };
+      expect(body.bootNonce).toBeUndefined();
+    }
+  );
 
   it("fails boot when remote bind is enabled in desktop auth mode", { timeout: 20_000 }, async () => {
     const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
@@ -287,5 +346,117 @@ describe("PAT surface — web-mode mount ordering (Task 16)", () => {
     const base = `http://127.0.0.1:${port}`;
     expect((await fetch(`${base}/api/v1/openapi.json`)).status).toBe(404);
     expect((await fetch(`${base}/api/v1/tokens`)).status).toBe(404);
+  });
+});
+
+// Bug 1a (v2.42.2): plasa globala de body limit pe /api/* — testata prin app-ul
+// REAL bootat din index.ts, NU prin app-uri izolate per-router: bugurile de
+// ordine a middleware-ului sunt invizibile in teste izolate (exact asa a trecut
+// Bug 1 de 1706 teste pe GitHub).
+describe("global body limit — Bug 1a (v2.42.2)", () => {
+  it(
+    "web: POST >1MB pe /api/v1/tokens cu sesiune valida intoarce 413 PAYLOAD_TOO_LARGE",
+    { timeout: 25_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "web",
+        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+        LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+        LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+      });
+      await waitForHealth(port);
+
+      const { insertUser } = await import("./db/userRepository.ts");
+      const { signAuthToken } = await import("./auth/jwt.ts");
+      const { randomUUID } = await import("node:crypto");
+      insertUser({ id: "u-bodylimit", email: "bodylimit@test.local", displayName: "Body Limit", role: "admin" });
+      const nowSec = Math.floor(Date.now() / 1000);
+      const jwt = signAuthToken(
+        {
+          sub: "u-bodylimit",
+          jti: randomUUID(),
+          iat: nowSec,
+          exp: nowSec + 3600,
+          iss: "legal-dashboard.test",
+          aud: "legal-dashboard-api",
+        },
+        SECRET
+      );
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/tokens`, {
+        method: "POST",
+        headers: { "content-type": "application/json", authorization: `Bearer ${jwt}` },
+        body: JSON.stringify({ name: "x".repeat(1024 * 1024 + 1024) }),
+      });
+      expect(res.status).toBe(413);
+      expect(((await res.json()) as { error: { code: string } }).error.code).toBe("PAYLOAD_TOO_LARGE");
+    }
+  );
+
+  it(
+    "desktop: POST >1MB pe o ruta inexistenta intoarce 413 (plasa acopera tot /api/*)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+      });
+      await waitForHealth(port);
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ pad: "x".repeat(1024 * 1024 + 1024) }),
+      });
+      expect(res.status).toBe(413);
+    }
+  );
+
+  it(
+    "desktop: POST 1.5MB pe /api/v1/dosare/export.xlsx trece de plasa (validarea rutei, NU 413)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({
+        LEGAL_DASHBOARD_PORT: String(port),
+        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+      });
+      await waitForHealth(port);
+
+      const res = await fetch(`http://127.0.0.1:${port}/api/v1/dosare/export.xlsx`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ dosare: [], pad: "x".repeat(Math.floor(1.5 * 1024 * 1024)) }),
+      });
+      // Limita proprie a rutei e 25MB; 1.5MB trebuie sa ajunga la validarea
+      // payload-ului (lista goala => 400), nu la plasa globala (413).
+      expect(res.status).toBe(400);
+    }
+  );
+
+  it("desktop: POST >25MB pe o ruta exceptata e taiat de plafonul exterior (413)", { timeout: 25_000 }, async () => {
+    const port = randomPort();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+      LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+    });
+    await waitForHealth(port);
+
+    // Audit advers 2026-07-09: exceptia nu e next() gol — rutele cu payload
+    // mare legitim au plafon exterior 25MB, deci limita per-ruta ramane
+    // defense-in-depth, nu singura aparare.
+    const res = await fetch(`http://127.0.0.1:${port}/api/v1/dosare/export.xlsx`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ dosare: [], pad: "x".repeat(26 * 1024 * 1024) }),
+    });
+    expect(res.status).toBe(413);
   });
 });

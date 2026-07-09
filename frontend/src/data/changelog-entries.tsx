@@ -73,6 +73,22 @@ export const versions: VersionEntry[] = [
         content:
           "Notificari toast pe operatiile reusite si pe erorile care inainte erau tacute (exporturile PDF din Changelog si Manual), dialoguri de confirmare unificate pentru toate actiunile ireversibile, sortare pe coloane in Utilizatori/Audit/Monitorizare/Consum, dropdown-uri tematizate corect pe dark mode, istoric functional cu bara laterala restransa, embleme PJ/ICCJ lizibile si titluri de alerta fara semne exotice in jurul numelui monitorizat.",
       },
+      {
+        title: "Hardening post-review si modele GPT-5.6",
+        content:
+          "Corectii de rezilienta si securitate aplicate inainte de lansare, dupa doua audituri independente, plus trecerea modelelor OpenAI pe familia GPT-5.6.",
+        bullets: [
+          "Limita globala de 1MB pe cererile API — un payload urias nu mai poate consuma memoria serverului; exporturile mari si importurile de liste raman neafectate",
+          "Limitarea de trafic corectata: analiza multi-model se contorizeaza corect pe ambele rute, iar utilizatorii legitimi din spatele aceluiasi proxy nu mai pot fi blocati din greseala",
+          "Pagina de stare detaliata a serverului nu mai e expusa in modul web",
+          "Cautarile RNPM in masa nu mai pot opri serverul daca pagina se inchide in timpul procesarii",
+          "Importul de utilizatori citeste corect emailurile lipite din Outlook ca link (numele afisat nu mai inlocuieste adresa)",
+          "Monitorizare: rezultatele nu se mai aplica de doua ori pe un job deja finalizat; durata reala inregistrata la erori",
+          "Protectie suplimentara la izolarea datelor intre utilizatori (identitatea proprietarului e acum obligatorie la nivel de cod)",
+          "Desktop: DevTools dezactivat in build-urile instalate, validare a expeditorului pe canalele interne, verificare de identitate la pornirea backend-ului si inchidere care asteapta terminarea verificarilor in curs",
+          "Modele OpenAI actualizate: GPT-5.6 Sol (premium), 5.6 Terra (echilibrat) si 5.6 Luna (rapid) inlocuiesc familia GPT-5.4",
+        ],
+      },
     ],
   },
   {
