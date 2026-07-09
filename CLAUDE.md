@@ -48,7 +48,7 @@ La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 ## Release flow GitHub Actions
 
 - Push pe tag `vX.Y.Z` declanseaza `build-windows.yml` (NSIS installer x64) si `build-mac.yml` (DMG x64+arm64); artefactele sunt atasate automat la GitHub Release.
-- Workflow-urile ruleaza `tsc --noEmit` + `vitest run` INAINTE de packaging — fail-ul lor blocheaza release-ul.
+- Workflow-urile ruleaza `biome check` + `tsc --noEmit` + `vitest run` INAINTE de packaging — fail-ul lor blocheaza release-ul. Atentie: `npm version` rescrie package.json in format multi-line pe care biome il respinge — ruleaza `npx biome check --write package.json` dupa orice bump, INAINTE de tag (v2.42.2 a cerut mutarea tag-ului din cauza asta).
 - Build manual fara tag: `gh workflow run build-windows.yml` (publica la prerelease `dev-build`).
 
 ## Workflow obligatoriu pentru push pe GitHub
