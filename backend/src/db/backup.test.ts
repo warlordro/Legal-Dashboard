@@ -11,6 +11,7 @@ import {
   restoreFromBackup,
   runDailyBackup,
   withMaintenanceRead,
+  withMaintenanceWrite,
 } from "./backup.ts";
 import { closeDb } from "./schema.ts";
 
@@ -187,6 +188,38 @@ describe("deleteAllBackups — audit log", () => {
   });
 });
 
+// Task 2 (fixuri post-review): delete-all pe monolit serializat sub
+// maintenance lock — cerut explicit de review-panel, pandantul testului rnpm.
+describe("deleteAllBackups — serializare sub maintenance lock", () => {
+  it("nu sterge nimic cat timp un writer tine lock-ul; sterge dupa eliberare", async () => {
+    await seedBackup("legal-dashboard.2026-04-10.db", "A");
+    const backupPath = path.join(getBackupDir(), "legal-dashboard.2026-04-10.db");
+
+    let releaseWriter: () => void = () => undefined;
+    const writer = withMaintenanceWrite(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseWriter = resolve;
+        })
+    );
+    await new Promise((r) => setImmediate(r));
+
+    const del = deleteAllBackups();
+    try {
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+      expect(fs.existsSync(backupPath)).toBe(true);
+    } finally {
+      // Elibereaza lock-ul MODULULUI si pe esec de asertie — altfel un red
+      // aici otraveste toate testele urmatoare din fisier (timeout in cascada).
+      releaseWriter();
+      await writer;
+      await del.catch(() => undefined);
+    }
+    expect(await del).toBe(1);
+    expect(fs.existsSync(backupPath)).toBe(false);
+  });
+});
+
 describe("runDailyBackup — atomicity + retention", () => {
   it("removes orphan .db.tmp files before writing the daily backup", async () => {
     const dir = getBackupDir();
@@ -230,6 +263,30 @@ describe("runDailyBackup — atomicity + retention", () => {
     expect(preMigration).not.toContain("legal-dashboard.pre-schema-20200101.db");
     // 22 seeded backups + runDailyBackup = heavy real file I/O; the 5s default
     // testTimeout flakes on slow CI runners (Windows + Defender). Generous budget.
+  }, 30_000);
+
+  // Task 2 (fixuri post-review): pool EXPLICIT pentru pre-rnpm-split — altfel
+  // cade in preMigration si sorteaza lexicografic DUPA pre-schema-upgrade
+  // (evacuat primul, desi e rollback-ul split-ului).
+  it("pool preSplit separat: pastreaza 3 pre-rnpm-split + 5 pre-schema-upgrade, fara furt intre pool-uri", async () => {
+    for (let i = 1; i <= 4; i++) {
+      await seedOldBackup(`legal-dashboard.pre-rnpm-split-2020-01-0${i}T00-00-0${i}.db`, `SPLIT-${i}`);
+    }
+    for (let i = 1; i <= 6; i++) {
+      await seedOldBackup(`legal-dashboard.pre-schema-upgrade-2020-01-0${i}T00-00-0${i}.db`, `UPG-${i}`);
+    }
+
+    await runDailyBackup();
+
+    const names = (await listBackupsWithMeta()).map((b) => b.name);
+    const split = names.filter((n) => n.startsWith("legal-dashboard.pre-rnpm-split-"));
+    const upgrade = names.filter((n) => n.startsWith("legal-dashboard.pre-schema-upgrade-"));
+    expect(split).toHaveLength(3);
+    expect(split).toContain("legal-dashboard.pre-rnpm-split-2020-01-04T00-00-04.db");
+    expect(split).not.toContain("legal-dashboard.pre-rnpm-split-2020-01-01T00-00-01.db");
+    expect(upgrade).toHaveLength(5);
+    expect(upgrade).toContain("legal-dashboard.pre-schema-upgrade-2020-01-06T00-00-06.db");
+    expect(upgrade).not.toContain("legal-dashboard.pre-schema-upgrade-2020-01-01T00-00-01.db");
   }, 30_000);
 });
 

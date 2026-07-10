@@ -70,6 +70,11 @@ const BACKUP_RETAIN_COUNT = 7;
 const PRE_RESTORE_RETAIN = 5;
 const PRE_MIGRATION_RETAIN = 5;
 const MANUAL_RETAIN = 5;
+// Fix review (Task 2): pool DEDICAT pentru backup-urile pre-split ale
+// monolitului — in pool-ul preMigration sortau lexicografic DUPA
+// pre-schema-upgrade-* si erau evacuate primele, desi sunt rollback-ul
+// promis al split-ului.
+const PRE_SPLIT_RETAIN = 3;
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
 
 const MAIN_PREFIX = "legal-dashboard.";
@@ -85,6 +90,7 @@ interface PoolRegexes {
   preRestore: RegExp;
   manual: RegExp;
   preMigration: RegExp;
+  preSplit: RegExp;
 }
 
 function poolRegexes(prefix: string): PoolRegexes {
@@ -93,8 +99,12 @@ function poolRegexes(prefix: string): PoolRegexes {
     dated: new RegExp(`^${p}\\d{4}-\\d{2}-\\d{2}\\.db$`),
     preRestore: new RegExp(`^${p}pre-restore-[^\\\\/]+\\.db$`),
     manual: new RegExp(`^${p}manual-[^\\\\/]+\\.db$`),
-    // Orice `pre-<label>-...` cu exceptia `pre-restore-` (pool separat).
-    preMigration: new RegExp(`^${p}pre-(?!restore-)[^\\\\/]+\\.db$`),
+    // Orice `pre-<label>-...` cu exceptia pool-urilor pre-* dedicate.
+    // Excluderea e IN REGEX (fix review), nu in ordinea clasificarii — un
+    // fisier nu poate fi numarat in doua pool-uri indiferent de ordinea
+    // filtrarilor de mai jos.
+    preMigration: new RegExp(`^${p}pre-(?!restore-|rnpm-split-)[^\\\\/]+\\.db$`),
+    preSplit: new RegExp(`^${p}pre-rnpm-split-[^\\\\/]+\\.db$`),
   };
 }
 
@@ -234,11 +244,16 @@ async function pruneOld(dir: string, prefix: string): Promise<number> {
     .filter((f) => res.preMigration.test(f) && !res.manual.test(f))
     .sort()
     .reverse();
+  const preSplit = all
+    .filter((f) => res.preSplit.test(f))
+    .sort()
+    .reverse();
   const toDelete = [
     ...dated.slice(BACKUP_RETAIN_COUNT),
     ...preRestore.slice(PRE_RESTORE_RETAIN),
     ...manual.slice(MANUAL_RETAIN),
     ...preMigration.slice(PRE_MIGRATION_RETAIN),
+    ...preSplit.slice(PRE_SPLIT_RETAIN),
   ];
   for (const f of toDelete) {
     await unlinkBundle(dir, f);
@@ -354,7 +369,11 @@ interface RestoreTargetSpec {
   closeLive: () => void;
 }
 
-async function restoreTargetImpl(t: RestoreTargetSpec, name: string): Promise<{ preRestoreName: string }> {
+async function restoreTargetImpl(
+  t: RestoreTargetSpec,
+  name: string,
+  onPhase?: (phase: string) => void
+): Promise<{ preRestoreName: string }> {
   const src = path.join(t.dir, name);
   try {
     await fsPromises.access(src);
@@ -395,137 +414,192 @@ async function restoreTargetImpl(t: RestoreTargetSpec, name: string): Promise<{ 
     }
   }
 
-  // Close the active handle so we can overwrite the file on Windows (which locks open files).
-  t.closeLive();
-
-  // Stale WAL/SHM sidecars belong to the OLD DB. Remove them BEFORE the rename
-  // so there's no window where the new DB at `dbPath` is paired with WAL/SHM
-  // pointing at the previous snapshot — opening that combination merges stale
-  // WAL frames into the restored data and produces silent corruption.
-  for (const suffix of ["-wal", "-shm"]) {
-    try {
-      await fsPromises.unlink(dbPath + suffix);
-    } catch (e) {
-      // ENOENT is benign. Anything else (EBUSY from AV / open handle, EACCES)
-      // means the file survived and would pair with the new DB after rename →
-      // silent corruption risk. Fail-closed: abort the restore.
-      const code = (e as NodeJS.ErrnoException)?.code;
-      if (code !== "ENOENT") {
-        logBackupEvent({
-          action: "restore_failed",
-          target: t.key,
-          stage: "stale_sidecar_unlink_failed",
-          source: name,
-          sidecar: suffix,
-          errnoCode: code,
-          reason: e instanceof Error ? e.message : String(e),
-        });
-        throw new Error(
-          `Nu am putut sterge sidecar-ul ${suffix} (${code}). Inchide programele care tin DB-ul deschis si reincearca.`
-        );
-      }
-    }
-  }
-
-  // Atomic replace: stage to a temp sibling, then rename onto the active DB
-  // path. BUNDLE-aware: backup-urile legacy (pre-v2.43.0) au fost copiate cu
-  // sidecars — snapshot-ul e coerent doar ca triplet, deci copiem si -wal/-shm
-  // daca exista langa sursa. Backup-urile noi (VACUUM INTO) nu au sidecars.
-  const tmpPath = `${dbPath}.restore.tmp`;
+  // STAGING (fix review): backup-ul (bundle-aware pentru cele legacy cu
+  // sidecars) se materializeaza INTAI intr-un director de staging, unde e
+  // verificat si checkpoint-uit intr-UN SINGUR fisier self-contained. Fisierul
+  // live nu e atins pana cand staged-ul nu e complet valid — publicarea e un
+  // singur rename atomic. Necesar de disc la varf: sursa + staged + pre-restore
+  // snapshot simultan; un esec de spatiu pica AICI, cu live-ul neatins (safe).
+  const stagingDir = `${dbPath}.restore-staging`;
+  const stagedMain = path.join(stagingDir, "staged.db");
+  // Staging orfan de la un crash anterior: curatat inainte de refolosire.
+  await fsPromises.rm(stagingDir, { recursive: true, force: true });
   try {
-    await fsPromises.copyFile(src, tmpPath);
-    await fsPromises.rename(tmpPath, dbPath);
+    await fsPromises.mkdir(stagingDir, { recursive: true });
+    await fsPromises.copyFile(src, stagedMain);
     for (const suffix of ["-wal", "-shm"] as const) {
       try {
         await fsPromises.access(src + suffix);
       } catch {
         continue;
       }
-      await fsPromises.copyFile(src + suffix, dbPath + suffix);
+      await fsPromises.copyFile(src + suffix, stagedMain + suffix);
     }
-  } catch (e) {
-    await fsPromises.unlink(tmpPath).catch(() => {
-      /* missing is fine */
-    });
-    logBackupEvent({
-      action: "restore_failed",
-      target: t.key,
-      source: name,
-      stage: "rename",
-      reason: e instanceof Error ? e.message : String(e),
-    });
-    throw new Error(`Restore esuat: ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  // Confirma integritatea fisierului restaurat inainte de a-l accepta.
-  // Conexiune read-write ca WAL-ul legacy (bundle) sa fie recuperat si
-  // checkpoint-uit in fisierul principal, apoi sidecars dispar la close.
-  try {
-    const verifyDb = new Database(dbPath);
+    // Conexiune rw temporara: WAL-ul legacy e recuperat si absorbit in staged.
+    const stagedDb = new Database(stagedMain);
     try {
-      const rows = verifyDb.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+      const rows = stagedDb.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
       const allOk = rows.length === 1 && rows[0]?.integrity_check === "ok";
       if (!allOk) {
         const summary = rows
           .slice(0, 5)
           .map((r) => r.integrity_check)
           .join("; ");
-        logBackupEvent({
-          action: "restore_failed",
-          target: t.key,
-          source: name,
-          stage: "integrity_check",
-          rows: rows.length,
-          summary,
-        });
-        throw new Error(`integrity_check pe DB-ul restaurat a esuat: ${summary}`);
+        throw new Error(`integrity_check pe backup-ul ${name} a esuat: ${summary}`);
       }
-      verifyDb.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+      stagedDb.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     } finally {
-      verifyDb.close();
+      stagedDb.close();
+    }
+    // Dupa checkpoint + close, sidecar-urile staged trebuie sa fi disparut;
+    // orice ramasita non-ENOENT e anormala => fail-closed.
+    for (const suffix of ["-wal", "-shm"] as const) {
+      try {
+        await fsPromises.unlink(stagedMain + suffix);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") throw e;
+      }
     }
   } catch (e) {
-    // Auto-revert FAIL-SAFE: copie in `.revert-tmp` + rename cu retry (nu
-    // copyFile direct peste fisierul viu). Esecul de unlink pe sidecars in
-    // revert e THROW — un revert partial e mai rau decat o eroare explicita.
-    if (dbExists) {
+    await fsPromises.rm(stagingDir, { recursive: true, force: true }).catch(() => {
+      /* best-effort */
+    });
+    logBackupEvent({
+      action: "restore_failed",
+      target: t.key,
+      source: name,
+      stage: "staging",
+      reason: e instanceof Error ? e.message : String(e),
+    });
+    throw new Error(`Restore esuat la staging: ${e instanceof Error ? e.message : String(e)}`);
+  }
+
+  try {
+    // Close the active handle so we can overwrite the file on Windows (which locks open files).
+    t.closeLive();
+
+    // Stale WAL/SHM sidecars belong to the OLD DB. Remove them BEFORE the rename
+    // so there's no window where the new DB at `dbPath` is paired with WAL/SHM
+    // pointing at the previous snapshot — opening that combination merges stale
+    // WAL frames into the restored data and produces silent corruption.
+    for (const suffix of ["-wal", "-shm"]) {
       try {
-        const revertTmp = `${dbPath}.revert-tmp`;
-        await fsPromises.copyFile(preRestorePath, revertTmp);
-        await renameWithRetryAsync(revertTmp, dbPath);
-        for (const suffix of ["-wal", "-shm"]) {
-          try {
-            await fsPromises.unlink(dbPath + suffix);
-          } catch (sidecarErr) {
-            const code = (sidecarErr as NodeJS.ErrnoException)?.code;
-            if (code !== "ENOENT") {
-              logBackupEvent({
-                action: "restore_failed",
-                target: t.key,
-                source: name,
-                stage: "auto_revert_sidecar_unlink",
-                sidecar: suffix,
-                errnoCode: code,
-                reason: sidecarErr instanceof Error ? sidecarErr.message : String(sidecarErr),
-              });
-              throw new Error(
-                `Auto-revert incomplet: sidecar-ul ${suffix} nu a putut fi sters (${code}). ` +
-                  `Fisierul de recuperare: ${preRestoreName}`
-              );
-            }
-          }
+        await fsPromises.unlink(dbPath + suffix);
+      } catch (e) {
+        // ENOENT is benign. Anything else (EBUSY from AV / open handle, EACCES)
+        // means the file survived and would pair with the new DB after rename →
+        // silent corruption risk. Fail-closed: abort the restore.
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") {
+          logBackupEvent({
+            action: "restore_failed",
+            target: t.key,
+            stage: "stale_sidecar_unlink_failed",
+            source: name,
+            sidecar: suffix,
+            errnoCode: code,
+            reason: e instanceof Error ? e.message : String(e),
+          });
+          throw new Error(
+            `Nu am putut sterge sidecar-ul ${suffix} (${code}). Inchide programele care tin DB-ul deschis si reincearca.`
+          );
         }
-      } catch (revertErr) {
-        logBackupEvent({
-          action: "restore_failed",
-          target: t.key,
-          source: name,
-          stage: "auto_revert",
-          reason: revertErr instanceof Error ? revertErr.message : String(revertErr),
-        });
       }
     }
-    throw new Error(e instanceof Error ? e.message : String(e));
+
+    // Publicare: UN SINGUR rename atomic (staged e deja self-contained si
+    // verificat). Esecul aici lasa fisierul live VECHI si valid — nu exista
+    // nimic de revertit inainte de publish.
+    try {
+      await renameWithRetryAsync(stagedMain, dbPath);
+    } catch (e) {
+      logBackupEvent({
+        action: "restore_failed",
+        target: t.key,
+        source: name,
+        stage: "rename",
+        reason: e instanceof Error ? e.message : String(e),
+      });
+      throw new Error(`Restore esuat: ${e instanceof Error ? e.message : String(e)}`);
+    }
+
+    // Post-publish probe: rename reusit logic != fisier citibil. Conexiune raw
+    // readonly (staged-ul e checkpointat — nu exista WAL de recuperat). Failpoint
+    // de test inainte de probe (pattern-ul onPhase al splitter-ului).
+    try {
+      onPhase?.("post_publish");
+      const verifyDb = new Database(dbPath, { readonly: true, fileMustExist: true });
+      try {
+        const rows = verifyDb.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
+        const allOk = rows.length === 1 && rows[0]?.integrity_check === "ok";
+        if (!allOk) {
+          const summary = rows
+            .slice(0, 5)
+            .map((r) => r.integrity_check)
+            .join("; ");
+          logBackupEvent({
+            action: "restore_failed",
+            target: t.key,
+            source: name,
+            stage: "integrity_check",
+            rows: rows.length,
+            summary,
+          });
+          throw new Error(`integrity_check pe DB-ul restaurat a esuat: ${summary}`);
+        }
+      } finally {
+        verifyDb.close();
+      }
+    } catch (e) {
+      // Auto-revert FAIL-SAFE (fix review — ordinea corecta): INTAI dispar
+      // sidecar-urile straine (throw pe non-ENOENT: un revert partial e mai rau
+      // decat o eroare explicita), ABIA APOI copia pre-restore e publicata prin
+      // temp + rename cu retry. Altfel un crash intre rename si unlink ar lasa
+      // DB-ul vechi imperecheat cu WAL strain.
+      if (dbExists) {
+        try {
+          for (const suffix of ["-wal", "-shm"]) {
+            try {
+              await fsPromises.unlink(dbPath + suffix);
+            } catch (sidecarErr) {
+              const code = (sidecarErr as NodeJS.ErrnoException)?.code;
+              if (code !== "ENOENT") {
+                logBackupEvent({
+                  action: "restore_failed",
+                  target: t.key,
+                  source: name,
+                  stage: "auto_revert_sidecar_unlink",
+                  sidecar: suffix,
+                  errnoCode: code,
+                  reason: sidecarErr instanceof Error ? sidecarErr.message : String(sidecarErr),
+                });
+                throw new Error(
+                  `Auto-revert incomplet: sidecar-ul ${suffix} nu a putut fi sters (${code}). ` +
+                    `Fisierul de recuperare: ${preRestoreName}`
+                );
+              }
+            }
+          }
+          const revertTmp = `${dbPath}.revert-tmp`;
+          await fsPromises.copyFile(preRestorePath, revertTmp);
+          await renameWithRetryAsync(revertTmp, dbPath);
+        } catch (revertErr) {
+          logBackupEvent({
+            action: "restore_failed",
+            target: t.key,
+            source: name,
+            stage: "auto_revert",
+            reason: revertErr instanceof Error ? revertErr.message : String(revertErr),
+          });
+        }
+      }
+      throw new Error(e instanceof Error ? e.message : String(e));
+    }
+  } finally {
+    await fsPromises.rm(stagingDir, { recursive: true, force: true }).catch(() => {
+      /* best-effort */
+    });
   }
 
   logBackupEvent({
@@ -535,6 +609,12 @@ async function restoreTargetImpl(t: RestoreTargetSpec, name: string): Promise<{ 
     preRestore: preRestoreName,
     preRestoreCreated: dbExists,
   });
+
+  // Fix review (Task 2): prune si la restore, sub acelasi write lock — altfel
+  // snapshot-urile pre-restore cresc nelimitat intr-un loop de restore-uri
+  // (prune-ul rula doar pe caile de backup). unlinkBundle e best-effort per
+  // fisier, deci prune-ul nu poate transforma un restore reusit in esec.
+  await pruneOld(t.dir, t.prefix);
 
   return { preRestoreName };
 }
@@ -553,7 +633,12 @@ function assertNameInJail(dir: string, name: string, re: RegExp): void {
   }
 }
 
-export async function restoreFromBackup(name: string): Promise<{ preRestoreName: string }> {
+export interface RestoreOptions {
+  // Failpoint-hook pentru testele de fault-injection (pattern-ul splitter-ului).
+  onPhase?: (phase: string) => void;
+}
+
+export async function restoreFromBackup(name: string, opts?: RestoreOptions): Promise<{ preRestoreName: string }> {
   assertNameInJail(getBackupDir(), name, RESTORE_NAME_RE);
   return withMaintenanceWrite(() =>
     restoreTargetImpl(
@@ -567,7 +652,8 @@ export async function restoreFromBackup(name: string): Promise<{ preRestoreName:
         openLiveForSnapshot: () => ({ db: getDb(), close: false }),
         closeLive: () => closeDb(),
       },
-      name
+      name,
+      opts?.onPhase
     )
   );
 }
@@ -583,7 +669,16 @@ function assertRnpmBackupVersionCompatible(backupPath: string): void {
     const hasTable = probe
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'")
       .get();
-    if (!hasTable) return; // bundle legacy fara tracking — acceptat
+    if (!hasTable) {
+      // Fix review: jail-urile rnpm exista DOAR din v2.43.0 — orice backup al
+      // lor are tracking de schema. Lipsa tabelei = fisier strain/trunchiat;
+      // acceptarea lui ar lasa runner-ul sa backfill-uiasca sentinel pe o baza
+      // incompleta structural. Fail-closed (monolitul isi pastreaza separat
+      // acceptarea backup-urilor legacy reale).
+      throw new BackupValidationError(
+        "Backup-ul nu are tracking de schema (_schema_versions) — nu e un backup RNPM valid v2.43.0+."
+      );
+    }
     const row = probe.prepare("SELECT MAX(version) AS v FROM _schema_versions").get() as { v: number | null };
     const backupVersion = row.v ?? 0;
     if (backupVersion > maxKnown) {
@@ -597,7 +692,11 @@ function assertRnpmBackupVersionCompatible(backupPath: string): void {
   }
 }
 
-export async function restoreRnpmFromBackup(ownerId: string, name: string): Promise<{ preRestoreName: string }> {
+export async function restoreRnpmFromBackup(
+  ownerId: string,
+  name: string,
+  opts?: RestoreOptions
+): Promise<{ preRestoreName: string }> {
   const jail = getRnpmBackupDir(ownerId); // valideaza implicit ownerId (stem)
   assertNameInJail(jail, name, RNPM_RESTORE_NAME_RE);
   return withMaintenanceWrite(async () => {
@@ -628,7 +727,8 @@ export async function restoreRnpmFromBackup(ownerId: string, name: string): Prom
           },
           closeLive: () => closeRnpmDb(ownerId),
         },
-        name
+        name,
+        opts?.onPhase
       );
     } finally {
       endRnpmRestore(ownerId);
@@ -662,12 +762,47 @@ async function deleteAllBackupsInDir(dir: string, prefix: string, logAction: str
   return deleted;
 }
 
+// Fix review (Task 2): delete-all serializat sub write lock — lansat in
+// timpul unui restore in zbor ar putea sterge sursa restore-ului sau
+// pre-restore snapshot-ul promis ca rollback.
 export async function deleteAllBackups(): Promise<number> {
-  return deleteAllBackupsInDir(getBackupDir(), MAIN_PREFIX, "delete_all_backups");
+  return withMaintenanceWrite(() => deleteAllBackupsInDir(getBackupDir(), MAIN_PREFIX, "delete_all_backups"));
 }
 
 export async function deleteRnpmBackups(ownerId: string): Promise<number> {
-  return deleteAllBackupsInDir(getRnpmBackupDir(ownerId), RNPM_PREFIX, "delete_rnpm_backups");
+  return withMaintenanceWrite(() =>
+    deleteAllBackupsInDir(getRnpmBackupDir(ownerId), RNPM_PREFIX, "delete_rnpm_backups")
+  );
+}
+
+// Prune SINCRON pe pool-ul preSplit al monolitului — apelat de splitter la
+// boot, dupa verificarea backup-ului proaspat (context sincron, inainte de
+// serve; maintenance lock-ul nu are inca clienti). Fara el, un crash-loop la
+// split ar crea cate un backup pre-split la fiecare boot, fara limita.
+export function prunePreSplitBackupsSync(): number {
+  const dir = getBackupDir();
+  let names: string[];
+  try {
+    names = fs.readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  const re = poolRegexes(MAIN_PREFIX).preSplit;
+  const doomed = names
+    .filter((f) => re.test(f))
+    .sort()
+    .reverse()
+    .slice(PRE_SPLIT_RETAIN);
+  for (const f of doomed) {
+    for (const suffix of ["", "-wal", "-shm"] as const) {
+      try {
+        fs.unlinkSync(path.join(dir, f + suffix));
+      } catch {
+        /* best-effort */
+      }
+    }
+  }
+  return doomed.length;
 }
 
 // v2.34.0 P1-8: offsite upload hook. Env `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`

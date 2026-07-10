@@ -718,6 +718,16 @@ Doua cai de remediere — alege UNA:
    rm -rf "<dataDir>/rnpm"    # sterge si .split-done.json
    ```
 
+Acelasi remediu (calea 1 sau 2, dupa caz) se aplica si cand boot-ul aborteaza
+cu `marker-ul de split e invalid` sau `resume 'wiping' refuzat` — marker-ul
+sau fisierele per-user au fost alterate manual/partial si splitter-ul refuza
+fail-closed sa continue. Caz special (doar medii dev, marker pre-fix): daca
+mesajul e `resume 'wiping' refuzat: marker 'wiping' fara manifest`, marker-ul
+a fost scris de o versiune dinainte de verificarea cu manifest, iar monolitul
+e INCA plin (wipe-ul nu rulase) — foloseste calea 2 (sterge `<dataDir>/rnpm`
+integral si reporneste; split-ul se reia din monolit). In productie cazul nu
+exista: splitter-ul scrie manifestul din v2.43.0.
+
 ### Owner invalid la split
 
 Simptom: boot abortat cu `ownerId invalid pentru operatii pe fisiere: ...`.

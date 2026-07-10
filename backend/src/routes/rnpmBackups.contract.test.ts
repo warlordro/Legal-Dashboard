@@ -97,6 +97,20 @@ describe("GET /api/rnpm/backups — jail-ul callerului", () => {
     expect(res.status).toBe(200);
     expect(((await res.json()) as { backups: { name: string }[] }).backups.map((b) => b.name)).toContain(name);
   });
+
+  // Task 2 (fixuri post-review): ownerId invalid de la ADMIN e input invalid
+  // (400 INVALID_PARAMS), nu eroare interna 500 — pe GET si pe DELETE.
+  it("admin cu ?ownerId invalid (traversal) => 400 INVALID_PARAMS, nu 500", async () => {
+    const app = buildApp("admin1");
+    for (const [method, url] of [
+      ["GET", "/api/rnpm/backups?ownerId=../x"],
+      ["DELETE", "/api/rnpm/backups?ownerId=../x"],
+    ] as const) {
+      const res = await app.request(url, { method, headers: DESKTOP });
+      expect(res.status, `${method} ${url}`).toBe(400);
+      expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("INVALID_PARAMS");
+    }
+  });
 });
 
 describe("POST /api/rnpm/backups/create", () => {
@@ -125,6 +139,34 @@ describe("POST /api/rnpm/backups/create", () => {
   it("fara header desktop in mod desktop => 403", async () => {
     const res = await buildApp("u1").request("/api/rnpm/backups/create", { method: "POST" });
     expect(res.status).toBe(403);
+  });
+
+  // Task 2 (fixuri post-review): cooldown set-la-start (anti-double-submit),
+  // dar REFUNDAT la esec — un create picat nu blocheaza retry-ul userului 60s.
+  it("doua create-uri cvasi-simultane => exact unul 200, celalalt 429 (anti-double-submit)", async () => {
+    seedRnpm("u1", "a");
+    const app = buildApp("u1");
+    const [r1, r2] = await Promise.all([
+      app.request("/api/rnpm/backups/create", { method: "POST", headers: DESKTOP }),
+      app.request("/api/rnpm/backups/create", { method: "POST", headers: DESKTOP }),
+    ]);
+    expect([r1.status, r2.status].sort((a, b) => a - b)).toEqual([200, 429]);
+  });
+
+  it("un create ESUAT refundeaza cooldown-ul: retry-ul imediat reuseste", async () => {
+    seedRnpm("u1", "a");
+    const app = buildApp("u1");
+    // Blocheaza jail-ul: un FISIER pe path-ul directorului de backup => mkdir pica.
+    const jail = getRnpmBackupDir("u1");
+    fs.mkdirSync(path.dirname(jail), { recursive: true });
+    fs.writeFileSync(jail, "not a dir");
+
+    const failed = await app.request("/api/rnpm/backups/create", { method: "POST", headers: DESKTOP });
+    expect(failed.status).toBe(500);
+
+    fs.rmSync(jail);
+    const retry = await app.request("/api/rnpm/backups/create", { method: "POST", headers: DESKTOP });
+    expect(retry.status).toBe(200);
   });
 });
 

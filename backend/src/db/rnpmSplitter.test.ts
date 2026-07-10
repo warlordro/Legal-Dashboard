@@ -257,30 +257,154 @@ describe("runRnpmSplitIfNeeded", () => {
     ).toThrow("failpoint marker_wiping");
     expect(readMarkerRaw()).toMatchObject({ status: "wiping" });
 
-    // Scrie un rand NOU in fisierul per-user al lui userA (fara trigger => fara UDF).
+    // Modifica un rand EXISTENT in fisierul per-user al lui userA (UPDATE, nu
+    // INSERT: count-urile raman egale cu manifestul — Task 3 verifica count-urile
+    // la resume, iar dovada "nu s-a re-copiat" e continutul modificat care
+    // supravietuieste; un re-copy l-ar fi suprascris din monolit).
     const fileA = new Database(getRnpmDbPath("userA"));
     try {
-      fileA
-        .prepare(
-          "INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('userA','dupa_nume','{\"nou\":1}')"
-        )
-        .run();
+      fileA.prepare("UPDATE rnpm_searches SET params_json = '{\"modificat\":1}' WHERE owner_id = 'userA'").run();
     } finally {
       fileA.close();
     }
 
     const result = runRnpmSplitIfNeeded();
     expect(result.split).toBe(true);
-    // Monolit golit; randul nou SUPRAVIETUIESTE (dovada ca nu s-a re-copiat).
+    // Monolit golit; continutul modificat SUPRAVIETUIESTE (dovada ca nu s-a re-copiat).
     const counts = monoCounts();
     for (const t of RNPM_TABLES) expect(counts[t]).toBe(0);
     const check = openUserFileRO("userA");
     try {
-      expect((check.prepare("SELECT COUNT(*) AS n FROM rnpm_searches").get() as { n: number }).n).toBe(2);
+      const row = check.prepare("SELECT params_json FROM rnpm_searches WHERE owner_id = 'userA'").get() as {
+        params_json: string;
+      };
+      expect(JSON.parse(row.params_json).modificat).toBe(1);
     } finally {
       check.close();
     }
     expect(readMarkerRaw()).toMatchObject({ status: "done" });
+  });
+
+  // Task 3 (fixuri post-review): readMarker valideaza runtime fail-closed —
+  // un marker cu status necunoscut cadea pe fluxul de split normal si putea
+  // SUPRASCRIE fisiere per-user mai noi; resume-ul "wiping" verifica fisierele
+  // per-user contra manifestului INAINTE de golirea monolitului.
+  describe("marker fail-closed + manifest (Task 3)", () => {
+    function fileCounts(owner: string): Record<string, number> {
+      const db = openUserFileRO(owner);
+      try {
+        const out: Record<string, number> = {};
+        for (const t of RNPM_TABLES) {
+          out[t] = (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+        }
+        return out;
+      } finally {
+        db.close();
+      }
+    }
+
+    function makeWipingMarker(): { before: Record<string, number> } {
+      seedTwoOwners();
+      const before = monoCounts();
+      expect(() =>
+        runRnpmSplitIfNeeded({
+          onPhase: (phase) => {
+            if (phase === "marker_wiping") throw new Error("failpoint marker_wiping");
+          },
+        })
+      ).toThrow("failpoint marker_wiping");
+      expect(readMarkerRaw()).toMatchObject({ status: "wiping" });
+      return { before };
+    }
+
+    it("(a) marker JSON valid cu status necunoscut => ABORT cu mesaj RUNBOOK, fisierele per-user neatinse", () => {
+      seedTwoOwners();
+      runRnpmSplitIfNeeded();
+      // Monolitul primeste din nou randuri (restore vechi) + marker exotic:
+      // fara validare, fluxul cadea pe split normal si SUPRASCRIA fisierele.
+      getDb()
+        .prepare("INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('userA','dupa_nume','{}')")
+        .run();
+      const bytesA = fs.readFileSync(getRnpmDbPath("userA"));
+      fs.writeFileSync(markerPath(), JSON.stringify({ status: "finished", owners: [] }));
+
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+      expect(fs.readFileSync(getRnpmDbPath("userA")).equals(bytesA)).toBe(true);
+    });
+
+    it("(b) marker wiping + fisier per-user sters => ABORT, monolit NEGOLIT", () => {
+      const { before } = makeWipingMarker();
+      fs.rmSync(getRnpmDbPath("userA"));
+
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+      expect(monoCounts()).toEqual(before);
+      expect(readMarkerRaw()).toMatchObject({ status: "wiping" });
+    });
+
+    it("(c) marker wiping + fisier per-user corupt (trunchiat) => ABORT, monolit NEGOLIT", () => {
+      const { before } = makeWipingMarker();
+      fs.truncateSync(getRnpmDbPath("userA"), 100);
+
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+      expect(monoCounts()).toEqual(before);
+    });
+
+    it("(d) marker wiping + count nepotrivit cu manifestul => ABORT, monolit NEGOLIT", () => {
+      const { before } = makeWipingMarker();
+      const marker = JSON.parse(fs.readFileSync(markerPath(), "utf8"));
+      marker.manifest = {
+        userA: { ...fileCounts("userA"), rnpm_searches: 999 },
+        userB: fileCounts("userB"),
+      };
+      fs.writeFileSync(markerPath(), JSON.stringify(marker));
+
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+      expect(monoCounts()).toEqual(before);
+    });
+
+    it("(e) marker wiping valid (manifest corect) => resume ok (regresie)", () => {
+      makeWipingMarker();
+      const marker = JSON.parse(fs.readFileSync(markerPath(), "utf8"));
+      marker.manifest = { userA: fileCounts("userA"), userB: fileCounts("userB") };
+      fs.writeFileSync(markerPath(), JSON.stringify(marker));
+
+      const result = runRnpmSplitIfNeeded();
+      expect(result.split).toBe(true);
+      const counts = monoCounts();
+      for (const t of RNPM_TABLES) expect(counts[t]).toBe(0);
+      expect(readMarkerRaw()).toMatchObject({ status: "done" });
+    });
+
+    it("(f) marker done FARA manifest (forma fresh-install) => acceptat (regresie)", () => {
+      getDb();
+      fs.mkdirSync(path.dirname(markerPath()), { recursive: true });
+      fs.writeFileSync(
+        markerPath(),
+        JSON.stringify({ status: "done", completedAt: "2026-07-10T00:00:00.000Z", owners: [], appVersion: "x" })
+      );
+      expect(runRnpmSplitIfNeeded()).toEqual({ split: false, owners: [] });
+    });
+
+    it("(g) marker cu ownerId invalid in owners => ABORT fail-closed", () => {
+      getDb();
+      fs.mkdirSync(path.dirname(markerPath()), { recursive: true });
+      fs.writeFileSync(
+        markerPath(),
+        JSON.stringify({ status: "done", completedAt: null, owners: ["../evil"], appVersion: "x" })
+      );
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+    });
+
+    it("(h) marker wiping FARA manifest (pre-fix) => ABORT, monolit NEGOLIT", () => {
+      const { before } = makeWipingMarker();
+      const marker = JSON.parse(fs.readFileSync(markerPath(), "utf8"));
+      // biome-ignore lint/performance/noDelete: forma exacta a marker-elor pre-fix (camp absent).
+      delete marker.manifest;
+      fs.writeFileSync(markerPath(), JSON.stringify(marker));
+
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+      expect(monoCounts()).toEqual(before);
+    });
   });
 
   it("marker done + randuri rnpm reaparute in monolit (restore de monolit vechi) => ABORT boot", () => {
@@ -345,6 +469,29 @@ describe("runRnpmSplitIfNeeded", () => {
       .run(seed.avizIdsA[0]);
     const before = monoCounts();
     expect(() => runRnpmSplitIfNeeded()).toThrow(/rnpm_creditori/);
+    expect(monoCounts()).toEqual(before);
+    expect(readMarkerRaw()).toBeNull();
+  });
+
+  it("crash-loop la split (failpoint dupa backup_ok, 5 iteratii) => cel mult 3 backup-uri pre-split pe disc", () => {
+    // Task 2 (fixuri post-review): fara prune, un boot-loop care crapa dupa
+    // backup ar umple discul cu cate un backup pre-split la fiecare incercare.
+    seedTwoOwners();
+    const before = monoCounts();
+    for (let i = 0; i < 5; i++) {
+      expect(() =>
+        runRnpmSplitIfNeeded({
+          onPhase: (phase) => {
+            if (phase === "backup_ok") throw new Error("failpoint backup_ok");
+          },
+        })
+      ).toThrow("failpoint backup_ok");
+    }
+
+    const backupsDir = path.join(path.dirname(getDbPath()), "backups");
+    const preSplit = fs.readdirSync(backupsDir).filter((f) => f.startsWith("legal-dashboard.pre-rnpm-split-"));
+    expect(preSplit.length).toBeLessThanOrEqual(3);
+    // Monolitul ramane intact (sursa de adevar), fara marker.
     expect(monoCounts()).toEqual(before);
     expect(readMarkerRaw()).toBeNull();
   });

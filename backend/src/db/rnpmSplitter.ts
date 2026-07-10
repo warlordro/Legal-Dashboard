@@ -16,6 +16,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import Database from "better-sqlite3";
+import { prunePreSplitBackupsSync } from "./backup.ts";
 import { runMigrations } from "./migrations/runner.ts";
 import {
   assertValidOwnerId,
@@ -55,6 +56,12 @@ interface SplitMarker {
   completedAt: string | null;
   owners: string[];
   appVersion: string;
+  // Fix review (Task 3): count-urile per owner/tabela, scrise de split pe
+  // marker-ul "wiping" (populate la faza de copiere, cu subsetul WHERE EXISTS
+  // pentru rnpm_bunuri_descrieri). OBLIGATORIU la resume-ul "wiping" (verifica
+  // fisierele per-user inainte de golirea monolitului), OPTIONAL pe "done"
+  // (fresh-install si markerele istorice nu il au).
+  manifest?: Record<string, Record<string, number>>;
 }
 
 export interface RnpmSplitOptions {
@@ -76,14 +83,44 @@ function markerPath(): string {
 function readMarker(): SplitMarker | null {
   const p = markerPath();
   if (!fs.existsSync(p)) return null;
+  let parsed: unknown;
   try {
-    return JSON.parse(fs.readFileSync(p, "utf8")) as SplitMarker;
+    parsed = JSON.parse(fs.readFileSync(p, "utf8"));
   } catch (e) {
     throw new Error(
       `[rnpm_split] marker-ul de split e corupt la ${p} (${e instanceof Error ? e.message : String(e)}). ` +
         "Boot abortat fail-closed. Vezi RUNBOOK 'Monolit restaurat dupa split' pentru remediere."
     );
   }
+  // Fix review (Task 3): validare runtime FAIL-CLOSED — cast-ul orb lasa un
+  // marker cu status necunoscut sa cada pe fluxul de split normal, care poate
+  // SUPRASCRIE fisiere per-user mai noi din monolit. Campurile necunoscute
+  // sunt tolerate (forward-compat); orice abatere pe cele cunoscute = abort.
+  const abort = (reason: string): never => {
+    throw new Error(
+      `[rnpm_split] marker-ul de split e invalid la ${p} (${reason}). ` +
+        "Boot abortat fail-closed. Vezi RUNBOOK 'Monolit restaurat dupa split' pentru remediere."
+    );
+  };
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return abort("nu e un obiect JSON");
+  const m = parsed as Partial<SplitMarker>;
+  if (m.status !== "wiping" && m.status !== "done") return abort(`status necunoscut: ${JSON.stringify(m.status)}`);
+  if (!Array.isArray(m.owners)) return abort("owners lipsa sau non-array");
+  for (const o of m.owners) {
+    if (typeof o !== "string") return abort("owner non-string in owners");
+    try {
+      assertValidOwnerId(o);
+    } catch (e) {
+      return abort(e instanceof Error ? e.message : "ownerId invalid in owners");
+    }
+  }
+  if (
+    m.manifest !== undefined &&
+    (typeof m.manifest !== "object" || m.manifest === null || Array.isArray(m.manifest))
+  ) {
+    return abort("manifest non-obiect");
+  }
+  return m as SplitMarker;
 }
 
 // Scriere durabila: temp + fsync + rename atomic, apoi fsync pe director
@@ -209,6 +246,11 @@ function preSplitBackupStrict(mono: Database.Database): string {
   } finally {
     probe.close();
   }
+  // Fix review (Task 2): prune DUPA verificarea backup-ului proaspat — un
+  // crash-loop la split (esec repetat dupa backup_ok) nu mai umple discul cu
+  // cate un backup pre-split per boot; raman cele mai noi 3.
+  const pruned = prunePreSplitBackupsSync();
+  if (pruned > 0) log({ stage: "backup_prune", pruned });
   return dest;
 }
 
@@ -299,11 +341,13 @@ function sourceSelect(table: string, cols: string[]): string {
 
 // Copiaza datele unui owner intr-un fisier tmp, verifica, publica prin rename.
 // Sursa = conexiune readonly REALA la monolit; transferul se face prin JS
-// (vezi nota de deviere de la openMonoSourceReadonly).
-function copyOwnerToFile(owner: string): void {
+// (vezi nota de deviere de la openMonoSourceReadonly). Returneaza count-urile
+// verificate per tabela — devin manifestul owner-ului din marker-ul "wiping".
+function copyOwnerToFile(owner: string): Record<string, number> {
   closeRnpmDb(owner);
   const finalPath = getRnpmDbPath(owner);
   const tmpPath = `${finalPath}.split-tmp`;
+  const counts: Record<string, number> = {};
   fs.mkdirSync(path.dirname(finalPath), { recursive: true });
   for (const p of [tmpPath, `${tmpPath}-wal`, `${tmpPath}-shm`]) unlinkStrict(p);
 
@@ -351,7 +395,10 @@ function copyOwnerToFile(owner: string): void {
     });
     copyAll();
 
-    // Verificare: COUNT per tabela (sursa WHERE owner vs fisier) + subsetul descrierilor.
+    // Verificare: COUNT per tabela (sursa WHERE owner vs fisier) + subsetul
+    // descrierilor. Count-urile verificate devin manifestul owner-ului (Task 3):
+    // pentru rnpm_bunuri_descrieri numarul e EXACT subsetul WHERE EXISTS al
+    // countSql-ului, nu COUNT(*) global pe monolit.
     const countSql = (t: string): string =>
       t === "rnpm_bunuri_descrieri"
         ? "SELECT COUNT(*) AS n FROM rnpm_bunuri_descrieri d " +
@@ -363,6 +410,7 @@ function copyOwnerToFile(owner: string): void {
       if (srcN !== mineN) {
         throw new Error(`[rnpm_split] verificare esuata pentru ${owner}/${t}: mono=${srcN} vs fisier=${mineN}`);
       }
+      counts[t] = mineN;
     }
     integrityCheckOrThrow(target, `${owner} (pre-publish)`);
     target.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
@@ -392,6 +440,70 @@ function copyOwnerToFile(owner: string): void {
     integrityCheckOrThrow(probe, `${owner} (post-publish)`);
   } finally {
     probe.close();
+  }
+  return counts;
+}
+
+// Fix review (Task 3): resume-ul "wiping" NU mai are voie sa goleasca
+// monolitul pe incredere — fisierele per-user sunt re-verificate contra
+// manifestului din marker (existenta + integrity_check + count-uri identice).
+// Orice abatere = ABORT inainte de wipe, cu monolitul intact (sursa de adevar).
+// Tabelele verificate vin din ALL_RNPM_TABLES (whitelist), NU din cheile
+// manifestului — un marker forjat nu poate injecta nume de tabela in SQL.
+function verifyWipingResume(marker: SplitMarker): void {
+  // Anotarea explicita pe VARIABILA (nu doar pe return) e necesara ca TS sa
+  // trateze apelul ca terminator de control-flow (narrowing dupa abort).
+  const abort: (reason: string) => never = (reason) => {
+    throw new Error(
+      `[rnpm_split] resume 'wiping' refuzat: ${reason}. Monolitul NU a fost golit. ` +
+        "Boot abortat fail-closed. Vezi RUNBOOK 'Monolit restaurat dupa split' pentru remediere."
+    );
+  };
+  const manifest = marker.manifest;
+  if (!manifest) {
+    // Nu exista in productie (splitter-ul scrie mereu manifest din acest fix);
+    // mediile dev cu marker pre-fix: sterge rnpm/.split-done.json + re-split
+    // (linia dedicata din RUNBOOK).
+    abort("marker 'wiping' fara manifest (marker pre-fix sau forjat)");
+  }
+  for (const owner of marker.owners) {
+    const ownerManifest = manifest[owner];
+    if (!ownerManifest || typeof ownerManifest !== "object") {
+      abort(`manifestul nu are intrare pentru ownerul ${owner}`);
+    }
+    const filePath = getRnpmDbPath(owner);
+    if (!fs.existsSync(filePath)) {
+      abort(`fisierul per-user al ownerului ${owner} lipseste (${path.basename(filePath)})`);
+    }
+    let db: Database.Database;
+    try {
+      db = new Database(filePath, { readonly: true, fileMustExist: true });
+    } catch (e) {
+      abort(
+        `fisierul per-user al ownerului ${owner} nu poate fi deschis: ${e instanceof Error ? e.message : String(e)}`
+      );
+    }
+    try {
+      integrityCheckOrThrow(db, `${owner} (resume wiping)`);
+      for (const t of ALL_RNPM_TABLES) {
+        const expected = ownerManifest[t];
+        if (typeof expected !== "number") {
+          abort(`manifestul ownerului ${owner} nu are count pentru ${t}`);
+        }
+        const n = (db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+        if (n !== expected) {
+          abort(`count nepotrivit pentru ${owner}/${t}: manifest=${expected} vs fisier=${n}`);
+        }
+      }
+    } catch (e) {
+      // integrity_check / SQL pe fisier corupt: acelasi abort cu context.
+      if (e instanceof Error && e.message.includes("resume 'wiping' refuzat")) throw e;
+      abort(
+        `fisierul per-user al ownerului ${owner} a picat verificarea: ${e instanceof Error ? e.message : String(e)}`
+      );
+    } finally {
+      db.close();
+    }
   }
 }
 
@@ -425,7 +537,9 @@ export function runRnpmSplitIfNeeded(opts?: RnpmSplitOptions): { split: boolean;
     );
   }
   if (marker?.status === "wiping") {
-    // Toti ownerii au fost deja copiati si verificati; reia DOAR wipe-ul.
+    // Toti ownerii au fost deja copiati si verificati la split; re-verificam
+    // fisierele contra manifestului INAINTE de wipe (Task 3) si reluam DOAR wipe-ul.
+    verifyWipingResume(marker);
     log({ stage: "resume_wipe", owners: marker.owners.length });
     wipeMonolithRnpm(mono);
     writeMarker({ status: "done", completedAt: new Date().toISOString(), owners: marker.owners, appVersion });
@@ -446,13 +560,14 @@ export function runRnpmSplitIfNeeded(opts?: RnpmSplitOptions): { split: boolean;
   log({ stage: "backup_ok", backup: path.basename(backupPath) });
   onPhase("backup_ok");
 
+  const manifest: Record<string, Record<string, number>> = {};
   for (const owner of owners) {
-    copyOwnerToFile(owner);
+    manifest[owner] = copyOwnerToFile(owner);
     log({ stage: "owner_done", owner });
     onPhase("owner_done", owner);
   }
 
-  writeMarker({ status: "wiping", completedAt: null, owners, appVersion });
+  writeMarker({ status: "wiping", completedAt: null, owners, appVersion, manifest });
   onPhase("marker_wiping");
   wipeMonolithRnpm(mono);
   writeMarker({ status: "done", completedAt: new Date().toISOString(), owners, appVersion });

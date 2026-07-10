@@ -7,7 +7,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   createRnpmManualBackup,
@@ -16,6 +16,7 @@ import {
   listRnpmBackups,
   restoreRnpmFromBackup,
   runDailyBackup,
+  withMaintenanceWrite,
 } from "./backup.ts";
 import { __resetRnpmActivityForTests, beginRnpmSearch, endRnpmSearch, RnpmSearchActiveError } from "./rnpmActivity.ts";
 import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, rnpmFileStem } from "./rnpmDb.ts";
@@ -32,6 +33,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   __resetRnpmActivityForTests();
   __resetRnpmDbForTests();
   closeDb();
@@ -169,6 +171,14 @@ describe("restoreRnpmFromBackup", () => {
     writer.exec(
       "CREATE TABLE rnpm_searches (id INTEGER PRIMARY KEY AUTOINCREMENT, owner_id TEXT NOT NULL DEFAULT 'local', search_type TEXT NOT NULL, params_json TEXT NOT NULL, total_results INTEGER NOT NULL DEFAULT 0, criteriu TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')))"
     );
+    // Jail-urile rnpm exista doar din v2.43.0 — orice backup al lor are
+    // _schema_versions; lipsa tabelei e fail-closed la restore (Task 1.4).
+    writer.exec(
+      "CREATE TABLE _schema_versions (version INTEGER PRIMARY KEY, sha256_up TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+    );
+    // Sentinelul de backfill e exceptat de la verificarea de hash a runner-ului
+    // (fisierul forjat nu a rulat 0001 real, dar schema lui e 'legacy').
+    writer.prepare("INSERT INTO _schema_versions (version, sha256_up) VALUES (1, '__backfilled_v1__')").run();
     writer
       .prepare(
         "INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('u1','dupa_nume','{\"m\":\"main\"}')"
@@ -187,6 +197,60 @@ describe("restoreRnpmFromBackup", () => {
 
     await restoreRnpmFromBackup("u1", legacyName);
     expect(countSearches("u1")).toBe(2);
+  });
+});
+
+// Task 2 (fixuri post-review): delete-all serializat sub maintenance lock —
+// un delete lansat in timpul unui restore in zbor ar putea sterge sursa
+// restore-ului sau pre-restore snapshot-ul promis ca rollback.
+describe("deleteRnpmBackups — serializare sub maintenance lock", () => {
+  it("nu sterge nimic cat timp un writer (restore in curs) tine lock-ul; sterge dupa eliberare", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    const backupPath = path.join(getRnpmBackupDir("u1"), name);
+
+    let releaseWriter: () => void = () => undefined;
+    const writer = withMaintenanceWrite(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseWriter = resolve;
+        })
+    );
+    // Lasa writer-ul sa achizitioneze lock-ul.
+    await new Promise((r) => setImmediate(r));
+
+    const del = deleteRnpmBackups("u1");
+    try {
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+      // Serializare: delete-ul asteapta writer-ul, backup-ul e inca pe disc.
+      expect(fs.existsSync(backupPath)).toBe(true);
+    } finally {
+      // Elibereaza lock-ul MODULULUI si pe esec de asertie — altfel un red
+      // aici otraveste toate testele urmatoare din fisier (timeout in cascada).
+      releaseWriter();
+      await writer;
+      await del.catch(() => undefined);
+    }
+    expect(await del).toBeGreaterThanOrEqual(1);
+    expect(fs.existsSync(backupPath)).toBe(false);
+  });
+});
+
+// Task 2 (fixuri post-review): prune-ul ruleaza si la restore — altfel
+// snapshot-urile pre-restore cresc nelimitat intr-un loop de restore-uri.
+describe("retentie pre-restore la restore", () => {
+  it("6 restore-uri consecutive => exact 5 snapshot-uri pre-restore in jail", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+
+    for (let i = 0; i < 6; i++) {
+      await restoreRnpmFromBackup("u1", name);
+      // Timestamp distinct pe numele snapshot-ului (precizie ms).
+      await new Promise((r) => setTimeout(r, 3));
+    }
+
+    const preRestore = fs.readdirSync(getRnpmBackupDir("u1")).filter((f) => f.startsWith("rnpm.pre-restore-"));
+    expect(preRestore.length).toBe(5);
   });
 });
 
@@ -297,5 +361,130 @@ describe("runDailyBackup — multi-target", () => {
 
     expect(fs.existsSync(path.join(jail, "rnpm.2026-01-01.db"))).toBe(false);
     expect(fs.existsSync(path.join(jail, "rnpm.2026-01-01.db-wal"))).toBe(false);
+  });
+});
+
+// Task 1 (fixuri post-review): restore atomic prin STAGING — esecurile inainte
+// de publish lasa fisierul live BYTE-IDENTIC; esecul post-publish declanseaza
+// auto-revert; staging-ul orfan e curatat. Failpoint prin opts.onPhase
+// (pattern-ul splitter-ului).
+describe("restore atomic prin staging (fault injection)", () => {
+  function liveBytes(ownerId: string): Buffer {
+    return fs.readFileSync(getRnpmDbPath(ownerId));
+  }
+
+  function stagingDir(ownerId: string): string {
+    return `${getRnpmDbPath(ownerId)}.restore-staging`;
+  }
+
+  it("esec in faza de staging => live byte-identic, staging curatat", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    __resetRnpmDbForTests();
+    const before = liveBytes("u1");
+
+    const copySpy = vi
+      .spyOn(fsPromises, "copyFile")
+      .mockRejectedValue(Object.assign(new Error("ENOSPC simulat"), { code: "ENOSPC" }));
+    await expect(restoreRnpmFromBackup("u1", name)).rejects.toThrow();
+    copySpy.mockRestore();
+
+    expect(liveBytes("u1").equals(before)).toBe(true);
+    expect(fs.existsSync(stagingDir("u1"))).toBe(false);
+    // Fisierul ramane functional dupa esec.
+    expect(countSearches("u1")).toBe(1);
+  });
+
+  it("esec la rename-ul de publicare => live-ul vechi ramane valid, fara auto-revert fortat", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    seedSearch("u1", "b");
+    __resetRnpmDbForTests();
+
+    // ENOENT nu e retryable in renameWithRetryAsync => esueaza imediat.
+    const renameSpy = vi
+      .spyOn(fsPromises, "rename")
+      .mockRejectedValue(Object.assign(new Error("rename esuat simulat"), { code: "ENOENT" }));
+    await expect(restoreRnpmFromBackup("u1", name)).rejects.toThrow();
+    renameSpy.mockRestore();
+
+    expect(fs.existsSync(stagingDir("u1"))).toBe(false);
+    // Live-ul e inca starea de dinainte de restore (2 randuri), valida.
+    expect(countSearches("u1")).toBe(2);
+  });
+
+  it("esec la post-publish probe => auto-revert la starea de dinainte de restore, fara sidecars straine", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    seedSearch("u1", "post-backup");
+    __resetRnpmDbForTests();
+
+    await expect(
+      restoreRnpmFromBackup("u1", name, {
+        onPhase: (phase: string) => {
+          if (phase === "post_publish") throw new Error("failpoint post_publish");
+        },
+      })
+    ).rejects.toThrow("failpoint post_publish");
+
+    // Auto-revert: starea live e cea din pre-restore snapshot (2 randuri).
+    expect(countSearches("u1")).toBe(2);
+    const dbPath = getRnpmDbPath("u1");
+    expect(fs.existsSync(`${dbPath}.revert-tmp`)).toBe(false);
+    expect(fs.existsSync(stagingDir("u1"))).toBe(false);
+    // Pre-restore snapshot-ul exista in jail (a fost sursa revert-ului).
+    const preRestore = fs.readdirSync(getRnpmBackupDir("u1")).filter((f) => f.startsWith("rnpm.pre-restore-"));
+    expect(preRestore.length).toBe(1);
+  });
+
+  it("rename-ul de publicare reincearca pe EPERM tranzitoriu si restore-ul reuseste", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    seedSearch("u1", "b");
+    __resetRnpmDbForTests();
+
+    const realRename = fsPromises.rename.bind(fsPromises);
+    let failed = false;
+    vi.spyOn(fsPromises, "rename").mockImplementation(async (from, to) => {
+      if (!failed) {
+        failed = true;
+        throw Object.assign(new Error("EPERM tranzitoriu simulat"), { code: "EPERM" });
+      }
+      return realRename(from, to);
+    });
+
+    await restoreRnpmFromBackup("u1", name);
+    expect(countSearches("u1")).toBe(1);
+  });
+
+  it("staging orfan de la un crash anterior e curatat si restore-ul reuseste", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    seedSearch("u1", "b");
+    __resetRnpmDbForTests();
+
+    fs.mkdirSync(stagingDir("u1"), { recursive: true });
+    fs.writeFileSync(path.join(stagingDir("u1"), "staged.db"), "gunoi de la crash");
+
+    await restoreRnpmFromBackup("u1", name);
+    expect(countSearches("u1")).toBe(1);
+    expect(fs.existsSync(stagingDir("u1"))).toBe(false);
+  });
+
+  it("backup rnpm FARA _schema_versions => 400 fail-closed (jail-urile exista doar din v2.43.0)", async () => {
+    seedSearch("u1", "a");
+    await createRnpmManualBackup("u1");
+    const jail = getRnpmBackupDir("u1");
+    const forgedName = "rnpm.manual-2020-01-01T00-00-00.db";
+    const forged = new Database(path.join(jail, forgedName));
+    try {
+      forged.exec(
+        "CREATE TABLE rnpm_searches (id INTEGER PRIMARY KEY, owner_id TEXT, search_type TEXT, params_json TEXT)"
+      );
+    } finally {
+      forged.close();
+    }
+    await expect(restoreRnpmFromBackup("u1", forgedName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(countSearches("u1")).toBe(1);
   });
 });

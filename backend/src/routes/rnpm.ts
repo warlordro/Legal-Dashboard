@@ -965,13 +965,24 @@ function resolveBackupOwner(c: import("hono").Context, requested: string | undef
   const caller = getOwnerId(c);
   if (!requested || requested === caller) return caller;
   if (c.get("role") !== "admin") return caller; // non-admin: cererea straina se ignora silentios
-  assertValidOwnerId(requested); // fail-closed inainte de orice folosire in path
+  try {
+    assertValidOwnerId(requested); // fail-closed inainte de orice folosire in path
+  } catch (e) {
+    // Fix review (Task 2): ownerId invalid de la admin e INPUT invalid (400),
+    // nu eroare interna — eroarea tipata lasa rutele sa clasifice corect.
+    throw new BackupValidationError(e instanceof Error ? e.message : "ownerId invalid");
+  }
   return requested;
 }
 
 // Cooldown 60s per owner pe backup-ul manual: create = maintenance lock +
 // VACUUM INTO + offsite hook, abuzabil prin click-loop. Pattern-ul de la
-// /email-settings/test (429 + Retry-After).
+// /email-settings/test (429 + Retry-After). Cooldown-ul se seteaza LA START
+// (anti-double-submit) si se REFUNDEAZA la esec — un create picat nu
+// blocheaza retry-ul userului 60s (fix review, Task 2).
+// Decizie documentata (Task 2.3): restore-ul NU primeste cooldown separat —
+// prune-ul de la finalul restore-ului plafoneaza cresterea discului
+// (pre-restore cap 5), iar rate-limit-urile globale raman singura frana.
 const BACKUP_CREATE_COOLDOWN_MS = 60_000;
 const lastBackupCreateByOwner = new Map<string, number>();
 function pruneExpiredBackupCooldowns(now: number): void {
@@ -990,6 +1001,7 @@ rnpmRouter.get("/backups", requireRole("admin", "user"), async (c) => {
     return c.json({ backups });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare listare backups";
+    if (e instanceof BackupValidationError) return invalidParams(c, msg);
     return internalError(c, msg);
   }
 });
@@ -1021,6 +1033,9 @@ rnpmRouter.post("/backups/create", requireDesktopHeader, requireRole("admin", "u
     });
     return c.json({ ok: true, name });
   } catch (e) {
+    // Refund pe esec: cooldown-ul consumat la start isi pierde ratiunea
+    // (nu exista backup de protejat); retry-ul imediat trebuie sa mearga.
+    lastBackupCreateByOwner.delete(ownerId);
     const msg = e instanceof Error ? e.message : "Eroare creare backup";
     recordAuditSafe(c, "backup.rnpm.create", {
       targetKind: "backup",
@@ -1084,6 +1099,8 @@ rnpmRouter.delete("/backups", requireDesktopHeader, requireRole("admin", "user")
       outcome: "error",
       detail: { error: msg },
     });
+    // Clasificare identica cu restore: input invalid = 400, restul = 500.
+    if (e instanceof BackupValidationError) return invalidParams(c, msg);
     return internalError(c, msg);
   }
 });
