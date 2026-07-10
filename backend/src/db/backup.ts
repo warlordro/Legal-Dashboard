@@ -1,9 +1,21 @@
 import { spawn } from "node:child_process";
+import fs from "node:fs";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
-import { getDb, getDbPath, closeDb } from "./schema.ts";
 import { RWLock } from "../util/rwlock.ts";
+import { discoverMigrations } from "./migrations/runner.ts";
+import { beginRnpmRestore, endRnpmRestore } from "./rnpmActivity.ts";
+import {
+  closeRnpmDb,
+  getRnpmBackupJail,
+  getRnpmDataDir,
+  getRnpmDb,
+  getRnpmDbPath,
+  MIGRATIONS_RNPM_DIR,
+  openRnpmDbRaw,
+} from "./rnpmDb.ts";
+import { closeDb, getDb, getDbPath } from "./schema.ts";
 
 // Single in-process maintenance gate. Restore + daily backup acquire WRITE
 // (exclusive — restore closes the DB handle and atomically renames the file;
@@ -18,12 +30,6 @@ const maintenanceLock = new RWLock();
 // Exclusive writer for restore + daily backup. Public: tests need to hold
 // the writer side to assert reader/writer interleaving (without spinning the
 // real runDailyBackup, which does I/O and can't be paused mid-flight).
-// Production callers are restoreFromBackup() and runDailyBackup() below.
-//
-// Tier 3 #17: previously exported as the test-only `_withMaintenanceWriteForTest`
-// alongside a private `withMaintenanceWrite`. The two were the same primitive —
-// only naming made one "test-only". Promoted to a single public symbol so the
-// production module no longer carries test-marked API.
 export function withMaintenanceWrite<T>(fn: () => Promise<T>): Promise<T> {
   return maintenanceLock.withWrite(fn);
 }
@@ -46,75 +52,155 @@ function logBackupEvent(entry: Record<string, unknown>): void {
   );
 }
 
-// Daily snapshot of legal-dashboard.db, kept in a sibling "backups/" folder.
-// Uses SQLite's online backup API (better-sqlite3 db.backup) — safe while the
-// DB is in use; respects WAL without requiring a checkpoint or exclusive lock.
+// v2.43.0 (rnpm-split): erorile de VALIDARE la restore (nume invalid, iesire
+// din jail, backup inexistent, versiune de schema mai noua) primesc cod masina
+// ca rutele sa raspunda 400 INVALID_PARAMS, nu 500 (clasificarea conteaza
+// pentru alerting).
+export class BackupValidationError extends Error {
+  readonly code = "INVALID_PARAMS";
+}
+
+// ---------------------------------------------------------------------------
+// Retentie: 4 pool-uri DISJUNCTE per target (daily/pre-restore/pre-migration/
+// manual), fiecare cu cap propriu ca un burst intr-un pool sa nu evacueze alt
+// pool. Numele pool-urilor: `<prefix>YYYY-MM-DD.db`, `<prefix>pre-restore-*.db`,
+// `<prefix>pre-<label>-*.db` (label cu puncte acceptat), `<prefix>manual-*.db`.
+// ---------------------------------------------------------------------------
 const BACKUP_RETAIN_COUNT = 7;
-// Pre-restore snapshots are the user's only rollback path after a restore. Keep
-// a separate retention bucket so a burst of restores can't evict all the dated
-// daily backups (or vice versa). Lex sort on ISO timestamps = chronological.
 const PRE_RESTORE_RETAIN = 5;
-// Pre-migration snapshots (e.g. `legal-dashboard.pre-descriere-dedup-<stamp>.db`,
-// produced from `backend/src/db/schema.ts` before destructive ALTERs). Kept in a
-// third pool so retention of one pool never starves another. Conservative cap —
-// these only fire on schema upgrades, so 5 covers multiple major versions.
 const PRE_MIGRATION_RETAIN = 5;
+const MANUAL_RETAIN = 5;
 const BACKUP_INTERVAL_MS = 24 * 60 * 60 * 1000;
-const BACKUP_PREFIX = "legal-dashboard.";
+
+const MAIN_PREFIX = "legal-dashboard.";
+const RNPM_PREFIX = "rnpm.";
 const BACKUP_SUFFIX = ".db";
-// Daily backup: `legal-dashboard.YYYY-MM-DD.db`
-const DATED_BACKUP_RE = /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/;
-// Pre-restore snapshot: `legal-dashboard.pre-restore-<ISO-with-dashes>.db`
-const PRE_RESTORE_RE = /^legal-dashboard\.pre-restore-/;
-// Pre-migration snapshot: `legal-dashboard.pre-<label>-<stamp>.db` for any
-// label except `restore`. Negative lookahead keeps the two `pre-*` buckets
-// disjoint so pruning logic is unambiguous.
-const PRE_MIGRATION_RE = /^legal-dashboard\.pre-(?!restore-)[^.]+\.db$/;
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+interface PoolRegexes {
+  dated: RegExp;
+  preRestore: RegExp;
+  manual: RegExp;
+  preMigration: RegExp;
+}
+
+function poolRegexes(prefix: string): PoolRegexes {
+  const p = escapeRegExp(prefix);
+  return {
+    dated: new RegExp(`^${p}\\d{4}-\\d{2}-\\d{2}\\.db$`),
+    preRestore: new RegExp(`^${p}pre-restore-[^\\\\/]+\\.db$`),
+    manual: new RegExp(`^${p}manual-[^\\\\/]+\\.db$`),
+    // Orice `pre-<label>-...` cu exceptia `pre-restore-` (pool separat).
+    preMigration: new RegExp(`^${p}pre-(?!restore-)[^\\\\/]+\\.db$`),
+  };
+}
+
+// Un "target" de backup = un fisier SQLite viu + directorul lui de backup +
+// prefixul de nume. main = monolitul; rnpm:<stem> = fisierul unui user.
+interface BackupTarget {
+  key: string;
+  dir: string;
+  prefix: string;
+  dbPath: string;
+  // Deschide conexiunea pentru snapshot. main: handle-ul viu (nu se inchide);
+  // rnpm: conexiune temporara readonly (callerul o inchide) — zero TOCTOU de
+  // creare de fisier gol, zero handle persistent in registry.
+  openForSnapshot: () => { db: Database.Database; close: boolean };
+}
+
+function mainTarget(): BackupTarget {
+  return {
+    key: "main",
+    dir: getBackupDir(),
+    prefix: MAIN_PREFIX,
+    dbPath: getDbPath(),
+    openForSnapshot: () => ({ db: getDb(), close: false }),
+  };
+}
+
+function rnpmTargetForStemFile(stem: string): BackupTarget {
+  const filePath = path.join(getRnpmDataDir(), `${stem}${BACKUP_SUFFIX}`);
+  return {
+    key: `rnpm:${stem}`,
+    dir: path.join(getBackupDir(), "rnpm", stem),
+    prefix: RNPM_PREFIX,
+    dbPath: filePath,
+    openForSnapshot: () => ({
+      db: new Database(filePath, { readonly: true, fileMustExist: true }),
+      close: true,
+    }),
+  };
+}
 
 export function getBackupDir(): string {
   return path.join(path.dirname(getDbPath()), "backups");
 }
 
-function todayBackupName(date = new Date()): string {
+// Jail-ul de backup al unui owner (backups/rnpm/<stem>/). Numele vine din
+// rnpmFileStem, deci validarea ownerId e implicita.
+export function getRnpmBackupDir(ownerId: string): string {
+  return getRnpmBackupJail(ownerId);
+}
+
+function stampNow(): string {
+  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+}
+
+function todayBackupName(prefix: string, date = new Date()): string {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, "0");
   const d = String(date.getDate()).padStart(2, "0");
-  return `${BACKUP_PREFIX}${y}-${m}-${d}${BACKUP_SUFFIX}`;
+  return `${prefix}${y}-${m}-${d}${BACKUP_SUFFIX}`;
 }
 
-async function listBackups(dir: string): Promise<string[]> {
+async function listBackups(dir: string, prefix: string): Promise<string[]> {
   try {
     const entries = await fsPromises.readdir(dir);
-    return entries.filter((f) => f.startsWith(BACKUP_PREFIX) && f.endsWith(BACKUP_SUFFIX));
+    return entries.filter((f) => f.startsWith(prefix) && f.endsWith(BACKUP_SUFFIX));
   } catch {
     return [];
   }
 }
 
+// Sterge un backup impreuna cu sidecar-urile lui (bundle) — backup-urile
+// legacy (pre-v2.43.0) sunt coerente doar ca triplet .db/-wal/-shm; fara
+// curatarea bundle-ului ar ramane sidecars orfane permanente in jail.
+async function unlinkBundle(dir: string, name: string): Promise<void> {
+  for (const suffix of ["", "-wal", "-shm"] as const) {
+    await fsPromises.unlink(path.join(dir, name + suffix)).catch(() => {
+      /* best-effort */
+    });
+  }
+}
+
 // Half-written backups left by a prior crash / SIGTERM / power loss between
-// `db.backup(tmp)` and the atomic rename below. Filter is strict (`.db.tmp`
+// `VACUUM INTO tmp` and the atomic rename below. Filter is strict (`.db.tmp`
 // suffix on a backup-prefixed name) so we never touch unrelated files even if
 // the user drops them into the backups folder.
-async function cleanupOrphanTmp(dir: string): Promise<void> {
+async function cleanupOrphanTmp(dir: string, prefix: string): Promise<void> {
   try {
     const entries = await fsPromises.readdir(dir);
     for (const f of entries) {
-      if (f.startsWith(BACKUP_PREFIX) && f.endsWith(`${BACKUP_SUFFIX}.tmp`)) {
+      if (f.startsWith(prefix) && f.endsWith(`${BACKUP_SUFFIX}.tmp`)) {
         await fsPromises.unlink(path.join(dir, f)).catch(() => {
           /* best-effort */
         });
       }
     }
   } catch {
-    /* dir missing — runDailyBackup will mkdir before us */
+    /* dir missing — mkdir happens before snapshot */
   }
 }
 
-async function latestBackupMtime(dir: string): Promise<number | null> {
+async function latestBackupMtime(dir: string, prefix: string): Promise<number | null> {
   // Only count dated daily backups for "should I skip today's snapshot" — a recent
-  // pre-restore snapshot was triggered by a user-initiated restore and does not
-  // mean the daily snapshot has already happened.
-  const backups = (await listBackups(dir)).filter((f) => DATED_BACKUP_RE.test(f));
+  // pre-restore/manual snapshot was user-initiated and does not mean the daily
+  // snapshot has already happened.
+  const res = poolRegexes(prefix);
+  const backups = (await listBackups(dir, prefix)).filter((f) => res.dated.test(f));
   if (backups.length === 0) return null;
   let max = 0;
   for (const f of backups) {
@@ -128,33 +214,97 @@ async function latestBackupMtime(dir: string): Promise<number | null> {
   return max || null;
 }
 
-async function pruneOld(dir: string): Promise<number> {
-  const all = await listBackups(dir);
-  // Three disjoint pools so the retention cap of one cannot starve the others.
-  // Pre-* filenames embed an ISO timestamp; lex sort = chronological.
+async function pruneOld(dir: string, prefix: string): Promise<number> {
+  const all = await listBackups(dir, prefix);
+  const res = poolRegexes(prefix);
+  // Patru pool-uri disjuncte; numele contin timestamp ISO => lex sort = cronologic.
   const dated = all
-    .filter((f) => DATED_BACKUP_RE.test(f))
+    .filter((f) => res.dated.test(f))
     .sort()
     .reverse();
   const preRestore = all
-    .filter((f) => PRE_RESTORE_RE.test(f))
+    .filter((f) => res.preRestore.test(f))
+    .sort()
+    .reverse();
+  const manual = all
+    .filter((f) => res.manual.test(f))
     .sort()
     .reverse();
   const preMigration = all
-    .filter((f) => PRE_MIGRATION_RE.test(f))
+    .filter((f) => res.preMigration.test(f) && !res.manual.test(f))
     .sort()
     .reverse();
   const toDelete = [
     ...dated.slice(BACKUP_RETAIN_COUNT),
     ...preRestore.slice(PRE_RESTORE_RETAIN),
+    ...manual.slice(MANUAL_RETAIN),
     ...preMigration.slice(PRE_MIGRATION_RETAIN),
   ];
   for (const f of toDelete) {
-    await fsPromises.unlink(path.join(dir, f)).catch(() => {
-      /* best-effort */
-    });
+    await unlinkBundle(dir, f);
   }
   return toDelete.length;
+}
+
+// Verificare snapshot: exista, size > 0, integrity_check pe o conexiune
+// readonly. Orice esec arunca — snapshot-urile sunt promisiunea de rollback.
+function verifySnapshot(p: string, label: string): void {
+  const size = fs.statSync(p).size;
+  if (size <= 0) throw new Error(`[backup] snapshot gol (${label})`);
+  const probe = new Database(p, { readonly: true, fileMustExist: true });
+  try {
+    const rows = probe.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
+    if (rows.length !== 1 || rows[0]?.integrity_check !== "ok") {
+      throw new Error(`[backup] snapshot corupt (integrity_check, ${label})`);
+    }
+  } finally {
+    probe.close();
+  }
+}
+
+// Snapshot self-contained prin VACUUM INTO (sincron; include tot ce e comis,
+// nu depinde de WAL, functioneaza si de pe conexiuni readonly): stage la
+// `.tmp`, verificare, rename atomic pe numele final.
+function snapshotViaVacuumInto(db: Database.Database, dir: string, name: string): string {
+  fs.mkdirSync(dir, { recursive: true });
+  const dest = path.join(dir, name);
+  const tmp = `${dest}.tmp`;
+  try {
+    fs.unlinkSync(tmp);
+  } catch {
+    /* missing is fine */
+  }
+  try {
+    db.prepare("VACUUM INTO ?").run(tmp);
+    verifySnapshot(tmp, name);
+    fs.renameSync(tmp, dest);
+  } catch (e) {
+    try {
+      fs.unlinkSync(tmp);
+    } catch {
+      /* best-effort */
+    }
+    throw e;
+  }
+  return dest;
+}
+
+// rename cu retry pe erorile tranzitorii Windows (AV/indexer tin lock scurt).
+async function renameWithRetryAsync(from: string, to: string): Promise<void> {
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      await fsPromises.rename(from, to);
+      return;
+    } catch (e) {
+      lastErr = e;
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw e;
+      logBackupEvent({ action: "backup_rename_retry", attempt, code, from: path.basename(from) });
+      await new Promise((r) => setTimeout(r, 200));
+    }
+  }
+  throw lastErr;
 }
 
 export interface BackupEntry {
@@ -163,9 +313,8 @@ export interface BackupEntry {
   mtime: number;
 }
 
-export async function listBackupsWithMeta(): Promise<BackupEntry[]> {
-  const dir = getBackupDir();
-  const names = await listBackups(dir);
+async function listBackupsWithMetaForDir(dir: string, prefix: string): Promise<BackupEntry[]> {
+  const names = await listBackups(dir, prefix);
   const entries: BackupEntry[] = [];
   for (const name of names) {
     try {
@@ -180,30 +329,40 @@ export async function listBackupsWithMeta(): Promise<BackupEntry[]> {
   return entries;
 }
 
-// Accept only our own backup-file pattern; blocks path traversal and arbitrary files.
-const RESTORE_NAME_RE = /^legal-dashboard\.[A-Za-z0-9._-]+\.db$/;
-
-export async function restoreFromBackup(name: string): Promise<{ preRestoreName: string }> {
-  if (!RESTORE_NAME_RE.test(name) || name.includes("/") || name.includes("\\")) {
-    throw new Error("Nume backup invalid");
-  }
-  return withMaintenanceWrite(() => restoreFromBackupImpl(name));
+export async function listBackupsWithMeta(): Promise<BackupEntry[]> {
+  return listBackupsWithMetaForDir(getBackupDir(), MAIN_PREFIX);
 }
 
-async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: string }> {
-  const dir = getBackupDir();
-  const src = path.join(dir, name);
+export async function listRnpmBackups(ownerId: string): Promise<BackupEntry[]> {
+  return listBackupsWithMetaForDir(getRnpmBackupDir(ownerId), RNPM_PREFIX);
+}
+
+// ---------------------------------------------------------------------------
+// Restore generic pe target (monolit / fisier rnpm per user)
+// ---------------------------------------------------------------------------
+
+interface RestoreTargetSpec {
+  key: string;
+  dir: string;
+  prefix: string;
+  dbPath: string;
+  // Conexiunea pentru snapshot-ul pre-restore; null = fisierul viu nu exista
+  // (restore la prima instalare) — se sare peste snapshot. close=true inchide
+  // conexiunea dupa snapshot (temporara); false o lasa (handle-ul viu al
+  // monolitului, inchis separat prin closeLive).
+  openLiveForSnapshot: () => { db: Database.Database; close: boolean } | null;
+  closeLive: () => void;
+}
+
+async function restoreTargetImpl(t: RestoreTargetSpec, name: string): Promise<{ preRestoreName: string }> {
+  const src = path.join(t.dir, name);
   try {
     await fsPromises.access(src);
   } catch {
-    throw new Error("Backup inexistent");
+    throw new BackupValidationError("Backup inexistent");
   }
 
-  const dbPath = getDbPath();
-
-  // Async existence probe — sync `fs.existsSync` here would block the event loop
-  // for the duration of the stat call (visible on AV-locked DB files), and the
-  // rest of this function is async-only.
+  const dbPath = t.dbPath;
   let dbExists = true;
   try {
     await fsPromises.access(dbPath);
@@ -211,68 +370,50 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
     dbExists = false;
   }
 
-  // Force WAL frames into the main DB BEFORE closing. better-sqlite3 does not
-  // guarantee a TRUNCATE checkpoint on close, so without this the pre-restore
-  // copyFile below would capture only the .db file and lose any uncommitted
-  // WAL frames — making rollback to "moments before the restore" silently
-  // incomplete. Best-effort: a checkpoint failure means the snapshot is
-  // slightly stale, which is the same failure mode as before this fix.
+  // Snapshot pre-restore SELF-CONTAINED prin VACUUM INTO, VERIFICAT, INAINTE
+  // de close/unlink/swap — e singura cale de rollback promisa userului. Orice
+  // esec abort-eaza restore-ul cu fisierul viu neatins.
+  const preRestoreName = `${t.prefix}pre-restore-${new Date().toISOString().replace(/[:.]/g, "-")}${BACKUP_SUFFIX}`;
+  const preRestorePath = path.join(t.dir, preRestoreName);
   if (dbExists) {
-    try {
-      getDb().prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-    } catch (e) {
-      logBackupEvent({
-        action: "restore",
-        stage: "checkpoint_failed",
-        source: name,
-        reason: e instanceof Error ? e.message : String(e),
-      });
+    const live = t.openLiveForSnapshot();
+    if (live) {
+      try {
+        snapshotViaVacuumInto(live.db, t.dir, preRestoreName);
+      } catch (e) {
+        logBackupEvent({
+          action: "restore_failed",
+          target: t.key,
+          source: name,
+          stage: "pre_restore_snapshot",
+          reason: e instanceof Error ? e.message : String(e),
+        });
+        throw new Error(`Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        if (live.close) live.db.close();
+      }
     }
   }
 
   // Close the active handle so we can overwrite the file on Windows (which locks open files).
-  closeDb();
-
-  // Preventive snapshot of the current DB into backups/ so the user can roll the restore back.
-  const ts = new Date().toISOString().replace(/[:.]/g, "-");
-  const preRestoreName = `${BACKUP_PREFIX}pre-restore-${ts}${BACKUP_SUFFIX}`;
-  const preRestorePath = path.join(dir, preRestoreName);
-  if (dbExists) {
-    try {
-      await fsPromises.copyFile(dbPath, preRestorePath);
-    } catch (e) {
-      logBackupEvent({
-        action: "restore_failed",
-        source: name,
-        stage: "pre_restore_snapshot",
-        reason: e instanceof Error ? e.message : String(e),
-      });
-      throw new Error(`Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
+  t.closeLive();
 
   // Stale WAL/SHM sidecars belong to the OLD DB. Remove them BEFORE the rename
   // so there's no window where the new DB at `dbPath` is paired with WAL/SHM
   // pointing at the previous snapshot — opening that combination merges stale
-  // WAL frames into the restored data and produces silent corruption. Order
-  // matters even on single-instance desktop because better-sqlite3's lazy open
-  // can race with any post-rename code path.
+  // WAL frames into the restored data and produces silent corruption.
   for (const suffix of ["-wal", "-shm"]) {
     try {
       await fsPromises.unlink(dbPath + suffix);
     } catch (e) {
-      // ENOENT is benign — the sidecar legitimately does not exist. Anything
-      // else (EBUSY on Windows from AV / open handle, EACCES, etc.) means the
-      // file survived and will pair with the new DB after rename → silent
-      // corruption risk on next open. Audit 2026-04-29 #2: flipped to throw —
-      // a partial cleanup must abort the restore, not proceed silently. The
-      // user retries after closing the offending process (AV scanner / external
-      // sqlite client). Active DB handle is already closed (closeDb() above),
-      // so the only realistic culprits are external readers.
+      // ENOENT is benign. Anything else (EBUSY from AV / open handle, EACCES)
+      // means the file survived and would pair with the new DB after rename →
+      // silent corruption risk. Fail-closed: abort the restore.
       const code = (e as NodeJS.ErrnoException)?.code;
       if (code !== "ENOENT") {
         logBackupEvent({
           action: "restore_failed",
+          target: t.key,
           stage: "stale_sidecar_unlink_failed",
           source: name,
           sidecar: suffix,
@@ -286,23 +427,29 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
     }
   }
 
-  // Atomic replace: stage to a temp sibling, then rename onto the active DB path.
-  // copyFile is non-atomic — a crash mid-copy would leave a half-written DB at
-  // dbPath with stale WAL/SHM pointing at the old snapshot. Rename onto an
-  // existing path is atomic same-volume on POSIX and on Windows (MoveFileEx
-  // with MOVEFILE_REPLACE_EXISTING, which Node uses internally).
-  const tmpPath = dbPath + ".restore.tmp";
+  // Atomic replace: stage to a temp sibling, then rename onto the active DB
+  // path. BUNDLE-aware: backup-urile legacy (pre-v2.43.0) au fost copiate cu
+  // sidecars — snapshot-ul e coerent doar ca triplet, deci copiem si -wal/-shm
+  // daca exista langa sursa. Backup-urile noi (VACUUM INTO) nu au sidecars.
+  const tmpPath = `${dbPath}.restore.tmp`;
   try {
     await fsPromises.copyFile(src, tmpPath);
     await fsPromises.rename(tmpPath, dbPath);
+    for (const suffix of ["-wal", "-shm"] as const) {
+      try {
+        await fsPromises.access(src + suffix);
+      } catch {
+        continue;
+      }
+      await fsPromises.copyFile(src + suffix, dbPath + suffix);
+    }
   } catch (e) {
-    // Stale tmp may remain if the copy failed midway — best-effort cleanup so the
-    // next restore attempt does not race a half-written sibling.
     await fsPromises.unlink(tmpPath).catch(() => {
       /* missing is fine */
     });
     logBackupEvent({
       action: "restore_failed",
+      target: t.key,
       source: name,
       stage: "rename",
       reason: e instanceof Error ? e.message : String(e),
@@ -310,13 +457,11 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
     throw new Error(`Restore esuat: ${e instanceof Error ? e.message : String(e)}`);
   }
 
-  // Audit 2026-04-29 #2: confirma integritatea fisierului restaurat inainte
-  // de a-l accepta. Daca backup-ul sursa era corupt (bit-rot pe disk, scriere
-  // incompleta in trecut) restore-ul nu trebuie sa il puna in productie.
-  // Deschidem un handle temporar (closeDb() s-a apelat mai sus, deci singleton-ul
-  // e free) si rulam integrity_check; orice rezultat != "ok" abort-eaza.
+  // Confirma integritatea fisierului restaurat inainte de a-l accepta.
+  // Conexiune read-write ca WAL-ul legacy (bundle) sa fie recuperat si
+  // checkpoint-uit in fisierul principal, apoi sidecars dispar la close.
   try {
-    const verifyDb = new Database(dbPath, { readonly: true });
+    const verifyDb = new Database(dbPath);
     try {
       const rows = verifyDb.prepare("PRAGMA integrity_check").all() as Array<{ integrity_check: string }>;
       const allOk = rows.length === 1 && rows[0]?.integrity_check === "ok";
@@ -327,6 +472,7 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
           .join("; ");
         logBackupEvent({
           action: "restore_failed",
+          target: t.key,
           source: name,
           stage: "integrity_check",
           rows: rows.length,
@@ -334,23 +480,19 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
         });
         throw new Error(`integrity_check pe DB-ul restaurat a esuat: ${summary}`);
       }
+      verifyDb.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
     } finally {
       verifyDb.close();
     }
   } catch (e) {
-    // Best-effort revert: incercam sa restauram pre-restore snapshot-ul
-    // automat, ca sa nu ramana userul cu un DB nepornibil. Daca revertul
-    // esueaza, mesajul indica explicit fisierul de recuperare.
+    // Auto-revert FAIL-SAFE: copie in `.revert-tmp` + rename cu retry (nu
+    // copyFile direct peste fisierul viu). Esecul de unlink pe sidecars in
+    // revert e THROW — un revert partial e mai rau decat o eroare explicita.
     if (dbExists) {
       try {
-        await fsPromises.copyFile(preRestorePath, dbPath);
-        // v2.20.8: dupa auto-revert trebuie sa stergem -wal/-shm pentru ca
-        // sidecar-urile create de integrity_check (sau de scrierea/rename-ul
-        // anterior) apartin DB-ului corupt. Daca le lasam, urmatorul open pe
-        // dbPath ar putea merge frames stale → silent corruption pe DB-ul
-        // care tocmai a fost revert-uit. Best-effort: ENOENT e benign;
-        // orice alta eroare e logata dar nu blocheaza eroarea originala
-        // (userul stie deja ca restore-ul a esuat).
+        const revertTmp = `${dbPath}.revert-tmp`;
+        await fsPromises.copyFile(preRestorePath, revertTmp);
+        await renameWithRetryAsync(revertTmp, dbPath);
         for (const suffix of ["-wal", "-shm"]) {
           try {
             await fsPromises.unlink(dbPath + suffix);
@@ -359,18 +501,24 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
             if (code !== "ENOENT") {
               logBackupEvent({
                 action: "restore_failed",
+                target: t.key,
                 source: name,
                 stage: "auto_revert_sidecar_unlink",
                 sidecar: suffix,
                 errnoCode: code,
                 reason: sidecarErr instanceof Error ? sidecarErr.message : String(sidecarErr),
               });
+              throw new Error(
+                `Auto-revert incomplet: sidecar-ul ${suffix} nu a putut fi sters (${code}). ` +
+                  `Fisierul de recuperare: ${preRestoreName}`
+              );
             }
           }
         }
       } catch (revertErr) {
         logBackupEvent({
           action: "restore_failed",
+          target: t.key,
           source: name,
           stage: "auto_revert",
           reason: revertErr instanceof Error ? revertErr.message : String(revertErr),
@@ -382,6 +530,7 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
 
   logBackupEvent({
     action: "restore",
+    target: t.key,
     source: name,
     preRestore: preRestoreName,
     preRestoreCreated: dbExists,
@@ -390,28 +539,135 @@ async function restoreFromBackupImpl(name: string): Promise<{ preRestoreName: st
   return { preRestoreName };
 }
 
-export async function deleteAllBackups(): Promise<number> {
-  const dir = getBackupDir();
-  const backups = await listBackups(dir);
+// Accept only our own backup-file pattern; blocks path traversal and arbitrary files.
+const RESTORE_NAME_RE = /^legal-dashboard\.[A-Za-z0-9._-]+\.db$/;
+const RNPM_RESTORE_NAME_RE = /^rnpm\.[A-Za-z0-9._-]+\.db$/;
+
+function assertNameInJail(dir: string, name: string, re: RegExp): void {
+  if (!re.test(name) || name.includes("/") || name.includes("\\") || name.includes("..")) {
+    throw new BackupValidationError("Nume backup invalid");
+  }
+  const resolved = path.resolve(dir, name);
+  if (resolved !== path.join(dir, name) || !resolved.startsWith(path.resolve(dir) + path.sep)) {
+    throw new BackupValidationError("Nume backup invalid (iesire din jail)");
+  }
+}
+
+export async function restoreFromBackup(name: string): Promise<{ preRestoreName: string }> {
+  assertNameInJail(getBackupDir(), name, RESTORE_NAME_RE);
+  return withMaintenanceWrite(() =>
+    restoreTargetImpl(
+      {
+        key: "main",
+        dir: getBackupDir(),
+        prefix: MAIN_PREFIX,
+        dbPath: getDbPath(),
+        // Snapshot-ul pre-restore vine de pe handle-ul viu; ramane deschis
+        // pana la closeLive de mai jos.
+        openLiveForSnapshot: () => ({ db: getDb(), close: false }),
+        closeLive: () => closeDb(),
+      },
+      name
+    )
+  );
+}
+
+// Validare de versiune la restore RNPM: un backup produs de o versiune mai
+// NOUA de schema ar bloca fisierul la urmatorul getRnpmDb (anti-downgrade-ul
+// runner-ului) — reject inainte de swap, cu mesaj clar.
+function assertRnpmBackupVersionCompatible(backupPath: string): void {
+  const known = discoverMigrations(MIGRATIONS_RNPM_DIR);
+  const maxKnown = known.reduce((m, f) => Math.max(m, f.version), 0);
+  const probe = new Database(backupPath, { readonly: true, fileMustExist: true });
+  try {
+    const hasTable = probe
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'")
+      .get();
+    if (!hasTable) return; // bundle legacy fara tracking — acceptat
+    const row = probe.prepare("SELECT MAX(version) AS v FROM _schema_versions").get() as { v: number | null };
+    const backupVersion = row.v ?? 0;
+    if (backupVersion > maxKnown) {
+      throw new BackupValidationError(
+        `Backup-ul are o versiune de schema mai noua (${backupVersion}) decat aplicatia (${maxKnown}). ` +
+          "Actualizeaza aplicatia inainte de restore."
+      );
+    }
+  } finally {
+    probe.close();
+  }
+}
+
+export async function restoreRnpmFromBackup(ownerId: string, name: string): Promise<{ preRestoreName: string }> {
+  const jail = getRnpmBackupDir(ownerId); // valideaza implicit ownerId (stem)
+  assertNameInJail(jail, name, RNPM_RESTORE_NAME_RE);
+  return withMaintenanceWrite(async () => {
+    // Gard de concurenta: arunca SEARCH_ACTIVE daca ownerul are o cautare in
+    // zbor; latch-ul (isRnpmRestoreInProgress) tine restul operatiilor
+    // ownerului afara pe toata durata (verificat in getRnpmDb).
+    beginRnpmRestore(ownerId);
+    try {
+      const src = path.join(jail, name);
+      try {
+        await fsPromises.access(src);
+      } catch {
+        throw new BackupValidationError("Backup inexistent");
+      }
+      assertRnpmBackupVersionCompatible(src);
+      return await restoreTargetImpl(
+        {
+          key: `rnpm:${ownerId}`,
+          dir: jail,
+          prefix: RNPM_PREFIX,
+          dbPath: getRnpmDbPath(ownerId),
+          // Fisierul viu se snapshot-uieste printr-o conexiune temporara
+          // readonly (openRnpmDbRaw) — latch-ul de restore e deja activ, deci
+          // getRnpmDb ar refuza; null = fisier absent, se sare peste snapshot.
+          openLiveForSnapshot: () => {
+            const raw = openRnpmDbRaw(ownerId);
+            return raw ? { db: raw, close: true } : null;
+          },
+          closeLive: () => closeRnpmDb(ownerId),
+        },
+        name
+      );
+    } finally {
+      endRnpmRestore(ownerId);
+    }
+  });
+}
+
+async function deleteAllBackupsInDir(dir: string, prefix: string, logAction: string): Promise<number> {
+  const backups = await listBackups(dir, prefix);
   let deleted = 0;
   for (const f of backups) {
     try {
       await fsPromises.unlink(path.join(dir, f));
       deleted++;
+      // Bundle-aware: sidecar-urile legacy pleaca odata cu backup-ul.
+      for (const suffix of ["-wal", "-shm"] as const) {
+        await fsPromises.unlink(path.join(dir, f + suffix)).catch(() => {
+          /* best-effort */
+        });
+      }
     } catch {
       /* best-effort */
     }
   }
-  // Audit line: mass-delete is a destructive op the user can trigger from the
-  // UI. Logging count + total lets ops correlate "all backups gone" reports
-  // with the actual click. No throw — partial failures already swallowed
-  // above by design (one stuck file should not block the rest).
   logBackupEvent({
-    action: "delete_all_backups",
+    action: logAction,
+    dir: path.basename(dir),
     deleted,
     total: backups.length,
   });
   return deleted;
+}
+
+export async function deleteAllBackups(): Promise<number> {
+  return deleteAllBackupsInDir(getBackupDir(), MAIN_PREFIX, "delete_all_backups");
+}
+
+export async function deleteRnpmBackups(ownerId: string): Promise<number> {
+  return deleteAllBackupsInDir(getRnpmBackupDir(ownerId), RNPM_PREFIX, "delete_rnpm_backups");
 }
 
 // v2.34.0 P1-8: offsite upload hook. Env `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`
@@ -497,72 +753,154 @@ async function runOffsiteBackupHook(backupPath: string): Promise<void> {
   });
 }
 
-export async function runDailyBackup(): Promise<void> {
-  // Serialize with restoreFromBackup so a user-triggered restore that closes
-  // the DB cannot interleave with `db.backup()` running from this scheduler.
-  // Lock is fast-path on desktop (no contention in practice).
-  return withMaintenanceWrite(runDailyBackupImpl);
+// ---------------------------------------------------------------------------
+// Backup manual (self-service) — monolit + per user
+// ---------------------------------------------------------------------------
+
+async function createManualBackupForTarget(t: BackupTarget): Promise<{ name: string; dest: string }> {
+  const name = `${t.prefix}manual-${stampNow()}${BACKUP_SUFFIX}`;
+  const dest = await withMaintenanceWrite(async () => {
+    const conn = t.openForSnapshot();
+    try {
+      const out = snapshotViaVacuumInto(conn.db, t.dir, name);
+      await pruneOld(t.dir, t.prefix);
+      return out;
+    } finally {
+      if (conn.close) conn.db.close();
+    }
+  });
+  logBackupEvent({ action: "manual_backup", target: t.key, file: name });
+  // Offsite in AFARA lock-ului de maintenance (transportul poate dura minute).
+  await runOffsiteBackupHook(dest);
+  return { name, dest };
 }
 
-async function runDailyBackupImpl(): Promise<void> {
-  const dir = getBackupDir();
+export async function createManualBackup(): Promise<{ name: string }> {
+  const { name } = await createManualBackupForTarget(mainTarget());
+  return { name };
+}
+
+export async function createRnpmManualBackup(ownerId: string): Promise<{ name: string }> {
+  // Daca fisierul nu exista inca, PROVISIONEAZA prin getRnpmDb — un user nou
+  // primeste un backup valid al bazei goale (decizie explicita de plan).
+  const name = `${RNPM_PREFIX}manual-${stampNow()}${BACKUP_SUFFIX}`;
+  const jail = getRnpmBackupDir(ownerId);
+  const dest = await withMaintenanceWrite(async () => {
+    const db = getRnpmDb(ownerId);
+    const out = snapshotViaVacuumInto(db, jail, name);
+    await pruneOld(jail, RNPM_PREFIX);
+    return out;
+  });
+  logBackupEvent({ action: "manual_backup", target: `rnpm:${ownerId}`, file: name });
+  await runOffsiteBackupHook(dest);
+  return { name };
+}
+
+// ---------------------------------------------------------------------------
+// Daily backup multi-target
+// ---------------------------------------------------------------------------
+
+// Promise-ul backup-ului in curs — gracefulShutdown il asteapta cu timeout
+// inainte de markRnpmShuttingDown/markShuttingDown (un VACUUM INTO intrerupt
+// de close arunca in mijlocul snapshot-ului).
+let backupInFlight: Promise<unknown> | null = null;
+
+export async function waitForBackupToSettle(timeoutMs = 10_000): Promise<void> {
+  const current = backupInFlight;
+  if (!current) return;
+  await Promise.race([
+    current.catch(() => {
+      /* esecul e deja logat de runDailyBackup */
+    }),
+    new Promise((r) => setTimeout(r, timeoutMs)),
+  ]);
+}
+
+// Snapshot-ul zilnic al unui target, cu freshness PER TARGET (main fresh nu
+// are voie sa sara peste targeturile rnpm noi/stale). Returneaza path-ul
+// fisierului proaspat sau null (fresh / esec logat).
+async function dailyBackupTarget(t: BackupTarget): Promise<string | null> {
   try {
-    await fsPromises.mkdir(dir, { recursive: true });
+    await fsPromises.mkdir(t.dir, { recursive: true });
   } catch (e) {
     logBackupEvent({
       action: "daily_backup_failed",
+      target: t.key,
       stage: "mkdir",
       reason: e instanceof Error ? e.message : String(e),
     });
-    return;
+    return null;
   }
+  await cleanupOrphanTmp(t.dir, t.prefix);
+  const lastMtime = await latestBackupMtime(t.dir, t.prefix);
+  if (lastMtime && Date.now() - lastMtime < BACKUP_INTERVAL_MS) return null;
 
-  // SQLite's online backup writes incrementally to its destination file. A
-  // SIGTERM / power loss / crash mid-`db.backup()` would leave a partial file
-  // at today's filename, which `latestBackupMtime` would then accept as
-  // "fresh enough" and `restoreFromBackup` would silently corrupt the live
-  // DB from on the next manual restore. Stage to a sibling `.tmp` and rename
-  // atomically — incomplete writes leave only the `.tmp`, cleaned at the
-  // next boot and skipped by the freshness check (different suffix).
-  await cleanupOrphanTmp(dir);
-
-  const lastMtime = await latestBackupMtime(dir);
-  if (lastMtime && Date.now() - lastMtime < BACKUP_INTERVAL_MS) return;
-
-  const dest = path.join(dir, todayBackupName());
-  const tmp = `${dest}.tmp`;
+  const name = todayBackupName(t.prefix);
   try {
-    // Defensive: an extra orphan can survive cleanupOrphanTmp if mkdirSync above
-    // raced with another writer; ensure tmp slot is empty before db.backup.
-    await fsPromises.unlink(tmp).catch(() => {
-      /* missing is fine */
-    });
-    await getDb().backup(tmp);
-    await fsPromises.rename(tmp, dest);
-    const pruned = await pruneOld(dir);
+    const conn = t.openForSnapshot();
+    let dest: string;
+    try {
+      dest = snapshotViaVacuumInto(conn.db, t.dir, name);
+    } finally {
+      if (conn.close) conn.db.close();
+    }
+    const pruned = await pruneOld(t.dir, t.prefix);
     logBackupEvent({
       action: "daily_backup",
-      file: path.basename(dest),
+      target: t.key,
+      file: name,
       pruned,
     });
-    // v2.34.0 P1-8: optional offsite upload hook. Configured via env so the
-    // user can plug in rclone / aws s3 cp / az storage blob upload / scp /
-    // any other transport without recompiling. Hook receives the absolute
-    // path to the freshly-written backup via env `LEGAL_DASHBOARD_BACKUP_PATH`;
-    // non-zero exit is logged but
-    // does NOT fail the local backup (offsite is a redundancy layer, the
-    // local snapshot already succeeded by this point).
-    await runOffsiteBackupHook(dest);
+    return dest;
   } catch (e) {
-    // Best-effort cleanup so the next attempt does not race a half-written sibling.
-    await fsPromises.unlink(tmp).catch(() => {
-      /* missing is fine */
-    });
     logBackupEvent({
       action: "daily_backup_failed",
+      target: t.key,
       stage: "backup",
-      file: path.basename(dest),
+      file: name,
       reason: e instanceof Error ? e.message : String(e),
     });
+    return null;
+  }
+}
+
+async function runDailyBackupImpl(): Promise<string[]> {
+  const fresh: string[] = [];
+  const main = await dailyBackupTarget(mainTarget());
+  if (main) fresh.push(main);
+
+  // Enumerare DE PE DISC a fisierelor per user (fara provisioning, fara handle
+  // persistent in registry): stem-urile vin din numele fisierelor .db.
+  let stems: string[] = [];
+  try {
+    stems = (await fsPromises.readdir(getRnpmDataDir()))
+      .filter((f) => f.endsWith(BACKUP_SUFFIX))
+      .map((f) => f.slice(0, -BACKUP_SUFFIX.length));
+  } catch {
+    /* directorul rnpm nu exista inca (pre-split / fara useri) */
+  }
+  for (const stem of stems) {
+    const dest = await dailyBackupTarget(rnpmTargetForStemFile(stem));
+    if (dest) fresh.push(dest);
+  }
+  return fresh;
+}
+
+export async function runDailyBackup(): Promise<void> {
+  // Serialize with restoreFromBackup so a user-triggered restore that closes
+  // the DB cannot interleave with the snapshot running from this scheduler.
+  // Offsite hook-urile ruleaza DUPA eliberarea lock-ului — N useri x 10 min
+  // timeout de transport nu au voie sa blocheze toate scrierile.
+  const run = (async () => {
+    const fresh = await withMaintenanceWrite(runDailyBackupImpl);
+    for (const f of fresh) {
+      await runOffsiteBackupHook(f);
+    }
+  })();
+  backupInFlight = run;
+  try {
+    await run;
+  } finally {
+    if (backupInFlight === run) backupInFlight = null;
   }
 }

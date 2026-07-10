@@ -17,27 +17,17 @@ export function preMigrationBackup(src: string, label: string): void {
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const dest = path.join(dir, `legal-dashboard.pre-${label}-${stamp}.db`);
-    // Plain file copy — DB is not yet opened when this runs (called from getDb before new Database(...)).
-    fs.copyFileSync(src, dest);
-    // v2.17.0 — also copy WAL (-wal) and SHM (-shm) sidecars when they exist.
-    // SQLite serializes a checkpointed copy of the latest committed pages in
-    // the WAL; without it, restoring the .db alone could lose in-flight writes
-    // that hadn't been checkpointed back into the main file at shutdown. The
-    // -shm file is regenerated from -wal on open, but copying both keeps the
-    // backup self-consistent without requiring SQLite tooling on the recovery
-    // host. Sidecars-missing is fine (DB was checkpointed clean).
-    for (const suffix of ["-wal", "-shm"] as const) {
-      const sidecarSrc = src + suffix;
-      if (fs.existsSync(sidecarSrc)) {
-        try {
-          fs.copyFileSync(sidecarSrc, dest + suffix);
-        } catch (e) {
-          console.warn(
-            `[schema] pre-migration backup sidecar ${suffix} failed (continuing):`,
-            e instanceof Error ? e.message : e
-          );
-        }
-      }
+    // v2.43.0 (rnpm-split): snapshot SELF-CONTAINED prin VACUUM INTO pe o
+    // conexiune temporara — include WAL-ul comis, fara sidecars de copiat
+    // (copyFile + sidecars producea un triplet coerent doar impreuna). DB-ul
+    // nu e inca deschis de getDb() (functia ruleaza inainte de new Database),
+    // iar conexiunea temporara read-write recupereaza si un WAL ramas dintr-un
+    // crash inainte sa-l serializeze in snapshot.
+    const tmp = new Database(src);
+    try {
+      tmp.prepare("VACUUM INTO ?").run(dest);
+    } finally {
+      tmp.close();
     }
     console.log(`[schema] pre-migration backup -> ${dest}`);
   } catch (e) {

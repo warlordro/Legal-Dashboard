@@ -14,16 +14,18 @@ import {
 import { defaultRnpmClient, RnpmError, type RnpmSearchType } from "../services/rnpmClient.ts";
 import { validateSubTypeLabels } from "../services/rnpmSubTypes.ts";
 import { CaptchaInsufficientFundsError, getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
-import { getDbPath, compactDb } from "../db/schema.ts";
 import {
-  getBackupDir,
-  deleteAllBackups,
-  listBackupsWithMeta,
-  restoreFromBackup,
+  BackupValidationError,
+  createRnpmManualBackup,
+  deleteRnpmBackups,
+  getRnpmBackupDir,
+  listRnpmBackups,
+  restoreRnpmFromBackup,
   withMaintenanceRead,
 } from "../db/backup.ts";
-import { recordAudit } from "../db/auditRepository.ts";
-import { isRnpmRestoreInProgress } from "../db/rnpmActivity.ts";
+import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
+import { hasActiveRnpmSearch, isRnpmRestoreInProgress, RnpmSearchActiveError } from "../db/rnpmActivity.ts";
+import { assertValidOwnerId, compactRnpmDb, getRnpmDbPath } from "../db/rnpmDb.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
@@ -853,12 +855,21 @@ rnpmRouter.get("/saved/:id", (c) => {
   return c.json(aviz);
 });
 
-rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin"), (c) => {
-  const count = deleteAllAvize(getOwnerId(c));
+rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user"), (c) => {
+  const ownerId = getOwnerId(c);
+  // v2.43.0 (rnpm-split): delete in timpul unei cautari active => FK errors sau
+  // repopulare imediat dupa stergere; refuzam explicit.
+  if (hasActiveRnpmSearch(ownerId)) {
+    return c.json(
+      fail("SEARCH_ACTIVE", "Exista o cautare RNPM in curs pentru acest cont; reincearca dupa finalizare", c),
+      409
+    );
+  }
+  const count = deleteAllAvize(ownerId);
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
   try {
-    compactDb();
+    compactRnpmDb(ownerId);
   } catch (e) {
     console.warn("[rnpm] compact after delete-all failed:", e);
   }
@@ -871,6 +882,13 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin"), (c) 
 });
 
 rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async (c) => {
+  // v2.43.0 (rnpm-split): acelasi gard ca la /saved/all.
+  if (hasActiveRnpmSearch(getOwnerId(c))) {
+    return c.json(
+      fail("SEARCH_ACTIVE", "Exista o cautare RNPM in curs pentru acest cont; reincearca dupa finalizare", c),
+      409
+    );
+  }
   const body = await parseJsonBody(c);
   if (body === null) return invalidJson(c);
   const { ids } = (body ?? {}) as { ids?: unknown };
@@ -886,9 +904,12 @@ rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async 
   return c.json({ deleted });
 });
 
-rnpmRouter.get("/stats", async (c) => {
-  const stats = getAvizStats(getOwnerId(c));
-  const dbPath = getDbPath();
+rnpmRouter.get("/stats", requireRole("admin", "user"), async (c) => {
+  // v2.43.0 (rnpm-split): statisticile si dimensiunea raporteaza FISIERUL
+  // PER USER al callerului, nu monolitul.
+  const ownerId = getOwnerId(c);
+  const stats = getAvizStats(ownerId);
+  const dbPath = getRnpmDbPath(ownerId);
   // CP-B4: async fs so handler does not block the event loop under concurrency (web mode).
   const sizeOf = async (p: string): Promise<number> => {
     try {
@@ -905,8 +926,9 @@ rnpmRouter.get("/stats", async (c) => {
 // `require("electron")` is marked external at bundle time (scripts/build.js) so it
 // resolves at runtime inside the main process; web deployments will hit the catch
 // and return 501.
-rnpmRouter.post("/open-db-folder", requireDesktopHeader, requireRole("admin"), (c) => {
-  const dbPath = getDbPath();
+rnpmRouter.post("/open-db-folder", requireDesktopHeader, requireRole("admin", "user"), (c) => {
+  // v2.43.0 (rnpm-split): dezvaluie FISIERUL RNPM al userului local.
+  const dbPath = getRnpmDbPath(getOwnerId(c));
   try {
     // esbuild emits `require("electron")` verbatim in the CJS bundle because
     // electron is marked external (scripts/build.js). At runtime inside Electron's
@@ -923,9 +945,10 @@ rnpmRouter.post("/open-db-folder", requireDesktopHeader, requireRole("admin"), (
   }
 });
 
-rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin"), (c) => {
+rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), (c) => {
+  // v2.43.0 (rnpm-split): compacteaza FISIERUL PER USER al callerului.
   try {
-    const result = compactDb();
+    const result = compactRnpmDb(getOwnerId(c));
     return c.json({ ok: true, ...result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare compactare baza";
@@ -933,32 +956,37 @@ rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin"), (c) => {
   }
 });
 
-// Tier 4 #21: destructive backup ops are audit-logged so a web/admin mode
-// later can reconstruct who wiped/rolled back the database. Audit on both
-// success and failure paths — a failed restore that left a pre-restore
-// snapshot behind still matters for reconstruction.
-rnpmRouter.delete("/backups", requireDesktopHeader, requireRole("admin"), async (c) => {
-  try {
-    const deleted = await deleteAllBackups();
-    recordAudit(c, "backup.delete_all", {
-      targetKind: "backup",
-      detail: { deleted },
-    });
-    return c.json({ deleted });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Eroare stergere backups";
-    recordAudit(c, "backup.delete_all", {
-      targetKind: "backup",
-      outcome: "error",
-      detail: { error: msg },
-    });
-    return internalError(c, msg);
-  }
-});
+// v2.43.0 (rnpm-split): backup self-service OWNER-SCOPED — fiecare user
+// opereaza pe jail-ul lui (backups/rnpm/<stem>/). Adminul poate tinti alt
+// owner prin ?ownerId= (GET/DELETE) sau body.ownerId (restore); pentru
+// non-admini cererea straina se IGNORA silentios (primesc jail-ul propriu,
+// fara oracle de existenta). Rutele monolitului s-au mutat in /api/v1/admin/backups.
+function resolveBackupOwner(c: import("hono").Context, requested: string | undefined): string {
+  const caller = getOwnerId(c);
+  if (!requested || requested === caller) return caller;
+  if (c.get("role") !== "admin") return caller; // non-admin: cererea straina se ignora silentios
+  assertValidOwnerId(requested); // fail-closed inainte de orice folosire in path
+  return requested;
+}
 
-rnpmRouter.get("/backups", requireRole("admin"), async (c) => {
+// Cooldown 60s per owner pe backup-ul manual: create = maintenance lock +
+// VACUUM INTO + offsite hook, abuzabil prin click-loop. Pattern-ul de la
+// /email-settings/test (429 + Retry-After).
+const BACKUP_CREATE_COOLDOWN_MS = 60_000;
+const lastBackupCreateByOwner = new Map<string, number>();
+function pruneExpiredBackupCooldowns(now: number): void {
+  for (const [owner, ts] of lastBackupCreateByOwner) {
+    if (now - ts > BACKUP_CREATE_COOLDOWN_MS) lastBackupCreateByOwner.delete(owner);
+  }
+}
+export function __resetRnpmBackupCooldownForTests(): void {
+  lastBackupCreateByOwner.clear();
+}
+
+rnpmRouter.get("/backups", requireRole("admin", "user"), async (c) => {
   try {
-    const backups = await listBackupsWithMeta();
+    const owner = resolveBackupOwner(c, c.req.query("ownerId"));
+    const backups = await listRnpmBackups(owner);
     return c.json({ backups });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare listare backups";
@@ -966,26 +994,36 @@ rnpmRouter.get("/backups", requireRole("admin"), async (c) => {
   }
 });
 
-rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin"), limitSmall, async (c) => {
-  const body = await parseJsonBody(c);
-  if (body === null) return invalidJson(c);
-  const name = (body as { name?: unknown })?.name;
-  if (typeof name !== "string" || name.length === 0) {
-    return invalidParams(c, "Nume backup lipsa");
-  }
-  try {
-    const { preRestoreName } = await restoreFromBackup(name);
-    recordAudit(c, "backup.restore", {
+rnpmRouter.post("/backups/create", requireDesktopHeader, requireRole("admin", "user"), limitSmall, async (c) => {
+  const ownerId = getOwnerId(c);
+  pruneExpiredBackupCooldowns(Date.now());
+  const now = Date.now();
+  const elapsed = now - (lastBackupCreateByOwner.get(ownerId) ?? 0);
+  if (elapsed < BACKUP_CREATE_COOLDOWN_MS) {
+    const retryAfterSec = Math.ceil((BACKUP_CREATE_COOLDOWN_MS - elapsed) / 1000);
+    recordAuditSafe(c, "backup.rnpm.create", {
+      outcome: "denied",
       targetKind: "backup",
-      targetId: name,
-      detail: { preRestoreName },
+      detail: { reason: "cooldown", retryAfterSec },
     });
-    return c.json({ ok: true, preRestoreName });
-  } catch (e) {
-    const msg = e instanceof Error ? e.message : "Eroare restore";
-    recordAudit(c, "backup.restore", {
+    c.header("Retry-After", String(retryAfterSec));
+    return c.json(
+      fail("cooldown", `Asteapta ${retryAfterSec}s inainte sa creezi alt backup`, c, { retryAfterSec }),
+      429
+    );
+  }
+  lastBackupCreateByOwner.set(ownerId, now);
+  try {
+    const { name } = await createRnpmManualBackup(ownerId);
+    recordAuditSafe(c, "backup.rnpm.create", {
       targetKind: "backup",
       targetId: name,
+    });
+    return c.json({ ok: true, name });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare creare backup";
+    recordAuditSafe(c, "backup.rnpm.create", {
+      targetKind: "backup",
       outcome: "error",
       detail: { error: msg },
     });
@@ -993,8 +1031,66 @@ rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin"), 
   }
 });
 
-rnpmRouter.post("/open-backups-folder", requireDesktopHeader, requireRole("admin"), async (c) => {
-  const dir = getBackupDir();
+rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin", "user"), limitSmall, async (c) => {
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
+  const name = (body as { name?: unknown })?.name;
+  if (typeof name !== "string" || name.length === 0) {
+    return invalidParams(c, "Nume backup lipsa");
+  }
+  let owner: string;
+  try {
+    owner = resolveBackupOwner(c, (body as { ownerId?: string }).ownerId);
+  } catch {
+    return invalidParams(c, "ownerId invalid");
+  }
+  const caller = getOwnerId(c);
+  try {
+    const { preRestoreName } = await restoreRnpmFromBackup(owner, name);
+    recordAudit(c, "backup.rnpm.restore", {
+      targetKind: "backup",
+      targetId: name,
+      detail: { preRestoreName, targetOwnerId: owner === caller ? undefined : owner },
+    });
+    return c.json({ ok: true, preRestoreName });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare restore";
+    recordAuditSafe(c, "backup.rnpm.restore", {
+      targetKind: "backup",
+      targetId: name,
+      outcome: "error",
+      detail: { error: msg, targetOwnerId: owner === caller ? undefined : owner },
+    });
+    // Clasificare: input invalid = 400; concurenta = 409; restul = 500.
+    if (e instanceof BackupValidationError) return invalidParams(c, msg);
+    if (e instanceof RnpmSearchActiveError) return c.json(fail("SEARCH_ACTIVE", msg, c), 409);
+    return internalError(c, msg);
+  }
+});
+
+rnpmRouter.delete("/backups", requireDesktopHeader, requireRole("admin", "user"), async (c) => {
+  try {
+    const owner = resolveBackupOwner(c, c.req.query("ownerId"));
+    const deleted = await deleteRnpmBackups(owner);
+    recordAuditSafe(c, "backup.rnpm.delete_all", {
+      targetKind: "backup",
+      detail: { deleted, targetOwnerId: owner === getOwnerId(c) ? undefined : owner },
+    });
+    return c.json({ deleted });
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare stergere backups";
+    recordAuditSafe(c, "backup.rnpm.delete_all", {
+      targetKind: "backup",
+      outcome: "error",
+      detail: { error: msg },
+    });
+    return internalError(c, msg);
+  }
+});
+
+rnpmRouter.post("/open-backups-folder", requireDesktopHeader, requireRole("admin", "user"), async (c) => {
+  // v2.43.0 (rnpm-split): jail-ul de backup al userului local.
+  const dir = getRnpmBackupDir(getOwnerId(c));
   try {
     await mkdir(dir, { recursive: true });
     const electron = require("electron") as { shell?: { openPath?: (p: string) => Promise<string> } };

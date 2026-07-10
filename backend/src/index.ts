@@ -53,9 +53,10 @@ import { runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
 import { recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
-import { runDailyBackup } from "./db/backup.ts";
+import { runDailyBackup, waitForBackupToSettle } from "./db/backup.ts";
 import { ErrorCodes, fail } from "./util/envelope.ts";
 import { appErrorHandler } from "./util/appErrorHandler.ts";
+import { adminBackupsRouter } from "./routes/adminBackups.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
 import { fileURLToPath } from "node:url";
@@ -417,6 +418,7 @@ app.route("/api/v1/auth", authRouter);
 // PR-8: current-user profile (always mounted) + admin surface (gated by
 // requireRole('admin') inside the router so non-admins get 403, not 404).
 app.route("/api/v1/me", meRouter);
+app.route("/api/v1/admin/backups", adminBackupsRouter);
 app.route("/api/v1/admin", adminRouter);
 // PR-A (v2.7.0): dashboard summary aggregation endpoint pentru KPI strip.
 // Owner-scoped, wrapped in withMaintenanceRead pentru a coexista cu backup/restore.
@@ -913,6 +915,14 @@ async function gracefulShutdown(reason: string): Promise<void> {
     await stopDailyReportScheduler();
   } catch (e) {
     console.error("[shutdown] stopDailyReportScheduler failed:", e);
+  }
+
+  // v2.43.0 (rnpm-split): asteapta backup-ul in curs (daily/manual) cu timeout
+  // — un VACUUM INTO intrerupt de close arunca in mijlocul snapshot-ului.
+  try {
+    await waitForBackupToSettle(10_000);
+  } catch (e) {
+    console.error("[shutdown] waitForBackupToSettle failed:", e);
   }
 
   // v2.43.0 (rnpm-split): inchide si latch-uieste registry-ul de fisiere RNPM

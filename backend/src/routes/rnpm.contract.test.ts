@@ -32,7 +32,7 @@ import { closeDb, getDb } from "../db/schema.ts";
 import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
-import { updateUserRole } from "../db/userRepository.ts";
+import { updateUserRole, updateUserStatus } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 
 vi.mock("../services/captchaSolver.ts", async (importOriginal) => {
@@ -656,41 +656,32 @@ describe("AUTH_MODE=web gate on captchaKey body endpoints (closure #12)", () => 
   });
 });
 
-// Closure #2 verification: defense-in-depth — un user non-admin nu poate
-// accesa rutele globale chiar daca getOwnerId returneaza id-ul lui.
-describe("requireRole(admin) gate on global rnpm routes (closure #2)", () => {
+// v2.43.0 (rnpm-split): rutele NU mai sunt globale — opereaza pe fisierul /
+// jail-ul per user al callerului, deci self-service = requireRole("admin",
+// "user"). Gate-ul care ramane: userii inactivi/necunoscuti sunt refuzati.
+describe("self-service gate on per-user rnpm routes (v2.43.0)", () => {
   beforeEach(() => {
-    // Demoteaza user-ul local promovat in beforeEach principal: requireRole
-    // trebuie sa returneze 403 pentru un user fara rol admin.
     updateUserRole("local", "user");
   });
 
-  it("DELETE /saved/all returns 403 for non-admin", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/saved/all", {
-      method: "DELETE",
-      headers: DESKTOP_HEADERS,
-    });
-    expect(res.status).toBe(403);
+  it("rolul user ARE acces la rutele self-service (fisierul propriu)", async () => {
+    const app = buildApp();
+    const delAll = await app.request("/api/v1/rnpm/saved/all", { method: "DELETE", headers: DESKTOP_HEADERS });
+    expect(delAll.status).toBe(200);
+    const compact = await app.request("/api/v1/rnpm/compact", { method: "POST", headers: DESKTOP_HEADERS });
+    expect(compact.status).toBe(200);
+    const list = await app.request("/api/v1/rnpm/backups");
+    expect(list.status).toBe(200);
+    const del = await app.request("/api/v1/rnpm/backups", { method: "DELETE", headers: DESKTOP_HEADERS });
+    expect(del.status).toBe(200);
   });
 
-  it("POST /compact returns 403 for non-admin", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/compact", {
-      method: "POST",
-      headers: DESKTOP_HEADERS,
-    });
+  it("user suspendat => 403 pe rutele self-service", async () => {
+    updateUserStatus("local", "suspended");
+    const app = buildApp();
+    const res = await app.request("/api/v1/rnpm/backups");
     expect(res.status).toBe(403);
-  });
-
-  it("GET /backups returns 403 for non-admin", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/backups");
-    expect(res.status).toBe(403);
-  });
-
-  it("DELETE /backups returns 403 for non-admin", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/backups", {
-      method: "DELETE",
-      headers: DESKTOP_HEADERS,
-    });
-    expect(res.status).toBe(403);
+    const del = await app.request("/api/v1/rnpm/saved/all", { method: "DELETE", headers: DESKTOP_HEADERS });
+    expect(del.status).toBe(403);
   });
 });
