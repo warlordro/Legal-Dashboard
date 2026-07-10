@@ -17,9 +17,20 @@ search/aviz devin namespace per user — starea "foreign"/403 dispare, izolarea 
 (confirmat explicit de user: "fiecare user este izolat de celalalt"). Analiza comparativa a 5
 variante (artifact HTML): https://claude.ai/code/artifact/bdd089f7-467c-433e-995d-80f85d98d236
 
-**STARE: EXECUTAT INTEGRAL PE COD (Task 0-9, 2026-07-10), TDD strict, gate-uri complete la
-fiecare commit.** Ramane Task 10 (smoke desktop Electron + smoke web cu 2 useri) inainte de
-push/MR. Commit-uri (branch cu commit-uri consolidate, la cererea userului):
+**STARE: EXECUTAT INTEGRAL (Task 0-10, 2026-07-10), TDD strict, gate-uri complete la fiecare
+commit.** Task 10 FACUT: `npm run check` verde de la zero (a cerut 2 fixuri de verificare:
+template literal biome in Backups.tsx + release pe instance lock in testul remote-bind — flake
+pre-existent de heartbeat orfan amplificat de load); smoke pe BUNDLE (dist-backend, port 3719,
+DB copie): boot fresh marcheaza done fara split, seed pre-split + reboot => split REAL 2 owneri
+(backup pre-split, marker, monolit 0 randuri, id-uri pastrate, descriere partajata in ambele
+fisiere, _norm recalculat), API self-service ok (stats per-user, create/list backup, cooldown
+429, restore), boot 3 fara re-split; smoke DESKTOP (Electron real, userData izolat prin
+--user-data-dir pe monolitul pre-split): split la boot, backup manual -> sterge baza -> restore
+cu reopen LAZY (fara restart), restart fara re-split, shutdown curat. NEFACUT (recomandat inainte
+de merge, userul testeaza oricum live): smoke web cu 2 useri pe dev-web-local.ps1. Push NEFACUT.
+Nota: exista un `node dist-backend/index.cjs` ORFAN al unei sesiuni vechi (PID 16792, pornit
+2026-07-06) — nu i-am dat kill (nu e al sesiunii asteia); de oprit manual daca nu e intentionat.
+Commit-uri (branch cu commit-uri consolidate, la cererea userului):
 d4ff132 (Task 0 CodeRabbit) -> f8e341c (T1-T3: baseline migrations-rnpm, rnpmDb+rnpmActivity,
 splitter nemontat) -> 27ad85f (T4-T5: CUTOVER atomic repositories + splitter la boot +
 bracketing/garduri 409) -> 0e64961 (T6-T7: backup multi-target + rute self-service +
