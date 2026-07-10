@@ -16,6 +16,7 @@ import {
   listRnpmBackups,
   restoreRnpmFromBackup,
   runDailyBackup,
+  waitForBackupToSettle,
   withMaintenanceWrite,
 } from "./backup.ts";
 import { __resetRnpmActivityForTests, beginRnpmSearch, endRnpmSearch, RnpmSearchActiveError } from "./rnpmActivity.ts";
@@ -233,6 +234,50 @@ describe("deleteRnpmBackups — serializare sub maintenance lock", () => {
     }
     expect(await del).toBeGreaterThanOrEqual(1);
     expect(fs.existsSync(backupPath)).toBe(false);
+  });
+});
+
+// Task 4 (fixuri post-review): waitForBackupToSettle urmarea DOAR daily-ul —
+// un restore RNPM in zbor la shutdown era abandonat (VACUUM INTO / swap
+// intrerupt de close). Settle-set-ul acopera acum toate write-urile.
+describe("waitForBackupToSettle — acopera restore-ul RNPM in zbor", () => {
+  it("nu se rezolva pana nu se termina un restoreRnpmFromBackup in curs", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    seedSearch("u1", "b");
+    __resetRnpmDbForTests();
+
+    // Gate pe PRIMA copiere din staging: restore-ul ramane in zbor pana la release.
+    const realCopy = fsPromises.copyFile.bind(fsPromises);
+    let releaseCopy: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      releaseCopy = resolve;
+    });
+    let gated = false;
+    const copySpy = vi.spyOn(fsPromises, "copyFile").mockImplementation(async (from, to, mode?) => {
+      if (!gated) {
+        gated = true;
+        await gate;
+      }
+      return realCopy(from as Parameters<typeof realCopy>[0], to as Parameters<typeof realCopy>[1], mode);
+    });
+
+    const restore = restoreRnpmFromBackup("u1", name);
+    for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+
+    let settled = false;
+    const wait = waitForBackupToSettle(5_000).then(() => {
+      settled = true;
+    });
+    for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+    expect(settled).toBe(false);
+
+    releaseCopy();
+    await restore;
+    await wait;
+    copySpy.mockRestore();
+    expect(settled).toBe(true);
+    expect(countSearches("u1")).toBe(1);
   });
 });
 

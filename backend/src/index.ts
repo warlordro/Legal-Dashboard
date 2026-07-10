@@ -47,13 +47,13 @@ import { purgeExpiredReservations } from "./db/aiUsageRepository.ts";
 import { purgeExpiredJti } from "./db/jwtDenylistRepository.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
-import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
+import { getDb, getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
 import { markRnpmShuttingDown } from "./db/rnpmDb.ts";
 import { runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
 import { recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
-import { runDailyBackup, waitForBackupToSettle } from "./db/backup.ts";
+import { markMaintenanceShuttingDown, runDailyBackup, waitForBackupToSettle } from "./db/backup.ts";
 import { ErrorCodes, fail } from "./util/envelope.ts";
 import { appErrorHandler } from "./util/appErrorHandler.ts";
 import { adminBackupsRouter } from "./routes/adminBackups.ts";
@@ -508,11 +508,40 @@ if (getAuthMode() === "desktop") {
   }
 }
 
+// Fix review (Task 4): schema init EXPLICIT inainte de splitter — un esec de
+// migratii era raportat "rnpm split failed" (splitter-ul apeleaza getDb()
+// intern), atributie gresita pentru operator.
+try {
+  getDb();
+} catch (e) {
+  fatalBoot("schema init failed", e);
+}
+
+// Fix review (Task 4): gate-ul de master key (web-only) ruleaza INAINTE de
+// splitter — un TENANT_KEY_ENCRYPTION_SECRET lipsa/invalid aborta boot-ul
+// DUPA split, cu monolitul deja golit si datele mutate in fisiere per-user
+// (stare corecta dar surprinzatoare la un abort de config). Round-trip probe:
+// encrypt + decrypt pe un sentinel non-secret, ca o cheie gresita (drift de
+// rotatie, polyfill crypto) sa pice BOOT-ul, nu primul PUT /keys real (F1.5).
+if (getAuthMode() === "web") {
+  try {
+    getMasterKey();
+    const probe = `boot-probe-${Date.now()}`;
+    const round = decryptKey(encryptKey(probe));
+    if (round !== probe) {
+      throw new Error("tenant key crypto round-trip mismatch");
+    }
+  } catch (e) {
+    fatalBoot("tenant key crypto self-test failed", e);
+  }
+}
+
 // v2.43.0 (rnpm-split): splitter-ul one-time ruleaza DUPA toate gate-urile
-// fatale de configuratie (instance lock, auth config, remote bind) si INAINTE
-// de prewarm/scheduler/serve — prewarm-ul de mai jos deschide deja fisiere
-// per-user prin getRnpmDb, deci datele trebuie mutate intai. Fail-closed:
-// orice esec de split opreste boot-ul (monolitul ramane sursa de adevar).
+// fatale de configuratie (instance lock, auth config, remote bind, master
+// key) si INAINTE de prewarm/scheduler/serve — prewarm-ul de mai jos deschide
+// deja fisiere per-user prin getRnpmDb, deci datele trebuie mutate intai.
+// Fail-closed: orice esec de split opreste boot-ul (monolitul ramane sursa
+// de adevar).
 try {
   const splitResult = runRnpmSplitIfNeeded({ appVersion: APP_VERSION });
   if (splitResult.split) console.log(`[boot] rnpm split complet: ${splitResult.owners.length} owneri`);
@@ -526,31 +555,16 @@ try {
 // behind the migration. Better: bind only when ready. Electron splash and any
 // orchestrator see connection-refused → polled retry, not a misleading 200.
 try {
-  // Boot prewarm: ownerId-ul nu conteaza functional (rezultatul nu e folosit),
-  // dar F2 cere ca apelul sa il primeasca explicit; trecem `"local"` pentru
-  // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
-  getAvize({ ownerId: "local", pageSize: 1 });
-  flushPendingReclaimAudit();
-  // Bug 6 (v2.42.1): ownerId e acum obligatoriu in repository — prewarm-ul de
-  // boot (desktop-only path) il paseaza explicit.
-  getAvizStats("local");
-  if (getAuthMode() === "web") {
-    getMasterKey();
-    // Round-trip probe: encrypt + decrypt a non-secret sentinel so a
-    // misconfigured master key (length-32 but wrong, mid-rotation drift, or a
-    // crypto polyfill regression) fails BOOT instead of failing the first real
-    // admin /keys PUT later. Sentinel is generated per boot — never logs or
-    // touches the DB. F1.5 (audit 2026-05-19).
-    try {
-      const probe = `boot-probe-${Date.now()}`;
-      const round = decryptKey(encryptKey(probe));
-      if (round !== probe) {
-        throw new Error("tenant key crypto round-trip mismatch");
-      }
-    } catch (probeErr) {
-      fatalBoot("tenant key crypto self-test failed", probeErr);
-    }
+  // Boot prewarm rnpm: DOAR pe desktop (fix review, Task 6) — "local" e
+  // singurul user acolo; in web mode apelurile ar PROVISIONA prin getRnpmDb
+  // un fisier rnpm/local-*.db orfan pentru un owner care nu exista ca user.
+  if (getAuthMode() === "desktop") {
+    getAvize({ ownerId: "local", pageSize: 1 });
+    getAvizStats("local");
   }
+  flushPendingReclaimAudit();
+  // Gate-ul de master key (web-only, getMasterKey + round-trip probe) a fost
+  // MUTAT inainte de runRnpmSplitIfNeeded (fix review, Task 4).
   recordAudit(null, "system.boot", {
     ownerId: null,
     actorId: "system",
@@ -577,6 +591,24 @@ try {
         action: "proxy.trusted_cidr.unsupported",
         note: "LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR contine entry-uri non-IPv4 / prefix invalid; sunt ignorate de XFF walk.",
         entries: unsupportedProxyCidrs,
+        ts: new Date().toISOString(),
+      })
+    );
+  }
+
+  // Fix review (Task 6.3, finding PLAUSIBLE tratat operational): in web mode
+  // in spatele unui reverse proxy, garduri precum originGuard si rate limiter
+  // depind de identificarea corecta a peer-ului; fara TRUSTED_PROXY_CIDR toate
+  // cererile au ca peer IP-ul proxy-ului (rate-limit bucket comun, XFF
+  // ignorat). Warn structurat, nu fatal — exista deploy-uri web fara proxy.
+  if (getAuthMode() === "web" && (process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR ?? "").trim() === "") {
+    console.warn(
+      JSON.stringify({
+        action: "proxy.trusted_cidr.missing",
+        note:
+          "Web mode fara LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: X-Forwarded-For e ignorat, " +
+          "toti clientii din spatele proxy-ului impart acelasi bucket de rate-limit. " +
+          "Seteaza CIDR-ul retelei proxy-ului (vezi DEPLOY-SERVER.md / RUNBOOK.md).",
         ts: new Date().toISOString(),
       })
     );
@@ -917,10 +949,15 @@ async function gracefulShutdown(reason: string): Promise<void> {
     console.error("[shutdown] stopDailyReportScheduler failed:", e);
   }
 
-  // v2.43.0 (rnpm-split): asteapta backup-ul in curs (daily/manual) cu timeout
-  // — un VACUUM INTO intrerupt de close arunca in mijlocul snapshot-ului.
+  // Fix review (Task 4): flag-ul de shutdown refuza scrierile de mentenanta
+  // NOI (503 prin handlerul central; HTTP-ul e oricum drenat mai sus), apoi
+  // settle-set-ul asteapta TOATE write-urile in zbor — daily/manual backup,
+  // restore monolit/rnpm, inclusiv writerii inca in coada pe lock. Plafon 30s;
+  // poate fi depasit de VACUUM-ul sincron multi-target pana la Task 7
+  // (fereastra existenta si inainte, la 10s).
   try {
-    await waitForBackupToSettle(10_000);
+    markMaintenanceShuttingDown();
+    await waitForBackupToSettle(30_000);
   } catch (e) {
     console.error("[shutdown] waitForBackupToSettle failed:", e);
   }

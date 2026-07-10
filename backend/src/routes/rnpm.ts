@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
+import fs from "node:fs";
 import { stat } from "node:fs/promises";
 import { z } from "zod";
 import {
@@ -32,6 +33,7 @@ import { requireRole } from "../middleware/requireRole.ts";
 import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { getUserById } from "../db/userRepository.ts";
+import { rethrowTypedMaintenanceError } from "../util/appErrorHandler.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 import { parseJsonBody, resolveCaptchaKeyForRoute, withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
@@ -908,8 +910,17 @@ rnpmRouter.get("/stats", requireRole("admin", "user"), async (c) => {
   // v2.43.0 (rnpm-split): statisticile si dimensiunea raporteaza FISIERUL
   // PER USER al callerului, nu monolitul.
   const ownerId = getOwnerId(c);
-  const stats = getAvizStats(ownerId);
   const dbPath = getRnpmDbPath(ownerId);
+  // Fix review (Task 6): existence-check LA NIVEL DE RUTA, inainte de orice
+  // apel de repository — getAvizStats provisioneaza fisierul prin getRnpmDb,
+  // iar un GET nu are voie sa creeze fisiere pe disc pentru un user care nu a
+  // folosit inca RNPM. Latch-ul de restore ramane PRIORITAR: in timpul unui
+  // restore raspunsul corect e 409 (prin getRnpmDb -> maparea centrala), nu
+  // zerouri false pentru un fisier aflat mid-swap.
+  if (!isRnpmRestoreInProgress(ownerId) && !fs.existsSync(dbPath)) {
+    return c.json({ total: 0, activ: 0, inactiv: 0, byType: {}, db: { path: dbPath, sizeBytes: 0 } });
+  }
+  const stats = getAvizStats(ownerId);
   // CP-B4: async fs so handler does not block the event loop under concurrency (web mode).
   const sizeOf = async (p: string): Promise<number> => {
     try {
@@ -947,10 +958,20 @@ rnpmRouter.post("/open-db-folder", requireDesktopHeader, requireRole("admin", "u
 
 rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), (c) => {
   // v2.43.0 (rnpm-split): compacteaza FISIERUL PER USER al callerului.
+  const ownerId = getOwnerId(c);
+  // Fix review (Task 6): fara fisier nu exista nimic de compactat — 404, nu
+  // provisioning implicit prin getRnpmDb. Latch-ul de restore ramane
+  // prioritar (409 prin rethrow, nu 404 pentru un fisier mid-swap).
+  if (!isRnpmRestoreInProgress(ownerId) && !fs.existsSync(getRnpmDbPath(ownerId))) {
+    return notFound(c, "Baza RNPM nu exista inca pentru acest cont");
+  }
   try {
-    const result = compactRnpmDb(getOwnerId(c));
+    const result = compactRnpmDb(ownerId);
     return c.json({ ok: true, ...result });
   } catch (e) {
+    // Fix review (Task 5): erorile tipate (restore in curs, shutdown) ies spre
+    // handlerul central => 409/503, nu 500 generic.
+    rethrowTypedMaintenanceError(e);
     const msg = e instanceof Error ? e.message : "Eroare compactare baza";
     return internalError(c, msg);
   }
@@ -1042,6 +1063,7 @@ rnpmRouter.post("/backups/create", requireDesktopHeader, requireRole("admin", "u
       outcome: "error",
       detail: { error: msg },
     });
+    rethrowTypedMaintenanceError(e);
     return internalError(c, msg);
   }
 });
@@ -1079,6 +1101,8 @@ rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin", "
     // Clasificare: input invalid = 400; concurenta = 409; restul = 500.
     if (e instanceof BackupValidationError) return invalidParams(c, msg);
     if (e instanceof RnpmSearchActiveError) return c.json(fail("SEARCH_ACTIVE", msg, c), 409);
+    // Restore concurent pe acelasi owner / shutdown => 409/503 central.
+    rethrowTypedMaintenanceError(e);
     return internalError(c, msg);
   }
 });
@@ -1101,6 +1125,7 @@ rnpmRouter.delete("/backups", requireDesktopHeader, requireRole("admin", "user")
     });
     // Clasificare identica cu restore: input invalid = 400, restul = 500.
     if (e instanceof BackupValidationError) return invalidParams(c, msg);
+    rethrowTypedMaintenanceError(e);
     return internalError(c, msg);
   }
 });

@@ -148,6 +148,17 @@ docker exec ld-container env | grep -E "LEGAL_DASHBOARD|JWT|TENANT"
 | `SQLite ... unable to open database file` | DB path nu exista / permissions | `chmod 644 $LEGAL_DASHBOARD_DB_PATH` + verifica owner |
 | `migrations failed` | Migration ne-aplicata si DB locked | Vezi §4 |
 
+### Warn la boot: `proxy.trusted_cidr.missing` (web mode)
+
+Nu e fatal, dar NU-l ignora in productie: fara `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR`
+backend-ul ignora `X-Forwarded-For`, deci gardurile dependente de identitatea
+clientului (rate limiter per IP, originGuard pe mutatii cross-LAN) vad TOATE
+cererile ca venind de la IP-ul proxy-ului — un singur bucket de rate-limit
+pentru toti utilizatorii, iar apararea CSRF ramane doar pe cookie-ul
+SameSite=Strict. Fix: seteaza CIDR-ul retelei Docker a proxy-ului (plus,
+optional, CIDR-urile Cloudflare daca exista layer CF) si restart. Detalii in
+DEPLOY-SERVER.md §12.
+
 ---
 
 ## 4. DB corruption / integrity check fail
@@ -189,6 +200,14 @@ ls -l /path/to/legal-dashboard.db*
 
 ### Cand
 User-ul vrea sa revina la o zi anterioara, sau dupa o migrare gresita.
+
+Nota (v2.43.0): restore-ul BAZEI UNICE (monolit, din Setari) inseamna
+indisponibilitate globala temporara — pe durata swap-ului toate rutele care
+ating DB-ul raspund 409 `RESTORE_IN_PROGRESS`. Fereastra e de ordinul
+secundelor si operatiunea e admin-triggered; clientii reincearca imediat.
+Un restore dintr-un backup cu schema mai NOUA decat aplicatia e refuzat 400
+(fail-closed, anti-downgrade). Restore-ul RNPM per user afecteaza DOAR
+ownerul respectiv (vezi sectiunea dedicata).
 
 ### Procedura
 

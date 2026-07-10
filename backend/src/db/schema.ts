@@ -9,7 +9,9 @@ import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
 // and prod (esbuild CJS bundle). In CJS __dirname is `dist-backend/`; in dev
 // it's `backend/src/db/`. Either way, sibling `migrations/` is the target.
 const __schemaDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = path.join(__schemaDir, "migrations");
+// Exportat pentru validarea de versiune la restore-ul monolitului (backup.ts)
+// — oglinda MIGRATIONS_RNPM_DIR din rnpmDb.ts.
+export const MIGRATIONS_DIR = path.join(__schemaDir, "migrations");
 
 export function preMigrationBackup(src: string, label: string): void {
   try {
@@ -43,6 +45,33 @@ let db: Database.Database | null = null;
 // the scheduler.running guard inside `tickOnce` after withMaintenanceRead.
 let shuttingDown = false;
 
+// Fix review (Task 5): paritate cu latch-ul RNPM — in fereastra restore-ului
+// de monolit (closeLive -> publish -> probe), orice getDb() strain e refuzat
+// tipat in loc sa REDESCHIDA fisierul in mijlocul swap-ului (handle nou pe
+// fisierul vechi/nou = EBUSY la rename pe Windows sau citiri din starea
+// gresita). Consecinta asumata si documentata: restore-ul de monolit inseamna
+// INDISPONIBILITATE GLOBALA temporara — toate rutele care ating DB-ul primesc
+// 409 prin handlerul central; fereastra e scurta si admin-triggered.
+// Latch-ul e setat/curatat EXCLUSIV in restoreFromBackup (backup.ts), in
+// try/finally in interiorul withMaintenanceWrite — NU in restoreTargetImpl
+// partajat (restore-ul RNPM are latch-ul lui per owner in rnpmActivity).
+export class MonolithRestoreInProgressError extends Error {
+  readonly code = "RESTORE_IN_PROGRESS";
+  constructor() {
+    super("Restore de baza de date in curs — aplicatia e indisponibila cateva secunde. Reincearca imediat.");
+  }
+}
+
+let monolithRestoreInProgress = false;
+
+export function setMonolithRestoreInProgress(): void {
+  monolithRestoreInProgress = true;
+}
+
+export function clearMonolithRestoreInProgress(): void {
+  monolithRestoreInProgress = false;
+}
+
 export function getDbPath(): string {
   return process.env.LEGAL_DASHBOARD_DB_PATH ?? path.join(process.cwd(), "legal-dashboard.db");
 }
@@ -50,6 +79,9 @@ export function getDbPath(): string {
 export function getDb(): Database.Database {
   if (shuttingDown) {
     throw new Error("DB closed; refusing to reopen during shutdown");
+  }
+  if (monolithRestoreInProgress) {
+    throw new MonolithRestoreInProgressError();
   }
   if (db) return db;
 

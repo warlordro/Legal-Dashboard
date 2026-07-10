@@ -1,7 +1,9 @@
+import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
@@ -275,6 +277,108 @@ describe("PR-9 index boot/auth boundaries", () => {
       const { releaseInstanceLock } = await import("./db/instanceLock.ts");
       releaseInstanceLock();
     }
+  });
+});
+
+// Task 4 (fixuri post-review): in web mode gate-ul de master key rula DUPA
+// splitter — un TENANT_KEY_ENCRYPTION_SECRET lipsa aborta boot-ul cu monolitul
+// DEJA golit si datele mutate in fisiere per-user (stare surprinzatoare pentru
+// operator, desi recuperabila). Gate-ul trebuie sa pice INAINTE de split.
+describe("ordinea de boot — master key INAINTE de rnpm split (Task 4)", () => {
+  it(
+    "web fara TENANT_KEY_ENCRYPTION_SECRET + monolit cu randuri rnpm => boot pica inainte de split",
+    { timeout: 30_000 },
+    async () => {
+      const dbPath = await makeTmpDb();
+
+      // Seed: schema completa + un rand rnpm in monolit, in sandbox de env +
+      // registru de module separat de boot-ul real de mai jos.
+      const prevDbPath = process.env.LEGAL_DASHBOARD_DB_PATH;
+      process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
+      vi.resetModules();
+      try {
+        const { getDb, closeDb } = await import("./db/schema.ts");
+        getDb()
+          .prepare("INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('userA','dupa_nume','{}')")
+          .run();
+        closeDb();
+      } finally {
+        if (prevDbPath === undefined) {
+          // biome-ignore lint/performance/noDelete: process.env trebuie unset real.
+          delete process.env.LEGAL_DASHBOARD_DB_PATH;
+        } else {
+          process.env.LEGAL_DASHBOARD_DB_PATH = prevDbPath;
+        }
+      }
+
+      const exitSpy = vi.spyOn(process, "exit").mockImplementation((() => {
+        throw new Error("process.exit called");
+      }) as typeof process.exit);
+
+      try {
+        await expect(
+          importFreshIndex({
+            LEGAL_DASHBOARD_PORT: String(randomPort()),
+            LEGAL_DASHBOARD_DB_PATH: dbPath,
+            LEGAL_DASHBOARD_AUTH_MODE: "web",
+            LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+            LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+            LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+            TENANT_KEY_ENCRYPTION_SECRET: "",
+          })
+        ).rejects.toThrow("process.exit called");
+        expect(exitSpy).toHaveBeenCalledWith(1);
+
+        // Monolitul e INTACT — splitter-ul nu a apucat sa goleasca nimic...
+        const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
+        try {
+          const n = (probe.prepare("SELECT COUNT(*) AS n FROM rnpm_searches").get() as { n: number }).n;
+          expect(n).toBe(1);
+        } finally {
+          probe.close();
+        }
+        // ...si nu exista fisiere per-user create de un split partial.
+        const rnpmDir = path.join(path.dirname(dbPath), "rnpm");
+        const perUser = fs.existsSync(rnpmDir) ? fs.readdirSync(rnpmDir).filter((f) => f.endsWith(".db")) : [];
+        expect(perUser).toEqual([]);
+      } finally {
+        // Aceeasi ratiune ca la testul de remote-bind: elibereaza instance
+        // lock-ul luat inainte de gate-ul care pica (heartbeat orfan flaky).
+        const { releaseInstanceLock } = await import("./db/instanceLock.ts");
+        releaseInstanceLock();
+        // Boot-ul a deschis DB-ul (schema init explicit) inainte de gate-ul
+        // care pica; fara close, rm-ul din afterEach da EBUSY pe Windows si
+        // otraveste toate testele urmatoare. Acelasi registru de module ca
+        // boot-ul (fara resetModules intre timp) => acelasi handle.
+        const { closeDb } = await import("./db/schema.ts");
+        closeDb();
+      }
+    }
+  );
+});
+
+// Task 6 (fixuri post-review): prewarm-ul rnpm de la boot e un artefact
+// desktop ("local" e singurul user acolo) — in web mode crea un fisier
+// rnpm/local-*.db orfan pentru un owner care nu exista ca user real.
+describe("igiena web-mode — prewarm rnpm gate-uit pe desktop (Task 6)", () => {
+  it("boot web NU provisioneaza fisierul rnpm al ownerului 'local'", { timeout: 25_000 }, async () => {
+    const port = randomPort();
+    const dbPath = await makeTmpDb();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: dbPath,
+      LEGAL_DASHBOARD_AUTH_MODE: "web",
+      LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+      LEGAL_DASHBOARD_JWT_ISSUER: "legal-dashboard.test",
+      LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard-api",
+    });
+    await waitForHealth(port);
+
+    const rnpmDir = path.join(path.dirname(dbPath), "rnpm");
+    const localFiles = fs.existsSync(rnpmDir)
+      ? fs.readdirSync(rnpmDir).filter((f) => f.startsWith("local-") && f.endsWith(".db"))
+      : [];
+    expect(localFiles).toEqual([]);
   });
 });
 

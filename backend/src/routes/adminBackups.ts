@@ -16,6 +16,7 @@ import {
 } from "../db/backup.ts";
 import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { requireRole } from "../middleware/requireRole.ts";
+import { rethrowTypedMaintenanceError } from "../util/appErrorHandler.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 
 const SMALL_BODY_LIMIT = 4 * 1024;
@@ -33,6 +34,9 @@ adminBackupsRouter.get("/", async (c) => {
     const backups = await listBackupsWithMeta();
     return c.json({ backups });
   } catch (e) {
+    // Fix review (Task 4.3/5.2): erorile tipate (shutdown, restore in curs)
+    // ies spre handlerul central => 409/503, nu 500 generic.
+    rethrowTypedMaintenanceError(e);
     const msg = e instanceof Error ? e.message : "Eroare listare backups";
     return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
   }
@@ -53,6 +57,7 @@ adminBackupsRouter.post("/create", requireDesktopHeader, async (c) => {
       outcome: "error",
       detail: { error: msg },
     });
+    rethrowTypedMaintenanceError(e);
     return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
   }
 });
@@ -83,6 +88,7 @@ adminBackupsRouter.post("/restore", requireDesktopHeader, limitSmall, async (c) 
     if (e instanceof BackupValidationError) {
       return c.json(fail(ErrorCodes.INVALID_PARAMS, msg, c), 400);
     }
+    rethrowTypedMaintenanceError(e);
     return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
   }
 });
@@ -102,6 +108,7 @@ adminBackupsRouter.delete("/", requireDesktopHeader, async (c) => {
       outcome: "error",
       detail: { error: msg },
     });
+    rethrowTypedMaintenanceError(e);
     return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
   }
 });

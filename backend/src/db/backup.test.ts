@@ -4,16 +4,23 @@ import os from "node:os";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
+import { Hono } from "hono";
 import {
+  __resetMaintenanceShutdownForTests,
   deleteAllBackups,
   getBackupDir,
   listBackupsWithMeta,
+  markMaintenanceShuttingDown,
   restoreFromBackup,
   runDailyBackup,
+  waitForBackupToSettle,
   withMaintenanceRead,
   withMaintenanceWrite,
 } from "./backup.ts";
-import { closeDb } from "./schema.ts";
+import { requestIdContext } from "../middleware/requestId.ts";
+import { meRouter } from "../routes/me.ts";
+import { appErrorHandler } from "../util/appErrorHandler.ts";
+import { clearMonolithRestoreInProgress, closeDb, getDb, setMonolithRestoreInProgress } from "./schema.ts";
 
 // Capture console.log during the body — vi.spyOn does not intercept reliably
 // across the maintenance-lock microtask hop, so override the method directly.
@@ -344,6 +351,154 @@ describe("runDailyBackup — offsite hook (POSIX only)", () => {
     const dated = names.filter((name) => /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/.test(name));
     // Hook failure is fail-open: local backup persists, only the offsite leg failed.
     expect(dated.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// Task 5 (fixuri post-review): restore-ul de monolit primeste paritate cu cel
+// RNPM — latch tipat pe getDb() in fereastra de restore (toate rutele 409 prin
+// handlerul central; indisponibilitate globala temporara, acceptata si
+// documentata) + validare de versiune de schema fail-closed.
+describe("restore monolit — latch + validare versiune (Task 5)", () => {
+  it("in fereastra restore-ului getDb() arunca tipat, iar snapshot-ul pre-restore PROPRIU reuseste", async () => {
+    const backupName = "legal-dashboard.2026-04-15.db";
+    await seedBackup(backupName, "RESTORED");
+
+    let latchError: unknown = null;
+    const { preRestoreName } = await restoreFromBackup(backupName, {
+      onPhase: (phase) => {
+        if (phase === "post_publish") {
+          try {
+            getDb();
+          } catch (e) {
+            latchError = e;
+          }
+        }
+      },
+    });
+
+    // Anti-self-block: snapshot-ul pre-restore al restore-ului insusi a mers
+    // (conexiune raw readonly, nu getDb-ul latch-uit).
+    expect(fs.existsSync(path.join(getBackupDir(), preRestoreName))).toBe(true);
+    // Latch-ul: orice getDb() strain din fereastra e refuzat tipat.
+    expect(latchError).toMatchObject({ code: "RESTORE_IN_PROGRESS" });
+    // Dupa restore latch-ul e curatat si baza e cea restaurata.
+    expect(() => getDb()).not.toThrow();
+    expect(readMarker(dbPath)).toBe("RESTORED");
+  });
+
+  it("o ruta ne-RNPM in timpul restore-ului de monolit primeste 409 prin handlerul central", async () => {
+    setMonolithRestoreInProgress();
+    try {
+      const app = new Hono();
+      app.onError(appErrorHandler);
+      app.use("*", requestIdContext);
+      app.use("*", async (c, next) => {
+        c.set("ownerId", "local");
+        await next();
+      });
+      app.route("/api/v1/me", meRouter);
+
+      const res = await app.request("/api/v1/me");
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("RESTORE_IN_PROGRESS");
+    } finally {
+      clearMonolithRestoreInProgress();
+    }
+  });
+
+  it("restore monolit dintr-un backup cu _schema_versions mai NOUA => 400 fail-closed, live neatins", async () => {
+    const backupName = "legal-dashboard.2026-04-16.db";
+    await seedBackup(backupName, "FUTURE");
+    const forge = new Database(path.join(getBackupDir(), backupName));
+    try {
+      forge.exec(
+        "CREATE TABLE _schema_versions (version INTEGER PRIMARY KEY, sha256_up TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+      );
+      forge.prepare("INSERT INTO _schema_versions (version, sha256_up) VALUES (9999, 'future')").run();
+    } finally {
+      forge.close();
+    }
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+    // Lipsa tabelei ramane ACCEPTATA la monolit (backup-uri legacy reale) —
+    // acoperita de testele de restore de mai sus (seedBackup nu creeaza
+    // _schema_versions).
+  });
+});
+
+// Task 4 (fixuri post-review): shutdown-ul acopera TOATE write-urile de
+// mentenanta, nu doar daily-ul — flag tipat MAINTENANCE_SHUTDOWN (refuz
+// INAINTE de coada lock-ului) + settle-set cu promise-urile care includ si
+// timpul de asteptare pe lock.
+describe("maintenance shutdown — flag tipat + settle-set (Task 4)", () => {
+  afterEach(() => {
+    __resetMaintenanceShutdownForTests();
+  });
+
+  it("dupa flag, un withMaintenanceWrite NOU arunca eroarea tipata si ruta raspunde 503 prin handlerul central", async () => {
+    markMaintenanceShuttingDown();
+
+    await expect(withMaintenanceWrite(async () => undefined)).rejects.toMatchObject({
+      code: "MAINTENANCE_SHUTDOWN",
+    });
+
+    const app = new Hono();
+    app.onError(appErrorHandler);
+    app.use("*", requestIdContext);
+    app.post("/op", async (c) => {
+      await withMaintenanceWrite(async () => undefined);
+      return c.json({ ok: true });
+    });
+    const res = await app.request("/op", { method: "POST" });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toMatch(/^\d+$/);
+    expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("MAINTENANCE_SHUTDOWN");
+  });
+
+  it("un writer DEJA in coada la setarea flag-ului isi termina treaba si e prins de settle-set", async () => {
+    let releaseFirst: () => void = () => undefined;
+    const first = withMaintenanceWrite(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        })
+    );
+    await new Promise((r) => setImmediate(r));
+
+    let secondRan = false;
+    const second = withMaintenanceWrite(async () => {
+      secondRan = true;
+    });
+    await new Promise((r) => setImmediate(r));
+
+    let settled = false;
+    let wait: Promise<void> = Promise.resolve();
+    try {
+      // Flag-ul se seteaza cat timp `second` ASTEAPTA pe lock.
+      markMaintenanceShuttingDown();
+
+      wait = waitForBackupToSettle(5_000).then(() => {
+        settled = true;
+      });
+      for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+      // Settle-ul asteapta si writer-ul din coada (promise-ul inregistrat
+      // include timpul de asteptare pe lock).
+      expect(settled).toBe(false);
+    } finally {
+      // Elibereaza lock-ul MODULULUI si pe esec — altfel un red aici
+      // otraveste testele urmatoare din fisier (timeout in cascada).
+      releaseFirst();
+      await Promise.allSettled([first, second]);
+    }
+    await Promise.all([first, second, wait]);
+    expect(settled).toBe(true);
+    expect(secondRan).toBe(true);
+
+    // Un writer NOU dupa flag ramane refuzat.
+    await expect(withMaintenanceWrite(async () => undefined)).rejects.toMatchObject({
+      code: "MAINTENANCE_SHUTDOWN",
+    });
   });
 });
 

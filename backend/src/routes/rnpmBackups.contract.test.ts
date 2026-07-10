@@ -11,12 +11,19 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { getRnpmBackupDir } from "../db/backup.ts";
-import { __resetRnpmActivityForTests, beginRnpmSearch, endRnpmSearch } from "../db/rnpmActivity.ts";
+import {
+  __resetRnpmActivityForTests,
+  beginRnpmRestore,
+  beginRnpmSearch,
+  endRnpmRestore,
+  endRnpmSearch,
+} from "../db/rnpmActivity.ts";
 import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, rnpmFileStem } from "../db/rnpmDb.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserRole } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
+import { appErrorHandler } from "../util/appErrorHandler.ts";
 import { __resetRnpmBackupCooldownForTests, rnpmRouter } from "./rnpm.ts";
 
 const DESKTOP = { "x-legal-dashboard-desktop": "1" } as const;
@@ -26,6 +33,10 @@ let tmpRoot: string;
 
 function buildApp(actAs: string) {
   const app = new Hono();
+  // Handlerul central de erori, ca in index.ts — erorile tipate rethrow-uite
+  // de rute (RESTORE_IN_PROGRESS / SEARCH_ACTIVE / MAINTENANCE_SHUTDOWN)
+  // trebuie sa ajunga la maparea 409/503, exact ca in productie.
+  app.onError(appErrorHandler);
   app.use("*", async (c, next) => {
     c.set("ownerId", actAs);
     await next();
@@ -294,6 +305,42 @@ describe("rutele pe fisierul callerului (stats/compact/delete-all)", () => {
     const body = (await res.json()) as { ok: boolean; beforeBytes: number; afterBytes: number };
     expect(body.ok).toBe(true);
     expect(body.beforeBytes).toBeGreaterThan(0);
+  });
+
+  // Task 6 (fixuri post-review): existence-check LA NIVEL DE RUTA — un GET
+  // /stats sau POST /compact al unui user care nu a folosit inca RNPM nu are
+  // voie sa PROVISIONEZE fisierul pe disc (getAvizStats trece prin getRnpmDb,
+  // care creeaza fisierul).
+  it("GET /stats pe user fara fisier RNPM => zerouri + sizeBytes 0, FARA creare de fisier", async () => {
+    insertUser({ id: "u-fara", email: "u-fara@x", displayName: "Fara" });
+    const res = await buildApp("u-fara").request("/api/rnpm/stats", { headers: DESKTOP });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { total: number; db: { sizeBytes: number } };
+    expect(body.total).toBe(0);
+    expect(body.db.sizeBytes).toBe(0);
+    expect(fs.existsSync(getRnpmDbPath("u-fara"))).toBe(false);
+  });
+
+  it("POST /compact pe user fara fisier RNPM => 404 NOT_FOUND, FARA creare de fisier", async () => {
+    insertUser({ id: "u-fara2", email: "u-fara2@x", displayName: "Fara2" });
+    const res = await buildApp("u-fara2").request("/api/rnpm/compact", { method: "POST", headers: DESKTOP });
+    expect(res.status).toBe(404);
+    expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("NOT_FOUND");
+    expect(fs.existsSync(getRnpmDbPath("u-fara2"))).toBe(false);
+  });
+
+  // Task 5 (fixuri post-review): erorile tipate de concurenta nu mai sunt
+  // inghitite de catch-ul generic al rutei — 409 prin handlerul central.
+  it("POST /compact in timpul unui restore RNPM al ownerului => 409 RESTORE_IN_PROGRESS, nu 500", async () => {
+    seedRnpm("u1", "a");
+    beginRnpmRestore("u1");
+    try {
+      const res = await buildApp("u1").request("/api/rnpm/compact", { method: "POST", headers: DESKTOP });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("RESTORE_IN_PROGRESS");
+    } finally {
+      endRnpmRestore("u1");
+    }
   });
 
   it("DELETE /saved/all e self-service si refuza cu 409 SEARCH_ACTIVE in timpul unei cautari", async () => {

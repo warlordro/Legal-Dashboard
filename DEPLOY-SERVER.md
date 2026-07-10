@@ -140,6 +140,7 @@ In `.env.prod`:
 ## 12. Constrangeri de securitate
 
   - Backend-ul NU foloseste `ports:` in compose, doar `expose:`. Daca cineva il publica direct, oricine cu un client HTTP poate trimite header `X-Auth-Request-Email` (bypass total al Google OAuth). Singura protectie suplimentara este shared secret `PROXY_BRIDGE_SECRET` — pastreaza-l rotativ si NU il loga.
+  - **`LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` este obligatoriu operational in spatele unui proxy** (v2.43.0): gardurile care depind de identitatea peer-ului (rate limiter per IP, originGuard pe mutatii cross-LAN) folosesc `X-Forwarded-For` DOAR daca peer-ul TCP intra in acest CIDR. Nesetat, toate cererile au ca peer IP-ul containerului de proxy — un singur bucket de rate-limit pentru toti utilizatorii si protectie CSRF dependenta exclusiv de cookie-ul SameSite=Strict. Seteaza CIDR-ul retelei Docker a proxy-ului (ex. `172.20.0.0/16`); backend-ul logheaza la boot warn-ul structurat `proxy.trusted_cidr.missing` cand lipseste in web mode.
   - oauth2-proxy NU forwardeaza tokenul Google catre backend (`PASS_AUTHORIZATION_HEADER=false`, `PASS_ACCESS_TOKEN=false`). Asa, tokenurile Google nu intra niciodata in DB-ul nostru.
   - Cookie-urile sunt HttpOnly + Secure + SameSite=Strict. Frontend-ul nu poate citi JWT-ul din JavaScript.
   - Audit log-ul backend-ului inregistreaza login-uri prin `auth.oauth2.sync` cu `targetId=user.id`, dar fara plaintext-ul email (doar hash SHA-256 pe refuzuri).

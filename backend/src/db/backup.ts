@@ -15,7 +15,14 @@ import {
   MIGRATIONS_RNPM_DIR,
   openRnpmDbRaw,
 } from "./rnpmDb.ts";
-import { closeDb, getDb, getDbPath } from "./schema.ts";
+import {
+  clearMonolithRestoreInProgress,
+  closeDb,
+  getDb,
+  getDbPath,
+  MIGRATIONS_DIR,
+  setMonolithRestoreInProgress,
+} from "./schema.ts";
 
 // Single in-process maintenance gate. Restore + daily backup acquire WRITE
 // (exclusive — restore closes the DB handle and atomically renames the file;
@@ -27,11 +34,51 @@ import { closeDb, getDb, getDbPath } from "./schema.ts";
 // with a row-lock or advisory lock in the gateway.
 const maintenanceLock = new RWLock();
 
+// Fix review (Task 4): la shutdown, scrierile de mentenanta NOI se refuza cu
+// eroare tipata (mapata la 503 in appErrorHandler), iar cele in zbor — inclusiv
+// cele care ASTEAPTA inca pe lock — sunt urmarite in settle-set si asteptate de
+// waitForBackupToSettle. Offsite hook-urile ruleaza in AFARA lock-ului si NU
+// sunt in set (best-effort la shutdown, transportul poate dura minute).
+export class MaintenanceShutdownError extends Error {
+  readonly code = "MAINTENANCE_SHUTDOWN";
+  constructor() {
+    super("Aplicatia se inchide — operatiunea de mentenanta a fost refuzata. Reincearca dupa repornire.");
+  }
+}
+
+let maintenanceShuttingDown = false;
+const maintenanceWritesInFlight = new Set<Promise<unknown>>();
+
+export function markMaintenanceShuttingDown(): void {
+  maintenanceShuttingDown = true;
+}
+
+export function __resetMaintenanceShutdownForTests(): void {
+  maintenanceShuttingDown = false;
+  maintenanceWritesInFlight.clear();
+}
+
 // Exclusive writer for restore + daily backup. Public: tests need to hold
 // the writer side to assert reader/writer interleaving (without spinning the
 // real runDailyBackup, which does I/O and can't be paused mid-flight).
 export function withMaintenanceWrite<T>(fn: () => Promise<T>): Promise<T> {
-  return maintenanceLock.withWrite(fn);
+  // Flag-ul se verifica INAINTE de withWrite (fix panel — writer preference:
+  // un writer refuzat abia in interiorul callback-ului ar fi blocat degeaba
+  // reader-ii noi cat timp statea in coada).
+  if (maintenanceShuttingDown) return Promise.reject(new MaintenanceShutdownError());
+  // Promise-ul inregistrat e CEL returnat de withWrite — include timpul de
+  // asteptare pe lock, deci un writer aflat deja in coada la shutdown ramane
+  // acoperit de settle-set (nu e abandonat).
+  const p = maintenanceLock.withWrite(fn);
+  maintenanceWritesInFlight.add(p);
+  void p
+    .finally(() => {
+      maintenanceWritesInFlight.delete(p);
+    })
+    .catch(() => {
+      /* esecul e propagat callerului prin `p`; aici doar curatam set-ul */
+    });
+  return p;
 }
 
 // Shared reader. Used by the monitoring scheduler to coordinate with the
@@ -638,24 +685,71 @@ export interface RestoreOptions {
   onPhase?: (phase: string) => void;
 }
 
+// Fix review (Task 5): validare de versiune la restore-ul MONOLITULUI — un
+// backup produs de o versiune mai noua de schema ar bloca boot-ul urmator pe
+// anti-downgrade-ul runner-ului. Lipsa tabelei _schema_versions ramane
+// ACCEPTATA aici (exista backup-uri legacy reale pre-tracking) — spre
+// deosebire de jail-urile rnpm, care exista doar din v2.43.0 (fail-closed).
+function assertMonolithBackupVersionCompatible(backupPath: string): void {
+  const known = discoverMigrations(MIGRATIONS_DIR);
+  const maxKnown = known.reduce((m, f) => Math.max(m, f.version), 0);
+  const probe = new Database(backupPath, { readonly: true, fileMustExist: true });
+  try {
+    const hasTable = probe
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'")
+      .get();
+    if (!hasTable) return;
+    const row = probe.prepare("SELECT MAX(version) AS v FROM _schema_versions").get() as { v: number | null };
+    const backupVersion = row.v ?? 0;
+    if (backupVersion > maxKnown) {
+      throw new BackupValidationError(
+        `Backup-ul are o versiune de schema mai noua (${backupVersion}) decat aplicatia (${maxKnown}). ` +
+          "Actualizeaza aplicatia inainte de restore."
+      );
+    }
+  } finally {
+    probe.close();
+  }
+}
+
 export async function restoreFromBackup(name: string, opts?: RestoreOptions): Promise<{ preRestoreName: string }> {
   assertNameInJail(getBackupDir(), name, RESTORE_NAME_RE);
-  return withMaintenanceWrite(() =>
-    restoreTargetImpl(
-      {
-        key: "main",
-        dir: getBackupDir(),
-        prefix: MAIN_PREFIX,
-        dbPath: getDbPath(),
-        // Snapshot-ul pre-restore vine de pe handle-ul viu; ramane deschis
-        // pana la closeLive de mai jos.
-        openLiveForSnapshot: () => ({ db: getDb(), close: false }),
-        closeLive: () => closeDb(),
-      },
-      name,
-      opts?.onPhase
-    )
-  );
+  return withMaintenanceWrite(async () => {
+    const src = path.join(getBackupDir(), name);
+    try {
+      await fsPromises.access(src);
+    } catch {
+      throw new BackupValidationError("Backup inexistent");
+    }
+    assertMonolithBackupVersionCompatible(src);
+    // Latch-ul global (Task 5): orice getDb() strain din fereastra de restore
+    // e refuzat tipat (409 central) in loc sa redeschida fisierul mid-swap.
+    // Set/clear DOAR aici, nu in restoreTargetImpl partajat.
+    setMonolithRestoreInProgress();
+    try {
+      return await restoreTargetImpl(
+        {
+          key: "main",
+          dir: getBackupDir(),
+          prefix: MAIN_PREFIX,
+          dbPath: getDbPath(),
+          // Anti-self-block (fix panel): conexiune RAW readonly, NU getDb() —
+          // latch-ul de mai sus ar respinge chiar snapshot-ul pre-restore
+          // propriu. Oglinda openRnpmDbRaw; post-publish probe foloseste deja
+          // conexiune raw in restoreTargetImpl (new Database(dbPath)).
+          openLiveForSnapshot: () => ({
+            db: new Database(getDbPath(), { readonly: true, fileMustExist: true }),
+            close: true,
+          }),
+          closeLive: () => closeDb(),
+        },
+        name,
+        opts?.onPhase
+      );
+    } finally {
+      clearMonolithRestoreInProgress();
+    }
+  });
 }
 
 // Validare de versiune la restore RNPM: un backup produs de o versiune mai
@@ -935,19 +1029,21 @@ export async function createRnpmManualBackup(ownerId: string): Promise<{ name: s
 // Daily backup multi-target
 // ---------------------------------------------------------------------------
 
-// Promise-ul backup-ului in curs — gracefulShutdown il asteapta cu timeout
-// inainte de markRnpmShuttingDown/markShuttingDown (un VACUUM INTO intrerupt
-// de close arunca in mijlocul snapshot-ului).
-let backupInFlight: Promise<unknown> | null = null;
-
+// Fix review (Task 4): gracefulShutdown asteapta TOATE write-urile de
+// mentenanta in zbor (daily backup, manual backup, restore monolit/rnpm),
+// nu doar daily-ul — un restore intrerupt de close arunca in mijlocul
+// swap-ului. Plafonul (30s la shutdown, setat de caller) poate fi inca
+// depasit de un VACUUM sincron multi-target — fereastra EXISTENTA si inainte
+// (10s), inchisa complet de Task 7 (VACUUM in worker).
 export async function waitForBackupToSettle(timeoutMs = 10_000): Promise<void> {
-  const current = backupInFlight;
-  if (!current) return;
+  const pending = [...maintenanceWritesInFlight];
+  if (pending.length === 0) return;
   await Promise.race([
-    current.catch(() => {
-      /* esecul e deja logat de runDailyBackup */
+    Promise.allSettled(pending).then(() => undefined),
+    new Promise<void>((r) => {
+      const t = setTimeout(r, timeoutMs);
+      t.unref?.();
     }),
-    new Promise((r) => setTimeout(r, timeoutMs)),
   ]);
 }
 
@@ -1025,17 +1121,11 @@ export async function runDailyBackup(): Promise<void> {
   // Serialize with restoreFromBackup so a user-triggered restore that closes
   // the DB cannot interleave with the snapshot running from this scheduler.
   // Offsite hook-urile ruleaza DUPA eliberarea lock-ului — N useri x 10 min
-  // timeout de transport nu au voie sa blocheze toate scrierile.
-  const run = (async () => {
-    const fresh = await withMaintenanceWrite(runDailyBackupImpl);
-    for (const f of fresh) {
-      await runOffsiteBackupHook(f);
-    }
-  })();
-  backupInFlight = run;
-  try {
-    await run;
-  } finally {
-    if (backupInFlight === run) backupInFlight = null;
+  // timeout de transport nu au voie sa blocheze toate scrierile; partea de
+  // snapshot e in settle-set prin withMaintenanceWrite, hook-urile NU
+  // (best-effort la shutdown).
+  const fresh = await withMaintenanceWrite(runDailyBackupImpl);
+  for (const f of fresh) {
+    await runOffsiteBackupHook(f);
   }
 }
