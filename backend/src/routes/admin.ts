@@ -17,7 +17,7 @@ import { Hono, type Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { z } from "zod";
 
-import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
+import { recordAuditSafe } from "../db/auditRepository.ts";
 import { AUDIT_EXPORT_MAX_ROWS, listAuditEvents, listAuditEventsForExport } from "../db/auditRepository.ts";
 import { AUDIT_SYSTEM_PLACEHOLDER, buildAuditXlsx } from "../services/auditExport.ts";
 import {
@@ -289,7 +289,7 @@ adminRouter.post("/users", limitAdminBody, async (c) => {
     // sa fi castigat reactivarea — statusul "deleted" din el poate fi deja
     // "active". Refetch, altfel si raspunsul si randul de audit mint permanent.
     const current = getUserById(existing.id) ?? existing;
-    recordAudit(c, "admin.users.create", {
+    recordAuditSafe(c, "admin.users.create", {
       outcome: "denied",
       targetKind: "user",
       targetId: current.id,
@@ -481,7 +481,7 @@ adminRouter.patch("/users/:id/role", limitAdminBody, async (c) => {
         id === getOwnerId(c)
           ? "Nu te poti demota — esti singurul admin. Promoveaza un alt utilizator inainte."
           : "Este singurul admin activ — operatiunea ar lasa organizatia fara admin. Promoveaza un alt utilizator inainte.";
-      recordAudit(c, "admin.users.demote_blocked", {
+      recordAuditSafe(c, "admin.users.demote_blocked", {
         outcome: "denied",
         targetKind: "user",
         targetId: id,
@@ -516,7 +516,7 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
   // anything but 'active'. They would lock themselves out and require DB
   // surgery to recover.
   if (id === getOwnerId(c) && parsed.data.status !== "active") {
-    recordAudit(c, "admin.users.deactivate_blocked", {
+    recordAuditSafe(c, "admin.users.deactivate_blocked", {
       outcome: "denied",
       targetKind: "user",
       targetId: id,
@@ -530,7 +530,7 @@ adminRouter.patch("/users/:id/status", limitAdminBody, async (c) => {
     updated = updateUserStatusChecked(id, parsed.data.status);
   } catch (err) {
     if (err instanceof LastAdminError) {
-      recordAudit(c, "admin.users.deactivate_blocked", {
+      recordAuditSafe(c, "admin.users.deactivate_blocked", {
         outcome: "denied",
         targetKind: "user",
         targetId: id,
@@ -587,7 +587,7 @@ adminRouter.get("/audit", (c) => {
     offset: (page - 1) * pageSize,
   });
   if (shouldAuditAuditView(parsed.data)) {
-    recordAudit(c, "audit.viewed", {
+    recordAuditSafe(c, "audit.viewed", {
       targetKind: "audit_log",
       detail: {
         ownerId: ownerId ?? null,

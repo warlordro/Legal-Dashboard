@@ -894,6 +894,28 @@ describe("v2.42.0 — POST /users (creare individuala)", () => {
     expect(body.error?.message).toContain("suspendat");
   });
 
+  it("audit INSERT picat nu transforma refuzul in 500 — 409 email_exists ramane", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-dub-audit", email: "dub-audit@firma.ro", displayName: "Dub" });
+    // Esec tranzitoriu REAL al scrierii de audit: orice INSERT in audit_log pica.
+    // Refuzul intentionat (409 email_exists) nu are voie sa devina 500.
+    getDb().exec(
+      "CREATE TRIGGER __fail_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'simulated audit failure'); END"
+    );
+    try {
+      const res = await app.request("/api/v1/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "dub-audit@firma.ro", displayName: "Alt", role: "user" }),
+      });
+      expect(res.status).toBe(409);
+      const body = await jsonOf(res);
+      expect(body.error?.code).toBe("email_exists");
+    } finally {
+      getDb().exec("DROP TRIGGER __fail_audit");
+    }
+  });
+
   it("email STERS se reactiveaza: 201, acelasi id, nume/rol din request, status activ", async () => {
     const app = buildApp();
     insertUser({ id: "u-del", email: "del@firma.ro", displayName: "Vechi" });

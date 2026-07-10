@@ -20,8 +20,9 @@ describe("quotaFeatureLabels", () => {
     expect(quotaFeatureLabel("ai.single")).toBe("AI — analiza simpla (vechi)");
   });
 
-  it("feature necunoscut: fallback pe token si isKnown=false", () => {
-    expect(quotaFeatureLabel("dosar_summary")).toBe("dosar_summary");
+  it("feature necunoscut: fallback localizat cu tokenul in paranteze si isKnown=false", () => {
+    expect(quotaFeatureLabel("dosar_summary")).toBe("Necunoscut (dosar_summary)");
+    expect(quotaFeatureLabel("mystery")).toBe("Necunoscut (mystery)");
     expect(isKnownQuotaFeature("dosar_summary")).toBe(false);
     expect(isKnownQuotaFeature("ai.single")).toBe(false); // legacy, iesit din enum
     expect(isKnownQuotaFeature("ai")).toBe(true);

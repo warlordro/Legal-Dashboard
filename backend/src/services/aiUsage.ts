@@ -71,7 +71,7 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "anthropic/claude-opus-4.8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
     "openai/gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
     "openai/gpt-5.4-mini": { inputUsdPerMillion: 0.25, outputUsdPerMillion: 2 },
-    "openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 10 },
+    "openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 15 },
     // v2.42.x: pe OpenRouter pricing-ul 5.6 e identic cu cel nativ (verificat
     // in catalogul live 2026-07-09).
     "openai/gpt-5.6-luna": { inputUsdPerMillion: 1, outputUsdPerMillion: 6 },

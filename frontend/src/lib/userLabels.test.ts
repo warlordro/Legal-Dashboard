@@ -15,8 +15,8 @@ describe("userLabels", () => {
     expect(userStatusLabel("deleted")).toBe("Sters");
   });
 
-  it("valoare necunoscuta: fallback pe token", () => {
-    expect(userRoleLabel("owner")).toBe("owner");
-    expect(userStatusLabel("archived")).toBe("archived");
+  it("valoare necunoscuta: fallback localizat cu tokenul in paranteze", () => {
+    expect(userRoleLabel("owner")).toBe("Necunoscut (owner)");
+    expect(userStatusLabel("archived")).toBe("Necunoscut (archived)");
   });
 });

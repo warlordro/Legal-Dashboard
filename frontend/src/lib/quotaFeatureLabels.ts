@@ -24,11 +24,12 @@ export function isKnownQuotaFeature(feature: string): feature is QuotaFeature {
   return (QUOTA_FEATURES as readonly string[]).includes(feature);
 }
 
-// Fallback pe token-ul brut: un feature legacy (in afara enum-ului) ramane
-// lizibil in tabel, dar salvarea lui e blocata in formular (vezi Quota.tsx).
+// Fallback localizat "Necunoscut (token)": un feature in afara enum-ului si a
+// listei legacy ramane lizibil in tabel (token-ul brut pastrat in paranteze
+// pentru diagnosticare), dar salvarea lui e blocata in formular (vezi Quota.tsx).
 export function quotaFeatureLabel(feature: string): string {
   if (isKnownQuotaFeature(feature)) return LABELS[feature];
-  return LEGACY_LABELS[feature] ?? feature;
+  return LEGACY_LABELS[feature] ?? `Necunoscut (${feature})`;
 }
 
 // Unitatea limitei per feature: USD pentru ai.*, numar de captcha-uri pentru
