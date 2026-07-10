@@ -187,6 +187,11 @@ export function checkpointRnpmWal(ownerId: string): void {
   getRnpmDb(ownerId).prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
 }
 
+// DEPRECATED (Task 7, fixuri post-review): rutele folosesc
+// compactRnpmDbViaWorker (backup.ts) — VACUUM in worker + swap sub maintenance
+// lock, nu VACUUM blocant pe handle-ul viu (SQLITE_BUSY intermitent cu un
+// worker pe acelasi fisier + event loop blocat). Ramane pentru teste
+// (schimbare chirurgicala — nu se sterge in acest batch).
 export function compactRnpmDb(ownerId: string): { beforeBytes: number; afterBytes: number; durationMs: number } {
   const db = getRnpmDb(ownerId);
   const dbPath = getRnpmDbPath(ownerId);

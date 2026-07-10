@@ -10,6 +10,7 @@ import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  compactRnpmDbViaWorker,
   createRnpmManualBackup,
   deleteRnpmBackups,
   getRnpmBackupDir,
@@ -234,6 +235,71 @@ describe("deleteRnpmBackups — serializare sub maintenance lock", () => {
     }
     expect(await del).toBeGreaterThanOrEqual(1);
     expect(fs.existsSync(backupPath)).toBe(false);
+  });
+});
+
+// Task 7 (fixuri post-review): compact prin worker + swap — VACUUM-ul nu mai
+// ruleaza nici pe thread-ul principal, nici pe handle-ul viu din registry
+// (SQLITE_BUSY intermitent); fisierul e inchis, worker-ul face VACUUM INTO
+// spre .compact-tmp, verificare, apoi un singur rename atomic + reopen lazy.
+describe("compactRnpmDbViaWorker — compact prin swap (Task 7)", () => {
+  it("scade dimensiunea fisierului, datele raman intacte, fara tmp orfan", async () => {
+    seedSearch("u1", "pastrat");
+    const db = getRnpmDb("u1");
+    const insert = db.prepare(
+      "INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('u1','dupa_nume',?)"
+    );
+    const pad = JSON.stringify({ pad: "x".repeat(600) });
+    const many = db.transaction(() => {
+      for (let i = 0; i < 2000; i++) insert.run(pad);
+    });
+    many();
+    db.prepare("DELETE FROM rnpm_searches WHERE params_json = ?").run(pad);
+    db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+
+    const result = await compactRnpmDbViaWorker("u1");
+
+    expect(result.afterBytes).toBeLessThan(result.beforeBytes);
+    expect(fs.existsSync(`${getRnpmDbPath("u1")}.compact-tmp`)).toBe(false);
+    // Reopen LAZY dupa swap: datele pastrate sunt acolo.
+    expect(countSearches("u1")).toBe(1);
+  });
+
+  it("refuza cu SEARCH_ACTIVE sub o cautare in zbor (gard sub maintenance lock)", async () => {
+    seedSearch("u1", "a");
+    beginRnpmSearch("u1");
+    try {
+      await expect(compactRnpmDbViaWorker("u1")).rejects.toMatchObject({ code: "SEARCH_ACTIVE" });
+    } finally {
+      endRnpmSearch("u1");
+    }
+    // Dupa terminarea cautarii, compact-ul functioneaza.
+    await expect(compactRnpmDbViaWorker("u1")).resolves.toBeDefined();
+  });
+
+  it("(e) waitForBackupToSettle acopera si snapshot-ul din worker in zbor (await-ul e IN lock)", async () => {
+    seedSearch("u1", "a");
+    const db = getRnpmDb("u1");
+    const insert = db.prepare(
+      "INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('u1','dupa_nume',?)"
+    );
+    const many = db.transaction(() => {
+      for (let i = 0; i < 3000; i++) insert.run(JSON.stringify({ pad: "y".repeat(800) }));
+    });
+    many();
+
+    let done = false;
+    const op = createRnpmManualBackup("u1").then(() => {
+      done = true;
+    });
+    await new Promise((r) => setImmediate(r));
+
+    await waitForBackupToSettle(30_000);
+    // Settle-ul nu are voie sa se rezolve inaintea operatiei din worker —
+    // promise-ul din settle-set acopera await-ul worker-ului din interiorul
+    // lock-ului, nu doar partea sincrona.
+    expect(done).toBe(true);
+    await op;
   });
 });
 

@@ -91,29 +91,49 @@ describe("migrations-rnpm baseline", () => {
         "rnpm_bunuri",
         "rnpm_istoric",
       ];
+      // Task 8.1 (Codex L2): comparatia acopera si DEFINITIILE, nu doar numele
+      // — un index/trigger cu acelasi nume dar expresie diferita e drift real.
+      // SQL-ul e normalizat (whitespace colapsat, lowercase) ca formatarea
+      // diferita intre monolit si baseline sa nu dea fals-pozitive.
+      const normSql = (s: string | null): string => (s ?? "").replace(/\s+/g, " ").trim().toLowerCase();
       for (const t of tables) {
         const cols = (d: Database.Database) =>
           d
             .prepare(`PRAGMA table_info(${t})`)
             .all()
             .map((c: any) => `${c.name}:${c.type}:${c.notnull}:${c.dflt_value}:${c.pk}`);
-        const idx = (d: Database.Database) =>
+        const idxDefs = (d: Database.Database) =>
           d
             .prepare(
-              `SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name NOT LIKE 'sqlite_%' ORDER BY name`
+              `SELECT name, sql FROM sqlite_master WHERE type='index' AND tbl_name=? AND name NOT LIKE 'sqlite_%' ORDER BY name`
             )
             .all(t)
-            .map((r: any) => r.name);
-        const fks = (d: Database.Database) => d.prepare(`PRAGMA foreign_key_list(${t})`).all();
-        const trg = (d: Database.Database) =>
+            .map((r: any) => `${r.name}=${normSql(r.sql)}`);
+        // index_xinfo pe TOATE indexurile din pragma_index_list — inclusiv
+        // autoindexurile UNIQUE (sqlite_autoindex_*), care nu au SQL in
+        // sqlite_master si ar scapa comparatiei pe definitii de mai sus.
+        const idxColumns = (d: Database.Database) =>
           d
-            .prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=? ORDER BY name`)
+            .prepare("SELECT name FROM pragma_index_list(?) ORDER BY name")
             .all(t)
-            .map((r: any) => r.name);
+            .map((r: any) => {
+              const xinfo = d
+                .prepare("SELECT * FROM pragma_index_xinfo(?)")
+                .all(r.name)
+                .map((c: any) => `${c.seqno}:${c.cid}:${c.name}:${c.desc}:${c.coll}:${c.key}`);
+              return `${r.name}[${xinfo.join(",")}]`;
+            });
+        const fks = (d: Database.Database) => d.prepare(`PRAGMA foreign_key_list(${t})`).all();
+        const trgDefs = (d: Database.Database) =>
+          d
+            .prepare(`SELECT name, sql FROM sqlite_master WHERE type='trigger' AND tbl_name=? ORDER BY name`)
+            .all(t)
+            .map((r: any) => `${r.name}=${normSql(r.sql)}`);
         expect(cols(user), `coloane ${t}`).toEqual(cols(mono));
-        expect(idx(user), `indexuri ${t}`).toEqual(idx(mono));
+        expect(idxDefs(user), `definitii indexuri ${t}`).toEqual(idxDefs(mono));
+        expect(idxColumns(user), `index_xinfo ${t}`).toEqual(idxColumns(mono));
         expect(fks(user), `FK ${t}`).toEqual(fks(mono));
-        expect(trg(user), `triggere ${t}`).toEqual(trg(mono));
+        expect(trgDefs(user), `definitii triggere ${t}`).toEqual(trgDefs(mono));
       }
       // Anti-drift invers: monolitul nu are tabele rnpm_* necunoscute listei de mai sus.
       const monoRnpm = mono

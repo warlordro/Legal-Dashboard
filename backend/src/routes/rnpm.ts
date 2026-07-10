@@ -17,6 +17,7 @@ import { validateSubTypeLabels } from "../services/rnpmSubTypes.ts";
 import { CaptchaInsufficientFundsError, getCaptchaBalance, type CaptchaProvider } from "../services/captchaSolver.ts";
 import {
   BackupValidationError,
+  compactRnpmDbViaWorker,
   createRnpmManualBackup,
   deleteRnpmBackups,
   getRnpmBackupDir,
@@ -26,7 +27,7 @@ import {
 } from "../db/backup.ts";
 import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
 import { hasActiveRnpmSearch, isRnpmRestoreInProgress, RnpmSearchActiveError } from "../db/rnpmActivity.ts";
-import { assertValidOwnerId, compactRnpmDb, getRnpmDbPath } from "../db/rnpmDb.ts";
+import { assertValidOwnerId, getRnpmDbPath } from "../db/rnpmDb.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
@@ -857,7 +858,7 @@ rnpmRouter.get("/saved/:id", (c) => {
   return c.json(aviz);
 });
 
-rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user"), (c) => {
+rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user"), async (c) => {
   const ownerId = getOwnerId(c);
   // v2.43.0 (rnpm-split): delete in timpul unei cautari active => FK errors sau
   // repopulare imediat dupa stergere; refuzam explicit.
@@ -870,8 +871,9 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user
   const count = deleteAllAvize(ownerId);
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
+  // Task 7: prin worker + swap (best-effort — delete-ul a reusit deja).
   try {
-    compactRnpmDb(ownerId);
+    await compactRnpmDbViaWorker(ownerId);
   } catch (e) {
     console.warn("[rnpm] compact after delete-all failed:", e);
   }
@@ -956,8 +958,10 @@ rnpmRouter.post("/open-db-folder", requireDesktopHeader, requireRole("admin", "u
   }
 });
 
-rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), (c) => {
+rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), async (c) => {
   // v2.43.0 (rnpm-split): compacteaza FISIERUL PER USER al callerului.
+  // Task 7: prin worker + swap sub maintenance lock (VACUUM-ul nu mai
+  // blocheaza event loop-ul si nu mai ruleaza pe handle-ul viu).
   const ownerId = getOwnerId(c);
   // Fix review (Task 6): fara fisier nu exista nimic de compactat — 404, nu
   // provisioning implicit prin getRnpmDb. Latch-ul de restore ramane
@@ -966,11 +970,11 @@ rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), 
     return notFound(c, "Baza RNPM nu exista inca pentru acest cont");
   }
   try {
-    const result = compactRnpmDb(ownerId);
+    const result = await compactRnpmDbViaWorker(ownerId);
     return c.json({ ok: true, ...result });
   } catch (e) {
-    // Fix review (Task 5): erorile tipate (restore in curs, shutdown) ies spre
-    // handlerul central => 409/503, nu 500 generic.
+    // Fix review (Task 5): erorile tipate (restore in curs, cautare activa,
+    // shutdown) ies spre handlerul central => 409/503, nu 500 generic.
     rethrowTypedMaintenanceError(e);
     const msg = e instanceof Error ? e.message : "Eroare compactare baza";
     return internalError(c, msg);

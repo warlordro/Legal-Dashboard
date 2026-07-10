@@ -4,8 +4,14 @@ import path from "node:path";
 import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
 import { RWLock } from "../util/rwlock.ts";
+import { runSnapshotOp } from "../util/snapshotRunner.ts";
 import { discoverMigrations } from "./migrations/runner.ts";
-import { beginRnpmRestore, endRnpmRestore } from "./rnpmActivity.ts";
+import {
+  beginRnpmRestore,
+  endRnpmRestore,
+  isRnpmRestoreInProgress,
+  RnpmRestoreInProgressError,
+} from "./rnpmActivity.ts";
 import {
   closeRnpmDb,
   getRnpmBackupJail,
@@ -13,7 +19,6 @@ import {
   getRnpmDb,
   getRnpmDbPath,
   MIGRATIONS_RNPM_DIR,
-  openRnpmDbRaw,
 } from "./rnpmDb.ts";
 import {
   clearMonolithRestoreInProgress,
@@ -32,6 +37,10 @@ import {
 // prevents a steady reader stream from starving the daily backup. Promise
 // chain is enough for single-process scope; web-mode would replace this
 // with a row-lock or advisory lock in the gateway.
+// Decizie documentata (Task 7.4): FARA coada globala de concurenta pentru
+// operatiile din worker in acest batch — write lock-ul de aici serializeaza
+// deja toate operatiile grele (un singur worker de snapshot activ la un
+// moment dat). Reevaluare la load-test daca apare presiune reala.
 const maintenanceLock = new RWLock();
 
 // Fix review (Task 4): la shutdown, scrierile de mentenanta NOI se refuza cu
@@ -157,15 +166,13 @@ function poolRegexes(prefix: string): PoolRegexes {
 
 // Un "target" de backup = un fisier SQLite viu + directorul lui de backup +
 // prefixul de nume. main = monolitul; rnpm:<stem> = fisierul unui user.
+// Task 7: snapshot-urile se fac din WORKER pe path-ul fisierului (conexiune
+// readonly proprie in worker) — nu mai exista openForSnapshot pe handle.
 interface BackupTarget {
   key: string;
   dir: string;
   prefix: string;
   dbPath: string;
-  // Deschide conexiunea pentru snapshot. main: handle-ul viu (nu se inchide);
-  // rnpm: conexiune temporara readonly (callerul o inchide) — zero TOCTOU de
-  // creare de fisier gol, zero handle persistent in registry.
-  openForSnapshot: () => { db: Database.Database; close: boolean };
 }
 
 function mainTarget(): BackupTarget {
@@ -174,21 +181,15 @@ function mainTarget(): BackupTarget {
     dir: getBackupDir(),
     prefix: MAIN_PREFIX,
     dbPath: getDbPath(),
-    openForSnapshot: () => ({ db: getDb(), close: false }),
   };
 }
 
 function rnpmTargetForStemFile(stem: string): BackupTarget {
-  const filePath = path.join(getRnpmDataDir(), `${stem}${BACKUP_SUFFIX}`);
   return {
     key: `rnpm:${stem}`,
     dir: path.join(getBackupDir(), "rnpm", stem),
     prefix: RNPM_PREFIX,
-    dbPath: filePath,
-    openForSnapshot: () => ({
-      db: new Database(filePath, { readonly: true, fileMustExist: true }),
-      close: true,
-    }),
+    dbPath: path.join(getRnpmDataDir(), `${stem}${BACKUP_SUFFIX}`),
   };
 }
 
@@ -324,10 +325,12 @@ function verifySnapshot(p: string, label: string): void {
   }
 }
 
-// Snapshot self-contained prin VACUUM INTO (sincron; include tot ce e comis,
-// nu depinde de WAL, functioneaza si de pe conexiuni readonly): stage la
-// `.tmp`, verificare, rename atomic pe numele final.
-function snapshotViaVacuumInto(db: Database.Database, dir: string, name: string): string {
+// Snapshot self-contained prin VACUUM INTO in WORKER THREAD (Task 7): include
+// tot ce e comis (WAL MVCC — snapshot consistent point-in-time, fara sa
+// blocheze scriitorii de pe conexiunea vie), nu blocheaza event loop-ul.
+// Stage la `.tmp`, verificare, rename atomic pe numele final. Fallback-ul
+// sincron (worker care nu porneste) traieste in snapshotRunner.
+async function snapshotViaVacuumIntoAsync(srcPath: string, dir: string, name: string): Promise<string> {
   fs.mkdirSync(dir, { recursive: true });
   const dest = path.join(dir, name);
   const tmp = `${dest}.tmp`;
@@ -337,7 +340,7 @@ function snapshotViaVacuumInto(db: Database.Database, dir: string, name: string)
     /* missing is fine */
   }
   try {
-    db.prepare("VACUUM INTO ?").run(tmp);
+    await runSnapshotOp({ op: "vacuum_into", srcPath, destPath: tmp });
     verifySnapshot(tmp, name);
     fs.renameSync(tmp, dest);
   } catch (e) {
@@ -408,11 +411,9 @@ interface RestoreTargetSpec {
   dir: string;
   prefix: string;
   dbPath: string;
-  // Conexiunea pentru snapshot-ul pre-restore; null = fisierul viu nu exista
-  // (restore la prima instalare) — se sare peste snapshot. close=true inchide
-  // conexiunea dupa snapshot (temporara); false o lasa (handle-ul viu al
-  // monolitului, inchis separat prin closeLive).
-  openLiveForSnapshot: () => { db: Database.Database; close: boolean } | null;
+  // Task 7: snapshot-ul pre-restore se face din worker pe path (conexiune
+  // readonly proprie in worker — anti-self-block "gratuit": latch-urile pe
+  // getDb/getRnpmDb nu sunt atinse). Fisier absent = se sare peste snapshot.
   closeLive: () => void;
 }
 
@@ -442,22 +443,17 @@ async function restoreTargetImpl(
   const preRestoreName = `${t.prefix}pre-restore-${new Date().toISOString().replace(/[:.]/g, "-")}${BACKUP_SUFFIX}`;
   const preRestorePath = path.join(t.dir, preRestoreName);
   if (dbExists) {
-    const live = t.openLiveForSnapshot();
-    if (live) {
-      try {
-        snapshotViaVacuumInto(live.db, t.dir, preRestoreName);
-      } catch (e) {
-        logBackupEvent({
-          action: "restore_failed",
-          target: t.key,
-          source: name,
-          stage: "pre_restore_snapshot",
-          reason: e instanceof Error ? e.message : String(e),
-        });
-        throw new Error(`Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`);
-      } finally {
-        if (live.close) live.db.close();
-      }
+    try {
+      await snapshotViaVacuumIntoAsync(dbPath, t.dir, preRestoreName);
+    } catch (e) {
+      logBackupEvent({
+        action: "restore_failed",
+        target: t.key,
+        source: name,
+        stage: "pre_restore_snapshot",
+        reason: e instanceof Error ? e.message : String(e),
+      });
+      throw new Error(`Nu am putut salva snapshot-ul pre-restore: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
 
@@ -727,20 +723,15 @@ export async function restoreFromBackup(name: string, opts?: RestoreOptions): Pr
     // Set/clear DOAR aici, nu in restoreTargetImpl partajat.
     setMonolithRestoreInProgress();
     try {
+      // Anti-self-block (fix panel): snapshot-ul pre-restore ruleaza in worker
+      // pe o conexiune readonly PROPRIE — latch-ul de mai sus nu e atins
+      // (post-publish probe foloseste deja conexiune raw in restoreTargetImpl).
       return await restoreTargetImpl(
         {
           key: "main",
           dir: getBackupDir(),
           prefix: MAIN_PREFIX,
           dbPath: getDbPath(),
-          // Anti-self-block (fix panel): conexiune RAW readonly, NU getDb() —
-          // latch-ul de mai sus ar respinge chiar snapshot-ul pre-restore
-          // propriu. Oglinda openRnpmDbRaw; post-publish probe foloseste deja
-          // conexiune raw in restoreTargetImpl (new Database(dbPath)).
-          openLiveForSnapshot: () => ({
-            db: new Database(getDbPath(), { readonly: true, fileMustExist: true }),
-            close: true,
-          }),
           closeLive: () => closeDb(),
         },
         name,
@@ -806,24 +797,93 @@ export async function restoreRnpmFromBackup(
         throw new BackupValidationError("Backup inexistent");
       }
       assertRnpmBackupVersionCompatible(src);
+      // Snapshot-ul pre-restore ruleaza in worker pe conexiune readonly
+      // proprie — latch-ul de restore (activ deja) nu e atins; fisier absent
+      // = se sare peste snapshot (dbExists in restoreTargetImpl).
       return await restoreTargetImpl(
         {
           key: `rnpm:${ownerId}`,
           dir: jail,
           prefix: RNPM_PREFIX,
           dbPath: getRnpmDbPath(ownerId),
-          // Fisierul viu se snapshot-uieste printr-o conexiune temporara
-          // readonly (openRnpmDbRaw) — latch-ul de restore e deja activ, deci
-          // getRnpmDb ar refuza; null = fisier absent, se sare peste snapshot.
-          openLiveForSnapshot: () => {
-            const raw = openRnpmDbRaw(ownerId);
-            return raw ? { db: raw, close: true } : null;
-          },
           closeLive: () => closeRnpmDb(ownerId),
         },
         name,
         opts?.onPhase
       );
+    } finally {
+      endRnpmRestore(ownerId);
+    }
+  });
+}
+
+// Task 7 (re-escaladat de panel + advisor Codex, optiunea B): compact prin
+// worker + SWAP, nu VACUUM pe handle-ul viu din registry (SQLITE_BUSY
+// intermitent cu workerul pe acelasi fisier). Sub maintenance write lock,
+// in bracket-ul beginRnpmRestore/endRnpmRestore: begin refuza SEARCH_ACTIVE
+// (gardul cerut de plan) SI seteaza latch-ul per owner verificat de getRnpmDb
+// — inchide complet fereastra de lost-write dintre VACUUM INTO si rename
+// (un writer non-search ar fi redeschis lazy fisierul VECHI, iar scrierea
+// lui ar fi fost aruncata la swap). In fereastra, operatiile RNPM ale
+// ownerului primesc 409 (per owner, nu global). Reopen LAZY la urmatorul
+// getRnpmDb. Capcana (advisor): begin INAINTE de closeRnpmDb; end in finally
+// DOAR daca begin a reusit.
+export async function compactRnpmDbViaWorker(
+  ownerId: string
+): Promise<{ beforeBytes: number; afterBytes: number; durationMs: number }> {
+  const dbPath = getRnpmDbPath(ownerId);
+  return withMaintenanceWrite(async () => {
+    // beginRnpmRestore NU e reentrant-aware (add pe un owner deja in restore
+    // trece, iar end-ul din finally ar curata latch-ul STRAIN) — refuzam
+    // explicit daca ownerul e deja in restore (acelasi contract ca getRnpmDb).
+    if (isRnpmRestoreInProgress(ownerId)) throw new RnpmRestoreInProgressError();
+    beginRnpmRestore(ownerId);
+    try {
+      const sizeOf = (p: string): number => {
+        try {
+          return fs.statSync(p).size;
+        } catch {
+          return 0;
+        }
+      };
+      const before = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
+      const t0 = Date.now();
+      closeRnpmDb(ownerId);
+      const tmp = `${dbPath}.compact-tmp`;
+      await fsPromises.unlink(tmp).catch(() => {
+        /* orfan absent */
+      });
+      try {
+        await runSnapshotOp({ op: "vacuum_into", srcPath: dbPath, destPath: tmp });
+        verifySnapshot(tmp, path.basename(dbPath));
+        // Sidecar-urile vechi pleaca INAINTE de rename (aceeasi ratiune ca la
+        // restore: fisier nou + WAL vechi = corupere silentioasa); fail-closed
+        // pe non-ENOENT.
+        for (const suffix of ["-wal", "-shm"] as const) {
+          try {
+            await fsPromises.unlink(dbPath + suffix);
+          } catch (e) {
+            const code = (e as NodeJS.ErrnoException)?.code;
+            if (code !== "ENOENT") throw e;
+          }
+        }
+        await renameWithRetryAsync(tmp, dbPath);
+      } catch (e) {
+        await fsPromises.unlink(tmp).catch(() => {
+          /* best-effort */
+        });
+        throw e;
+      }
+      const durationMs = Date.now() - t0;
+      const after = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
+      logBackupEvent({
+        action: "rnpm_compact",
+        target: `rnpm:${ownerId}`,
+        beforeBytes: before,
+        afterBytes: after,
+        durationMs,
+      });
+      return { beforeBytes: before, afterBytes: after, durationMs };
     } finally {
       endRnpmRestore(ownerId);
     }
@@ -989,14 +1049,9 @@ async function runOffsiteBackupHook(backupPath: string): Promise<void> {
 async function createManualBackupForTarget(t: BackupTarget): Promise<{ name: string; dest: string }> {
   const name = `${t.prefix}manual-${stampNow()}${BACKUP_SUFFIX}`;
   const dest = await withMaintenanceWrite(async () => {
-    const conn = t.openForSnapshot();
-    try {
-      const out = snapshotViaVacuumInto(conn.db, t.dir, name);
-      await pruneOld(t.dir, t.prefix);
-      return out;
-    } finally {
-      if (conn.close) conn.db.close();
-    }
+    const out = await snapshotViaVacuumIntoAsync(t.dbPath, t.dir, name);
+    await pruneOld(t.dir, t.prefix);
+    return out;
   });
   logBackupEvent({ action: "manual_backup", target: t.key, file: name });
   // Offsite in AFARA lock-ului de maintenance (transportul poate dura minute).
@@ -1015,8 +1070,8 @@ export async function createRnpmManualBackup(ownerId: string): Promise<{ name: s
   const name = `${RNPM_PREFIX}manual-${stampNow()}${BACKUP_SUFFIX}`;
   const jail = getRnpmBackupDir(ownerId);
   const dest = await withMaintenanceWrite(async () => {
-    const db = getRnpmDb(ownerId);
-    const out = snapshotViaVacuumInto(db, jail, name);
+    getRnpmDb(ownerId);
+    const out = await snapshotViaVacuumIntoAsync(getRnpmDbPath(ownerId), jail, name);
     await pruneOld(jail, RNPM_PREFIX);
     return out;
   });
@@ -1068,13 +1123,7 @@ async function dailyBackupTarget(t: BackupTarget): Promise<string | null> {
 
   const name = todayBackupName(t.prefix);
   try {
-    const conn = t.openForSnapshot();
-    let dest: string;
-    try {
-      dest = snapshotViaVacuumInto(conn.db, t.dir, name);
-    } finally {
-      if (conn.close) conn.db.close();
-    }
+    const dest = await snapshotViaVacuumIntoAsync(t.dbPath, t.dir, name);
     const pruned = await pruneOld(t.dir, t.prefix);
     logBackupEvent({
       action: "daily_backup",

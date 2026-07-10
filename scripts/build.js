@@ -71,4 +71,13 @@ cpSync(resolve(root, "backend", "src", "db", "migrations-rnpm"), resolve(root, "
   },
 });
 
+// Task 7 (fixuri post-review): worker-ul de snapshot (CJS pur, NU se bundleaza)
+// — snapshotRunner il incarca cu new Worker(__dirname/snapshot-worker.cjs).
+// Whitelist explicit: doar acest fisier. In Electron impachetat e exclus din
+// asar (package.json build.asarUnpack).
+cpSync(
+  resolve(root, "backend", "src", "util", "snapshot-worker.cjs"),
+  resolve(root, "dist-backend", "snapshot-worker.cjs")
+);
+
 console.log("\n=== Build complete! ===");

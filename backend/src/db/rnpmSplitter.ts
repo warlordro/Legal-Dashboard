@@ -223,7 +223,8 @@ export function openMonoSourceReadonly(): Database.Database {
 // Pre-split backup STRICT (fail-closed) — spre deosebire de preMigrationBackup
 // (best-effort), aici backup-ul E rollback-ul promis: VACUUM INTO self-contained,
 // verificare existenta + size > 0 + PRAGMA integrity_check pe copie; ORICE esec
-// opreste split-ul inainte de prima mutare.
+// opreste split-ul inainte de prima mutare. Ramane SINCRON deliberat (Task 7):
+// ruleaza la BOOT, inainte de serve() — nu exista event loop de protejat.
 function preSplitBackupStrict(mono: Database.Database): string {
   const dir = path.join(path.dirname(getDbPath()), "backups");
   fs.mkdirSync(dir, { recursive: true });

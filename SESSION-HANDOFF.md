@@ -19,31 +19,42 @@ au fost consolidate intr-un plan de fixuri care a trecut EL INSUSI printr-un rev
 COMMIT B dupa Task 6, COMMIT C dupa Task 8. Planul contine si sectiunile "Findings RESPINSE
 cu dovezi" si "Acceptate ca limitari" — NU le redeschide.
 
-**STARE EXECUTIE: Task 1 COMPLET (red -> GREEN, 2026-07-10).** Ce e facut:
-- Task 1.1 (red): teste fault-injection in `backend/src/db/rnpmBackup.test.ts`
-  (esec staging => live byte-identic; esec rename publicare => live vechi valid;
-  failpoint `post_publish` => auto-revert; retry EPERM pe rename; staging orfan
-  curatat; backup rnpm fara `_schema_versions` => 400). Testul legacy-bundle adaptat
-  (forjeaza `_schema_versions` cu sentinelul `__backfilled_v1__` — hash-check-ul
-  runner-ului respinge alte valori).
-- Task 1.2+1.3+1.4 (green): `restoreTargetImpl` rescris pe STAGING in
-  `backend/src/db/backup.ts` — staging dir `<dbPath>.restore-staging/` (cleanup orfan,
-  copiere bundle, integrity + wal_checkpoint pe STAGED, unlink sidecars staged),
-  pre-restore snapshot, closeLive, unlink sidecars live, UN SINGUR
-  `renameWithRetryAsync` de publicare, post-publish probe pe conexiune raw readonly
-  cu failpoint `onPhase("post_publish")`, auto-revert REORDONAT (sidecars intai, apoi
-  revert-tmp + rename), staging curatat in finally; `restoreFromBackup`/
-  `restoreRnpmFromBackup` au acum `opts?: RestoreOptions { onPhase }`;
-  `assertRnpmBackupVersionCompatible` e fail-closed pe lipsa `_schema_versions`.
-- Stare verificare: tsc backend verde; suitele afectate verzi (rnpmBackup + backup +
-  rnpmFullFlow: 35 passed / 4 skipped). Suita COMPLETA se ruleaza la gate-ul Commit A.
-- MODIFICARI NECOMISE in working tree (intentionat — Commit A abia dupa Task 3):
-  `backend/src/db/backup.ts` + `backend/src/db/rnpmBackup.test.ts`.
-- NOTA la 1.1 vs plan: ordinea aleasa e STAGING intai, apoi pre-restore snapshot
-  (mai putine efecte pe backup invalid); ambele raman inainte de orice mutare a live-ului.
-- URMATORUL PAS: **Task 2** (serializare delete sub maintenance lock, prune la
-  restore, pool preSplit cu regex exclusiv, cooldown cu refund, 400 pe ownerId admin
-  invalid) — red intai, conform planului.
+**STARE EXECUTIE: TOATE task-urile 1-8 COMPLETE pe TDD (2026-07-10), 3 commit-uri
+consolidate pe branch:**
+- **Commit A (2bd4a55)** — Task 1-3: restore atomic prin STAGING (fault-injection
+  complet, auto-revert reordonat, retry EPERM, fail-closed pe lipsa
+  `_schema_versions` la rnpm), serializare delete-all sub maintenance lock,
+  prune si la restore, pool DEDICAT pre-split (3, regex exclusiv + prune sincron
+  in `preSplitBackupStrict`), cooldown cu refund la esec, 400 pe ownerId admin
+  invalid, marker split validat runtime fail-closed + manifest cu count-uri pe
+  calea de resume `wiping` (testul vechi de resume adaptat INSERT->UPDATE — cu
+  manifest, dovada no-re-copy e continutul modificat, nu count-ul crescut).
+- **Commit B (d90b667)** — Task 4-6: gate master-key INAINTE de split (web),
+  schema-init cu atributie proprie, `MaintenanceShutdownError` (503 +
+  Retry-After central) cu flag verificat inainte de coada lock-ului + settle-set
+  care include timpul de asteptare pe lock (plafon 30s la shutdown), latch
+  global `RESTORE_IN_PROGRESS` pe `getDb()` la restore-ul monolitului
+  (indisponibilitate globala scurta, documentata RUNBOOK) cu anti-self-block,
+  validare versiune monolit (legacy fara tabela ramane acceptat), rethrow pe
+  erorile tipate din catch-urile generice rnpm.ts + adminBackups.ts, prewarm
+  rnpm gate-uit pe desktop, stats/compact fara provisioning (latch prioritar
+  la 409), warn `proxy.trusted_cidr.missing` + docs DEPLOY-SERVER/RUNBOOK.
+- **Commit C** — Task 7-8: VACUUM INTO in WORKER THREAD (`snapshot-worker.cjs`
+  + `snapshotRunner.ts`, timeout 10 min cu terminate pe toate caile, fallback
+  sincron cu warn `snapshot.worker_fallback`, copiat in dist-backend de
+  build.js + asarUnpack), toate snapshot-urile (daily/manual/pre-restore) pe
+  varianta async, compact per user = `compactRnpmDbViaWorker` (swap atomic sub
+  maintenance lock, in bracket `beginRnpmRestore`/`endRnpmRestore` — DECIZIE
+  luata cu advisorul Codex, optiunea B: inchide fereastra de lost-write dintre
+  VACUUM INTO si rename; guard explicit anti-clobber pe latch pentru ca
+  `beginRnpmRestore` nu e reentrant-aware), `compactRnpmDb`/`compactDb` vechi
+  marcate DEPRECATED (nu sterse), anti-drift intarit pe DEFINITII (SQL
+  normalizat + `index_xinfo`, inclusiv autoindexuri UNIQUE), CHANGELOG
+  sub-sectiune "Fixuri post-review adversarial", RUNBOOK actualizat.
+- Verificarea worker-ului in Electron IMPACHETAT (asar) ramane pe checklist-ul
+  de release (smoke-ul dev nu trece prin asar).
+- URMATORUL PAS dupa Commit C: review adversarial FINAL de la Codex si
+  review-panel pe delta completa (goal-ul setat de user in sesiunea curenta).
 
 **Stare ABI better-sqlite3: NODE** (`npm rebuild better-sqlite3` rulat pentru vitest).
 OBLIGATORIU `npm run rebuild:electron` inainte de orice smoke Electron si la finalul

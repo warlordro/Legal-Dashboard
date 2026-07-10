@@ -52,6 +52,7 @@
     ],
     "asarUnpack": [
       "dist-frontend/**/*",
+      "dist-backend/snapshot-worker.cjs",
       "node_modules/better-sqlite3/**/*",
       "node_modules/windows-notification-state/**/*",
       "node_modules/macos-notification-state/**/*"

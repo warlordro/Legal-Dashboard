@@ -569,6 +569,10 @@ export function checkpointWal(): void {
 // VACUUM rescrie intregul fisier eliminand paginile libere ramase dupa DELETE.
 // Nu poate rula in tranzactie si ia un lock exclusiv → blocheaza alte operatii pentru cateva secunde la 100MB.
 // Apelam TRUNCATE pe WAL inainte si dupa, ca statisticile post-compact sa reflecte imediat noua dimensiune.
+// DEPRECATED (Task 7, fixuri post-review): fara caller de productie dupa
+// mutarea rutelor de compact pe worker+swap (compactRnpmDbViaWorker); VACUUM
+// sincron pe handle-ul viu blocheaza event loop-ul. Nu se sterge in acest
+// batch (schimbare chirurgicala); candidat de eliminare la un refactor viitor.
 export function compactDb(): { beforeBytes: number; afterBytes: number; durationMs: number } {
   const d = getDb();
   const dbPath = getDbPath();
