@@ -66,7 +66,8 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
     if (busy) return;
     if (
       !(await confirm({
-        message: `Restaurezi backup-ul COMPLET al bazei — toate modulele, toti utilizatorii (datele RNPM au backup separat per utilizator)?\n\nBaza curenta va fi salvata automat inainte de suprascriere. Dupa restore este recomandata repornirea aplicatiei.`,
+        message:
+          "Restaurezi backup-ul COMPLET al bazei — toate modulele, toti utilizatorii (datele RNPM au backup separat per utilizator)?\n\nBaza curenta va fi salvata automat inainte de suprascriere. Dupa restore este recomandata repornirea aplicatiei.",
         confirmLabel: "Restaureaza",
         destructive: true,
       }))

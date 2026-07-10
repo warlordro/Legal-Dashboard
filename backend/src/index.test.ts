@@ -254,16 +254,27 @@ describe("PR-9 index boot/auth boundaries", () => {
       throw new Error("process.exit called");
     }) as typeof process.exit);
 
-    await expect(
-      importFreshIndex({
-        LEGAL_DASHBOARD_PORT: String(randomPort()),
-        LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
-        LEGAL_DASHBOARD_ALLOW_REMOTE: "1",
-        LEGAL_DASHBOARD_AUTH_MODE: "desktop",
-      })
-    ).rejects.toThrow("process.exit called");
+    try {
+      await expect(
+        importFreshIndex({
+          LEGAL_DASHBOARD_PORT: String(randomPort()),
+          LEGAL_DASHBOARD_DB_PATH: await makeTmpDb(),
+          LEGAL_DASHBOARD_ALLOW_REMOTE: "1",
+          LEGAL_DASHBOARD_AUTH_MODE: "desktop",
+        })
+      ).rejects.toThrow("process.exit called");
 
-    expect(exitSpy).toHaveBeenCalledWith(1);
+      expect(exitSpy).toHaveBeenCalledWith(1);
+    } finally {
+      // Boot-ul a luat instance lock-ul si a pornit heartbeat-ul INAINTE de
+      // gate-ul care pica; in productie process.exit(1) real omoara timer-ul,
+      // dar aici exit-ul e mock-uit si procesul de test traieste. Fara release,
+      // heartbeat-ul orfan arunca "[instanceLock] ownership lost" la ~5s dupa
+      // ce afterEach sterge tmpdir-ul — unhandled error flaky pe suita intreaga.
+      // Import dupa vi.resetModules => ACEEASI instanta de modul ca boot-ul fresh.
+      const { releaseInstanceLock } = await import("./db/instanceLock.ts");
+      releaseInstanceLock();
+    }
   });
 });
 
