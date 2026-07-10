@@ -110,7 +110,7 @@ interpretabil doar impreuna cu `owner_id` (coloana exista deja pe audit).
 ### Rute API (`backend/src/routes/rnpm.ts`)
 - `GET /api/rnpm/backups` — lista DOAR jail-ul callerului (`backups/rnpm/<ownerId>/`); admin poate cere `?ownerId=`.
 - `POST /api/rnpm/backups/create` — NOU: backup manual on-demand al fisierului propriu; audit `backup.rnpm.create`.
-- `POST /api/rnpm/backups/restore` — self-service pe fisierul PROPRIU (admin poate tinti alt owner); guard-uri: jail pe director + regex nume (fara separatoare), fara upload, gard SEARCH_ACTIVE, `recordAudit` pastrat, `limitSmall`. `requireDesktopHeader` SCOS de pe rutele rnpm-backup (self-service web e scopul; blast radius = fisierul propriu).
+- `POST /api/rnpm/backups/restore` — self-service pe fisierul PROPRIU (admin poate tinti alt owner); guard-uri: jail pe director (regex nume fara separatoare + verificare `path.resolve` in jail), fara upload, gard SEARCH_ACTIVE, `recordAudit` pastrat, `limitSmall`. CORECTIE (review-panel 2026-07-10): `requireDesktopHeader` RAMANE pe toate rutele mutante rnpm-backup — in desktop mode header-ul custom e apararea CSRF (forteaza preflight CORS spre 127.0.0.1), iar in web mode middleware-ul e pass-through complet, deci self-service-ul web functioneaza nemodificat. Self-service = guard `requireRole("admin", "user")` in loc de admin-only.
 - `DELETE /api/rnpm/backups` — sterge doar jail-ul propriu.
 - `GET /stats`, `POST /compact`, `DELETE /saved/all` — opereaza pe fisierul RNPM al callerului (compactDb per handle; rnpm.ts:835/902).
 - `open-db-folder`/`open-backups-folder` — raman desktop-only, pointate pe fisierul/jail-ul userului local.
