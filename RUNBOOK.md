@@ -206,8 +206,12 @@ indisponibilitate globala temporara — pe durata swap-ului toate rutele care
 ating DB-ul raspund 409 `RESTORE_IN_PROGRESS`. Fereastra e de ordinul
 secundelor si operatiunea e admin-triggered; clientii reincearca imediat.
 Un restore dintr-un backup cu schema mai NOUA decat aplicatia e refuzat 400
-(fail-closed, anti-downgrade). Restore-ul RNPM per user afecteaza DOAR
-ownerul respectiv (vezi sectiunea dedicata).
+(fail-closed, anti-downgrade). Din Rev. 3, un backup de monolit pre-split e
+refuzat 400 DIRECT la restore cand split-ul a rulat deja (mesajul trimite la
+sectiunea "Monolit restaurat dupa split") — nu mai poate produce un boot
+blocat; tot 400 primeste si un ledger de migratii alterat/incoerent.
+Restore-ul RNPM per user afecteaza DOAR ownerul respectiv (vezi sectiunea
+dedicata).
 
 ### Procedura
 

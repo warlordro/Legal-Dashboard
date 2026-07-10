@@ -51,10 +51,31 @@ consolidate pe branch:**
   marcate DEPRECATED (nu sterse), anti-drift intarit pe DEFINITII (SQL
   normalizat + `index_xinfo`, inclusiv autoindexuri UNIQUE), CHANGELOG
   sub-sectiune "Fixuri post-review adversarial", RUNBOOK actualizat.
-- Verificarea worker-ului in Electron IMPACHETAT (asar) ramane pe checklist-ul
-  de release (smoke-ul dev nu trece prin asar).
-- URMATORUL PAS dupa Commit C: review adversarial FINAL de la Codex si
-  review-panel pe delta completa (goal-ul setat de user in sesiunea curenta).
+- **REVIEW ADVERSARIAL FINAL FACUT (2026-07-10/11)** pe delta `485c455..f29e510`:
+  Codex GPT-5.6 Sol (`review-mresqsud-5igk0y`, verdict NO-SHIP: 3 HIGH, 2 MEDIUM)
+  + review-panel multi-model (5 MEDIUM, ~6 LOW; concurenta/staging/swap
+  verificate CURATE de 3-4 revieweri). Findings-urile consolidate in planul
+  **Rev. 3** (`docs/superpowers/plans/2026-07-11-fixes-rev3-rnpm-split.md`),
+  care a trecut EL INSUSI prin review de panel (BLOCKER gasit: catch-ul de
+  staging distrugea code-ul erorilor tipate) si a fost corectat inainte de executie.
+- **Commit D (Rev. 3)** — toate cele 8 task-uri executate pe TDD: asarUnpack
+  bindings + file-uri-to-path + handshake `ready` cu fallback pe esec ASYNC de
+  startup (worker viabil in Electron impachetat); refuz 400 la restore de
+  monolit pre-split dupa split (inclusiv marker ilizibil = fail-closed);
+  validare ledger de migratii pe copia STAGED (hash + self-heal raw/crlf +
+  sentinel v1 + prefix contiguu 1..N) prin hook-ul `verifyStaged`, cu rethrow
+  tipat in catch-ul de staging (BLOCKER-ul panelului); reconciliere owneri
+  monolit vs marker la resume-ul wiping; retry pe publish-ul snapshot-urilor +
+  writeMarker; settle STRICT dupa terminate confirmat (fara plafon in runner;
+  plafonul de shutdown ramane in waitForBackupToSettle) + integrity_check mutat
+  IN worker (`assertSnapshotNonEmpty` pe main); auto-revert dublu-esuat cu
+  context complet + code pastrat; camp `compacted` pe DELETE /saved/all;
+  asertia moarta `.restore.tmp` inlocuita; teste de regresie documentate ca
+  exceptii TDD (6.1, anti-clobber); testul settle-peste-worker determinist
+  (worker lent injectat prin `__setSnapshotWorkerPathForTests`).
+- Ramas pe RELEASE CHECKLIST: smoke pe artefact Electron IMPACHETAT
+  (backup/restore/compact rulate din app.asar.unpacked — abia acolo se
+  exerseaza real asarUnpack-ul + rezolutia bindings).
 
 **Stare ABI better-sqlite3: NODE** (`npm rebuild better-sqlite3` rulat pentru vitest).
 OBLIGATORIU `npm run rebuild:electron` inainte de orice smoke Electron si la finalul

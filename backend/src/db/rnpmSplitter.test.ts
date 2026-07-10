@@ -405,6 +405,31 @@ describe("runRnpmSplitIfNeeded", () => {
       expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
       expect(monoCounts()).toEqual(before);
     });
+
+    // Rev. 3 (convergent Codex + panel): marker-ul nu e crezut pe cuvant nici
+    // la ACOPERIRE — ownerii se deriva din monolit; un marker incomplet ar fi
+    // golit si datele necopiate.
+    it("(i) marker wiping cu owners GOL dar monolit plin => ABORT, monolit NEGOLIT", () => {
+      const { before } = makeWipingMarker();
+      const marker = JSON.parse(fs.readFileSync(markerPath(), "utf8"));
+      marker.owners = [];
+      marker.manifest = {};
+      fs.writeFileSync(markerPath(), JSON.stringify(marker));
+
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+      expect(monoCounts()).toEqual(before);
+    });
+
+    it("(j) marker wiping cu un owner OMIS => ABORT, monolit NEGOLIT", () => {
+      const { before } = makeWipingMarker();
+      const marker = JSON.parse(fs.readFileSync(markerPath(), "utf8"));
+      marker.owners = ["userA"]; // userB omis, desi monolitul il are
+      marker.manifest = { userA: marker.manifest.userA };
+      fs.writeFileSync(markerPath(), JSON.stringify(marker));
+
+      expect(() => runRnpmSplitIfNeeded()).toThrow(/RUNBOOK/);
+      expect(monoCounts()).toEqual(before);
+    });
   });
 
   it("marker done + randuri rnpm reaparute in monolit (restore de monolit vechi) => ABORT boot", () => {

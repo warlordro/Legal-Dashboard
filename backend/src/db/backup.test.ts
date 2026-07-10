@@ -3,7 +3,9 @@ import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { discoverMigrations } from "./migrations/runner.ts";
 import { Hono } from "hono";
 import {
   __resetMaintenanceShutdownForTests,
@@ -37,6 +39,8 @@ async function captureConsoleLog<T>(fn: () => Promise<T>): Promise<{ value: T; l
     console.log = original;
   }
 }
+
+const __testDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
 let tmpRoot: string;
 let dbPath: string;
@@ -119,13 +123,15 @@ describe("restoreFromBackup — atomicity + safety", () => {
     expect(fs.existsSync(dbPath + "-shm")).toBe(false);
   });
 
-  it("does not leave a half-written tmp file alongside the live DB on success", async () => {
+  it("does not leave staging artifacts alongside the live DB on success", async () => {
     const backupName = "legal-dashboard.2026-04-15.db";
     await seedBackup(backupName, "RESTORED");
 
     await restoreFromBackup(backupName);
 
-    expect(fs.existsSync(dbPath + ".restore.tmp")).toBe(false);
+    // Rev. 3 (panel LOW): asertia veche verifica numele `.restore.tmp`, pe
+    // care implementarea pe staging nu il mai produce — trecea trivial.
+    expect(fs.existsSync(`${dbPath}.restore-staging`)).toBe(false);
   });
 
   it("rejects path-traversal attempts", async () => {
@@ -351,6 +357,146 @@ describe("runDailyBackup — offsite hook (POSIX only)", () => {
     const dated = names.filter((name) => /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/.test(name));
     // Hook failure is fail-open: local backup persists, only the offsite leg failed.
     expect(dated.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// Rev. 3 (Codex H1): ledger-ul de migratii al backup-ului trebuie sa fie
+// coerent cu migratiile cunoscute (hash-uri + prefix contiguu 1..N) INAINTE de
+// publicare — altfel runner-ul il respinge abia la urmatorul open, dupa
+// fereastra de auto-revert.
+describe("restore monolit — validare ledger (Rev. 3)", () => {
+  function forgeLedger(backupName: string, rows: Array<{ version: number; hash: string }>): void {
+    const forge = new Database(path.join(getBackupDir(), backupName));
+    try {
+      forge.exec(
+        "CREATE TABLE IF NOT EXISTS _schema_versions (version INTEGER PRIMARY KEY, sha256_up TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+      );
+      for (const r of rows) {
+        forge
+          .prepare("INSERT OR REPLACE INTO _schema_versions (version, sha256_up) VALUES (?, ?)")
+          .run(r.version, r.hash);
+      }
+    } finally {
+      forge.close();
+    }
+  }
+
+  it("ledger cu hash gresit la o versiune cunoscuta => 400, live neatins", async () => {
+    const backupName = "legal-dashboard.2026-06-01.db";
+    await seedBackup(backupName, "FORGED");
+    forgeLedger(backupName, [{ version: 1, hash: "hash-forjat" }]);
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("ledger cu GAURA (incepe la 3, fara 1-2) => 400 (prefix contiguu obligatoriu)", async () => {
+    const backupName = "legal-dashboard.2026-06-05.db";
+    await seedBackup(backupName, "GAPPED");
+    const v3 = discoverMigrations(path.join(__testDir, "migrations")).find((f) => f.version === 3);
+    if (!v3) throw new Error("fixture: migratia 3 lipseste");
+    forgeLedger(backupName, [{ version: 3, hash: v3.sha256 }]);
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("ledger cu versiune invalida (0) => 400", async () => {
+    const backupName = "legal-dashboard.2026-06-06.db";
+    await seedBackup(backupName, "ZEROVER");
+    forgeLedger(backupName, [{ version: 0, hash: "orice" }]);
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+  });
+
+  it("ledger cu sentinel de backfill pe versiunea 1 + restul contiguu cu hash-uri reale => ACCEPTAT", async () => {
+    const backupName = "legal-dashboard.2026-06-02.db";
+    await seedBackup(backupName, "LEGACY");
+    const known = discoverMigrations(path.join(__testDir, "migrations"));
+    forgeLedger(backupName, [
+      { version: 1, hash: "__backfilled_v1__" },
+      ...known.filter((f) => f.version > 1).map((f) => ({ version: f.version, hash: f.sha256 })),
+    ]);
+
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+    expect(readMarker(dbPath)).toBe("LEGACY");
+  });
+
+  it("backup FARA _schema_versions ramane acceptat la monolit (regresie)", async () => {
+    const backupName = "legal-dashboard.2026-06-03.db";
+    await seedBackup(backupName, "NOLEDGER");
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+  });
+});
+
+// Rev. 3 (Codex H2): dupa split, un backup de monolit care mai contine randuri
+// rnpm_* nu se mai restaureaza — inainte, restore-ul raporta succes iar
+// urmatorul boot aborta fail-closed (marker done + randuri rnpm reaparute).
+describe("restore monolit — gate pre-split (Rev. 3)", () => {
+  function writeSplitMarker(content: string): void {
+    const dir = path.join(path.dirname(dbPath), "rnpm");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, ".split-done.json"), content);
+  }
+
+  function addRnpmRows(backupName: string): void {
+    const forge = new Database(path.join(getBackupDir(), backupName));
+    try {
+      forge.exec(
+        "CREATE TABLE IF NOT EXISTS rnpm_searches (id INTEGER PRIMARY KEY, owner_id TEXT NOT NULL, search_type TEXT, params_json TEXT)"
+      );
+      forge.prepare("INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('u1','x','{}')").run();
+    } finally {
+      forge.close();
+    }
+  }
+
+  it("split done + backup cu randuri rnpm => 400 fail-closed, live neatins", async () => {
+    const backupName = "legal-dashboard.2026-05-01.db";
+    await seedBackup(backupName, "PRESPLIT");
+    addRnpmRows(backupName);
+    writeSplitMarker(JSON.stringify({ status: "done", completedAt: null, owners: [], appVersion: "x" }));
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    await expect(restoreFromBackup(backupName)).rejects.toThrow(/RUNBOOK|pre-split|separar/i);
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("split wiping (mid-split) + backup cu randuri rnpm => acelasi refuz", async () => {
+    const backupName = "legal-dashboard.2026-05-02.db";
+    await seedBackup(backupName, "PRESPLIT");
+    addRnpmRows(backupName);
+    writeSplitMarker(JSON.stringify({ status: "wiping", completedAt: null, owners: [], appVersion: "x" }));
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+  });
+
+  it("marker ILIZIBIL (JSON corupt) + backup cu randuri rnpm => refuz fail-closed, nu 'split inexistent'", async () => {
+    const backupName = "legal-dashboard.2026-05-05.db";
+    await seedBackup(backupName, "PRESPLIT");
+    addRnpmRows(backupName);
+    writeSplitMarker("{ corupt");
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("fara marker (split inca nerulat): backup cu randuri rnpm ramane restaurabil", async () => {
+    const backupName = "legal-dashboard.2026-05-03.db";
+    await seedBackup(backupName, "PRESPLIT-OK");
+    addRnpmRows(backupName);
+
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+    expect(readMarker(dbPath)).toBe("PRESPLIT-OK");
+  });
+
+  it("marker done + backup FARA randuri rnpm ramane restaurabil", async () => {
+    const backupName = "legal-dashboard.2026-05-04.db";
+    await seedBackup(backupName, "POSTSPLIT");
+    writeSplitMarker(JSON.stringify({ status: "done", completedAt: null, owners: [], appVersion: "x" }));
+
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+    expect(readMarker(dbPath)).toBe("POSTSPLIT");
   });
 });
 

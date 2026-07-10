@@ -10,7 +10,11 @@ import path from "node:path";
 import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { runSnapshotOp } from "./snapshotRunner.ts";
+import {
+  __setSnapshotWorkerPathForTests,
+  __setSnapshotWorkerTimeoutForTests,
+  runSnapshotOp,
+} from "./snapshotRunner.ts";
 
 let tmpRoot: string;
 
@@ -19,6 +23,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __setSnapshotWorkerPathForTests(null);
+  __setSnapshotWorkerTimeoutForTests(null);
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -67,6 +73,50 @@ describe("runSnapshotOp — vacuum_into prin worker", () => {
     expect(fs.existsSync(`${dest}-wal`)).toBe(false);
   });
 
+  // Rev. 3 (Codex H3 + panel): esecul de STARTUP al worker-ului soseste
+  // ASINCRON (evenimentul 'error' — exact ca MODULE_NOT_FOUND in Electron
+  // impachetat); fallback-ul sincron trebuie sa il acopere, altfel toate
+  // backup/restore/compact ar esua in build-ul impachetat.
+  it("worker care esueaza ASINCRON la startup (inainte de ready) => fallback sincron cu warn, nu reject", async () => {
+    const src = path.join(tmpRoot, "src.db");
+    const dest = path.join(tmpRoot, "dest.db");
+    seedDb(src, 50);
+
+    const brokenWorker = path.join(tmpRoot, "broken-worker.cjs");
+    fs.writeFileSync(brokenWorker, "throw new Error('MODULE_NOT_FOUND simulat');");
+    __setSnapshotWorkerPathForTests(brokenWorker);
+
+    const warnings: string[] = [];
+    const originalWarn = console.warn;
+    console.warn = (...args: unknown[]) => {
+      if (typeof args[0] === "string") warnings.push(args[0]);
+    };
+    try {
+      await runSnapshotOp({ op: "vacuum_into", srcPath: src, destPath: dest });
+    } finally {
+      console.warn = originalWarn;
+    }
+
+    expect(countRows(dest)).toBe(50);
+    expect(warnings.some((w) => w.includes("snapshot.worker_fallback"))).toBe(true);
+  });
+
+  it("exit 0 FARA mesaj de rezultat = eroare de protocol => reject, nu fallback", async () => {
+    const src = path.join(tmpRoot, "src.db");
+    seedDb(src, 5);
+    const silentWorker = path.join(tmpRoot, "silent-worker.cjs");
+    // Posteaza ready (protocol respectat), apoi iese curat fara rezultat.
+    fs.writeFileSync(
+      silentWorker,
+      "const { parentPort } = require('node:worker_threads');\nparentPort.postMessage({ ready: true });\n"
+    );
+    __setSnapshotWorkerPathForTests(silentWorker);
+
+    await expect(
+      runSnapshotOp({ op: "vacuum_into", srcPath: src, destPath: path.join(tmpRoot, "d.db") })
+    ).rejects.toThrow(/exit|fara raspuns/i);
+  });
+
   it("(c) fisier sursa lipsa => promise rejected, fara handle orfan (rm pe tmpdir merge)", async () => {
     const dest = path.join(tmpRoot, "dest.db");
     await expect(
@@ -83,6 +133,32 @@ describe("runSnapshotOp — vacuum_into prin worker", () => {
     await expect(
       runSnapshotOp({ op: "bogus", srcPath: src, destPath: path.join(tmpRoot, "d.db") } as never)
     ).rejects.toThrow(/invalid|bogus/i);
+  });
+
+  // Rev. 3 (Codex M2) — test de REGRESIE (exceptie TDD documentata in plan):
+  // ordinea settle-vs-terminate nu are un red determinist ieftin; gardul
+  // verifica in schimb ca dupa reject worker-ul e MORT (fara handle-uri).
+  it("la timeout, reject-ul vine DUPA terminarea confirmata a worker-ului (regresie)", async () => {
+    const src = path.join(tmpRoot, "src.db");
+    seedDb(src, 5);
+    // Worker conform protocolului (posteaza ready) care apoi NU mai raspunde —
+    // timeout-ul e singura iesire.
+    const busyWorker = path.join(tmpRoot, "busy-worker.cjs");
+    fs.writeFileSync(
+      busyWorker,
+      "const { parentPort } = require('node:worker_threads');\n" +
+        "parentPort.postMessage({ ready: true });\n" +
+        "setInterval(() => {}, 1000);\n"
+    );
+    __setSnapshotWorkerPathForTests(busyWorker);
+    __setSnapshotWorkerTimeoutForTests(300);
+
+    await expect(
+      runSnapshotOp({ op: "vacuum_into", srcPath: src, destPath: path.join(tmpRoot, "d.db") })
+    ).rejects.toThrow(/timeout/);
+    // Dupa reject, worker-ul e MORT: tmpdir-ul se sterge fara EBUSY.
+    await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+    tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-snapworker-"));
   });
 
   it("(d) event loop-ul ramane responsiv in timpul unui VACUUM INTO mare", { timeout: 60_000 }, async () => {

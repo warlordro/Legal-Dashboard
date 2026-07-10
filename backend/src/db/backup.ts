@@ -5,7 +5,7 @@ import fsPromises from "node:fs/promises";
 import Database from "better-sqlite3";
 import { RWLock } from "../util/rwlock.ts";
 import { runSnapshotOp } from "../util/snapshotRunner.ts";
-import { discoverMigrations } from "./migrations/runner.ts";
+import { BACKFILL_SENTINEL, discoverMigrations } from "./migrations/runner.ts";
 import {
   beginRnpmRestore,
   endRnpmRestore,
@@ -288,8 +288,10 @@ async function pruneOld(dir: string, prefix: string): Promise<number> {
     .filter((f) => res.manual.test(f))
     .sort()
     .reverse();
+  // (Rev. 3: guard-ul redundant `!res.manual.test(f)` eliminat — un nume
+  // `manual-*` nu poate incepe cu `pre-`; excluderile reale sunt in regex.)
   const preMigration = all
-    .filter((f) => res.preMigration.test(f) && !res.manual.test(f))
+    .filter((f) => res.preMigration.test(f))
     .sort()
     .reverse();
   const preSplit = all
@@ -309,20 +311,13 @@ async function pruneOld(dir: string, prefix: string): Promise<number> {
   return toDelete.length;
 }
 
-// Verificare snapshot: exista, size > 0, integrity_check pe o conexiune
-// readonly. Orice esec arunca — snapshot-urile sunt promisiunea de rollback.
-function verifySnapshot(p: string, label: string): void {
+// Verificare usoara post-runner (Rev. 3): integritatea dest-ului e garantata
+// de contractul runSnapshotOp (integrity_check ruleaza IN worker, sau inline
+// in fallback-ul sincron) — pe main thread ramane doar plasa pe fisier gol,
+// nu un al doilea full-scan care ar re-bloca event loop-ul.
+function assertSnapshotNonEmpty(p: string, label: string): void {
   const size = fs.statSync(p).size;
   if (size <= 0) throw new Error(`[backup] snapshot gol (${label})`);
-  const probe = new Database(p, { readonly: true, fileMustExist: true });
-  try {
-    const rows = probe.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
-    if (rows.length !== 1 || rows[0]?.integrity_check !== "ok") {
-      throw new Error(`[backup] snapshot corupt (integrity_check, ${label})`);
-    }
-  } finally {
-    probe.close();
-  }
 }
 
 // Snapshot self-contained prin VACUUM INTO in WORKER THREAD (Task 7): include
@@ -341,8 +336,10 @@ async function snapshotViaVacuumIntoAsync(srcPath: string, dir: string, name: st
   }
   try {
     await runSnapshotOp({ op: "vacuum_into", srcPath, destPath: tmp });
-    verifySnapshot(tmp, name);
-    fs.renameSync(tmp, dest);
+    assertSnapshotNonEmpty(tmp, name);
+    // Rev. 3 (panel): publish cu retry pe EPERM/EBUSY tranzitoriu (AV/indexer
+    // pe Windows) — toate backup-urile trec pe aici.
+    await renameWithRetryAsync(tmp, dest);
   } catch (e) {
     try {
       fs.unlinkSync(tmp);
@@ -415,6 +412,9 @@ interface RestoreTargetSpec {
   // readonly proprie in worker — anti-self-block "gratuit": latch-urile pe
   // getDb/getRnpmDb nu sunt atinse). Fisier absent = se sare peste snapshot.
   closeLive: () => void;
+  // Rev. 3: validari per-target pe copia STAGED (vad si continutul absorbit
+  // din WAL-ul bundle-urilor legacy); orice throw = staging esuat, live neatins.
+  verifyStaged?: (staged: Database.Database) => void;
 }
 
 async function restoreTargetImpl(
@@ -491,6 +491,9 @@ async function restoreTargetImpl(
         throw new Error(`integrity_check pe backup-ul ${name} a esuat: ${summary}`);
       }
       stagedDb.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+      // Rev. 3: validari per-target pe copia STAGED (checkpoint-ul tocmai a
+      // absorbit si WAL-ul bundle-urilor legacy).
+      t.verifyStaged?.(stagedDb);
     } finally {
       stagedDb.close();
     }
@@ -515,6 +518,9 @@ async function restoreTargetImpl(
       stage: "staging",
       reason: e instanceof Error ? e.message : String(e),
     });
+    // Fix panel-pe-plan (BLOCKER): erorile de VALIDARE isi pastreaza tipul —
+    // altfel code-ul INVALID_PARAMS moare aici si rutele raspund 500, nu 400.
+    if (e instanceof BackupValidationError) throw e;
     throw new Error(`Restore esuat la staging: ${e instanceof Error ? e.message : String(e)}`);
   }
 
@@ -635,9 +641,24 @@ async function restoreTargetImpl(
             stage: "auto_revert",
             reason: revertErr instanceof Error ? revertErr.message : String(revertErr),
           });
+          // Rev. 3 (panel): dublu-esec = baza live e cea INVALIDA — callerul
+          // afla ca revert-ul a esuat si UNDE e copia de recuperare. Code-ul
+          // tipat al erorii ORIGINALE se pastreaza (clasificarea 400/409/503
+          // din handlerul central nu se pierde).
+          const combined = new Error(
+            `${e instanceof Error ? e.message : String(e)} — AUTO-REVERT ESUAT (${revertErr instanceof Error ? revertErr.message : String(revertErr)}). ` +
+              `Recuperare manuala din snapshot-ul pre-restore: ${preRestoreName}`
+          );
+          const origCode = (e as { code?: unknown })?.code;
+          if (typeof origCode === "string") {
+            (combined as unknown as { code: string }).code = origCode;
+          }
+          throw combined;
         }
       }
-      throw new Error(e instanceof Error ? e.message : String(e));
+      // Rev. 3 (panel LOW): eroarea ORIGINALA se propaga cu tot cu `code`-ul
+      // ei tipat, nu o copie doar cu mesajul.
+      throw e instanceof Error ? e : new Error(String(e));
     }
   } finally {
     await fsPromises.rm(stagingDir, { recursive: true, force: true }).catch(() => {
@@ -708,6 +729,96 @@ function assertMonolithBackupVersionCompatible(backupPath: string): void {
   }
 }
 
+// Rev. 3 (Codex H2): dupa split (marker done/wiping), un backup de monolit care
+// mai contine randuri rnpm_* NU se mai restaureaza — restore-ul ar raporta
+// succes, dar urmatorul boot ar aborta fail-closed (marker done + randuri rnpm
+// reaparute), transformand un "restore reusit" intr-o aplicatie care nu mai
+// porneste. Marker-ul se citeste direct de pe disc (fara import din
+// rnpmSplitter — ciclu de import). Fix panel-pe-plan: un marker EXISTENT dar
+// ilizibil NU inseamna "split inexistent" — boot-ul l-ar respinge fail-closed
+// oricum, deci si restore-ul refuza (aceeasi soarta, semnalata mai devreme).
+function readSplitMarkerStatus(): "absent" | "started" | "unreadable" {
+  const p = path.join(getRnpmDataDir(), ".split-done.json");
+  if (!fs.existsSync(p)) return "absent";
+  try {
+    const status = (JSON.parse(fs.readFileSync(p, "utf8")) as { status?: unknown }).status;
+    return status === "done" || status === "wiping" ? "started" : "unreadable";
+  } catch {
+    return "unreadable";
+  }
+}
+
+function assertBackupNotPreSplit(stagedDb: Database.Database): void {
+  const markerState = readSplitMarkerStatus();
+  if (markerState === "absent") return;
+  // ESCAPE: '_' e wildcard in LIKE — fara escape, o tabela 'rnpmX...' ar intra
+  // fals in verificare (fix panel-pe-plan).
+  const rnpmTables = stagedDb
+    .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rnpm\\_%' ESCAPE '\\'")
+    .all() as { name: string }[];
+  for (const t of rnpmTables) {
+    const n = (stagedDb.prepare(`SELECT COUNT(*) AS n FROM "${t.name.replace(/"/g, '""')}"`).get() as { n: number }).n;
+    if (n > 0) {
+      throw new BackupValidationError(
+        markerState === "unreadable"
+          ? "Marker-ul de separare RNPM e ilizibil, iar backup-ul contine randuri rnpm_* — restore refuzat " +
+              "fail-closed (boot-ul l-ar respinge oricum). Vezi RUNBOOK 'Monolit restaurat dupa split'."
+          : "Backup-ul e dinaintea separarii RNPM (contine randuri rnpm_*), iar separarea a rulat deja pe " +
+              "aceasta instalare — restaurarea lui ar bloca urmatoarea pornire. Vezi RUNBOOK " +
+              "'Monolit restaurat dupa split' pentru cele doua cai de remediere."
+      );
+    }
+  }
+}
+
+// Rev. 3 (Codex H1): ledger-ul copiei staged trebuie sa fie COERENT cu
+// migratiile cunoscute — aceleasi invariants ca runner-ul de la boot: hash
+// exact sau variantele de self-heal (raw/crlf), sentinel de backfill DOAR pe
+// versiunea 1, si (fix panel-pe-plan) PREFIX CONTIGUU 1..N: un ledger care
+// "incepe" la versiunea 3 ar lasa runner-ul sa aplice 1-2 peste o schema
+// existenta. Limita asumata: un ledger corect forjat peste o schema alterata
+// NU e prins (ar cere reconstructie structurala); recuperarea ramane
+// pre-restore snapshot-ul.
+function makeLedgerValidator(migrationsDir: string): (staged: Database.Database) => void {
+  return (staged) => {
+    const hasTable = staged
+      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'")
+      .get();
+    if (!hasTable) return; // lipsa tabelei e decisa de validarile per-target existente
+    const known = new Map(discoverMigrations(migrationsDir).map((f) => [f.version, f]));
+    const rows = staged.prepare("SELECT version, sha256_up FROM _schema_versions ORDER BY version").all() as Array<{
+      version: number;
+      sha256_up: string;
+    }>;
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i];
+      if (row.version !== i + 1) {
+        throw new BackupValidationError(
+          `Ledger-ul de migratii al backup-ului nu e contiguu (asteptat ${i + 1}, gasit ${row.version}) — ` +
+            "fisier alterat sau instalare incompatibila; restore refuzat fail-closed."
+        );
+      }
+      const file = known.get(row.version);
+      if (!file) {
+        throw new BackupValidationError(
+          `Backup-ul are versiunea de schema ${row.version}, necunoscuta acestei aplicatii. Actualizeaza aplicatia inainte de restore.`
+        );
+      }
+      const ok =
+        row.sha256_up === file.sha256 ||
+        row.sha256_up === file.sha256Raw ||
+        row.sha256_up === file.sha256Crlf ||
+        (row.version === 1 && row.sha256_up === BACKFILL_SENTINEL);
+      if (!ok) {
+        throw new BackupValidationError(
+          `Ledger-ul de migratii al backup-ului nu corespunde migratiilor cunoscute (versiunea ${row.version}). ` +
+            "Fisierul pare alterat sau provine dintr-o instalare incompatibila — restore refuzat fail-closed."
+        );
+      }
+    }
+  };
+}
+
 export async function restoreFromBackup(name: string, opts?: RestoreOptions): Promise<{ preRestoreName: string }> {
   assertNameInJail(getBackupDir(), name, RESTORE_NAME_RE);
   return withMaintenanceWrite(async () => {
@@ -733,6 +844,11 @@ export async function restoreFromBackup(name: string, opts?: RestoreOptions): Pr
           prefix: MAIN_PREFIX,
           dbPath: getDbPath(),
           closeLive: () => closeDb(),
+          // Pre-split PRIMUL — mesajul lui are prioritate cand ambele ar aplica.
+          verifyStaged: (staged) => {
+            assertBackupNotPreSplit(staged);
+            makeLedgerValidator(MIGRATIONS_DIR)(staged);
+          },
         },
         name,
         opts?.onPhase
@@ -807,6 +923,9 @@ export async function restoreRnpmFromBackup(
           prefix: RNPM_PREFIX,
           dbPath: getRnpmDbPath(ownerId),
           closeLive: () => closeRnpmDb(ownerId),
+          // Existenta tabelei _schema_versions e verificata deja pe SURSA
+          // (assertRnpmBackupVersionCompatible, fail-closed la rnpm).
+          verifyStaged: makeLedgerValidator(MIGRATIONS_RNPM_DIR),
         },
         name,
         opts?.onPhase
@@ -855,7 +974,7 @@ export async function compactRnpmDbViaWorker(
       });
       try {
         await runSnapshotOp({ op: "vacuum_into", srcPath: dbPath, destPath: tmp });
-        verifySnapshot(tmp, path.basename(dbPath));
+        assertSnapshotNonEmpty(tmp, path.basename(dbPath));
         // Sidecar-urile vechi pleaca INAINTE de rename (aceeasi ratiune ca la
         // restore: fisier nou + WAL vechi = corupere silentioasa); fail-closed
         // pe non-ENOENT.

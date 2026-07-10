@@ -20,7 +20,17 @@ import {
   waitForBackupToSettle,
   withMaintenanceWrite,
 } from "./backup.ts";
-import { __resetRnpmActivityForTests, beginRnpmSearch, endRnpmSearch, RnpmSearchActiveError } from "./rnpmActivity.ts";
+import { createRequire } from "node:module";
+import { __setSnapshotWorkerPathForTests } from "../util/snapshotRunner.ts";
+import {
+  __resetRnpmActivityForTests,
+  beginRnpmRestore,
+  beginRnpmSearch,
+  endRnpmRestore,
+  endRnpmSearch,
+  isRnpmRestoreInProgress,
+  RnpmSearchActiveError,
+} from "./rnpmActivity.ts";
 import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, rnpmFileStem } from "./rnpmDb.ts";
 import { closeDb, getDb, getDbPath } from "./schema.ts";
 
@@ -81,6 +91,26 @@ describe("createRnpmManualBackup + listRnpmBackups", () => {
     await createRnpmManualBackup("u1");
     expect(await listRnpmBackups("u2")).toEqual([]);
   });
+
+  // Rev. 3 (panel, 3 modele convergente): publish-ul snapshot-ului trece prin
+  // rename cu retry — un lock tranzitoriu de AV/indexer pe Windows nu mai
+  // pierde silentios backup-ul.
+  it("publish-ul snapshot-ului reincearca pe EPERM tranzitoriu (backup manual reuseste)", async () => {
+    seedSearch("u1", "a");
+    const realRename = fsPromises.rename.bind(fsPromises);
+    let failed = false;
+    vi.spyOn(fsPromises, "rename").mockImplementation(async (from, to) => {
+      if (!failed && String(from).endsWith(".db.tmp")) {
+        failed = true;
+        throw Object.assign(new Error("EPERM tranzitoriu simulat"), { code: "EPERM" });
+      }
+      return realRename(from as Parameters<typeof realRename>[0], to as Parameters<typeof realRename>[1]);
+    });
+
+    const { name } = await createRnpmManualBackup("u1");
+    expect(failed).toBe(true); // rename-ul async chiar e pe drumul critic acum
+    expect(fs.existsSync(path.join(getRnpmBackupDir("u1"), name))).toBe(true);
+  });
 });
 
 describe("restoreRnpmFromBackup", () => {
@@ -139,6 +169,19 @@ describe("restoreRnpmFromBackup", () => {
     }
     // Dupa terminarea cautarii, restore-ul functioneaza.
     await expect(restoreRnpmFromBackup("u1", name)).resolves.toBeDefined();
+  });
+
+  it("backup rnpm cu hash forjat in _schema_versions => 400 fail-closed, live neatins (Rev. 3)", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    const forge = new Database(path.join(getRnpmBackupDir("u1"), name));
+    try {
+      forge.prepare("UPDATE _schema_versions SET sha256_up = 'hash-forjat' WHERE version = 1").run();
+    } finally {
+      forge.close();
+    }
+    await expect(restoreRnpmFromBackup("u1", name)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(countSearches("u1")).toBe(1);
   });
 
   it("backup dintr-o versiune de schema mai NOUA => reject inainte de swap", async () => {
@@ -277,29 +320,65 @@ describe("compactRnpmDbViaWorker — compact prin swap (Task 7)", () => {
     await expect(compactRnpmDbViaWorker("u1")).resolves.toBeDefined();
   });
 
-  it("(e) waitForBackupToSettle acopera si snapshot-ul din worker in zbor (await-ul e IN lock)", async () => {
+  it("(e) waitForBackupToSettle acopera si snapshot-ul din worker in zbor (worker lent, determinist)", async () => {
+    // Rev. 3 (panel): fereastra e GARANTATA de un worker de test lent — cu
+    // VACUUM-ul rapid al unui DB mic, varianta veche putea trece fara sa
+    // demonstreze nimic. Path-ul absolut al lui better-sqlite3 e injectat ca
+    // worker-ul din tmpdir sa nu esueze pe bare-specifier (un esec de require
+    // ar activa silentios fallback-ul si ar anula fereastra).
     seedSearch("u1", "a");
-    const db = getRnpmDb("u1");
-    const insert = db.prepare(
-      "INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('u1','dupa_nume',?)"
+    const requireCjs = createRequire(import.meta.url);
+    const bsqlPath = requireCjs.resolve("better-sqlite3").replace(/\\/g, "\\\\");
+    const slowWorker = path.join(tmpRoot, "slow-worker.cjs");
+    fs.writeFileSync(
+      slowWorker,
+      "const { parentPort, workerData } = require('node:worker_threads');\n" +
+        `const Database = require("${bsqlPath}");\n` +
+        "parentPort.postMessage({ ready: true });\n" +
+        "const db = new Database(workerData.srcPath, { readonly: true, fileMustExist: true });\n" +
+        "db.prepare('VACUUM INTO ?').run(workerData.destPath);\n" +
+        "db.close();\n" +
+        "const probe = new Database(workerData.destPath, { readonly: true });\n" +
+        "probe.prepare('PRAGMA integrity_check').all();\n" +
+        "probe.close();\n" +
+        "setTimeout(() => parentPort.postMessage({ ok: true }), 400);\n"
     );
-    const many = db.transaction(() => {
-      for (let i = 0; i < 3000; i++) insert.run(JSON.stringify({ pad: "y".repeat(800) }));
-    });
-    many();
+    __setSnapshotWorkerPathForTests(slowWorker);
+    try {
+      let done = false;
+      const op = createRnpmManualBackup("u1").then(() => {
+        done = true;
+      });
+      await new Promise((r) => setTimeout(r, 50));
 
-    let done = false;
-    const op = createRnpmManualBackup("u1").then(() => {
-      done = true;
-    });
-    await new Promise((r) => setImmediate(r));
+      let settled = false;
+      const wait = waitForBackupToSettle(30_000).then(() => {
+        settled = true;
+      });
+      await new Promise((r) => setTimeout(r, 50));
+      expect(settled).toBe(false); // fereastra garantata de worker-ul lent
 
-    await waitForBackupToSettle(30_000);
-    // Settle-ul nu are voie sa se rezolve inaintea operatiei din worker —
-    // promise-ul din settle-set acopera await-ul worker-ului din interiorul
-    // lock-ului, nu doar partea sincrona.
-    expect(done).toBe(true);
-    await op;
+      await op;
+      await wait;
+      expect(done).toBe(true);
+      expect(settled).toBe(true);
+    } finally {
+      __setSnapshotWorkerPathForTests(null);
+    }
+  });
+
+  // Rev. 3 (panel LOW) — test de REGRESIE (gardul exista deja in cod):
+  // beginRnpmRestore nu e reentrant-aware; fara guard-ul explicit, end-ul din
+  // finally al compact-ului ar curata latch-ul restore-ului STRAIN.
+  it("compact refuzat sub latch-ul de restore NU curata latch-ul strain (anti-clobber)", async () => {
+    seedSearch("u1", "a");
+    beginRnpmRestore("u1");
+    try {
+      await expect(compactRnpmDbViaWorker("u1")).rejects.toMatchObject({ code: "RESTORE_IN_PROGRESS" });
+      expect(isRnpmRestoreInProgress("u1")).toBe(true); // latch-ul ramane al restore-ului
+    } finally {
+      endRnpmRestore("u1");
+    }
   });
 });
 
@@ -546,6 +625,32 @@ describe("restore atomic prin staging (fault injection)", () => {
     // Pre-restore snapshot-ul exista in jail (a fost sursa revert-ului).
     const preRestore = fs.readdirSync(getRnpmBackupDir("u1")).filter((f) => f.startsWith("rnpm.pre-restore-"));
     expect(preRestore.length).toBe(1);
+  });
+
+  // Rev. 3 (panel): dublu-esec (post-publish + revert imposibil) = baza live e
+  // cea INVALIDA — callerul trebuie sa afle ca revert-ul a esuat si UNDE e
+  // copia de recuperare.
+  it("esec post-publish + auto-revert esuat => eroarea numeste pre-restore snapshot-ul", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    seedSearch("u1", "b");
+    __resetRnpmDbForTests();
+
+    const realCopy = fsPromises.copyFile.bind(fsPromises);
+    vi.spyOn(fsPromises, "copyFile").mockImplementation(async (from, to, mode?) => {
+      if (String(to).endsWith(".revert-tmp")) {
+        throw Object.assign(new Error("ENOSPC simulat la revert"), { code: "ENOSPC" });
+      }
+      return realCopy(from as Parameters<typeof realCopy>[0], to as Parameters<typeof realCopy>[1], mode);
+    });
+
+    await expect(
+      restoreRnpmFromBackup("u1", name, {
+        onPhase: (phase) => {
+          if (phase === "post_publish") throw new Error("failpoint post_publish");
+        },
+      })
+    ).rejects.toThrow(/AUTO-REVERT|pre-restore/i);
   });
 
   it("rename-ul de publicare reincearca pe EPERM tranzitoriu si restore-ul reuseste", async () => {

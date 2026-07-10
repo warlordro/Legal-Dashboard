@@ -136,7 +136,8 @@ function writeMarker(m: SplitMarker): void {
   } finally {
     fs.closeSync(fd);
   }
-  fs.renameSync(tmp, p);
+  // Rev. 3 (panel LOW): acelasi retry EPERM/EBUSY ca la publish-ul per-owner.
+  renameWithRetry(tmp, p);
   try {
     const dirFd = fs.openSync(getRnpmDataDir(), "r");
     try {
@@ -451,7 +452,7 @@ function copyOwnerToFile(owner: string): Record<string, number> {
 // Orice abatere = ABORT inainte de wipe, cu monolitul intact (sursa de adevar).
 // Tabelele verificate vin din ALL_RNPM_TABLES (whitelist), NU din cheile
 // manifestului — un marker forjat nu poate injecta nume de tabela in SQL.
-function verifyWipingResume(marker: SplitMarker): void {
+function verifyWipingResume(marker: SplitMarker, mono: Database.Database): void {
   // Anotarea explicita pe VARIABILA (nu doar pe return) e necesara ca TS sa
   // trateze apelul ca terminator de control-flow (narrowing dupa abort).
   const abort: (reason: string) => never = (reason) => {
@@ -466,6 +467,19 @@ function verifyWipingResume(marker: SplitMarker): void {
     // mediile dev cu marker pre-fix: sterge rnpm/.split-done.json + re-split
     // (linia dedicata din RUNBOOK).
     abort("marker 'wiping' fara manifest (marker pre-fix sau forjat)");
+  }
+  // Rev. 3 (convergent Codex + panel): marker-ul nu e crezut pe cuvant nici la
+  // ACOPERIRE — ownerii se deriva din monolit (aceeasi interogare ca
+  // preflight-urile) si fiecare trebuie enumerat in marker.owners. Un marker
+  // incomplet (ex. owners:[]) ar fi golit si datele necopiate.
+  const monoOwners = mono
+    .prepare("SELECT owner_id FROM rnpm_searches UNION SELECT owner_id FROM rnpm_avize")
+    .all()
+    .map((r) => (r as { owner_id: string }).owner_id);
+  for (const o of monoOwners) {
+    if (!marker.owners.includes(o)) {
+      abort(`ownerul ${o} exista in monolit dar lipseste din marker.owners (marker incomplet sau forjat)`);
+    }
   }
   for (const owner of marker.owners) {
     const ownerManifest = manifest[owner];
@@ -540,7 +554,7 @@ export function runRnpmSplitIfNeeded(opts?: RnpmSplitOptions): { split: boolean;
   if (marker?.status === "wiping") {
     // Toti ownerii au fost deja copiati si verificati la split; re-verificam
     // fisierele contra manifestului INAINTE de wipe (Task 3) si reluam DOAR wipe-ul.
-    verifyWipingResume(marker);
+    verifyWipingResume(marker, mono);
     log({ stage: "resume_wipe", owners: marker.owners.length });
     wipeMonolithRnpm(mono);
     writeMarker({ status: "done", completedAt: new Date().toISOString(), owners: marker.owners, appVersion });

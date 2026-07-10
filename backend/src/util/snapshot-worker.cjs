@@ -11,6 +11,13 @@
 const { parentPort, workerData } = require("node:worker_threads");
 const Database = require("better-sqlite3");
 
+// Handshake (Rev. 3): ready DUPA require-uri (deci dupa incarcarea reusita a
+// lui better-sqlite3), INAINTE de orice operatie pe fisiere. Runner-ul face
+// fallback sincron DOAR pe esec pre-ready (startup, ex. MODULE_NOT_FOUND in
+// Electron impachetat); dupa ready, un esec e operational si se propaga ca
+// reject (fara dublarea VACUUM-ului pe un dest posibil partial).
+parentPort.postMessage({ ready: true });
+
 function run(op) {
   if (
     !op ||
@@ -26,6 +33,24 @@ function run(op) {
   try {
     db = new Database(op.srcPath, { readonly: true, fileMustExist: true });
     db.prepare("VACUUM INTO ?").run(op.destPath);
+    // Rev. 3 (panel): integrity_check pe DEST ruleaza tot in worker — pe main
+    // thread ar re-bloca event loop-ul cu un full-scan comparabil cu VACUUM-ul.
+    let probe = null;
+    try {
+      probe = new Database(op.destPath, { readonly: true, fileMustExist: true });
+      const rows = probe.prepare("PRAGMA integrity_check").all();
+      if (rows.length !== 1 || rows[0].integrity_check !== "ok") {
+        return { error: `[snapshot-worker] integrity_check a esuat pe ${op.destPath}` };
+      }
+    } finally {
+      if (probe) {
+        try {
+          probe.close();
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
     return { ok: true };
   } catch (e) {
     return { error: e?.message ? e.message : String(e) };

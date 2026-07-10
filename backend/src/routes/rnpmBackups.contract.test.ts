@@ -343,6 +343,15 @@ describe("rutele pe fisierul callerului (stats/compact/delete-all)", () => {
     }
   });
 
+  // Rev. 3 (panel LOW): compactarea post-delete e best-effort, dar vizibila.
+  it("DELETE /saved/all raporteaza si compacted", async () => {
+    seedRnpm("u1", "a");
+    const res = await buildApp("u1").request("/api/rnpm/saved/all", { method: "DELETE", headers: DESKTOP });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as { deleted: number; compacted: boolean };
+    expect(body.compacted).toBe(true);
+  });
+
   it("DELETE /saved/all e self-service si refuza cu 409 SEARCH_ACTIVE in timpul unei cautari", async () => {
     seedRnpm("u1", "a");
     beginRnpmSearch("u1");

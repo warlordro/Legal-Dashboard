@@ -872,17 +872,20 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user
   // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
   // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
   // Task 7: prin worker + swap (best-effort — delete-ul a reusit deja).
+  // Rev. 3 (panel LOW): esecul compactarii devine VIZIBIL in raspuns.
+  let compacted = true;
   try {
     await compactRnpmDbViaWorker(ownerId);
   } catch (e) {
+    compacted = false;
     console.warn("[rnpm] compact after delete-all failed:", e);
   }
   // Audit 2026-04-29 #15: ops destructive masive trebuie reconstruibile.
   recordAudit(c, "aviz.delete_all", {
     targetKind: "aviz",
-    detail: { deleted: count },
+    detail: { deleted: count, compacted },
   });
-  return c.json({ deleted: count });
+  return c.json({ deleted: count, compacted });
 });
 
 rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async (c) => {
