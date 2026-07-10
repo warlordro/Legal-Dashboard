@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -9,6 +9,8 @@ import { discoverMigrations } from "./migrations/runner.ts";
 import { Hono } from "hono";
 import {
   __resetMaintenanceShutdownForTests,
+  __uniqueManualBackupNameForTests,
+  createManualBackup,
   deleteAllBackups,
   getBackupDir,
   listBackupsWithMeta,
@@ -180,6 +182,46 @@ describe("restoreFromBackup — atomicity + safety", () => {
     expect(parsed.action).toBe("restore");
     expect(parsed.source).toBe(backupName);
     expect(parsed.preRestoreCreated).toBe(true);
+  });
+});
+
+// Rev. 4 (Codex): stampNow() trunchia la secunda, iar publish-ul suprascrie
+// prin rename — doua create-uri manuale in aceeasi secunda (ruta admin nu are
+// cooldown) produceau UN singur snapshot, silentios.
+describe("nume unic pentru backup-ul manual (Rev. 4)", () => {
+  it("acelasi stamp + fisier existent => sufix incremental, fara suprascriere", async () => {
+    const dir = getBackupDir();
+    await fsPromises.mkdir(dir, { recursive: true });
+    const stamp = "2026-07-11T10-00-00-000Z";
+    const first = __uniqueManualBackupNameForTests(dir, "legal-dashboard.", stamp);
+    expect(first).toBe("legal-dashboard.manual-2026-07-11T10-00-00-000Z.db");
+
+    fs.writeFileSync(path.join(dir, first), "x");
+    const second = __uniqueManualBackupNameForTests(dir, "legal-dashboard.", stamp);
+    expect(second).toBe("legal-dashboard.manual-2026-07-11T10-00-00-000Z-2.db");
+    fs.writeFileSync(path.join(dir, second), "x");
+    const third = __uniqueManualBackupNameForTests(dir, "legal-dashboard.", stamp);
+    expect(third).toBe("legal-dashboard.manual-2026-07-11T10-00-00-000Z-3.db");
+  });
+
+  // Red COMPORTAMENTAL pe fluxul de PRODUCTIE (fix panel-pe-plan): doua
+  // create-uri cu acelasi timestamp trebuie sa produca DOUA fisiere pe disc.
+  // Spy-ul pe Date.prototype.toISOString traieste doar pe main thread —
+  // worker-ul de snapshot e thread separat, neafectat.
+  it("doua backup-uri manuale cu acelasi timestamp => doua fisiere distincte pe disc", async () => {
+    const frozen = "2026-07-11T10:00:00.000Z";
+    const spy = vi.spyOn(Date.prototype, "toISOString").mockReturnValue(frozen);
+    let a: { name: string };
+    let b: { name: string };
+    try {
+      a = await createManualBackup();
+      b = await createManualBackup();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(a.name).not.toBe(b.name);
+    expect(fs.existsSync(path.join(getBackupDir(), a.name))).toBe(true);
+    expect(fs.existsSync(path.join(getBackupDir(), b.name))).toBe(true);
   });
 });
 

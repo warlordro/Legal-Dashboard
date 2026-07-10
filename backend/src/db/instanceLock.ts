@@ -69,8 +69,12 @@ function processAlive(pid: number): boolean {
   try {
     process.kill(pid, 0);
     return true;
-  } catch {
-    return false;
+  } catch (e) {
+    // Rev. 4 (panel-pe-plan): DOAR ESRCH inseamna "mort". EPERM = proces VIU
+    // sub alta identitate OS; orice alta eroare = necunoscut => fail-closed
+    // (posibil viu) — reclaim-ul peste un proces viu inaccesibil ar pune doua
+    // procese pe aceleasi fisiere SQLite.
+    return (e as NodeJS.ErrnoException)?.code !== "ESRCH";
   }
 }
 
@@ -106,10 +110,24 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
       const heartbeatAge = Date.now() - existing.heartbeatAt;
       const sameHost = existing.hostname === osHostname();
       const stale = heartbeatAge > STALE_FACTOR * HEARTBEAT_MS;
-      const alive = sameHost ? processAlive(existing.pid) : !stale;
-      if (alive && !stale) {
+      // Rev. 4 (Codex HIGH): pe ACELASI host, un PID viu nu se recupereaza
+      // NICIODATA automat, indiferent de heartbeat — operatiile sincrone de
+      // boot (split rnpm, migratii, pre-migration backup) blocheaza legitim
+      // event loop-ul (deci si heartbeat-ul setInterval) peste prag, iar un
+      // reclaim ar pune DOUA procese pe aceleasi fisiere SQLite. Heartbeat-ul
+      // ramane criteriul DOAR cross-host (pid-ul nu e verificabil acolo).
+      // Limita asumata: PID reuse de catre un proces strain = refuz
+      // fals-pozitiv, deblocabil manual (fail-closed, preferabil coruperii).
+      // Break-glass: LEGAL_DASHBOARD_FORCE_BOOT=1 (cu audit).
+      const blocked = sameHost ? processAlive(existing.pid) : !stale;
+      if (blocked) {
         throw new Error(
-          `Alt proces Legal Dashboard detine lock-ul SQLite (pid=${existing.pid}, host=${existing.hostname}).`
+          `Alt proces Legal Dashboard detine lock-ul SQLite (pid=${existing.pid}, host=${existing.hostname}` +
+            `, heartbeat acum ${Math.round(heartbeatAge / 1000)}s).` +
+            (stale
+              ? " Heartbeat-ul e vechi dar procesul e VIU (posibil blocat intr-o operatie lunga de boot);" +
+                " daca esti sigur ca e mort/blocat definitiv, opreste-l manual sau porneste cu LEGAL_DASHBOARD_FORCE_BOOT=1."
+              : "")
         );
       }
       const deadPath = `${path}.dead-${existing.pid}-${Date.now()}`;

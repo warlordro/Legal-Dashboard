@@ -1091,7 +1091,10 @@ rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin", "
   const caller = getOwnerId(c);
   try {
     const { preRestoreName } = await restoreRnpmFromBackup(owner, name);
-    recordAudit(c, "backup.rnpm.restore", {
+    // Rev. 4 (Codex): mutatia e COMISA — un esec al scrierii de audit nu are
+    // voie sa rastoarne rezultatul in 409/500 (clientul ar repeta un restore
+    // distructiv). Acelasi contract ca site-urile post-mutatie din admin.ts.
+    recordAuditSafe(c, "backup.rnpm.restore", {
       targetKind: "backup",
       targetId: name,
       detail: { preRestoreName, targetOwnerId: owner === caller ? undefined : owner },

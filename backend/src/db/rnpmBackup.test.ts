@@ -533,6 +533,65 @@ describe("runDailyBackup — multi-target", () => {
     expect(fs.existsSync(path.join(mainDir, "legal-dashboard.2019-01-01.db"))).toBe(true);
   });
 
+  // Rev. 4 (Codex): pruneOld raporta toate candidatele ca sterse desi
+  // unlinkBundle inghitea EPERM/EBUSY/EACCES — sub un AV/ACL care refuza
+  // unlink-ul, discul crestea in timp ce log-ul raporta prune reusit.
+  it("prune raporteaza DOAR stergerile reale si emite warn pe unlink refuzat (Rev. 4)", async () => {
+    seedSearch("u1", "a");
+    const jail = getRnpmBackupDir("u1");
+    fs.mkdirSync(jail, { recursive: true });
+    const old = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    // Ani clar in trecut (2026-01-0X ar coliziona cu todayBackupName daca
+    // suita ruleaza chiar in acele zile calendaristice).
+    for (let i = 1; i <= 9; i++) {
+      const p = path.join(jail, `rnpm.1999-01-0${i}.db`);
+      fs.writeFileSync(p, "x");
+      fs.utimesSync(p, old, old);
+    }
+    __resetRnpmDbForTests();
+    // Preconditie EXPLICITA: fisierul per-user ramane pe disc dupa resetul de
+    // registry — daily-ul enumereaza stem-urile de pe disc si trebuie sa
+    // produca al 10-lea backup datat (altfel aritmetica de mai jos pica
+    // pentru alt motiv).
+    expect(fs.existsSync(getRnpmDbPath("u1"))).toBe(true);
+
+    // Unlink-ul REFUZA exact un fisier candidat la prune (EPERM sustinut).
+    // (vi.restoreAllMocks() din afterEach curata spy-ul.)
+    const realUnlink = fsPromises.unlink.bind(fsPromises);
+    vi.spyOn(fsPromises, "unlink").mockImplementation(async (p) => {
+      if (String(p).endsWith("rnpm.1999-01-01.db")) {
+        throw Object.assign(new Error("EPERM simulat de AV"), { code: "EPERM" });
+      }
+      return realUnlink(p as Parameters<typeof realUnlink>[0]);
+    });
+
+    const lines: string[] = [];
+    const originalLog = console.log;
+    console.log = (...args: unknown[]) => {
+      if (typeof args[0] === "string") lines.push(args[0]);
+    };
+    try {
+      await runDailyBackup();
+    } finally {
+      console.log = originalLog;
+    }
+
+    // 9 vechi + 1 nou = 10 -> candidate la prune: 3; una refuzata => pruned=2.
+    const daily = lines
+      .map((l) => {
+        try {
+          return JSON.parse(l) as { action?: string; target?: string; pruned?: number };
+        } catch {
+          return null;
+        }
+      })
+      .find((o) => o?.action === "daily_backup" && String(o?.target).startsWith("rnpm:"));
+    expect(daily?.pruned).toBe(2);
+    // Fisierul refuzat exista inca pe disc, iar refuzul e semnalat structurat.
+    expect(fs.existsSync(path.join(jail, "rnpm.1999-01-01.db"))).toBe(true);
+    expect(lines.some((l) => l.includes("backup_prune_failed") && l.includes("rnpm.1999-01-01.db"))).toBe(true);
+  });
+
   it("prune curata bundle-ul (sidecars) al backup-urilor eliminate", async () => {
     seedSearch("u1", "a");
     const jail = getRnpmBackupDir("u1");

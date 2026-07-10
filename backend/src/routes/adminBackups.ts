@@ -6,7 +6,7 @@
 
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
+import { recordAuditSafe } from "../db/auditRepository.ts";
 import {
   BackupValidationError,
   createManualBackup,
@@ -71,7 +71,10 @@ adminBackupsRouter.post("/restore", requireDesktopHeader, limitSmall, async (c) 
   }
   try {
     const { preRestoreName } = await restoreFromBackup(name);
-    recordAudit(c, "backup.restore", {
+    // Rev. 4 (Codex): mutatia e COMISA — un esec al scrierii de audit nu are
+    // voie sa rastoarne rezultatul in 409/500 (clientul ar repeta un restore
+    // distructiv). Swap mecanic, aceeasi clasa ca ruta rnpm (testata acolo).
+    recordAuditSafe(c, "backup.restore", {
       targetKind: "backup",
       targetId: name,
       detail: { preRestoreName },

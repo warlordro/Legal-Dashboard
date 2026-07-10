@@ -73,6 +73,22 @@ consolidate pe branch:**
   asertia moarta `.restore.tmp` inlocuita; teste de regresie documentate ca
   exceptii TDD (6.1, anti-clobber); testul settle-peste-worker determinist
   (worker lent injectat prin `__setSnapshotWorkerPathForTests`).
+- **REVIEW CODEX PE INTREG BRANCH-UL FACUT (2026-07-11)** — la cererea userului,
+  pe `aac59da..ccab664`, dimensiuni: securitate/cod/bug-uri/rezilienta/
+  arhitectura (`review-mrfijdtk-6hpgld`; prima lansare a facut STALL real —
+  pid mort cu registry "running", anulata curat si relansata). Verdict:
+  securitate + arhitectura CURATE; 1 HIGH rezilienta + 3 MEDIUM, toate
+  verificate pe cod si inchise in **Rev. 4 (Commit E)** dupa acelasi workflow
+  (plan `2026-07-11-fixes-rev4-rnpm-split.md`, corectat cu review-ul panelului
+  pe plan — panel-ul a mai gasit: processAlive trata EPERM ca "mort"):
+  instanceLock nu mai recupereaza un PID viu pe acelasi host (+ ESRCH-only,
+  hint FORCE_BOOT in mesaj, test file NOU instanceLock.test.ts cu mock
+  determinist pe process.kill si garduri cross-host), recordAuditSafe pe
+  succesul restore-ului (rnpm + admin; red prin vi.mock in fisier dedicat
+  rnpmBackups.auditSafe.test.ts — latch-ul nu functiona ca injectie, requireRole
+  atinge getDb in middleware), nume unic la backup manual (ms + sufix plafonat,
+  rezervat sub lock; stampNow sters), prune cu contorizare reala + warn
+  `backup_prune_failed` pe EPERM/EBUSY/EACCES.
 - Ramas pe RELEASE CHECKLIST: smoke pe artefact Electron IMPACHETAT
   (backup/restore/compact rulate din app.asar.unpacked — abia acolo se
   exerseaza real asarUnpack-ul + rezolutia bindings).

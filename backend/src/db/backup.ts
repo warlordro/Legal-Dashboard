@@ -203,8 +203,26 @@ export function getRnpmBackupDir(ownerId: string): string {
   return getRnpmBackupJail(ownerId);
 }
 
-function stampNow(): string {
-  return new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+// Rev. 4 (Codex): nume REZERVAT pe disc — timestamp cu MILISECUNDE + sufix
+// incremental pe coliziune. Varianta veche (stampNow, trunchiat la secunda)
+// combinata cu publish-ul prin rename suprascria silentios: doua create-uri
+// manuale in aceeasi secunda (ruta admin nu are cooldown) = UN snapshot.
+// Rezervarea ruleaza sub maintenance write lock (callerii), deci existsSync
+// nu are cursa in-proces.
+function uniqueManualBackupName(dir: string, prefix: string, stamp?: string): string {
+  const s = stamp ?? new Date().toISOString().replace(/[:.]/g, "-");
+  let name = `${prefix}manual-${s}${BACKUP_SUFFIX}`;
+  for (let i = 2; fs.existsSync(path.join(dir, name)); i++) {
+    // Plafon: o bucla nemarginita sub write lock ar bloca toate scrierile de
+    // mentenanta pe un director patologic.
+    if (i > 1000) throw new Error(`[backup] nu am putut rezerva un nume unic in ${dir} (peste 1000 de coliziuni)`);
+    name = `${prefix}manual-${s}-${i}${BACKUP_SUFFIX}`;
+  }
+  return name;
+}
+
+export function __uniqueManualBackupNameForTests(dir: string, prefix: string, stamp: string): string {
+  return uniqueManualBackupName(dir, prefix, stamp);
 }
 
 function todayBackupName(prefix: string, date = new Date()): string {
@@ -226,12 +244,26 @@ async function listBackups(dir: string, prefix: string): Promise<string[]> {
 // Sterge un backup impreuna cu sidecar-urile lui (bundle) — backup-urile
 // legacy (pre-v2.43.0) sunt coerente doar ca triplet .db/-wal/-shm; fara
 // curatarea bundle-ului ar ramane sidecars orfane permanente in jail.
-async function unlinkBundle(dir: string, name: string): Promise<void> {
+// Rev. 4 (Codex): intoarce TRUE doar daca fisierul PRINCIPAL a disparut
+// efectiv (sters acum sau deja absent); EPERM/EBUSY/EACCES nu se mai inghit
+// silentios — un AV/ACL care refuza unlink-ul lasa discul sa creasca in timp
+// ce log-ul raporta prune reusit. Sidecar-urile raman best-effort (orfanele
+// se curata la urmatorul prune reusit).
+async function unlinkBundle(dir: string, name: string): Promise<boolean> {
+  let mainGone = true;
   for (const suffix of ["", "-wal", "-shm"] as const) {
-    await fsPromises.unlink(path.join(dir, name + suffix)).catch(() => {
-      /* best-effort */
-    });
+    try {
+      await fsPromises.unlink(path.join(dir, name + suffix));
+    } catch (e) {
+      const code = (e as NodeJS.ErrnoException)?.code;
+      if (code === "ENOENT") continue; // absent = obiectivul e atins
+      if (suffix === "") {
+        mainGone = false;
+        logBackupEvent({ action: "backup_prune_failed", file: name, errnoCode: code ?? null });
+      }
+    }
   }
+  return mainGone;
 }
 
 // Half-written backups left by a prior crash / SIGTERM / power loss between
@@ -305,10 +337,12 @@ async function pruneOld(dir: string, prefix: string): Promise<number> {
     ...preMigration.slice(PRE_MIGRATION_RETAIN),
     ...preSplit.slice(PRE_SPLIT_RETAIN),
   ];
+  // Rev. 4 (Codex): count-ul reflecta stergerile REALE, nu candidatele.
+  let pruned = 0;
   for (const f of toDelete) {
-    await unlinkBundle(dir, f);
+    if (await unlinkBundle(dir, f)) pruned++;
   }
-  return toDelete.length;
+  return pruned;
 }
 
 // Verificare usoara post-runner (Rev. 3): integritatea dest-ului e garantata
@@ -1166,8 +1200,11 @@ async function runOffsiteBackupHook(backupPath: string): Promise<void> {
 // ---------------------------------------------------------------------------
 
 async function createManualBackupForTarget(t: BackupTarget): Promise<{ name: string; dest: string }> {
-  const name = `${t.prefix}manual-${stampNow()}${BACKUP_SUFFIX}`;
+  // Numele se REZERVA in interiorul lock-ului (Rev. 4) — verificarea de
+  // coliziune si scrierea stau sub acelasi writer exclusiv.
+  let name = "";
   const dest = await withMaintenanceWrite(async () => {
+    name = uniqueManualBackupName(t.dir, t.prefix);
     const out = await snapshotViaVacuumIntoAsync(t.dbPath, t.dir, name);
     await pruneOld(t.dir, t.prefix);
     return out;
@@ -1186,10 +1223,11 @@ export async function createManualBackup(): Promise<{ name: string }> {
 export async function createRnpmManualBackup(ownerId: string): Promise<{ name: string }> {
   // Daca fisierul nu exista inca, PROVISIONEAZA prin getRnpmDb — un user nou
   // primeste un backup valid al bazei goale (decizie explicita de plan).
-  const name = `${RNPM_PREFIX}manual-${stampNow()}${BACKUP_SUFFIX}`;
   const jail = getRnpmBackupDir(ownerId);
+  let name = "";
   const dest = await withMaintenanceWrite(async () => {
     getRnpmDb(ownerId);
+    name = uniqueManualBackupName(jail, RNPM_PREFIX);
     const out = await snapshotViaVacuumIntoAsync(getRnpmDbPath(ownerId), jail, name);
     await pruneOld(jail, RNPM_PREFIX);
     return out;
