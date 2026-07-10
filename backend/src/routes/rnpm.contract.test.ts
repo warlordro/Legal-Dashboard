@@ -29,6 +29,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { rnpmRouter } from "./rnpm.ts";
 import { closeDb, getDb } from "../db/schema.ts";
+import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
 import { updateUserRole } from "../db/userRepository.ts";
@@ -114,6 +115,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __resetRnpmDbForTests();
   vi.clearAllMocks();
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");

@@ -23,6 +23,7 @@ import {
   withMaintenanceRead,
 } from "../db/backup.ts";
 import { recordAudit } from "../db/auditRepository.ts";
+import { isRnpmRestoreInProgress } from "../db/rnpmActivity.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
@@ -199,6 +200,17 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const guard = await withRnpmCaptchaGuards(c);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
+  // v2.43.0 (rnpm-split): gardul de restore loveste imediat dupa parsarea
+  // body-ului si INAINTE de streamSSE — un throw dupa ce stream-ul a pornit
+  // inseamna 200 deja trimis si eroare in mijlocul stream-ului. Sta DUPA
+  // withRnpmCaptchaGuards (gate-urile web-mode nu au nevoie de ownerId) si
+  // INAINTE de audit-ul de consum (nu logam consum pe o cerere refuzata).
+  if (isRnpmRestoreInProgress(getOwnerId(c))) {
+    return c.json(
+      fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
+      409
+    );
+  }
   if (guard.source === "tenant") {
     recordAudit(c, "rnpm.captcha.consume", {
       targetKind: "rnpm_search",
@@ -425,6 +437,13 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   const guard = await withRnpmCaptchaGuards(c);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
+  // v2.43.0 (rnpm-split): gard pre-SSE, vezi nota de la POST /search.
+  if (isRnpmRestoreInProgress(getOwnerId(c))) {
+    return c.json(
+      fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
+      409
+    );
+  }
   if (guard.source === "tenant") {
     recordAudit(c, "rnpm.captcha.consume", {
       targetKind: "rnpm_search",
@@ -553,6 +572,13 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   const guard = await withRnpmCaptchaGuards(c);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
+  // v2.43.0 (rnpm-split): gard pre-SSE, vezi nota de la POST /search.
+  if (isRnpmRestoreInProgress(getOwnerId(c))) {
+    return c.json(
+      fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
+      409
+    );
+  }
   if (guard.source === "tenant") {
     recordAudit(c, "rnpm.captcha.consume", {
       targetKind: "rnpm_search",

@@ -10,6 +10,7 @@ import {
   type RnpmFullDetail,
 } from "./rnpmClient.ts";
 import { getSearchOwnership, saveSearch, updateSearchTotal } from "../db/searchRepository.ts";
+import { beginRnpmSearch, endRnpmSearch } from "../db/rnpmActivity.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { withMaintenanceRead } from "../db/backup.ts";
 import { buildSaveAvizInput } from "./rnpmAvizMapper.ts";
@@ -100,31 +101,38 @@ function logRnpmEvent(entry: Record<string, unknown>): void {
   );
 }
 
+// v2.43.0 (rnpm-split): bracketing de activitate per owner — cat timp o cautare
+// e in zbor, restore-ul fisierului RNPM al ownerului e refuzat (si invers,
+// beginRnpmSearch arunca RESTORE_IN_PROGRESS daca un restore e in curs).
+// end-ul ruleaza in finally, inclusiv pe erori/abort.
 export async function executeSearch(
+  input: ExecuteSearchInput,
+  client: RnpmClient = defaultRnpmClient
+): Promise<ExecuteSearchResult> {
+  beginRnpmSearch(input.ownerId);
+  try {
+    return await executeSearchInner(input, client);
+  } finally {
+    endRnpmSearch(input.ownerId);
+  }
+}
+
+async function executeSearchInner(
   input: ExecuteSearchInput,
   client: RnpmClient = defaultRnpmClient
 ): Promise<ExecuteSearchResult> {
   const ownerId = input.ownerId;
 
-  // Tenant guard: refuza continuarile pe `existingSearchId` care apartin altui
-  // owner (audit 2026-04-29 #11). Cazul "missing" e benign — searchId e cache-uit
-  // in UI dupa "Sterge baza" care a sters rnpm_searches; in loc sa raspundem 403
-  // (vizibil userului ca eroare cross-tenant), tratam ca search nou: dropam
-  // existingSearchId/existingGcode/startRnpmPage si lasam restul fluxului sa
-  // creeze un row nou + sa rezolve un captcha proaspat.
+  // v2.43.0 (rnpm-split): id-urile sunt per fisier user, deci singura stare posibila
+  // in afara de "owned" e "missing" (ex. searchId cache-uit in UI dupa "Sterge baza"
+  // sau dupa un restore). Missing = tratam ca search nou, fara eroare vizibila.
   let existingSearchId = input.existingSearchId ?? undefined;
   let existingGcode = input.existingGcode ?? undefined;
   let startRnpmPage = input.startRnpmPage;
-  if (existingSearchId != null) {
-    const ownership = getSearchOwnership(existingSearchId, ownerId);
-    if (ownership === "foreign") {
-      throw new RnpmError("searchId nu apartine owner-ului curent", 403);
-    }
-    if (ownership === "missing") {
-      existingSearchId = undefined;
-      existingGcode = undefined;
-      startRnpmPage = undefined;
-    }
+  if (existingSearchId != null && getSearchOwnership(existingSearchId, ownerId) === "missing") {
+    existingSearchId = undefined;
+    existingGcode = undefined;
+    startRnpmPage = undefined;
   }
 
   const batchSize = input.batchSize ?? DEFAULT_BATCH_SIZE;
@@ -460,6 +468,38 @@ export async function executeBulkSearch(
   fallback2CaptchaKey?: string,
   captchaMode?: CaptchaMode
 ): Promise<void> {
+  // v2.43.0 (rnpm-split): bracketing per owner, vezi nota de la executeSearch.
+  // Sub-cautarile per item trec prin executeSearch care nesteaza begin/end
+  // (contorul suporta nesting).
+  beginRnpmSearch(ownerId);
+  try {
+    await executeBulkSearchInner(
+      items,
+      captchaKey,
+      ownerId,
+      onProgress,
+      client,
+      signal,
+      captchaProvider,
+      fallback2CaptchaKey,
+      captchaMode
+    );
+  } finally {
+    endRnpmSearch(ownerId);
+  }
+}
+
+async function executeBulkSearchInner(
+  items: BulkSearchItem[],
+  captchaKey: string,
+  ownerId: string,
+  onProgress: (p: BulkProgress) => void,
+  client: RnpmClient = defaultRnpmClient,
+  signal?: AbortSignal,
+  captchaProvider?: CaptchaProvider,
+  fallback2CaptchaKey?: string,
+  captchaMode?: CaptchaMode
+): Promise<void> {
   for (let i = 0; i < items.length; i++) {
     if (signal?.aborted) return;
     const item = items[i];
@@ -616,6 +656,20 @@ export interface SplitSearchResult {
 }
 
 export async function executeSplitSearch(
+  input: SplitSearchInput,
+  onProgress: (p: SplitSearchProgress) => void,
+  client: RnpmClient = defaultRnpmClient
+): Promise<SplitSearchResult> {
+  // v2.43.0 (rnpm-split): bracketing per owner, vezi nota de la executeSearch.
+  beginRnpmSearch(input.ownerId);
+  try {
+    return await executeSplitSearchInner(input, onProgress, client);
+  } finally {
+    endRnpmSearch(input.ownerId);
+  }
+}
+
+async function executeSplitSearchInner(
   input: SplitSearchInput,
   onProgress: (p: SplitSearchProgress) => void,
   client: RnpmClient = defaultRnpmClient

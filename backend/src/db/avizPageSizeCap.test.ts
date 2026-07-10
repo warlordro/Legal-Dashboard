@@ -10,6 +10,7 @@ import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { closeDb, getDb } from "./schema.ts";
+import { __resetRnpmDbForTests } from "./rnpmDb.ts";
 import { getAvize } from "./avizRepository.ts";
 
 let tmpRoot: string;
@@ -21,6 +22,7 @@ beforeEach(async () => {
   getDb();
 });
 afterEach(async () => {
+  __resetRnpmDbForTests();
   closeDb();
   // biome-ignore lint/performance/noDelete: env trebuie unset real
   delete process.env.LEGAL_DASHBOARD_DB_PATH;

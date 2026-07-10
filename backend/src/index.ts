@@ -48,11 +48,14 @@ import { purgeExpiredJti } from "./db/jwtDenylistRepository.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
+import { markRnpmShuttingDown } from "./db/rnpmDb.ts";
+import { runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
 import { recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { runDailyBackup } from "./db/backup.ts";
 import { ErrorCodes, fail } from "./util/envelope.ts";
+import { appErrorHandler } from "./util/appErrorHandler.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
 import { fileURLToPath } from "node:url";
@@ -84,6 +87,9 @@ dotenv.config({
 });
 
 const app = new Hono();
+
+// v2.43.0 (rnpm-split): mapare centrala a erorilor de concurenta RNPM la 409.
+app.onError(appErrorHandler);
 
 app.use("*", logger());
 
@@ -500,6 +506,18 @@ if (getAuthMode() === "desktop") {
   }
 }
 
+// v2.43.0 (rnpm-split): splitter-ul one-time ruleaza DUPA toate gate-urile
+// fatale de configuratie (instance lock, auth config, remote bind) si INAINTE
+// de prewarm/scheduler/serve — prewarm-ul de mai jos deschide deja fisiere
+// per-user prin getRnpmDb, deci datele trebuie mutate intai. Fail-closed:
+// orice esec de split opreste boot-ul (monolitul ramane sursa de adevar).
+try {
+  const splitResult = runRnpmSplitIfNeeded({ appVersion: APP_VERSION });
+  if (splitResult.split) console.log(`[boot] rnpm split complet: ${splitResult.owners.length} owneri`);
+} catch (e) {
+  fatalBoot("rnpm split failed", e);
+}
+
 // Run schema init + descriere migration + prewarm BEFORE binding the port. On
 // large DBs, VACUUM/ALTER blocks the event loop for tens of seconds; if serve()
 // were already listening we'd serve "ok" /health while real requests starve
@@ -895,6 +913,14 @@ async function gracefulShutdown(reason: string): Promise<void> {
     await stopDailyReportScheduler();
   } catch (e) {
     console.error("[shutdown] stopDailyReportScheduler failed:", e);
+  }
+
+  // v2.43.0 (rnpm-split): inchide si latch-uieste registry-ul de fisiere RNPM
+  // per user inainte de monolit — aceeasi ratiune de guard ca markShuttingDown.
+  try {
+    markRnpmShuttingDown();
+  } catch (e) {
+    console.error("[shutdown] markRnpmShuttingDown failed:", e);
   }
 
   // markShuttingDown() closes the DB AND latches the open-guard so any

@@ -31,6 +31,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { rnpmRouter } from "./rnpm.ts";
 import { closeDb, getDb } from "../db/schema.ts";
+import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
 import { insertUser, updateUserRole } from "../db/userRepository.ts";
@@ -90,6 +91,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __resetRnpmDbForTests();
   closeDb();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;

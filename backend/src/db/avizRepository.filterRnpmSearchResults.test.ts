@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { filterRnpmSearchResults } from "./avizRepository.ts";
+import { __resetRnpmDbForTests, getRnpmDb } from "./rnpmDb.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 // Bootstrap pattern: foloseste LEGAL_DASHBOARD_DB_PATH (acelasi pattern ca in
@@ -30,11 +31,14 @@ beforeEach(async () => {
   process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
   const seed = new Database(dbPath);
   seed.close();
-  // getDb() ruleaza initSchema -> runMigrations + inregistreaza rnpm_norm.
-  db = getDb();
+  getDb();
+  // v2.43.0 (rnpm-split): datele rnpm traiesc in fisierul per user; seed-urile
+  // merg in fisierul lui "local" (getRnpmDb aplica baseline + UDF rnpm_norm).
+  db = getRnpmDb("local");
 });
 
 afterEach(async () => {
+  __resetRnpmDbForTests();
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
@@ -208,41 +212,56 @@ describe("filterRnpmSearchResults", () => {
   });
 
   it("cross-tenant izolation pe avize", () => {
-    const sidA = makeSearch(db, "ownerA", "ipoteci");
-    const sidB = makeSearch(db, "ownerB", "ipoteci");
-    const aA = makeAviz(db, { ownerId: "ownerA", searchId: sidA, identificator: "AV-A" });
-    makeDebitor(db, { avizId: aA, ownerId: "ownerA", denumire: "Comun" });
-    const aB = makeAviz(db, { ownerId: "ownerB", searchId: sidB, identificator: "AV-B" });
-    makeDebitor(db, { avizId: aB, ownerId: "ownerB", denumire: "Comun" });
+    // v2.43.0 (rnpm-split): fiecare owner seed-uieste in FISIERUL lui.
+    const dbA = getRnpmDb("ownerA");
+    const dbB = getRnpmDb("ownerB");
+    const sidA = makeSearch(dbA, "ownerA", "ipoteci");
+    const sidB = makeSearch(dbB, "ownerB", "ipoteci");
+    const aA = makeAviz(dbA, { ownerId: "ownerA", searchId: sidA, identificator: "AV-A" });
+    makeDebitor(dbA, { avizId: aA, ownerId: "ownerA", denumire: "Comun" });
+    const aB = makeAviz(dbB, { ownerId: "ownerB", searchId: sidB, identificator: "AV-B" });
+    makeDebitor(dbB, { avizId: aB, ownerId: "ownerB", denumire: "Comun" });
 
     const resA = filterRnpmSearchResults({ ownerId: "ownerA", searchId: sidA, q: "comun" });
     expect(resA.matchedAvizIds).toEqual([aA]);
-    expect(resA.matchedAvizIds).not.toContain(aB);
     expect(resA.matchedCount).toBe(1);
     expect(resA.totalInSearch).toBe(1);
+    // Id-urile pot COINCIDE numeric intre fisiere (aA === aB e posibil prin
+    // design); identitatea se verifica pe continut, in fisierul lui A.
+    const row = dbA.prepare("SELECT identificator FROM rnpm_avize WHERE id = ?").get(resA.matchedAvizIds[0]) as {
+      identificator: string;
+    };
+    expect(row.identificator).toBe("AV-A");
+    expect(aB).toBeGreaterThan(0);
   });
 
   it("cross-tenant izolation pe rnpm_bunuri_descrieri content-addressable", () => {
-    const sidA = makeSearch(db, "ownerA", "ipoteci");
-    const sidB = makeSearch(db, "ownerB", "ipoteci");
-    const aA = makeAviz(db, { ownerId: "ownerA", searchId: sidA, identificator: "AV-DA" });
-    const aB = makeAviz(db, { ownerId: "ownerB", searchId: sidB, identificator: "AV-DB" });
-    const desc = db.prepare("INSERT INTO rnpm_bunuri_descrieri (text) VALUES (?)").run("descriere comuna tractor");
-    const descId = Number(desc.lastInsertRowid);
-    db.prepare("INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)").run(
-      aA,
-      "ownerA",
-      descId
-    );
-    db.prepare("INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)").run(
-      aB,
-      "ownerB",
-      descId
-    );
+    const dbA = getRnpmDb("ownerA");
+    const dbB = getRnpmDb("ownerB");
+    const sidA = makeSearch(dbA, "ownerA", "ipoteci");
+    const sidB = makeSearch(dbB, "ownerB", "ipoteci");
+    const aA = makeAviz(dbA, { ownerId: "ownerA", searchId: sidA, identificator: "AV-DA" });
+    const aB = makeAviz(dbB, { ownerId: "ownerB", searchId: sidB, identificator: "AV-DB" });
+    // Acelasi text de descriere exista in AMBELE fisiere (copii independente).
+    for (const [d, aviz, owner] of [
+      [dbA, aA, "ownerA"],
+      [dbB, aB, "ownerB"],
+    ] as const) {
+      const desc = d.prepare("INSERT INTO rnpm_bunuri_descrieri (text) VALUES (?)").run("descriere comuna tractor");
+      d.prepare("INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)").run(
+        aviz,
+        owner,
+        Number(desc.lastInsertRowid)
+      );
+    }
 
     const resA = filterRnpmSearchResults({ ownerId: "ownerA", searchId: sidA, q: "tractor" });
     expect(resA.matchedAvizIds).toEqual([aA]);
-    expect(resA.matchedAvizIds).not.toContain(aB);
+    const rowA = dbA.prepare("SELECT identificator FROM rnpm_avize WHERE id = ?").get(resA.matchedAvizIds[0]) as {
+      identificator: string;
+    };
+    expect(rowA.identificator).toBe("AV-DA");
+    expect(aB).toBeGreaterThan(0);
   });
 
   it("searchId neexistent -> RnpmSearchNotFoundError", () => {
@@ -251,9 +270,11 @@ describe("filterRnpmSearchResults", () => {
     );
   });
 
-  it("searchId apartine altui owner -> RnpmSearchNotFoundError (anti-enumeration)", () => {
-    const sidA = makeSearch(db, "ownerA", "ipoteci");
-    expect(() => filterRnpmSearchResults({ ownerId: "ownerB", searchId: sidA, q: "test" })).toThrow(
+  it("searchId inexistent in fisierul callerului -> RnpmSearchNotFoundError (anti-enumeration)", () => {
+    // v2.43.0 (rnpm-split): id-urile sunt namespace per fisier; fisierul lui
+    // ownerB nu are search-ul, indiferent ce id exista la ownerA.
+    const sidA = makeSearch(getRnpmDb("ownerA"), "ownerA", "ipoteci");
+    expect(() => filterRnpmSearchResults({ ownerId: "ownerB", searchId: sidA + 1000, q: "test" })).toThrow(
       /Search inexistent/
     );
   });

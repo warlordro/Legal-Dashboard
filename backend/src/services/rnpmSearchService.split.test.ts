@@ -28,6 +28,13 @@ vi.mock("./captchaSolver.ts", () => ({
 }));
 
 import { closeDb, getDb } from "../db/schema.ts";
+import { __resetRnpmDbForTests, getRnpmDb } from "../db/rnpmDb.ts";
+import {
+  __resetRnpmActivityForTests,
+  beginRnpmRestore,
+  endRnpmRestore,
+  hasActiveRnpmSearch,
+} from "../db/rnpmActivity.ts";
 import { saveSearch } from "../db/searchRepository.ts";
 import { executeSearch, executeSplitSearch } from "./rnpmSearchService.ts";
 import {
@@ -116,6 +123,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __resetRnpmActivityForTests();
+  __resetRnpmDbForTests();
   closeDb();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
@@ -678,7 +687,11 @@ describe("invariants critice (audit §6.5)", () => {
     return { total, pagesTotal: 24, pageSize: 25, currentPage: 1, documents: [], criteriu: "", eai: false };
   }
 
-  it("[I1] respinge cross-tenant existingSearchId cu RnpmError(403)", async () => {
+  it("[I1] existingSearchId inexistent in fisierul callerului = search nou (izolare fizica, fara 403)", async () => {
+    // v2.43.0 (rnpm-split): id-urile sunt namespace per fisier user. Un id venit
+    // din alt context (ex. al lui alice) nu exista in fisierul lui bob => missing
+    // => flow-ul creeaza un search NOU in fisierul lui bob; datele lui alice
+    // raman neatinse in fisierul ei. Garda cross-tenant e izolarea fizica insasi.
     const aliceSearchId = saveSearch({
       ownerId: "alice",
       searchType: "ipoteci",
@@ -686,22 +699,30 @@ describe("invariants critice (audit §6.5)", () => {
       totalResults: 0,
       criteriu: null,
     });
-    const stub = new StubClient(() => singleDocResult("not-called"));
+    const stub = new StubClient(() => singleDocResult("doc-bob"));
 
-    const promise = executeSearch(
+    const result = await executeSearch(
       {
         type: "ipoteci",
         params: {},
         captchaKey: "stub-key",
         ownerId: "bob",
-        existingSearchId: aliceSearchId,
+        existingSearchId: aliceSearchId + 500,
       },
       stub
     );
 
-    await expect(promise).rejects.toBeInstanceOf(RnpmError);
-    await expect(promise).rejects.toMatchObject({ status: 403 });
-    expect(stub.searchCalls.length).toBe(0);
+    expect(stub.searchCalls.length).toBeGreaterThan(0);
+    // Search NOU in fisierul lui bob, cu ownerul lui bob.
+    const bobRow = getRnpmDb("bob").prepare("SELECT owner_id FROM rnpm_searches WHERE id = ?").get(result.searchId) as
+      | { owner_id: string }
+      | undefined;
+    expect(bobRow?.owner_id).toBe("bob");
+    // Randul lui alice ramane neatins in fisierul ei.
+    const aliceRow = getRnpmDb("alice")
+      .prepare("SELECT owner_id, total_results FROM rnpm_searches WHERE id = ?")
+      .get(aliceSearchId) as { owner_id: string; total_results: number } | undefined;
+    expect(aliceRow).toEqual({ owner_id: "alice", total_results: 0 });
   });
 
   it("[I3] NU fail-fast la eroare transienta inainte de al 3-lea refuz silentios", async () => {
@@ -778,9 +799,46 @@ describe("invariants critice (audit §6.5)", () => {
       )
     ).rejects.toThrow(/Aborted/);
 
-    const row = getDb()
+    const row = getRnpmDb("test-owner")
       .prepare("SELECT total_results FROM rnpm_searches WHERE owner_id = ? ORDER BY id DESC LIMIT 1")
       .get("test-owner") as { total_results: number } | undefined;
     expect(row?.total_results).toBe(1);
+    // v2.43.0 (rnpm-split): bracketing-ul elibereaza ownerul si pe calea de eroare.
+    expect(hasActiveRnpmSearch("test-owner")).toBe(false);
+  });
+});
+
+// v2.43.0 (rnpm-split): bracketing-ul begin/end de activitate per owner —
+// restore-ul e refuzat cat timp o cautare e in zbor si invers.
+describe("bracketing activitate RNPM (v2.43.0)", () => {
+  it("ownerul e marcat activ pe TOATA durata cautarii si eliberat la final", async () => {
+    const seen: boolean[] = [];
+    const stub = new StubClient(({ tipIdx }) => {
+      seen.push(hasActiveRnpmSearch("test-owner"));
+      return singleDocResult(tipIdx ?? "?");
+    });
+    await executeSplitSearch(
+      { type: "ipoteci", ownerId: "test-owner", baseParams: {}, subTypeLabels: ["s1"], captchaKey: "stub-key" },
+      () => {
+        /* progress ignored */
+      },
+      stub
+    );
+    expect(seen.length).toBeGreaterThan(0);
+    expect(seen.every(Boolean)).toBe(true);
+    expect(hasActiveRnpmSearch("test-owner")).toBe(false);
+  });
+
+  it("executeSearch cu restore activ pe owner => refuz RESTORE_IN_PROGRESS, clientul nechemat", async () => {
+    const stub = new StubClient(() => singleDocResult("not-called"));
+    beginRnpmRestore("bob-restore");
+    try {
+      await expect(
+        executeSearch({ type: "ipoteci", params: {}, captchaKey: "stub-key", ownerId: "bob-restore" }, stub)
+      ).rejects.toMatchObject({ code: "RESTORE_IN_PROGRESS" });
+      expect(stub.searchCalls.length).toBe(0);
+    } finally {
+      endRnpmRestore("bob-restore");
+    }
   });
 });
