@@ -6,7 +6,63 @@ Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detal
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
 operational kill switches, riscuri ramase si directii deschise pentru urmatorul agent.
 
-## Sprint ACTIV: v2.43.0 — Split RNPM per user (branch `feat/v2.43.0-rnpm-split`)
+## Sprint ACTIV ACUM: fixuri post-review adversarial (acelasi branch `feat/v2.43.0-rnpm-split`)
+
+**Context:** dupa executia integrala a split-ului (sectiunea urmatoare), userul a cerut
+review adversarial dublu pe delta `aac59da..89986ff`: Codex GPT-5.6 Sol (verdict: NU e
+merge-ready — 0 CRITICAL, 5 HIGH, 6 MEDIUM, 2 LOW) + review-panel (Opus+Kimi). Findings-urile
+au fost consolidate intr-un plan de fixuri care a trecut EL INSUSI printr-un review de panel
+(4 modele) si a fost corectat la Rev. 2.
+
+**SURSA UNICA de executat:** `docs/superpowers/plans/2026-07-10-fixes-review-rnpm-split.md`
+(Rev. 2, comis in ea85f79). 8 task-uri TDD, 3 commit-uri consolidate: COMMIT A dupa Task 3,
+COMMIT B dupa Task 6, COMMIT C dupa Task 8. Planul contine si sectiunile "Findings RESPINSE
+cu dovezi" si "Acceptate ca limitari" — NU le redeschide.
+
+**STARE EXECUTIE: Task 1 in faza RED (2026-07-10).** Ce e facut:
+- Testele fault-injection scrise in `backend/src/db/rnpmBackup.test.ts` — MODIFICARE
+  NECOMISA in working tree (intentionat: nu se comit teste rosii). Starea red asteptata:
+  4 teste pica (auto-revert la failpoint `post_publish`, retry EPERM pe rename-ul de
+  publicare, staging orfan curatat, backup rnpm fara `_schema_versions` => 400); 2 teste
+  noi trec deja coincidental pe implementarea veche (esec staging => live intact, esec
+  rename => live valid) si trebuie sa RAMANA verzi; testul legacy-bundle a fost adaptat
+  (forjeaza `_schema_versions` cu sentinelul `__backfilled_v1__` — hash-check-ul
+  runner-ului respinge alte valori) si e verde.
+- URMATORUL PAS: Task 1.2 — rescrierea `restoreTargetImpl` pe secventa de STAGING
+  (pasii exacti in plan; failpoint-ul se expune ca `opts.onPhase` pe
+  `restoreRnpmFromBackup`/`restoreFromBackup`, pattern-ul splitter-ului; testul red
+  apeleaza deja `restoreRnpmFromBackup("u1", name, { onPhase })`).
+- NOTA la 1.1 vs plan: ordinea aleasa la executie e STAGING intai, apoi pre-restore
+  snapshot (mai putine efecte pe backup invalid); testul de staging-failure NU asserteaza
+  existenta snapshot-ului. Ambele raman inainte de orice mutare a live-ului.
+
+**Stare ABI better-sqlite3: NODE** (`npm rebuild better-sqlite3` rulat pentru vitest).
+OBLIGATORIU `npm run rebuild:electron` inainte de orice smoke Electron si la finalul
+sprintului (e pas explicit in Task 8.2).
+
+**Reguli sprint (mostenite + noi):** TDD strict (red inainte de implementare); gate-uri
+complete inainte de fiecare commit (biome pe fisierele atinse, tsc, build, suite);
+commit-uri DOAR cele 3 consolidate (A/B/C); `git add` doar pe fisiere enumerate; push
+DOAR la cererea userului; Codex (GPT-5.6 Sol) se foloseste ca ADVISOR la neclaritati sau
+decizii de design (goal-ul setat de user).
+
+**Capcane operationale Codex descoperite in sesiunea asta (respecta-le):**
+- Lansarea prin subagentul `codex:codex-rescue` poate pica mid-flight cu task-ul TOTUSI
+  pornit — inainte de relansare verifica `node .../codex-companion.mjs status --json`
+  (altfel dublezi task-ul).
+- `cancel` prin Git Bash mangleaza `taskkill /PID` (MSYS path conversion) — ruleaza cu
+  `MSYS_NO_PATHCONV=1 MSYS2_ARG_CONV_EXCL="*"`; un cancel cu `/T` pe runtime-ul partajat
+  a OMORAT silentios si un task legitim in curs (status ramane "running" stale — verifica
+  pid-ul din `status <id> --json` cu tasklist inainte sa crezi registry-ul).
+- Raportul Codex complet al review-ului: `node .../codex-companion.mjs result
+  task-mreltttf-13q85p`; sesiune Codex reluabila: `codex resume 019f4ae4-a4f0-7ac1-a1b0-6af770a65f5e`.
+
+**Alte note de mediu:** exista un `node dist-backend/index.cjs` ORFAN dintr-o sesiune
+veche (PID 16792, pornit 2026-07-06) — nu e al sesiunilor noastre; de oprit manual daca
+nu e intentionat. Fisierele de smoke ale sesiunii precedente sunt in scratchpad-ul ei
+(efemere, nu conteaza).
+
+## Sprint EXECUTAT: v2.43.0 — Split RNPM per user (branch `feat/v2.43.0-rnpm-split`)
 
 **Decizia (2026-07-10, dupa incidentul restore whole-DB de la testul live):** separare fizica
 DOAR pe modulul RNPM, per utilizator — fiecare user primeste fisierul lui SQLite
