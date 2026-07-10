@@ -1,18 +1,21 @@
-# RNPM Split Per User — Plan de Implementare (v2.43.0)
+# RNPM Split Per User — Plan de Implementare (v2.43.0) — Rev. 3
 
 > **Pentru agentul executant:** acest plan implementeaza spec-ul aprobat
 > `docs/superpowers/specs/2026-07-10-rnpm-split-per-user-design.md`. Citeste spec-ul INTAI.
 > Task-urile se executa IN ORDINE, cu checkbox-uri (`- [ ]`) pentru tracking. Fiecare task
 > se incheie cu gate-uri verzi + commit. NU sari peste pasii de test (TDD: red inainte de green).
+> Rev. 3 incorporeaza doua runde de review adversarial (review-panel multi-model + GPT-5.6 Sol);
+> vezi sectiunea finala "Istoric review" pentru ce s-a schimbat si de ce.
 
 **Goal:** separarea fizica a datelor RNPM per utilizator — fiecare user primeste fisierul lui
-SQLite `rnpm/<ownerId>.db` cu backup/restore self-service, iar baza unica (monolitul) pastreaza
-tot restul (users, auth, quota, monitoring, audit, fx_rates).
+SQLite cu backup/restore self-service, iar baza unica (monolitul) pastreaza tot restul
+(users, auth, quota, monitoring, audit, fx_rates).
 
 **Arhitectura:** un registry de handle-uri better-sqlite3 per owner cu provisioning lazy prin
-runner-ul de migrations existent; un splitter one-time la boot care muta datele RNPM din monolit
-in fisierele per-user pastrand ID-urile originale; backup.ts generalizat pe "targets" (monolit +
-N fisiere rnpm); rute self-service owner-scoped + router admin nou pentru monolit.
+runner-ul de migrations existent; un splitter one-time la boot (cu marker durabil de finalizare)
+care muta datele RNPM din monolit in fisierele per-user pastrand ID-urile originale; backup.ts
+generalizat pe "targets" cu snapshot-uri self-contained via `db.backup()`; rute self-service
+owner-scoped + router admin nou pentru monolit.
 
 **Tech stack:** Node 22, Hono, better-sqlite3 (sincron), Vitest, React 18 + Vite, esbuild (backend bundlat CJS).
 
@@ -23,17 +26,21 @@ N fisiere rnpm); rute self-service owner-scoped + router admin nou pentru monoli
 - SQL raw DOAR in `backend/src/db/**` (repository-only access).
 - Backend-ul e bundlat CJS de esbuild: `import.meta.url` nu functioneaza in CJS — foloseste pattern-ul existent `typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url))`.
 - Gate-uri INAINTE de fiecare commit (toate verzi, altfel nu comiti):
-  1. `npx biome check --write <fisierele atinse>` (re-stage ce reformateaza)
+  1. `npx biome check --write <DOAR fisierele atinse de task, enumerate explicit>` (re-stage ce reformateaza)
   2. `npx tsc --noEmit -p backend/tsconfig.json`
   3. `cd frontend && npx tsc --noEmit` (doar daca ai atins frontend)
-  4. `npm run test:backend` (sau suite tinta cu `npx vitest run <path> --root backend` in timpul TDD; suite completa inainte de commit)
-  5. `cd frontend && npm test -- --run` (doar daca ai atins frontend)
+  4. `npm run build` (obligatoriu la FIECARE task — bundle-ul CJS + copierea asset-urilor pot pica independent de tsc)
+  5. `npm run test:backend` (sau suite tinta cu `npx vitest run <path> --root backend` in timpul TDD; suita completa inainte de commit)
+  6. `cd frontend && npm test -- --run` (doar daca ai atins frontend)
+- `git add` DOAR pe fisierele enumerate in task (niciodata `git add -A` pe directoare); ruleaza `git status --short` si `git diff --stat --cached` inainte de commit si verifica sa nu fi prins fisiere straine.
 - Dupa teste Node care ating better-sqlite3, inainte de orice smoke Electron: `npm run rebuild:electron`.
 - Branch: `feat/v2.43.0-rnpm-split` (stacked pe `feat/v2.42.0-users-settings`). NU comite nimic pe `feat/v2.42.0-users-settings` si nimic pe `main`. NU face push fara cerere explicita a userului.
 - NU redenumi/reformata cod neatins de task (schimbari chirurgicale).
-- Numerele de linie din plan sunt ORIENTATIVE (pot fi decalate) — localizeaza intotdeauna dupa simbol/functie/continut, nu dupa numarul de linie.
-- `requireDesktopHeader` NU se scoate de pe NICIO ruta (corectie review-panel 2026-07-10): in desktop mode header-ul custom e apararea CSRF (forteaza preflight CORS pe request-urile cross-origin catre 127.0.0.1), iar in web mode middleware-ul e pass-through complet — self-service-ul web functioneaza cu el pastrat. Self-service = doar trecerea de la `requireRole("admin")` la `requireRole("admin", "user")` pe rutele owner-scoped.
-- `ownerId` e validat `^[A-Za-z0-9_-]{1,64}$` inainte de ORICE folosire intr-un path de fisier.
+- Numerele de linie din plan sunt ORIENTATIVE (pot fi decalate) — localizeaza intotdeauna dupa simbol/functie/continut.
+- `requireDesktopHeader` NU se scoate de pe NICIO ruta: in desktop mode header-ul custom e apararea CSRF (forteaza preflight CORS pe request-urile cross-origin catre 127.0.0.1), iar in web mode e pass-through complet. Self-service = doar trecerea de la `requireRole("admin")` la `requireRole("admin", "user")` pe rutele owner-scoped.
+- `ownerId` se valideaza `^[A-Za-z0-9_-]{1,64}$` inainte de ORICE folosire; numele de FISIER derivat din ownerId este `rnpmFileStem(ownerId)` (vezi Task 2) — NICIODATA ownerId-ul brut (coliziuni case-insensitive pe Windows/macOS + nume rezervate Windows).
+- Toate snapshot-urile de backup produse de cod NOU sunt self-contained via `db.backup()` (API-ul online al SQLite) — niciodata `copyFile` pe un DB cu WAL activ.
+- In teste, ORICE handle better-sqlite3 deschis se inchide in `finally`/teardown (Windows tine lock pe fisiere deschise si `rm -rf` pe tmpdir pica altfel).
 - Mesaje commit: prefix conventional (`feat:`, `fix:`, `test:`, `docs:`) + descriere in romana.
 
 ---
@@ -44,11 +51,12 @@ N fisiere rnpm); rute self-service owner-scoped + router admin nou pentru monoli
 - Create: `backend/src/db/migrations-rnpm/0001_rnpm_baseline.up.sql`
 - Create: `backend/src/db/migrations-rnpm/0001_rnpm_baseline.down.sql`
 - Modify: `scripts/build.js` (copierea directorului in dist-backend)
-- Test: `backend/src/db/rnpmDb.test.ts` (partial — testul de baseline; fisierul creste in Task 2)
+- Test: `backend/src/db/rnpmDb.test.ts` (partial — testele de baseline; fisierul creste in Task 2)
 
 **Interfaces:**
 - Produces: directorul `migrations-rnpm/` consumat de `runMigrations(db, MIGRATIONS_RNPM_DIR)` in Task 2.
 - Baseline-ul = forma FINALA consolidata a tabelelor rnpm din monolit: schema din `migrations/0001_baseline.up.sql` (doar tabelele rnpm) + coloanele `_norm` din `0022` incluse INLINE in CREATE TABLE + indexul din `0021` + trigger-ele din `0022` verbatim.
+- ATENTIE: testele existente ale chain-ului MONOLITIC (ex. testul migration `0021`, `downMigrations.test.ts`) NU se muta si NU se repointeaza — chain-ul monolitului ramane neatins si acoperit; baseline-ul rnpm primeste teste NOI, separate.
 
 - [ ] **Step 1.1: Scrie fisierul up**
 
@@ -364,8 +372,8 @@ DROP TABLE IF EXISTS rnpm_searches;
 
 - [ ] **Step 1.3: Adauga copierea in build**
 
-In `scripts/build.js`, imediat DUPA blocul existent care copiaza `migrations/` (liniile ~52-53:
-`mkdirSync(resolve(root, "dist-backend", "migrations"), ...)` + `cpSync(...)`), adauga:
+In `scripts/build.js`, imediat DUPA blocul existent care copiaza `migrations/` (cauta
+`dist-backend", "migrations"`), adauga:
 
 ```js
 mkdirSync(resolve(root, "dist-backend", "migrations-rnpm"), { recursive: true });
@@ -374,9 +382,11 @@ cpSync(resolve(root, "backend", "src", "db", "migrations-rnpm"), resolve(root, "
 });
 ```
 
-- [ ] **Step 1.4: Test failing — baseline-ul se aplica pe un DB fresh cu UDF inregistrat**
+- [ ] **Step 1.4: Teste — baseline aplicabil + ECHIVALENTA de schema cu monolitul**
 
-Creeaza `backend/src/db/rnpmDb.test.ts`:
+Creeaza `backend/src/db/rnpmDb.test.ts` cu DOUA teste (inchide toate handle-urile in `finally`):
+
+Test A — baseline-ul se aplica si trigger-ele populeaza `_norm` (identic cu testul clasic):
 
 ```ts
 import Database from "better-sqlite3";
@@ -390,902 +400,203 @@ import { stripDiacritics } from "../util/textNormalize.ts";
 
 const __testDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_RNPM_DIR = path.join(__testDir, "migrations-rnpm");
+const MIGRATIONS_MONO_DIR = path.join(__testDir, "migrations");
+
+function openWithNorm(p: string): Database.Database {
+  const db = new Database(p);
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.function("rnpm_norm", { deterministic: true }, (s) =>
+    s == null ? "" : stripDiacritics(String(s)).toLowerCase()
+  );
+  return db;
+}
 
 let tmpRoot: string;
-
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-rnpmdb-"));
 });
-
 afterEach(async () => {
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
 describe("migrations-rnpm baseline", () => {
   it("aplica baseline-ul pe un fisier fresh si trigger-ele populeaza _norm", () => {
-    const db = new Database(path.join(tmpRoot, "u1.db"));
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    db.function("rnpm_norm", { deterministic: true }, (s) =>
-      s == null ? "" : stripDiacritics(String(s)).toLowerCase()
-    );
-    const result = runMigrations(db, MIGRATIONS_RNPM_DIR);
-    expect(result.applied).toEqual([1]);
-    expect(result.backfilled).toBe(false);
+    const db = openWithNorm(path.join(tmpRoot, "u1.db"));
+    try {
+      const result = runMigrations(db, MIGRATIONS_RNPM_DIR);
+      expect(result.applied).toEqual([1]);
+      expect(result.backfilled).toBe(false);
+      db.prepare(
+        "INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results) VALUES ('u1','dupa_nume','{}',0)"
+      ).run();
+      db.prepare(
+        "INSERT INTO rnpm_avize (owner_id, uuid, identificator, search_type, tip, data) VALUES ('u1','uu','Ștefan-1','dupa_nume','aviz','2026-01-01')"
+      ).run();
+      const row = db.prepare("SELECT identificator_norm FROM rnpm_avize").get() as { identificator_norm: string };
+      expect(row.identificator_norm).toBe("stefan-1");
+    } finally {
+      db.close();
+    }
+  });
 
-    db.prepare(
-      "INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results) VALUES ('u1','dupa_nume','{}',0)"
-    ).run();
-    db.prepare(
-      "INSERT INTO rnpm_avize (owner_id, uuid, identificator, search_type, tip, data) VALUES ('u1','uu','Ștefan-1','dupa_nume','aviz','2026-01-01')"
-    ).run();
-    const row = db.prepare("SELECT identificator_norm FROM rnpm_avize").get() as { identificator_norm: string };
-    expect(row.identificator_norm).toBe("stefan-1");
-    db.close();
+  it("baseline-ul e ECHIVALENT structural cu tabelele rnpm dintr-un monolit fresh (anti-drift)", () => {
+    const mono = openWithNorm(path.join(tmpRoot, "mono.db"));
+    const user = openWithNorm(path.join(tmpRoot, "user.db"));
+    try {
+      runMigrations(mono, MIGRATIONS_MONO_DIR);
+      runMigrations(user, MIGRATIONS_RNPM_DIR);
+      const tables = ["rnpm_searches", "rnpm_avize", "rnpm_bunuri_descrieri", "rnpm_creditori", "rnpm_debitori", "rnpm_bunuri", "rnpm_istoric"];
+      for (const t of tables) {
+        const cols = (d: Database.Database) =>
+          d.prepare(`PRAGMA table_info(${t})`).all().map((c: any) => `${c.name}:${c.type}:${c.notnull}:${c.dflt_value}:${c.pk}`);
+        const idx = (d: Database.Database) =>
+          d.prepare(`SELECT name FROM sqlite_master WHERE type='index' AND tbl_name=? AND name NOT LIKE 'sqlite_%' ORDER BY name`).all(t).map((r: any) => r.name);
+        const fks = (d: Database.Database) => d.prepare(`PRAGMA foreign_key_list(${t})`).all();
+        const trg = (d: Database.Database) =>
+          d.prepare(`SELECT name FROM sqlite_master WHERE type='trigger' AND tbl_name=? ORDER BY name`).all(t).map((r: any) => r.name);
+        expect(cols(user), `coloane ${t}`).toEqual(cols(mono));
+        expect(idx(user), `indexuri ${t}`).toEqual(idx(mono));
+        expect(fks(user), `FK ${t}`).toEqual(fks(mono));
+        expect(trg(user), `triggere ${t}`).toEqual(trg(mono));
+      }
+      // Anti-drift invers: monolitul nu are tabele rnpm_* necunoscute listei de mai sus.
+      const monoRnpm = mono
+        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rnpm_%' ORDER BY name`)
+        .all()
+        .map((r: any) => r.name);
+      expect(monoRnpm.sort()).toEqual([...tables].sort());
+    } finally {
+      mono.close();
+      user.close();
+    }
   });
 });
 ```
 
-- [ ] **Step 1.5: Ruleaza testul — trebuie sa PICE**
+Testul B e apararea principala contra driftului: o migration viitoare care adauga o tabela/coloana
+rnpm in monolit fara pereche in baseline PICA aici.
 
-Run: `npx vitest run src/db/rnpmDb.test.ts --root backend`
-Pentru fisiere pur-SQL ordinea e: scrii SQL-ul (1.1-1.2), scrii testul (1.4), rulezi si astepti PASS.
-Daca vrei red-ul clasic: ruleaza testul inainte de a crea directorul `migrations-rnpm` (FAIL pe
-"directory missing"), apoi creeaza fisierele si confirma PASS.
+- [ ] **Step 1.5: Ruleaza testele** — `npx vitest run src/db/rnpmDb.test.ts --root backend`.
+Pentru fisiere pur-SQL: scrii SQL-ul, apoi testele, apoi PASS. Daca vrei red-ul clasic, ruleaza
+testul inainte de a crea directorul (FAIL pe "directory missing").
 
 - [ ] **Step 1.6: Gate-uri + commit**
 
 ```bash
 npx biome check --write backend/src/db/rnpmDb.test.ts scripts/build.js
 npx tsc --noEmit -p backend/tsconfig.json
+npm run build
 npx vitest run src/db/rnpmDb.test.ts --root backend
 git add backend/src/db/migrations-rnpm scripts/build.js backend/src/db/rnpmDb.test.ts
-git commit -m "feat(rnpm-split): baseline consolidat migrations-rnpm/0001 + copiere in build"
+git commit -m "feat(rnpm-split): baseline consolidat migrations-rnpm/0001 + test echivalenta schema + copiere in build"
 ```
 
 ---
 
-### Task 2: DB layer per user — `rnpmDb.ts`
+### Task 2: DB layer per user — `rnpmActivity.ts` + `rnpmDb.ts`
 
 **Files:**
+- Create: `backend/src/db/rnpmActivity.ts` (registry activitate + erori tipate — in DB layer, ca `rnpmDb` sa il poata consulta fara dependinta spre services)
 - Create: `backend/src/db/rnpmDb.ts`
-- Test: `backend/src/db/rnpmDb.test.ts` (extinde fisierul din Task 1)
+- Test: `backend/src/db/rnpmActivity.test.ts`, `backend/src/db/rnpmDb.test.ts` (extindere)
 
-**Interfaces (Produces — consumate de Task 3-7):**
-- `getRnpmDataDir(): string` — `<dirname(getDbPath())>/rnpm`
-- `getRnpmDbPath(ownerId: string): string`
-- `getRnpmDb(ownerId: string): Database.Database` — lazy open + provisioning
-- `closeRnpmDb(ownerId: string): void`, `closeAllRnpmDbs(): void`, `markRnpmShuttingDown(): void`, `__resetRnpmDbForTests(): void`
-- `checkpointRnpmWal(ownerId: string): void`
-- `compactRnpmDb(ownerId: string): { beforeBytes: number; afterBytes: number; durationMs: number }`
-- `registerRnpmNorm(db: Database.Database): void`
-- `assertValidOwnerId(ownerId: string): void`
-- `MIGRATIONS_RNPM_DIR: string`
-
-- [ ] **Step 2.1: Teste failing (extinde rnpmDb.test.ts)**
-
-Adauga in `backend/src/db/rnpmDb.test.ts` (importa acum din `./rnpmDb.ts`):
-
+**Interfaces (Produces — consumate de Task 3-8):**
 ```ts
-import {
-  __resetRnpmDbForTests,
-  assertValidOwnerId,
-  closeAllRnpmDbs,
-  compactRnpmDb,
-  getRnpmDb,
-  getRnpmDbPath,
-  markRnpmShuttingDown,
-} from "./rnpmDb.ts";
+// rnpmActivity.ts
+export class RnpmSearchActiveError extends Error { readonly code = "SEARCH_ACTIVE"; }
+export class RnpmRestoreInProgressError extends Error { readonly code = "RESTORE_IN_PROGRESS"; }
+export function beginRnpmSearch(ownerId: string): void;      // arunca RnpmRestoreInProgressError daca restore in curs
+export function endRnpmSearch(ownerId: string): void;        // tolerant la dublu-end (warn, nu throw)
+export function hasActiveRnpmSearch(ownerId: string): boolean;
+export function beginRnpmRestore(ownerId: string): void;     // arunca RnpmSearchActiveError daca exista search activ
+export function endRnpmRestore(ownerId: string): void;
+export function isRnpmRestoreInProgress(ownerId: string): boolean;
+export function __resetRnpmActivityForTests(): void;
+// rnpmDb.ts
+export const MIGRATIONS_RNPM_DIR: string;
+export function assertValidOwnerId(ownerId: string): void;               // ^[A-Za-z0-9_-]{1,64}$
+export function rnpmFileStem(ownerId: string): string;                   // nume de fisier collision-safe
+export function getRnpmDataDir(): string;                                // <dirname(getDbPath())>/rnpm
+export function getRnpmDbPath(ownerId: string): string;                  // <dataDir>/rnpm/<stem>.db
+export function getRnpmBackupJail(ownerId: string): string;              // <dataDir>/backups/rnpm/<stem>/
+export function registerRnpmNorm(db: Database.Database): void;
+export function getRnpmDb(ownerId: string): Database.Database;           // latch shutdown + latch restore + provisioning lazy
+export function openRnpmDbRaw(ownerId: string): Database.Database | null; // handle temporar readonly FARA provisioning (null daca fisierul lipseste); callerul inchide
+export function closeRnpmDb(ownerId: string): void;
+export function closeAllRnpmDbs(): void;
+export function markRnpmShuttingDown(): void;
+export function __resetRnpmDbForTests(): void;
+export function checkpointRnpmWal(ownerId: string): void;
+export function compactRnpmDb(ownerId: string): { beforeBytes: number; afterBytes: number; durationMs: number };
 ```
 
-si suite-ul (in acelasi fisier; seteaza `process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db")`
-in `beforeEach` si curata env + `__resetRnpmDbForTests()` in `afterEach`):
+**Decizii de design incorporate din review (Sol):**
+- **Numele de fisier NU e ownerId-ul brut.** ID-urile pot diferi doar prin majuscule, iar pe
+  filesystem-uri case-insensitive (Windows, macOS default) `A.db` si `a.db` sunt ACELASI fisier —
+  splitter-ul ar suprascrie datele unui owner cu ale altuia. In plus `CON`/`NUL`/`COM1` sunt nume
+  rezervate Windows. `rnpmFileStem(ownerId) = ownerId.toLowerCase() + "-" + sha256hex(ownerId).slice(0, 10)`
+  e injectiv indiferent de case-sensitivity (case-ul diferit schimba hash-ul) si sufixul face
+  imposibil un nume rezervat.
+- **Gardul de restore traieste in `getRnpmDb`**, nu doar in functiile de search: in timpul unui
+  restore, ORICE operatie repository a acelui owner (stats, list, delete, compact, export) primeste
+  `RnpmRestoreInProgressError` in loc sa redeschida lazy fisierul in mijlocul swap-ului.
+
+- [ ] **Step 2.1: Teste failing** — `rnpmActivity.test.ts`: begin/end simetric; `beginRnpmRestore`
+arunca `RnpmSearchActiveError` daca exista search activ; `beginRnpmSearch` arunca
+`RnpmRestoreInProgressError` daca restore activ; ownerii diferiti nu se blocheaza; dublu-begin +
+un end => inca activ; dublu-end => warn, nu throw. In `rnpmDb.test.ts` adauga:
 
 ```ts
 describe("getRnpmDb", () => {
-  it("provisioneaza lazy fisierul per owner cu baseline-ul aplicat", () => {
-    const db = getRnpmDb("u1");
-    const tables = db
-      .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'rnpm_%' ORDER BY name")
-      .all() as { name: string }[];
-    expect(tables.map((t) => t.name)).toEqual([
-      "rnpm_avize",
-      "rnpm_bunuri",
-      "rnpm_bunuri_descrieri",
-      "rnpm_creditori",
-      "rnpm_debitori",
-      "rnpm_istoric",
-      "rnpm_searches",
-    ]);
-    const version = db.prepare("SELECT MAX(version) AS v FROM _schema_versions").get() as { v: number };
-    expect(version.v).toBe(1);
+  it("provisioneaza lazy fisierul per owner cu baseline-ul aplicat", () => { /* tabelele rnpm_* + _schema_versions.max=1 */ });
+  it("NU backfill-uieste sentinel pe fisier fresh (capcana runner)", () => { /* sha256_up != "__backfilled_v1__" */ });
+  it("acelasi handle la apeluri repetate; handle diferit per owner", () => {});
+  it("rnpmFileStem e injectiv pe case-insensitive FS si evita nume rezervate", () => {
+    expect(rnpmFileStem("UserA")).not.toBe(rnpmFileStem("usera"));
+    expect(rnpmFileStem("UserA").toLowerCase()).toBe(rnpmFileStem("UserA")); // stem-ul e deja lowercase
+    expect(rnpmFileStem("CON").startsWith("con-")).toBe(true); // sufixul hash face numele portabil
   });
-
-  it("NU backfill-uieste sentinel pe fisier fresh (capcana runner.ts:126-148)", () => {
+  it("respinge ownerId invalid (traversal, lungime)", () => { /* "../evil", "a/b", "x".repeat(65) => throw */ });
+  it("refuza reopen dupa markRnpmShuttingDown", () => {});
+  it("refuza orice acces in timpul unui restore al ownerului (latch)", () => {
     getRnpmDb("u1");
-    const raw = new Database(getRnpmDbPath("u1"), { readonly: true });
-    const row = raw.prepare("SELECT sha256_up FROM _schema_versions WHERE version = 1").get() as {
-      sha256_up: string;
-    };
-    raw.close();
-    expect(row.sha256_up).not.toBe("__backfilled_v1__");
+    beginRnpmRestore("u1");
+    try {
+      closeRnpmDb("u1");
+      expect(() => getRnpmDb("u1")).toThrow(RnpmRestoreInProgressError);
+      expect(() => getRnpmDb("u2")).not.toThrow(); // alti owneri neafectati
+    } finally {
+      endRnpmRestore("u1");
+    }
+    expect(() => getRnpmDb("u1")).not.toThrow();
   });
-
-  it("returneaza acelasi handle la apeluri repetate si handle diferit per owner", () => {
-    const a1 = getRnpmDb("u1");
-    const a2 = getRnpmDb("u1");
-    const b = getRnpmDb("u2");
-    expect(a1).toBe(a2);
-    expect(a1).not.toBe(b);
+  it("esec la initializare => handle-ul e inchis, nu ramane orfan", () => {
+    // forteaza esec: creeaza <stem>.db ca DIRECTOR (open pica) sau injecteaza un
+    // MIGRATIONS_RNPM_DIR inexistent printr-un spy pe runner; asserteaza ca dupa
+    // throw se poate re-incerca curat (fara EBUSY pe Windows la rm tmpdir).
   });
-
-  it("respinge ownerId invalid pentru path (traversal, lungime)", () => {
-    expect(() => getRnpmDb("../evil")).toThrow();
-    expect(() => assertValidOwnerId("a/b")).toThrow();
-    expect(() => assertValidOwnerId("x".repeat(65))).toThrow();
-    expect(() => assertValidOwnerId("ok_user-1")).not.toThrow();
-  });
-
-  it("refuza reopen dupa markRnpmShuttingDown", () => {
-    getRnpmDb("u1");
-    markRnpmShuttingDown();
-    expect(() => getRnpmDb("u1")).toThrow(/shutdown/i);
-  });
-
-  it("compactRnpmDb ruleaza VACUUM pe fisierul ownerului si intoarce dimensiuni", () => {
-    getRnpmDb("u1");
-    const res = compactRnpmDb("u1");
-    expect(res.beforeBytes).toBeGreaterThan(0);
-    expect(res.durationMs).toBeGreaterThanOrEqual(0);
-  });
+  it("openRnpmDbRaw NU provisioneaza: null pe fisier lipsa, readonly pe fisier existent", () => {});
+  it("compactRnpmDb ruleaza VACUUM pe fisierul ownerului", () => {});
 });
 ```
 
-- [ ] **Step 2.2: Ruleaza testele — FAIL** (`rnpmDb.ts` nu exista)
-
-Run: `npx vitest run src/db/rnpmDb.test.ts --root backend` — Expected: FAIL (cannot resolve `./rnpmDb.ts`).
-
-- [ ] **Step 2.3: Implementeaza `backend/src/db/rnpmDb.ts`**
-
-```ts
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import Database from "better-sqlite3";
-import { getDbPath } from "./schema.ts";
-import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
-import { stripDiacritics } from "../util/textNormalize.ts";
-
-// Fisier SQLite separat per utilizator pentru modulul RNPM (v2.43.0, spec
-// 2026-07-10-rnpm-split-per-user-design.md). Monolitul (schema.ts) pastreaza
-// tot ce NU e RNPM; aici traieste registry-ul de handle-uri per owner.
-
-const __rnpmDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
-export const MIGRATIONS_RNPM_DIR = path.join(__rnpmDir, "migrations-rnpm");
-
-// Acelasi charset ca id-urile de useri; orice altceva e refuzat INAINTE sa
-// atinga un path de fisier (anti path-traversal, fail-closed). Cap de lungime
-// 64 ca un id corupt/foarte lung sa nu produca path-uri invalide pe Windows.
-const OWNER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
-
-const handles = new Map<string, Database.Database>();
-let shuttingDown = false;
-
-export function assertValidOwnerId(ownerId: string): void {
-  if (!OWNER_ID_RE.test(ownerId)) {
-    throw new Error(`ownerId invalid pentru operatii pe fisiere: ${JSON.stringify(ownerId)}`);
-  }
-}
-
-export function getRnpmDataDir(): string {
-  return path.join(path.dirname(getDbPath()), "rnpm");
-}
-
-export function getRnpmDbPath(ownerId: string): string {
-  assertValidOwnerId(ownerId);
-  return path.join(getRnpmDataDir(), `${ownerId}.db`);
-}
-
-// UDF-ul de normalizare (diacritice + lowercase) — identic cu cel din schema.ts.
-// Trigger-ele din migrations-rnpm/0001 il apeleaza, deci TREBUIE inregistrat pe
-// orice conexiune INAINTE de runMigrations sau de scrieri.
-export function registerRnpmNorm(db: Database.Database): void {
-  db.function("rnpm_norm", { deterministic: true }, (s) => (s == null ? "" : stripDiacritics(String(s)).toLowerCase()));
-}
-
-// Paritate cu hasPendingSchemaMigrations din schema.ts, dar pe chain-ul rnpm.
-// Fail-closed: orice eroare de probe => "ar putea avea pending" => backup.
-function hasPendingRnpmMigrations(dbPath: string): boolean {
-  try {
-    const probe = new Database(dbPath, { readonly: true, fileMustExist: true });
-    try {
-      const hasVersionsTable = probe
-        .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='_schema_versions'`)
-        .get();
-      const files = discoverMigrations(MIGRATIONS_RNPM_DIR);
-      if (!hasVersionsTable) return files.length > 0;
-      const stored = new Set<number>(
-        (probe.prepare("SELECT version FROM _schema_versions").all() as { version: number }[]).map((r) => r.version)
-      );
-      return files.some((f) => !stored.has(f.version));
-    } finally {
-      probe.close();
-    }
-  } catch {
-    return true;
-  }
-}
-
-// Snapshot pre-migration per fisier user, in jail-ul lui de backups
-// (backups/rnpm/<ownerId>/rnpm.pre-<label>-<stamp>.db). Best-effort, ca in schema.ts.
-// Corectie review-panel: intai checkpoint TRUNCATE pe o conexiune temporara, apoi
-// copiem DOAR .db — copierea raw a trio-ului .db/-wal/-shm e non-atomica si poate
-// produce un backup incoerent exact cand e nevoie de el.
-function preRnpmMigrationBackup(ownerId: string, src: string, label: string): void {
-  try {
-    try {
-      const tmp = new Database(src);
-      try {
-        tmp.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-      } finally {
-        tmp.close();
-      }
-    } catch (e) {
-      console.warn("[rnpmDb] pre-migration checkpoint failed (continuing):", e instanceof Error ? e.message : e);
-    }
-    const dir = path.join(path.dirname(getDbPath()), "backups", "rnpm", ownerId);
-    fs.mkdirSync(dir, { recursive: true });
-    const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
-    const dest = path.join(dir, `rnpm.pre-${label}-${stamp}.db`);
-    fs.copyFileSync(src, dest);
-    console.log(`[rnpmDb] pre-migration backup -> ${dest}`);
-  } catch (e) {
-    console.warn("[rnpmDb] pre-migration backup failed (continuing):", e instanceof Error ? e.message : e);
-  }
-}
-
-export function getRnpmDb(ownerId: string): Database.Database {
-  if (shuttingDown) {
-    throw new Error("RNPM DB closed; refusing to reopen during shutdown");
-  }
-  assertValidOwnerId(ownerId);
-  const existing = handles.get(ownerId);
-  if (existing) return existing;
-
-  const dbPath = getRnpmDbPath(ownerId);
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
-
-  if (fs.existsSync(dbPath) && hasPendingRnpmMigrations(dbPath)) {
-    preRnpmMigrationBackup(ownerId, dbPath, "schema-upgrade");
-  }
-
-  const db = new Database(dbPath);
-  db.pragma("journal_mode = WAL");
-  db.pragma("foreign_keys = ON");
-  db.pragma("synchronous = NORMAL");
-  db.pragma("busy_timeout = 5000");
-
-  // Paritate cu schema.ts: truncheaza WAL-ul umflat la deschidere.
-  try {
-    const walSize = fs.statSync(`${dbPath}-wal`).size;
-    if (walSize > 32 * 1024 * 1024) {
-      const t0 = Date.now();
-      db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-      console.log(`[rnpmDb] WAL ${ownerId} was ${(walSize / 1024 / 1024).toFixed(1)}MB; truncated in ${Date.now() - t0}ms`);
-    }
-  } catch {
-    /* -wal absent e ok */
-  }
-
-  // ORDINE CRITICA: UDF inainte de runMigrations (trigger-ele din 0001 il apeleaza)
-  // si runner-ul INAINTE de orice scriere (altfel detectia legacy din runner.ts
-  // ar backfill-ui sentinel pe un DB cu tabele rnpm dar fara _schema_versions).
-  registerRnpmNorm(db);
-  const result = runMigrations(db, MIGRATIONS_RNPM_DIR);
-  if (result.applied.length > 0) {
-    console.log(`[rnpmDb] ${ownerId}: applied migrations ${result.applied.join(", ")}`);
-  }
-
-  handles.set(ownerId, db);
-  return db;
-}
-
-export function closeRnpmDb(ownerId: string): void {
-  const db = handles.get(ownerId);
-  if (db) {
-    db.close();
-    handles.delete(ownerId);
-  }
-}
-
-export function closeAllRnpmDbs(): void {
-  for (const [ownerId, db] of handles) {
-    try {
-      db.close();
-    } catch (e) {
-      console.warn(`[rnpmDb] close ${ownerId} failed:`, e instanceof Error ? e.message : e);
-    }
-  }
-  handles.clear();
-}
-
-// Productie: gracefulShutdown il apeleaza inainte de markShuttingDown() pe monolit.
-export function markRnpmShuttingDown(): void {
-  shuttingDown = true;
-  closeAllRnpmDbs();
-}
-
-// Testele reseteaza latch-ul intre cazuri (paritate cu closeDb-ul monolitului).
-export function __resetRnpmDbForTests(): void {
-  shuttingDown = false;
-  closeAllRnpmDbs();
-}
-
-export function checkpointRnpmWal(ownerId: string): void {
-  getRnpmDb(ownerId).prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-}
-
-export function compactRnpmDb(ownerId: string): { beforeBytes: number; afterBytes: number; durationMs: number } {
-  const db = getRnpmDb(ownerId);
-  const dbPath = getRnpmDbPath(ownerId);
-  const sizeOf = (p: string): number => {
-    try {
-      return fs.statSync(p).size;
-    } catch {
-      return 0;
-    }
-  };
-  const before = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
-  const t0 = Date.now();
-  db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-  db.exec("VACUUM");
-  db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-  const durationMs = Date.now() - t0;
-  const after = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
-  return { beforeBytes: before, afterBytes: after, durationMs };
-}
-```
-
-- [ ] **Step 2.4: Ruleaza testele — PASS**
-
-Run: `npx vitest run src/db/rnpmDb.test.ts --root backend` — Expected: PASS (toate).
-
-- [ ] **Step 2.5: Gate-uri + commit**
-
-```bash
-npx biome check --write backend/src/db/rnpmDb.ts backend/src/db/rnpmDb.test.ts
-npx tsc --noEmit -p backend/tsconfig.json
-npm run test:backend
-git add backend/src/db/rnpmDb.ts backend/src/db/rnpmDb.test.ts
-git commit -m "feat(rnpm-split): rnpmDb.ts — registry handle-uri per owner + provisioning lazy prin runner"
-```
-
----
-
-### Task 3: Rutarea repositories pe fisierul per user + contractul de ownership
-
-**Files:**
-- Modify: `backend/src/db/avizRepository.ts` (11 call-sites `getDb()` la liniile ~155, 344, 354, 362, 429, 534, 547, 563, 586, 609, 708 + import + `checkpointWal`)
-- Modify: `backend/src/db/searchRepository.ts` (5 call-sites: ~28, 49, 70, 79, 98 + `getSearchOwnership`)
-- Modify: `backend/src/services/rnpmSearchService.ts` (blocul ownership, liniile ~109-128)
-- Test: `backend/src/db/repository-isolation.test.ts` (rescriere semantica) + suitele existente rnpm
-
-**Interfaces:**
-- Consumes: `getRnpmDb(ownerId)`, `checkpointRnpmWal(ownerId)` din Task 2.
-- Produces (contract NOU): `getSearchOwnership(id, ownerId): "owned" | "missing"` — starea `foreign` DISPARE
-  (id-urile devin namespace per fisier user; izolarea e fizica). `searchBelongsToOwner` ramane cu aceeasi
-  semnatura (`ownership === "owned"`).
-
-- [ ] **Step 3.1: Rescrie testele de izolare (red)**
-
-In `backend/src/db/repository-isolation.test.ts`: pastreaza setup-ul tmpdir + env, dar semantica noua:
-datele lui A se scriu prin `saveAvizFull({ ownerId: "userA", ... })` si ajung in `rnpm/userA.db`;
-ale lui B in `rnpm/userB.db`. Asertiile noi:
-1. `getAvize({ ownerId: "userA" })` vede DOAR datele lui A; idem B (ca inainte).
-2. NOU: fisierele exista separat pe disc (`fs.existsSync(getRnpmDbPath("userA"))` si `userB`), iar
-   `rnpm/userA.db` NU contine niciun rand cu `owner_id = 'userB'` (deschide raw readonly si verifica
-   `SELECT COUNT(*) FROM rnpm_avize WHERE owner_id != 'userA'` = 0).
-3. NOU: `getSearchOwnership(idInexistent, "userA")` intoarce `"missing"` (nu mai exista `"foreign"`).
-4. Sterge drill-urile "FK breach cross-owner in acelasi DB" (nu se mai pot construi — noteaza in
-   comentariul de header ca izolarea e acum fizica, prin fisier).
-Adapteaza si `afterEach` sa apeleze `__resetRnpmDbForTests()` din `./rnpmDb.ts`.
-Run: `npx vitest run src/db/repository-isolation.test.ts --root backend` — Expected: FAIL.
-
-- [ ] **Step 3.2: Ruteaza avizRepository.ts**
-
-- Inlocuieste importul liniei 1: `import { getDb, checkpointWal } from "./schema.ts";` cu
-  `import { checkpointRnpmWal, getRnpmDb } from "./rnpmDb.ts";`
-- La FIECARE din cele 11 call-sites, inlocuieste `const db = getDb();` cu `const db = getRnpmDb(ownerId);`
-  folosind ownerId-ul DEJA prezent in scope: `input.ownerId` (saveAvizFull L155), `ownerId` parametru
-  (getAvizById L344, getAvizByIdentificator L354, getAvize L429 via `opts.ownerId`, deleteAviz L534,
-  deleteAllAvize L547, deleteAvizeByIds L563, getAvizStats L586, getAvizeByIds L609,
-  filterRnpmSearchResults L708 via `opts.ownerId`), iar in `loadAvizChildren` (L362) foloseste
-  `aviz.owner_id` (row-ul e deja incarcat).
-- Inlocuieste cele 3 apeluri `checkpointWal()` (L541, L556, L574) cu `checkpointRnpmWal(ownerId)`.
-- `cleanupOrphanDescrieri(db)` ramane neschimbat (primeste handle-ul ca parametru; acum e handle-ul
-  per-user, deci GC-ul e sigur — descrierile nu mai sunt partajate intre useri). Actualizeaza
-  comentariul de deasupra lui (L517-519): dedup-ul e acum per-fisier-user, nu cross-user.
-- Atentie tip: `cleanupOrphanDescrieri(db: ReturnType<typeof getDb>)` — schimba in
-  `Database.Database` (importa `type Database from "better-sqlite3"`) ca sa nu mai depinda de schema.ts.
-
-- [ ] **Step 3.3: Ruteaza searchRepository.ts + noul contract ownership**
-
-- Inlocuieste importul `getDb` cu `getRnpmDb` si fiecare `const db = getDb();` cu
-  `const db = getRnpmDb(<ownerId din scope>);` (saveSearch: `input.ownerId`; getSearches: `opts.ownerId`;
-  updateSearchTotal/deleteSearch: parametrul `ownerId`).
-- Rescrie finalul fisierului (L84-104) astfel:
-
-```ts
-// v2.43.0 (rnpm-split): id-urile de search sunt namespace PER FISIER USER — un id
-// al altui owner nu mai e observabil (fisierul lui nici nu e deschis), deci starea
-// "foreign" a disparut din contract. Garda de tenant (audit 2026-04-29 #11) e acum
-// izolarea fizica insasi. "missing" ramane benign: searchId cache-uit in UI dupa
-// "Sterge baza" sau dupa un restore la un snapshot anterior.
-export type SearchOwnership = "owned" | "missing";
-
-export function getSearchOwnership(id: number, ownerId: string): SearchOwnership {
-  const db = getRnpmDb(ownerId);
-  const row = db.prepare("SELECT id FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1").get(id, ownerId) as
-    | { id: number }
-    | undefined;
-  return row ? "owned" : "missing";
-}
-
-export function searchBelongsToOwner(id: number, ownerId: string): boolean {
-  return getSearchOwnership(id, ownerId) === "owned";
-}
-```
-
-- [ ] **Step 3.4: Simplifica blocul ownership din rnpmSearchService.ts (liniile ~109-128)**
-
-Inlocuieste blocul existent (care are branch `foreign` cu `throw new RnpmError(..., 403)`) cu:
-
-```ts
-  // v2.43.0 (rnpm-split): id-urile sunt per fisier user, deci singura stare posibila
-  // in afara de "owned" e "missing" (ex. searchId cache-uit in UI dupa "Sterge baza"
-  // sau dupa un restore). Missing = tratam ca search nou, fara eroare vizibila.
-  let existingSearchId = input.existingSearchId ?? undefined;
-  let existingGcode = input.existingGcode ?? undefined;
-  let startRnpmPage = input.startRnpmPage;
-  if (existingSearchId != null && getSearchOwnership(existingSearchId, ownerId) === "missing") {
-    existingSearchId = undefined;
-    existingGcode = undefined;
-    startRnpmPage = undefined;
-  }
-```
-
-Descopera TOTI consumatorii dupa SIMBOL, nu doar dupa cuvantul "foreign":
-`grep -rn "getSearchOwnership\|searchBelongsToOwner\|SearchOwnership" backend/src frontend/src` plus
-`grep -rn "\"foreign\"\|'foreign'" backend/src`. Adapteaza fiecare consumator la noul contract
-(id inexistent => flux de search nou, NU 403), inclusiv testele care asteapta 403. Pentru fiecare
-entry point care ajunge in repos fara `ownerId` valid, verifica sa existe un test care asteapta
-eroarea de validare (mesaj "ownerId invalid"), distinct de respingerea de path traversal.
-
-- [ ] **Step 3.5: Ruleaza suitele atinse, apoi TOATA suita backend**
-
-Run: `npx vitest run src/db/repository-isolation.test.ts --root backend` — PASS.
-Run: `npm run test:backend` — apoi TRIAJEAZA esecurile inainte sa editezi ceva, in doua categorii:
-(a) teste care doar folosesc repos prin API-ul public (`saveAvizFull`, `getAvize`, ...) — de regula
-trec fara modificari sau cer doar `__resetRnpmDbForTests()` in teardown; (b) teste care deschid raw
-`new Database(dbPath)` sau citesc tabele rnpm prin `LEGAL_DASHBOARD_DB_PATH` — repointeaza-le pe
-`getRnpmDbPath(owner)`. Suite cunoscute ca afectate: `avizRepository.*.test.ts`, `avizPageSizeCap.test.ts`,
-`rnpm.contract.test.ts`, `rnpm.owner-isolation.test.ts`, `rnpm.filter.test.ts`, `rnpm.split-route.test.ts`,
-`rnpmGuards.test.ts`, `rnpmCaptchaQuota.test.ts`, `rnpmSearchService.split.test.ts`, `migrations/0021` test —
-dar lista NU e garantat completa: `grep -l "LEGAL_DASHBOARD_DB_PATH\|new Database(" backend/src/**/*.test.ts`
-si verifica fiecare hit care atinge tabele rnpm.
-REGULA: nu slabi asertiile; muta-le pe fisierul corect. Adauga `__resetRnpmDbForTests()` in teardown-uri.
-
-- [ ] **Step 3.6: Gate-uri + commit**
-
-```bash
-npx biome check --write backend/src
-npx tsc --noEmit -p backend/tsconfig.json
-npm run test:backend
-git add -A backend/src
-git commit -m "feat(rnpm-split): repositories RNPM rutate pe fisierul per user; ownership owned/missing"
-```
-
----
-
-### Task 4: Splitter one-time `rnpmSplitter.ts` + wiring la boot
-
-**Files:**
-- Create: `backend/src/db/rnpmSplitter.ts`
-- Modify: `backend/src/index.ts` (wiring dupa validarea auth, inainte de scheduler/serve)
-- Test: `backend/src/db/rnpmSplitter.test.ts`
-
-**Interfaces:**
-- Produces: `runRnpmSplitIfNeeded(): { split: boolean; owners: string[] }` — idempotent; apelat o data la boot.
-
-- [ ] **Step 4.1: Teste failing — `backend/src/db/rnpmSplitter.test.ts`**
-
-Setup per test: tmpdir + `LEGAL_DASHBOARD_DB_PATH`; seed-uieste monolitul prin `getDb()` (ruleaza
-migrations monolit) + INSERT-uri raw in tabelele rnpm din monolit pentru 2 owneri (`userA`, `userB`),
-inclusiv: 1 search/owner, 2 avize/owner (cu `search_id` legat), cate 1 creditor/debitor/istoric per aviz,
-2 bunuri care REFOLOSESC ACEEASI descriere (`rnpm_bunuri_descrieri` partajata intre A si B — cazul dedup).
-Fiecare INSERT de aviz trece prin conexiunea `getDb()` (are UDF + triggere) ca `_norm` sa fie populate.
-Cazuri:
-
-```ts
-it("muta datele fiecarui owner in fisierul lui, pastrand id-urile originale", ...)
-// - runRnpmSplitIfNeeded() => { split: true, owners: ["userA","userB"] }
-// - rnpm/userA.db contine EXACT randurile lui A (COUNT per tabela == COUNT-ul seed-uit),
-//   cu ACELEASI id-uri (SELECT id ... ORDER BY id identic cu snapshot-ul pre-split)
-// - descrierea partajata exista in AMBELE fisiere cu id-ul original
-// - monolitul are 0 randuri in toate tabelele rnpm_*
-
-it("este idempotent: al doilea apel nu face nimic", ...)
-// dupa primul split, runRnpmSplitIfNeeded() => { split: false, owners: [] }
-
-it("crash intre copiere si stergere: re-run reface fisierele din monolit", ...)
-// simuleaza: dupa split complet, restaureaza manual randurile in monolit (re-seed)
-// si sterge fisierul userA.db; re-run => userA.db refacut, monolit golit din nou
-
-it("owner cu id invalid pentru path => abort cu eroare clara, monolitul ramane intact", ...)
-// seed cu owner_id "a/b" => runRnpmSplitIfNeeded() arunca; COUNT-urile monolitului neschimbate
-
-it("scrie pre-split backup inainte de mutare", ...)
-// dupa split exista backups/legal-dashboard.pre-rnpm-split-*.db
-
-it("spatiu insuficient pe disc => abort INAINTE de orice mutare", ...)
-// assertDiskSpaceForSplit cu getFreeBytes injectat care intoarce putin => throw cu mesaj clar;
-// monolitul si folderul rnpm/ raman neatinse
-
-it("bresa FK in monolit => abort cu mesaj clar, fara fatalBoot loop mascat", ...)
-// seed cu PRAGMA foreign_keys=OFF un rand rnpm_bunuri cu aviz_id inexistent =>
-// runRnpmSplitIfNeeded() arunca cu mesaj care numeste tabela; monolitul intact
-```
-
-Run: `npx vitest run src/db/rnpmSplitter.test.ts --root backend` — FAIL.
-
-- [ ] **Step 4.2: Implementeaza `backend/src/db/rnpmSplitter.ts`**
-
-```ts
-import fs from "node:fs";
-import path from "node:path";
-import Database from "better-sqlite3";
-import { getDb, getDbPath, preMigrationBackup } from "./schema.ts";
-import {
-  assertValidOwnerId,
-  getRnpmDbPath,
-  registerRnpmNorm,
-  MIGRATIONS_RNPM_DIR,
-  closeRnpmDb,
-} from "./rnpmDb.ts";
-import { runMigrations } from "./migrations/runner.ts";
-
-// Splitter one-time (v2.43.0): muta datele RNPM din monolit in fisiere per owner.
-// Invariant de siguranta: monolitul ramane SURSA DE ADEVAR pana cand TOTI ownerii
-// au fisierele copiate si verificate; abia apoi randurile rnpm_* se sterg din monolit.
-// Crash oriunde inainte de stergere => re-run reface totul din monolit (idempotent).
-
-// Ordinea respecta dependintele FK la INSERT: searches inaintea avizelor
-// (rnpm_avize.search_id), avizele inaintea copiilor (aviz_id); descrierile se
-// copiaza separat INAINTE de rnpm_bunuri (descriere_id).
-const COPY_TABLES = [
-  "rnpm_searches",
-  "rnpm_avize",
-  "rnpm_creditori",
-  "rnpm_debitori",
-  "rnpm_bunuri",
-  "rnpm_istoric",
-] as const;
-
-function log(entry: Record<string, unknown>): void {
-  console.log(JSON.stringify({ action: "rnpm_split", ...entry, ts: new Date().toISOString() }));
-}
-
-// Preflight spatiu (cerut de spec): varful e ~3x volumul RNPM — monolit intact +
-// pre-split backup + fisierele noi coexista pana la DELETE+VACUUM. Estimam cu
-// dimensiunea totala a monolitului (majoranta pentru volumul RNPM). getFreeBytes
-// e injectabil pentru teste.
-export function assertDiskSpaceForSplit(
-  monoPath: string,
-  getFreeBytes: (dir: string) => number = (dir) => {
-    const s = fs.statfsSync(dir);
-    return Number(s.bavail) * Number(s.bsize);
-  }
-): void {
-  const monoSize = (() => {
-    try {
-      const main = fs.statSync(monoPath).size;
-      let wal = 0;
-      try {
-        wal = fs.statSync(`${monoPath}-wal`).size;
-      } catch {
-        /* absent e ok */
-      }
-      return main + wal;
-    } catch {
-      return 0;
-    }
-  })();
-  const free = getFreeBytes(path.dirname(monoPath));
-  if (free < 3 * monoSize) {
-    throw new Error(
-      `[rnpm_split] spatiu insuficient pe disc: liber ${(free / 1024 / 1024).toFixed(0)}MB, ` +
-        `necesar ~${((3 * monoSize) / 1024 / 1024).toFixed(0)}MB (3x volumul bazei). ` +
-        "Elibereaza spatiu si reporneste aplicatia; nu s-a mutat nimic."
-    );
-  }
-}
-
-// AV-urile de pe Windows tin scurt handle-uri pe fisiere nou-scrise; retry marunt
-// DOAR pe codurile tranzitorii. Sleep sincron — ruleaza la boot, inainte de listen.
-function renameWithRetry(from: string, to: string): void {
-  let lastErr: unknown;
-  for (let attempt = 1; attempt <= 5; attempt++) {
-    try {
-      fs.renameSync(from, to);
-      return;
-    } catch (e) {
-      lastErr = e;
-      const code = (e as NodeJS.ErrnoException)?.code;
-      if (code !== "EPERM" && code !== "EBUSY" && code !== "EACCES") throw e;
-      log({ stage: "rename_retry", attempt, code, from: path.basename(from) });
-      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 200);
-    }
-  }
-  throw lastErr;
-}
-
-export function runRnpmSplitIfNeeded(): { split: boolean; owners: string[] } {
-  // Concurenta: boot-ul detine deja instance lock-ul de fisier (acquireInstanceLock
-  // ruleaza inaintea acestui apel in index.ts), deci doua procese nu pot rula
-  // splitter-ul simultan pe acelasi director de date.
-  const mono = getDb();
-  // Probe pe TOATE tabelele rnpm — randuri orfane doar in tabele copil (bresa FK
-  // istorica) trebuie sa declanseze si ele split-ul, nu sa ramana in monolit.
-  const pending = (
-    mono
-      .prepare(
-        `SELECT (SELECT COUNT(*) FROM rnpm_searches) + (SELECT COUNT(*) FROM rnpm_avize)
-              + (SELECT COUNT(*) FROM rnpm_creditori) + (SELECT COUNT(*) FROM rnpm_debitori)
-              + (SELECT COUNT(*) FROM rnpm_bunuri) + (SELECT COUNT(*) FROM rnpm_istoric) AS n`
-      )
-      .get() as { n: number }
-  ).n;
-  if (pending === 0) return { split: false, owners: [] };
-
-  const owners = (
-    mono
-      .prepare(
-        `SELECT DISTINCT owner_id AS o FROM rnpm_searches
-         UNION SELECT DISTINCT owner_id FROM rnpm_avize ORDER BY 1`
-      )
-      .all() as { o: string }[]
-  ).map((r) => r.o);
-
-  // Fail-closed INAINTE de orice mutare: un owner nevalidabil ar produce un path
-  // nescriabil; abortam cu monolitul intact.
-  for (const owner of owners) assertValidOwnerId(owner);
-
-  // Fail-closed: brese FK in monolit (ex. aviz_id dangling dintr-o perioada cu
-  // foreign_keys=OFF) ar face INSERT...SELECT sa pice cu un mesaj criptic, in
-  // bucla de fatalBoot. Verificam explicit si abortam cu mesaj actionabil.
-  for (const table of COPY_TABLES) {
-    const violations = mono.pragma(`foreign_key_check(${table})`) as unknown[];
-    if (Array.isArray(violations) && violations.length > 0) {
-      throw new Error(
-        `[rnpm_split] monolitul are ${violations.length} brese FK in ${table}; ` +
-          "repara-le manual (vezi RUNBOOK, PRAGMA foreign_key_check) inainte de upgrade. Nu s-a mutat nimic."
-      );
-    }
-  }
-
-  assertDiskSpaceForSplit(getDbPath());
-
-  log({ stage: "start", owners: owners.length, rows: pending });
-  preMigrationBackup(getDbPath(), "rnpm-split");
-
-  const monoPath = getDbPath();
-  for (const owner of owners) {
-    // Handle-ul din registry (daca exista) tine fisierul FINAL deschis; il inchidem
-    // ca rename-ul de mai jos sa nu pice pe Windows.
-    closeRnpmDb(owner);
-    const finalPath = getRnpmDbPath(owner);
-    const tmpPath = `${finalPath}.split-tmp`;
-    fs.mkdirSync(path.dirname(finalPath), { recursive: true });
-    for (const p of [tmpPath, `${tmpPath}-wal`, `${tmpPath}-shm`]) {
-      try {
-        fs.unlinkSync(p);
-      } catch {
-        /* absent e ok */
-      }
-    }
-
-    const target = new Database(tmpPath);
-    try {
-      target.pragma("journal_mode = WAL");
-      target.pragma("foreign_keys = ON");
-      registerRnpmNorm(target);
-      // Runner-ul INAINTE de copiere — altfel detectia legacy (runner.ts) ar
-      // backfill-ui sentinel pe un DB cu tabele dar fara _schema_versions.
-      runMigrations(target, MIGRATIONS_RNPM_DIR);
-
-      // ATTACH monolitul READONLY prin URI. FAIL-CLOSED (corectie review-panel):
-      // fara fallback read-write — daca URI-ul nu e acceptat, abortam cu monolitul
-      // intact si mesaj actionabil, nu degradam silentios garantia read-only in
-      // singura fereastra in care monolitul e unica sursa de adevar.
-      try {
-        target.prepare("ATTACH DATABASE ? AS mono").run(`file:${monoPath.replace(/\\/g, "/")}?mode=ro`);
-      } catch (e) {
-        throw new Error(
-          `[rnpm_split] ATTACH readonly a esuat (${e instanceof Error ? e.message : String(e)}); ` +
-            "split-ul e abortat fail-closed, monolitul e intact. Verifica suportul URI al better-sqlite3."
-        );
-      }
-
-      // NOTA (asumat, review-panel): trigger-ele AFTER INSERT recalculeaza _norm
-      // peste valorile copiate — acelasi rezultat (UDF determinist), doar cost
-      // suplimentar one-time la split. sqlite_sequence ajunge la MAX(id) copiat;
-      // id-uri sterse istoric peste acel max pot fi teoretic reemise in fisierul
-      // nou — impact limitat la referinte vechi din loguri, acceptat.
-      const copyAll = target.transaction((ownerId: string) => {
-        target
-          .prepare(
-            `INSERT INTO rnpm_bunuri_descrieri (id, text, text_norm)
-             SELECT d.id, d.text, d.text_norm FROM mono.rnpm_bunuri_descrieri d
-             WHERE EXISTS (SELECT 1 FROM mono.rnpm_bunuri b WHERE b.descriere_id = d.id AND b.owner_id = ?)`
-          )
-          .run(ownerId);
-        for (const table of COPY_TABLES) {
-          // Lista explicita de coloane, identica in ambele scheme (baseline-ul rnpm
-          // consolideaza exact coloanele monolitului) — pastram id-urile originale.
-          const cols = (target.prepare(`PRAGMA table_info(${table})`).all() as { name: string }[])
-            .map((c) => c.name)
-            .join(", ");
-          target.prepare(`INSERT INTO ${table} (${cols}) SELECT ${cols} FROM mono.${table} WHERE owner_id = ?`).run(ownerId);
-        }
-      });
-      copyAll(owner);
-
-      // Verificare: COUNT per tabela, monolit vs fisier nou.
-      for (const table of [...COPY_TABLES, "rnpm_bunuri_descrieri"]) {
-        const where = table === "rnpm_bunuri_descrieri" ? "" : " WHERE owner_id = ?";
-        const src = (
-          table === "rnpm_bunuri_descrieri"
-            ? (target
-                .prepare(
-                  `SELECT COUNT(*) AS n FROM mono.rnpm_bunuri_descrieri d
-                   WHERE EXISTS (SELECT 1 FROM mono.rnpm_bunuri b WHERE b.descriere_id = d.id AND b.owner_id = ?)`
-                )
-                .get(owner) as { n: number })
-            : (target.prepare(`SELECT COUNT(*) AS n FROM mono.${table}${where}`).get(owner) as { n: number })
-        ).n;
-        const dst = (
-          table === "rnpm_bunuri_descrieri"
-            ? (target.prepare("SELECT COUNT(*) AS n FROM rnpm_bunuri_descrieri").get() as { n: number })
-            : (target.prepare(`SELECT COUNT(*) AS n FROM ${table}${where}`).get(owner) as { n: number })
-        ).n;
-        if (src !== dst) {
-          throw new Error(`[rnpm_split] count mismatch ${owner}/${table}: monolit=${src} fisier=${dst}`);
-        }
-      }
-      const integrity = target.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
-      if (integrity.length !== 1 || integrity[0]?.integrity_check !== "ok") {
-        throw new Error(`[rnpm_split] integrity_check failed pentru ${owner}`);
-      }
-      target.prepare("DETACH DATABASE mono").run();
-      target.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-    } finally {
-      target.close();
-    }
-
-    // Replace atomic: fisier final vechi (dintr-un run partial) e suprascris.
-    // renameSync pe Windows foloseste MOVEFILE_REPLACE_EXISTING (suprascrie);
-    // retry doar pe lock-uri tranzitorii de AV.
-    for (const suffix of ["-wal", "-shm"] as const) {
-      try {
-        fs.unlinkSync(finalPath + suffix);
-      } catch {
-        /* absent e ok */
-      }
-    }
-    renameWithRetry(tmpPath, finalPath);
-    log({ stage: "owner_done", owner });
-  }
-
-  // Toti ownerii verificati — abia acum golim monolitul. Explicit pe toate cele
-  // 7 tabele, copiii inaintea parintilor (nu ne bazam doar pe CASCADE, ca
-  // eventuale randuri orfane din brese FK istorice sa nu supravietuiasca).
-  const wipe = mono.transaction(() => {
-    mono.prepare("DELETE FROM rnpm_istoric").run();
-    mono.prepare("DELETE FROM rnpm_bunuri").run();
-    mono.prepare("DELETE FROM rnpm_debitori").run();
-    mono.prepare("DELETE FROM rnpm_creditori").run();
-    mono.prepare("DELETE FROM rnpm_avize").run();
-    mono.prepare("DELETE FROM rnpm_searches").run();
-    mono.prepare("DELETE FROM rnpm_bunuri_descrieri").run();
-  });
-  wipe();
-  // Compactarea e doar igiena de spatiu — split-ul e DEJA complet si consistent.
-  // Un esec aici (VACUUM cere ~2x spatiu temporar) NU trebuie sa dea fatalBoot.
-  try {
-    mono.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-    mono.exec("VACUUM");
-  } catch (e) {
-    log({ stage: "vacuum_failed", reason: e instanceof Error ? e.message : String(e) });
-  }
-  log({ stage: "done", owners: owners.length });
-  return { split: true, owners };
-}
-```
-
-- [ ] **Step 4.3: Wiring in `backend/src/index.ts`**
-
-Dupa blocul `validateAuthConfig()` (linia ~183-187) adauga:
-
-```ts
-try {
-  const splitResult = runRnpmSplitIfNeeded();
-  if (splitResult.split) {
-    console.log(`[boot] rnpm split complet: ${splitResult.owners.length} owneri`);
-  }
-} catch (e) {
-  fatalBoot("rnpm split failed", e);
-}
-```
-
-cu importul `import { runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";`. Fail-closed intentionat:
-daca split-ul pica, boot-ul se opreste cu monolitul INTACT si backup-ul pre-split pe disc.
-In `gracefulShutdown` (langa `markShuttingDown()`, linia ~905) adauga INAINTE:
-
-```ts
-  try {
-    markRnpmShuttingDown();
-  } catch (e) {
-    console.error("[shutdown] markRnpmShuttingDown failed:", e);
-  }
-```
-
-cu importul `import { markRnpmShuttingDown } from "./db/rnpmDb.ts";`.
-
-- [ ] **Step 4.4: Ruleaza testele — PASS**, apoi `npm run test:backend` integral.
-
-- [ ] **Step 4.5: Gate-uri + commit**
-
-```bash
-npx biome check --write backend/src/db/rnpmSplitter.ts backend/src/db/rnpmSplitter.test.ts backend/src/index.ts
-npx tsc --noEmit -p backend/tsconfig.json
-npm run test:backend
-git add backend/src/db/rnpmSplitter.ts backend/src/db/rnpmSplitter.test.ts backend/src/index.ts
-git commit -m "feat(rnpm-split): splitter one-time la boot — monolit -> fisiere per owner, fail-closed"
-```
-
----
-
-### Task 5: Registry de activitate + gardul race restore-vs-search
-
-**Files:**
-- Create: `backend/src/services/rnpmActivityRegistry.ts`
-- Modify: `backend/src/services/rnpmSearchService.ts` (bracket in executeSearch / executeBulkSearch / executeSplitSearch)
-- Test: `backend/src/services/rnpmActivityRegistry.test.ts`
-
-**Interfaces (Produces — consumate de Task 6/7):**
-```ts
-export function beginRnpmSearch(ownerId: string): void;   // arunca RnpmError(409) daca restore in curs
-export function endRnpmSearch(ownerId: string): void;
-export function hasActiveRnpmSearch(ownerId: string): boolean;
-export function beginRnpmRestore(ownerId: string): void;  // arunca Error cu .code="SEARCH_ACTIVE" daca exista search activ
-export function endRnpmRestore(ownerId: string): void;
-export function __resetRnpmActivityForTests(): void;
-```
-
-- [ ] **Step 5.1: Test failing** — `rnpmActivityRegistry.test.ts`: begin/end simetric (count 0 dupa end);
-`beginRnpmRestore` arunca daca `beginRnpmSearch` e activ; `beginRnpmSearch` arunca daca restore activ;
-ownerii diferiti nu se blocheaza reciproc; dublu `beginRnpmSearch` + un `endRnpmSearch` => inca activ.
-
-- [ ] **Step 5.2: Implementare**
+- [ ] **Step 2.2: Ruleaza — FAIL**, apoi **Step 2.3: Implementeaza `rnpmActivity.ts`:**
 
 ```ts
 // Gard in-proces (v2.43.0): restore-ul inlocuieste fisierul RNPM al ownerului, deci
-// nu are voie sa ruleze cat timp o cautare a ACELUIASI owner e in zbor (scrierile
-// post-swap ar pica pe FK, cu captcha platit degeaba) — si invers.
-// Ambele directii au clase de eroare cu cod MASINA (spec: SEARCH_ACTIVE /
-// RESTORE_IN_PROGRESS) ca rutele sa emita envelope cu code stabil, nu doar mesaj.
+// nu are voie sa ruleze cat timp o cautare a ACELUIASI owner e in zbor — si invers,
+// nicio operatie pe fisier nu are voie sa redeschida fisierul in timpul swap-ului
+// (getRnpmDb consulta isRnpmRestoreInProgress). Erori cu cod MASINA pentru envelope.
 const activeSearches = new Map<string, number>();
 const restoring = new Set<string>();
+
+export class RnpmSearchActiveError extends Error {
+  readonly code = "SEARCH_ACTIVE";
+  constructor() {
+    super("Exista o cautare RNPM in curs pentru acest cont; operatia e refuzata pana se termina");
+  }
+}
 
 export class RnpmRestoreInProgressError extends Error {
   readonly code = "RESTORE_IN_PROGRESS";
@@ -1295,15 +606,11 @@ export class RnpmRestoreInProgressError extends Error {
 }
 
 export function beginRnpmSearch(ownerId: string): void {
-  if (restoring.has(ownerId)) {
-    throw new RnpmRestoreInProgressError();
-  }
+  if (restoring.has(ownerId)) throw new RnpmRestoreInProgressError();
   activeSearches.set(ownerId, (activeSearches.get(ownerId) ?? 0) + 1);
 }
 
 export function endRnpmSearch(ownerId: string): void {
-  // Tolerant la dublu-end (bracket slip): nu aruncam din cleanup path — un
-  // count negativ e strict mai rau decat un warn.
   const n = (activeSearches.get(ownerId) ?? 0) - 1;
   if (n < 0) console.warn(`[rnpmActivity] endRnpmSearch fara begin pentru ${ownerId}`);
   if (n <= 0) activeSearches.delete(ownerId);
@@ -1312,13 +619,6 @@ export function endRnpmSearch(ownerId: string): void {
 
 export function hasActiveRnpmSearch(ownerId: string): boolean {
   return (activeSearches.get(ownerId) ?? 0) > 0;
-}
-
-export class RnpmSearchActiveError extends Error {
-  readonly code = "SEARCH_ACTIVE";
-  constructor() {
-    super("Exista o cautare RNPM in curs pentru acest cont; restore-ul e refuzat pana se termina");
-  }
 }
 
 export function beginRnpmRestore(ownerId: string): void {
@@ -1330,366 +630,646 @@ export function endRnpmRestore(ownerId: string): void {
   restoring.delete(ownerId);
 }
 
+export function isRnpmRestoreInProgress(ownerId: string): boolean {
+  return restoring.has(ownerId);
+}
+
 export function __resetRnpmActivityForTests(): void {
   activeSearches.clear();
   restoring.clear();
 }
 ```
 
-- [ ] **Step 5.3: Bracket in rnpmSearchService.ts** — in `executeSearch` (incepe L103), `executeBulkSearch`
-si `executeSplitSearch` (incepe L618): imediat dupa ce `ownerId` e disponibil, `beginRnpmSearch(ownerId)`
-si `try { ...corpul existent... } finally { endRnpmSearch(ownerId); }`. NU muta alta logica.
+- [ ] **Step 2.4: Implementeaza `rnpmDb.ts`** (punctele care difera de un simplu registry):
 
-- [ ] **Step 5.4: Teste PASS + suita integrala + commit**
+```ts
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import Database from "better-sqlite3";
+import { getDbPath } from "./schema.ts";
+import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
+import { stripDiacritics } from "../util/textNormalize.ts";
+import { isRnpmRestoreInProgress, RnpmRestoreInProgressError } from "./rnpmActivity.ts";
+
+const __rnpmDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
+export const MIGRATIONS_RNPM_DIR = path.join(__rnpmDir, "migrations-rnpm");
+
+const OWNER_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const handles = new Map<string, Database.Database>();
+let shuttingDown = false;
+
+export function assertValidOwnerId(ownerId: string): void {
+  if (!OWNER_ID_RE.test(ownerId)) {
+    throw new Error(`ownerId invalid pentru operatii pe fisiere: ${JSON.stringify(ownerId)}`);
+  }
+}
+
+// Nume de fisier collision-safe: lowercase + hash scurt al ID-ului EXACT.
+// Injectiv si pe filesystem-uri case-insensitive (Windows/macOS) si imun la
+// numele rezervate Windows (CON, NUL, COM1...) datorita sufixului.
+export function rnpmFileStem(ownerId: string): string {
+  assertValidOwnerId(ownerId);
+  const hash = createHash("sha256").update(ownerId, "utf8").digest("hex").slice(0, 10);
+  return `${ownerId.toLowerCase()}-${hash}`;
+}
+
+export function getRnpmDataDir(): string {
+  return path.join(path.dirname(getDbPath()), "rnpm");
+}
+
+export function getRnpmDbPath(ownerId: string): string {
+  return path.join(getRnpmDataDir(), `${rnpmFileStem(ownerId)}.db`);
+}
+
+export function getRnpmBackupJail(ownerId: string): string {
+  return path.join(path.dirname(getDbPath()), "backups", "rnpm", rnpmFileStem(ownerId));
+}
+
+export function registerRnpmNorm(db: Database.Database): void {
+  db.function("rnpm_norm", { deterministic: true }, (s) => (s == null ? "" : stripDiacritics(String(s)).toLowerCase()));
+}
+
+export function getRnpmDb(ownerId: string): Database.Database {
+  if (shuttingDown) throw new Error("RNPM DB closed; refusing to reopen during shutdown");
+  assertValidOwnerId(ownerId);
+  // Gardul de restore la NIVELUL DB layer-ului: acopera TOATE operatiile repository
+  // (nu doar search) — fara el, un GET /stats in timpul swap-ului ar redeschide lazy
+  // fisierul vechi (EBUSY pe Windows la rename; scrieri pierdute pe POSIX).
+  if (isRnpmRestoreInProgress(ownerId)) throw new RnpmRestoreInProgressError();
+  const existing = handles.get(ownerId);
+  if (existing) return existing;
+
+  const dbPath = getRnpmDbPath(ownerId);
+  fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+  // pre-migration backup per fisier cand exista migrations pending (paritate cu
+  // schema.ts, dar SELF-CONTAINED: temp connection readonly + db.backup(dest) in
+  // jail-ul ownerului, nume rnpm.pre-schema-upgrade-<stamp>.db) — vezi helperul
+  // preRnpmMigrationBackup de mai jos in fisier.
+
+  // Orice esec dupa open inchide handle-ul (altfel ramane lock nativ orfan pe
+  // Windows care blocheaza retry-ul/rename-ul urmator).
+  const db = new Database(dbPath);
+  try {
+    db.pragma("journal_mode = WAL");
+    db.pragma("foreign_keys = ON");
+    db.pragma("synchronous = NORMAL");
+    db.pragma("busy_timeout = 5000");
+    // WAL-truncate >32MB la deschidere (paritate schema.ts).
+    registerRnpmNorm(db);
+    const result = runMigrations(db, MIGRATIONS_RNPM_DIR);
+    if (result.applied.length > 0) console.log(`[rnpmDb] ${ownerId}: applied migrations ${result.applied.join(", ")}`);
+  } catch (e) {
+    try {
+      db.close();
+    } catch {
+      /* best-effort */
+    }
+    throw e;
+  }
+  handles.set(ownerId, db);
+  return db;
+}
+
+// Handle temporar FARA provisioning si FARA registry — pentru backup-ul fisierelor
+// userilor inactivi si pentru snapshot-ul pre-restore. Callerul inchide.
+export function openRnpmDbRaw(ownerId: string): Database.Database | null {
+  const dbPath = getRnpmDbPath(ownerId);
+  if (!fs.existsSync(dbPath)) return null;
+  return new Database(dbPath, { readonly: true, fileMustExist: true });
+}
+```
+
+`closeRnpmDb` / `closeAllRnpmDbs` / `markRnpmShuttingDown` / `__resetRnpmDbForTests` /
+`checkpointRnpmWal` / `compactRnpmDb` — ca in Rev. 2 (registry inchis complet la shutdown,
+compact per handle cu masurare before/after). `preRnpmMigrationBackup(ownerId, src, label)`:
+deschide temp `{ readonly: true, fileMustExist: true }`, `db.backup(dest)` in jail (self-contained,
+fara sidecars), close; best-effort cu warn (paritate cu schema.ts).
+
+- [ ] **Step 2.5: Toate testele PASS + gate-uri + commit**
 
 ```bash
-npx biome check --write backend/src/services
+npx biome check --write backend/src/db/rnpmActivity.ts backend/src/db/rnpmActivity.test.ts backend/src/db/rnpmDb.ts backend/src/db/rnpmDb.test.ts
 npx tsc --noEmit -p backend/tsconfig.json
+npm run build
 npm run test:backend
-git add backend/src/services
-git commit -m "feat(rnpm-split): registry activitate per owner + gard race restore-vs-search"
+git add backend/src/db/rnpmActivity.ts backend/src/db/rnpmActivity.test.ts backend/src/db/rnpmDb.ts backend/src/db/rnpmDb.test.ts
+git commit -m "feat(rnpm-split): rnpmDb + rnpmActivity — registry per owner, stem collision-safe, latch restore in DB layer"
 ```
+
+---
+
+### Task 3: Splitter one-time `rnpmSplitter.ts` (modul + teste, FARA wiring)
+
+**Files:**
+- Create: `backend/src/db/rnpmSplitter.ts`
+- Test: `backend/src/db/rnpmSplitter.test.ts`
+- NU se atinge `index.ts` in acest task — wiring-ul se face ATOMIC cu rutarea repositories in
+  Task 4 (altfel exista o fereastra de commit in care scrierile noi merg in fisiere per-user
+  iar splitter-ul ulterior le-ar suprascrie din monolit — finding Sol HIGH).
+
+**Interfaces:**
+- Produces: `runRnpmSplitIfNeeded(opts?: { onPhase?: (phase: string, detail?: unknown) => void }): { split: boolean; owners: string[] }` — idempotent, fail-closed; `onPhase` e failpoint-hook pentru testele de crash.
+- Marker durabil: `<dataDir>/rnpm/.split-done.json` — `{ status: "wiping" | "done", completedAt, owners, appVersion }`.
+
+**Protocol crash-safe (incorporeaza CRITICAL-urile Sol):**
+1. Daca marker `status="done"` exista SI monolitul are randuri rnpm => **ABORT boot** cu mesaj
+   actionabil: inseamna ca cineva a restaurat un backup de monolit pre-split; splitter-ul NU
+   suprascrie automat fisierele per-user mai noi. RUNBOOK descrie cele doua iesiri (re-split
+   fortat cu stergerea explicita a fisierelor per-user + marker, SAU golirea randurilor rnpm din
+   monolitul restaurat pentru a pastra fisierele per-user).
+2. Daca marker `status="wiping"` exista => faza de wipe a fost intrerupta DUPA verificarea
+   completa a tuturor ownerilor: reia DOAR wipe-ul (fisierele per-user sunt sursa de adevar).
+3. Fara marker + randuri rnpm prezente => split normal (crash inainte de marker = monolitul e
+   inca sursa de adevar; fisierele partiale se rescriu integral).
+4. Ordinea: preflights -> pre-split backup STRICT -> copiere+verificare per owner -> scrie marker
+   `wiping` (fsync pe fisier si pe director unde platforma permite) -> wipe monolit + verificare
+   zero randuri -> marker `done` -> VACUUM best-effort.
+
+- [ ] **Step 3.1: Teste failing** — seed monolit prin `getDb()` + INSERT-uri raw (2 owneri,
+descriere PARTAJATA intre ei, `_norm` populate via conexiunea cu UDF):
+
+```ts
+it("muta datele fiecarui owner in fisierul lui (stem collision-safe), pastrand id-urile", ...)
+// COUNT per tabela per owner identic; descrierea partajata exista in ambele fisiere cu id-ul
+// original; monolitul are 0 randuri in TOATE cele 7 tabele rnpm_*; marker status=done exista;
+// fisierele sunt <stem>.db, nu <ownerId>.db
+
+it("este idempotent: al doilea apel nu face nimic (marker done + monolit gol)", ...)
+
+it("crash INAINTE de marker (dupa owner 1 din 2): re-run reface totul din monolit", ...)
+// foloseste onPhase pentru a arunca dupa "owner_done" #1; asserteaza ca monolitul e INTACT;
+// re-run fara failpoint => ambii owneri coreecti, fisierul partial al lui owner1 suprascris curat
+
+it("crash IN TIMPUL wipe-ului (marker wiping): re-run reia DOAR wipe-ul, nu re-copiaza", ...)
+// onPhase arunca dupa "marker_wiping"; scrie apoi un rand nou in fisierul per-user al lui u1;
+// re-run => monolit golit, randul nou al lui u1 SUPRAVIETUIESTE (dovada ca nu s-a re-copiat)
+
+it("marker done + randuri rnpm reaparute in monolit (restore de monolit vechi) => ABORT boot", ...)
+// re-seed monolit dupa split complet => runRnpmSplitIfNeeded() ARUNCA cu mesaj care pomeneste
+// RUNBOOK; fisierele per-user raman neatinse
+
+it("owner cu id invalid => abort inainte de orice mutare, monolit intact", ...)
+it("spatiu insuficient (getFreeBytes injectat) => abort inainte de orice mutare", ...)
+it("bresa FK in monolit => abort cu mesaj care numeste tabela", ...)
+it("copil cu owner_id diferit de parinte => abort (consistenta owner parinte-copil)", ...)
+// seed rnpm_creditori cu owner_id='B' pe un aviz al lui 'A' => throw, monolit intact
+it("backup-ul pre-split esueaza (disc plin simulat pe calea de backup) => abort, monolit intact", ...)
+it("ATTACH readonly refuza scrierile spre mono.*", ...)
+// dupa ATTACH, un INSERT INTO mono.rnpm_searches trebuie sa arunce (test pe Windows real)
+it("dupa split, un INSERT fara id explicit primeste id peste maximul istoric", ...)
+// verifica preluarea sqlite_sequence (high-water), nu doar MAX(id) copiat
+```
+
+- [ ] **Step 3.2: Implementeaza `rnpmSplitter.ts`** — schelet cu punctele critice:
+
+```ts
+import { createHash } from "node:crypto";
+import fs from "node:fs";
+import path from "node:path";
+import Database from "better-sqlite3";
+import { getDb, getDbPath } from "./schema.ts";
+import {
+  assertValidOwnerId,
+  getRnpmDataDir,
+  getRnpmDbPath,
+  registerRnpmNorm,
+  MIGRATIONS_RNPM_DIR,
+  closeRnpmDb,
+} from "./rnpmDb.ts";
+import { runMigrations } from "./migrations/runner.ts";
+
+// Ordinea respecta dependintele FK la INSERT; descrierile se copiaza separat
+// INAINTE de rnpm_bunuri (descriere_id).
+const COPY_TABLES = ["rnpm_searches", "rnpm_avize", "rnpm_creditori", "rnpm_debitori", "rnpm_bunuri", "rnpm_istoric"] as const;
+const ALL_RNPM_TABLES = [...COPY_TABLES, "rnpm_bunuri_descrieri"] as const;
+const CHILD_TABLES = ["rnpm_creditori", "rnpm_debitori", "rnpm_bunuri", "rnpm_istoric"] as const;
+
+function markerPath(): string {
+  return path.join(getRnpmDataDir(), ".split-done.json");
+}
+
+// unlink care inghite DOAR ENOENT — EBUSY/EPERM/EACCES opresc split-ul inainte
+// de open/rename (un tmp sau WAL vechi reutilizat = corupere) (finding Sol CRITICAL).
+function unlinkStrict(p: string): void {
+  try {
+    fs.unlinkSync(p);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
+  }
+}
+
+export function assertDiskSpaceForSplit(monoPath: string, getFreeBytes?: (dir: string) => number): void {
+  // ca in Rev. 2 (statfsSync, prag 3x main+wal, mesaj actionabil, injectabil pentru teste)
+}
+
+function renameWithRetry(from: string, to: string): void {
+  // ca in Rev. 2 (5 incercari, doar EPERM/EBUSY/EACCES, sleep sincron 200ms, log per incercare)
+}
+
+// Pre-split backup STRICT (fail-closed) — spre deosebire de preMigrationBackup
+// (best-effort), aici backup-ul E rollback-ul promis: db.backup() self-contained,
+// verificare existenta + size > 0 + PRAGMA integrity_check pe copie; ORICE esec
+// opreste split-ul inainte de prima mutare (finding Sol HIGH).
+function preSplitBackupStrict(mono: Database.Database): string {
+  const dir = path.join(path.dirname(getDbPath()), "backups");
+  fs.mkdirSync(dir, { recursive: true });
+  const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const dest = path.join(dir, `legal-dashboard.pre-rnpm-split-${stamp}.db`);
+  // better-sqlite3 db.backup e async (Promise) — foloseste varianta sincrona prin
+  // VACUUM INTO (self-contained, atomic la nivel de fisier):
+  mono.prepare("VACUUM INTO ?").run(dest);
+  const size = fs.statSync(dest).size;
+  if (size <= 0) throw new Error("[rnpm_split] backup pre-split gol");
+  const probe = new Database(dest, { readonly: true, fileMustExist: true });
+  try {
+    const rows = probe.prepare("PRAGMA integrity_check").all() as { integrity_check: string }[];
+    if (rows.length !== 1 || rows[0]?.integrity_check !== "ok") {
+      throw new Error("[rnpm_split] backup pre-split corupt (integrity_check)");
+    }
+  } finally {
+    probe.close();
+  }
+  return dest;
+}
+```
+
+`runRnpmSplitIfNeeded(opts)` implementeaza protocolul crash-safe:
+
+```ts
+export function runRnpmSplitIfNeeded(opts?: { onPhase?: (phase: string, detail?: unknown) => void }): {
+  split: boolean;
+  owners: string[];
+} {
+  const onPhase = opts?.onPhase ?? (() => {});
+  const mono = getDb();
+  const pending = /* SUM COUNT peste TOATE cele 7 tabele ALL_RNPM_TABLES */;
+  const marker = readMarker(); // null | { status, ... }
+
+  if (marker?.status === "done") {
+    if (pending === 0) return { split: false, owners: [] };
+    // Monolit restaurat dintr-un backup pre-split — NU suprascrie fisierele per-user.
+    throw new Error(
+      "[rnpm_split] split-ul a fost deja finalizat, dar monolitul contine din nou randuri RNPM " +
+        "(probabil un restore de backup vechi al bazei). Boot abortat fail-closed. " +
+        "Vezi RUNBOOK 'Monolit restaurat dupa split' pentru cele doua cai de remediere."
+    );
+  }
+  if (marker?.status === "wiping") {
+    // Toti ownerii au fost deja copiati si verificati; reia DOAR wipe-ul.
+    wipeMonolithRnpm(mono);
+    writeMarker({ status: "done", ... });
+    return { split: true, owners: marker.owners };
+  }
+  if (pending === 0) {
+    writeMarker({ status: "done", owners: [], ... }); // instalare fresh: marcheaza direct
+    return { split: false, owners: [] };
+  }
+
+  // PREFLIGHTS (toate fail-closed, monolit intact):
+  // 1. owners din searches UNION avize; assertValidOwnerId pe fiecare.
+  // 2. PRAGMA foreign_key_check per tabela rnpm (mesaj cu tabela la violari).
+  // 3. Consistenta owner parinte-copil (finding Sol HIGH) — pentru fiecare tabela copil:
+  //    SELECT COUNT(*) FROM <copil> c JOIN rnpm_avize a ON c.aviz_id = a.id WHERE c.owner_id != a.owner_id
+  //    si pentru avize vs searches:
+  //    SELECT COUNT(*) FROM rnpm_avize a JOIN rnpm_searches s ON a.search_id = s.id WHERE a.owner_id != s.owner_id
+  //    Orice count > 0 => abort cu tabela numita.
+  // 4. assertDiskSpaceForSplit(getDbPath()).
+  onPhase("preflight_ok");
+
+  preSplitBackupStrict(mono);
+  onPhase("backup_ok");
+
+  for (const owner of owners) {
+    closeRnpmDb(owner);
+    const finalPath = getRnpmDbPath(owner);
+    const tmpPath = `${finalPath}.split-tmp`;
+    fs.mkdirSync(path.dirname(finalPath), { recursive: true });
+    for (const p of [tmpPath, `${tmpPath}-wal`, `${tmpPath}-shm`]) unlinkStrict(p);
+
+    const target = new Database(tmpPath);
+    try {
+      // pragmas + registerRnpmNorm + runMigrations(target, MIGRATIONS_RNPM_DIR) — ORDINEA
+      // runner-inainte-de-date e obligatorie (capcana sentinel din runner).
+      // ATTACH READONLY prin URI PERCENT-ENCODAT (path-ul real contine spatii!):
+      //   const monoUri = `file:${encodeURI(getDbPath().replace(/\\/g, "/"))}?mode=ro`;
+      //   target.prepare("ATTACH DATABASE ? AS mono").run(monoUri);
+      // FAIL-CLOSED: fara fallback read-write; la esec => throw cu mesaj actionabil.
+      // Copiere: descrieri subset (WHERE EXISTS pe mono.rnpm_bunuri al ownerului, cu id-urile
+      // originale) apoi COPY_TABLES in ordine, coloane enumerate din PRAGMA table_info,
+      // WHERE owner_id = ?. Trigger-ele _norm recalculeaza aceleasi valori (UDF determinist).
+      // sqlite_sequence: dupa copiere, pentru fiecare tabela preia high-water mark-ul sursei:
+      //   INSERT INTO sqlite_sequence(name, seq) SELECT name, seq FROM mono.sqlite_sequence WHERE name = ?
+      //     ON CONFLICT(name) DO UPDATE SET seq = MAX(seq, excluded.seq)
+      // (id-urile sterse istoric peste MAX(id) nu se reemit — finding Sol MEDIUM).
+      // Verificare: COUNT per tabela (mono WHERE owner vs target) + subsetul descrierilor +
+      // PRAGMA integrity_check; DETACH; wal_checkpoint(TRUNCATE).
+    } finally {
+      target.close();
+    }
+    for (const suffix of ["-wal", "-shm"] as const) unlinkStrict(finalPath + suffix);
+    renameWithRetry(tmpPath, finalPath);
+    // Post-publish probe: redeschide finalPath readonly + integrity_check rapid
+    // (rename reusit logic != fisier citibil; verificam inainte sa declaram owner_done).
+    onPhase("owner_done", owner);
+  }
+
+  writeMarker({ status: "wiping", owners, ... }); // + fsync fisier si director (best-effort pe Windows)
+  onPhase("marker_wiping");
+  wipeMonolithRnpm(mono); // DELETE explicit pe toate 7 tabelele, copii->parinti->descrieri,
+                          // apoi VERIFICA zero randuri in fiecare (throw daca nu)
+  writeMarker({ status: "done", owners, ... });
+  onPhase("marker_done");
+  try {
+    mono.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    mono.exec("VACUUM");
+  } catch (e) {
+    log({ stage: "vacuum_failed", reason: e instanceof Error ? e.message : String(e) });
+  }
+  return { split: true, owners };
+}
+```
+
+NOTA `db.backup()` vs `VACUUM INTO`: better-sqlite3 `db.backup()` e asincron (Promise). In tot
+acest plan, "snapshot self-contained" se implementeaza SINCRON cu `VACUUM INTO ?` (atomic,
+include tot ce e comis, nu depinde de WAL) — foloseste-l consecvent si in Task 6.
+
+- [ ] **Step 3.3: Toate testele PASS + gate-uri + commit**
+
+```bash
+npx biome check --write backend/src/db/rnpmSplitter.ts backend/src/db/rnpmSplitter.test.ts
+npx tsc --noEmit -p backend/tsconfig.json
+npm run build
+npm run test:backend
+git add backend/src/db/rnpmSplitter.ts backend/src/db/rnpmSplitter.test.ts
+git commit -m "feat(rnpm-split): splitter one-time cu marker durabil, preflights fail-closed si failpoints de test (nemontat)"
+```
+
+---
+
+### Task 4: CUTOVER atomic — rutare repositories + wiring splitter la boot (UN SINGUR commit)
+
+**Files:**
+- Modify: `backend/src/db/avizRepository.ts` (11 call-sites `getDb()` + import + `checkpointWal`)
+- Modify: `backend/src/db/searchRepository.ts` (5 call-sites + `getSearchOwnership`)
+- Modify: `backend/src/services/rnpmSearchService.ts` (blocul ownership)
+- Modify: `backend/src/index.ts` (wiring splitter + shutdown)
+- Test: `backend/src/db/repository-isolation.test.ts` (rescriere semantica) + suitele rnpm afectate
+
+**De ce atomic:** dupa acest commit, boot-ul MUTA datele in fisiere per-user si repos citesc DE
+ACOLO. Orice ordine alternativa lasa un commit intermediar in care aplicatia scrie intr-un layout
+si citeste din altul (finding Sol HIGH).
+
+- [ ] **Step 4.1: Teste de izolare rescrise (red)** — ca in Rev. 2: doua fisiere separate pe disc
+(cu `rnpmFileStem`!), fisierul lui A nu contine randuri ale lui B, `getSearchOwnership` fara starea
+`foreign`, teardown cu `__resetRnpmDbForTests()`.
+
+- [ ] **Step 4.2: Rutare `avizRepository.ts`** — importul devine
+`import { checkpointRnpmWal, getRnpmDb } from "./rnpmDb.ts";`; cele 11 call-sites
+(`saveAvizFull`~155 via `input.ownerId`; `getAvizById`~344, `getAvizByIdentificator`~354,
+`getAvize`~429, `deleteAviz`~534, `deleteAllAvize`~547, `deleteAvizeByIds`~563, `getAvizStats`~586,
+`getAvizeByIds`~609, `filterRnpmSearchResults`~708 via parametrul/`opts.ownerId`;
+`loadAvizChildren`~362 via `aviz.owner_id`); `checkpointWal()` -> `checkpointRnpmWal(ownerId)` (3 apeluri);
+`cleanupOrphanDescrieri(db: Database.Database)` (tip din better-sqlite3, nu `ReturnType<typeof getDb>`).
+
+- [ ] **Step 4.3: Rutare `searchRepository.ts` + contract ownership** — ca in Rev. 2:
+`getSearchOwnership` devine owned/missing cu query owner-scoped pe `getRnpmDb(ownerId)`;
+descoperirea consumatorilor DUPA SIMBOL (`grep -rn "getSearchOwnership\|searchBelongsToOwner\|SearchOwnership" backend/src frontend/src`
+plus `grep -rn "\"foreign\"\|'foreign'" backend/src`); blocul din `rnpmSearchService.ts` (~109-128)
+pastreaza doar branch-ul missing (drop existingSearchId/gcode/startRnpmPage).
+LIMITARE DOCUMENTATA (accepta, nu "repara"): dupa un restore, un searchId cache-uit in alt tab
+poate coincide cu un id realocat propriu — UI-ul reseteaza starea la restore (onRestored ->
+onAfterDeleteAll), iar restore-ul refuza cautari active; nota in spec, fara fingerprint in v1.
+
+- [ ] **Step 4.4: Wiring in `index.ts`** — DUPA TOATE validarile fatale de configuratie
+(`acquireInstanceLock`, `validateAuthConfig` si orice alt gate `fatalBoot` de configuratie
+existent — cauta toate apelurile `fatalBoot(` si plaseaza-l dupa ULTIMUL gate de config, inainte
+de prewarm/scheduler/serve):
+
+```ts
+try {
+  const splitResult = runRnpmSplitIfNeeded();
+  if (splitResult.split) console.log(`[boot] rnpm split complet: ${splitResult.owners.length} owneri`);
+} catch (e) {
+  fatalBoot("rnpm split failed", e);
+}
+```
+
+In `gracefulShutdown`, INAINTE de `markShuttingDown()`: `markRnpmShuttingDown()` in try/catch.
+
+- [ ] **Step 4.5: Triaj + reparare suite** — ca in Rev. 2 (doua categorii: API-public vs
+raw-`new Database(dbPath)`), cu completarile: testele chain-ului monolitic (0021, downMigrations)
+NU se repointeaza; lista suitelor din Rev. 2 nu e garantat completa —
+`grep -l "LEGAL_DASHBOARD_DB_PATH\|new Database(" backend/src/**/*.test.ts` si verifica fiecare
+hit care atinge tabele rnpm. Nu slabi asertii.
+
+- [ ] **Step 4.6: Gate-uri + commit** (enumera fisierele exact, fara `git add -A`):
+
+```bash
+npx biome check --write backend/src/db/avizRepository.ts backend/src/db/searchRepository.ts backend/src/services/rnpmSearchService.ts backend/src/index.ts backend/src/db/repository-isolation.test.ts <suitele adaptate, enumerate>
+npx tsc --noEmit -p backend/tsconfig.json
+npm run build
+npm run test:backend
+git add <aceleasi fisiere enumerate>
+git commit -m "feat(rnpm-split): CUTOVER — repositories pe fisiere per user + splitter montat la boot"
+```
+
+---
+
+### Task 5: Bracketing activitate in service + garduri pre-SSE in rute
+
+**Files:**
+- Modify: `backend/src/services/rnpmSearchService.ts` (bracket begin/end in executeSearch / executeBulkSearch / executeSplitSearch)
+- Modify: `backend/src/routes/rnpm.ts` (gard pre-SSE) + `backend/src/index.ts` (mapare centrala erori)
+- Test: extinde `backend/src/db/rnpmActivity.test.ts` + teste route-level noi in `backend/src/routes/rnpm.split-route.test.ts`
+
+- [ ] **Step 5.1:** In cele 3 functii de search: imediat dupa ce `ownerId` e disponibil,
+`beginRnpmSearch(ownerId)` + `try { ... } finally { endRnpmSearch(ownerId); }`.
+- [ ] **Step 5.2 (finding Sol):** Gardul trebuie sa loveasca INAINTE de a porni stream-ul SSE —
+un throw dupa `streamSSE` a inceput inseamna 200 deja trimis si eroare in mijlocul stream-ului.
+In rutele `/search`, `/bulk`, `/search-split` din `rnpm.ts`, PRIMUL lucru dupa parsarea
+body-ului: `if (isRnpmRestoreInProgress(getOwnerId(c))) return c.json(fail("RESTORE_IN_PROGRESS", ..., c), 409);`.
+- [ ] **Step 5.3:** Mapare centrala: in error-handler-ul global din `index.ts` (sau `app.onError`
+existent), mapeaza `RnpmRestoreInProgressError` si `RnpmSearchActiveError` (dupa proprietatea
+`code`) la envelope 409 — plasa de siguranta pentru orice cale care arunca din repository layer
+(inclusiv `getRnpmDb` latch).
+- [ ] **Step 5.4:** Teste route-level: cele 3 endpoint-uri raspund 409 `RESTORE_IN_PROGRESS`
+(envelope complet, nu 500) cand restore-ul ownerului e activ; un GET (`/stats`) in timpul
+restore-ului raspunde tot 409 prin maparea centrala. Gate-uri (lista explicita de fisiere) + commit
+`feat(rnpm-split): bracketing activitate + garduri pre-SSE + mapare centrala 409`.
 
 ---
 
 ### Task 6: Backup multi-target — generalizarea `backup.ts`
 
 **Files:**
-- Modify: `backend/src/db/backup.ts`
-- Test: `backend/src/db/backup.test.ts` (extindere) + `backend/src/db/rnpmBackup.test.ts` (nou)
+- Modify: `backend/src/db/backup.ts`, `backend/src/db/schema.ts` (preMigrationBackup self-contained), `backend/src/index.ts` (await backup la shutdown)
+- Test: `backend/src/db/backup.test.ts` (extindere) + `backend/src/db/rnpmBackup.test.ts` (nou) + `backend/src/db/rnpmFullFlow.test.ts` (nou)
 
-**Interfaces (Produces — consumate de Task 7):**
-```ts
-// Monolit (comportament identic celui de azi):
-export function listBackupsWithMeta(): Promise<BackupEntry[]>;
-export function restoreFromBackup(name: string): Promise<{ preRestoreName: string }>;
-export function deleteAllBackups(): Promise<number>;
-export function createManualBackup(): Promise<{ name: string }>;              // NOU — monolit on-demand
-export function getBackupDir(): string;
-// Per user RNPM (toate valideaza ownerId si opereaza in jail-ul backups/rnpm/<ownerId>/):
-export function getRnpmBackupDir(ownerId: string): string;
-export function listRnpmBackups(ownerId: string): Promise<BackupEntry[]>;
-export function createRnpmManualBackup(ownerId: string): Promise<{ name: string }>;
-export function restoreRnpmFromBackup(ownerId: string, name: string): Promise<{ preRestoreName: string }>;
-export function deleteRnpmBackups(ownerId: string): Promise<number>;
-// Neschimbate: withMaintenanceRead / withMaintenanceWrite / runDailyBackup (extins intern).
-```
+**Interfaces (Produces — consumate de Task 7):** ca in Rev. 2 (monolit: `listBackupsWithMeta` /
+`restoreFromBackup` / `deleteAllBackups` / `createManualBackup` NOU; per user: `getRnpmBackupDir(ownerId)`
+= `getRnpmBackupJail`, `listRnpmBackups`, `createRnpmManualBackup`, `restoreRnpmFromBackup`,
+`deleteRnpmBackups`), cu urmatoarele DECIZII revizuite:
 
-- [ ] **Step 6.1: Teste failing** — in `rnpmBackup.test.ts` (setup: tmpdir + env + `getRnpmDb("u1")` cu date):
-1. `createRnpmManualBackup("u1")` creeaza `backups/rnpm/u1/rnpm.manual-<stamp>.db` si `listRnpmBackups("u1")` il vede.
-2. `restoreRnpmFromBackup("u1", name)`: scrie un aviz DUPA backup, restaureaza, avizul post-backup dispare,
-   cele pre-backup exista; pre-restore snapshot `rnpm.pre-restore-*.db` exista in jail-ul lui u1.
-3. Jail: `restoreRnpmFromBackup("u1", "../../legal-dashboard.2026-01-01.db")` si nume cu `/` sau `\\` => throw;
-   `listRnpmBackups("u2")` NU vede fisierele lui u1.
-4. Gard race: cu `beginRnpmSearch("u1")` activ, `restoreRnpmFromBackup("u1", ...)` arunca `RnpmSearchActiveError`.
-5. `runDailyBackup()` produce si `legal-dashboard.YYYY-MM-DD.db` (monolit) si `rnpm.YYYY-MM-DD.db` in
-   jail-ul fiecarui fisier user EXISTENT PE DISC (creeaza `rnpm/u1.db` inchis — fara handle in registry —
-   si verifica ca backup-ul apare fara ca registry-ul sa deschida handle nou persistent).
-6. Retentie per pool per target: seed >7 daily + >5 manual in jail-ul u1 => prune la 7/5 fara sa atinga
-   pool-urile monolitului.
-7. Flux integral (test NOU `backend/src/db/rnpmFullFlow.test.ts`): seed monolit cu 2 owneri ->
-   `runRnpmSplitIfNeeded()` -> `createRnpmManualBackup("u1")` -> modifica datele lui u1 ->
-   `restoreRnpmFromBackup("u1", ...)` -> datele lui u1 revin la snapshot, datele lui u2 si monolitul
-   raman neatinse. Acesta e testul de integrare cap-coada al intregului feature.
-In `backup.test.ts` existent: verifica ca toate cazurile de azi raman verzi (comportamentul monolitului NU se schimba).
+1. **Toate snapshot-urile noi sunt self-contained** prin `VACUUM INTO` (sincron; vezi nota Task 3):
+   daily, manual, pre-restore, pre-migration (si cel din `schema.ts` pentru monolit — inlocuieste
+   copyFile+sidecars cu temp-connection + `VACUUM INTO`; scoate copierea sidecar-urilor).
+2. **Contract handle:** in loc de `openForBackup()` ambiguu, foloseste callback:
+   `withBackupConnection(target, fn)` — main: ruleaza fn(getDb()) fara close; rnpm: deschide prin
+   `openRnpmDbRaw(ownerId)` (readonly, fileMustExist — zero TOCTOU de creare fisier gol), close in
+   finally, si SKIP cu log daca fisierul nu exista.
+3. **Restore compatibil cu backup-urile legacy** (facute inainte de v2.43.0, cu sidecars):
+   `restoreTargetImpl` copiaza ca BUNDLE — daca langa `<name>.db` exista `<name>.db-wal`/`-shm`,
+   se copiaza si ele (snapshot-ul legacy e coerent doar ca triplet); backup-urile noi nu au sidecars.
+   Prune/delete sterg si sidecar-urile ca bundle (fara orfani permanenti in jail).
+4. **Pre-restore snapshot** prin `VACUUM INTO` de pe handle-ul viu (sau `openRnpmDbRaw` daca nu e
+   in registry), VERIFICAT (size>0 + integrity_check), INAINTE de close/unlink/swap. Fail => abort
+   restore cu fisierul viu neatins.
+5. **Auto-revert fail-safe**: revert-ul se face prin copie in `.revert-tmp` + `renameWithRetry`
+   (nu copyFile direct peste fisierul viu); esecul de unlink pe sidecars in revert e THROW
+   (fail-closed), nu doar log.
+6. **Validare de versiune la restore RNPM**: inainte de swap, deschide backup-ul readonly si
+   compara `MAX(version)` din `_schema_versions` cu max-ul din `discoverMigrations(MIGRATIONS_RNPM_DIR)`;
+   backup dintr-o versiune mai NOUA => reject cu mesaj clar (altfel urmatorul `getRnpmDb` pica pe
+   anti-downgrade-ul runner-ului si fisierul ramane blocat).
+7. **Restore per user** = `withMaintenanceWrite` -> `beginRnpmRestore(ownerId)` (throw
+   `SEARCH_ACTIVE` daca are cautare activa) in try/finally -> validare nume (regex cu prefix
+   ESCAPAT + `path.resolve` jail check) -> validare versiune -> pre-restore snapshot verificat ->
+   `closeRnpmDb(ownerId)` -> unlink sidecars live (`unlinkStrict`) -> copy bundle la `.restore.tmp`
+   + rename -> integrity_check -> auto-revert la esec. Latch-ul din `getRnpmDb` (Task 2) tine
+   restul operatiilor ownerului afara pe toata durata.
+8. **`createRnpmManualBackup(ownerId)`**: daca fisierul nu exista inca, PROVISIONEAZA prin
+   `getRnpmDb(ownerId)` (un user nou primeste un backup valid al bazei goale — decizie explicita);
+   apoi `VACUUM INTO` in jail cu nume `rnpm.manual-<stamp>.db`, pool `manual` cu retentie 5.
+9. **Daily backup**: enumerare DE PE DISC a stem-urilor (`fs.readdir(getRnpmDataDir())`, filtru
+   `\.db$`), FARA provisioning; ELIMINA early-return-ul global de freshness (`latestBackupMtime`)
+   si inlocuieste-l cu freshness PER TARGET (finding Sol: main fresh nu are voie sa sara peste
+   targeturile rnpm noi/stale); totul intr-o singura fereastra `withMaintenanceWrite`, DAR
+   **offsite hook-urile ruleaza DUPA eliberarea lock-ului** (aduna lista de fisiere proaspete sub
+   lock, upload-urile afara — altfel N useri x 10 min timeout blocheaza toate scrierile).
+10. **Shutdown**: pastreaza promise-ul backup-ului in curs intr-o variabila de modul;
+   `gracefulShutdown` il asteapta cu timeout (10s) inainte de `markRnpmShuttingDown`/`markShuttingDown`.
+11. **Retentie**: 4 pool-uri disjuncte per target (daily/pre-restore/pre-migration/manual), regex
+   cu `escapeRegExp(prefix)`, ancorate `^...\.db$`, label-uri cu puncte acceptate (`[^\\/]+`);
+   teste adversariale ca pool-urile nu se fura reciproc si ca prune curata bundle-ul.
 
-- [ ] **Step 6.2: Implementare in `backup.ts`** — refactor intern pe un tip privat:
-
-```ts
-interface BackupTarget {
-  id: string;                       // "main" | `rnpm:${ownerId}`
-  dbPath: string;
-  backupDir: string;
-  prefix: string;                   // "legal-dashboard." | "rnpm."
-  openForBackup(): Database.Database;   // main: getDb(); rnpm: handle temporar NOU pe fisier existent (fara registry/migrations)
-  closeForRestore(): void;              // main: closeDb(); rnpm: closeRnpmDb(ownerId)
-  checkpointBeforeRestore(): void;      // best-effort PRAGMA wal_checkpoint(TRUNCATE) pe handle-ul viu daca exista
-}
-```
-
-Reguli de implementare (pastreaza TOT fluxul existent, doar parametrizat):
-- `mainTarget()` reproduce exact comportamentul de azi (prefix `legal-dashboard.`, dir `backups/`, `closeDb()`).
-- `rnpmTarget(ownerId)`: `assertValidOwnerId` la constructie; dir `backups/rnpm/<ownerId>/`; prefix `rnpm.`;
-  `openForBackup()` deschide `new Database(dbPath)` DOAR daca fisierul exista (fara provisioning) si
-  callerul il inchide dupa `db.backup()`; `closeForRestore()` = `closeRnpmDb(ownerId)`.
-- Regex-urile de retentie devin functii de prefix, cu prefixul ESCAPAT (punctul din `rnpm.` /
-  `legal-dashboard.` e metacaracter — foloseste un helper `escapeRegExp`): daily
-  `^<prefix>\d{4}-\d{2}-\d{2}\.db$`, pre-restore `^<prefix>pre-restore-`, pre-migration
-  `^<prefix>pre-(?!restore-)[^\\/]+\.db$` (accepta puncte in label, ex. `pre-schema-upgrade-...`),
-  manual `^<prefix>manual-` cu `MANUAL_RETAIN = 5` (pool NOU, disjunct de celelalte trei —
-  adapteaza `pruneOld` la 4 pool-uri si verifica in test ca pool-urile raman disjuncte).
-- `restoreFromBackupImpl` devine `restoreTargetImpl(target, name)`: validare nume
-  `^<prefix>[A-Za-z0-9._-]+\.db$` + reject `/` si `\\` + DUBLA verificare de jail (defense in depth,
-  corectie review-panel): `const resolved = path.resolve(target.backupDir, name)` si throw daca
-  `!resolved.startsWith(path.resolve(target.backupDir) + path.sep)`. Apoi EXACT pasii existenti
-  (checkpoint, close, pre-restore snapshot IN dir-ul targetului, unlink sidecars cu throw pe
-  non-ENOENT, copy+rename atomic, integrity_check pe handle readonly, auto-revert).
-  `restoreFromBackup(name)` = wrapper pe mainTarget; `restoreRnpmFromBackup(ownerId, name)` =
-  `withMaintenanceWrite` + `beginRnpmRestore(ownerId)` in try/finally cu `endRnpmRestore` +
-  `restoreTargetImpl(rnpmTarget(ownerId), name)`.
-  NOTA concurenta: restore si daily backup NU se pot suprapune — ambele ruleaza sub acelasi
-  `withMaintenanceWrite` exclusiv (documenteaza cu un comentariu; nu e nevoie de gard suplimentar).
-  Limitare v1 asumata: daily backup-ul tine lock-ul global pe toata iterarea fisierelor (fereastra
-  creste liniar cu numarul de useri; acceptabil la zeci — documenteaza in comentariu si RUNBOOK).
-- `createManualBackup()` / `createRnpmManualBackup(ownerId)`: sub `withMaintenanceWrite`, `db.backup(tmp)`
-  + rename la `<prefix>manual-<stamp ISO cu dashes>.db` + prune + `runOffsiteBackupHook(dest)`.
-- `runDailyBackupImpl`: dupa snapshot-ul monolitului, enumereaza DE PE DISC `rnpm/*.db` (glob pe
-  `getRnpmDataDir()`, `fs.readdir` + filtru `\.db$`, ownerId = basename fara extensie, skip daca
-  `assertValidOwnerId` pica — log warn), si pentru fiecare: freshness check per jail, `openForBackup()`
-  temporar, `db.backup(tmp)` + rename + prune + offsite hook + close. TOT in acelasi
-  `withMaintenanceWrite` (o singura fereastra de maintenance pe noapte).
-- `deleteRnpmBackups(ownerId)`: sterge doar fisierele `rnpm.*.db` din jail-ul ownerului, cu audit line
-  `delete_rnpm_backups` + count. `logBackupEvent` primeste `target: target.id` pe toate evenimentele.
-
-- [ ] **Step 6.3: Teste PASS + suita integrala**
-
-Run: `npx vitest run src/db/rnpmBackup.test.ts src/db/backup.test.ts --root backend` apoi `npm run test:backend`.
-
-- [ ] **Step 6.4: Gate-uri + commit**
-
-```bash
-npx biome check --write backend/src/db
-npx tsc --noEmit -p backend/tsconfig.json
-npm run test:backend
-git add backend/src/db
-git commit -m "feat(rnpm-split): backup multi-target — monolit + fisiere rnpm per user, backup manual, retentie per pool"
-```
+- [ ] **Step 6.1: Teste failing** — cazurile din Rev. 2 (manual/restore/jail/race/daily/retentie/
+full-flow) PLUS: restore de backup legacy cu sidecars (datele din WAL supravietuiesc — seed un
+backup .db+.db-wal construit manual); restore de backup cu versiune de schema mai noua => reject;
+manual backup pentru user fara fisier => provisioneaza si reuseste; daily: main fresh dar rnpm
+fara backup => rnpm primeste backup (early-return-ul global eliminat); prune sterge bundle-ul.
+- [ ] **Step 6.2: Implementare** conform deciziilor 1-11.
+- [ ] **Step 6.3: PASS + suita integrala + gate-uri + commit** (fisiere enumerate explicit):
+`feat(rnpm-split): backup multi-target — snapshot-uri self-contained, restore bundle-aware, offsite in afara lock-ului`.
 
 ---
 
 ### Task 7: Rute — self-service RNPM owner-scoped + router admin pentru monolit
 
 **Files:**
-- Modify: `backend/src/routes/rnpm.ts` (blocurile: /stats L863-876, /saved/all L830-845, /compact L899-909, /open-db-folder L877-897, /backups* L910-985)
-- Create: `backend/src/routes/adminBackups.ts`
-- Modify: `backend/src/index.ts` (mount `/api/admin/backups`)
+- Modify: `backend/src/routes/rnpm.ts`; Create: `backend/src/routes/adminBackups.ts`; Modify: `backend/src/index.ts` (mount)
 - Test: `backend/src/routes/rnpmBackups.contract.test.ts` (nou) + `backend/src/routes/adminBackups.test.ts` (nou)
 
-**Interfaces:**
-- Consumes: functiile din Task 6 + `hasActiveRnpmSearch`/erori din Task 5 + `compactRnpmDb`/`getRnpmDbPath` din Task 2.
-- Contract rute RNPM (self-service; `requireDesktopHeader` RAMANE pe toate mutatiile — e apararea
-  CSRF pe desktop si pass-through pe web, vezi Constrangerile globale; self-service = guard
-  `requireRole("admin", "user")` in loc de admin-only):
-  - `GET /api/rnpm/backups` -> `{ backups }` din jail-ul callerului; admin poate `?ownerId=<id>`.
-  - `POST /api/rnpm/backups/create` -> `{ ok, name }`; audit `backup.rnpm.create`.
-  - `POST /api/rnpm/backups/restore` body `{ name }` -> `{ ok, preRestoreName }`; 409 envelope
-    `SEARCH_ACTIVE` daca ownerul are cautare activa (si simetric, pornirea unei cautari in timpul
-    restore-ului da 409 `RESTORE_IN_PROGRESS` — mapata in rutele de search din
-    `RnpmRestoreInProgressError.code`); audit `backup.rnpm.restore` (succes + eroare);
-    `limitSmall`; admin poate `{ name, ownerId }`.
-  - `DELETE /api/rnpm/backups` -> `{ deleted }` doar jail-ul propriu; audit `backup.rnpm.delete_all`.
-- Contract `/api/admin/backups` (monolit, `requireRole("admin")`):
-  - `GET /` -> `{ backups }`; `POST /create` -> `{ ok, name }` (audit `backup.create`);
-  - `POST /restore` (`requireDesktopHeader` pastrat + `limitSmall`) -> `{ ok, preRestoreName }` (audit `backup.restore`);
-  - `DELETE /` (`requireDesktopHeader`) -> `{ deleted }` (audit `backup.delete_all`).
+**Contract (toate mutatiile pastreaza `requireDesktopHeader`; self-service = `requireRole("admin", "user")`):**
+- `GET /api/rnpm/backups` -> `{ backups }` din jail-ul callerului; admin poate `?ownerId=`.
+- `POST /api/rnpm/backups/create` -> `{ ok, name }`; audit `backup.rnpm.create`; **cooldown 60s per
+  owner** (finding Sol: create = maintenance lock + VACUUM INTO + offsite => abuzabil; pattern-ul
+  de cooldown exista deja pe `/email-settings/test` — 429 cu `Retry-After`).
+- `POST /api/rnpm/backups/restore` body `{ name }` (admin: `{ name, ownerId }`) -> `{ ok, preRestoreName }`;
+  409 `SEARCH_ACTIVE`; erorile de VALIDARE (nume invalid, iesire din jail, versiune mai noua) sunt
+  **400 `INVALID_PARAMS`**, nu 500 (finding Sol: 500 pe input invalid ascunde clasificarea si
+  polueaza alerting-ul); audit succes + eroare.
+- `DELETE /api/rnpm/backups` -> `{ deleted }` doar jail-ul propriu; audit.
+- `GET /stats`, `POST /compact`, `DELETE /saved/all` — pe fisierul callerului
+  (`getRnpmDbPath`/`compactRnpmDb`); guard `requireDesktopHeader, requireRole("admin", "user")`.
+  **`DELETE /saved/all` si `POST /saved/delete-batch` primesc gardul SEARCH_ACTIVE** (finding Sol:
+  delete in timpul unei cautari active => FK errors sau repopulare imediat dupa stergere):
+  `if (hasActiveRnpmSearch(owner)) return c.json(fail("SEARCH_ACTIVE", ..., c), 409);`.
+- `open-db-folder`/`open-backups-folder` — desktop-only, pe fisierul/jail-ul userului local.
+- `resolveBackupOwner(c, requested)` ca in Rev. 2 (sursa parametrizata query/body; non-admin:
+  cererea straina se IGNORA silentios; admin: `assertValidOwnerId(requested)` inainte de folosire;
+  verifica accessorul de rol din `requireRole.ts` inainte de `c.get("role")`).
+- `/api/admin/backups` (monolit, `requireRole("admin")`): `GET /`, `POST /create` (audit
+  `backup.create`), `POST /restore` (`requireDesktopHeader` + `limitSmall`; audit `backup.restore`),
+  `DELETE /` (`requireDesktopHeader`; audit `backup.delete_all`). Rutele vechi de monolit din
+  rnpm.ts se elimina. **RUNBOOK (Task 9) documenteaza interactiunea restore-monolit + marker split.**
 
-- [ ] **Step 7.1: Teste failing (contract)** — `rnpmBackups.contract.test.ts`: app Hono de test cu
-`ownerContext` fals (userul `u1` rol `user`, userul `admin1` rol `admin`, pattern-ul din
-`rnpm.contract.test.ts`); cazuri: user vede doar jail-ul lui; pentru non-admin `?ownerId=u2` e
-IGNORAT silentios (raspunsul contine jail-ul propriu, nu 403); adminul cu `?ownerId=u2` vede jail-ul
-lui u2 si operatia e auditata cu `targetOwnerId`; create+restore+delete pe fisierul propriu;
-409 `SEARCH_ACTIVE` cand `beginRnpmSearch("u1")` e activ; 409 `RESTORE_IN_PROGRESS` pe pornirea unei
-cautari in timpul restore-ului; restore accepta doar nume `rnpm.*.db` fara separatoare SI verificarea
-de jail prin `path.resolve` respinge orice iesire din director. `adminBackups.test.ts`: non-admin =>
-401/403; admin list/create ok; restore cere header desktop in mod desktop.
-
-- [ ] **Step 7.2: Implementare rute RNPM (in rnpm.ts):**
-- `GET /stats` (L863-876): inlocuieste `getDbPath()` cu `getRnpmDbPath(getOwnerId(c))` (import din
-  `../db/rnpmDb.ts`); raportul `db.path`/`sizeBytes` devine al fisierului RNPM propriu.
-- `DELETE /saved/all` (L830): guard-ul devine EXACT `requireDesktopHeader, requireRole("admin", "user")`
-  (requireDesktopHeader RAMANE — CSRF desktop, pass-through web; admin-only devine self-service).
-  Inlocuieste `compactDb()` cu `compactRnpmDb(getOwnerId(c))`. Nimic altceva nu se schimba pe ruta.
-- `POST /compact` (L899): guard-ul devine EXACT `requireDesktopHeader, requireRole("admin", "user")`;
-  corpul apeleaza `compactRnpmDb(getOwnerId(c))`.
-- `POST /open-db-folder` (L877): ramane desktop-only (electron shell), dar arata fisierul
-  `getRnpmDbPath(getOwnerId(c))`.
-- `POST /open-backups-folder`: idem, `getRnpmBackupDir(getOwnerId(c))`.
-- Inlocuieste integral blocul `/backups*` (L910-985) cu rutele self-service din contract
-  (`requireDesktopHeader, requireRole("admin", "user")` pe mutatii; `requireRole("admin", "user")`
-  pe GET); helper comun — sursa ownerId-ului tinta e PARAMETRIZATA (query pe GET/DELETE, body pe
-  POST restore), validarea se face IN helper, iar regula e explicita: pentru non-admin orice
-  `ownerId` cerut diferit de propriul cont se IGNORA silentios (nu 403 — nu confirmam existenta
-  altor conturi); pentru admin se foloseste cel cerut:
-
-```ts
-function resolveBackupOwner(c: import("hono").Context, requested: string | undefined): string {
-  const caller = getOwnerId(c);
-  if (!requested || requested === caller) return caller;
-  if (c.get("role") !== "admin") return caller; // non-admin: cererea straina se ignora silentios
-  assertValidOwnerId(requested); // fail-closed inainte de orice folosire in path
-  return requested;
-}
-// GET/DELETE:   resolveBackupOwner(c, c.req.query("ownerId"))
-// POST restore: resolveBackupOwner(c, (body as { ownerId?: string }).ownerId)
-```
-
-ATENTIE la accessor: verifica in `requireRole.ts` cum e expus rolul in context (`c.get("role")` e
-setat de requireRole prin ContextVariableMap — confirma inainte de folosire). Fiecare mutatie:
-`recordAudit(c, "backup.rnpm.<op>", { targetKind: "backup", targetId: <name|ownerId>, detail })`
-pe succes SI pe eroare (pattern-ul existent L914-968); cand adminul tinteste ALT owner, include
-`detail: { targetOwnerId }` si auditeaza SI operatiile read-only (GET cross-owner) cu
-`backup.rnpm.list_foreign`. Mapare erori: `RnpmSearchActiveError` =>
-`c.json(fail("SEARCH_ACTIVE", e.message, c), 409)`; `RnpmRestoreInProgressError` (pe rutele de
-search) => `c.json(fail("RESTORE_IN_PROGRESS", e.message, c), 409)`; restul => `internalError(c, msg)`.
-
-- [ ] **Step 7.3: Creeaza `backend/src/routes/adminBackups.ts`** — router Hono nou cu cele 4 rute din
-contract, folosind `listBackupsWithMeta/createManualBackup/restoreFromBackup/deleteAllBackups` (monolit)
-si audit-urile existente `backup.restore`/`backup.delete_all` + `backup.create` nou. Mount in `index.ts`
-langa celelalte (linia ~410): `app.route("/api/admin/backups", adminBackupsRouter);`.
-
-- [ ] **Step 7.4: Teste PASS + suita integrala + commit**
-
-```bash
-npx biome check --write backend/src/routes backend/src/index.ts
-npx tsc --noEmit -p backend/tsconfig.json
-npm run test:backend
-git add backend/src/routes backend/src/index.ts
-git commit -m "feat(rnpm-split): rute backup self-service owner-scoped + /api/admin/backups pentru monolit"
-```
+- [ ] **Step 7.1: Teste failing (contract)** — cazurile din Rev. 2 PLUS: non-admin cu body
+`{ name, ownerId: "u2" }` la restore => opereaza pe fisierul PROPRIU si fisierul lui u2 ramane
+byte-identic (vectorul din body, nu doar query — finding Sol); admin targeting pozitiv cu audit
+`targetOwnerId`; nume invalid / traversal => 400 `INVALID_PARAMS` (nu 500); cooldown create =>
+429 cu `Retry-After`; delete-all cu search activ => 409 `SEARCH_ACTIVE`.
+- [ ] **Step 7.2: Implementare** conform contractului. **Step 7.3:** `adminBackups.ts` + mount.
+- [ ] **Step 7.4: PASS + gate-uri + commit** (fisiere enumerate):
+`feat(rnpm-split): rute backup self-service cu cooldown si clasificare erori + /api/admin/backups`.
 
 ---
 
 ### Task 8: Frontend — "Baza mea RNPM" + tab Setari "Backup"
 
-**Files:**
-- Modify: `frontend/src/lib/rnpmApi.ts` (functie noua `rnpmCreateBackup`; restul raman — path-urile nu se schimba)
-- Create: `frontend/src/lib/adminBackupsApi.ts`
-- Modify: `frontend/src/components/rnpm/RnpmSavedStats.tsx` + `frontend/src/components/rnpm/RnpmRestoreModal.tsx` (copy + buton nou)
-- Create: `frontend/src/pages/admin/Backups.tsx` (pattern `embedded` ca `pages/admin/Users.tsx`)
-- Modify: `frontend/src/pages/Settings.tsx` (tab nou)
-- Test: `frontend/src/components/rnpm/RnpmRestoreModal.test.tsx` (adapteaza copy), `frontend/src/pages/admin/Backups.test.tsx` (nou)
-
-- [ ] **Step 8.1: rnpmApi.ts** — adauga:
-
-```ts
-export async function rnpmCreateBackup(): Promise<{ name: string }> {
-  const res = await apiFetch(`${BASE}/backups/create`, { method: "POST" });
-  const data = await jsonOrThrow<{ ok: true; name: string }>(res);
-  return { name: data.name };
-}
-```
-
-- [ ] **Step 8.2: adminBackupsApi.ts** — functii `adminListBackups() / adminCreateBackup() /
-adminRestoreBackup(name) / adminDeleteBackups()` pe `/api/admin/backups*`, acelasi pattern
-`apiFetch` + `jsonOrThrow` si tipul `RnpmBackupEntry` reexportat ca `BackupEntry`.
-
-- [ ] **Step 8.3: Copy + buton in componentele RNPM:**
-- `RnpmSavedStats.tsx`: butonul "Info baza locala" devine "Baza mea RNPM"; adauga langa "Backups" un
-  buton "Creeaza backup acum" care apeleaza `rnpmCreateBackup()` (spinner pe durata + mesaj cu numele
-  fisierului la succes, pattern-ul `compactMsg`); copy-ul de la "Sterge back-up" devine: "Stergi toate
-  backup-urile TALE RNPM?\n\nCelelalte module si ceilalti utilizatori nu sunt afectati."
-- `RnpmRestoreModal.tsx`: titlul devine "Restaurare baza mea RNPM"; mesajul de confirmare (L48-53) devine:
-  `Restaurezi DOAR datele tale RNPM din ${entry.name}?\n\nRestul aplicatiei (monitorizari, utilizatori, setari) NU este afectat. Baza ta actuala va fi salvata automat ca rnpm.pre-restore-*.db inainte de suprascriere.`
-  Mesajul de succes: `Restaurare completa. Snapshot pre-restore: ${preRestoreName}.` (fara "reporneste
-  aplicatia" — fisierul viu se redeschide lazy, nu mai e nevoie de restart).
-- Trateaza 409 SEARCH_ACTIVE: mesajul erorii vine din envelope prin `extractErrorMessage` (deja folosit
-  de `jsonOrThrow`), deci `catch`-ul existent din `handleRestore` (`setError(e instanceof Error ?
-  e.message : "Eroare restore")`) il afiseaza fara cod nou — verifica cu un test ca mesajul
-  "cautare in curs" ajunge in `error` state-ul modalului, nu in fallback-ul generic.
-
-- [ ] **Step 8.4: `pages/admin/Backups.tsx`** — pagina embedded admin cu: lista backup-urilor monolitului
-(nume mono, data, dimensiune — reuse `formatBytes`/`formatBackupDate` pattern), buton "Creeaza backup acum",
-buton "Restaureaza" per rand cu `useConfirm` destructive si mesajul EXACT:
-`Restaurezi backup-ul COMPLET al bazei — toate modulele, toti utilizatorii (datele RNPM au backup separat per utilizator)?\n\nBaza curenta va fi salvata automat inainte de suprascriere. Dupa restore este recomandata repornirea aplicatiei.`
-si buton "Sterge toate backup-urile" (destructive). Stare loading/error/success ca in `RnpmRestoreModal`.
-
-- [ ] **Step 8.5: Settings.tsx** — adauga in `TABS` (dupa "audit"): `{ key: "backup", label: "Backup", adminOnly: true }`,
-lazy import `const AdminBackups = lazy(() => import("@/pages/admin/Backups"));` si blocul de montare
-identic cu celelalte (`AdminGate` + `Suspense` + `<AdminBackups embedded />`).
-
-- [ ] **Step 8.6: Teste frontend** — adapteaza `RnpmRestoreModal.test.tsx` la noul copy; test nou pentru
-`Backups.tsx` (render embedded, lista mock, confirmarea destructiva apare la restore). Run:
-`cd frontend && npm test -- --run` — PASS.
-
-- [ ] **Step 8.7: Gate-uri + commit**
-
-```bash
-npx biome check --write frontend/src
-cd frontend && npx tsc --noEmit && npm test -- --run && cd ..
-npm run build
-git add frontend/src
-git commit -m "feat(rnpm-split): UI Baza mea RNPM (self-service + backup manual) + tab Setari Backup (monolit, admin)"
-```
+Identic cu Rev. 2 (rnpmApi `rnpmCreateBackup`, `adminBackupsApi.ts`, copy nou pe
+`RnpmSavedStats`/`RnpmRestoreModal`, `pages/admin/Backups.tsx` embedded + tab in `Settings.tsx`,
+teste), cu completarile:
+- Trateaza si 429 (cooldown) pe butonul "Creeaza backup acum" — mesajul din envelope se afiseaza
+  ca eroare temporara, butonul ramane activ.
+- Dupa restore reusit, verifica in test ca `onRestored` -> `onAfterDeleteAll` reseteaza starea
+  cautarii (protectia UI pentru searchId-uri cache-uite — limitarea documentata din Task 4.3).
+- Gate-uri frontend complete + `npm run build` + commit.
 
 ---
 
 ### Task 9: Documentatie + bump v2.43.0
 
-**Files:**
-- Modify: `RUNBOOK.md`, `SECURITY.md`, `DEPLOY-SERVER.md`, `CLAUDE.md`, `SESSION-HANDOFF.md`
-- Bump: `package.json` (root + backend + frontend) + `package-lock.json`, `frontend/src/data/changelog-entries.tsx`, `CHANGELOG.md`, `README.md`, `STATUS.md`, `DOCUMENTATIE.md`
-
-- [ ] **Step 9.1: RUNBOOK.md** — sectiuni noi: (a) "Split-ul RNPM per utilizator (v2.43.0)" — ce s-a
-intamplat la primul boot, unde sunt fisierele (`<dataDir>/rnpm/<ownerId>.db`), backup-ul pre-split
-`legal-dashboard.pre-rnpm-split-*.db` ca rollback; (b) "Backup si restore per utilizator (RNPM)" —
-jail-urile `backups/rnpm/<ownerId>/`, pool-urile daily/manual/pre-restore, restore self-service +
-gardul SEARCH_ACTIVE; (c) actualizeaza sectiunea 5 (restore local) si 6 (offsite): offsite hook-ul
-ruleaza acum per fisier (monolit + fiecare rnpm), deci destinatia primeste N+1 fisiere/noapte;
-(d) nota: rollback-ul migrations rnpm foloseste `migrations-rnpm/*.down.sql`; (e) igiena fisiere
-orfane: conturile se sterg SOFT si pot fi reactivate (v2.42.0), deci fisierul `rnpm/<ownerId>.db` si
-jail-ul lui NU se sterg la stergerea contului — raman pe disc pentru reactivare; documenteaza procedura
-manuala de curatare definitiva (inchide handle, sterge fisier + jail) pentru conturile eliminate permanent.
-- [ ] **Step 9.2: SECURITY.md** — intrare noua: suprafata self-service restore (jail per owner, validare
-ownerId pe path, fara upload, audit `backup.rnpm.*`, gard race); mentioneaza scoaterea
-`requireDesktopHeader` de pe rutele rnpm-backup si motivatia (blast radius per fisier propriu).
-Adauga rand in changelog-table-ul de la baza fisierului.
-- [ ] **Step 9.3: DEPLOY-SERVER.md** — volumul `ld_data` contine acum `rnpm/` + `backups/rnpm/`;
-recomandarea de sincronizare offsite acopera ambele.
-- [ ] **Step 9.4: CLAUDE.md** — actualizeaza sectiunea Structura/Arhitectura: DB monolit + fisiere
-`rnpm/<ownerId>.db` per user (repository-only ramane; `backend/src/db/rnpmDb.ts` e noul entry point
-pentru handle-uri RNPM); actualizeaza "Versiune Curenta" la v2.43.0 conform regulilor din fisier.
-- [ ] **Step 9.5: Bump v2.43.0** — urmeaza EXACT "Checklist bump de versiune" din CLAUDE.md (package.json
-x3 + lockfile via `npm install --package-lock-only`, changelog-entries.tsx cu intrarea v2.43.0,
-CHANGELOG.md, README.md, STATUS.md header, DOCUMENTATIE.md, SESSION-HANDOFF.md context nou). Sanity:
-`grep -rn "2\.42\.0" *.md` — orice hit care nu e istoric se actualizeaza.
-- [ ] **Step 9.6: Gate-uri + commit**
-
-```bash
-npx biome check --write .
-npm run typecheck && npm run build && npm run check
-git add -A
-git commit -m "docs+release: v2.43.0 — split RNPM per user, backup self-service, tab Setari Backup"
-```
+Ca in Rev. 2 (RUNBOOK / SECURITY / DEPLOY-SERVER / CLAUDE.md / checklist bump), cu sectiuni
+RUNBOOK suplimentare (findings Sol):
+- **"Monolit restaurat dupa split"**: ce inseamna abort-ul de boot cu marker `done` + randuri rnpm;
+  cele doua cai de remediere (re-split fortat: sterge fisierele per-user + marker-ul, reporneste;
+  SAU pastreaza fisierele per-user: goleste randurile rnpm din monolitul restaurat cu SQL-ul dat).
+- **"Owner invalid la split"**: ce faci daca boot-ul aborteaza pe `ownerId invalid` (fixezi manual
+  randul din users/owner_id in monolit; split-ul nu a mutat nimic).
+- **Igiena fisiere orfane** (soft-delete de cont => fisierele raman pentru reactivare; ID-urile nu
+  se reutilizeaza pentru ca randul users ramane; procedura de curatare definitiva manuala).
+- **Offsite**: acum N+1 fisiere/noapte; upload-urile ruleaza dupa fereastra de maintenance.
 
 ---
 
 ### Task 10: Verificare finala end-to-end
 
-- [ ] **Step 10.1:** `npm run check` + `npm run build` — ambele verzi de la zero.
-- [ ] **Step 10.2:** `npm run rebuild:electron` (dupa toate testele Node).
-- [ ] **Step 10.3: Smoke desktop (Electron real, `npm run electron:dev`):** pe o copie de DB v2.42 cu
-date RNPM: (1) primul boot ruleaza split-ul — verifica log JSON `rnpm_split` + fisierul
-`rnpm/local.db` + monolitul fara randuri rnpm (sqlite3 sau DB browser); (2) datele RNPM identice in UI
-(tab Salvate — acelasi numar de avize); (3) cautare RNPM noua functioneaza; (4) "Creeaza backup acum" +
-restore propriu functioneaza; (5) restore refuzat cu 409 cand o cautare e in curs; (6) restart —
-split-ul NU re-ruleaza (log absent).
-- [ ] **Step 10.4: Smoke web (`scripts/dev-web-local.ps1` din pwsh 7, DOI useri):** (1) userul A isi
-restaureaza fisierul, userul B nu pierde nimic; (2) A nu vede backup-urile lui B (jail); (3) restore-ul
-lui A nu atinge monolitul (fx_rates/monitoring/users neschimbate); (4) tab-ul Setari > Backup e vizibil
-doar pentru admin si functioneaza; (5) daily backup (fortat prin restart) produce fisiere pentru monolit
-si pentru fiecare user.
-- [ ] **Step 10.5:** Raporteaza rezultatul complet (gate-uri, smoke, orice abatere de la plan) FARA push;
-push-ul se face doar la cererea explicita a userului.
+Ca in Rev. 2 (npm run check + build + rebuild:electron + smoke desktop cu split real + smoke web
+cu doi useri), plus:
+- **Smoke pe bundle**: dupa `npm run build`, porneste backend-ul din `dist-backend` (sau
+  `npm run electron:dev` care il foloseste) si verifica in log ca `migrations-rnpm` s-a gasit
+  (provisioning-ul unui user nou functioneaza din bundle, nu doar din surse).
+- Smoke desktop include: restore de backup LEGACY (pre-v2.43.0, daca exista pe masina) si
+  verificarea ca marker-ul `.split-done.json` exista si boot-ul urmator nu re-splituieste.
+- Raport final fara push; push doar la cererea userului.
 
 ---
 
-## Self-review + review-panel (2026-07-10)
+## Istoric review
 
-- Acoperire spec: layout fisiere (T1-T2), DB layer (T2), migrations (T1), splitter + fail-closed +
-  preflight disc + fk_check + fatalBoot (T4), backup multi-target + manual + retentie 4 pool-uri (T6),
-  gard race cu coduri masina (T5), contract ownership (T3), rute self-service + admin (T7), UI + copy
-  explicit (T8), docs + bump (T9), verificare (T10). Out of scope confirmat: restore sub-modul,
-  DROP tabele monolit, lock per-fisier, stergerea fisierelor la soft-delete de cont.
-- Consistenta tipuri: `getRnpmDb(ownerId)` / `RnpmSearchActiveError.code === "SEARCH_ACTIVE"` /
-  `RnpmRestoreInProgressError.code === "RESTORE_IN_PROGRESS"` / `restoreRnpmFromBackup(ownerId, name)`
-  folosite identic in T2/T5/T6/T7.
-- Planul a trecut prin review-panel adversarial (Opus 4.8 + Kimi K2.7 + GLM-5.2 + DeepSeek V4, sinteza
-  Fable 5; GPT-5.6 Sol timeout — review separat). Fixuri aplicate in aceasta versiune: preflight disc
-  (HIGH), pastrarea requireDesktopHeader = apararea CSRF desktop (HIGH), ATTACH fail-closed fara
-  fallback RW, probe split pe toate 6 tabelele, foreign_key_check pre-split, retry rename Windows,
-  VACUUM negardat -> try/catch, wipe explicit 7 tabele, cod RESTORE_IN_PROGRESS, resolveBackupOwner
-  parametrizat + validat + audit cross-owner, jail dublu (regex + path.resolve), regex-uri cu prefix
-  escapat + label cu puncte, cap lungime ownerId 64, checkpoint inainte de pre-migration backup per
-  user, descoperire consumatori dupa simbol, triaj teste, test full-flow nou, clarificare TDD pe
-  fisiere SQL. Findings respinse de panel (nu se aplica): renameSync EEXIST pe Windows (fals),
+- **Rev. 1** (468b744): planul initial.
+- **Rev. 2** (06a9c48): fixuri din review-panel multi-model (Opus 4.8 + Kimi K2.7 + GLM-5.2 +
+  DeepSeek V4, sinteza Fable 5): preflight disc, pastrarea requireDesktopHeader (CSRF desktop),
+  ATTACH fail-closed, probe split 6 tabele, foreign_key_check, retry rename, VACUUM negardat,
+  wipe explicit, cod RESTORE_IN_PROGRESS, resolveBackupOwner, jail path.resolve, regex escapate,
+  cap ownerId, checkpoint pre-migration, descoperire pe simbol, triaj teste, full-flow test.
+  Findings respinse cu motivare: renameSync EEXIST pe Windows (fals — MOVEFILE_REPLACE_EXISTING),
   endRnpmSearch throw pe underflow (tolerarea e deliberata), closeAllRnpmDbs in fatalBoot (speculativ).
+- **Rev. 3** (acest fisier): fixuri din review-ul GPT-5.6 Sol (2 CRITICAL + HIGH-uri noi):
+  `rnpmFileStem` collision-safe (case-insensitive FS + nume rezervate Windows), marker durabil
+  `.split-done.json` cu protocol crash-safe in 2 faze si ABORT pe monolit restaurat post-split,
+  cutover atomic (splitter nemontat pana la commit-ul de rutare repos), consistenta owner
+  parinte-copil la preflight, URI ATTACH percent-encodat (path-ul real contine spatii),
+  snapshot-uri self-contained prin VACUUM INTO peste tot (inclusiv preMigrationBackup monolit),
+  pre-split backup STRICT verificat, unlinkStrict (doar ENOENT), latch restore in getRnpmDb
+  (acopera toate operatiile, nu doar search), gard pre-SSE la nivel de ruta + mapare centrala 409,
+  validare versiune schema la restore, restore bundle-aware pentru backup-uri legacy, auto-revert
+  prin temp+rename, freshness per target (eliminat early-return-ul global), offsite in afara
+  lock-ului, await backup la shutdown, cooldown pe backup manual, erori de validare = 400 (nu 500),
+  gard SEARCH_ACTIVE pe delete-all/delete-batch, teste de crash cu failpoints (onPhase), test
+  echivalenta structurala baseline vs monolit, sqlite_sequence high-water, build gate per commit,
+  biome/git add chirurgicale, teste chain monolit pastrate. Acceptat ca limitare documentata (nu
+  se implementeaza in v1): fingerprint pe searchId dupa restore (UI-ul reseteaza starea; restore
+  refuza cautari active).

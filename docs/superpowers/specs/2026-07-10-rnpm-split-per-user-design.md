@@ -37,13 +37,16 @@ fezabila, efort L, fara deal-breakers. Fapte cheie verificate:
 ```
 <dataDir>/legal-dashboard.db          # monolitul: tot ce NU e RNPM (schema neschimbata;
                                       #   tabelele rnpm_* raman dar sunt golite; DROP amanat)
-<dataDir>/rnpm/<ownerId>.db           # per user: rnpm_searches -> rnpm_avize ->
+<dataDir>/rnpm/<stem>.db              # per user: rnpm_searches -> rnpm_avize ->
                                       #   creditori/debitori/bunuri/istoric + rnpm_bunuri_descrieri proprie
-<dataDir>/backups/                    # backup-urile monolitului (neschimbat: 7 daily / 5 pre-restore / 5 pre-migration)
-<dataDir>/backups/rnpm/<ownerId>/     # jail per user: rnpm.YYYY-MM-DD.db, rnpm.pre-restore-*, rnpm.manual-*
+<dataDir>/rnpm/.split-done.json       # marker durabil al splitter-ului (status wiping/done)
+<dataDir>/backups/                    # backup-urile monolitului (7 daily / 5 pre-restore / 5 pre-migration / 5 manual)
+<dataDir>/backups/rnpm/<stem>/        # jail per user: rnpm.YYYY-MM-DD.db, rnpm.pre-restore-*, rnpm.manual-*
 ```
 `<dataDir>` = dirname(getDbPath()) — neschimbat (userData pe desktop, /data pe Docker).
-`ownerId` validat `^[A-Za-z0-9_-]+$` inainte de orice folosire in path (refuz altfel).
+`ownerId` validat `^[A-Za-z0-9_-]{1,64}$`; numele de fisier este `stem = lowercase(ownerId) + "-" + sha256(ownerId)[0..10]`
+(CORECTIE review Sol: ownerId-ul brut nu e injectiv pe filesystem-uri case-insensitive — Windows/macOS —
+si poate coincide cu nume rezervate Windows; stem-ul rezolva ambele).
 Coloana `owner_id` si filtrele WHERE existente SE PASTREAZA in DB-urile per-user
 (belt-and-braces contra bug-urilor de rutare; diff minim in repositories).
 
@@ -55,8 +58,14 @@ Coloana `owner_id` si filtrele WHERE existente SE PASTREAZA in DB-urile per-user
   (provisioning lazy — acopera si userii noi, zero hook pe createUser).
 - `closeRnpmDb(ownerId)`, `closeAllRnpmDbs()`; latch-ul `shuttingDown` partajat cu schema.ts
   (markShuttingDown inchide si registry-ul). `checkpointWal`/`compactDb` parametrizate pe handle.
+- CORECTIE review Sol: `getRnpmDb` verifica si latch-ul de RESTORE per owner
+  (`isRnpmRestoreInProgress`) — in timpul unui restore, ORICE operatie repository a ownerului
+  (stats/list/delete/compact/export, nu doar search) primeste `RnpmRestoreInProgressError` in loc
+  sa redeschida lazy fisierul in mijlocul swap-ului. Registry-ul de activitate traieste in DB layer
+  (`backend/src/db/rnpmActivity.ts`).
 - Rutare in cele 16 call-sites din `avizRepository.ts` + `searchRepository.ts`
-  (`getDb()` -> `getRnpmDb(ownerId)`).
+  (`getDb()` -> `getRnpmDb(ownerId)`), livrata ATOMIC in acelasi commit cu montarea splitter-ului
+  la boot (altfel exista o fereastra in care scrierile noi si datele legacy traiesc in layout-uri diferite).
 
 ### Migrations
 - Director nou `backend/src/db/migrations-rnpm/` cu `0001_rnpm_baseline.up.sql/.down.sql` =
@@ -68,36 +77,62 @@ Coloana `owner_id` si filtrele WHERE existente SE PASTREAZA in DB-urile per-user
   (triggerele din 0022 il apeleaza — gasit de verificatorul adversarial).
 
 ### Splitter one-time (fisier nou `backend/src/db/rnpmSplitter.ts`, apelat din index.ts la boot)
-Conditie: monolitul are randuri in `rnpm_searches`/`rnpm_avize`. Pasi:
-1. Pre-split backup al monolitului (reuse `preMigrationBackup`, label `rnpm-split`).
-2. Preflight spatiu disc: varful e ~3x volumul RNPM (monolit intact + pre-split backup + fisiere noi) — abort cu mesaj clar daca nu incape.
-3. Per owner distinct: provisioneaza `rnpm/<ownerId>.db` PRIN runner (vezi capcana sentinel), scrie intr-un `.tmp` + rename la final; ATTACH monolit readonly; `INSERT...SELECT` filtrat pe `owner_id` PASTRAND id-urile originale (FK `search_id`/`aviz_id`/`descriere_id` raman valide; `sqlite_sequence` se actualizeaza automat). `rnpm_bunuri_descrieri`: doar subsetul referit de bunurile ownerului, cu id-urile originale — FARA remap.
-4. Verificare COUNT per tabela per owner (monolit vs fisier nou) + `integrity_check`.
-5. DOAR dupa ce TOTI ownerii sunt verificati: DELETE `rnpm_*` din monolit intr-o tranzactie + VACUUM.
-6. Idempotent la crash: monolitul ramane sursa de adevar pana la pasul 5; fisierele partiale `.tmp` se refac la re-run.
-Desktop = un singur owner `local`. Operatia e sincrona la boot (inainte de listen); durata acceptata, logata JSON (`action":"rnpm_split"` + per-owner counts).
+Conditie: monolitul are randuri in ORICARE din cele 7 tabele `rnpm_*` SI markerul nu e `done`. Pasi:
+1. Preflights fail-closed (monolit intact la orice esec): validare owneri; `PRAGMA foreign_key_check`
+   per tabela rnpm; consistenta owner parinte-copil (copil cu `owner_id` diferit de aviz => abort;
+   aviz cu owner diferit de search-ul referit => abort); spatiu disc ~3x volumul bazei (statfs, injectabil).
+2. Pre-split backup STRICT al monolitului (`VACUUM INTO`, verificat cu size>0 + integrity_check;
+   orice esec opreste split-ul — backup-ul e rollback-ul promis, nu best-effort).
+3. Per owner distinct: provisioneaza `rnpm/<stem>.db` PRIN runner (capcana sentinel), scrie in
+   `.split-tmp` + rename cu retry (AV Windows); ATTACH monolit READONLY prin URI percent-encodat
+   (path-ul poate contine spatii), FARA fallback read-write; `INSERT...SELECT` cu id-urile originale;
+   descrierile = subsetul referit, cu id-urile originale; `sqlite_sequence` preia high-water mark-ul
+   sursei (nu doar MAX(id) copiat). Curatarile de fisiere ignora DOAR ENOENT.
+4. Verificare COUNT per tabela per owner + `integrity_check` + probe de citire post-rename.
+5. Marker durabil `.split-done.json` (CORECTIE review Sol): dupa verificarea TUTUROR ownerilor se
+   scrie `status="wiping"`, apoi DELETE explicit pe toate cele 7 tabele + verificare zero randuri,
+   apoi `status="done"`, apoi VACUUM best-effort (esecul compactarii nu mai e fatal).
+6. Idempotenta pe faze: fara marker => re-split complet din monolit; marker `wiping` => se reia
+   DOAR wipe-ul (fisierele per-user sunt deja sursa de adevar); marker `done` + randuri rnpm
+   reaparute in monolit (ex. restore de backup vechi al bazei) => BOOT ABORTAT fail-closed cu
+   procedura de remediere in RUNBOOK — splitter-ul nu suprascrie NICIODATA automat fisiere per-user
+   mai noi.
+Desktop = un singur owner `local`. Operatia e sincrona la boot (inainte de listen), dupa TOATE
+validarile fatale de configuratie; logata JSON (`action":"rnpm_split"` + per-owner counts).
 
 ### Backup generalizat (`backend/src/db/backup.ts`)
-- Parametrizare pe target `{ id, dbPath, backupDir, prefix, getHandle?, closeHandle }`.
-  Monolitul ramane un target cu comportament identic celui de azi.
-- Daily backup: itereaza monolitul + toate `rnpm/*.db` ENUMERATE DE PE DISC (nu din registry
-  — altfel nightly backup declanseaza provisioning sub lock); pentru useri inactivi deschide
-  un handle temporar simplu (fara migrations), `db.backup()`, close. Freshness check per target.
-  Retention 7/5/5 per target. Offsite hook per fisier (env neschimbat).
-- Restore per user: `withMaintenanceWrite` global (RWLock ramane UNIC — simplu si suficient la
-  zeci de useri) -> gard race (vezi mai jos) -> checkpoint + close handle-ul ownerului din
-  registry -> snapshot pre-restore in jail-ul lui -> unlink sidecars (throw pe non-ENOENT) ->
-  copy+rename atomic -> `integrity_check` -> auto-revert la esec -> reopen lazy.
-  Flux identic cu `restoreFromBackupImpl` existent, parametrizat.
-- Backup manual: acelasi mecanism ca daily, nume `rnpm.manual-<stamp>.db`, pool propriu de
-  retentie (5) ca sa nu evacueze daily-urile.
+- Parametrizare pe target; monolitul ramane un target cu comportament identic celui de azi.
+- CORECTIE review Sol — snapshot-uri SELF-CONTAINED peste tot: toate backup-urile noi (daily,
+  manual, pre-restore, pre-migration, pre-split) se produc cu `VACUUM INTO` (sincron, atomic,
+  include tot ce e comis), NU cu copyFile dependent de WAL. Restore-ul ramane compatibil cu
+  backup-urile legacy care au sidecars: se restaureaza ca BUNDLE (.db + -wal/-shm daca exista),
+  iar prune/delete sterg bundle-ul intreg.
+- Daily backup: itereaza monolitul + toate `rnpm/*.db` de pe disc (fara provisioning; handle
+  temporar readonly `fileMustExist`); freshness PER TARGET (early-return-ul global de azi se
+  elimina); retentie 4 pool-uri disjuncte (daily/pre-restore/pre-migration/manual, regex cu
+  prefix escapat) per target; snapshot-urile ruleaza sub `withMaintenanceWrite`, dar hook-urile
+  OFFSITE ruleaza DUPA eliberarea lock-ului (altfel N useri x 10 min timeout blocheaza scrierile).
+  Promise-ul backup-ului in curs e asteptat cu timeout in `gracefulShutdown`.
+- Restore per user: `withMaintenanceWrite` -> `beginRnpmRestore` (SEARCH_ACTIVE daca are cautare)
+  -> validare nume (regex + `path.resolve` in jail) -> validare VERSIUNE de schema a backup-ului
+  (backup dintr-o versiune mai noua => reject clar, altfel anti-downgrade-ul runner-ului blocheaza
+  fisierul) -> snapshot pre-restore VERIFICAT prin `VACUUM INTO` -> close handle -> unlink sidecars
+  (doar ENOENT tolerat) -> copy bundle + rename atomic -> `integrity_check` -> auto-revert prin
+  `.revert-tmp` + rename (nu copyFile direct peste fisierul viu) -> reopen lazy.
+- Backup manual: `VACUUM INTO`, nume `rnpm.manual-<stamp>.db`, pool propriu (5); pentru un user
+  fara fisier inca, create provisioneaza intai baza goala (decizie explicita); ruta are cooldown
+  60s per owner (429 + Retry-After — snapshotul tine maintenance lock-ul si declanseaza offsite).
 
-### Gard race restore-vs-search (gasit de verificatorul adversarial)
-Registry in-proces `activeRnpmSearches: Map<ownerId, count>` incrementat/decrementat in
-`executeSearch`/`executeSplitSearch` (rnpmSearchService.ts). Restore cu search activ =>
-409 envelope `{ code: "SEARCH_ACTIVE" }`. Pornirea unei cautari in timpul restore-ului
-propriu => 409 `RESTORE_IN_PROGRESS` (flag per owner pe durata restore-ului).
-Fara asta, scrierile cautarii in-flight pica silentios pe FK dupa swap si captcha e platit degeaba.
+### Garduri de concurenta (extinse dupa review)
+Registry in-proces in DB layer (`backend/src/db/rnpmActivity.ts`), cu erori tipate cu cod masina:
+- Restore cu search activ => 409 `SEARCH_ACTIVE`; search pornit in timpul restore-ului => 409
+  `RESTORE_IN_PROGRESS`. Gardul de search e verificat IN RUTA, inainte de a porni stream-ul SSE
+  (dupa start, 200 e deja trimis).
+- Latch-ul de restore e consultat si de `getRnpmDb` (acopera toate operatiile repository, nu doar
+  search) si mapat central la 409 in error handler.
+- `DELETE /saved/all` si `POST /saved/delete-batch` refuza cu 409 `SEARCH_ACTIVE` cand ownerul are
+  o cautare in zbor (altfel FK errors / repopulare imediat dupa stergere).
+- Restore si daily backup se serializeaza natural (ambele sub acelasi `withMaintenanceWrite`).
 
 ### Schimbare de contract API (asumata explicit)
 Id-urile de search/aviz NU mai sunt unice global, ci per fisier user. `getSearchOwnership`
@@ -129,14 +164,27 @@ interpretabil doar impreuna cu `owner_id` (coloana exista deja pe audit).
 
 ## Etape de implementare (fiecare commit trece gate-urile 0.3: biome + tsc + build + teste)
 
-0. **Spec + plan executabil**: comite designul in `docs/superpowers/specs/2026-07-10-rnpm-split-per-user-design.md` (continutul acestui plan), apoi plan de implementare TDD detaliat via skill-ul `superpowers:writing-plans` in `docs/superpowers/plans/`.
-1. **DB layer**: `rnpmDb.ts` (registry, pragmas, UDF, provisioning lazy) + `migrations-rnpm/0001` baseline consolidat + teste (provisioning, sentinel trap, UDF pe handle nou).
-2. **Rutare repos**: cele 16 call-sites din `avizRepository.ts`/`searchRepository.ts` + `checkpointWal`/`compactDb` per handle + redefinirea `getSearchOwnership` (owned/missing) + adaptarea testelor de izolare (semantic).
-3. **Splitter**: `rnpmSplitter.ts` + wiring in `index.ts` + teste (fidelitate COUNT, descrieri subset cu id-uri originale, idempotenta la crash, preflight disc, DB legacy).
-4. **Backup multi-target**: generalizarea `backup.ts` + daily backup enumerat de pe disc + backup manual + restore per user cu gard race + `backup.test.ts` extins (cel mai greu pas — edge-case-urile existente re-verificate per target).
-5. **Rute + guard-uri**: rnpm backups self-service owner-scoped + `/api/admin/backups` (monolit) + gard SEARCH_ACTIVE/RESTORE_IN_PROGRESS + audit + teste de contract (jail, 409, admin targeting).
-6. **UI**: panoul "Baza mea RNPM" + sectiunea Setari admin "Backup baza de date" + copy romana + teste frontend.
-7. **Docs + release**: RUNBOOK (sectiuni: split, restore per user, DR cu N+1 fisiere, offsite multi-fisier), SECURITY.md (suprafata noua self-service), DEPLOY-SERVER.md, CLAUDE.md (arhitectura: DB-uri per user RNPM), apoi checklist bump v2.43.0 din CLAUDE.md.
+Ordinea REVIZUITA dupa review-ul Sol (splitter-ul se construieste inainte de rutare; cutover-ul e
+un singur commit — altfel exista o fereastra in care scrierile noi si datele legacy traiesc in
+layout-uri diferite). Planul executabil: `docs/superpowers/plans/2026-07-10-rnpm-split-per-user.md` (Rev. 3).
+
+1. **Baseline migrations-rnpm** + test de echivalenta structurala cu monolitul (anti-drift).
+2. **DB layer**: `rnpmActivity.ts` (registry activitate + erori tipate) + `rnpmDb.ts` (registry
+   handle-uri, stem collision-safe, latch restore, provisioning lazy, openRnpmDbRaw).
+3. **Splitter** (modul + teste cu failpoints, NEMONTAT): marker durabil, preflights, backup strict.
+4. **CUTOVER atomic**: rutare repos + `getSearchOwnership` owned/missing + wiring splitter la boot
+   + adaptarea testelor de izolare — UN SINGUR commit.
+5. **Bracketing + garduri pre-SSE**: begin/end search in service, gard RESTORE_IN_PROGRESS in rute
+   inainte de SSE, mapare centrala 409.
+6. **Backup multi-target**: VACUUM INTO peste tot, restore bundle-aware + validare versiune,
+   freshness per target, offsite in afara lock-ului, await la shutdown, full-flow test.
+7. **Rute + guard-uri**: self-service owner-scoped cu cooldown pe create + erori de validare 400
+   + `/api/admin/backups` (monolit) + gard SEARCH_ACTIVE pe delete-all/delete-batch.
+8. **UI**: panoul "Baza mea RNPM" + sectiunea Setari admin "Backup baza de date" + copy romana + teste.
+9. **Docs + release**: RUNBOOK (split, marker, "monolit restaurat dupa split", recuperare per user,
+   igiena fisiere orfane, offsite N+1), SECURITY.md, DEPLOY-SERVER.md, CLAUDE.md, bump v2.43.0.
+10. **Verificare finala**: gate-uri complete + smoke pe bundle (dist-backend) + smoke desktop cu
+   split real + smoke web cu doi useri.
 
 ## Verificare end-to-end
 
