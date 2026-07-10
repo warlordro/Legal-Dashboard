@@ -1,12 +1,71 @@
 # Session Handoff
 
-**Versiune curenta**: v2.42.0 (2026-07-07)
+**Versiune curenta**: v2.42.0 (2026-07-07) — sprintul v2.43.0 e in faza de plan, fara bump inca.
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
 operational kill switches, riscuri ramase si directii deschise pentru urmatorul agent.
 
-## Sprint activ: v2.42.0 (branch `feat/v2.42.0-users-settings`)
+## Sprint ACTIV: v2.43.0 — Split RNPM per user (branch `feat/v2.43.0-rnpm-split`)
+
+**Decizia (2026-07-10, dupa incidentul restore whole-DB de la testul live):** separare fizica
+DOAR pe modulul RNPM, per utilizator — fiecare user primeste fisierul lui SQLite
+`rnpm/<stem>.db` cu backup/restore self-service (inclusiv backup manual); restul aplicatiei
+(users, auth, quota, monitoring, audit, fx_rates) ramane in baza unica. Managementul backup-ului
+bazei unice se muta in Setari (admin-only, cu backup manual si copy explicit). ID-urile de
+search/aviz devin namespace per user — starea "foreign"/403 dispare, izolarea e fizica
+(confirmat explicit de user: "fiecare user este izolat de celalalt"). Analiza comparativa a 5
+variante (artifact HTML): https://claude.ai/code/artifact/bdd089f7-467c-433e-995d-80f85d98d236
+
+**STARE: PLAN COMPLET, EXECUTIA NU A INCEPUT.** Zero cod scris — pe branch sunt DOAR documente.
+
+**Sursele de adevar (comise pe branch, in aceasta ordine de citit):**
+1. `docs/superpowers/plans/2026-07-10-rnpm-split-per-user.md` — planul executabil (Rev. 3):
+   Task 0-10 cu pasi TDD, cod complet, comenzi, mesaje de commit. E AUTONOM — Anexa A contine
+   tot codul de referinta; nu cauta revizii vechi in git.
+2. `docs/superpowers/specs/2026-07-10-rnpm-split-per-user-design.md` — spec-ul aprobat, aliniat
+   la toate corectiile de review.
+3. Commit-uri documente: 468b744 (initial) -> 06a9c48 (fixuri review-panel) -> 42a9e0a (Rev. 3,
+   fixuri Sol) -> d2b5916 (Anexa A, plan autonom) -> 32fb5c6 (Task 0 CodeRabbit).
+
+**Review consumat (3 runde; toate findings-urile confirmate sunt IN plan, cele respinse au
+motivarea documentata in sectiunea "Istoric review" din plan):** review-panel multi-model
+(Opus 4.8 + Kimi K2.7 + GLM-5.2 + DeepSeek V4, sinteza Fable) + GPT-5.6 Sol (2 rapoarte).
+Decizii de design iesite din review — NU le "simplifica" inapoi la executie:
+- nume de fisier = `rnpmFileStem` (lowercase + hash sha256 scurt) — coliziuni case-insensitive
+  pe Windows/macOS + nume rezervate Windows;
+- marker durabil `rnpm/.split-done.json` (faze wiping/done) + ABORT de boot daca monolitul e
+  restaurat dintr-un backup pre-split (splitter-ul NU suprascrie fisiere per-user mai noi);
+- cutover ATOMIC: Task 3 construieste splitter-ul NEMONTAT; Task 4 = rutare repositories +
+  montare la boot intr-UN SINGUR commit;
+- snapshot-uri self-contained prin `VACUUM INTO` peste tot (nu copyFile pe DB cu WAL);
+- latch-ul de restore e verificat in `getRnpmDb` (acopera toate operatiile, nu doar search);
+- `requireDesktopHeader` RAMANE pe toate rutele (CSRF desktop; pass-through pe web);
+  self-service = `requireRole("admin", "user")` in loc de admin-only;
+- URI-ul ATTACH e percent-encodat (path-ul real contine spatii).
+
+**Primul task de executat — Task 0 (fixuri CodeRabbit verificate, independente de split):**
+pricing `openai/gpt-5.4` output 10 -> 15 USD/1M (dovada OpenRouter live; modelul nu mai e
+selectabil in aplicatie — inlocuit de GPT-5.6 — dar intrarea ramane pentru retry-uri si randuri
+istorice); fallback `Necunoscut (token)` in cele 4 helpere de etichete din frontend/src/lib
+(userLabels, monitoringRunStatus, auditOutcome, quotaFeatureLabels) + testele lor;
+`recordAuditSafe` pe caile de refuz din `routes/admin.ts`. RESPINS cu dovada: mutarea
+`PERIOD_RO` din AIUsagePanel in lib (single-use, tipat exhaustiv).
+
+**Reguli sprint (stricte):**
+- Branch-ul e STACKED pe `feat/v2.42.0-users-settings`, care e INGHETAT (MR-ul lui spre main
+  asteapta aprobare in GitLab) — NU comite nimic acolo si nimic pe `main`. Merge-ul v2.42 se
+  face fara squash, deci v2.43 nu va avea nevoie de rebase.
+- `main` a primit intre timp merge-uri GitLab (fixuri oauth2-proxy) — nu le atinge; la un
+  `git checkout main` fisierele sprintului dispar din working tree (sunt pe branch), nu e pierdere.
+- Gate-uri la FIECARE commit: biome doar pe fisierele atinse (re-stage), tsc backend + frontend,
+  `npm run build`, suita de teste; `git add` DOAR pe fisiere enumerate (niciodata -A pe directoare).
+- TDD strict (testul pica INAINTE de implementare); nu slabi asertii; push DOAR la cererea userului.
+- `PROMPT-GPT56-SOL-rnpm-split.md` (radacina, untracked) = promptul de REVIEW pentru GPT-5.6 Sol;
+  a fost deja consumat pe Rev. 2 (findings aplicate) — refoloseste-l doar daca userul cere alt review.
+- Dupa teste Node care ating better-sqlite3: `npm run rebuild:electron` inainte de smoke Electron.
+
+## Sprint v2.42.0 — INCHIS; MR spre main IN ASTEPTARE (branch `feat/v2.42.0-users-settings`)
 
 Reimplementare delta v2.40.1 -> v2.42.0 dupa `GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`.
 Reguli: doar branch-uri (nimic pe main), branch-uri minime, gate-uri 0.3 inainte de
