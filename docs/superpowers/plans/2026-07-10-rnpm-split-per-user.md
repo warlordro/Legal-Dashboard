@@ -45,6 +45,61 @@ owner-scoped + router admin nou pentru monolit.
 
 ---
 
+### Task 0: Fixuri CodeRabbit verificate (pre-executie, independente de split)
+
+Claims CodeRabbit de pe MR-ul GitLab, VERIFICATE pe cod + surse live (2026-07-10). Se livreaza
+pe acest branch inaintea task-urilor de split (ajung in main prin MR-ul v2.43; daca MR-ul v2.42
+se redeschide, commit-ul se poate cherry-pick-ui).
+
+Claim RESPINS cu dovada (NU se implementeaza): mutarea `PERIOD_RO` din `AIUsagePanel.tsx` in
+`frontend/src/lib/` — definit si folosit O SINGURA data, file-local, tipat exhaustiv
+`Record<MeBudgetItem["period"], string>`; abstractie pentru cod folosit o data.
+
+**Files:**
+- Modify: `backend/src/services/aiUsage.ts` (+ `aiUsage.test.ts`)
+- Modify: `backend/src/routes/admin.ts` (+ testul de rute admin existent)
+- Modify: `frontend/src/lib/userLabels.ts`, `monitoringRunStatus.ts`, `auditOutcome.ts`, `quotaFeatureLabels.ts` (+ testele lor)
+
+- [ ] **Step 0.1 (red): pricing `openai/gpt-5.4`** — in `aiUsage.test.ts` adauga un test care
+calculeaza costul unui call `openai/gpt-5.4` cu 1M output tokens si asteapta **$15** (dovada:
+OpenRouter API `pricing.completion = "0.000015"`; input `0.0000025` = $2.50 e deja corect).
+Ruleaza — pica (codul are `outputUsdPerMillion: 10`). CONTEXT: GPT-5.4 nu mai e selectabil in
+aplicatie (inlocuit de GPT-5.6), dar intrarea ramane deliberat pentru retry-uri si randuri
+istorice — fix-ul corecteaza contorizarea costului pe acele cai, severitate scazuta.
+- [ ] **Step 0.2 (green):** in `aiUsage.ts`, tabela de slug-uri OpenRouter:
+`"openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 15 }` (era 10). NU atinge
+intrarea nativa `"gpt-5.4": 1.25/10` (tabelul pricing-ului OpenAI direct, neflagat).
+- [ ] **Step 0.3 (red): fallback localizat in cele 4 helpere de etichete** — actualizeaza INTAI testele:
+`expect(userRoleLabel("owner")).toBe("Necunoscut (owner)")`,
+`expect(userStatusLabel("archived")).toBe("Necunoscut (archived)")`,
+`expect(monitoringRunStatusLabel("weird")).toBe("Necunoscut (weird)")` (null ramane "—"),
+`expect(outcomeLabel("bogus" as never)).toBe("Necunoscut (bogus)")`,
+`expect(quotaFeatureLabel("mystery")).toBe("Necunoscut (mystery)")` (LEGACY_LABELS neschimbate).
+Ruleaza — pica.
+- [ ] **Step 0.4 (green):** in fiecare helper, fallback-ul `?? token` devine
+`` ?? `Necunoscut (${token})` `` — aliniere la pattern-ul stabilit `rnpmGapReason.ts` (label
+localizat + token-ul brut pastrat in paranteze pentru diagnosticare; un enum nou de backend
+ramane VIZIBIL, nu mascat de un generic "Necunoscut"). Actualizeaza comentariile de header care
+descriau fallback-ul pe token brut.
+- [ ] **Step 0.5 (red+green): audit pe caile de refuz din `admin.ts`** — apelurile `recordAudit`
+NEIMPACHETATE de pe caile de refuz si de citire devin `recordAuditSafe` (un esec tranzitoriu al
+INSERT-ului de audit nu are voie sa transforme 409/403/200-ul intentionat in 500): `email_exists`
+(~L292), `demote_blocked` (~L484), `deactivate_blocked` (~L519 si ~L533), `audit.viewed` (~L590).
+Localizeaza dupa actiune, nu dupa linie. Test (red intai): mock/spy pe `recordAudit` care arunca
+=> POST /users cu email duplicat raspunde tot 409 `email_exists`, nu 500. Site-urile post-mutatie
+raman cum sunt (deja `recordAuditSafe` din v2.42).
+- [ ] **Step 0.6: Gate-uri + commit**
+
+```bash
+npx biome check --write backend/src/services/aiUsage.ts backend/src/services/aiUsage.test.ts backend/src/routes/admin.ts frontend/src/lib/userLabels.ts frontend/src/lib/userLabels.test.ts frontend/src/lib/monitoringRunStatus.ts frontend/src/lib/monitoringRunStatus.test.ts frontend/src/lib/auditOutcome.ts frontend/src/lib/auditOutcome.test.ts frontend/src/lib/quotaFeatureLabels.ts frontend/src/lib/quotaFeatureLabels.test.ts <testul admin adaptat>
+npx tsc --noEmit -p backend/tsconfig.json && cd frontend && npx tsc --noEmit && cd ..
+npm run build && npm run test:backend && cd frontend && npm test -- --run && cd ..
+git add <fisierele de mai sus>
+git commit -m "fix: CodeRabbit batch — pricing output openai/gpt-5.4 (10->15), fallback localizat Necunoscut(token) in helper-ele de etichete, recordAuditSafe pe caile de refuz admin"
+```
+
+---
+
 ### Task 1: Migration baseline consolidata `migrations-rnpm/0001`
 
 **Files:**
