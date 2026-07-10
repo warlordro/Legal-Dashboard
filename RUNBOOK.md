@@ -23,6 +23,9 @@ incidente — fiecare sectiune incepe cu simptomul si se termina cu pasii concre
 | Captcha cota epuizata pentru toti userii | §9 - Reset cota captcha urgent |
 | Web mode - userii nu mai pot loga (JWT issuer/audience) | §10 - JWT key rotation |
 | Investigatie post-incident (logs, audit) | §11 - Forensics |
+| Boot abortat: "monolitul contine din nou randuri RNPM" | "Monolit restaurat dupa split" (v2.43.0) |
+| Boot abortat: "ownerId invalid pentru operatii pe fisiere" | "Owner invalid la split" (v2.43.0) |
+| Backup/restore pe datele RNPM ale unui singur user | "Backup si restore per utilizator (RNPM)" |
 
 ---
 
@@ -669,3 +672,100 @@ originale (ai.single vs ai.multi) sunt pierdute la consolidare, iar granturile
 se duplica pe ambele pool-uri legacy la down. Nu rula down-ul decat daca
 backup-ul nu exista; nu rula up dupa down fara sa cureti intai
 user_quota_grants.
+
+---
+
+## Split-ul RNPM per utilizator (v2.43.0)
+
+Din v2.43.0 datele RNPM traiesc in fisiere SQLite SEPARATE per utilizator:
+`<dataDir>/rnpm/<stem>.db`, unde `stem = ownerId lowercase + "-" + sha256(ownerId)[:10]`
+(collision-safe pe filesystem-uri case-insensitive; imun la numele rezervate
+Windows). Monolitul `legal-dashboard.db` pastreaza restul (users, auth, quota,
+monitoring, audit, fx_rates).
+
+**Ce s-a intamplat la primul boot pe v2.43.0:** splitter-ul one-time
+(`backend/src/db/rnpmSplitter.ts`) a rulat automat: preflights fail-closed,
+backup pre-split `backups/legal-dashboard.pre-rnpm-split-<stamp>.db` (VACUUM
+INTO, verificat cu integrity_check — ACESTA e rollback-ul complet), copiere +
+verificare per owner, golirea tabelelor rnpm din monolit, marker durabil
+`rnpm/.split-done.json` (`status: "done"`). Log-urile sunt JSON pe stdout cu
+`"action":"rnpm_split"`. Boot-urile urmatoare nu mai re-splituiesc.
+
+### Monolit restaurat dupa split (boot abortat fail-closed)
+
+Simptom: boot-ul aborteaza cu `[rnpm_split] split-ul a fost deja finalizat,
+dar monolitul contine din nou randuri RNPM`. Cauza: cineva a restaurat un
+backup de monolit facut INAINTE de split (care mai contine tabele rnpm
+populate), iar splitter-ul refuza sa suprascrie fisierele per-user mai noi.
+Doua cai de remediere — alege UNA:
+
+1. **Pastreaza fisierele per-user (recomandat — sunt mai noi):** goleste
+   randurile rnpm din monolitul restaurat si reporneste:
+
+   ```sql
+   -- sqlite3 legal-dashboard.db
+   DELETE FROM rnpm_istoric; DELETE FROM rnpm_bunuri; DELETE FROM rnpm_creditori;
+   DELETE FROM rnpm_debitori; DELETE FROM rnpm_avize; DELETE FROM rnpm_searches;
+   DELETE FROM rnpm_bunuri_descrieri;
+   VACUUM;
+   ```
+
+2. **Re-split fortat (vrei datele RNPM DIN backup, pierzi fisierele per-user
+   curente):** cu aplicatia OPRITA, sterge fisierele per-user si marker-ul,
+   apoi reporneste — splitter-ul reia split-ul din monolitul restaurat:
+
+   ```bash
+   rm -rf "<dataDir>/rnpm"    # sterge si .split-done.json
+   ```
+
+### Owner invalid la split
+
+Simptom: boot abortat cu `ownerId invalid pentru operatii pe fisiere: ...`.
+Un rand din `rnpm_searches`/`rnpm_avize` are `owner_id` in afara pattern-ului
+`^[A-Za-z0-9_-]{1,64}$`. Split-ul NU a mutat nimic (preflight). Corecteaza
+manual randul in monolit (UPDATE owner_id la id-ul corect al userului din
+`users`) si reporneste.
+
+## Backup si restore per utilizator (RNPM, v2.43.0)
+
+- **Jail-uri:** backup-urile RNPM ale unui user stau in
+  `<dataDir>/backups/rnpm/<stem>/`, cu prefix `rnpm.`. Pool-uri disjuncte cu
+  retentie proprie: `rnpm.YYYY-MM-DD.db` (daily, 7), `rnpm.manual-*.db` (5),
+  `rnpm.pre-restore-*.db` (5), `rnpm.pre-<label>-*.db` (pre-migration, 5).
+  Monolitul pastreaza pool-urile lui in `backups/` cu prefix `legal-dashboard.`
+  (plus pool-ul nou `legal-dashboard.manual-*.db`, retentie 5).
+- **Self-service:** userii (rol `user` sau `admin`) isi creeaza backup manual
+  ("Creeaza backup acum", cooldown 60s/owner), restaureaza si sterg DOAR
+  jail-ul propriu, din modalul "Baza mea RNPM". Adminul poate tinti alt owner
+  (`?ownerId=` pe GET/DELETE, `body.ownerId` pe restore) — audit cu
+  `targetOwnerId`. Monolitul se administreaza din Setari > Backup
+  (`/api/v1/admin/backups`, admin-only).
+- **Garduri de concurenta:** restore-ul refuza 409 `SEARCH_ACTIVE` daca ownerul
+  are o cautare RNPM in zbor; in timpul restore-ului orice operatie RNPM a
+  ownerului primeste 409 `RESTORE_IN_PROGRESS` (latch in `getRnpmDb`).
+- **Validare versiune:** un backup RNPM produs de o versiune de schema mai noua
+  e respins la restore cu 400 (previne blocarea fisierului pe anti-downgrade).
+- **Rollback schema per-user:** chain-ul separat `migrations-rnpm/` are
+  `*.down.sql` pentru fiecare migration; pre-migration backup per fisier
+  (`rnpm.pre-schema-upgrade-*.db`) se face automat cand exista migrations
+  pending pe un fisier existent.
+
+### Offsite backup pe multi-target
+
+`runDailyBackup()` produce acum N+1 fisiere pe noapte (monolit + cate unul per
+fisier user de pe disc, cu freshness PER TARGET). `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`
+este invocat o data PER FISIER proaspat, DUPA eliberarea lock-ului de
+maintenance (upload-urile lente nu mai blocheaza scrierile). Sincronizarea
+externa (S3/rclone/restic) trebuie sa acopere si `backups/rnpm/**`.
+
+### Igiena fisierelor orfane (conturi sterse)
+
+Stergerea unui cont e soft-delete (randul `users` ramane cu `status='deleted'`,
+iar re-adaugarea REACTIVEAZA acelasi id) — fisierul `rnpm/<stem>.db` si jail-ul
+`backups/rnpm/<stem>/` raman deliberat pe disc pentru reactivare. ID-urile nu
+se reutilizeaza intre persoane diferite (email unic + acelasi rand users), deci
+un fisier orfan nu poate fi "capturat" de alt user. Curatarea definitiva e
+manuala si doar pentru conturi care sigur nu revin: cu aplicatia oprita (sau
+userul inactiv), sterge `rnpm/<stem>.db` (+ `-wal`/`-shm`) si directorul
+`backups/rnpm/<stem>/`. Stem-ul unui ownerId se poate calcula cu:
+`node -e "const c=require('crypto');const id=process.argv[1];console.log(id.toLowerCase()+'-'+c.createHash('sha256').update(id,'utf8').digest('hex').slice(0,10))" <ownerId>`

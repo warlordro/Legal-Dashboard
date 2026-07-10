@@ -1,5 +1,37 @@
 # Changelog - Legal Dashboard
 
+## v2.43.0 - 2026-07-10
+
+Separare fizica a datelor RNPM per utilizator: fiecare cont primeste propriul fisier SQLite `rnpm/<stem>.db`, cu backup si restaurare self-service care ating DOAR datele proprii. Baza unica (monolitul) pastreaza restul aplicatiei (utilizatori, autentificare, cote, monitorizari, audit, cursuri valutare) si primeste management de backup dedicat, admin-only, in Setari > Backup. Motivatia: incidentul din testarea live in care restaurarea din zona RNPM s-a dovedit a fi whole-DB si a pierdut scrieri recente din alte module.
+
+### Split-ul one-time la primul boot
+
+La prima pornire pe o baza cu date RNPM, un splitter crash-safe muta datele fiecarui owner din monolit in fisierul lui (`rnpm/<stem>.db`, unde stem = ownerId lowercase + hash scurt — imun la coliziuni case-insensitive pe Windows/macOS si la numele rezervate Windows), pastrand ID-urile originale si preluand high-water mark-ul `sqlite_sequence`. Protocol in doua faze cu marker durabil `rnpm/.split-done.json`: preflights fail-closed (validare owneri, integritate FK, consistenta owner parinte-copil, spatiu pe disc 3x), backup pre-split STRICT verificat (`legal-dashboard.pre-rnpm-split-*.db`), copiere + verificare per owner (tmp + rename atomic + integrity check post-publish), abia apoi golirea monolitului. Un crash inainte de marker lasa monolitul sursa de adevar (re-run reface totul); un crash in timpul golirii reia DOAR golirea. Daca un backup de monolit pre-split e restaurat DUPA split, boot-ul aborteaza fail-closed cu instructiuni in RUNBOOK (splitter-ul nu suprascrie fisierele per-user mai noi).
+
+### Izolare fizica in loc de filtre
+
+Repositories RNPM (`avizRepository`, `searchRepository`) citesc si scriu fisierul per user prin registry-ul `rnpmDb.ts` (provisioning lazy cu chain separat de migrations `migrations-rnpm/`, baseline consolidat cu test de echivalenta structurala anti-drift fata de monolit). ID-urile de search/aviz devin namespace per fisier: starea "foreign" si raspunsul 403 cross-tenant dispar din contract — un id strain pur si simplu nu exista in fisierul callerului ("missing" = search nou, fara eroare vizibila). Garduri de concurenta: o cautare in zbor blocheaza restaurarea (409 `SEARCH_ACTIVE`) si invers (409 `RESTORE_IN_PROGRESS`, verificat si in DB layer prin latch pe `getRnpmDb`, si pre-SSE pe rutele de cautare, si central prin `app.onError`).
+
+### Backup multi-target + self-service
+
+`backup.ts` generalizat pe targets (monolit + fiecare fisier rnpm de pe disc): toate snapshot-urile noi sunt self-contained prin `VACUUM INTO` (inclusiv pre-migration backup — fara sidecars WAL/SHM de copiat), restore bundle-aware pentru backup-urile legacy (.db + -wal/-shm copiate impreuna, WAL-ul recuperat la verificare), pre-restore snapshot VERIFICAT inainte de swap, auto-revert prin temp + rename, validare de versiune de schema la restore (un backup dintr-o versiune mai noua e respins cu mesaj clar, nu blocheaza fisierul), retentie pe 4 pool-uri disjuncte per target (daily 7 / pre-restore 5 / pre-migration 5 / manual 5, prune bundle-aware), freshness PER TARGET la daily backup (monolitul proaspat nu mai sare peste fisierele user noi) si offsite hook rulat DUPA eliberarea lock-ului de maintenance. Shutdown-ul asteapta backup-ul in curs (10s).
+
+### Rute si UI
+
+Self-service owner-scoped pe `/api/rnpm/backups*` (list/create/restore/delete pe jail-ul propriu `backups/rnpm/<stem>/`; adminul poate tinti alt owner; non-adminii primesc silentios jail-ul propriu), cooldown 60s pe backup-ul manual (429 + `Retry-After`), erori de validare clasificate 400 `INVALID_PARAMS` (nu 500). `GET /stats`, `POST /compact`, `DELETE /saved/all` si folderele desktop opereaza pe fisierul callerului si devin self-service (`admin` + `user`); delete-urile refuza 409 in timpul unei cautari active. Rutele de backup ale monolitului s-au mutat in `/api/v1/admin/backups` (admin-only). UI: butonul devine "Baza mea RNPM" cu "Creeaza backup acum" si copy explicit per-user la restaurare/stergere (restul aplicatiei si ceilalti utilizatori nu sunt afectati; fara "reporneste aplicatia" — fisierul se redeschide lazy); tab nou Setari > Backup pentru baza completa, cu confirmare destructiva explicita.
+
+### Fixuri independente (batch CodeRabbit)
+
+Pricing `openai/gpt-5.4` output corectat 10 -> 15 USD/1M (dovada OpenRouter live; intrarea ramane pentru retry-uri istorice), fallback localizat `Necunoscut (token)` in cele 4 helpere de etichete din frontend (roluri/statusuri utilizator, status rulare monitorizare, outcome audit, feature cota), `recordAuditSafe` pe caile de refuz din rutele admin (un esec tranzitoriu al scrierii de audit nu mai transforma 409/403-ul intentionat in 500).
+
+### Verificare
+
+TDD strict per task (red inainte de implementare), gate-uri complete la fiecare commit (biome, tsc backend + frontend, build, suite). 1795 teste backend (+ ~100 noi: baseline echivalenta schema, registry per owner, splitter cu failpoints de crash, backup multi-target, full-flow split -> backup -> restore, contracte rute self-service + admin) si 347 teste frontend (+ modal restore per-user, pagina admin Backups). Deviere documentata fata de plan, validata cu GPT-5.6 Sol la executie: ATTACH readonly prin URI nu e suportat de better-sqlite3 (compilat fara SQLITE_USE_URI) — copierea splitter-ului foloseste doua conexiuni (sursa deschisa readonly REAL la nivel de OS) cu transfer prin JavaScript, acelasi contract fail-closed.
+
+### Note de upgrade
+
+Primul boot dupa upgrade ruleaza split-ul automat (o singura data; pe baze mari dureaza proportional cu volumul RNPM). Rollback-ul complet = restaurarea backup-ului `legal-dashboard.pre-rnpm-split-*.db` pe versiunea VECHE a aplicatiei (pe v2.43.0 un monolit restaurat pre-split aborteaza boot-ul fail-closed — vezi RUNBOOK "Monolit restaurat dupa split"). Backup-urile vechi de monolit raman restaurabile din Setari > Backup; datele RNPM au de acum backup separat per utilizator.
+
 ## v2.42.0 - 2026-07-07
 
 Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode) si aliniere de design la repo-ul de referinta. Partea a doua a reimplementarii deltei v2.40.1 -> v2.42.0 dupa `GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md` (MR 5-12 pe branch-ul `feat/v2.42.0-users-settings`, construit peste `feat/v2.41.0-web-ux` — vezi sectiunea v2.41.0), plus fixuri post-livrare din testare reala. Release-ul consolidat este v2.42.0; v2.41.0 nu a avut artefact propriu. Modul desktop: zero impact.

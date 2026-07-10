@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.42.0** - 7 Iulie 2026
+**v2.43.0** - 10 Iulie 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -81,7 +81,7 @@ legal-dashboard/
 Modulele individuale sunt descoperite la nevoie cu Glob/Grep. Constrangeri arhitecturale cheie:
 - Repository-only DB access: SQL raw doar in `backend/src/db/**`
 - `owner_id` pe toate tabelele (DEFAULT `'local'`)
-- Migrations in `backend/src/db/migrations/` (latest 0038)
+- Migrations monolit in `backend/src/db/migrations/`; fisierele RNPM per user au chain SEPARAT in `backend/src/db/migrations-rnpm/` (baseline consolidat, test de echivalenta structurala anti-drift in `rnpmDb.test.ts` — o migration monolit care atinge tabele `rnpm_*` are nevoie de pereche in baseline)
 - Backend bundled CJS (esbuild) - vezi `## Nota Importanta Build`
 - Tabele monitoring: `monitoring_jobs`, `monitoring_runs`, `monitoring_snapshots`, `monitoring_alerts`, `owner_email_settings`
 
@@ -108,7 +108,7 @@ Tabelul complet de kill switches operationale e in [SESSION-HANDOFF.md](SESSION-
 ## Arhitectura
 - **Frontend**: React 18, Vite 6, Tailwind + clsx + tailwind-merge (`cn()` helper), Recharts, DOMPurify
 - **Backend**: Hono + `@hono/node-server`, SOAP XML parsing manual
-- **DB**: SQLite via `better-sqlite3`, repositories + schema cu `owner_id DEFAULT 'local'` pe toate tabelele
+- **DB**: SQLite via `better-sqlite3`. Monolitul (`legal-dashboard.db`) tine users/auth/quota/monitoring/audit/fx_rates; datele RNPM traiesc in fisiere SEPARATE per user `rnpm/<stem>.db` (v2.43.0, `backend/src/db/rnpmDb.ts` = entry point pentru handle-uri + provisioning lazy pe chain-ul `migrations-rnpm/`). Repositories + schema cu `owner_id DEFAULT 'local'` pe toate tabelele
 - **AI**: Anthropic SDK, OpenAI SDK, Google Generative AI SDK **+ toggle OpenRouter** (auto-detect prefix `sk-or-`, kill switch `OPENROUTER_DISABLED`)
 - **Captcha**: 2Captcha + CapSolver (mod sequential sau race)
 - **Export**: `xlsx-js-style` cu formula-injection escape (`=+-@\t\r` prefix)

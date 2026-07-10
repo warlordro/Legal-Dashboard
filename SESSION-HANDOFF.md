@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.42.0 (2026-07-07) — sprintul v2.43.0 e in faza de plan, fara bump inca.
+**Versiune curenta**: v2.43.0 (2026-07-10) — bump facut pe branch-ul `feat/v2.43.0-rnpm-split`; push NEFACUT (asteapta cererea userului).
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
@@ -17,16 +17,25 @@ search/aviz devin namespace per user — starea "foreign"/403 dispare, izolarea 
 (confirmat explicit de user: "fiecare user este izolat de celalalt"). Analiza comparativa a 5
 variante (artifact HTML): https://claude.ai/code/artifact/bdd089f7-467c-433e-995d-80f85d98d236
 
-**STARE: PLAN COMPLET, EXECUTIA NU A INCEPUT.** Zero cod scris — pe branch sunt DOAR documente.
+**STARE: EXECUTAT INTEGRAL PE COD (Task 0-9, 2026-07-10), TDD strict, gate-uri complete la
+fiecare commit.** Ramane Task 10 (smoke desktop Electron + smoke web cu 2 useri) inainte de
+push/MR. Commit-uri (branch cu commit-uri consolidate, la cererea userului):
+d4ff132 (Task 0 CodeRabbit) -> f8e341c (T1-T3: baseline migrations-rnpm, rnpmDb+rnpmActivity,
+splitter nemontat) -> 27ad85f (T4-T5: CUTOVER atomic repositories + splitter la boot +
+bracketing/garduri 409) -> 0e64961 (T6-T7: backup multi-target + rute self-service +
+/api/v1/admin/backups) -> 0201545 (T8: frontend Baza mea RNPM + tab Setari > Backup) + commit-ul
+de docs/bump v2.43.0. Stare gate-uri la final: 1795 teste backend + 347 frontend, biome/tsc/build verzi.
 
-**Sursele de adevar (comise pe branch, in aceasta ordine de citit):**
-1. `docs/superpowers/plans/2026-07-10-rnpm-split-per-user.md` — planul executabil (Rev. 3):
-   Task 0-10 cu pasi TDD, cod complet, comenzi, mesaje de commit. E AUTONOM — Anexa A contine
-   tot codul de referinta; nu cauta revizii vechi in git.
-2. `docs/superpowers/specs/2026-07-10-rnpm-split-per-user-design.md` — spec-ul aprobat, aliniat
-   la toate corectiile de review.
-3. Commit-uri documente: 468b744 (initial) -> 06a9c48 (fixuri review-panel) -> 42a9e0a (Rev. 3,
-   fixuri Sol) -> d2b5916 (Anexa A, plan autonom) -> 32fb5c6 (Task 0 CodeRabbit).
+**DEVIERE documentata fata de plan (validata cu GPT-5.6 Sol prin /codex: la executie):**
+ATTACH readonly prin URI percent-encodat NU functioneaza — better-sqlite3 e compilat fara
+SQLITE_USE_URI, iar `PRAGMA mono.query_only` e connection-wide (ar bloca si scrierile in
+target). Inlocuitor echivalent fail-closed: sursa monolit deschisa pe conexiune SEPARATA cu
+`{ readonly: true }` (readonly REAL la nivel de OS) + copiere prin JavaScript intre conexiuni.
+Comentariu in `rnpmSplitter.ts` la `openMonoSourceReadonly`.
+
+**Sursele de adevar:**
+1. `docs/superpowers/plans/2026-07-10-rnpm-split-per-user.md` — planul executabil (Rev. 3).
+2. `docs/superpowers/specs/2026-07-10-rnpm-split-per-user-design.md` — spec-ul aprobat.
 
 **Review consumat (3 runde; toate findings-urile confirmate sunt IN plan, cele respinse au
 motivarea documentata in sectiunea "Istoric review" din plan):** review-panel multi-model
@@ -44,13 +53,9 @@ Decizii de design iesite din review — NU le "simplifica" inapoi la executie:
   self-service = `requireRole("admin", "user")` in loc de admin-only;
 - URI-ul ATTACH e percent-encodat (path-ul real contine spatii).
 
-**Primul task de executat — Task 0 (fixuri CodeRabbit verificate, independente de split):**
-pricing `openai/gpt-5.4` output 10 -> 15 USD/1M (dovada OpenRouter live; modelul nu mai e
-selectabil in aplicatie — inlocuit de GPT-5.6 — dar intrarea ramane pentru retry-uri si randuri
-istorice); fallback `Necunoscut (token)` in cele 4 helpere de etichete din frontend/src/lib
-(userLabels, monitoringRunStatus, auditOutcome, quotaFeatureLabels) + testele lor;
-`recordAuditSafe` pe caile de refuz din `routes/admin.ts`. RESPINS cu dovada: mutarea
-`PERIOD_RO` din AIUsagePanel in lib (single-use, tipat exhaustiv).
+**Task 0 (fixuri CodeRabbit) LIVRAT in d4ff132:** pricing `openai/gpt-5.4` output 10 -> 15,
+fallback `Necunoscut (token)` in cele 4 helpere de etichete + teste, `recordAuditSafe` pe caile
+de refuz din `routes/admin.ts`. RESPINS cu dovada: mutarea `PERIOD_RO` in lib (single-use).
 
 **Reguli sprint (stricte):**
 - Branch-ul e STACKED pe `feat/v2.42.0-users-settings`, care e INGHETAT (MR-ul lui spre main

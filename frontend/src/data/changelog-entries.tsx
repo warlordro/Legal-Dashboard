@@ -40,6 +40,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.43.0",
+    date: "10 Iulie 2026",
+    subtitle:
+      "Datele RNPM devin separate fizic per utilizator: fiecare cont are propriul fisier de baza de date, cu backup si restaurare self-service care ating DOAR datele proprii. Restaurarea nu mai poate afecta monitorizarile, utilizatorii sau setarile — baza completa are acum management de backup dedicat, admin-only, in Setari > Backup.",
+    icon: <Split className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Baza mea RNPM — fisier separat per utilizator",
+        content:
+          "La prima pornire dupa actualizare, datele RNPM ale fiecarui utilizator se muta automat intr-un fisier propriu (o singura data, cu backup complet de siguranta creat inainte). Din acel moment, fiecare cont este izolat fizic de celelalte: cautarile si avizele tale traiesc in fisierul tau, iar operatiile destructive (stergere baza, restaurare) nu pot atinge datele altcuiva.",
+      },
+      {
+        title: "Backup si restaurare self-service",
+        content:
+          "Din modalul 'Baza mea RNPM' poti crea oricand un backup manual ('Creeaza backup acum', cel mult unul pe minut), poti restaura un backup propriu sau poti sterge backup-urile tale — totul strict pe datele tale RNPM. Restaurarea refuza politicos daca ai o cautare in curs (si invers), iar inainte de orice suprascriere se salveaza automat un snapshot pre-restore. Backup-ul zilnic automat acopera acum si fisierele per utilizator, nu doar baza principala.",
+      },
+      {
+        title: "Setari > Backup pentru baza completa (admin)",
+        content:
+          "Backup-urile bazei complete (utilizatori, monitorizari, audit, setari) se administreaza dintr-un tab nou in Setari, doar pentru admini, cu confirmare explicita ca restaurarea atinge toate modulele si toti utilizatorii. Mesajele din zona RNPM spun acum clar ca acolo se restaureaza DOAR datele tale RNPM.",
+      },
+      {
+        title: "Fixuri marunte",
+        content:
+          "Costul afisat pentru modelul GPT-5.4 pe OpenRouter foloseste tariful corect de output; etichetele necunoscute din tabele apar ca 'Necunoscut (valoare)' in loc de codul brut; cateva refuzuri administrative nu mai pot fi transformate in eroare 500 de un esec trecator al jurnalului de audit.",
+      },
+    ],
+  },
+  {
     version: "v2.42.0",
     date: "7 Iulie 2026",
     subtitle:

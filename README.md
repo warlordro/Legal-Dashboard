@@ -7,10 +7,10 @@ PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
 Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
 `safeStorage` pe desktop si chei tenant criptate server-side in web mode.
 
-Versiune curenta: **v2.42.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
+Versiune curenta: **v2.43.0**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
 [SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
 
-Ultimul release **v2.42.0** - Administrare utilizatori completa in web mode: creare individuala si import xlsx cu template descarcabil (email unic case-insensitive, reactivare conturi sterse), pagina Setari pe taburi cu cele 6 pagini admin integrate, pool unic de cota AI cu granturi temporare si revocare, tab Consum per utilizator (AI + captcha), jurnal de audit cu email-uri si export xlsx, plus modelul Claude Sonnet 5 pe pozitia "Echilibrat". Desktop: zero impact functional. Predecesor **v2.41.0** - fundatia web UX: mediu local de testare cu doua proxy-uri simuland oauth2-proxy, layout web fara chrome Electron, status chei tenant pe roluri si vederi globale pentru Cote si Granturi (baza integrala a v2.42, fara artefact propriu de release).
+Ultimul release **v2.43.0** - Separare fizica a datelor RNPM per utilizator: fiecare cont primeste propriul fisier SQLite `rnpm/<stem>.db` (split one-time crash-safe la primul boot, cu backup pre-split verificat), backup si restaurare self-service strict pe datele proprii (cooldown, garduri de concurenta cautare/restore, snapshot pre-restore verificat), backup zilnic multi-target cu retentie pe pool-uri disjuncte si tab nou Setari > Backup (admin-only) pentru baza completa. Predecesor **v2.42.0** - administrare utilizatori completa in web mode: creare individuala si import xlsx, pagina Setari pe taburi, pool unic de cota AI cu granturi, tab Consum per utilizator, jurnal de audit cu export xlsx, Claude Sonnet 5.
 
 Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
