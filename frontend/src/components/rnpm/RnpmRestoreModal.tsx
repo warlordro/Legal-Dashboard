@@ -47,7 +47,7 @@ export function RnpmRestoreModal({ onClose, onRestored }: { onClose: () => void;
     if (restoring) return;
     if (
       !(await confirm({
-        message: `Restaurezi baza locala din ${entry.name}?\n\nBaza curenta va fi salvata automat ca legal-dashboard.pre-restore-*.db inainte de a fi suprascrisa. Dupa restore este recomandat sa reporniti aplicatia.`,
+        message: `Restaurezi DOAR datele tale RNPM din ${entry.name}?\n\nRestul aplicatiei (monitorizari, utilizatori, setari) NU este afectat. Baza ta actuala va fi salvata automat ca rnpm.pre-restore-*.db inainte de suprascriere.`,
         confirmLabel: "Restaureaza",
         destructive: true,
       }))
@@ -57,9 +57,8 @@ export function RnpmRestoreModal({ onClose, onRestored }: { onClose: () => void;
     setError(null);
     try {
       const { preRestoreName } = await rnpmRestoreBackup(entry.name);
-      setSuccessMsg(
-        `Restaurare completa. Snapshot pre-restore: ${preRestoreName}. Reporneste aplicatia pentru finalizare.`
-      );
+      // Fara "reporneste aplicatia" — fisierul per user se redeschide lazy.
+      setSuccessMsg(`Restaurare completa. Snapshot pre-restore: ${preRestoreName}.`);
       setTimeout(onRestored, 2500);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Eroare restore");
@@ -82,7 +81,7 @@ export function RnpmRestoreModal({ onClose, onRestored }: { onClose: () => void;
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <History className="h-4 w-4 text-muted-foreground" />
-            Restaurare baza locala
+            Restaurare baza mea RNPM
           </h3>
           <button
             type="button"

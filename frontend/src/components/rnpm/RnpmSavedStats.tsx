@@ -18,6 +18,7 @@ import {
   rnpmGetStats,
   rnpmOpenDbFolder,
   rnpmOpenBackupsFolder,
+  rnpmCreateBackup,
   rnpmDeleteBackups,
   rnpmDeleteAllSaved,
   rnpmListBackups,
@@ -49,7 +50,7 @@ export function RnpmSavedStats({ refreshKey, onAfterDeleteAll }: RnpmSavedStatsP
   return (
     <>
       <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Info className="h-4 w-4" /> Info baza locala
+        <Info className="h-4 w-4" /> Baza mea RNPM
       </Button>
       {open && (
         <StatsModal onClose={() => setOpen(false)} refreshKey={refreshKey} onAfterDeleteAll={onAfterDeleteAll} />
@@ -73,6 +74,7 @@ function StatsModal({
   const [compacting, setCompacting] = useState(false);
   const [compactMsg, setCompactMsg] = useState<string | null>(null);
   const [showRestore, setShowRestore] = useState(false);
+  const [creatingBackup, setCreatingBackup] = useState(false);
   // null = inca nu am aflat / eroare la listare → lasam butonul activ ca user-ul sa reincerce.
   const [backupCount, setBackupCount] = useState<number | null>(null);
 
@@ -142,11 +144,29 @@ function StatsModal({
     }
   };
 
+  // v2.43.0 (rnpm-split): backup manual self-service al fisierului propriu.
+  // 429 (cooldown) vine ca Error cu mesajul din envelope — il afisam ca
+  // eroare temporara, butonul ramane activ.
+  const handleCreateBackup = async () => {
+    if (creatingBackup) return;
+    setCreatingBackup(true);
+    setFolderError(null);
+    setCompactMsg(null);
+    try {
+      const { name } = await rnpmCreateBackup();
+      setCompactMsg(`Backup creat: ${name}.`);
+      await loadBackups();
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : "Eroare la crearea backup-ului");
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
   const handleDeleteBackups = async () => {
     if (
       !(await confirm({
-        message:
-          "Stergi toate backup-urile bazei locale?\n\nUrmatorul backup se va genera la urmatoarea pornire a aplicatiei.",
+        message: "Stergi toate backup-urile TALE RNPM?\n\nCelelalte module si ceilalti utilizatori nu sunt afectati.",
         confirmLabel: "Sterge backups",
         destructive: true,
       }))
@@ -228,7 +248,7 @@ function StatsModal({
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <Info className="h-4 w-4 text-muted-foreground" />
-            Info baza locala
+            Baza mea RNPM
           </h3>
           <button
             type="button"
@@ -307,6 +327,17 @@ function StatsModal({
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={handleOpenBackups}>
                   <Archive className="h-4 w-4" /> Backups
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCreateBackup}
+                  disabled={creatingBackup}
+                  title="Creeaza un backup manual al bazei tale RNPM"
+                >
+                  {creatingBackup ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
+                  Creeaza backup acum
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowRestore(true)}>
                   <History className="h-4 w-4" /> Restaurare

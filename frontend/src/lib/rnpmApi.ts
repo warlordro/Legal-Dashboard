@@ -376,6 +376,14 @@ export async function rnpmRestoreBackup(name: string): Promise<{ preRestoreName:
   return jsonOrThrow<{ ok: true; preRestoreName: string }>(res);
 }
 
+// v2.43.0 (rnpm-split): backup manual self-service al fisierului RNPM propriu.
+// 429 (cooldown) ajunge la caller ca Error cu mesajul din envelope.
+export async function rnpmCreateBackup(): Promise<{ name: string }> {
+  const res = await apiFetch(`${BASE}/backups/create`, { method: "POST" });
+  const data = await jsonOrThrow<{ ok: true; name: string }>(res);
+  return { name: data.name };
+}
+
 // Hard cap pentru blob xlsx/pdf — corespunde plafonului server din rnpm.ts.
 const EXPORT_BLOB_MAX = 5000;
 
