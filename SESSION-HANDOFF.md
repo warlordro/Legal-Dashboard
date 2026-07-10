@@ -19,22 +19,31 @@ au fost consolidate intr-un plan de fixuri care a trecut EL INSUSI printr-un rev
 COMMIT B dupa Task 6, COMMIT C dupa Task 8. Planul contine si sectiunile "Findings RESPINSE
 cu dovezi" si "Acceptate ca limitari" — NU le redeschide.
 
-**STARE EXECUTIE: Task 1 in faza RED (2026-07-10).** Ce e facut:
-- Testele fault-injection scrise in `backend/src/db/rnpmBackup.test.ts` — MODIFICARE
-  NECOMISA in working tree (intentionat: nu se comit teste rosii). Starea red asteptata:
-  4 teste pica (auto-revert la failpoint `post_publish`, retry EPERM pe rename-ul de
-  publicare, staging orfan curatat, backup rnpm fara `_schema_versions` => 400); 2 teste
-  noi trec deja coincidental pe implementarea veche (esec staging => live intact, esec
-  rename => live valid) si trebuie sa RAMANA verzi; testul legacy-bundle a fost adaptat
+**STARE EXECUTIE: Task 1 COMPLET (red -> GREEN, 2026-07-10).** Ce e facut:
+- Task 1.1 (red): teste fault-injection in `backend/src/db/rnpmBackup.test.ts`
+  (esec staging => live byte-identic; esec rename publicare => live vechi valid;
+  failpoint `post_publish` => auto-revert; retry EPERM pe rename; staging orfan
+  curatat; backup rnpm fara `_schema_versions` => 400). Testul legacy-bundle adaptat
   (forjeaza `_schema_versions` cu sentinelul `__backfilled_v1__` — hash-check-ul
-  runner-ului respinge alte valori) si e verde.
-- URMATORUL PAS: Task 1.2 — rescrierea `restoreTargetImpl` pe secventa de STAGING
-  (pasii exacti in plan; failpoint-ul se expune ca `opts.onPhase` pe
-  `restoreRnpmFromBackup`/`restoreFromBackup`, pattern-ul splitter-ului; testul red
-  apeleaza deja `restoreRnpmFromBackup("u1", name, { onPhase })`).
-- NOTA la 1.1 vs plan: ordinea aleasa la executie e STAGING intai, apoi pre-restore
-  snapshot (mai putine efecte pe backup invalid); testul de staging-failure NU asserteaza
-  existenta snapshot-ului. Ambele raman inainte de orice mutare a live-ului.
+  runner-ului respinge alte valori).
+- Task 1.2+1.3+1.4 (green): `restoreTargetImpl` rescris pe STAGING in
+  `backend/src/db/backup.ts` — staging dir `<dbPath>.restore-staging/` (cleanup orfan,
+  copiere bundle, integrity + wal_checkpoint pe STAGED, unlink sidecars staged),
+  pre-restore snapshot, closeLive, unlink sidecars live, UN SINGUR
+  `renameWithRetryAsync` de publicare, post-publish probe pe conexiune raw readonly
+  cu failpoint `onPhase("post_publish")`, auto-revert REORDONAT (sidecars intai, apoi
+  revert-tmp + rename), staging curatat in finally; `restoreFromBackup`/
+  `restoreRnpmFromBackup` au acum `opts?: RestoreOptions { onPhase }`;
+  `assertRnpmBackupVersionCompatible` e fail-closed pe lipsa `_schema_versions`.
+- Stare verificare: tsc backend verde; suitele afectate verzi (rnpmBackup + backup +
+  rnpmFullFlow: 35 passed / 4 skipped). Suita COMPLETA se ruleaza la gate-ul Commit A.
+- MODIFICARI NECOMISE in working tree (intentionat — Commit A abia dupa Task 3):
+  `backend/src/db/backup.ts` + `backend/src/db/rnpmBackup.test.ts`.
+- NOTA la 1.1 vs plan: ordinea aleasa e STAGING intai, apoi pre-restore snapshot
+  (mai putine efecte pe backup invalid); ambele raman inainte de orice mutare a live-ului.
+- URMATORUL PAS: **Task 2** (serializare delete sub maintenance lock, prune la
+  restore, pool preSplit cu regex exclusiv, cooldown cu refund, 400 pe ownerId admin
+  invalid) — red intai, conform planului.
 
 **Stare ABI better-sqlite3: NODE** (`npm rebuild better-sqlite3` rulat pentru vitest).
 OBLIGATORIU `npm run rebuild:electron` inainte de orice smoke Electron si la finalul
