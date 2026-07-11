@@ -104,6 +104,16 @@ consolidate pe branch:**
   Limitari asumate documentate in plan: publicarea initiala a lock-ului
   (fereastra de microsecunde, pre-existenta), FORCE_BOOT in afara gate-ului,
   O_EXCL pe NFS, worst-case 60s pe gate orfan.
+- **Rev. 5.1 (micro-fix, aprobat de user dupa review-ul de inchidere pe Rev. 5,
+  `review-mrflqs9x-9ly5vf`):** F1 (bundle la prune) confirmat INCHIS de Codex;
+  din cele 2 findings ramase: (a) MEDIUM reparat — mesaj EXPLICIT (errno +
+  path) cand gate-ul orfan nu poate fi sters + warn structurat pe finally +
+  fault-injection pe unlinkSync in instanceLock.gate.test.ts; (b) HIGH-ul
+  "heartbeat vs reclaim cross-host" DOCUMENTAT ca in afara topologiei
+  sustinute (volum partajat intre host-uri = nesuportat; pe single-host
+  reclaim-ul same-host cere PID mort, care nu are heartbeat — cursa
+  imposibila) — nota de topologie in RUNBOOK. VERDICT INTERN: branch-ul e
+  merge-ready pe cod pentru web.
 - Ramas pe RELEASE CHECKLIST: smoke pe artefact Electron IMPACHETAT
   (backup/restore/compact rulate din app.asar.unpacked — abia acolo se
   exerseaza real asarUnpack-ul + rezolutia bindings) + smoke web cu 2 useri pe

@@ -94,13 +94,22 @@ function withReclaimGate(path: string, fn: () => void): void {
         /* gate-ul a disparut intre timp (TOCTOU) — refuz tipat; retry-ul reuseste */
       }
       if (orphan) {
+        // Rev. 5.1 (Codex): mesajul spune ADEVARUL — daca gate-ul orfan nu
+        // poate fi sters (ACL deny-delete, AV), boot-urile urmatoare ar refuza
+        // la nesfarsit cu un mesaj care pretindea ca l-a curatat; operatorul
+        // trebuie sa afle fisierul si cauza exacta.
+        let removeErr: string | null = null;
         try {
           unlinkSync(gate);
-        } catch {
-          /* best-effort */
+        } catch (e) {
+          removeErr = (e as NodeJS.ErrnoException)?.code ?? String(e);
         }
+        if (removeErr === null && existsSync(gate)) removeErr = "inca prezent dupa unlink";
         throw new Error(
-          "Recuperarea lock-ului SQLite a fost intrerupta anterior (gate orfan curatat). Reincearca pornirea."
+          removeErr === null
+            ? "Recuperarea lock-ului SQLite a fost intrerupta anterior (gate orfan curatat). Reincearca pornirea."
+            : `Gate-ul de recuperare a lock-ului SQLite NU a putut fi sters (${removeErr}): ${gate}. ` +
+                "Verifica permisiunile/antivirusul pe acest fisier, sterge-l manual, apoi reporneste."
         );
       }
       throw new Error("Alt proces Legal Dashboard recupereaza lock-ul SQLite chiar acum. Reincearca pornirea.");
@@ -115,8 +124,13 @@ function withReclaimGate(path: string, fn: () => void): void {
       }
       try {
         unlinkSync(gate);
-      } catch {
-        /* best-effort */
+      } catch (e) {
+        // Nu mascam eroarea principala, dar semnalam vizibil: un gate ramas
+        // aici va fi tratat de self-heal la urmatorul reclaim (60s), iar
+        // operatorul are errno + path in log.
+        console.warn(
+          `[instanceLock] gate-ul de reclaim nu a putut fi sters (${(e as NodeJS.ErrnoException)?.code ?? e}): ${gate}`
+        );
       }
     }
   }

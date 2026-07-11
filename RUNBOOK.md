@@ -156,8 +156,15 @@ lock mort (docker restart pe acelasi volum), exact UNA recupereaza; cealalta
 refuza fail-closed cu mesajul de mai sus — restart policy-ul containerului (sau
 o repornire manuala) rezolva. Un gate ORFAN dupa un crash in mijlocul
 recuperarii se autovindeca: e curatat automat dupa 60s, iar urmatoarea pornire
-reuseste (worst-case: ~60s + o repornire). Nota: atomicitatea gate-ului si a
-lock-ului presupune storage local/overlay/bind — NU volume NFS.
+reuseste (worst-case: ~60s + o repornire). Daca gate-ul NU poate fi sters
+(ACL deny-delete, antivirus), mesajul de refuz numeste explicit fisierul si
+errno-ul — sterge-l manual si reporneste. NOTA DE TOPOLOGIE: atomicitatea
+gate-ului si a lock-ului presupune storage local/overlay/bind; volumele NFS
+si, in general, un volum PARTAJAT intre mai multe host-uri sunt NESUPORTATE —
+o singura instanta per volum e presupunerea de baza (SQLite insusi nu suporta
+storage de retea). Garantiile de exclusivitate sunt complete pe un singur
+host; intre host-uri care ar imparti acelasi disc raman ferestre de cursa pe
+heartbeat (documentat la Rev. 5, in afara topologiei sustinute).
 
 ### Warn la boot: `proxy.trusted_cidr.missing` (web mode)
 
