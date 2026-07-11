@@ -9,7 +9,7 @@ import os from "node:os";
 import path from "node:path";
 import fsPromises from "node:fs/promises";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { acquireInstanceLock, releaseInstanceLock } from "./instanceLock.ts";
+import { __setHeartbeatFatalHandlerForTests, acquireInstanceLock, releaseInstanceLock } from "./instanceLock.ts";
 
 let tmpRoot: string;
 let originalForceBoot: string | undefined;
@@ -169,5 +169,89 @@ describe("acquireInstanceLock — cross-host ramane pe heartbeat (regresie)", ()
     expect(() => acquireInstanceLock(tmpRoot, "test")).not.toThrow();
     const now = JSON.parse(fs.readFileSync(path.join(tmpRoot, ".instance.lock"), "utf8"));
     expect(now.pid).toBe(process.pid);
+  });
+});
+
+// INT-H1/INT-H2 (audit v2.43.0): heartbeat-ul nu are voie sa arunce in
+// setInterval (devine uncaughtException, fara handler in index.ts) — erorile
+// tranzitorii sar tick-ul LOGAT; pierderea reala de ownership declanseaza
+// handlerul fatal (in productie: shutdown graceful + exit). Invariant de timp:
+// 3 tick-uri sarite = 15s < pragul de stale de 30s.
+describe("heartbeat resilient (INT-H1) + dual-holder (INT-H2)", () => {
+  const lockFile = (): string => path.join(tmpRoot, ".instance.lock");
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    __setHeartbeatFatalHandlerForTests(null);
+    vi.useRealTimers();
+  });
+
+  it("lock ilizibil tranzitoriu => skip tick cu instance_lock.heartbeat_skip logat, fara fatal; isi revine", () => {
+    const fatal = vi.fn();
+    __setHeartbeatFatalHandlerForTests(fatal);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    acquireInstanceLock(tmpRoot, "test");
+    const saved = fs.readFileSync(lockFile(), "utf8");
+    fs.writeFileSync(lockFile(), "{corupt");
+    vi.advanceTimersByTime(5_000); // 1 tick
+    expect(fatal).not.toHaveBeenCalled();
+    expect(warnSpy.mock.calls.map((c) => String(c[0])).some((l) => l.includes("instance_lock.heartbeat_skip"))).toBe(
+      true
+    );
+    fs.writeFileSync(lockFile(), saved);
+    vi.advanceTimersByTime(5_000); // recovery: contorul se reseteaza
+    expect(fatal).not.toHaveBeenCalled();
+    // Inca 2 tick-uri cu lock sanatos — nu se acumuleaza spre pragul fatal.
+    vi.advanceTimersByTime(10_000);
+    expect(fatal).not.toHaveBeenCalled();
+  });
+
+  it("lock ilizibil 3 tick-uri consecutive => fatal (fail-safe inainte de pragul de stale)", () => {
+    const fatal = vi.fn();
+    __setHeartbeatFatalHandlerForTests(fatal);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    acquireInstanceLock(tmpRoot, "test");
+    fs.writeFileSync(lockFile(), "{corupt");
+    vi.advanceTimersByTime(15_000); // 3 tick-uri
+    expect(fatal).toHaveBeenCalledTimes(1);
+    // Dupa fatal, interval-ul e oprit: alte tick-uri nu re-apeleaza handlerul.
+    vi.advanceTimersByTime(15_000);
+    expect(fatal).toHaveBeenCalledTimes(1);
+  });
+
+  it("INT-H2: dupa reclaim de catre holder B, holderul A detecteaza mismatch la PRIMUL tick si NU rescrie lock-ul lui B", () => {
+    const fatal = vi.fn();
+    __setHeartbeatFatalHandlerForTests(fatal);
+    acquireInstanceLock(tmpRoot, "test");
+    // Simuleaza reclaim-ul lui B: continut VALID cu alt pid/nonce.
+    const stolen = { ...JSON.parse(fs.readFileSync(lockFile(), "utf8")), pid: 99_999, nonce: "b-nonce" };
+    fs.writeFileSync(lockFile(), JSON.stringify(stolen));
+    vi.advanceTimersByTime(5_000); // primul tick al lui A dupa furt
+    expect(fatal).toHaveBeenCalledTimes(1); // imediat, nu dupa 3 miss-uri
+    // A nu a rescris lock-ul peste B (dual-writer ar incepe exact asa):
+    expect(JSON.parse(fs.readFileSync(lockFile(), "utf8")).nonce).toBe("b-nonce");
+  });
+
+  it("eroare I/O la scrierea heartbeat-ului => skip logat, fara fatal la primul tick", () => {
+    const fatal = vi.fn();
+    __setHeartbeatFatalHandlerForTests(fatal);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    acquireInstanceLock(tmpRoot, "test");
+    // Fara mock pe fs (importurile named ale SUT-ului nu se intercepteaza):
+    // cu fake timers Date.now() e determinist, deci path-ul temp al tick-ului
+    // urmator e predictibil — un DIRECTOR pre-creat acolo face writeFileSync
+    // sa arunce EISDIR real, exact clasa de eroare I/O tranzitorie vizata.
+    const tempPathAtNextTick = `${lockFile()}.heartbeat-${process.pid}-${Date.now() + 5_000}`;
+    fs.mkdirSync(tempPathAtNextTick);
+    vi.advanceTimersByTime(5_000);
+    expect(fatal).not.toHaveBeenCalled();
+    expect(warnSpy.mock.calls.map((c) => String(c[0])).some((l) => l.includes("instance_lock.heartbeat_skip"))).toBe(
+      true
+    );
+    vi.advanceTimersByTime(5_000); // tick sanatos (alt timestamp => alt path): recovery
+    expect(fatal).not.toHaveBeenCalled();
   });
 });

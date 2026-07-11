@@ -861,10 +861,16 @@ httpServer.on("error", (err: Error) => {
 // - Electron mode: main.js calls the exported closer on `before-quit` (in-process bundle).
 // closeDb() is idempotent (null-guarded in schema.ts).
 const SHUTDOWN_DRAIN_MS = 30_000;
-let shuttingDown = false;
-async function gracefulShutdown(reason: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
+// Idempotent prin JOIN, nu early-return (INT-H1): al doilea apelant (ex.
+// heartbeat fatal peste un SIGTERM in curs) asteapta ACELASI drain complet,
+// in loc sa primeasca un promise rezolvat instant si sa faca exit peste el.
+let shutdownPromise: Promise<void> | null = null;
+function gracefulShutdown(reason: string): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = gracefulShutdownImpl(reason);
+  return shutdownPromise;
+}
+async function gracefulShutdownImpl(reason: string): Promise<void> {
   console.log(`[shutdown] ${reason} — draining HTTP + scheduler + closing SQLite`);
   try {
     recordAudit(null, "system.shutdown", {
