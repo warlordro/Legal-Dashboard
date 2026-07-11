@@ -66,6 +66,7 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
     if (busy) return;
     if (
       !(await confirm({
+        title: "Restaureaza backup",
         message:
           "Restaurezi backup-ul COMPLET al bazei — toate modulele, toti utilizatorii (datele RNPM au backup separat per utilizator)?\n\nBaza curenta va fi salvata automat inainte de suprascriere. Dupa restore este recomandata repornirea aplicatiei.",
         confirmLabel: "Restaureaza",
@@ -78,7 +79,10 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
     setSuccessMsg(null);
     try {
       const { preRestoreName } = await adminRestoreBackup(entry.name);
-      setSuccessMsg(`Restaurare completa. Snapshot pre-restore: ${preRestoreName}. Reporneste aplicatia.`);
+      setSuccessMsg(`Restaurare completa. Snapshot pre-restore: ${preRestoreName}. Aplicatia se reincarca...`);
+      // INT-M12: dupa restaurarea monolitului TOT state-ul clientului e stale
+      // (useri, alerte, setari). Reload complet dupa un beat vizibil.
+      setTimeout(() => window.location.reload(), 2000);
       await load();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Eroare restore");

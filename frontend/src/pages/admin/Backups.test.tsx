@@ -103,6 +103,114 @@ describe("AdminBackups (embedded)", () => {
     expect(host.textContent).toContain("Restaurare completa. Snapshot pre-restore: legal-dashboard.pre-restore-x.db");
   });
 
+  it("confirmarea de restore are titlul 'Restaureaza backup', nu fallback-ul de stergere", async () => {
+    await render(<AdminBackups embedded />);
+    await act(async () => {
+      clickButton(/^Restaureaza/);
+      await Promise.resolve();
+    });
+    const dialog = confirmDialog();
+    expect(dialog.textContent).toContain("Restaureaza backup");
+    expect(dialog.textContent).not.toContain("Confirmare stergere");
+  });
+
+  it("reload-ul NU se programeaza dupa anularea restore-ului", async () => {
+    vi.useFakeTimers();
+    const reloadSpy = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload: reloadSpy });
+    try {
+      await render(<AdminBackups embedded />);
+      await act(async () => {
+        clickButton(/^Restaureaza/);
+        await Promise.resolve();
+      });
+      const dialog = confirmDialog();
+      const cancelBtn = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+        /Anuleaza/.test(b.textContent ?? "")
+      );
+      if (!cancelBtn) throw new Error("Butonul de anulare lipsa");
+      await act(async () => {
+        cancelBtn.click();
+        await Promise.resolve();
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(restoreMock).not.toHaveBeenCalled();
+      expect(reloadSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reload-ul se programeaza o singura data dupa restore reusit (INT-M12)", async () => {
+    vi.useFakeTimers();
+    const reloadSpy = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload: reloadSpy });
+    try {
+      restoreMock.mockResolvedValue({ preRestoreName: "legal-dashboard.pre-restore-x.db" });
+      await render(<AdminBackups embedded />);
+      await act(async () => {
+        clickButton(/^Restaureaza/);
+        await Promise.resolve();
+      });
+      const dialog = confirmDialog();
+      const confirmBtn = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+        /Restaureaza/.test(b.textContent ?? "")
+      );
+      if (!confirmBtn) throw new Error("Butonul de confirmare lipsa");
+      await act(async () => {
+        confirmBtn.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(host.textContent).toContain(
+        "Restaurare completa. Snapshot pre-restore: legal-dashboard.pre-restore-x.db. Aplicatia se reincarca..."
+      );
+      expect(reloadSpy).not.toHaveBeenCalled();
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(2000);
+      });
+      expect(reloadSpy).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
+  it("reload-ul NU se programeaza cand restore-ul esueaza", async () => {
+    vi.useFakeTimers();
+    const reloadSpy = vi.fn();
+    vi.stubGlobal("location", { ...window.location, reload: reloadSpy });
+    try {
+      restoreMock.mockRejectedValue(new Error("eroare restore simulata"));
+      await render(<AdminBackups embedded />);
+      await act(async () => {
+        clickButton(/^Restaureaza/);
+        await Promise.resolve();
+      });
+      const dialog = confirmDialog();
+      const confirmBtn = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+        /Restaureaza/.test(b.textContent ?? "")
+      );
+      if (!confirmBtn) throw new Error("Butonul de confirmare lipsa");
+      await act(async () => {
+        confirmBtn.click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(host.textContent).toContain("eroare restore simulata");
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000);
+      });
+      expect(reloadSpy).not.toHaveBeenCalled();
+    } finally {
+      vi.unstubAllGlobals();
+      vi.useRealTimers();
+    }
+  });
+
   it("creeaza backup manual si afiseaza numele", async () => {
     createMock.mockResolvedValue({ name: "legal-dashboard.manual-2026-07-10T12-00-00.db" });
     await render(<AdminBackups embedded />);
