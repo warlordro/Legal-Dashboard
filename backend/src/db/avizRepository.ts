@@ -543,17 +543,26 @@ export function deleteAviz(id: number, ownerId: string): boolean {
   return deleted;
 }
 
-export function deleteAllAvize(ownerId: string): number {
-  assertOwnerIdForMutation(ownerId, "deleteAllAvize");
-  const db = getRnpmDb(ownerId);
+// v2.43.x (EXT-M-01): corpul delete-all, rulabil si pe un handle DIRECT
+// (deschis de backup.ts prin openRnpmDbHandleDirect, sub latch-ul de restore,
+// cand registry-ul e inchis). Owner-ul se valideaza AICI, nu doar in wrapper
+// — handle-ul direct nu trece prin getRnpmDb. ATENTIE: handle-ul TREBUIE sa
+// aiba foreign_keys=ON (cascadele pe creditori/debitori/bunuri/istoric).
+export function deleteAllAvizeOnHandle(db: Database.Database, ownerId: string): number {
+  assertOwnerIdForMutation(ownerId, "deleteAllAvizeOnHandle");
   // Sterge avizele (CASCADE curata creditori/debitori/bunuri/istoric) si metadata din rnpm_searches.
   // search_id din rnpm_avize are ON DELETE SET NULL, deci searches nu cad in cascada — le stergem explicit.
-  const changes = db.transaction(() => {
+  return db.transaction(() => {
     const res = db.prepare("DELETE FROM rnpm_avize WHERE owner_id = ?").run(ownerId);
     db.prepare("DELETE FROM rnpm_searches WHERE owner_id = ?").run(ownerId);
     if (res.changes > 0) cleanupOrphanDescrieri(db);
     return res.changes;
   })();
+}
+
+export function deleteAllAvize(ownerId: string): number {
+  const db = getRnpmDb(ownerId);
+  const changes = deleteAllAvizeOnHandle(db, ownerId);
   if (changes > 0) checkpointRnpmWal(ownerId);
   return changes;
 }

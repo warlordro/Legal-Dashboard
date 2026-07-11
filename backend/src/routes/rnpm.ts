@@ -19,6 +19,7 @@ import {
   BackupValidationError,
   compactRnpmDbViaWorker,
   createRnpmManualBackup,
+  deleteAllRnpmAndCompact,
   deleteRnpmBackups,
   getRnpmBackupDir,
   listRnpmBackups,
@@ -26,7 +27,12 @@ import {
   withMaintenanceRead,
 } from "../db/backup.ts";
 import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
-import { hasActiveRnpmSearch, isRnpmRestoreInProgress, RnpmSearchActiveError } from "../db/rnpmActivity.ts";
+import {
+  hasActiveRnpmSearch,
+  isRnpmRestoreInProgress,
+  RnpmRestoreInProgressError,
+  RnpmSearchActiveError,
+} from "../db/rnpmActivity.ts";
 import { assertValidOwnerId, getRnpmDbPath } from "../db/rnpmDb.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
@@ -109,7 +115,6 @@ import {
   getAvize,
   getAvizById,
   deleteAviz,
-  deleteAllAvize,
   deleteAvizeByIds,
   filterRnpmSearchResults,
   getAvizeByIds,
@@ -860,38 +865,33 @@ rnpmRouter.get("/saved/:id", (c) => {
 
 rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user"), async (c) => {
   const ownerId = getOwnerId(c);
-  // v2.43.0 (rnpm-split): delete in timpul unei cautari active => FK errors sau
-  // repopulare imediat dupa stergere; refuzam explicit.
-  if (hasActiveRnpmSearch(ownerId)) {
-    recordAudit(c, "aviz.delete_all", {
-      outcome: "denied",
-      targetKind: "aviz",
-      detail: { reason: "search_active" },
-    });
-    return c.json(
-      fail("SEARCH_ACTIVE", "Exista o cautare RNPM in curs pentru acest cont; reincearca dupa finalizare", c),
-      409
-    );
-  }
-  const count = deleteAllAvize(ownerId);
-  // "Sterge baza" must actually free disk space, not just remove rows — run VACUUM +
-  // WAL truncate so the file shrinks from ~hundreds of MB back to the schema size.
-  // Task 7: prin worker + swap (best-effort — delete-ul a reusit deja).
-  // Rev. 3 (panel LOW): esecul compactarii devine VIZIBIL in raspuns.
-  let compacted = true;
   try {
-    await compactRnpmDbViaWorker(ownerId);
+    // EXT-M-01 (audit v2.43.0): gardul de cautare + delete + compact ATOMIC
+    // in DB layer (un singur write lock + latch de owner) — o cautare noua nu
+    // mai poate repopula baza intre delete si compact.
+    const { deleted, compacted } = await deleteAllRnpmAndCompact(ownerId);
+    // Mutatia e COMISA — un esec al scrierii de audit nu are voie sa intoarca
+    // 500 (clientul ar repeta un delete deja terminat). Contract Rev. 4.
+    recordAuditSafe(c, "aviz.delete_all", {
+      targetKind: "aviz",
+      detail: { deleted, compacted },
+    });
+    return c.json({ deleted, compacted });
   } catch (e) {
-    compacted = false;
-    console.warn("[rnpm] compact after delete-all failed:", e);
+    if (e instanceof RnpmSearchActiveError || e instanceof RnpmRestoreInProgressError) {
+      recordAudit(c, "aviz.delete_all", {
+        outcome: "denied",
+        targetKind: "aviz",
+        detail: { reason: e instanceof RnpmSearchActiveError ? "search_active" : "restore_in_progress" },
+      });
+    }
+    // SEARCH_ACTIVE / RESTORE_IN_PROGRESS / MAINTENANCE_SHUTDOWN => 409/503
+    // prin handlerul central (appErrorHandler).
+    rethrowTypedMaintenanceError(e);
+    console.error("[rnpm] delete-all failed:", e);
+    const msg = e instanceof Error ? e.message : "Eroare stergere";
+    return internalError(c, msg);
   }
-  // Mutatia e COMISA — un esec al scrierii de audit nu are voie sa intoarca
-  // 500 (clientul ar repeta un delete deja terminat). Contract Rev. 4.
-  recordAuditSafe(c, "aviz.delete_all", {
-    targetKind: "aviz",
-    detail: { deleted: count, compacted },
-  });
-  return c.json({ deleted: count, compacted });
 });
 
 rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async (c) => {

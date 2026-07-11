@@ -14,6 +14,7 @@ import {
   deleteAllBackups,
   getBackupDir,
   listBackupsWithMeta,
+  MaintenanceShutdownError,
   markMaintenanceShuttingDown,
   restoreFromBackup,
   runDailyBackup,
@@ -645,7 +646,10 @@ describe("maintenance shutdown — flag tipat + settle-set (Task 4)", () => {
     expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("MAINTENANCE_SHUTDOWN");
   });
 
-  it("un writer DEJA in coada la setarea flag-ului isi termina treaba si e prins de settle-set", async () => {
+  // EXT-H-01 (audit v2.43.0) a INVERSAT semantica Rev. 4: writer-ul din coada
+  // nu-si mai "termina treaba" — e refuzat la acquire (recheck), INAINTE de
+  // orice mutatie. Settle-set-ul il acopera in continuare cat sta in coada.
+  it("un writer DEJA in coada la setarea flag-ului e refuzat la acquire, dar ramane acoperit de settle-set", async () => {
     let releaseFirst: () => void = () => undefined;
     const first = withMaintenanceWrite(
       () =>
@@ -680,9 +684,12 @@ describe("maintenance shutdown — flag tipat + settle-set (Task 4)", () => {
       releaseFirst();
       await Promise.allSettled([first, second]);
     }
-    await Promise.all([first, second, wait]);
+    await first;
+    // EXT-H-01: writer-ul din coada e refuzat la acquire — mutatia NU incepe.
+    await expect(second).rejects.toMatchObject({ code: "MAINTENANCE_SHUTDOWN" });
+    await wait;
     expect(settled).toBe(true);
-    expect(secondRan).toBe(true);
+    expect(secondRan).toBe(false);
 
     // Un writer NOU dupa flag ramane refuzat.
     await expect(withMaintenanceWrite(async () => undefined)).rejects.toMatchObject({
@@ -784,5 +791,49 @@ describe("daily backup — enumerarea rnpm fail-explicit (EXT-H-02)", () => {
     const { lines } = await captureConsoleLog(() => runDailyBackup());
 
     expect(lines.some((l) => l.includes("enumerate_rnpm"))).toBe(false);
+  });
+});
+
+// EXT-H-01 (audit v2.43.0): un writer care astepta in coada cand shutdown-ul
+// a ridicat flag-ul nu are voie sa inceapa o mutatie pe care shutdown-ul n-o
+// va mai astepta; iar callerul lui waitForBackupToSettle trebuie sa STIE daca
+// settle-ul a expirat (decizia de a retine instance lock-ul depinde de asta).
+describe("shutdown vs maintenance writers (EXT-H-01)", () => {
+  afterEach(() => {
+    __resetMaintenanceShutdownForTests();
+  });
+
+  it("writer aflat in coada la markMaintenanceShuttingDown e refuzat cu MaintenanceShutdownError (recheck dupa acquire)", async () => {
+    let releaseFirst: () => void = () => {};
+    const first = withMaintenanceWrite(
+      () =>
+        new Promise<void>((r) => {
+          releaseFirst = r;
+        })
+    );
+    // withWrite face await acquireWrite() INAINTE de callback — asteapta un
+    // tick ca primul writer sa detina efectiv lock-ul si releaseFirst sa fie
+    // legat (altfel release-ul e no-op si testul blocheaza).
+    await new Promise((r) => setImmediate(r));
+    const queued = withMaintenanceWrite(async () => "a-rulat");
+    markMaintenanceShuttingDown();
+    releaseFirst();
+    await expect(queued).rejects.toBeInstanceOf(MaintenanceShutdownError);
+    await first;
+  });
+
+  it("waitForBackupToSettle: false la timeout cu writer blocat, true dupa settle", async () => {
+    let release: () => void = () => {};
+    const hung = withMaintenanceWrite(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+        })
+    );
+    await new Promise((r) => setImmediate(r));
+    await expect(waitForBackupToSettle(50)).resolves.toBe(false);
+    release();
+    await hung;
+    await expect(waitForBackupToSettle(50)).resolves.toBe(true);
   });
 });

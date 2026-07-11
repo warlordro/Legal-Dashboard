@@ -97,6 +97,28 @@ function hasPendingRnpmMigrations(dbPath: string): boolean {
   }
 }
 
+// v2.43.x (EXT-M-01, corectie Codex HIGH): pragmas-urile de conexiune intr-un
+// singur loc — orice handle pe un fisier RNPM (registry SAU direct, sub latch
+// de restore) are nevoie de ACELASI set; in special foreign_keys=ON, fara de
+// care DELETE pe rnpm_avize nu executa cascadele si lasa tabelele copil
+// (creditori/debitori/bunuri/istoric) orfane.
+function applyRnpmConnectionPragmas(db: Database.Database): void {
+  db.pragma("journal_mode = WAL");
+  db.pragma("foreign_keys = ON");
+  db.pragma("synchronous = NORMAL");
+  db.pragma("busy_timeout = 5000");
+}
+
+// Handle DIRECT pe un fisier RNPM, in afara registry-ului — folosit de
+// backup.ts sub maintenance write + latch de owner (registry-ul e inchis si
+// getRnpmDb ar refuza cu RESTORE_IN_PROGRESS). Callerul detine ciclul de
+// viata (close in finally).
+export function openRnpmDbHandleDirect(dbPath: string): Database.Database {
+  const db = new Database(dbPath, { fileMustExist: true });
+  applyRnpmConnectionPragmas(db);
+  return db;
+}
+
 export function getRnpmDb(ownerId: string): Database.Database {
   if (shuttingDown) throw new Error("RNPM DB closed; refusing to reopen during shutdown");
   assertValidOwnerId(ownerId);
@@ -117,10 +139,7 @@ export function getRnpmDb(ownerId: string): Database.Database {
   // Windows care blocheaza retry-ul/rename-ul urmator).
   const db = new Database(dbPath);
   try {
-    db.pragma("journal_mode = WAL");
-    db.pragma("foreign_keys = ON");
-    db.pragma("synchronous = NORMAL");
-    db.pragma("busy_timeout = 5000");
+    applyRnpmConnectionPragmas(db);
     // WAL-truncate >32MB la deschidere (paritate schema.ts).
     try {
       const walSize = fs.statSync(`${dbPath}-wal`).size;

@@ -19,7 +19,9 @@ import {
   getRnpmDb,
   getRnpmDbPath,
   MIGRATIONS_RNPM_DIR,
+  openRnpmDbHandleDirect,
 } from "./rnpmDb.ts";
+import { deleteAllAvizeOnHandle } from "./avizRepository.ts";
 import {
   clearMonolithRestoreInProgress,
   closeDb,
@@ -78,7 +80,13 @@ export function withMaintenanceWrite<T>(fn: () => Promise<T>): Promise<T> {
   // Promise-ul inregistrat e CEL returnat de withWrite — include timpul de
   // asteptare pe lock, deci un writer aflat deja in coada la shutdown ramane
   // acoperit de settle-set (nu e abandonat).
-  const p = maintenanceLock.withWrite(fn);
+  // EXT-H-01: recheck si DUPA acquire — un writer care astepta in coada cand
+  // flag-ul s-a ridicat nu are voie sa inceapa o mutatie pe care shutdown-ul
+  // n-o va mai astepta.
+  const p = maintenanceLock.withWrite(async () => {
+    if (maintenanceShuttingDown) throw new MaintenanceShutdownError();
+    return fn();
+  });
   maintenanceWritesInFlight.add(p);
   void p
     .finally(() => {
@@ -986,6 +994,60 @@ export async function restoreRnpmFromBackup(
 // ownerului primesc 409 (per owner, nu global). Reopen LAZY la urmatorul
 // getRnpmDb. Capcana (advisor): begin INAINTE de closeRnpmDb; end in finally
 // DOAR daca begin a reusit.
+// Corpul compactarii, rulat STRICT sub maintenance write + latch-ul ownerului
+// (beginRnpmRestore facut de caller). Extras (EXT-M-01) ca sa fie refolosit de
+// deleteAllRnpmAndCompact fara begin/end dublu — latch-ul NU e reentrant.
+async function compactRnpmUnderLatch(
+  ownerId: string,
+  dbPath: string
+): Promise<{ beforeBytes: number; afterBytes: number; durationMs: number }> {
+  const sizeOf = (p: string): number => {
+    try {
+      return fs.statSync(p).size;
+    } catch {
+      return 0;
+    }
+  };
+  const before = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
+  const t0 = Date.now();
+  closeRnpmDb(ownerId);
+  const tmp = `${dbPath}.compact-tmp`;
+  await fsPromises.unlink(tmp).catch(() => {
+    /* orfan absent */
+  });
+  try {
+    await runSnapshotOp({ op: "vacuum_into", srcPath: dbPath, destPath: tmp });
+    assertSnapshotNonEmpty(tmp, path.basename(dbPath));
+    // Sidecar-urile vechi pleaca INAINTE de rename (aceeasi ratiune ca la
+    // restore: fisier nou + WAL vechi = corupere silentioasa); fail-closed
+    // pe non-ENOENT.
+    for (const suffix of ["-wal", "-shm"] as const) {
+      try {
+        await fsPromises.unlink(dbPath + suffix);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException)?.code;
+        if (code !== "ENOENT") throw e;
+      }
+    }
+    await renameWithRetryAsync(tmp, dbPath);
+  } catch (e) {
+    await fsPromises.unlink(tmp).catch(() => {
+      /* best-effort */
+    });
+    throw e;
+  }
+  const durationMs = Date.now() - t0;
+  const after = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
+  logBackupEvent({
+    action: "rnpm_compact",
+    target: `rnpm:${ownerId}`,
+    beforeBytes: before,
+    afterBytes: after,
+    durationMs,
+  });
+  return { beforeBytes: before, afterBytes: after, durationMs };
+}
+
 export async function compactRnpmDbViaWorker(
   ownerId: string
 ): Promise<{ beforeBytes: number; afterBytes: number; durationMs: number }> {
@@ -997,51 +1059,57 @@ export async function compactRnpmDbViaWorker(
     if (isRnpmRestoreInProgress(ownerId)) throw new RnpmRestoreInProgressError();
     beginRnpmRestore(ownerId);
     try {
-      const sizeOf = (p: string): number => {
-        try {
-          return fs.statSync(p).size;
-        } catch {
-          return 0;
-        }
-      };
-      const before = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
-      const t0 = Date.now();
-      closeRnpmDb(ownerId);
-      const tmp = `${dbPath}.compact-tmp`;
-      await fsPromises.unlink(tmp).catch(() => {
-        /* orfan absent */
-      });
+      return await compactRnpmUnderLatch(ownerId, dbPath);
+    } finally {
+      endRnpmRestore(ownerId);
+    }
+  });
+}
+
+// EXT-M-01 (audit v2.43.0): gardul de cautare, delete-ul si compactarea sub
+// ACELASI write lock + latch de owner — o cautare noua nu mai poate repopula
+// baza intre delete si compact, iar raspunsul reflecta starea finala reala.
+// Delete-ul ruleaza pe un handle DIRECT configurat identic cu registry-ul
+// (foreign_keys=ON — altfel cascadele nu ruleaza; corectie Codex HIGH).
+export async function deleteAllRnpmAndCompact(ownerId: string): Promise<{ deleted: number; compacted: boolean }> {
+  const dbPath = getRnpmDbPath(ownerId);
+  return withMaintenanceWrite(async () => {
+    if (isRnpmRestoreInProgress(ownerId)) throw new RnpmRestoreInProgressError();
+    beginRnpmRestore(ownerId); // refuza atomic SEARCH_ACTIVE + latch pe scrierile noi
+    try {
+      let exists = true;
       try {
-        await runSnapshotOp({ op: "vacuum_into", srcPath: dbPath, destPath: tmp });
-        assertSnapshotNonEmpty(tmp, path.basename(dbPath));
-        // Sidecar-urile vechi pleaca INAINTE de rename (aceeasi ratiune ca la
-        // restore: fisier nou + WAL vechi = corupere silentioasa); fail-closed
-        // pe non-ENOENT.
-        for (const suffix of ["-wal", "-shm"] as const) {
-          try {
-            await fsPromises.unlink(dbPath + suffix);
-          } catch (e) {
-            const code = (e as NodeJS.ErrnoException)?.code;
-            if (code !== "ENOENT") throw e;
-          }
-        }
-        await renameWithRetryAsync(tmp, dbPath);
+        await fsPromises.stat(dbPath);
       } catch (e) {
-        await fsPromises.unlink(tmp).catch(() => {
-          /* best-effort */
-        });
-        throw e;
+        // DOAR ENOENT inseamna absent; EACCES/EIO/ENOTDIR se propaga —
+        // altfel raportam succes fals {deleted:0} peste o problema FS.
+        if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
+        exists = false;
       }
-      const durationMs = Date.now() - t0;
-      const after = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
-      logBackupEvent({
-        action: "rnpm_compact",
-        target: `rnpm:${ownerId}`,
-        beforeBytes: before,
-        afterBytes: after,
-        durationMs,
-      });
-      return { beforeBytes: before, afterBytes: after, durationMs };
+      let deleted = 0;
+      let compacted = true;
+      if (exists) {
+        closeRnpmDb(ownerId);
+        const db = openRnpmDbHandleDirect(dbPath); // pragmas identice cu registry
+        try {
+          deleted = deleteAllAvizeOnHandle(db, ownerId);
+          db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+        } finally {
+          db.close();
+        }
+        try {
+          await compactRnpmUnderLatch(ownerId, dbPath);
+        } catch (e) {
+          // Delete-ul e comis; esecul compactarii ramane vizibil, nu fatal.
+          compacted = false;
+          logBackupEvent({
+            action: "rnpm_compact_failed",
+            target: `rnpm:${ownerId}`,
+            reason: e instanceof Error ? e.message : String(e),
+          });
+        }
+      }
+      return { deleted, compacted };
     } finally {
       endRnpmRestore(ownerId);
     }
@@ -1252,16 +1320,24 @@ export async function createRnpmManualBackup(ownerId: string): Promise<{ name: s
 // swap-ului. Plafonul (30s la shutdown, setat de caller) poate fi inca
 // depasit de un VACUUM sincron multi-target — fereastra EXISTENTA si inainte
 // (10s), inchisa complet de Task 7 (VACUUM in worker).
-export async function waitForBackupToSettle(timeoutMs = 10_000): Promise<void> {
+// EXT-H-01: boolean — callerul (gracefulShutdown) decide pe baza lui daca
+// elibereaza instance lock-ul (true = settled) sau il retine intentionat
+// (false = writer inca in zbor; lock-ul devine stale si e recuperat la boot).
+export async function waitForBackupToSettle(timeoutMs = 10_000): Promise<boolean> {
   const pending = [...maintenanceWritesInFlight];
-  if (pending.length === 0) return;
-  await Promise.race([
-    Promise.allSettled(pending).then(() => undefined),
-    new Promise<void>((r) => {
-      const t = setTimeout(r, timeoutMs);
-      t.unref?.();
-    }),
-  ]);
+  if (pending.length === 0) return true;
+  let timer: NodeJS.Timeout | null = null;
+  try {
+    return await Promise.race([
+      Promise.allSettled(pending).then(() => true),
+      new Promise<boolean>((r) => {
+        timer = setTimeout(() => r(false), timeoutMs);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
 }
 
 // Snapshot-ul zilnic al unui target, cu freshness PER TARGET (main fresh nu

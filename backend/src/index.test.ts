@@ -575,3 +575,42 @@ describe("global body limit — Bug 1a (v2.42.2)", () => {
     expect(res.status).toBe(413);
   });
 });
+
+// EXT-H-01 (audit v2.43.0): la shutdown cu un maintenance writer care nu face
+// settle in plafon, instance lock-ul NU se elibereaza — ramane pe disc si e
+// recuperat ca stale la urmatorul boot (fail-safe contra "a doua instanta
+// porneste curat peste un swap in zbor").
+describe("shutdown — lock retention cu writer nesettled (EXT-H-01)", () => {
+  it("lock-ul de instanta NU se elibereaza cand un writer nu face settle in plafon", async () => {
+    const port = randomPort();
+    const dbPath = await makeTmpDb();
+    await importFreshIndex({
+      LEGAL_DASHBOARD_PORT: String(port),
+      LEGAL_DASHBOARD_DB_PATH: dbPath,
+      LEGAL_DASHBOARD_SETTLE_TIMEOUT_MS: "100",
+    });
+    await waitForHealth(port);
+
+    const { withMaintenanceWrite } = await import("./db/backup.ts");
+    let release: () => void = () => {};
+    const hung = withMaintenanceWrite(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+        })
+    );
+    await new Promise((r) => setImmediate(r)); // writer-ul detine efectiv lock-ul
+
+    const shutdown = (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> })
+      .__legalDashboardShutdown;
+    await shutdown?.();
+
+    const lockPath = path.join(path.dirname(dbPath), ".instance.lock");
+    expect(fs.existsSync(lockPath)).toBe(true); // retinut intentionat
+
+    release();
+    await hung.catch(() => {
+      /* DB-ul e inchis de shutdown; esecul writerului e asteptat aici */
+    });
+  }, 30_000);
+});

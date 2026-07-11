@@ -665,6 +665,11 @@ describe("self-service gate on per-user rnpm routes (v2.43.0)", () => {
   });
 
   it("rolul user ARE acces la rutele self-service (fisierul propriu)", async () => {
+    // EXT-M-01: delete-all NU mai provisioneaza implicit fisierul unui owner
+    // fara date (vechiul comportament era side-effect al getRnpmDb); compact
+    // pe fisier inexistent = 404 by design. Seed explicit ca fluxul sa aiba
+    // fisier real.
+    seedAviz({ identificator: "AV-SELF" });
     const app = buildApp();
     const delAll = await app.request("/api/v1/rnpm/saved/all", { method: "DELETE", headers: DESKTOP_HEADERS });
     expect(delAll.status).toBe(200);

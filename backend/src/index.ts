@@ -961,10 +961,25 @@ async function gracefulShutdownImpl(reason: string): Promise<void> {
   // restore monolit/rnpm, inclusiv writerii inca in coada pe lock. Plafon 30s;
   // poate fi depasit de VACUUM-ul sincron multi-target pana la Task 7
   // (fereastra existenta si inainte, la 10s).
+  // EXT-H-01: plafonul e configurabil pentru teste; rezultatul (settled sau
+  // nu) decide mai jos daca instance lock-ul se elibereaza sau se retine.
+  const settleTimeoutMs = Number(process.env.LEGAL_DASHBOARD_SETTLE_TIMEOUT_MS) || 30_000;
+  let maintenanceSettled = true;
   try {
     markMaintenanceShuttingDown();
-    await waitForBackupToSettle(30_000);
+    maintenanceSettled = await waitForBackupToSettle(settleTimeoutMs);
+    if (!maintenanceSettled) {
+      console.error(
+        JSON.stringify({
+          action: "shutdown.maintenance_unsettled",
+          detail: "writer de mentenanta inca in zbor dupa plafon",
+          timeoutMs: settleTimeoutMs,
+          ts: new Date().toISOString(),
+        })
+      );
+    }
   } catch (e) {
+    maintenanceSettled = false;
     console.error("[shutdown] waitForBackupToSettle failed:", e);
   }
 
@@ -985,7 +1000,21 @@ async function gracefulShutdownImpl(reason: string): Promise<void> {
   } catch (e) {
     console.error("[shutdown] markShuttingDown failed:", e);
   }
-  releaseInstanceLock();
+  // EXT-H-01: lock-ul se elibereaza DOAR daca writerii au settled. Altfel
+  // ramane pe disc (fail-safe): instanta noua il vede stale dupa ~30s
+  // (HEARTBEAT_MS x STALE_FACTOR) si il recupereaza prin gate — nu porneste
+  // curat PESTE un swap in zbor.
+  if (maintenanceSettled) {
+    releaseInstanceLock();
+  } else {
+    console.error(
+      JSON.stringify({
+        action: "shutdown.lock_retained",
+        detail: "instance lock pastrat intentionat; recuperat ca stale la urmatorul boot",
+        ts: new Date().toISOString(),
+      })
+    );
+  }
 }
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM").finally(() => process.exit(0));

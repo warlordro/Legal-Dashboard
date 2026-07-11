@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   compactRnpmDbViaWorker,
   createRnpmManualBackup,
+  deleteAllRnpmAndCompact,
   deleteRnpmBackups,
   getRnpmBackupDir,
   listRnpmBackups,
@@ -31,7 +32,7 @@ import {
   isRnpmRestoreInProgress,
   RnpmSearchActiveError,
 } from "./rnpmActivity.ts";
-import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, rnpmFileStem } from "./rnpmDb.ts";
+import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, openRnpmDbHandleDirect, rnpmFileStem } from "./rnpmDb.ts";
 import { closeDb, getDb, getDbPath } from "./schema.ts";
 
 let tmpRoot: string;
@@ -794,5 +795,92 @@ describe("restore atomic prin staging (fault injection)", () => {
     }
     await expect(restoreRnpmFromBackup("u1", forgedName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
     expect(countSearches("u1")).toBe(1);
+  });
+});
+
+// EXT-M-01 (audit v2.43.0): gardul de cautare + delete + compact sub ACELASI
+// write lock + latch de owner. Corectie Codex HIGH: handle-ul direct trebuie
+// sa aiba foreign_keys=ON, altfel DELETE pe rnpm_avize nu executa cascadele
+// si lasa creditori/debitori/bunuri/istoric orfane.
+describe("deleteAllRnpmAndCompact (EXT-M-01)", () => {
+  function seedAvizCuCopii(ownerId: string): void {
+    const db = getRnpmDb(ownerId);
+    const avizId = db
+      .prepare(
+        "INSERT INTO rnpm_avize (owner_id, uuid, identificator, search_type, tip, data) VALUES (?, ?, ?, 'dupa_nume', 'aviz', '2026-01-01')"
+      )
+      .run(ownerId, `uuid-${ownerId}`, `ident-${ownerId}`).lastInsertRowid as number;
+    db.prepare("INSERT INTO rnpm_creditori (owner_id, aviz_id, tip_persoana) VALUES (?, ?, 'PJ')").run(ownerId, avizId);
+    db.prepare("INSERT INTO rnpm_debitori (owner_id, aviz_id, tip_persoana) VALUES (?, ?, 'PF')").run(ownerId, avizId);
+    db.prepare("INSERT INTO rnpm_bunuri (owner_id, aviz_id, tip_bun) VALUES (?, ?, 'auto')").run(ownerId, avizId);
+    db.prepare(
+      "INSERT INTO rnpm_istoric (owner_id, aviz_id, identificator, uuid, data, tip) VALUES (?, ?, 'i1', 'u1', '2026-01-01', 't')"
+    ).run(ownerId, avizId);
+  }
+
+  function countRows(ownerId: string, table: string): number {
+    return (getRnpmDb(ownerId).prepare(`SELECT COUNT(*) AS n FROM ${table}`).get() as { n: number }).n;
+  }
+
+  it("cu cautare activa: refuza cu RnpmSearchActiveError si NU sterge nimic", async () => {
+    seedAvizCuCopii("u1");
+    beginRnpmSearch("u1");
+    try {
+      await expect(deleteAllRnpmAndCompact("u1")).rejects.toBeInstanceOf(RnpmSearchActiveError);
+      expect(countRows("u1", "rnpm_avize")).toBe(1);
+      expect(countRows("u1", "rnpm_creditori")).toBe(1);
+    } finally {
+      endRnpmSearch("u1");
+    }
+  });
+
+  it("sterge avizele SI toate tabelele copil (cascadele ruleaza pe handle-ul direct)", async () => {
+    seedAvizCuCopii("u1");
+    const res = await deleteAllRnpmAndCompact("u1");
+    expect(res.deleted).toBe(1);
+    expect(res.compacted).toBe(true);
+    const db = openRnpmDbHandleDirect(getRnpmDbPath("u1"));
+    try {
+      for (const t of [
+        "rnpm_avize",
+        "rnpm_searches",
+        "rnpm_creditori",
+        "rnpm_debitori",
+        "rnpm_bunuri",
+        "rnpm_istoric",
+      ]) {
+        const { n } = db.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number };
+        expect(n, t).toBe(0);
+      }
+      expect(db.prepare("PRAGMA foreign_key_check").all()).toEqual([]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("izolare: delete-all pe owner A nu atinge datele lui owner B", async () => {
+    seedAvizCuCopii("ua");
+    seedAvizCuCopii("ub");
+    await deleteAllRnpmAndCompact("ua");
+    expect(countRows("ub", "rnpm_avize")).toBe(1);
+    expect(countRows("ub", "rnpm_creditori")).toBe(1);
+  });
+
+  it("owner fara fisier: deleted=0, fara provisioning implicit", async () => {
+    const res = await deleteAllRnpmAndCompact("owner-fara-fisier");
+    expect(res.deleted).toBe(0);
+    expect(res.compacted).toBe(true);
+    expect(fs.existsSync(getRnpmDbPath("owner-fara-fisier"))).toBe(false);
+  });
+
+  it("eroare FS non-ENOENT la verificarea fisierului se PROPAGA (nu succes fals)", async () => {
+    // Pe Windows, stat("<fisier>/<copil>") da ENOENT (nu ENOTDIR), deci
+    // aranjamentul "parintele devine fisier" nu produce codul vizat. Spy pe
+    // namespace-ul fsPromises functioneaza (backup.ts apeleaza fsPromises.stat
+    // pe obiect — acelasi pattern ca mock-ul copyFile din suita de restore).
+    vi.spyOn(fsPromises, "stat").mockRejectedValueOnce(
+      Object.assign(new Error("EACCES: permission denied"), { code: "EACCES" })
+    );
+    await expect(deleteAllRnpmAndCompact("u1")).rejects.toMatchObject({ code: "EACCES" });
   });
 });
