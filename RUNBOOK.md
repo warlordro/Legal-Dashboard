@@ -148,6 +148,17 @@ docker exec ld-container env | grep -E "LEGAL_DASHBOARD|JWT|TENANT"
 | `SQLite ... unable to open database file` | DB path nu exista / permissions | `chmod 644 $LEGAL_DASHBOARD_DB_PATH` + verifica owner |
 | `migrations failed` | Migration ne-aplicata si DB locked | Vezi §4 |
 
+### Boot refuzat: "recupereaza lock-ul SQLite chiar acum" / "Reincearca pornirea" (v2.43.0, Rev. 5)
+
+Recuperarea unui lock de instanta mort e serializata printr-un gate atomic
+(`.instance.lock.reclaim-gate`): daca doua porniri concurente gasesc acelasi
+lock mort (docker restart pe acelasi volum), exact UNA recupereaza; cealalta
+refuza fail-closed cu mesajul de mai sus — restart policy-ul containerului (sau
+o repornire manuala) rezolva. Un gate ORFAN dupa un crash in mijlocul
+recuperarii se autovindeca: e curatat automat dupa 60s, iar urmatoarea pornire
+reuseste (worst-case: ~60s + o repornire). Nota: atomicitatea gate-ului si a
+lock-ului presupune storage local/overlay/bind — NU volume NFS.
+
 ### Warn la boot: `proxy.trusted_cidr.missing` (web mode)
 
 Nu e fatal, dar NU-l ignora in productie: fara `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR`

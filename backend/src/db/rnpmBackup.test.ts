@@ -592,6 +592,39 @@ describe("runDailyBackup — multi-target", () => {
     expect(lines.some((l) => l.includes("backup_prune_failed") && l.includes("rnpm.1999-01-01.db"))).toBe(true);
   });
 
+  // Rev. 5 (Codex HIGH): cand unlink-ul pe .db e refuzat, sidecars NU se
+  // ating — la bundle-urile legacy datele comise pot trai doar in WAL, iar un
+  // .db "pastrat" fara WAL-ul lui e un recovery point corupt silentios.
+  it("prune refuzat pe .db NU sterge sidecars-ul bundle-ului (WAL-ul ramane restaurabil)", async () => {
+    seedSearch("u1", "a");
+    const jail = getRnpmBackupDir("u1");
+    fs.mkdirSync(jail, { recursive: true });
+    const old = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000);
+    for (let i = 1; i <= 9; i++) {
+      const p = path.join(jail, `rnpm.1998-01-0${i}.db`);
+      fs.writeFileSync(p, "x");
+      fs.utimesSync(p, old, old);
+    }
+    // Bundle legacy: candidatul refuzat are un WAL care conteaza la restore.
+    fs.writeFileSync(path.join(jail, "rnpm.1998-01-01.db-wal"), "date-comise-doar-in-wal");
+    __resetRnpmDbForTests();
+    expect(fs.existsSync(getRnpmDbPath("u1"))).toBe(true);
+
+    const realUnlink = fsPromises.unlink.bind(fsPromises);
+    vi.spyOn(fsPromises, "unlink").mockImplementation(async (p) => {
+      if (String(p).endsWith("rnpm.1998-01-01.db")) {
+        throw Object.assign(new Error("EPERM simulat de AV"), { code: "EPERM" });
+      }
+      return realUnlink(p as Parameters<typeof realUnlink>[0]);
+    });
+
+    await runDailyBackup();
+
+    // Bundle-ul refuzat ramane INTACT: si .db, si WAL-ul lui.
+    expect(fs.existsSync(path.join(jail, "rnpm.1998-01-01.db"))).toBe(true);
+    expect(fs.existsSync(path.join(jail, "rnpm.1998-01-01.db-wal"))).toBe(true);
+  });
+
   it("prune curata bundle-ul (sidecars) al backup-urilor eliminate", async () => {
     seedSearch("u1", "a");
     const jail = getRnpmBackupDir("u1");

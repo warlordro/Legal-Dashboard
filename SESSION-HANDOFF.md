@@ -89,9 +89,25 @@ consolidate pe branch:**
   atinge getDb in middleware), nume unic la backup manual (ms + sufix plafonat,
   rezervat sub lock; stampNow sters), prune cu contorizare reala + warn
   `backup_prune_failed` pe EPERM/EBUSY/EACCES.
+- **Rev. 5 (Commit F, focus deploy WEB, la decizia userului)** — cele 2 HIGH
+  din review-ul Codex de inchidere pe Rev. 4 (`review-mrfka72k-z0p6y3`),
+  ambele DIRECT relevante pe web: (1) `unlinkBundle` nu mai atinge sidecars
+  cand stergerea principalului e refuzata (bundle legacy = date comise doar in
+  WAL; recovery point corupt silentios); (2) reclaim-ul unui lock mort trece
+  prin gate atomic O_EXCL (`.instance.lock.reclaim-gate`) cu re-evaluare
+  COMPLETA sub gate (nonce + liveness + staleness — nonce-ul singur nu ajunge,
+  heartbeat-ul il reimprospateaza neschimbat), ENOENT tipat pe rename,
+  self-heal pe gate orfan (60s) si exception-safety testata prin fault
+  injection (instanceLock.gate.test.ts, vi.mock pe node:fs). Planul
+  `2026-07-11-fixes-rev5-rnpm-split.md` a trecut prin review de panel
+  (verdict: design corect, zero Critical/High pe plan) inainte de executie.
+  Limitari asumate documentate in plan: publicarea initiala a lock-ului
+  (fereastra de microsecunde, pre-existenta), FORCE_BOOT in afara gate-ului,
+  O_EXCL pe NFS, worst-case 60s pe gate orfan.
 - Ramas pe RELEASE CHECKLIST: smoke pe artefact Electron IMPACHETAT
   (backup/restore/compact rulate din app.asar.unpacked — abia acolo se
-  exerseaza real asarUnpack-ul + rezolutia bindings).
+  exerseaza real asarUnpack-ul + rezolutia bindings) + smoke web cu 2 useri pe
+  dev-web-local.ps1 + `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` setat la deploy.
 
 **Stare ABI better-sqlite3: NODE** (`npm rebuild better-sqlite3` rulat pentru vitest).
 OBLIGATORIU `npm run rebuild:electron` inainte de orice smoke Electron si la finalul

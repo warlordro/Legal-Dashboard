@@ -6,6 +6,7 @@ import {
   readFileSync,
   readdirSync,
   renameSync,
+  statSync,
   unlinkSync,
   writeFileSync,
   writeSync,
@@ -17,6 +18,10 @@ import { recordAudit } from "./auditRepository.ts";
 const HEARTBEAT_MS = 5_000;
 const STALE_FACTOR = 6;
 const LOCK_NAME = ".instance.lock";
+// Rev. 5: self-heal-ul gate-ului de reclaim. INVARIANT: fn()-ul rulat sub
+// gate ramane DOAR recheck+rename+write (microsecunde) — nu adauga I/O lent
+// acolo, altfel expirarea devine atinsa in mod real.
+const GATE_STALE_MS = 60_000;
 
 interface LockRecord {
   pid: number;
@@ -62,6 +67,58 @@ function readLock(path: string): LockRecord | null {
     return JSON.parse(readFileSync(path, "utf8")) as LockRecord;
   } catch {
     return null;
+  }
+}
+
+// Rev. 5 (Codex HIGH, critic pentru web): reclaim-ul unui lock mort/stale
+// trece printr-un GATE creat atomic (O_EXCL) — doua boot-uri concurente care
+// citesc acelasi lock mort (docker restart pe acelasi volum; pe web nu exista
+// single-instance lock-ul Electron) nu mai pot face AMBELE rename+write;
+// pierzatorul refuza fail-closed cu mesaj de retry. Gate-ul orfan (crash
+// mid-reclaim) se autovindeca: peste GATE_STALE_MS e sters best-effort si
+// pornirea CURENTA tot refuza — urmatoarea il castiga. Exception-safe: un
+// singur try acopera open+fn; finally curata fd + gate cu garzi individuale.
+// Continutul gate-ului nu e citit de nimeni — nu se scrie nimic in el.
+function withReclaimGate(path: string, fn: () => void): void {
+  const gate = `${path}.reclaim-gate`;
+  let fd: number | null = null;
+  try {
+    try {
+      fd = openSync(gate, "wx");
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+      let orphan = false;
+      try {
+        orphan = Date.now() - statSync(gate).mtimeMs > GATE_STALE_MS;
+      } catch {
+        /* gate-ul a disparut intre timp (TOCTOU) — refuz tipat; retry-ul reuseste */
+      }
+      if (orphan) {
+        try {
+          unlinkSync(gate);
+        } catch {
+          /* best-effort */
+        }
+        throw new Error(
+          "Recuperarea lock-ului SQLite a fost intrerupta anterior (gate orfan curatat). Reincearca pornirea."
+        );
+      }
+      throw new Error("Alt proces Legal Dashboard recupereaza lock-ul SQLite chiar acum. Reincearca pornirea.");
+    }
+    fn();
+  } finally {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* best-effort */
+      }
+      try {
+        unlinkSync(gate);
+      } catch {
+        /* best-effort */
+      }
+    }
   }
 }
 
@@ -130,20 +187,60 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
               : "")
         );
       }
-      const deadPath = `${path}.dead-${existing.pid}-${Date.now()}`;
-      renameSync(path, deadPath);
-      writeNewLock(path, record);
-      pendingReclaimAudit = {
-        forced: false,
-        previousPid: existing.pid,
-        previousHostname: existing.hostname,
-        previousHeartbeatAgeMs: heartbeatAge,
-      };
+      withReclaimGate(path, () => {
+        // Re-evaluare COMPLETA sub gate (fix panel-pe-plan: nonce-ul singur nu
+        // ajunge — heartbeat-ul reimprospateaza ACELASI nonce, deci un lock
+        // cross-host citit stale in snapshot poate fi din nou viu aici).
+        const recheck = readLock(path);
+        if (!recheck || recheck.nonce !== existing.nonce) {
+          throw new Error("Lock-ul SQLite a fost preluat de alt proces in timpul recuperarii. Reincearca pornirea.");
+        }
+        const recheckAge = Date.now() - recheck.heartbeatAt;
+        const recheckStale = recheckAge > STALE_FACTOR * HEARTBEAT_MS;
+        const recheckBlocked = sameHost ? processAlive(recheck.pid) : !recheckStale;
+        if (recheckBlocked) {
+          throw new Error(
+            "Lock-ul SQLite a redevenit activ in timpul recuperarii (heartbeat proaspat). Reincearca pornirea."
+          );
+        }
+        const deadPath = `${path}.dead-${existing.pid}-${Date.now()}`;
+        try {
+          renameSync(path, deadPath);
+        } catch (e) {
+          // ENOENT = alt proces (ex. FORCE_BOOT concurent) a mutat lock-ul
+          // intre recheck si rename — refuz TIPAT, nu eroare bruta.
+          if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+            throw new Error("Lock-ul SQLite a fost preluat de alt proces in timpul recuperarii. Reincearca pornirea.");
+          }
+          throw e;
+        }
+        writeNewLock(path, record);
+        pendingReclaimAudit = {
+          forced: false,
+          previousPid: existing.pid,
+          previousHostname: existing.hostname,
+          previousHeartbeatAgeMs: heartbeatAge,
+        };
+      });
     } else {
-      const deadPath = `${path}.dead-invalid-${Date.now()}`;
-      renameSync(path, deadPath);
-      writeNewLock(path, record);
-      pendingReclaimAudit = { forced: false, invalidPrevious: true };
+      withReclaimGate(path, () => {
+        // Re-validare sub gate: daca intre timp un proces a scris un lock
+        // VALID (JSON parseabil), il respectam (nu-l redenumim).
+        if (readLock(path) !== null) {
+          throw new Error("Lock-ul SQLite a fost preluat de alt proces in timpul recuperarii. Reincearca pornirea.");
+        }
+        const deadPath = `${path}.dead-invalid-${Date.now()}`;
+        try {
+          renameSync(path, deadPath);
+        } catch (e) {
+          if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+            throw new Error("Lock-ul SQLite a fost preluat de alt proces in timpul recuperarii. Reincearca pornirea.");
+          }
+          throw e;
+        }
+        writeNewLock(path, record);
+        pendingReclaimAudit = { forced: false, invalidPrevious: true };
+      });
     }
   }
 

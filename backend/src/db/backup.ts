@@ -246,24 +246,29 @@ async function listBackups(dir: string, prefix: string): Promise<string[]> {
 // curatarea bundle-ului ar ramane sidecars orfane permanente in jail.
 // Rev. 4 (Codex): intoarce TRUE doar daca fisierul PRINCIPAL a disparut
 // efectiv (sters acum sau deja absent); EPERM/EBUSY/EACCES nu se mai inghit
-// silentios — un AV/ACL care refuza unlink-ul lasa discul sa creasca in timp
-// ce log-ul raporta prune reusit. Sidecar-urile raman best-effort (orfanele
-// se curata la urmatorul prune reusit).
+// silentios. Rev. 5 (Codex HIGH): fisierul PRINCIPAL decide si ORDINEA —
+// daca stergerea lui e refuzata (non-ENOENT), sidecars NU se ating: la
+// bundle-urile legacy datele comise pot trai doar in WAL, iar un .db
+// "pastrat" fara WAL-ul lui e un recovery point corupt silentios. Sidecars
+// se sterg DOAR dupa ce principalul a disparut; esecul pe ele ramane
+// best-effort (un sidecar refuzat DUPA stergerea principalului ramane orfan
+// permanent — asumat, enumerarea nu il mai redescopera).
 async function unlinkBundle(dir: string, name: string): Promise<boolean> {
-  let mainGone = true;
-  for (const suffix of ["", "-wal", "-shm"] as const) {
-    try {
-      await fsPromises.unlink(path.join(dir, name + suffix));
-    } catch (e) {
-      const code = (e as NodeJS.ErrnoException)?.code;
-      if (code === "ENOENT") continue; // absent = obiectivul e atins
-      if (suffix === "") {
-        mainGone = false;
-        logBackupEvent({ action: "backup_prune_failed", file: name, errnoCode: code ?? null });
-      }
+  try {
+    await fsPromises.unlink(path.join(dir, name));
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") {
+      logBackupEvent({ action: "backup_prune_failed", file: name, errnoCode: code ?? null });
+      return false;
     }
   }
-  return mainGone;
+  for (const suffix of ["-wal", "-shm"] as const) {
+    await fsPromises.unlink(path.join(dir, name + suffix)).catch(() => {
+      /* best-effort */
+    });
+  }
+  return true;
 }
 
 // Half-written backups left by a prior crash / SIGTERM / power loss between

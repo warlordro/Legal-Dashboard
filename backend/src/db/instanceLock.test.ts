@@ -103,6 +103,59 @@ describe("acquireInstanceLock — exclusivitate pe acelasi host (Rev. 4)", () =>
   });
 });
 
+// Rev. 5 (Codex HIGH, critic pentru web): reclaim-ul unui lock mort trece
+// printr-un GATE creat atomic (O_EXCL) — doua boot-uri concurente (docker
+// restart pe acelasi volum) nu mai pot face AMBELE rename+write.
+describe("acquireInstanceLock — reclaim atomic prin gate (Rev. 5)", () => {
+  function gatePath(): string {
+    return path.join(tmpRoot, ".instance.lock.reclaim-gate");
+  }
+
+  it("gate PROASPAT existent + lock mort => REFUZ fail-closed (alt proces recupereaza)", () => {
+    mockPidProbe(999_999, "ESRCH");
+    writeForeignLock({ pid: 999_999, heartbeatAt: Date.now() - 10 * 60 * 1000 });
+    fs.writeFileSync(gatePath(), "");
+
+    expect(() => acquireInstanceLock(tmpRoot, "test")).toThrow(/recupereaza|reincearca/i);
+    // Lock-ul strain si gate-ul strain raman neatinse.
+    const kept = JSON.parse(fs.readFileSync(path.join(tmpRoot, ".instance.lock"), "utf8"));
+    expect(kept.nonce).toBe("nonce-strain");
+    expect(fs.existsSync(gatePath())).toBe(true);
+  });
+
+  it("gate ORFAN (vechi) + lock mort => self-heal: gate-ul dispare, boot-ul curent refuza, urmatorul reuseste", () => {
+    mockPidProbe(999_999, "ESRCH");
+    writeForeignLock({ pid: 999_999, heartbeatAt: Date.now() - 10 * 60 * 1000 });
+    fs.writeFileSync(gatePath(), "");
+    const old = new Date(Date.now() - 10 * 60 * 1000);
+    fs.utimesSync(gatePath(), old, old);
+
+    expect(() => acquireInstanceLock(tmpRoot, "test")).toThrow(/reincearca/i);
+    expect(fs.existsSync(gatePath())).toBe(false); // self-heal
+    // A doua incercare (semantica unei reporniri) reuseste.
+    expect(() => acquireInstanceLock(tmpRoot, "test")).not.toThrow();
+    const now = JSON.parse(fs.readFileSync(path.join(tmpRoot, ".instance.lock"), "utf8"));
+    expect(now.pid).toBe(process.pid);
+  });
+
+  // REGRESIE (trece si azi — gate-ul nici nu se creeaza inca): fluxul normal
+  // de reclaim nu lasa gate in urma.
+  it("reclaim reusit lasa gate-ul CURATAT (regresie pe fluxul normal)", () => {
+    mockPidProbe(999_999, "ESRCH");
+    writeForeignLock({ pid: 999_999, heartbeatAt: Date.now() });
+
+    expect(() => acquireInstanceLock(tmpRoot, "test")).not.toThrow();
+    expect(fs.existsSync(gatePath())).toBe(false);
+  });
+
+  it("lock cu JSON neparseabil trece tot prin gate (gate proaspat => refuz)", () => {
+    fs.writeFileSync(path.join(tmpRoot, ".instance.lock"), "{ corupt");
+    fs.writeFileSync(gatePath(), "");
+
+    expect(() => acquireInstanceLock(tmpRoot, "test")).toThrow(/recupereaza|reincearca/i);
+  });
+});
+
 // Cross-host: ramurile "neschimbate" primesc gard — o inversare accidentala a
 // lui !stale ar fi trecut altfel de toata suita (fisierul e caracterizare noua).
 describe("acquireInstanceLock — cross-host ramane pe heartbeat (regresie)", () => {
