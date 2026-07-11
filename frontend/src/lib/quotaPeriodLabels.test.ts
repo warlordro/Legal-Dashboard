@@ -12,8 +12,8 @@ describe("quotaPeriodLabel", () => {
     expect(quotaPeriodLabel("month")).toBe("Lunar");
   });
 
-  it("cade sigur pe o valoare necunoscuta, fara sa expuna token-ul brut in eticheta afisata", () => {
+  it("valoare necunoscuta => conventia repo-ului: 'Necunoscut (token)', nu token brut", () => {
     // @ts-expect-error - testam fallback-ul pentru un input in afara uniunii QuotaPeriod
-    expect(quotaPeriodLabel("year")).toBe("year");
+    expect(quotaPeriodLabel("year")).toBe("Necunoscut (year)");
   });
 });

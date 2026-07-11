@@ -55,20 +55,28 @@ describe("full-flow split -> backup -> restore per user", () => {
     // 3. Backup manual u1.
     const { name } = await createRnpmManualBackup("u1");
 
-    // 4. Modificare date u1 (stergere aviz + insert nou).
+    // 4. Modificare date u1 (stergere aviz + insert nou POST-backup — fix C3:
+    // randul promis de comentariu chiar se insereaza, ca restore-ul sa aiba
+    // ce sa FACA SA DISPARA, nu doar ce sa readuca).
     const u1 = getRnpmDb("u1");
     u1.prepare("DELETE FROM rnpm_avize").run();
+    u1.prepare(
+      "INSERT INTO rnpm_avize (owner_id, uuid, identificator, search_type, tip, data) VALUES (?,?,?,?,?,?)"
+    ).run("u1", "uu-U1-POST", "U1-POST", "dupa_nume", "aviz", "2026-02-01");
     const monoBytes = fs.statSync(path.join(tmpRoot, "legal-dashboard.db")).size;
     const u2CountBefore = (getRnpmDb("u2").prepare("SELECT COUNT(*) AS n FROM rnpm_avize").get() as { n: number }).n;
 
     // 5. Restore u1.
     await restoreRnpmFromBackup("u1", name);
 
-    // 6. Datele u1 revin (avizul original, cu id-ul original).
-    const rows = getRnpmDb("u1").prepare("SELECT identificator FROM rnpm_avize").all() as {
+    // 6. Datele u1 revin (avizul original, cu uuid-ul original), iar randul
+    // post-backup a DISPARUT.
+    const rows = getRnpmDb("u1").prepare("SELECT uuid, identificator FROM rnpm_avize").all() as {
+      uuid: string;
       identificator: string;
     }[];
     expect(rows.map((r) => r.identificator)).toEqual(["U1-0001"]);
+    expect(rows.map((r) => r.uuid)).toEqual(["uu-U1-0001"]);
 
     // u2 si monolitul neatinse.
     expect((getRnpmDb("u2").prepare("SELECT COUNT(*) AS n FROM rnpm_avize").get() as { n: number }).n).toBe(

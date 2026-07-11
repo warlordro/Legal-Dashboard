@@ -1163,6 +1163,22 @@ describe("v2.42.0 (5.4) — audit enrichment + export", () => {
 // ---------------------------------------------------------------------------
 
 describe("v2.42.0 (5.3) — GET /usage/overview", () => {
+  it("cap-ul se aplica si cand totalul e cu mai putin de o pagina peste el (C5)", async () => {
+    // total = 553 (550 aici + local + uo-1 + uo-2 din beforeEach): in (500, 600]
+    // conditia veche `offset < total` era falsa la ultima pagina si raspunsul
+    // continea >500 useri cu truncated=false.
+    for (let i = 0; i < 550; i++) {
+      insertUser({ id: `cap-${i}`, email: `cap-${String(i).padStart(3, "0")}@x`, displayName: `C${i}` });
+    }
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as { data: { items: Array<{ userId: string }>; truncated: boolean } };
+    const uniqueUsers = new Set(body.data.items.map((i) => i.userId));
+    expect(uniqueUsers.size).toBeLessThanOrEqual(500);
+    expect(body.data.truncated).toBe(true);
+  });
+
   beforeEach(() => {
     updateUserRole("local", "admin");
     insertUser({ id: "uo-1", email: "b@x", displayName: "B" });

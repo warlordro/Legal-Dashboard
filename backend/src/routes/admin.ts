@@ -1067,8 +1067,12 @@ adminRouter.get("/usage/overview", (c) => {
     const page = listUsers({ status: "active", limit: USAGE_OVERVIEW_PAGE, offset });
     users.push(...page.rows);
     offset += page.rows.length;
-    if (users.length >= USAGE_OVERVIEW_CAP && offset < page.total) {
-      truncated = true;
+    if (users.length >= USAGE_OVERVIEW_CAP) {
+      // Fix CodeRabbit C5: conditia veche `&& offset < page.total` lasa cap-ul
+      // neaplicat cand totalul era cu mai putin de o pagina peste el (ex. 553)
+      // — ultima pagina aducea offset == total si raspunsul depasea cap-ul cu
+      // truncated=false. Truncat = am taiat randuri SAU mai raman pe server.
+      truncated = users.length > USAGE_OVERVIEW_CAP || offset < page.total;
       users.length = USAGE_OVERVIEW_CAP;
       break;
     }

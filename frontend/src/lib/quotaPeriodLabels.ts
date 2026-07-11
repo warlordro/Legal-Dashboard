@@ -13,8 +13,11 @@ export function quotaPeriodLabel(period: QuotaPeriod): string {
       return "Lunar";
     default: {
       // Exhaustive guard — TS va eroa daca QuotaPeriod adauga o valoare noua.
+      // Fix C11: la runtime un token necunoscut urmeaza conventia repo-ului
+      // ("Necunoscut (token)" — pastreaza valoarea pentru diagnosticare),
+      // nu se afiseaza brut.
       const _exhaustive: never = period;
-      return String(_exhaustive);
+      return `Necunoscut (${String(_exhaustive)})`;
     }
   }
 }
