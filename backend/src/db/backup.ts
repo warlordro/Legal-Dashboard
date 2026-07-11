@@ -990,6 +990,9 @@ export async function restoreRnpmFromBackup(
   const jail = getRnpmBackupDir(ownerId); // valideaza implicit ownerId (stem)
   assertNameInJail(jail, name, RNPM_RESTORE_NAME_RE);
   return withMaintenanceWrite(async () => {
+    // beginRnpmRestore NU e reentrant-aware — refuzam explicit al doilea
+    // restore concurent pe acelasi owner (409 rapid, nu coada silentioasa).
+    if (isRnpmRestoreInProgress(ownerId)) throw new RnpmRestoreInProgressError();
     // Gard de concurenta: arunca SEARCH_ACTIVE daca ownerul are o cautare in
     // zbor; latch-ul (isRnpmRestoreInProgress) tine restul operatiilor
     // ownerului afara pe toata durata (verificat in getRnpmDb).

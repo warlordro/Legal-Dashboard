@@ -515,6 +515,9 @@ async function callOpenAI(
             ...(system !== null ? { instructions: system } : {}),
             input: user,
             max_output_tokens: AI_MAX_TOKENS,
+            // Datele de dosar (parti, solutii) nu au voie sa fie persistate de
+            // OpenAI; nu folosim previous_response_id nicaieri in cod.
+            store: false,
           },
           { signal: composed }
         );

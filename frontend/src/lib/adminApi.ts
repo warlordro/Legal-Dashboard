@@ -359,7 +359,8 @@ export function triggerBlobDownload(blob: Blob, filename: string): void {
   document.body.appendChild(a);
   a.click();
   a.remove();
-  URL.revokeObjectURL(url);
+  // Amanam revoke-ul (pattern-ul repo-ului): browserul are nevoie de URL activ pe durata click-ului.
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function adminQs(params: Record<string, string | number | undefined | null>): string {

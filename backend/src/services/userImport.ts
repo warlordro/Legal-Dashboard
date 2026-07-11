@@ -101,19 +101,24 @@ export async function parseUserImport(buffer: Buffer): Promise<ParseImportResult
   }
 
   const workbook = new ExcelJS.Workbook();
+  let timeoutHandle: NodeJS.Timeout | undefined;
   try {
     // Comentariu onest: race-ul elibereaza handlerul HTTP dupa 30s, dar NU
     // opreste parsarea exceljs pornita in fundal. Apararea reala impotriva
     // fisierelor ostile e capul de 512KB + ruta admin-only.
     await Promise.race([
       workbook.xlsx.load(buffer as unknown as ArrayBuffer),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("parse timeout")), PARSE_TIMEOUT_MS)),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("parse timeout")), PARSE_TIMEOUT_MS);
+      }),
     ]);
   } catch (err) {
     // O linie de diagnostic server-side — altfel "user a trimis junk" si
     // "regresie de parser" sunt indistinguibile din raspunsul sanitizat.
     console.error("[userImport] xlsx parse failed:", err instanceof Error ? err.message : err);
     return { ok: false, code: "invalid_file", message: "Fisierul nu a putut fi citit ca .xlsx." };
+  } finally {
+    clearTimeout(timeoutHandle);
   }
 
   const sheet = workbook.worksheets[0];

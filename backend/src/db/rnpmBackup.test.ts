@@ -172,6 +172,19 @@ describe("restoreRnpmFromBackup", () => {
     await expect(restoreRnpmFromBackup("u1", name)).resolves.toBeDefined();
   });
 
+  it("restore concurent pe acelasi owner: al doilea refuza cu RESTORE_IN_PROGRESS (nu coada silentioasa)", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    beginRnpmRestore("u1");
+    try {
+      await expect(restoreRnpmFromBackup("u1", name)).rejects.toMatchObject({ code: "RESTORE_IN_PROGRESS" });
+    } finally {
+      endRnpmRestore("u1");
+    }
+    // Dupa eliberarea latch-ului, restore-ul functioneaza normal.
+    await expect(restoreRnpmFromBackup("u1", name)).resolves.toBeDefined();
+  });
+
   it("backup rnpm cu hash forjat in _schema_versions => 400 fail-closed, live neatins (Rev. 3)", async () => {
     seedSearch("u1", "a");
     const { name } = await createRnpmManualBackup("u1");

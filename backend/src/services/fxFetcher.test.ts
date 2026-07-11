@@ -73,6 +73,14 @@ describe("parseEcbFeed", () => {
     expect(parseEcbFeed(xml)).toEqual({ rateDate: "2026-07-06", eurUsdRate: 1.1415 });
   });
 
+  it("returns null when attribute quotes are mismatched (not a valid pair)", () => {
+    // Regresie: regex-ul ["']...["'] accepta azi ghilimele NEPERECHE
+    // (ex. time="2026-07-06') — trebuie sa ceara acelasi delimitator la
+    // deschidere si inchidere (backreference).
+    const xml = `<Cube><Cube time="2026-07-06'><Cube currency="USD" rate="1.08"/></Cube></Cube>`;
+    expect(parseEcbFeed(xml)).toBeNull();
+  });
+
   it("returns null when USD is missing", () => {
     const xml = `<Cube><Cube time="2026-05-19"><Cube currency="JPY" rate="166.32"/></Cube></Cube>`;
     expect(parseEcbFeed(xml)).toBeNull();

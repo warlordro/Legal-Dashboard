@@ -1,7 +1,7 @@
 # Legal Dashboard - RUNBOOK Operational
 
-**Versiune**: v2.34.0
-**Data ultima revizie**: 2026-05-20
+**Versiune**: v2.43.0
+**Data ultima revizie**: 2026-07-11
 **Audienta**: admin firma (ops + IT) responsabil cu rularea aplicatiei.
 
 Runbook centralizat cu procedurile de recovery, rollback si troubleshooting pentru

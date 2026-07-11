@@ -97,7 +97,7 @@ legal-dashboard/
 
 ### AI SDKs
 - **@anthropic-ai/sdk 0.90** — Claude Haiku/Opus 4.x, Sonnet 5
-- **openai 6.33** — GPT-5.4 via Responses API
+- **openai 6.33** — GPT-5.6 via Responses API
 - **@google/generative-ai 0.24** — Gemini 3.x
 
 ### Captcha
@@ -293,14 +293,14 @@ Vezi sectiunea SQLite pentru schema completa. Filtre:
 | **Anthropic** | Claude Haiku 4.5 (Rapid) | `claude-haiku` | `claude-haiku-4-5-20251001` |
 | | Claude Sonnet 5 (Echilibrat) | `claude-sonnet` | `claude-sonnet-5` |
 | | Claude Opus 4.8 (Premium) | `claude-opus` | `claude-opus-4-8` |
-| **OpenAI** | GPT-5.4 nano (Rapid) | `gpt-5.4-nano` | `gpt-5.4-nano` |
-| | GPT-5.4 mini (Echilibrat) | `gpt-5.4-mini` | `gpt-5.4-mini` |
-| | GPT-5.4 (Premium) | `gpt-5.4` | `gpt-5.4` |
+| **OpenAI** | GPT-5.6 Luna (Rapid) | `gpt-5.6-luna` | `gpt-5.6-luna` |
+| | GPT-5.6 Terra (Echilibrat) | `gpt-5.6-terra` | `gpt-5.6-terra` |
+| | GPT-5.6 Sol (Premium) | `gpt-5.6-sol` | `gpt-5.6-sol` |
 | **Google** | Gemini 3.1 Flash Lite (Rapid) | `gemini-flash-lite-3` | `gemini-3.1-flash-lite-preview` |
 | | Gemini 3.5 Flash (Echilibrat) | `gemini-flash-3.5` | `gemini-3.5-flash` |
 | | Gemini 3.1 Pro (Premium) | `gemini-pro-3` | `gemini-3.1-pro-preview` |
 
-Modele permise ca **judecator** in multi-agent: `claude-opus`, `gpt-5.4`, `gemini-pro-3`.
+Modele permise ca **judecator** in multi-agent: `claude-opus`, `gpt-5.6-sol`, `gemini-pro-3`.
 
 ### Autentificare AI
 
