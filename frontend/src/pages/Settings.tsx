@@ -23,6 +23,7 @@ const AdminGrants = lazy(() => import("@/pages/admin/Grants"));
 const AdminUsage = lazy(() => import("@/pages/admin/Usage"));
 const AdminAudit = lazy(() => import("@/pages/admin/Audit"));
 const AdminBackups = lazy(() => import("@/pages/admin/Backups"));
+const AdminRnpmStorage = lazy(() => import("@/pages/admin/RnpmStorage"));
 
 const TABS = [
   { key: "general", label: "General", adminOnly: false },
@@ -156,6 +157,7 @@ export default function SettingsPage() {
           <AdminGate>
             <Suspense fallback={fallback}>
               <AdminBackups embedded />
+              <AdminRnpmStorage embedded />
             </Suspense>
           </AdminGate>
         )}

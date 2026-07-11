@@ -993,26 +993,62 @@ rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), 
   // v2.43.0 (rnpm-split): compacteaza FISIERUL PER USER al callerului.
   // Task 7: prin worker + swap sub maintenance lock (VACUUM-ul nu mai
   // blocheaza event loop-ul si nu mai ruleaza pe handle-ul viu).
-  const ownerId = getOwnerId(c);
+  // v2.43.x (admin rnpm storage): adminul poate tinti alt owner prin
+  // ?ownerId= — acelasi mecanism ca la backups (resolveBackupOwner: non-admin
+  // e ignorat silentios, ownerId invalid de la admin = 400).
+  let ownerId: string;
+  try {
+    ownerId = resolveBackupOwner(c, c.req.query("ownerId"));
+  } catch (e) {
+    return invalidParams(c, e instanceof Error ? e.message : "ownerId invalid");
+  }
+  const caller = getOwnerId(c);
+  const targetDetail = ownerId === caller ? undefined : ownerId;
   // Fix review (Task 6): fara fisier nu exista nimic de compactat — 404, nu
   // provisioning implicit prin getRnpmDb. Latch-ul de restore ramane
   // prioritar (409 prin rethrow, nu 404 pentru un fisier mid-swap).
-  if (!isRnpmRestoreInProgress(ownerId) && !(await rnpmFileExists(getRnpmDbPath(ownerId)))) {
-    return notFound(c, "Baza RNPM nu exista inca pentru acest cont");
+  if (!isRnpmRestoreInProgress(ownerId)) {
+    let dbExists: boolean;
+    try {
+      dbExists = await rnpmFileExists(getRnpmDbPath(ownerId));
+    } catch (e) {
+      // Fix review Codex: EACCES/EIO la proba de existenta (semantica
+      // ENOENT-only) mergea direct in handlerul central FARA urma in audit —
+      // tentativa si ownerul afectat trebuie inregistrate inainte de 500.
+      recordAuditSafe(c, "rnpm.compact", {
+        targetKind: "rnpm_db",
+        ownerId,
+        outcome: "error",
+        detail: { error: e instanceof Error ? e.message : String(e), targetOwnerId: targetDetail },
+      });
+      throw e;
+    }
+    if (!dbExists) {
+      // Tentativa admin pe owner fara fisier trebuie sa lase urma in audit.
+      recordAuditSafe(c, "rnpm.compact", {
+        targetKind: "rnpm_db",
+        ownerId,
+        outcome: "denied",
+        detail: { error: "rnpm_db_not_found", targetOwnerId: targetDetail },
+      });
+      return notFound(c, "Baza RNPM nu exista inca pentru acest cont");
+    }
   }
   try {
     const result = await compactRnpmDbViaWorker(ownerId);
     recordAuditSafe(c, "rnpm.compact", {
       targetKind: "rnpm_db",
-      detail: { beforeBytes: result.beforeBytes, afterBytes: result.afterBytes },
+      ownerId,
+      detail: { beforeBytes: result.beforeBytes, afterBytes: result.afterBytes, targetOwnerId: targetDetail },
     });
     return c.json({ ok: true, ...result });
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare compactare baza";
     recordAuditSafe(c, "rnpm.compact", {
       targetKind: "rnpm_db",
+      ownerId,
       outcome: isTypedMaintenanceError(e) ? "denied" : "error",
-      detail: { error: msg },
+      detail: { error: msg, targetOwnerId: targetDetail },
     });
     // Fix review (Task 5): erorile tipate (restore in curs, cautare activa,
     // shutdown) ies spre handlerul central => 409/503, nu 500 generic.

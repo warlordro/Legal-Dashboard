@@ -57,6 +57,7 @@ import { markMaintenanceShuttingDown, runDailyBackup, waitForBackupToSettle } fr
 import { ErrorCodes, fail } from "./util/envelope.ts";
 import { appErrorHandler } from "./util/appErrorHandler.ts";
 import { adminBackupsRouter } from "./routes/adminBackups.ts";
+import { adminRnpmRouter } from "./routes/adminRnpm.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
 import { fileURLToPath } from "node:url";
@@ -456,6 +457,7 @@ app.route("/api/v1/auth", authRouter);
 // requireRole('admin') inside the router so non-admins get 403, not 404).
 app.route("/api/v1/me", meRouter);
 app.route("/api/v1/admin/backups", adminBackupsRouter);
+app.route("/api/v1/admin/rnpm", adminRnpmRouter);
 app.route("/api/v1/admin", adminRouter);
 // PR-A (v2.7.0): dashboard summary aggregation endpoint pentru KPI strip.
 // Owner-scoped, wrapped in withMaintenanceRead pentru a coexista cu backup/restore.

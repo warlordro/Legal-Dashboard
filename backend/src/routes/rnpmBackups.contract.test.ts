@@ -465,3 +465,58 @@ describe("rutele pe fisierul callerului (stats/compact/delete-all)", () => {
     }
   });
 });
+
+describe("POST /compact cross-owner (admin rnpm storage)", () => {
+  it("adminul compacteaza fisierul altui owner prin ?ownerId=", async () => {
+    seedRnpm("u1", "a");
+    const res = await buildApp("admin1").request("/api/rnpm/compact?ownerId=u1", { method: "POST", headers: DESKTOP });
+    expect(res.status).toBe(200);
+    const audits = getAuditEvents({ action: "rnpm.compact" });
+    expect(audits[0]?.owner_id).toBe("u1"); // userul AFECTAT, nu adminul
+    expect(JSON.parse(audits[0]?.detail_json ?? "{}").targetOwnerId).toBe("u1");
+  });
+
+  it("non-adminul cu ?ownerId= strain e ignorat silentios (opereaza pe fisierul propriu)", async () => {
+    seedRnpm("u1", "a");
+    // u1 isi are propriul fisier; tinteste un owner strain si ramane pe al lui
+    const res = await buildApp("u1").request("/api/rnpm/compact?ownerId=admin1", { method: "POST", headers: DESKTOP });
+    expect(res.status).toBe(200);
+    const audits = getAuditEvents({ action: "rnpm.compact" });
+    expect(audits[0]?.owner_id).toBe("u1"); // propriul fisier, nu admin1
+    expect(JSON.parse(audits[0]?.detail_json ?? "{}").targetOwnerId).toBeUndefined();
+  });
+
+  it("ownerId invalid de la admin => 400, nu 500", async () => {
+    const res = await buildApp("admin1").request("/api/rnpm/compact?ownerId=..%2F..%2Fetc", {
+      method: "POST",
+      headers: DESKTOP,
+    });
+    expect(res.status).toBe(400);
+  });
+
+  it("admin pe owner fara fisier => 404 CU audit denied pe ownerul tinta", async () => {
+    // u2 exista ca user (insertUser in beforeEach) dar nu are fisier RNPM.
+    const res = await buildApp("admin1").request("/api/rnpm/compact?ownerId=u2", { method: "POST", headers: DESKTOP });
+    expect(res.status).toBe(404);
+    const audits = getAuditEvents({ action: "rnpm.compact" });
+    expect(audits[0]?.outcome).toBe("denied");
+    expect(audits[0]?.owner_id).toBe("u2");
+  });
+
+  it("cautare activa la userul TINTA => 409 cu audit denied pe ownerul tinta", async () => {
+    seedRnpm("u1", "a");
+    beginRnpmSearch("u1");
+    try {
+      const res = await buildApp("admin1").request("/api/rnpm/compact?ownerId=u1", {
+        method: "POST",
+        headers: DESKTOP,
+      });
+      expect(res.status).toBe(409);
+      const audits = getAuditEvents({ action: "rnpm.compact" });
+      expect(audits[0]?.outcome).toBe("denied");
+      expect(audits[0]?.owner_id).toBe("u1");
+    } finally {
+      endRnpmSearch("u1");
+    }
+  });
+});

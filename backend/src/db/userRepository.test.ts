@@ -13,6 +13,7 @@ import {
   insertUser,
   isUniqueEmailViolation,
   LastAdminError,
+  listAllUserIdentities,
   listUsers,
   provisionUsersBulk,
   updateUserRole,
@@ -297,5 +298,19 @@ describe("invariantul ultimul admin activ (checked updates)", () => {
     insertUser({ id: "a1", email: "a1@x.ro", displayName: "A1", role: "admin" });
     insertUser({ id: "u1", email: "u1@x.ro", displayName: "U1" });
     expect(updateUserStatusChecked("u1", "suspended").status).toBe("suspended");
+  });
+});
+
+describe("listAllUserIdentities (admin rnpm storage)", () => {
+  it("intoarce toti userii, indiferent de status, sortati pe email", () => {
+    insertUser({ id: "u-c", email: "c@x.ro", displayName: "C", role: "user" });
+    insertUser({ id: "u-a", email: "a@x.ro", displayName: "A", role: "admin" });
+    const b = insertUser({ id: "u-b", email: "b@x.ro", displayName: "B", role: "user" });
+    updateUserStatus(b.id, "suspended");
+    const rows = listAllUserIdentities();
+    // seed-ul 'local@desktop' (migration 0002) e mereu prezent si sorteaza ultimul (l > c).
+    expect(rows.map((r) => r.email)).toEqual(["a@x.ro", "b@x.ro", "c@x.ro", "local@desktop"]);
+    expect(rows.find((r) => r.id === "u-b")?.status).toBe("suspended");
+    expect(rows[0]).toHaveProperty("display_name");
   });
 });

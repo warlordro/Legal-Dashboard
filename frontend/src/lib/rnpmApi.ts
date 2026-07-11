@@ -364,8 +364,9 @@ export interface RnpmCompactResult {
   durationMs: number;
 }
 
-export async function rnpmCompactDb(): Promise<RnpmCompactResult> {
-  const res = await apiFetch(`${BASE}/compact`, { method: "POST" });
+export async function rnpmCompactDb(ownerId?: string): Promise<RnpmCompactResult> {
+  const qs = ownerId ? `?ownerId=${encodeURIComponent(ownerId)}` : "";
+  const res = await apiFetch(`${BASE}/compact${qs}`, { method: "POST" });
   return jsonOrThrow<RnpmCompactResult>(res);
 }
 
