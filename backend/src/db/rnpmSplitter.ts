@@ -535,6 +535,12 @@ function wipeMonolithRnpm(mono: Database.Database): void {
   }
 }
 
+// B1: check minimal pentru backfill-ul de audit idempotent la boot — refoloseste
+// parsarea/validarea markerului din readMarker() in loc sa o duplice.
+export function isRnpmSplitDone(): boolean {
+  return readMarker()?.status === "done";
+}
+
 export function runRnpmSplitIfNeeded(opts?: RnpmSplitOptions): { split: boolean; owners: string[] } {
   const onPhase = opts?.onPhase ?? (() => {});
   const appVersion = opts?.appVersion ?? "unknown";

@@ -16,8 +16,8 @@ import {
 } from "../db/backup.ts";
 import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { requireRole } from "../middleware/requireRole.ts";
-import { rethrowTypedMaintenanceError } from "../util/appErrorHandler.ts";
-import { ErrorCodes, fail } from "../util/envelope.ts";
+import { isTypedMaintenanceError, rethrowTypedMaintenanceError } from "../util/appErrorHandler.ts";
+import { ErrorCodes, fail, ok } from "../util/envelope.ts";
 
 const SMALL_BODY_LIMIT = 4 * 1024;
 const limitSmall = bodyLimit({
@@ -32,13 +32,20 @@ adminBackupsRouter.use("*", requireRole("admin"));
 adminBackupsRouter.get("/", async (c) => {
   try {
     const backups = await listBackupsWithMeta();
-    return c.json({ backups });
+    return c.json(ok({ backups }, c));
   } catch (e) {
     // Fix review (Task 4.3/5.2): erorile tipate (shutdown, restore in curs)
     // ies spre handlerul central => 409/503, nu 500 generic.
     rethrowTypedMaintenanceError(e);
-    const msg = e instanceof Error ? e.message : "Eroare listare backups";
-    return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
+    console.error("[adminBackups] list failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
   }
 });
 
@@ -49,16 +56,24 @@ adminBackupsRouter.post("/create", requireDesktopHeader, async (c) => {
       targetKind: "backup",
       targetId: name,
     });
-    return c.json({ ok: true, name });
+    return c.json(ok({ name }, c));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare creare backup";
     recordAuditSafe(c, "backup.create", {
       targetKind: "backup",
-      outcome: "error",
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
       detail: { error: msg },
     });
     rethrowTypedMaintenanceError(e);
-    return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
+    console.error("[adminBackups] create failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
   }
 });
 
@@ -79,20 +94,28 @@ adminBackupsRouter.post("/restore", requireDesktopHeader, limitSmall, async (c) 
       targetId: name,
       detail: { preRestoreName },
     });
-    return c.json({ ok: true, preRestoreName });
+    return c.json(ok({ preRestoreName }, c));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare restore";
     recordAuditSafe(c, "backup.restore", {
       targetKind: "backup",
       targetId: name,
-      outcome: "error",
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
       detail: { error: msg },
     });
     if (e instanceof BackupValidationError) {
       return c.json(fail(ErrorCodes.INVALID_PARAMS, msg, c), 400);
     }
     rethrowTypedMaintenanceError(e);
-    return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
+    console.error("[adminBackups] restore failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
   }
 });
 
@@ -103,15 +126,23 @@ adminBackupsRouter.delete("/", requireDesktopHeader, async (c) => {
       targetKind: "backup",
       detail: { deleted },
     });
-    return c.json({ deleted });
+    return c.json(ok({ deleted }, c));
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare stergere backups";
     recordAuditSafe(c, "backup.delete_all", {
       targetKind: "backup",
-      outcome: "error",
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
       detail: { error: msg },
     });
     rethrowTypedMaintenanceError(e);
-    return c.json(fail(ErrorCodes.INTERNAL_ERROR, msg, c), 500);
+    console.error("[adminBackups] delete-all failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
   }
 });

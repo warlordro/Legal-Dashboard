@@ -18,7 +18,7 @@ import {
   endRnpmRestore,
   endRnpmSearch,
 } from "../db/rnpmActivity.ts";
-import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, rnpmFileStem } from "../db/rnpmDb.ts";
+import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath } from "../db/rnpmDb.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserRole } from "../db/userRepository.ts";
@@ -179,6 +179,21 @@ describe("POST /api/rnpm/backups/create", () => {
     const retry = await app.request("/api/rnpm/backups/create", { method: "POST", headers: DESKTOP });
     expect(retry.status).toBe(200);
   });
+
+  // B1: refuzul tipat (restore in curs pe acelasi owner) e o concurenta
+  // asteptata, nu o eroare de sistem — audit-ul trebuie sa reflecte asta.
+  it("refuzul tipat (restore in curs) pe create e clasificat denied, nu error", async () => {
+    seedRnpm("u1", "a");
+    beginRnpmRestore("u1");
+    try {
+      const res = await buildApp("u1").request("/api/rnpm/backups/create", { method: "POST", headers: DESKTOP });
+      expect(res.status).toBe(409);
+      const events = getAuditEvents({ action: "backup.rnpm.create" });
+      expect(events[0]?.outcome).toBe("denied");
+    } finally {
+      endRnpmRestore("u1");
+    }
+  });
 });
 
 describe("POST /api/rnpm/backups/restore", () => {
@@ -239,6 +254,10 @@ describe("POST /api/rnpm/backups/restore", () => {
     const audits = getAuditEvents({ action: "backup.rnpm.restore" });
     expect(audits.length).toBe(1);
     expect(JSON.parse(audits[0].detail_json ?? "{}").targetOwnerId).toBe("u1");
+    // B1: audit-ul cross-owner trebuie sa scrie owner_id = ownerul AFECTAT
+    // (coloana indexata), nu ownerul callerului admin — altfel query-urile
+    // owner-scoped pe audit_log nu gasesc evenimentul.
+    expect(audits[0].owner_id).toBe("u1");
   });
 
   it("409 SEARCH_ACTIVE cand ownerul are o cautare in zbor", async () => {
@@ -271,6 +290,18 @@ describe("POST /api/rnpm/backups/restore", () => {
       expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("INVALID_PARAMS");
     }
   });
+
+  it("body.ownerId non-string => 400 INVALID_PARAMS, nu 500 (Task 15, INT-M9)", async () => {
+    seedRnpm("u1", "a");
+    const name = await createBackupAs("u1");
+
+    const res = await buildApp("u1").request("/api/rnpm/backups/restore", {
+      method: "POST",
+      headers: JSON_DESKTOP,
+      body: JSON.stringify({ name, ownerId: 123 }),
+    });
+    expect(res.status).toBe(400);
+  });
 });
 
 describe("DELETE /api/rnpm/backups", () => {
@@ -289,13 +320,13 @@ describe("DELETE /api/rnpm/backups", () => {
 });
 
 describe("rutele pe fisierul callerului (stats/compact/delete-all)", () => {
-  it("GET /stats raporteaza fisierul per user (stem), nu monolitul", async () => {
+  it("GET /stats raporteaza fisierul per user (stem), nu monolitul, fara path absolut", async () => {
     seedRnpm("u1", "a");
     const res = await buildApp("u1").request("/api/rnpm/stats", { headers: DESKTOP });
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { total: number; db: { path: string; sizeBytes: number } };
-    expect(path.basename(body.db.path)).toBe(`${rnpmFileStem("u1")}.db`);
+    const body = (await res.json()) as { total: number; db: Record<string, unknown> };
     expect(body.db.sizeBytes).toBeGreaterThan(0);
+    expect("path" in body.db).toBe(false);
   });
 
   it("POST /compact ruleaza pe fisierul callerului si e permis rolului user", async () => {

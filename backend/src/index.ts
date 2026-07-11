@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
-import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { rnpmRouter } from "./routes/rnpm.ts";
 import { dosareExportRouter, dosareRouter } from "./routes/dosare.ts";
@@ -45,12 +44,13 @@ import { selectPendingEmailRetries } from "./db/budgetNotificationsRepository.ts
 import { checkBudgetWarningRetry } from "./services/budgetWarningService.ts";
 import { purgeExpiredReservations } from "./db/aiUsageRepository.ts";
 import { purgeExpiredJti } from "./db/jwtDenylistRepository.ts";
+import { runRetentionPurge } from "./services/retentionPurge.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDb, getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
 import { markRnpmShuttingDown } from "./db/rnpmDb.ts";
-import { runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
-import { recordAudit } from "./db/auditRepository.ts";
+import { isRnpmSplitDone, runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
+import { getAuditEvents, recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
 import { markMaintenanceShuttingDown, runDailyBackup, waitForBackupToSettle } from "./db/backup.ts";
@@ -92,7 +92,26 @@ const app = new Hono();
 // v2.43.0 (rnpm-split): mapare centrala a erorilor de concurenta RNPM la 409.
 app.onError(appErrorHandler);
 
-app.use("*", logger());
+// E2 (audit v2.43.0): logger-ul Hono scria URL-ul COMPLET — nume de parti,
+// numere de dosar si filtre juridice ajungeau in stdout (persistat pe
+// Docker/colectoare). Logam doar pathname + status + durata; requestId-ul e
+// setat de requestIdContext downstream si citit din header-ul de raspuns.
+app.use("*", async (c, next) => {
+  const t0 = Date.now();
+  await next();
+  const { pathname } = new URL(c.req.url);
+  console.log(
+    JSON.stringify({
+      action: "http",
+      method: c.req.method,
+      path: pathname,
+      status: c.res.status,
+      ms: Date.now() - t0,
+      requestId: c.res.headers.get("x-request-id") ?? undefined,
+      ts: new Date().toISOString(),
+    })
+  );
+});
 
 // Security headers + CSP (applied to both Electron-served HTML and future web build)
 app.use(
@@ -221,6 +240,24 @@ try {
 // 401/403, ca raspunsurile auth sa includa `x-request-id` si `requestId` in
 // envelope (fail()).
 app.use("*", requestIdContext);
+
+// E6 (audit v2.43.0): raspunsurile API autentificate nu aveau no-store decat
+// pe PAT/export. MERGE de directive (corectie Codex): rutele cu politici
+// proprii (SSE no-cache, exporturi no-store) le PASTREAZA — adaugam doar ce
+// lipseste, nu suprascriem.
+app.use("/api/*", async (c, next) => {
+  await next();
+  const existing = c.res.headers.get("Cache-Control");
+  const directives = new Set(
+    (existing ?? "")
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  directives.add("no-store");
+  directives.add("private");
+  c.res.headers.set("Cache-Control", [...directives].join(", "));
+});
 
 // PR-9 fix B4: /health trebuie sa fie disponibil fara DB user lookup. Mount-uit
 // inainte de ownerContext, ca readiness probes sa nu cada cand users.local
@@ -563,6 +600,18 @@ try {
     getAvizStats("local");
   }
   flushPendingReclaimAudit();
+  // B1 (corectie Codex): auditul splitului trebuie sa fie DURABIL. Markerul
+  // done se scrie inainte de return in splitter; daca recordAudit ar esua
+  // aici, boot-urile urmatoare intorc split:false si evenimentul s-ar pierde
+  // definitiv. Backfill idempotent: marker done + zero randuri rnpm.split in
+  // audit_log => inserteaza acum (o interogare pe boot, ieftina).
+  if (isRnpmSplitDone() && getAuditEvents({ action: "rnpm.split", limit: 1 }).length === 0) {
+    recordAudit(null, "rnpm.split", {
+      ownerId: null,
+      actorId: "system",
+      detail: { version: APP_VERSION, backfilled: true },
+    });
+  }
   // Gate-ul de master key (web-only, getMasterKey + round-trip probe) a fost
   // MUTAT inainte de runRnpmSplitIfNeeded (fix review, Task 4).
   recordAudit(null, "system.boot", {
@@ -689,6 +738,11 @@ let reservationPurgeInterval: NodeJS.Timeout | null = null;
 // independent daily timer in web mode only, mirroring reservationPurgeInterval.
 const JWT_PURGE_INTERVAL_MS = 86_400_000;
 let jwtPurgeInterval: NodeJS.Timeout | null = null;
+// E4 (audit v2.43.0): retentia audit_log + ai_usage rula DOAR in scheduler-ul
+// de monitoring — cu MONITORING_ENABLED=0 (indiferent de mod, desktop sau web)
+// tabelele cresteau nelimitat. Timer independent, AMBELE moduri.
+const RETENTION_PURGE_INTERVAL_MS = 86_400_000;
+let retentionPurgeInterval: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {
   try {
@@ -807,6 +861,13 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
     }, JWT_PURGE_INTERVAL_MS);
     jwtPurgeInterval.unref?.();
   }
+
+  // E4: in AMBELE moduri (desktop + web) — finding-ul acopera exact
+  // deploy-urile cu MONITORING_ENABLED=0, indiferent de mod.
+  retentionPurgeInterval = setInterval(() => {
+    runRetentionPurge();
+  }, RETENTION_PURGE_INTERVAL_MS);
+  retentionPurgeInterval.unref?.();
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
   // shares the maintenance lock with backup so concurrent ticks pause cleanly
@@ -928,6 +989,10 @@ async function gracefulShutdownImpl(reason: string): Promise<void> {
   if (jwtPurgeInterval) {
     clearInterval(jwtPurgeInterval);
     jwtPurgeInterval = null;
+  }
+  if (retentionPurgeInterval) {
+    clearInterval(retentionPurgeInterval);
+    retentionPurgeInterval = null;
   }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca

@@ -445,6 +445,38 @@ describe("retentie pre-restore la restore", () => {
   });
 });
 
+// Task 15 (EXT-M-04): snapshot-ul pre-restore se creeaza INAINTE de staging
+// (ramane, e plasa de siguranta), dar pool-ul se plafoneaza SI pe failure —
+// retry-uri repetate pe un backup care esueaza mereu la staging nu au voie sa
+// acumuleze fisiere nelimitat in jail.
+describe("prune pe failure de staging (EXT-M-04)", () => {
+  function preRestoreFiles(ownerId: string): string[] {
+    return fs.readdirSync(getRnpmBackupDir(ownerId)).filter((f) => f.startsWith("rnpm.pre-restore-"));
+  }
+
+  it("restore esuat la staging aplica prune pe pool-ul pre-restore existent", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+
+    // PRE_RESTORE_RETAIN = 5: 5 restore-uri reusite => exact 5 snapshot-uri.
+    for (let i = 0; i < 5; i++) {
+      await restoreRnpmFromBackup("u1", name);
+      await new Promise((r) => setTimeout(r, 3));
+    }
+    expect(preRestoreFiles("u1").length).toBe(5);
+
+    // Al 6-lea restore: snapshot-ul pre-restore reuseste (VACUUM INTO), dar
+    // staging-ul (copyFile) esueaza mereu.
+    const copySpy = vi
+      .spyOn(fsPromises, "copyFile")
+      .mockRejectedValue(Object.assign(new Error("ENOSPC simulat"), { code: "ENOSPC" }));
+    await expect(restoreRnpmFromBackup("u1", name)).rejects.toThrow();
+    copySpy.mockRestore();
+
+    expect(preRestoreFiles("u1").length).toBeLessThanOrEqual(5);
+  });
+});
+
 describe("deleteRnpmBackups", () => {
   it("sterge doar jail-ul propriu, bundle-aware", async () => {
     seedSearch("u1", "a");

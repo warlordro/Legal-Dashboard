@@ -794,6 +794,33 @@ describe("daily backup — enumerarea rnpm fail-explicit (EXT-H-02)", () => {
   });
 });
 
+// Task 15 (G quick-wins, EXT-L-01/INT-M9/INT-M10): listarea PUBLICA propaga
+// erorile non-ENOENT (semantica fail-explicit — un caller nu are voie sa vada
+// "zero backup-uri" cand cauza reala e EACCES/EIO/ENOTDIR), in timp ce prune-ul
+// intern ramane tolerant (ruleaza DUPA mutatii deja comise — un esec de
+// listare acolo nu are voie sa transforme un backup reusit intr-un 500).
+describe("listBackupsWithMeta fail-explicit vs pruneOld tolerant (Task 15)", () => {
+  it("listBackupsWithMeta propaga erorile non-ENOENT de listare (EXT-L-01)", async () => {
+    // backup dir = FISIER, nu director => readdir arunca ENOTDIR (verificat
+    // empiric pe Windows, acelasi comportament ca testul enumerate_rnpm de mai sus).
+    await fsPromises.writeFile(getBackupDir(), "not a directory");
+
+    await expect(listBackupsWithMeta()).rejects.toMatchObject({ code: "ENOTDIR" });
+  });
+
+  it("pruneOld tolereaza erorile de listare (log + 0), fara sa arunce (post-mutatie safe)", async () => {
+    const readdirSpy = vi
+      .spyOn(fsPromises, "readdir")
+      .mockRejectedValueOnce(Object.assign(new Error("EIO simulat"), { code: "EIO" }));
+
+    const { value, lines } = await captureConsoleLog(() => createManualBackup());
+    readdirSpy.mockRestore();
+
+    expect(value).toMatchObject({ name: expect.any(String) });
+    expect(lines.some((l) => l.includes('"action":"backup_prune_failed"'))).toBe(true);
+  });
+});
+
 // EXT-H-01 (audit v2.43.0): un writer care astepta in coada cand shutdown-ul
 // a ridicat flag-ul nu are voie sa inceapa o mutatie pe care shutdown-ul n-o
 // va mai astepta; iar callerul lui waitForBackupToSettle trebuie sa STIE daca

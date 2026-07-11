@@ -240,12 +240,17 @@ function todayBackupName(prefix: string, date = new Date()): string {
   return `${prefix}${y}-${m}-${d}${BACKUP_SUFFIX}`;
 }
 
+// Task 15 (INT-M9, EXT-L-01): DOAR ENOENT (director inexistent — pre-provisioning,
+// stare normala) inseamna "fara backup-uri". Restul (EACCES/EIO/ENOTDIR) se
+// propaga — listarea PUBLICA (listBackupsWithMeta/listRnpmBackups) nu are voie
+// sa raporteze "zero backup-uri" cand cauza reala e o problema de FS.
 async function listBackups(dir: string, prefix: string): Promise<string[]> {
   try {
     const entries = await fsPromises.readdir(dir);
     return entries.filter((f) => f.startsWith(prefix) && f.endsWith(BACKUP_SUFFIX));
-  } catch {
-    return [];
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return [];
+    throw e;
   }
 }
 
@@ -303,7 +308,21 @@ async function latestBackupMtime(dir: string, prefix: string): Promise<number | 
   // pre-restore/manual snapshot was user-initiated and does not mean the daily
   // snapshot has already happened.
   const res = poolRegexes(prefix);
-  const backups = (await listBackups(dir, prefix)).filter((f) => res.dated.test(f));
+  let names: string[];
+  try {
+    names = await listBackups(dir, prefix);
+  } catch (e) {
+    // Task 15: apelat DIN dailyBackupTarget in afara catch-ului de snapshot —
+    // propagarea bruta ar rupe backup-ul zilnic la o eroare de listare.
+    // Tolerant: log + null, dailyBackupTarget incearca oricum un snapshot nou.
+    logBackupEvent({
+      action: "backup_mtime_check_failed",
+      dir: path.basename(dir),
+      errnoCode: (e as NodeJS.ErrnoException)?.code ?? null,
+    });
+    return null;
+  }
+  const backups = names.filter((f) => res.dated.test(f));
   if (backups.length === 0) return null;
   let max = 0;
   for (const f of backups) {
@@ -318,7 +337,21 @@ async function latestBackupMtime(dir: string, prefix: string): Promise<number | 
 }
 
 async function pruneOld(dir: string, prefix: string): Promise<number> {
-  const all = await listBackups(dir, prefix);
+  let all: string[];
+  try {
+    all = await listBackups(dir, prefix);
+  } catch (e) {
+    // Task 15: pruneOld ruleaza DUPA mutatii deja comise (backup/restore
+    // reusit) — un esec de listare aici nu are voie sa transforme un succes
+    // in 500. Tolerant: log + 0 (nimic pruned, dar mutatia deja comisa ramane).
+    logBackupEvent({
+      action: "backup_prune_failed",
+      stage: "list",
+      dir: path.basename(dir),
+      errnoCode: (e as NodeJS.ErrnoException)?.code ?? null,
+    });
+    return 0;
+  }
   const res = poolRegexes(prefix);
   // Patru pool-uri disjuncte; numele contin timestamp ISO => lex sort = cronologic.
   const dated = all
@@ -429,8 +462,11 @@ async function listBackupsWithMetaForDir(dir: string, prefix: string): Promise<B
     try {
       const s = await fsPromises.stat(path.join(dir, name));
       entries.push({ name, sizeBytes: s.size, mtime: s.mtimeMs });
-    } catch {
-      /* vanished between readdir and stat */
+    } catch (e) {
+      // Task 15: DOAR ENOENT e benign (fisier disparut intre readdir si stat —
+      // cursa normala cu un delete concurent). Restul (EACCES/EIO) se propaga —
+      // listarea PUBLICA nu are voie sa ascunda o problema reala de FS.
+      if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
     }
   }
   // Newest first (mtime desc).
@@ -564,6 +600,12 @@ async function restoreTargetImpl(
       source: name,
       stage: "staging",
       reason: e instanceof Error ? e.message : String(e),
+    });
+    // EXT-M-04: snapshot-ul pre-restore creat mai sus ramane (plasa de
+    // siguranta), dar pool-ul se plafoneaza si pe failure — retry-uri repetate
+    // nu mai acumuleaza fisiere nelimitat. Best-effort: pruneOld e tolerant.
+    await pruneOld(t.dir, t.prefix).catch(() => {
+      /* pruneOld logheaza intern; eroarea reala de staging ramane cea aruncata */
     });
     // Fix panel-pe-plan (BLOCKER): erorile de VALIDARE isi pastreaza tipul —
     // altfel code-ul INVALID_PARAMS moare aici si rutele raspund 500, nu 400.

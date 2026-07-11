@@ -20,6 +20,14 @@ export function rethrowTypedMaintenanceError(err: unknown): void {
   if (typeof code === "string" && TYPED_MAINTENANCE_CODES.has(code)) throw err as Error;
 }
 
+// B1: acelasi test de clasificare, fara efectul de rethrow — folosit de
+// rutele care trebuie sa scrie audit outcome="denied" (nu "error") PE eroarea
+// tipata inainte de a o retrimite spre handlerul central.
+export function isTypedMaintenanceError(err: unknown): boolean {
+  const code = (err as { code?: unknown })?.code;
+  return typeof code === "string" && TYPED_MAINTENANCE_CODES.has(code);
+}
+
 export function appErrorHandler(err: Error, c: Context): Response {
   const code = (err as { code?: unknown }).code;
   if (code === "RESTORE_IN_PROGRESS" || code === "SEARCH_ACTIVE") {

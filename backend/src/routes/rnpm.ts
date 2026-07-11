@@ -1,7 +1,6 @@
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { streamSSE } from "hono/streaming";
-import fs from "node:fs";
 import { stat } from "node:fs/promises";
 import { z } from "zod";
 import {
@@ -40,7 +39,7 @@ import { requireRole } from "../middleware/requireRole.ts";
 import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { getUserById } from "../db/userRepository.ts";
-import { rethrowTypedMaintenanceError } from "../util/appErrorHandler.ts";
+import { isTypedMaintenanceError, rethrowTypedMaintenanceError } from "../util/appErrorHandler.ts";
 import { ErrorCodes, fail } from "../util/envelope.ts";
 import { parseJsonBody, resolveCaptchaKeyForRoute, withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
@@ -904,7 +903,7 @@ rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async 
       detail: { reason: "search_active" },
     });
     return c.json(
-      fail("SEARCH_ACTIVE", "Exista o cautare RNPM in curs pentru acest cont; reincearca dupa finalizare", c),
+      fail(ErrorCodes.SEARCH_ACTIVE, "Exista o cautare RNPM in curs pentru acest cont; reincearca dupa finalizare", c),
       409
     );
   }
@@ -925,6 +924,19 @@ rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async 
   return c.json({ deleted });
 });
 
+// Task 15 (INT-M10): async cu semantica ENOENT-only — DOAR ENOENT inseamna
+// "fisierul nu exista"; EACCES/EIO/ENOTDIR se propaga, altfel un fisier real
+// dar inaccesibil ar raporta fals "baza nu exista inca" catre caller.
+async function rnpmFileExists(p: string): Promise<boolean> {
+  try {
+    await stat(p);
+    return true;
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return false;
+    throw e;
+  }
+}
+
 rnpmRouter.get("/stats", requireRole("admin", "user"), async (c) => {
   // v2.43.0 (rnpm-split): statisticile si dimensiunea raporteaza FISIERUL
   // PER USER al callerului, nu monolitul.
@@ -936,8 +948,8 @@ rnpmRouter.get("/stats", requireRole("admin", "user"), async (c) => {
   // folosit inca RNPM. Latch-ul de restore ramane PRIORITAR: in timpul unui
   // restore raspunsul corect e 409 (prin getRnpmDb -> maparea centrala), nu
   // zerouri false pentru un fisier aflat mid-swap.
-  if (!isRnpmRestoreInProgress(ownerId) && !fs.existsSync(dbPath)) {
-    return c.json({ total: 0, activ: 0, inactiv: 0, byType: {}, db: { path: dbPath, sizeBytes: 0 } });
+  if (!isRnpmRestoreInProgress(ownerId) && !(await rnpmFileExists(dbPath))) {
+    return c.json({ total: 0, activ: 0, inactiv: 0, byType: {}, db: { sizeBytes: 0 } });
   }
   const stats = getAvizStats(ownerId);
   // CP-B4: async fs so handler does not block the event loop under concurrency (web mode).
@@ -949,7 +961,7 @@ rnpmRouter.get("/stats", requireRole("admin", "user"), async (c) => {
     }
   };
   const [main, wal, shm] = await Promise.all([sizeOf(dbPath), sizeOf(`${dbPath}-wal`), sizeOf(`${dbPath}-shm`)]);
-  return c.json({ ...stats, db: { path: dbPath, sizeBytes: main + wal + shm } });
+  return c.json({ ...stats, db: { sizeBytes: main + wal + shm } });
 });
 
 // Desktop-only: reveal the DB file in the system file manager via Electron shell.
@@ -970,8 +982,8 @@ rnpmRouter.post("/open-db-folder", requireDesktopHeader, requireRole("admin", "u
     electron.shell.showItemInFolder(dbPath);
     return c.json({ ok: true });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Eroare deschidere folder";
-    return internalError(c, msg);
+    console.error("[rnpm] open-db-folder failed:", e);
+    return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   }
 });
 
@@ -983,17 +995,26 @@ rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), 
   // Fix review (Task 6): fara fisier nu exista nimic de compactat — 404, nu
   // provisioning implicit prin getRnpmDb. Latch-ul de restore ramane
   // prioritar (409 prin rethrow, nu 404 pentru un fisier mid-swap).
-  if (!isRnpmRestoreInProgress(ownerId) && !fs.existsSync(getRnpmDbPath(ownerId))) {
+  if (!isRnpmRestoreInProgress(ownerId) && !(await rnpmFileExists(getRnpmDbPath(ownerId)))) {
     return notFound(c, "Baza RNPM nu exista inca pentru acest cont");
   }
   try {
     const result = await compactRnpmDbViaWorker(ownerId);
+    recordAuditSafe(c, "rnpm.compact", {
+      targetKind: "rnpm_db",
+      detail: { beforeBytes: result.beforeBytes, afterBytes: result.afterBytes },
+    });
     return c.json({ ok: true, ...result });
   } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare compactare baza";
+    recordAuditSafe(c, "rnpm.compact", {
+      targetKind: "rnpm_db",
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
+      detail: { error: msg },
+    });
     // Fix review (Task 5): erorile tipate (restore in curs, cautare activa,
     // shutdown) ies spre handlerul central => 409/503, nu 500 generic.
     rethrowTypedMaintenanceError(e);
-    const msg = e instanceof Error ? e.message : "Eroare compactare baza";
     return internalError(c, msg);
   }
 });
@@ -1044,7 +1065,8 @@ rnpmRouter.get("/backups", requireRole("admin", "user"), async (c) => {
   } catch (e) {
     const msg = e instanceof Error ? e.message : "Eroare listare backups";
     if (e instanceof BackupValidationError) return invalidParams(c, msg);
-    return internalError(c, msg);
+    console.error("[rnpm] backups list failed:", e);
+    return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   }
 });
 
@@ -1062,7 +1084,7 @@ rnpmRouter.post("/backups/create", requireDesktopHeader, requireRole("admin", "u
     });
     c.header("Retry-After", String(retryAfterSec));
     return c.json(
-      fail("cooldown", `Asteapta ${retryAfterSec}s inainte sa creezi alt backup`, c, { retryAfterSec }),
+      fail(ErrorCodes.COOLDOWN, `Asteapta ${retryAfterSec}s inainte sa creezi alt backup`, c, { retryAfterSec }),
       429
     );
   }
@@ -1081,11 +1103,12 @@ rnpmRouter.post("/backups/create", requireDesktopHeader, requireRole("admin", "u
     const msg = e instanceof Error ? e.message : "Eroare creare backup";
     recordAuditSafe(c, "backup.rnpm.create", {
       targetKind: "backup",
-      outcome: "error",
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
       detail: { error: msg },
     });
     rethrowTypedMaintenanceError(e);
-    return internalError(c, msg);
+    console.error("[rnpm] backups create failed:", e);
+    return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   }
 });
 
@@ -1096,9 +1119,13 @@ rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin", "
   if (typeof name !== "string" || name.length === 0) {
     return invalidParams(c, "Nume backup lipsa");
   }
+  const requestedOwner = (body as { ownerId?: unknown }).ownerId;
+  if (requestedOwner !== undefined && typeof requestedOwner !== "string") {
+    return invalidParams(c, "ownerId invalid");
+  }
   let owner: string;
   try {
-    owner = resolveBackupOwner(c, (body as { ownerId?: string }).ownerId);
+    owner = resolveBackupOwner(c, requestedOwner);
   } catch {
     return invalidParams(c, "ownerId invalid");
   }
@@ -1111,6 +1138,10 @@ rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin", "
     recordAuditSafe(c, "backup.rnpm.restore", {
       targetKind: "backup",
       targetId: name,
+      // B1: owner_id (coloana indexata) trebuie sa fie ownerul AFECTAT de
+      // restore, nu callerul admin — altfel query-urile owner-scoped pe
+      // audit_log nu gasesc evenimentul.
+      ownerId: owner,
       detail: { preRestoreName, targetOwnerId: owner === caller ? undefined : owner },
     });
     return c.json({ ok: true, preRestoreName });
@@ -1119,24 +1150,35 @@ rnpmRouter.post("/backups/restore", requireDesktopHeader, requireRole("admin", "
     recordAuditSafe(c, "backup.rnpm.restore", {
       targetKind: "backup",
       targetId: name,
-      outcome: "error",
+      ownerId: owner,
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
       detail: { error: msg, targetOwnerId: owner === caller ? undefined : owner },
     });
     // Clasificare: input invalid = 400; concurenta = 409; restul = 500.
     if (e instanceof BackupValidationError) return invalidParams(c, msg);
-    if (e instanceof RnpmSearchActiveError) return c.json(fail("SEARCH_ACTIVE", msg, c), 409);
+    if (e instanceof RnpmSearchActiveError) return c.json(fail(ErrorCodes.SEARCH_ACTIVE, msg, c), 409);
     // Restore concurent pe acelasi owner / shutdown => 409/503 central.
     rethrowTypedMaintenanceError(e);
-    return internalError(c, msg);
+    console.error("[rnpm] backups restore failed:", e);
+    return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   }
 });
 
 rnpmRouter.delete("/backups", requireDesktopHeader, requireRole("admin", "user"), async (c) => {
+  // B1: owner-ul se rezolva INAINTE de try, ca eroarea tipata de mai jos
+  // (denied vs error) si audit-ul din catch sa poata purta ownerId: owner —
+  // acelasi pattern ca /backups/restore.
+  let owner: string;
   try {
-    const owner = resolveBackupOwner(c, c.req.query("ownerId"));
+    owner = resolveBackupOwner(c, c.req.query("ownerId"));
+  } catch (e) {
+    return invalidParams(c, e instanceof Error ? e.message : "ownerId invalid");
+  }
+  try {
     const deleted = await deleteRnpmBackups(owner);
     recordAuditSafe(c, "backup.rnpm.delete_all", {
       targetKind: "backup",
+      ownerId: owner,
       detail: { deleted, targetOwnerId: owner === getOwnerId(c) ? undefined : owner },
     });
     return c.json({ deleted });
@@ -1144,13 +1186,13 @@ rnpmRouter.delete("/backups", requireDesktopHeader, requireRole("admin", "user")
     const msg = e instanceof Error ? e.message : "Eroare stergere backups";
     recordAuditSafe(c, "backup.rnpm.delete_all", {
       targetKind: "backup",
-      outcome: "error",
+      ownerId: owner,
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
       detail: { error: msg },
     });
-    // Clasificare identica cu restore: input invalid = 400, restul = 500.
-    if (e instanceof BackupValidationError) return invalidParams(c, msg);
     rethrowTypedMaintenanceError(e);
-    return internalError(c, msg);
+    console.error("[rnpm] backups delete-all failed:", e);
+    return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   }
 });
 
@@ -1164,11 +1206,17 @@ rnpmRouter.post("/open-backups-folder", requireDesktopHeader, requireRole("admin
       return desktopOnly(c);
     }
     const err = await electron.shell.openPath(dir);
-    if (err) return internalError(c, err);
+    if (err) {
+      console.error("[rnpm] open-backups-folder failed:", err);
+      return internalError(
+        c,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns."
+      );
+    }
     return c.json({ ok: true });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "Eroare deschidere folder backups";
-    return internalError(c, msg);
+    console.error("[rnpm] open-backups-folder failed:", e);
+    return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   }
 });
 

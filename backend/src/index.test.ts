@@ -88,6 +88,24 @@ describe("PR-9 index boot/auth boundaries", () => {
     expect(preflight.headers.get("access-control-allow-headers")?.toLowerCase()).toContain("authorization");
   });
 
+  it(
+    "raspunsurile /api/* contin directiva no-store si private (inclusiv 4xx si rutele cu politici proprii)",
+    { timeout: 20_000 },
+    async () => {
+      const port = randomPort();
+      await importFreshIndex({ LEGAL_DASHBOARD_PORT: String(port), LEGAL_DASHBOARD_DB_PATH: await makeTmpDb() });
+      await waitForHealth(port);
+      // Ruta deterministe locala (400 la validare, fara SOAP):
+      const res = await fetch(`http://127.0.0.1:${port}/api/dosare?marker=x`);
+      const cc = res.headers.get("cache-control") ?? "";
+      expect(cc).toContain("no-store");
+      expect(cc).toContain("private");
+      // 404 API:
+      const res404 = await fetch(`http://127.0.0.1:${port}/api/v1/ruta-inexistenta`);
+      expect(res404.headers.get("cache-control") ?? "").toContain("no-store");
+    }
+  );
+
   // F15 audit hardening (v2.28.4): /health public expune doar status + service.
   // Detalii operationale (authMode, emailConfigured, monitoring) sunt mutate la
   // /health/detail, accesibil doar de pe loopback. Probele de mai jos verifica
@@ -430,9 +448,12 @@ describe("PAT surface — web-mode mount ordering (Task 16)", () => {
       expect(((await tokensRes.json()) as { error: { code: string } }).error.code).toBe("PAT_CANNOT_MANAGE_TOKENS");
 
       // ruta permisa (scope rnpm, citire locala) trece gate-ul + primeste no-store
+      // (+ private, adaugat de merge-ul global E6 pe /api/*)
       const saved = await fetch(`${base}/api/rnpm/saved`, { headers: h });
       expect(saved.status).toBe(200);
-      expect(saved.headers.get("cache-control")).toBe("no-store");
+      const savedCc = saved.headers.get("cache-control") ?? "";
+      expect(savedCc).toContain("no-store");
+      expect(savedCc).toContain("private");
 
       // openapi reachable de un PAT (montat inaintea gate-ului) — NU 403
       const spec = await fetch(`${base}/api/v1/openapi.json`, { headers: h });
@@ -613,4 +634,24 @@ describe("shutdown — lock retention cu writer nesettled (EXT-H-01)", () => {
       /* DB-ul e inchis de shutdown; esecul writerului e asteptat aici */
     });
   }, 30_000);
+});
+
+// E2 (audit v2.43.0): logger-ul Hono implicit scria URL-ul COMPLET — nume de
+// parti, numere de dosar si alte filtre juridice ajungeau in stdout, persistat
+// de colectoarele de log Docker. Middleware-ul inlocuitor logheaza doar
+// pathname + status, fara query string.
+describe("logger HTTP — fara query string (E2)", () => {
+  it("logger-ul HTTP nu scrie query string-ul (PII juridic) — doar pathname", { timeout: 20_000 }, async () => {
+    const logSpy = vi.spyOn(console, "log"); // INAINTE de importFreshIndex
+    const port = randomPort();
+    await importFreshIndex({ LEGAL_DASHBOARD_PORT: String(port), LEGAL_DASHBOARD_DB_PATH: await makeTmpDb() });
+    await waitForHealth(port);
+    // Cerere care pica determinist la validare (400) INAINTE de orice apel SOAP:
+    const res = await fetch(`http://127.0.0.1:${port}/api/dosare?marker=NUME-FOARTE-SENSIBIL`);
+    expect(res.status).toBe(400);
+    const lines = logSpy.mock.calls.map((c) => c.map(String).join(" "));
+    expect(lines.some((l) => l.includes("NUME-FOARTE-SENSIBIL"))).toBe(false);
+    expect(lines.some((l) => l.includes('"path":"/api/dosare"') && l.includes('"status":400'))).toBe(true);
+    logSpy.mockRestore();
+  });
 });

@@ -1,17 +1,5 @@
 import { useEffect, useState, useCallback } from "react";
-import {
-  Database,
-  Copy,
-  Check,
-  RefreshCw,
-  Info,
-  FolderOpen,
-  Archive,
-  X,
-  Trash2,
-  History,
-  Minimize2,
-} from "lucide-react";
+import { Database, RefreshCw, Info, FolderOpen, Archive, X, Trash2, History, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -68,7 +56,6 @@ function StatsModal({
   const [stats, setStats] = useState<RnpmStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [compacting, setCompacting] = useState(false);
@@ -114,17 +101,6 @@ function StatsModal({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, compacting]);
-
-  const handleCopyPath = async () => {
-    if (!stats?.db.path) return;
-    try {
-      await navigator.clipboard.writeText(stats.db.path);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setError("Nu am putut copia calea");
-    }
-  };
 
   const handleOpenFolder = async () => {
     setFolderError(null);
@@ -303,21 +279,6 @@ function StatsModal({
                 <div>
                   Dimensiune: <span className="font-mono text-foreground">{formatBytes(stats.db.sizeBytes)}</span>{" "}
                   <span className="opacity-70">(date + jurnal)</span>
-                </div>
-                <div className="leading-5">
-                  <span>Cale: </span>
-                  <span className="font-mono text-foreground break-all" title={stats.db.path}>
-                    {stats.db.path}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyPath}
-                    className="ml-1 inline-flex h-4 w-4 translate-y-[2px] items-center justify-center rounded hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    title={copied ? "Copiat!" : "Copiaza calea"}
-                    aria-label={copied ? "Copiat" : "Copiaza calea"}
-                  >
-                    {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
-                  </button>
                 </div>
               </div>
 

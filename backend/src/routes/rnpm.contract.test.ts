@@ -321,7 +321,7 @@ describe("POST /api/v1/rnpm/saved/export", () => {
 });
 
 describe("GET /api/v1/rnpm/stats", () => {
-  it("returns { total, activ, inactiv, byType, db: { path, sizeBytes } }", async () => {
+  it("returns { total, activ, inactiv, byType, db: { sizeBytes } } fara path absolut", async () => {
     seedAviz({ identificator: "AV-STAT-1" });
     seedAviz({ identificator: "AV-STAT-2", searchType: "fiducii", activ: false });
 
@@ -332,15 +332,15 @@ describe("GET /api/v1/rnpm/stats", () => {
       activ: number;
       inactiv: number;
       byType: Record<string, number>;
-      db: { path: string; sizeBytes: number };
+      db: Record<string, unknown>;
     }>(res);
     expect(body.total).toBe(2);
     expect(body.activ).toBe(1);
     expect(body.inactiv).toBe(1);
     expect(body.byType.ipoteci).toBe(1);
     expect(body.byType.fiducii).toBe(1);
-    expect(typeof body.db.path).toBe("string");
     expect(typeof body.db.sizeBytes).toBe("number");
+    expect("path" in body.db).toBe(false);
   });
 });
 

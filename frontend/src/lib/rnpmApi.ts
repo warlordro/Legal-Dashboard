@@ -49,6 +49,22 @@ export class RnpmFilterDisabledError extends Error {
   }
 }
 
+// v2.43.x (C1): jsonOrThrow arunca Error simplu (doar message), pierzand
+// code/status/requestId din envelope — clientii nu pot distinge programatic
+// intre coduri tipate (ex. SEARCH_ACTIVE, RESTORE_IN_PROGRESS). ApiError le
+// pastreaza pe toate trei.
+export class ApiError extends Error {
+  readonly code?: string;
+  readonly status: number;
+  readonly requestId?: string;
+  constructor(message: string, status: number, code?: string, requestId?: string) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+  }
+}
+
 const BASE = "/api/rnpm";
 
 export async function filterRnpmResults(
@@ -105,11 +121,15 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
     // v2.14.0 envelope: error e obiect { code, message }; legacy: string
     const raw = (data as { error?: unknown })?.error;
     let err: string;
+    let code: string | undefined;
     if (typeof raw === "string") err = raw;
-    else if (raw && typeof raw === "object" && typeof (raw as { message?: unknown }).message === "string") {
-      err = (raw as { message: string }).message;
+    else if (raw && typeof raw === "object") {
+      const obj = raw as { message?: unknown; code?: unknown };
+      err = typeof obj.message === "string" ? obj.message : `Eroare (${res.status})`;
+      if (typeof obj.code === "string") code = obj.code;
     } else err = `Eroare (${res.status})`;
-    throw new Error(err);
+    const requestId = (data as { requestId?: unknown })?.requestId;
+    throw new ApiError(err, res.status, code, typeof requestId === "string" ? requestId : undefined);
   }
   return data as T;
 }

@@ -74,14 +74,17 @@ describe("/api/v1/admin/backups — gate + contract", () => {
 
     const created = await app.request("/api/v1/admin/backups/create", { method: "POST", headers: DESKTOP });
     expect(created.status).toBe(200);
-    const { name } = (await created.json()) as { ok: boolean; name: string };
+    const createdBody = (await created.json()) as { data: { name: string }; requestId: string };
+    const { name } = createdBody.data;
     expect(name).toMatch(/^legal-dashboard\.manual-/);
+    expect(typeof createdBody.requestId).toBe("string");
     expect(fs.existsSync(path.join(getBackupDir(), name))).toBe(true);
     expect(getAuditEvents({ action: "backup.create" }).length).toBe(1);
 
     const list = await app.request("/api/v1/admin/backups");
     expect(list.status).toBe(200);
-    expect(((await list.json()) as { backups: { name: string }[] }).backups.map((b) => b.name)).toContain(name);
+    const listBody = (await list.json()) as { data: { backups: { name: string }[] } };
+    expect(listBody.data.backups.map((b) => b.name)).toContain(name);
 
     // Scriere post-backup in monolit; restore o intoarce.
     getDb().prepare("INSERT INTO fx_rates (pair, rate, rate_date) VALUES ('USDRON', 5.0, '2099-01-01')").run();
@@ -91,8 +94,8 @@ describe("/api/v1/admin/backups — gate + contract", () => {
       body: JSON.stringify({ name }),
     });
     expect(restored.status).toBe(200);
-    const rBody = (await restored.json()) as { ok: boolean; preRestoreName: string };
-    expect(rBody.preRestoreName).toMatch(/^legal-dashboard\.pre-restore-/);
+    const rBody = (await restored.json()) as { data: { preRestoreName: string } };
+    expect(rBody.data.preRestoreName).toMatch(/^legal-dashboard\.pre-restore-/);
     const n = (
       getDb().prepare("SELECT COUNT(*) AS n FROM fx_rates WHERE rate_date = '2099-01-01'").get() as { n: number }
     ).n;
@@ -101,7 +104,8 @@ describe("/api/v1/admin/backups — gate + contract", () => {
 
     const deleted = await app.request("/api/v1/admin/backups", { method: "DELETE", headers: DESKTOP });
     expect(deleted.status).toBe(200);
-    expect(((await deleted.json()) as { deleted: number }).deleted).toBeGreaterThanOrEqual(1);
+    const deletedBody = (await deleted.json()) as { data: { deleted: number } };
+    expect(deletedBody.data.deleted).toBeGreaterThanOrEqual(1);
     expect(getAuditEvents({ action: "backup.delete_all" }).length).toBe(1);
   });
 
