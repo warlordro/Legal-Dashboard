@@ -325,11 +325,11 @@ export async function rnpmDeleteAviz(id: number): Promise<boolean> {
   return data.deleted;
 }
 
-export async function rnpmDeleteAllSaved(): Promise<number> {
+export async function rnpmDeleteAllSaved(): Promise<{ deleted: number; compacted: boolean }> {
   const res = await apiFetch(`${BASE}/saved/all`, { method: "DELETE" });
-  const data = await jsonOrThrow<{ deleted: number }>(res);
+  const data = await jsonOrThrow<{ deleted: number; compacted: boolean }>(res);
   avizDetailCache.clear();
-  return data.deleted;
+  return data;
 }
 
 export async function rnpmGetStats(): Promise<RnpmStats> {

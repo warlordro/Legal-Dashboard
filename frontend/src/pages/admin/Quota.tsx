@@ -16,6 +16,7 @@ import {
   quotaFeatureLabel,
   quotaLimitUnitLabel,
 } from "@/lib/quotaFeatureLabels";
+import { quotaPeriodLabel } from "@/lib/quotaPeriodLabels";
 import { userRoleLabel, userStatusLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
@@ -25,12 +26,6 @@ import { cn } from "@/lib/utils";
 // interpreteaza ca NUMAR (integer count de captcha-uri pe fereastra), nu USD.
 // UI bypass-uieste conversia milli ca admin sa tasteze "50" si sa stocam 50.
 const MILLI = 1000;
-
-const PERIOD_LABELS: Record<QuotaPeriod, string> = {
-  day: "Zilnic",
-  week: "Saptamanal",
-  month: "Lunar",
-};
 
 function formatStoredValue(feature: string, stored: number | null): string {
   if (stored === null) return "—";
@@ -130,7 +125,15 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     return () => ac.abort();
   }, [selected, refreshTick]);
 
+  // AbortController + staleness guard (pattern 6.7, ca la overviewAcRef mai
+  // sus): selectFromOverview e async (admin.getUser); un raspuns intarziat
+  // pentru un rand vechi ar putea ateriza dupa ce userul a selectat deja alt
+  // rand si i-ar suprascrie selectia curenta cu cea veche.
+  const selectAcRef = useRef<AbortController | null>(null);
+
   const onSelect = (user: AdminUser) => {
+    selectAcRef.current?.abort();
+    selectAcRef.current = null;
     setSelected(user);
     setFeature(DEFAULT_FEATURE);
     setPeriod("day");
@@ -150,11 +153,16 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
   // randului, nu porneste gol).
   const selectFromOverview = async (row: GlobalQuotaOverride) => {
     setError(null);
+    selectAcRef.current?.abort();
+    const ac = new AbortController();
+    selectAcRef.current = ac;
     try {
-      const user = await admin.getUser(row.userId);
+      const user = await admin.getUser(row.userId, ac.signal);
+      if (ac.signal.aborted) return;
       setSelected(user);
       startEdit(row);
     } catch (err) {
+      if (ac.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorului.");
     }
   };
@@ -195,7 +203,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
         : isCountFeature(override.feature)
           ? `${override.limitUsdMilli} ${quotaLimitUnitLabel(override.feature)}`
           : `${formatStoredValue(override.feature, override.limitUsdMilli)} $`;
-    const periodLabel = PERIOD_LABELS[override.period].toLowerCase();
+    const periodLabel = quotaPeriodLabel(override.period).toLowerCase();
     const ok = await confirm({
       title: "Sterge cota",
       message: `Sterge limita pentru "${quotaFeatureLabel(override.feature)}" (${limitLabel} / ${periodLabel})? Userul revine la buget nelimitat.`,
@@ -295,7 +303,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                             {row.displayName && <p className="text-xs text-muted-foreground">{row.displayName}</p>}
                           </td>
                           <td className="px-3 py-2 align-top">{quotaFeatureLabel(row.feature)}</td>
-                          <td className="px-3 py-2 align-top">{PERIOD_LABELS[row.period]}</td>
+                          <td className="px-3 py-2 align-top">{quotaPeriodLabel(row.period)}</td>
                           <td className="px-3 py-2 align-top">
                             {row.limitUsdMilli === null
                               ? "Nelimitat"
@@ -464,7 +472,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     {overrides.map((row) => (
                       <tr key={row.feature} className="border-b border-border last:border-b-0 hover:bg-muted/30">
                         <td className="px-3 py-2 align-top text-xs">{quotaFeatureLabel(row.feature)}</td>
-                        <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[row.period]}</td>
+                        <td className="px-3 py-2 align-top text-xs">{quotaPeriodLabel(row.period)}</td>
                         <td className="px-3 py-2 align-top">
                           {row.limitUsdMilli === null ? (
                             <Badge variant="outline">Nelimitat</Badge>

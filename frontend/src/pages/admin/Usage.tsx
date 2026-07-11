@@ -13,23 +13,17 @@ import {
   type MeBudgetResult,
   type MeBudgetWarning,
   type MeFxRate,
-  type QuotaPeriod,
   type UsageOverviewResult,
 } from "@/lib/api";
 import { formatIsoDateTime } from "@/lib/datetime-formatters";
 import { quotaFeatureLabel } from "@/lib/quotaFeatureLabels";
+import { quotaPeriodLabel } from "@/lib/quotaPeriodLabels";
 import { userRoleLabel } from "@/lib/userLabels";
 import { cn } from "@/lib/utils";
 
 const MILLI = 1000;
 const FX_STALE_BADGE_HOURS = 48;
 const USER_PAGE_SIZE_DEFAULT = 25;
-
-const PERIOD_LABELS: Record<QuotaPeriod, string> = {
-  day: "Zilnic",
-  week: "Saptamanal",
-  month: "Lunar",
-};
 
 const LIMIT_SOURCE_LABELS: Record<"override" | "default" | "none", string> = {
   override: "Cota setata",
@@ -155,13 +149,13 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
     email: (r) => r.email,
     used: (r) => r.usedMilli,
     limit: (r) => r.effectiveLimitMilli,
-    period: (r) => PERIOD_LABELS[r.period],
+    period: (r) => quotaPeriodLabel(r.period),
   });
   const captchaSort = useClientSort(captchaRows, {
     email: (r) => r.email,
     used: (r) => r.usedCount,
     limit: (r) => r.effectiveLimitCount,
-    period: (r) => PERIOD_LABELS[r.period],
+    period: (r) => quotaPeriodLabel(r.period),
   });
 
   const activeSorted = tab === "ai" ? aiSort.sorted : captchaSort.sorted;
@@ -325,7 +319,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                                     {r.displayName} · {userRoleLabel(r.role)}
                                   </p>
                                 </td>
-                                <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[r.period]}</td>
+                                <td className="px-3 py-2 align-top text-xs">{quotaPeriodLabel(r.period)}</td>
                                 <td className="px-3 py-2 align-top font-mono text-xs">
                                   <span className="inline-flex items-center gap-1">
                                     {milliToUsd(r.usedMilli)}
@@ -396,7 +390,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                                   {r.displayName} · {userRoleLabel(r.role)}
                                 </p>
                               </td>
-                              <td className="px-3 py-2 align-top text-xs">{PERIOD_LABELS[r.period]}</td>
+                              <td className="px-3 py-2 align-top text-xs">{quotaPeriodLabel(r.period)}</td>
                               <td className="px-3 py-2 align-top font-mono text-xs">{r.usedCount}</td>
                               <td className="px-3 py-2 align-top text-xs">
                                 {r.effectiveLimitCount === null ? (
@@ -496,7 +490,7 @@ export default function UsagePage({ embedded = false }: { embedded?: boolean } =
                       <div className="flex flex-wrap items-center justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <span className="text-sm">{quotaFeatureLabel(item.feature)}</span>
-                          <Badge variant="outline">{PERIOD_LABELS[item.period]}</Badge>
+                          <Badge variant="outline">{quotaPeriodLabel(item.period)}</Badge>
                           {item.effectiveLimitMilli === null && <Badge variant="success">Nelimitat</Badge>}
                           {/* +grant doar pe bugete limitate — pe nelimitat grantul nu are efect. */}
                           {item.effectiveLimitMilli !== null && item.extraFromGrantsMilli > 0 && (

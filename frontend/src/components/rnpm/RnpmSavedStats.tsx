@@ -60,6 +60,10 @@ function StatsModal({
   const [deleting, setDeleting] = useState(false);
   const [compacting, setCompacting] = useState(false);
   const [compactMsg, setCompactMsg] = useState<string | null>(null);
+  // v2.43.0: delete-all poate reusi pe partea de stergere dar esua la
+  // compactarea automata (spatiul ramane ocupat) — avertisment informativ,
+  // NU eroare blocanta (stergerea in sine a reusit).
+  const [deleteWarning, setDeleteWarning] = useState<string | null>(null);
   const [showRestore, setShowRestore] = useState(false);
   const [creatingBackup, setCreatingBackup] = useState(false);
   // null = inca nu am aflat / eroare la listare → lasam butonul activ ca user-ul sa reincerce.
@@ -197,8 +201,14 @@ function StatsModal({
     )
       return;
     setDeleting(true);
+    setDeleteWarning(null);
     try {
-      await rnpmDeleteAllSaved();
+      const { compacted } = await rnpmDeleteAllSaved();
+      if (!compacted) {
+        setDeleteWarning(
+          "Avizele au fost sterse, dar eliberarea spatiului pe disc a esuat. Spatiul se recupereaza la urmatoarea compactare reusita."
+        );
+      }
       onAfterDeleteAll?.();
       await load();
     } catch (e) {
@@ -341,6 +351,7 @@ function StatsModal({
               </div>
               {folderError && <div className="text-xs text-red-600 dark:text-red-400">{folderError}</div>}
               {compactMsg && <div className="text-xs text-muted-foreground">{compactMsg}</div>}
+              {deleteWarning && <div className="text-xs text-amber-600 dark:text-amber-400">{deleteWarning}</div>}
             </>
           )}
         </div>
