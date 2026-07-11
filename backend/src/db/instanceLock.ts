@@ -290,7 +290,10 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
           heartbeatFatal("lock detinut de alt proces (mismatch pid/hostname/nonce)");
           return;
         }
-        heartbeatMisses = 0;
+        // NU reseta contorul aici (fix panel): un esec PERSISTENT de scriere
+        // (disc plin, EPERM) cu citiri reusite ar oscila 0->1 la nesfarsit si
+        // n-ar atinge pragul fatal, desi heartbeatAt de pe disc ingheata si
+        // alt proces poate face reclaim la 30s. Reset doar dupa ciclul COMPLET.
       } else {
         // readLock intoarce null si pe eroare I/O si pe JSON corupt, nu doar
         // pe absenta — posibil tranzitoriu (AV/EBUSY pe Windows, fereastra de
@@ -307,6 +310,7 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
       const tempPath = `${path}.heartbeat-${current.pid}-${Date.now()}`;
       writeFileSync(tempPath, JSON.stringify(current));
       renameSync(tempPath, path);
+      heartbeatMisses = 0; // ciclu complet read+write reusit
     } catch (e) {
       heartbeatMisses++;
       logHeartbeatSkip(e instanceof Error ? e.message : String(e));

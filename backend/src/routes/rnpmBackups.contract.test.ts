@@ -446,4 +446,22 @@ describe("rutele pe fisierul callerului (stats/compact/delete-all)", () => {
       endRnpmSearch("u1");
     }
   });
+
+  // P3 (fix TOCTOU): gardul SEARCH_ACTIVE ruleaza acum DUPA validarile de
+  // body — un body invalid in timpul unei cautari active trebuie sa dea tot
+  // 400 (validarea primeaza), nu 409.
+  it("POST /saved/delete-batch cu body invalid si cautare activa da 400, nu 409", async () => {
+    seedRnpm("u1", "a");
+    beginRnpmSearch("u1");
+    try {
+      const res = await buildApp("u1").request("/api/rnpm/saved/delete-batch", {
+        method: "POST",
+        headers: JSON_DESKTOP,
+        body: JSON.stringify({ ids: [] }),
+      });
+      expect(res.status).toBe(400);
+    } finally {
+      endRnpmSearch("u1");
+    }
+  });
 });

@@ -624,6 +624,7 @@ describe("shutdown — lock retention cu writer nesettled (EXT-H-01)", () => {
 
     const shutdown = (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> })
       .__legalDashboardShutdown;
+    expect(shutdown).toBeDefined();
     await shutdown?.();
 
     const lockPath = path.join(path.dirname(dbPath), ".instance.lock");

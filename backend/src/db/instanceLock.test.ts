@@ -254,4 +254,23 @@ describe("heartbeat resilient (INT-H1) + dual-holder (INT-H2)", () => {
     vi.advanceTimersByTime(5_000); // tick sanatos (alt timestamp => alt path): recovery
     expect(fatal).not.toHaveBeenCalled();
   });
+
+  it("esec PERSISTENT de scriere (3 tick-uri consecutive) => fatal inainte de pragul de stale", () => {
+    const fatal = vi.fn();
+    __setHeartbeatFatalHandlerForTests(fatal);
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    acquireInstanceLock(tmpRoot, "test");
+    // Acelasi aranjament EISDIR ca mai sus, dar pe TOATE cele 3 tick-uri
+    // urmatoare: citirea reuseste (lock-ul e al nostru), scrierea pica mereu.
+    // Fara fatal, heartbeatAt de pe disc ingheata si alt proces poate face
+    // reclaim la 30s cu ambele procese vii — contorul trebuie sa acumuleze
+    // peste tick-uri cu read reusit + write esuat, nu sa se reseteze la read.
+    const t0 = Date.now();
+    for (const dt of [5_000, 10_000, 15_000]) {
+      fs.mkdirSync(`${lockFile()}.heartbeat-${process.pid}-${t0 + dt}`);
+    }
+    vi.advanceTimersByTime(15_000);
+    expect(fatal).toHaveBeenCalledTimes(1);
+    expect(String(fatal.mock.calls[0]?.[0])).toContain("3");
+  });
 });

@@ -743,6 +743,7 @@ let jwtPurgeInterval: NodeJS.Timeout | null = null;
 // tabelele cresteau nelimitat. Timer independent, AMBELE moduri.
 const RETENTION_PURGE_INTERVAL_MS = 86_400_000;
 let retentionPurgeInterval: NodeJS.Timeout | null = null;
+let retentionInitialTimer: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {
   try {
@@ -868,6 +869,13 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
     runRetentionPurge();
   }, RETENTION_PURGE_INTERVAL_MS);
   retentionPurgeInterval.unref?.();
+  // Timerul de 24h de mai sus nu ruleaza niciodata pe procese cu viata scurta
+  // (desktop inchis zilnic) — un run initial amanat 60s dupa boot asigura
+  // retentia si pe sesiunile care nu supravietuiesc pana la primul tick.
+  retentionInitialTimer = setTimeout(() => {
+    runRetentionPurge();
+  }, 60_000);
+  retentionInitialTimer.unref?.();
 
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
   // shares the maintenance lock with backup so concurrent ticks pause cleanly
@@ -993,6 +1001,10 @@ async function gracefulShutdownImpl(reason: string): Promise<void> {
   if (retentionPurgeInterval) {
     clearInterval(retentionPurgeInterval);
     retentionPurgeInterval = null;
+  }
+  if (retentionInitialTimer) {
+    clearTimeout(retentionInitialTimer);
+    retentionInitialTimer = null;
   }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca

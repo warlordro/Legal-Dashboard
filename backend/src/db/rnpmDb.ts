@@ -115,7 +115,16 @@ function applyRnpmConnectionPragmas(db: Database.Database): void {
 // viata (close in finally).
 export function openRnpmDbHandleDirect(dbPath: string): Database.Database {
   const db = new Database(dbPath, { fileMustExist: true });
-  applyRnpmConnectionPragmas(db);
+  try {
+    applyRnpmConnectionPragmas(db);
+  } catch (e) {
+    try {
+      db.close();
+    } catch {
+      /* best-effort */
+    }
+    throw e;
+  }
   return db;
 }
 

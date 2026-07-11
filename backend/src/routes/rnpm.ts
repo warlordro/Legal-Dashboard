@@ -26,12 +26,7 @@ import {
   withMaintenanceRead,
 } from "../db/backup.ts";
 import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
-import {
-  hasActiveRnpmSearch,
-  isRnpmRestoreInProgress,
-  RnpmRestoreInProgressError,
-  RnpmSearchActiveError,
-} from "../db/rnpmActivity.ts";
+import { hasActiveRnpmSearch, isRnpmRestoreInProgress, RnpmSearchActiveError } from "../db/rnpmActivity.ts";
 import { assertValidOwnerId, getRnpmDbPath } from "../db/rnpmDb.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
@@ -877,27 +872,38 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user
     });
     return c.json({ deleted, compacted });
   } catch (e) {
-    if (e instanceof RnpmSearchActiveError || e instanceof RnpmRestoreInProgressError) {
-      recordAudit(c, "aviz.delete_all", {
+    // B1/P2: acopera si MAINTENANCE_SHUTDOWN (nu doar cele doua cunoscute) si
+    // un esec de audit nu are voie sa transforme 409/503 in 500.
+    if (isTypedMaintenanceError(e)) {
+      const code = (e as { code?: string }).code ?? "unknown";
+      recordAuditSafe(c, "aviz.delete_all", {
         outcome: "denied",
         targetKind: "aviz",
-        detail: { reason: e instanceof RnpmSearchActiveError ? "search_active" : "restore_in_progress" },
+        detail: { reason: code.toLowerCase() },
       });
     }
     // SEARCH_ACTIVE / RESTORE_IN_PROGRESS / MAINTENANCE_SHUTDOWN => 409/503
     // prin handlerul central (appErrorHandler).
     rethrowTypedMaintenanceError(e);
     console.error("[rnpm] delete-all failed:", e);
-    const msg = e instanceof Error ? e.message : "Eroare stergere";
-    return internalError(c, msg);
+    return internalError(c, "Eroare interna la stergere. Reincearca sau contacteaza administratorul.");
   }
 });
 
 rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async (c) => {
   const ownerId = getOwnerId(c);
-  // v2.43.0 (rnpm-split): acelasi gard ca la /saved/all.
+  const body = await parseJsonBody(c);
+  if (body === null) return invalidJson(c);
+  const { ids } = (body ?? {}) as { ids?: unknown };
+  if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
+  const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
+  if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
+  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per batch");
+  // v2.43.0 (rnpm-split): acelasi gard ca la /saved/all — MUTAT dupa
+  // validarile de body (P3, fix TOCTOU) ca o cautare pornita in timpul
+  // parse-ului sa nu mai poata scapa neverificata.
   if (hasActiveRnpmSearch(ownerId)) {
-    recordAudit(c, "aviz.delete_batch", {
+    recordAuditSafe(c, "aviz.delete_batch", {
       outcome: "denied",
       targetKind: "aviz",
       detail: { reason: "search_active" },
@@ -907,13 +913,6 @@ rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async 
       409
     );
   }
-  const body = await parseJsonBody(c);
-  if (body === null) return invalidJson(c);
-  const { ids } = (body ?? {}) as { ids?: unknown };
-  if (!Array.isArray(ids) || ids.length === 0) return invalidParams(c, "Lista id-uri goala");
-  const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
-  if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
-  if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per batch");
   const deleted = deleteAvizeByIds(numIds, ownerId);
   // Mutatia e COMISA — un esec al scrierii de audit nu are voie sa intoarca
   // 500 (clientul ar repeta un delete deja terminat). Contract Rev. 4.
@@ -956,8 +955,11 @@ rnpmRouter.get("/stats", requireRole("admin", "user"), async (c) => {
   const sizeOf = async (p: string): Promise<number> => {
     try {
       return (await stat(p)).size;
-    } catch {
-      return 0;
+    } catch (e) {
+      // DOAR ENOENT inseamna fisier absent (sidecar -wal/-shm poate lipsi normal);
+      // EACCES/EIO se propaga — altfel raportam dimensiuni false.
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return 0;
+      throw e;
     }
   };
   const [main, wal, shm] = await Promise.all([sizeOf(dbPath), sizeOf(`${dbPath}-wal`), sizeOf(`${dbPath}-shm`)]);
@@ -1015,7 +1017,10 @@ rnpmRouter.post("/compact", requireDesktopHeader, requireRole("admin", "user"), 
     // Fix review (Task 5): erorile tipate (restore in curs, cautare activa,
     // shutdown) ies spre handlerul central => 409/503, nu 500 generic.
     rethrowTypedMaintenanceError(e);
-    return internalError(c, msg);
+    // Mesajul brut poate contine path-uri/worker internals; raw-ul ramane in
+    // console.error + detail.error din audit, clientul primeste mesaj generic.
+    console.error("[rnpm] compact failed:", e);
+    return internalError(c, "Eroare interna la compactare. Reincearca sau contacteaza administratorul.");
   }
 });
 

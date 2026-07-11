@@ -508,7 +508,9 @@ async function restoreTargetImpl(
   const src = path.join(t.dir, name);
   try {
     await fsPromises.access(src);
-  } catch {
+  } catch (e) {
+    // DOAR ENOENT inseamna backup absent; EACCES/EIO se propaga ca eroare reala.
+    if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
     throw new BackupValidationError("Backup inexistent");
   }
 
@@ -914,7 +916,9 @@ export async function restoreFromBackup(name: string, opts?: RestoreOptions): Pr
     const src = path.join(getBackupDir(), name);
     try {
       await fsPromises.access(src);
-    } catch {
+    } catch (e) {
+      // DOAR ENOENT inseamna backup absent; EACCES/EIO se propaga ca eroare reala.
+      if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
       throw new BackupValidationError("Backup inexistent");
     }
     assertMonolithBackupVersionCompatible(src);
@@ -1001,7 +1005,9 @@ export async function restoreRnpmFromBackup(
       const src = path.join(jail, name);
       try {
         await fsPromises.access(src);
-      } catch {
+      } catch (e) {
+        // DOAR ENOENT inseamna backup absent; EACCES/EIO se propaga ca eroare reala.
+        if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
         throw new BackupValidationError("Backup inexistent");
       }
       assertRnpmBackupVersionCompatible(src);
@@ -1138,7 +1144,17 @@ export async function deleteAllRnpmAndCompact(ownerId: string): Promise<{ delete
         const db = openRnpmDbHandleDirect(dbPath); // pragmas identice cu registry
         try {
           deleted = deleteAllAvizeOnHandle(db, ownerId);
-          db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+          // Delete-ul e deja comis; un checkpoint picat nu are voie sa rastoarne
+          // succesul in 500 — compactarea de mai jos rescrie oricum fisierul.
+          try {
+            db.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+          } catch (e) {
+            logBackupEvent({
+              action: "rnpm_checkpoint_failed",
+              target: `rnpm:${ownerId}`,
+              reason: e instanceof Error ? e.message : String(e),
+            });
+          }
         } finally {
           db.close();
         }
