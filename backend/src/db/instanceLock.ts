@@ -309,7 +309,18 @@ export function acquireInstanceLock(dataDir: string, appVersion?: string): void 
       current.heartbeatAt = Date.now();
       const tempPath = `${path}.heartbeat-${current.pid}-${Date.now()}`;
       writeFileSync(tempPath, JSON.stringify(current));
-      renameSync(tempPath, path);
+      try {
+        renameSync(tempPath, path);
+      } catch (renameErr) {
+        // Fix Codex: fara cleanup, fiecare rename esuat (EPERM/EBUSY) lasa un
+        // sidecar .heartbeat-* permanent — se acumuleaza fara limita.
+        try {
+          unlinkSync(tempPath);
+        } catch {
+          /* best-effort */
+        }
+        throw renameErr;
+      }
       heartbeatMisses = 0; // ciclu complet read+write reusit
     } catch (e) {
       heartbeatMisses++;

@@ -518,7 +518,11 @@ async function restoreTargetImpl(
   let dbExists = true;
   try {
     await fsPromises.access(dbPath);
-  } catch {
+  } catch (e) {
+    // DOAR ENOENT inseamna DB absent (fix Codex): un EACCES/EIO tranzitoriu
+    // clasificat "absent" ar SARI snapshot-ul pre-restore si ar suprascrie
+    // baza vie fara plasa de siguranta — exact rollback-ul promis userului.
+    if ((e as NodeJS.ErrnoException)?.code !== "ENOENT") throw e;
     dbExists = false;
   }
 
@@ -1055,8 +1059,11 @@ async function compactRnpmUnderLatch(
   const sizeOf = (p: string): number => {
     try {
       return fs.statSync(p).size;
-    } catch {
-      return 0;
+    } catch (e) {
+      // DOAR ENOENT = fisier absent (sidecar -wal/-shm poate lipsi normal);
+      // EACCES/EIO se propaga — altfel raportam beforeBytes/afterBytes false.
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return 0;
+      throw e;
     }
   };
   const before = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);

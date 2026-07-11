@@ -541,6 +541,13 @@ export function isRnpmSplitDone(): boolean {
   return readMarker()?.status === "done";
 }
 
+// Fix Codex (retentie vs backfill): momentul real al splitului, ca backfill-ul
+// din index.ts sa NU re-insereze evenimentul dupa ce retentia de 90 zile l-a
+// purjat legitim (re-inserarea ar sugera un split recent, cu timestamp fals).
+export function rnpmSplitCompletedAt(): string | null {
+  return readMarker()?.completedAt ?? null;
+}
+
 export function runRnpmSplitIfNeeded(opts?: RnpmSplitOptions): { split: boolean; owners: string[] } {
   const onPhase = opts?.onPhase ?? (() => {});
   const appVersion = opts?.appVersion ?? "unknown";

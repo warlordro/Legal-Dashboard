@@ -2,12 +2,14 @@
 // siguranta pentru erorile de concurenta RNPM aruncate din straturi adanci
 // (inclusiv latch-ul de restore din getRnpmDb) pe cai care nu au gard explicit
 // la nivel de ruta — clientul primeste envelope 409, nu un 500 generic.
-// Restul erorilor pastreaza comportamentul default Hono (HTTPException
-// pass-through; altfel 500 text).
+// Restul erorilor: HTTPException pass-through; altfel 500 pe envelope-ul
+// standard (fix Codex: fallback-ul text/plain rupea contractul
+// {data,error,requestId} pentru erorile propagate din rute fara try, ex.
+// EACCES pe stat in /stats dupa semantica ENOENT-only).
 
 import type { Context } from "hono";
 import { HTTPException } from "hono/http-exception";
-import { fail } from "./envelope.ts";
+import { ErrorCodes, fail } from "./envelope.ts";
 
 // Fix review (Task 4.3/5.2): rutele cu catch GENERIC apeleaza helper-ul la
 // clasificarea erorii — erorile tipate de concurenta/shutdown se rethrow-uiesc
@@ -41,5 +43,5 @@ export function appErrorHandler(err: Error, c: Context): Response {
   }
   if (err instanceof HTTPException) return err.getResponse();
   console.error("[app] unhandled route error:", err);
-  return c.text("Internal Server Error", 500);
+  return c.json(fail(ErrorCodes.INTERNAL_ERROR, "Eroare interna. Reincearca sau contacteaza administratorul.", c), 500);
 }

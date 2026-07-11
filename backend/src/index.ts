@@ -44,12 +44,12 @@ import { selectPendingEmailRetries } from "./db/budgetNotificationsRepository.ts
 import { checkBudgetWarningRetry } from "./services/budgetWarningService.ts";
 import { purgeExpiredReservations } from "./db/aiUsageRepository.ts";
 import { purgeExpiredJti } from "./db/jwtDenylistRepository.ts";
-import { runRetentionPurge } from "./services/retentionPurge.ts";
+import { RETENTION_DAYS, runRetentionPurge } from "./services/retentionPurge.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDb, getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
 import { markRnpmShuttingDown } from "./db/rnpmDb.ts";
-import { isRnpmSplitDone, runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
+import { isRnpmSplitDone, rnpmSplitCompletedAt, runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
 import { getAuditEvents, recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
@@ -605,12 +605,19 @@ try {
   // aici, boot-urile urmatoare intorc split:false si evenimentul s-ar pierde
   // definitiv. Backfill idempotent: marker done + zero randuri rnpm.split in
   // audit_log => inserteaza acum (o interogare pe boot, ieftina).
+  // Garda pe varsta (fix Codex, retentie vs backfill): dupa RETENTION_DAYS
+  // absenta randului e purjarea legitima, nu un audit pierdut — re-inserarea
+  // ar sugera un split recent cu timestamp fals.
   if (isRnpmSplitDone() && getAuditEvents({ action: "rnpm.split", limit: 1 }).length === 0) {
-    recordAudit(null, "rnpm.split", {
-      ownerId: null,
-      actorId: "system",
-      detail: { version: APP_VERSION, backfilled: true },
-    });
+    const completedAt = rnpmSplitCompletedAt();
+    const ageMs = completedAt ? Date.now() - Date.parse(completedAt) : Number.POSITIVE_INFINITY;
+    if (ageMs < RETENTION_DAYS * 86_400_000) {
+      recordAudit(null, "rnpm.split", {
+        ownerId: null,
+        actorId: "system",
+        detail: { version: APP_VERSION, backfilled: true },
+      });
+    }
   }
   // Gate-ul de master key (web-only, getMasterKey + round-trip probe) a fost
   // MUTAT inainte de runRnpmSplitIfNeeded (fix review, Task 4).

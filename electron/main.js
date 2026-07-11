@@ -78,13 +78,17 @@ process.on("unhandledRejection", (reason) => {
 // recursive before-quit fired by the second app.quit().
 //
 // Bug 10 (v2.42.2): capul exterior TREBUIE sa fie peste bugetul intern de
-// drain al backend-ului (SHUTDOWN_DRAIN_MS 30s + drainEmailDispatches 5s) —
-// cu 5s, orice quit in timpul unui tick de monitoring taia drain-ul si arunca
-// outcome-ul run-ului in zbor. Drain-ul se rezolva in milisecunde cand nu e
-// nimic in zbor, deci quit-ul normal ramane instant; 40s e doar plafonul
-// patologic (runner care a inghitit cancellation) — log si force.
+// drain al backend-ului — cu 5s, orice quit in timpul unui tick de monitoring
+// taia drain-ul si arunca outcome-ul run-ului in zbor. Drain-ul se rezolva in
+// milisecunde cand nu e nimic in zbor, deci quit-ul normal ramane instant;
+// plafonul e doar cazul patologic (runner care a inghitit cancellation).
+// v2.43.0 (EXT-H-01, fix Codex): bugetul intern a crescut — SHUTDOWN_DRAIN_MS
+// 30s + drainEmailDispatches 5s + waitForBackupToSettle 30s (settle-ul
+// writerilor de mentenanta, care decide si retinerea instance lock-ului).
+// 40s taia settle-ul exact in timpul unui restore/compact in zbor; 75s
+// acopera 30+5+30 plus marja pentru inchiderea SQLite.
 let backendShutdownStarted = false;
-const BACKEND_SHUTDOWN_TIMEOUT_MS = 40_000;
+const BACKEND_SHUTDOWN_TIMEOUT_MS = 75_000;
 app.on("before-quit", (event) => {
   const shutdown = globalThis.__legalDashboardShutdown;
   if (typeof shutdown !== "function") return;
