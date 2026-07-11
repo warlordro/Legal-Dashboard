@@ -863,6 +863,11 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user
   // v2.43.0 (rnpm-split): delete in timpul unei cautari active => FK errors sau
   // repopulare imediat dupa stergere; refuzam explicit.
   if (hasActiveRnpmSearch(ownerId)) {
+    recordAudit(c, "aviz.delete_all", {
+      outcome: "denied",
+      targetKind: "aviz",
+      detail: { reason: "search_active" },
+    });
     return c.json(
       fail("SEARCH_ACTIVE", "Exista o cautare RNPM in curs pentru acest cont; reincearca dupa finalizare", c),
       409
@@ -880,8 +885,9 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user
     compacted = false;
     console.warn("[rnpm] compact after delete-all failed:", e);
   }
-  // Audit 2026-04-29 #15: ops destructive masive trebuie reconstruibile.
-  recordAudit(c, "aviz.delete_all", {
+  // Mutatia e COMISA — un esec al scrierii de audit nu are voie sa intoarca
+  // 500 (clientul ar repeta un delete deja terminat). Contract Rev. 4.
+  recordAuditSafe(c, "aviz.delete_all", {
     targetKind: "aviz",
     detail: { deleted: count, compacted },
   });
@@ -889,8 +895,14 @@ rnpmRouter.delete("/saved/all", requireDesktopHeader, requireRole("admin", "user
 });
 
 rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async (c) => {
+  const ownerId = getOwnerId(c);
   // v2.43.0 (rnpm-split): acelasi gard ca la /saved/all.
-  if (hasActiveRnpmSearch(getOwnerId(c))) {
+  if (hasActiveRnpmSearch(ownerId)) {
+    recordAudit(c, "aviz.delete_batch", {
+      outcome: "denied",
+      targetKind: "aviz",
+      detail: { reason: "search_active" },
+    });
     return c.json(
       fail("SEARCH_ACTIVE", "Exista o cautare RNPM in curs pentru acest cont; reincearca dupa finalizare", c),
       409
@@ -903,8 +915,10 @@ rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async 
   const numIds = ids.filter((v): v is number => typeof v === "number" && Number.isFinite(v));
   if (numIds.length === 0) return invalidParams(c, "Lista id-uri invalida");
   if (numIds.length > 500) return invalidParams(c, "Maxim 500 avize per batch");
-  const deleted = deleteAvizeByIds(numIds, getOwnerId(c));
-  recordAudit(c, "aviz.delete_batch", {
+  const deleted = deleteAvizeByIds(numIds, ownerId);
+  // Mutatia e COMISA — un esec al scrierii de audit nu are voie sa intoarca
+  // 500 (clientul ar repeta un delete deja terminat). Contract Rev. 4.
+  recordAuditSafe(c, "aviz.delete_batch", {
     targetKind: "aviz",
     detail: { requested: numIds.length, deleted },
   });

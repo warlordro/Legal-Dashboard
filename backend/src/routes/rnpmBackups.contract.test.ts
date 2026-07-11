@@ -366,6 +366,21 @@ describe("rutele pe fisierul callerului (stats/compact/delete-all)", () => {
     expect(ok.status).toBe(200);
   });
 
+  // Task 2 (fixuri post-audit): refuzul SEARCH_ACTIVE trebuie sa fie vizibil
+  // in audit trail (outcome=denied), nu doar in raspunsul HTTP.
+  it("refuzul SEARCH_ACTIVE pe DELETE /saved/all scrie audit cu outcome=denied", async () => {
+    seedRnpm("u1", "a");
+    beginRnpmSearch("u1");
+    try {
+      const res = await buildApp("u1").request("/api/rnpm/saved/all", { method: "DELETE", headers: DESKTOP });
+      expect(res.status).toBe(409);
+      const events = getAuditEvents({ action: "aviz.delete_all" });
+      expect(events[0]?.outcome).toBe("denied");
+    } finally {
+      endRnpmSearch("u1");
+    }
+  });
+
   it("POST /saved/delete-batch refuza cu 409 SEARCH_ACTIVE in timpul unei cautari", async () => {
     seedRnpm("u1", "a");
     beginRnpmSearch("u1");
@@ -377,6 +392,25 @@ describe("rutele pe fisierul callerului (stats/compact/delete-all)", () => {
       });
       expect(res.status).toBe(409);
       expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("SEARCH_ACTIVE");
+    } finally {
+      endRnpmSearch("u1");
+    }
+  });
+
+  // Task 2 (fixuri post-audit): analog delete-all — refuzul SEARCH_ACTIVE pe
+  // batch trebuie sa scrie audit cu outcome=denied.
+  it("refuzul SEARCH_ACTIVE pe POST /saved/delete-batch scrie audit cu outcome=denied", async () => {
+    seedRnpm("u1", "a");
+    beginRnpmSearch("u1");
+    try {
+      const res = await buildApp("u1").request("/api/rnpm/saved/delete-batch", {
+        method: "POST",
+        headers: JSON_DESKTOP,
+        body: JSON.stringify({ ids: [1] }),
+      });
+      expect(res.status).toBe(409);
+      const events = getAuditEvents({ action: "aviz.delete_batch" });
+      expect(events[0]?.outcome).toBe("denied");
     } finally {
       endRnpmSearch("u1");
     }
