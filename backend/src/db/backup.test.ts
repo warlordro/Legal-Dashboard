@@ -24,6 +24,7 @@ import {
 import { requestIdContext } from "../middleware/requestId.ts";
 import { meRouter } from "../routes/me.ts";
 import { appErrorHandler } from "../util/appErrorHandler.ts";
+import { getRnpmDataDir } from "./rnpmDb.ts";
 import { clearMonolithRestoreInProgress, closeDb, getDb, setMonolithRestoreInProgress } from "./schema.ts";
 
 // Capture console.log during the body — vi.spyOn does not intercept reliably
@@ -759,5 +760,29 @@ describe("maintenance RWLock — backup vs scheduler integration", () => {
     // Both reader bodies eventually ran — proves the lock did not deadlock.
     expect(events).toContain("r1-end");
     expect(events).toContain("r2-start");
+  });
+});
+
+describe("daily backup — enumerarea rnpm fail-explicit (EXT-H-02)", () => {
+  it("eroare non-ENOENT la readdir(rnpm/) emite daily_backup_failed stage=enumerate_rnpm si NU opreste backup-ul monolitului", async () => {
+    const rnpmPath = getRnpmDataDir();
+    await fsPromises.rm(rnpmPath, { recursive: true, force: true });
+    await fsPromises.writeFile(rnpmPath, "not a directory");
+
+    const { lines } = await captureConsoleLog(() => runDailyBackup());
+
+    const failLine = lines.find((l) => l.includes('"stage":"enumerate_rnpm"'));
+    expect(failLine).toBeDefined();
+    expect(failLine).toContain('"action":"daily_backup_failed"');
+    expect(failLine).toContain('"errnoCode":"ENOTDIR"');
+    expect(lines.some((l) => l.includes('"action":"daily_backup"') && l.includes('"target":"main"'))).toBe(true);
+  });
+
+  it("ENOENT pe directorul rnpm ramane silentios (pre-split, fara useri)", async () => {
+    await fsPromises.rm(getRnpmDataDir(), { recursive: true, force: true });
+
+    const { lines } = await captureConsoleLog(() => runDailyBackup());
+
+    expect(lines.some((l) => l.includes("enumerate_rnpm"))).toBe(false);
   });
 });

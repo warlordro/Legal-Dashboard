@@ -1318,8 +1318,20 @@ async function runDailyBackupImpl(): Promise<string[]> {
     stems = (await fsPromises.readdir(getRnpmDataDir()))
       .filter((f) => f.endsWith(BACKUP_SUFFIX))
       .map((f) => f.slice(0, -BACKUP_SUFFIX.length));
-  } catch {
-    /* directorul rnpm nu exista inca (pre-split / fara useri) */
+  } catch (e) {
+    const code = (e as NodeJS.ErrnoException)?.code;
+    // ENOENT = pre-split / fara useri — benign. ORICE altceva (EACCES, EIO,
+    // ENOTDIR, ACL/storage) inseamna ca recovery set-ul NU contine bazele
+    // RNPM per user si run-ul NU are voie sa para reusit silentios.
+    if (code !== "ENOENT") {
+      logBackupEvent({
+        action: "daily_backup_failed",
+        target: "rnpm:*",
+        stage: "enumerate_rnpm",
+        errnoCode: code ?? null,
+        reason: e instanceof Error ? e.message : String(e),
+      });
+    }
   }
   for (const stem of stems) {
     const dest = await dailyBackupTarget(rnpmTargetForStemFile(stem));
