@@ -360,6 +360,11 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
         400
       );
     }
+    // Fix audit v2.43: recheck-ul de limita de stocare din timpul cautarii
+    // (intre paginile interne) arunca din interiorul run-ului si ajunge in
+    // catch-ul local — rethrow spre handlerul central (429 cu cifre), altfel
+    // ar fi mascat ca 500 generic.
+    if ((e as { code?: unknown })?.code === "RNPM_STORAGE_LIMIT") throw e;
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
     console.error("[rnpm/search]", msg);
     return internalError(c, msg);

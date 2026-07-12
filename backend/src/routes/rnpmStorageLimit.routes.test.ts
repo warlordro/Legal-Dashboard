@@ -56,12 +56,14 @@ vi.mock("./rnpmGuards.ts", async (importOriginal) => {
 
 import { assertRnpmStorageWithinLimit, RnpmStorageLimitError } from "../db/rnpmStorageLimit.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
+import { executeSearch } from "../services/rnpmSearchService.ts";
 import { appErrorHandler } from "../util/appErrorHandler.ts";
 import { rnpmRouter } from "./rnpm.ts";
 import { withRnpmCaptchaGuards } from "./rnpmGuards.ts";
 
 const storageGuard = vi.mocked(assertRnpmStorageWithinLimit);
 const captchaGuard = vi.mocked(withRnpmCaptchaGuards);
+const searchService = vi.mocked(executeSearch);
 
 function buildApp(): Hono {
   const app = new Hono();
@@ -126,6 +128,39 @@ describe("limita RNPM ruleaza inainte de captcha", () => {
     expect(res.status).toBe(200);
     expect(storageGuard).toHaveBeenCalledWith("u1");
     expect(captchaGuard).toHaveBeenCalledOnce();
+  });
+
+  it("recheck-ul din timpul cautarii intoarce 429 cu cifre, nu 500", async () => {
+    captchaGuard.mockResolvedValueOnce({
+      ok: true,
+      source: "body",
+      body: { type: "ipoteci", params: {}, captchaKey: "x".repeat(32) },
+      captchaKey: "x".repeat(32),
+    });
+    // Simuleaza depasirea limitei intre paginile interne: recheck-ul din
+    // executeSearch arunca eroarea tipata DIN interiorul run-ului (nu din gate).
+    searchService.mockRejectedValueOnce(new RnpmStorageLimitError(600 * 1024 * 1024, 500 * 1024 * 1024));
+
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci", params: {}, captchaKey: "x".repeat(32) }),
+    });
+
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: {
+        code: "QUOTA_EXCEEDED",
+        message: expect.stringContaining("Sterge avize"),
+        details: {
+          feature: "rnpm.storage",
+          usedBytes: 600 * 1024 * 1024,
+          limitBytes: 500 * 1024 * 1024,
+        },
+      },
+      requestId: expect.any(String),
+    });
   });
 
   it("paginarea cu gcode existent este exceptata", async () => {

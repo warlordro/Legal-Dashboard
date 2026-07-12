@@ -11,6 +11,7 @@ vi.mock("./captchaSolver.ts", () => ({
 
 import { __resetRnpmActivityForTests } from "../db/rnpmActivity.ts";
 import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
+import { RnpmStorageLimitError } from "../db/rnpmStorageLimit.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { executeBulkSearch, executeSearch, executeSplitSearch } from "./rnpmSearchService.ts";
 import { RnpmClient, type RnpmSearchResult, type RnpmSearchType } from "./rnpmClient.ts";
@@ -223,6 +224,150 @@ describe("recheck limita RNPM in servicii", () => {
     expect(client.calls).toBe(1);
     expect(result.splitStats).toContainEqual(
       expect.objectContaining({ label: "unu", status: "error", reason: "storage full in paging" })
+    );
+  });
+});
+
+// Client care raporteaza mereu total peste MAX_TOTAL_RESULTS — forteaza
+// limit_exceeded pe sub-tipul tier-1 si intrarea in split-ul nested tier-2.
+class OverLimitClient extends RnpmClient {
+  calls = 0;
+
+  constructor() {
+    super({ requestDelayMs: 0 });
+  }
+
+  override async search(): Promise<RnpmSearchResult> {
+    this.calls++;
+    return {
+      total: 2000,
+      pagesTotal: 80,
+      pageSize: 25,
+      currentPage: 1,
+      documents: [],
+      criteriu: "",
+      eai: false,
+    };
+  }
+}
+
+describe("oprire la primul refuz de limita de stocare (fail-fast)", () => {
+  const storageError = () => new RnpmStorageLimitError(600 * 1024 * 1024, 500 * 1024 * 1024);
+
+  it("bulk se opreste dupa primul refuz si marcheaza itemele ramase ca oprite", async () => {
+    const client = new PagingClient();
+    const progress = vi.fn();
+    const storageLimitCheck = vi.fn(async () => {
+      throw storageError();
+    });
+
+    await executeBulkSearch(
+      [
+        { type: "ipoteci", params: {}, label: "unu" },
+        { type: "ipoteci", params: {}, label: "doi" },
+        { type: "ipoteci", params: {}, label: "trei" },
+      ],
+      "stub-key",
+      "u1",
+      progress,
+      client,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      storageLimitCheck
+    );
+
+    // Refuzul nu se schimba intre iteme — un singur recheck, zero cautari pornite.
+    expect(storageLimitCheck).toHaveBeenCalledTimes(1);
+    expect(client.calls).toBe(0);
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({
+        index: 0,
+        phase: "error",
+        error: expect.stringContaining("Spatiul RNPM alocat este plin"),
+      })
+    );
+    expect(progress).toHaveBeenCalledWith(
+      expect.objectContaining({ index: 2, phase: "error", error: expect.stringContaining("Oprit: limita de stocare") })
+    );
+  });
+
+  it("split se opreste dupa primul refuz, marcheaza restul si nu numara captcha", async () => {
+    const client = new PagingClient();
+    const storageLimitCheck = vi.fn(async () => {
+      throw storageError();
+    });
+
+    const result = await executeSplitSearch(
+      {
+        type: "fiducii",
+        baseParams: {},
+        subTypeLabels: ["unu", "doi", "trei"],
+        captchaKey: "stub-key",
+        ownerId: "u1",
+        storageLimitCheck,
+      },
+      vi.fn(),
+      client
+    );
+
+    expect(storageLimitCheck).toHaveBeenCalledTimes(1);
+    expect(client.calls).toBe(0);
+    expect(result.captchasUsed).toBe(0);
+    expect(result.splitStats).toContainEqual(
+      expect.objectContaining({
+        label: "unu",
+        status: "error",
+        reason: expect.stringContaining("Spatiul RNPM alocat este plin"),
+      })
+    );
+    expect(result.splitStats).toContainEqual(
+      expect.objectContaining({
+        label: "trei",
+        status: "error",
+        reason: expect.stringContaining("Oprit: limita de stocare"),
+      })
+    );
+  });
+
+  it("refuzul din split-ul nested (tier-2) opreste si bucla tier-1", async () => {
+    const client = new OverLimitClient();
+    const storageLimitCheck = vi
+      .fn<() => Promise<void>>()
+      .mockResolvedValueOnce()
+      .mockRejectedValueOnce(storageError());
+
+    const result = await executeSplitSearch(
+      {
+        type: "ipoteci",
+        baseParams: {},
+        subTypeLabels: ["unu", "doi"],
+        captchaKey: "stub-key",
+        ownerId: "u1",
+        storageLimitCheck,
+      },
+      vi.fn(),
+      client
+    );
+
+    // Tier-1 "unu": check ok + limit_exceeded (total 2000) -> nested; nested j=0:
+    // check refuzat INAINTE de orice cautare tier-2 -> stop complet, "doi" nu porneste.
+    expect(storageLimitCheck).toHaveBeenCalledTimes(2);
+    expect(client.calls).toBe(1);
+    expect(result.splitStats).toContainEqual(
+      expect.objectContaining({
+        label: "unu",
+        status: "error",
+        reason: expect.stringContaining("Spatiul RNPM alocat este plin"),
+      })
+    );
+    expect(result.splitStats).toContainEqual(
+      expect.objectContaining({
+        label: "doi",
+        status: "error",
+        reason: expect.stringContaining("Oprit: limita de stocare"),
+      })
     );
   });
 });

@@ -91,6 +91,15 @@ const MAX_TOTAL_RESULTS = 1500;
 // daca era doar fluke.
 const K_SILENT_REFUSAL_FAIL_FAST = 3;
 
+// Fix audit v2.43: refuzul de limita de stocare nu se poate schimba intre
+// itemele aceluiasi batch (nimic nu sterge date intre timp), deci buclele
+// bulk/split se opresc la primul refuz — fiecare recheck inutil ar costa un
+// lock global de mentenanta + stat + checkpoint pe fisierul RNPM.
+const isStorageLimitError = (e: unknown): boolean =>
+  (e as { code?: unknown } | null | undefined)?.code === "RNPM_STORAGE_LIMIT";
+
+const STORAGE_STOP_MSG = "Oprit: limita de stocare RNPM atinsa (nu a fost pornit).";
+
 // Single-line JSON timing line on stdout. Same shape as other audit events
 // (ai_call, restore). Lets ops grep `"action":"rnpm_phase"` and pivot by
 // phase to see where wall-clock time goes (captcha solver vs RNPM search vs
@@ -544,6 +553,19 @@ async function executeBulkSearchInner(
       if (e instanceof DOMException && e.name === "AbortError") return;
       const msg = e instanceof Error ? e.message : String(e);
       onProgress({ index: i, total: items.length, label, phase: "error", error: msg });
+      if (isStorageLimitError(e)) {
+        for (let j = i + 1; j < items.length; j++) {
+          const skipped = items[j];
+          onProgress({
+            index: j,
+            total: items.length,
+            label: skipped.label ?? describeItem(skipped),
+            phase: "error",
+            error: STORAGE_STOP_MSG,
+          });
+        }
+        return;
+      }
     }
   }
 }
@@ -721,6 +743,17 @@ async function executeSplitSearchInner(
   // nu probeaza ca upstream functioneaza, dar nici nu incrementeaza.
   let consecutiveSilentRefusals = 0;
 
+  // Fix audit v2.43: la refuz de limita de stocare, sub-tipurile ramase sunt
+  // marcate ca oprite (nu pornite) — pattern identic cu fail-fast-ul de
+  // silent_refusal de mai jos.
+  const markStorageStopped = (from: number) => {
+    for (let j = from; j < subN; j++) {
+      const skippedLabel = input.subTypeLabels[j];
+      splitStats.push({ label: skippedLabel, status: "error", count: 0, subTotal: 0, reason: STORAGE_STOP_MSG });
+      onProgress({ index: j, total: subN, label: skippedLabel, phase: "error", message: STORAGE_STOP_MSG });
+    }
+  };
+
   try {
     for (let i = 0; i < subN; i++) {
       throwIfAborted(input.signal);
@@ -824,6 +857,18 @@ async function executeSplitSearchInner(
         });
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") throw e;
+        // Fix audit v2.43: refuzul de limita opreste bucla — restul sub-tipurilor
+        // ar fi refuzate identic. Fara increment captchasUsed: in cazul tipic
+        // recheck-ul refuza inainte de captcha; pe path-ul rar (refuz intre
+        // paginile interne, dupa captcha) acceptam under-count, simetric cu
+        // under-count-ul de retry din comentariul de mai jos.
+        if (isStorageLimitError(e)) {
+          const msg = e instanceof Error ? e.message : String(e);
+          splitStats.push({ label, status: "error", count: 0, subTotal: 0, reason: msg });
+          onProgress({ index: i, total: subN, label, phase: "error", message: msg });
+          markStorageStopped(i + 1);
+          break;
+        }
         // v2.20.3 Grupul M: conservative count — daca executeSearch a aruncat
         // dupa ce a consumat captcha (ex. limit_exceeded vine dupa primul search
         // care a consumat captcha-ul), masuram cel putin 1. Retry-urile nu sunt
@@ -898,6 +943,15 @@ async function executeSplitSearchInner(
               continue;
             } catch (nestedErr) {
               if (nestedErr instanceof DOMException && nestedErr.name === "AbortError") throw nestedErr;
+              // Fix audit v2.43: refuzul de limita propagat din tier-2 opreste
+              // si bucla tier-1 — vezi comentariul de pe branch-ul simetric de mai sus.
+              if (isStorageLimitError(nestedErr)) {
+                const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
+                splitStats.push({ label, status: "error", count: 0, subTotal: tier1SubTotal, reason: msg });
+                onProgress({ index: i, total: subN, label, phase: "error", message: msg, subTotal: tier1SubTotal });
+                markStorageStopped(i + 1);
+                break;
+              }
               const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
               splitStats.push({
                 label,
@@ -1129,6 +1183,9 @@ async function executeNestedDestinationSplit(
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") throw e;
+      // Fix audit v2.43: refuzul de limita de stocare nu e o eroare
+      // per-destinatie — se propaga ca apelantul sa opreasca si bucla tier-1.
+      if (isStorageLimitError(e)) throw e;
       // v2.20.3 Grupul M: conservative count pe error path (vezi comentariul
       // identic din executeSplitSearch).
       captchasUsed += 1;
