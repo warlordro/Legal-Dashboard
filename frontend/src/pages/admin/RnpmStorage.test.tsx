@@ -10,7 +10,7 @@ import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import { adminListRnpmUsage, type AdminRnpmUsageRow } from "@/lib/adminRnpmApi";
-import { ApiError, rnpmCompactDb } from "@/lib/rnpmApi";
+import { ApiError, rnpmCompactDb, rnpmDeleteBackups } from "@/lib/rnpmApi";
 import AdminRnpmStorage from "./RnpmStorage";
 
 vi.mock("@/lib/adminRnpmApi", () => ({
@@ -22,11 +22,13 @@ vi.mock("@/lib/rnpmApi", async (importOriginal) => {
   return {
     ...actual,
     rnpmCompactDb: vi.fn(),
+    rnpmDeleteBackups: vi.fn(),
   };
 });
 
 const usageMock = vi.mocked(adminListRnpmUsage);
 const compactMock = vi.mocked(rnpmCompactDb);
+const deleteBackupsMock = vi.mocked(rnpmDeleteBackups);
 
 let host: HTMLDivElement;
 let root: Root;
@@ -79,6 +81,7 @@ afterEach(async () => {
 beforeEach(() => {
   usageMock.mockReset();
   compactMock.mockReset();
+  deleteBackupsMock.mockReset();
 });
 
 describe("AdminRnpmStorage (embedded)", () => {
@@ -296,6 +299,104 @@ describe("AdminRnpmStorage (embedded)", () => {
     expect(usageMock).toHaveBeenCalledTimes(1);
     // Remontam un root gol ca afterEach-ul (root.unmount) sa ramana valid.
     root = createRoot(host);
+  });
+
+  it("butonul Sterge backup-urile cere confirmare destructiva si apeleaza rnpmDeleteBackups cu ownerId-ul randului", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u1",
+        email: "a@x.ro",
+        displayName: "A",
+        status: "active",
+        dbSizeBytes: 4096,
+        backupCount: 2,
+        backupsBytes: 2048,
+      },
+    ]);
+    deleteBackupsMock.mockResolvedValue(2);
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+
+    await act(async () => {
+      clickButton(/Sterge backup-urile/);
+      await Promise.resolve();
+    });
+
+    // Dialog destructiv: focusul initial sta pe Anuleaza (EXT-H-03).
+    expect(document.activeElement?.textContent).toMatch(/Anuleaz/);
+
+    await act(async () => {
+      dialogButton(/^Sterge$/).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deleteBackupsMock).toHaveBeenCalledWith("u1");
+    expect(usageMock).toHaveBeenCalledTimes(2); // mount + reload post-delete
+    expect(host.textContent).toContain("Backup-uri sterse: 2");
+  });
+
+  it("butonul Sterge backup-urile e dezactivat cand userul nu are backup-uri", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u1",
+        email: "a@x.ro",
+        displayName: "A",
+        status: "active",
+        dbSizeBytes: 4096,
+        backupCount: 0,
+        backupsBytes: 0,
+      },
+    ]);
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+
+    const btn = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      /Sterge backup-urile/.test(b.textContent ?? "")
+    );
+    expect(btn).toBeTruthy();
+    expect(btn?.disabled).toBe(true);
+  });
+
+  it("409 la stergerea backup-urilor se afiseaza ca mesaj prietenos", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u1",
+        email: "a@x.ro",
+        displayName: "A",
+        status: "active",
+        dbSizeBytes: 4096,
+        backupCount: 1,
+        backupsBytes: 1024,
+      },
+    ]);
+    deleteBackupsMock.mockRejectedValue(new ApiError("Restore in curs", 409, "RESTORE_IN_PROGRESS"));
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+
+    await act(async () => {
+      clickButton(/Sterge backup-urile/);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      dialogButton(/^Sterge$/).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(host.textContent).toContain("operatie RNPM in curs");
   });
 
   it("409 (operatie RNPM in curs la userul tinta) se afiseaza ca mesaj prietenos", async () => {

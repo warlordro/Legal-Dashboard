@@ -4,13 +4,13 @@
 // repository (email ASC); UI-ul nu re-sorteaza.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Database, HardDriveDownload, RefreshCw } from "lucide-react";
+import { Database, HardDriveDownload, RefreshCw, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import { adminListRnpmUsage, type AdminRnpmUsageRow } from "@/lib/adminRnpmApi";
-import { ApiError, rnpmCompactDb } from "@/lib/rnpmApi";
+import { ApiError, rnpmCompactDb, rnpmDeleteBackups } from "@/lib/rnpmApi";
 import { userStatusLabel } from "@/lib/userLabels";
 import { cn, formatBytes } from "@/lib/utils";
 
@@ -20,18 +20,21 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [busyOwnerId, setBusyOwnerId] = useState<string | null>(null);
+  // busy poarta si actiunea, ca spinnerul sa apara pe butonul apasat, nu pe
+  // amandoua; cat timp e non-null toate actiunile per rand sunt dezactivate.
+  const [busy, setBusy] = useState<{ ownerId: string; action: "compact" | "delete" } | null>(null);
   // AbortController + staleness guard (pattern 6.7): un raspuns lent pornit
   // inainte de un reload ar ateriza dupa cel nou si ar suprascrie lista cu
   // starea veche. Reincarca si reload-ul post-compact folosesc acelasi load().
   const acRef = useRef<AbortController | null>(null);
-  // Guard-uri sincrone (fix review Codex): compactarea nu are AbortController,
+  // Guard-uri sincrone (fix review Codex): mutatiile nu au AbortController,
   // deci un raspuns tarziu ar face setState + reload DUPA unmount; iar dublul
-  // click pe Compacteaza inainte de confirmare ar deschide un al doilea
+  // click pe Compacteaza/Sterge inainte de confirmare ar deschide un al doilea
   // confirm() care orfaneaza promisiunea primului (state-ul providerului e
-  // inlocuit, nu pus in coada).
+  // inlocuit, nu pus in coada). Ref-ul e partajat de ambele actiuni: un singur
+  // dialog de confirmare deschis o data.
   const mountedRef = useRef(true);
-  const compactInFlightRef = useRef(false);
+  const actionInFlightRef = useRef(false);
 
   const load = useCallback(async () => {
     if (!mountedRef.current) return;
@@ -63,9 +66,9 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
 
   const handleCompact = async (row: AdminRnpmUsageRow) => {
     // Ref sincron, nu state: doua clickuri in acelasi tick vad amandoua
-    // busyOwnerId === null (setState e asincron), dar ref-ul se inchide imediat.
-    if (compactInFlightRef.current) return;
-    compactInFlightRef.current = true;
+    // busy === null (setState e asincron), dar ref-ul se inchide imediat.
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     try {
       const ok = await confirm({
         title: "Compacteaza baza RNPM",
@@ -73,7 +76,7 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
         confirmLabel: "Compacteaza",
       });
       if (!ok || !mountedRef.current) return;
-      setBusyOwnerId(row.userId);
+      setBusy({ ownerId: row.userId, action: "compact" });
       setError(null);
       setSuccessMsg(null);
       try {
@@ -89,10 +92,44 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
           setError(e instanceof Error ? e.message : "Eroare la compactarea bazei RNPM.");
         }
       } finally {
-        if (mountedRef.current) setBusyOwnerId(null);
+        if (mountedRef.current) setBusy(null);
       }
     } finally {
-      compactInFlightRef.current = false;
+      actionInFlightRef.current = false;
+    }
+  };
+
+  const handleDeleteBackups = async (row: AdminRnpmUsageRow) => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    try {
+      const ok = await confirm({
+        title: "Sterge backup-urile RNPM",
+        message: `Stergi toate backup-urile RNPM ale userului ${row.email} (${row.backupCount}, ${formatBytes(row.backupsBytes)})? Operatia nu poate fi anulata.`,
+        confirmLabel: "Sterge",
+        destructive: true,
+      });
+      if (!ok || !mountedRef.current) return;
+      setBusy({ ownerId: row.userId, action: "delete" });
+      setError(null);
+      setSuccessMsg(null);
+      try {
+        const deleted = await rnpmDeleteBackups(row.userId);
+        if (!mountedRef.current) return;
+        setSuccessMsg(`Backup-uri sterse: ${deleted}.`);
+        await load();
+      } catch (e) {
+        if (!mountedRef.current) return;
+        if (e instanceof ApiError && e.status === 409) {
+          setError("Userul are o operatie RNPM in curs (cautare sau restaurare); reincearca dupa finalizare.");
+        } else {
+          setError(e instanceof Error ? e.message : "Eroare la stergerea backup-urilor RNPM.");
+        }
+      } finally {
+        if (mountedRef.current) setBusy(null);
+      }
+    } finally {
+      actionInFlightRef.current = false;
     }
   };
 
@@ -103,7 +140,7 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
           <Database className="h-4 w-4 text-muted-foreground" />
           Stocare RNPM
         </CardTitle>
-        <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={busyOwnerId !== null}>
+        <Button type="button" variant="outline" size="sm" onClick={() => void load()} disabled={busy !== null}>
           <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           Reincarca
         </Button>
@@ -111,7 +148,8 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
       <CardContent className="space-y-3">
         <p className="text-xs text-muted-foreground">
           Dimensiunea bazei RNPM per utilizator (fisiere separate) si backup-urile lor. Compactarea (VACUUM) elibereaza
-          spatiul nefolosit dupa stergeri masive.
+          spatiul nefolosit dupa stergeri masive; stergerea backup-urilor elibereaza spatiul ocupat de copiile de
+          siguranta ale userului.
         </p>
         {error && (
           <div className="rounded-md border border-red-300 bg-red-50 px-3 py-2 text-sm text-red-800 dark:border-red-900 dark:bg-red-950/40 dark:text-red-300">
@@ -158,20 +196,37 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
                       {row.backupCount} ({formatBytes(row.backupsBytes)})
                     </td>
                     <td className="px-3 py-2 align-top text-right">
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        disabled={row.dbSizeBytes === null || busyOwnerId !== null}
-                        onClick={() => void handleCompact(row)}
-                      >
-                        {busyOwnerId === row.userId ? (
-                          <RefreshCw className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <HardDriveDownload className="h-3.5 w-3.5" />
-                        )}
-                        Compacteaza
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={row.dbSizeBytes === null || busy !== null}
+                          onClick={() => void handleCompact(row)}
+                        >
+                          {busy?.ownerId === row.userId && busy.action === "compact" ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <HardDriveDownload className="h-3.5 w-3.5" />
+                          )}
+                          Compacteaza
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          disabled={row.backupCount === 0 || busy !== null}
+                          onClick={() => void handleDeleteBackups(row)}
+                          className="text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400 disabled:opacity-50"
+                        >
+                          {busy?.ownerId === row.userId && busy.action === "delete" ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                          Sterge backup-urile
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ))}

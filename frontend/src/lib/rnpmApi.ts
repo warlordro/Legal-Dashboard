@@ -370,8 +370,11 @@ export async function rnpmCompactDb(ownerId?: string): Promise<RnpmCompactResult
   return jsonOrThrow<RnpmCompactResult>(res);
 }
 
-export async function rnpmDeleteBackups(): Promise<number> {
-  const res = await apiFetch(`${BASE}/backups`, { method: "DELETE" });
+// ownerId (admin-only, v2.43.x): tinteste jail-ul altui user — acelasi
+// mecanism cross-owner ca rnpmCompactDb; fara argument = jail-ul propriu.
+export async function rnpmDeleteBackups(ownerId?: string): Promise<number> {
+  const qs = ownerId ? `?ownerId=${encodeURIComponent(ownerId)}` : "";
+  const res = await apiFetch(`${BASE}/backups${qs}`, { method: "DELETE" });
   const data = await jsonOrThrow<{ deleted: number }>(res);
   return data.deleted;
 }
