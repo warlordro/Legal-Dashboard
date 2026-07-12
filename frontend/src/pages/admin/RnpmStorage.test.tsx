@@ -366,6 +366,79 @@ describe("AdminRnpmStorage (embedded)", () => {
     expect(btn?.disabled).toBe(true);
   });
 
+  it("user fara baza vie dar cu backup-uri ramane stergibil (cazul userului sters)", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u-sters",
+        email: "fost@x.ro",
+        displayName: "Fost User",
+        status: "deleted",
+        dbSizeBytes: null,
+        backupCount: 1,
+        backupsBytes: 1024,
+      },
+    ]);
+    deleteBackupsMock.mockResolvedValue(1);
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+
+    const btn = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      /Sterge backup-urile/.test(b.textContent ?? "")
+    );
+    expect(btn?.disabled).toBe(false);
+
+    await act(async () => {
+      clickButton(/Sterge backup-urile/);
+      await Promise.resolve();
+    });
+    await act(async () => {
+      dialogButton(/^Sterge$/).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deleteBackupsMock).toHaveBeenCalledWith("u-sters");
+  });
+
+  it("double-click pe Sterge backup-urile porneste O SINGURA stergere (guard sincron pre-confirm)", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u1",
+        email: "a@x.ro",
+        displayName: "A",
+        status: "active",
+        dbSizeBytes: 4096,
+        backupCount: 2,
+        backupsBytes: 2048,
+      },
+    ]);
+    deleteBackupsMock.mockResolvedValue(2);
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+
+    await act(async () => {
+      clickButton(/Sterge backup-urile/);
+      clickButton(/Sterge backup-urile/);
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      dialogButton(/^Sterge$/).click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(deleteBackupsMock).toHaveBeenCalledTimes(1);
+  });
+
   it("409 la stergerea backup-urilor se afiseaza ca mesaj prietenos", async () => {
     usageMock.mockResolvedValue([
       {
@@ -399,7 +472,7 @@ describe("AdminRnpmStorage (embedded)", () => {
     expect(host.textContent).toContain("operatie RNPM in curs");
   });
 
-  it("409 (operatie RNPM in curs la userul tinta) se afiseaza ca mesaj prietenos", async () => {
+  it("409 la compactare (operatie RNPM in curs la userul tinta) se afiseaza ca mesaj prietenos", async () => {
     usageMock.mockResolvedValue([
       {
         userId: "u1",
