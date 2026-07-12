@@ -23,6 +23,7 @@ vi.mock("@/lib/api", async () => {
       listUsers: vi.fn(),
       listQuota: vi.fn(),
       getUser: vi.fn(),
+      deleteQuota: vi.fn(),
     },
   };
 });
@@ -31,6 +32,7 @@ const listAllQuotaOverridesMock = vi.mocked(admin.listAllQuotaOverrides);
 const listUsersMock = vi.mocked(admin.listUsers);
 const listQuotaMock = vi.mocked(admin.listQuota);
 const getUserMock = vi.mocked(admin.getUser);
+const deleteQuotaMock = vi.mocked(admin.deleteQuota);
 
 let host: HTMLDivElement;
 let root: Root;
@@ -110,6 +112,7 @@ beforeEach(() => {
     ],
   };
   listAllQuotaOverridesMock.mockResolvedValue(overview);
+  deleteQuotaMock.mockReset().mockResolvedValue({ feature: "rnpm.storage", removed: true });
 });
 
 function clickEditFor(email: string): void {
@@ -158,5 +161,56 @@ describe("AdminQuota - selectFromOverview staleness guard", () => {
     // Selectia trebuie sa ramana B — A nu trebuie sa suprascrie.
     expect(host.textContent).toContain("userb@example.com");
     expect(host.textContent).not.toContain("usera@example.com");
+  });
+});
+
+describe("AdminQuota - rnpm.storage", () => {
+  it("afiseaza perioada Permanenta, ascunde selectorul si copy-ul revine la default-ul configurat", async () => {
+    const storageRow = {
+      userId: "userA",
+      email: "usera@example.com",
+      displayName: "userA",
+      role: "user" as const,
+      status: "active" as const,
+      feature: "rnpm.storage",
+      period: "day" as const,
+      limitUsdMilli: 500,
+      updatedAt: "2026-01-01T00:00:00.000Z",
+      updatedBy: null,
+    };
+    listAllQuotaOverridesMock.mockResolvedValue({ truncated: false, overrides: [storageRow] });
+    getUserMock.mockResolvedValue(makeUser("userA", "usera@example.com"));
+    listQuotaMock.mockResolvedValue({
+      userId: "userA",
+      overrides: [
+        {
+          feature: "rnpm.storage",
+          period: "day",
+          limitUsdMilli: 500,
+          dailyLimitUsdMilli: 500,
+          updatedAt: storageRow.updatedAt,
+          updatedBy: null,
+        },
+      ],
+    });
+    await render(<AdminQuota embedded />);
+
+    expect(host.textContent).toContain("Permanenta");
+    await act(async () => {
+      clickEditFor("usera@example.com");
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(document.getElementById("quota-period")).toBeNull();
+    expect(host.textContent).toContain("Permanenta");
+
+    const deleteButton = host.querySelector<HTMLButtonElement>('[aria-label="Sterge plafonul Stocare RNPM"]');
+    if (!deleteButton) throw new Error("Butonul de stergere storage lipseste");
+    await act(async () => {
+      deleteButton.click();
+      await Promise.resolve();
+    });
+    const dialog = document.querySelector('[role="alertdialog"]');
+    expect(dialog?.textContent).toContain("revine la default-ul configurat");
   });
 });

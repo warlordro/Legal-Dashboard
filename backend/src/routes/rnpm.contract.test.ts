@@ -28,8 +28,11 @@ import { Hono } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { rnpmRouter } from "./rnpm.ts";
+import { maybeAutoCompactRnpm } from "../db/backup.ts";
+import { listAuditEvents } from "../db/auditRepository.ts";
+import { measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
 import { closeDb, getDb } from "../db/schema.ts";
-import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
+import { __resetRnpmDbForTests, closeRnpmDb, getRnpmDb, getRnpmDbPath } from "../db/rnpmDb.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { saveSearch } from "../db/searchRepository.ts";
 import { updateUserRole, updateUserStatus } from "../db/userRepository.ts";
@@ -40,6 +43,14 @@ vi.mock("../services/captchaSolver.ts", async (importOriginal) => {
   return {
     ...actual,
     getCaptchaBalance: vi.fn(),
+  };
+});
+
+vi.mock("../db/backup.ts", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../db/backup.ts")>();
+  return {
+    ...actual,
+    maybeAutoCompactRnpm: vi.fn(actual.maybeAutoCompactRnpm),
   };
 });
 
@@ -119,6 +130,9 @@ afterEach(async () => {
   vi.clearAllMocks();
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
+  Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_MIN_FREE_MB");
+  Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_DISABLED");
+  Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -291,6 +305,142 @@ describe("POST /api/v1/rnpm/saved/delete-batch", () => {
     const body = await jsonOf<EnvelopeErrorBody>(res);
     expectEnvelopeError(body, "INVALID_JSON");
   });
+
+  it("nu adauga campul compacted cand pragul nu cere compactare", async () => {
+    const id = seedAviz({ identificator: "AV-BATCH-SMALL" });
+
+    const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+    const body = await jsonOf<Record<string, unknown>>(res);
+
+    expect(res.status).toBe(200);
+    expect(body.deleted).toBe(1);
+    expect(body).not.toHaveProperty("compacted");
+    expect(body).not.toHaveProperty("freedBytes");
+  });
+
+  it("compacteaza ruta reala peste prag si micsoreaza fisierul", async () => {
+    process.env.LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_MIN_FREE_MB = "0.1";
+    const ids: number[] = [];
+    for (let index = 0; index < 80; index++) {
+      ids.push(
+        saveAvizFull({
+          ownerId: "local",
+          uuid: `uuid-large-${index}`,
+          identificator: `AV-LARGE-${index}`,
+          searchType: "ipoteci",
+          tip: "Aviz initial",
+          data: "12.07.2026",
+          bunuri: [
+            {
+              tip_bun: "altele",
+              categorie: null,
+              identificare: null,
+              descriere: `${index}-${"x".repeat(8 * 1024)}`,
+              model: null,
+              serie_sasiu: null,
+              serie_motor: null,
+              nr_inmatriculare: null,
+              referinte: [],
+            },
+          ],
+        })
+      );
+    }
+    closeRnpmDb("local");
+    const beforeBytes = (await fsPromises.stat(getRnpmDbPath("local"))).size;
+
+    const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
+      body: JSON.stringify({ ids }),
+    });
+    const body = await jsonOf<{ deleted: number; compacted?: boolean; freedBytes?: number }>(res);
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ deleted: ids.length, compacted: true });
+    expect(body.freedBytes).toBeGreaterThan(0);
+    expect((await fsPromises.stat(getRnpmDbPath("local"))).size).toBeLessThan(beforeBytes);
+  });
+
+  it("pastreaza 200 si raporteaza compacted false la refuzul compactarii", async () => {
+    vi.mocked(maybeAutoCompactRnpm).mockResolvedValueOnce({
+      attempted: true,
+      compacted: false,
+      freedBytes: 0,
+      reason: "search_active",
+      durationMs: 1,
+    });
+    const id = seedAviz({ identificator: "AV-BATCH-REFUSED" });
+
+    const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(jsonOf(res)).resolves.toMatchObject({ deleted: 1, compacted: false, freedBytes: 0 });
+  });
+
+  it("kill switch-ul pastreaza contractul vechi fara compacted", async () => {
+    process.env.LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_DISABLED = "1";
+    const id = seedAviz({ identificator: "AV-BATCH-DISABLED" });
+
+    const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+    const body = await jsonOf<Record<string, unknown>>(res);
+
+    expect(body).not.toHaveProperty("compacted");
+  });
+
+  it("delete-batch ramane permis cand baza este peste limita de stocare", async () => {
+    process.env.LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB = "0.000001";
+    const id = seedAviz({ identificator: "AV-BATCH-OVER-STORAGE" });
+
+    const res = await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(jsonOf(res)).resolves.toMatchObject({ deleted: 1 });
+  });
+
+  it("auditul delete ramane primul si autocompact are eveniment distinct", async () => {
+    vi.mocked(maybeAutoCompactRnpm).mockResolvedValueOnce({
+      attempted: true,
+      compacted: true,
+      freedBytes: 4096,
+      durationMs: 7,
+    });
+    const id = seedAviz({ identificator: "AV-BATCH-AUDIT" });
+
+    await buildApp().request("/api/v1/rnpm/saved/delete-batch", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-legal-dashboard-desktop": "1" },
+      body: JSON.stringify({ ids: [id] }),
+    });
+    const rows = listAuditEvents({ ownerId: "local", limit: 20 })
+      .rows.filter((row) => row.action === "aviz.delete_batch" || row.action === "rnpm.autocompact")
+      .reverse();
+
+    expect(rows.map((row) => row.action)).toEqual(["aviz.delete_batch", "rnpm.autocompact"]);
+    expect(JSON.parse(rows[0].detail_json)).toMatchObject({ requested: 1, deleted: 1 });
+    expect(JSON.parse(rows[1].detail_json)).toEqual({
+      attempted: true,
+      compacted: true,
+      freedBytes: 4096,
+      durationMs: 7,
+    });
+  });
 });
 
 describe("POST /api/v1/rnpm/saved/export", () => {
@@ -332,14 +482,14 @@ describe("GET /api/v1/rnpm/stats", () => {
       activ: number;
       inactiv: number;
       byType: Record<string, number>;
-      db: Record<string, unknown>;
+      db: { sizeBytes: number; path?: string };
     }>(res);
     expect(body.total).toBe(2);
     expect(body.activ).toBe(1);
     expect(body.inactiv).toBe(1);
     expect(body.byType.ipoteci).toBe(1);
     expect(body.byType.fiducii).toBe(1);
-    expect(typeof body.db.sizeBytes).toBe("number");
+    expect(body.db.sizeBytes).toBe((await measureRnpmStorage("local")).usedBytes);
     expect("path" in body.db).toBe(false);
   });
 });
@@ -402,6 +552,29 @@ describe("DELETE /api/v1/rnpm/searches/:id", () => {
     expect(res.status).toBe(400);
     const body = await jsonOf<EnvelopeErrorBody>(res);
     expectEnvelopeError(body, "INVALID_PARAMS");
+  });
+
+  it("apeleaza autocompact si raporteaza rezultatul pe stergerea individuala", async () => {
+    vi.mocked(maybeAutoCompactRnpm).mockResolvedValueOnce({ attempted: true, compacted: true, freedBytes: 2048 });
+    const id = saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
+
+    const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, { method: "DELETE" });
+
+    expect(await jsonOf(res)).toEqual({ deleted: true, compacted: true, freedBytes: 2048 });
+  });
+});
+
+describe("DELETE /api/v1/rnpm/saved/:id autocompact", () => {
+  it("apeleaza autocompact si tolereaza o eroare netipata dupa delete", async () => {
+    vi.mocked(maybeAutoCompactRnpm).mockRejectedValueOnce(new Error("boom"));
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const id = seedAviz({ identificator: "AV-ONE-AUTO" });
+
+    const res = await buildApp().request(`/api/v1/rnpm/saved/${id}`, { method: "DELETE" });
+
+    expect(res.status).toBe(200);
+    expect(await jsonOf(res)).toEqual({ deleted: true, compacted: false, freedBytes: 0 });
+    expect(error).toHaveBeenCalled();
   });
 });
 

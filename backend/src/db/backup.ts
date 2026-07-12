@@ -6,6 +6,7 @@ import Database from "better-sqlite3";
 import { RWLock } from "../util/rwlock.ts";
 import { runSnapshotOp } from "../util/snapshotRunner.ts";
 import { BACKFILL_SENTINEL, discoverMigrations } from "./migrations/runner.ts";
+import { pruneBackupJail } from "./backupPrune.ts";
 import {
   beginRnpmRestore,
   endRnpmRestore,
@@ -130,10 +131,6 @@ export class BackupValidationError extends Error {
 // pool. Numele pool-urilor: `<prefix>YYYY-MM-DD.db`, `<prefix>pre-restore-*.db`,
 // `<prefix>pre-<label>-*.db` (label cu puncte acceptat), `<prefix>manual-*.db`.
 // ---------------------------------------------------------------------------
-const BACKUP_RETAIN_COUNT = 7;
-const PRE_RESTORE_RETAIN = 5;
-const PRE_MIGRATION_RETAIN = 5;
-const MANUAL_RETAIN = 5;
 // Fix review (Task 2): pool DEDICAT pentru backup-urile pre-split ale
 // monolitului — in pool-ul preMigration sortau lexicografic DUPA
 // pre-schema-upgrade-* si erau evacuate primele, desi sunt rollback-ul
@@ -254,36 +251,6 @@ async function listBackups(dir: string, prefix: string): Promise<string[]> {
   }
 }
 
-// Sterge un backup impreuna cu sidecar-urile lui (bundle) — backup-urile
-// legacy (pre-v2.43.0) sunt coerente doar ca triplet .db/-wal/-shm; fara
-// curatarea bundle-ului ar ramane sidecars orfane permanente in jail.
-// Rev. 4 (Codex): intoarce TRUE doar daca fisierul PRINCIPAL a disparut
-// efectiv (sters acum sau deja absent); EPERM/EBUSY/EACCES nu se mai inghit
-// silentios. Rev. 5 (Codex HIGH): fisierul PRINCIPAL decide si ORDINEA —
-// daca stergerea lui e refuzata (non-ENOENT), sidecars NU se ating: la
-// bundle-urile legacy datele comise pot trai doar in WAL, iar un .db
-// "pastrat" fara WAL-ul lui e un recovery point corupt silentios. Sidecars
-// se sterg DOAR dupa ce principalul a disparut; esecul pe ele ramane
-// best-effort (un sidecar refuzat DUPA stergerea principalului ramane orfan
-// permanent — asumat, enumerarea nu il mai redescopera).
-async function unlinkBundle(dir: string, name: string): Promise<boolean> {
-  try {
-    await fsPromises.unlink(path.join(dir, name));
-  } catch (e) {
-    const code = (e as NodeJS.ErrnoException)?.code;
-    if (code !== "ENOENT") {
-      logBackupEvent({ action: "backup_prune_failed", file: name, errnoCode: code ?? null });
-      return false;
-    }
-  }
-  for (const suffix of ["-wal", "-shm"] as const) {
-    await fsPromises.unlink(path.join(dir, name + suffix)).catch(() => {
-      /* best-effort */
-    });
-  }
-  return true;
-}
-
 // Half-written backups left by a prior crash / SIGTERM / power loss between
 // `VACUUM INTO tmp` and the atomic rename below. Filter is strict (`.db.tmp`
 // suffix on a backup-prefixed name) so we never touch unrelated files even if
@@ -336,59 +303,9 @@ async function latestBackupMtime(dir: string, prefix: string): Promise<number | 
   return max || null;
 }
 
-async function pruneOld(dir: string, prefix: string): Promise<number> {
-  let all: string[];
-  try {
-    all = await listBackups(dir, prefix);
-  } catch (e) {
-    // Task 15: pruneOld ruleaza DUPA mutatii deja comise (backup/restore
-    // reusit) — un esec de listare aici nu are voie sa transforme un succes
-    // in 500. Tolerant: log + 0 (nimic pruned, dar mutatia deja comisa ramane).
-    logBackupEvent({
-      action: "backup_prune_failed",
-      stage: "list",
-      dir: path.basename(dir),
-      errnoCode: (e as NodeJS.ErrnoException)?.code ?? null,
-    });
-    return 0;
-  }
-  const res = poolRegexes(prefix);
-  // Patru pool-uri disjuncte; numele contin timestamp ISO => lex sort = cronologic.
-  const dated = all
-    .filter((f) => res.dated.test(f))
-    .sort()
-    .reverse();
-  const preRestore = all
-    .filter((f) => res.preRestore.test(f))
-    .sort()
-    .reverse();
-  const manual = all
-    .filter((f) => res.manual.test(f))
-    .sort()
-    .reverse();
-  // (Rev. 3: guard-ul redundant `!res.manual.test(f)` eliminat — un nume
-  // `manual-*` nu poate incepe cu `pre-`; excluderile reale sunt in regex.)
-  const preMigration = all
-    .filter((f) => res.preMigration.test(f))
-    .sort()
-    .reverse();
-  const preSplit = all
-    .filter((f) => res.preSplit.test(f))
-    .sort()
-    .reverse();
-  const toDelete = [
-    ...dated.slice(BACKUP_RETAIN_COUNT),
-    ...preRestore.slice(PRE_RESTORE_RETAIN),
-    ...manual.slice(MANUAL_RETAIN),
-    ...preMigration.slice(PRE_MIGRATION_RETAIN),
-    ...preSplit.slice(PRE_SPLIT_RETAIN),
-  ];
-  // Rev. 4 (Codex): count-ul reflecta stergerile REALE, nu candidatele.
-  let pruned = 0;
-  for (const f of toDelete) {
-    if (await unlinkBundle(dir, f)) pruned++;
-  }
-  return pruned;
+async function pruneOld(dir: string, prefix: string, protectedNames: string[] = []): Promise<number> {
+  const result = await pruneBackupJail(dir, prefix, { protectedNames, logEvent: logBackupEvent });
+  return result.pruned;
 }
 
 // Verificare usoara post-runner (Rev. 3): integritatea dest-ului e garantata
@@ -610,7 +527,7 @@ async function restoreTargetImpl(
     // EXT-M-04: snapshot-ul pre-restore creat mai sus ramane (plasa de
     // siguranta), dar pool-ul se plafoneaza si pe failure — retry-uri repetate
     // nu mai acumuleaza fisiere nelimitat. Best-effort: pruneOld e tolerant.
-    await pruneOld(t.dir, t.prefix).catch(() => {
+    await pruneOld(t.dir, t.prefix, [name, preRestoreName]).catch(() => {
       /* pruneOld logheaza intern; eroarea reala de staging ramane cea aruncata */
     });
     // Fix panel-pe-plan (BLOCKER): erorile de VALIDARE isi pastreaza tipul —
@@ -773,7 +690,7 @@ async function restoreTargetImpl(
   // snapshot-urile pre-restore cresc nelimitat intr-un loop de restore-uri
   // (prune-ul rula doar pe caile de backup). unlinkBundle e best-effort per
   // fisier, deci prune-ul nu poate transforma un restore reusit in esec.
-  await pruneOld(t.dir, t.prefix);
+  await pruneOld(t.dir, t.prefix, [name, preRestoreName]);
 
   return { preRestoreName };
 }
@@ -1124,6 +1041,155 @@ export async function compactRnpmDbViaWorker(
   });
 }
 
+const AUTOCOMPACT_DEFAULT_MIN_FREE_MB = 10;
+const AUTOCOMPACT_MIN_FREE_RATIO = 0.2;
+const BYTES_PER_MIB = 1024 * 1024;
+
+export interface RnpmAutoCompactResult {
+  attempted: boolean;
+  compacted: boolean;
+  freedBytes: number;
+  coalesced?: boolean;
+  durationMs?: number;
+  reason?: string;
+}
+
+interface RnpmFreelistMeasurement {
+  freelistBytes: number;
+  totalBytes: number;
+}
+
+export function shouldAutoCompactRnpm(freelistBytes: number, totalBytes: number, minFreeBytes: number): boolean {
+  return freelistBytes >= minFreeBytes && totalBytes > 0 && freelistBytes / totalBytes >= AUTOCOMPACT_MIN_FREE_RATIO;
+}
+
+let warnedInvalidAutoCompactMinFree = false;
+
+export function readAutoCompactMinFreeBytes(): number {
+  const raw = process.env.LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_MIN_FREE_MB;
+  if (raw === undefined || raw === "") return AUTOCOMPACT_DEFAULT_MIN_FREE_MB * BYTES_PER_MIB;
+  const parsed = Number(raw);
+  if (!Number.isFinite(parsed) || parsed < 0) {
+    if (!warnedInvalidAutoCompactMinFree) {
+      warnedInvalidAutoCompactMinFree = true;
+      console.warn(
+        `[backup] LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_MIN_FREE_MB invalid ("${raw}") — folosesc default ${AUTOCOMPACT_DEFAULT_MIN_FREE_MB} MB.`
+      );
+    }
+    return AUTOCOMPACT_DEFAULT_MIN_FREE_MB * BYTES_PER_MIB;
+  }
+  return Math.round(parsed * BYTES_PER_MIB);
+}
+
+function measureRnpmFreelist(db: Database.Database): RnpmFreelistMeasurement {
+  const pageSize = Number(db.pragma("page_size", { simple: true }));
+  const pageCount = Number(db.pragma("page_count", { simple: true }));
+  const freelistCount = Number(db.pragma("freelist_count", { simple: true }));
+  return {
+    freelistBytes: pageSize * freelistCount,
+    totalBytes: pageSize * pageCount,
+  };
+}
+
+async function measureRnpmFreelistIfPresent(ownerId: string): Promise<RnpmFreelistMeasurement | null> {
+  const dbPath = getRnpmDbPath(ownerId);
+  try {
+    await fsPromises.stat(dbPath);
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return null;
+    throw e;
+  }
+  return measureRnpmFreelist(getRnpmDb(ownerId));
+}
+
+// Recheck-ul ruleaza sub maintenance write + latch. getRnpmDb este interzis
+// dupa beginRnpmRestore, deci handle-ul de masurare este deschis DIRECT si
+// inchis inainte ca VACUUM INTO sa inceapa.
+export async function compactRnpmIfStillNeeded(ownerId: string, minFreeBytes: number): Promise<RnpmAutoCompactResult> {
+  const dbPath = getRnpmDbPath(ownerId);
+  return withMaintenanceWrite(async () => {
+    if (isRnpmRestoreInProgress(ownerId)) throw new RnpmRestoreInProgressError();
+    beginRnpmRestore(ownerId);
+    try {
+      closeRnpmDb(ownerId);
+      const direct = openRnpmDbHandleDirect(dbPath);
+      let measurement: RnpmFreelistMeasurement;
+      try {
+        measurement = measureRnpmFreelist(direct);
+      } finally {
+        direct.close();
+      }
+      if (!shouldAutoCompactRnpm(measurement.freelistBytes, measurement.totalBytes, minFreeBytes)) {
+        return {
+          attempted: true,
+          compacted: true,
+          freedBytes: 0,
+          coalesced: true,
+          durationMs: 0,
+        };
+      }
+
+      const compacted = await compactRnpmUnderLatch(ownerId, dbPath);
+      return {
+        attempted: true,
+        compacted: true,
+        freedBytes: Math.max(0, compacted.beforeBytes - compacted.afterBytes),
+        durationMs: compacted.durationMs,
+      };
+    } finally {
+      endRnpmRestore(ownerId);
+    }
+  });
+}
+
+function autoCompactFailureReason(error: unknown): string {
+  const code = (error as { code?: unknown })?.code;
+  switch (code) {
+    case "SEARCH_ACTIVE":
+      return "search_active";
+    case "RESTORE_IN_PROGRESS":
+      return "restore_in_progress";
+    case "MAINTENANCE_SHUTDOWN":
+      return "maintenance_shutdown";
+    case "ENOSPC":
+      return "enospc";
+    default:
+      return "error";
+  }
+}
+
+export async function maybeAutoCompactRnpm(
+  ownerId: string,
+  deps: { compact?: typeof compactRnpmIfStillNeeded } = {}
+): Promise<RnpmAutoCompactResult> {
+  if (process.env.LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_DISABLED === "1") {
+    return { attempted: false, compacted: false, freedBytes: 0 };
+  }
+
+  const minFreeBytes = readAutoCompactMinFreeBytes();
+  const measurement = await measureRnpmFreelistIfPresent(ownerId);
+  if (measurement === null || !shouldAutoCompactRnpm(measurement.freelistBytes, measurement.totalBytes, minFreeBytes)) {
+    return { attempted: false, compacted: false, freedBytes: 0 };
+  }
+
+  const compact = deps.compact ?? compactRnpmIfStillNeeded;
+  const startedAt = Date.now();
+  try {
+    return await compact(ownerId, minFreeBytes);
+  } catch (error) {
+    const reason = autoCompactFailureReason(error);
+    const durationMs = Date.now() - startedAt;
+    logBackupEvent({
+      action: "rnpm_autocompact_skipped",
+      target: `rnpm:${ownerId}`,
+      reason,
+      durationMs,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return { attempted: true, compacted: false, freedBytes: 0, durationMs, reason };
+  }
+}
+
 // EXT-M-01 (audit v2.43.0): gardul de cautare, delete-ul si compactarea sub
 // ACELASI write lock + latch de owner — o cautare noua nu mai poate repopula
 // baza intre delete si compact, iar raspunsul reflecta starea finala reala.
@@ -1347,7 +1413,7 @@ async function createManualBackupForTarget(t: BackupTarget): Promise<{ name: str
   const dest = await withMaintenanceWrite(async () => {
     name = uniqueManualBackupName(t.dir, t.prefix);
     const out = await snapshotViaVacuumIntoAsync(t.dbPath, t.dir, name);
-    await pruneOld(t.dir, t.prefix);
+    await pruneOld(t.dir, t.prefix, [name]);
     return out;
   });
   logBackupEvent({ action: "manual_backup", target: t.key, file: name });
@@ -1370,7 +1436,7 @@ export async function createRnpmManualBackup(ownerId: string): Promise<{ name: s
     getRnpmDb(ownerId);
     name = uniqueManualBackupName(jail, RNPM_PREFIX);
     const out = await snapshotViaVacuumIntoAsync(getRnpmDbPath(ownerId), jail, name);
-    await pruneOld(jail, RNPM_PREFIX);
+    await pruneOld(jail, RNPM_PREFIX, [name]);
     return out;
   });
   logBackupEvent({ action: "manual_backup", target: `rnpm:${ownerId}`, file: name });
@@ -1430,7 +1496,7 @@ async function dailyBackupTarget(t: BackupTarget): Promise<string | null> {
   const name = todayBackupName(t.prefix);
   try {
     const dest = await snapshotViaVacuumIntoAsync(t.dbPath, t.dir, name);
-    const pruned = await pruneOld(t.dir, t.prefix);
+    const pruned = await pruneOld(t.dir, t.prefix, [name]);
     logBackupEvent({
       action: "daily_backup",
       target: t.key,

@@ -858,7 +858,7 @@ adminRouter.put("/users/:id/quota", limitAdminBody, async (c) => {
   const limitUsdMilli: number | null = usedLegacyAlias
     ? (parsed.data.dailyLimitUsdMilli as number)
     : (parsed.data.limitUsdMilli as number | null);
-  const period: QuotaPeriod = parsed.data.period ?? (usedLegacyAlias ? "day" : "day");
+  const period: QuotaPeriod = parsed.data.feature === "rnpm.storage" ? "day" : (parsed.data.period ?? "day");
 
   // getActorId, nu getOwnerId: sub un token de acces actorul != owner, iar
   // updatedBy/grantedBy + audit-ul trebuie sa atribuie cine a executat efectiv.

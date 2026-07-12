@@ -115,6 +115,11 @@ docker compose -f deploy/docker-compose.prod.yml up -d backend
 
 Rolling deploy: compose recreeaza doar containerul `backend`; oauth2-proxy + Caddy raman. Sesiunile JWT raman valide; daca rotezi `JWT_SECRET`, toti userii vor fi re-sync-uiti la urmatorul request prin bridge.
 
+Pentru rutele API RNPM, configureaza timeout-ul end-to-end al Caddy,
+oauth2-proxy si al oricarui layer Traefik/Cloudflare la minimum 60s.
+Autocompact-ul SQLite dupa stergeri este sincron si poate dura mai multe
+secunde pe o baza apropiata de limita implicita de 500 MB.
+
 ## 9. Rotire secrete
 
   - **JWT_SECRET**: rotire forteaza re-sync prin oauth2-proxy. Update `.env.prod`, `docker compose up -d backend`. Userii vad re-redirect transparent.

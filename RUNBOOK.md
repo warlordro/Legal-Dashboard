@@ -781,8 +781,8 @@ manual randul in monolit (UPDATE owner_id la id-ul corect al userului din
 
 - **Jail-uri:** backup-urile RNPM ale unui user stau in
   `<dataDir>/backups/rnpm/<stem>/`, cu prefix `rnpm.`. Pool-uri disjuncte cu
-  retentie proprie: `rnpm.YYYY-MM-DD.db` (daily, 7), `rnpm.manual-*.db` (5),
-  `rnpm.pre-restore-*.db` (5), `rnpm.pre-<label>-*.db` (pre-migration, 5).
+  retentie proprie: `rnpm.YYYY-MM-DD.db` (daily, 3), `rnpm.manual-*.db` (2),
+  `rnpm.pre-restore-*.db` (2), `rnpm.pre-<label>-*.db` (pre-migration, 2).
   Monolitul pastreaza pool-urile lui in `backups/` cu prefix `legal-dashboard.`
   (plus pool-ul nou `legal-dashboard.manual-*.db`, retentie 5).
 - **Self-service:** userii (rol `user` sau `admin`) isi creeaza backup manual
@@ -801,6 +801,32 @@ manual randul in monolit (UPDATE owner_id la id-ul corect al userului din
   (`rnpm.pre-schema-upgrade-*.db`) se face automat cand exista migrations
   pending pe un fisier existent.
 
+### Limite de stocare RNPM si recuperare
+
+- `LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB` stabileste limita implicita a bazei
+  vii per user (default 500 MB; `0` sau negativ = nelimitat). Override-ul admin
+  `rnpm.storage`, exprimat in MB, are prioritate. Masurarea foloseste acelasi
+  numar in guard, `/stats` si cardul admin: fisierul `.db` + `-wal` + `-shm`.
+- Limita este admission control, nu stergere automata: la `used >= limit`, o
+  cautare noua raspunde 429 `QUOTA_EXCEEDED`, cu cifrele folosit/limita si
+  indicatia de a sterge avize sau de a compacta. Stergerile, compactarea,
+  backup-ul si restore-ul raman permise, ca userul sa poata iesi din blocaj.
+- Un restore peste limita este permis deliberat: recovery bate limita. Dupa
+  restore, cautarile noi raman blocate pana cand userul sterge date/compacteaza
+  sau adminul mareste/dezactiveaza limita. O continuare deja inceputa care are
+  `existingGcode` este exceptata si poate termina paginarea curenta.
+- Raspunsul 429 de stocare NU include `Retry-After`: lipsa spatiului nu este o
+  conditie tranzitorie, iar retry-ul automat al proxy-ului ar crea o bucla.
+- Autocompact-ul dupa stergeri ruleaza sincron. Pentru baze de pana la 500 MB
+  poate dura mai multe secunde; timeout-ul end-to-end al reverse proxy-ului
+  (oauth2-proxy/Caddy/Traefik/Cloudflare) pe rutele API trebuie sa fie cel putin
+  60s. Daca apar timeout-uri reale, escaladarea este un job async separat.
+- `LEGAL_DASHBOARD_RNPM_BACKUP_CAP_MB` plafoneaza best-effort fiecare jail RNPM
+  (default 500 MB; `0` sau negativ = nelimitat). Pruning-ul pastreaza mereu cea
+  mai noua copie daily/manual/pre-restore/pre-migration; de aceea podeaua de
+  siguranta poate lasa jail-ul peste plafon. `capSatisfied:false` in log cere
+  verificarea spatiului disponibil si a permisiunilor de stergere.
+
 ### Offsite backup pe multi-target
 
 `runDailyBackup()` produce acum N+1 fisiere pe noapte (monolit + cate unul per
@@ -808,6 +834,10 @@ fisier user de pe disc, cu freshness PER TARGET). `LEGAL_DASHBOARD_BACKUP_OFFSIT
 este invocat o data PER FISIER proaspat, DUPA eliberarea lock-ului de
 maintenance (upload-urile lente nu mai blocheaza scrierile). Sincronizarea
 externa (S3/rclone/restic) trebuie sa acopere si `backups/rnpm/**`.
+Plafonul local este best-effort, iar pruning-ul poate sterge un fisier in timp
+ce hook-ul offsite il citeste (aceeasi fereastra existenta la pruning-ul pe
+retentie). Daca hook-ul este activ, dimensioneaza plafonul generos pentru durata
+maxima de upload si verifica in destinatia offsite fiecare fisier proaspat.
 
 ### Igiena fisierelor orfane (conturi sterse)
 

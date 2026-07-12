@@ -34,6 +34,7 @@ import {
 } from "./rnpmActivity.ts";
 import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, openRnpmDbHandleDirect, rnpmFileStem } from "./rnpmDb.ts";
 import { closeDb, getDb, getDbPath } from "./schema.ts";
+import { assertRnpmStorageWithinLimit } from "./rnpmStorageLimit.ts";
 
 let tmpRoot: string;
 
@@ -52,6 +53,7 @@ afterEach(async () => {
   closeDb();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
+  Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -115,6 +117,15 @@ describe("createRnpmManualBackup + listRnpmBackups", () => {
 });
 
 describe("restoreRnpmFromBackup", () => {
+  it("permite restore peste limita, dar cautarea urmatoare ramane blocata pana la curatare", async () => {
+    seedSearch("u1", "recovery");
+    const { name } = await createRnpmManualBackup("u1");
+    process.env.LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB = "0.000001";
+
+    await expect(restoreRnpmFromBackup("u1", name)).resolves.toBeDefined();
+    await expect(assertRnpmStorageWithinLimit("u1")).rejects.toMatchObject({ code: "RNPM_STORAGE_LIMIT" });
+  });
+
   it("datele scrise DUPA backup dispar la restore; cele pre-backup exista; pre-restore snapshot in jail", async () => {
     seedSearch("u1", "pre-backup");
     const { name } = await createRnpmManualBackup("u1");
@@ -443,7 +454,7 @@ describe("waitForBackupToSettle — acopera restore-ul RNPM in zbor", () => {
 // Task 2 (fixuri post-review): prune-ul ruleaza si la restore — altfel
 // snapshot-urile pre-restore cresc nelimitat intr-un loop de restore-uri.
 describe("retentie pre-restore la restore", () => {
-  it("6 restore-uri consecutive => exact 5 snapshot-uri pre-restore in jail", async () => {
+  it("6 restore-uri consecutive => exact 2 snapshot-uri pre-restore in jail", async () => {
     seedSearch("u1", "a");
     const { name } = await createRnpmManualBackup("u1");
 
@@ -454,7 +465,7 @@ describe("retentie pre-restore la restore", () => {
     }
 
     const preRestore = fs.readdirSync(getRnpmBackupDir("u1")).filter((f) => f.startsWith("rnpm.pre-restore-"));
-    expect(preRestore.length).toBe(5);
+    expect(preRestore.length).toBe(2);
   });
 });
 
@@ -471,14 +482,14 @@ describe("prune pe failure de staging (EXT-M-04)", () => {
     seedSearch("u1", "a");
     const { name } = await createRnpmManualBackup("u1");
 
-    // PRE_RESTORE_RETAIN = 5: 5 restore-uri reusite => exact 5 snapshot-uri.
-    for (let i = 0; i < 5; i++) {
+    // RNPM pre-restore retain = 2: doua restore-uri reusite => exact 2 snapshot-uri.
+    for (let i = 0; i < 2; i++) {
       await restoreRnpmFromBackup("u1", name);
       await new Promise((r) => setTimeout(r, 3));
     }
-    expect(preRestoreFiles("u1").length).toBe(5);
+    expect(preRestoreFiles("u1").length).toBe(2);
 
-    // Al 6-lea restore: snapshot-ul pre-restore reuseste (VACUUM INTO), dar
+    // Al 3-lea restore: snapshot-ul pre-restore reuseste (VACUUM INTO), dar
     // staging-ul (copyFile) esueaza mereu.
     const copySpy = vi
       .spyOn(fsPromises, "copyFile")
@@ -486,7 +497,7 @@ describe("prune pe failure de staging (EXT-M-04)", () => {
     await expect(restoreRnpmFromBackup("u1", name)).rejects.toThrow();
     copySpy.mockRestore();
 
-    expect(preRestoreFiles("u1").length).toBeLessThanOrEqual(5);
+    expect(preRestoreFiles("u1").length).toBeLessThanOrEqual(2);
   });
 });
 
@@ -544,7 +555,7 @@ describe("runDailyBackup — multi-target", () => {
     expect(dated.length).toBe(1);
   });
 
-  it("retentie pe pool-uri disjuncte per target: daily 7 / manual 5, monolitul neatins", async () => {
+  it("retentie pe pool-uri disjuncte per target: RNPM daily 3 / manual 2, monolitul neatins", async () => {
     seedSearch("u1", "a");
     const jail = getRnpmBackupDir("u1");
     fs.mkdirSync(jail, { recursive: true });
@@ -570,9 +581,9 @@ describe("runDailyBackup — multi-target", () => {
     const after = fs.readdirSync(jail);
     const dated = after.filter((f) => /^rnpm\.\d{4}-\d{2}-\d{2}\.db$/.test(f));
     const manual = after.filter((f) => /^rnpm\.manual-/.test(f));
-    // 9 seed + 1 nou = 10 -> prune la 7; manual 7 -> prune la 5.
-    expect(dated.length).toBe(7);
-    expect(manual.length).toBe(5);
+    // 9 seed + 1 nou = 10 -> prune la 3; manual 7 -> prune la 2.
+    expect(dated.length).toBe(3);
+    expect(manual.length).toBe(2);
     // Pool-urile nu se fura reciproc: cel mai NOU manual supravietuieste.
     expect(manual).toContain("rnpm.manual-2026-01-07T00-00-07.db");
     // Monolitul neatins de prune-ul jail-ului (fisierul vechi ramane in pool-ul LUI).
@@ -622,7 +633,7 @@ describe("runDailyBackup — multi-target", () => {
       console.log = originalLog;
     }
 
-    // 9 vechi + 1 nou = 10 -> candidate la prune: 3; una refuzata => pruned=2.
+    // 9 vechi + 1 nou = 10 -> candidate la prune: 7; una refuzata => pruned=6.
     const daily = lines
       .map((l) => {
         try {
@@ -632,7 +643,7 @@ describe("runDailyBackup — multi-target", () => {
         }
       })
       .find((o) => o?.action === "daily_backup" && String(o?.target).startsWith("rnpm:"));
-    expect(daily?.pruned).toBe(2);
+    expect(daily?.pruned).toBe(6);
     // Fisierul refuzat exista inca pe disc, iar refuzul e semnalat structurat.
     expect(fs.existsSync(path.join(jail, "rnpm.1999-01-01.db"))).toBe(true);
     expect(lines.some((l) => l.includes("backup_prune_failed") && l.includes("rnpm.1999-01-01.db"))).toBe(true);

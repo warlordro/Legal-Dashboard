@@ -10,6 +10,7 @@ import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { stripDiacritics } from "../util/textNormalize.ts";
 import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
+import { pruneBackupJailSync } from "./backupPrune.ts";
 import { isRnpmRestoreInProgress, RnpmRestoreInProgressError } from "./rnpmActivity.ts";
 import { getDbPath } from "./schema.ts";
 
@@ -66,6 +67,10 @@ function preRnpmMigrationBackup(ownerId: string, src: string, label: string): vo
     } finally {
       tmp.close();
     }
+    pruneBackupJailSync(dir, "rnpm.", {
+      protectedNames: [path.basename(dest)],
+      logEvent: (entry) => console.log(JSON.stringify({ ...entry, ts: new Date().toISOString() })),
+    });
     console.log(`[rnpmDb] pre-migration backup -> ${dest}`);
   } catch (e) {
     console.warn("[rnpmDb] pre-migration backup failed (continuing):", e instanceof Error ? e.message : e);

@@ -13,6 +13,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createRnpmManualBackup } from "../db/backup.ts";
 import { __resetRnpmDbForTests, getRnpmDb } from "../db/rnpmDb.ts";
+import { measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserRole } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
@@ -70,14 +71,22 @@ describe("GET /api/v1/admin/rnpm/usage", () => {
     expect(res.status).toBe(200);
     const body = (await res.json()) as {
       data?: {
-        rows?: Array<{ userId: string; dbSizeBytes: number | null; backupCount: number; backupsBytes: number }>;
+        rows?: Array<{
+          userId: string;
+          dbSizeBytes: number | null;
+          storageLimitBytes: number | null;
+          backupCount: number;
+          backupsBytes: number;
+        }>;
       };
       requestId?: string;
     };
     expect(typeof body.requestId).toBe("string");
     const u1 = body.data?.rows?.find((r) => r.userId === "u1");
     const u2 = body.data?.rows?.find((r) => r.userId === "u2");
-    expect((u1?.dbSizeBytes ?? 0) > 0).toBe(true);
+    const measured = await measureRnpmStorage("u1");
+    expect(u1?.dbSizeBytes).toBe(measured.usedBytes);
+    expect(u1?.storageLimitBytes).toBe(500 * 1024 * 1024);
     expect(u1?.backupCount).toBe(1);
     expect((u1?.backupsBytes ?? 0) > 0).toBe(true);
     expect(u2?.dbSizeBytes).toBeNull();

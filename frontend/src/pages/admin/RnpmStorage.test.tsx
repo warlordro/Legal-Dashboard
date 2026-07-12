@@ -116,6 +116,34 @@ describe("AdminRnpmStorage (embedded)", () => {
     expect(host.textContent).toContain("—");
   });
 
+  it("afiseaza folosit / limita si evidentiaza peste 85%", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u1",
+        email: "aproape-plin@x.ro",
+        displayName: "Aproape plin",
+        status: "active",
+        dbSizeBytes: 9 * 1024 * 1024,
+        storageLimitBytes: 10 * 1024 * 1024,
+        backupCount: 0,
+        backupsBytes: 0,
+      },
+    ]);
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+    const row = Array.from(host.querySelectorAll("tr")).find((candidate) =>
+      candidate.textContent?.includes("aproape-plin@x.ro")
+    );
+
+    expect(host.textContent).toContain("Baza (folosit / limita)");
+    expect(row?.textContent).toContain("9.0 MB / 10.0 MB");
+    expect(row?.querySelector("[data-storage-warning='true']")).not.toBeNull();
+  });
+
   it("butonul Compacteaza cere confirmare si apeleaza rnpmCompactDb cu ownerId-ul randului", async () => {
     usageMock.mockResolvedValue([
       {

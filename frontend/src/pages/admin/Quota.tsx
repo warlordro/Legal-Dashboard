@@ -14,6 +14,7 @@ import {
   isCountFeature,
   isKnownQuotaFeature,
   quotaFeatureLabel,
+  quotaFeatureUnit,
   quotaLimitUnitLabel,
 } from "@/lib/quotaFeatureLabels";
 import { quotaPeriodLabel } from "@/lib/quotaPeriodLabels";
@@ -29,7 +30,7 @@ const MILLI = 1000;
 
 function formatStoredValue(feature: string, stored: number | null): string {
   if (stored === null) return "—";
-  if (isCountFeature(feature)) return String(stored);
+  if (quotaFeatureUnit(feature) !== "usd") return String(stored);
   return (stored / MILLI).toFixed(3);
 }
 
@@ -38,7 +39,7 @@ function parseInputToStored(feature: string, value: string): number | null | "in
   if (!trimmed) return "invalid";
   const n = Number(trimmed);
   if (!Number.isFinite(n) || n < 0) return "invalid";
-  if (isCountFeature(feature)) {
+  if (quotaFeatureUnit(feature) !== "usd") {
     if (!Number.isInteger(n)) return "invalid";
     return n;
   }
@@ -142,7 +143,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
 
   const startEdit = (override: Pick<QuotaOverride, "feature" | "period" | "limitUsdMilli">) => {
     setFeature(override.feature);
-    setPeriod(override.period);
+    setPeriod(override.feature === "rnpm.storage" ? "day" : override.period);
     // Rand legacy nelimitat (override NULL): campul porneste gol — salvarea
     // cere un numar; revenirea la nelimitat se face cu Sterge.
     setLimitInput(override.limitUsdMilli === null ? "" : formatStoredValue(override.feature, override.limitUsdMilli));
@@ -175,13 +176,19 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     // randul din lista), nu un override explicit NULL.
     const parsed = parseInputToStored(feature, limitInput);
     if (parsed === "invalid") {
-      setError(isCountFeature(feature) ? "Introdu un numar intreg >= 0." : "Introdu o limita valida (>= 0).");
+      setError(
+        quotaFeatureUnit(feature) !== "usd" ? "Introdu un numar intreg >= 0." : "Introdu o limita valida (>= 0)."
+      );
       return;
     }
     setBusyFeature(feature);
     setError(null);
     try {
-      await admin.upsertQuota(selected.id, { feature, period, limitUsdMilli: parsed });
+      await admin.upsertQuota(selected.id, {
+        feature,
+        period: feature === "rnpm.storage" ? "day" : period,
+        limitUsdMilli: parsed,
+      });
       refreshOverrides();
       void loadOverview();
       setFeature(DEFAULT_FEATURE);
@@ -200,13 +207,16 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
     const limitLabel =
       override.limitUsdMilli === null
         ? "nelimitat"
-        : isCountFeature(override.feature)
-          ? `${override.limitUsdMilli} ${quotaLimitUnitLabel(override.feature)}`
-          : `${formatStoredValue(override.feature, override.limitUsdMilli)} $`;
-    const periodLabel = quotaPeriodLabel(override.period).toLowerCase();
+        : `${formatStoredValue(override.feature, override.limitUsdMilli)} ${quotaLimitUnitLabel(override.feature)}`;
+    const periodLabel =
+      override.feature === "rnpm.storage" ? "permanenta" : quotaPeriodLabel(override.period).toLowerCase();
+    const deleteOutcome =
+      override.feature === "rnpm.storage"
+        ? "Userul revine la default-ul configurat."
+        : "Userul revine la buget nelimitat.";
     const ok = await confirm({
       title: "Sterge cota",
-      message: `Sterge limita pentru "${quotaFeatureLabel(override.feature)}" (${limitLabel} / ${periodLabel})? Userul revine la buget nelimitat.`,
+      message: `Sterge limita pentru "${quotaFeatureLabel(override.feature)}" (${limitLabel} / ${periodLabel})? ${deleteOutcome}`,
       destructive: true,
       confirmLabel: "Sterge",
     });
@@ -217,9 +227,14 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
       await admin.deleteQuota(selected.id, override.feature);
       refreshOverrides();
       void loadOverview();
-      toast(`Limita pentru "${quotaFeatureLabel(override.feature)}" a fost stearsa — buget nelimitat.`, {
-        variant: "success",
-      });
+      toast(
+        `Limita pentru "${quotaFeatureLabel(override.feature)}" a fost stearsa — ${
+          override.feature === "rnpm.storage" ? "revine la default-ul configurat" : "buget nelimitat"
+        }.`,
+        {
+          variant: "success",
+        }
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : "Eroare la stergerea cotei.");
     } finally {
@@ -238,9 +253,8 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
             </h1>
           )}
           <p className={cn("text-sm text-muted-foreground", !embedded && "mt-1")}>
-            Limitele de cheltuiala per utilizator, pe fereastra rulanta (zi / saptamana / luna): pentru analizele AI
-            limita e cost in USD, pentru Captcha RNPM e numar de captcha-uri. Un user fara limita setata are buget
-            nelimitat; ca sa scoti un plafon existent, sterge-l din lista.
+            Limitele per utilizator: AI in USD si Captcha RNPM ca numar pe fereastra rulanta; Stocare RNPM in MB,
+            permanent. Fara override, AI/captcha raman nelimitate, iar stocarea revine la default-ul configurat.
           </p>
         </div>
 
@@ -303,7 +317,9 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                             {row.displayName && <p className="text-xs text-muted-foreground">{row.displayName}</p>}
                           </td>
                           <td className="px-3 py-2 align-top">{quotaFeatureLabel(row.feature)}</td>
-                          <td className="px-3 py-2 align-top">{quotaPeriodLabel(row.period)}</td>
+                          <td className="px-3 py-2 align-top">
+                            {row.feature === "rnpm.storage" ? "Permanenta" : quotaPeriodLabel(row.period)}
+                          </td>
                           <td className="px-3 py-2 align-top">
                             {row.limitUsdMilli === null
                               ? "Nelimitat"
@@ -395,16 +411,22 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-period">
                     Perioada
                   </label>
-                  <Select value={period} onValueChange={(v) => setPeriod(v as QuotaPeriod)}>
-                    <SelectTrigger id="quota-period">
-                      <SelectValue placeholder="Perioada" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="day">Zilnic</SelectItem>
-                      <SelectItem value="week">Saptamanal</SelectItem>
-                      <SelectItem value="month">Lunar</SelectItem>
-                    </SelectContent>
-                  </Select>
+                  {feature === "rnpm.storage" ? (
+                    <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm">
+                      Permanenta
+                    </div>
+                  ) : (
+                    <Select value={period} onValueChange={(v) => setPeriod(v as QuotaPeriod)}>
+                      <SelectTrigger id="quota-period">
+                        <SelectValue placeholder="Perioada" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="day">Zilnic</SelectItem>
+                        <SelectItem value="week">Saptamanal</SelectItem>
+                        <SelectItem value="month">Lunar</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div>
                   <label className="mb-1 block text-xs text-muted-foreground" htmlFor="quota-limit">
@@ -413,11 +435,11 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                   <input
                     id="quota-limit"
                     type="number"
-                    step={isCountFeature(feature) ? "1" : "0.001"}
+                    step={quotaFeatureUnit(feature) === "usd" ? "0.001" : "1"}
                     min="0"
                     value={limitInput}
                     onChange={(e) => setLimitInput(e.target.value)}
-                    placeholder={isCountFeature(feature) ? "ex: 50" : "ex: 25"}
+                    placeholder={feature === "rnpm.storage" ? "ex: 500" : isCountFeature(feature) ? "ex: 50" : "ex: 25"}
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </div>
@@ -437,9 +459,11 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     Feature: cu items-end, inaltimea extra ar defaza selectul fata
                     de restul campurilor. */}
                 <p className="col-span-full text-xs text-muted-foreground">
-                  {isCountFeature(feature)
-                    ? "Limita = numar de captcha-uri pe fereastra aleasa."
-                    : "Limita = cost in USD pe fereastra aleasa."}
+                  {feature === "rnpm.storage"
+                    ? "Limita = MB permanenti pentru baza RNPM vie."
+                    : isCountFeature(feature)
+                      ? "Limita = numar de captcha-uri pe fereastra aleasa."
+                      : "Limita = cost in USD pe fereastra aleasa."}
                 </p>
                 {!isKnownQuotaFeature(feature) && (
                   <p className="col-span-full text-xs text-amber-700 dark:text-amber-400">
@@ -472,11 +496,13 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     {overrides.map((row) => (
                       <tr key={row.feature} className="border-b border-border last:border-b-0 hover:bg-muted/30">
                         <td className="px-3 py-2 align-top text-xs">{quotaFeatureLabel(row.feature)}</td>
-                        <td className="px-3 py-2 align-top text-xs">{quotaPeriodLabel(row.period)}</td>
+                        <td className="px-3 py-2 align-top text-xs">
+                          {row.feature === "rnpm.storage" ? "Permanenta" : quotaPeriodLabel(row.period)}
+                        </td>
                         <td className="px-3 py-2 align-top">
                           {row.limitUsdMilli === null ? (
                             <Badge variant="outline">Nelimitat</Badge>
-                          ) : isCountFeature(row.feature) ? (
+                          ) : quotaFeatureUnit(row.feature) !== "usd" ? (
                             <span className="font-mono">
                               {row.limitUsdMilli} {quotaLimitUnitLabel(row.feature)}
                             </span>

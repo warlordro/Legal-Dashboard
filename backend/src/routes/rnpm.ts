@@ -22,12 +22,15 @@ import {
   deleteRnpmBackups,
   getRnpmBackupDir,
   listRnpmBackups,
+  maybeAutoCompactRnpm,
+  type RnpmAutoCompactResult,
   restoreRnpmFromBackup,
   withMaintenanceRead,
 } from "../db/backup.ts";
 import { recordAudit, recordAuditSafe } from "../db/auditRepository.ts";
 import { hasActiveRnpmSearch, isRnpmRestoreInProgress, RnpmSearchActiveError } from "../db/rnpmActivity.ts";
 import { assertValidOwnerId, getRnpmDbPath } from "../db/rnpmDb.ts";
+import { assertRnpmStorageWithinLimit, measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
 import { mkdir } from "node:fs/promises";
 import { getOwnerId } from "../middleware/owner.ts";
 import { requireRole } from "../middleware/requireRole.ts";
@@ -76,6 +79,35 @@ const duplicateRequest = (c: import("hono").Context, message: string) =>
   c.json(fail(ErrorCodes.DUPLICATE_REQUEST, message, c), 409);
 const desktopOnly = (c: import("hono").Context) =>
   c.json(fail(ErrorCodes.DESKTOP_ONLY, "Functie disponibila doar in Electron", c), 501);
+
+async function runAutoCompactAfterDelete(c: import("hono").Context, ownerId: string): Promise<RnpmAutoCompactResult> {
+  const auto: RnpmAutoCompactResult = await maybeAutoCompactRnpm(ownerId).catch((error) => {
+    console.error("[rnpm] autocompact after delete failed:", error);
+    return {
+      attempted: true,
+      compacted: false,
+      freedBytes: 0,
+      reason: "error",
+    } satisfies RnpmAutoCompactResult;
+  });
+  recordAuditSafe(c, "rnpm.autocompact", {
+    targetKind: "rnpm",
+    targetId: ownerId,
+    detail: {
+      attempted: auto.attempted,
+      compacted: auto.compacted,
+      freedBytes: auto.freedBytes,
+      ...(auto.reason ? { reason: auto.reason } : {}),
+      ...(auto.durationMs !== undefined ? { durationMs: auto.durationMs } : {}),
+    },
+  });
+  return auto;
+}
+
+function withAutoCompactResult<T extends Record<string, unknown>>(base: T, auto: RnpmAutoCompactResult): T {
+  if (!auto.attempted) return base;
+  return { ...base, compacted: auto.compacted, freedBytes: auto.freedBytes };
+}
 
 // W-1: defense in depth — cap string fields in params tree (500 chars per field, max depth 4)
 const MAX_STRING_FIELD_LEN = 500;
@@ -201,14 +233,26 @@ function parseClientRequestId(body: Record<string, unknown> | null): string | nu
 }
 
 rnpmRouter.post("/search", limitSearch, async (c) => {
-  const guard = await withRnpmCaptchaGuards(c);
+  const parsedBody = await parseJsonBody(c);
+  if (parsedBody === null) return invalidJson(c);
+  const captchaResolution = resolveCaptchaKeyForRoute(c);
+  if (captchaResolution.source === "tenant" && !captchaResolution.ok) {
+    return captchaResolution.response;
+  }
+  const ownerId = getOwnerId(c);
+  const previewGcode = (parsedBody as { gcode?: unknown }).gcode;
+  if (!(typeof previewGcode === "string" && previewGcode.length > 0)) {
+    await assertRnpmStorageWithinLimit(ownerId);
+  }
+  const guard = await withRnpmCaptchaGuards(c, parsedBody);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
   // v2.43.0 (rnpm-split): gardul de restore loveste imediat dupa parsarea
   // body-ului si INAINTE de streamSSE — un throw dupa ce stream-ul a pornit
-  // inseamna 200 deja trimis si eroare in mijlocul stream-ului. Sta DUPA
-  // withRnpmCaptchaGuards (gate-urile web-mode nu au nevoie de ownerId) si
-  // INAINTE de audit-ul de consum (nu logam consum pe o cerere refuzata).
+  // inseamna 200 deja trimis si eroare in mijlocul stream-ului. Rezolutia
+  // configuratiei CAPTCHA a rulat inainte de owner/storage ca web-mode sa-si
+  // pastreze raspunsul canonic 501; consumul CAPTCHA ramane dupa limita de
+  // stocare. Restore-ul sta inainte de auditul de consum.
   if (isRnpmRestoreInProgress(getOwnerId(c))) {
     return c.json(
       fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
@@ -242,7 +286,6 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const existingGcode = typeof gcode === "string" && gcode.length > 0 ? gcode : undefined;
   const existingSearchId = typeof searchId === "number" && Number.isFinite(searchId) ? searchId : undefined;
 
-  const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
   const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
   if (dedupKey && inflightRequests.has(dedupKey)) {
@@ -269,6 +312,7 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     existingGcode,
     existingSearchId,
     signal: c.req.raw.signal,
+    storageLimitCheck: assertRnpmStorageWithinLimit,
     onSearchCreated: (sid) => {
       createdSearchId = sid;
     },
@@ -437,7 +481,15 @@ rnpmRouter.post("/search/:searchId/filter", limitSearch, async (c) => {
 });
 
 rnpmRouter.post("/bulk", limitBulk, async (c) => {
-  const guard = await withRnpmCaptchaGuards(c);
+  const parsedBody = await parseJsonBody(c);
+  if (parsedBody === null) return invalidJson(c);
+  const captchaResolution = resolveCaptchaKeyForRoute(c);
+  if (captchaResolution.source === "tenant" && !captchaResolution.ok) {
+    return captchaResolution.response;
+  }
+  const ownerId = getOwnerId(c);
+  await assertRnpmStorageWithinLimit(ownerId);
+  const guard = await withRnpmCaptchaGuards(c, parsedBody);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
   // v2.43.0 (rnpm-split): gard pre-SSE, vezi nota de la POST /search.
@@ -463,7 +515,6 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
   if (items.length > 200) return invalidParams(c, "Maxim 200 cautari per bulk");
   const provider = guard.captchaProvider ?? parseProvider(captchaProvider);
 
-  const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
   const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
 
@@ -531,7 +582,8 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
       controller.signal,
       provider,
       guard.fallback2CaptchaKey,
-      guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential")
+      guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential"),
+      assertRnpmStorageWithinLimit
     );
 
     try {
@@ -571,7 +623,15 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
 // (terminal_cap / silent_refusal / residual_unclassified) si skipped; celelalte
 // continua. Vezi rnpmSearchService.executeSplitSearch.
 rnpmRouter.post("/search-split", limitSearch, async (c) => {
-  const guard = await withRnpmCaptchaGuards(c);
+  const parsedBody = await parseJsonBody(c);
+  if (parsedBody === null) return invalidJson(c);
+  const captchaResolution = resolveCaptchaKeyForRoute(c);
+  if (captchaResolution.source === "tenant" && !captchaResolution.ok) {
+    return captchaResolution.response;
+  }
+  const ownerId = getOwnerId(c);
+  await assertRnpmStorageWithinLimit(ownerId);
+  const guard = await withRnpmCaptchaGuards(c, parsedBody);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
   // v2.43.0 (rnpm-split): gard pre-SSE, vezi nota de la POST /search.
@@ -620,7 +680,6 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
   }
   const provider = guard.captchaProvider ?? parseProvider(captchaProvider);
 
-  const ownerId = getOwnerId(c);
   const clientRequestId = parseClientRequestId(body as Record<string, unknown> | null);
   const dedupKey = clientRequestId ? inflightKey(ownerId, clientRequestId) : null;
   // CP-B8 (v2.20.3): vezi nota pe ruta /bulk — aceeasi rezervare sincrona
@@ -665,6 +724,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
         fallback2CaptchaKey: guard.fallback2CaptchaKey,
         captchaMode: guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential"),
         ownerId,
+        storageLimitCheck: assertRnpmStorageWithinLimit,
         signal: controller.signal,
         onSearchCreated: (sid) => {
           parentSearchId = sid;
@@ -916,7 +976,8 @@ rnpmRouter.post("/saved/delete-batch", requireDesktopHeader, limitExport, async 
     targetKind: "aviz",
     detail: { requested: numIds.length, deleted },
   });
-  return c.json({ deleted });
+  const auto = await runAutoCompactAfterDelete(c, ownerId);
+  return c.json(withAutoCompactResult({ deleted }, auto));
 });
 
 // Task 15 (INT-M10): async cu semantica ENOENT-only — DOAR ENOENT inseamna
@@ -936,30 +997,22 @@ rnpmRouter.get("/stats", requireRole("admin", "user"), async (c) => {
   // v2.43.0 (rnpm-split): statisticile si dimensiunea raporteaza FISIERUL
   // PER USER al callerului, nu monolitul.
   const ownerId = getOwnerId(c);
-  const dbPath = getRnpmDbPath(ownerId);
   // Fix review (Task 6): existence-check LA NIVEL DE RUTA, inainte de orice
   // apel de repository — getAvizStats provisioneaza fisierul prin getRnpmDb,
   // iar un GET nu are voie sa creeze fisiere pe disc pentru un user care nu a
   // folosit inca RNPM. Latch-ul de restore ramane PRIORITAR: in timpul unui
   // restore raspunsul corect e 409 (prin getRnpmDb -> maparea centrala), nu
   // zerouri false pentru un fisier aflat mid-swap.
-  if (!isRnpmRestoreInProgress(ownerId) && !(await rnpmFileExists(dbPath))) {
+  if (isRnpmRestoreInProgress(ownerId)) {
+    // Pastreaza prioritatea latch-ului: repository-ul arunca eroarea tipata.
+    getAvizStats(ownerId);
+  }
+  const storage = await measureRnpmStorage(ownerId);
+  if (!storage.exists) {
     return c.json({ total: 0, activ: 0, inactiv: 0, byType: {}, db: { sizeBytes: 0 } });
   }
   const stats = getAvizStats(ownerId);
-  // CP-B4: async fs so handler does not block the event loop under concurrency (web mode).
-  const sizeOf = async (p: string): Promise<number> => {
-    try {
-      return (await stat(p)).size;
-    } catch (e) {
-      // DOAR ENOENT inseamna fisier absent (sidecar -wal/-shm poate lipsi normal);
-      // EACCES/EIO se propaga — altfel raportam dimensiuni false.
-      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") return 0;
-      throw e;
-    }
-  };
-  const [main, wal, shm] = await Promise.all([sizeOf(dbPath), sizeOf(`${dbPath}-wal`), sizeOf(`${dbPath}-shm`)]);
-  return c.json({ ...stats, db: { sizeBytes: main + wal + shm } });
+  return c.json({ ...stats, db: { sizeBytes: storage.usedBytes } });
 });
 
 // Desktop-only: reveal the DB file in the system file manager via Electron shell.
@@ -1257,17 +1310,19 @@ rnpmRouter.post("/open-backups-folder", requireDesktopHeader, requireRole("admin
   }
 });
 
-rnpmRouter.delete("/saved/:id", (c) => {
+rnpmRouter.delete("/saved/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return invalidParams(c, "ID invalid");
-  const ok = deleteAviz(id, getOwnerId(c));
+  const ownerId = getOwnerId(c);
+  const ok = deleteAviz(id, ownerId);
   recordAudit(c, "aviz.delete", {
     targetKind: "aviz",
     targetId: String(id),
     outcome: ok ? "ok" : "error",
     detail: { found: ok },
   });
-  return c.json({ deleted: ok });
+  const auto = await runAutoCompactAfterDelete(c, ownerId);
+  return c.json(withAutoCompactResult({ deleted: ok }, auto));
 });
 
 rnpmRouter.post("/saved/export", limitExport, async (c) => {
@@ -1386,17 +1441,19 @@ rnpmRouter.get("/searches", (c) => {
   );
 });
 
-rnpmRouter.delete("/searches/:id", (c) => {
+rnpmRouter.delete("/searches/:id", async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return invalidParams(c, "ID invalid");
-  const deleted = deleteSearch(id, getOwnerId(c));
+  const ownerId = getOwnerId(c);
+  const deleted = deleteSearch(id, ownerId);
   recordAudit(c, "search.delete", {
     targetKind: "search",
     targetId: String(id),
     outcome: deleted ? "ok" : "error",
     detail: { found: deleted },
   });
-  return c.json({ deleted });
+  const auto = await runAutoCompactAfterDelete(c, ownerId);
+  return c.json(withAutoCompactResult({ deleted }, auto));
 });
 
 rnpmRouter.post("/captcha/balance", limitSmall, async (c) => {

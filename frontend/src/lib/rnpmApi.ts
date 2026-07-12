@@ -57,11 +57,13 @@ export class ApiError extends Error {
   readonly code?: string;
   readonly status: number;
   readonly requestId?: string;
-  constructor(message: string, status: number, code?: string, requestId?: string) {
+  readonly details?: Record<string, unknown>;
+  constructor(message: string, status: number, code?: string, requestId?: string, details?: Record<string, unknown>) {
     super(message);
     this.status = status;
     this.code = code;
     this.requestId = requestId;
+    this.details = details;
   }
 }
 
@@ -122,16 +124,31 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
     const raw = (data as { error?: unknown })?.error;
     let err: string;
     let code: string | undefined;
+    let details: Record<string, unknown> | undefined;
     if (typeof raw === "string") err = raw;
     else if (raw && typeof raw === "object") {
-      const obj = raw as { message?: unknown; code?: unknown };
+      const obj = raw as { message?: unknown; code?: unknown; details?: unknown };
       err = typeof obj.message === "string" ? obj.message : `Eroare (${res.status})`;
       if (typeof obj.code === "string") code = obj.code;
+      if (obj.details && typeof obj.details === "object" && !Array.isArray(obj.details)) {
+        details = obj.details as Record<string, unknown>;
+      }
     } else err = `Eroare (${res.status})`;
     const requestId = (data as { requestId?: unknown })?.requestId;
-    throw new ApiError(err, res.status, code, typeof requestId === "string" ? requestId : undefined);
+    throw new ApiError(err, res.status, code, typeof requestId === "string" ? requestId : undefined, details);
   }
   return data as T;
+}
+
+export function formatRnpmStorageLimitError(error: unknown): string | null {
+  if (!(error instanceof ApiError) || error.code !== "QUOTA_EXCEEDED") return null;
+  const details = error.details;
+  if (details?.feature !== "rnpm.storage") return null;
+  const usedBytes = details.usedBytes;
+  const limitBytes = details.limitBytes;
+  if (typeof usedBytes !== "number" || typeof limitBytes !== "number") return error.message;
+  const mib = 1024 * 1024;
+  return `Spatiul RNPM alocat este plin (${(usedBytes / mib).toFixed(1)} MB din ${(limitBytes / mib).toFixed(1)} MB). Sterge avize (stergerea pe selectie elibereaza automat spatiul) sau compacteaza din zona RNPM.`;
 }
 
 export type CaptchaProvider = "2captcha" | "capsolver";
@@ -337,15 +354,17 @@ export async function rnpmGetStats(): Promise<RnpmStats> {
   return jsonOrThrow<RnpmStats>(res);
 }
 
-export async function rnpmDeleteAvizeBatch(ids: number[]): Promise<number> {
+export async function rnpmDeleteAvizeBatch(
+  ids: number[]
+): Promise<{ deleted: number; compacted?: boolean; freedBytes?: number }> {
   const res = await apiFetch(`${BASE}/saved/delete-batch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
   });
-  const data = await jsonOrThrow<{ deleted: number }>(res);
+  const data = await jsonOrThrow<{ deleted: number; compacted?: boolean; freedBytes?: number }>(res);
   for (const id of ids) avizDetailCache.delete(id);
-  return data.deleted;
+  return data;
 }
 
 export async function rnpmOpenDbFolder(): Promise<void> {

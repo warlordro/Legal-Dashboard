@@ -5,12 +5,13 @@
 
 // v2.42.0 (5.2): pool AI unic — enum-ul de cota devine ["ai", "captcha.rnpm"].
 // ai.single/ai.multi raman DOAR ca etichete lizibile pentru randuri legacy.
-export const QUOTA_FEATURES = ["ai", "captcha.rnpm"] as const;
+export const QUOTA_FEATURES = ["ai", "captcha.rnpm", "rnpm.storage"] as const;
 export type QuotaFeature = (typeof QUOTA_FEATURES)[number];
 
 const LABELS: Record<QuotaFeature, string> = {
   ai: "AI — toate analizele (limita unica)",
   "captcha.rnpm": "Captcha RNPM",
+  "rnpm.storage": "Stocare RNPM",
 };
 
 // Etichete pentru feature-uri legacy (pre-consolidare 0041) — raman lizibile
@@ -34,10 +35,21 @@ export function quotaFeatureLabel(feature: string): string {
 
 // Unitatea limitei per feature: USD pentru ai.*, numar de captcha-uri pentru
 // captcha.* (conventia stocarii din v2.34.0: limit_usd_milli = count brut).
+export type QuotaFeatureUnit = "usd" | "count" | "mb";
+
+export function quotaFeatureUnit(feature: string): QuotaFeatureUnit {
+  if (feature === "rnpm.storage") return "mb";
+  if (feature.startsWith("captcha.")) return "count";
+  return "usd";
+}
+
 export function isCountFeature(feature: string): boolean {
-  return feature.startsWith("captcha.");
+  return quotaFeatureUnit(feature) === "count";
 }
 
 export function quotaLimitUnitLabel(feature: string): string {
-  return isCountFeature(feature) ? "captcha-uri" : "USD";
+  const unit = quotaFeatureUnit(feature);
+  if (unit === "count") return "captcha-uri";
+  if (unit === "mb") return "MB";
+  return "USD";
 }

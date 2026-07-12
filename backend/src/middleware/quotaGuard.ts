@@ -26,7 +26,7 @@ declare module "hono" {
 // pe pool-ul "ai" — suma acopera toate feature-urile AI istorice prin
 // quotaFeatureAliases("ai"). `captcha.rnpm` ramane cu semantica de count si se
 // aplica in `withRnpmCaptchaGuards`.
-export const QUOTA_FEATURES = ["ai", "captcha.rnpm"] as const;
+export const QUOTA_FEATURES = ["ai", "captcha.rnpm", "rnpm.storage"] as const;
 export type QuotaFeature = (typeof QUOTA_FEATURES)[number];
 // Tipul de apel AI — decide costul estimat si feature-ul randului de consum.
 export type AiCallKind = "ai.single" | "ai.multi";

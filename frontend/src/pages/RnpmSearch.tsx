@@ -11,7 +11,7 @@ import { RnpmSavedStats } from "@/components/rnpm/RnpmSavedStats";
 import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
 import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
 import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
-import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
+import { formatRnpmStorageLimitError, rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
 import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
 import { describeNestedPhase, describeSplitPhase, formatSplitProgress } from "@/lib/rnpmProgressPhase";
 import type {
@@ -159,7 +159,7 @@ export default function RnpmSearchPage({
         // Deschide dialog de confirmare; userul decide daca platim N captcha-uri.
         setPendingSplit({ type, params, total: e.total, limit: e.limit });
       } else {
-        setError(e instanceof Error ? e.message : "Eroare necunoscuta");
+        setError(formatRnpmStorageLimitError(e) ?? (e instanceof Error ? e.message : "Eroare necunoscuta"));
       }
     } finally {
       if (abortRef.current === ctl) abortRef.current = null;

@@ -41,6 +41,17 @@ export function appErrorHandler(err: Error, c: Context): Response {
     c.header("Retry-After", "10");
     return c.json(fail(code, err.message, c), 503);
   }
+  if (code === "RNPM_STORAGE_LIMIT") {
+    const storageError = err as Error & { usedBytes: number; limitBytes: number };
+    return c.json(
+      fail(ErrorCodes.QUOTA_EXCEEDED, err.message, c, {
+        feature: "rnpm.storage",
+        usedBytes: storageError.usedBytes,
+        limitBytes: storageError.limitBytes,
+      }),
+      429
+    );
+  }
   if (err instanceof HTTPException) return err.getResponse();
   console.error("[app] unhandled route error:", err);
   return c.json(fail(ErrorCodes.INTERNAL_ERROR, "Eroare interna. Reincearca sau contacteaza administratorul.", c), 500);

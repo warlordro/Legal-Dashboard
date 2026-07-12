@@ -8,6 +8,7 @@ export interface AdminRnpmUsageRow {
   displayName: string;
   status: string;
   dbSizeBytes: number | null;
+  storageLimitBytes?: number | null;
   backupCount: number;
   backupsBytes: number;
 }

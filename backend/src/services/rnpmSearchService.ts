@@ -17,6 +17,8 @@ import { buildSaveAvizInput } from "./rnpmAvizMapper.ts";
 import { stripDiacriticsDeep } from "../util/textNormalize.ts";
 import { DESTINATII_BY_CATEGORY, hasNestedDestinations } from "./rnpmDestinations.ts";
 
+export type RnpmStorageLimitCheck = (ownerId: string) => Promise<void>;
+
 export interface ExecuteSearchInput {
   type: RnpmSearchType;
   params: Omit<RnpmSearchParams, "gcode">;
@@ -36,6 +38,7 @@ export interface ExecuteSearchInput {
   fetchDetails?: boolean;
   detailConcurrency?: number;
   signal?: AbortSignal;
+  storageLimitCheck?: RnpmStorageLimitCheck;
   // v2.20.3 Grupul K — invoked exact o data, sincron, dupa ce search row e creat
   // (saveSearch sau cand existingSearchId e prezent — fired imediat). Permite
   // catch-ul AbortError din ruta /search sa includa searchId in 499 body pentru
@@ -350,6 +353,7 @@ async function executeSearchInner(
 
   while (allDocs.length < batchSize && rnpmPage <= pagesTotal) {
     throwIfAborted(signal);
+    if (!existingGcode) await input.storageLimitCheck?.(ownerId);
     let r: RnpmSearchResult;
     try {
       const tMore = Date.now();
@@ -466,7 +470,8 @@ export async function executeBulkSearch(
   signal?: AbortSignal,
   captchaProvider?: CaptchaProvider,
   fallback2CaptchaKey?: string,
-  captchaMode?: CaptchaMode
+  captchaMode?: CaptchaMode,
+  storageLimitCheck?: RnpmStorageLimitCheck
 ): Promise<void> {
   // v2.43.0 (rnpm-split): bracketing per owner, vezi nota de la executeSearch.
   // Sub-cautarile per item trec prin executeSearch care nesteaza begin/end
@@ -482,7 +487,8 @@ export async function executeBulkSearch(
       signal,
       captchaProvider,
       fallback2CaptchaKey,
-      captchaMode
+      captchaMode,
+      storageLimitCheck
     );
   } finally {
     endRnpmSearch(ownerId);
@@ -498,14 +504,16 @@ async function executeBulkSearchInner(
   signal?: AbortSignal,
   captchaProvider?: CaptchaProvider,
   fallback2CaptchaKey?: string,
-  captchaMode?: CaptchaMode
+  captchaMode?: CaptchaMode,
+  storageLimitCheck?: RnpmStorageLimitCheck
 ): Promise<void> {
   for (let i = 0; i < items.length; i++) {
     if (signal?.aborted) return;
     const item = items[i];
     const label = item.label ?? describeItem(item);
-    onProgress({ index: i, total: items.length, label, phase: "captcha" });
     try {
+      await storageLimitCheck?.(ownerId);
+      onProgress({ index: i, total: items.length, label, phase: "captcha" });
       onProgress({ index: i, total: items.length, label, phase: "search" });
       // Bulk items fetch toate paginile automat (cap intern MAX_TOTAL_RESULTS). Single search foloseste batchSize=25
       // plus butonul "Incarca mai multe"; bulk nu are echivalent, deci se comporta ca "fetch all".
@@ -520,6 +528,7 @@ async function executeBulkSearchInner(
           ownerId,
           batchSize: MAX_TOTAL_RESULTS,
           signal,
+          storageLimitCheck,
         },
         client
       );
@@ -574,6 +583,7 @@ export interface SplitSearchInput {
   // e creat (inainte de prima sub-cautare). Permite SSE handler-ului sa emita
   // searchId imediat pentru a putea afisa partial results pe abort/timeout.
   onSearchCreated?: (searchId: number) => void;
+  storageLimitCheck?: RnpmStorageLimitCheck;
 }
 
 // Cauze distincte pentru records nepre-luate dupa split, fiecare cu actiune
@@ -721,9 +731,9 @@ async function executeSplitSearchInner(
         tipInscriere: { type: "1", value: String(i + 1) },
       };
 
-      onProgress({ index: i, total: subN, label, phase: "captcha" });
-
       try {
+        await input.storageLimitCheck?.(ownerId);
+        onProgress({ index: i, total: subN, label, phase: "captcha" });
         onProgress({ index: i, total: subN, label, phase: "search" });
         // v2.20.3 Grupul M: acumuleaza din result.captchasUsed (include retries
         // interne ale executeSearch — ex. search_retry pe gcode invalid). Pre-
@@ -740,6 +750,7 @@ async function executeSplitSearchInner(
             batchSize: MAX_TOTAL_RESULTS, // fetch toate paginile pentru sub-tip
             existingSearchId: parentSearchId,
             signal: input.signal,
+            storageLimitCheck: input.storageLimitCheck,
           },
           client
         );
@@ -849,6 +860,7 @@ async function executeSplitSearchInner(
                   ownerId,
                   parentSearchId,
                   signal: input.signal,
+                  storageLimitCheck: input.storageLimitCheck,
                 },
                 onProgress,
                 client
@@ -962,6 +974,7 @@ interface NestedSplitInput {
   ownerId: string;
   parentSearchId: number;
   signal?: AbortSignal;
+  storageLimitCheck?: RnpmStorageLimitCheck;
 }
 
 interface NestedSplitOutcome {
@@ -1002,14 +1015,6 @@ async function executeNestedDestinationSplit(
     throwIfAborted(input.signal);
     const destLabel = destinations[j];
 
-    onProgress({
-      index: input.tier1Index,
-      total: input.tier1Total,
-      label: input.tier1Label,
-      phase: "nested_progress",
-      nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "captcha" },
-    });
-
     // RNPM asteapta destinatieInscriere.value ca **index 1-based** in lista
     // DESTINATII_BY_CATEGORY a tipului curent, EXACT ca tipInscriere
     // (vezi RnpmSearchForm.tsx:134-142 pentru pattern). Empiric verificat
@@ -1025,6 +1030,14 @@ async function executeNestedDestinationSplit(
     };
 
     try {
+      await input.storageLimitCheck?.(input.ownerId);
+      onProgress({
+        index: input.tier1Index,
+        total: input.tier1Total,
+        label: input.tier1Label,
+        phase: "nested_progress",
+        nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "captcha" },
+      });
       onProgress({
         index: input.tier1Index,
         total: input.tier1Total,
@@ -1046,6 +1059,7 @@ async function executeNestedDestinationSplit(
           batchSize: MAX_TOTAL_RESULTS,
           existingSearchId: input.parentSearchId,
           signal: input.signal,
+          storageLimitCheck: input.storageLimitCheck,
         },
         client
       );

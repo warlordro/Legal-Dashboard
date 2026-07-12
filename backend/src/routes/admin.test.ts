@@ -406,6 +406,29 @@ describe("/api/v1/admin/users/:id/quota", () => {
     expect(stored[0].limit_usd_milli).toBe(25000);
   });
 
+  it("PUT accepta rnpm.storage cu valoare MB mare si canonizeaza period la day", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "rnpm.storage", period: "month", limitUsdMilli: 200000 }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toMatchObject({
+      feature: "rnpm.storage",
+      period: "day",
+      limitUsdMilli: 200000,
+      dailyLimitUsdMilli: 200000,
+    });
+    expect(listOverridesForUser("u-1")[0]).toMatchObject({
+      feature: "rnpm.storage",
+      period: "day",
+      limit_usd_milli: 200000,
+    });
+  });
+
   it("PUT accepts limitUsdMilli=null (unlimited)", async () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/users/u-1/quota", {

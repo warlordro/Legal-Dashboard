@@ -75,8 +75,8 @@ export type CaptchaResolution =
     }
   | { source: "tenant"; ok: false; response: Response };
 
-export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuardResult> {
-  const body = await parseJsonBody(c);
+export async function withRnpmCaptchaGuards(c: Context, parsedBody?: unknown): Promise<RnpmCaptchaGuardResult> {
+  const body = parsedBody === undefined ? await parseJsonBody(c) : parsedBody;
   if (body === null) {
     return {
       ok: false,

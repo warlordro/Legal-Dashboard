@@ -174,7 +174,7 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
               <thead className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
                   <th className="px-3 py-2 font-semibold">Utilizator</th>
-                  <th className="px-3 py-2 font-semibold">Baza</th>
+                  <th className="px-3 py-2 font-semibold">Baza (folosit / limita)</th>
                   <th className="px-3 py-2 font-semibold">Backup-uri</th>
                   <th className="px-3 py-2" />
                 </tr>
@@ -190,7 +190,26 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
                       </div>
                     </td>
                     <td className="px-3 py-2 align-top font-mono text-xs">
-                      {row.dbSizeBytes === null ? "—" : formatBytes(row.dbSizeBytes)}
+                      <span
+                        data-storage-warning={
+                          row.dbSizeBytes !== null &&
+                          row.storageLimitBytes != null &&
+                          row.storageLimitBytes > 0 &&
+                          row.dbSizeBytes / row.storageLimitBytes > 0.85
+                            ? "true"
+                            : undefined
+                        }
+                        className={cn(
+                          row.dbSizeBytes !== null &&
+                            row.storageLimitBytes != null &&
+                            row.storageLimitBytes > 0 &&
+                            row.dbSizeBytes / row.storageLimitBytes > 0.85 &&
+                            "font-semibold text-red-600 dark:text-red-400"
+                        )}
+                      >
+                        {row.dbSizeBytes === null ? "—" : formatBytes(row.dbSizeBytes)} /{" "}
+                        {row.storageLimitBytes == null ? "Nelimitat" : formatBytes(row.storageLimitBytes)}
+                      </span>
                     </td>
                     <td className="px-3 py-2 align-top text-xs text-muted-foreground">
                       {row.backupCount} ({formatBytes(row.backupsBytes)})
