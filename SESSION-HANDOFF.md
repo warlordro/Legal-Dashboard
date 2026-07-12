@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.43.0 (2026-07-10) — bump facut pe branch-ul `feat/v2.43.0-rnpm-split`; push NEFACUT (asteapta cererea userului).
+**Versiune curenta**: v2.43.0 (2026-07-13) — branch `feat/v2.43.0-rnpm-split`, pushuit pe GitLab 2026-07-13 (24 commits peste a9630b9: split + fixuri audit + captcha fallback web + autocompact/limite stocare Codex + fixuri human testing).
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
