@@ -118,7 +118,7 @@ Rolling deploy: compose recreeaza doar containerul `backend`; oauth2-proxy + Cad
 Pentru rutele API RNPM, configureaza timeout-ul end-to-end al Caddy,
 oauth2-proxy si al oricarui layer Traefik/Cloudflare la minimum 60s.
 Autocompact-ul SQLite dupa stergeri este sincron si poate dura mai multe
-secunde pe o baza apropiata de limita implicita de 500 MB.
+secunde pe o baza apropiata de limita implicita de 750 MB.
 
 ## 9. Rotire secrete
 

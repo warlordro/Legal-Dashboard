@@ -439,7 +439,7 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     min="0"
                     value={limitInput}
                     onChange={(e) => setLimitInput(e.target.value)}
-                    placeholder={feature === "rnpm.storage" ? "ex: 500" : isCountFeature(feature) ? "ex: 50" : "ex: 25"}
+                    placeholder={feature === "rnpm.storage" ? "ex: 750" : isCountFeature(feature) ? "ex: 50" : "ex: 25"}
                     className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
                   />
                 </div>

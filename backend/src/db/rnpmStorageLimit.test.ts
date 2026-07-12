@@ -42,8 +42,8 @@ afterEach(async () => {
 });
 
 describe("readDefaultRnpmStorageMb", () => {
-  it("foloseste 500 MB cand env-ul lipseste", () => {
-    expect(readDefaultRnpmStorageMb()).toBe(500);
+  it("foloseste 750 MB cand env-ul lipseste", () => {
+    expect(readDefaultRnpmStorageMb()).toBe(750);
   });
 
   it("zero si valorile negative dezactiveaza limita", () => {
@@ -53,11 +53,11 @@ describe("readDefaultRnpmStorageMb", () => {
     expect(readDefaultRnpmStorageMb()).toBeNull();
   });
 
-  it("valoarea invalida revine la 500 si avertizeaza o singura data", () => {
+  it("valoarea invalida revine la 750 si avertizeaza o singura data", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
     for (const raw of ["abc", "Infinity"]) {
       process.env.LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB = raw;
-      expect(readDefaultRnpmStorageMb()).toBe(500);
+      expect(readDefaultRnpmStorageMb()).toBe(750);
     }
     expect(warn).toHaveBeenCalledTimes(1);
   });

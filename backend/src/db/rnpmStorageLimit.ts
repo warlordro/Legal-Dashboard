@@ -3,7 +3,7 @@ import { withMaintenanceRead } from "./backup.ts";
 import { getRnpmDb, getRnpmDbPath } from "./rnpmDb.ts";
 import { getOverride } from "./userQuotaRepository.ts";
 
-const DEFAULT_RNPM_STORAGE_MB = 500;
+const DEFAULT_RNPM_STORAGE_MB = 750;
 const BYTES_PER_MIB = 1024 * 1024;
 const RNPM_STORAGE_FEATURE = "rnpm.storage";
 

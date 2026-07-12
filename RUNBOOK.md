@@ -804,7 +804,7 @@ manual randul in monolit (UPDATE owner_id la id-ul corect al userului din
 ### Limite de stocare RNPM si recuperare
 
 - `LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB` stabileste limita implicita a bazei
-  vii per user (default 500 MB; `0` sau negativ = nelimitat). Override-ul admin
+  vii per user (default 750 MB; `0` sau negativ = nelimitat). Override-ul admin
   `rnpm.storage`, exprimat in MB, are prioritate. Masurarea foloseste acelasi
   numar in guard, `/stats` si cardul admin: fisierul `.db` + `-wal` + `-shm`.
 - Limita este admission control, nu stergere automata: la `used >= limit`, o
