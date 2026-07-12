@@ -50,6 +50,7 @@ function buildApp() {
       captchaKey: guard.captchaKey,
       captchaProvider: guard.captchaProvider,
       captchaMode: guard.captchaMode,
+      fallback2CaptchaKey: guard.fallback2CaptchaKey,
     });
   });
   return app;
@@ -226,6 +227,97 @@ describe("withRnpmCaptchaGuards", () => {
       captchaProvider: "2captcha",
       captchaMode: "sequential",
     });
+  });
+
+  it("in web mode cu ambele chei salvate propaga cheia celuilalt provider ca fallback2CaptchaKey", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "capsolver",
+      captchaMode: "race",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      source: "tenant",
+      captchaKey: "tenant-capsolver-key",
+      captchaProvider: "capsolver",
+      captchaMode: "race",
+      fallback2CaptchaKey: "tenant-2captcha-key",
+    });
+  });
+
+  it("in web mode cu provider 2captcha si capsolver salvat, fallback-ul e cheia capsolver", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "tenant-2captcha-key",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    await expect(res.json()).resolves.toMatchObject({
+      ok: true,
+      source: "tenant",
+      captchaKey: "tenant-2captcha-key",
+      captchaProvider: "2captcha",
+      captchaMode: "sequential",
+      fallback2CaptchaKey: "tenant-capsolver-key",
+    });
+  });
+
+  it("in web mode cu o singura cheie salvata fallback2CaptchaKey ramane absent", async () => {
+    mockedGetAuthMode.mockReturnValue("web");
+    mockedGetTenantKeys.mockReturnValue({
+      anthropic: "",
+      openai: "",
+      google: "",
+      openrouter: "",
+      twocaptcha: "",
+      capsolver: "tenant-capsolver-key",
+      captchaProvider: "capsolver",
+      captchaMode: "race",
+      updatedAt: "2026-05-19T00:00:00Z",
+      updatedBy: "admin",
+    });
+
+    const res = await buildApp().request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci" }),
+    });
+
+    expect(res.status).toBe(200);
+    const json = (await res.json()) as Record<string, unknown>;
+    expect(json).toMatchObject({ ok: true, source: "tenant", captchaKey: "tenant-capsolver-key" });
+    expect(json.fallback2CaptchaKey).toBeUndefined();
   });
 
   it("in web mode body.captchaKey ramane in body dar declanseaza un warning structurat", async () => {
