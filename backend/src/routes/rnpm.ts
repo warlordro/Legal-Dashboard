@@ -221,18 +221,16 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
       detail: { provider: guard.captchaProvider ?? null, mode: guard.captchaMode ?? null, route: "search" },
     });
   }
-  const { type, params, captchaProvider, fallback2CaptchaKey, captchaMode, startRnpmPage, batchSize, gcode, searchId } =
-    (body ?? {}) as {
-      type?: unknown;
-      params?: unknown;
-      captchaProvider?: unknown;
-      fallback2CaptchaKey?: unknown;
-      captchaMode?: unknown;
-      startRnpmPage?: unknown;
-      batchSize?: unknown;
-      gcode?: unknown;
-      searchId?: unknown;
-    };
+  const { type, params, captchaProvider, captchaMode, startRnpmPage, batchSize, gcode, searchId } = (body ?? {}) as {
+    type?: unknown;
+    params?: unknown;
+    captchaProvider?: unknown;
+    captchaMode?: unknown;
+    startRnpmPage?: unknown;
+    batchSize?: unknown;
+    gcode?: unknown;
+    searchId?: unknown;
+  };
 
   if (!isValidType(type)) return invalidParams(c, "Tip cautare invalid");
   if (!params || typeof params !== "object") return invalidParams(c, "Parametri cautare lipsa");
@@ -261,8 +259,9 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     params: params as Parameters<typeof executeSearch>[0]["params"],
     captchaKey,
     captchaProvider: provider,
-    fallback2CaptchaKey:
-      guard.fallback2CaptchaKey ?? (typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined),
+    // DOAR valoarea guard-ului: pe desktop guard-ul o extrage din body, iar in
+    // web mode vine exclusiv din tenant keys (BYOK din browser e interzis).
+    fallback2CaptchaKey: guard.fallback2CaptchaKey,
     captchaMode: guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential"),
     ownerId,
     startRnpmPage: startPage,
@@ -454,10 +453,9 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
       detail: { provider: guard.captchaProvider ?? null, mode: guard.captchaMode ?? null, route: "bulk" },
     });
   }
-  const { items, captchaProvider, fallback2CaptchaKey, captchaMode } = body as {
+  const { items, captchaProvider, captchaMode } = body as {
     items?: unknown;
     captchaProvider?: unknown;
-    fallback2CaptchaKey?: unknown;
     captchaMode?: unknown;
   };
 
@@ -532,7 +530,7 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
       defaultRnpmClient,
       controller.signal,
       provider,
-      guard.fallback2CaptchaKey ?? (typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined),
+      guard.fallback2CaptchaKey,
       guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential")
     );
 
@@ -589,12 +587,11 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
       detail: { provider: guard.captchaProvider ?? null, mode: guard.captchaMode ?? null, route: "search-split" },
     });
   }
-  const { type, baseParams, subTypeLabels, captchaProvider, fallback2CaptchaKey, captchaMode } = body as {
+  const { type, baseParams, subTypeLabels, captchaProvider, captchaMode } = body as {
     type?: unknown;
     baseParams?: unknown;
     subTypeLabels?: unknown;
     captchaProvider?: unknown;
-    fallback2CaptchaKey?: unknown;
     captchaMode?: unknown;
   };
 
@@ -665,8 +662,7 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
         subTypeLabels: subTypeLabels as string[],
         captchaKey,
         captchaProvider: provider,
-        fallback2CaptchaKey:
-          guard.fallback2CaptchaKey ?? (typeof fallback2CaptchaKey === "string" ? fallback2CaptchaKey : undefined),
+        fallback2CaptchaKey: guard.fallback2CaptchaKey,
         captchaMode: guard.captchaMode ?? (captchaMode === "race" ? "race" : "sequential"),
         ownerId,
         signal: controller.signal,
