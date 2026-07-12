@@ -86,7 +86,7 @@ describe("GET /api/v1/admin/rnpm/usage", () => {
     const u2 = body.data?.rows?.find((r) => r.userId === "u2");
     const measured = await measureRnpmStorage("u1");
     expect(u1?.dbSizeBytes).toBe(measured.usedBytes);
-    expect(u1?.storageLimitBytes).toBe(500 * 1024 * 1024);
+    expect(u1?.storageLimitBytes).toBe(750 * 1024 * 1024);
     expect(u1?.backupCount).toBe(1);
     expect((u1?.backupsBytes ?? 0) > 0).toBe(true);
     expect(u2?.dbSizeBytes).toBeNull();
