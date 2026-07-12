@@ -23,6 +23,10 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
   // busy poarta si actiunea, ca spinnerul sa apara pe butonul apasat, nu pe
   // amandoua; cat timp e non-null toate actiunile per rand sunt dezactivate.
   const [busy, setBusy] = useState<{ ownerId: string; action: "compact" | "delete" } | null>(null);
+  // Userii stersi/suspendati FARA date (fara baza vie si fara backup-uri) sunt
+  // doar zgomot in lista — ascunsi implicit. Cei care inca ocupa spatiu raman
+  // mereu vizibili: exact pe ei trebuie sa-i vada adminul ca sa curete.
+  const [showInactive, setShowInactive] = useState(false);
   // AbortController + staleness guard (pattern 6.7): un raspuns lent pornit
   // inainte de un reload ar ateriza dupa cel nou si ar suprascrie lista cu
   // starea veche. Reincarca si reload-ul post-compact folosesc acelasi load().
@@ -133,6 +137,10 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
     }
   };
 
+  const hasFootprint = (row: AdminRnpmUsageRow) => row.dbSizeBytes !== null || row.backupCount > 0;
+  const visibleRows = rows?.filter((row) => showInactive || row.status === "active" || hasFootprint(row)) ?? null;
+  const hiddenCount = rows && visibleRows ? rows.length - visibleRows.length : 0;
+
   const body = (
     <Card>
       <CardHeader className="flex flex-row items-center justify-between space-y-0">
@@ -168,7 +176,23 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
         {rows && rows.length === 0 && (
           <div className="text-sm text-muted-foreground">Niciun utilizator inregistrat.</div>
         )}
-        {rows && rows.length > 0 && (
+        {(hiddenCount > 0 || showInactive) && (
+          <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={showInactive}
+              onChange={(e) => setShowInactive(e.target.checked)}
+              className="h-3.5 w-3.5 accent-primary"
+            />
+            Arata si userii stersi sau suspendati fara date ({hiddenCount})
+          </label>
+        )}
+        {visibleRows && visibleRows.length === 0 && rows && rows.length > 0 && (
+          <div className="text-sm text-muted-foreground">
+            Toti userii ramasi sunt stersi sau suspendati, fara date RNPM.
+          </div>
+        )}
+        {visibleRows && visibleRows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="border-b border-border text-left text-xs uppercase tracking-wide text-muted-foreground">
@@ -180,7 +204,7 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
                 </tr>
               </thead>
               <tbody className="divide-y divide-border">
-                {rows.map((row) => (
+                {visibleRows.map((row) => (
                   <tr key={row.userId}>
                     <td className="px-3 py-2 align-top">
                       <p className="font-mono text-xs">{row.email}</p>

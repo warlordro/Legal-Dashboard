@@ -100,7 +100,7 @@ describe("AdminRnpmStorage (embedded)", () => {
         userId: "u2",
         email: "b@x.ro",
         displayName: "B",
-        status: "suspended",
+        status: "active",
         dbSizeBytes: null,
         backupCount: 0,
         backupsBytes: 0,
@@ -465,6 +465,81 @@ describe("AdminRnpmStorage (embedded)", () => {
     });
 
     expect(deleteBackupsMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("userii stersi/suspendati fara date sunt ascunsi implicit; checkbox-ul ii arata", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u1",
+        email: "activ@x.ro",
+        displayName: "Activ",
+        status: "active",
+        dbSizeBytes: 1024,
+        backupCount: 0,
+        backupsBytes: 0,
+      },
+      {
+        userId: "u2",
+        email: "sters-gol@x.ro",
+        displayName: "Sters gol",
+        status: "deleted",
+        dbSizeBytes: null,
+        backupCount: 0,
+        backupsBytes: 0,
+      },
+      {
+        userId: "u3",
+        email: "sters-cu-date@x.ro",
+        displayName: "Sters cu date",
+        status: "deleted",
+        dbSizeBytes: null,
+        backupCount: 1,
+        backupsBytes: 1024,
+      },
+    ]);
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+
+    // Implicit: sters fara date = ascuns; sters cu date (ocupa spatiu) = vizibil.
+    expect(host.textContent).toContain("activ@x.ro");
+    expect(host.textContent).not.toContain("sters-gol@x.ro");
+    expect(host.textContent).toContain("sters-cu-date@x.ro");
+
+    const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]');
+    expect(checkbox).not.toBeNull();
+    expect(host.textContent).toContain("(1)");
+
+    await act(async () => {
+      checkbox?.click();
+      await Promise.resolve();
+    });
+    expect(host.textContent).toContain("sters-gol@x.ro");
+  });
+
+  it("fara useri stersi/suspendati fara date, checkbox-ul nu apare", async () => {
+    usageMock.mockResolvedValue([
+      {
+        userId: "u1",
+        email: "activ@x.ro",
+        displayName: "Activ",
+        status: "active",
+        dbSizeBytes: 1024,
+        backupCount: 0,
+        backupsBytes: 0,
+      },
+    ]);
+
+    await render(
+      <ConfirmProvider>
+        <AdminRnpmStorage embedded />
+      </ConfirmProvider>
+    );
+
+    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
   it("409 la stergerea backup-urilor se afiseaza ca mesaj prietenos", async () => {
