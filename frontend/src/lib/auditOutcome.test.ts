@@ -14,7 +14,7 @@ describe("outcomeLabel — v2.42.0 audit outcome translation", () => {
     expect(outcomeLabel("error")).toBe("Eroare");
   });
 
-  it("falls back to the raw token for an unknown value", () => {
-    expect(outcomeLabel("necunoscut" as unknown as "ok")).toBe("necunoscut");
+  it("falls back to a localized label keeping the raw token for an unknown value", () => {
+    expect(outcomeLabel("bogus" as never)).toBe("Necunoscut (bogus)");
   });
 });

@@ -124,6 +124,25 @@ export function getUserByEmail(email: string): UserRow | null {
   return row ?? null;
 }
 
+// v2.43.x (admin rnpm storage): identitatile tuturor userilor pentru join-ul
+// cu dimensiunile fisierelor rnpm/<stem>.db — fara paginare (lista e mica,
+// conventia UserPicker), toate statusurile (fisierul unui user suspendat/sters
+// ocupa disc la fel de mult). Ordinea (email ASC) e CONTRACT: UI nu re-sorteaza.
+export function listAllUserIdentities(): Array<{
+  id: string;
+  email: string;
+  display_name: string;
+  status: UserStatus;
+}> {
+  const db = getDb();
+  return db.prepare("SELECT id, email, display_name, status FROM users ORDER BY email ASC").all() as Array<{
+    id: string;
+    email: string;
+    display_name: string;
+    status: UserStatus;
+  }>;
+}
+
 // Returns the row AFTER the update so the route can echo the new state without
 // a second SELECT. Throws if the user does not exist (caller maps to 404).
 export function updateUserRole(id: string, role: UserRole): UserRow {

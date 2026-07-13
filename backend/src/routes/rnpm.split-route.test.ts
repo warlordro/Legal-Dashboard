@@ -31,7 +31,10 @@ vi.mock("../services/rnpmSearchService.ts", async () => {
 import { rnpmRouter } from "./rnpm.ts";
 import { executeSplitSearch } from "../services/rnpmSearchService.ts";
 import { closeDb, getDb } from "../db/schema.ts";
+import { __resetRnpmActivityForTests, beginRnpmRestore } from "../db/rnpmActivity.ts";
+import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
 import { updateUserRole } from "../db/userRepository.ts";
+import { appErrorHandler } from "../util/appErrorHandler.ts";
 import * as auditRepository from "../db/auditRepository.ts";
 import type { SplitSearchInput, SplitSearchResult, SplitSearchProgress } from "../services/rnpmSearchService.ts";
 
@@ -57,6 +60,8 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  __resetRnpmActivityForTests();
+  __resetRnpmDbForTests();
   closeDb();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
@@ -383,5 +388,65 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
       // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
       delete process.env.RNPM_AUDIT_CAP_HIT_DISABLED;
     }
+  });
+});
+
+// v2.43.0 (rnpm-split): gardurile de restore lovesc INAINTE de a porni stream-ul
+// SSE — un throw dupa streamSSE inseamna 200 deja trimis si eroare in mijlocul
+// stream-ului. Plus maparea centrala (app.onError) pentru caile fara gard explicit.
+describe("garduri RESTORE_IN_PROGRESS (v2.43.0)", () => {
+  function buildAppWithErrorHandler() {
+    const app = new Hono();
+    app.onError(appErrorHandler);
+    app.route("/api/v1/rnpm", rnpmRouter);
+    return app;
+  }
+
+  async function expectRestore409(res: Response): Promise<void> {
+    expect(res.status).toBe(409);
+    expect(res.headers.get("content-type")).toContain("application/json");
+    const body = (await res.json()) as { error?: { code: string; message: string }; requestId?: string };
+    expect(body.error?.code).toBe("RESTORE_IN_PROGRESS");
+    expect(body.error?.message).toMatch(/[Rr]estaurare/);
+  }
+
+  it("POST /search cu restore activ => 409 envelope, nu SSE", async () => {
+    beginRnpmRestore("local");
+    const res = await buildAppWithErrorHandler().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci", params: { numeProprietar: "X" }, captchaKey: "0123456789abcdef" }),
+    });
+    await expectRestore409(res);
+  });
+
+  it("POST /bulk cu restore activ => 409 envelope, nu SSE", async () => {
+    beginRnpmRestore("local");
+    const res = await buildAppWithErrorHandler().request("/api/v1/rnpm/bulk", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        items: [{ type: "ipoteci", params: { numeProprietar: "X" } }],
+        captchaKey: "0123456789abcdef",
+      }),
+    });
+    await expectRestore409(res);
+  });
+
+  it("POST /search-split cu restore activ => 409 envelope, executeSplitSearch nechemat", async () => {
+    beginRnpmRestore("local");
+    const res = await buildAppWithErrorHandler().request("/api/v1/rnpm/search-split", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(POST_BODY),
+    });
+    await expectRestore409(res);
+    expect(executeSplitSearchMock).not.toHaveBeenCalled();
+  });
+
+  it("GET /stats in timpul restore-ului => 409 prin maparea centrala (latch getRnpmDb)", async () => {
+    beginRnpmRestore("local");
+    const res = await buildAppWithErrorHandler().request("/api/v1/rnpm/stats");
+    await expectRestore409(res);
   });
 });

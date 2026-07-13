@@ -1,4 +1,5 @@
-import { getDb, checkpointWal } from "./schema.ts";
+import type Database from "better-sqlite3";
+import { checkpointRnpmWal, getRnpmDb } from "./rnpmDb.ts";
 import { buildRnpmLikePattern, tokenizeFilterQuery } from "../util/textNormalize.ts";
 import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
@@ -152,7 +153,7 @@ function serializeActiv(activ: boolean | null | undefined): 0 | 1 | null {
 
 export function saveAvizFull(input: SaveAvizInput): number {
   assertOwnerIdForMutation(input.ownerId, "saveAvizFull");
-  const db = getDb();
+  const db = getRnpmDb(input.ownerId);
   const ownerId = input.ownerId;
 
   const run = db.transaction((): number => {
@@ -341,7 +342,7 @@ export function saveAvizFull(input: SaveAvizInput): number {
 }
 
 export function getAvizById(id: number, ownerId: string): AvizFull | null {
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const aviz = db.prepare("SELECT * FROM rnpm_avize WHERE id = ? AND owner_id = ?").get(id, ownerId) as
     | AvizRecord
     | undefined;
@@ -350,7 +351,7 @@ export function getAvizById(id: number, ownerId: string): AvizFull | null {
 }
 
 export function getAvizByIdentificator(identificator: string, ownerId: string): AvizFull | null {
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const aviz = db
     .prepare("SELECT * FROM rnpm_avize WHERE identificator = ? AND owner_id = ?")
     .get(identificator, ownerId) as AvizRecord | undefined;
@@ -359,7 +360,7 @@ export function getAvizByIdentificator(identificator: string, ownerId: string): 
 }
 
 function loadAvizChildren(aviz: AvizRecord): AvizFull {
-  const db = getDb();
+  const db = getRnpmDb(aviz.owner_id);
   // Defense in depth: aviz row was already filtered by owner_id at the entry
   // point, but child queries must repeat the constraint so that a stale FK
   // (bug-introduced or partial restore) cannot leak rows from a different
@@ -426,7 +427,7 @@ export interface GetAvizeOptions {
 }
 
 export function getAvize(opts: GetAvizeOptions): OffsetPage<AvizRecord> {
-  const db = getDb();
+  const db = getRnpmDb(opts.ownerId);
   const ownerId = opts.ownerId;
   const pageSize = Math.min(Math.max(opts.pageSize ?? 25, 1), 200);
   const page = Math.max(opts.page ?? 0, 0);
@@ -517,7 +518,7 @@ export function getAvize(opts: GetAvizeOptions): OffsetPage<AvizRecord> {
 // GC orfani: rnpm_bunuri_descrieri e un lookup dedup-uit (nu legat direct de aviz),
 // deci CASCADE nu il atinge cand stergem avize. Aici stergem randurile fara referinte
 // din rnpm_bunuri. Index pe rnpm_bunuri(descriere_id) face NOT EXISTS eficient chiar si pe zeci de mii de randuri.
-function cleanupOrphanDescrieri(db: ReturnType<typeof getDb>): number {
+function cleanupOrphanDescrieri(db: Database.Database): number {
   const res = db
     .prepare(`
     DELETE FROM rnpm_bunuri_descrieri
@@ -531,36 +532,45 @@ function cleanupOrphanDescrieri(db: ReturnType<typeof getDb>): number {
 
 export function deleteAviz(id: number, ownerId: string): boolean {
   assertOwnerIdForMutation(ownerId, "deleteAviz");
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const deleted = db.transaction(() => {
     const res = db.prepare("DELETE FROM rnpm_avize WHERE id = ? AND owner_id = ?").run(id, ownerId);
     if (res.changes > 0) cleanupOrphanDescrieri(db);
     return res.changes > 0;
   })();
   // Checkpoint WAL dupa tranzactie — altfel fisierul -wal creste continuu si modalul "date + jurnal" urca.
-  if (deleted) checkpointWal();
+  if (deleted) checkpointRnpmWal(ownerId);
   return deleted;
 }
 
-export function deleteAllAvize(ownerId: string): number {
-  assertOwnerIdForMutation(ownerId, "deleteAllAvize");
-  const db = getDb();
+// v2.43.x (EXT-M-01): corpul delete-all, rulabil si pe un handle DIRECT
+// (deschis de backup.ts prin openRnpmDbHandleDirect, sub latch-ul de restore,
+// cand registry-ul e inchis). Owner-ul se valideaza AICI, nu doar in wrapper
+// — handle-ul direct nu trece prin getRnpmDb. ATENTIE: handle-ul TREBUIE sa
+// aiba foreign_keys=ON (cascadele pe creditori/debitori/bunuri/istoric).
+export function deleteAllAvizeOnHandle(db: Database.Database, ownerId: string): number {
+  assertOwnerIdForMutation(ownerId, "deleteAllAvizeOnHandle");
   // Sterge avizele (CASCADE curata creditori/debitori/bunuri/istoric) si metadata din rnpm_searches.
   // search_id din rnpm_avize are ON DELETE SET NULL, deci searches nu cad in cascada — le stergem explicit.
-  const changes = db.transaction(() => {
+  return db.transaction(() => {
     const res = db.prepare("DELETE FROM rnpm_avize WHERE owner_id = ?").run(ownerId);
     db.prepare("DELETE FROM rnpm_searches WHERE owner_id = ?").run(ownerId);
     if (res.changes > 0) cleanupOrphanDescrieri(db);
     return res.changes;
   })();
-  if (changes > 0) checkpointWal();
+}
+
+export function deleteAllAvize(ownerId: string): number {
+  const db = getRnpmDb(ownerId);
+  const changes = deleteAllAvizeOnHandle(db, ownerId);
+  if (changes > 0) checkpointRnpmWal(ownerId);
   return changes;
 }
 
 export function deleteAvizeByIds(ids: number[], ownerId: string): number {
   if (ids.length === 0) return 0;
   assertOwnerIdForMutation(ownerId, "deleteAvizeByIds");
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const placeholders = ids.map(() => "?").join(",");
   // CASCADE pe creditori/debitori/bunuri/istoric; rnpm_searches nu se sterge aici
   // (pot ramane cu search_id = NULL pe randuri pastrate din aceeasi cautare).
@@ -571,7 +581,7 @@ export function deleteAvizeByIds(ids: number[], ownerId: string): number {
     if (res.changes > 0) cleanupOrphanDescrieri(db);
     return res.changes;
   })();
-  if (changes > 0) checkpointWal();
+  if (changes > 0) checkpointRnpmWal(ownerId);
   return changes;
 }
 
@@ -583,7 +593,7 @@ export interface AvizStats {
 }
 
 export function getAvizStats(ownerId: string): AvizStats {
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const totals = db
     .prepare(`
     SELECT
@@ -606,7 +616,7 @@ export function getAvizStats(ownerId: string): AvizStats {
 
 export function getAvizeByIds(ids: number[], ownerId: string): AvizFull[] {
   if (ids.length === 0) return [];
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const placeholders = ids.map(() => "?").join(",");
   const rows = db
     .prepare(`SELECT * FROM rnpm_avize WHERE owner_id = ? AND id IN (${placeholders}) ORDER BY id DESC`)
@@ -705,7 +715,7 @@ export class RnpmSearchNotFoundError extends Error {
 
 export function filterRnpmSearchResults(opts: FilterRnpmResultsOptions): FilterRnpmResultsOutcome {
   const HARD_LIMIT = 1500;
-  const db = getDb();
+  const db = getRnpmDb(opts.ownerId);
   const { ownerId, searchId, q, signal } = opts;
   const limit = Math.min(opts.limit ?? HARD_LIMIT, HARD_LIMIT);
 

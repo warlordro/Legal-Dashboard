@@ -406,6 +406,29 @@ describe("/api/v1/admin/users/:id/quota", () => {
     expect(stored[0].limit_usd_milli).toBe(25000);
   });
 
+  it("PUT accepta rnpm.storage cu valoare MB mare si canonizeaza period la day", async () => {
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/users/u-1/quota", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ feature: "rnpm.storage", period: "month", limitUsdMilli: 200000 }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await jsonOf(res);
+    expect(body.data).toMatchObject({
+      feature: "rnpm.storage",
+      period: "day",
+      limitUsdMilli: 200000,
+      dailyLimitUsdMilli: 200000,
+    });
+    expect(listOverridesForUser("u-1")[0]).toMatchObject({
+      feature: "rnpm.storage",
+      period: "day",
+      limit_usd_milli: 200000,
+    });
+  });
+
   it("PUT accepts limitUsdMilli=null (unlimited)", async () => {
     const app = buildApp();
     const res = await app.request("/api/v1/admin/users/u-1/quota", {
@@ -894,6 +917,28 @@ describe("v2.42.0 — POST /users (creare individuala)", () => {
     expect(body.error?.message).toContain("suspendat");
   });
 
+  it("audit INSERT picat nu transforma refuzul in 500 — 409 email_exists ramane", async () => {
+    const app = buildApp();
+    insertUser({ id: "u-dub-audit", email: "dub-audit@firma.ro", displayName: "Dub" });
+    // Esec tranzitoriu REAL al scrierii de audit: orice INSERT in audit_log pica.
+    // Refuzul intentionat (409 email_exists) nu are voie sa devina 500.
+    getDb().exec(
+      "CREATE TRIGGER __fail_audit BEFORE INSERT ON audit_log BEGIN SELECT RAISE(ABORT, 'simulated audit failure'); END"
+    );
+    try {
+      const res = await app.request("/api/v1/admin/users", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ email: "dub-audit@firma.ro", displayName: "Alt", role: "user" }),
+      });
+      expect(res.status).toBe(409);
+      const body = await jsonOf(res);
+      expect(body.error?.code).toBe("email_exists");
+    } finally {
+      getDb().exec("DROP TRIGGER __fail_audit");
+    }
+  });
+
   it("email STERS se reactiveaza: 201, acelasi id, nume/rol din request, status activ", async () => {
     const app = buildApp();
     insertUser({ id: "u-del", email: "del@firma.ro", displayName: "Vechi" });
@@ -1141,6 +1186,22 @@ describe("v2.42.0 (5.4) — audit enrichment + export", () => {
 // ---------------------------------------------------------------------------
 
 describe("v2.42.0 (5.3) — GET /usage/overview", () => {
+  it("cap-ul se aplica si cand totalul e cu mai putin de o pagina peste el (C5)", async () => {
+    // total = 553 (550 aici + local + uo-1 + uo-2 din beforeEach): in (500, 600]
+    // conditia veche `offset < total` era falsa la ultima pagina si raspunsul
+    // continea >500 useri cu truncated=false.
+    for (let i = 0; i < 550; i++) {
+      insertUser({ id: `cap-${i}`, email: `cap-${String(i).padStart(3, "0")}@x`, displayName: `C${i}` });
+    }
+    const app = buildApp();
+    const res = await app.request("/api/v1/admin/usage/overview");
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as { data: { items: Array<{ userId: string }>; truncated: boolean } };
+    const uniqueUsers = new Set(body.data.items.map((i) => i.userId));
+    expect(uniqueUsers.size).toBeLessThanOrEqual(500);
+    expect(body.data.truncated).toBe(true);
+  });
+
   beforeEach(() => {
     updateUserRole("local", "admin");
     insertUser({ id: "uo-1", email: "b@x", displayName: "B" });

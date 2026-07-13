@@ -29,7 +29,7 @@
 
 import type { Context, Next } from "hono";
 import { getAuthMode } from "../auth/config.ts";
-import { fail } from "../util/envelope.ts";
+import { ErrorCodes, fail } from "../util/envelope.ts";
 
 const DESKTOP_HEADER = "x-legal-dashboard-desktop";
 const DESKTOP_HEADER_VALUE = "1";
@@ -43,7 +43,11 @@ export async function requireDesktopHeader(c: Context, next: Next): Promise<Resp
   const headerValue = c.req.header(DESKTOP_HEADER);
   if (headerValue !== DESKTOP_HEADER_VALUE) {
     return c.json(
-      fail("desktop_header_required", "Cerere refuzata: header X-Legal-Dashboard-Desktop lipsa sau invalida.", c),
+      fail(
+        ErrorCodes.DESKTOP_HEADER_REQUIRED,
+        "Cerere refuzata: header X-Legal-Dashboard-Desktop lipsa sau invalida.",
+        c
+      ),
       403
     );
   }

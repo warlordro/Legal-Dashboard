@@ -1,0 +1,148 @@
+// v2.43.0 (rnpm-split): backup-urile MONOLITULUI (baza unica: users, auth,
+// quota, monitoring, audit, fx_rates) se administreaza din Setari, admin-only.
+// Inlocuieste rutele vechi de monolit din rnpm.ts — zona RNPM ramane
+// self-service pe fisierele per user. requireDesktopHeader pe mutatii =
+// apararea CSRF pe desktop (pass-through in web mode).
+
+import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { recordAuditSafe } from "../db/auditRepository.ts";
+import {
+  BackupValidationError,
+  createManualBackup,
+  deleteAllBackups,
+  listBackupsWithMeta,
+  restoreFromBackup,
+} from "../db/backup.ts";
+import { requireDesktopHeader } from "../middleware/requireDesktopHeader.ts";
+import { requireRole } from "../middleware/requireRole.ts";
+import { isTypedMaintenanceError, rethrowTypedMaintenanceError } from "../util/appErrorHandler.ts";
+import { ErrorCodes, fail, ok } from "../util/envelope.ts";
+
+const SMALL_BODY_LIMIT = 4 * 1024;
+const limitSmall = bodyLimit({
+  maxSize: SMALL_BODY_LIMIT,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+
+export const adminBackupsRouter = new Hono();
+
+adminBackupsRouter.use("*", requireRole("admin"));
+
+adminBackupsRouter.get("/", async (c) => {
+  try {
+    const backups = await listBackupsWithMeta();
+    return c.json(ok({ backups }, c));
+  } catch (e) {
+    // Fix review (Task 4.3/5.2): erorile tipate (shutdown, restore in curs)
+    // ies spre handlerul central => 409/503, nu 500 generic.
+    rethrowTypedMaintenanceError(e);
+    console.error("[adminBackups] list failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
+  }
+});
+
+adminBackupsRouter.post("/create", requireDesktopHeader, async (c) => {
+  try {
+    const { name } = await createManualBackup();
+    recordAuditSafe(c, "backup.create", {
+      targetKind: "backup",
+      targetId: name,
+    });
+    return c.json(ok({ name }, c));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare creare backup";
+    recordAuditSafe(c, "backup.create", {
+      targetKind: "backup",
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
+      detail: { error: msg },
+    });
+    rethrowTypedMaintenanceError(e);
+    console.error("[adminBackups] create failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
+  }
+});
+
+adminBackupsRouter.post("/restore", requireDesktopHeader, limitSmall, async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (body === null) return c.json(fail(ErrorCodes.INVALID_JSON, "JSON invalid", c), 400);
+  const name = (body as { name?: unknown })?.name;
+  if (typeof name !== "string" || name.length === 0) {
+    return c.json(fail(ErrorCodes.INVALID_PARAMS, "Nume backup lipsa", c), 400);
+  }
+  try {
+    const { preRestoreName } = await restoreFromBackup(name);
+    // Rev. 4 (Codex): mutatia e COMISA — un esec al scrierii de audit nu are
+    // voie sa rastoarne rezultatul in 409/500 (clientul ar repeta un restore
+    // distructiv). Swap mecanic, aceeasi clasa ca ruta rnpm (testata acolo).
+    recordAuditSafe(c, "backup.restore", {
+      targetKind: "backup",
+      targetId: name,
+      detail: { preRestoreName },
+    });
+    return c.json(ok({ preRestoreName }, c));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare restore";
+    recordAuditSafe(c, "backup.restore", {
+      targetKind: "backup",
+      targetId: name,
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
+      detail: { error: msg },
+    });
+    if (e instanceof BackupValidationError) {
+      return c.json(fail(ErrorCodes.INVALID_PARAMS, msg, c), 400);
+    }
+    rethrowTypedMaintenanceError(e);
+    console.error("[adminBackups] restore failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
+  }
+});
+
+adminBackupsRouter.delete("/", requireDesktopHeader, async (c) => {
+  try {
+    const deleted = await deleteAllBackups();
+    recordAuditSafe(c, "backup.delete_all", {
+      targetKind: "backup",
+      detail: { deleted },
+    });
+    return c.json(ok({ deleted }, c));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare stergere backups";
+    recordAuditSafe(c, "backup.delete_all", {
+      targetKind: "backup",
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
+      detail: { error: msg },
+    });
+    rethrowTypedMaintenanceError(e);
+    console.error("[adminBackups] delete-all failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
+  }
+});

@@ -139,13 +139,19 @@ export function Sidebar({
       setPopoverSection(null);
     };
     const closeOnResize = () => setPopoverSection(null);
+    // Escape inchide popover-ul, ca orice dropdown/flyout standard (v2.43.0).
+    const closeOnEscape = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setPopoverSection(null);
+    };
     document.addEventListener("mousedown", handler);
     window.addEventListener("scroll", close, true);
     window.addEventListener("resize", closeOnResize);
+    window.addEventListener("keydown", closeOnEscape);
     return () => {
       document.removeEventListener("mousedown", handler);
       window.removeEventListener("scroll", close, true);
       window.removeEventListener("resize", closeOnResize);
+      window.removeEventListener("keydown", closeOnEscape);
     };
   }, [popoverSection]);
 

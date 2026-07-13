@@ -42,14 +42,16 @@ export function parseEcbFeed(xml: string): { rateDate: string; eurUsdRate: numbe
   if (typeof xml !== "string" || xml.length === 0) return null;
   // Feed-ul live ECB foloseste apostrofuri pe atribute (time='...'); XML-ul
   // permite ambele stiluri, deci acceptam ["'] — cu ghilimele-only parserul
-  // intorcea null si UI-ul ramanea permanent pe "EUR indisponibil".
-  const timeMatch = xml.match(/<Cube\s+time=["'](\d{4}-\d{2}-\d{2})["']/);
+  // intorcea null si UI-ul ramanea permanent pe "EUR indisponibil". Backreference
+  // (["'])...\1 cere acelasi delimitator la deschidere si inchidere — respinge
+  // ghilimele nepereche in loc sa le accepte silentios.
+  const timeMatch = xml.match(/<Cube\s+time=(["'])(\d{4}-\d{2}-\d{2})\1/);
   if (!timeMatch) return null;
-  const usdMatch = xml.match(/<Cube\s+currency=["']USD["']\s+rate=["']([\d.]+)["']/);
+  const usdMatch = xml.match(/<Cube\s+currency=(["'])USD\1\s+rate=(["'])([\d.]+)\2/);
   if (!usdMatch) return null;
-  const eurUsdRate = Number(usdMatch[1]);
+  const eurUsdRate = Number(usdMatch[3]);
   if (!Number.isFinite(eurUsdRate) || eurUsdRate <= 0) return null;
-  return { rateDate: timeMatch[1], eurUsdRate };
+  return { rateDate: timeMatch[2], eurUsdRate };
 }
 
 // Convertor: ECB publica EUR/USD (1 EUR = Y USD); noi stocam USD/EUR (1 USD = X EUR).

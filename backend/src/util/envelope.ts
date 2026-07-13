@@ -45,6 +45,14 @@ export const ErrorCodes = {
   INSUFFICIENT_SCOPE: "INSUFFICIENT_SCOPE",
   PAT_CANNOT_MANAGE_TOKENS: "PAT_CANNOT_MANAGE_TOKENS",
   ICCJ_UNAVAILABLE: "ICCJ_UNAVAILABLE",
+  // v2.43.x (C1): coduri de concurenta/mentenanta emise de rutele de backup
+  // si handlerul central. COOLDOWN/DESKTOP_HEADER_REQUIRED raman lowercase pe
+  // sarma — clientii existenti le compara ca stringuri.
+  SEARCH_ACTIVE: "SEARCH_ACTIVE",
+  RESTORE_IN_PROGRESS: "RESTORE_IN_PROGRESS",
+  MAINTENANCE_SHUTDOWN: "MAINTENANCE_SHUTDOWN",
+  COOLDOWN: "cooldown",
+  DESKTOP_HEADER_REQUIRED: "desktop_header_required",
 } as const;
 
 export type ErrorCode = (typeof ErrorCodes)[keyof typeof ErrorCodes];

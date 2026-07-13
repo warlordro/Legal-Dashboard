@@ -103,6 +103,8 @@ docker cp $(docker compose -f docker-compose.prod.yml ps -q backend):/data/backu
 
 Backup-ul intern automat al backend-ului scrie la `backups/` in interiorul volumului `ld_data` (daily backup, retention 7 zile). Sincronizeaza folderul `/data/backups` periodic cu un storage extern (S3, rclone, restic).
 
+Din v2.43.0, volumul `ld_data` contine si `rnpm/` (fisierele SQLite per utilizator pentru datele RNPM) plus `backups/rnpm/<stem>/` (jail-urile de backup per utilizator). Daily backup-ul intern acopera automat si fisierele per user (freshness per target); sincronizarea offsite trebuie sa acopere TOT `/data/backups` (inclusiv subdirectoarele `rnpm/`), iar snapshot-ul manual de mai sus acopera doar monolitul — pentru un backup complet copiaza si `/data/rnpm/`.
+
 ## 8. Update la versiune noua
 
 ```bash
@@ -118,6 +120,11 @@ Rolling deploy: compose recreeaza doar containerul `backend`; oauth2-proxy + Cad
 ```bash
 docker compose -f deploy/docker-compose.prod.yml run --rm --user root backend chown -R app:app /data
 ```
+
+Pentru rutele API RNPM, configureaza timeout-ul end-to-end al Caddy,
+oauth2-proxy si al oricarui layer Traefik/Cloudflare la minimum 60s.
+Autocompact-ul SQLite dupa stergeri este sincron si poate dura mai multe
+secunde pe o baza apropiata de limita implicita de 750 MB.
 
 ## 9. Rotire secrete
 
@@ -166,6 +173,7 @@ Avertisment neschimbat: NU seta `OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER=true` �
 ## 14. Constrangeri de securitate
 
   - Backend-ul NU foloseste `ports:` in compose, doar `expose:`. Daca cineva il publica direct, oricine cu un client HTTP poate trimite header-ele de identitate (`X-Forwarded-Email` / `X-Auth-Request-Email`) direct la bridge. Singura protectie ramasa in acel scenariu este shared secret-ul `PROXY_BRIDGE_SECRET` (validat inainte de orice header de identitate) — pastreaza-l rotativ si NU il loga.
+  - **`LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` este obligatoriu operational in spatele unui proxy** (v2.43.0): gardurile care depind de identitatea peer-ului (rate limiter per IP, originGuard pe mutatii cross-LAN) folosesc `X-Forwarded-For` DOAR daca peer-ul TCP intra in acest CIDR. Nesetat, toate cererile au ca peer IP-ul containerului de proxy — un singur bucket de rate-limit pentru toti utilizatorii si protectie CSRF dependenta exclusiv de cookie-ul SameSite=Strict. Seteaza CIDR-ul retelei Docker a proxy-ului (ex. `172.20.0.0/16`); backend-ul logheaza la boot warn-ul structurat `proxy.trusted_cidr.missing` cand lipseste in web mode.
   - oauth2-proxy NU forwardeaza tokenul Google catre backend (`PASS_AUTHORIZATION_HEADER=false`, `PASS_ACCESS_TOKEN=false`). Asa, tokenurile Google nu intra niciodata in DB-ul nostru.
   - Cookie-urile sunt HttpOnly + Secure + SameSite=Strict. Frontend-ul nu poate citi JWT-ul din JavaScript.
   - Audit log-ul backend-ului inregistreaza login-uri prin `auth.oauth2.sync` cu `targetId=user.id`, dar fara plaintext-ul email (doar hash SHA-256 pe refuzuri).

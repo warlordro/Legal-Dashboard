@@ -46,12 +46,38 @@ const ImportRowSchema = z.object({
 
 // Celulele exceljs pot fi string, numar, data, richText, hyperlink (mailto pe
 // emailuri lipite din Outlook) sau formula cu result — normalizam totul la text.
-function cellToString(value: ExcelJS.CellValue): string {
+// `preferMailto` (doar coloana de email): celulele-hyperlink au INTOTDEAUNA
+// { text, hyperlink }, deci ramura de hyperlink de mai jos era de neatins cand
+// textul exista — un paste Outlook cu text afisat NON-email ("Ion Popescu" ->
+// mailto:ion@firma.ro) importa numele si pica la validare (fix duel-review
+// 2026-07-09). Contractul "textul afisat castiga" se pastreaza cand textul
+// arata a email (contine @) — vezi testul de contract din userImport.test.ts.
+function cellToString(value: ExcelJS.CellValue, preferMailto = false): string {
   if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (typeof value === "number" || typeof value === "boolean") return String(value);
   if (value instanceof Date) return value.toISOString();
   if (typeof value === "object") {
+    if (
+      preferMailto &&
+      "hyperlink" in value &&
+      typeof value.hyperlink === "string" &&
+      /^mailto:/i.test(value.hyperlink)
+    ) {
+      const displayed = "text" in value ? cellToString(value.text as ExcelJS.CellValue) : "";
+      if (!displayed.includes("@")) {
+        // Adresa reala e in hyperlink; parametrii mailto (?subject=...) si
+        // fragmentul (#...) se taie, iar percent-encoding-ul RFC 6068 se
+        // decodeaza (audit advers 2026-07-09) — best-effort, un encoding
+        // invalid pastreaza stringul brut si pica la validarea de email.
+        const raw = value.hyperlink.replace(/^mailto:/i, "").split(/[?#]/)[0] ?? "";
+        try {
+          return decodeURIComponent(raw);
+        } catch {
+          return raw;
+        }
+      }
+    }
     if ("richText" in value && Array.isArray(value.richText)) {
       return value.richText.map((part) => part.text ?? "").join("");
     }
@@ -75,19 +101,24 @@ export async function parseUserImport(buffer: Buffer): Promise<ParseImportResult
   }
 
   const workbook = new ExcelJS.Workbook();
+  let timeoutHandle: NodeJS.Timeout | undefined;
   try {
     // Comentariu onest: race-ul elibereaza handlerul HTTP dupa 30s, dar NU
     // opreste parsarea exceljs pornita in fundal. Apararea reala impotriva
     // fisierelor ostile e capul de 512KB + ruta admin-only.
     await Promise.race([
       workbook.xlsx.load(buffer as unknown as ArrayBuffer),
-      new Promise<never>((_, reject) => setTimeout(() => reject(new Error("parse timeout")), PARSE_TIMEOUT_MS)),
+      new Promise<never>((_, reject) => {
+        timeoutHandle = setTimeout(() => reject(new Error("parse timeout")), PARSE_TIMEOUT_MS);
+      }),
     ]);
   } catch (err) {
     // O linie de diagnostic server-side — altfel "user a trimis junk" si
     // "regresie de parser" sunt indistinguibile din raspunsul sanitizat.
     console.error("[userImport] xlsx parse failed:", err instanceof Error ? err.message : err);
     return { ok: false, code: "invalid_file", message: "Fisierul nu a putut fi citit ca .xlsx." };
+  } finally {
+    clearTimeout(timeoutHandle);
   }
 
   const sheet = workbook.worksheets[0];
@@ -101,7 +132,9 @@ export async function parseUserImport(buffer: Buffer): Promise<ParseImportResult
   sheet.eachRow((row, rowNumber) => {
     const cells: string[] = [];
     for (let col = 1; col <= 3; col++) {
-      cells.push(cellToString(row.getCell(col).value).trim());
+      // preferMailto DOAR pe coloana 1 (email) — un "Nume afisat" cu link nu
+      // trebuie inlocuit cu adresa/URL-ul.
+      cells.push(cellToString(row.getCell(col).value, col === 1).trim());
     }
     if (cells.some((cell) => cell !== "")) {
       rawRows.push({ rowNumber, cells });

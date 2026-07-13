@@ -239,7 +239,7 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
               </div>
               <p className="text-xs text-muted-foreground">
                 Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude Opus
-                4.8 & Sonnet 5 / Gemini 3.x / GPT-5.4), administrare utilizatori cu cote si granturi pe pool AI unic,
+                4.8 & Sonnet 5 / Gemini 3.x / GPT-5.6), administrare utilizatori cu cote si granturi pe pool AI unic,
                 audit exportabil — cheile API pastrate in OS keystore, backend legat pe loopback si protectie formula
                 injection la export.
               </p>

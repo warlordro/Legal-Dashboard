@@ -4,7 +4,6 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
-import { logger } from "hono/logger";
 import { secureHeaders } from "hono/secure-headers";
 import { rnpmRouter } from "./routes/rnpm.ts";
 import { dosareExportRouter, dosareRouter } from "./routes/dosare.ts";
@@ -45,16 +44,22 @@ import { selectPendingEmailRetries } from "./db/budgetNotificationsRepository.ts
 import { checkBudgetWarningRetry } from "./services/budgetWarningService.ts";
 import { purgeExpiredReservations } from "./db/aiUsageRepository.ts";
 import { purgeExpiredJti } from "./db/jwtDenylistRepository.ts";
+import { RETENTION_DAYS, runRetentionPurge } from "./services/retentionPurge.ts";
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
-import { getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
-import { recordAudit } from "./db/auditRepository.ts";
+import { getDb, getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
+import { markRnpmShuttingDown } from "./db/rnpmDb.ts";
+import { isRnpmSplitDone, rnpmSplitCompletedAt, runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
+import { getAuditEvents, recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
 import { getAvize, getAvizStats } from "./db/avizRepository.ts";
-import { runDailyBackup } from "./db/backup.ts";
+import { markMaintenanceShuttingDown, runDailyBackup, waitForBackupToSettle } from "./db/backup.ts";
+import { ErrorCodes, fail } from "./util/envelope.ts";
+import { appErrorHandler } from "./util/appErrorHandler.ts";
+import { adminBackupsRouter } from "./routes/adminBackups.ts";
+import { adminRnpmRouter } from "./routes/adminRnpm.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
-import { ErrorCodes, fail } from "./util/envelope.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -85,7 +90,29 @@ dotenv.config({
 
 const app = new Hono();
 
-app.use("*", logger());
+// v2.43.0 (rnpm-split): mapare centrala a erorilor de concurenta RNPM la 409.
+app.onError(appErrorHandler);
+
+// E2 (audit v2.43.0): logger-ul Hono scria URL-ul COMPLET — nume de parti,
+// numere de dosar si filtre juridice ajungeau in stdout (persistat pe
+// Docker/colectoare). Logam doar pathname + status + durata; requestId-ul e
+// setat de requestIdContext downstream si citit din header-ul de raspuns.
+app.use("*", async (c, next) => {
+  const t0 = Date.now();
+  await next();
+  const { pathname } = new URL(c.req.url);
+  console.log(
+    JSON.stringify({
+      action: "http",
+      method: c.req.method,
+      path: pathname,
+      status: c.res.status,
+      ms: Date.now() - t0,
+      requestId: c.res.headers.get("x-request-id") ?? undefined,
+      ts: new Date().toISOString(),
+    })
+  );
+});
 
 // Security headers + CSP (applied to both Electron-served HTML and future web build)
 app.use(
@@ -215,6 +242,24 @@ try {
 // envelope (fail()).
 app.use("*", requestIdContext);
 
+// E6 (audit v2.43.0): raspunsurile API autentificate nu aveau no-store decat
+// pe PAT/export. MERGE de directive (corectie Codex): rutele cu politici
+// proprii (SSE no-cache, exporturi no-store) le PASTREAZA — adaugam doar ce
+// lipseste, nu suprascriem.
+app.use("/api/*", async (c, next) => {
+  await next();
+  const existing = c.res.headers.get("Cache-Control");
+  const directives = new Set(
+    (existing ?? "")
+      .split(",")
+      .map((d) => d.trim().toLowerCase())
+      .filter(Boolean)
+  );
+  directives.add("no-store");
+  directives.add("private");
+  c.res.headers.set("Cache-Control", [...directives].join(", "));
+});
+
 // PR-9 fix B4: /health trebuie sa fie disponibil fara DB user lookup. Mount-uit
 // inainte de ownerContext, ca readiness probes sa nu cada cand users.local
 // lipseste sau auth web nu are token.
@@ -223,14 +268,10 @@ app.use("*", requestIdContext);
 // pentru probe externe / load balancer / Electron splash. Detaliile
 // operationale (authMode, monitoring scheduler state, emailConfigured) leakuiau
 // telemetry intern catre orice client neautentificat in mod web. Mutate la
-// `/health/detail`, accesibil doar de pe loopback (desktop in-proc +
-// container-internal probes).
-//
-// R07 hardening: in mod web, loopback singur nu mai e suficient — un reverse
-// proxy pe acelasi host ar putea atinge ruta ca "loopback". /health/detail
-// intoarce 403 neconditionat in web mode; ops foloseste plain /health
-// (200/503) pentru liveness. Nu exista in prezent un endpoint admin dedicat
-// de health detaliat in web mode.
+// `/health/detail`, accesibil:
+//   - de pe loopback (desktop in-proc + container-internal probes), sau
+//   - cu rol `admin` (web cutover: ops loggat).
+// Restul publicului primeste 403 fara informatii operationale.
 app.get("/health", publicHealthHandler);
 app.get("/health/detail", detailedHealthHandler);
 
@@ -275,18 +316,20 @@ if (getAuthMode() === "web") {
 // for cross-LAN POST/PUT/PATCH/DELETE.
 app.use("/api/*", originGuard);
 
-// R07 hardening (rev. v2.42.2): global 1MB safety net pe /api/*. Hono ruleaza
-// middleware-ul in ordinea INREGISTRARII, deci limiterul trebuie montat inaintea
-// ORICARUI router /api — v2.42.1 il monta dupa mount-ul /api/v1/tokens (web mode),
-// ceea ce lasa POST /api/v1/tokens complet fara limita de body. Simetric, montat
-// global inaintea routerelor ar UMBRI limitele per-ruta mai mari de 1MB (Hono
-// bodyLimit intoarce 413 pe Content-Length fara sa apeleze next()), deci rutele
-// cu payload mare legitim sunt exceptate exact-match si raman guvernate de
-// limitele lor proprii: export xlsx dosare/termene (25MB), name-lists
-// preview/commit (10MB/15MB). Restul rutelor cu limite proprii (toate <1MB)
-// primesc doar plafonul suplimentar de siguranta. Same envelope shape as the
-// per-route limiters.
+// Bug 1a (v2.42.2): plasa globala 1MB pe /api/*, montata inainte de TOATE
+// routerele — POST /api/v1/tokens facea await c.req.json() fara nicio limita
+// (orice sesiune autentificata putea bufera sute de MB in procesul partajat).
+// Rutele cu payload mare legitim raman guvernate de limitele lor per-ruta
+// (25MB export xlsx dosare/termene, 10/15MB name-lists) prin exceptii
+// exact-match: bodyLimit din Hono intoarce 413 pe Content-Length fara sa
+// apeleze next(), deci plasa montata fara exceptii le-ar umbri (regresia
+// v2.42.1 de pe GitHub, Bug 1b — nu o reproduce).
 const GLOBAL_BODY_LIMIT = 1024 * 1024;
+// Audit advers 2026-07-09: rutele exceptate NU trec cu next() gol — primesc un
+// plafon exterior de 25MB (cel mai mare cap per-ruta existent), astfel incat
+// limitele lor proprii raman defense-in-depth, nu singura aparare: un refactor
+// care ar scapa un bodyLimit per-ruta nu reintroduce buffering nelimitat.
+const LARGE_BODY_CEILING = 25 * 1024 * 1024;
 const LARGE_BODY_ROUTES = new Set([
   "/api/v1/dosare/export.xlsx",
   "/api/v1/termene/export.xlsx",
@@ -298,7 +341,13 @@ const globalBodyLimit = bodyLimit({
   maxSize: GLOBAL_BODY_LIMIT,
   onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
 });
-app.use("/api/*", (c, next) => (LARGE_BODY_ROUTES.has(c.req.path) ? next() : globalBodyLimit(c, next)));
+const largeBodyCeiling = bodyLimit({
+  maxSize: LARGE_BODY_CEILING,
+  onError: (c) => c.json(fail(ErrorCodes.PAYLOAD_TOO_LARGE, "Payload prea mare", c), 413),
+});
+app.use("/api/*", (c, next) =>
+  LARGE_BODY_ROUTES.has(c.req.path) ? largeBodyCeiling(c, next) : globalBodyLimit(c, next)
+);
 
 // Token-management DUPA originGuard (CSRF) + rateLimit. Gate-ul de mai sus deja respinge
 // PAT-urile pe /api/v1/tokens (PAT_CANNOT_MANAGE_TOKENS), deci sesiunile ajung aici Origin-checked.
@@ -317,22 +366,18 @@ const HEALTH_LOOPBACK_ADDRESSES = new Set(["127.0.0.1", "::1", "::ffff:127.0.0.1
 // `service`. Probele externe (LB, container orchestrator) au tot ce le trebuie:
 // 200=ok, 503=starting. Telemetry-ul operational (authMode, monitoring,
 // emailConfigured) e disponibil pe `/health/detail` filtrat prin loopback.
-// Boot-nonce identity check (Electron only): main.js seteaza
-// LEGAL_DASHBOARD_BOOT_NONCE inainte de a incarca backend-ul in-proc si
-// verifica ca /health raspunde cu acelasi nonce, ca protectie impotriva unui
-// alt proces care a apucat portul intre timp. Absent in server/web mode —
-// camp omis complet, nu doar undefined, ca sa nu apara telemetrie noua in
-// raspunsul public.
-const BOOT_NONCE = process.env.LEGAL_DASHBOARD_BOOT_NONCE;
-
 function publicHealthHandler(c: Context): Response {
   if (!ready) {
-    return c.json(
-      { status: "starting", service: "Legal Dashboard API", ...(BOOT_NONCE ? { boot: BOOT_NONCE } : {}) },
-      503
-    );
+    return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
   }
-  return c.json({ status: "ok", service: "Legal Dashboard API", ...(BOOT_NONCE ? { boot: BOOT_NONCE } : {}) });
+  // Bug 9 (v2.42.1): health-check-ul de boot din Electron verifica un nonce
+  // generat de main process (protectie port-squat: un alt proces care a ocupat
+  // portul nu poate ghici nonce-ul). Campul e emis DOAR cand env-ul e setat de
+  // main inainte de require-ul backend-ului in-proc; in web mode e omis
+  // neconditionat (audit advers 2026-07-09) — un env setat accidental pe un
+  // deployment web nu ajunge pe endpoint-ul public.
+  const bootNonce = getAuthMode() !== "web" ? process.env.LEGAL_DASHBOARD_BOOT_NONCE : undefined;
+  return c.json({ status: "ok", service: "Legal Dashboard API", ...(bootNonce ? { bootNonce } : {}) });
 }
 
 function isLoopbackPeer(c: Context): boolean {
@@ -350,10 +395,13 @@ function detailedHealthHandler(c: Context): Response {
   if (!ready) {
     return c.json({ status: "starting", service: "Legal Dashboard API" }, 503);
   }
-  // R07 hardening: in web mode, un reverse proxy pe acelasi host ar putea atinge
-  // aceasta ruta ca "loopback" — telemetry-ul operational (monitoring, email) nu e
-  // pentru consum public, deci gate-ul e neconditionat aici, chiar si de pe loopback.
-  // Ops in web mode foloseste plain /health (200/503) pentru liveness.
+  // Bug 5 (v2.42.1): in web mode gate-ul de loopback nu e suficient — un
+  // reverse proxy pe acelasi host (Caddy, oauth2-proxy) atinge ruta ca
+  // "loopback" si ar expune telemetrie operationala (authMode, monitoring,
+  // emailConfigured) oricarui client neautentificat. Ops in web mode
+  // foloseste /health (liveness 200/503); un endpoint admin-only pentru
+  // telemetrie (ex. /api/v1/admin/health) e follow-up — vezi triajul F04 din
+  // planul 2026-07-09.
   if (getAuthMode() === "web") {
     return c.json({ error: { code: "forbidden", message: "not available in web mode" } }, 403);
   }
@@ -408,6 +456,8 @@ app.route("/api/v1/auth", authRouter);
 // PR-8: current-user profile (always mounted) + admin surface (gated by
 // requireRole('admin') inside the router so non-admins get 403, not 404).
 app.route("/api/v1/me", meRouter);
+app.route("/api/v1/admin/backups", adminBackupsRouter);
+app.route("/api/v1/admin/rnpm", adminRnpmRouter);
 app.route("/api/v1/admin", adminRouter);
 // PR-A (v2.7.0): dashboard summary aggregation endpoint pentru KPI strip.
 // Owner-scoped, wrapped in withMaintenanceRead pentru a coexista cu backup/restore.
@@ -497,35 +547,82 @@ if (getAuthMode() === "desktop") {
   }
 }
 
+// Fix review (Task 4): schema init EXPLICIT inainte de splitter — un esec de
+// migratii era raportat "rnpm split failed" (splitter-ul apeleaza getDb()
+// intern), atributie gresita pentru operator.
+try {
+  getDb();
+} catch (e) {
+  fatalBoot("schema init failed", e);
+}
+
+// Fix review (Task 4): gate-ul de master key (web-only) ruleaza INAINTE de
+// splitter — un TENANT_KEY_ENCRYPTION_SECRET lipsa/invalid aborta boot-ul
+// DUPA split, cu monolitul deja golit si datele mutate in fisiere per-user
+// (stare corecta dar surprinzatoare la un abort de config). Round-trip probe:
+// encrypt + decrypt pe un sentinel non-secret, ca o cheie gresita (drift de
+// rotatie, polyfill crypto) sa pice BOOT-ul, nu primul PUT /keys real (F1.5).
+if (getAuthMode() === "web") {
+  try {
+    getMasterKey();
+    const probe = `boot-probe-${Date.now()}`;
+    const round = decryptKey(encryptKey(probe));
+    if (round !== probe) {
+      throw new Error("tenant key crypto round-trip mismatch");
+    }
+  } catch (e) {
+    fatalBoot("tenant key crypto self-test failed", e);
+  }
+}
+
+// v2.43.0 (rnpm-split): splitter-ul one-time ruleaza DUPA toate gate-urile
+// fatale de configuratie (instance lock, auth config, remote bind, master
+// key) si INAINTE de prewarm/scheduler/serve — prewarm-ul de mai jos deschide
+// deja fisiere per-user prin getRnpmDb, deci datele trebuie mutate intai.
+// Fail-closed: orice esec de split opreste boot-ul (monolitul ramane sursa
+// de adevar).
+try {
+  const splitResult = runRnpmSplitIfNeeded({ appVersion: APP_VERSION });
+  if (splitResult.split) console.log(`[boot] rnpm split complet: ${splitResult.owners.length} owneri`);
+} catch (e) {
+  fatalBoot("rnpm split failed", e);
+}
+
 // Run schema init + descriere migration + prewarm BEFORE binding the port. On
 // large DBs, VACUUM/ALTER blocks the event loop for tens of seconds; if serve()
 // were already listening we'd serve "ok" /health while real requests starve
 // behind the migration. Better: bind only when ready. Electron splash and any
 // orchestrator see connection-refused → polled retry, not a misleading 200.
 try {
-  // Boot prewarm: ownerId-ul nu conteaza functional (rezultatul nu e folosit),
-  // dar F2 cere ca apelul sa il primeasca explicit; trecem `"local"` pentru
-  // simetrie cu desktop adapter — singura cale prin care porneste codul azi.
-  getAvize({ ownerId: "local", pageSize: 1 });
+  // Boot prewarm rnpm: DOAR pe desktop (fix review, Task 6) — "local" e
+  // singurul user acolo; in web mode apelurile ar PROVISIONA prin getRnpmDb
+  // un fisier rnpm/local-*.db orfan pentru un owner care nu exista ca user.
+  if (getAuthMode() === "desktop") {
+    getAvize({ ownerId: "local", pageSize: 1 });
+    getAvizStats("local");
+  }
   flushPendingReclaimAudit();
-  getAvizStats("local");
-  if (getAuthMode() === "web") {
-    getMasterKey();
-    // Round-trip probe: encrypt + decrypt a non-secret sentinel so a
-    // misconfigured master key (length-32 but wrong, mid-rotation drift, or a
-    // crypto polyfill regression) fails BOOT instead of failing the first real
-    // admin /keys PUT later. Sentinel is generated per boot — never logs or
-    // touches the DB. F1.5 (audit 2026-05-19).
-    try {
-      const probe = `boot-probe-${Date.now()}`;
-      const round = decryptKey(encryptKey(probe));
-      if (round !== probe) {
-        throw new Error("tenant key crypto round-trip mismatch");
-      }
-    } catch (probeErr) {
-      fatalBoot("tenant key crypto self-test failed", probeErr);
+  // B1 (corectie Codex): auditul splitului trebuie sa fie DURABIL. Markerul
+  // done se scrie inainte de return in splitter; daca recordAudit ar esua
+  // aici, boot-urile urmatoare intorc split:false si evenimentul s-ar pierde
+  // definitiv. Backfill idempotent: marker done + zero randuri rnpm.split in
+  // audit_log => inserteaza acum (o interogare pe boot, ieftina).
+  // Garda pe varsta (fix Codex, retentie vs backfill): dupa RETENTION_DAYS
+  // absenta randului e purjarea legitima, nu un audit pierdut — re-inserarea
+  // ar sugera un split recent cu timestamp fals.
+  if (isRnpmSplitDone() && getAuditEvents({ action: "rnpm.split", limit: 1 }).length === 0) {
+    const completedAt = rnpmSplitCompletedAt();
+    const ageMs = completedAt ? Date.now() - Date.parse(completedAt) : Number.POSITIVE_INFINITY;
+    if (ageMs < RETENTION_DAYS * 86_400_000) {
+      recordAudit(null, "rnpm.split", {
+        ownerId: null,
+        actorId: "system",
+        detail: { version: APP_VERSION, backfilled: true },
+      });
     }
   }
+  // Gate-ul de master key (web-only, getMasterKey + round-trip probe) a fost
+  // MUTAT inainte de runRnpmSplitIfNeeded (fix review, Task 4).
   recordAudit(null, "system.boot", {
     ownerId: null,
     actorId: "system",
@@ -552,6 +649,24 @@ try {
         action: "proxy.trusted_cidr.unsupported",
         note: "LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR contine entry-uri non-IPv4 / prefix invalid; sunt ignorate de XFF walk.",
         entries: unsupportedProxyCidrs,
+        ts: new Date().toISOString(),
+      })
+    );
+  }
+
+  // Fix review (Task 6.3, finding PLAUSIBLE tratat operational): in web mode
+  // in spatele unui reverse proxy, garduri precum originGuard si rate limiter
+  // depind de identificarea corecta a peer-ului; fara TRUSTED_PROXY_CIDR toate
+  // cererile au ca peer IP-ul proxy-ului (rate-limit bucket comun, XFF
+  // ignorat). Warn structurat, nu fatal — exista deploy-uri web fara proxy.
+  if (getAuthMode() === "web" && (process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR ?? "").trim() === "") {
+    console.warn(
+      JSON.stringify({
+        action: "proxy.trusted_cidr.missing",
+        note:
+          "Web mode fara LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: X-Forwarded-For e ignorat, " +
+          "toti clientii din spatele proxy-ului impart acelasi bucket de rate-limit. " +
+          "Seteaza CIDR-ul retelei proxy-ului (vezi DEPLOY-SERVER.md / RUNBOOK.md).",
         ts: new Date().toISOString(),
       })
     );
@@ -632,6 +747,12 @@ let reservationPurgeInterval: NodeJS.Timeout | null = null;
 // independent daily timer in web mode only, mirroring reservationPurgeInterval.
 const JWT_PURGE_INTERVAL_MS = 86_400_000;
 let jwtPurgeInterval: NodeJS.Timeout | null = null;
+// E4 (audit v2.43.0): retentia audit_log + ai_usage rula DOAR in scheduler-ul
+// de monitoring — cu MONITORING_ENABLED=0 (indiferent de mod, desktop sau web)
+// tabelele cresteau nelimitat. Timer independent, AMBELE moduri.
+const RETENTION_PURGE_INTERVAL_MS = 86_400_000;
+let retentionPurgeInterval: NodeJS.Timeout | null = null;
+let retentionInitialTimer: NodeJS.Timeout | null = null;
 
 async function refreshFxRatesSafely(label: string): Promise<void> {
   try {
@@ -751,6 +872,20 @@ const httpServer = serve({ fetch: app.fetch, port, hostname }, () => {
     jwtPurgeInterval.unref?.();
   }
 
+  // E4: in AMBELE moduri (desktop + web) — finding-ul acopera exact
+  // deploy-urile cu MONITORING_ENABLED=0, indiferent de mod.
+  retentionPurgeInterval = setInterval(() => {
+    runRetentionPurge();
+  }, RETENTION_PURGE_INTERVAL_MS);
+  retentionPurgeInterval.unref?.();
+  // Timerul de 24h de mai sus nu ruleaza niciodata pe procese cu viata scurta
+  // (desktop inchis zilnic) — un run initial amanat 60s dupa boot asigura
+  // retentia si pe sesiunile care nu supravietuiesc pana la primul tick.
+  retentionInitialTimer = setTimeout(() => {
+    runRetentionPurge();
+  }, 60_000);
+  retentionInitialTimer.unref?.();
+
   // PR-4: start the scheduler AFTER listen + backup are queued. The scheduler
   // shares the maintenance lock with backup so concurrent ticks pause cleanly
   // for a writer; starting it any earlier would race the schema/prewarm path
@@ -804,10 +939,16 @@ httpServer.on("error", (err: Error) => {
 // - Electron mode: main.js calls the exported closer on `before-quit` (in-process bundle).
 // closeDb() is idempotent (null-guarded in schema.ts).
 const SHUTDOWN_DRAIN_MS = 30_000;
-let shuttingDown = false;
-async function gracefulShutdown(reason: string): Promise<void> {
-  if (shuttingDown) return;
-  shuttingDown = true;
+// Idempotent prin JOIN, nu early-return (INT-H1): al doilea apelant (ex.
+// heartbeat fatal peste un SIGTERM in curs) asteapta ACELASI drain complet,
+// in loc sa primeasca un promise rezolvat instant si sa faca exit peste el.
+let shutdownPromise: Promise<void> | null = null;
+function gracefulShutdown(reason: string): Promise<void> {
+  if (shutdownPromise) return shutdownPromise;
+  shutdownPromise = gracefulShutdownImpl(reason);
+  return shutdownPromise;
+}
+async function gracefulShutdownImpl(reason: string): Promise<void> {
   console.log(`[shutdown] ${reason} — draining HTTP + scheduler + closing SQLite`);
   try {
     recordAudit(null, "system.shutdown", {
@@ -866,6 +1007,14 @@ async function gracefulShutdown(reason: string): Promise<void> {
     clearInterval(jwtPurgeInterval);
     jwtPurgeInterval = null;
   }
+  if (retentionPurgeInterval) {
+    clearInterval(retentionPurgeInterval);
+    retentionPurgeInterval = null;
+  }
+  if (retentionInitialTimer) {
+    clearTimeout(retentionInitialTimer);
+    retentionInitialTimer = null;
+  }
 
   // v2.20.8: stop rate-limit sweep timer la shutdown. Idempotent (no-op daca
   // sweeper-ul nu a pornit, ex. boot failure inainte de listen).
@@ -892,6 +1041,42 @@ async function gracefulShutdown(reason: string): Promise<void> {
     console.error("[shutdown] stopDailyReportScheduler failed:", e);
   }
 
+  // Fix review (Task 4): flag-ul de shutdown refuza scrierile de mentenanta
+  // NOI (503 prin handlerul central; HTTP-ul e oricum drenat mai sus), apoi
+  // settle-set-ul asteapta TOATE write-urile in zbor — daily/manual backup,
+  // restore monolit/rnpm, inclusiv writerii inca in coada pe lock. Plafon 30s;
+  // poate fi depasit de VACUUM-ul sincron multi-target pana la Task 7
+  // (fereastra existenta si inainte, la 10s).
+  // EXT-H-01: plafonul e configurabil pentru teste; rezultatul (settled sau
+  // nu) decide mai jos daca instance lock-ul se elibereaza sau se retine.
+  const settleTimeoutMs = Number(process.env.LEGAL_DASHBOARD_SETTLE_TIMEOUT_MS) || 30_000;
+  let maintenanceSettled = true;
+  try {
+    markMaintenanceShuttingDown();
+    maintenanceSettled = await waitForBackupToSettle(settleTimeoutMs);
+    if (!maintenanceSettled) {
+      console.error(
+        JSON.stringify({
+          action: "shutdown.maintenance_unsettled",
+          detail: "writer de mentenanta inca in zbor dupa plafon",
+          timeoutMs: settleTimeoutMs,
+          ts: new Date().toISOString(),
+        })
+      );
+    }
+  } catch (e) {
+    maintenanceSettled = false;
+    console.error("[shutdown] waitForBackupToSettle failed:", e);
+  }
+
+  // v2.43.0 (rnpm-split): inchide si latch-uieste registry-ul de fisiere RNPM
+  // per user inainte de monolit — aceeasi ratiune de guard ca markShuttingDown.
+  try {
+    markRnpmShuttingDown();
+  } catch (e) {
+    console.error("[shutdown] markRnpmShuttingDown failed:", e);
+  }
+
   // markShuttingDown() closes the DB AND latches the open-guard so any
   // microtask-deferred ai_usage write that lost the race against drain
   // throws instead of silently reopening a fresh handle on its way out.
@@ -901,7 +1086,21 @@ async function gracefulShutdown(reason: string): Promise<void> {
   } catch (e) {
     console.error("[shutdown] markShuttingDown failed:", e);
   }
-  releaseInstanceLock();
+  // EXT-H-01: lock-ul se elibereaza DOAR daca writerii au settled. Altfel
+  // ramane pe disc (fail-safe): instanta noua il vede stale dupa ~30s
+  // (HEARTBEAT_MS x STALE_FACTOR) si il recupereaza prin gate — nu porneste
+  // curat PESTE un swap in zbor.
+  if (maintenanceSettled) {
+    releaseInstanceLock();
+  } else {
+    console.error(
+      JSON.stringify({
+        action: "shutdown.lock_retained",
+        detail: "instance lock pastrat intentionat; recuperat ca stale la urmatorul boot",
+        ts: new Date().toISOString(),
+      })
+    );
+  }
 }
 process.on("SIGTERM", () => {
   void gracefulShutdown("SIGTERM").finally(() => process.exit(0));

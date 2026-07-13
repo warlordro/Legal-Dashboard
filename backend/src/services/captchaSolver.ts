@@ -230,6 +230,10 @@ async function solveRace(
     return winner.tok;
   } catch (e) {
     if (e instanceof AggregateError) {
+      // Abort-ul clientului aborteaza ambele sloturi -> ambele rejecteaza si
+      // Promise.any arunca AggregateError. Fara recheck-ul de mai jos, abort-ul
+      // ar iesi ca CaptchaError generic si ruta ar raspunde 500 in loc de 499.
+      if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       const errs = e.errors
         .map((x) => {
           const info = x as { provider?: string; err?: unknown };

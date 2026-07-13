@@ -12,6 +12,7 @@ const {
 } = require("electron");
 const path = require("node:path");
 const fs = require("node:fs");
+const { randomUUID } = require("node:crypto");
 const pkg = require(path.join(__dirname, "..", "package.json"));
 const { registerNotificationIpc } = require(path.join(__dirname, "notifications.js"));
 const { startEventLoopWatchdog } = require(path.join(__dirname, "event-loop-watchdog.js"));
@@ -76,17 +77,18 @@ process.on("unhandledRejection", (reason) => {
 // re-issue app.quit(). The `backendShutdownStarted` flag short-circuits the
 // recursive before-quit fired by the second app.quit().
 //
-// Hard cap so a wedged socket can never hang the user's quit indefinitely;
-// scheduler.stop() already propagates AbortSignal into fetch, so reaching the
-// timeout would indicate a runner that swallowed cancellation — log and force.
-// rev. v2.42.2: capul era 5s, mult sub bugetul intern al backend-ului
-// (SHUTDOWN_DRAIN_MS 30s + drainEmailDispatches 5s in index.ts), deci orice
-// quit in timpul unui tick de monitoring taia drain-ul gratios si arunca
-// outcome-ul run-ului in zbor. Capul de aici e doar failsafe-ul EXTERIOR —
-// bugetele interne ale backend-ului guverneaza durata reala (drain-ul se
-// rezolva in ms cand nu e nimic in zbor); 40s > 30s + 5s + marja.
+// Bug 10 (v2.42.2): capul exterior TREBUIE sa fie peste bugetul intern de
+// drain al backend-ului — cu 5s, orice quit in timpul unui tick de monitoring
+// taia drain-ul si arunca outcome-ul run-ului in zbor. Drain-ul se rezolva in
+// milisecunde cand nu e nimic in zbor, deci quit-ul normal ramane instant;
+// plafonul e doar cazul patologic (runner care a inghitit cancellation).
+// v2.43.0 (EXT-H-01, fix Codex): bugetul intern a crescut — SHUTDOWN_DRAIN_MS
+// 30s + drainEmailDispatches 5s + waitForBackupToSettle 30s (settle-ul
+// writerilor de mentenanta, care decide si retinerea instance lock-ului).
+// 40s taia settle-ul exact in timpul unui restore/compact in zbor; 75s
+// acopera 30+5+30 plus marja pentru inchiderea SQLite.
 let backendShutdownStarted = false;
-const BACKEND_SHUTDOWN_TIMEOUT_MS = 40_000;
+const BACKEND_SHUTDOWN_TIMEOUT_MS = 75_000;
 app.on("before-quit", (event) => {
   const shutdown = globalThis.__legalDashboardShutdown;
   if (typeof shutdown !== "function") return;
@@ -124,12 +126,11 @@ app.on("before-quit", (event) => {
 
 let mainWindow;
 let backendStarted = false;
-let bootNonce = null;
 
-// SECURITY: process.env.NODE_ENV is only forced to "production" inside startBackend(),
-// which runs after this module-level evaluation — in packaged installs NODE_ENV is
-// unset at this point, so a check against it would leave DevTools + debug menu on.
-// app.isPackaged is set by Electron itself and is reliable at load time.
+// Bug 8 (v2.42.1): NODE_ENV se seteaza pe "production" abia in startBackend(),
+// DUPA ce modulul s-a evaluat — build-urile instalate ramaneau cu DevTools +
+// meniul de debug active (expunere desktopApi.decryptKeys din consola).
+// app.isPackaged e adevarul direct al packagerului.
 const IS_DEV = !app.isPackaged;
 
 function buildAppMenu() {
@@ -233,10 +234,11 @@ function startBackend() {
     process.env.MONITORING_ENABLED = "1";
   }
 
-  // SECURITY: boot nonce — proves the /health response on BACKEND_PORT actually came
-  // from the backend we just spawned, not from another process squatting the port.
-  // The backend echoes this back in body.boot when the env var is set.
-  bootNonce = require("node:crypto").randomBytes(16).toString("hex");
+  // Bug 9 (v2.42.1): nonce generat de main, ecou in /health — health-check-ul
+  // de boot nu mai poate fi pacalit de un alt proces care a ocupat portul
+  // (port squat) si raspunde cu service-ul asteptat. Setat INAINTE de
+  // require-ul backend-ului in-proc, ca env-ul sa fie vizibil la module load.
+  const bootNonce = randomUUID();
   process.env.LEGAL_DASHBOARD_BOOT_NONCE = bootNonce;
 
   try {
@@ -261,10 +263,8 @@ function startBackend() {
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
         .then((body) => {
           // SECURITY: Verify response identity to prevent port hijacking.
-          // body.boot must echo the nonce we generated for this launch — a
-          // service-name string alone is trivially spoofable by anything
-          // squatting the port.
-          if (body && body.service === "Legal Dashboard API" && body.boot === bootNonce) {
+          // Bug 9 (v2.42.1): numele serviciului e ghicibil — nonce-ul per-boot nu.
+          if (body && body.service === "Legal Dashboard API" && body.bootNonce === bootNonce) {
             backendStarted = true;
             resolve();
           } else {
@@ -292,15 +292,12 @@ function startBackend() {
 const MAX_PLAINTEXT = 8 * 1024;
 const MAX_CIPHERTEXT_B64 = 16 * 1024;
 
-// SECURITY: only the app's own renderer may drive safeStorage — reject IPC calls
-// from any OTHER webContents (child window / sub-frame that inherited the preload).
-// Nota (rev. v2.42.2): codul injectat din consola DevTools ruleaza in webContents-ul
-// paginii inspectate, deci trece acest check — vectorul DevTools e mitigat de
-// `devTools: IS_DEV` (dezactivat in productie), nu de comparatia de sender.
-// mainWindow is not created yet when registerSafeStorageIpc() runs, so null-safe
-// comparison means "no window yet" is treated as untrusted rather than throwing.
+// Bug 9 (v2.42.1): valideaza ca IPC-ul vine din webContents-ul ferestrei
+// principale. NU blocheaza codul injectat din consola DevTools (acela ruleaza
+// in acelasi webContents si trece check-ul) — mitigarea reala pentru consola e
+// devTools: IS_DEV. Check-ul opreste webContents secundare (webview, popup).
 function isTrustedIpcSender(event) {
-  return !!mainWindow && event.sender === mainWindow.webContents;
+  return Boolean(mainWindow) && !mainWindow.isDestroyed() && event.sender === mainWindow.webContents;
 }
 
 function registerSafeStorageIpc() {

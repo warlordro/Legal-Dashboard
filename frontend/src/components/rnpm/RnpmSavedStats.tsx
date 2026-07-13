@@ -1,23 +1,12 @@
 import { useEffect, useState, useCallback } from "react";
-import {
-  Database,
-  Copy,
-  Check,
-  RefreshCw,
-  Info,
-  FolderOpen,
-  Archive,
-  X,
-  Trash2,
-  History,
-  Minimize2,
-} from "lucide-react";
+import { Database, RefreshCw, Info, FolderOpen, Archive, X, Trash2, History, Minimize2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
   rnpmGetStats,
   rnpmOpenDbFolder,
   rnpmOpenBackupsFolder,
+  rnpmCreateBackup,
   rnpmDeleteBackups,
   rnpmDeleteAllSaved,
   rnpmListBackups,
@@ -49,7 +38,7 @@ export function RnpmSavedStats({ refreshKey, onAfterDeleteAll }: RnpmSavedStatsP
   return (
     <>
       <Button type="button" variant="outline" size="sm" onClick={() => setOpen(true)}>
-        <Info className="h-4 w-4" /> Info baza locala
+        <Info className="h-4 w-4" /> Baza mea RNPM
       </Button>
       {open && (
         <StatsModal onClose={() => setOpen(false)} refreshKey={refreshKey} onAfterDeleteAll={onAfterDeleteAll} />
@@ -67,12 +56,16 @@ function StatsModal({
   const [stats, setStats] = useState<RnpmStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [copied, setCopied] = useState(false);
   const [folderError, setFolderError] = useState<string | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [compacting, setCompacting] = useState(false);
   const [compactMsg, setCompactMsg] = useState<string | null>(null);
+  // v2.43.0: delete-all poate reusi pe partea de stergere dar esua la
+  // compactarea automata (spatiul ramane ocupat) — avertisment informativ,
+  // NU eroare blocanta (stergerea in sine a reusit).
+  const [deleteWarning, setDeleteWarning] = useState<string | null>(null);
   const [showRestore, setShowRestore] = useState(false);
+  const [creatingBackup, setCreatingBackup] = useState(false);
   // null = inca nu am aflat / eroare la listare → lasam butonul activ ca user-ul sa reincerce.
   const [backupCount, setBackupCount] = useState<number | null>(null);
 
@@ -113,17 +106,6 @@ function StatsModal({
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, compacting]);
 
-  const handleCopyPath = async () => {
-    if (!stats?.db.path) return;
-    try {
-      await navigator.clipboard.writeText(stats.db.path);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {
-      setError("Nu am putut copia calea");
-    }
-  };
-
   const handleOpenFolder = async () => {
     setFolderError(null);
     try {
@@ -142,11 +124,29 @@ function StatsModal({
     }
   };
 
+  // v2.43.0 (rnpm-split): backup manual self-service al fisierului propriu.
+  // 429 (cooldown) vine ca Error cu mesajul din envelope — il afisam ca
+  // eroare temporara, butonul ramane activ.
+  const handleCreateBackup = async () => {
+    if (creatingBackup) return;
+    setCreatingBackup(true);
+    setFolderError(null);
+    setCompactMsg(null);
+    try {
+      const { name } = await rnpmCreateBackup();
+      setCompactMsg(`Backup creat: ${name}.`);
+      await loadBackups();
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : "Eroare la crearea backup-ului");
+    } finally {
+      setCreatingBackup(false);
+    }
+  };
+
   const handleDeleteBackups = async () => {
     if (
       !(await confirm({
-        message:
-          "Stergi toate backup-urile bazei locale?\n\nUrmatorul backup se va genera la urmatoarea pornire a aplicatiei.",
+        message: "Stergi toate backup-urile TALE RNPM?\n\nCelelalte module si ceilalti utilizatori nu sunt afectati.",
         confirmLabel: "Sterge backups",
         destructive: true,
       }))
@@ -201,8 +201,14 @@ function StatsModal({
     )
       return;
     setDeleting(true);
+    setDeleteWarning(null);
     try {
-      await rnpmDeleteAllSaved();
+      const { compacted } = await rnpmDeleteAllSaved();
+      if (!compacted) {
+        setDeleteWarning(
+          "Avizele au fost sterse, dar eliberarea spatiului pe disc a esuat. Spatiul se recupereaza la urmatoarea compactare reusita."
+        );
+      }
       onAfterDeleteAll?.();
       await load();
     } catch (e) {
@@ -228,7 +234,7 @@ function StatsModal({
         <div className="flex items-center justify-between border-b border-border px-4 py-3">
           <h3 className="flex items-center gap-2 text-sm font-semibold">
             <Info className="h-4 w-4 text-muted-foreground" />
-            Info baza locala
+            Baza mea RNPM
           </h3>
           <button
             type="button"
@@ -284,21 +290,6 @@ function StatsModal({
                   Dimensiune: <span className="font-mono text-foreground">{formatBytes(stats.db.sizeBytes)}</span>{" "}
                   <span className="opacity-70">(date + jurnal)</span>
                 </div>
-                <div className="leading-5">
-                  <span>Cale: </span>
-                  <span className="font-mono text-foreground break-all" title={stats.db.path}>
-                    {stats.db.path}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={handleCopyPath}
-                    className="ml-1 inline-flex h-4 w-4 translate-y-[2px] items-center justify-center rounded hover:bg-muted focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    title={copied ? "Copiat!" : "Copiaza calea"}
-                    aria-label={copied ? "Copiat" : "Copiaza calea"}
-                  >
-                    {copied ? <Check className="h-3 w-3 text-green-600" /> : <Copy className="h-3 w-3" />}
-                  </button>
-                </div>
               </div>
 
               <div className="flex flex-wrap items-center gap-2 border-t border-border pt-3">
@@ -307,6 +298,17 @@ function StatsModal({
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={handleOpenBackups}>
                   <Archive className="h-4 w-4" /> Backups
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleCreateBackup}
+                  disabled={creatingBackup}
+                  title="Creeaza un backup manual al bazei tale RNPM"
+                >
+                  {creatingBackup ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Archive className="h-4 w-4" />}
+                  Creeaza backup acum
                 </Button>
                 <Button type="button" variant="outline" size="sm" onClick={() => setShowRestore(true)}>
                   <History className="h-4 w-4" /> Restaurare
@@ -349,6 +351,7 @@ function StatsModal({
               </div>
               {folderError && <div className="text-xs text-red-600 dark:text-red-400">{folderError}</div>}
               {compactMsg && <div className="text-xs text-muted-foreground">{compactMsg}</div>}
+              {deleteWarning && <div className="text-xs text-amber-600 dark:text-amber-400">{deleteWarning}</div>}
             </>
           )}
         </div>

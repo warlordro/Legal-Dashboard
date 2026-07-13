@@ -10,11 +10,14 @@ import {
   type RnpmFullDetail,
 } from "./rnpmClient.ts";
 import { getSearchOwnership, saveSearch, updateSearchTotal } from "../db/searchRepository.ts";
+import { beginRnpmSearch, endRnpmSearch } from "../db/rnpmActivity.ts";
 import { saveAvizFull } from "../db/avizRepository.ts";
 import { withMaintenanceRead } from "../db/backup.ts";
 import { buildSaveAvizInput } from "./rnpmAvizMapper.ts";
 import { stripDiacriticsDeep } from "../util/textNormalize.ts";
 import { DESTINATII_BY_CATEGORY, hasNestedDestinations } from "./rnpmDestinations.ts";
+
+export type RnpmStorageLimitCheck = (ownerId: string) => Promise<void>;
 
 export interface ExecuteSearchInput {
   type: RnpmSearchType;
@@ -35,6 +38,7 @@ export interface ExecuteSearchInput {
   fetchDetails?: boolean;
   detailConcurrency?: number;
   signal?: AbortSignal;
+  storageLimitCheck?: RnpmStorageLimitCheck;
   // v2.20.3 Grupul K — invoked exact o data, sincron, dupa ce search row e creat
   // (saveSearch sau cand existingSearchId e prezent — fired imediat). Permite
   // catch-ul AbortError din ruta /search sa includa searchId in 499 body pentru
@@ -87,6 +91,15 @@ const MAX_TOTAL_RESULTS = 1500;
 // daca era doar fluke.
 const K_SILENT_REFUSAL_FAIL_FAST = 3;
 
+// Fix audit v2.43: refuzul de limita de stocare nu se poate schimba intre
+// itemele aceluiasi batch (nimic nu sterge date intre timp), deci buclele
+// bulk/split se opresc la primul refuz — fiecare recheck inutil ar costa un
+// lock global de mentenanta + stat + checkpoint pe fisierul RNPM.
+const isStorageLimitError = (e: unknown): boolean =>
+  (e as { code?: unknown } | null | undefined)?.code === "RNPM_STORAGE_LIMIT";
+
+const STORAGE_STOP_MSG = "Oprit: limita de stocare RNPM atinsa (nu a fost pornit).";
+
 // Single-line JSON timing line on stdout. Same shape as other audit events
 // (ai_call, restore). Lets ops grep `"action":"rnpm_phase"` and pivot by
 // phase to see where wall-clock time goes (captcha solver vs RNPM search vs
@@ -100,31 +113,38 @@ function logRnpmEvent(entry: Record<string, unknown>): void {
   );
 }
 
+// v2.43.0 (rnpm-split): bracketing de activitate per owner — cat timp o cautare
+// e in zbor, restore-ul fisierului RNPM al ownerului e refuzat (si invers,
+// beginRnpmSearch arunca RESTORE_IN_PROGRESS daca un restore e in curs).
+// end-ul ruleaza in finally, inclusiv pe erori/abort.
 export async function executeSearch(
+  input: ExecuteSearchInput,
+  client: RnpmClient = defaultRnpmClient
+): Promise<ExecuteSearchResult> {
+  beginRnpmSearch(input.ownerId);
+  try {
+    return await executeSearchInner(input, client);
+  } finally {
+    endRnpmSearch(input.ownerId);
+  }
+}
+
+async function executeSearchInner(
   input: ExecuteSearchInput,
   client: RnpmClient = defaultRnpmClient
 ): Promise<ExecuteSearchResult> {
   const ownerId = input.ownerId;
 
-  // Tenant guard: refuza continuarile pe `existingSearchId` care apartin altui
-  // owner (audit 2026-04-29 #11). Cazul "missing" e benign — searchId e cache-uit
-  // in UI dupa "Sterge baza" care a sters rnpm_searches; in loc sa raspundem 403
-  // (vizibil userului ca eroare cross-tenant), tratam ca search nou: dropam
-  // existingSearchId/existingGcode/startRnpmPage si lasam restul fluxului sa
-  // creeze un row nou + sa rezolve un captcha proaspat.
+  // v2.43.0 (rnpm-split): id-urile sunt per fisier user, deci singura stare posibila
+  // in afara de "owned" e "missing" (ex. searchId cache-uit in UI dupa "Sterge baza"
+  // sau dupa un restore). Missing = tratam ca search nou, fara eroare vizibila.
   let existingSearchId = input.existingSearchId ?? undefined;
   let existingGcode = input.existingGcode ?? undefined;
   let startRnpmPage = input.startRnpmPage;
-  if (existingSearchId != null) {
-    const ownership = getSearchOwnership(existingSearchId, ownerId);
-    if (ownership === "foreign") {
-      throw new RnpmError("searchId nu apartine owner-ului curent", 403);
-    }
-    if (ownership === "missing") {
-      existingSearchId = undefined;
-      existingGcode = undefined;
-      startRnpmPage = undefined;
-    }
+  if (existingSearchId != null && getSearchOwnership(existingSearchId, ownerId) === "missing") {
+    existingSearchId = undefined;
+    existingGcode = undefined;
+    startRnpmPage = undefined;
   }
 
   const batchSize = input.batchSize ?? DEFAULT_BATCH_SIZE;
@@ -342,6 +362,7 @@ export async function executeSearch(
 
   while (allDocs.length < batchSize && rnpmPage <= pagesTotal) {
     throwIfAborted(signal);
+    if (!existingGcode) await input.storageLimitCheck?.(ownerId);
     let r: RnpmSearchResult;
     try {
       const tMore = Date.now();
@@ -458,14 +479,50 @@ export async function executeBulkSearch(
   signal?: AbortSignal,
   captchaProvider?: CaptchaProvider,
   fallback2CaptchaKey?: string,
-  captchaMode?: CaptchaMode
+  captchaMode?: CaptchaMode,
+  storageLimitCheck?: RnpmStorageLimitCheck
+): Promise<void> {
+  // v2.43.0 (rnpm-split): bracketing per owner, vezi nota de la executeSearch.
+  // Sub-cautarile per item trec prin executeSearch care nesteaza begin/end
+  // (contorul suporta nesting).
+  beginRnpmSearch(ownerId);
+  try {
+    await executeBulkSearchInner(
+      items,
+      captchaKey,
+      ownerId,
+      onProgress,
+      client,
+      signal,
+      captchaProvider,
+      fallback2CaptchaKey,
+      captchaMode,
+      storageLimitCheck
+    );
+  } finally {
+    endRnpmSearch(ownerId);
+  }
+}
+
+async function executeBulkSearchInner(
+  items: BulkSearchItem[],
+  captchaKey: string,
+  ownerId: string,
+  onProgress: (p: BulkProgress) => void,
+  client: RnpmClient = defaultRnpmClient,
+  signal?: AbortSignal,
+  captchaProvider?: CaptchaProvider,
+  fallback2CaptchaKey?: string,
+  captchaMode?: CaptchaMode,
+  storageLimitCheck?: RnpmStorageLimitCheck
 ): Promise<void> {
   for (let i = 0; i < items.length; i++) {
     if (signal?.aborted) return;
     const item = items[i];
     const label = item.label ?? describeItem(item);
-    onProgress({ index: i, total: items.length, label, phase: "captcha" });
     try {
+      await storageLimitCheck?.(ownerId);
+      onProgress({ index: i, total: items.length, label, phase: "captcha" });
       onProgress({ index: i, total: items.length, label, phase: "search" });
       // Bulk items fetch toate paginile automat (cap intern MAX_TOTAL_RESULTS). Single search foloseste batchSize=25
       // plus butonul "Incarca mai multe"; bulk nu are echivalent, deci se comporta ca "fetch all".
@@ -480,6 +537,7 @@ export async function executeBulkSearch(
           ownerId,
           batchSize: MAX_TOTAL_RESULTS,
           signal,
+          storageLimitCheck,
         },
         client
       );
@@ -495,6 +553,19 @@ export async function executeBulkSearch(
       if (e instanceof DOMException && e.name === "AbortError") return;
       const msg = e instanceof Error ? e.message : String(e);
       onProgress({ index: i, total: items.length, label, phase: "error", error: msg });
+      if (isStorageLimitError(e)) {
+        for (let j = i + 1; j < items.length; j++) {
+          const skipped = items[j];
+          onProgress({
+            index: j,
+            total: items.length,
+            label: skipped.label ?? describeItem(skipped),
+            phase: "error",
+            error: STORAGE_STOP_MSG,
+          });
+        }
+        return;
+      }
     }
   }
 }
@@ -534,6 +605,7 @@ export interface SplitSearchInput {
   // e creat (inainte de prima sub-cautare). Permite SSE handler-ului sa emita
   // searchId imediat pentru a putea afisa partial results pe abort/timeout.
   onSearchCreated?: (searchId: number) => void;
+  storageLimitCheck?: RnpmStorageLimitCheck;
 }
 
 // Cauze distincte pentru records nepre-luate dupa split, fiecare cu actiune
@@ -620,6 +692,20 @@ export async function executeSplitSearch(
   onProgress: (p: SplitSearchProgress) => void,
   client: RnpmClient = defaultRnpmClient
 ): Promise<SplitSearchResult> {
+  // v2.43.0 (rnpm-split): bracketing per owner, vezi nota de la executeSearch.
+  beginRnpmSearch(input.ownerId);
+  try {
+    return await executeSplitSearchInner(input, onProgress, client);
+  } finally {
+    endRnpmSearch(input.ownerId);
+  }
+}
+
+async function executeSplitSearchInner(
+  input: SplitSearchInput,
+  onProgress: (p: SplitSearchProgress) => void,
+  client: RnpmClient = defaultRnpmClient
+): Promise<SplitSearchResult> {
   const ownerId = input.ownerId;
   const subN = input.subTypeLabels.length;
 
@@ -657,6 +743,17 @@ export async function executeSplitSearch(
   // nu probeaza ca upstream functioneaza, dar nici nu incrementeaza.
   let consecutiveSilentRefusals = 0;
 
+  // Fix audit v2.43: la refuz de limita de stocare, sub-tipurile ramase sunt
+  // marcate ca oprite (nu pornite) — pattern identic cu fail-fast-ul de
+  // silent_refusal de mai jos.
+  const markStorageStopped = (from: number) => {
+    for (let j = from; j < subN; j++) {
+      const skippedLabel = input.subTypeLabels[j];
+      splitStats.push({ label: skippedLabel, status: "error", count: 0, subTotal: 0, reason: STORAGE_STOP_MSG });
+      onProgress({ index: j, total: subN, label: skippedLabel, phase: "error", message: STORAGE_STOP_MSG });
+    }
+  };
+
   try {
     for (let i = 0; i < subN; i++) {
       throwIfAborted(input.signal);
@@ -667,9 +764,9 @@ export async function executeSplitSearch(
         tipInscriere: { type: "1", value: String(i + 1) },
       };
 
-      onProgress({ index: i, total: subN, label, phase: "captcha" });
-
       try {
+        await input.storageLimitCheck?.(ownerId);
+        onProgress({ index: i, total: subN, label, phase: "captcha" });
         onProgress({ index: i, total: subN, label, phase: "search" });
         // v2.20.3 Grupul M: acumuleaza din result.captchasUsed (include retries
         // interne ale executeSearch — ex. search_retry pe gcode invalid). Pre-
@@ -686,6 +783,7 @@ export async function executeSplitSearch(
             batchSize: MAX_TOTAL_RESULTS, // fetch toate paginile pentru sub-tip
             existingSearchId: parentSearchId,
             signal: input.signal,
+            storageLimitCheck: input.storageLimitCheck,
           },
           client
         );
@@ -759,6 +857,18 @@ export async function executeSplitSearch(
         });
       } catch (e) {
         if (e instanceof DOMException && e.name === "AbortError") throw e;
+        // Fix audit v2.43: refuzul de limita opreste bucla — restul sub-tipurilor
+        // ar fi refuzate identic. Fara increment captchasUsed: in cazul tipic
+        // recheck-ul refuza inainte de captcha; pe path-ul rar (refuz intre
+        // paginile interne, dupa captcha) acceptam under-count, simetric cu
+        // under-count-ul de retry din comentariul de mai jos.
+        if (isStorageLimitError(e)) {
+          const msg = e instanceof Error ? e.message : String(e);
+          splitStats.push({ label, status: "error", count: 0, subTotal: 0, reason: msg });
+          onProgress({ index: i, total: subN, label, phase: "error", message: msg });
+          markStorageStopped(i + 1);
+          break;
+        }
         // v2.20.3 Grupul M: conservative count — daca executeSearch a aruncat
         // dupa ce a consumat captcha (ex. limit_exceeded vine dupa primul search
         // care a consumat captcha-ul), masuram cel putin 1. Retry-urile nu sunt
@@ -795,6 +905,7 @@ export async function executeSplitSearch(
                   ownerId,
                   parentSearchId,
                   signal: input.signal,
+                  storageLimitCheck: input.storageLimitCheck,
                 },
                 onProgress,
                 client
@@ -832,6 +943,15 @@ export async function executeSplitSearch(
               continue;
             } catch (nestedErr) {
               if (nestedErr instanceof DOMException && nestedErr.name === "AbortError") throw nestedErr;
+              // Fix audit v2.43: refuzul de limita propagat din tier-2 opreste
+              // si bucla tier-1 — vezi comentariul de pe branch-ul simetric de mai sus.
+              if (isStorageLimitError(nestedErr)) {
+                const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
+                splitStats.push({ label, status: "error", count: 0, subTotal: tier1SubTotal, reason: msg });
+                onProgress({ index: i, total: subN, label, phase: "error", message: msg, subTotal: tier1SubTotal });
+                markStorageStopped(i + 1);
+                break;
+              }
               const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
               splitStats.push({
                 label,
@@ -908,6 +1028,7 @@ interface NestedSplitInput {
   ownerId: string;
   parentSearchId: number;
   signal?: AbortSignal;
+  storageLimitCheck?: RnpmStorageLimitCheck;
 }
 
 interface NestedSplitOutcome {
@@ -948,14 +1069,6 @@ async function executeNestedDestinationSplit(
     throwIfAborted(input.signal);
     const destLabel = destinations[j];
 
-    onProgress({
-      index: input.tier1Index,
-      total: input.tier1Total,
-      label: input.tier1Label,
-      phase: "nested_progress",
-      nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "captcha" },
-    });
-
     // RNPM asteapta destinatieInscriere.value ca **index 1-based** in lista
     // DESTINATII_BY_CATEGORY a tipului curent, EXACT ca tipInscriere
     // (vezi RnpmSearchForm.tsx:134-142 pentru pattern). Empiric verificat
@@ -971,6 +1084,14 @@ async function executeNestedDestinationSplit(
     };
 
     try {
+      await input.storageLimitCheck?.(input.ownerId);
+      onProgress({
+        index: input.tier1Index,
+        total: input.tier1Total,
+        label: input.tier1Label,
+        phase: "nested_progress",
+        nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "captcha" },
+      });
       onProgress({
         index: input.tier1Index,
         total: input.tier1Total,
@@ -992,6 +1113,7 @@ async function executeNestedDestinationSplit(
           batchSize: MAX_TOTAL_RESULTS,
           existingSearchId: input.parentSearchId,
           signal: input.signal,
+          storageLimitCheck: input.storageLimitCheck,
         },
         client
       );
@@ -1061,6 +1183,9 @@ async function executeNestedDestinationSplit(
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") throw e;
+      // Fix audit v2.43: refuzul de limita de stocare nu e o eroare
+      // per-destinatie — se propaga ca apelantul sa opreasca si bucla tier-1.
+      if (isStorageLimitError(e)) throw e;
       // v2.20.3 Grupul M: conservative count pe error path (vezi comentariul
       // identic din executeSplitSearch).
       captchasUsed += 1;

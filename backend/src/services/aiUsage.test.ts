@@ -39,6 +39,19 @@ describe("estimateAiCostUsdMilli", () => {
     ).toBe(18_000);
   });
 
+  it("openrouter openai/gpt-5.4 foloseste output-ul live de $15/1M (nu 10)", () => {
+    // Dovada 2026-07-10: OpenRouter API pricing.completion = "0.000015" ($15/1M);
+    // input pricing.prompt = "0.0000025" ($2.50/1M) era deja corect.
+    expect(
+      estimateAiCostUsdMilli({
+        provider: "openrouter",
+        model: "openai/gpt-5.4",
+        inputTokens: 0,
+        outputTokens: 1_000_000,
+      })
+    ).toBe(15_000);
+  });
+
   it("falls back to zero when model or tokens are missing", () => {
     // qwen/qwen3.7-max a fost delistat in v2.38.0 (stack chinese eliminat) —
     // model fara intrare de pret = cost 0 + warn one-shot, nu throw.

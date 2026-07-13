@@ -9,8 +9,8 @@ describe("monitoringRunStatusLabel", () => {
     expect(monitoringRunStatusLabel("skipped")).toBe("Omis");
   });
 
-  it("fallback pe token pentru necunoscute si — pentru lipsa", () => {
-    expect(monitoringRunStatusLabel("weird")).toBe("weird");
+  it("fallback localizat pentru necunoscute si — pentru lipsa", () => {
+    expect(monitoringRunStatusLabel("weird")).toBe("Necunoscut (weird)");
     expect(monitoringRunStatusLabel(null)).toBe("—");
     expect(monitoringRunStatusLabel(undefined)).toBe("—");
   });

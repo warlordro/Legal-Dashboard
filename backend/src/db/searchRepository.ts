@@ -1,4 +1,4 @@
-import { getDb } from "./schema.ts";
+import { getRnpmDb } from "./rnpmDb.ts";
 import { assertOwnerIdForMutation } from "../util/ownerGuard.ts";
 
 export interface SearchRecord {
@@ -25,7 +25,7 @@ export interface SaveSearchInput {
 
 export function saveSearch(input: SaveSearchInput): number {
   assertOwnerIdForMutation(input.ownerId, "saveSearch");
-  const db = getDb();
+  const db = getRnpmDb(input.ownerId);
   const stmt = db.prepare(`
     INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
     VALUES (?, ?, ?, ?, ?)
@@ -46,7 +46,7 @@ export interface CursorPage<T> {
 }
 
 export function getSearches(opts: GetSearchesOptions): CursorPage<SearchRecord> {
-  const db = getDb();
+  const db = getRnpmDb(opts.ownerId);
   const ownerId = opts.ownerId;
   const limit = Math.min(Math.max(opts.limit ?? 50, 1), 200);
   const cursor = opts.cursor ?? null;
@@ -67,7 +67,7 @@ export function getSearches(opts: GetSearchesOptions): CursorPage<SearchRecord> 
 
 export function updateSearchTotal(id: number, totalResults: number, ownerId: string): boolean {
   assertOwnerIdForMutation(ownerId, "updateSearchTotal");
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const res = db
     .prepare("UPDATE rnpm_searches SET total_results = ? WHERE id = ? AND owner_id = ?")
     .run(totalResults, id, ownerId);
@@ -76,29 +76,26 @@ export function updateSearchTotal(id: number, totalResults: number, ownerId: str
 
 export function deleteSearch(id: number, ownerId: string): boolean {
   assertOwnerIdForMutation(ownerId, "deleteSearch");
-  const db = getDb();
+  const db = getRnpmDb(ownerId);
   const res = db.prepare("DELETE FROM rnpm_searches WHERE id = ? AND owner_id = ?").run(id, ownerId);
   return res.changes > 0;
 }
 
-// Tenant guard pentru continuari de cautare RNPM. Clientul poate trimite un
-// `existingSearchId` arbitrar; fara aceasta verificare, avizele descoperite
-// in continuare s-ar lega de istoricul altui owner. Vezi audit 2026-04-29 #11.
-export function searchBelongsToOwner(id: number, ownerId: string): boolean {
-  return getSearchOwnership(id, ownerId) === "owned";
-}
-
-// 3-state ownership pentru a putea distinge "row sters din baza" (missing) de
-// "row exista dar e al altui tenant" (foreign). Missing nu e atac — apare cand
-// userul sterge baza ("Sterge baza") iar UI-ul cache-uieste searchId vechi.
-// Foreign trebuie sa ramana 403 ca sa pastram garda din audit 2026-04-29 #11.
-export type SearchOwnership = "owned" | "foreign" | "missing";
+// v2.43.0 (rnpm-split): id-urile de search sunt namespace PER FISIER USER — un id
+// al altui owner nu mai e observabil (fisierul lui nici nu e deschis), deci starea
+// "foreign" a disparut din contract. Garda de tenant (audit 2026-04-29 #11) e acum
+// izolarea fizica insasi. "missing" ramane benign: searchId cache-uit in UI dupa
+// "Sterge baza" sau dupa un restore la un snapshot anterior.
+export type SearchOwnership = "owned" | "missing";
 
 export function getSearchOwnership(id: number, ownerId: string): SearchOwnership {
-  const db = getDb();
-  const row = db.prepare("SELECT owner_id FROM rnpm_searches WHERE id = ? LIMIT 1").get(id) as
-    | { owner_id: string }
+  const db = getRnpmDb(ownerId);
+  const row = db.prepare("SELECT id FROM rnpm_searches WHERE id = ? AND owner_id = ? LIMIT 1").get(id, ownerId) as
+    | { id: number }
     | undefined;
-  if (!row) return "missing";
-  return row.owner_id === ownerId ? "owned" : "foreign";
+  return row ? "owned" : "missing";
+}
+
+export function searchBelongsToOwner(id: number, ownerId: string): boolean {
+  return getSearchOwnership(id, ownerId) === "owned";
 }

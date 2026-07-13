@@ -63,11 +63,20 @@ export type RnpmCaptchaGuardResult =
 
 export type CaptchaResolution =
   | { source: "body" }
-  | { source: "tenant"; ok: true; captchaKey: string; provider: CaptchaProvider; mode: CaptchaMode }
+  | {
+      source: "tenant";
+      ok: true;
+      captchaKey: string;
+      provider: CaptchaProvider;
+      mode: CaptchaMode;
+      // Cheia CELUILALT provider, daca e configurata — alimenteaza race/fallback
+      // in web mode cu aceeasi semantica precum BYOK-ul desktop.
+      fallbackKey?: string;
+    }
   | { source: "tenant"; ok: false; response: Response };
 
-export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuardResult> {
-  const body = await parseJsonBody(c);
+export async function withRnpmCaptchaGuards(c: Context, parsedBody?: unknown): Promise<RnpmCaptchaGuardResult> {
+  const body = parsedBody === undefined ? await parseJsonBody(c) : parsedBody;
   if (body === null) {
     return {
       ok: false,
@@ -176,6 +185,7 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
           captchaKey: resolved.captchaKey,
           captchaProvider: resolved.provider,
           captchaMode: resolved.mode,
+          fallback2CaptchaKey: resolved.fallbackKey,
         };
       }
     }
@@ -205,6 +215,7 @@ export async function withRnpmCaptchaGuards(c: Context): Promise<RnpmCaptchaGuar
       captchaKey: resolved.captchaKey,
       captchaProvider: resolved.provider,
       captchaMode: resolved.mode,
+      fallback2CaptchaKey: resolved.fallbackKey,
     };
   }
 
@@ -260,6 +271,7 @@ export function resolveCaptchaKeyForRoute(c: Context): CaptchaResolution {
   const tenant = getTenantKeys();
   const provider = tenant.captchaProvider;
   const key = provider === "capsolver" ? tenant.capsolver : tenant.twocaptcha;
+  const otherKey = provider === "capsolver" ? tenant.twocaptcha : tenant.capsolver;
   if (!key) {
     return {
       source: "tenant",
@@ -270,7 +282,14 @@ export function resolveCaptchaKeyForRoute(c: Context): CaptchaResolution {
       ),
     };
   }
-  return { source: "tenant", ok: true, captchaKey: key, provider, mode: tenant.captchaMode };
+  return {
+    source: "tenant",
+    ok: true,
+    captchaKey: key,
+    provider,
+    mode: tenant.captchaMode,
+    fallbackKey: otherKey || undefined,
+  };
 }
 
 // Captcha key validation predicate: rejects empty / whitespace-only / sub-10-char

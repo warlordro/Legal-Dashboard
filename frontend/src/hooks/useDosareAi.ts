@@ -72,7 +72,7 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
   const [showKeyPrompt, setShowKeyPrompt] = useState(false);
   const [collapsedAiConfig, setCollapsedAiConfig] = useState<Set<string>>(new Set());
 
-  const [multiAnalysts, setMultiAnalysts] = useState<[string, string]>(["claude-sonnet", "gpt-5.4-mini"]);
+  const [multiAnalysts, setMultiAnalysts] = useState<[string, string]>(["claude-sonnet", "gpt-5.6-terra"]);
   const [multiJudge, setMultiJudge] = useState<string>("claude-opus");
   const [multiLoading, setMultiLoading] = useState<string | null>(null);
   const [multiResult, setMultiResult] = useState<Record<string, MultiResultPayload>>({});

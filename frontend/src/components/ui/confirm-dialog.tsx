@@ -26,6 +26,7 @@ type State = ConfirmOptions & { resolve: (v: boolean) => void };
 export function ConfirmProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<State | null>(null);
   const confirmBtnRef = useRef<HTMLButtonElement>(null);
+  const cancelBtnRef = useRef<HTMLButtonElement>(null);
 
   const confirm = useCallback<ConfirmFn>((opts) => {
     const normalized: ConfirmOptions = typeof opts === "string" ? { message: opts } : opts;
@@ -44,15 +45,16 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
   // biome-ignore lint/correctness/useExhaustiveDependencies: close este callback local pentru dialogul curent; includerea lui rebindeaza handlerul la fiecare render.
   useEffect(() => {
     if (!state) return;
-    confirmBtnRef.current?.focus();
+    // EXT-H-03: pe actiuni distructive focusul initial sta pe Anuleaza —
+    // Enter apasat din inertie nu are voie sa execute stergerea/restaurarea.
+    (state.destructive ? cancelBtnRef : confirmBtnRef).current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
         e.preventDefault();
         close(false);
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        close(true);
       }
+      // FARA ramura globala pe Enter (EXT-H-03): activarea vine nativ de la
+      // butonul focalizat; un Enter oriunde altundeva nu confirma nimic.
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -88,7 +90,7 @@ export function ConfirmProvider({ children }: { children: ReactNode }) {
               </div>
             </div>
             <div className="mt-5 flex justify-end gap-2 border-t border-border bg-muted/30 px-5 py-3">
-              <Button variant="outline" size="sm" onClick={() => close(false)}>
+              <Button ref={cancelBtnRef} variant="outline" size="sm" onClick={() => close(false)}>
                 {state.cancelLabel ?? "Anuleaza"}
               </Button>
               <Button
