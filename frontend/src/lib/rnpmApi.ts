@@ -49,6 +49,24 @@ export class RnpmFilterDisabledError extends Error {
   }
 }
 
+// v2.43.x (C1): jsonOrThrow arunca Error simplu (doar message), pierzand
+// code/status/requestId din envelope — clientii nu pot distinge programatic
+// intre coduri tipate (ex. SEARCH_ACTIVE, RESTORE_IN_PROGRESS). ApiError le
+// pastreaza pe toate trei.
+export class ApiError extends Error {
+  readonly code?: string;
+  readonly status: number;
+  readonly requestId?: string;
+  readonly details?: Record<string, unknown>;
+  constructor(message: string, status: number, code?: string, requestId?: string, details?: Record<string, unknown>) {
+    super(message);
+    this.status = status;
+    this.code = code;
+    this.requestId = requestId;
+    this.details = details;
+  }
+}
+
 const BASE = "/api/rnpm";
 
 export async function filterRnpmResults(
@@ -105,13 +123,32 @@ async function jsonOrThrow<T>(res: Response): Promise<T> {
     // v2.14.0 envelope: error e obiect { code, message }; legacy: string
     const raw = (data as { error?: unknown })?.error;
     let err: string;
+    let code: string | undefined;
+    let details: Record<string, unknown> | undefined;
     if (typeof raw === "string") err = raw;
-    else if (raw && typeof raw === "object" && typeof (raw as { message?: unknown }).message === "string") {
-      err = (raw as { message: string }).message;
+    else if (raw && typeof raw === "object") {
+      const obj = raw as { message?: unknown; code?: unknown; details?: unknown };
+      err = typeof obj.message === "string" ? obj.message : `Eroare (${res.status})`;
+      if (typeof obj.code === "string") code = obj.code;
+      if (obj.details && typeof obj.details === "object" && !Array.isArray(obj.details)) {
+        details = obj.details as Record<string, unknown>;
+      }
     } else err = `Eroare (${res.status})`;
-    throw new Error(err);
+    const requestId = (data as { requestId?: unknown })?.requestId;
+    throw new ApiError(err, res.status, code, typeof requestId === "string" ? requestId : undefined, details);
   }
   return data as T;
+}
+
+export function formatRnpmStorageLimitError(error: unknown): string | null {
+  if (!(error instanceof ApiError) || error.code !== "QUOTA_EXCEEDED") return null;
+  const details = error.details;
+  if (details?.feature !== "rnpm.storage") return null;
+  const usedBytes = details.usedBytes;
+  const limitBytes = details.limitBytes;
+  if (typeof usedBytes !== "number" || typeof limitBytes !== "number") return error.message;
+  const mib = 1024 * 1024;
+  return `Spatiul RNPM alocat este plin (${(usedBytes / mib).toFixed(1)} MB din ${(limitBytes / mib).toFixed(1)} MB). Sterge avize (stergerea pe selectie elibereaza automat spatiul) sau compacteaza din zona RNPM.`;
 }
 
 export type CaptchaProvider = "2captcha" | "capsolver";
@@ -305,11 +342,11 @@ export async function rnpmDeleteAviz(id: number): Promise<boolean> {
   return data.deleted;
 }
 
-export async function rnpmDeleteAllSaved(): Promise<number> {
+export async function rnpmDeleteAllSaved(): Promise<{ deleted: number; compacted: boolean }> {
   const res = await apiFetch(`${BASE}/saved/all`, { method: "DELETE" });
-  const data = await jsonOrThrow<{ deleted: number }>(res);
+  const data = await jsonOrThrow<{ deleted: number; compacted: boolean }>(res);
   avizDetailCache.clear();
-  return data.deleted;
+  return data;
 }
 
 export async function rnpmGetStats(): Promise<RnpmStats> {
@@ -317,15 +354,17 @@ export async function rnpmGetStats(): Promise<RnpmStats> {
   return jsonOrThrow<RnpmStats>(res);
 }
 
-export async function rnpmDeleteAvizeBatch(ids: number[]): Promise<number> {
+export async function rnpmDeleteAvizeBatch(
+  ids: number[]
+): Promise<{ deleted: number; compacted?: boolean; freedBytes?: number }> {
   const res = await apiFetch(`${BASE}/saved/delete-batch`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ ids }),
   });
-  const data = await jsonOrThrow<{ deleted: number }>(res);
+  const data = await jsonOrThrow<{ deleted: number; compacted?: boolean; freedBytes?: number }>(res);
   for (const id of ids) avizDetailCache.delete(id);
-  return data.deleted;
+  return data;
 }
 
 export async function rnpmOpenDbFolder(): Promise<void> {
@@ -344,13 +383,17 @@ export interface RnpmCompactResult {
   durationMs: number;
 }
 
-export async function rnpmCompactDb(): Promise<RnpmCompactResult> {
-  const res = await apiFetch(`${BASE}/compact`, { method: "POST" });
+export async function rnpmCompactDb(ownerId?: string): Promise<RnpmCompactResult> {
+  const qs = ownerId ? `?ownerId=${encodeURIComponent(ownerId)}` : "";
+  const res = await apiFetch(`${BASE}/compact${qs}`, { method: "POST" });
   return jsonOrThrow<RnpmCompactResult>(res);
 }
 
-export async function rnpmDeleteBackups(): Promise<number> {
-  const res = await apiFetch(`${BASE}/backups`, { method: "DELETE" });
+// ownerId (admin-only, v2.43.x): tinteste jail-ul altui user — acelasi
+// mecanism cross-owner ca rnpmCompactDb; fara argument = jail-ul propriu.
+export async function rnpmDeleteBackups(ownerId?: string): Promise<number> {
+  const qs = ownerId ? `?ownerId=${encodeURIComponent(ownerId)}` : "";
+  const res = await apiFetch(`${BASE}/backups${qs}`, { method: "DELETE" });
   const data = await jsonOrThrow<{ deleted: number }>(res);
   return data.deleted;
 }
@@ -374,6 +417,14 @@ export async function rnpmRestoreBackup(name: string): Promise<{ preRestoreName:
     body: JSON.stringify({ name }),
   });
   return jsonOrThrow<{ ok: true; preRestoreName: string }>(res);
+}
+
+// v2.43.0 (rnpm-split): backup manual self-service al fisierului RNPM propriu.
+// 429 (cooldown) ajunge la caller ca Error cu mesajul din envelope.
+export async function rnpmCreateBackup(): Promise<{ name: string }> {
+  const res = await apiFetch(`${BASE}/backups/create`, { method: "POST" });
+  const data = await jsonOrThrow<{ ok: true; name: string }>(res);
+  return { name: data.name };
 }
 
 // Hard cap pentru blob xlsx/pdf — corespunde plafonului server din rnpm.ts.

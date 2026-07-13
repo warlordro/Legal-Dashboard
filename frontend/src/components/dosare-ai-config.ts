@@ -19,16 +19,16 @@ export const AI_MODELS: AiModelDef[] = [
     color: "violet",
   },
   { key: "claude-opus", label: "Opus 4.8", provider: "anthropic", desc: "Premium", color: "violet" },
-  // OpenAI
-  { key: "gpt-5.4-nano", label: "5.4 nano", provider: "openai", desc: "Rapid", color: "emerald" },
+  // OpenAI — v2.42.x: familia GPT-5.6 (Sol=premium, Terra=echilibrat, Luna=rapid).
+  { key: "gpt-5.6-luna", label: "5.6 Luna", provider: "openai", desc: "Rapid", color: "emerald" },
   {
-    key: "gpt-5.4-mini",
-    label: "5.4 mini",
+    key: "gpt-5.6-terra",
+    label: "5.6 Terra",
     provider: "openai",
     desc: "Echilibrat",
     color: "emerald",
   },
-  { key: "gpt-5.4", label: "GPT-5.4", provider: "openai", desc: "Premium", color: "emerald" },
+  { key: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "openai", desc: "Premium", color: "emerald" },
   // Google
   {
     key: "gemini-flash-lite-3",
@@ -49,7 +49,7 @@ export const JUDGE_MODELS_LIST: AiModelDef[] = [
     color: "violet",
     desc: "Premium",
   },
-  { key: "gpt-5.4", label: "GPT-5.4", provider: "openai", color: "emerald", desc: "Premium" },
+  { key: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "openai", color: "emerald", desc: "Premium" },
   {
     key: "gemini-pro-3",
     label: "Gemini 3.1 Pro",

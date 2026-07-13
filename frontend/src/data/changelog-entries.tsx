@@ -40,6 +40,57 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.43.0",
+    date: "13 Iulie 2026",
+    subtitle:
+      "Datele RNPM devin separate fizic per utilizator: fiecare cont are propriul fisier de baza de date, cu backup si restaurare self-service care ating DOAR datele proprii. Restaurarea nu mai poate afecta monitorizarile, utilizatorii sau setarile — baza completa are acum management de backup dedicat, admin-only, in Setari > Backup. In plus: limita de stocare per utilizator (750 MB, ajustabila din Cote), compactare automata dupa stergeri mari si card admin cu stocarea RNPM per utilizator.",
+    icon: <Split className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Baza mea RNPM — fisier separat per utilizator",
+        content:
+          "La prima pornire dupa actualizare, datele RNPM ale fiecarui utilizator se muta automat intr-un fisier propriu (o singura data, cu backup complet de siguranta creat inainte). Din acel moment, fiecare cont este izolat fizic de celelalte: cautarile si avizele tale traiesc in fisierul tau, iar operatiile destructive (stergere baza, restaurare) nu pot atinge datele altcuiva.",
+      },
+      {
+        title: "Backup si restaurare self-service",
+        content:
+          "Din modalul 'Baza mea RNPM' poti crea oricand un backup manual ('Creeaza backup acum', cel mult unul pe minut), poti restaura un backup propriu sau poti sterge backup-urile tale — totul strict pe datele tale RNPM. Restaurarea refuza politicos daca ai o cautare in curs (si invers), iar inainte de orice suprascriere se salveaza automat un snapshot pre-restore. Backup-ul zilnic automat acopera acum si fisierele per utilizator, nu doar baza principala.",
+      },
+      {
+        title: "Setari > Backup pentru baza completa (admin)",
+        content:
+          "Backup-urile bazei complete (utilizatori, monitorizari, audit, setari) se administreaza dintr-un tab nou in Setari, doar pentru admini, cu confirmare explicita ca restaurarea atinge toate modulele si toti utilizatorii. Mesajele din zona RNPM spun acum clar ca acolo se restaureaza DOAR datele tale RNPM.",
+      },
+      {
+        title: "Limita de stocare RNPM per utilizator",
+        content:
+          "Fiecare utilizator are o limita de spatiu pentru datele RNPM (750 MB standard). Cand spatiul e plin, cautarile noi sunt refuzate cu un mesaj clar cu cifre ('Spatiul RNPM alocat este plin (X MB din Y MB)') si indicatia de a sterge avize sau de a compacta — nimic nu se pierde, doar nu se mai adauga. Limita se verifica si in timpul cautarilor lungi (intre pagini si intre itemele cautarilor multiple), iar la primul refuz cautarea multipla se opreste imediat, fara consum inutil de captcha. Adminul poate da oricui alta limita din Setari > Cote (noul tip 'Stocare RNPM', in MB).",
+      },
+      {
+        title: "Compactare automata dupa stergeri mari",
+        content:
+          "Cand stergi multe avize, fisierul RNPM se micsoreaza acum automat (compactare pornita imediat dupa stergere, daca spatiul eliberat merita). Validat live: o stergere de 80 de avize a eliberat automat 103 MB in 0.12 secunde. Daca compactarea nu poate rula (de exemplu ai o cautare in curs), stergerea ramane valabila si compactarea se poate face manual mai tarziu.",
+      },
+      {
+        title: "Card admin 'Stocare RNPM' complet",
+        content:
+          "In Setari > Backup, adminul vede pentru fiecare utilizator spatiul folosit din limita (cu evidentiere cand se apropie de prag), numarul si dimensiunea backup-urilor, si are butoane per utilizator: Compacteaza si Sterge backup-urile. Conturile sterse sau suspendate fara date nu mai aglomereaza lista (checkbox pentru a le afisa). Backup-urile RNPM per utilizator au si ele un plafon de spatiu, cu protectie: cea mai recenta copie din fiecare categorie nu se sterge niciodata.",
+      },
+      {
+        title: "Captcha pe web si finisaje",
+        content:
+          "In modul web, a doua cheie de captcha salvata de admin e folosita automat ca rezerva (race sau secvential) — daca un furnizor are probleme, celalalt preia fara ca utilizatorul sa simta. Oprirea unei cautari din buton se inregistreaza curat (fara erori false). Lista de rezultate nu mai afiseaza randuri duplicate cand serverul RNPM repeta inregistrari intre pagini — contorul nu mai poate depasi totalul.",
+      },
+      {
+        title: "Fixuri marunte",
+        content:
+          "Costul afisat pentru modelul GPT-5.4 pe OpenRouter foloseste tariful corect de output; etichetele necunoscute din tabele apar ca 'Necunoscut (valoare)' in loc de codul brut; cateva refuzuri administrative nu mai pot fi transformate in eroare 500 de un esec trecator al jurnalului de audit.",
+      },
+    ],
+  },
+  {
     version: "v2.42.2",
     date: "9 Iulie 2026",
     subtitle:

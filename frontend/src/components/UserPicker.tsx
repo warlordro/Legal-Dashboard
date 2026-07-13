@@ -8,8 +8,12 @@ import { userRoleLabel } from "@/lib/userLabels";
 // v2.41.0 (5.5): selectia userului in paginile Cote + Granturi = dropdown cu
 // TOTI userii activi (nu cautare dupa email — un tenant e o firma, lista e
 // mica). Sortare pe email; nota vizibila cand totalul depaseste pagina.
+// v2.43.0: pagineaza pana acopera tot totalul (plafon de siguranta MAX_USERS)
+// — inainte se opreau la prima pagina si userii de dupa locul 100 lipseau din
+// dropdown, ne-selectabili pentru cote/granturi.
 
 const PAGE_SIZE = 100;
+const MAX_USERS = 1000;
 
 export interface UserPickerProps {
   // Id-ul selectat curent ("" = nimic selectat).
@@ -29,14 +33,25 @@ export function UserPicker({ value, onSelect, disabled, ariaLabel }: UserPickerP
     const ac = new AbortController();
     setLoading(true);
     setError(null);
-    admin
-      .listUsers({ status: "active", pageSize: PAGE_SIZE, signal: ac.signal })
-      .then((result) => {
+    (async () => {
+      const all: AdminUser[] = [];
+      let page = 1;
+      let grandTotal = 0;
+      let hasMore = true;
+      while (hasMore) {
+        const result = await admin.listUsers({ status: "active", page, pageSize: PAGE_SIZE, signal: ac.signal });
         if (ac.signal.aborted) return;
-        const sorted = [...result.rows].sort((a, b) => a.email.localeCompare(b.email));
-        setUsers(sorted);
-        setTotal(result.total);
-      })
+        all.push(...result.rows);
+        grandTotal = result.total;
+        // Garda anti-bucla: daca o pagina vine goala desi totalul promitea mai
+        // mult (useri stersi intre pagini), ne oprim — altfel fetch infinit.
+        hasMore = result.rows.length > 0 && all.length < grandTotal && all.length < MAX_USERS;
+        page += 1;
+      }
+      const sorted = all.sort((a, b) => a.email.localeCompare(b.email));
+      setUsers(sorted);
+      setTotal(grandTotal);
+    })()
       .catch((err) => {
         if (ac.signal.aborted) return;
         setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorilor.");
@@ -81,8 +96,8 @@ export function UserPicker({ value, onSelect, disabled, ariaLabel }: UserPickerP
         {error && <p className="text-xs text-red-600">{error}</p>}
         {!loading && total > users.length && (
           <p className="text-xs text-muted-foreground">
-            Se afiseaza {users.length} din {total} utilizatori activi — lista e incompleta, unii utilizatori pot lipsi
-            din dropdown.
+            Se afiseaza {users.length} din {total} utilizatori activi — lista e trunchiata la {MAX_USERS}, unii
+            utilizatori pot lipsi din dropdown.
           </p>
         )}
       </CardContent>

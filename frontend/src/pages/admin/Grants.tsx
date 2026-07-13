@@ -133,7 +133,15 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
     return () => ac.abort();
   }, [selected, refreshTick]);
 
+  // AbortController + staleness guard (pattern 6.7, ca la activeGrantsAcRef
+  // mai sus): selectFromActive e async (admin.getUser); un raspuns intarziat
+  // pentru un rand vechi ar putea ateriza dupa ce userul a selectat deja alt
+  // rand si i-ar suprascrie selectia curenta cu cea veche.
+  const selectAcRef = useRef<AbortController | null>(null);
+
   const onSelect = (user: AdminUser) => {
+    selectAcRef.current?.abort();
+    selectAcRef.current = null;
     setSelected(user);
     setFeature(GRANTABLE_FEATURES[0]);
     setExtraUsd("");
@@ -143,10 +151,15 @@ export default function AdminGrants({ embedded = false }: { embedded?: boolean }
 
   const selectFromActive = async (userId: string) => {
     setError(null);
+    selectAcRef.current?.abort();
+    const ac = new AbortController();
+    selectAcRef.current = ac;
     try {
-      const user = await admin.getUser(userId);
+      const user = await admin.getUser(userId, ac.signal);
+      if (ac.signal.aborted) return;
       onSelect(user);
     } catch (err) {
+      if (ac.signal.aborted) return;
       setError(err instanceof Error ? err.message : "Eroare la incarcarea utilizatorului.");
     }
   };

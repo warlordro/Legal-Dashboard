@@ -4,6 +4,7 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { filterRnpmSearchResults } from "./avizRepository.ts";
+import { __resetRnpmDbForTests, getRnpmDb } from "./rnpmDb.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 // Regression suite v2.27.5 — coloanele *_norm materializate (migration 0022) trebuie sa
@@ -21,10 +22,14 @@ beforeEach(async () => {
   process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
   const seed = new Database(dbPath);
   seed.close();
-  db = getDb();
+  getDb();
+  // v2.43.0 (rnpm-split): tabelele rnpm + trigger-ele _norm traiesc in fisierul
+  // per user; seed-urile si asertiile ruleaza pe fisierul lui "local".
+  db = getRnpmDb("local");
 });
 
 afterEach(async () => {
+  __resetRnpmDbForTests();
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });

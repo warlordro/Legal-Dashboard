@@ -17,11 +17,25 @@ describe("dosare-ai-config AI_MODELS", () => {
     expect(AI_MODELS.find((model) => model.key === "claude-opus")?.label).toBe("Opus 4.8");
     expect(AI_MODELS.find((model) => model.key === "gemini-flash-3.5")?.label).toBe("3.5 Flash");
   });
+
+  // v2.42.x: familia OpenAI trece pe GPT-5.6 — Sol (premium), Terra
+  // (echilibrat), Luna (rapid). Cheile 5.4 dispar din catalog.
+  it("familia OpenAI e GPT-5.6 Sol/Terra/Luna, fara chei 5.4", () => {
+    const keys = AI_MODELS.map((model) => model.key);
+    expect(keys).toEqual(expect.arrayContaining(["gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"]));
+    expect(keys.some((k) => k.startsWith("gpt-5.4"))).toBe(false);
+    expect(AI_MODELS.find((m) => m.key === "gpt-5.6-sol")?.label).toBe("GPT-5.6 Sol");
+    expect(AI_MODELS.find((m) => m.key === "gpt-5.6-terra")?.label).toBe("5.6 Terra");
+    expect(AI_MODELS.find((m) => m.key === "gpt-5.6-luna")?.label).toBe("5.6 Luna");
+    expect(AI_MODELS.find((m) => m.key === "gpt-5.6-sol")?.desc).toBe("Premium");
+    expect(AI_MODELS.find((m) => m.key === "gpt-5.6-terra")?.desc).toBe("Echilibrat");
+    expect(AI_MODELS.find((m) => m.key === "gpt-5.6-luna")?.desc).toBe("Rapid");
+  });
 });
 
 describe("dosare-ai-config JUDGE_MODELS_LIST", () => {
   it("lists the 3 western judges", () => {
-    expect(JUDGE_MODELS_LIST.map((model) => model.key)).toEqual(["claude-opus", "gpt-5.4", "gemini-pro-3"]);
+    expect(JUDGE_MODELS_LIST.map((model) => model.key)).toEqual(["claude-opus", "gpt-5.6-sol", "gemini-pro-3"]);
   });
 
   it("labels the Claude judge Opus 4.8", () => {

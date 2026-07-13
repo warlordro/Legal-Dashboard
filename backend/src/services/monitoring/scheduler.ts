@@ -265,6 +265,9 @@ export class Scheduler {
     }
 
     const nowIso = this.opts.clock.now().toISOString();
+    // Bug 7 (v2.42.1): ancora pentru durata reala in catch-ul de mai jos —
+    // `durationMs: 0` hardcodat ascundea cat a rulat efectiv jobul cazut.
+    const startMs = this.opts.clock.now().getTime();
     let runId = 0;
     await withMaintenanceRead(async () => {
       // Re-check after lock acquires (same reason as tickOnce).
@@ -311,11 +314,10 @@ export class Scheduler {
       this.inflight.delete(job.id);
       try {
         const endIso = this.opts.clock.now().toISOString();
-        const durationMs = Math.max(0, Date.parse(endIso) - Date.parse(nowIso));
         finalize(runId, {
           status: "error",
           endedAt: endIso,
-          durationMs,
+          durationMs: this.opts.clock.now().getTime() - startMs,
           errorCode: "RUNONE_THREW",
           errorMessage: err instanceof Error ? err.message : String(err),
           alertsCreated: 0,
@@ -556,24 +558,16 @@ export class Scheduler {
             alertsCreated: outcome.alertsCreated ?? 0,
             alertsPatched: outcome.alertsPatched ?? 0,
           });
-
           if (!didFinalize) {
-            // Run row was already terminal (e.g. crash recovery flipped it to
-            // 'aborted' concurrently, or a duplicate finalize call). Advancing
-            // fail_streak/next_run_at here would double-apply an outcome that
-            // was never actually observed by this run — skip and just log.
-            // Consecinta asumata (rev. v2.42.2): pe ramura non-duplicate,
-            // next_run_at ramane in trecut si urmatorul tick re-claimeaza jobul
-            // imediat. Acceptabil sub single-writer (single-instance lock pe
-            // desktop, single-replica pe server); daca apare vreodata
-            // multi-replica, claim-ul are nevoie de ownership distribuit.
+            // Bug 7 (v2.42.1): run deja terminal (finalizat concurent /
+            // recovery) — skip applyJobOutcome ca sa nu dublu-aplicam
+            // fail_streak/next_run_at si sa nu emitem alerte source_error
+            // false. Consecinta asumata: pe ramura non-duplicate, next_run_at
+            // ramane in trecut si urmatorul tick re-claimeaza jobul imediat.
+            // Acceptabil sub single-writer (single-instance lock desktop /
+            // single-replica server).
             console.warn(
-              JSON.stringify({
-                action: "monitoring.finalize_noop",
-                job_id: job.id,
-                run_id: runId,
-                ts: endIso,
-              })
+              JSON.stringify({ action: "monitoring.finalize_noop", job_id: job.id, run_id: runId, ts: endIso })
             );
             return;
           }

@@ -9,7 +9,9 @@ import { discoverMigrations, runMigrations } from "./migrations/runner.ts";
 // and prod (esbuild CJS bundle). In CJS __dirname is `dist-backend/`; in dev
 // it's `backend/src/db/`. Either way, sibling `migrations/` is the target.
 const __schemaDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
-const MIGRATIONS_DIR = path.join(__schemaDir, "migrations");
+// Exportat pentru validarea de versiune la restore-ul monolitului (backup.ts)
+// — oglinda MIGRATIONS_RNPM_DIR din rnpmDb.ts.
+export const MIGRATIONS_DIR = path.join(__schemaDir, "migrations");
 
 export function preMigrationBackup(src: string, label: string): void {
   try {
@@ -17,27 +19,17 @@ export function preMigrationBackup(src: string, label: string): void {
     fs.mkdirSync(dir, { recursive: true });
     const stamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
     const dest = path.join(dir, `legal-dashboard.pre-${label}-${stamp}.db`);
-    // Plain file copy — DB is not yet opened when this runs (called from getDb before new Database(...)).
-    fs.copyFileSync(src, dest);
-    // v2.17.0 — also copy WAL (-wal) and SHM (-shm) sidecars when they exist.
-    // SQLite serializes a checkpointed copy of the latest committed pages in
-    // the WAL; without it, restoring the .db alone could lose in-flight writes
-    // that hadn't been checkpointed back into the main file at shutdown. The
-    // -shm file is regenerated from -wal on open, but copying both keeps the
-    // backup self-consistent without requiring SQLite tooling on the recovery
-    // host. Sidecars-missing is fine (DB was checkpointed clean).
-    for (const suffix of ["-wal", "-shm"] as const) {
-      const sidecarSrc = src + suffix;
-      if (fs.existsSync(sidecarSrc)) {
-        try {
-          fs.copyFileSync(sidecarSrc, dest + suffix);
-        } catch (e) {
-          console.warn(
-            `[schema] pre-migration backup sidecar ${suffix} failed (continuing):`,
-            e instanceof Error ? e.message : e
-          );
-        }
-      }
+    // v2.43.0 (rnpm-split): snapshot SELF-CONTAINED prin VACUUM INTO pe o
+    // conexiune temporara — include WAL-ul comis, fara sidecars de copiat
+    // (copyFile + sidecars producea un triplet coerent doar impreuna). DB-ul
+    // nu e inca deschis de getDb() (functia ruleaza inainte de new Database),
+    // iar conexiunea temporara read-write recupereaza si un WAL ramas dintr-un
+    // crash inainte sa-l serializeze in snapshot.
+    const tmp = new Database(src);
+    try {
+      tmp.prepare("VACUUM INTO ?").run(dest);
+    } finally {
+      tmp.close();
     }
     console.log(`[schema] pre-migration backup -> ${dest}`);
   } catch (e) {
@@ -53,6 +45,33 @@ let db: Database.Database | null = null;
 // the scheduler.running guard inside `tickOnce` after withMaintenanceRead.
 let shuttingDown = false;
 
+// Fix review (Task 5): paritate cu latch-ul RNPM — in fereastra restore-ului
+// de monolit (closeLive -> publish -> probe), orice getDb() strain e refuzat
+// tipat in loc sa REDESCHIDA fisierul in mijlocul swap-ului (handle nou pe
+// fisierul vechi/nou = EBUSY la rename pe Windows sau citiri din starea
+// gresita). Consecinta asumata si documentata: restore-ul de monolit inseamna
+// INDISPONIBILITATE GLOBALA temporara — toate rutele care ating DB-ul primesc
+// 409 prin handlerul central; fereastra e scurta si admin-triggered.
+// Latch-ul e setat/curatat EXCLUSIV in restoreFromBackup (backup.ts), in
+// try/finally in interiorul withMaintenanceWrite — NU in restoreTargetImpl
+// partajat (restore-ul RNPM are latch-ul lui per owner in rnpmActivity).
+export class MonolithRestoreInProgressError extends Error {
+  readonly code = "RESTORE_IN_PROGRESS";
+  constructor() {
+    super("Restore de baza de date in curs — aplicatia e indisponibila cateva secunde. Reincearca imediat.");
+  }
+}
+
+let monolithRestoreInProgress = false;
+
+export function setMonolithRestoreInProgress(): void {
+  monolithRestoreInProgress = true;
+}
+
+export function clearMonolithRestoreInProgress(): void {
+  monolithRestoreInProgress = false;
+}
+
 export function getDbPath(): string {
   return process.env.LEGAL_DASHBOARD_DB_PATH ?? path.join(process.cwd(), "legal-dashboard.db");
 }
@@ -60,6 +79,9 @@ export function getDbPath(): string {
 export function getDb(): Database.Database {
   if (shuttingDown) {
     throw new Error("DB closed; refusing to reopen during shutdown");
+  }
+  if (monolithRestoreInProgress) {
+    throw new MonolithRestoreInProgressError();
   }
   if (db) return db;
 
@@ -547,6 +569,10 @@ export function checkpointWal(): void {
 // VACUUM rescrie intregul fisier eliminand paginile libere ramase dupa DELETE.
 // Nu poate rula in tranzactie si ia un lock exclusiv → blocheaza alte operatii pentru cateva secunde la 100MB.
 // Apelam TRUNCATE pe WAL inainte si dupa, ca statisticile post-compact sa reflecte imediat noua dimensiune.
+// DEPRECATED (Task 7, fixuri post-review): fara caller de productie dupa
+// mutarea rutelor de compact pe worker+swap (compactRnpmDbViaWorker); VACUUM
+// sincron pe handle-ul viu blocheaza event loop-ul. Nu se sterge in acest
+// batch (schimbare chirurgicala); candidat de eliminare la un refactor viitor.
 export function compactDb(): { beforeBytes: number; afterBytes: number; durationMs: number } {
   const d = getDb();
   const dbPath = getDbPath();

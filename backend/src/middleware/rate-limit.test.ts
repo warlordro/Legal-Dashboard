@@ -61,88 +61,6 @@ function buildAppWithToken(): Hono {
   return app;
 }
 
-// Stand-in ownerContext + AI routes registered on BOTH mounted paths, mirroring
-// index.ts's dual app.route("/api/ai", aiRouter) / app.route("/api/v1/ai", aiRouter).
-function buildAppWithAiRoutes(): Hono {
-  const app = new Hono();
-  app.use("*", async (c, next) => {
-    c.set("ownerId", c.req.header("x-test-owner") ?? "local");
-    const t = c.req.header("x-test-token");
-    if (t) c.set("tokenId", t);
-    await next();
-  });
-  app.use("/api/*", rateLimit);
-  app.post("/api/ai/analyze-multi", (c) => c.json({ ok: true }));
-  app.post("/api/v1/ai/analyze-multi", (c) => c.json({ ok: true }));
-  return app;
-}
-
-// FIX 1 (HIGH): weight-3 must apply on BOTH mounted paths. Pre-fix, the exact-match
-// check only covered /api/ai/analyze-multi, so aiRouter's other mount point
-// (/api/v1/ai — index.ts) let the multi-agent endpoint through at weight 1.
-describe("rateLimit — FIX 1: analyze-multi weight applies on both mounted paths", () => {
-  it("consumes weight 3 per request on /api/v1/ai/analyze-multi (regression: dual mount)", async () => {
-    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.70" } } as ReturnType<typeof getConnInfo>);
-    const app = buildAppWithAiRoutes();
-    const maxRequests = Math.floor(RATE_LIMIT / 3);
-
-    for (let i = 0; i < maxRequests; i++) {
-      const res = await app.request("/api/v1/ai/analyze-multi", {
-        method: "POST",
-        headers: { "x-test-owner": "alice" },
-      });
-      expect(res.status).toBe(200);
-    }
-    const limited = await app.request("/api/v1/ai/analyze-multi", {
-      method: "POST",
-      headers: { "x-test-owner": "alice" },
-    });
-    expect(limited.status).toBe(429);
-  });
-
-  it("also applies weight 3 on the legacy /api/ai/analyze-multi path", async () => {
-    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.71" } } as ReturnType<typeof getConnInfo>);
-    const app = buildAppWithAiRoutes();
-    const maxRequests = Math.floor(RATE_LIMIT / 3);
-
-    for (let i = 0; i < maxRequests; i++) {
-      const res = await app.request("/api/ai/analyze-multi", {
-        method: "POST",
-        headers: { "x-test-owner": "alice" },
-      });
-      expect(res.status).toBe(200);
-    }
-    const limited = await app.request("/api/ai/analyze-multi", {
-      method: "POST",
-      headers: { "x-test-owner": "alice" },
-    });
-    expect(limited.status).toBe(429);
-  });
-});
-
-// FIX 2 (MEDIUM): the per-token (PAT) bucket must also burn `weight` units, not a
-// flat 1 — pre-fix, a PAT hammering analyze-multi only counted as 1 unit/call there.
-describe("rateLimit — FIX 2: weight applies to the per-token (PAT) bucket", () => {
-  it("burns TOKEN_RATE_LIMIT in 1/3 as many requests on the weighted endpoint", async () => {
-    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.72" } } as ReturnType<typeof getConnInfo>);
-    const app = buildAppWithAiRoutes();
-    const maxRequests = Math.floor(TOKEN_RATE_LIMIT / 3);
-
-    for (let i = 0; i < maxRequests; i++) {
-      const res = await app.request("/api/v1/ai/analyze-multi", {
-        method: "POST",
-        headers: { "x-test-token": "tokC" },
-      });
-      expect(res.status).toBe(200);
-    }
-    const limited = await app.request("/api/v1/ai/analyze-multi", {
-      method: "POST",
-      headers: { "x-test-token": "tokC" },
-    });
-    expect(limited.status).toBe(429);
-  });
-});
-
 describe("clampTokenRateLimit — defensive env parsing", () => {
   it("defaults to 60 for non-finite / non-positive input", () => {
     expect(clampTokenRateLimit(Number.NaN)).toBe(60);
@@ -545,90 +463,192 @@ describe("PR-9 fix B2 - pre-auth rate limit", () => {
       expect(res.status).toBe(200);
     }
   });
+});
 
-  // FIX 3 (MEDIUM): release must run in `finally`. Pre-fix, `await next()` was
-  // followed by a bare conditional release — if the downstream handler threw AFTER
-  // ownerContext set ownerId, the release line never ran, and the pre-auth bucket
-  // (shared per-IP) silently accumulated toward PRE_AUTH_LIMIT.
-  it("releases the pre-auth bucket even when the downstream handler throws after auth succeeds", async () => {
+// Bug 2 (v2.42.2): release-ul trebuie sa ruleze si pe caile de EXCEPTIE, dar
+// numai cand autentificarea a reusit. Capcana evitata: pe throw-unwind getter-ul
+// lazy c.res din Hono instantiaza Response(null) cu status 200 — un check naiv
+// de status ar elibera exact tentativele neautentificate esuate.
+describe("preAuthRateLimit — release pe caile de exceptie (Bug 2 v2.42.2)", () => {
+  it("un throw FARA ownerId setat retine tentativa: a 61-a cerere e 429", async () => {
     mockedGetConnInfo.mockReturnValue({
-      remote: { address: "10.0.0.55" },
+      remote: { address: "10.0.0.60" },
     } as ReturnType<typeof getConnInfo>);
 
     const app = new Hono();
     app.use("*", requestIdContext);
     app.use("/api/*", preAuthRateLimit);
-    app.get("/api/boom-auth", (c) => {
-      c.set("ownerId", "alice"); // simulates ownerContext having authenticated successfully
-      throw new Error("downstream boom");
-    });
-
-    // Pre-fix, the leaked bucket would exhaust by request #61 and this loop would
-    // see a spurious 429 instead of Hono's default 500 for the thrown error.
-    for (let i = 0; i < 100; i++) {
-      const res = await app.request("/api/boom-auth");
-      expect(res.status).toBe(500);
-    }
-  });
-
-  // v2.42.2 regression: getter-ul lazy c.res instantiaza `new Response(null)`
-  // (status 200) pe calea de exceptie, deci conditia veche `c.res && c.res.status
-  // < 300` elibera tentativa la un throw INAINTE ca ownerId sa fie setat — exact
-  // clasa de cereri neautentificate esuate pe care limiterul trebuie sa o numere.
-  // Guard-ul pe c.finalized pastreaza consumul: in timpul throw-unwind finalized
-  // e false (error handler-ul Hono ruleaza dupa finally-ul limiterului).
-  it("retine bucket-ul cand handler-ul arunca INAINTE ca autentificarea sa reuseasca", async () => {
-    mockedGetConnInfo.mockReturnValue({
-      remote: { address: "10.0.0.56" },
-    } as ReturnType<typeof getConnInfo>);
-
-    const app = new Hono();
-    app.use("*", requestIdContext);
-    app.use("/api/*", preAuthRateLimit);
-    app.get("/api/boom-preauth", () => {
-      // ownerId ramane nesetat — simuleaza un throw in ownerContext/auth provider
-      // inainte ca autentificarea sa reuseasca.
-      throw new Error("pre-auth boom");
+    app.post("/api/boom", () => {
+      throw new Error("boom");
     });
 
     for (let i = 0; i < 60; i++) {
-      const res = await app.request("/api/boom-preauth");
+      const res = await app.request("/api/boom", { method: "POST" });
       expect(res.status).toBe(500);
     }
 
-    // Pre-fix, release-ul eronat golea bucket-ul la fiecare request si flood-ul
-    // nu atingea niciodata 429.
-    const limited = await app.request("/api/boom-preauth");
-    expect(limited.status).toBe(429);
+    const res61 = await app.request("/api/boom", { method: "POST" });
+    expect(res61.status).toBe(429);
   });
 
-  // v2.42.2: fereastra proaspata trece prin acelasi ceiling ca ramura de
-  // increment. Cu LEGAL_DASHBOARD_TOKEN_RATE_LIMIT=2 (clamp permite 1-2) si
-  // weight=3 pe analyze-multi, primul request din fiecare fereastra scapa
-  // pre-fix neplafonat (bucket-ul era setat la count=3 fara verificare).
-  it("fereastra proaspata respecta ceiling-ul per-token cand weight > TOKEN_RATE_LIMIT", async () => {
-    vi.resetModules();
-    vi.stubEnv("LEGAL_DASHBOARD_TOKEN_RATE_LIMIT", "2");
-    try {
-      const rl = await import("./rate-limit.ts");
-      const conninfo = await import("@hono/node-server/conninfo");
-      vi.mocked(conninfo.getConnInfo).mockReturnValue({
-        remote: { address: "10.0.0.57" },
-      } as ReturnType<typeof getConnInfo>);
+  it("un throw DUPA ownerId setat elibereaza tentativa: 100 de cereri raman 500, niciodata 429", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.61" },
+    } as ReturnType<typeof getConnInfo>);
 
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.use("/api/*", async (c, next) => {
+      c.set("ownerId", "user-1");
+      await next();
+    });
+    app.post("/api/boom", () => {
+      throw new Error("boom");
+    });
+
+    for (let i = 0; i < 100; i++) {
+      const res = await app.request("/api/boom", { method: "POST" });
+      expect(res.status).toBe(500);
+    }
+  });
+
+  // Throw-urile non-Error NU sunt prinse de error handler-ul din frame-ul
+  // handler-ului (compose-ul Hono le re-arunca), deci next() chiar REJECTEAZA
+  // si app.request() insusi rejecteaza — exact calea de unwind pe care
+  // release-ul v2.42.0 (dupa next(), fara finally) o sarea complet. Observam
+  // bucket-ul prin comportament: o cerere blocata de limiter se REZOLVA cu
+  // 429; o cerere care ajunge la handler REJECTEAZA.
+  async function requestOutcome(
+    app: Hono,
+    path: string
+  ): Promise<{ kind: "response"; status: number } | { kind: "rejected" }> {
+    try {
+      const res = await app.request(path, { method: "POST" });
+      return { kind: "response", status: res.status };
+    } catch {
+      return { kind: "rejected" };
+    }
+  }
+
+  it("un REJECT real al lui next() DUPA ownerId setat elibereaza tentativa (niciodata 429)", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.62" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.use("/api/*", async (c, next) => {
+      c.set("ownerId", "user-2");
+      await next();
+    });
+    app.post("/api/boom", () => {
+      // throw non-Error intentionat: exact scenariul testat (reject real al lui next())
+      throw "boom-string";
+    });
+
+    for (let i = 0; i < 100; i++) {
+      // Fiecare cerere trebuie sa AJUNGA la handler (reject), nu sa fie
+      // oprita de limiter (429) — bucket-ul se elibereaza la fiecare pas.
+      expect(await requestOutcome(app, "/api/boom")).toEqual({ kind: "rejected" });
+    }
+  });
+
+  it("un REJECT real al lui next() FARA ownerId retine tentativa (guard anti-regresie lazy c.res=200)", async () => {
+    mockedGetConnInfo.mockReturnValue({
+      remote: { address: "10.0.0.63" },
+    } as ReturnType<typeof getConnInfo>);
+
+    const app = new Hono();
+    app.use("*", requestIdContext);
+    app.use("/api/*", preAuthRateLimit);
+    app.post("/api/boom", () => {
+      // throw non-Error intentionat: exact scenariul testat (reject real al lui next())
+      throw "boom-string";
+    });
+
+    for (let i = 0; i < 60; i++) {
+      expect(await requestOutcome(app, "/api/boom")).toEqual({ kind: "rejected" });
+    }
+
+    // A 61-a e oprita de limiter INAINTE de handler → raspuns 429 real.
+    expect(await requestOutcome(app, "/api/boom")).toEqual({ kind: "response", status: 429 });
+  });
+});
+
+// Bug 3 (v2.42.1): analyze-multi costa 3 apeluri AI; routerul AI e montat dublu
+// (/api/ai si /api/v1/ai). Weight-ul trebuie aplicat pe AMBELE path-uri si pe
+// AMBELE bucket-uri (per-owner si per-token) — altfel ruta v1 permite ~3x
+// bugetul intentionat, iar un PAT nu e ponderat deloc.
+describe("weight 3x analyze-multi — ambele mount-uri + per-token (Bug 3 v2.42.1)", () => {
+  function buildAppWithMulti(withToken: boolean): Hono {
+    const app = new Hono();
+    app.use("*", async (c, next) => {
+      c.set("ownerId", "owner-w");
+      if (withToken) c.set("tokenId", "tok-w");
+      await next();
+    });
+    app.use("/api/*", rateLimit);
+    app.post("/api/v1/ai/analyze-multi", (c) => c.json({ ok: true }));
+    return app;
+  }
+
+  it("mount-ul /api/v1/ai/analyze-multi consuma 3 unitati pe bucketul per-owner (a 41-a cerere e 429)", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.70" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithMulti(false);
+    // RATE_LIMIT=120, weight 3 => 40 de cereri incap exact; a 41-a depaseste.
+    for (let i = 0; i < RATE_LIMIT / 3; i++) {
+      const res = await app.request("/api/v1/ai/analyze-multi", { method: "POST" });
+      expect(res.status).toBe(200);
+    }
+    const over = await app.request("/api/v1/ai/analyze-multi", { method: "POST" });
+    expect(over.status).toBe(429);
+  });
+
+  it("bucketul per-token pondereaza si el: TOKEN_RATE_LIMIT/3 cereri incap, urmatoarea e 429", async () => {
+    mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.71" } } as ReturnType<typeof getConnInfo>);
+    const app = buildAppWithMulti(true);
+    for (let i = 0; i < TOKEN_RATE_LIMIT / 3; i++) {
+      const res = await app.request("/api/v1/ai/analyze-multi", { method: "POST" });
+      expect(res.status).toBe(200);
+    }
+    const over = await app.request("/api/v1/ai/analyze-multi", { method: "POST" });
+    expect(over.status).toBe(429);
+  });
+});
+
+// Bug 4 (v2.42.2): pe fereastra noua/expirata bucket-ul se seta la count=weight
+// FARA verificarea plafonului — cu LEGAL_DASHBOARD_TOKEN_RATE_LIMIT sub 3
+// (clamp-ul permite 1-2), primul request ponderat din fiecare fereastra scapa
+// neplafonat. Limita se citeste la import, deci testul re-importa modulul cu
+// env-ul setat (module proaspete = maps proaspete).
+describe("plafon pe fereastra proaspata (Bug 4 v2.42.2)", () => {
+  it("TOKEN_RATE_LIMIT=2: primul analyze-multi (weight 3) dintr-o fereastra noua e 429", async () => {
+    vi.resetModules();
+    const prev = process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT;
+    process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT = "2";
+    try {
+      const { rateLimit: freshRateLimit } = await import("./rate-limit.ts");
+      mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.80" } } as ReturnType<typeof getConnInfo>);
       const app = new Hono();
       app.use("*", async (c, next) => {
-        c.set("ownerId", "local");
-        c.set("tokenId", "tok-fresh-window");
+        c.set("ownerId", "owner-f");
+        c.set("tokenId", "tok-f");
         await next();
       });
-      app.use("/api/*", rl.rateLimit);
-      app.post("/api/ai/analyze-multi", (c) => c.json({ ok: true }));
+      app.use("/api/*", freshRateLimit);
+      app.post("/api/v1/ai/analyze-multi", (c) => c.json({ ok: true }));
 
-      const res = await app.request("/api/ai/analyze-multi", { method: "POST" });
+      const res = await app.request("/api/v1/ai/analyze-multi", { method: "POST" });
       expect(res.status).toBe(429);
     } finally {
-      vi.unstubAllEnvs();
+      if (prev === undefined) {
+        // biome-ignore lint/performance/noDelete: env trebuie unset real
+        delete process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT;
+      } else {
+        process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT = prev;
+      }
       vi.resetModules();
     }
   });

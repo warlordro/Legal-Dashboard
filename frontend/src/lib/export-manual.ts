@@ -346,7 +346,7 @@ export async function buildManualPdf(): Promise<ExportResult> {
 
   addHeading("Modele disponibile:", 2);
   addParagraph("Anthropic (Claude): Haiku 4.5 (Rapid), Sonnet 5 (Echilibrat), Opus 4.8 (Premium)");
-  addParagraph("OpenAI (GPT): GPT-5.4 nano (Rapid), GPT-5.4 mini (Echilibrat), GPT-5.4 (Premium)");
+  addParagraph("OpenAI (GPT): GPT-5.6 Luna (Rapid), GPT-5.6 Terra (Echilibrat), GPT-5.6 Sol (Premium)");
   addParagraph("Google (Gemini): Gemini 3.1 Lite (Rapid), Gemini 3.5 Flash (Echilibrat), Gemini 3.1 Pro (Premium)");
 
   addHeading("Structura analizei (7 sectiuni):", 2);
@@ -371,7 +371,9 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet('Selecteaza 2 modele "Analist" — acestea analizeaza dosarul independent si in paralel');
   addBullet('Selecteaza 1 model "Judecator" — acesta primeste ambele analize si le reconciliaza');
   addBullet("Nu se poate selecta acelasi model de doua ori");
-  addBullet("Modelele judecator sunt restrictionate la modele premium: Claude Opus 4.8, GPT-5.4 sau Gemini 3.1 Pro");
+  addBullet(
+    "Modelele judecator sunt restrictionate la modele premium: Claude Opus 4.8, GPT-5.6 Sol sau Gemini 3.1 Pro"
+  );
 
   addHeading("Rolul judecatorului AI:", 2);
   addBullet("Primeste datele complete ale dosarului plus cele 2 analize independente");

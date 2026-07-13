@@ -7,7 +7,7 @@ Aplicatie desktop (Electron) + build web viitor pentru:
 2. Interogarea Registrului National de Publicitate Mobiliara (RNPM / mj.rnpm.ro) cu persistenta SQLite locala.
 3. Analiza juridica AI multi-provider (Claude, OpenAI, Gemini) in mod single-agent sau multi-agent (2 analisti + judecator).
 
-- **Versiune curenta**: **v2.42.2** - 9 Iulie 2026. Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
+- **Versiune curenta**: **v2.43.0** - 13 Iulie 2026. Pentru istoric complet vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (`/changelog`).
 - **AppId**: `ro.legaldashboard.app`
 - **Produs**: `Legal Dashboard`
 - **Platforme**: Windows (NSIS installer, x64), macOS (DMG, x64 + arm64), Web (build standalone viitor)
@@ -79,25 +79,25 @@ legal-dashboard/
 
 ### Frontend
 - **React 18.3** + **TypeScript 5.5**
-- **Vite 5.4** (dev server + build, port 5173)
+- **Vite 6.4** (dev server + build, port 5173)
 - **Tailwind CSS 3.4** + primitive UI proprii (shadcn-style)
-- **Recharts 3.8** (statistici RNPM, MetricsPanel dosare/termene)
+- **Recharts 3.9** (statistici RNPM, MetricsPanel dosare/termene)
 - **Lucide React** (iconite)
 - **date-fns 3.6** + **react-day-picker 8.10** (calendar termene)
 - **DOMPurify 3.4** (sanitizare renderere AI)
 - **xlsx 0.18** + **xlsx-js-style 1.2** (export Excel stilizat, dynamic import)
-- **jsPDF 2.5** + **jspdf-autotable 3.8** (export PDF, dynamic import)
+- **jsPDF 4.2** + **jspdf-autotable 5.0** (export PDF, dynamic import)
 
 ### Backend
 - **Node.js ≥ 22** (ruleaza .ts direct cu `--experimental-strip-types`)
 - **Hono 4.12** + **@hono/node-server 1.19**
-- **better-sqlite3 12.9** (WAL, online backup API, VACUUM)
+- **better-sqlite3 12.11** (WAL, online backup API, VACUUM)
 - **dotenv 16** (`backend/.env`)
 - SOAP XML parsat manual (regex, zero dependenta externa XML)
 
 ### AI SDKs
-- **@anthropic-ai/sdk 0.90** — Claude Haiku 4.5 / Sonnet 5 / Opus 4.8
-- **openai 6.33** — GPT-5.4 via Responses API
+- **@anthropic-ai/sdk 0.109** — Claude Haiku/Opus 4.x, Sonnet 5
+- **openai 6.45** — GPT-5.6 via Responses API
 - **@google/generative-ai 0.24** — Gemini 3.x
 
 ### Captcha
@@ -106,7 +106,7 @@ legal-dashboard/
 
 ### Desktop
 - **Electron 41** + **electron-builder 26**
-- **esbuild 0.27** (backend bundle -> CJS, pentru compatibilitate require() in Electron)
+- **esbuild 0.28** (backend bundle -> CJS, pentru compatibilitate require() in Electron)
 - NSIS installer Windows (per-user, fara elevare admin)
 - DMG macOS (x64 + arm64)
 
@@ -293,14 +293,14 @@ Vezi sectiunea SQLite pentru schema completa. Filtre:
 | **Anthropic** | Claude Haiku 4.5 (Rapid) | `claude-haiku` | `claude-haiku-4-5-20251001` |
 | | Claude Sonnet 5 (Echilibrat) | `claude-sonnet` | `claude-sonnet-5` |
 | | Claude Opus 4.8 (Premium) | `claude-opus` | `claude-opus-4-8` |
-| **OpenAI** | GPT-5.4 nano (Rapid) | `gpt-5.4-nano` | `gpt-5.4-nano` |
-| | GPT-5.4 mini (Echilibrat) | `gpt-5.4-mini` | `gpt-5.4-mini` |
-| | GPT-5.4 (Premium) | `gpt-5.4` | `gpt-5.4` |
+| **OpenAI** | GPT-5.6 Luna (Rapid) | `gpt-5.6-luna` | `gpt-5.6-luna` |
+| | GPT-5.6 Terra (Echilibrat) | `gpt-5.6-terra` | `gpt-5.6-terra` |
+| | GPT-5.6 Sol (Premium) | `gpt-5.6-sol` | `gpt-5.6-sol` |
 | **Google** | Gemini 3.1 Flash Lite (Rapid) | `gemini-flash-lite-3` | `gemini-3.1-flash-lite-preview` |
 | | Gemini 3.5 Flash (Echilibrat) | `gemini-flash-3.5` | `gemini-3.5-flash` |
 | | Gemini 3.1 Pro (Premium) | `gemini-pro-3` | `gemini-3.1-pro-preview` |
 
-Modele permise ca **judecator** in multi-agent: `claude-opus`, `gpt-5.4`, `gemini-pro-3`.
+Modele permise ca **judecator** in multi-agent: `claude-opus`, `gpt-5.6-sol`, `gemini-pro-3`.
 
 ### Autentificare AI
 

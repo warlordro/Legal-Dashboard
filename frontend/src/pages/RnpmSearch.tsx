@@ -11,7 +11,8 @@ import { RnpmSavedStats } from "@/components/rnpm/RnpmSavedStats";
 import { RnpmDetailModal } from "@/components/rnpm/RnpmDetailModal";
 import { RnpmSplitDialog } from "@/components/rnpm/RnpmSplitDialog";
 import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
-import { rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
+import { formatRnpmStorageLimitError, rnpmSearch, rnpmSplitSearch, RnpmLimitExceededError } from "@/lib/rnpmApi";
+import { appendUniqueDocuments } from "@/lib/rnpmDedup";
 import { describeBlockedSubResult } from "@/lib/rnpmGapReason";
 import { describeNestedPhase, describeSplitPhase, formatSplitProgress } from "@/lib/rnpmProgressPhase";
 import type {
@@ -159,7 +160,7 @@ export default function RnpmSearchPage({
         // Deschide dialog de confirmare; userul decide daca platim N captcha-uri.
         setPendingSplit({ type, params, total: e.total, limit: e.limit });
       } else {
-        setError(e instanceof Error ? e.message : "Eroare necunoscuta");
+        setError(formatRnpmStorageLimitError(e) ?? (e instanceof Error ? e.message : "Eroare necunoscuta"));
       }
     } finally {
       if (abortRef.current === ctl) abortRef.current = null;
@@ -274,18 +275,20 @@ export default function RnpmSearchPage({
       );
       if (stoppedRef.current || ctl.signal.aborted) return;
       setElapsedMs((prev) => (prev ?? 0) + Math.round(performance.now() - startTs));
-      setResult((prev) =>
-        prev
-          ? {
-              ...prev,
-              documents: [...prev.documents, ...res.documents],
-              avizIds: [...prev.avizIds, ...res.avizIds],
-              detailsFailed: [...prev.detailsFailed, ...res.detailsFailed],
-              gcode: res.gcode,
-              nextRnpmPage: res.nextRnpmPage,
-            }
-          : null
-      );
+      setResult((prev) => {
+        if (!prev) return null;
+        // Dedup dupa identificator: RNPM repeta randuri intre pagini (vezi
+        // lib/rnpmDedup.ts) — fara filtrare, contorul depaseste totalul.
+        const merged = appendUniqueDocuments(prev, res);
+        return {
+          ...prev,
+          documents: merged.documents,
+          avizIds: merged.avizIds,
+          detailsFailed: [...prev.detailsFailed, ...res.detailsFailed],
+          gcode: res.gcode,
+          nextRnpmPage: res.nextRnpmPage,
+        };
+      });
       setSavedRefreshKey((k) => k + 1);
     } catch (e) {
       if (!isAbort(e) && !ctl.signal.aborted) {

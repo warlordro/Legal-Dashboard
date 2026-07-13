@@ -124,10 +124,10 @@ describe("resolveOpenRouterSlug", () => {
 
   it("ignora override-uri cu format invalid sau provider neacceptat", () => {
     process.env.OPENROUTER_MODEL_OVERRIDES =
-      "claude-sonnet:javascript:alert(1), claude-opus:evil-provider/model, gpt-5.4:openai/custom-gpt";
+      "claude-sonnet:javascript:alert(1), claude-opus:evil-provider/model, gpt-5.6-sol:openai/custom-gpt";
     expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/claude-sonnet-5"); // fallback static
     expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-4.8"); // provider respins
-    expect(resolveOpenRouterSlug("gpt-5.4")).toBe("openai/custom-gpt"); // valid, trece
+    expect(resolveOpenRouterSlug("gpt-5.6-sol")).toBe("openai/custom-gpt"); // valid, trece
   });
 
   it("ignora pair-uri malformate fara colon (defensiv)", () => {
@@ -307,11 +307,11 @@ describe("callModel OpenRouter routing", () => {
   it("uses a sk-or body key as OpenRouter override in desktop mode", async () => {
     mockOpenRouterResponse();
 
-    await callModel("gpt-5.4-mini", "prompt", { openrouter: "sk-or-v1-body" }, 5000);
+    await callModel("gpt-5.6-terra", "prompt", { openrouter: "sk-or-v1-body" }, 5000);
 
     expect(openAiConstructorMock).toHaveBeenCalledWith(expect.objectContaining({ apiKey: "sk-or-v1-body" }));
     expect(openRouterCreateMock).toHaveBeenCalledWith(
-      expect.objectContaining({ model: "openai/gpt-5.4-mini" }),
+      expect.objectContaining({ model: "openai/gpt-5.6-terra" }),
       expect.any(Object)
     );
   });

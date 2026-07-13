@@ -10,5 +10,5 @@ const LABELS: Record<string, string> = {
 
 export function monitoringRunStatusLabel(status: string | null | undefined): string {
   if (!status) return "—";
-  return LABELS[status] ?? status;
+  return LABELS[status] ?? `Necunoscut (${status})`;
 }

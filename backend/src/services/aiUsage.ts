@@ -46,9 +46,18 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "claude-opus-4-8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
   },
   openai: {
+    // Intrarile 5.4 raman pentru retry-uri/cozi in zbor din jurul migrarii
+    // la 5.6 (acelasi pattern ca Sonnet 4-6 mai sus); istoricul are costul
+    // stocat la insert.
     "gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
     "gpt-5.4-mini": { inputUsdPerMillion: 0.25, outputUsdPerMillion: 2 },
     "gpt-5.4": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
+    // v2.42.x: familia GPT-5.6 — preturi de PREVIEW verificate 2026-07-09
+    // (catalogul live OpenRouter + surse de pricing concordante); de
+    // reverificat la GA.
+    "gpt-5.6-luna": { inputUsdPerMillion: 1, outputUsdPerMillion: 6 },
+    "gpt-5.6-terra": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 15 },
+    "gpt-5.6-sol": { inputUsdPerMillion: 5, outputUsdPerMillion: 30 },
   },
   google: {
     "gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.4 },
@@ -62,7 +71,12 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "anthropic/claude-opus-4.8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
     "openai/gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
     "openai/gpt-5.4-mini": { inputUsdPerMillion: 0.25, outputUsdPerMillion: 2 },
-    "openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 10 },
+    "openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 15 },
+    // v2.42.x: pe OpenRouter pricing-ul 5.6 e identic cu cel nativ (verificat
+    // in catalogul live 2026-07-09).
+    "openai/gpt-5.6-luna": { inputUsdPerMillion: 1, outputUsdPerMillion: 6 },
+    "openai/gpt-5.6-terra": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 15 },
+    "openai/gpt-5.6-sol": { inputUsdPerMillion: 5, outputUsdPerMillion: 30 },
     "google/gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.075, outputUsdPerMillion: 0.3 },
     "google/gemini-3.5-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 9 },
     "google/gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },

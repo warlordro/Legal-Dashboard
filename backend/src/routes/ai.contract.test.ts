@@ -61,6 +61,20 @@ describe("AI routes - envelope shape", () => {
     await expectEnvelope(res, "UNKNOWN_MODEL");
   });
 
+  it("POST /api/ai/analyze cu cheia veche gpt-5.4 returneaza UNKNOWN_MODEL 400 (migrare GPT-5.6)", async () => {
+    const res = await buildApp().request("/api/ai/analyze", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "gpt-5.4",
+        dosar: { numar: "123/2024", institutie: "JUDECATORIA BUCURESTI" },
+        apiKeys: { openai: "sk-test" },
+      }),
+    });
+    expect(res.status).toBe(400);
+    await expectEnvelope(res, "UNKNOWN_MODEL");
+  });
+
   it("POST /api/ai/analyze cu model valid dar fara apiKeys returneaza MISSING_API_KEY", async () => {
     const res = await buildApp().request("/api/ai/analyze", {
       method: "POST",

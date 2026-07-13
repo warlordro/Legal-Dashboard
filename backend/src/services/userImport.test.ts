@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { buildImportTemplate, MAX_IMPORT_ROWS, parseRoleInput, parseUserImport } from "./userImport.ts";
 
-async function xlsxOf(rows: (string | number | null)[][]): Promise<Buffer> {
+async function xlsxOf(rows: ExcelJS.CellValue[][]): Promise<Buffer> {
   const wb = new ExcelJS.Workbook();
   const ws = wb.addWorksheet("Utilizatori");
   for (const row of rows) {
@@ -179,6 +179,67 @@ describe("parseUserImport", () => {
       expect(result.rows).toHaveLength(1);
       expect(result.rows[0].email).toBe("ana@firma.ro");
     }
+  });
+
+  // Fix duel-review 2026-07-09: paste din Outlook cu text afisat diferit de
+  // adresa ("Ion Popescu" -> mailto:ion@firma.ro). Ramura mailto era de neatins
+  // (text-ul, mereu prezent pe hyperlink, era verificat primul) si randul pica
+  // la validare. Contractul existent "textul afisat castiga" (testul de mai
+  // sus) se pastreaza cand textul arata a email.
+  it("email ca hyperlink Outlook cu text NON-email: adresa se ia din mailto", async () => {
+    const buf = await xlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      [{ text: "Ion Popescu", hyperlink: "mailto:ion@firma.ro" }, "Ion Popescu", "Utilizator"],
+    ]);
+    const res = await parseUserImport(buf);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.issues).toHaveLength(0);
+    expect(res.rows).toEqual([{ rowNumber: 2, email: "ion@firma.ro", displayName: "Ion Popescu", role: "user" }]);
+  });
+
+  it("parametrii mailto (?subject=...) se taie din adresa", async () => {
+    const buf = await xlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      [{ text: "Ion Popescu", hyperlink: "mailto:ion@firma.ro?subject=Salut" }, "Ion", ""],
+    ]);
+    const res = await parseUserImport(buf);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.rows[0]?.email).toBe("ion@firma.ro");
+  });
+
+  it("mailto cu percent-encoding si fragment se normalizeaza (audit 2026-07-09)", async () => {
+    const buf = await xlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      [{ text: "Ion Plus", hyperlink: "mailto:ion%2Btag@firma.ro#sectiune" }, "Ion Plus", ""],
+    ]);
+    const res = await parseUserImport(buf);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.rows[0]?.email).toBe("ion+tag@firma.ro");
+  });
+
+  it("REGRESIE: numele afisat cu hyperlink NU se inlocuieste cu URL-ul", async () => {
+    const buf = await xlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      ["ion@firma.ro", { text: "Ion Popescu", hyperlink: "https://firma.ro/ion" }, ""],
+    ]);
+    const res = await parseUserImport(buf);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.rows[0]?.displayName).toBe("Ion Popescu");
+  });
+
+  it("email cu hyperlink NON-mailto pastreaza textul afisat", async () => {
+    const buf = await xlsxOf([
+      ["Email", "Nume afisat", "Rol"],
+      [{ text: "ion@firma.ro", hyperlink: "https://firma.ro" }, "Ion", ""],
+    ]);
+    const res = await parseUserImport(buf);
+    expect(res.ok).toBe(true);
+    if (!res.ok) return;
+    expect(res.rows[0]?.email).toBe("ion@firma.ro");
   });
 
   it("celula Date pe coloana de nume nu arunca si nu produce [object Object]", async () => {

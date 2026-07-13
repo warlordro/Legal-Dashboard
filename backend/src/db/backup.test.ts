@@ -1,18 +1,32 @@
-import { describe, it, expect, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
 import fsPromises from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
+import { discoverMigrations } from "./migrations/runner.ts";
+import { Hono } from "hono";
 import {
+  __resetMaintenanceShutdownForTests,
+  __uniqueManualBackupNameForTests,
+  createManualBackup,
   deleteAllBackups,
   getBackupDir,
   listBackupsWithMeta,
+  MaintenanceShutdownError,
+  markMaintenanceShuttingDown,
   restoreFromBackup,
   runDailyBackup,
+  waitForBackupToSettle,
   withMaintenanceRead,
+  withMaintenanceWrite,
 } from "./backup.ts";
-import { closeDb } from "./schema.ts";
+import { requestIdContext } from "../middleware/requestId.ts";
+import { meRouter } from "../routes/me.ts";
+import { appErrorHandler } from "../util/appErrorHandler.ts";
+import { getRnpmDataDir } from "./rnpmDb.ts";
+import { clearMonolithRestoreInProgress, closeDb, getDb, setMonolithRestoreInProgress } from "./schema.ts";
 
 // Capture console.log during the body — vi.spyOn does not intercept reliably
 // across the maintenance-lock microtask hop, so override the method directly.
@@ -29,6 +43,8 @@ async function captureConsoleLog<T>(fn: () => Promise<T>): Promise<{ value: T; l
     console.log = original;
   }
 }
+
+const __testDir = typeof __dirname !== "undefined" ? __dirname : path.dirname(fileURLToPath(import.meta.url));
 
 let tmpRoot: string;
 let dbPath: string;
@@ -111,13 +127,15 @@ describe("restoreFromBackup — atomicity + safety", () => {
     expect(fs.existsSync(dbPath + "-shm")).toBe(false);
   });
 
-  it("does not leave a half-written tmp file alongside the live DB on success", async () => {
+  it("does not leave staging artifacts alongside the live DB on success", async () => {
     const backupName = "legal-dashboard.2026-04-15.db";
     await seedBackup(backupName, "RESTORED");
 
     await restoreFromBackup(backupName);
 
-    expect(fs.existsSync(dbPath + ".restore.tmp")).toBe(false);
+    // Rev. 3 (panel LOW): asertia veche verifica numele `.restore.tmp`, pe
+    // care implementarea pe staging nu il mai produce — trecea trivial.
+    expect(fs.existsSync(`${dbPath}.restore-staging`)).toBe(false);
   });
 
   it("rejects path-traversal attempts", async () => {
@@ -169,6 +187,46 @@ describe("restoreFromBackup — atomicity + safety", () => {
   });
 });
 
+// Rev. 4 (Codex): stampNow() trunchia la secunda, iar publish-ul suprascrie
+// prin rename — doua create-uri manuale in aceeasi secunda (ruta admin nu are
+// cooldown) produceau UN singur snapshot, silentios.
+describe("nume unic pentru backup-ul manual (Rev. 4)", () => {
+  it("acelasi stamp + fisier existent => sufix incremental, fara suprascriere", async () => {
+    const dir = getBackupDir();
+    await fsPromises.mkdir(dir, { recursive: true });
+    const stamp = "2026-07-11T10-00-00-000Z";
+    const first = __uniqueManualBackupNameForTests(dir, "legal-dashboard.", stamp);
+    expect(first).toBe("legal-dashboard.manual-2026-07-11T10-00-00-000Z.db");
+
+    fs.writeFileSync(path.join(dir, first), "x");
+    const second = __uniqueManualBackupNameForTests(dir, "legal-dashboard.", stamp);
+    expect(second).toBe("legal-dashboard.manual-2026-07-11T10-00-00-000Z-2.db");
+    fs.writeFileSync(path.join(dir, second), "x");
+    const third = __uniqueManualBackupNameForTests(dir, "legal-dashboard.", stamp);
+    expect(third).toBe("legal-dashboard.manual-2026-07-11T10-00-00-000Z-3.db");
+  });
+
+  // Red COMPORTAMENTAL pe fluxul de PRODUCTIE (fix panel-pe-plan): doua
+  // create-uri cu acelasi timestamp trebuie sa produca DOUA fisiere pe disc.
+  // Spy-ul pe Date.prototype.toISOString traieste doar pe main thread —
+  // worker-ul de snapshot e thread separat, neafectat.
+  it("doua backup-uri manuale cu acelasi timestamp => doua fisiere distincte pe disc", async () => {
+    const frozen = "2026-07-11T10:00:00.000Z";
+    const spy = vi.spyOn(Date.prototype, "toISOString").mockReturnValue(frozen);
+    let a: { name: string };
+    let b: { name: string };
+    try {
+      a = await createManualBackup();
+      b = await createManualBackup();
+    } finally {
+      spy.mockRestore();
+    }
+    expect(a.name).not.toBe(b.name);
+    expect(fs.existsSync(path.join(getBackupDir(), a.name))).toBe(true);
+    expect(fs.existsSync(path.join(getBackupDir(), b.name))).toBe(true);
+  });
+});
+
 describe("deleteAllBackups — audit log", () => {
   it("emits a delete_all_backups audit line with deleted count and total", async () => {
     await seedBackup("legal-dashboard.2026-04-10.db", "A");
@@ -184,6 +242,38 @@ describe("deleteAllBackups — audit log", () => {
     expect(parsed.deleted).toBe(3);
     expect(parsed.total).toBe(3);
     expect(typeof parsed.ts).toBe("string");
+  });
+});
+
+// Task 2 (fixuri post-review): delete-all pe monolit serializat sub
+// maintenance lock — cerut explicit de review-panel, pandantul testului rnpm.
+describe("deleteAllBackups — serializare sub maintenance lock", () => {
+  it("nu sterge nimic cat timp un writer tine lock-ul; sterge dupa eliberare", async () => {
+    await seedBackup("legal-dashboard.2026-04-10.db", "A");
+    const backupPath = path.join(getBackupDir(), "legal-dashboard.2026-04-10.db");
+
+    let releaseWriter: () => void = () => undefined;
+    const writer = withMaintenanceWrite(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseWriter = resolve;
+        })
+    );
+    await new Promise((r) => setImmediate(r));
+
+    const del = deleteAllBackups();
+    try {
+      for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+      expect(fs.existsSync(backupPath)).toBe(true);
+    } finally {
+      // Elibereaza lock-ul MODULULUI si pe esec de asertie — altfel un red
+      // aici otraveste toate testele urmatoare din fisier (timeout in cascada).
+      releaseWriter();
+      await writer;
+      await del.catch(() => undefined);
+    }
+    expect(await del).toBe(1);
+    expect(fs.existsSync(backupPath)).toBe(false);
   });
 });
 
@@ -230,6 +320,30 @@ describe("runDailyBackup — atomicity + retention", () => {
     expect(preMigration).not.toContain("legal-dashboard.pre-schema-20200101.db");
     // 22 seeded backups + runDailyBackup = heavy real file I/O; the 5s default
     // testTimeout flakes on slow CI runners (Windows + Defender). Generous budget.
+  }, 30_000);
+
+  // Task 2 (fixuri post-review): pool EXPLICIT pentru pre-rnpm-split — altfel
+  // cade in preMigration si sorteaza lexicografic DUPA pre-schema-upgrade
+  // (evacuat primul, desi e rollback-ul split-ului).
+  it("pool preSplit separat: pastreaza 3 pre-rnpm-split + 5 pre-schema-upgrade, fara furt intre pool-uri", async () => {
+    for (let i = 1; i <= 4; i++) {
+      await seedOldBackup(`legal-dashboard.pre-rnpm-split-2020-01-0${i}T00-00-0${i}.db`, `SPLIT-${i}`);
+    }
+    for (let i = 1; i <= 6; i++) {
+      await seedOldBackup(`legal-dashboard.pre-schema-upgrade-2020-01-0${i}T00-00-0${i}.db`, `UPG-${i}`);
+    }
+
+    await runDailyBackup();
+
+    const names = (await listBackupsWithMeta()).map((b) => b.name);
+    const split = names.filter((n) => n.startsWith("legal-dashboard.pre-rnpm-split-"));
+    const upgrade = names.filter((n) => n.startsWith("legal-dashboard.pre-schema-upgrade-"));
+    expect(split).toHaveLength(3);
+    expect(split).toContain("legal-dashboard.pre-rnpm-split-2020-01-04T00-00-04.db");
+    expect(split).not.toContain("legal-dashboard.pre-rnpm-split-2020-01-01T00-00-01.db");
+    expect(upgrade).toHaveLength(5);
+    expect(upgrade).toContain("legal-dashboard.pre-schema-upgrade-2020-01-06T00-00-06.db");
+    expect(upgrade).not.toContain("legal-dashboard.pre-schema-upgrade-2020-01-01T00-00-01.db");
   }, 30_000);
 });
 
@@ -287,6 +401,300 @@ describe("runDailyBackup — offsite hook (POSIX only)", () => {
     const dated = names.filter((name) => /^legal-dashboard\.\d{4}-\d{2}-\d{2}\.db$/.test(name));
     // Hook failure is fail-open: local backup persists, only the offsite leg failed.
     expect(dated.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+// Rev. 3 (Codex H1): ledger-ul de migratii al backup-ului trebuie sa fie
+// coerent cu migratiile cunoscute (hash-uri + prefix contiguu 1..N) INAINTE de
+// publicare — altfel runner-ul il respinge abia la urmatorul open, dupa
+// fereastra de auto-revert.
+describe("restore monolit — validare ledger (Rev. 3)", () => {
+  function forgeLedger(backupName: string, rows: Array<{ version: number; hash: string }>): void {
+    const forge = new Database(path.join(getBackupDir(), backupName));
+    try {
+      forge.exec(
+        "CREATE TABLE IF NOT EXISTS _schema_versions (version INTEGER PRIMARY KEY, sha256_up TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+      );
+      for (const r of rows) {
+        forge
+          .prepare("INSERT OR REPLACE INTO _schema_versions (version, sha256_up) VALUES (?, ?)")
+          .run(r.version, r.hash);
+      }
+    } finally {
+      forge.close();
+    }
+  }
+
+  it("ledger cu hash gresit la o versiune cunoscuta => 400, live neatins", async () => {
+    const backupName = "legal-dashboard.2026-06-01.db";
+    await seedBackup(backupName, "FORGED");
+    forgeLedger(backupName, [{ version: 1, hash: "hash-forjat" }]);
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("ledger cu GAURA (incepe la 3, fara 1-2) => 400 (prefix contiguu obligatoriu)", async () => {
+    const backupName = "legal-dashboard.2026-06-05.db";
+    await seedBackup(backupName, "GAPPED");
+    const v3 = discoverMigrations(path.join(__testDir, "migrations")).find((f) => f.version === 3);
+    if (!v3) throw new Error("fixture: migratia 3 lipseste");
+    forgeLedger(backupName, [{ version: 3, hash: v3.sha256 }]);
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("ledger cu versiune invalida (0) => 400", async () => {
+    const backupName = "legal-dashboard.2026-06-06.db";
+    await seedBackup(backupName, "ZEROVER");
+    forgeLedger(backupName, [{ version: 0, hash: "orice" }]);
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+  });
+
+  it("ledger cu sentinel de backfill pe versiunea 1 + restul contiguu cu hash-uri reale => ACCEPTAT", async () => {
+    const backupName = "legal-dashboard.2026-06-02.db";
+    await seedBackup(backupName, "LEGACY");
+    const known = discoverMigrations(path.join(__testDir, "migrations"));
+    forgeLedger(backupName, [
+      { version: 1, hash: "__backfilled_v1__" },
+      ...known.filter((f) => f.version > 1).map((f) => ({ version: f.version, hash: f.sha256 })),
+    ]);
+
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+    expect(readMarker(dbPath)).toBe("LEGACY");
+  });
+
+  it("backup FARA _schema_versions ramane acceptat la monolit (regresie)", async () => {
+    const backupName = "legal-dashboard.2026-06-03.db";
+    await seedBackup(backupName, "NOLEDGER");
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+  });
+});
+
+// Rev. 3 (Codex H2): dupa split, un backup de monolit care mai contine randuri
+// rnpm_* nu se mai restaureaza — inainte, restore-ul raporta succes iar
+// urmatorul boot aborta fail-closed (marker done + randuri rnpm reaparute).
+describe("restore monolit — gate pre-split (Rev. 3)", () => {
+  function writeSplitMarker(content: string): void {
+    const dir = path.join(path.dirname(dbPath), "rnpm");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, ".split-done.json"), content);
+  }
+
+  function addRnpmRows(backupName: string): void {
+    const forge = new Database(path.join(getBackupDir(), backupName));
+    try {
+      forge.exec(
+        "CREATE TABLE IF NOT EXISTS rnpm_searches (id INTEGER PRIMARY KEY, owner_id TEXT NOT NULL, search_type TEXT, params_json TEXT)"
+      );
+      forge.prepare("INSERT INTO rnpm_searches (owner_id, search_type, params_json) VALUES ('u1','x','{}')").run();
+    } finally {
+      forge.close();
+    }
+  }
+
+  it("split done + backup cu randuri rnpm => 400 fail-closed, live neatins", async () => {
+    const backupName = "legal-dashboard.2026-05-01.db";
+    await seedBackup(backupName, "PRESPLIT");
+    addRnpmRows(backupName);
+    writeSplitMarker(JSON.stringify({ status: "done", completedAt: null, owners: [], appVersion: "x" }));
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    await expect(restoreFromBackup(backupName)).rejects.toThrow(/RUNBOOK|pre-split|separar/i);
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("split wiping (mid-split) + backup cu randuri rnpm => acelasi refuz", async () => {
+    const backupName = "legal-dashboard.2026-05-02.db";
+    await seedBackup(backupName, "PRESPLIT");
+    addRnpmRows(backupName);
+    writeSplitMarker(JSON.stringify({ status: "wiping", completedAt: null, owners: [], appVersion: "x" }));
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+  });
+
+  it("marker ILIZIBIL (JSON corupt) + backup cu randuri rnpm => refuz fail-closed, nu 'split inexistent'", async () => {
+    const backupName = "legal-dashboard.2026-05-05.db";
+    await seedBackup(backupName, "PRESPLIT");
+    addRnpmRows(backupName);
+    writeSplitMarker("{ corupt");
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
+
+  it("fara marker (split inca nerulat): backup cu randuri rnpm ramane restaurabil", async () => {
+    const backupName = "legal-dashboard.2026-05-03.db";
+    await seedBackup(backupName, "PRESPLIT-OK");
+    addRnpmRows(backupName);
+
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+    expect(readMarker(dbPath)).toBe("PRESPLIT-OK");
+  });
+
+  it("marker done + backup FARA randuri rnpm ramane restaurabil", async () => {
+    const backupName = "legal-dashboard.2026-05-04.db";
+    await seedBackup(backupName, "POSTSPLIT");
+    writeSplitMarker(JSON.stringify({ status: "done", completedAt: null, owners: [], appVersion: "x" }));
+
+    await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
+    expect(readMarker(dbPath)).toBe("POSTSPLIT");
+  });
+});
+
+// Task 5 (fixuri post-review): restore-ul de monolit primeste paritate cu cel
+// RNPM — latch tipat pe getDb() in fereastra de restore (toate rutele 409 prin
+// handlerul central; indisponibilitate globala temporara, acceptata si
+// documentata) + validare de versiune de schema fail-closed.
+describe("restore monolit — latch + validare versiune (Task 5)", () => {
+  it("in fereastra restore-ului getDb() arunca tipat, iar snapshot-ul pre-restore PROPRIU reuseste", async () => {
+    const backupName = "legal-dashboard.2026-04-15.db";
+    await seedBackup(backupName, "RESTORED");
+
+    let latchError: unknown = null;
+    const { preRestoreName } = await restoreFromBackup(backupName, {
+      onPhase: (phase) => {
+        if (phase === "post_publish") {
+          try {
+            getDb();
+          } catch (e) {
+            latchError = e;
+          }
+        }
+      },
+    });
+
+    // Anti-self-block: snapshot-ul pre-restore al restore-ului insusi a mers
+    // (conexiune raw readonly, nu getDb-ul latch-uit).
+    expect(fs.existsSync(path.join(getBackupDir(), preRestoreName))).toBe(true);
+    // Latch-ul: orice getDb() strain din fereastra e refuzat tipat.
+    expect(latchError).toMatchObject({ code: "RESTORE_IN_PROGRESS" });
+    // Dupa restore latch-ul e curatat si baza e cea restaurata.
+    expect(() => getDb()).not.toThrow();
+    expect(readMarker(dbPath)).toBe("RESTORED");
+  });
+
+  it("o ruta ne-RNPM in timpul restore-ului de monolit primeste 409 prin handlerul central", async () => {
+    setMonolithRestoreInProgress();
+    try {
+      const app = new Hono();
+      app.onError(appErrorHandler);
+      app.use("*", requestIdContext);
+      app.use("*", async (c, next) => {
+        c.set("ownerId", "local");
+        await next();
+      });
+      app.route("/api/v1/me", meRouter);
+
+      const res = await app.request("/api/v1/me");
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("RESTORE_IN_PROGRESS");
+    } finally {
+      clearMonolithRestoreInProgress();
+    }
+  });
+
+  it("restore monolit dintr-un backup cu _schema_versions mai NOUA => 400 fail-closed, live neatins", async () => {
+    const backupName = "legal-dashboard.2026-04-16.db";
+    await seedBackup(backupName, "FUTURE");
+    const forge = new Database(path.join(getBackupDir(), backupName));
+    try {
+      forge.exec(
+        "CREATE TABLE _schema_versions (version INTEGER PRIMARY KEY, sha256_up TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT (datetime('now')))"
+      );
+      forge.prepare("INSERT INTO _schema_versions (version, sha256_up) VALUES (9999, 'future')").run();
+    } finally {
+      forge.close();
+    }
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    expect(readMarker(dbPath)).toBe("LIVE");
+    // Lipsa tabelei ramane ACCEPTATA la monolit (backup-uri legacy reale) —
+    // acoperita de testele de restore de mai sus (seedBackup nu creeaza
+    // _schema_versions).
+  });
+});
+
+// Task 4 (fixuri post-review): shutdown-ul acopera TOATE write-urile de
+// mentenanta, nu doar daily-ul — flag tipat MAINTENANCE_SHUTDOWN (refuz
+// INAINTE de coada lock-ului) + settle-set cu promise-urile care includ si
+// timpul de asteptare pe lock.
+describe("maintenance shutdown — flag tipat + settle-set (Task 4)", () => {
+  afterEach(() => {
+    __resetMaintenanceShutdownForTests();
+  });
+
+  it("dupa flag, un withMaintenanceWrite NOU arunca eroarea tipata si ruta raspunde 503 prin handlerul central", async () => {
+    markMaintenanceShuttingDown();
+
+    await expect(withMaintenanceWrite(async () => undefined)).rejects.toMatchObject({
+      code: "MAINTENANCE_SHUTDOWN",
+    });
+
+    const app = new Hono();
+    app.onError(appErrorHandler);
+    app.use("*", requestIdContext);
+    app.post("/op", async (c) => {
+      await withMaintenanceWrite(async () => undefined);
+      return c.json({ ok: true });
+    });
+    const res = await app.request("/op", { method: "POST" });
+    expect(res.status).toBe(503);
+    expect(res.headers.get("Retry-After")).toMatch(/^\d+$/);
+    expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("MAINTENANCE_SHUTDOWN");
+  });
+
+  // EXT-H-01 (audit v2.43.0) a INVERSAT semantica Rev. 4: writer-ul din coada
+  // nu-si mai "termina treaba" — e refuzat la acquire (recheck), INAINTE de
+  // orice mutatie. Settle-set-ul il acopera in continuare cat sta in coada.
+  it("un writer DEJA in coada la setarea flag-ului e refuzat la acquire, dar ramane acoperit de settle-set", async () => {
+    let releaseFirst: () => void = () => undefined;
+    const first = withMaintenanceWrite(
+      () =>
+        new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        })
+    );
+    await new Promise((r) => setImmediate(r));
+
+    let secondRan = false;
+    const second = withMaintenanceWrite(async () => {
+      secondRan = true;
+    });
+    await new Promise((r) => setImmediate(r));
+
+    let settled = false;
+    let wait: Promise<void> = Promise.resolve();
+    try {
+      // Flag-ul se seteaza cat timp `second` ASTEAPTA pe lock.
+      markMaintenanceShuttingDown();
+
+      wait = waitForBackupToSettle(5_000).then(() => {
+        settled = true;
+      });
+      for (let i = 0; i < 3; i++) await new Promise((r) => setImmediate(r));
+      // Settle-ul asteapta si writer-ul din coada (promise-ul inregistrat
+      // include timpul de asteptare pe lock).
+      expect(settled).toBe(false);
+    } finally {
+      // Elibereaza lock-ul MODULULUI si pe esec — altfel un red aici
+      // otraveste testele urmatoare din fisier (timeout in cascada).
+      releaseFirst();
+      await Promise.allSettled([first, second]);
+    }
+    await first;
+    // EXT-H-01: writer-ul din coada e refuzat la acquire — mutatia NU incepe.
+    await expect(second).rejects.toMatchObject({ code: "MAINTENANCE_SHUTDOWN" });
+    await wait;
+    expect(settled).toBe(true);
+    expect(secondRan).toBe(false);
+
+    // Un writer NOU dupa flag ramane refuzat.
+    await expect(withMaintenanceWrite(async () => undefined)).rejects.toMatchObject({
+      code: "MAINTENANCE_SHUTDOWN",
+    });
   });
 });
 
@@ -359,5 +767,100 @@ describe("maintenance RWLock — backup vs scheduler integration", () => {
     // Both reader bodies eventually ran — proves the lock did not deadlock.
     expect(events).toContain("r1-end");
     expect(events).toContain("r2-start");
+  });
+});
+
+describe("daily backup — enumerarea rnpm fail-explicit (EXT-H-02)", () => {
+  it("eroare non-ENOENT la readdir(rnpm/) emite daily_backup_failed stage=enumerate_rnpm si NU opreste backup-ul monolitului", async () => {
+    const rnpmPath = getRnpmDataDir();
+    await fsPromises.rm(rnpmPath, { recursive: true, force: true });
+    await fsPromises.writeFile(rnpmPath, "not a directory");
+
+    const { lines } = await captureConsoleLog(() => runDailyBackup());
+
+    const failLine = lines.find((l) => l.includes('"stage":"enumerate_rnpm"'));
+    expect(failLine).toBeDefined();
+    expect(failLine).toContain('"action":"daily_backup_failed"');
+    expect(failLine).toContain('"errnoCode":"ENOTDIR"');
+    expect(lines.some((l) => l.includes('"action":"daily_backup"') && l.includes('"target":"main"'))).toBe(true);
+  });
+
+  it("ENOENT pe directorul rnpm ramane silentios (pre-split, fara useri)", async () => {
+    await fsPromises.rm(getRnpmDataDir(), { recursive: true, force: true });
+
+    const { lines } = await captureConsoleLog(() => runDailyBackup());
+
+    expect(lines.some((l) => l.includes("enumerate_rnpm"))).toBe(false);
+  });
+});
+
+// Task 15 (G quick-wins, EXT-L-01/INT-M9/INT-M10): listarea PUBLICA propaga
+// erorile non-ENOENT (semantica fail-explicit — un caller nu are voie sa vada
+// "zero backup-uri" cand cauza reala e EACCES/EIO/ENOTDIR), in timp ce prune-ul
+// intern ramane tolerant (ruleaza DUPA mutatii deja comise — un esec de
+// listare acolo nu are voie sa transforme un backup reusit intr-un 500).
+describe("listBackupsWithMeta fail-explicit vs pruneOld tolerant (Task 15)", () => {
+  it("listBackupsWithMeta propaga erorile non-ENOENT de listare (EXT-L-01)", async () => {
+    // backup dir = FISIER, nu director => readdir arunca ENOTDIR (verificat
+    // empiric pe Windows, acelasi comportament ca testul enumerate_rnpm de mai sus).
+    await fsPromises.writeFile(getBackupDir(), "not a directory");
+
+    await expect(listBackupsWithMeta()).rejects.toMatchObject({ code: "ENOTDIR" });
+  });
+
+  it("pruneOld tolereaza erorile de listare (log + 0), fara sa arunce (post-mutatie safe)", async () => {
+    const readdirSpy = vi
+      .spyOn(fsPromises, "readdir")
+      .mockRejectedValueOnce(Object.assign(new Error("EIO simulat"), { code: "EIO" }));
+
+    const { value, lines } = await captureConsoleLog(() => createManualBackup());
+    readdirSpy.mockRestore();
+
+    expect(value).toMatchObject({ name: expect.any(String) });
+    expect(lines.some((l) => l.includes('"action":"backup_prune_failed"'))).toBe(true);
+  });
+});
+
+// EXT-H-01 (audit v2.43.0): un writer care astepta in coada cand shutdown-ul
+// a ridicat flag-ul nu are voie sa inceapa o mutatie pe care shutdown-ul n-o
+// va mai astepta; iar callerul lui waitForBackupToSettle trebuie sa STIE daca
+// settle-ul a expirat (decizia de a retine instance lock-ul depinde de asta).
+describe("shutdown vs maintenance writers (EXT-H-01)", () => {
+  afterEach(() => {
+    __resetMaintenanceShutdownForTests();
+  });
+
+  it("writer aflat in coada la markMaintenanceShuttingDown e refuzat cu MaintenanceShutdownError (recheck dupa acquire)", async () => {
+    let releaseFirst: () => void = () => {};
+    const first = withMaintenanceWrite(
+      () =>
+        new Promise<void>((r) => {
+          releaseFirst = r;
+        })
+    );
+    // withWrite face await acquireWrite() INAINTE de callback — asteapta un
+    // tick ca primul writer sa detina efectiv lock-ul si releaseFirst sa fie
+    // legat (altfel release-ul e no-op si testul blocheaza).
+    await new Promise((r) => setImmediate(r));
+    const queued = withMaintenanceWrite(async () => "a-rulat");
+    markMaintenanceShuttingDown();
+    releaseFirst();
+    await expect(queued).rejects.toBeInstanceOf(MaintenanceShutdownError);
+    await first;
+  });
+
+  it("waitForBackupToSettle: false la timeout cu writer blocat, true dupa settle", async () => {
+    let release: () => void = () => {};
+    const hung = withMaintenanceWrite(
+      () =>
+        new Promise<void>((r) => {
+          release = r;
+        })
+    );
+    await new Promise((r) => setImmediate(r));
+    await expect(waitForBackupToSettle(50)).resolves.toBe(false);
+    release();
+    await hung;
+    await expect(waitForBackupToSettle(50)).resolves.toBe(true);
   });
 });

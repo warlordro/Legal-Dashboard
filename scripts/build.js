@@ -60,4 +60,24 @@ cpSync(resolve(root, "backend", "src", "db", "migrations"), resolve(root, "dist-
   },
 });
 
+// v2.43.0 (rnpm-split): chain-ul separat pentru fisierele RNPM per user, citit
+// de rnpmDb.ts din sibling-ul `migrations-rnpm/` — acelasi whitelist ca mai sus.
+mkdirSync(resolve(root, "dist-backend", "migrations-rnpm"), { recursive: true });
+cpSync(resolve(root, "backend", "src", "db", "migrations-rnpm"), resolve(root, "dist-backend", "migrations-rnpm"), {
+  recursive: true,
+  filter: (src) => {
+    if (statSync(src).isDirectory()) return true;
+    return MIGRATION_FILE.test(src);
+  },
+});
+
+// Task 7 (fixuri post-review): worker-ul de snapshot (CJS pur, NU se bundleaza)
+// — snapshotRunner il incarca cu new Worker(__dirname/snapshot-worker.cjs).
+// Whitelist explicit: doar acest fisier. In Electron impachetat e exclus din
+// asar (package.json build.asarUnpack).
+cpSync(
+  resolve(root, "backend", "src", "util", "snapshot-worker.cjs"),
+  resolve(root, "dist-backend", "snapshot-worker.cjs")
+);
+
 console.log("\n=== Build complete! ===");

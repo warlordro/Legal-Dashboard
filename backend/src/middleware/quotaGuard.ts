@@ -26,7 +26,7 @@ declare module "hono" {
 // pe pool-ul "ai" — suma acopera toate feature-urile AI istorice prin
 // quotaFeatureAliases("ai"). `captcha.rnpm` ramane cu semantica de count si se
 // aplica in `withRnpmCaptchaGuards`.
-export const QUOTA_FEATURES = ["ai", "captcha.rnpm"] as const;
+export const QUOTA_FEATURES = ["ai", "captcha.rnpm", "rnpm.storage"] as const;
 export type QuotaFeature = (typeof QUOTA_FEATURES)[number];
 // Tipul de apel AI — decide costul estimat si feature-ul randului de consum.
 export type AiCallKind = "ai.single" | "ai.multi";
@@ -45,9 +45,18 @@ export const PERIOD_SECONDS: Record<QuotaPeriod, number> = {
   month: 2_592_000,
 };
 
+// 2026-07-10: estimari realiste, aliniate la costurile masurate in ai_usage
+// (~$0.19 un call single pe model premium, ~$0.27 un run multi complet).
+// Vechile worst-case ($2/$8) faceau multi-model inutilizabil sub politica
+// reala de cota (~$5/user/zi): 0 + 8000 > 5000 bloca orice run inainte de a
+// incepe. Sub-estimarea nu scapa bugetul: rezervarea se regleaza la costul
+// real la confirm, iar guard-ul blocheaza oricum la used >= limit; singura
+// expunere ramane overshoot-ul concurrent deja acceptat (comentariul PLAN
+// §12 de mai jos). Tuning operational fara rebuild:
+// LEGAL_DASHBOARD_QUOTA_ESTIMATE_MULTIPLIER.
 const FEATURE_ESTIMATED_COST_MILLI: Record<AiCallKind, number> = {
-  "ai.single": 2_000,
-  "ai.multi": 8_000,
+  "ai.single": 250,
+  "ai.multi": 500,
 };
 
 function estimatedCostMilli(feature: AiCallKind): number {

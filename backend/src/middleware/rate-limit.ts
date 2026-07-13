@@ -24,12 +24,13 @@ export function clampTokenRateLimit(raw: number, ceiling: number = RATE_LIMIT): 
 }
 export const TOKEN_RATE_LIMIT = clampTokenRateLimit(Number(process.env.LEGAL_DASHBOARD_TOKEN_RATE_LIMIT));
 
+// Bug 3 (v2.42.1): analyze-multi costa 3 apeluri AI; routerul AI e montat dublu
+// (/api/ai si /api/v1/ai), deci weight-ul se aplica exact-match pe AMBELE
+// path-uri si pe AMBELE bucket-uri (per-token si per-owner).
+const ANALYZE_MULTI_PATHS = new Set(["/api/ai/analyze-multi", "/api/v1/ai/analyze-multi"]);
+
 const rateLimitMap = new Map<string, { count: number; resetTime: number }>();
 const tokenRateLimitMap = new Map<string, { count: number; resetTime: number }>();
-
-// aiRouter is mounted on both /api/ai and /api/v1/ai (legacy + v1 paths) — see index.ts.
-// Exact match on both, not endsWith(), to avoid matching an unrelated route sharing the suffix.
-const ANALYZE_MULTI_PATHS = new Set(["/api/ai/analyze-multi", "/api/v1/ai/analyze-multi"]);
 
 // Standard envelope for limiter failures (503 fail-closed, 429 throttle).
 // Inlined in fiecare loc inseamna o copie de envelope per branch (4x) — sub un singur helper se vede mai usor cand schema evolueaza.
@@ -55,10 +56,7 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
   }
   const now = Date.now();
 
-  // SECURITY: Multi-agent endpoint consumes 3 rate limit units (3 AI calls). aiRouter is
-  // mounted on BOTH /api/ai and /api/v1/ai (index.ts) — match both exact paths, computed
-  // once here so it applies to the per-token bucket below AND the per-owner bucket further
-  // down. endsWith() would be wrong (could match an unrelated route sharing the suffix).
+  // Weight-ul cererii, calculat O DATA si aplicat pe ambele bucket-uri (Bug 3).
   const weight = ANALYZE_MULTI_PATHS.has(c.req.path) ? 3 : 1;
 
   // PAT (piesa A): bucket per-token, aplicat DUPA rezolvarea PAT (tokenId setat de
@@ -71,9 +69,9 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
     const tentry = tokenRateLimitMap.get(tkey);
     if (!tentry || now > tentry.resetTime) {
       tokenRateLimitMap.set(tkey, { count: weight, resetTime: now + RATE_WINDOW });
-      // rev. v2.42.2: fereastra proaspata trebuie sa treaca prin acelasi ceiling —
-      // cu TOKEN_RATE_LIMIT configurat sub weight (env clamp permite 1-2), primul
-      // request weighted din fiecare fereastra ar scapa altfel neplafonat.
+      // Bug 4 (v2.42.2): si fereastra proaspata respecta plafonul — cu
+      // LEGAL_DASHBOARD_TOKEN_RATE_LIMIT sub 3, primul request ponderat
+      // dintr-o fereastra noua scapa altfel neplafonat.
       if (weight > TOKEN_RATE_LIMIT) {
         return fail(c, 429, "rate_limited", "Prea multe cereri pentru acest token.");
       }
@@ -104,7 +102,9 @@ export async function rateLimit(c: Context, next: Next): Promise<Response | unde
 
   if (!entry || now > entry.resetTime) {
     rateLimitMap.set(key, { count: weight, resetTime: now + RATE_WINDOW });
-    // rev. v2.42.2: acelasi ceiling si pe fereastra proaspata (vezi bucket-ul per-token).
+    // Bug 4 (v2.42.2): simetric cu bucket-ul per-token — plafonul se respecta
+    // si pe fereastra proaspata (azi RATE_LIMIT >= 3, ramura e plasa de
+    // siguranta pentru configuri viitoare).
     if (weight > RATE_LIMIT) {
       return fail(c, 429, "rate_limited", "Prea multe cereri. Incercati din nou in cateva momente.");
     }
@@ -204,22 +204,22 @@ export async function preAuthRateLimit(c: Context, next: Next): Promise<Response
     }
   }
 
+  // Bug 2 (v2.42.2): release-ul ruleaza si pe calea de exceptie (finally), dar
+  // NUMAI cand autentificarea a reusit. Un caller autentificat al carui request
+  // se termina cu un reject real al lui next() (throw non-Error re-aruncat de
+  // compose, error handler cazut) nu trebuie sa consume bucketul IP-only
+  // partajat — ar bloca tot traficul din spatele aceluiasi NAT/proxy (fix runda
+  // 4 + v2.42.2). Flag-ul local `completed` (audit advers 2026-07-09) evita
+  // atat capcana getter-ului lazy c.res (pe throw-unwind Hono instantiaza
+  // Response(null) cu status 200), cat si dependenta de invariantul de
+  // framework `c.finalized`: pe unwind flag-ul ramane false, deci ramura de
+  // status se aplica doar raspunsurilor reale, complet materializate.
+  let completed = false;
   try {
     await next();
+    completed = true;
   } finally {
-    // Elibereaza bucket-ul pre-auth cand AUTENTIFICAREA a reusit (ownerId setat de ownerContext,
-    // care ruleaza in interiorul next()), indiferent de statusul final. Altfel un caller autentificat
-    // care primeste 403/429 (ex. un PAT scurs care spameaza rute forbidden) ar epuiza bucketul IP-only
-    // partajat si ar bloca TOT traficul din spatele acelui NAT/proxy (fix runda 4). Doar tentativele
-    // NEautentificate (auth esuata / token lipsa) raman consumate — exact scopul acestui limiter.
-    // In finally ca un downstream throw (exceptie neprinsa dupa autentificare reusita) sa nu ramana
-    // blocat cu bucket-ul pre-auth consumat pe nedrept (fix R06). c.finalized e obligatoriu pe
-    // ramura fara ownerId (rev. v2.42.2): getter-ul lazy c.res instantiaza `new Response(null)`
-    // (status 200) pe calea de exceptie, deci fara guard un throw INAINTE ca ownerId sa fie setat
-    // ar elibera tentativa — exact clasa de cereri neautentificate esuate pe care limiterul
-    // trebuie sa o numere. In timpul throw-unwind c.finalized e false (error handler-ul Hono
-    // ruleaza dupa acest finally), deci esecul ramane consumat.
-    if (c.get("ownerId") || (c.finalized && c.res.status >= 200 && c.res.status < 300)) {
+    if (c.get("ownerId") || (completed && c.res.status >= 200 && c.res.status < 300)) {
       releasePreAuthAttempt(key);
     }
 

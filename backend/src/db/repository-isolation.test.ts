@@ -1,21 +1,19 @@
-// PR-1 regression suite: latent owner_id leaks (PLAN §3).
+// PR-1 regression suite, rescrisa pentru v2.43.0 (rnpm-split).
 //
-// Why: on desktop the only owner_id in use is "local" — nothing leaks today.
-// In web mode (PR-9) two users share the same SQLite. If a SELECT forgets a
-// `WHERE owner_id = ?` filter, user A could see user B's rows the moment a
-// foreign-key breach happens (bug-introduced or partial restore).
-//
-// What this suite tests:
-//   1. Happy path — A's queries return only A's data, B's queries only B's.
-//   2. FK breach drills — manually insert a child row with mismatched
-//      owner_id and assert the repository query does NOT surface it.
-//
-// FK breach is NOT achievable through the public API (saveAvizFull uses one
-// owner_id for the whole transaction). We synthesise it via raw INSERTs to
-// exercise exactly the defense-in-depth path.
-//
-// Skeleton extensibil: add new repos here as they ship in PR-3+ rather than
-// scattering owner_id assertions across feature suites.
+// Din v2.43.0 izolarea RNPM e FIZICA: fiecare owner are fisierul lui SQLite
+// (rnpm/<stem>.db), deci "leak cross-tenant" inseamna acum "randuri straine
+// ajunse in fisierul altui owner" (posibil doar printr-un restore partial sau
+// bug de splitter). Suita verifica:
+//   1. Fisiere separate pe disc (nume prin rnpmFileStem, nu ownerId brut);
+//      fisierul lui A nu contine NICIUN rand al lui B.
+//   2. Happy path — API-urile repository raman owner-scoped in interiorul
+//      fisierului propriu.
+//   3. FK breach drills — un rand copil cu owner_id nepotrivit FORJAT in
+//      fisierul lui A nu e servit de loadAvizChildren/getAvize (defense in
+//      depth pentru artefacte de restore).
+//   4. getSearchOwnership are DOAR owned/missing — starea "foreign" a disparut
+//      (id-urile sunt namespace per fisier; acelasi numar la useri diferiti
+//      inseamna cautari diferite, fara leak).
 
 import Database from "better-sqlite3";
 import path from "node:path";
@@ -35,6 +33,8 @@ import {
   saveAvizFull,
   type SaveAvizInput,
 } from "./avizRepository.ts";
+import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, rnpmFileStem } from "./rnpmDb.ts";
+import { getSearchOwnership } from "./searchRepository.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 let tmpRoot: string;
@@ -44,15 +44,13 @@ beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-isolation-"));
   dbPath = path.join(tmpRoot, "legal-dashboard.db");
   process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
-  // Touch the db so getDb() takes the existing-file path; migration runner
-  // will install the baseline schema regardless.
   const seed = new Database(dbPath);
   seed.close();
-  // Force schema init now so the first repository call doesn't pay it.
   getDb();
 });
 
 afterEach(async () => {
+  __resetRnpmDbForTests();
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
@@ -62,7 +60,7 @@ const OWNER_A = "userA";
 const OWNER_B = "userB";
 
 function makeSearch(ownerId: string, type: string): number {
-  const info = getDb()
+  const info = getRnpmDb(ownerId)
     .prepare(
       `INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
        VALUES (?, ?, '{}', 0, '')`
@@ -146,7 +144,39 @@ function makeAviz(ownerId: string, identificator: string, extra?: Partial<SaveAv
   };
 }
 
-describe("repository isolation — happy path (no FK breach)", () => {
+describe("izolare fizica — fisiere per owner", () => {
+  it("scrierile fiecarui owner merg in fisierul lui (stem collision-safe), nu in monolit", () => {
+    saveAvizFull(makeAviz(OWNER_A, "AVA1"));
+    saveAvizFull(makeAviz(OWNER_B, "BVB1"));
+
+    // Doua fisiere separate pe disc, numite prin stem, nu prin ownerId brut.
+    const pathA = getRnpmDbPath(OWNER_A);
+    const pathB = getRnpmDbPath(OWNER_B);
+    expect(pathA).not.toBe(pathB);
+    expect(path.basename(pathA)).toBe(`${rnpmFileStem(OWNER_A)}.db`);
+
+    // Fisierul lui A nu contine NICIUN rand al lui B, in nicio tabela.
+    const fileA = getRnpmDb(OWNER_A);
+    for (const t of ["rnpm_searches", "rnpm_avize", "rnpm_creditori", "rnpm_debitori", "rnpm_bunuri", "rnpm_istoric"]) {
+      const n = (fileA.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE owner_id != ?`).get(OWNER_A) as { n: number }).n;
+      expect(n, `randuri straine in ${t}`).toBe(0);
+    }
+
+    // Monolitul nu mai primeste randuri rnpm.
+    const monoN = (getDb().prepare("SELECT COUNT(*) AS n FROM rnpm_avize").get() as { n: number }).n;
+    expect(monoN).toBe(0);
+  });
+
+  it("getSearchOwnership are doar owned/missing — foreign a disparut din contract", () => {
+    const sidA = makeSearch(OWNER_A, "ipoteci");
+    expect(getSearchOwnership(sidA, OWNER_A)).toBe("owned");
+    // In fisierul lui B, id-ul nu exista (fisier gol) => missing, nu foreign.
+    expect(getSearchOwnership(sidA, OWNER_B)).toBe("missing");
+    expect(getSearchOwnership(999_999, OWNER_A)).toBe("missing");
+  });
+});
+
+describe("repository isolation — happy path", () => {
   it("getAvize never returns rows from a different owner", () => {
     saveAvizFull(makeAviz(OWNER_A, "AVA1"));
     saveAvizFull(makeAviz(OWNER_A, "AVA2"));
@@ -161,43 +191,45 @@ describe("repository isolation — happy path (no FK breach)", () => {
     expect(bPage.items[0]?.identificator).toBe("BVB1");
   });
 
-  it("getAvizById/Identificator scoped by owner — different-owner id is null", () => {
+  it("getAvizById/Identificator scoped by owner — id-ul altui owner e null in fisierul propriu", () => {
     const idA = saveAvizFull(makeAviz(OWNER_A, "AVA1"));
     saveAvizFull(makeAviz(OWNER_B, "BVB1"));
 
     expect(getAvizById(idA, OWNER_A)?.aviz.identificator).toBe("AVA1");
-    expect(getAvizById(idA, OWNER_B)).toBeNull();
+    // In fisierul lui B, idA fie nu exista, fie e alt aviz al lui B — niciodata al lui A.
+    const inB = getAvizById(idA, OWNER_B);
+    if (inB !== null) expect(inB.aviz.owner_id).toBe(OWNER_B);
 
     expect(getAvizByIdentificator("BVB1", OWNER_B)?.aviz.owner_id).toBe(OWNER_B);
     expect(getAvizByIdentificator("BVB1", OWNER_A)).toBeNull();
   });
 
-  it("getAvizStats/getAvizeByIds/delete* respect owner_id", () => {
+  it("getAvizStats/getAvizeByIds/delete* respect fisierul ownerului", () => {
     const idA = saveAvizFull(makeAviz(OWNER_A, "AVA1"));
     const idB = saveAvizFull(makeAviz(OWNER_B, "BVB1"));
 
     expect(getAvizStats(OWNER_A).total).toBe(1);
     expect(getAvizStats(OWNER_B).total).toBe(1);
 
-    expect(getAvizeByIds([idA, idB], OWNER_A).map((r) => r.aviz.identificator)).toEqual(["AVA1"]);
-    expect(getAvizeByIds([idA, idB], OWNER_B).map((r) => r.aviz.identificator)).toEqual(["BVB1"]);
+    expect(getAvizeByIds([idA], OWNER_A).map((r) => r.aviz.identificator)).toEqual(["AVA1"]);
+    expect(getAvizeByIds([idB], OWNER_B).map((r) => r.aviz.identificator)).toEqual(["BVB1"]);
 
-    // delete with the wrong owner is a no-op
-    expect(deleteAviz(idB, OWNER_A)).toBe(false);
+    // delete pe id inexistent in fisierul propriu e no-op; B-ul ramane intact.
+    expect(deleteAviz(999_999, OWNER_A)).toBe(false);
     expect(getAvizStats(OWNER_B).total).toBe(1);
 
-    expect(deleteAvizeByIds([idA, idB], OWNER_B)).toBe(1);
+    expect(deleteAvizeByIds([idB], OWNER_B)).toBe(1);
     expect(getAvizStats(OWNER_B).total).toBe(0);
     expect(getAvizStats(OWNER_A).total).toBe(1);
   });
 });
 
-describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", () => {
-  // Helper: forge a child row whose aviz_id points to OWNER_A's aviz but whose
-  // own owner_id is OWNER_B. Simulates the post-restore / partial-rollback bug
-  // class that the §3 fixes guard against.
-  function forgeBreachChild(table: string, columns: Record<string, unknown>): void {
-    const db = getDb();
+describe("repository isolation — FK breach defense (artefacte de restore in fisierul propriu)", () => {
+  // Helper: forjeaza un rand copil in FISIERUL lui A, cu owner_id al lui B —
+  // clasa de bug "restore partial/artefact" contra careia filtrarea owner_id
+  // din loadAvizChildren ramane defense in depth si dupa split.
+  function forgeBreachChild(fileOwner: string, table: string, columns: Record<string, unknown>): void {
+    const db = getRnpmDb(fileOwner);
     const cols = Object.keys(columns);
     const placeholders = cols.map(() => "?").join(", ");
     db.prepare(`INSERT INTO ${table} (${cols.join(", ")}) VALUES (${placeholders})`).run(
@@ -207,7 +239,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
 
   it("fix #1 — loadAvizChildren skips creditori with mismatched owner_id", () => {
     const idA = saveAvizFull(makeAviz(OWNER_A, "AVA1"));
-    forgeBreachChild("rnpm_creditori", {
+    forgeBreachChild(OWNER_A, "rnpm_creditori", {
       owner_id: OWNER_B,
       aviz_id: idA,
       tip_persoana: "PF",
@@ -225,7 +257,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
 
   it("fix #2 — loadAvizChildren skips debitori with mismatched owner_id", () => {
     const idA = saveAvizFull(makeAviz(OWNER_A, "AVA1"));
-    forgeBreachChild("rnpm_debitori", {
+    forgeBreachChild(OWNER_A, "rnpm_debitori", {
       owner_id: OWNER_B,
       aviz_id: idA,
       tip_persoana: "PJ",
@@ -240,7 +272,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
 
   it("fix #3 — loadAvizChildren skips bunuri with mismatched owner_id", () => {
     const idA = saveAvizFull(makeAviz(OWNER_A, "AVA1"));
-    forgeBreachChild("rnpm_bunuri", {
+    forgeBreachChild(OWNER_A, "rnpm_bunuri", {
       owner_id: OWNER_B,
       aviz_id: idA,
       tip_bun: "auto",
@@ -253,7 +285,7 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
 
   it("fix #4 — loadAvizChildren skips istoric with mismatched owner_id", () => {
     const idA = saveAvizFull(makeAviz(OWNER_A, "AVA1"));
-    forgeBreachChild("rnpm_istoric", {
+    forgeBreachChild(OWNER_A, "rnpm_istoric", {
       owner_id: OWNER_B,
       aviz_id: idA,
       identificator: "LEAKED-IST",
@@ -267,9 +299,9 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
   });
 
   it("fix #5 — getAvize EXISTS subqueries reject parties from a different owner", () => {
-    const idA = saveAvizFull(makeAviz(OWNER_A, "AVA1"));
-    // Forge a creditor row keyed to A's aviz, with text matching only OWNER_B's namespace.
-    forgeBreachChild("rnpm_creditori", {
+    saveAvizFull(makeAviz(OWNER_A, "AVA1"));
+    const idA = (getAvize({ ownerId: OWNER_A }).items[0] as { id: number }).id;
+    forgeBreachChild(OWNER_A, "rnpm_creditori", {
       owner_id: OWNER_B,
       aviz_id: idA,
       tip_persoana: "PF",
@@ -278,20 +310,14 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
       nr_ordine: null,
     });
 
-    // Searching as A with the breach token — pre-fix the EXISTS subquery would
-    // match the B-owned creditor and surface aviz_A. Post-fix: zero results.
     const result = getAvize({ ownerId: OWNER_A, searchText: "LEAK-MATCH-TOKEN" });
     expect(result.total).toBe(0);
 
-    // Sanity: A's own creditor name still finds A's aviz.
     const own = getAvize({ ownerId: OWNER_A, searchText: `CRED-${OWNER_A}` });
     expect(own.total).toBe(1);
     expect(own.items[0]?.identificator).toBe("AVA1");
   });
 
-  // H-7: defend `getAvize` searchText against LIKE wildcard injection. Without
-  // the `\` escape in `buildRnpmLikePattern` + `ESCAPE '\\'` clause, a user
-  // typing "%" would surface every row in the table.
   it("getAvize: searchText='%' returns zero results (no wildcard bleed)", () => {
     saveAvizFull(makeAviz(OWNER_A, "AVA1"));
     saveAvizFull(makeAviz(OWNER_A, "AVA2"));
@@ -312,10 +338,14 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
     expect(result.total).toBe(0);
   });
 
-  describe("filterRnpmSearchResults cross-tenant breach drill", () => {
-    it("nu returneaza avize ale altui owner chiar daca acelasi text apare in ambele", () => {
+  describe("filterRnpmSearchResults — namespace per fisier", () => {
+    it("acelasi id numeric la useri diferiti inseamna cautari diferite, fara leak", () => {
       const sidA = makeSearch(OWNER_A, "ipoteci");
       const sidB = makeSearch(OWNER_B, "ipoteci");
+      // Ambele fisiere pornesc secventele de la 1 — id-urile COINCID numeric
+      // prin design (namespace per fisier), izolarea e data de fisier.
+      expect(sidA).toBe(sidB);
+
       const aA1 = saveAvizFull(
         makeAviz(OWNER_A, "A-1", {
           searchId: sidA,
@@ -367,34 +397,49 @@ describe("repository isolation — FK breach defense (PLAN §3 fixes #1-#5)", ()
         })
       );
 
-      expect(() => filterRnpmSearchResults({ ownerId: OWNER_B, searchId: sidA, q: "popescu" })).toThrow(
-        /Search inexistent/
-      );
+      // B filtreaza pe acelasi id numeric: primeste DOAR avizele lui, din fisierul lui.
+      const resB = filterRnpmSearchResults({ ownerId: OWNER_B, searchId: sidA, q: "popescu" });
+      expect(resB.matchedAvizIds).toEqual([aB1]);
 
       const resA = filterRnpmSearchResults({ ownerId: OWNER_A, searchId: sidA, q: "popescu" });
       expect(resA.matchedAvizIds).toEqual([aA1]);
-      expect(resA.matchedAvizIds).not.toContain(aB1);
+      // Continutul e diferit chiar daca id-urile coincid numeric: verificam textul.
+      expect(getAvizById(resA.matchedAvizIds[0], OWNER_A)?.debitori[0]?.denumire).toBe("Popescu Ion");
+      expect(getAvizById(resB.matchedAvizIds[0], OWNER_B)?.debitori[0]?.denumire).toBe("Popescu Maria");
     });
 
-    it("rnpm_bunuri_descrieri content-addressable: descriere comuna NU leak cross-tenant", () => {
+    it("searchId inexistent in fisierul propriu => SEARCH_NOT_FOUND (anti-enumeration)", () => {
+      makeSearch(OWNER_A, "ipoteci");
+      expect(() => filterRnpmSearchResults({ ownerId: OWNER_B, searchId: 424_242, q: "x" })).toThrow(
+        /Search inexistent/
+      );
+    });
+
+    it("descriere cu acelasi text in ambele fisiere NU leak cross-tenant", () => {
       const sidA = makeSearch(OWNER_A, "ipoteci");
       const sidB = makeSearch(OWNER_B, "ipoteci");
       const aA1 = saveAvizFull(makeAviz(OWNER_A, "A-DESC-1", { searchId: sidA, bunuri: [] }));
       const aB1 = saveAvizFull(makeAviz(OWNER_B, "B-DESC-1", { searchId: sidB, bunuri: [] }));
 
-      const desc = getDb().prepare("INSERT INTO rnpm_bunuri_descrieri (text) VALUES (?)").run("tractor unic descriere");
-      const descId = Number(desc.lastInsertRowid);
-
-      getDb()
-        .prepare("INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)")
-        .run(aA1, OWNER_A, descId);
-      getDb()
-        .prepare("INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)")
-        .run(aB1, OWNER_B, descId);
+      // Acelasi text de descriere exista in AMBELE fisiere (copii independente).
+      for (const [owner, avizId] of [
+        [OWNER_A, aA1],
+        [OWNER_B, aB1],
+      ] as const) {
+        const db = getRnpmDb(owner);
+        const descId = Number(
+          db.prepare("INSERT INTO rnpm_bunuri_descrieri (text) VALUES (?)").run("tractor unic descriere")
+            .lastInsertRowid
+        );
+        db.prepare(
+          "INSERT INTO rnpm_bunuri (aviz_id, owner_id, tip_bun, descriere_id) VALUES (?, ?, 'bun mobil', ?)"
+        ).run(avizId, owner, descId);
+      }
 
       const resA = filterRnpmSearchResults({ ownerId: OWNER_A, searchId: sidA, q: "tractor" });
       expect(resA.matchedAvizIds).toEqual([aA1]);
-      expect(resA.matchedAvizIds).not.toContain(aB1);
+      const resB = filterRnpmSearchResults({ ownerId: OWNER_B, searchId: sidB, q: "tractor" });
+      expect(resB.matchedAvizIds).toEqual([aB1]);
     });
   });
 });

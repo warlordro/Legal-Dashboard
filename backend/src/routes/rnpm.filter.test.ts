@@ -5,6 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { closeDb, getDb } from "../db/schema.ts";
+import { __resetRnpmDbForTests, getRnpmDb } from "../db/rnpmDb.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { rnpmRouter } from "./rnpm.ts";
 
@@ -29,13 +30,16 @@ beforeEach(async () => {
   process.env.LEGAL_DASHBOARD_DB_PATH = dbPath;
   const seed = new Database(dbPath);
   seed.close();
-  db = getDb();
+  getDb();
+  // v2.43.0 (rnpm-split): seed-urile rnpm merg in fisierul per user al lui "local".
+  db = getRnpmDb("local");
   app = new Hono();
   app.use("*", requestIdContext);
   app.route("/api/rnpm", rnpmRouter);
 });
 
 afterEach(async () => {
+  __resetRnpmDbForTests();
   Reflect.deleteProperty(process.env, "RNPM_RESULTS_FILTER_DISABLED");
   closeDb();
   Reflect.deleteProperty(process.env, "LEGAL_DASHBOARD_DB_PATH");
@@ -212,13 +216,15 @@ describe("POST /api/rnpm/search/:searchId/filter", () => {
   });
 
   it("searchId al altui owner -> 404 (NU 403, anti-enumeration)", async () => {
-    const other = db
+    // v2.43.0 (rnpm-split): search-ul strain traieste in FISIERUL altui owner;
+    // pentru caller (local) id-ul pur si simplu nu exista in fisierul propriu.
+    const other = getRnpmDb("other-tenant")
       .prepare(
         `INSERT INTO rnpm_searches (owner_id, search_type, params_json, total_results, criteriu)
          VALUES ('other-tenant', 'ipoteci', '{}', 0, '')`
       )
       .run();
-    const otherSearchId = Number(other.lastInsertRowid);
+    const otherSearchId = Number(other.lastInsertRowid) + 7000;
     const res = await app.request(`/api/rnpm/search/${otherSearchId}/filter`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },

@@ -9,6 +9,7 @@ import {
   readMailerConfig,
   resetMailerForTests,
   sendAlertEmail,
+  sendComposedEmail,
   sendTestEmail,
 } from "./mailer.ts";
 
@@ -177,5 +178,28 @@ describe("send email", () => {
         subject: "[Legal Dashboard] Test notificari email",
       })
     );
+  });
+
+  it.each([
+    ["sendAlertEmail", () => sendAlertEmail(alert(), { ...settings, toAddress: "victima@firma.ro" })],
+    ["sendComposedEmail", () => sendComposedEmail("victima@firma.ro", { subject: "s", html: "<p>h</p>", text: "t" })],
+    ["sendTestEmail", () => sendTestEmail("victima@firma.ro")],
+  ])("%s: esecul sendMail se logheaza SANITIZAT (fara adresa in stdout/stderr)", async (_name, run) => {
+    setSmtpEnv(); // altfel mailerul e disabled si sendMail nu e apelat
+    mocks.sendMail.mockRejectedValueOnce(
+      Object.assign(new Error("RCPT TO:<victima@firma.ro> refused"), { code: "EENVELOPE", responseCode: 550 })
+    );
+    const errSpy = vi.spyOn(console, "error");
+    const result = await run();
+    expect(result.ok).toBe(false);
+    // Serializare corecta: Error.message e non-enumerabil in JSON.stringify —
+    // extrage-l explicit.
+    const dump = errSpy.mock.calls
+      .flat()
+      .map((a) => (a instanceof Error ? a.message : typeof a === "string" ? a : JSON.stringify(a)))
+      .join("\n");
+    expect(dump).not.toContain("victima@firma.ro");
+    expect(dump).toContain("EENVELOPE");
+    errSpy.mockRestore();
   });
 });

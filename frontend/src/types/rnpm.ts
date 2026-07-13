@@ -189,7 +189,7 @@ export interface RnpmStats {
   activ: number;
   inactiv: number;
   byType: Partial<Record<RnpmSearchType, number>>;
-  db: { path: string; sizeBytes: number };
+  db: { sizeBytes: number };
 }
 
 export interface RnpmSearchHistoryEntry {

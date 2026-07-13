@@ -22,6 +22,8 @@ const AdminQuota = lazy(() => import("@/pages/admin/Quota"));
 const AdminGrants = lazy(() => import("@/pages/admin/Grants"));
 const AdminUsage = lazy(() => import("@/pages/admin/Usage"));
 const AdminAudit = lazy(() => import("@/pages/admin/Audit"));
+const AdminBackups = lazy(() => import("@/pages/admin/Backups"));
+const AdminRnpmStorage = lazy(() => import("@/pages/admin/RnpmStorage"));
 
 const TABS = [
   { key: "general", label: "General", adminOnly: false },
@@ -31,6 +33,7 @@ const TABS = [
   { key: "granturi", label: "Granturi", adminOnly: true },
   { key: "consum", label: "Consum", adminOnly: true },
   { key: "audit", label: "Audit", adminOnly: true },
+  { key: "backup", label: "Backup", adminOnly: true },
 ] as const;
 
 type TabKey = (typeof TABS)[number]["key"];
@@ -147,6 +150,14 @@ export default function SettingsPage() {
           <AdminGate>
             <Suspense fallback={fallback}>
               <AdminAudit embedded />
+            </Suspense>
+          </AdminGate>
+        )}
+        {activeTab === "backup" && (
+          <AdminGate>
+            <Suspense fallback={fallback}>
+              <AdminBackups embedded />
+              <AdminRnpmStorage embedded />
             </Suspense>
           </AdminGate>
         )}

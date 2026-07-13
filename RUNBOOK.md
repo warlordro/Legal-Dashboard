@@ -1,7 +1,7 @@
 # Legal Dashboard - RUNBOOK Operational
 
-**Versiune**: v2.34.0
-**Data ultima revizie**: 2026-05-20
+**Versiune**: v2.43.0
+**Data ultima revizie**: 2026-07-11
 **Audienta**: admin firma (ops + IT) responsabil cu rularea aplicatiei.
 
 Runbook centralizat cu procedurile de recovery, rollback si troubleshooting pentru
@@ -23,6 +23,9 @@ incidente — fiecare sectiune incepe cu simptomul si se termina cu pasii concre
 | Captcha cota epuizata pentru toti userii | §9 - Reset cota captcha urgent |
 | Web mode - userii nu mai pot loga (JWT issuer/audience) | §10 - JWT key rotation |
 | Investigatie post-incident (logs, audit) | §11 - Forensics |
+| Boot abortat: "monolitul contine din nou randuri RNPM" | "Monolit restaurat dupa split" (v2.43.0) |
+| Boot abortat: "ownerId invalid pentru operatii pe fisiere" | "Owner invalid la split" (v2.43.0) |
+| Backup/restore pe datele RNPM ale unui singur user | "Backup si restore per utilizator (RNPM)" |
 
 ---
 
@@ -145,6 +148,35 @@ docker exec ld-container env | grep -E "LEGAL_DASHBOARD|JWT|TENANT"
 | `SQLite ... unable to open database file` | DB path nu exista / permissions | `chmod 644 $LEGAL_DASHBOARD_DB_PATH` + verifica owner |
 | `migrations failed` | Migration ne-aplicata si DB locked | Vezi §4 |
 
+### Boot refuzat: "recupereaza lock-ul SQLite chiar acum" / "Reincearca pornirea" (v2.43.0, Rev. 5)
+
+Recuperarea unui lock de instanta mort e serializata printr-un gate atomic
+(`.instance.lock.reclaim-gate`): daca doua porniri concurente gasesc acelasi
+lock mort (docker restart pe acelasi volum), exact UNA recupereaza; cealalta
+refuza fail-closed cu mesajul de mai sus — restart policy-ul containerului (sau
+o repornire manuala) rezolva. Un gate ORFAN dupa un crash in mijlocul
+recuperarii se autovindeca: e curatat automat dupa 60s, iar urmatoarea pornire
+reuseste (worst-case: ~60s + o repornire). Daca gate-ul NU poate fi sters
+(ACL deny-delete, antivirus), mesajul de refuz numeste explicit fisierul si
+errno-ul — sterge-l manual si reporneste. NOTA DE TOPOLOGIE: atomicitatea
+gate-ului si a lock-ului presupune storage local/overlay/bind; volumele NFS
+si, in general, un volum PARTAJAT intre mai multe host-uri sunt NESUPORTATE —
+o singura instanta per volum e presupunerea de baza (SQLite insusi nu suporta
+storage de retea). Garantiile de exclusivitate sunt complete pe un singur
+host; intre host-uri care ar imparti acelasi disc raman ferestre de cursa pe
+heartbeat (documentat la Rev. 5, in afara topologiei sustinute).
+
+### Warn la boot: `proxy.trusted_cidr.missing` (web mode)
+
+Nu e fatal, dar NU-l ignora in productie: fara `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR`
+backend-ul ignora `X-Forwarded-For`, deci gardurile dependente de identitatea
+clientului (rate limiter per IP, originGuard pe mutatii cross-LAN) vad TOATE
+cererile ca venind de la IP-ul proxy-ului — un singur bucket de rate-limit
+pentru toti utilizatorii, iar apararea CSRF ramane doar pe cookie-ul
+SameSite=Strict. Fix: seteaza CIDR-ul retelei Docker a proxy-ului (plus,
+optional, CIDR-urile Cloudflare daca exista layer CF) si restart. Detalii in
+DEPLOY-SERVER.md §12.
+
 ---
 
 ## 4. DB corruption / integrity check fail
@@ -186,6 +218,18 @@ ls -l /path/to/legal-dashboard.db*
 
 ### Cand
 User-ul vrea sa revina la o zi anterioara, sau dupa o migrare gresita.
+
+Nota (v2.43.0): restore-ul BAZEI UNICE (monolit, din Setari) inseamna
+indisponibilitate globala temporara — pe durata swap-ului toate rutele care
+ating DB-ul raspund 409 `RESTORE_IN_PROGRESS`. Fereastra e de ordinul
+secundelor si operatiunea e admin-triggered; clientii reincearca imediat.
+Un restore dintr-un backup cu schema mai NOUA decat aplicatia e refuzat 400
+(fail-closed, anti-downgrade). Din Rev. 3, un backup de monolit pre-split e
+refuzat 400 DIRECT la restore cand split-ul a rulat deja (mesajul trimite la
+sectiunea "Monolit restaurat dupa split") — nu mai poate produce un boot
+blocat; tot 400 primeste si un ledger de migratii alterat/incoerent.
+Restore-ul RNPM per user afecteaza DOAR ownerul respectiv (vezi sectiunea
+dedicata).
 
 ### Procedura
 
@@ -642,3 +686,167 @@ sqlite3 $DB_PATH "
 
 **Issue tracker**: GitHub Issues - https://github.com/<org>/legal-dashboard/issues
 **Dev contact**: cdragos@gmail.com
+
+---
+
+## Rollback si pre-flight pentru migratiile v2.42.0 (0040-0042)
+
+**Pre-flight OBLIGATORIU inainte de upgrade pe un tenant web** (migration 0040
+adauga index unic case-insensitive pe users.email si BLOCHEAZA boot-ul daca
+exista duplicate istorice):
+
+    SELECT lower(email) AS e, COUNT(*) AS n FROM users GROUP BY e HAVING n > 1;
+
+Zero randuri = upgrade sigur. Randuri gasite = rezolva manual duplicatele
+(pastreaza contul corect, marcheaza-l pe celalalt cu email placeholder unic)
+INAINTE de a porni versiunea noua.
+
+**Rollback = restore din backup, NU reinstalare de build vechi.** Runner-ul de
+migratii refuza boot-ul cand DB-ul are versiune de schema mai mare decat
+fisierele de pe disc, deci un downgrade de aplicatie dupa 0040-0042 nu porneste.
+Procedura corecta: opreste aplicatia, restaureaza
+`backups/legal-dashboard.pre-schema-upgrade-*.db` (generat automat inainte de
+migrare), apoi porneste versiunea veche.
+
+**0041 down.sql este best-effort, NU inversa fidela**: valorile per-pool
+originale (ai.single vs ai.multi) sunt pierdute la consolidare, iar granturile
+se duplica pe ambele pool-uri legacy la down. Nu rula down-ul decat daca
+backup-ul nu exista; nu rula up dupa down fara sa cureti intai
+user_quota_grants.
+
+---
+
+## Split-ul RNPM per utilizator (v2.43.0)
+
+Din v2.43.0 datele RNPM traiesc in fisiere SQLite SEPARATE per utilizator:
+`<dataDir>/rnpm/<stem>.db`, unde `stem = ownerId lowercase + "-" + sha256(ownerId)[:10]`
+(collision-safe pe filesystem-uri case-insensitive; imun la numele rezervate
+Windows). Monolitul `legal-dashboard.db` pastreaza restul (users, auth, quota,
+monitoring, audit, fx_rates).
+
+**Ce s-a intamplat la primul boot pe v2.43.0:** splitter-ul one-time
+(`backend/src/db/rnpmSplitter.ts`) a rulat automat: preflights fail-closed,
+backup pre-split `backups/legal-dashboard.pre-rnpm-split-<stamp>.db` (VACUUM
+INTO, verificat cu integrity_check — ACESTA e rollback-ul complet), copiere +
+verificare per owner, golirea tabelelor rnpm din monolit, marker durabil
+`rnpm/.split-done.json` (`status: "done"`). Log-urile sunt JSON pe stdout cu
+`"action":"rnpm_split"`. Boot-urile urmatoare nu mai re-splituiesc.
+
+### Monolit restaurat dupa split (boot abortat fail-closed)
+
+Simptom: boot-ul aborteaza cu `[rnpm_split] split-ul a fost deja finalizat,
+dar monolitul contine din nou randuri RNPM`. Cauza: cineva a restaurat un
+backup de monolit facut INAINTE de split (care mai contine tabele rnpm
+populate), iar splitter-ul refuza sa suprascrie fisierele per-user mai noi.
+Doua cai de remediere — alege UNA:
+
+1. **Pastreaza fisierele per-user (recomandat — sunt mai noi):** goleste
+   randurile rnpm din monolitul restaurat si reporneste:
+
+   ```sql
+   -- sqlite3 legal-dashboard.db
+   DELETE FROM rnpm_istoric; DELETE FROM rnpm_bunuri; DELETE FROM rnpm_creditori;
+   DELETE FROM rnpm_debitori; DELETE FROM rnpm_avize; DELETE FROM rnpm_searches;
+   DELETE FROM rnpm_bunuri_descrieri;
+   VACUUM;
+   ```
+
+2. **Re-split fortat (vrei datele RNPM DIN backup, pierzi fisierele per-user
+   curente):** cu aplicatia OPRITA, sterge fisierele per-user si marker-ul,
+   apoi reporneste — splitter-ul reia split-ul din monolitul restaurat:
+
+   ```bash
+   rm -rf "<dataDir>/rnpm"    # sterge si .split-done.json
+   ```
+
+Acelasi remediu (calea 1 sau 2, dupa caz) se aplica si cand boot-ul aborteaza
+cu `marker-ul de split e invalid` sau `resume 'wiping' refuzat` — marker-ul
+sau fisierele per-user au fost alterate manual/partial si splitter-ul refuza
+fail-closed sa continue. Caz special (doar medii dev, marker pre-fix): daca
+mesajul e `resume 'wiping' refuzat: marker 'wiping' fara manifest`, marker-ul
+a fost scris de o versiune dinainte de verificarea cu manifest, iar monolitul
+e INCA plin (wipe-ul nu rulase) — foloseste calea 2 (sterge `<dataDir>/rnpm`
+integral si reporneste; split-ul se reia din monolit). In productie cazul nu
+exista: splitter-ul scrie manifestul din v2.43.0.
+
+### Owner invalid la split
+
+Simptom: boot abortat cu `ownerId invalid pentru operatii pe fisiere: ...`.
+Un rand din `rnpm_searches`/`rnpm_avize` are `owner_id` in afara pattern-ului
+`^[A-Za-z0-9_-]{1,64}$`. Split-ul NU a mutat nimic (preflight). Corecteaza
+manual randul in monolit (UPDATE owner_id la id-ul corect al userului din
+`users`) si reporneste.
+
+## Backup si restore per utilizator (RNPM, v2.43.0)
+
+- **Jail-uri:** backup-urile RNPM ale unui user stau in
+  `<dataDir>/backups/rnpm/<stem>/`, cu prefix `rnpm.`. Pool-uri disjuncte cu
+  retentie proprie: `rnpm.YYYY-MM-DD.db` (daily, 3), `rnpm.manual-*.db` (2),
+  `rnpm.pre-restore-*.db` (2), `rnpm.pre-<label>-*.db` (pre-migration, 2).
+  Monolitul pastreaza pool-urile lui in `backups/` cu prefix `legal-dashboard.`
+  (plus pool-ul nou `legal-dashboard.manual-*.db`, retentie 5).
+- **Self-service:** userii (rol `user` sau `admin`) isi creeaza backup manual
+  ("Creeaza backup acum", cooldown 60s/owner), restaureaza si sterg DOAR
+  jail-ul propriu, din modalul "Baza mea RNPM". Adminul poate tinti alt owner
+  (`?ownerId=` pe GET/DELETE, `body.ownerId` pe restore) — audit cu
+  `targetOwnerId`. Monolitul se administreaza din Setari > Backup
+  (`/api/v1/admin/backups`, admin-only).
+- **Garduri de concurenta:** restore-ul refuza 409 `SEARCH_ACTIVE` daca ownerul
+  are o cautare RNPM in zbor; in timpul restore-ului orice operatie RNPM a
+  ownerului primeste 409 `RESTORE_IN_PROGRESS` (latch in `getRnpmDb`).
+- **Validare versiune:** un backup RNPM produs de o versiune de schema mai noua
+  e respins la restore cu 400 (previne blocarea fisierului pe anti-downgrade).
+- **Rollback schema per-user:** chain-ul separat `migrations-rnpm/` are
+  `*.down.sql` pentru fiecare migration; pre-migration backup per fisier
+  (`rnpm.pre-schema-upgrade-*.db`) se face automat cand exista migrations
+  pending pe un fisier existent.
+
+### Limite de stocare RNPM si recuperare
+
+- `LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB` stabileste limita implicita a bazei
+  vii per user (default 750 MB; `0` sau negativ = nelimitat). Override-ul admin
+  `rnpm.storage`, exprimat in MB, are prioritate. Masurarea foloseste acelasi
+  numar in guard, `/stats` si cardul admin: fisierul `.db` + `-wal` + `-shm`.
+- Limita este admission control, nu stergere automata: la `used >= limit`, o
+  cautare noua raspunde 429 `QUOTA_EXCEEDED`, cu cifrele folosit/limita si
+  indicatia de a sterge avize sau de a compacta. Stergerile, compactarea,
+  backup-ul si restore-ul raman permise, ca userul sa poata iesi din blocaj.
+- Un restore peste limita este permis deliberat: recovery bate limita. Dupa
+  restore, cautarile noi raman blocate pana cand userul sterge date/compacteaza
+  sau adminul mareste/dezactiveaza limita. O continuare deja inceputa care are
+  `existingGcode` este exceptata si poate termina paginarea curenta.
+- Raspunsul 429 de stocare NU include `Retry-After`: lipsa spatiului nu este o
+  conditie tranzitorie, iar retry-ul automat al proxy-ului ar crea o bucla.
+- Autocompact-ul dupa stergeri ruleaza sincron. Pentru baze de pana la 500 MB
+  poate dura mai multe secunde; timeout-ul end-to-end al reverse proxy-ului
+  (oauth2-proxy/Caddy/Traefik/Cloudflare) pe rutele API trebuie sa fie cel putin
+  60s. Daca apar timeout-uri reale, escaladarea este un job async separat.
+- `LEGAL_DASHBOARD_RNPM_BACKUP_CAP_MB` plafoneaza best-effort fiecare jail RNPM
+  (default 500 MB; `0` sau negativ = nelimitat). Pruning-ul pastreaza mereu cea
+  mai noua copie daily/manual/pre-restore/pre-migration; de aceea podeaua de
+  siguranta poate lasa jail-ul peste plafon. `capSatisfied:false` in log cere
+  verificarea spatiului disponibil si a permisiunilor de stergere.
+
+### Offsite backup pe multi-target
+
+`runDailyBackup()` produce acum N+1 fisiere pe noapte (monolit + cate unul per
+fisier user de pe disc, cu freshness PER TARGET). `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD`
+este invocat o data PER FISIER proaspat, DUPA eliberarea lock-ului de
+maintenance (upload-urile lente nu mai blocheaza scrierile). Sincronizarea
+externa (S3/rclone/restic) trebuie sa acopere si `backups/rnpm/**`.
+Plafonul local este best-effort, iar pruning-ul poate sterge un fisier in timp
+ce hook-ul offsite il citeste (aceeasi fereastra existenta la pruning-ul pe
+retentie). Daca hook-ul este activ, dimensioneaza plafonul generos pentru durata
+maxima de upload si verifica in destinatia offsite fiecare fisier proaspat.
+
+### Igiena fisierelor orfane (conturi sterse)
+
+Stergerea unui cont e soft-delete (randul `users` ramane cu `status='deleted'`,
+iar re-adaugarea REACTIVEAZA acelasi id) — fisierul `rnpm/<stem>.db` si jail-ul
+`backups/rnpm/<stem>/` raman deliberat pe disc pentru reactivare. ID-urile nu
+se reutilizeaza intre persoane diferite (email unic + acelasi rand users), deci
+un fisier orfan nu poate fi "capturat" de alt user. Curatarea definitiva e
+manuala si doar pentru conturi care sigur nu revin: cu aplicatia oprita (sau
+userul inactiv), sterge `rnpm/<stem>.db` (+ `-wal`/`-shm`) si directorul
+`backups/rnpm/<stem>/`. Stem-ul unui ownerId se poate calcula cu:
+`node -e "const c=require('crypto');const id=process.argv[1];console.log(id.toLowerCase()+'-'+c.createHash('sha256').update(id,'utf8').digest('hex').slice(0,10))" <ownerId>`

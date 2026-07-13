@@ -1,6 +1,7 @@
 import type { Transporter } from "nodemailer";
 import type { AlertKind, AlertSeverity, MonitoringAlertRow } from "../../db/monitoringAlertsRepository.ts";
 import type { EmailSettings } from "../../db/ownerEmailSettingsRepository.ts";
+import { sanitizeSmtpError } from "../../util/auditSanitize.ts";
 
 interface MailerConfig {
   host: string;
@@ -184,7 +185,7 @@ export async function sendAlertEmail(alert: MonitoringAlertRow, settings: EmailS
     });
     return { ok: true };
   } catch (err) {
-    console.error("[email] sendAlertEmail failed", err);
+    console.error("[email] sendAlertEmail failed", sanitizeSmtpError(err));
     return { ok: false, reason: "send_failed" };
   }
 }
@@ -210,7 +211,7 @@ export async function sendComposedEmail(
     });
     return { ok: true };
   } catch (err) {
-    console.error("[email] sendComposedEmail failed", err);
+    console.error("[email] sendComposedEmail failed", sanitizeSmtpError(err));
     return { ok: false, reason: "send_failed" };
   }
 }
@@ -230,7 +231,7 @@ export async function sendTestEmail(toAddress: string): Promise<EmailSendResult>
     });
     return { ok: true };
   } catch (err) {
-    console.error("[email] sendTestEmail failed", err);
+    console.error("[email] sendTestEmail failed", sanitizeSmtpError(err));
     return { ok: false, reason: "send_failed" };
   }
 }

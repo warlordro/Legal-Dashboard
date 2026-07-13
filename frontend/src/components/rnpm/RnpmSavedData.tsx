@@ -49,6 +49,7 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
   const [pageSize, setPageSize] = useState(25);
   const [loading, setLoading] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [deleteWarning, setDeleteWarning] = useState<string | null>(null);
   const [exporting, setExporting] = useState<"xlsx" | "pdf" | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
   const [q, setQ] = useState("");
@@ -173,8 +174,14 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
     )
       return;
     setLoading(true);
+    setDeleteWarning(null);
     try {
-      await rnpmDeleteAvizeBatch(ids);
+      const result = await rnpmDeleteAvizeBatch(ids);
+      if (result.compacted === false) {
+        setDeleteWarning(
+          "Avizele au fost sterse, dar eliberarea spatiului pe disc a esuat. Spatiul se recupereaza la urmatoarea compactare reusita."
+        );
+      }
       setSelectedIds(new Set());
       await refreshAfterDelete(ids.length);
       onChanged?.();
@@ -329,6 +336,8 @@ export function RnpmSavedData({ onOpenDetail, refreshKey, onChanged }: RnpmSaved
           </div>
         </div>
       )}
+
+      {deleteWarning && <div className="text-xs text-amber-600 dark:text-amber-400">{deleteWarning}</div>}
 
       {items.length === 0 && !loading && !loadError && (
         <div className="rounded-lg border border-border bg-muted/30 p-6 text-center text-sm text-muted-foreground">
