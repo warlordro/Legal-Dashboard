@@ -614,13 +614,18 @@ describe("shutdown — lock retention cu writer nesettled (EXT-H-01)", () => {
 
     const { withMaintenanceWrite } = await import("./db/backup.ts");
     let release: () => void = () => {};
+    let markWriterAcquired: () => void = () => {};
+    const writerAcquired = new Promise<void>((resolve) => {
+      markWriterAcquired = resolve;
+    });
     const hung = withMaintenanceWrite(
       () =>
         new Promise<void>((r) => {
           release = r;
+          markWriterAcquired();
         })
     );
-    await new Promise((r) => setImmediate(r)); // writer-ul detine efectiv lock-ul
+    await writerAcquired; // writer-ul detine efectiv lock-ul
 
     const shutdown = (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> })
       .__legalDashboardShutdown;
