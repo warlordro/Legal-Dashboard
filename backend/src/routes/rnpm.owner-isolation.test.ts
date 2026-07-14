@@ -189,7 +189,7 @@ describe("RNPM owner isolation — Alice vs Bob", () => {
 
       const res = await buildApp().request(`/api/v1/rnpm/saved/${aliceId}`, {
         method: "DELETE",
-        headers: { "x-test-owner": "bob" },
+        headers: { "x-test-owner": "bob", "x-legal-dashboard-desktop": "1" },
       });
       expect(res.status).toBe(200);
       const body = await jsonOf<{ deleted: boolean }>(res);
@@ -284,7 +284,7 @@ describe("RNPM owner isolation — Alice vs Bob", () => {
       const aliceSearchId = seedSearchFor("alice");
       const res = await buildApp().request(`/api/v1/rnpm/searches/${aliceSearchId}`, {
         method: "DELETE",
-        headers: { "x-test-owner": "bob" },
+        headers: { "x-test-owner": "bob", "x-legal-dashboard-desktop": "1" },
       });
       expect(res.status).toBe(200);
       const body = await jsonOf<{ deleted: boolean }>(res);

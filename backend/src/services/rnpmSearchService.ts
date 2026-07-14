@@ -918,6 +918,31 @@ async function executeSplitSearchInner(
               const recoveredCount = nestedRes.documents.length;
               const tier2Sum = nestedRes.subResults.reduce((acc, r) => acc + r.subTotal, 0);
               const gap = Math.max(0, tier1SubTotal - tier2Sum);
+              if (nestedRes.storageStopped) {
+                splitStats.push({
+                  label,
+                  status: recoveredCount > 0 ? "partial" : "error",
+                  count: recoveredCount,
+                  subTotal: tier1SubTotal,
+                  reason:
+                    recoveredCount > 0
+                      ? `Recuperat ${recoveredCount}/${tier1SubTotal}; split-ul tier-2 a fost oprit: ${nestedRes.storageStopped}`
+                      : nestedRes.storageStopped,
+                  nested: nestedRes.subResults,
+                  gap,
+                });
+                onProgress({
+                  index: i,
+                  total: subN,
+                  label,
+                  phase: "error",
+                  message: nestedRes.storageStopped,
+                  resultCount: recoveredCount,
+                  subTotal: tier1SubTotal,
+                });
+                markStorageStopped(i + 1);
+                break;
+              }
               const status: SplitSubResult["status"] = gap === 0 && recoveredCount > 0 ? "recovered" : "partial";
               splitStats.push({
                 label,
@@ -943,15 +968,8 @@ async function executeSplitSearchInner(
               continue;
             } catch (nestedErr) {
               if (nestedErr instanceof DOMException && nestedErr.name === "AbortError") throw nestedErr;
-              // Fix audit v2.43: refuzul de limita propagat din tier-2 opreste
-              // si bucla tier-1 — vezi comentariul de pe branch-ul simetric de mai sus.
-              if (isStorageLimitError(nestedErr)) {
-                const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
-                splitStats.push({ label, status: "error", count: 0, subTotal: tier1SubTotal, reason: msg });
-                onProgress({ index: i, total: subN, label, phase: "error", message: msg, subTotal: tier1SubTotal });
-                markStorageStopped(i + 1);
-                break;
-              }
+              // Refuzurile de storage din bucla tier-2 sunt returnate structurat
+              // prin nestedRes.storageStopped; aici raman doar erorile neasteptate.
               const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
               splitStats.push({
                 label,
@@ -1037,6 +1055,7 @@ interface NestedSplitOutcome {
   detailsFailed: string[];
   subResults: NestedSplitSubResult[];
   captchasUsed: number;
+  storageStopped?: string;
 }
 
 async function executeNestedDestinationSplit(
@@ -1183,9 +1202,21 @@ async function executeNestedDestinationSplit(
       });
     } catch (e) {
       if (e instanceof DOMException && e.name === "AbortError") throw e;
-      // Fix audit v2.43: refuzul de limita de stocare nu e o eroare
-      // per-destinatie — se propaga ca apelantul sa opreasca si bucla tier-1.
-      if (isStorageLimitError(e)) throw e;
+      // Rezultatele destinatiilor anterioare sunt deja persistate. Returneaza-le
+      // impreuna cu semnalul de stop, astfel incat apelantul sa nu le piarda din
+      // raspuns si sa actualizeze corect totalul cautarii parinte.
+      if (isStorageLimitError(e)) {
+        const msg = e instanceof Error ? e.message : String(e);
+        subResults.push({ label: destLabel, status: "error", count: 0, subTotal: 0, reason: msg });
+        onProgress({
+          index: input.tier1Index,
+          total: input.tier1Total,
+          label: input.tier1Label,
+          phase: "nested_progress",
+          nested: { index: j + 1, total: destinations.length, label: destLabel, phase: "error" },
+        });
+        return { documents, avizIds, detailsFailed, subResults, captchasUsed, storageStopped: msg };
+      }
       // v2.20.3 Grupul M: conservative count pe error path (vezi comentariul
       // identic din executeSplitSearch).
       captchasUsed += 1;

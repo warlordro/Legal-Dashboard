@@ -5,13 +5,14 @@ import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { compactRnpmDbViaWorker } from "./backup.ts";
+import { compactRnpmDbViaWorker, getRnpmBackupDir, withMaintenanceWrite } from "./backup.ts";
 import { upsertOverride } from "./userQuotaRepository.ts";
 import { __setSnapshotWorkerPathForTests } from "../util/snapshotRunner.ts";
 import {
   assertRnpmStorageWithinLimit,
   getRnpmStorageLimitBytes,
   measureRnpmStorage,
+  measureRnpmStorageWithBackups,
   readDefaultRnpmStorageMb,
   RnpmStorageLimitError,
 } from "./rnpmStorageLimit.ts";
@@ -186,5 +187,45 @@ describe("measureRnpmStorage + assertRnpmStorageWithinLimit", () => {
     await compact;
     await expect(measurement).resolves.toMatchObject({ exists: true });
     expect(measured).toBe(true);
+  });
+
+  it("masoara DB-ul si backup-urile in aceeasi generatie de maintenance lock", async () => {
+    getRnpmDb(OWNER);
+    const dbPath = getRnpmDbPath(OWNER);
+    const backupDir = getRnpmBackupDir(OWNER);
+    const realStat = fsPromises.stat.bind(fsPromises);
+    let releaseStat!: () => void;
+    let enteredStat!: () => void;
+    const statReleased = new Promise<void>((resolve) => {
+      releaseStat = resolve;
+    });
+    const statEntered = new Promise<void>((resolve) => {
+      enteredStat = resolve;
+    });
+    let held = false;
+    vi.spyOn(fsPromises, "stat").mockImplementation(async (file, options) => {
+      if (!held && String(file) === dbPath) {
+        held = true;
+        enteredStat();
+        await statReleased;
+      }
+      return realStat(file, options as never);
+    });
+
+    const snapshot = measureRnpmStorageWithBackups(OWNER);
+    await statEntered;
+    const writer = withMaintenanceWrite(async () => {
+      await fsPromises.mkdir(backupDir, { recursive: true });
+      await fsPromises.writeFile(path.join(backupDir, "rnpm.race.db"), "new generation");
+    });
+    releaseStat();
+
+    const beforeWriter = await snapshot;
+    expect(beforeWriter.storage.exists).toBe(true);
+    expect(beforeWriter.backups).toEqual([]);
+    await writer;
+    await expect(measureRnpmStorageWithBackups(OWNER)).resolves.toMatchObject({
+      backups: [expect.objectContaining({ name: "rnpm.race.db" })],
+    });
   });
 });

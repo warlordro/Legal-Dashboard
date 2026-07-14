@@ -3,8 +3,7 @@
 // envelope standard, fara audit (paritate cu GET /api/v1/admin/backups).
 // Erorile FS non-ENOENT se propaga -> appErrorHandler -> 500 pe envelope.
 import { Hono } from "hono";
-import { listRnpmBackups, withMaintenanceRead } from "../db/backup.ts";
-import { getRnpmStorageLimitBytes, measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
+import { getRnpmStorageLimitBytes, measureRnpmStorageWithBackups } from "../db/rnpmStorageLimit.ts";
 import { listAllUserIdentities } from "../db/userRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { ok } from "../util/envelope.ts";
@@ -31,8 +30,7 @@ adminRnpmRouter.get("/usage", async (c) => {
   // diferite ale aceluiasi fisier si nu raporteaza tranzitoriu "fara baza".
   const rows: AdminRnpmUsageRow[] = [];
   for (const u of users) {
-    const storage = await measureRnpmStorage(u.id);
-    const backups = await withMaintenanceRead(() => listRnpmBackups(u.id));
+    const { storage, backups } = await measureRnpmStorageWithBackups(u.id);
     rows.push({
       userId: u.id,
       email: u.email,
