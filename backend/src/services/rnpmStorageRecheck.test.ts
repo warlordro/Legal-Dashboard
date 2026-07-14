@@ -10,8 +10,9 @@ vi.mock("./captchaSolver.ts", () => ({
 }));
 
 import { __resetRnpmActivityForTests } from "../db/rnpmActivity.ts";
-import { __resetRnpmDbForTests, getRnpmDb } from "../db/rnpmDb.ts";
+import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
 import { RnpmStorageLimitError } from "../db/rnpmStorageLimit.ts";
+import { getSearches } from "../db/searchRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { executeBulkSearch, executeSearch, executeSplitSearch } from "./rnpmSearchService.ts";
 import { RnpmClient, type RnpmFullDetail, type RnpmSearchResult, type RnpmSearchType } from "./rnpmClient.ts";
@@ -453,9 +454,7 @@ describe("oprire la primul refuz de limita de stocare (fail-fast)", () => {
       status: "error",
       reason: expect.stringContaining("Oprit: limita de stocare"),
     });
-    const stored = getRnpmDb("u1")
-      .prepare("SELECT total_results FROM rnpm_searches WHERE id = ? AND owner_id = ?")
-      .get(result.searchId, "u1") as { total_results: number };
-    expect(stored.total_results).toBe(1);
+    const stored = getSearches({ ownerId: "u1", limit: 200 }).items.find((row) => row.id === result.searchId);
+    expect(stored?.total_results).toBe(1);
   });
 });

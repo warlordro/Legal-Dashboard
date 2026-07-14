@@ -968,15 +968,8 @@ async function executeSplitSearchInner(
               continue;
             } catch (nestedErr) {
               if (nestedErr instanceof DOMException && nestedErr.name === "AbortError") throw nestedErr;
-              // Fix audit v2.43: refuzul de limita propagat din tier-2 opreste
-              // si bucla tier-1 — vezi comentariul de pe branch-ul simetric de mai sus.
-              if (isStorageLimitError(nestedErr)) {
-                const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
-                splitStats.push({ label, status: "error", count: 0, subTotal: tier1SubTotal, reason: msg });
-                onProgress({ index: i, total: subN, label, phase: "error", message: msg, subTotal: tier1SubTotal });
-                markStorageStopped(i + 1);
-                break;
-              }
+              // Refuzurile de storage din bucla tier-2 sunt returnate structurat
+              // prin nestedRes.storageStopped; aici raman doar erorile neasteptate.
               const msg = nestedErr instanceof Error ? nestedErr.message : String(nestedErr);
               splitStats.push({
                 label,

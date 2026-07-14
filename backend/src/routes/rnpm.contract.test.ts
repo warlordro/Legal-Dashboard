@@ -269,6 +269,30 @@ describe("DELETE /api/v1/rnpm/saved/:id", () => {
     const res = await buildApp().request(`/api/v1/rnpm/saved/${id}`, { method: "DELETE" });
     expect(res.status).toBe(403);
   });
+
+  it("pastreaza succesul delete-ului cand scrierea de audit esueaza", async () => {
+    const id = seedAviz({ identificator: "AV-DEL-AUDIT-FAIL" });
+    getDb().exec("DROP TABLE audit_log");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const existing = await buildApp().request(`/api/v1/rnpm/saved/${id}`, {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
+    const missing = await buildApp().request("/api/v1/rnpm/saved/999999", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
+
+    expect(existing.status).toBe(200);
+    expect(await jsonOf(existing)).toMatchObject({ deleted: true });
+    expect(missing.status).toBe(200);
+    expect(await jsonOf(missing)).toMatchObject({ deleted: false });
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("[audit] write failed for aviz.delete"),
+      expect.any(String)
+    );
+  });
 });
 
 describe("DELETE /api/v1/rnpm/saved/all", () => {
@@ -594,6 +618,30 @@ describe("DELETE /api/v1/rnpm/searches/:id", () => {
     const id = saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
     const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, { method: "DELETE" });
     expect(res.status).toBe(403);
+  });
+
+  it("pastreaza succesul delete-ului cand scrierea de audit esueaza", async () => {
+    const id = saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
+    getDb().exec("DROP TABLE audit_log");
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    const existing = await buildApp().request(`/api/v1/rnpm/searches/${id}`, {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
+    const missing = await buildApp().request("/api/v1/rnpm/searches/999999", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
+
+    expect(existing.status).toBe(200);
+    expect(await jsonOf(existing)).toMatchObject({ deleted: true });
+    expect(missing.status).toBe(200);
+    expect(await jsonOf(missing)).toMatchObject({ deleted: false });
+    expect(error).toHaveBeenCalledWith(
+      expect.stringContaining("[audit] write failed for search.delete"),
+      expect.any(String)
+    );
   });
 });
 
