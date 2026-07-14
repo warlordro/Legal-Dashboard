@@ -163,6 +163,33 @@ describe("limita RNPM ruleaza inainte de captcha", () => {
     });
   });
 
+  it("cursa cu restore inceput dupa pre-check ramane 409 tipat, nu 500", async () => {
+    captchaGuard.mockResolvedValueOnce({
+      ok: true,
+      source: "body",
+      body: { type: "ipoteci", params: {}, captchaKey: "x".repeat(32) },
+      captchaKey: "x".repeat(32),
+    });
+    searchService.mockRejectedValueOnce(
+      Object.assign(new Error("Restaurare in curs pentru acest cont; reincearca dupa finalizare"), {
+        code: "RESTORE_IN_PROGRESS",
+      })
+    );
+
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci", params: {}, captchaKey: "x".repeat(32) }),
+    });
+
+    expect(res.status).toBe(409);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: { code: "RESTORE_IN_PROGRESS", message: expect.stringContaining("Restaurare") },
+      requestId: expect.any(String),
+    });
+  });
+
   it("paginarea cu gcode existent este exceptata", async () => {
     captchaGuard.mockResolvedValueOnce({
       ok: true,

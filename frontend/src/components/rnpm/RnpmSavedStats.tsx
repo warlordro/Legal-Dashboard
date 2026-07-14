@@ -134,6 +134,7 @@ function StatsModal({
     setCompactMsg(null);
     try {
       const { name } = await rnpmCreateBackup();
+      setDeleteWarning(null);
       setCompactMsg(`Backup creat: ${name}.`);
       await loadBackups();
     } catch (e) {
@@ -176,6 +177,7 @@ function StatsModal({
     setFolderError(null);
     try {
       const { beforeBytes, afterBytes, durationMs } = await rnpmCompactDb();
+      setDeleteWarning(null);
       const saved = Math.max(0, beforeBytes - afterBytes);
       setCompactMsg(
         saved > 0

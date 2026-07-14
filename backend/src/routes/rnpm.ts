@@ -365,6 +365,9 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     // catch-ul local — rethrow spre handlerul central (429 cu cifre), altfel
     // ar fi mascat ca 500 generic.
     if ((e as { code?: unknown })?.code === "RNPM_STORAGE_LIMIT") throw e;
+    // Restore-ul poate incepe dupa gardul pre-flight, dar inainte ca serviciul
+    // sa-si inregistreze activitatea. Pastreaza eroarea tipata ca 409.
+    rethrowTypedMaintenanceError(e);
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
     console.error("[rnpm/search]", msg);
     return internalError(c, msg);
@@ -1315,12 +1318,12 @@ rnpmRouter.post("/open-backups-folder", requireDesktopHeader, requireRole("admin
   }
 });
 
-rnpmRouter.delete("/saved/:id", async (c) => {
+rnpmRouter.delete("/saved/:id", requireDesktopHeader, async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return invalidParams(c, "ID invalid");
   const ownerId = getOwnerId(c);
   const ok = deleteAviz(id, ownerId);
-  recordAudit(c, "aviz.delete", {
+  recordAuditSafe(c, "aviz.delete", {
     targetKind: "aviz",
     targetId: String(id),
     outcome: ok ? "ok" : "error",
@@ -1446,12 +1449,12 @@ rnpmRouter.get("/searches", (c) => {
   );
 });
 
-rnpmRouter.delete("/searches/:id", async (c) => {
+rnpmRouter.delete("/searches/:id", requireDesktopHeader, async (c) => {
   const id = Number(c.req.param("id"));
   if (!Number.isFinite(id)) return invalidParams(c, "ID invalid");
   const ownerId = getOwnerId(c);
   const deleted = deleteSearch(id, ownerId);
-  recordAudit(c, "search.delete", {
+  recordAuditSafe(c, "search.delete", {
     targetKind: "search",
     targetId: String(id),
     outcome: deleted ? "ok" : "error",

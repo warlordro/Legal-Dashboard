@@ -235,24 +235,39 @@ describe("GET /api/v1/rnpm/saved/:id", () => {
 describe("DELETE /api/v1/rnpm/saved/:id", () => {
   it("returns { deleted: true } when row existed", async () => {
     const id = seedAviz({ identificator: "AV-DEL" });
-    const res = await buildApp().request(`/api/v1/rnpm/saved/${id}`, { method: "DELETE" });
+    const res = await buildApp().request(`/api/v1/rnpm/saved/${id}`, {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(200);
     const body = await jsonOf<{ deleted: boolean }>(res);
     expect(body.deleted).toBe(true);
   });
 
   it("returns { deleted: false } when row missing", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/saved/9999", { method: "DELETE" });
+    const res = await buildApp().request("/api/v1/rnpm/saved/9999", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(200);
     const body = await jsonOf<{ deleted: boolean }>(res);
     expect(body.deleted).toBe(false);
   });
 
   it("returns 400 + { error } on non-numeric id", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/saved/notanumber", { method: "DELETE" });
+    const res = await buildApp().request("/api/v1/rnpm/saved/notanumber", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(400);
     const body = await jsonOf<EnvelopeErrorBody>(res);
     expectEnvelopeError(body, "INVALID_PARAMS");
+  });
+
+  it("returns 403 without the desktop header", async () => {
+    const id = seedAviz({ identificator: "AV-DEL-NO-HEADER" });
+    const res = await buildApp().request(`/api/v1/rnpm/saved/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(403);
   });
 });
 
@@ -534,21 +549,30 @@ describe("GET /api/v1/rnpm/searches", () => {
 describe("DELETE /api/v1/rnpm/searches/:id", () => {
   it("returns { deleted: true } on existing row", async () => {
     const id = saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
-    const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, { method: "DELETE" });
+    const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(200);
     const body = await jsonOf<{ deleted: boolean }>(res);
     expect(body.deleted).toBe(true);
   });
 
   it("returns { deleted: false } when row missing", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/searches/9999", { method: "DELETE" });
+    const res = await buildApp().request("/api/v1/rnpm/searches/9999", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(200);
     const body = await jsonOf<{ deleted: boolean }>(res);
     expect(body.deleted).toBe(false);
   });
 
   it("returns 400 + { error } on non-numeric id", async () => {
-    const res = await buildApp().request("/api/v1/rnpm/searches/notanumber", { method: "DELETE" });
+    const res = await buildApp().request("/api/v1/rnpm/searches/notanumber", {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
     expect(res.status).toBe(400);
     const body = await jsonOf<EnvelopeErrorBody>(res);
     expectEnvelopeError(body, "INVALID_PARAMS");
@@ -558,9 +582,18 @@ describe("DELETE /api/v1/rnpm/searches/:id", () => {
     vi.mocked(maybeAutoCompactRnpm).mockResolvedValueOnce({ attempted: true, compacted: true, freedBytes: 2048 });
     const id = saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
 
-    const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, { method: "DELETE" });
+    const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
 
     expect(await jsonOf(res)).toEqual({ deleted: true, compacted: true, freedBytes: 2048 });
+  });
+
+  it("returns 403 without the desktop header", async () => {
+    const id = saveSearch({ ownerId: "local", searchType: "ipoteci", paramsJson: "{}", totalResults: 0 });
+    const res = await buildApp().request(`/api/v1/rnpm/searches/${id}`, { method: "DELETE" });
+    expect(res.status).toBe(403);
   });
 });
 
@@ -570,7 +603,10 @@ describe("DELETE /api/v1/rnpm/saved/:id autocompact", () => {
     const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
     const id = seedAviz({ identificator: "AV-ONE-AUTO" });
 
-    const res = await buildApp().request(`/api/v1/rnpm/saved/${id}`, { method: "DELETE" });
+    const res = await buildApp().request(`/api/v1/rnpm/saved/${id}`, {
+      method: "DELETE",
+      headers: DESKTOP_HEADERS,
+    });
 
     expect(res.status).toBe(200);
     expect(await jsonOf(res)).toEqual({ deleted: true, compacted: false, freedBytes: 0 });
