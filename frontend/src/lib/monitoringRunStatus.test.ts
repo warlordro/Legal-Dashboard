@@ -14,4 +14,10 @@ describe("monitoringRunStatusLabel", () => {
     expect(monitoringRunStatusLabel(null)).toBe("—");
     expect(monitoringRunStatusLabel(undefined)).toBe("—");
   });
+
+  it("nu rezolva chei mostenite din Object.prototype", () => {
+    expect(monitoringRunStatusLabel("toString")).toBe("Necunoscut (toString)");
+    expect(monitoringRunStatusLabel("constructor")).toBe("Necunoscut (constructor)");
+    expect(monitoringRunStatusLabel("hasOwnProperty")).toBe("Necunoscut (hasOwnProperty)");
+  });
 });
