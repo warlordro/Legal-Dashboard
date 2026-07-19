@@ -62,7 +62,7 @@
 
 **Frontend - eroare vizibila pentru header lipsa:** in `parseBulkFile` cand `findHeaderRow(matrix) < 0` se push-uieste `{ rowNumber: 1, display: fileName, message: "Header lipsa: fisierul nu contine niciuna dintre coloanele recunoscute (numar_dosar, nume, name_normalized, denumire). Descarca template-ul si reincearca." }` in `invalid[]`. Anterior: silent return cu `valid=[]`+`invalid=[]`, utilizatorul nu primea niciun semnal de eroare.
 
-**Docs - corectare claim stale:** in `SESSION-HANDOFF.md` linia "xlsx@0.18.5 ramane risc acceptat temporar..." rescrisa — post-v2.6.4 `nameListParser.ts` ruleaza pe `exceljs@^4.4.0` (`xlsx` mutat in `devDependencies`). xlsx nu mai e pe path-ul de parsare a inputului user, ramane folosit tranzitiv pe path-ul write-only prin `xlsx-js-style` si in fixturile de test.
+**Docs - corectare claim stale:** in `SESSION-HANDOFF.md` linia "xlsx@0.18.5 ramane risc acceptat temporar..." rescrisa — post-v2.6.4 `nameListParser.ts` ruleaza pe `exceljs@^4.4.0` (`xlsx` mutat in `devDependencies`). xlsx nu mai e pe path-ul de parsare a inputului user, ramane folosit tranzitiv prin `xlsx-js-style` (care e reachable si la parsarea de preview a importului bulk Monitorizare, deci nu doar write-only) si in fixturile de test.
 
 **Style commitment:** structured-section style aplicat pe entries noi de aici inainte (subsections cu `**Frontend:**`, `**Backend:**`, `**Tests:**`, etc.). Entries istorice nu se retrofiteaza — costul de mentenanta depaseste beneficiul.
 

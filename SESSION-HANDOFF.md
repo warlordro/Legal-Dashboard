@@ -470,9 +470,12 @@ infra.
   partial-config probe in v2.17.0 (warn la lipsa partiala in loc de silent
   runtime fail).
 - `xlsx@0.18.5` nu mai este pe path-ul de parsare a inputului user (in v2.6.4
-  `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
-  ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
-  si in fixturile de test — fara expunere directa la fisiere uploadate.
+  `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Codul SheetJS 0.18.5
+  ramane transitiv prin `xlsx-js-style`, care e folosit atat la export cat si la
+  parsarea de preview a importului bulk Monitorizare (`parseBulkFile`,
+  `XLSX.read`) — deci nu e write-only; mitigat de cap pe dimensiunea fisierului +
+  validare interna, iar parsarea autoritativa a importului ramane pe `exceljs`.
+  Pachetul `xlsx` standalone ramane doar in fixturile de test.
 
 ## Sprint inchis 2026-05-20 - v2.34.0 web hardening
 

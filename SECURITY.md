@@ -199,9 +199,15 @@ not BYOK / not supplied by the browser client.
   `xlsx@0.18.5` ramane in `devDependencies` doar pentru fixture-urile de
   test — nu mai ajunge in bundle-ul productie. Mitigari active in
   `nameListParser.ts`: cap 10MB body, max 50K rows, max 20 cols, timeout 30s
-  pe parse (Promise.race). Frontend-ul pastreaza `xlsx-js-style.writeFile()`
-  pentru EXPORT (date deja validate intern, nu primeste spreadsheets de la
-  atacatori) — neafectat de CVE-uri pe path-ul write-only.
+  pe parse (Promise.race). Frontend-ul foloseste `xlsx-js-style` nu doar pentru
+  EXPORT (`writeFile()`), ci si la PARSAREA de preview a fisierelor de import
+  bulk Monitorizare (`XLSX.read` in `monitoringBulkTemplate.ts:318`,
+  `parseBulkFile`), deci parserul ESTE reachable pe un path de input user — nu
+  este write-only. Riscul e mitigat inainte de parse printr-un cap pe
+  dimensiunea fisierului (`MAX_BULK_FILE_BYTES`) plus validare interna a matricei
+  (decode `!ref` cu cap pe randuri/coloane inainte de `sheet_to_json`);
+  parsarea autoritativa a importului ramane server-side pe `exceljs@^4.4.0`, iar
+  preview-ul din renderer nu comite nimic in DB.
 - **Unsigned Windows binaries.** We do not currently code-sign Windows
   installers. SmartScreen will warn on first launch. Obtaining and wiring an
   EV / OV certificate is tracked separately.
