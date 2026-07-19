@@ -97,6 +97,25 @@ describe("PR-9 auth config validation", () => {
     expect(warn).toHaveBeenCalledWith(expect.stringContaining("AUTH_COOKIE_SECURE=0"));
   });
 
+  it("rejects placeholder JWT secrets left in the deploy template (SEC-11)", () => {
+    // Placeholder-ul de 48 chars din docker-compose.web.example.yml trece pragul
+    // de lungime dar trebuie respins ca template necompletat.
+    expect(() =>
+      validateAuthConfig({
+        ...WEB_ENV,
+        LEGAL_DASHBOARD_JWT_SECRET: "REPLACE_WITH_32_PLUS_CHAR_SECRET_FROM_SECRET_MGR",
+      } as NodeJS.ProcessEnv)
+    ).toThrow(/placeholder/i);
+
+    // Un secret real de 32+ caractere e acceptat.
+    expect(() =>
+      validateAuthConfig({
+        ...WEB_ENV,
+        LEGAL_DASHBOARD_JWT_SECRET: SECRET,
+      } as NodeJS.ProcessEnv)
+    ).not.toThrow();
+  });
+
   it("accepts desktop mode without a JWT secret", () => {
     expect(() => validateAuthConfig({ LEGAL_DASHBOARD_AUTH_MODE: "desktop" } as NodeJS.ProcessEnv)).not.toThrow();
   });
