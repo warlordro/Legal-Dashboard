@@ -435,23 +435,27 @@ function createWindow() {
   // Use strict URL parsing (NOT startsWith) — userinfo prefix like
   // `http://localhost:3002@attacker.example/` would otherwise pass a naive
   // prefix check while the parser resolves to attacker.example.
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    let allowed = false;
+  const isAllowedNavUrl = (url) => {
     try {
       const parsed = new URL(url);
-      allowed =
+      return (
         parsed.protocol === "http:" &&
         (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
         parsed.port === String(BACKEND_PORT) &&
         parsed.username === "" &&
-        parsed.password === "";
+        parsed.password === ""
+      );
     } catch {
-      allowed = false;
+      return false;
     }
-    if (!allowed) {
-      event.preventDefault();
-    }
-  });
+  };
+  const guardNavigation = (event, url) => {
+    if (!isAllowedNavUrl(url)) event.preventDefault();
+  };
+  mainWindow.webContents.on("will-navigate", guardNavigation);
+  // SECURITY: mirror the same whitelist on redirects (a 30x from an allowed URL
+  // could otherwise land on an external origin without hitting will-navigate).
+  mainWindow.webContents.on("will-redirect", guardNavigation);
 
   // SECURITY: Block new window creation (popups)
   const ALLOWED_EXTERNAL_DOMAINS = [
