@@ -39,6 +39,7 @@ interface DosareState {
   searched: boolean;
   error: string | null;
   searchedName?: string;
+  failedInstitutii?: string[];
   lastSearchParams?: SearchParams;
 }
 
@@ -357,6 +358,7 @@ function AuthedApp() {
     institutii: [],
     searched: false,
     error: null,
+    failedInstitutii: [],
   });
 
   const [termeneState, setTermeneState] = useState<TermeneState>({

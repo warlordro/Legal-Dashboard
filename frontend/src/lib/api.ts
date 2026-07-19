@@ -320,7 +320,10 @@ async function loadMoreSSE<T>(
 export const api = {
   dosare: {
     search: (params: SearchParams) =>
-      get<{ data: Dosar[]; total: number }>("/dosare", params as Record<string, string | string[] | undefined>),
+      get<{ data: Dosar[]; total: number; exactMatch?: boolean; failedInstitutii?: string[] }>(
+        "/dosare",
+        params as Record<string, string | string[] | undefined>
+      ),
     // ICCJ live-proxy search (separate endpoint; date-DESC, paginated).
     searchIccj: (params: SearchParams, page = 1) =>
       get<{ data: Dosar[]; total: number; page: number }>("/dosare-iccj", {

@@ -12,7 +12,7 @@ import { exportDosareExcel, exportDosarePDF } from "@/lib/export-dosare";
 import type { Dosar, DosarSource, SearchParams } from "@/types";
 import type { ApiKeys } from "@/hooks/useApiKey";
 import type { AiMode } from "@/components/dosare-ai-config";
-import { INSTITUTII, normalizeInstitutie } from "@/lib/institutii";
+import { INSTITUTII, normalizeInstitutie, getInstitutieLabel } from "@/lib/institutii";
 import { dropLegalFormTokens } from "@/lib/legalSuffix";
 
 function stripDiacritics(s: string): string {
@@ -86,6 +86,12 @@ function filterByInstitutii(dosare: Dosar[], institutii: string[]): Dosar[] {
   return dosare.filter((d) => selectedLabels.has(normalizeInstitutie(d.institutie ?? "")));
 }
 
+function formatFailedInstitutii(tokens: string[]): string {
+  const labels = tokens.map((t) => getInstitutieLabel(t));
+  if (labels.length <= 3) return labels.join(", ");
+  return `${labels.slice(0, 3).join(", ")} si alte ${labels.length - 3} instante`;
+}
+
 interface DosareState {
   allDosare: Dosar[];
   categorii: string[];
@@ -94,6 +100,7 @@ interface DosareState {
   searched: boolean;
   error: string | null;
   searchedName?: string;
+  failedInstitutii?: string[];
   lastSearchParams?: SearchParams;
 }
 
@@ -186,7 +193,7 @@ export default function Dosare({
     setLoadMoreWarnings([]);
     setLoadMoreProgress(null);
     setIccjPaging(null);
-    onStateChange({ ...state, error: null, searched: true });
+    onStateChange({ ...state, error: null, searched: true, failedInstitutii: [] });
     try {
       const { categorii: cats, stadii: st, ...searchParams } = params;
       lastSearchParams.current = searchParams;
@@ -202,6 +209,7 @@ export default function Dosare({
           searched: true,
           error: null,
           searchedName: searchParams.numeParte || undefined,
+          failedInstitutii: [],
           lastSearchParams: params,
         });
         // hasMore is derived cumulatively (backend no longer guesses page size):
@@ -224,6 +232,7 @@ export default function Dosare({
         searched: true,
         error: null,
         searchedName: searchParams.numeParte || undefined,
+        failedInstitutii: res.failedInstitutii ?? [],
         lastSearchParams: params,
       });
       const catSet = new Set<string>();
@@ -244,6 +253,7 @@ export default function Dosare({
         institutii: state.institutii,
         searched: true,
         error: e instanceof Error ? e.message : "Eroare la cautare",
+        failedInstitutii: [],
       });
     } finally {
       setLoading(false);
@@ -447,6 +457,7 @@ export default function Dosare({
             institutii: [],
             searched: false,
             error: null,
+            failedInstitutii: [],
           });
         }}
       />
@@ -469,6 +480,16 @@ export default function Dosare({
             <p className="text-sm font-medium text-red-800 dark:text-red-400">Eroare la cautare</p>
             <p className="text-xs text-red-700 dark:text-red-500">{state.error}</p>
           </div>
+        </div>
+      )}
+
+      {state.searched && !loading && !state.error && (state.failedInstitutii?.length ?? 0) > 0 && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 dark:border-amber-700 dark:bg-amber-950/40">
+          <p className="text-sm font-medium text-amber-800 dark:text-amber-400">Unele instante nu au raspuns</p>
+          <p className="text-sm text-amber-700 dark:text-amber-300">
+            {formatFailedInstitutii(state.failedInstitutii ?? [])} — rezultatele acestor instante lipsesc din lista.
+            Incercati din nou mai tarziu.
+          </p>
         </div>
       )}
 
@@ -508,7 +529,16 @@ export default function Dosare({
       {!loading && dosare.length > 0 && (
         <DosareTable
           dosare={dosare}
-          onExportExcel={(sel) => exportDosareExcel(sel || dosare)}
+          onExportExcel={(sel) => {
+            if (
+              (state.failedInstitutii?.length ?? 0) > 0 &&
+              !window.confirm(
+                "Rezultatele sunt PARTIALE (instante fara raspuns la cautare). Exporti totusi lista incompleta?"
+              )
+            )
+              return;
+            exportDosareExcel(sel || dosare);
+          }}
           onExportPDF={(sel) => exportDosarePDF(sel || dosare)}
           searchedName={state.searchedName}
           apiKeys={apiKeys}
