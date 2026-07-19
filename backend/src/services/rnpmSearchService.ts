@@ -275,6 +275,12 @@ async function executeSearchInner(
   const pageSize = firstResult.pageSize;
   const criteriu = firstResult.criteriu;
 
+  // BUG-06: RNPM ocasional intoarce un pagesTotal umflat; clampeaza la numarul
+  // real de pagini derivat din total (pageSize>0), altfel bucla face un fetch
+  // per pagina goala. total/pageSize vin din primul raspuns validat (guard-ul de
+  // MAX_TOTAL_RESULTS de mai sus le acopera).
+  const pagesTotalClamped = pageSize > 0 ? Math.min(pagesTotal, Math.max(Math.ceil(total / pageSize), 1)) : 1;
+
   const searchId =
     existingSearchId ??
     saveSearch({
@@ -360,7 +366,7 @@ async function executeSearchInner(
   await processPage(firstResult.documents);
   rnpmPage++;
 
-  while (allDocs.length < batchSize && rnpmPage <= pagesTotal) {
+  while (allDocs.length < batchSize && rnpmPage <= pagesTotalClamped) {
     throwIfAborted(signal);
     if (!existingGcode) await input.storageLimitCheck?.(ownerId);
     let r: RnpmSearchResult;
@@ -410,7 +416,7 @@ async function executeSearchInner(
     rnpmPage++;
   }
 
-  const nextRnpmPage = rnpmPage <= pagesTotal ? rnpmPage : null;
+  const nextRnpmPage = rnpmPage <= pagesTotalClamped ? rnpmPage : null;
 
   logRnpmEvent({
     action: "rnpm_search",
@@ -433,7 +439,7 @@ async function executeSearchInner(
     avizIds,
     detailsFailed,
     total,
-    pagesTotal,
+    pagesTotal: pagesTotalClamped,
     pageSize,
     currentPage: startRnpmPage ?? 1,
     criteriu,
