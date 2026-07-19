@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { once } from "node:events";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -178,10 +179,21 @@ export async function buildAlertsPdf(rows: AlertExportDecoratedRow[], contextLab
   const headerLine = `Generat: ${todayRo()}  |  Total: ${rows.length}${contextLabel ? `  |  ${contextLabel}` : ""}`;
   doc.font("Helvetica").fontSize(9).text(text(headerLine), 40, 64);
 
-  drawTable(doc, rows, 82, 1);
-  doc.end();
-  await finishWriteStream(stream, tmpPath);
-
-  const stat = await fs.stat(tmpPath);
-  return { filepath: tmpPath, filename: alertsFilename("pdf", rows.length), mime: MIME_PDF, byteLength: stat.size };
+  try {
+    drawTable(doc, rows, 82, 1);
+    doc.end();
+    await finishWriteStream(stream, tmpPath);
+    const stat = await fs.stat(tmpPath);
+    return { filepath: tmpPath, filename: alertsFilename("pdf", rows.length), mime: MIME_PDF, byteLength: stat.size };
+  } catch (err) {
+    doc.destroy();
+    stream.destroy();
+    // Asteapta inchiderea stream-ului inainte de unlink: createWriteStream
+    // deschide fd-ul asincron, deci un throw sincron din drawTable ar unlink-ui
+    // inainte sa existe fisierul (ENOENT inghitit) iar fd-ul deschis ulterior ar
+    // lasa un orfan. "close" garanteaza ca fd-ul e deschis-si-inchis sau abortat.
+    await once(stream, "close").catch(() => {});
+    await fs.unlink(tmpPath).catch(() => {});
+    throw err;
+  }
 }

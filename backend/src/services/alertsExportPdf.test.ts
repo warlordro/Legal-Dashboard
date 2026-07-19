@@ -1,4 +1,5 @@
-import { readFile, unlink } from "node:fs/promises";
+import { readdir, readFile, unlink } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import type { MonitoringAlertRow } from "../db/monitoringAlertsRepository.ts";
 import { buildAlertsPdf } from "./alertsExportPdf.ts";
@@ -51,5 +52,22 @@ describe("buildAlertsPdf", () => {
     const bytes = await readFile(result.filepath);
     expect(bytes.subarray(0, 4).toString("utf8")).toBe("%PDF");
     expect(result.filename).toMatch(/^alerte_1_.+\.pdf$/);
+  });
+
+  it("leaves no orphan tmp PDF when drawing throws (BUG-01)", async () => {
+    const before = (await readdir(tmpdir())).filter((f) => f.startsWith("alerts-pdf-"));
+    const poisoned = [
+      new Proxy(
+        {},
+        {
+          get() {
+            throw new Error("boom");
+          },
+        }
+      ),
+    ] as never;
+    await expect(buildAlertsPdf(poisoned)).rejects.toThrow();
+    const after = (await readdir(tmpdir())).filter((f) => f.startsWith("alerts-pdf-"));
+    expect(after.length).toBeLessThanOrEqual(before.length);
   });
 });
