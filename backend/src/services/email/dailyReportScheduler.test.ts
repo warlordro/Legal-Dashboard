@@ -492,6 +492,109 @@ describe("runDailyReportTick — retry backoff (Batch 4.4)", () => {
   });
 });
 
+describe("runDailyReportTick — off-hour retry (BUG-04)", () => {
+  it("runs a due retry off-hour but does NOT send to owners without a pending retry", async () => {
+    _resetDailyReportRetryStateForTest();
+    // owner-A and owner-B both enabled with a yesterday alert (fresh, no retry).
+    upsertEmailSettings("owner-A", {
+      enabled: true,
+      toAddress: "a@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    upsertEmailSettings("owner-B", {
+      enabled: true,
+      toAddress: "b@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("owner-A", YESTERDAY_NOON_UTC, "a-1");
+    seedAlertAt("owner-B", YESTERDAY_NOON_UTC, "b-1");
+
+    const send = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: false, reason: "smtp" }) // first owner @ 09:30 fails
+      .mockResolvedValue({ ok: true });
+    const at930 = new Date(2026, 4, 3, 9, 30, 0);
+    const at1005 = new Date(2026, 4, 3, 10, 5, 0); // off-hour, failing owner retry due (09:35)
+    await runDailyReportTick({
+      now: () => at930,
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    send.mockClear();
+    const r = await runDailyReportTick({
+      now: () => at1005,
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Only the owner with a due retry is sent off-hour; the other is not touched.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(r.emailsSent).toBe(1);
+  });
+
+  it("clears an exhausted retry off-hour (retry_exhausted audit)", async () => {
+    _resetDailyReportRetryStateForTest();
+    upsertEmailSettings("owner-A", {
+      enabled: true,
+      toAddress: "a@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("owner-A", YESTERDAY_NOON_UTC, "a-1");
+
+    const send = vi.fn().mockResolvedValue({ ok: false, reason: "send_failed" });
+    // Tick 1 @ 09:30 → fail #1, nextAttemptAt = 09:35.
+    await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 30, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Tick 2 @ 09:36 → fail #2, nextAttemptAt = 09:51.
+    await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 36, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Tick 3 @ 09:52 → fail #3, attempts = MAX(3).
+    await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 9, 52, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+    // Tick 4 @ 10:05 is OFF-HOUR: the exhausted branch must still run here.
+    const finalResult = await runDailyReportTick({
+      now: () => new Date(2026, 4, 3, 10, 5, 0),
+      reportHour: () => 9,
+      mailerConfigured: () => true,
+      send,
+    });
+
+    expect(send).toHaveBeenCalledTimes(3);
+    expect(finalResult.emailsFailed).toBe(0);
+    expect(finalResult.emailsSent).toBe(0);
+
+    const row = getDb()
+      .prepare("SELECT last_daily_report_sent_for FROM owner_email_settings WHERE owner_id = ?")
+      .get("owner-A") as { last_daily_report_sent_for: string };
+    expect(row.last_daily_report_sent_for).toBe("2026-05-03");
+
+    const audit = getDb()
+      .prepare(
+        "SELECT action, outcome, detail_json FROM audit_log WHERE owner_id = ? AND action = 'email.daily_report.failed' ORDER BY id DESC LIMIT 1"
+      )
+      .get("owner-A") as { action: string; outcome: string; detail_json: string };
+    const detail = JSON.parse(audit.detail_json) as { reason?: string; attempts?: number };
+    expect(detail.reason).toBe("retry_exhausted");
+    expect(detail.attempts).toBe(3);
+  });
+});
+
 describe("runDailyReportTick — yesterday window correctness", () => {
   it("only includes alerts whose created_at falls in the previous local day", async () => {
     upsertEmailSettings("alice", {

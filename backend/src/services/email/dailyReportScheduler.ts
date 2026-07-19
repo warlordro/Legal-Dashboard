@@ -51,6 +51,24 @@ interface RetryState {
 
 const retryByOwner = new Map<string, RetryState>();
 
+// BUG-04: cand tick-ul se trezeste in afara orei configurate, are voie sa ruleze
+// DOAR daca exista deja lucru de retry pentru ziua curenta — un retry due
+// (attempts<MAX, nowMs>=nextAttemptAt) SAU un retry epuizat (attempts>=MAX) care
+// mai are nevoie de curatenie (markDailyReportSent + audit). Ownerii fara entry
+// de retry nu primesc trimiterea initiala in afara orei.
+function retryWorkState(todayLocal: string, nowMs: number): { anyDue: boolean } {
+  let anyDue = false;
+  for (const retry of retryByOwner.values()) {
+    if (retry.date !== todayLocal) continue;
+    if (retry.attempts >= MAX_RETRY_ATTEMPTS) {
+      anyDue = true; // exhausted cleanup counts
+      continue;
+    }
+    if (nowMs >= retry.nextAttemptAt) anyDue = true;
+  }
+  return { anyDue };
+}
+
 // Exportat pentru teste: reseteaza state-ul de retry intre teste.
 export function _resetDailyReportRetryStateForTest(): void {
   retryByOwner.clear();
@@ -154,10 +172,13 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
     emailsFailed: 0,
   };
 
-  if (now.getHours() !== configuredHour) return baseResult;
+  const nowMs = now.getTime();
+  const todayLocal = formatLocalDate(now);
+  const offHour = now.getHours() !== configuredHour;
+  // BUG-04: off-hour tick-urile ruleaza doar daca exista retry due/exhausted azi.
+  if (offHour && !retryWorkState(todayLocal, nowMs).anyDue) return baseResult;
   if (!mailerCheck()) return { ...baseResult, fired: true };
 
-  const todayLocal = formatLocalDate(now);
   const yesterdayLocal = previousDay(todayLocal);
   const { startIso, endIso } = localDayBoundsToUtcIso(yesterdayLocal);
 
@@ -172,7 +193,6 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
   let sent = 0;
   let skippedNoAlerts = 0;
   let failed = 0;
-  const nowMs = now.getTime();
   for (const owner of candidates) {
     if (!owner.enabled || !owner.toAddress) continue;
 
@@ -181,6 +201,9 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
     // Daca state-ul e pentru o zi anterioara, e stale → cleanup si continuam ca
     // attempt nou.
     const retry = retryByOwner.get(owner.ownerId);
+    // BUG-04: in afara orei configurate proceseaza doar ownerii cu un entry de
+    // retry pentru ziua curenta (due sau exhausted) — nu trimiterea initiala.
+    if (offHour && (!retry || retry.date !== todayLocal)) continue;
     if (retry) {
       if (retry.date !== todayLocal) {
         retryByOwner.delete(owner.ownerId);
