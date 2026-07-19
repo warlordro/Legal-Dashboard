@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { readResponseTextWithCap, ResponseTooLargeSignal } from "../util/streamCap.ts";
 
 export const RNPM_BASE_URL = "https://mj.rnpm.ro";
 
@@ -258,6 +259,28 @@ function withRnpmTimeout(signal?: AbortSignal): AbortSignal {
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
 }
 
+// SEC-07: RNPM era singurul upstream care buffera raspunsul integral prin
+// `res.json()` fara plafon — un mj.rnpm.ro compromis/agatat putea trimite un
+// body arbitrar de mare (OOM/DoS). Cap-ul (default 20MB, env override) opreste
+// citirea la prag; peste el aruncam RnpmError "response_too_large".
+const RNPM_MAX_RESPONSE_BYTES = (() => {
+  const raw = Number.parseInt(process.env.RNPM_MAX_RESPONSE_BYTES ?? "", 10);
+  return Number.isFinite(raw) && raw > 0 ? raw : 20 * 1024 * 1024;
+})();
+
+async function readRnpmJson(res: Response, signal: AbortSignal): Promise<unknown> {
+  let text: string;
+  try {
+    text = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, signal);
+  } catch (err) {
+    if (err instanceof ResponseTooLargeSignal) {
+      throw new RnpmError(`Raspuns RNPM prea mare (${err.bytes} bytes).`, 502, undefined, "response_too_large");
+    }
+    throw err;
+  }
+  return JSON.parse(text); // JSON invalid ramane SyntaxError, ca azi
+}
+
 export class RnpmClient {
   private readonly delayMs: number;
   private readonly fetchImpl: typeof fetch;
@@ -274,17 +297,18 @@ export class RnpmClient {
     signal?: AbortSignal
   ): Promise<RnpmSearchResult> {
     const url = `${RNPM_BASE_URL}/api/search/${type}/${page}`;
+    const composed = withRnpmTimeout(signal);
     const res = await this.fetchImpl(url, {
       method: "POST",
       headers: defaultHeaders(),
       body: JSON.stringify(params),
-      signal: withRnpmTimeout(signal),
+      signal: composed,
     });
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
+      const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
       throw new RnpmError(`Eroare RNPM search (${res.status}): ${body.slice(0, 200)}`, res.status);
     }
-    const raw = await res.json();
+    const raw = await readRnpmJson(res, composed);
     const parsed = RnpmSearchResultSchema.safeParse(raw);
     if (!parsed.success) {
       console.warn(
@@ -299,13 +323,14 @@ export class RnpmClient {
 
   async fetchPart(uuid: string, part: 1 | 2 | 3 | 4, signal?: AbortSignal): Promise<unknown> {
     const url = `${RNPM_BASE_URL}/api/view/inscriere/${uuid}?part=${part}`;
-    const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: withRnpmTimeout(signal) });
+    const composed = withRnpmTimeout(signal);
+    const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
     if (res.status === 400 || res.status === 404 || res.status === 410) return null;
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
+      const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
       throw new RnpmError(`Eroare RNPM detail part ${part} (${res.status}): ${body.slice(0, 200)}`, res.status);
     }
-    return await res.json();
+    return await readRnpmJson(res, composed);
   }
 
   async fetchIstoric(uuid: string, signal?: AbortSignal): Promise<RnpmIstoricEntry[]> {
@@ -325,10 +350,10 @@ export class RnpmClient {
     // 404/410 = aviz not found / gone; 400 after retry = treat as no history.
     if (res.status === 400 || res.status === 404 || res.status === 410) return [];
     if (!res.ok) {
-      const body = await res.text().catch(() => "");
+      const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
       throw new RnpmError(`Eroare RNPM istoric (${res.status}): ${body.slice(0, 200)}`, res.status);
     }
-    const data = await res.json();
+    const data = await readRnpmJson(res, composed);
     // Real response shape is { inscriere: string, istoric: Entry[] }.
     // Keep array + { entries } paths as tolerant fallbacks.
     if (data && Array.isArray((data as { istoric?: unknown }).istoric)) {

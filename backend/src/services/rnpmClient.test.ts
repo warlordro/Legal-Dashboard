@@ -100,3 +100,28 @@ describe("RnpmClient timeout backstop (v2.37.1, review cluster 4)", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 });
+
+function oversizedFetch(): typeof fetch {
+  const huge = "x".repeat(40 * 1024 * 1024);
+  return vi.fn(
+    async () =>
+      new Response(`{"pad":"${huge}"}`, {
+        status: 200,
+        headers: { "content-length": String(40 * 1024 * 1024 + 12) },
+      })
+  ) as unknown as typeof fetch;
+}
+
+describe("RnpmClient response cap (SEC-07)", () => {
+  it("search rejects an oversized response with code response_too_large", async () => {
+    const client = new RnpmClient({ requestDelayMs: 0, fetchImpl: oversizedFetch() });
+    await expect(client.search("creante", { gcode: "captcha" }, 1)).rejects.toMatchObject({
+      name: "RnpmError",
+      code: "response_too_large",
+    });
+  });
+  it("fetchPart rejects an oversized response with code response_too_large", async () => {
+    const client = new RnpmClient({ requestDelayMs: 0, fetchImpl: oversizedFetch() });
+    await expect(client.fetchPart("uuid", 1)).rejects.toMatchObject({ code: "response_too_large" });
+  });
+});
