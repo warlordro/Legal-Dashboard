@@ -479,8 +479,13 @@ async function restoreTargetImpl(
     for (const suffix of ["-wal", "-shm"] as const) {
       try {
         await fsPromises.access(src + suffix);
-      } catch {
-        continue;
+      } catch (e) {
+        // ENOENT = sidecar-ul chiar nu exista (backup self-contained modern) ->
+        // skip legitim. Orice alta eroare (EACCES/EIO): sidecar-ul EXISTA dar e
+        // ilizibil; a-l trata ca absent ar pierde silentios frame-urile WAL.
+        // Fail-closed, ca restul cailor din acest fisier.
+        if ((e as NodeJS.ErrnoException)?.code === "ENOENT") continue;
+        throw e;
       }
       await fsPromises.copyFile(src + suffix, stagedMain + suffix);
     }
@@ -802,6 +807,15 @@ function makeLedgerValidator(migrationsDir: string): (staged: Database.Database)
       version: number;
       sha256_up: string;
     }>;
+    // Ledger PREZENT dar GOL (0 randuri): loop-ul de mai jos ar trece fals (nimic
+    // de verificat), dar dupa restore boot-ul ar reaplica migratiile peste schema
+    // deja existenta si ar pica. Fail-closed inainte de swap.
+    if (rows.length === 0) {
+      throw new BackupValidationError(
+        "Ledger-ul de migratii al backup-ului e prezent dar GOL (_schema_versions fara randuri) — " +
+          "schema exista fara evidenta migratiilor, iar boot-ul ar reaplica migratiile peste ea. Restore refuzat fail-closed."
+      );
+    }
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       if (row.version !== i + 1) {
@@ -895,7 +909,16 @@ function assertRnpmBackupVersionCompatible(backupPath: string): void {
       );
     }
     const row = probe.prepare("SELECT MAX(version) AS v FROM _schema_versions").get() as { v: number | null };
-    const backupVersion = row.v ?? 0;
+    // Tabela PREZENTA dar GOALA (MAX(version) null): tratata ca versiune 0 ar
+    // trece validarea, dar dupa restore boot-ul reaplica migratiile peste schema
+    // existenta si pica. Fail-closed, ca lipsa tabelei de mai sus.
+    if (row.v === null) {
+      throw new BackupValidationError(
+        "Backup-ul RNPM are tabela _schema_versions prezenta dar GOALA (0 randuri) — nu e un backup valid; " +
+          "boot-ul ar reaplica migratiile peste schema. Restore refuzat fail-closed."
+      );
+    }
+    const backupVersion = row.v;
     if (backupVersion > maxKnown) {
       throw new BackupValidationError(
         `Backup-ul are o versiune de schema mai noua (${backupVersion}) decat aplicatia (${maxKnown}). ` +
