@@ -5,6 +5,7 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/com
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useDialog } from "@/hooks/useDialog";
+import { useAuthMode } from "@/hooks/useAuthMode";
 import { useToast } from "@/components/ui/toast";
 import type { Dosar, SearchHistoryEntry, SearchParams } from "@/types";
 import type { RnpmSearchHistoryEntry } from "@/types/rnpm";
@@ -58,6 +59,7 @@ function getUniqueInstitutii(dosare: Dosar[]): number {
 
 export default function Dashboard({ dosareState, rnpmHistory, history, onHistoryClick }: DashboardProps) {
   const navigate = useNavigate();
+  const authMode = useAuthMode();
   const toast = useToast();
   const [showChangelog, setShowChangelog] = useState(false);
   const [showManual, setShowManual] = useState(false);
@@ -240,8 +242,11 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
               <p className="text-xs text-muted-foreground">
                 Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude Opus
                 4.8 & Sonnet 5 / Gemini 3.x / GPT-5.6), administrare utilizatori cu cote si granturi pe pool AI unic,
-                audit exportabil — cheile API pastrate in OS keystore, backend legat pe loopback si protectie formula
-                injection la export.
+                audit exportabil —{" "}
+                {authMode === "web"
+                  ? "cheile API sunt stocate criptat pe server, per utilizator"
+                  : "cheile API pastrate in OS keystore, backend legat pe loopback"}{" "}
+                si protectie formula injection la export.
               </p>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" className="gap-2" onClick={() => setShowChangelog(true)}>
