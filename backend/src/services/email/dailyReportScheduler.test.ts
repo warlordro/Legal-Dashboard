@@ -523,6 +523,19 @@ describe("runDailyReportTick — off-hour retry (BUG-04)", () => {
       mailerConfigured: () => true,
       send,
     });
+    // owner-C is enabled with a yesterday alert but is activated ONLY AFTER the
+    // 09:30 tick — so it was never sent and holds no retry entry. A weakened
+    // implementation that opens the off-hour window GLOBALLY (instead of gating
+    // per-owner on a pending retry) would send to owner-C at 10:05; the strict
+    // gate must skip it. owner-B alone cannot prove this (it was already marked
+    // sent at 09:30, so the candidate query filters it out regardless).
+    upsertEmailSettings("owner-C", {
+      enabled: true,
+      toAddress: "c@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("owner-C", YESTERDAY_NOON_UTC, "c-1");
     send.mockClear();
     const r = await runDailyReportTick({
       now: () => at1005,
@@ -530,8 +543,10 @@ describe("runDailyReportTick — off-hour retry (BUG-04)", () => {
       mailerConfigured: () => true,
       send,
     });
-    // Only the owner with a due retry is sent off-hour; the other is not touched.
+    // Only the owner with a due retry is sent off-hour; owner-B (already sent)
+    // and owner-C (activated post-tick, no retry) are not touched.
     expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toBe("a@firma.ro");
     expect(r.emailsSent).toBe(1);
   });
 
