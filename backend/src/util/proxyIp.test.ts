@@ -1,6 +1,6 @@
 import type { Context } from "hono";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { isLoopbackAddress, readClientIp } from "./proxyIp.ts";
+import { findUnsupportedTrustedCidrEntries, isLoopbackAddress, readClientIp } from "./proxyIp.ts";
 
 vi.mock("@hono/node-server/conninfo", () => ({
   getConnInfo: vi.fn(),
@@ -70,6 +70,26 @@ describe("readClientIp", () => {
 
   it("returns null when no peer is available", () => {
     expect(readClientIp(fakeContext(null))).toBe(null);
+  });
+
+  it("treats ::1/128 as trusted IPv6 loopback (canonical forms)", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "::1/128";
+    expect(readClientIp(fakeContext("::1", "203.0.113.9"))).toBe("203.0.113.9");
+  });
+
+  it("matches expanded ::1 written as 0:0:0:0:0:0:0:1", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "0:0:0:0:0:0:0:1/128";
+    expect(readClientIp(fakeContext("::1", "203.0.113.9"))).toBe("203.0.113.9");
+  });
+
+  it("still matches an IPv4-mapped CIDR base", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "::ffff:10.0.0.0/8";
+    expect(readClientIp(fakeContext("10.0.0.1", "203.0.113.9"))).toBe("203.0.113.9");
+  });
+
+  it("does not flag ::1/128 as unsupported", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "10.0.0.0/8, ::1/128";
+    expect(findUnsupportedTrustedCidrEntries()).toEqual([]);
   });
 });
 
