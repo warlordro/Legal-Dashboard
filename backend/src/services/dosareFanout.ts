@@ -4,6 +4,11 @@ import { cautareDosare } from "../soap.ts";
 export interface PartialSearchResult {
   dosare: Dosar[];
   failedInstitutii: string[];
+  // true cand scheduling-ul s-a oprit din cauza maxResults (plafon pe randuri
+  // BRUTE, inainte de dedup). Ruta il trateaza fail-closed ca 413: altfel un
+  // total brut > plafon care se dedup-uieste sub plafon ar trece drept 200
+  // „complet", cu institutii neinterogate lipsa silentios.
+  limitHit: boolean;
 }
 
 const DEFAULT_CONCURRENCY = 10;
@@ -38,11 +43,15 @@ export async function searchInstitutiiTolerant(
   const failedSet = new Set<number>();
   let collected = 0;
   let next = 0;
+  let limitHit = false;
 
   async function worker(): Promise<void> {
     while (true) {
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
-      if (maxResults !== undefined && collected > maxResults) return; // stop, fara failed
+      if (maxResults !== undefined && collected > maxResults) {
+        limitHit = true; // plafon brut atins: scheduling oprit, restul instantelor neinterogate
+        return; // stop, fara failed
+      }
       const idx = next++;
       if (idx >= institutii.length) return;
       const msLeft = deadlineAt - Date.now();
@@ -92,5 +101,5 @@ export async function searchInstitutiiTolerant(
       `[dosare.fanout] ${failedInstitutii.length}/${institutii.length} institutii fara raspuns: ${failedInstitutii.slice(0, 20).join(", ")}${failedInstitutii.length > 20 ? " ..." : ""}`
     );
   }
-  return { dosare, failedInstitutii };
+  return { dosare, failedInstitutii, limitHit };
 }

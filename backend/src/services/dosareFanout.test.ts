@@ -25,6 +25,20 @@ describe("searchInstitutiiTolerant", () => {
     expect(soapSearch).toHaveBeenCalledTimes(3);
   });
 
+  it("preserves list order even when completion order is inverted (first slow, second fast)", async () => {
+    // Prima instanta raspunde ULTIMA (resolve intarziat), a doua prima. O implementare
+    // care ar face push in completion-order ar produce [B, A] — testul o prinde.
+    const soapSearch = vi.fn(async ({ institutie }: { institutie?: string }) => {
+      if (institutie === "A") await new Promise((r) => setTimeout(r, 20));
+      return [dosar(`1/${institutie}`, institutie ?? "")];
+    });
+    const r = await searchInstitutiiTolerant({ numeParte: "X" }, ["A", "B"], {
+      soapSearch: soapSearch as never,
+      concurrency: 2, // ambele pornesc simultan; B termina inaintea lui A
+    });
+    expect(r.dosare.map((d) => d.institutie)).toEqual(["A", "B"]); // ordinea listei, nu completion (B, A)
+  });
+
   it("propagates the base filters (dataStart/dataStop) into every per-court call", async () => {
     const soapSearch = vi.fn(async (_p: { numeParte?: string }) => []);
     await searchInstitutiiTolerant({ numeParte: "X", dataStart: "2026-01-01", dataStop: "2026-02-01" }, ["A", "B"], {
@@ -93,6 +107,20 @@ describe("searchInstitutiiTolerant", () => {
     expect(soapSearch.mock.calls.length).toBeLessThan(6); // s-a oprit devreme
     expect(r.failedInstitutii).toEqual([]); // neinterogat != esuat
     expect(r.dosare.length).toBeGreaterThan(4);
+    expect(r.limitHit).toBe(true); // plafonul brut a fost atins → semnal fail-closed pentru ruta
+  });
+
+  it("does not set limitHit when every court fits under maxResults", async () => {
+    const soapSearch = vi.fn(async ({ institutie }: { institutie?: string }) => [
+      dosar(`1/${institutie}`, institutie ?? ""),
+    ]);
+    const r = await searchInstitutiiTolerant({ numeParte: "X" }, ["A", "B", "C"], {
+      soapSearch: soapSearch as never,
+      concurrency: 1,
+      maxResults: 100,
+    });
+    expect(r.limitHit).toBe(false);
+    expect(soapSearch).toHaveBeenCalledTimes(3);
   });
 
   it("budget exhaustion marks unqueried courts as failed instead of hanging", async () => {
@@ -113,6 +141,39 @@ describe("searchInstitutiiTolerant", () => {
     });
     expect(r.failedInstitutii).toContain("SLOW");
     expect(r.failedInstitutii).toEqual(expect.arrayContaining(["B", "C"])); // neinterogate din cauza bugetului = failed
+  });
+
+  it("client abort stops scheduling new sibling calls (concurrency 2, no orphan dispatch after abort)", async () => {
+    // concurrency 2: A si B pornesc concurent. B se stabilizeaza cu SUCCES si aborteaza
+    // in acelasi timp; worker-ul lui B face apoi loop → trebuie sa se opreasca la garda
+    // de la varful buclei (semnal abortat) fara sa mai dispecerizeze C. O regresie care
+    // scoate acea garda ar programa C (apel orfan) — pe care concurrency 1 nu l-ar prinde.
+    const ac = new AbortController();
+    let callsAtAbort = 0;
+    const soapSearch = vi.fn(
+      ({ institutie }: { institutie?: string }, opts?: { signal?: AbortSignal }) =>
+        new Promise<Dosar[]>((resolve, reject) => {
+          const abortReject = () => reject(new DOMException("Aborted", "AbortError"));
+          if (institutie === "B") {
+            callsAtAbort = soapSearch.mock.calls.length; // A + B dispecerizate = 2
+            ac.abort();
+            resolve([]); // B reuseste; worker-ul lui B face loop dupa asta
+            return;
+          }
+          // A / C / D: atarna pana la abort (sau resping imediat daca semnalul e deja abortat)
+          if (opts?.signal?.aborted) return abortReject();
+          opts?.signal?.addEventListener("abort", abortReject);
+        })
+    );
+    await expect(
+      searchInstitutiiTolerant({ numeParte: "X" }, ["A", "B", "C", "D"], {
+        soapSearch: soapSearch as never,
+        signal: ac.signal,
+        concurrency: 2,
+      })
+    ).rejects.toMatchObject({ name: "AbortError" });
+    expect(callsAtAbort).toBe(2); // A + B, inainte de abort
+    expect(soapSearch).toHaveBeenCalledTimes(2); // C nu s-a mai programat dupa abort (garda de la varful buclei)
   });
 
   it("client abort propagates as AbortError; a TimeoutError alone does NOT abort the fanout", async () => {

@@ -39,9 +39,10 @@ function dosar(numar: string, institutie: string) {
 beforeEach(() => vi.clearAllMocks());
 afterEach(() => vi.restoreAllMocks());
 
-// Nota: randul 3 din matrice (abort de client la apelul agregat) e acoperit la
-// nivel de helper in dosareFanout.test.ts — la nivel de ruta `app.request` nu
-// expune un AbortSignal controlabil, deci nu-l putem reproduce aici.
+// Nota: `app.request(path, { signal })` propaga semnalul la `c.req.raw.signal`
+// (verificat de testul „abort de client in timpul fanout-ului" de mai jos, care
+// scurteaza catalogul cand semnalul rutei se aborteaza). Randul de matrice
+// pentru abort la nivel de helper ramane in dosareFanout.test.ts.
 describe("GET /api/dosare — fallback per instanta + failedInstitutii", () => {
   it("agregat OK: un singur apel, fara failedInstitutii", async () => {
     mockCautare.mockResolvedValueOnce([dosar("1/2026", "TribunalulCLUJ")]);
@@ -54,8 +55,11 @@ describe("GET /api/dosare — fallback per instanta + failedInstitutii", () => {
 
   it("agregat esuat: fallback per instanta intoarce partial + failedInstitutii + exactMatch", async () => {
     mockCautare.mockRejectedValueOnce(new Error("Eroare la comunicarea cu serviciul PortalJust."));
+    // Capturam parametrii si asertam DUPA await: un `expect` aruncat AICI ar fi
+    // inghitit de try/catch-ul fan-out-ului (ar deveni „institutie failed") — false green.
+    const seenDataStart: Array<string | undefined> = [];
     mockCautare.mockImplementation(async ({ institutie, dataStart }) => {
-      expect(dataStart).toBe("2026-01-01"); // filtrele se propaga in fiecare apel per instanta
+      seenDataStart.push(dataStart);
       if (institutie === "JudecatoriaPLOIESTI") throw new Error("fault");
       return institutie === "TribunalulCLUJ" ? [dosar("77/2026", institutie)] : [];
     });
@@ -65,6 +69,9 @@ describe("GET /api/dosare — fallback per instanta + failedInstitutii", () => {
     expect(body.failedInstitutii).toEqual(["JudecatoriaPLOIESTI"]);
     expect(body.exactMatch).toBe(true); // exactMatch functioneaza si pe drumul de fallback
     expect(mockCautare.mock.calls.length).toBe(1 + allInstitutionTokens().length); // fallback-ul a rulat tot catalogul
+    // filtrele se propaga in FIECARE apel per instanta (asertat dupa await, nu inghitit de catch)
+    expect(seenDataStart.length).toBe(allInstitutionTokens().length);
+    expect(seenDataStart.every((d) => d === "2026-01-01")).toBe(true);
   });
 
   it("agregat esuat cu SoapResponseTooLargeError: 413, FARA fallback", async () => {
@@ -91,6 +98,37 @@ describe("GET /api/dosare — fallback per instanta + failedInstitutii", () => {
     );
     const res = await app.request("/api/dosare?numeParte=POPESCU");
     expect(res.status).toBe(413);
+  });
+
+  it("fallback cu >MAX_DOSARE_RESPONSE randuri BRUTE dar unice <=MAX dupa dedup: 413 (limitHit), NU 200", async () => {
+    mockCautare.mockRejectedValueOnce(new Error("fault"));
+    // Fiecare instanta intoarce 3000 randuri IDENTICE (dedup pe institutie|numar le colapseaza la 1),
+    // dar `collected` numara randurile BRUTE → dupa cateva instante depaseste plafonul. Fara fix,
+    // dosare.length post-dedup (~cateva) < MAX → 200 „complet" cu gauri; cu limitHit → 413.
+    mockCautare.mockImplementation(async ({ institutie }) =>
+      Array.from({ length: 3000 }, () => dosar("1/2026", institutie ?? ""))
+    );
+    const res = await app.request("/api/dosare?numeParte=POPESCU");
+    expect(res.status).toBe(413);
+  });
+
+  it("token-uri institutie duplicate in query: un singur apel per token unic, failedInstitutii fara duplicate", async () => {
+    const seen: string[] = [];
+    mockCautare.mockImplementation(async ({ institutie }) => {
+      seen.push(institutie ?? "");
+      if (institutie === "TribunalulPRAHOVA") throw new Error("fault");
+      return [dosar(`5/${institutie}/2026`, institutie ?? "")];
+    });
+    const res = await app.request(
+      "/api/dosare?numeParte=X&institutie=TribunalulPRAHOVA&institutie=TribunalulPRAHOVA&institutie=TribunalulCLUJ"
+    );
+    const body = (await res.json()) as DosareBody;
+    expect(res.status).toBe(200);
+    // un singur apel per token unic (nu 3)
+    expect(seen.sort()).toEqual(["TribunalulCLUJ", "TribunalulPRAHOVA"]);
+    // failedInstitutii fara duplicate si fara contradictii (PRAHOVA doar in failed, nu si in date)
+    expect(body.failedInstitutii).toEqual(["TribunalulPRAHOVA"]);
+    expect(body.data).toHaveLength(1);
   });
 
   it("o singura institutie selectata esuata: 500 ca azi, fara fallback global", async () => {
@@ -128,24 +166,61 @@ describe("GET /api/dosare — fallback per instanta + failedInstitutii", () => {
     expect(body.failedInstitutii).toBeUndefined(); // camp omis cand nu exista esecuri
   });
 
-  it("plafonul global de fallback-uri: a doua cautare degradata concurenta primeste 500 fara fanout", async () => {
-    // Primul request: agregatul pica, fanout-ul ramane agatat (promise controlat).
+  it("abort de client in timpul fanout-ului (semnal de ruta): scurteaza catalogul, nu ruleaza tot", async () => {
+    // Agregatul pica (semnal INCA ne-abortat) → fallback porneste. Prima instanta
+    // din fanout aborteaza semnalul rutei. Daca `app.request` propaga semnalul la
+    // `c.req.raw.signal`, workerii se opresc → total apeluri << 1 + catalog.
+    const ac = new AbortController();
+    mockCautare.mockRejectedValueOnce(new Error("fault"));
+    let fanoutCalls = 0;
+    mockCautare.mockImplementation(async ({ institutie: _institutie }) => {
+      fanoutCalls++;
+      if (fanoutCalls === 1) {
+        ac.abort();
+        throw new DOMException("Aborted", "AbortError");
+      }
+      return [];
+    });
+    const res = await app.request("/api/dosare?numeParte=X", { signal: ac.signal });
+    expect(res.status).toBe(500);
+    // scurtat de abort: mult sub catalogul complet (regresie la propagarea semnalului = tot catalogul)
+    expect(mockCautare.mock.calls.length).toBeLessThan(1 + allInstitutionTokens().length);
+  });
+
+  it("plafonul global de fallback-uri: al doilea fallback E permis (MAX=2), al treilea primeste 500 fara fanout", async () => {
+    // Agregatele pica mereu; apelurile de fanout atarna controlat. Fiecare fallback
+    // dispecerizeaza pana la 10 apeluri concurente (default), deci >10 in zbor = al
+    // doilea fallback a pornit → bariera reala inainte de request-ul 3.
     const releases: Array<() => void> = [];
+    let inFlight = 0;
     mockCautare.mockImplementation(({ institutie }) => {
-      if (institutie === undefined) return Promise.reject(new Error("fault")); // agregatele pica mereu
-      return new Promise((resolve) => releases.push(() => resolve([]))); // fanout-ul atarna controlat
+      if (institutie === undefined) return Promise.reject(new Error("fault")); // agregat
+      inFlight++;
+      return new Promise((resolve) =>
+        releases.push(() => {
+          inFlight--;
+          resolve([]);
+        })
+      );
     });
     const first = app.request("/api/dosare?numeParte=A");
-    await vi.waitFor(() => expect(releases.length).toBeGreaterThan(0)); // fanout-ul 1 e pornit
     const second = app.request("/api/dosare?numeParte=B");
-    const third = app.request("/api/dosare?numeParte=C"); // al 3-lea: peste MAX_CONCURRENT_FALLBACKS=2
+    // bariera: AMBELE fallback-uri au dispecerizat (>10 concurente = al doilea a pornit).
+    // O regresie MAX_CONCURRENT_FALLBACKS=1 ar bloca al doilea aici (inFlight ramane <=10).
+    await vi.waitFor(() => expect(inFlight).toBeGreaterThan(10));
+    const callsBeforeThird = mockCautare.mock.calls.length;
+    const third = app.request("/api/dosare?numeParte=C"); // peste MAX_CONCURRENT_FALLBACKS=2
     const resThird = await third;
-    expect(resThird.status).toBe(500); // plafon atins: fara fanout nou
-    for (const r of releases.splice(0)) r(); // elibereaza si dreneaza
+    expect(resThird.status).toBe(500); // plafon atins
+    // al treilea a facut EXACT 1 apel (agregatul), fara fanout
+    expect(mockCautare.mock.calls.length - callsBeforeThird).toBe(1);
+    // elibereaza si dreneaza pana se inchid primele doua
     const drain = setInterval(() => {
       for (const r of releases.splice(0)) r();
     }, 5);
-    await Promise.all([first, second]);
+    const [resFirst, resSecond] = await Promise.all([first, second]);
     clearInterval(drain);
+    expect(resFirst.status).toBe(200);
+    expect(resSecond.status).toBe(200); // al doilea fallback a fost PERMIS (nu 500)
   });
 });

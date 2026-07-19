@@ -117,7 +117,9 @@ dosareExportRouter.post("/export.xlsx", limitExport, async (c) => {
 // Cautare dosare (cu sedinte incluse)
 dosareRouter.get("/", async (c) => {
   const { numarDosar, obiectDosar, numeParte, dataStart, dataStop } = c.req.query();
-  const institutii = c.req.queries("institutie") ?? [];
+  // Dedup first-occurrence pe token: `?institutie=A&institutie=A` ar face apeluri
+  // duble si ar putea pune A si in date SI in failedInstitutii (contradictoriu).
+  const institutii = [...new Set(c.req.queries("institutie") ?? [])];
 
   if (!numarDosar && !obiectDosar && !numeParte) {
     return c.json({ error: "Cel putin un parametru este necesar: numarDosar, obiectDosar sau numeParte" }, 400);
@@ -163,6 +165,8 @@ dosareRouter.get("/", async (c) => {
     const base = { numarDosar, obiectDosar, numeParte, dataStart, dataStop };
     let dosare: Awaited<ReturnType<typeof cautareDosare>>;
     let failedInstitutii: string[] = [];
+    // Fail-closed pe plafonul de randuri brute din fallback (vezi PartialSearchResult.limitHit).
+    let limitHit = false;
 
     if (institutii.length >= 2) {
       // Fan-out tolerant pe selectia userului, cu paralelism complet ca
@@ -194,6 +198,8 @@ dosareRouter.get("/", async (c) => {
         try {
           partial = await searchInstitutiiTolerant(base, tokens, {
             signal,
+            // Worst-case TOTAL al requestului ~180s: 60s timeout intern al apelului
+            // agregat (deja consumat mai sus) + 120s buget pe fanout de aici.
             budgetMs: 120_000,
             maxResults: MAX_DOSARE_RESPONSE,
           });
@@ -203,13 +209,14 @@ dosareRouter.get("/", async (c) => {
         if (partial.failedInstitutii.length === tokens.length) throw err;
         dosare = partial.dosare;
         failedInstitutii = partial.failedInstitutii;
+        limitHit = partial.limitHit;
       }
     }
     // SECURITY: cap response size before JSON.stringify. Each dosar carries
     // parti + sedinte arrays; an aggregate of >MAX_DOSARE_RESPONSE explodes
     // memory and stalls the event loop on serialization. Reject loudly with
     // 413 so the client narrows filters rather than silently truncating.
-    if (dosare.length > MAX_DOSARE_RESPONSE) {
+    if (dosare.length > MAX_DOSARE_RESPONSE || limitHit) {
       return c.json(
         {
           error: `Rezultat prea mare (${dosare.length} dosare). Restrange filtrele sau intervalul (max ${MAX_DOSARE_RESPONSE}).`,
