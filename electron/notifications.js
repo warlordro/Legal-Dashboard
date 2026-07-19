@@ -208,20 +208,26 @@ function showNativeNotification(payload) {
   }
 }
 
-function registerNotificationIpc(ipcMain) {
-  ipcMain.handle("notification:getStatus", () => getNotificationStatus());
+function registerNotificationIpc(ipcMain, isTrustedIpcSender) {
+  if (typeof isTrustedIpcSender !== "function") {
+    throw new Error("registerNotificationIpc necesita isTrustedIpcSender (fail-closed)");
+  }
+  const guard = isTrustedIpcSender;
+  ipcMain.handle("notification:getStatus", (event) => (guard(event) ? getNotificationStatus() : null));
 
-  ipcMain.handle("notification:test", () =>
-    showNativeNotification({
-      title: "Legal Dashboard - notificari active",
-      body: "Aceasta este o notificare de test pentru alertele de monitorizare.",
-      tag: "legal-dashboard-notification-test",
-    })
+  ipcMain.handle("notification:test", (event) =>
+    guard(event)
+      ? showNativeNotification({
+          title: "Legal Dashboard - notificari active",
+          body: "Aceasta este o notificare de test pentru alertele de monitorizare.",
+          tag: "legal-dashboard-notification-test",
+        })
+      : undefined
   );
 
   // notification:show is the renderer-driven path; identical contract to
   // showNativeNotification (same caps, same dedup, same status gate).
-  ipcMain.handle("notification:show", (_event, payload) => showNativeNotification(payload));
+  ipcMain.handle("notification:show", (event, payload) => (guard(event) ? showNativeNotification(payload) : undefined));
 }
 
 module.exports = {

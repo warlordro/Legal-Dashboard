@@ -347,7 +347,7 @@ function registerSafeStorageIpc() {
     }
   });
 
-  registerNotificationIpc(ipcMain);
+  registerNotificationIpc(ipcMain, isTrustedIpcSender);
 }
 
 function showStartupErrorAndQuit(err) {
