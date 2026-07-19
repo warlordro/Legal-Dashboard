@@ -13,6 +13,7 @@ import { aiRouter } from "./routes/ai.ts";
 import { preAuthRateLimit, rateLimit, startRateLimitSweeper, stopRateLimitSweeper } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
+import { requireDesktopHeaderGlobal } from "./middleware/requireDesktopHeaderGlobal.ts";
 import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
 import { patSecurity } from "./middleware/patSecurity.ts";
 import { patUsageAudit } from "./middleware/patUsageAudit.ts";
@@ -315,6 +316,10 @@ if (getAuthMode() === "web") {
 // the desktop loopback path stays unchanged. Host/Origin parsing happens only
 // for cross-LAN POST/PUT/PATCH/DELETE.
 app.use("/api/*", originGuard);
+
+// SEC-01: desktop CSRF hardening — require the desktop header on every mutating
+// /api/* verb unless PAT. Mounted after ownerContext (tokenId set) + originGuard.
+app.use("/api/*", requireDesktopHeaderGlobal);
 
 // Bug 1a (v2.42.2): plasa globala 1MB pe /api/*, montata inainte de TOATE
 // routerele — POST /api/v1/tokens facea await c.req.json() fara nicio limita
@@ -695,6 +700,16 @@ try {
     } catch (err) {
       console.error("[boot] rnpm.validation.disabled audit failed:", err);
     }
+  }
+
+  if (getAuthMode() === "desktop" && process.env.LEGAL_DASHBOARD_DISABLE_CSRF_HARDENING === "1") {
+    console.warn(
+      JSON.stringify({
+        action: "csrf.hardening.disabled.boot",
+        note: "LEGAL_DASHBOARD_DISABLE_CSRF_HARDENING=1: guard-ul CSRF desktop e OPRIT pentru toate mutatiile.",
+        ts: new Date().toISOString(),
+      })
+    );
   }
 } catch (e) {
   // Boot-time DB failure means subsequent requests will fail too. Server mode:
