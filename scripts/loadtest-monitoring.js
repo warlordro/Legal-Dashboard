@@ -56,7 +56,7 @@ export const options = {
 };
 
 function jsonHeaders() {
-  const h = { "Content-Type": "application/json" };
+  const h = { "Content-Type": "application/json", "X-Legal-Dashboard-Desktop": "1" };
   if (AUTH) h.Authorization = AUTH;
   return h;
 }

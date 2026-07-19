@@ -546,7 +546,7 @@ describe("global body limit — Bug 1a (v2.42.2)", () => {
 
       const res = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "X-Legal-Dashboard-Desktop": "1" },
         body: JSON.stringify({ pad: "x".repeat(1024 * 1024 + 1024) }),
       });
       expect(res.status).toBe(413);
@@ -567,7 +567,7 @@ describe("global body limit — Bug 1a (v2.42.2)", () => {
 
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/dosare/export.xlsx`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "X-Legal-Dashboard-Desktop": "1" },
         body: JSON.stringify({ dosare: [], pad: "x".repeat(Math.floor(1.5 * 1024 * 1024)) }),
       });
       // Limita proprie a rutei e 25MB; 1.5MB trebuie sa ajunga la validarea
@@ -590,7 +590,7 @@ describe("global body limit — Bug 1a (v2.42.2)", () => {
     // defense-in-depth, nu singura aparare.
     const res = await fetch(`http://127.0.0.1:${port}/api/v1/dosare/export.xlsx`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "X-Legal-Dashboard-Desktop": "1" },
       body: JSON.stringify({ dosare: [], pad: "x".repeat(26 * 1024 * 1024) }),
     });
     expect(res.status).toBe(413);
