@@ -99,12 +99,15 @@ app.on("before-quit", (event) => {
   console.log("[main] before-quit: draining backend (scheduler + DB)...");
 
   let timedOut = false;
-  const timeout = new Promise((resolve) =>
-    setTimeout(() => {
+  const timeout = new Promise((resolve) => {
+    const t = setTimeout(() => {
       timedOut = true;
       resolve("timeout");
-    }, BACKEND_SHUTDOWN_TIMEOUT_MS)
-  );
+    }, BACKEND_SHUTDOWN_TIMEOUT_MS);
+    // unref: timer-ul de watchdog nu tine event loop-ul viu dupa ce drain-ul
+    // s-a rezolvat (altfel quit-ul ar astepta cele 75s degeaba).
+    t.unref?.();
+  });
 
   const drain = Promise.resolve()
     .then(() => shutdown())
