@@ -13,6 +13,7 @@
 // "dosar_multi_analyst" / "dosar_multi_judge"; quota e pe "ai.single" /
 // "ai.multi". Mapping in `quotaFeatureOf` mai jos.
 
+import { getAuthMode } from "../auth/config.ts";
 import { earliestAiUsageTsInWindow, sumAiUsageMilliInWindow } from "../db/aiUsageRepository.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import {
@@ -83,7 +84,10 @@ export async function checkBudgetWarning(
   if (!quotaFeature) return { state: "skipped", reason: "not_quota_feature" };
 
   const override = getOverride(ownerId, quotaFeature);
-  const defaultMilli = readDefaultQuotaMilli();
+  // Default-ul din env se ENFORCE-uieste (quotaGuard) doar in web mode. Pe
+  // desktop nu se impune, deci nu alimenteaza avertizarile. Override-urile
+  // explicite per user raman functionale pe ambele moduri (neatinse mai jos).
+  const defaultMilli = getAuthMode() === "web" ? readDefaultQuotaMilli() : null;
   const baseLimit = override ? override.limit_usd_milli : defaultMilli;
   // Unlimited (NULL) sau lipsa de cap => fara warning posibil. Clear episode
   // anterior daca a fost activ (admin a setat NULL ca sa scoata banner-ul).
@@ -168,7 +172,8 @@ export async function checkBudgetWarningRetry(
   }
 
   const override = getOverride(ownerId, quotaFeature);
-  const defaultMilli = readDefaultQuotaMilli();
+  // Aceeasi semantica ca in checkBudgetWarning: default env doar in web mode.
+  const defaultMilli = getAuthMode() === "web" ? readDefaultQuotaMilli() : null;
   const baseLimit = override ? override.limit_usd_milli : defaultMilli;
   if (baseLimit === null) return { state: "skipped", reason: "unlimited" };
 
