@@ -221,6 +221,13 @@ not BYOK / not supplied by the browser client.
   nobody tries to "fix" it without understanding the compatibility impact.
 - **Screenshot / clipboard exfiltration by other apps.** Standard desktop
   threat model — not something the app can prevent.
+- **Portita de stocare RNPM prin replay gcode (BUG-02/NEW-01).** Risc acceptat pe
+  deploy intern cu utilizatori de incredere; redeschidere daca apar conturi
+  externe organizatiei.
+- **Absenta unui plafon de joburi de monitorizare per owner (SEC-09).** Risc
+  acceptat pe deploy intern; mitigari active (cadence 600s, claim 50/tick, rate
+  limit 120/min, dedup target_hash); redeschidere la conturi externe sau
+  infometare reala a scheduler-ului.
 
 ## Reporting a vulnerability
 
