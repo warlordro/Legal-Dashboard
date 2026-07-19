@@ -13,6 +13,24 @@ import {
 } from "../util/validation.ts";
 import { batchFetchDosare, parseExistingFromBody, sseEvent } from "../services/batch-dosare.ts";
 import { buildDosareXlsx } from "../services/dosareExportXlsx.ts";
+import { searchInstitutiiTolerant } from "../services/dosareFanout.ts";
+import { allInstitutionTokens } from "../util/institutionLabel.ts";
+
+// Fallback-ul per instanta (apel agregat esuat) genereaza pana la
+// allInstitutionTokens().length + 1 apeluri SOAP server-side. Invariantul
+// MAX_SOAP_FANOUT ramane global: verificat static aici (la load), nu per request.
+if (allInstitutionTokens().length + 1 > MAX_SOAP_FANOUT) {
+  throw new Error(
+    `Catalogul de institutii (${allInstitutionTokens().length}) + 1 depaseste MAX_SOAP_FANOUT (${MAX_SOAP_FANOUT}).`
+  );
+}
+
+// Plafon GLOBAL per proces pe fallback-urile de catalog: o pana PortalJust
+// loveste toti userii simultan; fara plafon, fiecare cautare esuata ar porni
+// propriul fanout de ~231 apeluri (10 concurente fiecare). Peste plafon,
+// cautarea primeste 500 ca inainte de feature — degradare, nu amplificare.
+const MAX_CONCURRENT_FALLBACKS = 2;
+let fallbacksInFlight = 0;
 
 export const dosareRouter = new Hono();
 export const dosareExportRouter = new Hono();
@@ -113,6 +131,8 @@ dosareRouter.get("/", async (c) => {
   // SECURITY: defensive fanout cap mirrors the SSE /load-more guard. Today
   // institutii.length is already capped by MAX_INSTITUTII, but if either limit
   // shifts in the future this keeps a hard upper bound on upstream SOAP calls.
+  // Exceptia: fallback-ul server-side pe apel agregat esuat poate genera pana la
+  // allInstitutionTokens().length + 1 apeluri — verificat static la load (vezi sus).
   const fanout = Math.max(institutii.length, 1);
   if (fanout > MAX_SOAP_FANOUT) {
     return c.json(
@@ -140,26 +160,50 @@ dosareRouter.get("/", async (c) => {
   const signal = c.req.raw.signal;
 
   try {
+    const base = { numarDosar, obiectDosar, numeParte, dataStart, dataStop };
     let dosare: Awaited<ReturnType<typeof cautareDosare>>;
-    if (institutii.length <= 1) {
-      dosare = await cautareDosare(
-        { numarDosar, obiectDosar, numeParte, institutie: institutii[0], dataStart, dataStop },
-        { signal }
-      );
+    let failedInstitutii: string[] = [];
+
+    if (institutii.length >= 2) {
+      // Fan-out tolerant pe selectia userului, cu paralelism complet ca
+      // Promise.all-ul de dinainte (fara regresie de latenta; <=50 via
+      // MAX_INSTITUTII). O instanta cazuta NU mai e inghitita ca "0 rezultate".
+      const partial = await searchInstitutiiTolerant(base, institutii, {
+        signal,
+        concurrency: institutii.length,
+      });
+      if (partial.failedInstitutii.length === institutii.length) {
+        return c.json({ error: "Eroare la comunicarea cu serviciul PortalJust. Incercati din nou." }, 500);
+      }
+      dosare = partial.dosare;
+      failedInstitutii = partial.failedInstitutii;
     } else {
-      // Parallel SOAP calls for multiple institutions
-      const results = await Promise.all(
-        institutii.map((inst) =>
-          cautareDosare(
-            { numarDosar, obiectDosar, numeParte, institutie: inst, dataStart, dataStop },
-            { signal }
-          ).catch((err) => {
-            console.error(`Eroare cautare ${inst}:`, err);
-            return [];
-          })
-        )
-      );
-      dosare = results.flat();
+      try {
+        dosare = await cautareDosare({ ...base, institutie: institutii[0] }, { signal });
+      } catch (err) {
+        // Fallback per instanta DOAR pentru cautarea fara filtru: PortalJust
+        // agrega server-side si un shard cazut (ex. Prahova) omoara tot apelul.
+        // NU pe: >1000 (determinist, 413), abort de client, sau o singura
+        // institutie selectata (fallback-ul nu ar aduce nimic in plus).
+        if (institutii.length === 1 || err instanceof SoapResponseTooLargeError || signal.aborted) throw err;
+        if (fallbacksInFlight >= MAX_CONCURRENT_FALLBACKS) throw err; // plafon global: 500 ca azi
+        console.error("[dosare] apel agregat esuat; fallback per instanta:", err instanceof Error ? err.message : err);
+        const tokens = allInstitutionTokens();
+        fallbacksInFlight++;
+        let partial: Awaited<ReturnType<typeof searchInstitutiiTolerant>>;
+        try {
+          partial = await searchInstitutiiTolerant(base, tokens, {
+            signal,
+            budgetMs: 120_000,
+            maxResults: MAX_DOSARE_RESPONSE,
+          });
+        } finally {
+          fallbacksInFlight--;
+        }
+        if (partial.failedInstitutii.length === tokens.length) throw err;
+        dosare = partial.dosare;
+        failedInstitutii = partial.failedInstitutii;
+      }
     }
     // SECURITY: cap response size before JSON.stringify. Each dosar carries
     // parti + sedinte arrays; an aggregate of >MAX_DOSARE_RESPONSE explodes
@@ -178,7 +222,12 @@ dosareRouter.get("/", async (c) => {
     // PAT-012), campul ajuta stratul MCP sa decida daca mai continua load-more.
     const q = (numarDosar ?? "").trim();
     const exactMatch = q.length > 0 && dosare.some((d) => d.numar === q);
-    return c.json({ data: dosare, total: dosare.length, exactMatch });
+    return c.json({
+      data: dosare,
+      total: dosare.length,
+      exactMatch,
+      ...(failedInstitutii.length > 0 ? { failedInstitutii } : {}),
+    });
   } catch (err) {
     console.error("Eroare cautare dosare:", err);
     if (err instanceof SoapResponseTooLargeError) {

@@ -58,6 +58,9 @@ ca `string | { code, message }`:
   INDICATIVE pentru consumator; corpul REAL pe rutele ICCJ ramane forma legacy `{ error }`, nu envelope-ul.
 - **`/api/dosare`** e imbogatit: `{ data, total, exactMatch }`. `exactMatch` e **doar pe numar dosar**
   (match pe nume normalizat e deferat); `parti[].calitateParte` da rolul (reclamant/parat/...).
+  Optional apare si `failedInstitutii: string[]` (token-uri de instanta): raspuns 200 cu rezultate
+  PARTIALE — instantele listate nu au raspuns si dosarele lor lipsesc din `data`. Cand campul e
+  prezent, `total` NU mai garanteaza completitudine (inainte de v2.44 acest caz era eroare 500).
 - **`/api/rnpm/saved`**: obiect paginat brut.
 - **`/api/rnpm/search`**: rol = dimensiunea de cautare **debitor/creditor**.
 - **Rutele `/api/v1/*` care folosesc `ok()`/`fail()`** (token-management + celelalte v1 cu envelope)
