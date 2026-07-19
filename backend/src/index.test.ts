@@ -39,7 +39,16 @@ async function importFreshIndex(env: NodeJS.ProcessEnv): Promise<void> {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",
     MONITORING_ENABLED: "0",
-    ...(env.LEGAL_DASHBOARD_AUTH_MODE === "web" ? { TENANT_KEY_ENCRYPTION_SECRET: TENANT_KEY_SECRET } : {}),
+    ...(env.LEGAL_DASHBOARD_AUTH_MODE === "web"
+      ? {
+          TENANT_KEY_ENCRYPTION_SECRET: TENANT_KEY_SECRET,
+          // NEW-02 (PR-5): web mode legat pe loopback cere TRUSTED_PROXY_CIDR, altfel gate-ul
+          // strict fatalBoot (presupune reverse proxy co-locat). Clientii web-boot de test sunt
+          // loopback legitimi (analog scripts/dev-web-local.ps1); ...env de mai jos lasa un test
+          // care vrea sa exercite gate-ul strict sa suprascrie explicit acest default.
+          LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: "127.0.0.1/32",
+        }
+      : {}),
     ...env,
   };
   vi.resetModules();
