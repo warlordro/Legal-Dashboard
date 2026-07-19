@@ -325,7 +325,10 @@ export class RnpmClient {
     const url = `${RNPM_BASE_URL}/api/view/inscriere/${uuid}?part=${part}`;
     const composed = withRnpmTimeout(signal);
     const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
-    if (res.status === 400 || res.status === 404 || res.status === 410) return null;
+    if (res.status === 400 || res.status === 404 || res.status === 410) {
+      await res.body?.cancel().catch(() => {});
+      return null;
+    }
     if (!res.ok) {
       const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
       throw new RnpmError(`Eroare RNPM detail part ${part} (${res.status}): ${body.slice(0, 200)}`, res.status);
@@ -343,12 +346,16 @@ export class RnpmClient {
     const doFetch = () => this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
     let res = await doFetch();
     if (res.status === 400) {
+      await res.body?.cancel().catch(() => {});
       await new Promise((r) => setTimeout(r, 1500));
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
       res = await doFetch();
     }
     // 404/410 = aviz not found / gone; 400 after retry = treat as no history.
-    if (res.status === 400 || res.status === 404 || res.status === 410) return [];
+    if (res.status === 400 || res.status === 404 || res.status === 410) {
+      await res.body?.cancel().catch(() => {});
+      return [];
+    }
     if (!res.ok) {
       const body = await readResponseTextWithCap(res, RNPM_MAX_RESPONSE_BYTES, composed).catch(() => "");
       throw new RnpmError(`Eroare RNPM istoric (${res.status}): ${body.slice(0, 200)}`, res.status);

@@ -125,3 +125,39 @@ describe("RnpmClient response cap (SEC-07)", () => {
     await expect(client.fetchPart("uuid", 1)).rejects.toMatchObject({ code: "response_too_large" });
   });
 });
+
+describe("RnpmClient abandoned-body drain (Codex MED)", () => {
+  function instrumentedResponse(status: number, cancelledRef: { value: boolean }): Response {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("x"));
+      },
+      cancel() {
+        cancelledRef.value = true;
+      },
+    });
+    return new Response(stream, { status });
+  }
+
+  it("fetchPart cancels the body on a 404 early return", async () => {
+    const cancelled = { value: false };
+    const fetchImpl = vi.fn(async () => instrumentedResponse(404, cancelled)) as unknown as typeof fetch;
+    const client = new RnpmClient({ requestDelayMs: 0, fetchImpl });
+
+    const result = await client.fetchPart("uuid", 1);
+
+    expect(result).toBeNull();
+    expect(cancelled.value).toBe(true);
+  });
+
+  it("fetchIstoric cancels the body on a 410 early return", async () => {
+    const cancelled = { value: false };
+    const fetchImpl = vi.fn(async () => instrumentedResponse(410, cancelled)) as unknown as typeof fetch;
+    const client = new RnpmClient({ requestDelayMs: 0, fetchImpl });
+
+    const result = await client.fetchIstoric("uuid");
+
+    expect(result).toEqual([]);
+    expect(cancelled.value).toBe(true);
+  });
+});
