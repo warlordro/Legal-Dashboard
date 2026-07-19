@@ -103,7 +103,7 @@ docker cp $(docker compose -f docker-compose.prod.yml ps -q backend):/data/backu
 
 Backup-ul intern automat al backend-ului scrie la `backups/` in interiorul volumului `ld_data` (daily backup, retention 7 zile). Sincronizeaza folderul `/data/backups` periodic cu un storage extern (S3, rclone, restic).
 
-Din v2.43.0, volumul `ld_data` contine si `rnpm/` (fisierele SQLite per utilizator pentru datele RNPM) plus `backups/rnpm/<stem>/` (jail-urile de backup per utilizator). Daily backup-ul intern acopera automat si fisierele per user (freshness per target); sincronizarea offsite trebuie sa acopere TOT `/data/backups` (inclusiv subdirectoarele `rnpm/`), iar snapshot-ul manual de mai sus acopera doar monolitul — pentru un backup complet copiaza si `/data/rnpm/`.
+Din v2.43.0, volumul `ld_data` contine si `rnpm/` (fisierele SQLite per utilizator pentru datele RNPM) plus `backups/rnpm/<stem>/` (jail-urile de backup per utilizator). Daily backup-ul intern acopera automat si fisierele per user (freshness per target); sincronizarea offsite trebuie sa acopere TOT `/data/backups` (inclusiv subdirectoarele `rnpm/`), iar snapshot-ul manual de mai sus acopera doar monolitul. Pentru datele RNPM NU copia direct directorul live `/data/rnpm/`: fisierele au WAL activ, deci o copiere la nivel de filesystem poate produce un backup inconsistent, nerestaurabil. Backup-urile RNPM valide se produc exclusiv prin mecanismul aplicatiei — snapshot-uri self-contained (`VACUUM INTO`, verificate) expuse per utilizator prin suprafata `/api/rnpm/backups` si prin backup-urile administrative, colectate automat de daily backup-ul intern in `backups/rnpm/`.
 
 ## 8. Update la versiune noua
 
