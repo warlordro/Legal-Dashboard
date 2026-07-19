@@ -318,6 +318,12 @@ export default function Dosare({
       if (result.partial) warnings.unshift("Cautarea a fost oprita — rezultatele sunt partiale");
       setLoadMoreWarnings(warnings);
       setLoadMoreDone(true);
+      // Un load-more complet reusit si FARA warnings a re-interogat instantele: daca a
+      // recuperat cele cazute la cautarea initiala, curata failedInstitutii (altfel
+      // banner-ul amber + confirm-ul de export ar minti invers). Cu warnings, il pastram.
+      if (warnings.length === 0) {
+        onStateChange((prev) => ({ ...prev, failedInstitutii: [] }));
+      }
     } catch (e) {
       if ((e as Error).name === "AbortError") {
         // State already updated incrementally via onBatch — nothing to do
@@ -337,6 +343,12 @@ export default function Dosare({
   const handleStopLoadMore = () => {
     loadMoreAbort.current?.abort();
   };
+
+  // Confirmare partajata de export (XLSX + PDF): daca lista e incompleta (instante
+  // fara raspuns), cere confirmare inainte de a exporta rezultate partiale.
+  const confirmPartialExport = (): boolean =>
+    (state.failedInstitutii?.length ?? 0) === 0 ||
+    window.confirm("Rezultatele sunt PARTIALE (instante fara raspuns la cautare). Exporti totusi lista incompleta?");
 
   // ICCJ "next page": fetch the next page and append (dedup by iccjId). Unlike
   // PortalJust load-more (SSE month-sweep), this is plain pagination over the
@@ -496,8 +508,19 @@ export default function Dosare({
       {!loading && state.searched && !state.error && dosare.length === 0 && (
         <div className="flex flex-col items-center gap-2 py-16 text-center">
           <FileSearch className="h-10 w-10 text-muted-foreground/30" />
-          <p className="text-sm font-medium text-muted-foreground">Niciun dosar gasit</p>
-          <p className="text-xs text-muted-foreground">Incercati alti parametri de cautare</p>
+          {(state.failedInstitutii?.length ?? 0) > 0 ? (
+            <>
+              <p className="text-sm font-medium text-muted-foreground">
+                Niciun rezultat de la instantele care au raspuns
+              </p>
+              <p className="text-xs text-muted-foreground">Instante fara raspuns: pot exista dosare acolo.</p>
+            </>
+          ) : (
+            <>
+              <p className="text-sm font-medium text-muted-foreground">Niciun dosar gasit</p>
+              <p className="text-xs text-muted-foreground">Incercati alti parametri de cautare</p>
+            </>
+          )}
         </div>
       )}
 
@@ -530,16 +553,13 @@ export default function Dosare({
         <DosareTable
           dosare={dosare}
           onExportExcel={(sel) => {
-            if (
-              (state.failedInstitutii?.length ?? 0) > 0 &&
-              !window.confirm(
-                "Rezultatele sunt PARTIALE (instante fara raspuns la cautare). Exporti totusi lista incompleta?"
-              )
-            )
-              return;
+            if (!confirmPartialExport()) return;
             exportDosareExcel(sel || dosare);
           }}
-          onExportPDF={(sel) => exportDosarePDF(sel || dosare)}
+          onExportPDF={(sel) => {
+            if (!confirmPartialExport()) return;
+            exportDosarePDF(sel || dosare);
+          }}
           searchedName={state.searchedName}
           apiKeys={apiKeys}
           aiSettings={aiSettings}
