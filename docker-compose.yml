@@ -29,7 +29,7 @@ services:
       OAUTH2_PROXY_UPSTREAMS: http://backend:3002/
       OAUTH2_PROXY_REDIRECT_URL: https://${DOMAIN}/oauth2/callback
       OAUTH2_PROXY_WHITELIST_DOMAINS: .${DOMAIN}
-      OAUTH2_PROXY_EMAIL_DOMAINS: ${OAUTH2_PROXY_EMAIL_DOMAINS}   # set to instantfactoring.com
+      OAUTH2_PROXY_EMAIL_DOMAINS: ${OAUTH2_PROXY_EMAIL_DOMAINS}   # set to your allowed email domain (e.g. example.com)
       OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_PASS_ACCESS_TOKEN: "false"
       OAUTH2_PROXY_PASS_USER_HEADERS: "true"
@@ -79,7 +79,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:-2.38.0}
+    image: legal-dashboard:${APP_VERSION:-2.43.0}
     restart: unless-stopped
     expose:
       # NEVER `ports:` — backend reachable ONLY from oauth2-proxy via ld_net.
