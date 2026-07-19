@@ -610,6 +610,122 @@ describe("runDailyReportTick — off-hour retry (BUG-04)", () => {
   });
 });
 
+describe("runDailyReportTick — cross-midnight retry (FIX C)", () => {
+  // reportHour=23; a send that fails at 23:55 on day D backs off past midnight.
+  const D_2355 = () => new Date(2026, 4, 2, 23, 55, 0); // 23:55 May 2 (day D)
+  const D1_0005 = () => new Date(2026, 4, 3, 0, 5, 0); // 00:05 May 3 (day D+1)
+  const D1_2300 = () => new Date(2026, 4, 3, 23, 0, 0); // 23:00 May 3 (day D+1)
+  const D_MINUS1_NOON_UTC = "2026-05-01T12:00:00.000Z"; // firmly in local May 1 (D-1)
+  const D_NOON_UTC = "2026-05-02T12:00:00.000Z"; // firmly in local May 2 (D)
+
+  it("resends the ORIGINAL day's report when a retry crosses midnight", async () => {
+    _resetDailyReportRetryStateForTest();
+    upsertEmailSettings("owner-A", {
+      enabled: true,
+      toAddress: "a@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("owner-A", D_MINUS1_NOON_UTC, "cm-1"); // alert belongs to D-1 report
+
+    const send = vi.fn().mockResolvedValueOnce({ ok: false, reason: "smtp" }).mockResolvedValue({ ok: true });
+
+    // Tick 1 @ 23:55 D (at reportHour) → report for D-1, send fails, retry armed.
+    await runDailyReportTick({ now: D_2355, reportHour: () => 23, mailerConfigured: () => true, send });
+    send.mockClear();
+    // Tick 2 @ 00:05 D+1 (off-hour) → cross-midnight retry resends the D-1 report.
+    const r = await runDailyReportTick({ now: D1_0005, reportHour: () => 23, mailerConfigured: () => true, send });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const composed = send.mock.calls[0][1] as { subject: string; html: string };
+    expect(composed.subject).toContain("01.05.2026"); // original day D-1, not previousDay(today)
+    expect(composed.html).toContain("alerta-cm-1");
+    expect(r.emailsSent).toBe(1);
+
+    const row = getDb()
+      .prepare("SELECT last_daily_report_sent_for FROM owner_email_settings WHERE owner_id = ?")
+      .get("owner-A") as { last_daily_report_sent_for: string };
+    expect(row.last_daily_report_sent_for).toBe("2026-05-01"); // D-1
+  });
+
+  it("does NOT send to owners without a retry at the cross-midnight tick", async () => {
+    _resetDailyReportRetryStateForTest();
+    upsertEmailSettings("owner-A", {
+      enabled: true,
+      toAddress: "a@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    upsertEmailSettings("owner-B", {
+      enabled: true,
+      toAddress: "b@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("owner-A", D_MINUS1_NOON_UTC, "cm-a");
+    seedAlertAt("owner-B", D_MINUS1_NOON_UTC, "cm-b");
+
+    // Address-aware so the outcome does not depend on candidate ordering:
+    // owner-A fails its first attempt (arming a cross-midnight retry), owner-B
+    // always succeeds (marked sent at 23:55, no retry).
+    let aAttempts = 0;
+    const send = vi.fn(async (to: string) => {
+      if (to === "a@firma.ro") {
+        aAttempts++;
+        return aAttempts === 1 ? { ok: false, reason: "smtp" } : { ok: true };
+      }
+      return { ok: true };
+    });
+
+    await runDailyReportTick({ now: D_2355, reportHour: () => 23, mailerConfigured: () => true, send });
+    send.mockClear();
+    const r = await runDailyReportTick({ now: D1_0005, reportHour: () => 23, mailerConfigured: () => true, send });
+
+    // Only owner-A (cross-midnight retry) is resent; owner-B holds no retry.
+    expect(send).toHaveBeenCalledTimes(1);
+    expect(send.mock.calls[0][0]).toBe("a@firma.ro");
+    expect(r.emailsSent).toBe(1);
+  });
+
+  it("still fires the next day's normal send after a cross-midnight success", async () => {
+    _resetDailyReportRetryStateForTest();
+    upsertEmailSettings("owner-A", {
+      enabled: true,
+      toAddress: "a@firma.ro",
+      minSeverity: "info",
+      dailyReportEnabled: true,
+    });
+    seedAlertAt("owner-A", D_MINUS1_NOON_UTC, "cm-d1"); // D-1 report content
+    seedAlertAt("owner-A", D_NOON_UTC, "cm-d"); // D report content
+
+    const send = vi.fn().mockResolvedValueOnce({ ok: false, reason: "smtp" }).mockResolvedValue({ ok: true });
+
+    // Tick 1 @ 23:55 D → report D-1, fails.
+    await runDailyReportTick({ now: D_2355, reportHour: () => 23, mailerConfigured: () => true, send });
+    // Tick 2 @ 00:05 D+1 → cross-midnight resend of D-1 report, succeeds.
+    const r2 = await runDailyReportTick({ now: D1_0005, reportHour: () => 23, mailerConfigured: () => true, send });
+    expect(send).toHaveBeenCalledTimes(2);
+    expect((send.mock.calls[1][1] as { subject: string }).subject).toContain("01.05.2026");
+    expect(r2.emailsSent).toBe(1);
+
+    send.mockClear();
+    // Tick 3 @ 23:00 D+1 (configured hour) → normal send for D (the day that ended).
+    const r3 = await runDailyReportTick({ now: D1_2300, reportHour: () => 23, mailerConfigured: () => true, send });
+
+    expect(send).toHaveBeenCalledTimes(1);
+    const composed = send.mock.calls[0][1] as { subject: string; html: string };
+    expect(composed.subject).toContain("02.05.2026"); // report for D
+    expect(composed.html).toContain("alerta-cm-d");
+    expect(composed.html).not.toContain("alerta-cm-d1");
+    expect(r3.emailsSent).toBe(1);
+
+    const row = getDb()
+      .prepare("SELECT last_daily_report_sent_for FROM owner_email_settings WHERE owner_id = ?")
+      .get("owner-A") as { last_daily_report_sent_for: string };
+    expect(row.last_daily_report_sent_for).toBe("2026-05-03"); // D+1 tick marks todayLocal
+  });
+});
+
 describe("runDailyReportTick — yesterday window correctness", () => {
   it("only includes alerts whose created_at falls in the previous local day", async () => {
     upsertEmailSettings("alice", {
