@@ -403,8 +403,12 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addBullet('Pentru a sterge o cheie, apasa "Sterge cheia" sub campul respectiv');
 
   addHeading("Securitatea cheilor:", 2);
-  addBullet("Cheile sunt stocate doar local (in browser-ul aplicatiei), nu pe niciun server extern");
-  addBullet("Cheile sunt obfuscate in localStorage (nu sunt stocate ca text simplu)");
+  addBullet(
+    "Pe desktop, cheile sunt stocate local prin OS keystore (DPAPI / Keychain / libsecret) via Electron safeStorage — doar ciphertext-ul ajunge in localStorage, plaintext-ul nu atinge disk-ul"
+  );
+  addBullet(
+    "Pe web, cheile sunt stocate server-side per utilizator (criptate AES-256-GCM in tenant_api_keys); backend-ul detine cheile si face requesturile catre furnizori"
+  );
   addBullet("La fiecare cerere AI, cheia este trimisa doar catre API-ul furnizorului respectiv");
   addBullet("Cheile persista intre sesiuni — nu trebuie reintroduse la fiecare pornire a aplicatiei");
 
@@ -467,10 +471,13 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addHeading("12. Securitate si Confidentialitate");
 
   addHeading("Unde sunt datele tale:", 2);
-  addBullet("Cheile API sunt stocate doar local pe calculatorul tau (in localStorage, obfuscate)");
+  addBullet("Pe desktop, cheile API sunt stocate local prin OS keystore (safeStorage; ciphertext in localStorage)");
+  addBullet("Pe web, cheile API sunt stocate server-side per utilizator, criptate AES-256-GCM (tenant_api_keys)");
   addBullet("Istoricul cautarilor este salvat doar local");
   addBullet("Preferintele (tema, font) sunt salvate doar local");
-  addBullet("Nu exista niciun server intermediar — datele merg direct de la calculatorul tau catre API-urile oficiale");
+  addBullet(
+    "Pe desktop nu exista server intermediar — datele merg direct de la calculatorul tau catre API-urile oficiale; pe web, backend-ul aplicatiei contacteaza aceste API-uri in numele tau"
+  );
   addBullet("Dosarele si termenele sunt date publice obtinute din API-ul Ministerului Justitiei");
 
   addHeading("Protectii implementate:", 2);
