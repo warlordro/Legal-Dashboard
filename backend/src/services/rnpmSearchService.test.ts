@@ -98,11 +98,14 @@ describe("executeSearch pagesTotal clamp (BUG-06)", () => {
       }
     }
     const client = new InflatedPagesClient();
-    await executeSearch(
+    const result = await executeSearch(
       { type: "ipoteci", ownerId: "t", params: {}, captchaKey: "stub", fetchDetails: false },
       client
-    ).catch(() => {});
-    // ceil(30/25) = 2 pages, NOT the inflated 50 the client advertised.
-    expect(client.calls).toBeLessThanOrEqual(2);
+    );
+    // ceil(30/25) = 2 pages, NOT the inflated 50 the client advertised. Asertia
+    // EXACTA prinde regresia in ambele sensuri: 50 (clamp sters) SI 0/1 (setup picat
+    // devreme). `.catch` a fost eliminat ca un throw de mediu sa NU treaca fals.
+    expect(client.calls).toBe(2);
+    expect(result.pagesTotal).toBe(2);
   });
 });
