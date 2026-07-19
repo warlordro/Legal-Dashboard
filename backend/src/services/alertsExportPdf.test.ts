@@ -1,6 +1,6 @@
 import { readdir, readFile, unlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MonitoringAlertRow } from "../db/monitoringAlertsRepository.ts";
 import { buildAlertsPdf } from "./alertsExportPdf.ts";
 import type { AlertExportDecoratedRow } from "./alertsExportXlsx.ts";
@@ -68,6 +68,40 @@ describe("buildAlertsPdf", () => {
     ] as never;
     await expect(buildAlertsPdf(poisoned)).rejects.toThrow();
     const after = (await readdir(tmpdir())).filter((f) => f.startsWith("alerts-pdf-"));
-    expect(after.length).toBeLessThanOrEqual(before.length);
+    // Setul de fisiere NOI (after minus before) trebuie sa fie gol — asertia pe
+    // lungime ar putea trece si cu un orfan daca alt proces sterge un fisier intre timp.
+    expect(after.filter((f) => !before.includes(f))).toEqual([]);
+  });
+
+  it("rejects fast (nu atarna) cand write stream-ul da eroare async", async () => {
+    // Simuleaza ENOSPC/EACCES: primul _write esueaza, streamul emite "error" apoi
+    // "close" in timp ce finishWriteStream inca asteapta. Implementarea veche cu
+    // once(stream,"close") atasa listener DUPA ce "close" a fost deja emis => atarna
+    // permanent; finished(stream) se rezolva imediat pe stream deja inchis.
+    vi.resetModules();
+    vi.doMock("node:fs", async () => {
+      const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+      const { Writable } = await import("node:stream");
+      return {
+        ...actual,
+        promises: actual.promises,
+        createWriteStream: () => {
+          let n = 0;
+          return new Writable({
+            write(_chunk, _enc, cb) {
+              n += 1;
+              cb(n === 1 ? new Error("ENOSPC: no space left on device") : null);
+            },
+          });
+        },
+      };
+    });
+    try {
+      const { buildAlertsPdf: build } = await import("./alertsExportPdf.ts");
+      await expect(build([makeRow()])).rejects.toThrow();
+    } finally {
+      vi.doUnmock("node:fs");
+      vi.resetModules();
+    }
   });
 });
