@@ -369,4 +369,18 @@ describe("decodeXmlEntities", () => {
     expect(decodeXmlEntities("Popescu Ionescu 2024")).toBe("Popescu Ionescu 2024");
     expect(decodeXmlEntities("")).toBe("");
   });
+
+  it("maps XML-invalid or out-of-range numeric references to U+FFFD (SEC-06)", () => {
+    // > 0x10FFFF would make String.fromCodePoint throw a RangeError.
+    expect(decodeXmlEntities("&#x110000;")).toBe("�");
+    // Lone surrogate half — invalid in XML 1.0.
+    expect(decodeXmlEntities("&#xD800;")).toBe("�");
+    // NUL and other C0 controls are not allowed in XML 1.0 text.
+    expect(decodeXmlEntities("&#0;")).toBe("�");
+    expect(decodeXmlEntities("&#1;")).toBe("�");
+    // Valid references (incl. an astral emoji and Tab) still decode.
+    expect(decodeXmlEntities("&#65;")).toBe("A");
+    expect(decodeXmlEntities("&#x1F600;")).toBe("\u{1F600}");
+    expect(decodeXmlEntities("&#9;")).toBe("\t");
+  });
 });
