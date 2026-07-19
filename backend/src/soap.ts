@@ -149,8 +149,14 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
   }
 
   if (!response.ok || text.includes("soap:Fault")) {
-    const fault = text.match(/<faultstring>([\s\S]*?)<\/faultstring>/)?.[1] ?? "necunoscut";
-    // SECURITY: Log full fault server-side, throw generic message to client
+    const rawFault = text.match(/<faultstring>([\s\S]*?)<\/faultstring>/)?.[1] ?? "necunoscut";
+    // SEC-05: strip C0/C1 control chars + DEL + Unicode line separators and
+    // cap before logging. Upstream is plain HTTP and the faultstring is
+    // attacker-influenceable, so an unsanitized value could inject fake log
+    // lines or flood the log. Full fault stays server-side; client gets a
+    // generic message.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional sanitization of log input
+    const fault = rawFault.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ").slice(0, 500);
     console.error("SOAP Fault detalii:", fault);
     throw new Error("Eroare la comunicarea cu serviciul PortalJust.");
   }
