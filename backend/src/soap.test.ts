@@ -157,6 +157,17 @@ describe("SOAP response cap", () => {
   });
 });
 
+describe("SOAP redirect safety (SEC-04)", () => {
+  it("rejects a 3xx redirect on the SOAP fetch (SEC-04)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      expect((init as RequestInit).redirect).toBe("manual");
+      return new Response(null, { status: 302 });
+    });
+    await expect(cautareDosare({ numeParte: "x" })).rejects.toThrow(/redirect/i);
+  });
+});
+
 describe("cautareDosare false-empty guard (v2.37.1, review cluster 3)", () => {
   it("arunca pe 200 fara envelope-ul CautareDosareResult (pagina drifted != 0 rezultate)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});

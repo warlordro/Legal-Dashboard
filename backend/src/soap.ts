@@ -128,8 +128,14 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
       SOAPAction: `"${NS}/${action}"`,
     },
     body: envelope,
+    redirect: "manual",
     signal: combinedSignal,
   });
+
+  if (response.status >= 300 && response.status < 400) {
+    console.error(`[soap] redirect neasteptat (status ${response.status}) — refuzat`);
+    throw new Error("Raspuns neasteptat de la PortalJust (redirect).");
+  }
 
   let text: string;
   try {
