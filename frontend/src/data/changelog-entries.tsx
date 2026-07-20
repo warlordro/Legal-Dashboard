@@ -40,6 +40,27 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.43.1",
+    date: "20 Iulie 2026",
+    subtitle:
+      "Doua directii peste v2.43.0: cautarea de dosare intoarce acum rezultate partiale cand o instanta nu raspunde (in loc sa esueze toata cautarea), plus un val de intariri de securitate si corectitudine verificate prin doua review-uri independente.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Rezultate partiale cand o instanta nu raspunde (dosare)",
+        content:
+          "La cautarea de dosare, daca una sau mai multe instante nu raspund la timp, aplicatia nu mai esueaza toata cautarea. Iti arata rezultatele de la instantele care au raspuns si un banner galben cu instantele care lipsesc (cu numele lor, colapsat cand sunt multe), ca sa stii ca lista poate fi incompleta. La export in Excel sau PDF primesti o confirmare ca datele sunt partiale inainte sa salvezi. Verificat pe o pana reala la Curtea de Apel Galati: cautarea a intors 240 de dosare de la instantele sanatoase in loc sa dea eroare.",
+      },
+      {
+        title: "Intariri de securitate si corectitudine",
+        content:
+          "Un val de intariri verificate prin doua review-uri independente: cererile de modificare catre server sunt protejate mai strict impotriva falsificarii, legaturile catre portalurile externe (PortalJust, RNPM, ICCJ) au limite de dimensiune si nu mai urmeaza redirectari neasteptate, iar raportul zilnic pe email se retrimite corect chiar daca prima incercare pica peste noapte. Panoul principal arata acum garantiile de securitate potrivite pentru modul in care folosesti aplicatia: pe desktop cheile stau in seiful sistemului de operare si accesul e limitat la calculatorul tau; pe web cheile sunt criptate pe server.",
+      },
+    ],
+  },
+  {
     version: "v2.43.0",
     date: "13 Iulie 2026",
     subtitle:
@@ -87,16 +108,6 @@ export const versions: VersionEntry[] = [
         title: "Fixuri marunte",
         content:
           "Costul afisat pentru modelul GPT-5.4 pe OpenRouter foloseste tariful corect de output; etichetele necunoscute din tabele apar ca 'Necunoscut (valoare)' in loc de codul brut; cateva refuzuri administrative nu mai pot fi transformate in eroare 500 de un esec trecator al jurnalului de audit.",
-      },
-      {
-        title: "Rezultate partiale cand o instanta nu raspunde (dosare)",
-        content:
-          "La cautarea de dosare, daca una sau mai multe instante nu raspund la timp, aplicatia nu mai esueaza toata cautarea. Iti arata rezultatele de la instantele care au raspuns si un banner galben cu instantele care lipsesc (cu numele lor, colapsat cand sunt multe), ca sa stii ca lista poate fi incompleta. La export in Excel sau PDF primesti o confirmare ca datele sunt partiale inainte sa salvezi. Verificat pe o pana reala la Curtea de Apel Galati: cautarea a intors 240 de dosare de la instantele sanatoase in loc sa dea eroare.",
-      },
-      {
-        title: "Intariri de securitate si corectitudine",
-        content:
-          "Un val de intariri verificate prin doua review-uri independente: cererile de modificare catre server sunt protejate mai strict impotriva falsificarii, legaturile catre portalurile externe (PortalJust, RNPM, ICCJ) au limite de dimensiune si nu mai urmeaza redirectari neasteptate, iar raportul zilnic pe email se retrimite corect chiar daca prima incercare pica peste noapte. Panoul principal arata acum garantiile de securitate potrivite pentru modul in care folosesti aplicatia: pe desktop cheile stau in seiful sistemului de operare si accesul e limitat la calculatorul tau; pe web cheile sunt criptate pe server.",
       },
     ],
   },
