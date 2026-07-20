@@ -16,6 +16,7 @@ import { checkBudgetWarning, checkBudgetWarningRetry, quotaFeatureOf } from "./b
 let tmpRoot: string;
 const originalDbPath = process.env.LEGAL_DASHBOARD_DB_PATH;
 const originalDefault = process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
+const originalAuthMode = process.env.LEGAL_DASHBOARD_AUTH_MODE;
 
 beforeEach(async () => {
   tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-bw-"));
@@ -39,6 +40,12 @@ afterEach(async () => {
     delete process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI;
   } else {
     process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = originalDefault;
+  }
+  if (originalAuthMode === undefined) {
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+    delete process.env.LEGAL_DASHBOARD_AUTH_MODE;
+  } else {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = originalAuthMode;
   }
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
@@ -94,6 +101,59 @@ describe("checkBudgetWarning", () => {
   it("skips when no override and no default quota", async () => {
     const result = await checkBudgetWarning("alice", "dosar_summary", { sendEmail: vi.fn() });
     expect(result.state).toBe("skipped");
+  });
+
+  // v2.43.0: default-ul din env (LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI) e
+  // enforce-uit de quotaGuard DOAR in web mode. Pe desktop nu se impune nicio
+  // limita din env, deci nu trebuie sa emita nici avertizari/email-uri pentru o
+  // limita care nu exista efectiv. Aliniere cu quotaGuard.ts (getAuthMode).
+  it("desktop: env default set, no override -> NO warning (limita din env nu se impune pe desktop)", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "desktop";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "100";
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 95,
+      ts: new Date().toISOString(),
+    });
+    const sendEmail = vi.fn().mockResolvedValue({ ok: true });
+    const result = await checkBudgetWarning("alice", "dosar_summary", { sendEmail });
+    expect(result.state).toBe("skipped");
+    expect(isWarningActive("alice", "ai", 80)).toBe(false);
+    expect(sendEmail).not.toHaveBeenCalled();
+  });
+
+  it("web: env default set, no override, usage >=80% -> fires (comportament neschimbat)", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_DEFAULT_AI_QUOTA_MILLI = "100";
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 95,
+      ts: new Date().toISOString(),
+    });
+    const result = await checkBudgetWarning("alice", "dosar_summary", { sendEmail: vi.fn() });
+    expect(result.state).toBe("fired");
+    expect(isWarningActive("alice", "ai", 80)).toBe(true);
+  });
+
+  it("desktop: override explicit ramane functional (semantica limitelor per user neschimbata)", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "desktop";
+    upsertOverride({ userId: "alice", feature: "ai", period: "day", limitUsdMilli: 100 });
+    insertAiUsage({
+      ownerId: "alice",
+      provider: "openai",
+      model: "gpt-5.4",
+      feature: "dosar_summary",
+      costUsdMilli: 95,
+      ts: new Date().toISOString(),
+    });
+    const result = await checkBudgetWarning("alice", "dosar_summary", { sendEmail: vi.fn() });
+    expect(result.state).toBe("fired");
   });
 
   it("skips when limit is NULL (unlimited)", async () => {

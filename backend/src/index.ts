@@ -13,6 +13,7 @@ import { aiRouter } from "./routes/ai.ts";
 import { preAuthRateLimit, rateLimit, startRateLimitSweeper, stopRateLimitSweeper } from "./middleware/rate-limit.ts";
 import { originGuard } from "./middleware/originGuard.ts";
 import { ownerContext } from "./middleware/owner.ts";
+import { requireDesktopHeaderGlobal } from "./middleware/requireDesktopHeaderGlobal.ts";
 import { patCapabilityGate } from "./middleware/patCapabilityGate.ts";
 import { patSecurity } from "./middleware/patSecurity.ts";
 import { patUsageAudit } from "./middleware/patUsageAudit.ts";
@@ -60,6 +61,7 @@ import { adminBackupsRouter } from "./routes/adminBackups.ts";
 import { adminRnpmRouter } from "./routes/adminRnpm.ts";
 import { decryptKey, encryptKey, getMasterKey } from "./util/tenantKeyCrypto.ts";
 import { findUnsupportedTrustedCidrEntries } from "./util/proxyIp.ts";
+import { assertTrustedProxyForWeb } from "./util/trustedProxyBootCheck.ts";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import fs from "node:fs";
@@ -316,6 +318,10 @@ if (getAuthMode() === "web") {
 // for cross-LAN POST/PUT/PATCH/DELETE.
 app.use("/api/*", originGuard);
 
+// SEC-01: desktop CSRF hardening — require the desktop header on every mutating
+// /api/* verb unless PAT. Mounted after ownerContext (tokenId set) + originGuard.
+app.use("/api/*", requireDesktopHeaderGlobal);
+
 // Bug 1a (v2.42.2): plasa globala 1MB pe /api/*, montata inainte de TOATE
 // routerele — POST /api/v1/tokens facea await c.req.json() fara nicio limita
 // (orice sesiune autentificata putea bufera sute de MB in procesul partajat).
@@ -526,6 +532,17 @@ if (REMOTE_BIND_ACTIVE) {
   console.warn("====================================================================");
 }
 
+// NEW-02 (strict, decuplat de REMOTE_BIND_ACTIVE): web mode legat pe loopback =
+// reverse proxy pe acelasi host; fara TRUSTED_PROXY_CIDR, originGuard trateaza
+// orice client venit prin proxy ca loopback (bypass CSRF/rate-limit). Fatal.
+// Plasat IN AFARA try-ului mare de boot ca sa NU fie reambalat ca
+// "schema/prewarm failed" — e un esec de configuratie, nu de schema.
+try {
+  assertTrustedProxyForWeb(process.env, hostname);
+} catch (err) {
+  fatalBoot("trusted proxy required for web loopback bind", err);
+}
+
 // v2.19.1 — desktop admin auto-promote. Utilizatorul `local` e singurul user
 // in desktop mode. Migration 0002 il seed-uieste cu role=user (default sigur
 // pentru web mode multi-tenant), dar pe desktop e contraproductiv:
@@ -636,18 +653,19 @@ try {
     },
   });
 
-  // LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR e IPv4-only in parser. Entry-urile IPv6
-  // (sau prefixele invalide) sunt acceptate de env loader dar ignorate de
-  // cidrContains, ceea ce inseamna ca XFF venit prin proxy IPv6 ar fi tratat ca
-  // peer non-trusted si rate-limit key-ul ar flip-ui pe peer la fiecare call.
-  // Warn-ul la boot face vizibila configurarea fara efect inainte sa devina
-  // incident operational.
+  // LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: parserul accepta IPv4 / IPv4-mapat
+  // (::ffff:x) cu prefix in [0,32] plus IPv6 loopback la exact /128. Entry-urile
+  // ramase nesuportate (IPv6 non-/128, prefix invalid) sunt acceptate de env
+  // loader dar ignorate de cidrContains, deci XFF venit prin acel hop ar fi
+  // tratat ca peer non-trusted si rate-limit key-ul ar flip-ui pe peer la
+  // fiecare call. Warn-ul la boot face vizibila configurarea fara efect inainte
+  // sa devina incident operational.
   const unsupportedProxyCidrs = findUnsupportedTrustedCidrEntries();
   if (unsupportedProxyCidrs.length > 0) {
     console.warn(
       JSON.stringify({
         action: "proxy.trusted_cidr.unsupported",
-        note: "LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR contine entry-uri non-IPv4 / prefix invalid; sunt ignorate de XFF walk.",
+        note: "LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR contine entry-uri nesuportate (IPv6 non-/128 / prefix invalid); sunt ignorate de XFF walk.",
         entries: unsupportedProxyCidrs,
         ts: new Date().toISOString(),
       })
@@ -695,6 +713,16 @@ try {
     } catch (err) {
       console.error("[boot] rnpm.validation.disabled audit failed:", err);
     }
+  }
+
+  if (getAuthMode() === "desktop" && process.env.LEGAL_DASHBOARD_DISABLE_CSRF_HARDENING === "1") {
+    console.warn(
+      JSON.stringify({
+        action: "csrf.hardening.disabled.boot",
+        note: "LEGAL_DASHBOARD_DISABLE_CSRF_HARDENING=1: guard-ul CSRF desktop e OPRIT pentru toate mutatiile.",
+        ts: new Date().toISOString(),
+      })
+    );
   }
 } catch (e) {
   // Boot-time DB failure means subsequent requests will fail too. Server mode:

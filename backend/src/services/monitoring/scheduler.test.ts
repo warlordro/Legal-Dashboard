@@ -683,6 +683,37 @@ describe("Scheduler — runJobNow (manual trigger)", () => {
     await sch.stop();
   });
 
+  // BUG-03: an existing `running` run row (e.g. left by another process / a
+  // stale lease the in-memory inflight map never learned about) must surface
+  // as { code: 'in_flight' }, not leak the raw SQLITE_CONSTRAINT_UNIQUE from
+  // the partial unique index idx_one_running_per_job.
+  it("maps a DB unique-constraint on an existing running row to { code: 'in_flight' }", async () => {
+    const jobId = seedJob({
+      cadenceSec: 600,
+      nextRunAt: "2026-04-29T00:00:00.000Z",
+    });
+    const sch = new Scheduler({
+      clock: new FakeClock(T0_DATE),
+      runners: { dosar_soap: new NoopOkRunner() },
+      tickIntervalMs: 60_000,
+      claimLimit: 10,
+      jitterSecMax: 0,
+    });
+
+    await sch.start();
+    // Insert the `running` row AFTER start() so recoverOrphanRuns doesn't flip
+    // it to aborted. The scheduler's in-memory inflight map is empty, so the
+    // pre-insert guards pass and insertRunning hits the DB unique constraint.
+    getDb()
+      .prepare("INSERT INTO monitoring_runs (owner_id, job_id, started_at, status) VALUES (?, ?, ?, 'running')")
+      .run(OWNER, jobId, "2026-04-28T10:00:00.000Z");
+
+    const job = getDb().prepare("SELECT * FROM monitoring_jobs WHERE id = ?").get(jobId) as ScheduledJob;
+    await expect(sch.runJobNow(job)).rejects.toMatchObject({ code: "in_flight" });
+
+    await sch.stop();
+  });
+
   // C1 regression: prior to the lock split, runJobNow wrapped insertRunning
   // in withMaintenanceRead and then `void runOne(...)`'d outside the lock,
   // so a backup writer could race the runner's snapshot/alert/finalize

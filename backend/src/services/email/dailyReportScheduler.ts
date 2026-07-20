@@ -51,6 +51,27 @@ interface RetryState {
 
 const retryByOwner = new Map<string, RetryState>();
 
+// BUG-04: cand tick-ul se trezeste in afara orei configurate, are voie sa ruleze
+// DOAR daca exista deja lucru de retry pentru ziua curenta — un retry due
+// (attempts<MAX, nowMs>=nextAttemptAt) SAU un retry epuizat (attempts>=MAX) care
+// mai are nevoie de curatenie (markDailyReportSent + audit). Ownerii fara entry
+// de retry nu primesc trimiterea initiala in afara orei.
+function retryWorkState(todayLocal: string, nowMs: number): { anyDue: boolean } {
+  // FIX C: un retry armat ieri (retry.date === previousDay(todayLocal)) a trecut
+  // de miezul noptii si ramane viu — off-hour tick-ul trebuie sa-l numere ca lucru.
+  const yesterdayLocal = previousDay(todayLocal);
+  let anyDue = false;
+  for (const retry of retryByOwner.values()) {
+    if (retry.date !== todayLocal && retry.date !== yesterdayLocal) continue;
+    if (retry.attempts >= MAX_RETRY_ATTEMPTS) {
+      anyDue = true; // exhausted cleanup counts
+      continue;
+    }
+    if (nowMs >= retry.nextAttemptAt) anyDue = true;
+  }
+  return { anyDue };
+}
+
 // Exportat pentru teste: reseteaza state-ul de retry intre teste.
 export function _resetDailyReportRetryStateForTest(): void {
   retryByOwner.clear();
@@ -154,12 +175,14 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
     emailsFailed: 0,
   };
 
-  if (now.getHours() !== configuredHour) return baseResult;
+  const nowMs = now.getTime();
+  const todayLocal = formatLocalDate(now);
+  const offHour = now.getHours() !== configuredHour;
+  // BUG-04: off-hour tick-urile ruleaza doar daca exista retry due/exhausted azi.
+  if (offHour && !retryWorkState(todayLocal, nowMs).anyDue) return baseResult;
   if (!mailerCheck()) return { ...baseResult, fired: true };
 
-  const todayLocal = formatLocalDate(now);
   const yesterdayLocal = previousDay(todayLocal);
-  const { startIso, endIso } = localDayBoundsToUtcIso(yesterdayLocal);
 
   let candidates: EmailSettings[] = [];
   try {
@@ -172,7 +195,6 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
   let sent = 0;
   let skippedNoAlerts = 0;
   let failed = 0;
-  const nowMs = now.getTime();
   for (const owner of candidates) {
     if (!owner.enabled || !owner.toAddress) continue;
 
@@ -181,15 +203,33 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
     // Daca state-ul e pentru o zi anterioara, e stale → cleanup si continuam ca
     // attempt nou.
     const retry = retryByOwner.get(owner.ownerId);
+    // FIX C: un retry cu date === ieri a trecut de miezul noptii — ramane viu si
+    // tinteste raportul ZILEI ORIGINALE (previousDay(retry.date)), nu al zilei
+    // curente. Entry-urile mai vechi de o zi raman stale (cleanup mai jos).
+    const isCrossMidnight = retry ? retry.date === yesterdayLocal : false;
+    // BUG-04: in afara orei configurate proceseaza doar ownerii cu un entry de
+    // retry pentru ziua curenta SAU un retry cross-midnight — nu trimiterea initiala.
+    if (offHour && (!retry || (retry.date !== todayLocal && !isCrossMidnight))) continue;
+
+    // Ziua ancora a retry-ului (identitatea entry-ului): ramane ziua originala
+    // pentru un retry cross-midnight; altfel ziua curenta. Din ea derivam
+    // fereastra de alerte + continutul raportului (ziua precedenta ancorei) si ce
+    // marcam in last_daily_report_sent_for la finalizare.
+    const retryAnchorDay = isCrossMidnight && retry ? retry.date : todayLocal;
+    const reportDay = previousDay(retryAnchorDay);
+    const markDay = isCrossMidnight ? reportDay : todayLocal;
+    const { startIso, endIso } = localDayBoundsToUtcIso(reportDay);
+
     if (retry) {
-      if (retry.date !== todayLocal) {
+      if (retry.date !== todayLocal && !isCrossMidnight) {
+        // Mai vechi de o zi → stale: cleanup si continua ca attempt nou pentru azi.
         retryByOwner.delete(owner.ownerId);
       } else if (retry.attempts >= MAX_RETRY_ATTEMPTS) {
         // Exhausted: marcheaza ziua sent pentru cleanup linistit (vezi markDailyReportSent
         // mai jos in zero-alerts path pentru rationament identic). Audit indica
         // explicit motivul ca operatorul sa nu se intrebe.
         try {
-          markDailyReportSent(owner.ownerId, todayLocal);
+          markDailyReportSent(owner.ownerId, markDay);
         } catch (err) {
           console.error(`[daily-report] markDailyReportSent (retry-exhausted) failed for ${owner.ownerId}`, err);
         }
@@ -202,7 +242,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
             detail: {
               reason: "retry_exhausted",
               attempts: retry.attempts,
-              date: yesterdayLocal,
+              date: reportDay,
             },
           });
         } catch {
@@ -230,14 +270,14 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
     } catch (err) {
       console.error(`[daily-report] listAlerts failed for owner ${owner.ownerId}`, err);
       failed++;
-      recordRetryFailure(owner.ownerId, todayLocal, nowMs);
+      recordRetryFailure(owner.ownerId, retryAnchorDay, nowMs);
       try {
         recordAudit(null, "email.daily_report.failed", {
           outcome: "error",
           ownerId: owner.ownerId,
           targetKind: "owner_email_settings",
           targetId: owner.ownerId,
-          detail: { reason: "fetch_failed", date: yesterdayLocal },
+          detail: { reason: "fetch_failed", date: reportDay },
         });
       } catch {
         /* audit best-effort */
@@ -252,7 +292,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
       // partial send for yesterday.
       retryByOwner.delete(owner.ownerId);
       try {
-        markDailyReportSent(owner.ownerId, todayLocal);
+        markDailyReportSent(owner.ownerId, markDay);
       } catch (err) {
         console.error(`[daily-report] markDailyReportSent (zero-alert path) failed for ${owner.ownerId}`, err);
       }
@@ -261,7 +301,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
     }
 
     const composed = renderDailyReport({
-      reportDateLocal: yesterdayLocal,
+      reportDateLocal: reportDay,
       alerts,
     });
 
@@ -275,7 +315,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
         sent++;
         retryByOwner.delete(owner.ownerId);
         try {
-          markDailyReportSent(owner.ownerId, todayLocal);
+          markDailyReportSent(owner.ownerId, markDay);
         } catch (err) {
           console.error(`[daily-report] markDailyReportSent failed for ${owner.ownerId}`, err);
         }
@@ -286,7 +326,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
             targetKind: "owner_email_settings",
             targetId: owner.ownerId,
             detail: {
-              date: yesterdayLocal,
+              date: reportDay,
               alertCount: composed.rowCount,
             },
           });
@@ -295,14 +335,14 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
         }
       } else {
         failed++;
-        recordRetryFailure(owner.ownerId, todayLocal, nowMs);
+        recordRetryFailure(owner.ownerId, retryAnchorDay, nowMs);
         try {
           recordAudit(null, "email.daily_report.failed", {
             outcome: "error",
             ownerId: owner.ownerId,
             targetKind: "owner_email_settings",
             targetId: owner.ownerId,
-            detail: { reason: result.reason ?? "unknown", date: yesterdayLocal },
+            detail: { reason: result.reason ?? "unknown", date: reportDay },
           });
         } catch {
           /* audit best-effort */
@@ -310,7 +350,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
       }
     } catch (err) {
       failed++;
-      recordRetryFailure(owner.ownerId, todayLocal, nowMs);
+      recordRetryFailure(owner.ownerId, retryAnchorDay, nowMs);
       console.error(`[daily-report] send threw for owner ${owner.ownerId}`, err);
       try {
         recordAudit(null, "email.daily_report.failed", {
@@ -321,7 +361,7 @@ export async function runDailyReportTick(deps: SchedulerDeps): Promise<DailyRepo
           detail: {
             reason: "exception",
             message: err instanceof Error ? err.message : String(err),
-            date: yesterdayLocal,
+            date: reportDay,
           },
         });
       } catch {

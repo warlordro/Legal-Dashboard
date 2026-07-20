@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeInstitutie } from "./institutionLabel.ts";
+import { allInstitutionTokens, normalizeInstitutie } from "./institutionLabel.ts";
 
 describe("normalizeInstitutie", () => {
   it("expands SOAP enum value to spaced label", () => {
@@ -30,5 +30,17 @@ describe("normalizeInstitutie", () => {
 
   it("returns empty for empty input", () => {
     expect(normalizeInstitutie("")).toBe("");
+  });
+});
+
+describe("allInstitutionTokens", () => {
+  it("returns the full frozen SOAP token catalog", () => {
+    const tokens = allInstitutionTokens();
+    expect(tokens.length).toBeGreaterThan(200);
+    expect(tokens).toContain("CurteadeApelPLOIESTI");
+    expect(tokens).toContain("JudecatoriaPLOIESTI");
+    expect(tokens).toContain("TribunalulPRAHOVA");
+    expect(new Set(tokens).size).toBe(tokens.length);
+    expect(Object.isFrozen(tokens)).toBe(true);
   });
 });

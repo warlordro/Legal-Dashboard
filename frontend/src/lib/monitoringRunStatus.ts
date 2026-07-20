@@ -10,5 +10,6 @@ const LABELS: Record<string, string> = {
 
 export function monitoringRunStatusLabel(status: string | null | undefined): string {
   if (!status) return "—";
-  return LABELS[status] ?? `Necunoscut (${status})`;
+  // hasOwnProperty guard: fara el, chei ca "toString" rezolva membri din Object.prototype.
+  return Object.prototype.hasOwnProperty.call(LABELS, status) ? LABELS[status] : `Necunoscut (${status})`;
 }

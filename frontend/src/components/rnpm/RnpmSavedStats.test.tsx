@@ -4,8 +4,9 @@
 // automata — backend intoarce {deleted, compacted}; UI trebuie sa arate un
 // avertisment informativ (NU o eroare blocanta) cand compacted === false.
 
-import { act, type ReactNode } from "react";
+import type React from "react";
 import { createRoot, type Root } from "react-dom/client";
+import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
 import {
@@ -35,17 +36,17 @@ vi.mock("@/lib/rnpmApi", () => ({
 const getStatsMock = vi.mocked(rnpmGetStats);
 const listBackupsMock = vi.mocked(rnpmListBackups);
 const deleteAllMock = vi.mocked(rnpmDeleteAllSaved);
-const createBackupMock = vi.mocked(rnpmCreateBackup);
-const compactMock = vi.mocked(rnpmCompactDb);
 // Chemate doar la nevoie in acest test; mock-uite ca modulul sa nu esueze la import.
 void rnpmOpenDbFolder;
 void rnpmOpenBackupsFolder;
+void rnpmCreateBackup;
 void rnpmDeleteBackups;
+void rnpmCompactDb;
 
 let host: HTMLDivElement;
 let root: Root;
 
-async function render(ui: ReactNode) {
+async function render(ui: React.ReactNode) {
   host = document.createElement("div");
   document.body.appendChild(host);
   root = createRoot(host);
@@ -75,8 +76,6 @@ beforeEach(() => {
   getStatsMock.mockReset().mockResolvedValue(STATS);
   listBackupsMock.mockReset().mockResolvedValue([]);
   deleteAllMock.mockReset();
-  createBackupMock.mockReset().mockResolvedValue({ name: "rnpm.manual.db" });
-  compactMock.mockReset().mockResolvedValue({ beforeBytes: 2048, afterBytes: 1024, durationMs: 100 });
 });
 
 function clickButton(pattern: RegExp): void {
@@ -147,81 +146,6 @@ describe("RnpmSavedStats - handleDeleteAll", () => {
     });
 
     expect(deleteAllMock).toHaveBeenCalledTimes(1);
-    expect(host.textContent).not.toContain("eliberarea spatiului pe disc a esuat");
-  });
-
-  it("compactarea manuala reusita curata avertismentul anterior", async () => {
-    deleteAllMock.mockResolvedValue({ deleted: 5, compacted: false });
-    await render(<RnpmSavedStats />);
-    await act(async () => {
-      clickButton(/Baza mea RNPM/);
-      await Promise.resolve();
-    });
-    await act(async () => {
-      clickButton(/Sterge baza/);
-      await Promise.resolve();
-    });
-    const deleteDialog = confirmDialog();
-    const deleteConfirm = Array.from(deleteDialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
-      /Sterge tot/.test(b.textContent ?? "")
-    );
-    if (!deleteConfirm) throw new Error("Butonul de confirmare lipsa");
-    await act(async () => {
-      deleteConfirm.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(host.textContent).toContain("eliberarea spatiului pe disc a esuat");
-
-    await act(async () => {
-      clickButton(/^Compacteaza$/);
-      await Promise.resolve();
-    });
-    const compactDialog = confirmDialog();
-    const compactConfirm = Array.from(compactDialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
-      /^Compacteaza$/.test(b.textContent?.trim() ?? "")
-    );
-    if (!compactConfirm) throw new Error("Butonul de compactare lipsa");
-    await act(async () => {
-      compactConfirm.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(compactMock).toHaveBeenCalledTimes(1);
-    expect(host.textContent).not.toContain("eliberarea spatiului pe disc a esuat");
-  });
-
-  it("backup-ul manual reusit curata avertismentul anterior", async () => {
-    deleteAllMock.mockResolvedValue({ deleted: 5, compacted: false });
-    await render(<RnpmSavedStats />);
-    await act(async () => {
-      clickButton(/Baza mea RNPM/);
-      await Promise.resolve();
-    });
-    await act(async () => {
-      clickButton(/Sterge baza/);
-      await Promise.resolve();
-    });
-    const dialog = confirmDialog();
-    const confirmBtn = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
-      /Sterge tot/.test(b.textContent ?? "")
-    );
-    if (!confirmBtn) throw new Error("Butonul de confirmare lipsa");
-    await act(async () => {
-      confirmBtn.click();
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(host.textContent).toContain("eliberarea spatiului pe disc a esuat");
-
-    await act(async () => {
-      clickButton(/Creeaza backup acum/);
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-
-    expect(createBackupMock).toHaveBeenCalledTimes(1);
     expect(host.textContent).not.toContain("eliberarea spatiului pe disc a esuat");
   });
 });

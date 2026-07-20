@@ -1,5 +1,15 @@
 # Changelog - Legal Dashboard
 
+## v2.43.1 - 2026-07-20
+
+Release patch peste v2.43.0, pe acelasi branch `feat/v2.43.0-rnpm-split`. Doua directii mari, ambele dublu-review-uite adversarial (Codex GPT-5.6 Sol + panel multi-model), plus finisaje UI.
+
+**1. Remediere audit securitate + corectitudine.** Guard CSRF desktop GLOBAL pe mutatiile `/api/*` (header `X-Legal-Dashboard-Desktop`, exemptie PAT + SSE, kill switch cu warn structurat la boot) (SEC-01). Electron ridicat la 41.10.2 (patch Chromium via lockfile) (SEC-02a). Gate trusted-proxy fail-closed la boot pe web + loopback fara `TRUSTED_PROXY_CIDR`, cu validarea reala a CIDR-urilor (garbage sau prefix gol respinse), clasificator loopback unificat (127/8, `::1` canonic, `::ffff:127.x`) si suport `::1/128` (NEW-02). `redirect: "manual"` + guard pe 3xx la validarea cheilor API si pe fetch-ul SOAP PortalJust (SEC-04). Cap de dimensiune pe raspunsul RNPM (20MB, cod `response_too_large`) plus drenarea cu cap a `warmSession` ICCJ si a body-urilor abandonate pe early-return-uri (SEC-07). Sanitizarea + trunchierea `faultstring` la logare si `decodeXmlEntities` cu `U+FFFD` pe code points XML-invalide (SEC-05/06). Respingerea placeholder-elor de JWT secret din template (SEC-11). IPC de notificari fail-closed pe sender-check + validarea navigatiei oglindita pe `will-redirect` + `unref` pe timer-ul de shutdown drain (SEC-08/10, BUG-08). Raportul zilnic pe email are retry off-hour STRICT per-owner care supravietuieste miezului noptii retrimitand raportul zilei originale (BUG-04). `409 in_flight` pe race-ul de monitoring runs (`SQLITE_CONSTRAINT_UNIQUE` pe `monitoring_runs.job_id`) (BUG-03). Clamp pe `pagesTotal` RNPM la `ceil(total/pageSize)` (BUG-06). Cleanup robust al PDF-ului temporar cu `finished()` (BUG-01) si `try/finally` pe splitter (BUG-05). Backup fail-closed pe sidecar WAL ilizibil si pe ledger RNPM gol la restore. Avertizarile de buget AI respecta web-mode ca `quotaGuard`. Manualul in-app corectat pe stocarea cheilor (desktop = safeStorage OS; web = server-side AES-256-GCM). DEPLOY-SERVER cu backup RNPM corect (snapshot-uri, nu copierea directorului live) si versiuni de deploy sincronizate. Tracking advisory `GHSA-w5hq-g745-h8pq` pe `uuid`/`exceljs`. Riscuri acceptate documentate in SECURITY.md.
+
+**2. Rezultate partiale la cautarea PortalJust.** Cand apelul agregat PortalJust esueaza, `GET /api/dosare` face fallback tolerant per instanta (~246 instante, concurenta 10, buget 120s, cel mult 2 fallback-uri concurente per proces, limita fail-closed 413) si intoarce rezultatele sanatoase plus `failedInstitutii`; la doua sau mai multe instante selectate esecurile nu mai sunt inghitite silentios. UI: banner amber cu instantele fara raspuns (etichete traduse, colaps la 3+N), empty-state temperat, confirmare la export XLSX/PDF partial. Contract documentat in `API.md` + OpenAPI: raspunsul 200 poate fi partial, `exactMatch` e garantat DOAR cand `failedInstitutii` lipseste, dedup pe cheia `institutie|numar`. Verificat LIVE pe o pana reala la Galati: fallback in 23s, 240 dosare returnate. Dublu-review-uit pe plan SI pe implementare.
+
+**3. UI.** Dashboard-ul afiseaza garantiile de securitate corecte per mod (desktop = OS keystore + loopback; web = chei server-side criptate).
+
 ## v2.43.0 - 2026-07-13
 
 Separare fizica a datelor RNPM per utilizator: fiecare cont primeste propriul fisier SQLite `rnpm/<stem>.db`, cu backup si restaurare self-service care ating DOAR datele proprii. Baza unica (monolitul) pastreaza restul aplicatiei (utilizatori, autentificare, cote, monitorizari, audit, cursuri valutare) si primeste management de backup dedicat, admin-only, in Setari > Backup. Motivatia: incidentul din testarea live in care restaurarea din zona RNPM s-a dovedit a fi whole-DB si a pierdut scrieri recente din alte module.
@@ -82,85 +92,41 @@ Test live cu 4 identitati simultane (admin + 3 useri, proxy-uri dev separate): 4
 
 Primul boot dupa upgrade ruleaza split-ul automat (o singura data; pe baze mari dureaza proportional cu volumul RNPM). Rollback-ul complet = restaurarea backup-ului `legal-dashboard.pre-rnpm-split-*.db` pe versiunea VECHE a aplicatiei (pe v2.43.0 un monolit restaurat pre-split aborteaza boot-ul fail-closed — vezi RUNBOOK "Monolit restaurat dupa split"). Backup-urile vechi de monolit raman restaurabile din Setari > Backup; datele RNPM au de acum backup separat per utilizator.
 
-## v2.42.2 - 2026-07-09
+## v2.42.0 - 2026-07-07
 
-Patch de corectii pe findings-urile din review-ul post-merge al v2.42.1 (2 agenti paraleli pe diff-ul de cod). Un fix critic de regresie functionala, doua medii si trei minore. Branch `fix/v2.42.2-review-findings`.
+Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode) si aliniere de design la repo-ul de referinta. Partea a doua a reimplementarii deltei v2.40.1 -> v2.42.0 dupa `GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md` (MR 5-12 pe branch-ul `feat/v2.42.0-users-settings`, construit peste `feat/v2.41.0-web-ux` — vezi sectiunea v2.41.0), plus fixuri post-livrare din testare reala. Release-ul consolidat este v2.42.0; v2.41.0 nu a avut artefact propriu. Modul desktop: zero impact.
 
-### Fix critic: body limit global vs limite per-ruta
-
-Limiterul global de 1MB introdus in v2.42.1 era montat DUPA routerele `/api/*` (deci nu acoperea `POST /api/v1/tokens`, montat mai devreme in web mode — body nelimitat bufferat integral in memorie de un user autentificat) si, prin ordinea de inregistrare Hono, UMBREA limitele per-ruta mai mari de 1MB: exportul xlsx de dosare/termene (limita proprie 25MB) si name-lists preview/commit (10MB/15MB) primeau 413 "Payload prea mare" pe payload-uri normale (~300 dosare selectate depasesc deja 1MB). Fix: limiterul global e inregistrat inaintea TUTUROR routerelor, iar rutele cu payload mare legitim sunt exceptate exact-match si raman guvernate de limitele lor proprii. Regresii noi prin app-ul intreg (nu app-uri izolate per-router): body 1.5MB pe export ajunge la validarea rutei (400, nu 413); body >1MB pe `/api/v1/tokens` cu sesiune valida primeste 413.
-
-### Fixuri medii
-
-Release-ul bucket-ului pre-auth de rate limit e acum gardat pe `c.finalized`: getter-ul lazy `c.res` din Hono instantiaza `Response(null)` cu status 200 pe calea de exceptie, deci un throw INAINTE de autentificare elibera tentativa — exact clasa de cereri neautentificate esuate pe care limiterul trebuie sa o numere (regresie introdusa de mutarea release-ului in `finally` la v2.42.1). Timeout-ul de shutdown din Electron a crescut de la 5s la 40s: era mult sub bugetul intern de drain al backend-ului (30s HTTP/scheduler + 5s email), deci orice inchidere a aplicatiei in timpul unui tick de monitoring taia drain-ul gratios; capul exterior e doar failsafe — cand nu e nimic in zbor, drain-ul se rezolva in milisecunde.
-
-### Fixuri minore
-
-Fereastra proaspata de rate limit trece prin acelasi ceiling ca ramura de increment (cu `LEGAL_DASHBOARD_TOKEN_RATE_LIMIT` sub weight-ul 3x al `analyze-multi`, primul request din fiecare fereastra scapa neplafonat). Comentariul `isTrustedIpcSender` din `electron/main.js` nu mai sustine ca sender check-ul blocheaza consola DevTools (vectorul real e inchis de `devTools: IS_DEV`). Comentariul `finalize_noop` din scheduler documenteaza consecinta de re-claim imediat pe ramura non-duplicate, asumata sub single-writer.
-
-### Verificare
-
-Biome, tsc backend + frontend, build si suitele complete backend + frontend; 4 teste de regresie noi (export 1.5MB nu primeste 413, tokens web mode 413 pe >1MB, bucket pre-auth retinut la throw pre-auth, ceiling pe fereastra proaspata per-token).
-
-## v2.42.1 - 2026-07-08
-
-Patch de hardening rezultat din auditul full-project post-v2.42.0 (multi-agent + multi-model). Zero features noi; 10 fixuri de securitate si robustete pe findings confirmate individual pe cod, cu prioritate pe suprafata web. Branch `fix/v2.42.1-web-hardening`.
-
-### Securitate desktop (Electron)
-
-DevTools si meniul de debug erau active in build-urile instalate: `IS_DEV` se evalua din `NODE_ENV` la module load, inainte ca `startBackend()` sa-l seteze — acum deriva din `!app.isPackaged` (inchide expunerea `desktopApi.decryptKeys` din consola). Handler-ele IPC safeStorage (`available`/`encrypt`/`decrypt`) plus `window:setTheme` valideaza `event.sender` contra `mainWindow.webContents`. Health-check-ul de boot nu mai accepta doar string-ul `service` ca identitate: main genereaza un boot nonce (`LEGAL_DASHBOARD_BOOT_NONCE`), backend-ul il ecou in `/health` doar cand env-ul e setat, main verifica egalitatea — un proces local care fura portul 3002 nu mai trece drept backend.
-
-### Securitate si robustete web (backend)
-
-Weight-ul 3x pe rate limit se aplica acum pe AMBELE mount-uri ale `analyze-multi` (`/api/ai` + `/api/v1/ai` — ruta v1 primea weight 1) si pe bucket-ul per-token PAT (numara si el ponderat). Release-ul bucket-ului pre-auth a fost mutat in `finally` (o exceptie downstream nu mai consuma bugetul IP-ului pentru callerii autentificati). Body limit global de 1MB pe `/api/*` ca plasa de siguranta pentru rute viitoare (limitele per-ruta existente raman neschimbate). `/health/detail` intoarce 403 neconditionat in web mode — loopback-ul singur nu mai e suficient in spatele unui reverse proxy same-host; ops foloseste `/health` pentru liveness.
-
-### Monitoring scheduler
-
-`applyJobOutcome` ruleaza doar daca `finalize()` chiar a tranzitionat run-ul din `running` (return-ul boolean era ignorat — un run deja terminal putea corupe `fail_streak` si emite alerte `source_error` false); no-op-ul se logheaza. `durationMs` din catch-ul `runJobNow` se calculeaza din timestamp-ul de claim in loc de 0 hardcodat.
-
-### Tenant isolation (web-readiness)
-
-`ownerId` a devenit parametru obligatoriu (fara default `"local"`) in 9 functii din `avizRepository` + `searchRepository`. Audit-ul call site-urilor a confirmat ca rutele pasau deja ownerId-ul din context — niciun bug activ de tenant isolation; fix-ul inchide riscul latent (un call site viitor care omite parametrul nu mai compileaza). Singurul consumator al default-ului era prewarm-ul de boot (desktop-only), acum explicit.
-
-### Fara fix (justificat)
-
-Heartbeat-ul instance lock NU esueaza silent (throw-ul devine `uncaughtException` -> dialog + exit) — claim-ul de audit era inexact. Drain-ul `stop()` fara timeout propriu ramane acceptat: e deja marginit de `SHUTDOWN_DRAIN_MS` (30s) si de hard timeout-ul Electron `before-quit`.
-
-### Verificare
-
-Biome, tsc backend + frontend, build si suita completa: 1706 teste backend trecute (+ regresii noi: weight pe `/api/v1/ai/analyze-multi`, weight pe bucket token, release pre-auth pe exceptie, 413 global body limit, nonce prezent/absent in `/health`, 403 `/health/detail` web mode, finalize no-op fara `applyJobOutcome`, durationMs real pe throw).
-
-## v2.42.0 - 2026-07-08
-
-Administrare completa a utilizatorilor + pagina Setari pe taburi + pool AI unic cu cote si granturi + consum per utilizator + audit exportabil + refresh AI (Sonnet 5) + doua niveluri de finisaj UX (toast-uri, confirmari, sortare, dark mode). Etapa 2 din corectiile post-testare web (PLAN-web-ux-etapa2.md), pe branch-ul `feat/v2.42.0-users-settings`. Starea finala e sincronizata din implementarea paralela de pe GitLab (`GHID-IMPLEMENTARE-GITLAB-v2.41-v2.42.md`), care a inclus si fixuri post-livrare din testarea reala pe deployment-ul web. Modul desktop: zero impact.
-
-### Utilizatori: provisionare din UI
+### Utilizatori: provisionare din UI (MR 5)
 
 Migratia `0040` adauga index unic NOCASE pe email + `canonicalizeEmail` ca UNIC normalizator (creare, import, seed, bridge oauth2). `POST /users` creeaza utilizatori individual (roluri creabile: doar Utilizator/Admin); import in masa din xlsx cu template generat server-side, parsare server-side (header exact, aliasuri de rol, dedup in fisier, duplicate din DB raportate per rand, cap 500 randuri / 512KB), insert tranzactional totul-sau-nimic. Guard last-admin numai pe adminii ACTIVI (un admin suspendat nu mai conteaza ca fallback). Post-livrare: un cont STERS nu mai blocheaza emailul pe veci — re-adaugarea (create sau import) REACTIVEAZA randul existent (acelasi id, nume/rol din input, password_hash curatat, audit `reactivated: true`); activ/suspendat raman duplicate.
 
-### Setari pe taburi + pool AI unic
+### Setari pe taburi (MR 6) + pool AI unic (MR 7)
 
 Pagina `/setari` pe taburi cu gating pe rol (General pentru toti; Utilizatori/Chei API/Cote/Granturi/Consum/Audit doar admin), tab activ in `?tab=` cu `replace:true`, paginile admin refolosite cu prop `embedded`. `useCurrentUser` rescris ca store partajat (`useSyncExternalStore`). Migratiile `0041` (consolidare `ai.single`+`ai.multi` -> pool unic "ai") si `0042` (backfill expirari legacy la UTC); `quotaGuard` aplica limita pe pool-ul unic (single + multi insumate); granturile si nelimitatul se exclud (422 `unlimited_budget`, baza include default-ul din env); `POST /grants/:id/revoke` + `/me/budget` pe "ai".
 
-### Consum per utilizator + audit utilizabil
+### Consum per utilizator (MR 8) + audit utilizabil (MR 9)
 
-`GET /usage/overview` (AI + captcha per utilizator, EXACT aceleasi functii ca guard-urile — cifrele coincid cu enforcementul), tab Consum cu sub-taburi AI/Captcha, totaluri per user (zilnic/saptamanal/total) cu rand expandabil + total tenant, QuotaCard cu echivalent EUR (fail-closed pe curs stale; parserul ECB accepta si atribute cu apostrofuri), sortare client-side (`useClientSort` + `SortableTh`) si paginare client-side cu clamp sincronizat. Audit imbogatit cu emailul owner/actor (ID-ul brut in title, fallback ID/"system"), filtre pe pattern-ul corect (debounce cu flush pe Reseteaza, reset pagina inline, AbortController cu guards, refreshTick), paginare completa 25-200 si raport XLSX care respecta TOATE filtrele paginii (`GET /audit/export`, 413 peste 10000 randuri, escape formula-injection inclusiv pe IP, nume fisier datat).
+`GET /usage/overview` (AI + captcha per utilizator, EXACT aceleasi functii ca guard-urile — cifrele coincid cu enforcementul), tab Consum cu sub-taburi AI/Captcha, sortare client-side (`useClientSort` + `SortableTh`) si paginare client-side cu clamp sincronizat. Audit imbogatit cu emailul owner/actor (ID-ul brut in title, fallback ID/"system"), filtre pe pattern-ul corect (debounce cu flush pe Reseteaza, reset pagina inline, AbortController cu guards, refreshTick), paginare completa 25-200 si raport XLSX pe interval (`GET /audit/export`, 413 peste 10000 randuri, escape formula-injection inclusiv pe IP, nume fisier datat).
 
-### AI: Sonnet 5 + prompturi system/user
+### AI: Sonnet 5 + prompturi system/user (MR 10)
 
 Claude Sonnet 4.6 -> Sonnet 5 (`claude-sonnet-5`, OpenRouter `anthropic/claude-sonnet-5`, pricing 3/15 USD per 1M). `AiPrompt { system, user }` separa instructiunile de datele dosarului (fence cu escape pe obiect/parti/sedinte/analize/nume model); helper comun `dosar_data` cu cap 30 sedinte + total declarat, campurile ICCJ si caile de atac (`caiAtac`) incluse.
 
-### Finisaj UX Nivel 1 + 2
+### Finisaj UX Nivel 1 + 2 (MR 11-12)
 
-Chunk-reload la deploy (sessionStorage in try/catch), confirmari pe TOATE actiunile ireversibile prin `ConfirmProvider` (stergere cheie tenant, inchidere alerta, bulk dismiss cu count real, revoke-all tokens, rol/status, cota, grant — zero `window.confirm`), etichete umane din surse unice (`monitoringRunStatus`, `userLabels`, `quotaFeatureLabels`, `auditOutcome`), dark mode fara scapari, sistem de toast-uri in-house (`ToastProvider`, cap 4 cu evictie FIFO, timere curatate la unmount) adoptat pe toate mutatiile + toast de EROARE pe exporturile PDF Changelog/Manual (inainte esuau silentios), fix critic `useDialog` (onClose in ref, efect doar pe `[open]` — nu mai fura focusul), modalele de export pe `useDialog`, sortare pe coloane in Users/Audit/Monitorizare pe etichetele umane.
+Chunk-reload la deploy (sessionStorage in try/catch), confirmari pe TOATE actiunile ireversibile prin `ConfirmProvider` (stergere cheie tenant, inchidere alerta, bulk dismiss cu count real, revoke-all tokens, rol/status, cota, grant — zero `window.confirm`), etichete umane din surse unice (`monitoringRunStatus`, `userLabels`, `quotaFeatureLabels`), dark mode fara scapari, sistem de toast-uri in-house (`ToastProvider`, cap 4 cu evictie FIFO, timere curatate la unmount) adoptat pe toate mutatiile + toast de EROARE pe exporturile PDF Changelog/Manual (inainte esuau silentios), fix critic `useDialog` (onClose in ref, efect doar pe `[open]` — nu mai fura focusul), modalele de export pe `useDialog`, sortare pe coloane in Users/Audit/Monitorizare pe etichetele umane.
 
-### Fixuri din testarea reala pe web
+### Aliniere design la repo-ul de referinta + fixuri din testare
 
-Popover-ele de istoric functionale cu sidebar-ul restrans (position:fixed vs clipping), `Cache-Control` explicit pe static (no-cache pe HTML, immutable pe /assets — browserul nu mai serveste bundle-uri vechi dupa rebuild), select-urile native inlocuite cu componenta Select custom (popup tematizat pe dark), reset formular cota la schimbarea feature-ului, badge PJ lizibil (culoare proprie, 10px) si absent pe intrarile RNPM, titluri de alerta fara ghilimele in jurul numelui monitorizat (normalizare si pe titlurile istorice, la afisare), JobKindTabs la aceeasi inaltime cu inputul de cautare, panoul Notificari sistem ascuns in browser, aria-sort + aria-label pe coloanele sortabile, `LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1` in mediul local de dev (tokenurile API erau blocate de cerinta HTTPS pe HTTP local).
+Paritate vizuala cu `feat/v2.42.0-users-settings` din repo-ul original (taburi pill, structura paginilor Cote/Granturi cu vedere globala doar fara selectie + "Schimba utilizatorul", texte/empty states/confirmari identice), cu 4 extras pastrate deliberat: revocare grant din vederea globala, coloanele Limita efectiva/Sursa in Consum, pre-populare formular la Editeaza in Cote, panoul de chei tenant cu badge-uri. Fixuri: popover-ele de istoric functionale cu sidebar-ul restrans (position:fixed vs clipping), `Cache-Control` explicit pe static (no-cache pe HTML, immutable pe /assets — browserul nu mai serveste bundle-uri vechi dupa rebuild), select-urile native inlocuite cu componenta Select custom (popup tematizat pe dark), reset formular cota la schimbarea feature-ului, badge PJ lizibil (culoare proprie, 10px) si absent pe intrarile RNPM, titluri de alerta fara ghilimele in jurul numelui monitorizat (normalizare si pe titlurile istorice, la afisare), JobKindTabs la aceeasi inaltime cu inputul de cautare, panoul Notificari sistem ascuns in browser, aria-sort + aria-label pe coloanele sortabile.
+
+### Hardening post-review + migrare GPT-5.6 (2026-07-09, pre-merge)
+
+Fixurile v2.42.1/v2.42.2 de pe repo-ul de referinta, aplicate in forma finala (fara regresia intermediara de body limit), plus doua findings noi din audituri independente si migrarea modelelor OpenAI. Backend: plasa globala `bodyLimit` 1MB pe `/api/*` montata inaintea tuturor routerelor, cu exceptii exact-match pentru rutele cu payload mare legitim (export xlsx 25MB, name-lists 10/15MB) — `POST /api/v1/tokens` nu mai bufera body-uri nelimitate; release-ul `preAuthRateLimit` mutat in `try/finally` cu guard pe `c.finalized` (throw pre-auth ramane contorizat, throw post-auth elibereaza bucket-ul); weight 3x pe `analyze-multi` aplicat pe AMBELE mount-uri (`/api/ai` + `/api/v1/ai`) si pe bucket-ul per-token; plafonul verificat si pe fereastra proaspata; `/health/detail` intoarce 403 neconditionat in web mode (reverse proxy same-host nu mai expune telemetrie); `ownerId` obligatoriu in `avizRepository`/`searchRepository` (fallback-ul silentios cross-tenant devine eroare de compilare); scheduler-ul nu mai dublu-aplica `fail_streak` pe un run deja terminal (guard pe `finalize()` + log `finalize_noop`) si scrie durata reala in catch-ul din `runJobNow`. Rezilienta web: scrierile SSE fire-and-forget din RNPM bulk/split au acum catch — un client deconectat mid-stream nu mai poate dobori procesul prin `unhandledRejection`. Import utilizatori: emailurile lipite din Outlook ca hyperlink cu text non-email se citesc din adresa `mailto:` (contractul "textul afisat castiga" se pastreaza cand textul e email). Desktop: `IS_DEV` din `app.isPackaged` (DevTools oprit in build-urile instalate), validare sender pe IPC safeStorage, boot nonce anti port-squat ecou in `/health`, shutdown 40s peste bugetul de drain. Modele: familia GPT-5.6 (Sol premium $5/$30, Terra echilibrat $2.50/$15, Luna rapid $1/$6 per 1M, preturi de preview verificate 2026-07-09) inlocuieste GPT-5.4 in cataloage; pricing-ul 5.4 ramane pentru retry-uri in zbor.
 
 ### Verificare
 
-Gate-uri complete inainte de commit (biome, tsc backend + frontend, build, teste). 1665 teste backend (+ reactivare useri stersi, usage/overview, quotaGuard pool unic, import, audit export, down 0040/0042) si 326 teste frontend (+ toast timere, useDialog focus, useClientSort, Keys/ApiAccessPanel cu provideri). Claim-uri CodeRabbit verificate individual (acceptate cu dovezi sau respinse cu argumente).
+Gate-uri 0.3 inainte de fiecare commit (biome, tsc backend + frontend, build, teste). 1665 teste backend (+ reactivare useri stersi, usage/overview, quotaGuard pool unic, import, audit export) si 326 teste frontend (+ toast timere, useDialog focus, useClientSort, Keys/ApiAccessPanel cu provideri). Claim-uri CodeRabbit verificate individual (acceptate cu dovezi sau respinse cu argumente); comparatie side-by-side cu repo-ul de referinta rulat local. Batch-ul de hardening 2026-07-09: TDD per fix (red inainte de implementare), suite complete backend + frontend verzi, audit advers cu review-panel inainte de commit.
 
 ### Note de upgrade
 
@@ -169,60 +135,32 @@ dintre ai.single si ai.multi ca limita a pool-ului unic "ai". Utilizatorii care
 aveau limite asimetrice (ex. multi mult peste single) pot vedea 429 pe analiza
 multi-agent dupa upgrade — adminul trebuie sa revada limitele in pagina Cote si
 sa le reaseze la valorile dorite. Inainte de upgrade pe un tenant web, ruleaza
-pre-flight-ul de duplicate de email (migration 0040 opreste boot-ul pe
-duplicate istorice case-insensitive).
+pre-flight-ul de duplicate de email din RUNBOOK (migration 0040 opreste boot-ul
+pe duplicate istorice case-insensitive).
 
-## v2.41.0 - 2026-07-04
+## v2.41.0 - 2026-07-06
 
-Etapa 1 din corectiile post-testare web (PLAN-web-ux-fixes.md): layout-ul in browser, conectarea frontend-ului la cheile tenant si UX-ul paginii de cote. Diagnostic prin doua workflow-uri multi-agent cu verificare in cod; planul a trecut printr-un review adversarial multi-model (review-panel: Opus 4.8 + GPT-5.5 + Kimi K2.7 + Qwen3.7, sinteza Fable 5) — 3 findings High + 8 Medium integrate inainte de implementare. Zero schimbari Docker/Caddy/oauth2-proxy; desktop-ul ramane identic.
+Fundatia web a sprintului v2.41-v2.42: mediu local de testare pentru web mode, identitate fail-closed pe bridge-ul oauth2, layout web fara chrome-ul Electron, cheile tenant conectate in frontend si vederile globale pentru cote/granturi. Livrat pe branch-ul `feat/v2.41.0-web-ux` (MR 0-4 + fixuri din review), consolidat ulterior in release-ul v2.42.0 — v2.41.0 nu a avut artefact de release propriu. Modul desktop: zero impact.
 
-### Fix: layout web (banda alba, scala 112.5%, sidebar taiat)
+### Audit baseline + bridge oauth2 fail-closed (MR 0 / 0a)
 
-Trei cauze independente, trei fix-uri gated pe `window.desktopApi`: (1) drag strip-ul de 32px + `pt-8` (compensatii pentru `titleBarOverlay` Electron) nu se mai randeaza in browser — banda alba de sus dispare; (2) font-size-ul root porneste pe web de la 16px (baseline browser) in loc de 18px — valoarea desktop era mascata de `setZoomLevel(0.9)` aplicat de Electron, compensare inexistenta in browser, deci web-ul randa la 112.5% si cerea zoom-out manual; migrare one-time a valorii auto-persistate in localStorage (rulata INAINTE de orice persist — altfel vechiul default o suprascria) + persistenta doar la alegerea explicita a userului + validare `Number.isInteger` pe valoarea stocata; (3) navigatia + istoricul din sidebar primesc scroll intern in modul expandat (footer-ul ramane pinned; in modul colapsat fara overflow, ca popover-urile de istoric sa nu fie clip-uite), cu `min-h-40` pe sectiunea de istoric deschisa ca lista sa nu colapseze la 0 pe viewport-uri scunde.
+Audit al main-ului GitLab cu sonde functionale A-F consemnat in `BASELINE-DELTA.md` (ce exista si functioneaza vs ce trebuie portat din ghid). Bridge-ul oauth2 respinge cererile cu headere de identitate conflictuale (fail-closed pe `X-Forwarded-Email` vs `X-Auth-Request-Email`) in loc sa aleaga tacit unul dintre ele.
 
-### Fix: cheile tenant ajung in sfarsit la frontend-ul web
+### Mediu local de testare web (MR 1)
 
-Backend-ul rezolva corect cheile din `tenant_api_keys` inca din v2.34.0, dar frontend-ul citea cheile EXCLUSIV prin `window.desktopApi` (inexistent in browser) si bloca request-urile client-side inainte sa plece — cautarile RNPM si analizele AI pareau moarte desi adminul configurase totul. Hook nou `useTenantKeyStatus` consuma `GET /api/v1/me/key-status` (endpoint existent, zero consumatori pana acum), cu stare cvadrivalenta (desktop/loading/ready/error), politica fail-open pe starile tranzitorii (backend-ul e sursa de adevar), refetch la window focus si semnal de platforma din raspunsul serverului (`authMode` real, nu detectia de browser — combinatia dev "browser + backend desktop" ramane BYOK). Guard-urile RNPM devin web-aware in toate punctele: `runSearch`, `runSplit`, **`loadNextBatch` (paginarea "Incarca tot" — ar fi ramas no-op silentios)** si bulk; badge-ul "Setari API" arata starea cheilor tenant (neutru pe loading, nu "Neconfigurat" fals); `useDosareAi` isi deriva listele de modele din cheile tenant si nu mai trimite `apiKeys` in body (care declansa 501). Body-urile RNPM omit campurile captcha in tenant mode.
+`scripts/dev-web-local.ps1`: porneste backend-ul in `auth_mode=web` cu DB izolata (git-ignored) si DOUA proxy-uri care simuleaza oauth2-proxy (admin pe 127.0.0.1:3003, user normal pe localhost:3004 — host diferit ca cookie jar-urile sa nu se fure reciproc). Secrete persistente generate exclusiv din RNG criptografic; seed admin idempotent; verificare automata a bridge-ului la pornire. Fix ulterior: compatibilitate PowerShell 5.1 + robustete (cleanup procese orfane la esec).
 
-### Fix: dialogul "Setari API" in web + PAT admin-only
+### Layout web + chei tenant in frontend (MR 2, 3, 3b)
 
-In tenant mode dialogul se deschide pentru TOTI userii (non-adminii primeau un no-op silentios), dar formularul BYOK nu se mai randeaza niciodata in web — salvarea safeStorage esua silentios, footerul afirma fals "cheile se salveaza local", iar cheile ramase in state ajungeau in body si declansau 501 pe AI. In locul lui: panou read-only cu starea per cheie din `/me/key-status` + textul "gestionate de administratorul tenantului"; adminii au buton direct catre Administrare -> Chei API. Sectiunea de notificari native (Electron-only) dispare din browser, iar managementul token-urilor PAT devine admin-only in web — atat in UI cat si server-side (`requireRole("admin")` pe `/api/v1/tokens*` cand `auth_mode=web`; desktop neafectat).
+In browser aplicatia nu mai afiseaza chrome-ul Electron (bara de titlu, controale fereastra); trepte de font per platforma. `useTenantKeyStatus` citeste starea cheilor tenant de la server (`GET /me/key-status`) cu politica fail-open pe loading/error; panou de status pe roluri: adminul vede inventarul per provider (Configurata, cu ultimele 4 caractere ale cheii / Neconfigurata), non-adminul doar un banner cand o capabilitate e indisponibila. Rutarea AI implicita prin `resolveEffectiveAiMode` (env > tenant DB > BYOK desktop).
 
-### Fix: fallback captcha simetric pe ramura tenant + "tenant key wins" integral
+### Vederi globale cote si granturi (MR 4)
 
-`resolveCaptchaKeyForRoute` deriva acum `fallback2CaptchaKey` din cheile tenant cu paritate desktop: race -> cheia celuilalt provider (ambele directii), sequential + CapSolver primary -> fallback uman 2Captcha. Body-ul forwarded pe ramura tenant e sanitizat (campurile `captchaKey/captchaProvider/captchaMode/fallback2CaptchaKey` din client sunt eliminate) — inainte, `rnpm.ts` cadea pe `body.fallback2CaptchaKey` ales de client chiar in web mode. Functia orfana `rejectCaptchaKeyInWebMode` (zero call-sites) stearsa; sectiunea stale "Web-mode 501 gate" din CLAUDE.md rescrisa pe mecanismul real. Teste noi: ambele directii de fallback, sanitizarea body-ului, sequential cu/fara fallback.
+Paginile Cote si Granturi primesc vedere globala la deschidere (toate plafoanele / granturile active ale tuturor userilor, fara cautare prealabila), formular pe enum-ul de feature-uri si `UserPicker` cu dropdown-ul tuturor userilor activi.
 
-### Fix: pagina Cote fara token-uri interne
+### Fixuri din review-uri
 
-Campul text liber pentru feature (enum inchis de 3 valori, validat cu `z.enum` — "RNPM" tastat producea "Body invalid" generic) devine select cu etichete umane; unitatea limitei (USD vs captcha-uri) si helper text-ul se actualizeaza din selectie. Edit-ul unui rand legacy cu feature in afara enum-ului round-trip-uieste corect (optiune disabled-but-selected). Grants: relabel pe cele doua optiuni AI existente; ramane explicit AI-only (granturile sunt denominate USD, guard-ul captcha nu aplica extra-grant logic).
-
-### Tooling: mediu web local de test
-
-`scripts/dev-web-local.ps1` ridica un server web local complet fara Docker/Caddy: backend in `auth_mode=web` cu DB izolata (`.dev-web-local/`, git-ignored), seed admin si mint de sesiune prin `POST /api/v1/auth/oauth2/sync` — exact request-ul oauth2-proxy din productie. Smoke-ul v2.41.0 a rulat pe el: bridge -> sesiune -> key-status -> RNPM pe ramura tenant (501 `CAPTCHA_NOT_CONFIGURED` corect fara cheie; validare reala a cheilor la setare in `/admin/keys`).
-
-### Verificare
-
-Plan reviewed adversarial INAINTE de cod (15 findings adoptate, 3 respinse ca false dupa verificare in sursa, 1 escaladat la decizie de produs). Teste noi: `useFontSize` (9 — defaults per platforma, migrare cu ordinea corecta, persist doar la alegere), `useTenantKeyStatus` (5 — fail-open, dev combo, refetch la focus), `ApiKeyDialog` (rework web), `rnpmGuards` (+6 — fallback ambele directii, sanitizare). Biome + `tsc --noEmit` backend/frontend + `npm run build` + suitele complete (1599 backend, 279 frontend, 2 electron) verzi. Smoke web local end-to-end + review deep-code-reviewer pe diff inainte de merge.
-
-## v2.40.1 - 2026-07-02
-
-Doua fixuri de deploy web, ambele descoperite la primul deploy real pe platforma Dokploy (build direct din git clone): imaginea Docker nu se putea construi fara build local prealabil, iar puntea de autentificare oauth2-proxy -> backend folosea mecanisme care nu exista in oauth2-proxy legacy config si nu a functionat niciodata in productie. Desktop: zero impact.
-
-### Fix: Docker build din git clone + persistenta DB
-
-`Dockerfile`-ul castiga un stage `build` care compileaza `dist-backend` (esbuild CJS) + `dist-frontend` (Vite) in imagine, cu `npm ci --ignore-scripts` (fara download Electron, fara compilare nativa inutila). `docker build` functioneaza acum pe un git clone curat — cerinta platformelor build-from-git (Dokploy, Coolify) — si identic in CI si local; inainte, `COPY dist-*` presupunea un `npm run build` rulat pe host si esua pe clone proaspat. `.dockerignore` rescris ca sursele sa intre in context iar artefactele locale (dist-*, release) si secretele sa ramana afara. `docker-compose.yml` (root) monteaza acum volumul persistent `ld_data` la `/data` cu `LEGAL_DASHBOARD_DB_PATH` implicit — inainte baza de date traia in filesystem-ul containerului si disparea la fiecare redeploy. Directorul `/data` e creat in imagine cu ownership pentru userul non-root `app` (un volum nou initializat dintr-o imagine fara director iesea root-owned si backend-ul pica cu EACCES la primul write). `scripts/seed-admin.mjs` e inclus in imaginea runtime — pasul de provisionare admin din DEPLOY-SERVER.md rula un fisier care nu exista in container.
-
-### Fix: bridge oauth2-proxy pe mecanismele reale (Basic Auth + X-Forwarded-Email)
-
-Designul original (v2.31-v2.40.0) presupunea ca oauth2-proxy injecteaza upstream `X-Proxy-Auth` (prin `OAUTH2_PROXY_INJECT_REQUEST_HEADERS` — optiune care exista DOAR in alpha config; env var-ul e ignorat silentios) si `X-Auth-Request-Email` (prin `set-xauthrequest` — care seteaza header-e de RASPUNS pentru nginx auth_request, nu header-e catre upstream). Niciunul nu ajungea la backend, deci bridge-ul `/api/v1/auth/oauth2/sync` respingea 100% din request-uri in productie; testele unit injectau header-ele direct in Hono si nu puteau prinde asta. Acum stack-ul foloseste mecanismele reale din legacy config: secretul comun pleaca ca parola in `Authorization: Basic base64(user:secret)` (`basic-auth-password` + `pass-basic-auth`), identitatea ca `X-Forwarded-Email` (`pass-user-headers`). Bridge-ul accepta ambele variante pentru fiecare (Basic Auth SAU `X-Proxy-Auth`; `X-Forwarded-Email` SAU `X-Auth-Request-Email` — compatibilitate cu setup-uri nginx auth_request), identitatea fiind citita exclusiv dupa validarea timing-safe a secretului. `set-xauthrequest` si ruta moarta `GET /api/v1/auth/oauth2/sync` din `skip_auth_routes` eliminate din compose. Multumiri raportului de deploy care a identificat mecanismele functionale.
-
-### Ingress PAT prin fata publica (Caddy @pat)
-
-API-ul programatic PAT (v2.40.0) era inaccesibil prin stack-ul `deploy/`: Caddy strip-uia `Authorization` iar oauth2-proxy redirecta request-urile fara sesiune Google la login. `deploy/Caddyfile` are acum o ruta dedicata: `Authorization: Bearer ld_pat_*` pe `/api/*` (exceptand `/api/v1/auth/*` — traficul PAT nu poate atinge bridge-ul oauth2) merge DIRECT la backend, cu `Cookie` + header-ele de identitate strip-uite (strat security-critical, dublat de excluderea de path). Enforcementul ramane integral in backend (dispatch Bearer-only, validare DB per request, gate default-deny, rate-limit per token, gate HTTPS, audit + alerta IP nou). Ambele handle-uri Caddy trimit acum `{remote_host}` (IP fara port) in loc de `{remote}` (IP:port, pe care `readClientIp` il respingea — rate-limit-ul per client si alerta IP-nou colapsau pe IP-ul containerului). Design validat printr-un review adversarial pe 3 lentile (semantica Caddy, bypass securitate, regresii ops; verdict GO-WITH-FIXES, toate fix-urile aplicate), `caddy validate` verde local si adaugat ca pas CI in `docker-build.yml`, iar `scripts/smoke-deploy.sh`/`.ps1` au proba de ingress PAT (401 asteptat, 302 = ruta lipsa; header-ele de securitate prezente). API.md documenteaza forma canonica `Bearer ld_pat_...` (case-sensitive pe ruta de edge).
-
-### Verificare + hardening post-review
-
-Review adversarial multi-model (review-panel: Opus + GPT + GLM + Qwen, sinteza Opus) pe intregul diff, cu remedieri aplicate: comparatia de secret trece prin SHA-256 inainte de `timingSafeEqual` (fara early-return pe lungime = fara semnal de timing), mecanismele de secret sunt OR adevarat (un Basic malformat nu mai blocheaza un `X-Proxy-Auth` valid), header-ele de identitate conflictuale (ambele prezente, valori diferite) sunt respinse fail-closed cu audit dedicat, iar pentru upgrade-ul volumelor `ld_data` create de imagini pre-v2.40.1 (root-owned) e documentat chown-ul one-time in DEPLOY-SERVER.md §8. Limitarea PAT identificata la acest review (clientii `Authorization: Bearer ld_pat_...` nu puteau traversa stack-ul oauth2-proxy) a fost REZOLVATA in acelasi release prin ruta de ingress Caddy `@pat` — vezi sectiunea "Ingress PAT prin fata publica" de mai sus si DEPLOY-SERVER.md §13. Teste bridge extinse (+10): parola Basic valida/gresita/goala/malformata, secret cu `:`, identitate din `X-Forwarded-Email`, user-ul Basic ignorat ca identitate, header Basic inert pe rutele non-bridge (cookie-ul castiga), conflict de identitate respins, caile `X-Proxy-Auth` + `X-Auth-Request-Email` raman verzi. Biome + `tsc --noEmit` backend/frontend + `npm run build` + suitele complete de teste verzi.
+Audit adversarial review-panel (5 modele + sinteza) + batch-uri CodeRabbit aplicate: sidebar scrollabil (footer-ul nu mai iese din pagina), dialogul de chei pentru non-admini, badge tri-state pe statusul cheilor, aria-labels pe butoanele icon-only, reset formulare la schimbarea userului, fix crash pe pagina Consum, gating-ul panoului de status pe modul serverului (nu pe runtime-ul browserului).
 
 ## v2.40.0 - 2026-07-02
 

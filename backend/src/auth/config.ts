@@ -64,11 +64,23 @@ export function getOAuth2ProxySharedSecret(env: NodeJS.ProcessEnv = process.env)
   return raw;
 }
 
+// SEC-11: placeholder-ele lasate in template-urile de deploy (docker-compose,
+// .env.example) trec pragul de lungime dar NU sunt secrete reale. Respinge-le
+// fail-closed la boot ca un stack pornit cu template necompletat sa esueze
+// zgomotos, nu sa ruleze cu un secret ghicibil.
+const JWT_SECRET_PLACEHOLDER = /REPLACE_WITH|CHANGE_ME|YOUR_SECRET/i;
+
 export function requireJwtSecret(env: NodeJS.ProcessEnv = process.env): string {
   const secret = getJwtSecret(env);
   if (!secret || secret.length < WEB_SECRET_MIN_LENGTH) {
     throw new Error(
       `JWT_SECRET este obligatoriu in web mode si trebuie sa aiba cel putin ${WEB_SECRET_MIN_LENGTH} caractere.`
+    );
+  }
+  if (JWT_SECRET_PLACEHOLDER.test(secret)) {
+    throw new Error(
+      "JWT_SECRET contine un placeholder de template (REPLACE_WITH/CHANGE_ME/YOUR_SECRET); " +
+        "inlocuieste-l cu un secret real inainte de boot."
     );
   }
   return secret;

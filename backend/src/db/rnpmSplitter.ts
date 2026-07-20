@@ -353,97 +353,99 @@ function copyOwnerToFile(owner: string): Record<string, number> {
   fs.mkdirSync(path.dirname(finalPath), { recursive: true });
   for (const p of [tmpPath, `${tmpPath}-wal`, `${tmpPath}-shm`]) unlinkStrict(p);
 
+  // BUG-05: src (conexiunea readonly la monolit) traieste intr-un try/finally
+  // care garanteaza close() pe ORICE path — inclusiv daca `new Database(tmpPath)`,
+  // renameWithRetry sau probe-ul post-publish arunca (altfel handle-ul sursa ar fi
+  // scapat neinchis pe fiecare esec).
   const src = openMonoSourceReadonly();
-  const target = new Database(tmpPath);
   try {
-    target.pragma("journal_mode = WAL");
-    target.pragma("foreign_keys = ON");
-    target.pragma("synchronous = NORMAL");
-    target.pragma("busy_timeout = 5000");
-    registerRnpmNorm(target);
-    // Runner-ul INAINTE de date (capcana sentinel: pe fisier gol nu exista
-    // tabele => nu backfill-uieste; cu date deja prezente ar backfill-ui).
-    runMigrations(target, MIGRATIONS_RNPM_DIR);
+    const target = new Database(tmpPath);
+    try {
+      target.pragma("journal_mode = WAL");
+      target.pragma("foreign_keys = ON");
+      target.pragma("synchronous = NORMAL");
+      target.pragma("busy_timeout = 5000");
+      registerRnpmNorm(target);
+      // Runner-ul INAINTE de date (capcana sentinel: pe fisier gol nu exista
+      // tabele => nu backfill-uieste; cu date deja prezente ar backfill-ui).
+      runMigrations(target, MIGRATIONS_RNPM_DIR);
 
-    const columnsOf = (t: string): string[] =>
-      (src.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
-    // Ordinea de insert: descrieri INAINTE de COPY_TABLES (rnpm_bunuri.descriere_id).
-    const insertOrder = ["rnpm_bunuri_descrieri", ...COPY_TABLES] as const;
+      const columnsOf = (t: string): string[] =>
+        (src.prepare(`PRAGMA table_info(${t})`).all() as { name: string }[]).map((c) => c.name);
+      // Ordinea de insert: descrieri INAINTE de COPY_TABLES (rnpm_bunuri.descriere_id).
+      const insertOrder = ["rnpm_bunuri_descrieri", ...COPY_TABLES] as const;
 
-    const copyAll = target.transaction(() => {
+      const copyAll = target.transaction(() => {
+        for (const t of insertOrder) {
+          const cols = columnsOf(t);
+          const insert = target.prepare(
+            `INSERT INTO ${t} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`
+          );
+          for (const row of src.prepare(sourceSelect(t, cols)).iterate(owner)) {
+            insert.run(cols.map((c) => (row as Record<string, unknown>)[c]));
+          }
+        }
+        // sqlite_sequence: preia high-water mark-ul sursei per tabela — id-urile
+        // sterse istoric peste MAX(id) nu se reemit in fisierul nou.
+        for (const t of ALL_RNPM_TABLES) {
+          const srcSeq = src.prepare("SELECT seq FROM sqlite_sequence WHERE name = ?").get(t) as
+            | { seq: number }
+            | undefined;
+          if (!srcSeq) continue;
+          const updated = target
+            .prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?")
+            .run(srcSeq.seq, t);
+          if (updated.changes === 0) {
+            target.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)").run(t, srcSeq.seq);
+          }
+        }
+      });
+      copyAll();
+
+      // Verificare: COUNT per tabela (sursa WHERE owner vs fisier) + subsetul
+      // descrierilor. Count-urile verificate devin manifestul owner-ului (Task 3):
+      // pentru rnpm_bunuri_descrieri numarul e EXACT subsetul WHERE EXISTS al
+      // countSql-ului, nu COUNT(*) global pe monolit.
+      const countSql = (t: string): string =>
+        t === "rnpm_bunuri_descrieri"
+          ? "SELECT COUNT(*) AS n FROM rnpm_bunuri_descrieri d " +
+            "WHERE EXISTS (SELECT 1 FROM rnpm_bunuri b WHERE b.descriere_id = d.id AND b.owner_id = ?)"
+          : `SELECT COUNT(*) AS n FROM ${t} WHERE owner_id = ?`;
       for (const t of insertOrder) {
-        const cols = columnsOf(t);
-        const insert = target.prepare(
-          `INSERT INTO ${t} (${cols.join(", ")}) VALUES (${cols.map(() => "?").join(", ")})`
-        );
-        for (const row of src.prepare(sourceSelect(t, cols)).iterate(owner)) {
-          insert.run(cols.map((c) => (row as Record<string, unknown>)[c]));
+        const srcN = (src.prepare(countSql(t)).get(owner) as { n: number }).n;
+        const mineN = (target.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
+        if (srcN !== mineN) {
+          throw new Error(`[rnpm_split] verificare esuata pentru ${owner}/${t}: mono=${srcN} vs fisier=${mineN}`);
         }
+        counts[t] = mineN;
       }
-      // sqlite_sequence: preia high-water mark-ul sursei per tabela — id-urile
-      // sterse istoric peste MAX(id) nu se reemit in fisierul nou.
-      for (const t of ALL_RNPM_TABLES) {
-        const srcSeq = src.prepare("SELECT seq FROM sqlite_sequence WHERE name = ?").get(t) as
-          | { seq: number }
-          | undefined;
-        if (!srcSeq) continue;
-        const updated = target
-          .prepare("UPDATE sqlite_sequence SET seq = MAX(seq, ?) WHERE name = ?")
-          .run(srcSeq.seq, t);
-        if (updated.changes === 0) {
-          target.prepare("INSERT INTO sqlite_sequence (name, seq) VALUES (?, ?)").run(t, srcSeq.seq);
-        }
+      integrityCheckOrThrow(target, `${owner} (pre-publish)`);
+      target.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
+    } catch (e) {
+      try {
+        target.close();
+      } catch {
+        /* best-effort */
       }
-    });
-    copyAll();
-
-    // Verificare: COUNT per tabela (sursa WHERE owner vs fisier) + subsetul
-    // descrierilor. Count-urile verificate devin manifestul owner-ului (Task 3):
-    // pentru rnpm_bunuri_descrieri numarul e EXACT subsetul WHERE EXISTS al
-    // countSql-ului, nu COUNT(*) global pe monolit.
-    const countSql = (t: string): string =>
-      t === "rnpm_bunuri_descrieri"
-        ? "SELECT COUNT(*) AS n FROM rnpm_bunuri_descrieri d " +
-          "WHERE EXISTS (SELECT 1 FROM rnpm_bunuri b WHERE b.descriere_id = d.id AND b.owner_id = ?)"
-        : `SELECT COUNT(*) AS n FROM ${t} WHERE owner_id = ?`;
-    for (const t of insertOrder) {
-      const srcN = (src.prepare(countSql(t)).get(owner) as { n: number }).n;
-      const mineN = (target.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get() as { n: number }).n;
-      if (srcN !== mineN) {
-        throw new Error(`[rnpm_split] verificare esuata pentru ${owner}/${t}: mono=${srcN} vs fisier=${mineN}`);
-      }
-      counts[t] = mineN;
+      throw e;
     }
-    integrityCheckOrThrow(target, `${owner} (pre-publish)`);
-    target.prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
-  } catch (e) {
+    target.close();
+
+    for (const suffix of ["-wal", "-shm"] as const) unlinkStrict(finalPath + suffix);
+    renameWithRetry(tmpPath, finalPath);
+
+    // Post-publish probe: rename reusit logic != fisier citibil; verificam inainte
+    // sa declaram owner_done.
+    const probe = new Database(finalPath, { readonly: true, fileMustExist: true });
     try {
-      target.close();
-    } catch {
-      /* best-effort */
+      integrityCheckOrThrow(probe, `${owner} (post-publish)`);
+    } finally {
+      probe.close();
     }
-    try {
-      src.close();
-    } catch {
-      /* best-effort */
-    }
-    throw e;
-  }
-  target.close();
-  src.close();
-
-  for (const suffix of ["-wal", "-shm"] as const) unlinkStrict(finalPath + suffix);
-  renameWithRetry(tmpPath, finalPath);
-
-  // Post-publish probe: rename reusit logic != fisier citibil; verificam inainte
-  // sa declaram owner_done.
-  const probe = new Database(finalPath, { readonly: true, fileMustExist: true });
-  try {
-    integrityCheckOrThrow(probe, `${owner} (post-publish)`);
+    return counts;
   } finally {
-    probe.close();
+    src.close();
   }
-  return counts;
 }
 
 // Fix review (Task 3): resume-ul "wiping" NU mai are voie sa goleasca

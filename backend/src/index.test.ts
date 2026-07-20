@@ -39,7 +39,16 @@ async function importFreshIndex(env: NodeJS.ProcessEnv): Promise<void> {
     ...process.env,
     ELECTRON_RUN_AS_NODE: "",
     MONITORING_ENABLED: "0",
-    ...(env.LEGAL_DASHBOARD_AUTH_MODE === "web" ? { TENANT_KEY_ENCRYPTION_SECRET: TENANT_KEY_SECRET } : {}),
+    ...(env.LEGAL_DASHBOARD_AUTH_MODE === "web"
+      ? {
+          TENANT_KEY_ENCRYPTION_SECRET: TENANT_KEY_SECRET,
+          // NEW-02 (PR-5): web mode legat pe loopback cere TRUSTED_PROXY_CIDR, altfel gate-ul
+          // strict fatalBoot (presupune reverse proxy co-locat). Clientii web-boot de test sunt
+          // loopback legitimi (analog scripts/dev-web-local.ps1); ...env de mai jos lasa un test
+          // care vrea sa exercite gate-ul strict sa suprascrie explicit acest default.
+          LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: "127.0.0.1/32",
+        }
+      : {}),
     ...env,
   };
   vi.resetModules();
@@ -546,7 +555,7 @@ describe("global body limit — Bug 1a (v2.42.2)", () => {
 
       const res = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "X-Legal-Dashboard-Desktop": "1" },
         body: JSON.stringify({ pad: "x".repeat(1024 * 1024 + 1024) }),
       });
       expect(res.status).toBe(413);
@@ -567,7 +576,7 @@ describe("global body limit — Bug 1a (v2.42.2)", () => {
 
       const res = await fetch(`http://127.0.0.1:${port}/api/v1/dosare/export.xlsx`, {
         method: "POST",
-        headers: { "content-type": "application/json" },
+        headers: { "content-type": "application/json", "X-Legal-Dashboard-Desktop": "1" },
         body: JSON.stringify({ dosare: [], pad: "x".repeat(Math.floor(1.5 * 1024 * 1024)) }),
       });
       // Limita proprie a rutei e 25MB; 1.5MB trebuie sa ajunga la validarea
@@ -590,7 +599,7 @@ describe("global body limit — Bug 1a (v2.42.2)", () => {
     // defense-in-depth, nu singura aparare.
     const res = await fetch(`http://127.0.0.1:${port}/api/v1/dosare/export.xlsx`, {
       method: "POST",
-      headers: { "content-type": "application/json" },
+      headers: { "content-type": "application/json", "X-Legal-Dashboard-Desktop": "1" },
       body: JSON.stringify({ dosare: [], pad: "x".repeat(26 * 1024 * 1024) }),
     });
     expect(res.status).toBe(413);
@@ -614,18 +623,13 @@ describe("shutdown — lock retention cu writer nesettled (EXT-H-01)", () => {
 
     const { withMaintenanceWrite } = await import("./db/backup.ts");
     let release: () => void = () => {};
-    let markWriterAcquired: () => void = () => {};
-    const writerAcquired = new Promise<void>((resolve) => {
-      markWriterAcquired = resolve;
-    });
     const hung = withMaintenanceWrite(
       () =>
         new Promise<void>((r) => {
           release = r;
-          markWriterAcquired();
         })
     );
-    await writerAcquired; // writer-ul detine efectiv lock-ul
+    await new Promise((r) => setImmediate(r)); // writer-ul detine efectiv lock-ul
 
     const shutdown = (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> })
       .__legalDashboardShutdown;

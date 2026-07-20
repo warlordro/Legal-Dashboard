@@ -26,25 +26,17 @@ node_modules
 .npm
 .pnpm-store
 
-# Local build artifacts. The image compiles its own dist-backend/dist-frontend
-# in the `build` stage (see Dockerfile), so stale host builds must NOT leak in.
-dist-backend
-dist-frontend
-frontend/dist
+# Output dirs / artifacts not needed in the image. NOTE: the `builder` stage
+# compiles dist-frontend/ + dist-backend/ from source (scripts/build.js), so the
+# app source (scripts/, frontend/, backend/src) MUST stay in the build context.
 release
 server-release
 build
+dist-frontend
+dist-backend
+electron
 *.log
 *.tsbuildinfo
-
-# Not needed inside the image
-electron
-deploy
-docs
-audit
-*.md
-*.pdf
-*.html
 
 # OS noise
 .DS_Store

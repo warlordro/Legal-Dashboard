@@ -278,3 +278,12 @@ export function normalizeInstitutie(raw: string): string {
   _ensureLookup();
   return _normalizeCache.get(_buildKey(raw)) ?? raw;
 }
+
+// Catalogul complet de token-uri SOAP (enum-ul WSDL), pentru fan-out-ul tolerant
+// din cautarea de dosare cand apelul agregat PortalJust esueaza. Inghetat: e
+// sursa unica, nimeni nu are voie sa-l mute la runtime.
+const _tokens: readonly string[] = Object.freeze(ENTRIES.map(([value]) => value));
+
+export function allInstitutionTokens(): readonly string[] {
+  return _tokens;
+}

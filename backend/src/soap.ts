@@ -128,8 +128,14 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
       SOAPAction: `"${NS}/${action}"`,
     },
     body: envelope,
+    redirect: "manual",
     signal: combinedSignal,
   });
+
+  if (response.status >= 300 && response.status < 400) {
+    console.error(`[soap] redirect neasteptat (status ${response.status}) — refuzat`);
+    throw new Error("Raspuns neasteptat de la PortalJust (redirect).");
+  }
 
   let text: string;
   try {
@@ -143,8 +149,14 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
   }
 
   if (!response.ok || text.includes("soap:Fault")) {
-    const fault = text.match(/<faultstring>([\s\S]*?)<\/faultstring>/)?.[1] ?? "necunoscut";
-    // SECURITY: Log full fault server-side, throw generic message to client
+    const rawFault = text.match(/<faultstring>([\s\S]*?)<\/faultstring>/)?.[1] ?? "necunoscut";
+    // SEC-05: strip C0/C1 control chars + DEL + Unicode line separators and
+    // cap before logging. Upstream is plain HTTP and the faultstring is
+    // attacker-influenceable, so an unsanitized value could inject fake log
+    // lines or flood the log. Full fault stays server-side; client gets a
+    // generic message.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: intentional sanitization of log input
+    const fault = rawFault.replace(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/g, " ").slice(0, 500);
     console.error("SOAP Fault detalii:", fault);
     throw new Error("Eroare la comunicarea cu serviciul PortalJust.");
   }
@@ -156,10 +168,30 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
 // re-parse for nested tags).
 // Order matters: numeric refs first, then named refs, &amp; LAST so we don't
 // double-decode sequences like "&amp;lt;" → "<".
+// SEC-06: numeric character references can encode code points that XML 1.0
+// forbids (NUL, C0/C1 controls, surrogate halves 0xD800-0xDFFF, 0xFFFE/0xFFFF)
+// or that fall outside Unicode (> 0x10FFFF, which makes String.fromCodePoint
+// throw a RangeError and abort the whole parse). Map any such code point to the
+// replacement character U+FFFD instead of emitting a lone surrogate or crashing.
+function isValidXmlChar(cp: number): boolean {
+  return (
+    cp === 0x9 ||
+    cp === 0xa ||
+    cp === 0xd ||
+    (cp >= 0x20 && cp <= 0xd7ff) ||
+    (cp >= 0xe000 && cp <= 0xfffd) ||
+    (cp >= 0x10000 && cp <= 0x10ffff)
+  );
+}
+
+function safeCodePoint(cp: number): string {
+  return Number.isInteger(cp) && isValidXmlChar(cp) ? String.fromCodePoint(cp) : "�";
+}
+
 export function decodeXmlEntities(s: string): string {
   return s
-    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
-    .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number(dec)))
+    .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => safeCodePoint(Number.parseInt(hex, 16)))
+    .replace(/&#(\d+);/g, (_, dec) => safeCodePoint(Number(dec)))
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, '"')

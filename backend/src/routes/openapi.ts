@@ -65,7 +65,7 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
   }
   if (prefix === "/api/dosare") {
     op.description =
-      "Raspuns imbogatit: `exactMatch` (boolean, DOAR pe numar dosar) + `parti[].calitateParte`. Forma legacy `{ data, total, exactMatch }`.";
+      "Raspuns imbogatit: `exactMatch` (boolean, DOAR pe numar dosar) + `parti[].calitateParte`. Forma legacy `{ data, total, exactMatch }`. Optional `failedInstitutii: string[]` = raspuns 200 cu rezultate PARTIALE (instantele listate nu au raspuns, dosarele lor lipsesc; inainte de v2.44 acest caz era eroare 500).";
   }
   if (prefix === "/api/rnpm/search") {
     op.description = "Cautare RNPM dupa rol debitor/creditor; paginare prin `startRnpmPage` (body) -> `nextRnpmPage`.";

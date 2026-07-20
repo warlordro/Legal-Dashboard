@@ -27,6 +27,22 @@ describe("streamCap", () => {
     await expect(readResponseTextWithCap(response, 5)).rejects.toBeInstanceOf(ResponseTooLargeSignal);
   });
 
+  it("cancels the abandoned body when Content-Length exceeds the cap", async () => {
+    let cancelled = false;
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode("abc"));
+      },
+      cancel() {
+        cancelled = true;
+      },
+    });
+    const response = new Response(stream, { headers: { "content-length": "10" } });
+
+    await expect(readResponseTextWithCap(response, 5)).rejects.toBeInstanceOf(ResponseTooLargeSignal);
+    expect(cancelled).toBe(true);
+  });
+
   it("fails while streaming when the byte cap is exceeded", async () => {
     await expect(readResponseTextWithCap(chunkedResponse(["abc", "def"]), 5)).rejects.toMatchObject({
       name: "ResponseTooLargeSignal",

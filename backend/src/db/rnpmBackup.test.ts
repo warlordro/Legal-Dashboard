@@ -225,6 +225,43 @@ describe("restoreRnpmFromBackup", () => {
     expect(countSearches("u1")).toBe(1);
   });
 
+  it("backup rnpm cu _schema_versions PREZENT dar GOL (0 randuri) => reject fail-closed, live neatins", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    const forge = new Database(path.join(getRnpmBackupDir("u1"), name));
+    try {
+      forge.prepare("DELETE FROM _schema_versions").run();
+    } finally {
+      forge.close();
+    }
+    await expect(restoreRnpmFromBackup("u1", name)).rejects.toThrow(/goala|0 randuri/i);
+    // Fisierul viu ramane functional.
+    expect(countSearches("u1")).toBe(1);
+  });
+
+  it("sidecar -wal PREZENT dar ILIZIBIL (EACCES) => restore esueaza vizibil, nu tacut (fail-closed)", async () => {
+    seedSearch("u1", "a");
+    const { name } = await createRnpmManualBackup("u1");
+    const jail = getRnpmBackupDir("u1");
+    const src = path.join(jail, name);
+    // Sidecar-ul exista fizic (forma bundle legacy), dar citirea lui va esua cu
+    // EACCES — un sidecar ilizibil NU trebuie tratat ca absent (pierdere WAL).
+    await fsPromises.writeFile(`${src}-wal`, "wal frames simulate");
+    const realAccess = fsPromises.access.bind(fsPromises);
+    vi.spyOn(fsPromises, "access").mockImplementation(((p: fs.PathLike, mode?: number) => {
+      if (typeof p === "string" && p.endsWith("-wal")) {
+        const err: NodeJS.ErrnoException = new Error("EACCES simulat");
+        err.code = "EACCES";
+        return Promise.reject(err);
+      }
+      return realAccess(p, mode);
+    }) as typeof fsPromises.access);
+
+    await expect(restoreRnpmFromBackup("u1", name)).rejects.toThrow();
+    // Live neatins: datele pre-restore raman.
+    expect(countSearches("u1")).toBe(1);
+  });
+
   it("restore de backup legacy cu sidecars (bundle): datele din WAL supravietuiesc", async () => {
     seedSearch("u1", "a");
     await createRnpmManualBackup("u1"); // provisioning + jail existent

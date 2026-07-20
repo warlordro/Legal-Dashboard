@@ -17,6 +17,10 @@ export async function validateKey(field: TenantKeyField, value: string): Promise
     if (field === "twocaptcha") return await validateTwoCaptcha(value);
 
     const res = await fetchValidation(field, value);
+    if (res.status >= 300 && res.status < 400) {
+      // redirect:"manual" — nu urmarim redirect-ul cu cheia atasata; validare omisa.
+      return { valid: true, validationSkipped: true, reason: "Provider a raspuns cu redirect; validare online omisa." };
+    }
     if (res.status === 401 || res.status === 403 || res.status === 422) {
       return { valid: false, reason: "Cheia pare invalida sau neautorizata." };
     }
@@ -50,8 +54,13 @@ async function validateTwoCaptcha(value: string): Promise<KeyValidationResult> {
   const signal = AbortSignal.timeout(VALIDATION_TIMEOUT_MS);
   const res = await fetch(`https://2captcha.com/res.php?key=${encodeURIComponent(value)}&action=getbalance`, {
     method: "GET",
+    redirect: "manual",
     signal,
   });
+  if (res.status >= 300 && res.status < 400) {
+    // redirect:"manual" — nu urmarim redirect-ul cu cheia atasata; validare omisa.
+    return { valid: true, validationSkipped: true, reason: "Provider a raspuns cu redirect; validare online omisa." };
+  }
   if (res.status === 408 || res.status === 429 || res.status >= 500) {
     return {
       valid: true,
@@ -75,6 +84,7 @@ async function fetchValidation(field: TenantKeyField, value: string): Promise<Re
     return fetch("https://api.anthropic.com/v1/models", {
       method: "GET",
       headers: { "x-api-key": value, "anthropic-version": "2023-06-01" },
+      redirect: "manual",
       signal,
     });
   }
@@ -82,6 +92,7 @@ async function fetchValidation(field: TenantKeyField, value: string): Promise<Re
     return fetch("https://api.openai.com/v1/models", {
       method: "GET",
       headers: { Authorization: `Bearer ${value}` },
+      redirect: "manual",
       signal,
     });
   }
@@ -89,6 +100,7 @@ async function fetchValidation(field: TenantKeyField, value: string): Promise<Re
     return fetch("https://generativelanguage.googleapis.com/v1beta/models", {
       method: "GET",
       headers: { "x-goog-api-key": value },
+      redirect: "manual",
       signal,
     });
   }
@@ -96,6 +108,7 @@ async function fetchValidation(field: TenantKeyField, value: string): Promise<Re
     return fetch("https://openrouter.ai/api/v1/auth/key", {
       method: "GET",
       headers: { Authorization: `Bearer ${value}` },
+      redirect: "manual",
       signal,
     });
   }
@@ -104,6 +117,7 @@ async function fetchValidation(field: TenantKeyField, value: string): Promise<Re
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ clientKey: value }),
+    redirect: "manual",
     signal,
   });
 }

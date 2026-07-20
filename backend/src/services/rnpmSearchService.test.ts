@@ -1,10 +1,17 @@
-import { describe, expect, it, vi } from "vitest";
+import Database from "better-sqlite3";
+import path from "node:path";
+import os from "node:os";
+import fsPromises from "node:fs/promises";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("./captchaSolver.ts", () => ({
   solveRnpmCaptcha: vi.fn(async () => "stub-gcode"),
   CaptchaError: class CaptchaError extends Error {},
 }));
 
+import { __resetRnpmActivityForTests } from "../db/rnpmActivity.ts";
+import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
+import { closeDb, getDb } from "../db/schema.ts";
 import { executeSearch } from "./rnpmSearchService.ts";
 import { RnpmClient, type RnpmError, type RnpmSearchResult, type RnpmSearchType } from "./rnpmClient.ts";
 
@@ -48,5 +55,57 @@ describe("executeSearch RNPM first result guard", () => {
       status: 400,
       details: { total: null, limit: 1500 },
     } satisfies Partial<RnpmError>);
+  });
+});
+
+describe("executeSearch pagesTotal clamp (BUG-06)", () => {
+  let tmpRoot: string;
+
+  beforeEach(async () => {
+    tmpRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "ld-rnpm-clamp-"));
+    process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
+    const seed = new Database(process.env.LEGAL_DASHBOARD_DB_PATH);
+    seed.close();
+    getDb();
+  });
+
+  afterEach(async () => {
+    __resetRnpmActivityForTests();
+    __resetRnpmDbForTests();
+    closeDb();
+    // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+    delete process.env.LEGAL_DASHBOARD_DB_PATH;
+    await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+  });
+
+  it("clamps an inflated pagesTotal to ceil(total/pageSize)", async () => {
+    class InflatedPagesClient extends RnpmClient {
+      calls = 0;
+      constructor() {
+        super({ requestDelayMs: 0 });
+      }
+      override async search(): Promise<RnpmSearchResult> {
+        this.calls++;
+        return {
+          total: 30,
+          pagesTotal: 50,
+          pageSize: 25,
+          currentPage: this.calls,
+          documents: [],
+          criteriu: "",
+          eai: false,
+        } as unknown as RnpmSearchResult;
+      }
+    }
+    const client = new InflatedPagesClient();
+    const result = await executeSearch(
+      { type: "ipoteci", ownerId: "t", params: {}, captchaKey: "stub", fetchDetails: false },
+      client
+    );
+    // ceil(30/25) = 2 pages, NOT the inflated 50 the client advertised. Asertia
+    // EXACTA prinde regresia in ambele sensuri: 50 (clamp sters) SI 0/1 (setup picat
+    // devreme). `.catch` a fost eliminat ca un throw de mediu sa NU treaca fals.
+    expect(client.calls).toBe(2);
+    expect(result.pagesTotal).toBe(2);
   });
 });

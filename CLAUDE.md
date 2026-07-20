@@ -5,7 +5,7 @@ Aplicatie Electron desktop pentru cautare dosare si termene (portalquery.just.ro
 
 ## Versiune Curenta
 
-**v2.43.0** - 13 Iulie 2026
+**v2.43.1** - 20 Iulie 2026
 
 Pentru istoric complet (toate versiunile + breakdown per release) vezi [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
 
@@ -48,7 +48,7 @@ La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 ## Release flow GitHub Actions
 
 - Push pe tag `vX.Y.Z` declanseaza `build-windows.yml` (NSIS installer x64) si `build-mac.yml` (DMG x64+arm64); artefactele sunt atasate automat la GitHub Release.
-- Workflow-urile ruleaza `biome check` + `tsc --noEmit` + `vitest run` INAINTE de packaging — fail-ul lor blocheaza release-ul. Atentie: `npm version` rescrie package.json in format multi-line pe care biome il respinge — ruleaza `npx biome check --write package.json` dupa orice bump, INAINTE de tag (v2.42.2 a cerut mutarea tag-ului din cauza asta).
+- Workflow-urile ruleaza `tsc --noEmit` + `vitest run` INAINTE de packaging — fail-ul lor blocheaza release-ul.
 - Build manual fara tag: `gh workflow run build-windows.yml` (publica la prerelease `dev-build`).
 
 ## Workflow obligatoriu pentru push pe GitHub
@@ -136,7 +136,7 @@ Tabelul complet de kill switches operationale e in [SESSION-HANDOFF.md](SESSION-
 - **Monitoring run retention**: `monitoring_runs` purjat zilnic la 90 zile pentru a limita cresterea istoricului operational
 - **AI usage tracking**: orice call SDK reusit sau pornit si esuat scrie owner-scoped in `ai_usage` dupa call, fara SQLite lock peste I/O extern
 - **Admin guards**: `requireRole("admin")` pe rutele care opereaza pe state global (RNPM `DELETE /saved/all`, `POST /compact`, backup management)
-- **Web-mode tenant captcha**: in `auth_mode=web`, POST `/rnpm/search`/`/bulk`/`/search-split` rezolva cheia captcha din `tenant_api_keys` ca sursa primara (`resolveCaptchaKeyForRoute`); campurile captcha din body-ul clientului sunt eliminate ("tenant key wins"), fallback-ul race e derivat simetric din cheile tenant, iar 501 `CAPTCHA_NOT_CONFIGURED` apare doar cand cheia providerului activ lipseste
+- **Web-mode 501 gate**: `rejectCaptchaKeyInWebMode()` blocheaza POST `/rnpm/search`/`/bulk`/`/captcha/balance` cand `getAuthMode() === "web"` (necesita per-user key storage server-side)
 - **JWT revocation**: claim `jti` + tabela `jwt_denylist` (migration 0038), revoke la logout (cookie + Bearer), `isJtiRevoked` la verify, purge zilnic; tokenele fara `jti` (pre-v2.38.0) expira la TTL
 - **Session cookie SameSite=Strict**: strans de la `Lax` in v2.38.0 (anti-CSRF)
 - **ACK_NO_AUTH gate eliminat**: `LEGAL_DASHBOARD_ACK_NO_AUTH` retras in v2.38.0; web auth (`auth_mode=web` + JWT valid) e gate suficient si mai riguros pentru remote bind

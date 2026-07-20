@@ -1,20 +1,22 @@
 # Session Handoff
 
-**Versiune curenta**: v2.43.0 (2026-07-13) — migrare locala finalizata si validata pe branch-ul GitHub `feat/v2.43.0-rnpm-split`; sursa GitLab a fost folosita read-only, fara commit sau push pe GitHub.
+**Versiune curenta**: v2.43.1 (2026-07-20) — branch `feat/v2.43.0-rnpm-split`. Munca de dupa push-ul initial din 13 iulie (remediere sec + rezultate partiale PortalJust) e reincadrata ca release patch v2.43.1 peste v2.43.0.
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
 operational kill switches, riscuri ramase si directii deschise pentru urmatorul agent.
 
-## Migrare GitHub v2.43.0 (finalizata local)
+## Stadiu curent (2026-07-20): remediere sec + rezultate partiale PortalJust livrate pe branch
 
-- Sursa semantica: delta GitLab v2.42.0 (`6a1b656`) -> v2.43.0 (`6923792`), importata din refs locale de comparatie.
-- Destinatie: branch local GitHub `feat/v2.43.0-rnpm-split`, pornit din `origin/main` la `b6883a3`.
-- Stare: sursele v2.43.0 sunt integrate, inclusiv catalogul GPT-5.6 si corectiile de baza care nu apartineau strict split-ului RNPM; dependintele mai noi si infrastructura GitHub au fost pastrate.
-- Validare: Biome pe toate fisierele de cod atinse, typecheck backend + frontend, build productie, 1991 teste backend trecute (8 skipped), 394 teste frontend trecute si smoke Electron real (fereastra responsive, `/health` ok, shutdown gratios).
-- Constrangeri: zero modificari pe GitLab si zero push pe GitHub pana la aprobarea explicita a utilizatorului.
+Dupa push-ul initial v2.43.0 (13 iulie), pe acelasi branch s-au livrat si pushuit DOUA directii mari (reincadrate ca release patch v2.43.1), ambele dublu-review-uite adversarial (Codex GPT-5.6 Sol + panel multi-model):
 
-## Istoric sursa GitLab v2.43.0 (finalizat)
+**Remediere audit securitate + corectitudine** — guard CSRF desktop GLOBAL pe mutatiile `/api/*` (`X-Legal-Dashboard-Desktop`, exemptie PAT+SSE, kill switch cu warn la boot) (SEC-01); Electron 41.10.2 patch Chromium via lockfile (SEC-02a); gate trusted-proxy fail-closed la boot pe web+loopback fara `TRUSTED_PROXY_CIDR`, cu validare reala a CIDR-urilor + clasificator loopback unificat + `::1/128` (NEW-02); `redirect:manual` + guard 3xx pe validarea cheilor API si pe SOAP PortalJust (SEC-04); cap 20MB pe raspunsul RNPM (`response_too_large`) + drenare `warmSession` ICCJ si body-uri abandonate (SEC-07); sanitizare `faultstring` + `decodeXmlEntities` cu `U+FFFD` (SEC-05/06); respingere placeholder JWT secret (SEC-11); IPC notificari fail-closed + validare `will-redirect` + `unref` timer shutdown (SEC-08/10, BUG-08); raport zilnic email retry off-hour STRICT per-owner care supravietuieste miezului noptii (BUG-04); `409 in_flight` pe race monitoring runs (BUG-03); clamp `pagesTotal` RNPM (BUG-06); cleanup tmp PDF cu `finished()` (BUG-01); `try/finally` pe splitter (BUG-05); backup fail-closed pe sidecar WAL ilizibil si ledger RNPM gol; avertizari buget AI respecta web-mode; manual in-app + DEPLOY-SERVER + versiuni deploy corectate; tracking `GHSA-w5hq-g745-h8pq`. Riscuri acceptate in SECURITY.md.
+
+**Rezultate partiale la cautarea PortalJust** — la esecul apelului agregat, `GET /api/dosare` face fallback tolerant per instanta (~246 instante, concurenta 10, buget 120s, max 2 fallback-uri concurente/proces, cap fail-closed 413) si intoarce rezultatele sanatoase + `failedInstitutii`; la >=2 instante selectate esecurile nu mai sunt inghitite silentios. UI: banner amber cu instantele fara raspuns, empty-state temperat, confirmare la export XLSX/PDF partial. Contract in `API.md` + OpenAPI (200 poate fi partial; `exactMatch` garantat doar fara `failedInstitutii`; dedup `institutie|numar`). Verificat LIVE pe pana reala Galati: fallback 23s, 240 dosare. Plus UI: Dashboard afiseaza garantiile de securitate corecte per mod (desktop = OS keystore/loopback; web = chei server-side criptate).
+
+Detaliul complet e in CHANGELOG v2.43.1 si SECURITY.md (rand `2026-07-20`). Sectiunile de mai jos raman istoric datat imutabil.
+
+## Sprint EXECUTAT: fixuri post-review adversarial split (acelasi branch `feat/v2.43.0-rnpm-split`)
 
 **Context:** dupa executia integrala a split-ului (sectiunea urmatoare), userul a cerut
 review adversarial dublu pe delta `aac59da..89986ff`: Codex GPT-5.6 Sol (verdict: NU e
@@ -458,6 +460,11 @@ infra.
 
 ## Probleme/riscuri ramase
 
+- **De rezolvat in v2.42.0 (audit v2.41.0 vs ghid)**: `GET /api/v1/ai/settings`
+  (si `PUT`-ul pereche) raspund cu forma legacy `{ mode }` in loc de envelope-ul
+  standard `{ data, error, requestId }` (invariant 0.2 din ghid). Mostenire de
+  pe main, nu regresie v2.41; fix-ul cere schimbare coordonata backend
+  (`ok()` in `routes/ai.ts`) + frontend (`useAiSettings` citeste `data.mode`).
 - `useCurrentUser` se apeleaza din mai multe locuri (Sidebar + AdminGate per
   pagina admin). Pe desktop call-ul este local si rapid; daca devine vizibil in
   load tests pe web mode, va fi lift-ed in context shared (sau cache-uit).
@@ -473,9 +480,12 @@ infra.
   partial-config probe in v2.17.0 (warn la lipsa partiala in loc de silent
   runtime fail).
 - `xlsx@0.18.5` nu mai este pe path-ul de parsare a inputului user (in v2.6.4
-  `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Ramane folosit doar
-  ca dependinta tranzitiva pe path-ul write-only de export prin `xlsx-js-style`
-  si in fixturile de test — fara expunere directa la fisiere uploadate.
+  `nameListParser.ts` a fost migrat la `exceljs@^4.4.0`). Codul SheetJS 0.18.5
+  ramane transitiv prin `xlsx-js-style`, care e folosit atat la export cat si la
+  parsarea de preview a importului bulk Monitorizare (`parseBulkFile`,
+  `XLSX.read`) — deci nu e write-only; mitigat de cap pe dimensiunea fisierului +
+  validare interna, iar parsarea autoritativa a importului ramane pe `exceljs`.
+  Pachetul `xlsx` standalone ramane doar in fixturile de test.
 
 ## Sprint inchis 2026-05-20 - v2.34.0 web hardening
 

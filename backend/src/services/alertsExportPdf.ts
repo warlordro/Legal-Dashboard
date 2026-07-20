@@ -1,4 +1,5 @@
 import PDFDocument from "pdfkit";
+import { finished } from "node:stream/promises";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { promises as fs } from "node:fs";
@@ -178,10 +179,30 @@ export async function buildAlertsPdf(rows: AlertExportDecoratedRow[], contextLab
   const headerLine = `Generat: ${todayRo()}  |  Total: ${rows.length}${contextLabel ? `  |  ${contextLabel}` : ""}`;
   doc.font("Helvetica").fontSize(9).text(text(headerLine), 40, 64);
 
-  drawTable(doc, rows, 82, 1);
-  doc.end();
-  await finishWriteStream(stream, tmpPath);
-
-  const stat = await fs.stat(tmpPath);
-  return { filepath: tmpPath, filename: alertsFilename("pdf", rows.length), mime: MIME_PDF, byteLength: stat.size };
+  try {
+    drawTable(doc, rows, 82, 1);
+    doc.end();
+    await finishWriteStream(stream, tmpPath);
+    const stat = await fs.stat(tmpPath);
+    return { filepath: tmpPath, filename: alertsFilename("pdf", rows.length), mime: MIME_PDF, byteLength: stat.size };
+  } catch (err) {
+    // Fiecare pas de cleanup e gardat independent: un throw din doc.destroy() nu
+    // trebuie sa sara peste stream.destroy() / unlink si nici sa inlocuiasca eroarea
+    // originala rearuncata la final.
+    try {
+      doc.destroy();
+    } catch {}
+    try {
+      stream.destroy();
+    } catch {}
+    // Asteapta inchiderea stream-ului inainte de unlink: createWriteStream deschide
+    // fd-ul asincron, deci un throw sincron din drawTable ar unlink-ui inainte sa
+    // existe fisierul (ENOENT inghitit) iar fd-ul deschis ulterior ar lasa un orfan.
+    // finished() se rezolva/respinge imediat si pe stream deja inchis sau distrus —
+    // spre deosebire de once(stream,"close"), care ar atarna daca "close" a fost deja
+    // emis (ex. finishWriteStream a respins pentru ENOSPC/EACCES cu autoDestroy).
+    await finished(stream).catch(() => {});
+    await fs.unlink(tmpPath).catch(() => {});
+    throw err;
+  }
 }

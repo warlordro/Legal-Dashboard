@@ -615,8 +615,8 @@ export function ManualChapters() {
         <SubSection title="Securitatea cheilor:">
           <BulletList
             items={[
-              "Cheile sunt stocate doar local (in browser-ul aplicatiei), nu pe niciun server extern",
-              "Cheile sunt obfuscate in localStorage (nu sunt stocate ca text simplu)",
+              "Pe desktop, cheile sunt stocate local prin OS keystore (DPAPI / Keychain / libsecret) via Electron safeStorage — doar ciphertext-ul ajunge in localStorage, plaintext-ul nu atinge disk-ul",
+              "Pe web, cheile sunt stocate server-side per utilizator (criptate AES-256-GCM in tenant_api_keys); backend-ul detine cheile si face requesturile catre furnizori",
               "La fiecare cerere AI, cheia este trimisa doar catre API-ul furnizorului respectiv",
               "Cheile persista intre sesiuni — nu trebuie reintroduse la fiecare pornire a aplicatiei",
             ]}
@@ -724,10 +724,10 @@ export function ManualChapters() {
           <BulletList
             items={[
               "Cheile API (Anthropic / OpenAI / Google / 2Captcha / CapSolver) sunt stocate in OS keystore pe desktop — DPAPI pe Windows, Keychain pe macOS, libsecret pe Linux — prin Electron safeStorage. Ciphertext-ul ajunge in localStorage; plaintext-ul nu atinge niciodata disk-ul",
-              "Pe web (fara desktop keystore) cheile sunt obfuscate reversibil in localStorage — nu e control real de securitate, e doar anti-screenshot casual",
+              "Pe web, cheile API sunt stocate server-side per utilizator, criptate AES-256-GCM (tabela tenant_api_keys) — nu in browser; backend-ul detine cheile si face requesturile catre furnizori",
               "Istoricul cautarilor si preferintele (tema, font) — doar in localStorage local",
               "Avizele RNPM si dosarele cautate sunt salvate in SQLite local (%APPDATA%/legal-dashboard/legal-dashboard.db)",
-              "Nu exista niciun server intermediar — datele merg direct de la calculatorul tau catre API-urile oficiale (just.ro, mj.rnpm.ro, furnizorii AI, 2Captcha / CapSolver)",
+              "Pe desktop nu exista server intermediar — datele merg direct de la calculatorul tau catre API-urile oficiale (just.ro, mj.rnpm.ro, furnizorii AI, 2Captcha / CapSolver); pe web, backend-ul aplicatiei contacteaza aceste API-uri in numele tau",
             ]}
           />
         </SubSection>

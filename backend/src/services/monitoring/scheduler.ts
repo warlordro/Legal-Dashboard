@@ -283,11 +283,27 @@ export class Scheduler {
         err.code = "in_flight";
         throw err;
       }
-      runId = insertRunning({
-        ownerId: job.owner_id,
-        jobId: job.id,
-        startedAt: nowIso,
-      });
+      try {
+        runId = insertRunning({
+          ownerId: job.owner_id,
+          jobId: job.id,
+          startedAt: nowIso,
+        });
+      } catch (err) {
+        // BUG-03: partial unique index idx_one_running_per_job (job_id WHERE
+        // status='running') can reject the insert when a `running` row already
+        // exists that the in-memory inflight map never learned about (another
+        // process / stale lease). Surface it as in_flight (409) instead of the
+        // raw SQLITE error. SQLite reports the columns as `tabela.coloana`.
+        const code = (err as { code?: string }).code ?? "";
+        const msg = err instanceof Error ? err.message : "";
+        if (code === "SQLITE_CONSTRAINT_UNIQUE" && msg.includes("monitoring_runs.job_id")) {
+          const e = new Error("already in flight") as Error & { code?: string };
+          e.code = "in_flight";
+          throw e;
+        }
+        throw err;
+      }
     });
 
     // Fire and forget: runOne acquires its OWN withMaintenanceRead and runs

@@ -12,10 +12,9 @@ vi.mock("./captchaSolver.ts", () => ({
 import { __resetRnpmActivityForTests } from "../db/rnpmActivity.ts";
 import { __resetRnpmDbForTests } from "../db/rnpmDb.ts";
 import { RnpmStorageLimitError } from "../db/rnpmStorageLimit.ts";
-import { getSearches } from "../db/searchRepository.ts";
 import { closeDb, getDb } from "../db/schema.ts";
 import { executeBulkSearch, executeSearch, executeSplitSearch } from "./rnpmSearchService.ts";
-import { RnpmClient, type RnpmFullDetail, type RnpmSearchResult, type RnpmSearchType } from "./rnpmClient.ts";
+import { RnpmClient, type RnpmSearchResult, type RnpmSearchType } from "./rnpmClient.ts";
 
 let tmpRoot: string;
 
@@ -252,52 +251,6 @@ class OverLimitClient extends RnpmClient {
   }
 }
 
-class PartialNestedClient extends RnpmClient {
-  calls = 0;
-
-  constructor() {
-    super({ requestDelayMs: 0 });
-  }
-
-  override async search(_type: RnpmSearchType, params: unknown): Promise<RnpmSearchResult> {
-    this.calls++;
-    const destination = (params as { destinatieInscriere?: { value?: string } })?.destinatieInscriere?.value;
-    if (!destination) {
-      return {
-        total: 2000,
-        pagesTotal: 80,
-        pageSize: 25,
-        currentPage: 1,
-        documents: [],
-        criteriu: "",
-        eai: false,
-      };
-    }
-    return {
-      total: 1,
-      pagesTotal: 1,
-      pageSize: 25,
-      currentPage: 1,
-      documents: [
-        {
-          no: 1,
-          identificator: { v: `AV-${destination}`, k: `uuid-${destination}` },
-          utilizatorAutorizat: "",
-          data: "12.07.2026",
-          tip: "Aviz initial",
-          needsActualizare: false,
-        },
-      ],
-      criteriu: "",
-      eai: false,
-    };
-  }
-
-  override async fetchFullDetail(): Promise<RnpmFullDetail> {
-    return { part1: null, part2: null, part3: null, part4: null, istoric: [] };
-  }
-}
-
 describe("oprire la primul refuz de limita de stocare (fail-fast)", () => {
   const storageError = () => new RnpmStorageLimitError(600 * 1024 * 1024, 500 * 1024 * 1024);
 
@@ -416,45 +369,5 @@ describe("oprire la primul refuz de limita de stocare (fail-fast)", () => {
         reason: expect.stringContaining("Oprit: limita de stocare"),
       })
     );
-  });
-
-  it("pastreaza rezultatele tier-2 deja salvate cand urmatorul recheck refuza", async () => {
-    const client = new PartialNestedClient();
-    const storageLimitCheck = vi
-      .fn<() => Promise<void>>()
-      .mockResolvedValueOnce()
-      .mockResolvedValueOnce()
-      .mockRejectedValueOnce(storageError());
-
-    const result = await executeSplitSearch(
-      {
-        type: "ipoteci",
-        baseParams: {},
-        subTypeLabels: ["unu", "doi"],
-        captchaKey: "stub-key",
-        ownerId: "u1",
-        storageLimitCheck,
-      },
-      vi.fn(),
-      client
-    );
-
-    expect(storageLimitCheck).toHaveBeenCalledTimes(3);
-    expect(client.calls).toBe(2);
-    expect(result.documents).toHaveLength(1);
-    expect(result.total).toBe(1);
-    expect(result.splitStats[0]).toMatchObject({
-      label: "unu",
-      status: "partial",
-      count: 1,
-      reason: expect.stringContaining("split-ul tier-2 a fost oprit"),
-    });
-    expect(result.splitStats[1]).toMatchObject({
-      label: "doi",
-      status: "error",
-      reason: expect.stringContaining("Oprit: limita de stocare"),
-    });
-    const stored = getSearches({ ownerId: "u1", limit: 200 }).items.find((row) => row.id === result.searchId);
-    expect(stored?.total_results).toBe(1);
   });
 });

@@ -9,6 +9,8 @@ export async function readResponseTextWithCap(
   if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const contentLength = Number(response.headers.get("content-length"));
   if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+    // Dreneaza body-ul abandonat ca sa nu tinem conexiunea ocupata pana la timeout.
+    await response.body?.cancel().catch(() => {});
     throw new ResponseTooLargeSignal(contentLength);
   }
   if (!response.body) {

@@ -44,8 +44,10 @@ services:
       # Persisted DB lives on a named volume so a restart doesn't lose tenant data.
       LEGAL_DASHBOARD_DB_PATH: "/data/legal-dashboard.db"
       # MUST replace these placeholders with real secrets BEFORE bringing the
-      # stack up. The backend refuses to boot otherwise. JWT_SECRET min length
-      # is 32 chars (enforced by backend/src/auth/config.ts:requireJwtSecret).
+      # stack up. The backend refuses to boot otherwise: JWT_SECRET min length
+      # is 32 chars AND any REPLACE_WITH/CHANGE_ME/YOUR_SECRET placeholder is
+      # rejected (enforced by backend/src/auth/config.ts:requireJwtSecret), so
+      # leaving the value below unchanged is a fatal, intentional boot failure.
       LEGAL_DASHBOARD_JWT_SECRET: "REPLACE_WITH_32_PLUS_CHAR_SECRET_FROM_SECRET_MGR"
       LEGAL_DASHBOARD_JWT_ISSUER: "https://idp.example.com/"
       LEGAL_DASHBOARD_JWT_AUDIENCE: "legal-dashboard"

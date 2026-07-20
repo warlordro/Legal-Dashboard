@@ -40,7 +40,7 @@ export const options = {
 };
 
 function headers(extra = {}) {
-  const h = { ...extra };
+  const h = { "X-Legal-Dashboard-Desktop": "1", ...extra };
   if (AUTH) h.Authorization = AUTH;
   return h;
 }

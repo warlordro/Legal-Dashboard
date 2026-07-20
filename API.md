@@ -22,13 +22,6 @@ curl -H "Authorization: Bearer ld_pat_XXXXXXXX..." \
   "https://<host>/api/dosare?numarDosar=4821/3/2024"
 ```
 
-**Forma canonica a header-ului (importanta pe stack-ul de referinta):** exact `Authorization: Bearer ld_pat_...` —
-`Bearer` cu B mare si UN singur spatiu ASCII. Pe deploy-ul de referinta (Caddy + oauth2-proxy, v2.40.1+),
-ruta directa de ingress face match pe prefixul exact al valorii; variantele (`bearer` lowercase, tab,
-spatii multiple) cad in fluxul de login browser si primesc **302 redirect catre Google**, nu 401.
-Daca primesti 302 in loc de raspuns JSON: verifica forma header-ului si ca serverul ruleaza v2.40.1+
-(ruta `@pat` din `deploy/Caddyfile`).
-
 **HTTPS-only in productie:** o cerere PAT peste HTTP (fara `x-forwarded-proto: https` de la reverse-proxy)
 e respinsa cu **426**. Raspunsurile PAT au `Cache-Control: no-store`. Header-ul `Authorization` nu apare
 in loguri (logger-ul scrie doar method/path/status).
@@ -65,6 +58,13 @@ ca `string | { code, message }`:
   INDICATIVE pentru consumator; corpul REAL pe rutele ICCJ ramane forma legacy `{ error }`, nu envelope-ul.
 - **`/api/dosare`** e imbogatit: `{ data, total, exactMatch }`. `exactMatch` e **doar pe numar dosar**
   (match pe nume normalizat e deferat); `parti[].calitateParte` da rolul (reclamant/parat/...).
+  Optional apare si `failedInstitutii: string[]` (token-uri de instanta): raspuns 200 cu rezultate
+  PARTIALE — instantele listate nu au raspuns si dosarele lor lipsesc din `data`. Cand campul e
+  prezent, `total` NU mai garanteaza completitudine (inainte de v2.44 acest caz era eroare 500).
+  La **doua sau mai multe institutii** selectate, rezultatele sunt deduplicate pe cheia
+  `institutie|numar` (schimbare minora fata de concatenarea istorica a raspunsurilor per instanta).
+  `exactMatch` e garantat DOAR cand `failedInstitutii` lipseste: un dosar cu numar exact poate
+  exista intr-o instanta picata, deci `exactMatch=false` pe raspuns partial nu inseamna absenta certa.
 - **`/api/rnpm/saved`**: obiect paginat brut.
 - **`/api/rnpm/search`**: rol = dimensiunea de cautare **debitor/creditor**.
 - **Rutele `/api/v1/*` care folosesc `ok()`/`fail()`** (token-management + celelalte v1 cu envelope)

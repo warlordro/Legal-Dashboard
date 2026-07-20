@@ -465,7 +465,7 @@ async function warmSession(signal: AbortSignal): Promise<string> {
       headers: { "User-Agent": "Mozilla/5.0 (LegalDashboard ICCJ proxy)" },
       signal,
     });
-    await res.arrayBuffer().catch(() => {});
+    await readResponseTextWithCap(res, ICCJ_MAX_RESPONSE_BYTES, signal).catch(() => "");
     const setCookies =
       typeof res.headers.getSetCookie === "function"
         ? res.headers.getSetCookie()

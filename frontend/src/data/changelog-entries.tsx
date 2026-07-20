@@ -40,6 +40,27 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.43.1",
+    date: "20 Iulie 2026",
+    subtitle:
+      "Doua directii peste v2.43.0: cautarea de dosare intoarce acum rezultate partiale cand o instanta nu raspunde (in loc sa esueze toata cautarea), plus un val de intariri de securitate si corectitudine verificate prin doua review-uri independente.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Rezultate partiale cand o instanta nu raspunde (dosare)",
+        content:
+          "La cautarea de dosare, daca una sau mai multe instante nu raspund la timp, aplicatia nu mai esueaza toata cautarea. Iti arata rezultatele de la instantele care au raspuns si un banner galben cu instantele care lipsesc (cu numele lor, colapsat cand sunt multe), ca sa stii ca lista poate fi incompleta. La export in Excel sau PDF primesti o confirmare ca datele sunt partiale inainte sa salvezi. Verificat pe o pana reala la Curtea de Apel Galati: cautarea a intors 240 de dosare de la instantele sanatoase in loc sa dea eroare.",
+      },
+      {
+        title: "Intariri de securitate si corectitudine",
+        content:
+          "Un val de intariri verificate prin doua review-uri independente: cererile de modificare catre server sunt protejate mai strict impotriva falsificarii, legaturile catre portalurile externe (PortalJust, RNPM, ICCJ) au limite de dimensiune si nu mai urmeaza redirectari neasteptate, iar raportul zilnic pe email se retrimite corect chiar daca prima incercare pica peste noapte. Panoul principal arata acum garantiile de securitate potrivite pentru modul in care folosesti aplicatia: pe desktop cheile stau in seiful sistemului de operare si accesul e limitat la calculatorul tau; pe web cheile sunt criptate pe server.",
+      },
+    ],
+  },
+  {
     version: "v2.43.0",
     date: "13 Iulie 2026",
     subtitle:
@@ -91,53 +112,6 @@ export const versions: VersionEntry[] = [
     ],
   },
   {
-    version: "v2.42.2",
-    date: "9 Iulie 2026",
-    subtitle:
-      "Corectii pe constatarile review-ului post-lansare al v2.42.1: exporturile si importurile mari functioneaza din nou (limita globala de 1MB le bloca), limita de marime acopera acum si crearea tokenurilor API, iar inchiderea aplicatiei asteapta finalizarea verificarilor de monitorizare in curs.",
-    icon: <Wrench className="h-5 w-5" />,
-    borderColor: "border-l-amber-500",
-    badgeClass: "bg-amber-100 text-amber-900 dark:bg-amber-900/30 dark:text-amber-300",
-    sections: [
-      {
-        title: "Export si import de volume mari reparate",
-        content:
-          'Plasa de siguranta de 1MB introdusa in v2.42.1 bloca din greseala si rutele care accepta legitim payload-uri mari: exportul Excel de dosare si termene (pana la 25MB) si importul listelor de nume (10-15MB) primeau eroarea "Payload prea mare" la volume normale de lucru (aproximativ 300 de dosare selectate depaseau deja pragul). Limitele dedicate ale acestor rute guverneaza din nou, iar plasa globala ramane activa pe restul rutelor si acopera acum si crearea tokenurilor API in modul web, care ramasese complet fara limita.',
-      },
-      {
-        title: "Limitare cereri si inchidere aplicatie",
-        content:
-          "Limiterul de cereri neautentificate nu mai ierta incercarile esuate printr-o exceptie aparuta inainte de autentificare, iar prima cerere din fiecare fereastra de limitare trece prin acelasi plafon ca restul. La inchiderea aplicatiei, backend-ul primeste acum timp suficient sa termine verificarea de monitorizare aflata in curs si sa salveze rezultatul, in loc sa fie intrerupt dupa 5 secunde.",
-      },
-    ],
-  },
-  {
-    version: "v2.42.1",
-    date: "8 Iulie 2026",
-    subtitle:
-      "Patch de securitate si robustete rezultat din auditul complet post-v2.42.0: inchidere DevTools in build-urile instalate, limitare corecta a apelurilor AI pe toate rutele, izolare mai stricta a datelor per utilizator in modul web si fixuri de acuratete in monitorizare. Fara features noi.",
-    icon: <ShieldCheck className="h-5 w-5" />,
-    borderColor: "border-l-emerald-500",
-    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
-    sections: [
-      {
-        title: "Securitate desktop",
-        content:
-          "Consola de developer (DevTools) si meniul de debug nu mai sunt accesibile in aplicatia instalata — erau active din cauza unei evaluari premature a modului de rulare. Canalele interne prin care aplicatia cripteaza si decripteaza cheile API valideaza acum sursa fiecarui apel, iar la pornire backend-ul este verificat printr-un cod unic de sesiune, nu doar dupa nume.",
-      },
-      {
-        title: "Limitare corecta a apelurilor AI",
-        content:
-          "Analiza multi-model consuma acum 3 unitati de rate limit pe toate rutele (o varianta de ruta permitea de ~3 ori mai multe apeluri decat limita intentionata) si ponderarea se aplica si pe tokenurile API. Cererile mai mari de 1MB sunt respinse global, ca plasa de siguranta.",
-      },
-      {
-        title: "Izolare date si monitorizare",
-        content:
-          "Functiile de acces la datele RNPM si istoricul cautarilor cer acum explicit identitatea utilizatorului — nu mai exista fallback implicit, eliminand riscul latent de amestec de date intre conturi in modul web. Scheduler-ul de monitorizare nu mai poate numara dublu esecurile unui job deja finalizat, iar duratele rulate manual se raporteaza corect.",
-      },
-    ],
-  },
-  {
     version: "v2.42.0",
     date: "7 Iulie 2026",
     subtitle:
@@ -171,66 +145,52 @@ export const versions: VersionEntry[] = [
         content:
           "Notificari toast pe operatiile reusite si pe erorile care inainte erau tacute (exporturile PDF din Changelog si Manual), dialoguri de confirmare unificate pentru toate actiunile ireversibile, sortare pe coloane in Utilizatori/Audit/Monitorizare/Consum, dropdown-uri tematizate corect pe dark mode, istoric functional cu bara laterala restransa, embleme PJ/ICCJ lizibile si titluri de alerta fara semne exotice in jurul numelui monitorizat.",
       },
+      {
+        title: "Hardening post-review si modele GPT-5.6",
+        content:
+          "Corectii de rezilienta si securitate aplicate inainte de lansare, dupa doua audituri independente, plus trecerea modelelor OpenAI pe familia GPT-5.6.",
+        bullets: [
+          "Limita globala de 1MB pe cererile API — un payload urias nu mai poate consuma memoria serverului; exporturile mari si importurile de liste raman neafectate",
+          "Limitarea de trafic corectata: analiza multi-model se contorizeaza corect pe ambele rute, iar utilizatorii legitimi din spatele aceluiasi proxy nu mai pot fi blocati din greseala",
+          "Pagina de stare detaliata a serverului nu mai e expusa in modul web",
+          "Cautarile RNPM in masa nu mai pot opri serverul daca pagina se inchide in timpul procesarii",
+          "Importul de utilizatori citeste corect emailurile lipite din Outlook ca link (numele afisat nu mai inlocuieste adresa)",
+          "Monitorizare: rezultatele nu se mai aplica de doua ori pe un job deja finalizat; durata reala inregistrata la erori",
+          "Protectie suplimentara la izolarea datelor intre utilizatori (identitatea proprietarului e acum obligatorie la nivel de cod)",
+          "Desktop: DevTools dezactivat in build-urile instalate, validare a expeditorului pe canalele interne, verificare de identitate la pornirea backend-ului si inchidere care asteapta terminarea verificarilor in curs",
+          "Modele OpenAI actualizate: GPT-5.6 Sol (premium), 5.6 Terra (echilibrat) si 5.6 Luna (rapid) inlocuiesc familia GPT-5.4",
+        ],
+      },
     ],
   },
   {
     version: "v2.41.0",
-    date: "4 Iulie 2026",
+    date: "6 Iulie 2026",
     subtitle:
-      "Primul val de corectii dupa testarea reala a aplicatiei web: pagina se afiseaza corect in browser fara zoom manual, cautarile RNPM si analizele AI folosesc cheile configurate de administrator, iar pagina de cote nu mai cere coduri tehnice tastate de mana. Modul desktop ramane neschimbat.",
-    icon: <Wrench className="h-5 w-5" />,
-    borderColor: "border-l-sky-500",
-    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+      "Fundatia web a sprintului: aplicatia in browser fara chrome-ul de desktop, starea cheilor tenant vizibila pe roluri, vederi globale pentru cote si granturi. Livrat impreuna cu v2.42.0 (fara release separat). Modul desktop ramane neschimbat.",
+    icon: <Layers className="h-5 w-5" />,
+    borderColor: "border-l-cyan-500",
+    badgeClass: "bg-cyan-100 text-cyan-900 dark:bg-cyan-900/30 dark:text-cyan-300",
     sections: [
       {
-        title: "Afisare corecta in browser",
+        title: "Aplicatia in browser, fara chrome de desktop",
         content:
-          "Banda alba din partea de sus (rezervata barei de titlu din aplicatia desktop) nu mai apare pe web, textul porneste de la marimea standard a browserului (fara sa mai fie nevoie de zoom-out), iar meniul lateral devine derulabil cand nu incape pe ecran — toate modulele, inclusiv sectiunea de administrare si istoricul, raman accesibile.",
+          "In mod web, bara de titlu si controalele de fereastra specifice aplicatiei desktop dispar — interfata foloseste tot ecranul browserului, cu trepte de marime a fontului adaptate platformei.",
       },
       {
-        title: "Cheile administratorului functioneaza peste tot",
+        title: "Starea cheilor API, vizibila pe roluri",
         content:
-          "Pana acum browserul cauta cheile API doar in seiful local al aplicatiei desktop, care nu exista pe web — cautarile RNPM si analizele AI pareau blocate desi administratorul configurase totul. Acum aplicatia web citeste starea cheilor de la server: cautarile pornesc, paginarea functioneaza, iar modelele AI disponibile reflecta cheile setate de administrator.",
+          "Adminul vede in Setari inventarul cheilor tenant per provider (Configurata cu ultimele 4 caractere / Neconfigurata) si sare direct la administrarea lor. Utilizatorul obisnuit nu vede inventarul — primeste doar un avertisment clar cand o functionalitate (AI sau RNPM) e indisponibila pentru ca cheia lipseste.",
       },
       {
-        title: "Fereastra Setari API adaptata pentru web",
+        title: "Vederi globale pentru cote si granturi",
         content:
-          "Utilizatorii web nu mai vad formularul de chei personale (care oricum nu putea salva nimic in browser). In locul lui: starea cheilor configurate de administrator, cu buton direct catre pagina de administrare pentru admini. Tokenurile de acces programatic se administreaza doar de admin, iar sectiunea de notificari de sistem (specifica desktop-ului) dispare de pe web.",
-        bullets: [
-          "Fallback-ul intre providerii de captcha (2Captcha/CapSolver) functioneaza acum si pe web, derivat automat din cheile administratorului",
-          "Mesajele de eroare indica administratorul cand o cheie lipseste, in loc sa ceara configurare locala",
-        ],
+          "Paginile Cote si Granturi arata de la deschidere toate plafoanele si granturile active ale tuturor utilizatorilor, fara sa fie nevoie sa cauti mai intai un utilizator. Selectia utilizatorului se face dintr-un dropdown cu toti userii activi.",
       },
       {
-        title: "Cote fara coduri tehnice",
+        title: "Fundatie si sigurante pentru web",
         content:
-          "Pagina Cote cerea tastarea exacta a unor coduri interne (ai.single, captcha.rnpm) si raspundea cu 'Body invalid' la orice greseala. Acum feature-ul se alege dintr-o lista cu denumiri clare, iar unitatea limitei (dolari sau numar de captcha-uri) se afiseaza automat in functie de selectie.",
-      },
-    ],
-  },
-  {
-    version: "v2.40.1",
-    date: "2 Iulie 2026",
-    subtitle:
-      "Doua reparatii pentru instalarea pe server (web): imaginea Docker se construieste acum direct din codul sursa, iar autentificarea Google prin oauth2-proxy foloseste mecanismele reale ale proxy-ului. Ambele probleme au fost descoperite la primul deploy de productie. Modul desktop ramane neschimbat.",
-    icon: <Rocket className="h-5 w-5" />,
-    borderColor: "border-l-orange-500",
-    badgeClass: "bg-orange-100 text-orange-900 dark:bg-orange-900/30 dark:text-orange-300",
-    sections: [
-      {
-        title: "Instalare pe server fara pasi manuali",
-        content:
-          "Imaginea Docker isi compileaza singura aplicatia la construire — platformele care fac build direct din git (Dokploy, Coolify) functioneaza acum fara pre-compilare locala. Baza de date sta implicit pe un volum persistent, deci nu se mai pierde la redeploy, iar scriptul de provisionare a primului admin e inclus in imagine.",
-      },
-      {
-        title: "Autentificarea web functioneaza cap-coada",
-        content:
-          "Puntea dintre oauth2-proxy si aplicatie folosea doua setari care nu exista in configuratia reala a proxy-ului, deci login-ul de productie esua intotdeauna. Acum secretul comun circula ca parola Basic Auth si identitatea ca X-Forwarded-Email — mecanismele pe care oauth2-proxy chiar le implementeaza — cu compatibilitate pastrata pentru setup-uri nginx auth_request.",
-      },
-      {
-        title: "API-ul programatic (tokenuri) accesibil prin fata publica",
-        content:
-          "Tokenurile de acces personal (v2.40.0) nu puteau traversa poarta de login Google a serverului. Acum cererile programatice cu token sunt rutate direct catre aplicatie printr-o ruta dedicata si securizata la nivelul proxy-ului public, cu toate protectiile existente (drepturi granulare, limite de rata, audit, alerta la IP nou) neatinse. Scripturile de verificare a instalarii testeaza automat si aceasta ruta.",
+          "Identitatea primita de la proxy-ul de autentificare e verificata strict (cereri cu headere de identitate contradictorii sunt respinse), iar rutarea AI foloseste automat cheile potrivite modului de rulare. Plus un set de corectii din review: bara laterala scrollabila, dialogul de chei pentru non-admini, resetarea formularelor la schimbarea utilizatorului.",
       },
     ],
   },

@@ -17,6 +17,7 @@ vi.mock("../soap.ts", async (importOriginal) => {
 
 import { requestIdContext } from "../middleware/requestId.ts";
 import { cautareDosare, SoapResponseTooLargeError } from "../soap.ts";
+import { allInstitutionTokens } from "../util/institutionLabel.ts";
 import { dosareRouter } from "./dosare.ts";
 import { termeneRouter } from "./termene.ts";
 
@@ -49,13 +50,19 @@ describe("SoapResponseTooLargeError -> HTTP 413 actionable", () => {
   });
 
   it("GET /api/dosare ramane 500 generic pentru alte erori SOAP (network, fault)", async () => {
-    mockedCautare.mockRejectedValueOnce(new Error("Eroare la comunicarea cu serviciul PortalJust."));
+    // Esec PERSISTENT (nu Once): pe cautarea fara filtru, apelul agregat esuat
+    // declanseaza fallback-ul per instanta pe tot catalogul. Cu toate instantele
+    // picate, ruta ramane 500 generic — dar asertam explicit call count-ul ca sa
+    // nu fie fals-verde care mascheaza fanout-ul (un Once ar lasa restul apelurilor
+    // sa se rezolve undefined si tot ar da 500, din alt motiv).
+    mockedCautare.mockRejectedValue(new Error("Eroare la comunicarea cu serviciul PortalJust."));
 
     const res = await buildApp().request("/api/dosare?numeParte=POPESCU");
 
     expect(res.status).toBe(500);
     const body = (await res.json()) as { error: string };
     expect(body.error).toMatch(/Incercati din nou/i);
+    expect(mockedCautare).toHaveBeenCalledTimes(1 + allInstitutionTokens().length);
   });
 
   it("GET /api/termene returneaza 413 + envelope PAYLOAD_TOO_LARGE cand SOAP body > cap", async () => {

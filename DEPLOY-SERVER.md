@@ -84,7 +84,7 @@ Scriptul este idempotent: rulat de doua ori cu acelasi email returneaza `already
 
   1. Deschide `https://DOMAIN/` in browser.
   2. oauth2-proxy te redirecteaza la consent screen Google. Aproba accesul.
-  3. Dupa callback, frontend-ul cheama automat `POST /api/v1/auth/oauth2/sync` (bridge) care minteste JWT-ul nostru HS256 si seteaza cookie-ul `legal_dashboard_session`. Bridge-ul valideaza secretul comun primit ca parola in `Authorization: Basic` (setat de oauth2-proxy prin `basic-auth-password`) si citeste identitatea din `X-Forwarded-Email` (setat de `pass-user-headers`).
+  3. Dupa callback, frontend-ul cheama automat `POST /api/v1/auth/oauth2/sync` (bridge) care minteste JWT-ul nostru HS256 si seteaza cookie-ul `legal_dashboard_session`.
   4. Esti redirectionat in dashboard cu rol admin.
 
 Pentru utilizatori suplimentari, foloseste UI-ul `/admin/users` (PR-8) sau ruleaza scriptul cu `SEED_ADMIN_EMAIL` schimbat.
@@ -103,7 +103,7 @@ docker cp $(docker compose -f docker-compose.prod.yml ps -q backend):/data/backu
 
 Backup-ul intern automat al backend-ului scrie la `backups/` in interiorul volumului `ld_data` (daily backup, retention 7 zile). Sincronizeaza folderul `/data/backups` periodic cu un storage extern (S3, rclone, restic).
 
-Din v2.43.0, volumul `ld_data` contine si `rnpm/` (fisierele SQLite per utilizator pentru datele RNPM) plus `backups/rnpm/<stem>/` (jail-urile de backup per utilizator). Daily backup-ul intern acopera automat si fisierele per user (freshness per target); sincronizarea offsite trebuie sa acopere TOT `/data/backups` (inclusiv subdirectoarele `rnpm/`), iar snapshot-ul manual de mai sus acopera doar monolitul — pentru un backup complet copiaza si `/data/rnpm/`.
+Din v2.43.0, volumul `ld_data` contine si `rnpm/` (fisierele SQLite per utilizator pentru datele RNPM) plus `backups/rnpm/<stem>/` (jail-urile de backup per utilizator). Daily backup-ul intern acopera automat si fisierele per user (freshness per target); sincronizarea offsite trebuie sa acopere TOT `/data/backups` (inclusiv subdirectoarele `rnpm/`), iar snapshot-ul manual de mai sus acopera doar monolitul. Pentru datele RNPM NU copia direct directorul live `/data/rnpm/`: fisierele au WAL activ, deci o copiere la nivel de filesystem poate produce un backup inconsistent, nerestaurabil. Backup-urile RNPM valide se produc exclusiv prin mecanismul aplicatiei — snapshot-uri self-contained (`VACUUM INTO`, verificate) expuse per utilizator prin suprafata `/api/rnpm/backups` si prin backup-urile administrative, colectate automat de daily backup-ul intern in `backups/rnpm/`.
 
 ## 8. Update la versiune noua
 
@@ -114,12 +114,6 @@ docker compose -f deploy/docker-compose.prod.yml up -d backend
 ```
 
 Rolling deploy: compose recreeaza doar containerul `backend`; oauth2-proxy + Caddy raman. Sesiunile JWT raman valide; daca rotezi `JWT_SECRET`, toti userii vor fi re-sync-uiti la urmatorul request prin bridge.
-
-**Upgrade la v2.40.1 de pe un volum `ld_data` creat de o imagine pre-v2.40.1:** imaginile vechi nu contineau directorul `/data`, deci Docker a initializat volumul cu ownership `root`. Imaginea noua creeaza `/data` cu ownership `app`, dar Docker copiaza ownership-ul in volum DOAR la prima initializare (volum gol) — un volum existent ramane root-owned si backend-ul non-root pica cu EACCES la deschiderea DB-ului. Remediere one-time inainte de `up -d`:
-
-```bash
-docker compose -f deploy/docker-compose.prod.yml run --rm --user root backend chown -R app:app /data
-```
 
 Pentru rutele API RNPM, configureaza timeout-ul end-to-end al Caddy,
 oauth2-proxy si al oricarui layer Traefik/Cloudflare la minimum 60s.
@@ -140,39 +134,17 @@ In `.env.prod`:
   - `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` opreste claim-ul pe tipuri de job-uri fara modificari DB.
   - SMTP partial config dezactiveaza mailer-ul cu warning; lipsa completa = mailer disabled silent.
 
-## 11. Platforme build-from-git (Dokploy, Coolify, CapRover)
-
-Din v2.40.1, `Dockerfile`-ul compileaza singur `dist-backend` + `dist-frontend` intr-un stage de build — `docker build` functioneaza direct pe un git clone curat, fara `npm run build` local in prealabil. Pe Dokploy si platforme similare:
-
-  - **Build**: foloseste build type "Dockerfile" cu context radacina repo-ului. Nu e nevoie de niciun pas de pre-compilare.
-  - **Persistenta DB (obligatoriu)**: monteaza un volum persistent la `/data` si seteaza `LEGAL_DASHBOARD_DB_PATH=/data/legal-dashboard.db`. Fara volum, baza de date traieste in filesystem-ul containerului si DISPARE la fiecare redeploy. Directorul `/data` exista deja in imagine cu ownership corect pentru userul non-root `app`.
-  - **Env obligatorii pentru web mode**: aceleasi ca in `deploy/docker-compose.prod.yml` — `HOST=0.0.0.0`, `LEGAL_DASHBOARD_ALLOW_REMOTE=1`, `LEGAL_DASHBOARD_AUTH_MODE=web`, `LEGAL_DASHBOARD_JWT_SECRET/ISSUER/AUDIENCE`, `TENANT_KEY_ENCRYPTION_SECRET`, `LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET`.
-  - **Auth**: daca platforma are propriul reverse proxy (Traefik etc.), ruleaza oauth2-proxy ca serviciu separat in fata backend-ului, configurat cu `basic-auth-password` + `pass-basic-auth` + `pass-user-headers` (vezi `deploy/docker-compose.prod.yml` pentru env-urile exacte). Orice alt proxy de autentificare trebuie sa livreze bridge-ului secretul (Basic Auth sau `X-Proxy-Auth`) si emailul (`X-Forwarded-Email` sau `X-Auth-Request-Email`) si sa strip-uiasca aceste header-e de pe request-urile clientilor.
-
-## 12. Troubleshooting
+## 11. Troubleshooting
 
   - **Caddy nu obtine cert**: verifica DNS public (`dig DOMAIN`), porturile 80/443 deschise, `docker compose logs caddy`. Foloseste `acme_ca https://acme-staging-v02.api.letsencrypt.org/directory` in Caddyfile cat timp testezi pentru a evita rate limit-ul Let's Encrypt.
   - **`/health` returneaza 503**: backend inca prewarms. Healthcheck-ul are `start_period=120s`. Daca persista, `docker compose logs backend` arata erorile (cel mai des: secret JWT < 32 chars, TENANT_KEY_SECRET invalid base64, DB locked).
   - **Login Google reuseste, dar dashboard arata 403**: emailul nu e in `users`. Ruleaza `seed-admin.mjs` cu emailul respectiv si refresh.
   - **`docker compose logs oauth2-proxy` arata "invalid redirect URL"**: `OAUTH2_PROXY_REDIRECT_URL` din compose nu se potriveste cu URI-ul autorizat in Google Cloud Console. Verifica scheme (https), domeniul exact si `/oauth2/callback`.
-  - **403 forbidden la `/api/v1/auth/oauth2/sync`**: shared secret-ul din `.env.prod` (`PROXY_BRIDGE_SECRET`) este diferit intre backend si oauth2-proxy. Ambele containere trebuie sa citeasca acelasi `.env.prod`; restart oauth2-proxy si backend simultan dupa orice modificare. Daca rulezi alt proxy decat stack-ul din `deploy/`, verifica sa trimita upstream secretul ca parola Basic Auth (`Authorization: Basic base64(user:secret)`) sau ca header `X-Proxy-Auth`, plus emailul in `X-Forwarded-Email` sau `X-Auth-Request-Email`.
-  - **400 missing_identity la `/api/v1/auth/oauth2/sync`**: proxy-ul nu trimite emailul upstream. Pe oauth2-proxy legacy config activeaza `pass-user-headers` (trimite `X-Forwarded-Email`); `set-xauthrequest` NU ajuta — acela seteaza header-e de raspuns pentru nginx auth_request, nu header-e catre upstream.
+  - **403 forbidden la `/api/v1/auth/oauth2/sync`**: shared secret-ul din `.env.prod` (`PROXY_BRIDGE_SECRET`) este diferit intre backend si oauth2-proxy. Ambele containere trebuie sa citeasca acelasi `.env.prod`; restart oauth2-proxy si backend simultan dupa orice modificare.
 
-## 13. Ingress PAT (API programatic v2.40.0) prin fata publica
+## 12. Constrangeri de securitate
 
-Din v2.40.1, `deploy/Caddyfile` are o ruta dedicata pentru clientii programatici: request-urile cu `Authorization: Bearer ld_pat_*` pe `/api/*` (cu exceptia `/api/v1/auth/*`) sunt proxy-ate DIRECT la backend, ocolind oauth2-proxy — care altfel ar redirecta request-urile fara sesiune Google la login si ar suprascrie `Authorization` cu Basic-ul de bridge. Cum functioneaza:
-
-  - **Matching strict**: doar forma canonica `Authorization: Bearer ld_pat_...` (B mare, un singur spatiu) intra pe ruta directa. Variantele (`bearer` lowercase, tab) cad in fluxul oauth2-proxy si primesc redirect la Google — fail-safe, dar deconcertant pentru clienti; foloseste forma canonica (vezi API.md).
-  - **Securitatea ramane in backend**: dispatch PAT doar din header-ul Bearer (niciodata din cookie), validare per-request in DB (revocare instanta), gate default-deny pe `(metoda, path, scope)`, rate-limit per token, gate HTTPS (`x-forwarded-proto`), audit + alerta email la IP nou.
-  - **Strip-uri security-critical pe ruta directa**: Caddy strip-uieste `Cookie`, `X-Proxy-Auth`, `X-Forwarded-Email`, `X-Auth-Request-Email`, `X-Forwarded-User` — nimic identity-shaped de la client nu ajunge la backend, iar `not path /api/v1/auth/*` tine traficul PAT complet departe de bridge-ul oauth2 sync.
-  - **IP-ul real al clientului** ajunge la backend prin `X-Forwarded-For`/`X-Real-IP` cu `{remote_host}` (IP fara port) — rate-limit-ul per client si alerta "IP nou" per token functioneaza si pe ruta directa. Presupunere: Caddy e PRIMUL hop public. Daca pui un CDN/load balancer in fata lui Caddy, `{remote_host}` devine IP-ul CDN-ului — adauga `servers { trusted_proxies ... }` in blocul global din Caddyfile si inlocuieste `{remote_host}` cu `{client_ip}`.
-  - **Verificare**: `BASE_URL=https://DOMAIN scripts/smoke-deploy.sh` include proba de ingress PAT (401 asteptat pe token invalid; 302 = ruta lipseste). `deploy/Caddyfile` e validat si in CI (`docker-build.yml`).
-
-Avertisment neschimbat: NU seta `OAUTH2_PROXY_PASS_AUTHORIZATION_HEADER=true` — ar emite doua valori `Authorization` catre backend pe fluxul browser (Bearer id-token Google + Basic) si ar strica bridge-ul; fix-ul corect e exact aceasta rutare in Caddy, nu pass-through-ul din oauth2-proxy.
-
-## 14. Constrangeri de securitate
-
-  - Backend-ul NU foloseste `ports:` in compose, doar `expose:`. Daca cineva il publica direct, oricine cu un client HTTP poate trimite header-ele de identitate (`X-Forwarded-Email` / `X-Auth-Request-Email`) direct la bridge. Singura protectie ramasa in acel scenariu este shared secret-ul `PROXY_BRIDGE_SECRET` (validat inainte de orice header de identitate) — pastreaza-l rotativ si NU il loga.
+  - Backend-ul NU foloseste `ports:` in compose, doar `expose:`. Daca cineva il publica direct, oricine cu un client HTTP poate trimite header `X-Auth-Request-Email` (bypass total al Google OAuth). Singura protectie suplimentara este shared secret `PROXY_BRIDGE_SECRET` — pastreaza-l rotativ si NU il loga.
   - **`LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` este obligatoriu operational in spatele unui proxy** (v2.43.0): gardurile care depind de identitatea peer-ului (rate limiter per IP, originGuard pe mutatii cross-LAN) folosesc `X-Forwarded-For` DOAR daca peer-ul TCP intra in acest CIDR. Nesetat, toate cererile au ca peer IP-ul containerului de proxy — un singur bucket de rate-limit pentru toti utilizatorii si protectie CSRF dependenta exclusiv de cookie-ul SameSite=Strict. Seteaza CIDR-ul retelei Docker a proxy-ului (ex. `172.20.0.0/16`); backend-ul logheaza la boot warn-ul structurat `proxy.trusted_cidr.missing` cand lipseste in web mode.
   - oauth2-proxy NU forwardeaza tokenul Google catre backend (`PASS_AUTHORIZATION_HEADER=false`, `PASS_ACCESS_TOKEN=false`). Asa, tokenurile Google nu intra niciodata in DB-ul nostru.
   - Cookie-urile sunt HttpOnly + Secure + SameSite=Strict. Frontend-ul nu poate citi JWT-ul din JavaScript.

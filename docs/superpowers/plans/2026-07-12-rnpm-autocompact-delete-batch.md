@@ -1,7 +1,7 @@
 # Autocompact conditionat dupa delete-batch RNPM — Implementation Plan (Rev. 2)
 
 > **Rev. 2:** corectiile review-ului adversarial Codex (2026-07-12) sunt integrate in sectiunea "Rev. 2 — corectii obligatorii" de la final; unde exista conflict, Rev. 2 castiga asupra textului initial al taskurilor.
->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Stergerea pe selectie a avizelor (`POST /saved/delete-batch`) elibereaza automat si spatiul pe disc cand cantitatea eliberata e semnificativa — un singur click, rezultatul asteptat — fara sa incetineasca stergerile mici cu compactari inutile.

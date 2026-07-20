@@ -1,5 +1,5 @@
 import fsPromises from "node:fs/promises";
-import { listRnpmBackups, withMaintenanceRead, type BackupEntry } from "./backup.ts";
+import { withMaintenanceRead } from "./backup.ts";
 import { getRnpmDb, getRnpmDbPath } from "./rnpmDb.ts";
 import { getOverride } from "./userQuotaRepository.ts";
 
@@ -58,51 +58,34 @@ export interface RnpmStorageMeasurement {
   exists: boolean;
 }
 
-async function measureRnpmStorageUnlocked(ownerId: string): Promise<RnpmStorageMeasurement> {
-  const dbPath = getRnpmDbPath(ownerId);
-  let mainBytes: number;
-  try {
-    mainBytes = (await fsPromises.stat(dbPath)).size;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return { usedBytes: 0, exists: false };
-    throw error;
-  }
-
-  const rawUsedBytes = mainBytes + (await sizeOrZero(`${dbPath}-wal`)) + (await sizeOrZero(`${dbPath}-shm`));
-  const limitBytes = getRnpmStorageLimitBytes(ownerId);
-  if (limitBytes !== null && rawUsedBytes >= limitBytes) {
-    // A doua sansa best-effort: publica paginile WAL deja comise in main
-    // inainte de decizia de admission. PASSIVE nu blocheaza writerii activi.
-    try {
-      getRnpmDb(ownerId).pragma("wal_checkpoint(PASSIVE)");
-    } catch (error) {
-      console.warn(
-        "[rnpmStorageLimit] wal_checkpoint(PASSIVE) failed:",
-        error instanceof Error ? error.message : error
-      );
-    }
-    return { usedBytes: await measureFiles(dbPath), exists: true };
-  }
-  return { usedBytes: rawUsedBytes, exists: true };
-}
-
 export function measureRnpmStorage(ownerId: string): Promise<RnpmStorageMeasurement> {
-  return withMaintenanceRead(() => measureRnpmStorageUnlocked(ownerId));
-}
+  return withMaintenanceRead(async () => {
+    const dbPath = getRnpmDbPath(ownerId);
+    let mainBytes: number;
+    try {
+      mainBytes = (await fsPromises.stat(dbPath)).size;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException)?.code === "ENOENT") return { usedBytes: 0, exists: false };
+      throw error;
+    }
 
-export interface RnpmStorageWithBackups {
-  storage: RnpmStorageMeasurement;
-  backups: BackupEntry[];
-}
-
-// Admin usage must observe the live DB files and backup jail in one maintenance
-// generation. This helper deliberately avoids nesting read locks: with writer
-// preference, a queued writer between nested reads could otherwise self-block.
-export function measureRnpmStorageWithBackups(ownerId: string): Promise<RnpmStorageWithBackups> {
-  return withMaintenanceRead(async () => ({
-    storage: await measureRnpmStorageUnlocked(ownerId),
-    backups: await listRnpmBackups(ownerId),
-  }));
+    const rawUsedBytes = mainBytes + (await sizeOrZero(`${dbPath}-wal`)) + (await sizeOrZero(`${dbPath}-shm`));
+    const limitBytes = getRnpmStorageLimitBytes(ownerId);
+    if (limitBytes !== null && rawUsedBytes >= limitBytes) {
+      // A doua sansa best-effort: publica paginile WAL deja comise in main
+      // inainte de decizia de admission. PASSIVE nu blocheaza writerii activi.
+      try {
+        getRnpmDb(ownerId).pragma("wal_checkpoint(PASSIVE)");
+      } catch (error) {
+        console.warn(
+          "[rnpmStorageLimit] wal_checkpoint(PASSIVE) failed:",
+          error instanceof Error ? error.message : error
+        );
+      }
+      return { usedBytes: await measureFiles(dbPath), exists: true };
+    }
+    return { usedBytes: rawUsedBytes, exists: true };
+  });
 }
 
 export class RnpmStorageLimitError extends Error {

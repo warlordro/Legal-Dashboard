@@ -137,6 +137,9 @@ $env:NODE_ENV = "production"
 # respinsa. Escape hatch documentat in patSecurity.ts pentru dev/loopback.
 $env:LEGAL_DASHBOARD_PAT_ALLOW_HTTP = "1"
 $env:PORT = "$BackendPort"
+# PR-5 (fail-closed strict): web mode pe loopback presupune proxy co-locat.
+# Smoke-ul local nu are proxy real, deci declaram explicit loopback ca trusted.
+$env:LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "127.0.0.1/32"
 
 # --- 4. Backend ----------------------------------------------------------------
 Write-Host "[dev-web-local] pornesc backend-ul pe portul $BackendPort..."

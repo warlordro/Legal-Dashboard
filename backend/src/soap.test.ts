@@ -157,6 +157,44 @@ describe("SOAP response cap", () => {
   });
 });
 
+describe("SOAP redirect safety (SEC-04)", () => {
+  it("rejects a 3xx redirect on the SOAP fetch (SEC-04)", async () => {
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      expect((init as RequestInit).redirect).toBe("manual");
+      return new Response(null, { status: 302 });
+    });
+    await expect(cautareDosare({ numeParte: "x" })).rejects.toThrow(/redirect/i);
+  });
+});
+
+describe("SOAP fault sanitization (SEC-05)", () => {
+  it("strips control chars + Unicode line separators and caps the faultstring before logging", async () => {
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    // Attacker-influenceable faultstring: log-injection newlines, NUL, DEL, NEL
+    // and the Unicode line/paragraph separators, then an over-long tail.
+    const injected = "linia1\nlinia2\r\tTAB\u0000NUL\u007fDEL\u0085NEL\u2028LS\u2029PS";
+    const longTail = "A".repeat(600);
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        `<soap:Envelope><soap:Body><soap:Fault><faultstring>${injected}${longTail}</faultstring></soap:Fault></soap:Body></soap:Envelope>`,
+        { status: 500 }
+      )
+    );
+
+    await expect(cautareDosare({ numarDosar: "1/1/2024" })).rejects.toThrow(/PortalJust/);
+
+    const call = consoleError.mock.calls.find((c) => c[0] === "SOAP Fault detalii:");
+    expect(call).toBeDefined();
+    const logged = call?.[1] as string;
+    // No C0/C1 controls, DEL, or Unicode line separators survive.
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: test asserts sanitization of log input
+    expect(logged).not.toMatch(/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/);
+    // Capped at 500 chars so the over-long tail cannot flood the log.
+    expect(logged.length).toBeLessThanOrEqual(500);
+  });
+});
+
 describe("cautareDosare false-empty guard (v2.37.1, review cluster 3)", () => {
   it("arunca pe 200 fara envelope-ul CautareDosareResult (pagina drifted != 0 rezultate)", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
@@ -357,5 +395,19 @@ describe("decodeXmlEntities", () => {
   it("leaves text without entities untouched", () => {
     expect(decodeXmlEntities("Popescu Ionescu 2024")).toBe("Popescu Ionescu 2024");
     expect(decodeXmlEntities("")).toBe("");
+  });
+
+  it("maps XML-invalid or out-of-range numeric references to U+FFFD (SEC-06)", () => {
+    // > 0x10FFFF would make String.fromCodePoint throw a RangeError.
+    expect(decodeXmlEntities("&#x110000;")).toBe("�");
+    // Lone surrogate half — invalid in XML 1.0.
+    expect(decodeXmlEntities("&#xD800;")).toBe("�");
+    // NUL and other C0 controls are not allowed in XML 1.0 text.
+    expect(decodeXmlEntities("&#0;")).toBe("�");
+    expect(decodeXmlEntities("&#1;")).toBe("�");
+    // Valid references (incl. an astral emoji and Tab) still decode.
+    expect(decodeXmlEntities("&#65;")).toBe("A");
+    expect(decodeXmlEntities("&#x1F600;")).toBe("\u{1F600}");
+    expect(decodeXmlEntities("&#9;")).toBe("\t");
   });
 });

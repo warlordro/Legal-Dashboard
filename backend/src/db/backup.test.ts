@@ -471,6 +471,16 @@ describe("restore monolit — validare ledger (Rev. 3)", () => {
     await seedBackup(backupName, "NOLEDGER");
     await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
   });
+
+  it("ledger PREZENT dar GOL (0 randuri) => 400 fail-closed, live neatins", async () => {
+    const backupName = "legal-dashboard.2026-06-07.db";
+    await seedBackup(backupName, "EMPTYLEDGER");
+    forgeLedger(backupName, []); // creeaza _schema_versions, insereaza 0 randuri
+
+    await expect(restoreFromBackup(backupName)).rejects.toMatchObject({ code: "INVALID_PARAMS" });
+    await expect(restoreFromBackup(backupName)).rejects.toThrow(/gol|fara randuri/i);
+    expect(readMarker(dbPath)).toBe("LIVE");
+  });
 });
 
 // Rev. 3 (Codex H2): dupa split, un backup de monolit care mai contine randuri

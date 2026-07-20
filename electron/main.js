@@ -99,12 +99,15 @@ app.on("before-quit", (event) => {
   console.log("[main] before-quit: draining backend (scheduler + DB)...");
 
   let timedOut = false;
-  const timeout = new Promise((resolve) =>
-    setTimeout(() => {
+  const timeout = new Promise((resolve) => {
+    const t = setTimeout(() => {
       timedOut = true;
       resolve("timeout");
-    }, BACKEND_SHUTDOWN_TIMEOUT_MS)
-  );
+    }, BACKEND_SHUTDOWN_TIMEOUT_MS);
+    // unref: timer-ul de watchdog nu tine event loop-ul viu dupa ce drain-ul
+    // s-a rezolvat (altfel quit-ul ar astepta cele 75s degeaba).
+    t.unref?.();
+  });
 
   const drain = Promise.resolve()
     .then(() => shutdown())
@@ -347,7 +350,7 @@ function registerSafeStorageIpc() {
     }
   });
 
-  registerNotificationIpc(ipcMain);
+  registerNotificationIpc(ipcMain, isTrustedIpcSender);
 }
 
 function showStartupErrorAndQuit(err) {
@@ -435,23 +438,27 @@ function createWindow() {
   // Use strict URL parsing (NOT startsWith) — userinfo prefix like
   // `http://localhost:3002@attacker.example/` would otherwise pass a naive
   // prefix check while the parser resolves to attacker.example.
-  mainWindow.webContents.on("will-navigate", (event, url) => {
-    let allowed = false;
+  const isAllowedNavUrl = (url) => {
     try {
       const parsed = new URL(url);
-      allowed =
+      return (
         parsed.protocol === "http:" &&
         (parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1") &&
         parsed.port === String(BACKEND_PORT) &&
         parsed.username === "" &&
-        parsed.password === "";
+        parsed.password === ""
+      );
     } catch {
-      allowed = false;
+      return false;
     }
-    if (!allowed) {
-      event.preventDefault();
-    }
-  });
+  };
+  const guardNavigation = (event, url) => {
+    if (!isAllowedNavUrl(url)) event.preventDefault();
+  };
+  mainWindow.webContents.on("will-navigate", guardNavigation);
+  // SECURITY: mirror the same whitelist on redirects (a 30x from an allowed URL
+  // could otherwise land on an external origin without hitting will-navigate).
+  mainWindow.webContents.on("will-redirect", guardNavigation);
 
   // SECURITY: Block new window creation (popups)
   const ALLOWED_EXTERNAL_DOMAINS = [

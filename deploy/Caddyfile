@@ -1,13 +1,8 @@
 # Legal Dashboard — Caddy reverse proxy with auto-TLS via Let's Encrypt.
 #
-# Caddy terminates HTTPS. Two ingress paths (v2.40.1):
-#   1. Programmatic PAT clients (`Authorization: Bearer ld_pat_*` on /api/*,
-#      except /api/v1/auth/*) are proxied DIRECTLY to the backend — oauth2-proxy
-#      would redirect sessionless requests to Google and overwrite Authorization
-#      with the bridge Basic header, so PATs cannot traverse it.
-#   2. Everything else goes to oauth2-proxy on port 4180, which either redirects
-#      unauthenticated users to Google OAuth or proxies authenticated requests
-#      to the backend on port 3002.
+# Caddy terminates HTTPS, forwards everything to oauth2-proxy on port 4180.
+# oauth2-proxy then either redirects unauthenticated users to Google OAuth or
+# proxies authenticated requests to the backend on port 3002.
 #
 # Health probe path `/health` is exempted from auth inside oauth2-proxy (see
 # OAUTH2_PROXY_SKIP_AUTH_ROUTES in docker-compose.prod.yml). External monitors
@@ -22,77 +17,24 @@
 {$DOMAIN} {
 	encode zstd gzip
 
-	# PAT ingress (v2.40.1). Matcher notes:
-	#   - value is quoted: unquoted it would parse as two OR'd values.
-	#   - trailing `*` = prefix match on the header VALUE (case-sensitive, single
-	#     space) — canonical form `Authorization: Bearer ld_pat_...`; variants
-	#     (lowercase "bearer", tab) fall through to oauth2-proxy where
-	#     Authorization is stripped -> OAuth redirect, fail-safe.
-	#   - `not path /api/v1/auth/*`: PAT-shaped traffic may NEVER reach the
-	#     oauth2 sync bridge / login / logout directly; it routes through
-	#     oauth2-proxy, which strips Authorization.
-	#   - multi-Authorization: the matcher passes if ANY value matches, but Node
-	#     keeps only the FIRST Authorization header. A `Basic x` + `Bearer ld_pat_y`
-	#     pair routes here and arrives as `Basic x` -> no Bearer -> 401 (fail-closed;
-	#     pinned assumption, do not rely on header merging).
-	@pat {
-		header Authorization "Bearer ld_pat_*"
-		path /api/*
-		not path /api/v1/auth/*
-	}
-	handle @pat {
-		reverse_proxy backend:3002 {
-			# SECURITY-CRITICAL strip list — NU e igiena cosmetica. Bridge-ul
-			# oauth2 sync are incredere in X-Proxy-Auth / Basic (secret) si in
-			# X-Forwarded-Email / X-Auth-Request-Email (identitate). `not path`
-			# de mai sus tine traficul PAT departe de bridge; strip-urile de aici
-			# sunt al doilea strat: nimic identity-shaped de la client nu are voie
-			# sa ajunga direct la backend. Cookie e strip-uit pentru determinism:
-			# pe calea PAT autentificarea e DOAR tokenul Bearer, niciodata sesiunea.
-			header_up -Cookie
-			header_up -X-Auth-Request-Email
-			header_up -X-Auth-Request-User
-			header_up -X-Auth-Request-Groups
-			header_up -X-Forwarded-Email
-			header_up -X-Forwarded-User
-			header_up -X-Forwarded-Preferred-Username
-			header_up -X-Proxy-Auth
-			header_up Host {host}
-			# {remote_host} = IP-ul clientului FARA port. {remote} ar fi "IP:port",
-			# pe care backend-ul (readClientIp, net.isIP) il ignora si ar cadea pe
-			# IP-ul containerului Caddy — rate-limit per client si alerta "IP nou"
-			# per token ar colapsa pe o singura valoare.
-			# ASSUMPTION: Caddy e PRIMUL hop public. In spatele unui CDN/LB,
-			# {remote_host} = IP-ul CDN-ului; adauga `servers { trusted_proxies ... }`
-			# in blocul global si foloseste {client_ip} in loc de {remote_host}.
-			header_up X-Real-IP {remote_host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-		}
-	}
-
 	# Forward client-real-IP + scheme so oauth2-proxy + backend rate limiter +
 	# originGuard see the correct headers. Without `X-Forwarded-Proto=https`,
 	# oauth2-proxy may build the wrong redirect URL after Google callback.
-	handle {
-		reverse_proxy oauth2-proxy:4180 {
-			# v2.37.1: NU stripui Cookie — oauth2-proxy isi citeste sesiunea si
-			# tokenul CSRF din cookie, iar backend-ul primeste legal_dashboard_session
-			# pe acelasi canal; cu `-Cookie` activ, login-ul intra in bucla infinita.
-			# Stripuim doar header-ele de identitate spoofabile, pe care DOAR
-			# oauth2-proxy are voie sa le seteze in aval.
-			header_up -Authorization
-			header_up -X-Auth-Request-Email
-			header_up -X-Forwarded-Email
-			header_up -X-Forwarded-User
-			header_up -X-Proxy-Auth
-			header_up Host {host}
-			# v2.40.1: {remote_host} (IP fara port) in loc de {remote} (IP:port) —
-			# backend-ul valideaza cu net.isIP si arunca valorile cu port.
-			header_up X-Real-IP {remote_host}
-			header_up X-Forwarded-For {remote_host}
-			header_up X-Forwarded-Proto {scheme}
-		}
+	reverse_proxy oauth2-proxy:4180 {
+		# v2.37.1: NU stripui Cookie — oauth2-proxy isi citeste sesiunea si
+		# tokenul CSRF din cookie, iar backend-ul primeste legal_dashboard_session
+		# pe acelasi canal; cu `-Cookie` activ, login-ul intra in bucla infinita.
+		# Stripuim doar header-ele de identitate spoofabile, pe care DOAR
+		# oauth2-proxy are voie sa le seteze in aval.
+		header_up -Authorization
+		header_up -X-Auth-Request-Email
+		header_up -X-Forwarded-Email
+		header_up -X-Forwarded-User
+		header_up -X-Proxy-Auth
+		header_up Host {host}
+		header_up X-Real-IP {remote}
+		header_up X-Forwarded-For {remote}
+		header_up X-Forwarded-Proto {scheme}
 	}
 
 	# Security headers complementary to Hono's secureHeaders().
