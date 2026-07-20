@@ -623,13 +623,17 @@ describe("shutdown — lock retention cu writer nesettled (EXT-H-01)", () => {
 
     const { withMaintenanceWrite } = await import("./db/backup.ts");
     let release: () => void = () => {};
-    const hung = withMaintenanceWrite(
-      () =>
-        new Promise<void>((r) => {
-          release = r;
-        })
-    );
-    await new Promise((r) => setImmediate(r)); // writer-ul detine efectiv lock-ul
+    let writerStarted = false;
+    const hung = withMaintenanceWrite(() => {
+      // Body-ul ruleaza DOAR dupa ce lock-ul e efectiv detinut si writer-ul e
+      // inregistrat in settle-set. Un singur setImmediate nu era suficient pe
+      // scheduling-ul macOS (race: settle-set gol -> lock eliberat -> fals FAIL).
+      writerStarted = true;
+      return new Promise<void>((r) => {
+        release = r;
+      });
+    });
+    await vi.waitFor(() => expect(writerStarted).toBe(true));
 
     const shutdown = (globalThis as unknown as { __legalDashboardShutdown?: () => Promise<void> })
       .__legalDashboardShutdown;
