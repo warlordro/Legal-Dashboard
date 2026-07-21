@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.43.1 (2026-07-20) — branch `feat/v2.43.0-rnpm-split`. Munca de dupa push-ul initial din 13 iulie (remediere sec + rezultate partiale PortalJust) e reincadrata ca release patch v2.43.1 peste v2.43.0.
+**Versiune curenta**: v2.43.2 (2026-07-21) — branch `feat/v2.43.0-rnpm-split`. v2.43.2 = refresh model AI (Gemini 3.5 Flash -> 3.6 Flash, cheie interna `gemini-flash-3.6`, nativ + OpenRouter). Munca de dupa push-ul initial din 13 iulie (remediere sec + rezultate partiale PortalJust) e reincadrata ca release patch v2.43.1 peste v2.43.0.
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,

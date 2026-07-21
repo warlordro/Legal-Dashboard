@@ -1,5 +1,9 @@
 # Changelog - Legal Dashboard
 
+## v2.43.2 - 2026-07-21
+
+Refresh de model AI: Gemini 3.5 Flash -> 3.6 Flash pe slotul "Echilibrat" Google, atat pe provider-ul nativ (id `gemini-3.6-flash`) cat si pe rutarea OpenRouter (`google/gemini-3.6-flash`). Cheie interna noua versionata `gemini-flash-3.6` (precedent GPT-5.6): cheia veche `gemini-flash-3.5` dispare din catalog (400 UNKNOWN_MODEL pe requesturi directe), iar selectiile salvate in UI se re-mapeaza automat pe primul model disponibil, fara reconfigurare. Pricing 1.5/7.5 USD per 1M tokeni in/out (verificat in catalogul live OpenRouter 2026-07-21; 3.5 Flash era 1.5/9) — intrarea 3.5 ramane in tabelul de pricing pentru retry-urile in zbor, istoricul `ai_usage` are costul stocat la insert. Actualizate manualul in-app, exportul PDF al manualului si tabelul de modele din DOCUMENTATIE.md; teste de regresie pe slug-ul OpenRouter si pe retragerea cheilor vechi.
+
 ## v2.43.1 - 2026-07-20
 
 Release patch peste v2.43.0, pe acelasi branch `feat/v2.43.0-rnpm-split`. Doua directii mari, ambele dublu-review-uite adversarial (Codex GPT-5.6 Sol + panel multi-model), plus finisaje UI.
