@@ -296,7 +296,7 @@ Vezi sectiunea SQLite pentru schema completa. Filtre:
 | **OpenAI** | GPT-5.6 Luna (Rapid) | `gpt-5.6-luna` | `gpt-5.6-luna` |
 | | GPT-5.6 Terra (Echilibrat) | `gpt-5.6-terra` | `gpt-5.6-terra` |
 | | GPT-5.6 Sol (Premium) | `gpt-5.6-sol` | `gpt-5.6-sol` |
-| **Google** | Gemini 3.1 Flash Lite (Rapid) | `gemini-flash-lite-3` | `gemini-3.1-flash-lite-preview` |
+| **Google** | Gemini 3.5 Flash Lite (Rapid) | `gemini-flash-lite-3.5` | `gemini-3.5-flash-lite` |
 | | Gemini 3.6 Flash (Echilibrat) | `gemini-flash-3.6` | `gemini-3.6-flash` |
 | | Gemini 3.1 Pro (Premium) | `gemini-pro-3` | `gemini-3.1-pro-preview` |
 

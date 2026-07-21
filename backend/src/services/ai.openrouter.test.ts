@@ -109,9 +109,14 @@ describe("resolveOpenRouterSlug", () => {
     expect(resolveOpenRouterSlug("gemini-flash-3.6")).toBe("google/gemini-3.6-flash");
   });
 
-  it("returns null for the retired gemini-flash-3 and gemini-flash-3.5 keys", () => {
+  it("pins gemini-flash-lite-3.5 to the v2.43.x slug (regression guard)", () => {
+    expect(resolveOpenRouterSlug("gemini-flash-lite-3.5")).toBe("google/gemini-3.5-flash-lite");
+  });
+
+  it("returns null for the retired gemini-flash-3, gemini-flash-3.5 and gemini-flash-lite-3 keys", () => {
     expect(resolveOpenRouterSlug("gemini-flash-3")).toBeNull();
     expect(resolveOpenRouterSlug("gemini-flash-3.5")).toBeNull();
+    expect(resolveOpenRouterSlug("gemini-flash-lite-3")).toBeNull();
   });
 
   it("uses OPENROUTER_MODEL_OVERRIDES before the static map", () => {

@@ -519,7 +519,7 @@ export function ManualChapters() {
               </Badge>
             </p>
             <BulletList
-              items={["Gemini 3.1 Lite — Rapid", "Gemini 3.6 Flash — Echilibrat", "Gemini 3.1 Pro — Premium"]}
+              items={["Gemini 3.5 Lite — Rapid", "Gemini 3.6 Flash — Echilibrat", "Gemini 3.1 Pro — Premium"]}
             />
           </div>
         </SubSection>

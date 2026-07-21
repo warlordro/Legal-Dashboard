@@ -43,7 +43,7 @@ export const versions: VersionEntry[] = [
     version: "v2.43.2",
     date: "21 Iulie 2026",
     subtitle:
-      "Modelul Google 'Echilibrat' din analiza AI trece de la Gemini 3.5 Flash la Gemini 3.6 Flash, atat pe ruta nativa cat si prin OpenRouter.",
+      "Modelele Google din analiza AI se actualizeaza: Gemini 3.5 Flash devine 3.6 Flash pe slotul 'Echilibrat', iar Gemini 3.1 Lite devine 3.5 Lite pe slotul 'Rapid' — atat pe ruta nativa cat si prin OpenRouter.",
     icon: <BrainCircuit className="h-5 w-5" />,
     borderColor: "border-l-blue-500",
     badgeClass: "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-300",
@@ -52,6 +52,11 @@ export const versions: VersionEntry[] = [
         title: "Gemini 3.6 Flash inlocuieste 3.5 Flash",
         content:
           "Noul model Google este mai capabil si mai ieftin la generare (7.5 in loc de 9 USD per milion de tokeni la iesire, acelasi pret la intrare). Daca aveai selectat 3.5 Flash, selectia se muta automat pe un model disponibil la prima deschidere a panoului AI — nu trebuie sa reconfigurezi nimic, doar sa alegi 3.6 Flash daca il vrei inapoi ca model preferat.",
+      },
+      {
+        title: "Gemini 3.5 Lite inlocuieste 3.1 Lite",
+        content:
+          "Modelul rapid Google trece pe generatia noua, cu capabilitati mai bune la acelasi profil de viteza. Ramane cel mai ieftin model din catalog, chiar daca pretul creste fata de 3.1 Lite (0.3/2.5 in loc de 0.1/0.4 USD per milion de tokeni intrare/iesire). Ca si la Flash, selectia veche se re-mapeaza automat — alege 3.5 Lite din panoul AI daca il vrei inapoi ca model preferat.",
       },
     ],
   },
