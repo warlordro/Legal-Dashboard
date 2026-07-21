@@ -37,7 +37,7 @@ export const AI_MODELS: AiModelDef[] = [
     desc: "Rapid",
     color: "blue",
   },
-  { key: "gemini-flash-3.5", label: "3.5 Flash", provider: "google", desc: "Echilibrat", color: "blue" },
+  { key: "gemini-flash-3.6", label: "3.6 Flash", provider: "google", desc: "Echilibrat", color: "blue" },
   { key: "gemini-pro-3", label: "3.1 Pro", provider: "google", desc: "Premium", color: "blue" },
 ];
 

@@ -347,7 +347,7 @@ export async function buildManualPdf(): Promise<ExportResult> {
   addHeading("Modele disponibile:", 2);
   addParagraph("Anthropic (Claude): Haiku 4.5 (Rapid), Sonnet 5 (Echilibrat), Opus 4.8 (Premium)");
   addParagraph("OpenAI (GPT): GPT-5.6 Luna (Rapid), GPT-5.6 Terra (Echilibrat), GPT-5.6 Sol (Premium)");
-  addParagraph("Google (Gemini): Gemini 3.1 Lite (Rapid), Gemini 3.5 Flash (Echilibrat), Gemini 3.1 Pro (Premium)");
+  addParagraph("Google (Gemini): Gemini 3.1 Lite (Rapid), Gemini 3.6 Flash (Echilibrat), Gemini 3.1 Pro (Premium)");
 
   addHeading("Structura analizei (7 sectiuni):", 2);
   addBullet("Rezumatul dosarului — descriere sintetica a cauzei");

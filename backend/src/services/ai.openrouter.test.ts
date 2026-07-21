@@ -102,14 +102,16 @@ describe("resolveOpenRouterSlug", () => {
   });
 
   // Pin literale (NU prin OPENROUTER_MODEL_MAP, altfel testul citeste aceeasi
-  // sursa pe care o citeste functia si nu ar mai prinde regresia). v2.38.0 a
-  // bumpuit gemini la 3.5-flash; vechea cheie gemini-flash-3 a fost eliminata.
-  it("pins gemini-flash-3.5 to the v2.38.0 slug (regression guard)", () => {
-    expect(resolveOpenRouterSlug("gemini-flash-3.5")).toBe("google/gemini-3.5-flash");
+  // sursa pe care o citeste functia si nu ar mai prinde regresia). v2.43.x a
+  // bumpuit gemini la 3.6-flash; cheile gemini-flash-3 si gemini-flash-3.5
+  // au fost eliminate.
+  it("pins gemini-flash-3.6 to the v2.43.x slug (regression guard)", () => {
+    expect(resolveOpenRouterSlug("gemini-flash-3.6")).toBe("google/gemini-3.6-flash");
   });
 
-  it("returns null for the retired gemini-flash-3 key", () => {
+  it("returns null for the retired gemini-flash-3 and gemini-flash-3.5 keys", () => {
     expect(resolveOpenRouterSlug("gemini-flash-3")).toBeNull();
+    expect(resolveOpenRouterSlug("gemini-flash-3.5")).toBeNull();
   });
 
   it("uses OPENROUTER_MODEL_OVERRIDES before the static map", () => {

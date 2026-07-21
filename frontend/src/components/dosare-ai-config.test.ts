@@ -13,9 +13,10 @@ describe("dosare-ai-config AI_MODELS", () => {
     expect(keys).not.toContain("qwen-3.7-max");
   });
 
-  it("uses the refreshed Opus 4.8 and 3.5 Flash labels", () => {
+  it("uses the refreshed Opus 4.8 and 3.6 Flash labels", () => {
     expect(AI_MODELS.find((model) => model.key === "claude-opus")?.label).toBe("Opus 4.8");
-    expect(AI_MODELS.find((model) => model.key === "gemini-flash-3.5")?.label).toBe("3.5 Flash");
+    expect(AI_MODELS.find((model) => model.key === "gemini-flash-3.6")?.label).toBe("3.6 Flash");
+    expect(AI_MODELS.map((model) => model.key)).not.toContain("gemini-flash-3.5");
   });
 
   // v2.42.x: familia OpenAI trece pe GPT-5.6 — Sol (premium), Terra
