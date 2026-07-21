@@ -27,11 +27,13 @@ export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: str
   "gpt-5.6-luna": { provider: "openai", modelId: "gpt-5.6-luna" },
   "gpt-5.6-terra": { provider: "openai", modelId: "gpt-5.6-terra" },
   "gpt-5.6-sol": { provider: "openai", modelId: "gpt-5.6-sol" },
-  // Google — v2.43.x: 3.5 Flash → 3.6 Flash. Cheia interna e versionata
-  // (precedent GPT-5.6): cheie noua "gemini-flash-3.6", cheia veche
-  // "gemini-flash-3.5" dispare din catalog — requesturile cu ea primesc
-  // 400 UNKNOWN_MODEL, iar selectiile salvate sunt re-mapate automat in UI.
-  "gemini-flash-lite-3": { provider: "google", modelId: "gemini-3.1-flash-lite-preview" },
+  // Google — v2.43.x: 3.5 Flash → 3.6 Flash si 3.1 Flash Lite → 3.5 Flash
+  // Lite. Cheile interne sunt versionate (precedent GPT-5.6): chei noi
+  // "gemini-flash-3.6" / "gemini-flash-lite-3.5", cheile vechi
+  // ("gemini-flash-3.5", "gemini-flash-lite-3") dispar din catalog —
+  // requesturile cu ele primesc 400 UNKNOWN_MODEL, iar selectiile salvate
+  // sunt re-mapate automat in UI.
+  "gemini-flash-lite-3.5": { provider: "google", modelId: "gemini-3.5-flash-lite" },
   "gemini-flash-3.6": { provider: "google", modelId: "gemini-3.6-flash" },
   "gemini-pro-3": { provider: "google", modelId: "gemini-3.1-pro-preview" },
 };
@@ -45,7 +47,7 @@ export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "gpt-5.6-luna": "openai/gpt-5.6-luna",
   "gpt-5.6-terra": "openai/gpt-5.6-terra",
   "gpt-5.6-sol": "openai/gpt-5.6-sol",
-  "gemini-flash-lite-3": "google/gemini-3.1-flash-lite-preview",
+  "gemini-flash-lite-3.5": "google/gemini-3.5-flash-lite",
   "gemini-flash-3.6": "google/gemini-3.6-flash",
   "gemini-pro-3": "google/gemini-3.1-pro-preview",
 };

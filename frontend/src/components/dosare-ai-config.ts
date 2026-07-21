@@ -31,8 +31,8 @@ export const AI_MODELS: AiModelDef[] = [
   { key: "gpt-5.6-sol", label: "GPT-5.6 Sol", provider: "openai", desc: "Premium", color: "emerald" },
   // Google
   {
-    key: "gemini-flash-lite-3",
-    label: "3.1 Lite",
+    key: "gemini-flash-lite-3.5",
+    label: "3.5 Lite",
     provider: "google",
     desc: "Rapid",
     color: "blue",
