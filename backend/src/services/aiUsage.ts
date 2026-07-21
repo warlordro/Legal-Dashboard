@@ -61,7 +61,11 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
   },
   google: {
     "gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.4 },
+    // Intrarea 3.5 ramane pentru retry-uri/cozi in zbor din jurul migrarii la
+    // 3.6 (acelasi pattern ca GPT-5.4 mai sus); istoricul are costul stocat la
+    // insert. Pricing 3.6 verificat in catalogul live OpenRouter 2026-07-21.
     "gemini-3.5-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 9 },
+    "gemini-3.6-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 7.5 },
     "gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
   },
   openrouter: {
@@ -79,6 +83,7 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "openai/gpt-5.6-sol": { inputUsdPerMillion: 5, outputUsdPerMillion: 30 },
     "google/gemini-3.1-flash-lite-preview": { inputUsdPerMillion: 0.075, outputUsdPerMillion: 0.3 },
     "google/gemini-3.5-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 9 },
+    "google/gemini-3.6-flash": { inputUsdPerMillion: 1.5, outputUsdPerMillion: 7.5 },
     "google/gemini-3.1-pro-preview": { inputUsdPerMillion: 1.25, outputUsdPerMillion: 10 },
   },
 };
