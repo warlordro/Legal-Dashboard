@@ -13,8 +13,8 @@ describe("dosare-ai-config AI_MODELS", () => {
     expect(keys).not.toContain("qwen-3.7-max");
   });
 
-  it("uses the refreshed Opus 4.8, 3.6 Flash and 3.5 Lite labels", () => {
-    expect(AI_MODELS.find((model) => model.key === "claude-opus")?.label).toBe("Opus 4.8");
+  it("uses the refreshed Opus 5, 3.6 Flash and 3.5 Lite labels", () => {
+    expect(AI_MODELS.find((model) => model.key === "claude-opus")?.label).toBe("Opus 5");
     expect(AI_MODELS.find((model) => model.key === "gemini-flash-3.6")?.label).toBe("3.6 Flash");
     expect(AI_MODELS.find((model) => model.key === "gemini-flash-lite-3.5")?.label).toBe("3.5 Lite");
     expect(AI_MODELS.map((model) => model.key)).not.toContain("gemini-flash-3.5");
@@ -41,7 +41,7 @@ describe("dosare-ai-config JUDGE_MODELS_LIST", () => {
     expect(JUDGE_MODELS_LIST.map((model) => model.key)).toEqual(["claude-opus", "gpt-5.6-sol", "gemini-pro-3"]);
   });
 
-  it("labels the Claude judge Opus 4.8", () => {
-    expect(JUDGE_MODELS_LIST.find((model) => model.key === "claude-opus")?.label).toBe("Claude Opus 4.8");
+  it("labels the Claude judge Opus 5", () => {
+    expect(JUDGE_MODELS_LIST.find((model) => model.key === "claude-opus")?.label).toBe("Claude Opus 5");
   });
 });

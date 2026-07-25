@@ -20,7 +20,10 @@ export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: str
   // "claude-sonnet" RAMANE (istoricul de usage si selectiile salvate raman
   // valide); doar modelId-ul se schimba.
   "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-5" },
-  "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-8" },
+  // v2.43.2: modelul "Premium" trece pe Opus 5. Ca la Sonnet, cheia interna
+  // "claude-opus" RAMANE (selectiile salvate si JUDGE_MODELS raman valide);
+  // doar modelId-ul se schimba.
+  "claude-opus": { provider: "anthropic", modelId: "claude-opus-5" },
   // OpenAI — v2.42.x: familia GPT-5.6 inlocuieste 5.4 (Sol=premium,
   // Terra=echilibrat, Luna=rapid). Chei interne noi, versionate; cheile 5.4
   // nu mai exista in catalog — requesturile cu ele primesc 400 UNKNOWN_MODEL.
@@ -43,7 +46,7 @@ export const JUDGE_MODELS = ["claude-opus", "gpt-5.6-sol", "gemini-pro-3"];
 export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "claude-haiku": "anthropic/claude-haiku-4.5",
   "claude-sonnet": "anthropic/claude-sonnet-5",
-  "claude-opus": "anthropic/claude-opus-4.8",
+  "claude-opus": "anthropic/claude-opus-5",
   "gpt-5.6-luna": "openai/gpt-5.6-luna",
   "gpt-5.6-terra": "openai/gpt-5.6-terra",
   "gpt-5.6-sol": "openai/gpt-5.6-sol",

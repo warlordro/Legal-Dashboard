@@ -43,7 +43,7 @@ export const versions: VersionEntry[] = [
     version: "v2.43.2",
     date: "21 Iulie 2026",
     subtitle:
-      "Modelele Google din analiza AI se actualizeaza: Gemini 3.5 Flash devine 3.6 Flash pe slotul 'Echilibrat', iar Gemini 3.1 Lite devine 3.5 Lite pe slotul 'Rapid' — atat pe ruta nativa cat si prin OpenRouter.",
+      "Modelele din analiza AI se actualizeaza: Gemini 3.5 Flash devine 3.6 Flash pe slotul 'Echilibrat', Gemini 3.1 Lite devine 3.5 Lite pe slotul 'Rapid', iar Claude Opus 4.8 devine Claude Opus 5 pe slotul 'Premium' — atat pe ruta nativa cat si prin OpenRouter.",
     icon: <BrainCircuit className="h-5 w-5" />,
     borderColor: "border-l-blue-500",
     badgeClass: "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-300",
@@ -57,6 +57,11 @@ export const versions: VersionEntry[] = [
         title: "Gemini 3.5 Lite inlocuieste 3.1 Lite",
         content:
           "Modelul rapid Google trece pe generatia noua, cu capabilitati mai bune la acelasi profil de viteza. Ramane cel mai ieftin model din catalog, chiar daca pretul creste fata de 3.1 Lite (0.3/2.5 in loc de 0.1/0.4 USD per milion de tokeni intrare/iesire). Ca si la Flash, selectia veche se re-mapeaza automat — alege 3.5 Lite din panoul AI daca il vrei inapoi ca model preferat.",
+      },
+      {
+        title: "Claude Opus 5 inlocuieste Opus 4.8",
+        content:
+          "Modelul Premium Anthropic trece pe generatia noua, folosit atat la analiza cu un singur model cat si ca analist sau judecator in analiza multi-agent. Spre deosebire de modelele Google de mai sus, aici nu trebuie sa faci absolut nimic: intrarea Opus din panoul AI ramane pe loc si trece automat pe Opus 5, fara re-mapare si fara reconfigurare. Tariful per milion de tokeni este identic cu al lui 4.8, deci cotele nu se recalibreaza; cat consumi efectiv depinde in continuare de cate analize rulezi.",
       },
     ],
   },

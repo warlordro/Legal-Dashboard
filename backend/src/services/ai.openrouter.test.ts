@@ -133,7 +133,7 @@ describe("resolveOpenRouterSlug", () => {
     process.env.OPENROUTER_MODEL_OVERRIDES =
       "claude-sonnet:javascript:alert(1), claude-opus:evil-provider/model, gpt-5.6-sol:openai/custom-gpt";
     expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/claude-sonnet-5"); // fallback static
-    expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-4.8"); // provider respins
+    expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-5"); // provider respins
     expect(resolveOpenRouterSlug("gpt-5.6-sol")).toBe("openai/custom-gpt"); // valid, trece
   });
 
