@@ -188,7 +188,13 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
         )}
         {loading && !rows && <div className="text-sm text-muted-foreground">Se incarca lista...</div>}
         {rows && rows.length === 0 && (
-          <div className="text-sm text-muted-foreground">Niciun utilizator inregistrat.</div>
+          // Filtrul de inactivi ruleaza pe server, deci lista goala nu inseamna "nimeni
+          // inregistrat" cand el e activ — inseamna doar ca nimeni nu are date RNPM.
+          <div className="text-sm text-muted-foreground">
+            {showInactive
+              ? "Niciun utilizator inregistrat."
+              : "Niciun utilizator cu date RNPM. Bifeaza mai jos ca sa vezi si conturile fara baza."}
+          </div>
         )}
         {(rows !== null || showInactive) && (
           <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">

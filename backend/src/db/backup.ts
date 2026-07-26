@@ -1300,7 +1300,12 @@ export async function deleteAllRnpmAndCompact(ownerId: string): Promise<{ delete
   });
 }
 
-async function deleteAllBackupsInDir(dir: string, prefix: string, logAction: string): Promise<number> {
+async function deleteAllBackupsInDir(
+  dir: string,
+  prefix: string,
+  logAction: string,
+  removeDirIfEmpty = false
+): Promise<number> {
   const backups = await listBackups(dir, prefix);
   let deleted = 0;
   for (const f of backups) {
@@ -1316,6 +1321,14 @@ async function deleteAllBackupsInDir(dir: string, prefix: string, logAction: str
     } catch {
       /* best-effort */
     }
+  }
+  // Jail-ul per user e dedicat unui singur owner: dupa stergerea tuturor backup-urilor
+  // ramanea un director gol per user sters, pentru totdeauna. rmdir esueaza (ENOTEMPTY)
+  // daca a mai ramas ceva inauntru, deci nu poate distruge fisiere nelistate.
+  if (removeDirIfEmpty && deleted > 0) {
+    await fsPromises.rmdir(dir).catch(() => {
+      /* best-effort: directorul nu e gol sau nu exista */
+    });
   }
   logBackupEvent({
     action: logAction,
@@ -1335,7 +1348,7 @@ export async function deleteAllBackups(): Promise<number> {
 
 export async function deleteRnpmBackups(ownerId: string): Promise<number> {
   return withMaintenanceWrite(() =>
-    deleteAllBackupsInDir(getRnpmBackupDir(ownerId), RNPM_PREFIX, "delete_rnpm_backups")
+    deleteAllBackupsInDir(getRnpmBackupDir(ownerId), RNPM_PREFIX, "delete_rnpm_backups", true)
   );
 }
 

@@ -227,6 +227,29 @@ export function checkpointRnpmWal(ownerId: string): void {
   getRnpmDb(ownerId).prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
 }
 
+// Checkpoint PASSIVE care NU inregistreaza un handle nou. Masuratoarea de storage il
+// cere pe calea "peste limita", iar ruta admin /usage o executa pentru TOTI userii:
+// cu getRnpmDb, o singura cerere lasa in registry cate un handle permanent per user
+// peste limita. Daca userul are deja conexiune vie o refolosim; altfel deschidem una
+// temporara si o inchidem. Best-effort: fara fisier sau in timpul unui restore, no-op.
+export function passiveCheckpointRnpmWal(ownerId: string): void {
+  const existing = handles.get(ownerId);
+  if (existing) {
+    existing.pragma("wal_checkpoint(PASSIVE)");
+    return;
+  }
+  assertValidOwnerId(ownerId);
+  if (shuttingDown || isRnpmRestoreInProgress(ownerId)) return;
+  const dbPath = getRnpmDbPath(ownerId);
+  if (!fs.existsSync(dbPath)) return;
+  const db = new Database(dbPath);
+  try {
+    db.pragma("wal_checkpoint(PASSIVE)");
+  } finally {
+    db.close();
+  }
+}
+
 // DEPRECATED (Task 7, fixuri post-review): rutele folosesc
 // compactRnpmDbViaWorker (backup.ts) — VACUUM in worker + swap sub maintenance
 // lock, nu VACUUM blocant pe handle-ul viu (SQLITE_BUSY intermitent cu un

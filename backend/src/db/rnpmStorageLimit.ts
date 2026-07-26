@@ -1,6 +1,6 @@
 import fsPromises from "node:fs/promises";
 import { withMaintenanceRead } from "./backup.ts";
-import { getRnpmDb, getRnpmDbPath } from "./rnpmDb.ts";
+import { getRnpmDbPath, passiveCheckpointRnpmWal } from "./rnpmDb.ts";
 import { getOverride } from "./userQuotaRepository.ts";
 
 const DEFAULT_RNPM_STORAGE_MB = 750;
@@ -88,7 +88,7 @@ function measureRnpmStorageInner(ownerId: string): Promise<RnpmStorageMeasuremen
       // A doua sansa best-effort: publica paginile WAL deja comise in main
       // inainte de decizia de admission. PASSIVE nu blocheaza writerii activi.
       try {
-        getRnpmDb(ownerId).pragma("wal_checkpoint(PASSIVE)");
+        passiveCheckpointRnpmWal(ownerId);
       } catch (error) {
         console.warn(
           "[rnpmStorageLimit] wal_checkpoint(PASSIVE) failed:",
