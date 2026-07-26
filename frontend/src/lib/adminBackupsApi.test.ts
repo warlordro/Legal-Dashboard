@@ -14,7 +14,13 @@ vi.mock("@/lib/api", async (importOriginal) => {
   };
 });
 
-import { adminCreateBackup, adminDeleteBackups, adminListBackups, adminRestoreBackup } from "./adminBackupsApi";
+import {
+  adminCreateBackup,
+  adminDeleteBackup,
+  adminDeleteBackups,
+  adminListBackups,
+  adminRestoreBackup,
+} from "./adminBackupsApi";
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -70,5 +76,16 @@ describe("adminBackupsApi", () => {
     mockApiFetch.mockResolvedValue(jsonResponse(200, { data: { deleted: 3 }, requestId: "rid-4" }));
 
     await expect(adminDeleteBackups()).resolves.toBe(3);
+  });
+
+  it("adminDeleteBackup apeleaza DELETE pe numele encodat si rezolva la succes", async () => {
+    mockApiFetch.mockResolvedValue(
+      jsonResponse(200, { data: { name: "legal-dashboard.manual-x.db" }, requestId: "rid-5" })
+    );
+
+    await expect(adminDeleteBackup("legal-dashboard.manual-x.db")).resolves.toBeUndefined();
+    expect(mockApiFetch).toHaveBeenCalledWith("/api/v1/admin/backups/legal-dashboard.manual-x.db", {
+      method: "DELETE",
+    });
   });
 });

@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { useConfirm } from "@/components/ui/confirm-dialog";
 import {
   adminCreateBackup,
+  adminDeleteBackup,
   adminDeleteBackups,
   adminListBackups,
   adminRestoreBackup,
@@ -28,7 +29,7 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
-  const [busy, setBusy] = useState<string | null>(null); // "create" | "delete" | <nume backup>
+  const [busy, setBusy] = useState<string | null>(null); // "create" | "delete" | <nume backup> (restore) | "delete:<nume backup>"
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -103,6 +104,37 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
         await load();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Eroare restore");
+      } finally {
+        setBusy(null);
+      }
+    } finally {
+      actionInFlightRef.current = false;
+    }
+  };
+
+  const handleDelete = async (entry: BackupEntry) => {
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
+    try {
+      if (busy) return;
+      if (
+        !(await confirm({
+          title: "Sterge backup",
+          message: `Stergi backup-ul ${entry.name}?\n\nActiunea este ireversibila. Celelalte backup-uri nu sunt afectate.`,
+          confirmLabel: "Sterge",
+          destructive: true,
+        }))
+      )
+        return;
+      setBusy(`delete:${entry.name}`);
+      setError(null);
+      setSuccessMsg(null);
+      try {
+        await adminDeleteBackup(entry.name);
+        setSuccessMsg(`Backup sters: ${entry.name}.`);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Eroare la stergerea backup-ului");
       } finally {
         setBusy(null);
       }
@@ -211,6 +243,21 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
                     <History className="h-3.5 w-3.5" />
                   )}
                   Restaureaza
+                </Button>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={!!busy}
+                  onClick={() => void handleDelete(b)}
+                  className="text-red-600 hover:bg-red-500/10 hover:text-red-700 dark:text-red-400 disabled:opacity-50"
+                >
+                  {busy === `delete:${b.name}` ? (
+                    <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                  ) : (
+                    <Trash2 className="h-3.5 w-3.5" />
+                  )}
+                  Sterge
                 </Button>
               </li>
             ))}
