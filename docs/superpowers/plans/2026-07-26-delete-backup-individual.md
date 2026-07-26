@@ -369,7 +369,11 @@ git commit -m "feat(admin): buton de stergere per backup in Setari > Backup"
 - [ ] **Step 2:** `npx tsc --noEmit -p backend/tsconfig.json` si `cd frontend && npx tsc --noEmit` — curat.
 - [ ] **Step 3:** `npm run build` — curat.
 - [ ] **Step 4:** `npm test --workspace=backend` si `cd frontend && npm test -- --run` — baseline 2148 backend (dupa fixul de cause) / 401 frontend, plus testele noi.
-- [ ] **Step 5:** Smoke live in mediul web pornit: sterge un backup din UI, verifica lista si linia `delete_backup` in `.dev-web-local/backend.out.log`. FARA push.
+- [x] **Step 5:** Smoke live in mediul web pornit: sterge un backup din UI, verifica lista si linia `delete_backup` in `.dev-web-local/backend.out.log`. FARA push.
+  EXECUTAT 2026-07-26 23:44 (sesiune admin din browser): `delete_backup` pe
+  `legal-dashboard.manual-2026-07-26T20-44-46-035Z.db`, DELETE 200 in 7ms
+  (requestId 5ce4e407), lista reincarcata; probele neautentificate anterioare au
+  primit corect 401.
 
 ## Review adversarial (2026-07-26, procesat)
 
