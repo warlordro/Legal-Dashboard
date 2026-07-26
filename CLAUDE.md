@@ -34,7 +34,6 @@ La fiecare release (vX.Y.Z → vX.Y.Z+1), actualizeaza in ordine:
 
 8. `SECURITY.md` — daca releaseul aduce schimbari security-relevante (auth, secrets, network surface, CVE patches, threat model). Adauga entry in changelog table la baza fisierului.
 9. `HARDENING.md` — daca releaseul inchide o Faza de hardening sau adauga findings noi din `/multi-review`.
-10. `EXECUTION-ROADMAP.md` — daca releaseul livreaza un PR sau marcheaza un DoD checkbox.
 
 **Sanity check inainte de commit:** `Grep -i "<vechea_versiune>"` pe toate `.md` la radacina; fiecare hit care nu e parte din istoric (CHANGELOG entry vechi, etc.) trebuie actualizat.
 
@@ -164,8 +163,7 @@ Tabelul complet de kill switches operationale e in [SESSION-HANDOFF.md](SESSION-
 Sprintul monitoring + web cutover (PR-0 -> PR-12) e INCHIS pe cod din 2026-05-18
 (PR-10/PR-12 eliminate; ce ramane din web e strict operational: Docker/OAuth/DNS/TLS).
 - [SESSION-HANDOFF.md](SESSION-HANDOFF.md) - context activ + tabel complet kill switches operationale. Citeste-l la inceput de sesiune.
-- [EXECUTION-ROADMAP.md](EXECUTION-ROADMAP.md) + [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md) - istoric sprint inchis (referinta, nu plan activ).
-- [PLAN-iccj-integration.md](PLAN-iccj-integration.md) - spec integrare ICCJ (livrata v2.34+).
+- [docs/archive/](docs/archive/) - planuri, handoff-uri si backloguri inchise (sprintul monitoring + web, spec ICCJ livrata, planuri v2.38-v2.42, handoff-uri de sesiune).
 - [RUNBOOK.md](RUNBOOK.md) / [DEPLOY-SERVER.md](DEPLOY-SERVER.md) - operare si deploy server.
 - [HARDENING.md](HARDENING.md) - backlog hardening (L274-440 obsolete, vezi banner).
 

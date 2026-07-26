@@ -19,7 +19,7 @@ one-step tasks.
 Read `CLAUDE.md` before starting a new development PR. It carries the fuller
 current sprint context, accepted risks, web-readiness bridge, build notes, and
 runtime traps. Then read `SESSION-HANDOFF.md` for the immediate next-session
-handoff and `EXECUTION-ROADMAP.md` for the active PR checklist.
+handoff. Closed plans and handoffs live in `docs/archive/`.
 
 ## Scope Discipline
 

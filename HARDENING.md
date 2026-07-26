@@ -374,7 +374,7 @@ Faza 2, itemul „Bump dompurify + jspdf" spune **„NU migrare xlsx → exceljs
 
 > ## ❌ OBSOLETE — 2026-04-27
 >
-> **Acest spec este absorbit in [PLAN-monitoring-webmode.md](PLAN-monitoring-webmode.md) §5.1 + §11.2bis si NU se mai implementeaza ca atare.**
+> **Acest spec este absorbit in [PLAN-monitoring-webmode.md](docs/archive/PLAN-monitoring-webmode.md) §5.1 + §11.2bis si NU se mai implementeaza ca atare.**
 >
 > **Motivul absorbtiei**: schema `tracked_dosare` + `termene_cache` documentata aici e single-purpose (doar dosare urmarite explicit). Plan-ul nou foloseste schema generica `monitoring_jobs(kind='dosar_soap'|'name_soap'|'aviz_rnpm')` + `monitoring_runs` + `monitoring_alerts` care:
 > - acopera Watched Dosare ca un caz particular (kind='dosar_soap')

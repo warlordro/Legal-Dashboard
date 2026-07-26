@@ -4,12 +4,13 @@
 **Ultimul push:** `4ff06ce` (2026-07-26 03:21). Local suntem inaintea remote-ului cu commituri de documentatie — vezi sectiunea 5.
 **Stare cod:** nimic remediat in aceasta sesiune. Tot ce urmeaza e triaj verificat la sursa, nu backlog copiat.
 
-Doua fluxuri de lucru deschise, in ordinea in care se ataca:
+Trei fluxuri de lucru deschise, in ordinea in care se ataca:
 
 | # | Flux | Sursa detaliilor | Volum |
 |---|------|------------------|-------|
 | A | Cele 3 findings de securitate care blocheaza web deploy | [HANDOFF-SEC-WEB-BLOCKERS-F12-2026-07-26.md](HANDOFF-SEC-WEB-BLOCKERS-F12-2026-07-26.md) | ~5h |
 | B | Review CodeRabbit din 2026-07-26 (54 comentarii) | [audit/CODERABBIT-TRIAJ-2026-07-26.md](audit/CODERABBIT-TRIAJ-2026-07-26.md) | 9 fixuri + 1 commit ieftin |
+| C | Calibrare AI Claude 5: effort + max_tokens + fix raportare cost OpenRouter | sectiunea 9 de mai jos | ~3-4h |
 
 **Ordinea:** intai A (web deploy e prioritatea declarata a proiectului, iar F12-F5 scurge cheia
 2Captcha a tenantului), apoi cele 9 din B care merita, apoi cele 18 cosmetice intr-un singur commit.
@@ -144,3 +145,108 @@ extrage e in scratchpad-ul sesiunii (`export-coderabbit.mjs`) — daca nu mai ex
 conteaza sunt: folderul workspace-ului e salvat ca URI cu encoding inconsistent (`file:///c%3A/...%20...`),
 deci comparatia se face pe cale decodata; fisierul de review e cel mai mare `.json` din folder
 (exclus `categories.json`); rularea cere `--max-old-space-size=4096`.
+
+## 9. Flux C — calibrare AI Claude 5 (plan aprobat 2026-07-26, neimplementat)
+
+Independent de A si B: atinge doar `backend/src/services/ai.ts`, `backend/src/routes/ai.ts` si
+testele aferente — zero suprapunere de fisiere cu F12 sau CodeRabbit. Un singur release (decizie
+explicita: aplicatia NU e inca deployata, deci nu exista baseline de date de protejat — argumentul
+"observabilitate intai, comportament dupa" nu se aplica). Plan trecut prin review-panel (OpenRouter:
+Opus 5 + GPT-5.6 Sol + Kimi K3 + Grok 4.5, sinteza Fable 5); review-panel2/cheaperinference a picat
+cu erori de conexiune ("fetch failed" pe 4/5 modele + sinteza) — instabilitate provider, nu config.
+
+### Context
+
+Bump-ul la `claude-opus-5`/`claude-sonnet-5` (eb736c5) NU a schimbat parametrii de apel. Pe
+generatia Claude 5, thinking-ul e pornit IMPLICIT cand nu se trimite camp `thinking`: tokenii de
+thinking se factureaza ca output si consuma din `AI_MAX_TOKENS` (8000, ai.ts:104). Traficul merge
+in principal prin OpenRouter. Prompturile system NU se ating (decizie: sunt curate, livrate in
+v2.42.0; lungimea outputului se masoara post-deploy din `ai_usage` inainte de orice revizuire).
+
+### Bug preexistent confirmat (fix inclus in acest flux)
+
+`callOpenRouter` trimite `extra_body: { usage: { include: true } }` (ai.ts:662-663) — idiom din
+SDK-ul Python. VERIFICAT 2026-07-26: `openai@6.36.0` instalat contine ZERO aparitii de
+`extra_body` in tot pachetul, deci campul pleaca literal in JSON si OpenRouter il ignora.
+Raportarea de cost real (`usage.cost` → `costUsdMilli`, ai.ts:701) nu a functionat niciodata;
+nu s-a observat pentru ca `aiUsage.ts:79-85` cade pe tabelul static de preturi. Dublu-check
+optional: toate randurile openrouter din `ai_usage` ar trebui sa aiba `cost` NULL.
+NU urma sugestia (respinsa) de a pune `reasoning` in `extra_body` — exact asta ar reproduce bug-ul.
+
+### Pasii de implementare
+
+1. **Body OpenRouter corect:** `usage: { include: true }` si conditionat `reasoning: { effort }`
+   ca proprietati TOP-LEVEL in `chat.completions.create` — o singura variabila de body cu cast
+   tipizat (un `@ts-expect-error` pe spread conditionat pica strict build-ul ca "unused"). Sterge
+   `extra_body`.
+2. **Effort "medium" prin allowlist exact, pe ambele rute:**
+   - nativ, in `callAnthropic`: `output_config: { effort }` DOAR pentru modelId in
+     {`claude-sonnet-5`, `claude-opus-5`}. VERIFICAT: `output_config`/`effort` sunt tipizate in
+     `@anthropic-ai/sdk` 0.94 (`messages.d.ts`, include si `xhigh`/`max`) — fara beta header,
+     fara cast.
+   - OpenRouter, in `callOpenRouter`: DOAR pentru slug REZOLVAT in {`anthropic/claude-sonnet-5`,
+     `anthropic/claude-opus-5`}. Prefixul generic `anthropic/` NU e suficient:
+     `OPENROUTER_MODEL_MAP["claude-haiku"]` = `anthropic/claude-haiku-4.5` (ai.ts:47) ar trece de
+     un gate pe prefix, iar Haiku 4.5 nu suporta effort (400 nativ). Atentie si la
+     `OPENROUTER_MODEL_OVERRIDES` (ai.ts:76-90), care poate remapa chei pe alte sluguri — gate-ul
+     se aplica dupa `resolveOpenRouterSlug`.
+   - construieste campul doar daca `effort !== undefined` SI allowlist — nu trimite
+     `{ effort: undefined }` (se serializeaza `{}`).
+3. **Call sites (`routes/ai.ts`):** medium pe single (~:216), pe ambii analisti (~:344, ~:359) SI
+   pe judge (~:386) — "medium peste tot" e decizie asumata a userului; revert = un string.
+   Semnal de regresie pe judge: sectiunea "Revizuire si reconciliere" devine formala/goala pe
+   dosare unde analizele chiar difera. GPT/Gemini ca judge nu primesc nimic (comentariu la call
+   site ca sa nu se presupuna paritate).
+4. **Semnatura:** `effort?: AiEffort` ("low"|"medium"|"high", tip exportat) ca ULTIM parametru
+   pozitional pe `callModel`/`callAnthropic`/`callOpenRouter` (la callOpenRouter dupa
+   `routingTag`). FARA refactor la options object acum — devine obligatoriu la urmatorul parametru.
+5. **Kill switch operational:** env var (ex. `AI_EFFORT_DISABLED=1`) care omite campurile de
+   effort pe ambele rute — face saptamana de masurare reversibila fara rebuild. De adaugat in
+   tabelul de kill switches din SESSION-HANDOFF.md.
+6. **`AI_MAX_TOKENS` 8000 → 16000** (ai.ts:104; actualizeaza si comentariul stale "increased from
+   3000"). Constanta e partajata: anthropic `max_tokens`, openai `max_output_tokens` +
+   `max_completion_tokens` (fallback), gemini `maxOutputTokens`, openrouter `max_tokens` — bump-ul
+   e doar tavan, nu cost garantat. DE VERIFICAT la implementare: SDK-ul Anthropic poate cere
+   streaming la max_tokens mari pe apeluri non-streaming (guard de durata); daca da, treci
+   `callAnthropic` pe `client.messages.stream(...).finalMessage()` — schimbare locala, fara SSE
+   spre client.
+7. **`TRUNCATE_ANALYSIS` 50000 → ~120000** (ai.ts:98): la 16k tokeni output (~60-70k caractere),
+   capul de 50k ar trunchia analiza analistului inainte de judge — pastreaza rolul de bound
+   anti-injection, doar mai sus.
+8. **Observabilitate (acelasi release):** logheaza `stop_reason` (anthropic) / `finish_reason`
+   (openai/openrouter) / echivalentul Gemini in meta-ul existent `ai_call` (ai.ts:492-496 si
+   omologii); extinde diagnosticul `openrouter_empty_content` (ai.ts:676-697) cu effort-ul trimis;
+   pe fluxul SINGLE, content gol/whitespace dupa apel reasoning-enabled = eroare tipizata (nu
+   `200 {"analysis":""}`). Pe MULTI nu se schimba nimic: promptul judge are deja regula pentru
+   analiza goala (ai.ts:323) — degradarea e by design.
+9. **Canary post-implementare (inainte de commit final):** un apel live OpenRouter pe
+   `anthropic/claude-opus-5` care confirma (a) `usage.cost` populat, (b) cum traduce OpenRouter
+   `reasoning.effort` pentru Claude 5 (inspecteaza reasoning details in raspuns; daca se dovedeste
+   translatie in budget fix, reevalueaza daca effort-ul pe ruta OpenRouter merita pastrat); un apel
+   nativ per model din allowlist. Necesita cheile userului — cere-le la momentul respectiv.
+
+### Ce NU se schimba (decizii, nu omisiuni)
+
+- Prompturile system (`AI_ANALYSIS_SYSTEM`/`AI_JUDGE_SYSTEM`) si structura de headinguri.
+- Timeout-urile 120s/180s — se monitorizeaza `errorType:"timeout"` in `ai_call` dupa deploy;
+  crestem doar cu date.
+- Calibrarea GPT-5.6 (Responses API `reasoning`) si Gemini (`thinkingConfig`) — follow-up separat.
+- Estimarile de cota ($0.25 single / $0.50 multi) — raman sub-dimensionate ~2x fata de noul tavan,
+  acceptat constient; re-baseline din `ai_usage` dupa primele saptamani reale post-deploy.
+
+### Teste si gate
+
+Mock-urile existente pe `chat.completions.create` folosesc `objectContaining` (aditivele nu le
+pica), dar clasa de bug `extra_body` NU e prinsa de mockuri la nivel de metoda — adauga teste de
+forma requestului (stub pe `fetch` al SDK-ului): top-level `usage.include` + `reasoning.effort`
+prezente, `extra_body` ABSENT; `output_config.effort` doar pentru cele doua modelId-uri; negative
+pentru haiku (ambele rute), `openai/*`, `google/*` si override-uri in ambele directii.
+Gate-ul standard inainte de commit: biome + tsc (backend+frontend) + build + teste backend.
+Commit pe `feat/v2.43.0-rnpm-split`, FARA push (regula din sectiunea 5 ramane valabila).
+
+### Context sesiune 2026-07-26 (in afara repo-ului, deja livrat — nu reface)
+
+Global `~/.claude/CLAUDE.md`: sectiuni noi "Stil de raspuns" + "Subagenti" si scope-ul integrat in
+regulile Karpathy (calibrare Claude 5). Cei 6 agenti custom din `~/.claude/agents` mutati pe
+`claude-opus-5`. Skill-ul `~/.claude/skills/claude-api` actualizat complet la familia Claude 5
+(default `claude-opus-5`, thinking-on-by-default, effort cu `xhigh`, catalog modele 2026-07-26).

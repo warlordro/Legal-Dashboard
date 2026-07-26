@@ -2,7 +2,7 @@
 
 **Data:** 2026-07-25. **Branch:** `feat/v2.43.0-rnpm-split`.
 **Status:** revizuit dupa reviewul Fable 5 (v2). D3 si D4 aprobate de user pe 2026-07-25.
-Executia NU a inceput — vezi [HANDOFF-OPUS-5-REFRESH-2026-07-25.md](../../../HANDOFF-OPUS-5-REFRESH-2026-07-25.md).
+Executia NU a inceput — vezi [HANDOFF-OPUS-5-REFRESH-2026-07-25.md](../../archive/HANDOFF-OPUS-5-REFRESH-2026-07-25.md).
 
 ## Obiectiv
 
