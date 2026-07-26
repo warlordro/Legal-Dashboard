@@ -13,9 +13,22 @@ export interface AdminRnpmUsageRow {
   backupsBytes: number;
 }
 
-export async function adminListRnpmUsage(signal?: AbortSignal): Promise<AdminRnpmUsageRow[]> {
-  const data = await unwrapMonitoring<{ rows: AdminRnpmUsageRow[] }>(
-    await apiFetch("/api/v1/admin/rnpm/usage", { signal })
-  );
-  return data.rows;
+export interface AdminRnpmUsagePage {
+  rows: AdminRnpmUsageRow[];
+  page: number;
+  pageSize: number;
+  total: number;
+}
+
+// CodeRabbit 1.6: ruta e paginata — per rand se fac masuratori de fisier si listari de
+// director, deci la cateva sute de useri o cerere nelimitata devine lenta.
+export async function adminListRnpmUsage(
+  params: { page?: number; pageSize?: number } = {},
+  signal?: AbortSignal
+): Promise<AdminRnpmUsagePage> {
+  const qs = new URLSearchParams();
+  if (params.page) qs.set("page", String(params.page));
+  if (params.pageSize) qs.set("pageSize", String(params.pageSize));
+  const suffix = qs.toString() ? `?${qs}` : "";
+  return unwrapMonitoring<AdminRnpmUsagePage>(await apiFetch(`/api/v1/admin/rnpm/usage${suffix}`, { signal }));
 }

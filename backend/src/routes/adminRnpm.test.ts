@@ -63,6 +63,32 @@ afterEach(async () => {
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
+describe("GET /api/v1/admin/rnpm/usage — paginare (CodeRabbit 1.6)", () => {
+  it("respecta page/pageSize si raporteaza totalul", async () => {
+    // Userii seed-uiti in beforeEach, ordonati email ASC.
+    const res = await buildApp("admin1").request("/api/v1/admin/rnpm/usage?page=2&pageSize=1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { rows: Array<{ userId: string }>; page: number; pageSize: number; total: number };
+    };
+    expect(body.data.rows).toHaveLength(1);
+    expect(body.data).toMatchObject({ page: 2, pageSize: 1, total: 4 });
+  });
+
+  it("default-ul intoarce toti userii cand sunt sub o pagina", async () => {
+    const res = await buildApp("admin1").request("/api/v1/admin/rnpm/usage");
+    const body = (await res.json()) as { data: { rows: unknown[]; page: number; total: number } };
+    expect(body.data.rows).toHaveLength(4);
+    expect(body.data).toMatchObject({ page: 1, total: 4 });
+  });
+
+  it("parametrii invalizi dau 400, nu 500", async () => {
+    const res = await buildApp("admin1").request("/api/v1/admin/rnpm/usage?page=0");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("INVALID_PARAMS");
+  });
+});
+
 describe("GET /api/v1/admin/rnpm/usage", () => {
   it("intoarce envelope cu un rand per user: dimensiune fisier viu + backups", async () => {
     seedRnpm("u1", "a");

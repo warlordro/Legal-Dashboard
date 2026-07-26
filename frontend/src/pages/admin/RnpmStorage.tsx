@@ -17,6 +17,11 @@ import { cn, formatBytes } from "@/lib/utils";
 export default function AdminRnpmStorage({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const [rows, setRows] = useState<AdminRnpmUsageRow[] | null>(null);
+  // CodeRabbit 1.6: ruta e paginata. Fara controale aici, pagina ar afisa tacut doar
+  // primii `pageSize` useri — o regresie mai grava decat problema de scalare.
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const PAGE_SIZE = 20;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -48,16 +53,17 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
     setLoading(true);
     setError(null);
     try {
-      const result = await adminListRnpmUsage(ac.signal);
+      const result = await adminListRnpmUsage({ page, pageSize: PAGE_SIZE }, ac.signal);
       if (ac.signal.aborted) return;
-      setRows(result);
+      setRows(result.rows);
+      setTotal(result.total);
     } catch (e) {
       if (ac.signal.aborted) return;
       setError(e instanceof Error ? e.message : "Eroare la incarcarea utilizarii RNPM.");
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -275,6 +281,35 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
+            <span>
+              {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, total)} din {total} utilizatori
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Inapoi
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={page * PAGE_SIZE >= total || loading}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Inainte
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>

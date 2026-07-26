@@ -3,11 +3,12 @@
 // envelope standard, fara audit (paritate cu GET /api/v1/admin/backups).
 // Erorile FS non-ENOENT se propaga -> appErrorHandler -> 500 pe envelope.
 import { Hono } from "hono";
+import { z } from "zod";
 import { listRnpmBackups, withMaintenanceRead } from "../db/backup.ts";
 import { getRnpmStorageLimitBytes, measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
 import { listAllUserIdentities } from "../db/userRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
-import { ok } from "../util/envelope.ts";
+import { ErrorCodes, fail, ok } from "../util/envelope.ts";
 
 export const adminRnpmRouter = new Hono();
 adminRnpmRouter.use("*", requireRole("admin"));
@@ -23,8 +24,30 @@ export interface AdminRnpmUsageRow {
   backupsBytes: number;
 }
 
+// CodeRabbit 1.6: ruta intorcea TOTI userii, iar pentru fiecare facea, serial,
+// masuratori de fisier (stat db/wal/shm) plus listarea directorului de backup-uri.
+// La cativa useri e in regula; la cateva sute devine o cerere lenta si nelimitata.
+// Paginare dupa modelul ListUsersQuerySchema din admin.ts — forma { rows, page,
+// pageSize, total } e conventia web-readiness din CLAUDE.md.
+// Nota: forma veche (lista simpla) era DELIBERATA, pentru paritate cu
+// GET /api/v1/admin/backups; schimbarea e o imbunatatire de scalare, nu repararea
+// unei incalcari de conventie.
+const UsageQuerySchema = z.object({
+  page: z.coerce.number().int().min(1).default(1),
+  pageSize: z.coerce.number().int().min(1).max(100).default(20),
+});
+
 adminRnpmRouter.get("/usage", async (c) => {
-  const users = listAllUserIdentities(); // ordinea (email ASC) e contractul repository-ului
+  const parsed = UsageQuerySchema.safeParse(c.req.query());
+  if (!parsed.success) {
+    return c.json(fail(ErrorCodes.INVALID_PARAMS, "Parametri de paginare invalizi.", c, parsed.error.issues), 400);
+  }
+  const { page, pageSize } = parsed.data;
+  const allUsers = listAllUserIdentities(); // ordinea (email ASC) e contractul repository-ului
+  const total = allUsers.length;
+  // Feliem INAINTE de bucla: costul per rand e I/O pe disc, deci paginarea trebuie sa
+  // reduca munca efectiva, nu doar raspunsul.
+  const users = allUsers.slice((page - 1) * pageSize, page * pageSize);
   // Fix review Codex: citirile (stat main/wal/shm + listarea backup-urilor)
   // ruleaza sub maintenance READ lock — un compact/restore concurent (writer)
   // nu mai poate face swap intre stat-uri, deci randul nu insumeaza generatii
@@ -44,5 +67,5 @@ adminRnpmRouter.get("/usage", async (c) => {
       backupsBytes: backups.reduce((sum, b) => sum + b.sizeBytes, 0),
     });
   }
-  return c.json(ok({ rows }, c));
+  return c.json(ok({ rows, page, pageSize, total }, c));
 });

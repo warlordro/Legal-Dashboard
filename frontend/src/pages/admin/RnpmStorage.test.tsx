@@ -27,6 +27,12 @@ vi.mock("@/lib/rnpmApi", async (importOriginal) => {
 });
 
 const usageMock = vi.mocked(adminListRnpmUsage);
+
+// CodeRabbit 1.6: ruta e paginata. Testele descriu randurile; ambalajul de paginare
+// e derivat, ca sa nu se repete in fiecare caz.
+function page(rows: AdminRnpmUsageRow[]) {
+  return { rows, page: 1, pageSize: 20, total: rows.length };
+}
 const compactMock = vi.mocked(rnpmCompactDb);
 const deleteBackupsMock = vi.mocked(rnpmDeleteBackups);
 
@@ -86,26 +92,28 @@ beforeEach(() => {
 
 describe("AdminRnpmStorage (embedded)", () => {
   it("randeaza un rand per user cu dimensiuni formatate si — pentru user fara fisier", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 2 * 1024 * 1024,
-        backupCount: 1,
-        backupsBytes: 1024,
-      },
-      {
-        userId: "u2",
-        email: "b@x.ro",
-        displayName: "B",
-        status: "active",
-        dbSizeBytes: null,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 2 * 1024 * 1024,
+          backupCount: 1,
+          backupsBytes: 1024,
+        },
+        {
+          userId: "u2",
+          email: "b@x.ro",
+          displayName: "B",
+          status: "active",
+          dbSizeBytes: null,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+      ])
+    );
     await render(
       <ConfirmProvider>
         <AdminRnpmStorage embedded />
@@ -117,18 +125,20 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("afiseaza folosit / limita si evidentiaza peste 85%", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "aproape-plin@x.ro",
-        displayName: "Aproape plin",
-        status: "active",
-        dbSizeBytes: 9 * 1024 * 1024,
-        storageLimitBytes: 10 * 1024 * 1024,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "aproape-plin@x.ro",
+          displayName: "Aproape plin",
+          status: "active",
+          dbSizeBytes: 9 * 1024 * 1024,
+          storageLimitBytes: 10 * 1024 * 1024,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+      ])
+    );
 
     await render(
       <ConfirmProvider>
@@ -145,17 +155,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("butonul Compacteaza cere confirmare si apeleaza rnpmCompactDb cu ownerId-ul randului", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 1,
-        backupsBytes: 2048,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 1,
+          backupsBytes: 2048,
+        },
+      ])
+    );
     compactMock.mockResolvedValue({ beforeBytes: 4096, afterBytes: 2048, durationMs: 12 });
 
     await render(
@@ -181,8 +193,8 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("raspunsul stale al listei nu suprascrie un reload mai nou", async () => {
-    const p1 = deferred<AdminRnpmUsageRow[]>();
-    const p2 = deferred<AdminRnpmUsageRow[]>();
+    const p1 = deferred<ReturnType<typeof page>>();
+    const p2 = deferred<ReturnType<typeof page>>();
     usageMock.mockReturnValueOnce(p1.promise).mockReturnValueOnce(p2.promise);
 
     await render(
@@ -199,34 +211,38 @@ describe("AdminRnpmStorage (embedded)", () => {
 
     // P2 (lista noua) rezolva primul.
     await act(async () => {
-      p2.resolve([
-        {
-          userId: "u2",
-          email: "nou@x.ro",
-          displayName: "Nou",
-          status: "active",
-          dbSizeBytes: 1024,
-          backupCount: 0,
-          backupsBytes: 0,
-        },
-      ]);
+      p2.resolve(
+        page([
+          {
+            userId: "u2",
+            email: "nou@x.ro",
+            displayName: "Nou",
+            status: "active",
+            dbSizeBytes: 1024,
+            backupCount: 0,
+            backupsBytes: 0,
+          },
+        ])
+      );
       await Promise.resolve();
       await Promise.resolve();
     });
 
     // P1 (lista veche) rezolva ultimul — nu trebuie sa suprascrie.
     await act(async () => {
-      p1.resolve([
-        {
-          userId: "u1",
-          email: "vechi@x.ro",
-          displayName: "Vechi",
-          status: "active",
-          dbSizeBytes: 4096,
-          backupCount: 0,
-          backupsBytes: 0,
-        },
-      ]);
+      p1.resolve(
+        page([
+          {
+            userId: "u1",
+            email: "vechi@x.ro",
+            displayName: "Vechi",
+            status: "active",
+            dbSizeBytes: 4096,
+            backupCount: 0,
+            backupsBytes: 0,
+          },
+        ])
+      );
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -236,17 +252,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("double-click pe Compacteaza porneste O SINGURA compactare (guard sincron pre-confirm)", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+      ])
+    );
     compactMock.mockResolvedValue({ beforeBytes: 4096, afterBytes: 2048, durationMs: 12 });
 
     await render(
@@ -283,17 +301,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("unmount in timpul compactarii: fara reload si fara setState post-unmount", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+      ])
+    );
     const pending = deferred<{ beforeBytes: number; afterBytes: number; durationMs: number }>();
     compactMock.mockReturnValue(pending.promise);
 
@@ -330,17 +350,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("butonul Sterge backup-urile cere confirmare destructiva si apeleaza rnpmDeleteBackups cu ownerId-ul randului", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 2,
-        backupsBytes: 2048,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 2,
+          backupsBytes: 2048,
+        },
+      ])
+    );
     deleteBackupsMock.mockResolvedValue(2);
 
     await render(
@@ -369,17 +391,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("butonul Sterge backup-urile e dezactivat cand userul nu are backup-uri", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+      ])
+    );
 
     await render(
       <ConfirmProvider>
@@ -395,17 +419,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("user fara baza vie dar cu backup-uri ramane stergibil (cazul userului sters)", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u-sters",
-        email: "fost@x.ro",
-        displayName: "Fost User",
-        status: "deleted",
-        dbSizeBytes: null,
-        backupCount: 1,
-        backupsBytes: 1024,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u-sters",
+          email: "fost@x.ro",
+          displayName: "Fost User",
+          status: "deleted",
+          dbSizeBytes: null,
+          backupCount: 1,
+          backupsBytes: 1024,
+        },
+      ])
+    );
     deleteBackupsMock.mockResolvedValue(1);
 
     await render(
@@ -433,17 +459,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("double-click pe Sterge backup-urile porneste O SINGURA stergere (guard sincron pre-confirm)", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 2,
-        backupsBytes: 2048,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 2,
+          backupsBytes: 2048,
+        },
+      ])
+    );
     deleteBackupsMock.mockResolvedValue(2);
 
     await render(
@@ -468,35 +496,37 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("userii stersi/suspendati fara date sunt ascunsi implicit; checkbox-ul ii arata", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "activ@x.ro",
-        displayName: "Activ",
-        status: "active",
-        dbSizeBytes: 1024,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-      {
-        userId: "u2",
-        email: "sters-gol@x.ro",
-        displayName: "Sters gol",
-        status: "deleted",
-        dbSizeBytes: null,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-      {
-        userId: "u3",
-        email: "sters-cu-date@x.ro",
-        displayName: "Sters cu date",
-        status: "deleted",
-        dbSizeBytes: null,
-        backupCount: 1,
-        backupsBytes: 1024,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "activ@x.ro",
+          displayName: "Activ",
+          status: "active",
+          dbSizeBytes: 1024,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+        {
+          userId: "u2",
+          email: "sters-gol@x.ro",
+          displayName: "Sters gol",
+          status: "deleted",
+          dbSizeBytes: null,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+        {
+          userId: "u3",
+          email: "sters-cu-date@x.ro",
+          displayName: "Sters cu date",
+          status: "deleted",
+          dbSizeBytes: null,
+          backupCount: 1,
+          backupsBytes: 1024,
+        },
+      ])
+    );
 
     await render(
       <ConfirmProvider>
@@ -521,17 +551,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("fara useri stersi/suspendati fara date, checkbox-ul nu apare", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "activ@x.ro",
-        displayName: "Activ",
-        status: "active",
-        dbSizeBytes: 1024,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "activ@x.ro",
+          displayName: "Activ",
+          status: "active",
+          dbSizeBytes: 1024,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+      ])
+    );
 
     await render(
       <ConfirmProvider>
@@ -543,17 +575,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("409 la stergerea backup-urilor se afiseaza ca mesaj prietenos", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 1,
-        backupsBytes: 1024,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 1,
+          backupsBytes: 1024,
+        },
+      ])
+    );
     deleteBackupsMock.mockRejectedValue(new ApiError("Restore in curs", 409, "RESTORE_IN_PROGRESS"));
 
     await render(
@@ -576,17 +610,19 @@ describe("AdminRnpmStorage (embedded)", () => {
   });
 
   it("409 la compactare (operatie RNPM in curs la userul tinta) se afiseaza ca mesaj prietenos", async () => {
-    usageMock.mockResolvedValue([
-      {
-        userId: "u1",
-        email: "a@x.ro",
-        displayName: "A",
-        status: "active",
-        dbSizeBytes: 4096,
-        backupCount: 0,
-        backupsBytes: 0,
-      },
-    ]);
+    usageMock.mockResolvedValue(
+      page([
+        {
+          userId: "u1",
+          email: "a@x.ro",
+          displayName: "A",
+          status: "active",
+          dbSizeBytes: 4096,
+          backupCount: 0,
+          backupsBytes: 0,
+        },
+      ])
+    );
     compactMock.mockRejectedValue(new ApiError("Exista o cautare RNPM in curs", 409, "SEARCH_ACTIVE"));
 
     await render(
