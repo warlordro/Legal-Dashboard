@@ -1,6 +1,6 @@
 import type { Context, Next } from "hono";
 import { getAuthMode } from "../auth/config.ts";
-import { fail } from "../util/envelope.ts";
+import { ErrorCodes, fail } from "../util/envelope.ts";
 
 // SEC-01: originGuard has a loopback bypass, so a hostile page can fire a
 // simple-request POST at 127.0.0.1 with no preflight. The custom header
@@ -21,7 +21,11 @@ export async function requireDesktopHeaderGlobal(c: Context, next: Next): Promis
   if (c.get("tokenId")) return void (await next());
   if (c.req.header(DESKTOP_HEADER) !== DESKTOP_HEADER_VALUE) {
     return c.json(
-      fail("desktop_header_required", "Cerere refuzata: header X-Legal-Dashboard-Desktop lipsa sau invalida.", c),
+      fail(
+        ErrorCodes.DESKTOP_HEADER_REQUIRED,
+        "Cerere refuzata: header X-Legal-Dashboard-Desktop lipsa sau invalida.",
+        c
+      ),
       403
     );
   }

@@ -489,7 +489,8 @@ export default function AdminQuota({ embedded = false }: { embedded?: boolean } 
                     {overrides.length === 0 && !loading && (
                       <tr>
                         <td colSpan={6} className="px-4 py-6 text-center text-muted-foreground">
-                          Nicio limita setata pentru acest user — buget nelimitat. Seteaza una cu formularul de mai sus.
+                          Nicio limita setata pentru acest user — AI si captcha au buget nelimitat, iar stocarea RNPM
+                          revine la default-ul configurat. Seteaza una cu formularul de mai sus.
                         </td>
                       </tr>
                     )}

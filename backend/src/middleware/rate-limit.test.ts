@@ -598,7 +598,7 @@ describe("weight 3x analyze-multi — ambele mount-uri + per-token (Bug 3 v2.42.
     mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.70" } } as ReturnType<typeof getConnInfo>);
     const app = buildAppWithMulti(false);
     // RATE_LIMIT=120, weight 3 => 40 de cereri incap exact; a 41-a depaseste.
-    for (let i = 0; i < RATE_LIMIT / 3; i++) {
+    for (let i = 0; i < Math.floor(RATE_LIMIT / 3); i++) {
       const res = await app.request("/api/v1/ai/analyze-multi", { method: "POST" });
       expect(res.status).toBe(200);
     }
@@ -609,7 +609,7 @@ describe("weight 3x analyze-multi — ambele mount-uri + per-token (Bug 3 v2.42.
   it("bucketul per-token pondereaza si el: TOKEN_RATE_LIMIT/3 cereri incap, urmatoarea e 429", async () => {
     mockedGetConnInfo.mockReturnValue({ remote: { address: "10.0.0.71" } } as ReturnType<typeof getConnInfo>);
     const app = buildAppWithMulti(true);
-    for (let i = 0; i < TOKEN_RATE_LIMIT / 3; i++) {
+    for (let i = 0; i < Math.floor(TOKEN_RATE_LIMIT / 3); i++) {
       const res = await app.request("/api/v1/ai/analyze-multi", { method: "POST" });
       expect(res.status).toBe(200);
     }

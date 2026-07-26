@@ -6,7 +6,7 @@ Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detal
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
 operational kill switches, riscuri ramase si directii deschise pentru urmatorul agent.
 
-## Stadiu curent (2026-07-20): remediere sec + rezultate partiale PortalJust livrate pe branch
+## Ultimul sprint mare livrat (2026-07-20): remediere sec + rezultate partiale PortalJust pe branch
 
 Dupa push-ul initial v2.43.0 (13 iulie), pe acelasi branch s-au livrat si pushuit DOUA directii mari (reincadrate ca release patch v2.43.1), ambele dublu-review-uite adversarial (Codex GPT-5.6 Sol + panel multi-model):
 
