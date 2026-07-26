@@ -301,17 +301,23 @@ describe("POST /api/v1/rnpm/search-split — audit rnpm.cap_hit", () => {
       }),
     ]);
 
-    expect(res1.status).toBe(200);
-    expect(res2.status).toBe(409);
-    const errBody = (await res2.json()) as { error: { code: string; message: string } };
+    // Care dintre cele doua cereri ajunge prima la rezervare nu e parte din
+    // contract si nu e garantat de Promise.all — sub incarcare (runnerul macOS)
+    // a doua poate castiga cursa. Invariantul testat e ca EXACT una trece si
+    // exact una e respinsa ca duplicat.
+    const accepted = [res1, res2].filter((r) => r.status === 200);
+    const rejected = [res1, res2].filter((r) => r.status === 409);
+    expect(accepted).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    const errBody = (await rejected[0].json()) as { error: { code: string; message: string } };
     expect(errBody.error.code).toBe("DUPLICATE_REQUEST");
     expect(errBody.error.message).toMatch(/dedup/);
 
-    // Cleanup: deblocheaza prima cerere si consuma stream-ul, ca finally-ul
+    // Cleanup: deblocheaza cererea acceptata si consuma stream-ul, ca finally-ul
     // sa stearga inflightRequests Map (altfel a treia cerere ar mai fi blocata
     // intre teste — desi `vi.restoreAllMocks` din afterEach gestioneaza asta).
     resolveFirst?.(buildSplitResult({ searchId: 1 }));
-    await consumeSSE(res1);
+    await consumeSSE(accepted[0]);
   });
 
   it("E4: gapByReason for partial uses s.gap (not subTotal - count) to avoid double-count of tier-2 recovered rows", async () => {
