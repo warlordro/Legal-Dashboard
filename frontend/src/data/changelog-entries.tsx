@@ -40,6 +40,37 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.43.3",
+    date: "26 Iulie 2026",
+    subtitle:
+      "Release de securitate si calibrare AI: cheile si tokenurile sunt protejate mai strict (acces API doar pentru admin, cheia captcha nu mai poate ajunge in mesaje de eroare, limita de stocare RNPM nu mai poate fi ocolita), analiza AI pe modelele Claude 5 e calibrata pe cost si corectitudine, iar backup-urile bazei complete se pot sterge acum si individual.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-red-500",
+    badgeClass: "bg-red-100 text-red-900 dark:bg-red-900/30 dark:text-red-300",
+    sections: [
+      {
+        title: "Securitate: acces API, cheia captcha, limita de stocare",
+        content:
+          "Trei intariri importante pentru varianta web: tokenurile de acces API se pot crea si administra doar de administrator (inainte, orice utilizator autentificat putea emite tokenuri); cheia serviciului de captcha nu mai poate aparea in mesajele de eroare sau in loguri, indiferent de tipul erorii de retea; iar limita de stocare RNPM per utilizator nu mai poate fi ocolita printr-o cerere construita manual. In plus, o cautare RNPM refuzata (de exemplu in timpul unei restaurari) nu mai consuma o rezolvare de captcha degeaba.",
+      },
+      {
+        title: "Analiza AI calibrata pentru Claude 5",
+        content:
+          "Modelele Claude 5 'gandesc' implicit inainte sa raspunda, iar gandirea se factureaza ca text generat. Aplicatia trimite acum instructiuni de efort potrivite rolului (redus pentru analisti, mediu pentru judecator) si aloca un plafon de tokeni marit doar pentru aceste modele — analizele lungi nu mai risca sa fie taiate, iar costul ramane sub control. Raportarea costului real de la OpenRouter functioneaza acum corect (verificata la cent cu dashboard-ul provider-ului), iar analizele taiate sau goale sunt detectate si semnalate pe toate modelele, nu livrate in tacere ca rezultate complete.",
+      },
+      {
+        title: "Stergere individuala de backup",
+        content:
+          "In Setari > Backup, fiecare backup al bazei complete are acum propriul buton de stergere, cu confirmare — nu mai trebuie sa stergi toate backup-urile ca sa scapi de unul singur. Stergerea e permisa doar administratorului si e inregistrata in jurnalul de audit.",
+      },
+      {
+        title: "Fixuri din review-uri externe",
+        content:
+          "Doua valuri de review (CodeRabbit + review-uri adversariale independente) au fost procesate integral: paginare pe consumul RNPM din zona admin, protectie la dublu-click pe crearea de backup, pornirea mai rapida a bazelor RNPM la boot, un blocaj rar de mentenanta eliminat, si o serie de corecturi cosmetice si de loguri operationale.",
+      },
+    ],
+  },
+  {
     version: "v2.43.2",
     date: "21 Iulie 2026",
     subtitle:

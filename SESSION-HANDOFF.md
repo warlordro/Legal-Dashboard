@@ -1,6 +1,6 @@
 # Session Handoff
 
-**Versiune curenta**: v2.43.2 (2026-07-21, completat 2026-07-26) — branch `feat/v2.43.0-rnpm-split`. v2.43.2 = refresh modele AI (Gemini 3.5 Flash -> 3.6 Flash, cheie interna `gemini-flash-3.6`; Gemini 3.1 Flash Lite -> 3.5 Flash Lite, cheie interna `gemini-flash-lite-3.5`; Claude Opus 4.8 -> Opus 5, cheia interna `claude-opus` ramane neschimbata; toate nativ + OpenRouter). Munca de dupa push-ul initial din 13 iulie (remediere sec + rezultate partiale PortalJust) e reincadrata ca release patch v2.43.1 peste v2.43.0.
+**Versiune curenta**: v2.43.3 (2026-07-26) — branch `feat/v2.43.0-rnpm-split`. v2.43.3 = securitate (F12-F3/F5/F8 + CodeRabbit 1.2, cele 3 findings care blocau web deploy) + calibrare AI Claude 5 (effort pe rol, plafon split 8000/16000, fix `extra_body` OpenRouter cu cost real validat live, detectie trunchiere pe toate rutele) + fixurile CodeRabbit + stergere individuala de backup admin. Predecesor v2.43.2 = refresh modele AI (Gemini 3.5 Flash -> 3.6 Flash, cheie interna `gemini-flash-3.6`; Gemini 3.1 Flash Lite -> 3.5 Flash Lite, cheie interna `gemini-flash-lite-3.5`; Claude Opus 4.8 -> Opus 5, cheia interna `claude-opus` ramane neschimbata; toate nativ + OpenRouter).
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
