@@ -8,6 +8,11 @@ nu au fost deschise individual. #3 si #4 au fost verificate direct.
 **Numerotare:** findings-urile sunt numerotate 1-54 in ordinea alfabetica a fisierelor din
 [raport](CODERABBIT-REVIEW-2026-07-26.md) (`CHANGELOG.md`=1 ... `scripts/dev-web-local.ps1`=54).
 
+> **Status executie (2026-07-26):** 1.2 livrat in Fluxul A (`706b9ae`). Restul de sase livrate in
+> Fluxul B: `0ae2c4e` (1.1), `547c48b` (1.3), `4c17c31` (1.4), `9203358` (1.5), `2f051a5` (1.6),
+> `a7a92e8` (1.8), plus `56bb969` pentru lotul cosmetic. **1.7 e INFIRMAT** — vezi sectiunea lui.
+> Plan si trasabilitate: [docs/superpowers/plans/2026-07-26-flux-b-coderabbit.md](../docs/superpowers/plans/2026-07-26-flux-b-coderabbit.md).
+
 ## Verdict
 
 | Categorie | Nr. | Gravitate | Ce faci |
@@ -76,25 +81,48 @@ la al doilea click din aceeasi fractiune de secunda. Ai deja solutia corecta in
 functioneaza. Aici lipseste. La creare de backup inseamna doua scrieri reale.
 
 ### 1.6 Lista admin de useri nu are paginare — MIC spre MEDIU (#19 + #44)
-`backend/src/routes/adminRnpm.ts:26-48` (+ `frontend/src/lib/adminApi.ts:157-172`)
+`backend/src/routes/adminRnpm.ts:26-48` (+ `frontend/src/lib/adminRnpmApi.ts:16-21` si
+`frontend/src/pages/admin/RnpmStorage.tsx`)
+
+**Corectie (2026-07-26):** fisierul frontend citat initial (`adminApi.ts:157-172`) e ALTUL —
+acolo sunt override-urile de cota, fara legatura cu `/usage`. Consumatorii reali sunt cei doi
+de mai sus; al doilea a fost ratat si in prima versiune a planului de implementare.
 
 `/usage` intoarce toti userii, iar pentru fiecare face masuratori de fisier si listeaza
 directorul de backup-uri. La cativa useri e in regula; la cateva sute devine o cerere
-lenta si nelimitata. Incalca si conventia proprie a proiectului (`{ page, pageSize, total }`).
+lenta si nelimitata.
 
-### 1.7 Kill-switch-ul CSRF se activeaza fara sa spuna nimic — MIC
+**Atenuare (2026-07-26):** "incalca conventia proprie a proiectului" e prea tare. Proiectul are
+cel putin trei forme de liste admin — paginata (`admin.ts:237-246`), plafonata-fara-paginare
+(`{ overrides, truncated }`) si lista simpla — iar `adminRnpm.ts:1-3` spune EXPLICIT ca forma
+actuala e deliberata, "paritate cu GET /api/v1/admin/backups". Schimbarea e o imbunatatire de
+scalare, nu repararea unei incalcari.
+
+### 1.7 Kill-switch-ul CSRF se activeaza fara sa spuna nimic — ~~MIC~~ **INFIRMAT (2026-07-26)**
 `backend/src/middleware/requireDesktopHeaderGlobal.ts:19`
 
-`LEGAL_DASHBOARD_DISABLE_CSRF_HARDENING=1` dezactiveaza protectia fara niciun mesaj la
-pornire. O valoare uitata intr-un `.env` ramane invizibila. Fix: un `console.warn` la boot.
-Afecteaza doar modul desktop.
+**Afirmatia era INVECHITA.** Avertismentul la boot exista deja: `backend/src/index.ts:718-726`
+emite `csrf.hardening.disabled.boot`, adaugat in commitul `d176019`. Gardul warn-ului
+(`getAuthMode() === "desktop"`) oglindeste exact early-return-ul middleware-ului, deci nu
+exista nici gaura de acoperire. Findingul original venea din raportul CodeRabbit, care
+*propunea* codul ce fusese deja aplicat.
+
+Ce ramanea real, si e mult mai mic: alte kill switches scriu si in `audit_log` pe langa
+`console.warn` (vezi `RNPM_RUNTIME_VALIDATION_DISABLED`, `index.ts:699-716` — "operatorul
+vede warn-ul in stdout, complianta vede entry-ul in audit_log"), iar ramura CSRF are doar
+warn. Nu s-a implementat: e o alegere de politica de audit, nu un bug.
 
 ### 1.8 Un skip de autocompactare nu se logheaza — MIC
 `backend/src/db/backup.ts:1184-1214`
 
 Masuratoarea de dinainte de compactare e in afara blocului `try`. Daca esueaza, nu se scrie
-evenimentul structurat de "skip", ci doar un `console.error` generic. **Nu** e un crash:
-am verificat apelantul (`rnpm.ts:84`) si are `.catch`. E strict o gaura de observabilitate.
+evenimentul structurat de "skip". **Nu** e un crash: am verificat apelantul (`rnpm.ts:84`) si
+are `.catch`. E strict o gaura de observabilitate.
+
+**Precizare (2026-07-26):** "doar un `console.error` generic" e inexact. `.catch`-ul INTOARCE o
+valoare in loc sa re-arunce, deci executia continua la `recordAuditSafe` si se scrie totusi un
+rand de audit cu `reason: "error"`. Ce se pierdea efectiv: motivul granular (`search_active` /
+`restore_in_progress` / `maintenance_shutdown` / `enospc`, colapsate in `"error"`) si `durationMs`.
 
 ---
 
