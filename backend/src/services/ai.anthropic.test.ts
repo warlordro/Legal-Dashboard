@@ -1,0 +1,218 @@
+// Primul test pe FORMA requestului catre Anthropic. Inainte de v2.43.3 niciun fisier
+// de test nu mock-uia @anthropic-ai/sdk (singurul import al SDK-ului era ai.ts:1), deci
+// `max_tokens` si orice camp nou de pe calea nativa erau complet nefixate de teste.
+//
+// vi.hoisted e OBLIGATORIU: fabrica `vi.mock` e ridicata deasupra declaratiilor de
+// modul, deci un `const streamMock = vi.fn()` simplu ar fi in TDZ cand fabrica ruleaza.
+// Acelasi tipar ca in ai.openrouter.test.ts.
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const streamMock = vi.hoisted(() => vi.fn());
+
+vi.mock("@anthropic-ai/sdk", () => ({
+  default: class MockAnthropic {
+    messages = { stream: streamMock };
+  },
+}));
+
+import { AI_MAX_TOKENS, AI_MAX_TOKENS_EFFORT, callAnthropic, callModel } from "./ai.ts";
+
+function mockFinalMessage(options?: { text?: string; stopReason?: string }) {
+  return {
+    finalMessage: async () => ({
+      content: [{ type: "text", text: options?.text ?? "ok" }],
+      usage: { input_tokens: 10, output_tokens: 20 },
+      stop_reason: options?.stopReason ?? "end_turn",
+    }),
+  };
+}
+
+beforeEach(() => {
+  streamMock.mockReset().mockReturnValue(mockFinalMessage());
+});
+
+afterEach(() => {
+  vi.clearAllMocks();
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu undefined.
+  delete process.env.AI_EFFORT_DISABLED;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu undefined.
+  delete process.env.AI_EFFORT_OVERRIDE;
+});
+
+describe("callAnthropic — forma requestului (v2.43.3)", () => {
+  it("foloseste streaming si trimite max_tokens din constanta partajata", async () => {
+    const out = await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000);
+
+    expect(out).toBe("ok");
+    expect(streamMock).toHaveBeenCalledTimes(1);
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.max_tokens).toBe(AI_MAX_TOKENS_EFFORT);
+    expect(body.model).toBe("claude-opus-5");
+  });
+
+  it("plafonul RIDICAT merge doar la modelele Claude 5; haiku ramane pe cel implicit", async () => {
+    // Perechea plafon-ridicat + effort-redus e ce tine costul in frau. Haiku nu
+    // primeste effort, deci nici plafonul ridicat — altfel ar fi crestere de cost
+    // fara compensare.
+    await callAnthropic("k".repeat(20), "claude-haiku-4-5-20251001", "prompt", 5000);
+    expect((streamMock.mock.calls[0][0] as Record<string, unknown>).max_tokens).toBe(AI_MAX_TOKENS);
+
+    streamMock.mockClear().mockReturnValue(mockFinalMessage());
+    await callAnthropic("k".repeat(20), "claude-sonnet-5", "prompt", 5000);
+    expect((streamMock.mock.calls[0][0] as Record<string, unknown>).max_tokens).toBe(AI_MAX_TOKENS_EFFORT);
+  });
+
+  it("plafoanele au valorile asteptate (buget, nu doar cablare)", () => {
+    expect(AI_MAX_TOKENS).toBe(8000);
+    expect(AI_MAX_TOKENS_EFFORT).toBe(16000);
+  });
+
+  it("abortul clientului mid-call se propaga si opreste apelul", async () => {
+    // Inainte testul verifica doar `instanceof AbortSignal`, ceea ce era mereu
+    // adevarat din composeSignal (timeout intern) — trecea si daca signal-ul
+    // parinte nu era compus deloc.
+    streamMock.mockReset().mockImplementation((_body: unknown, opts?: { signal?: AbortSignal }) => ({
+      finalMessage: () =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+            once: true,
+          });
+        }),
+    }));
+
+    const controller = new AbortController();
+    const pending = callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 60_000, undefined, controller.signal);
+    const assertion = expect(pending).rejects.toSatisfy(
+      (e: unknown) => e instanceof DOMException && e.name === "AbortError",
+      "asteptat AbortError propagat din signal-ul parinte"
+    );
+    setTimeout(() => controller.abort(), 20);
+    await assertion;
+  });
+
+  it("usage-ul acumulat se recupereaza cand apelul pica la mijloc", async () => {
+    // Fara asta, un apel taiat dupa ce providerul a generat tokeni s-ar inregistra
+    // cu 0/0 si cost 0 — exact cifra pe care ne bazam ca sa spunem daca a crescut costul.
+    streamMock.mockReset().mockReturnValue({
+      currentMessage: { usage: { input_tokens: 120, output_tokens: 14000 } },
+      finalMessage: async () => {
+        throw new Error("connection reset");
+      },
+    });
+
+    await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).rejects.toSatisfy((e: unknown) => {
+      const usage = (e as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+      return usage?.input_tokens === 120 && usage?.output_tokens === 14000;
+    }, "asteptat usage partial atasat pe eroare");
+  });
+
+  it("output_config.effort DOAR pentru claude-sonnet-5 si claude-opus-5", async () => {
+    for (const modelId of ["claude-sonnet-5", "claude-opus-5"]) {
+      streamMock.mockClear().mockReturnValue(mockFinalMessage());
+      await callAnthropic("k".repeat(20), modelId, "prompt", 5000, undefined, undefined, "medium");
+      const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(body.output_config).toEqual({ effort: "medium" });
+    }
+  });
+
+  it("haiku 4.5 NU primeste output_config (l-ar respinge cu 400)", async () => {
+    await callAnthropic("k".repeat(20), "claude-haiku-4-5-20251001", "prompt", 5000, undefined, undefined, "medium");
+
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("fara effort explicit nu se trimite output_config (default-ul serverului e high)", async () => {
+    await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000);
+
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("AI_EFFORT_OVERRIDE=off omite output_config chiar si pe un model capabil", async () => {
+    process.env.AI_EFFORT_OVERRIDE = "off";
+    await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000, undefined, undefined, "medium");
+
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("AI_EFFORT_DISABLED=1 ramane recunoscut (compat cu varianta veche)", async () => {
+    process.env.AI_EFFORT_DISABLED = "1";
+    await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000, undefined, undefined, "medium");
+
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("AI_EFFORT_OVERRIDE forteaza nivelul cerut de operator, in ambele directii", async () => {
+    // Asta e ce lipsea din varianta pornit/oprit: parghia mergea doar spre scump.
+    for (const level of ["low", "high"]) {
+      process.env.AI_EFFORT_OVERRIDE = level;
+      streamMock.mockClear().mockReturnValue(mockFinalMessage());
+      await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000, undefined, undefined, "medium");
+      const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(body.output_config).toEqual({ effort: level });
+    }
+  });
+
+  it("callModel propaga effort spre ruta nativa Anthropic", async () => {
+    // routing native EXPLICIT: shouldRouteViaOpenRouter scurt-circuiteaza pe prima
+    // linie, deci nu mai atinge DB-ul (getDecryptedKey) — fisierul asta nu are DB.
+    await callModel(
+      "claude-opus",
+      "prompt",
+      { anthropic: "k".repeat(20) },
+      5000,
+      undefined,
+      undefined,
+      { mode: "native" },
+      "medium"
+    );
+
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.output_config).toEqual({ effort: "medium" });
+  });
+
+  it("stop_reason-urile de finalizare normala NU sunt tratate ca trunchiere", async () => {
+    // Gate-ul e prin excludere, pe calea calda a tuturor analistilor Claude si a
+    // judecatorului implicit: o greseala aici ar face TOATE analizele sa iasa pe eroare.
+    for (const reason of ["end_turn", "stop_sequence"]) {
+      streamMock.mockReset().mockReturnValue(mockFinalMessage({ stopReason: reason }));
+      await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).resolves.toBe("ok");
+    }
+  });
+
+  it("refusal e tot raspuns incomplet, nu rezultat valid", async () => {
+    streamMock.mockReset().mockReturnValue(mockFinalMessage({ stopReason: "refusal" }));
+
+    await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).rejects.toMatchObject({
+      code: "AI_TRUNCATED",
+      stopReason: "refusal",
+      // Nu e o problema de buget, deci mesajul catre user nu are voie sa o afirme.
+      tokenBudget: false,
+    });
+  });
+
+  it("stop_reason ajunge in linia de log ai_call (semnal de trunchiere)", async () => {
+    streamMock.mockReset().mockReturnValue(mockFinalMessage({ stopReason: "max_tokens" }));
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+      logs.push(a.map(String).join(" "));
+    });
+    try {
+      // v2.43.3: trunchierea se INREGISTREAZA ca succes (apelul a avut loc si a fost
+      // facturat), apoi se arunca — textul partial nu ajunge la user.
+      await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).rejects.toMatchObject({
+        code: "AI_TRUNCATED",
+        stopReason: "max_tokens",
+      });
+      const line = logs.find((l) => l.includes('"action":"ai_call"'));
+      expect(line).toBeDefined();
+      expect(line).toContain('"stopReason":"max_tokens"');
+      expect(line).toContain('"status":"ok"');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

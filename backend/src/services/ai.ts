@@ -20,7 +20,10 @@ export const AI_MODELS: Record<string, { provider: AiUsageProvider; modelId: str
   // "claude-sonnet" RAMANE (istoricul de usage si selectiile salvate raman
   // valide); doar modelId-ul se schimba.
   "claude-sonnet": { provider: "anthropic", modelId: "claude-sonnet-5" },
-  "claude-opus": { provider: "anthropic", modelId: "claude-opus-4-8" },
+  // v2.43.2: modelul "Premium" trece pe Opus 5. Ca la Sonnet, cheia interna
+  // "claude-opus" RAMANE (selectiile salvate si JUDGE_MODELS raman valide);
+  // doar modelId-ul se schimba.
+  "claude-opus": { provider: "anthropic", modelId: "claude-opus-5" },
   // OpenAI — v2.42.x: familia GPT-5.6 inlocuieste 5.4 (Sol=premium,
   // Terra=echilibrat, Luna=rapid). Chei interne noi, versionate; cheile 5.4
   // nu mai exista in catalog — requesturile cu ele primesc 400 UNKNOWN_MODEL.
@@ -43,7 +46,7 @@ export const JUDGE_MODELS = ["claude-opus", "gpt-5.6-sol", "gemini-pro-3"];
 export const OPENROUTER_MODEL_MAP: Record<string, string> = {
   "claude-haiku": "anthropic/claude-haiku-4.5",
   "claude-sonnet": "anthropic/claude-sonnet-5",
-  "claude-opus": "anthropic/claude-opus-4.8",
+  "claude-opus": "anthropic/claude-opus-5",
   "gpt-5.6-luna": "openai/gpt-5.6-luna",
   "gpt-5.6-terra": "openai/gpt-5.6-terra",
   "gpt-5.6-sol": "openai/gpt-5.6-sol",
@@ -98,7 +101,80 @@ const TRUNCATE_FIELD = 200;
 // SECURITY: Timeout for AI API calls
 export const AI_TIMEOUT = 120000; // 120s per call — single analysis (native: Claude/GPT/Gemini)
 export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analysts + judge)
-const AI_MAX_TOKENS = 8000; // max output tokens — increased from 3000 for complex dosare
+// v2.43.3: exportat pentru ca testele asertau literalul 8000, care a driftat la primul
+// bump.
+//
+// Plafon IMPLICIT, neschimbat fata de v2.43.2. Se aplica la GPT, Gemini si Haiku 4.5 —
+// modele care NU primesc `effort` in acest release, deci nu au nicio compensare de cost.
+// Un plafon ridicat pentru ele ar fi fost o cale directa de crestere a cheltuielii
+// (finding review adversarial, HIGH: obiectivul declarat e ca costul sa NU creasca).
+export const AI_MAX_TOKENS = 8000;
+
+// Plafon ridicat, DOAR pentru modelele Claude 5 care primesc si `effort`. Pe generatia
+// asta thinking-ul e pornit implicit si consuma din ACELASI buget ca textul de raspuns,
+// deci un plafon calibrat pentru modele fara thinking taie analiza
+// (stop_reason: "max_tokens") dupa o faza lunga de gandire. Perechea plafon-ridicat +
+// effort-redus e ce tine costul in frau; una fara alta nu.
+export const AI_MAX_TOKENS_EFFORT = 16000;
+
+// Plafonul urmeaza CAPABILITATEA modelului, nu faptul ca effort-ul a fost trimis
+// efectiv: cu AI_EFFORT_DISABLED=1 un model Claude 5 tot gandeste implicit, deci tot
+// are nevoie de spatiu ca sa nu iasa trunchiat.
+function maxTokensFor(effortCapable: boolean): number {
+  return effortCapable ? AI_MAX_TOKENS_EFFORT : AI_MAX_TOKENS;
+}
+
+// v2.43.3: analiza taiata inainte de final. Se arunca DUPA ce apelul a fost
+// inregistrat ca succes in `ai_usage` — pentru ca a fost real si a fost facturat —
+// dar inainte ca textul incomplet sa ajunga la user. Motivul: o analiza trunchiata
+// arata completa pentru un cititor non-specialist, care e exact publicul tinta;
+// e un mod de esec mai periculos decat raspunsul gol, fiindca nu se vede.
+// v2.43.3 (al doilea review): acopera si taierile care NU vin din bugetul de tokeni —
+// content filter pe OpenAI, BLOCKLIST / PROHIBITED_CONTENT / SPII pe Gemini (ultimul e
+// plauzibil pe dosare, care sunt pline de date personale). SDK-ul Gemini arunca singur
+// doar pentru SAFETY / RECITATION / LANGUAGE; restul intorc text partial in tacere.
+// Consecinta pentru user e aceeasi — o analiza incompleta care arata completa — deci
+// acelasi tip de eroare, cu mesaj care nu mai afirma un motiv pe care nu-l stie.
+const TOKEN_BUDGET_STOP_REASONS = new Set(["max_tokens", "max_output_tokens", "length", "MAX_TOKENS"]);
+
+export class AiTruncatedError extends Error {
+  readonly code = "AI_TRUNCATED";
+  readonly tokenBudget: boolean;
+  constructor(readonly stopReason: string) {
+    super("Analiza s-a oprit inainte de final si a fost respinsa ca incompleta.");
+    this.name = "AiTruncatedError";
+    this.tokenBudget = TOKEN_BUDGET_STOP_REASONS.has(stopReason);
+  }
+}
+
+// v2.43.3 (Claude 5): effort controleaza adancimea de thinking. Default-ul serverului
+// e "high" (a omite campul == high), deci "medium"/"low" sunt REDUCERI fata de
+// cheltuiala implicita de acum, nu functii noi.
+export type AiEffort = "low" | "medium" | "high";
+
+// Allowlist pe valori EXACTE, nu pe prefix. `anthropic/claude-haiku-4.5` exista in
+// OPENROUTER_MODEL_MAP si NU suporta effort (400) — un gate pe prefixul "anthropic/"
+// sau pe substringul "claude-" l-ar include. Gate-ul OpenRouter se aplica pe slug-ul
+// REZOLVAT (dupa resolveOpenRouterSlug), pentru ca OPENROUTER_MODEL_OVERRIDES poate
+// remapa orice cheie pe orice slug valid.
+const EFFORT_CAPABLE_MODEL_IDS = new Set(["claude-sonnet-5", "claude-opus-5"]);
+const EFFORT_CAPABLE_OPENROUTER_SLUGS = new Set(["anthropic/claude-sonnet-5", "anthropic/claude-opus-5"]);
+
+// Parghie operationala pe effort, in AMBELE directii, fara rebuild.
+// `AI_EFFORT_OVERRIDE=low|medium|high` forteaza nivelul pe toate apelurile, ignorand
+// ce cere codul; `off` omite complet campul, deci modelele revin la default-ul
+// serverului (`high`) — adica varianta cea mai scumpa.
+// Varianta veche `AI_EFFORT_DISABLED=1` ramane recunoscuta, echivalenta cu `off`.
+// Motivul schimbarii (finding review adversarial): un simplu pornit/oprit oferea DOAR
+// directia scumpa. Daca dupa deploy costul creste, trebuie sa poti cobori nivelul din
+// configurare, nu prin redeploy.
+function resolveEffort(requested?: AiEffort): AiEffort | undefined {
+  const raw = process.env.AI_EFFORT_OVERRIDE?.trim().toLowerCase();
+  if (raw === "off") return undefined;
+  if (raw === "low" || raw === "medium" || raw === "high") return raw;
+  if (process.env.AI_EFFORT_DISABLED === "1") return undefined;
+  return requested;
+}
 
 // SECURITY: Body size limit for AI endpoint (100KB max)
 export const MAX_AI_BODY_SIZE = 100 * 1024;
@@ -465,35 +541,76 @@ async function callAnthropic(
   prompt: PromptInput,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  effort?: AiEffort
 ): Promise<string> {
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "anthropic",
     modelId,
     async () => {
       const client = new Anthropic({ apiKey });
-      const message = await client.messages.create(
+      // v2.43.3: streaming + finalMessage() in loc de messages.create. Motivul e
+      // guard-ul SDK-ului pe apeluri non-streaming cu max_tokens mare, plus mentinerea
+      // conexiunii vii fata de intermediari. NU ocoleste timeout-ul nostru:
+      // composeSignal produce un AbortSignal.timeout ABSOLUT, care taie la `timeout`
+      // indiferent daca stream-ul primeste evenimente. Valoarea de retur e identica cu
+      // varianta non-streaming; NU se face SSE spre client.
+      const effortCapable = EFFORT_CAPABLE_MODEL_IDS.has(modelId);
+      const effectiveEffort = resolveEffort(effort);
+      const sendEffort = effectiveEffort !== undefined && effortCapable;
+      const stream = client.messages.stream(
         {
           model: modelId,
-          max_tokens: AI_MAX_TOKENS,
+          max_tokens: maxTokensFor(effortCapable),
           // v2.42.0 (5.6): system prompt nativ Anthropic.
           ...(system !== null ? { system } : {}),
           messages: [{ role: "user", content: user }],
+          // Doar modelele din allowlist — Haiku 4.5 respinge campul cu 400.
+          ...(sendEffort ? { output_config: { effort: effectiveEffort } } : {}),
         },
         { signal: composeSignal(timeout, signal) }
       );
+      let message: Anthropic.Message;
+      try {
+        message = await stream.finalMessage();
+      } catch (e) {
+        // v2.43.3: pastram referinta la stream tocmai ca sa putem recupera tokenii deja
+        // generati cand apelul pica la mijloc (timeout, abort, eroare de retea).
+        // withAiLogging citeste `e.usage` pe calea de eroare; fara asta un apel taiat
+        // dupa 14k tokeni s-ar inregistra cu 0/0 si cost 0, desi providerul l-a facturat
+        // — exact cifra pe care ne bazam ca sa spunem daca a crescut costul.
+        const partial = stream.currentMessage?.usage;
+        if (partial && e !== null && typeof e === "object" && !("usage" in e)) {
+          (e as { usage?: unknown }).usage = partial;
+        }
+        throw e;
+      }
       const value = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+      // Idem callOpenAI/callGoogle: orice oprire care nu e finalizare normala. Uniunea
+      // completa din SDK-ul instalat (@anthropic-ai/sdk, messages.d.ts:874) e
+      // end_turn | max_tokens | stop_sequence | tool_use | pause_turn | refusal — deci
+      // in afara celor doua acceptate raman doar rezultate incomplete. Gate-ul e
+      // fail-closed deliberat: la o valoare noua preferam eroarea vizibila in locul unei
+      // analize taiate care arata completa.
+      if (message.stop_reason && message.stop_reason !== "end_turn" && message.stop_reason !== "stop_sequence") {
+        truncatedBy = message.stop_reason;
+      }
       return {
         value,
         meta: {
           usageInput: message.usage?.input_tokens,
           usageOutput: message.usage?.output_tokens,
+          stopReason: message.stop_reason ?? undefined,
+          effortSent: sendEffort ? effectiveEffort : "none",
         },
       };
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 async function callOpenAI(
@@ -505,7 +622,13 @@ async function callOpenAI(
   signal?: AbortSignal
 ): Promise<string> {
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  // v2.43.3 (finding review): detectia de trunchiere exista pe Anthropic si pe
+  // OpenRouter, dar lipsea aici si pe Gemini — adica exact aceeasi analiza taiata
+  // ajungea la user ca rezultat "complet" sau nu, dupa cum era rutata. Acelasi
+  // pattern ca la Anthropic: se arunca DUPA logare, ca apelul facturat sa ramana
+  // inregistrat.
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "openai",
     modelId,
     async () => {
@@ -527,11 +650,20 @@ async function callOpenAI(
           { signal: composed }
         );
         const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+        // Responses API: status "incomplete" + incomplete_details.reason.
+        // `status: "incomplete"` e semnalul primar; `reason` e optional in tipurile SDK
+        // (openai 6.36.0) si poate fi si "content_filter", nu doar plafonul de tokeni.
+        const incomplete = response as { status?: string; incomplete_details?: { reason?: string } };
+        const incompleteReason = incomplete.incomplete_details?.reason;
+        if (incomplete.status === "incomplete" || incompleteReason) {
+          truncatedBy = incompleteReason ?? "incomplete";
+        }
         return {
           value: response.output_text || "",
           meta: {
             usageInput: usage?.input_tokens,
             usageOutput: usage?.output_tokens,
+            stopReason: incompleteReason,
           },
         };
       } catch (err) {
@@ -569,17 +701,24 @@ async function callOpenAI(
           { signal: fallbackSignal }
         );
         const usage = completion.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+        // Orice motiv de oprire in afara de "stop" inseamna raspuns incomplet
+        // ("length", "content_filter"; tool_calls nu apar — nu trimitem tool-uri).
+        const finishReason = completion.choices?.[0]?.finish_reason;
+        if (finishReason && finishReason !== "stop") truncatedBy = finishReason;
         return {
           value: completion.choices?.[0]?.message?.content ?? "",
           meta: {
             usageInput: usage?.prompt_tokens,
             usageOutput: usage?.completion_tokens,
+            stopReason: finishReason ?? undefined,
           },
         };
       }
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 async function callGoogle(
@@ -591,7 +730,9 @@ async function callGoogle(
   signal?: AbortSignal
 ): Promise<string> {
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  // Vezi callOpenAI: aceeasi paritate de trunchiere.
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "google",
     modelId,
     async () => {
@@ -611,16 +752,23 @@ async function callGoogle(
       const usage = (
         result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
       ).usageMetadata;
+      // Idem: orice finishReason diferit de STOP. SAFETY / RECITATION / LANGUAGE arunca
+      // deja din text(), dar BLOCKLIST / PROHIBITED_CONTENT / SPII / OTHER nu.
+      const finishReason = result.response.candidates?.[0]?.finishReason as string | undefined;
+      if (finishReason && finishReason !== "STOP") truncatedBy = finishReason;
       return {
         value: result.response.text(),
         meta: {
           usageInput: usage?.promptTokenCount,
           usageOutput: usage?.candidatesTokenCount,
+          stopReason: finishReason,
         },
       };
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 export async function callOpenRouter(
@@ -630,14 +778,16 @@ export async function callOpenRouter(
   timeout: number,
   tracking?: AiUsageTrackingContext,
   signal?: AbortSignal,
-  routingTag?: AiUsageRoutingTag
+  routingTag?: AiUsageRoutingTag,
+  effort?: AiEffort
 ): Promise<string> {
   if (process.env.OPENROUTER_DISABLED === "1") {
     throw new Error("OPENROUTER_DISABLED");
   }
 
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "openrouter",
     slug,
     async () => {
@@ -650,17 +800,32 @@ export async function callOpenRouter(
         },
         timeout,
       });
-      const completion = await client.chat.completions.create(
-        {
-          model: slug,
-          // v2.42.0 (5.6): mesaj system separat (toChatMessages).
-          messages: toChatMessages(system, user),
-          max_tokens: AI_MAX_TOKENS,
-          // @ts-expect-error OpenRouter extension for returning real per-call cost.
-          extra_body: { usage: { include: true } },
-        },
-        { signal: composeSignal(timeout, signal) }
-      );
+      // v2.43.3: `usage` si `reasoning` sunt proprietati TOP-LEVEL in corpul cererii
+      // OpenRouter. Inainte se trimitea `extra_body: { usage: { include: true } }` —
+      // idiom din SDK-ul Python, inexistent in openai@6 (zero aparitii in pachet).
+      // SDK-ul nu l-a aruncat: `FallbackEncoder` face JSON.stringify pe obiectul
+      // intreg, deci pleca pe wire ca o cheie literala `extra_body`, pe care
+      // OpenRouter nu o interpreteaza. Rezultat: `usage.cost` nu venea niciodata si
+      // costul cadea mereu pe tabelul static din aiUsage.ts.
+      // O SINGURA variabila de body cu cast: un `@ts-expect-error` pe spread
+      // conditionat ar pica build-ul strict ca "unused" cand conditia e falsa.
+      const effortCapable = EFFORT_CAPABLE_OPENROUTER_SLUGS.has(slug);
+      const effectiveEffort = resolveEffort(effort);
+      const sendEffort = effectiveEffort !== undefined && effortCapable;
+      const body = {
+        model: slug,
+        // v2.42.0 (5.6): mesaj system separat (toChatMessages).
+        messages: toChatMessages(system, user),
+        max_tokens: maxTokensFor(effortCapable),
+        usage: { include: true },
+        ...(sendEffort ? { reasoning: { effort: effectiveEffort } } : {}),
+        // Cast pe varianta NON-streaming: `create` are overload-uri discriminate pe
+        // `stream`, iar un cast pe uniunea de parametri ar face TS sa infereze
+        // ChatCompletion | Stream si sa piarda `.choices` / `.usage`.
+      } as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
+      const completion = await client.chat.completions.create(body, {
+        signal: composeSignal(timeout, signal),
+      });
       const usage = completion.usage as
         | {
             prompt_tokens?: number;
@@ -670,6 +835,7 @@ export async function callOpenRouter(
         | undefined;
       const choice = completion.choices?.[0];
       const content = choice?.message?.content ?? "";
+      if (choice?.finish_reason === "length") truncatedBy = "length";
       if (!content.trim()) {
         // F10: diagnosticul OpenRouter pentru raspunsuri goale logheaza doar
         // shape-ul (finish_reason, presence flags, lungimi) si NU continutul
@@ -687,7 +853,11 @@ export async function callOpenRouter(
           "reasoning_present:",
           Boolean(reasoningPresent),
           "role:",
-          msg?.role
+          msg?.role,
+          // v2.43.3: fara asta, la un raspuns gol nu stii daca effort-ul a plecat sau nu,
+          // deci debugging-ul ar fi ghicit.
+          "effort_sent:",
+          sendEffort ? effectiveEffort : "none"
         );
       }
       return {
@@ -697,11 +867,17 @@ export async function callOpenRouter(
           usageOutput: usage?.completion_tokens,
           costUsdMilli: usage?.cost != null ? Math.round(usage.cost * 1000) : null,
           routingTag,
+          // v2.43.3: omologul lui stop_reason de pe ruta nativa. "length" = raspuns
+          // taiat de plafonul de tokeni — semnalul pe care il masuram dupa deploy.
+          stopReason: choice?.finish_reason ?? undefined,
+          effortSent: sendEffort ? effectiveEffort : "none",
         },
       };
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 export { callAnthropic, callOpenAI, callGoogle };
@@ -806,7 +982,8 @@ export async function callModel(
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
   signal?: AbortSignal,
-  routing?: AiRouting
+  routing?: AiRouting,
+  effort?: AiEffort
 ): Promise<string> {
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");
@@ -818,12 +995,16 @@ export async function callModel(
     if (!apiKey) throw new Error("NO_API_KEY:openrouter");
     const slug = resolveOpenRouterSlug(modelKey);
     if (!slug) throw new Error(`MODEL_NOT_IN_STACK:${modelKey}`);
-    return callOpenRouter(apiKey, slug, prompt, timeout, tracking, signal, "openrouter:western");
+    return callOpenRouter(apiKey, slug, prompt, timeout, tracking, signal, "openrouter:western", effort);
   }
 
   const apiKey = getApiKey(model.provider, apiKeys);
   if (!apiKey) throw new Error(`NO_API_KEY:${model.provider}`);
-  if (model.provider === "anthropic") return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking, signal);
+  if (model.provider === "anthropic")
+    return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking, signal, effort);
+  // GPT-5.6 (Responses API `reasoning`) si Gemini (`thinkingConfig`) NU primesc effort:
+  // calibrarea lor e follow-up separat, cu alte nume de campuri si alte valori permise.
+  // Nu presupune paritate cu ruta Anthropic.
   if (model.provider === "openai") return callOpenAI(apiKey, model.modelId, prompt, timeout, tracking, signal);
   if (model.provider === "google") return callGoogle(apiKey, model.modelId, prompt, timeout, tracking, signal);
   throw new Error("Provider necunoscut");

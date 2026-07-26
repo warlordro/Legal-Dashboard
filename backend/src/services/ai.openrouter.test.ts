@@ -31,6 +31,8 @@ import { closeDb, getDb } from "../db/schema.ts";
 import { invalidateCache, setTenantKey } from "../db/tenantKeysRepository.ts";
 import { resetMasterKeyCacheForTests } from "../util/tenantKeyCrypto.ts";
 import {
+  AI_MAX_TOKENS,
+  AI_MAX_TOKENS_EFFORT,
   callModel,
   callOpenAI,
   callOpenRouter,
@@ -96,6 +98,101 @@ function mockOpenRouterResponse(options?: { text?: string; input?: number; outpu
   });
 }
 
+describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
+  it("are usage.include TOP-LEVEL si NU extra_body", async () => {
+    mockOpenRouterResponse({ text: "ok" });
+    await callOpenRouter("k".repeat(20), "anthropic/claude-opus-5", "prompt", 5000);
+
+    const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+    // `extra_body` e idiom din SDK-ul Python; openai@6 il trimite ca pe o cheie
+    // literala, pe care OpenRouter nu o interpreteaza -> costul nu venea niciodata.
+    expect(body).not.toHaveProperty("extra_body");
+    expect(body.usage).toEqual({ include: true });
+    expect(body.max_tokens).toBe(AI_MAX_TOKENS_EFFORT);
+  });
+
+  it("plafonul ridicat merge doar la slugurile Claude 5 din allowlist", async () => {
+    mockOpenRouterResponse({ text: "ok" });
+    await callOpenRouter("k".repeat(20), "openai/gpt-5.6-sol", "prompt", 5000);
+    expect((openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>).max_tokens).toBe(AI_MAX_TOKENS);
+  });
+
+  it("effort ajunge in reasoning.effort pentru un slug din allowlist", async () => {
+    mockOpenRouterResponse({ text: "ok" });
+    await callOpenRouter(
+      "k".repeat(20),
+      "anthropic/claude-opus-5",
+      "prompt",
+      5000,
+      undefined,
+      undefined,
+      undefined,
+      "medium"
+    );
+
+    const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("AI_EFFORT_OVERRIDE=off omite reasoning, dar pastreaza usage", async () => {
+    process.env.AI_EFFORT_OVERRIDE = "off";
+    try {
+      mockOpenRouterResponse({ text: "ok" });
+      await callOpenRouter(
+        "k".repeat(20),
+        "anthropic/claude-opus-5",
+        "prompt",
+        5000,
+        undefined,
+        undefined,
+        undefined,
+        "medium"
+      );
+      const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(body).not.toHaveProperty("reasoning");
+      // Kill switch-ul e doar pentru effort, nu pentru raportarea de cost.
+      expect(body.usage).toEqual({ include: true });
+    } finally {
+      // biome-ignore lint/performance/noDelete: env trebuie unset real
+      delete process.env.AI_EFFORT_OVERRIDE;
+    }
+  });
+
+  it("finish_reason ajunge in linia de log ai_call (semnal de trunchiere)", async () => {
+    openRouterCreateMock.mockResolvedValue({
+      choices: [{ message: { content: "ok" }, finish_reason: "length" }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    });
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+      logs.push(a.map(String).join(" "));
+    });
+    try {
+      // v2.43.3: la fel ca pe ruta nativa — succes inregistrat, apoi throw.
+      await expect(callOpenRouter("k".repeat(20), "anthropic/claude-opus-5", "prompt", 5000)).rejects.toMatchObject({
+        code: "AI_TRUNCATED",
+        stopReason: "length",
+      });
+      const line = logs.find((l) => l.includes('"action":"ai_call"'));
+      expect(line).toBeDefined();
+      expect(line).toContain('"stopReason":"length"');
+      expect(line).toContain('"status":"ok"');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  it("modelele din afara allowlist-ului NU primesc reasoning", async () => {
+    for (const slug of ["anthropic/claude-haiku-4.5", "openai/gpt-5.6-sol", "google/gemini-3.1-pro-preview"]) {
+      openRouterCreateMock.mockClear();
+      mockOpenRouterResponse({ text: "ok" });
+      await callOpenRouter("k".repeat(20), slug, "prompt", 5000, undefined, undefined, undefined, "medium");
+      const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(body).not.toHaveProperty("reasoning");
+    }
+  });
+});
+
 describe("resolveOpenRouterSlug", () => {
   it("resolves model slugs", () => {
     expect(resolveOpenRouterSlug("claude-sonnet")).toBe(OPENROUTER_MODEL_MAP["claude-sonnet"]);
@@ -133,7 +230,7 @@ describe("resolveOpenRouterSlug", () => {
     process.env.OPENROUTER_MODEL_OVERRIDES =
       "claude-sonnet:javascript:alert(1), claude-opus:evil-provider/model, gpt-5.6-sol:openai/custom-gpt";
     expect(resolveOpenRouterSlug("claude-sonnet")).toBe("anthropic/claude-sonnet-5"); // fallback static
-    expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-4.8"); // provider respins
+    expect(resolveOpenRouterSlug("claude-opus")).toBe("anthropic/claude-opus-5"); // provider respins
     expect(resolveOpenRouterSlug("gpt-5.6-sol")).toBe("openai/custom-gpt"); // valid, trece
   });
 
@@ -254,7 +351,7 @@ describe("callOpenAI — Responses API fallback (audit R3)", () => {
       expect.objectContaining({
         model: "gpt-5.4",
         messages: [{ role: "user", content: "prompt" }],
-        max_completion_tokens: 8000,
+        max_completion_tokens: AI_MAX_TOKENS,
       }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );

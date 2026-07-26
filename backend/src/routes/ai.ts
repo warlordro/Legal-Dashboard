@@ -14,6 +14,7 @@ import {
   shouldRouteViaOpenRouter,
   type AiRouting,
   validateAiBody,
+  AiTruncatedError,
 } from "../services/ai.ts";
 import { getSettings, upsertSettings, type AiProviderMode } from "../db/ownerAiSettingsRepository.ts";
 import { getDecryptedKey } from "../db/tenantKeysRepository.ts";
@@ -220,13 +221,43 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
       AI_TIMEOUT,
       tracking,
       c.req.raw.signal,
-      routing
+      routing,
+      // v2.43.3: `low` — analiza single extrage si explica din datele dosarului, fara
+      // reconciliere. Default-ul serverului ar fi `high`; asta e o reducere deliberata
+      // de cost fata de ce rula pana acum implicit.
+      "low"
     );
+
+    // v2.43.3: un raspuns gol nu mai iese ca 200 {"analysis":""}. Pe Claude 5 thinking-ul
+    // consuma din acelasi buget ca textul, deci content gol e semnal de trunchiere sau de
+    // refuz al modelului, nu un rezultat valid. Pe MULTI nu se schimba nimic: promptul
+    // judge are deja regula pentru analiza goala, deci degradarea acolo e by design.
+    // Reservation-ul a fost deja confirmat de callModel — apelul a costat, deci NU se
+    // elibereaza; userul primeste eroare, dar consumul real ramane contabilizat.
+    if (!text.trim()) {
+      reservationToRelease = null;
+      return c.json(fail(ErrorCodes.AI_EMPTY_RESPONSE, "Modelul a returnat un raspuns gol. Reincearca.", c), 502);
+    }
 
     // Succes: callModel a apelat deja confirmAiUsageReservation in interior.
     reservationToRelease = null;
     return c.json({ analysis: text });
   } catch (err: unknown) {
+    // v2.43.3: analiza taiata de plafonul de tokeni. Apelul a fost real si a fost
+    // facturat (deja inregistrat in ai_usage), dar textul partial nu se livreaza —
+    // arata complet pentru cine nu e jurist. Rezervarea NU se elibereaza, din acelasi
+    // motiv ca la raspunsul gol: consumul a avut loc.
+    if (err instanceof AiTruncatedError) {
+      reservationToRelease = null;
+      return c.json(
+        fail(
+          ErrorCodes.AI_TRUNCATED,
+          "Analiza s-a oprit inainte de final si a fost respinsa ca incompleta. Reincearca; daca se repeta, alege un model diferit.",
+          c
+        ),
+        502
+      );
+    }
     // SECURITY: Log error server-side but never expose internal details to client
     console.error("Eroare AI:", err instanceof Error ? err.message : err);
     return aiFailure(c, "Eroare la analiza AI. Verificati cheia API si incercati din nou.");
@@ -279,7 +310,7 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
     }
     if (!body.judge || typeof body.judge !== "string") return invalidParams(c, "Lipseste modelul judecator.");
     if (!JUDGE_MODELS.includes(body.judge))
-      return invalidParams(c, "Model judecator nepermis. Doar Claude Opus 4.8, GPT-5.4 si Gemini 3.1 Pro.");
+      return invalidParams(c, "Model judecator nepermis. Doar Claude Opus 5, GPT-5.6 Sol si Gemini 3.1 Pro.");
     if (!(body.judge in AI_MODELS)) return modelError(c, "Model judecator necunoscut.");
 
     // Validate apiKeys
@@ -339,6 +370,16 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
       stream.onAbort(() => {
         cancelAll();
       });
+      // Declarat IN AFARA try-ului ca sa fie vizibil in catch: cand judge-ul pica dupa ce
+      // analistii au livrat, analizele lor sunt deja platite si trebuie sa ajunga la user.
+      // Membrii sunt OPTIONALI: daca un analist cade dupa ce celalalt a livrat, analiza
+      // livrata e deja platita si trebuie sa ajunga la user, singura.
+      let partialAnalyses: {
+        analyst1?: { model: string; text: string };
+        analyst2?: { model: string; text: string };
+      } | null = null;
+      let done1: { model: string; text: string } | undefined;
+      let done2: { model: string; text: string } | undefined;
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
         const p1 = callModel(
@@ -351,8 +392,14 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
             feature: "dosar_multi_analyst",
           },
           analystsAbort.signal,
-          routing
+          routing,
+          // v2.43.3: analistii pe `low` — sunt doua apeluri din trei, deci acolo e masa
+          // de cost. Judge-ul ramane mai sus, vezi comentariul de la faza 3.
+          "low"
         ).then(async (text) => {
+          // Marcat INAINTE de writeSSE: daca sibling-ul respinge intre timp, analiza asta
+          // e deja platita si trebuie sa fie recuperabila din catch.
+          done1 = { model: analysts[0], text };
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 1 }) });
           return text;
         });
@@ -366,19 +413,33 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
             feature: "dosar_multi_analyst",
           },
           analystsAbort.signal,
-          routing
+          routing,
+          // v2.43.3: vezi analistul 1 — acelasi rol, acelasi effort.
+          "low"
         ).then(async (text) => {
+          done2 = { model: analysts[1], text };
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
         });
+        // Ramane `all`, NU allSettled: prima respingere trebuie sa taie imediat sibling-ul
+        // (un NO_API_KEY respinge instant, iar allSettled ar fi lasat celalalt analist sa
+        // genereze pana la 180s, facturat, pe o cerere care oricum iese pe eroare).
+        // Analiza deja livrata nu se pierde: `done1`/`done2` sunt setate in `.then`.
         let analysisA: string;
         let analysisB: string;
         try {
           [analysisA, analysisB] = await Promise.all([p1, p2]);
         } catch (err) {
           analystsAbort.abort();
+          if (done1 || done2) {
+            partialAnalyses = { ...(done1 && { analyst1: done1 }), ...(done2 && { analyst2: done2 }) };
+          }
           throw err;
         }
+        partialAnalyses = {
+          analyst1: { model: analysts[0], text: analysisA },
+          analyst2: { model: analysts[1], text: analysisB },
+        };
 
         // Phase 3: judge reconciliation.
         await stream.writeSSE({ event: "judge_started", data: "{}" });
@@ -393,8 +454,31 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
             feature: "dosar_multi_judge",
           },
           judgeAbort.signal,
-          routing
+          routing,
+          // v2.43.3: judge-ul ramane PESTE analisti. El reconciliaza doua analize care
+          // pot sa se contrazica — detecteaza contradictii si le cantareste, pasul unde
+          // thinking-ul chiar isi merita costul. Semnal de regresie de urmarit: sectiunea
+          // "Revizuire si reconciliere" devine formala pe dosare unde analizele difera.
+          "medium"
         );
+
+        // v2.43.3: judge gol nu mai iese ca `done` cu `final: ""`. Promptul judge are
+        // regula pentru ANALIZA de analist goala, dar nimic nu acoperea cazul in care
+        // JUDGE-ul insusi nu produce text — iar el are promptul cel mai lung si outputul
+        // cel mai mare, deci e apelul cel mai expus la epuizarea bugetului de thinking.
+        // Analizele analistilor se trimit oricum: sunt platite si utile, chiar daca
+        // reconcilierea lipseste. Degradare explicita, nu succes fals.
+        if (!finalAnalysis.trim()) {
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({
+              code: ErrorCodes.AI_EMPTY_RESPONSE,
+              error: "Judecatorul AI a returnat un raspuns gol. Analizele individuale sunt mai jos.",
+              result: { analyses: partialAnalyses },
+            }),
+          });
+          return;
+        }
 
         await stream.writeSSE({
           event: "done",
@@ -413,11 +497,33 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
         console.error("Eroare AI Multi:", err instanceof Error ? err.message : err);
         const msg = err instanceof Error ? err.message : "";
         let errorText = "Eroare la analiza AI avansata. Verificati cheile API si incercati din nou.";
+        let errorCode: string | undefined;
         if (msg.startsWith("NO_API_KEY:")) {
           const provider = msg.split(":")[1];
           errorText = `Lipseste cheia API pentru ${provider}. Configureaza din Setari AI.`;
+        } else if (err instanceof AiTruncatedError) {
+          // v2.43.3 (finding review): trunchierea cadea in mesajul generic si trimitea
+          // userul sa-si verifice cheile API — diagnostic gresit pentru o problema de
+          // buget de tokeni. Judge-ul e cel mai expus, si e si apelul dupa care
+          // analizele individuale sunt deja platite.
+          errorCode = ErrorCodes.AI_TRUNCATED;
+          // Motivul se afirma DOAR cand e cunoscut: taierea poate veni si din filtrul de
+          // continut al providerului, nu doar din plafonul de tokeni.
+          const cauza = err.tokenBudget ? " (buget de tokeni epuizat)" : "";
+          errorText = partialAnalyses
+            ? `Reconcilierea s-a oprit inainte de final${cauza}. Analizele individuale sunt mai jos.`
+            : `Analiza s-a oprit inainte de final${cauza}. Reincearca; daca se repeta, alege un model diferit.`;
         }
-        await stream.writeSSE({ event: "error", data: JSON.stringify({ error: errorText }) });
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({
+            error: errorText,
+            ...(errorCode ? { code: errorCode } : {}),
+            // Analizele deja obtinute se trimit ORICUM: sunt platite si utile, chiar
+            // daca reconcilierea lipseste.
+            ...(partialAnalyses ? { result: { analyses: partialAnalyses } } : {}),
+          }),
+        });
       } finally {
         if (releaseReservationAfterStream != null) {
           const reservationId = releaseReservationAfterStream;

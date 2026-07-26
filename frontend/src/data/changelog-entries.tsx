@@ -40,10 +40,41 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.43.3",
+    date: "26 Iulie 2026",
+    subtitle:
+      "Release de securitate si calibrare AI: cheile si tokenurile sunt protejate mai strict (acces API doar pentru admin, cheia captcha nu mai poate ajunge in mesaje de eroare, limita de stocare RNPM nu mai poate fi ocolita), analiza AI pe modelele Claude 5 e calibrata pe cost si corectitudine, iar backup-urile bazei complete se pot sterge acum si individual.",
+    icon: <ShieldCheck className="h-5 w-5" />,
+    borderColor: "border-l-red-500",
+    badgeClass: "bg-red-100 text-red-900 dark:bg-red-900/30 dark:text-red-300",
+    sections: [
+      {
+        title: "Securitate: acces API, cheia captcha, limita de stocare",
+        content:
+          "Trei intariri importante pentru varianta web: tokenurile de acces API se pot crea si administra doar de administrator (inainte, orice utilizator autentificat putea emite tokenuri); cheia serviciului de captcha nu mai poate aparea in mesajele de eroare sau in loguri, indiferent de tipul erorii de retea; iar limita de stocare RNPM per utilizator nu mai poate fi ocolita printr-o cerere construita manual. In plus, o cautare RNPM refuzata (de exemplu in timpul unei restaurari) nu mai consuma o rezolvare de captcha degeaba.",
+      },
+      {
+        title: "Analiza AI calibrata pentru Claude 5",
+        content:
+          "Modelele Claude 5 'gandesc' implicit inainte sa raspunda, iar gandirea se factureaza ca text generat. Aplicatia trimite acum instructiuni de efort potrivite rolului (redus pentru analisti, mediu pentru judecator) si aloca un plafon de tokeni marit doar pentru aceste modele — analizele lungi nu mai risca sa fie taiate, iar costul ramane sub control. Raportarea costului real de la OpenRouter functioneaza acum corect (verificata la cent cu dashboard-ul provider-ului), iar analizele taiate sau goale sunt detectate si semnalate pe toate modelele, nu livrate in tacere ca rezultate complete.",
+      },
+      {
+        title: "Stergere individuala de backup",
+        content:
+          "In Setari > Backup, fiecare backup al bazei complete are acum propriul buton de stergere, cu confirmare — nu mai trebuie sa stergi toate backup-urile ca sa scapi de unul singur. Stergerea e permisa doar administratorului si e inregistrata in jurnalul de audit.",
+      },
+      {
+        title: "Fixuri din review-uri externe",
+        content:
+          "Doua valuri de review (CodeRabbit + review-uri adversariale independente) au fost procesate integral: paginare pe consumul RNPM din zona admin, protectie la dublu-click pe crearea de backup, pornirea mai rapida a bazelor RNPM la boot, un blocaj rar de mentenanta eliminat, si o serie de corecturi cosmetice si de loguri operationale.",
+      },
+    ],
+  },
+  {
     version: "v2.43.2",
     date: "21 Iulie 2026",
     subtitle:
-      "Modelele Google din analiza AI se actualizeaza: Gemini 3.5 Flash devine 3.6 Flash pe slotul 'Echilibrat', iar Gemini 3.1 Lite devine 3.5 Lite pe slotul 'Rapid' — atat pe ruta nativa cat si prin OpenRouter.",
+      "Modelele din analiza AI se actualizeaza: Gemini 3.5 Flash devine 3.6 Flash pe slotul 'Echilibrat', Gemini 3.1 Lite devine 3.5 Lite pe slotul 'Rapid', iar Claude Opus 4.8 devine Claude Opus 5 pe slotul 'Premium' — atat pe ruta nativa cat si prin OpenRouter.",
     icon: <BrainCircuit className="h-5 w-5" />,
     borderColor: "border-l-blue-500",
     badgeClass: "bg-blue-100 text-blue-900 dark:bg-blue-900/30 dark:text-blue-300",
@@ -57,6 +88,11 @@ export const versions: VersionEntry[] = [
         title: "Gemini 3.5 Lite inlocuieste 3.1 Lite",
         content:
           "Modelul rapid Google trece pe generatia noua, cu capabilitati mai bune la acelasi profil de viteza. Ramane cel mai ieftin model din catalog, chiar daca pretul creste fata de 3.1 Lite (0.3/2.5 in loc de 0.1/0.4 USD per milion de tokeni intrare/iesire). Ca si la Flash, selectia veche se re-mapeaza automat — alege 3.5 Lite din panoul AI daca il vrei inapoi ca model preferat.",
+      },
+      {
+        title: "Claude Opus 5 inlocuieste Opus 4.8",
+        content:
+          "Modelul Premium Anthropic trece pe generatia noua, folosit atat la analiza cu un singur model cat si ca analist sau judecator in analiza multi-agent. Spre deosebire de modelele Google de mai sus, aici nu trebuie sa faci absolut nimic: intrarea Opus din panoul AI ramane pe loc si trece automat pe Opus 5, fara re-mapare si fara reconfigurare. Tariful per milion de tokeni este identic cu al lui 4.8, deci cotele nu se recalibreaza; cat consumi efectiv depinde in continuare de cate analize rulezi.",
       },
     ],
   },

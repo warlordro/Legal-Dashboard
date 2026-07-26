@@ -18,6 +18,7 @@ vi.mock("@hono/node-server/conninfo", () => ({ getConnInfo: vi.fn() }));
 
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { closeDb, getDb } from "../db/schema.ts";
+import { insertUser } from "../db/userRepository.ts";
 import { originGuard } from "../middleware/originGuard.ts";
 import { apiTokensRouter } from "./apiTokens.ts";
 
@@ -43,6 +44,10 @@ beforeEach(async () => {
   process.env.LEGAL_DASHBOARD_DB_PATH = path.join(tmpRoot, "legal-dashboard.db");
   new Database(process.env.LEGAL_DASHBOARD_DB_PATH).close();
   getDb();
+  // F12-F8: testul 2 verifica faptul ca o cerere same-origin AJUNGE la router
+  // (404 pe token inexistent). Fara rand admin pentru "alice", requireRole ar
+  // raspunde 401 si testul ar PICA — seed-ul e ce il tine valid dupa gard.
+  insertUser({ id: "alice", email: "alice@x.ro", displayName: "Alice", role: "admin" });
   mockedConn.mockReturnValue({ remote: { address: "10.0.0.5" } } as ReturnType<typeof getConnInfo>);
 });
 afterEach(async () => {

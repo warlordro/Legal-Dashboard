@@ -187,6 +187,13 @@ export function openRnpmDbRaw(ownerId: string): Database.Database | null {
   return new Database(dbPath, { readonly: true, fileMustExist: true });
 }
 
+// Test-only: dimensiunea registry-ului de handle-uri. Fara el, un leak in prewarm nu
+// poate fi pinat de niciun test — `hasPendingRnpmMigrations` deschide o conexiune
+// proprie, deci contoarele lui nu spun nimic despre registry.
+export function __rnpmHandleCountForTests(): number {
+  return handles.size;
+}
+
 export function closeRnpmDb(ownerId: string): void {
   const db = handles.get(ownerId);
   if (db) {
@@ -220,6 +227,29 @@ export function checkpointRnpmWal(ownerId: string): void {
   getRnpmDb(ownerId).prepare("PRAGMA wal_checkpoint(TRUNCATE)").get();
 }
 
+// Checkpoint PASSIVE care NU inregistreaza un handle nou. Masuratoarea de storage il
+// cere pe calea "peste limita", iar ruta admin /usage o executa pentru TOTI userii:
+// cu getRnpmDb, o singura cerere lasa in registry cate un handle permanent per user
+// peste limita. Daca userul are deja conexiune vie o refolosim; altfel deschidem una
+// temporara si o inchidem. Best-effort: fara fisier sau in timpul unui restore, no-op.
+export function passiveCheckpointRnpmWal(ownerId: string): void {
+  const existing = handles.get(ownerId);
+  if (existing) {
+    existing.pragma("wal_checkpoint(PASSIVE)");
+    return;
+  }
+  assertValidOwnerId(ownerId);
+  if (shuttingDown || isRnpmRestoreInProgress(ownerId)) return;
+  const dbPath = getRnpmDbPath(ownerId);
+  if (!fs.existsSync(dbPath)) return;
+  const db = new Database(dbPath);
+  try {
+    db.pragma("wal_checkpoint(PASSIVE)");
+  } finally {
+    db.close();
+  }
+}
+
 // DEPRECATED (Task 7, fixuri post-review): rutele folosesc
 // compactRnpmDbViaWorker (backup.ts) — VACUUM in worker + swap sub maintenance
 // lock, nu VACUUM blocant pe handle-ul viu (SQLITE_BUSY intermitent cu un
@@ -243,4 +273,62 @@ export function compactRnpmDb(ownerId: string): { beforeBytes: number; afterByte
   const durationMs = Date.now() - t0;
   const after = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
   return { beforeBytes: before, afterBytes: after, durationMs };
+}
+
+// CodeRabbit 1.3 (v2.43.3): pre-migrarea bazei RNPM a unui user e integral SINCRONA
+// (mkdirSync + VACUUM INTO + prune), iar `getRnpmDb` are semnatura sincrona, deci nu
+// poate astepta workerul din snapshotRunner. Pe desktop e invizibil — un singur user.
+// Pe web, prima cerere a fiecarui user dupa un upgrade cu migrari noi ingheata TOT
+// serverul cat dureaza (masurat: ~120 ms la 103 MB, creste cu marimea bazei).
+//
+// Solutia respecta constrangerea de semnatura: nu facem `getRnpmDb` asincron, ci mutam
+// munca inaintea serverului. Se apeleaza din blocul de prewarm din index.ts, care ruleaza
+// deja INAINTE de `serve()` tocmai ca sa nu se raspunda "ok" la /health cat timp migrarile
+// blocheaza event loop-ul.
+//
+// Atinge DOAR fisierele care exista deja: `getRnpmDb` ar provisiona lazy un fisier nou,
+// iar un user care n-a folosit niciodata RNPM nu trebuie sa capete unul la boot.
+// Un esec pe un user NU opreste restul si NU trebuie sa cada boot-ul — pre-migrarea are
+// deja try/catch propriu care doar avertizeaza.
+export function prewarmRnpmMigrations(ownerIds: readonly string[]): {
+  warmed: number;
+  skipped: number;
+  failed: number;
+  durationMs: number;
+} {
+  const t0 = Date.now();
+  let warmed = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const ownerId of ownerIds) {
+    try {
+      const dbPath = getRnpmDbPath(ownerId);
+      // Gate pe migrari PENDING, nu doar pe existenta fisierului (finding review
+      // adversarial, convergent pe toate trei reviewurile). Fara el, prewarm-ul ar fi
+      // rulat la FIECARE boot, nu doar dupa un upgrade cu migrari noi — cazul majoritar
+      // fiind boot fara migrari, unde nu are nimic de facut.
+      if (!fs.existsSync(dbPath) || !hasPendingRnpmMigrations(dbPath)) {
+        skipped++;
+        continue;
+      }
+      getRnpmDb(ownerId);
+      // Handle-ul se INCHIDE imediat: migrarile sunt durabile, iar prima cerere reala
+      // il redeschide ieftin. Fara close, boot-ul ar fi tinut deschis permanent cate un
+      // handle (fd + wal + shm) pentru fiecare user cu baza RNPM, indiferent daca se mai
+      // logheaza vreodata — registry-ul nu are evictie, deci la cateva sute de useri
+      // inseamna drum direct spre EMFILE.
+      closeRnpmDb(ownerId);
+      warmed++;
+    } catch (e) {
+      failed++;
+      console.warn(`[rnpmDb] prewarm esuat pentru ${ownerId} (continuam):`, e instanceof Error ? e.message : e);
+    }
+  }
+  const durationMs = Date.now() - t0;
+  // Progresul se logheaza: pe multi useri cu baze mari boot-ul se lungeste proportional,
+  // si operatorul trebuie sa vada de ce sta, nu sa para blocat.
+  console.log(
+    JSON.stringify({ action: "rnpm_prewarm", warmed, skipped, failed, durationMs, ts: new Date().toISOString() })
+  );
+  return { warmed, skipped, failed, durationMs };
 }

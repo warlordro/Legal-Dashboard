@@ -15,7 +15,7 @@ import {
   readDefaultRnpmStorageMb,
   RnpmStorageLimitError,
 } from "./rnpmStorageLimit.ts";
-import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath } from "./rnpmDb.ts";
+import { __resetRnpmDbForTests, __rnpmHandleCountForTests, getRnpmDb, getRnpmDbPath } from "./rnpmDb.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 const MIB = 1024 * 1024;
@@ -131,6 +131,20 @@ describe("measureRnpmStorage + assertRnpmStorageWithinLimit", () => {
     await measureRnpmStorage(OWNER);
 
     expect(pragma).toHaveBeenCalledWith("wal_checkpoint(PASSIVE)");
+  });
+
+  it("checkpoint-ul peste limita NU inregistreaza un handle nou (finding review)", async () => {
+    // Ruta admin /usage masoara TOTI userii. Cu getRnpmDb, fiecare user peste limita
+    // ramanea cu un handle in registry, permanent, dupa o singura cerere.
+    getRnpmDb(OWNER);
+    __resetRnpmDbForTests();
+    expect(__rnpmHandleCountForTests()).toBe(0);
+    process.env.LEGAL_DASHBOARD_DEFAULT_RNPM_STORAGE_MB = "0.000001";
+
+    const measured = await measureRnpmStorage(OWNER);
+
+    expect(measured.exists).toBe(true);
+    expect(__rnpmHandleCountForTests()).toBe(0);
   });
 
   it("blocheaza la boundary used egal cu limit si expune cifrele tipat", async () => {

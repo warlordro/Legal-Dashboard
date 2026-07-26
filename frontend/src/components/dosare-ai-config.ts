@@ -18,7 +18,7 @@ export const AI_MODELS: AiModelDef[] = [
     desc: "Echilibrat",
     color: "violet",
   },
-  { key: "claude-opus", label: "Opus 4.8", provider: "anthropic", desc: "Premium", color: "violet" },
+  { key: "claude-opus", label: "Opus 5", provider: "anthropic", desc: "Premium", color: "violet" },
   // OpenAI — v2.42.x: familia GPT-5.6 (Sol=premium, Terra=echilibrat, Luna=rapid).
   { key: "gpt-5.6-luna", label: "5.6 Luna", provider: "openai", desc: "Rapid", color: "emerald" },
   {
@@ -44,7 +44,7 @@ export const AI_MODELS: AiModelDef[] = [
 export const JUDGE_MODELS_LIST: AiModelDef[] = [
   {
     key: "claude-opus",
-    label: "Claude Opus 4.8",
+    label: "Claude Opus 5",
     provider: "anthropic",
     color: "violet",
     desc: "Premium",

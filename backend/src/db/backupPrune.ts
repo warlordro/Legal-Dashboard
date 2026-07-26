@@ -328,12 +328,33 @@ export async function pruneBackupJail(
   let measured = await measureJail(dir, prefix, logEvent);
   if (measured.reliable && measured.bytes <= capBytes) return { pruned, capSatisfied: true };
   for (const name of await byteCandidates(dir, names, prefix, protectedNames)) {
-    if (measured.reliable && measured.bytes <= capBytes) break;
-    if (await unlinkBundle(dir, name, logEvent)) pruned++;
+    // Fail-safe: cu `reliable: false` (readdir/stat esuat non-ENOENT — pe Windows
+    // EPERM/EBUSY de la antivirus) conditia de oprire nu s-ar putea satisface
+    // NICIODATA, iar bucla ar sterge fiecare candidat non-floor. Nu stergem pe
+    // baza unei cifre in care nu avem incredere.
+    if (!measured.reliable || measured.bytes <= capBytes) break;
+    const bytesBefore = measured.bytes;
+    const removed = await unlinkBundle(dir, name, logEvent);
+    if (removed) pruned++;
     measured = await measureJail(dir, prefix, logEvent);
+    // Al doilea gard: bytes acontati dar nerecuperabili (sidecar orfan ramas dupa
+    // un unlink partial, .db.tmp blocat) nu scad niciodata sub plafon si bucla ar
+    // goli tot istoricul incercand. O stergere reusita care nu scade totalul =
+    // stop.
+    if (removed && measured.reliable && measured.bytes >= bytesBefore) {
+      logEvent({ action: "backup_prune_failed", stage: "cap_no_progress", file: name });
+      break;
+    }
   }
   const capSatisfied = measured.reliable && measured.bytes <= capBytes;
-  logEvent({ action: "rnpm_backup_cap", dir: path.basename(dir), usedBytes: measured.bytes, capBytes, capSatisfied });
+  logEvent({
+    action: "rnpm_backup_cap",
+    dir: path.basename(dir),
+    usedBytes: measured.bytes,
+    capBytes,
+    capSatisfied,
+    reliable: measured.reliable,
+  });
   return { pruned, capSatisfied };
 }
 
@@ -367,11 +388,26 @@ export function pruneBackupJailSync(dir: string, prefix: string, options: Backup
   }
   let measured = measureJailSync(dir, prefix, logEvent);
   for (const name of byteCandidatesSync(dir, names, prefix, protectedNames)) {
-    if (measured.reliable && measured.bytes <= capBytes) break;
-    if (unlinkBundleSync(dir, name, logEvent)) pruned++;
+    // Vezi comentariile din varianta async: acelasi fail-safe pe masuratoare
+    // nesigura si acelasi gard pe lipsa de progres.
+    if (!measured.reliable || measured.bytes <= capBytes) break;
+    const bytesBefore = measured.bytes;
+    const removed = unlinkBundleSync(dir, name, logEvent);
+    if (removed) pruned++;
     measured = measureJailSync(dir, prefix, logEvent);
+    if (removed && measured.reliable && measured.bytes >= bytesBefore) {
+      logEvent({ action: "backup_prune_failed", stage: "cap_no_progress", file: name });
+      break;
+    }
   }
   const capSatisfied = measured.reliable && measured.bytes <= capBytes;
-  logEvent({ action: "rnpm_backup_cap", dir: path.basename(dir), usedBytes: measured.bytes, capBytes, capSatisfied });
+  logEvent({
+    action: "rnpm_backup_cap",
+    dir: path.basename(dir),
+    usedBytes: measured.bytes,
+    capBytes,
+    capSatisfied,
+    reliable: measured.reliable,
+  });
   return { pruned, capSatisfied };
 }

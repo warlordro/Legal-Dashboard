@@ -168,6 +168,82 @@ describe("pruneBackupJail RNPM", () => {
     expect(fs.existsSync(path.join(dir, "rnpm.pre-schema-upgrade-current.db"))).toBe(true);
   });
 
+  it("masuratoarea nesigura opreste faza pe bytes in loc sa goleasca jail-ul", async () => {
+    process.env.LEGAL_DASHBOARD_RNPM_BACKUP_CAP_MB = String(1 / 1024 / 1024);
+    for (let index = 1; index <= 5; index++) write(`rnpm.2026-01-0${index}.db`, 10, index);
+    const logEvent = vi.fn();
+    const realStat = fsPromises.stat.bind(fsPromises);
+    vi.spyOn(fsPromises, "stat").mockImplementation(async (target, options) => {
+      if (String(target).endsWith("rnpm.2026-01-05.db")) {
+        throw Object.assign(new Error("EPERM simulat"), { code: "EPERM" });
+      }
+      return realStat(target as never, options as never) as never;
+    });
+
+    const result = await pruneBackupJail(dir, "rnpm.", { logEvent });
+
+    // Faza pe numar taie 5 -> 3 (RNPM dated retain = 3). Faza pe bytes nu are
+    // voie sa continue: cu `reliable: false` conditia de oprire nu s-ar putea
+    // satisface niciodata si ar sterge fiecare candidat non-floor.
+    expect(fs.readdirSync(dir)).toHaveLength(3);
+    expect(result.capSatisfied).toBe(false);
+    // `reliable` in payload distinge "podeaua depaseste plafonul" de "am renuntat
+    // pe o masuratoare in care nu am incredere"; fara el `usedBytes` e o cifra
+    // subevaluata si neinterpretabila.
+    expect(logEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "rnpm_backup_cap", capSatisfied: false, reliable: false })
+    );
+  });
+
+  it("varianta sync opreste faza pe bytes cand masuratoarea e nesigura", () => {
+    process.env.LEGAL_DASHBOARD_RNPM_BACKUP_CAP_MB = String(1 / 1024 / 1024);
+    for (let index = 1; index <= 5; index++) write(`rnpm.2026-01-0${index}.db`, 10, index);
+    const realStatSync = fs.statSync.bind(fs);
+    vi.spyOn(fs, "statSync").mockImplementation((target, options) => {
+      if (String(target).endsWith("rnpm.2026-01-05.db")) {
+        throw Object.assign(new Error("EPERM simulat"), { code: "EPERM" });
+      }
+      return realStatSync(target, options as never) as never;
+    });
+
+    const result = pruneBackupJailSync(dir, "rnpm.");
+
+    expect(fs.readdirSync(dir)).toHaveLength(3);
+    expect(result.capSatisfied).toBe(false);
+  });
+
+  it("bytes nerecuperabili nu golesc istoricul: stergerea fara progres opreste faza", async () => {
+    process.env.LEGAL_DASHBOARD_RNPM_BACKUP_CAP_MB = String(5 / 1024 / 1024);
+    // Sidecar orfan: intra in accounting, dar nu e niciodata candidat la stergere
+    // (candidatii sunt doar primary `.db`). Singur depaseste plafonul.
+    write("rnpm.orfan.db-wal", 50, 9);
+    for (let index = 1; index <= 3; index++) write(`rnpm.2026-01-0${index}.db`, 0, index);
+    const logEvent = vi.fn();
+
+    const result = await pruneBackupJail(dir, "rnpm.", { logEvent });
+
+    // Prima stergere reusita nu scade totalul => oprim. Fara gard, bucla ar
+    // consuma toti candidatii non-floor si tot nu ar ajunge sub plafon.
+    expect(fs.readdirSync(dir)).toHaveLength(3);
+    expect(result.pruned).toBe(1);
+    expect(result.capSatisfied).toBe(false);
+    expect(logEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ action: "backup_prune_failed", stage: "cap_no_progress" })
+    );
+  });
+
+  it("varianta sync opreste si ea faza pe bytes cand stergerea nu face progres", () => {
+    process.env.LEGAL_DASHBOARD_RNPM_BACKUP_CAP_MB = String(5 / 1024 / 1024);
+    write("rnpm.orfan.db-wal", 50, 9);
+    for (let index = 1; index <= 3; index++) write(`rnpm.2026-01-0${index}.db`, 0, index);
+
+    const result = pruneBackupJailSync(dir, "rnpm.");
+
+    expect(fs.readdirSync(dir)).toHaveLength(3);
+    expect(result.pruned).toBe(1);
+    expect(result.capSatisfied).toBe(false);
+  });
+
   it("varianta sync tolereaza eroarea de relistare dupa pruning si raporteaza cap nesatisfacut", () => {
     process.env.LEGAL_DASHBOARD_RNPM_BACKUP_CAP_MB = String(1 / 1024 / 1024);
     write("rnpm.2026-01-01.db", 10, 1);

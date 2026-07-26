@@ -15,7 +15,7 @@ import { createRnpmManualBackup } from "../db/backup.ts";
 import { __resetRnpmDbForTests, getRnpmDb } from "../db/rnpmDb.ts";
 import { measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
 import { closeDb, getDb } from "../db/schema.ts";
-import { insertUser, updateUserRole } from "../db/userRepository.ts";
+import { insertUser, updateUserRole, updateUserStatus } from "../db/userRepository.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { appErrorHandler } from "../util/appErrorHandler.ts";
 import { adminRnpmRouter } from "./adminRnpm.ts";
@@ -61,6 +61,58 @@ afterEach(async () => {
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_DB_PATH;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
+});
+
+describe("GET /api/v1/admin/rnpm/usage — paginare (CodeRabbit 1.6)", () => {
+  it("respecta page/pageSize si raporteaza totalul", async () => {
+    // Userii seed-uiti in beforeEach, ordonati email ASC.
+    const res = await buildApp("admin1").request("/api/v1/admin/rnpm/usage?page=2&pageSize=1");
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      data: { rows: Array<{ userId: string }>; page: number; pageSize: number; total: number };
+    };
+    expect(body.data.rows).toHaveLength(1);
+    expect(body.data).toMatchObject({ page: 2, pageSize: 1, total: 4 });
+  });
+
+  it("default-ul intoarce toti userii cand sunt sub o pagina", async () => {
+    const res = await buildApp("admin1").request("/api/v1/admin/rnpm/usage");
+    const body = (await res.json()) as { data: { rows: unknown[]; page: number; total: number } };
+    expect(body.data.rows).toHaveLength(4);
+    expect(body.data).toMatchObject({ page: 1, total: 4 });
+  });
+
+  it("userii inactivi FARA date sunt exclusi implicit si inclusi cu includeInactive=1", async () => {
+    // Filtrul a fost mutat pe server tocmai ca `total` si paginile sa fie coerente;
+    // client-side, dupa feliere, o pagina intreaga putea aparea goala.
+    updateUserStatus("u2", "deleted");
+
+    const fara = await buildApp("admin1").request("/api/v1/admin/rnpm/usage");
+    const bodyFara = (await fara.json()) as { data: { rows: Array<{ userId: string }>; total: number } };
+    expect(bodyFara.data.rows.map((r) => r.userId)).not.toContain("u2");
+    expect(bodyFara.data.total).toBe(3);
+
+    const cu = await buildApp("admin1").request("/api/v1/admin/rnpm/usage?includeInactive=1");
+    const bodyCu = (await cu.json()) as { data: { rows: Array<{ userId: string }>; total: number } };
+    expect(bodyCu.data.rows.map((r) => r.userId)).toContain("u2");
+    expect(bodyCu.data.total).toBe(4);
+  });
+
+  it("un user inactiv CU date ramane vizibil implicit", async () => {
+    seedRnpm("u2", "are-date");
+    updateUserStatus("u2", "deleted");
+
+    const res = await buildApp("admin1").request("/api/v1/admin/rnpm/usage");
+    const body = (await res.json()) as { data: { rows: Array<{ userId: string }>; total: number } };
+    expect(body.data.rows.map((r) => r.userId)).toContain("u2");
+    expect(body.data.total).toBe(4);
+  });
+
+  it("parametrii invalizi dau 400, nu 500", async () => {
+    const res = await buildApp("admin1").request("/api/v1/admin/rnpm/usage?page=0");
+    expect(res.status).toBe(400);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("INVALID_PARAMS");
+  });
 });
 
 describe("GET /api/v1/admin/rnpm/usage", () => {

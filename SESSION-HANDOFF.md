@@ -1,12 +1,21 @@
 # Session Handoff
 
-**Versiune curenta**: v2.43.2 (2026-07-21, completat 2026-07-22) — branch `feat/v2.43.0-rnpm-split`. v2.43.2 = refresh modele AI Google (Gemini 3.5 Flash -> 3.6 Flash, cheie interna `gemini-flash-3.6`; Gemini 3.1 Flash Lite -> 3.5 Flash Lite, cheie interna `gemini-flash-lite-3.5`; ambele nativ + OpenRouter). Munca de dupa push-ul initial din 13 iulie (remediere sec + rezultate partiale PortalJust) e reincadrata ca release patch v2.43.1 peste v2.43.0.
+**Versiune curenta**: v2.43.3 (2026-07-26) — branch `feat/v2.43.0-rnpm-split`. v2.43.3 = securitate (F12-F3/F5/F8 + CodeRabbit 1.2, cele 3 findings care blocau web deploy) + calibrare AI Claude 5 (effort pe rol, plafon split 8000/16000, fix `extra_body` OpenRouter cu cost real validat live, detectie trunchiere pe toate rutele) + fixurile CodeRabbit + stergere individuala de backup admin. Predecesor v2.43.2 = refresh modele AI (Gemini 3.5 Flash -> 3.6 Flash, cheie interna `gemini-flash-3.6`; Gemini 3.1 Flash Lite -> 3.5 Flash Lite, cheie interna `gemini-flash-lite-3.5`; Claude Opus 4.8 -> Opus 5, cheia interna `claude-opus` ramane neschimbata; toate nativ + OpenRouter).
 
 Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detaliat
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
 operational kill switches, riscuri ramase si directii deschise pentru urmatorul agent.
 
-## Stadiu curent (2026-07-20): remediere sec + rezultate partiale PortalJust livrate pe branch
+**Urmatoarea bucata de lucru:** [HANDOFF-SESIUNE-2026-07-26.md](HANDOFF-SESIUNE-2026-07-26.md)
+— punctul de intrare pentru sesiunea urmatoare, cu ordinea celor doua fluxuri deschise:
+(A) cele 3 findings F12 care blocheaza web deploy, detaliate in
+[HANDOFF-SEC-WEB-BLOCKERS-F12-2026-07-26.md](HANDOFF-SEC-WEB-BLOCKERS-F12-2026-07-26.md)
+(F12-F3 bypass cota RNPM prin `gcode`, F12-F5 cheie captcha in raspunsul 500, F12-F8
+`/api/v1/tokens*` fara gard de rol), verificate la sursa si neremediate; (B) triajul review-ului
+CodeRabbit din 2026-07-26, in [audit/CODERABBIT-TRIAJ-2026-07-26.md](audit/CODERABBIT-TRIAJ-2026-07-26.md)
+(9 findings de reparat din 54 comentarii). Restul de 9 findings F12 sunt in [HARDENING.md](HARDENING.md).
+
+## Ultimul sprint mare livrat (2026-07-20): remediere sec + rezultate partiale PortalJust pe branch
 
 Dupa push-ul initial v2.43.0 (13 iulie), pe acelasi branch s-au livrat si pushuit DOUA directii mari (reincadrate ca release patch v2.43.1), ambele dublu-review-uite adversarial (Codex GPT-5.6 Sol + panel multi-model):
 
@@ -419,7 +428,9 @@ infra.
 | `SMTP_SECURE=true\|false` | Forteaza TLS implicit/explicit; default = `port === 465` | Cand provider-ul SMTP cere STARTTLS pe 587 (`SMTP_SECURE=false`) sau implicit TLS pe 465 |
 | `MONITORING_DISABLED_KINDS=dosar_soap,name_soap` | Scheduler-ul nu mai claim-uieste tipurile listate; joburile raman in DB, alertele existente raman accesibile | Stop temporar pe sursa upstream cu probleme (PortalJust SOAP rate-limit) |
 | `OPENROUTER_DISABLED=1` | `callOpenRouter` esueaza imediat si nu face fallback silent la native | Stop urgent daca OpenRouter are incident, billing risc sau policy drift |
-| `OPENROUTER_MODEL_OVERRIDES=modelKey:provider/slug` | Suprascrie slug-uri OpenRouter fara rebuild backend | Cand OpenRouter redenumeste un model sau muta un provider |
+| `OPENROUTER_MODEL_OVERRIDES=modelKey:provider/slug` | Suprascrie slug-uri OpenRouter fara rebuild backend. **Atentie (v2.43.3):** allowlist-ul de effort e pe slug-ul REZOLVAT (`anthropic/claude-sonnet-5`, `anthropic/claude-opus-5`). Un override care muta o cheie Claude 5 pe alt slug scoate apelul din allowlist: nu se mai trimite `effort` SI plafonul coboara de la 16000 la 8000 tokeni. Analizele lungi pot iesi trunchiate (`AI_TRUNCATED`), fara alt semnal in log | Cand OpenRouter redenumeste un model sau muta un provider. Daca noul slug e tot Claude 5, adauga-l in `EFFORT_CAPABLE_OPENROUTER_SLUGS` (`backend/src/services/ai.ts`) la urmatorul release |
+| `AI_EFFORT_OVERRIDE=low\|medium\|high\|off` | Forteaza nivelul de effort pe TOATE apelurile, ignorand ce cere codul (`low` analisti+single / `medium` judge). `off` omite campul, deci modelele revin la default-ul serverului, care e `high`. Raportarea de cost (`usage.include`) nu e afectata | Parghie in AMBELE directii, fara rebuild: `low` daca dupa deploy costul creste, `high`/`off` daca scade calitatea analizei. Atentie: `off` e varianta cea mai SCUMPA, nu un rollback neutru |
+| `AI_EFFORT_DISABLED=1` | Echivalent cu `AI_EFFORT_OVERRIDE=off`; pastrat pentru compatibilitate | Prefera `AI_EFFORT_OVERRIDE`; asta merge doar intr-o directie |
 | `RNPM_AUDIT_CAP_HIT_DISABLED=1` | `POST /api/v1/rnpm/search-split` sare INSERT-ul `rnpm.cap_hit` din `audit_log`; restul flow-ului (SSE, decision, captchasUsed) ruleaza neschimbat | Stop urgent daca tabela audit creste suspect sau introduce contention vizibil pe write |
 | `RNPM_RUNTIME_VALIDATION_DISABLED=1` | Opt-out temporar pentru validarea runtime RNPM fail-closed; payload-urile invalide sunt acceptate doar cat timp flag-ul este setat | Foloseste doar ca rollback operational daca upstream-ul RNPM schimba schema in productie |
 | `LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_DISABLED=1` | Dezactiveaza semantic autocompact-ul dupa stergeri; raspunsurile raman fara campul `compacted` | Stop temporar daca VACUUM introduce latenta sau presiune pe disc |

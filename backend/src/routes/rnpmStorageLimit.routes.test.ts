@@ -54,6 +54,7 @@ vi.mock("./rnpmGuards.ts", async (importOriginal) => {
   return { ...actual, withRnpmCaptchaGuards: vi.fn() };
 });
 
+import { __resetRnpmActivityForTests, beginRnpmRestore } from "../db/rnpmActivity.ts";
 import { assertRnpmStorageWithinLimit, RnpmStorageLimitError } from "../db/rnpmStorageLimit.ts";
 import { requestIdContext } from "../middleware/requestId.ts";
 import { executeSearch } from "../services/rnpmSearchService.ts";
@@ -78,6 +79,8 @@ function buildApp(): Hono {
 }
 
 beforeEach(() => {
+  // Latch-ul de restore e state global pe modul — fara reset scurge intre teste.
+  __resetRnpmActivityForTests();
   storageGuard.mockReset();
   captchaGuard.mockReset().mockResolvedValue({
     ok: true,
@@ -163,7 +166,7 @@ describe("limita RNPM ruleaza inainte de captcha", () => {
     });
   });
 
-  it("paginarea cu gcode existent este exceptata", async () => {
+  it("paginarea cu gcode existent trece prin aceeasi verificare de limita (F12-F3)", async () => {
     captchaGuard.mockResolvedValueOnce({
       ok: true,
       source: "body",
@@ -178,7 +181,97 @@ describe("limita RNPM ruleaza inainte de captcha", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(storageGuard).not.toHaveBeenCalled();
+    // Inainte de fix: not.toHaveBeenCalled() — continuarea era scutita de limita
+    // pe baza unui `gcode` nevid din body, fara nicio validare a lui.
+    expect(storageGuard).toHaveBeenCalledWith("u1");
     expect(captchaGuard).toHaveBeenCalledOnce();
+  });
+
+  it("F12-F3: un gcode arbitrar din body NU scuteste de limita (429, nu 200)", async () => {
+    storageGuard.mockRejectedValueOnce(new RnpmStorageLimitError(600 * 1024 * 1024, 500 * 1024 * 1024));
+
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "ipoteci",
+        params: {},
+        captchaKey: "x".repeat(32),
+        gcode: "orice-string-nevid",
+      }),
+    });
+
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: { code: "QUOTA_EXCEEDED", message: expect.stringContaining("Sterge avize") },
+    });
+    expect(storageGuard).toHaveBeenCalledWith("u1");
+    expect(captchaGuard).not.toHaveBeenCalled();
+  });
+});
+
+// F12-F5 (2026-07-26): mesajul erorii interne nu mai pleaca verbatim spre client.
+// Pe calea captcha continea cheia tenantului (vezi captchaSolver.redactCaptchaSecrets);
+// redactarea la sursa e primul strat, textul generic de aici e al doilea.
+describe("F12-F5 — raspunsul 500 nu expune textul erorii interne", () => {
+  it("o eroare din executeSearch intoarce mesaj generic cu trimitere la requestId", async () => {
+    // Guard-ul mock-uit implicit intoarce body gol -> ruta ar da 400 la validarea
+    // de tip inainte sa ajunga la serviciu. Aici ne trebuie calea completa.
+    captchaGuard.mockResolvedValueOnce({
+      ok: true,
+      source: "body",
+      body: { type: "ipoteci", params: {}, captchaKey: "x".repeat(32) },
+      captchaKey: "x".repeat(32),
+    });
+    searchService.mockRejectedValueOnce(
+      new Error("Eroare 2Captcha: request to https://2captcha.com/in.php?key=SECRET failed")
+    );
+
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci", params: {}, captchaKey: "x".repeat(32) }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string; message: string }; requestId: string };
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.message).not.toContain("SECRET");
+    expect(body.error.message).not.toContain("2captcha.com");
+    expect(body.error.message).toContain("requestId");
+    expect(body.requestId).toEqual(expect.any(String));
+  });
+});
+
+// CodeRabbit 1.2 (2026-07-26): withRnpmCaptchaGuards inregistreaza consumul de
+// captcha (recordCaptchaUsage / reserveTokenCaptcha) INAINTE ca ruta sa verifice
+// restore-ul, deci o cerere respinsa pe 409 taxa cota degeaba. Gardul de restore
+// trebuie sa fie primul dupa rezolutia de configuratie captcha — inclusiv inaintea
+// verificarii de stocare, care intra in withMaintenanceRead si asteapta writer
+// lock-ul restore-ului (cand ii vine randul, latch-ul e deja sters).
+describe("CR-1.2 — restore in curs nu consuma captcha", () => {
+  it.each([
+    ["/search", { type: "ipoteci", params: {}, captchaKey: "x".repeat(32) }],
+    ["/bulk", { items: [], captchaKey: "x".repeat(32) }],
+    ["/search-split", { type: "ipoteci", baseParams: {}, subTypeLabels: [], captchaKey: "x".repeat(32) }],
+  ])("POST %s intoarce 409 inainte de guard-ul de captcha", async (route, body) => {
+    beginRnpmRestore("u1");
+
+    const res = await buildApp().request(`/api/v1/rnpm${route}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { error: { code: string } }).error.code).toBe("RESTORE_IN_PROGRESS");
+    // Asertiunea care conteaza: guard-ul care inregistreaza consumul de captcha
+    // nu a apucat sa ruleze.
+    expect(captchaGuard).not.toHaveBeenCalled();
+    // Si dovada ca gardul sta INAINTE de verificarea de stocare. Testul foloseste
+    // un storageGuard mock-uit, deci nu poate reproduce blocarea pe reader lock —
+    // asertiunea pe ORDINE e singurul semnal disponibil aici.
+    expect(storageGuard).not.toHaveBeenCalled();
   });
 });

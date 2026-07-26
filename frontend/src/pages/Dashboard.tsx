@@ -240,9 +240,9 @@ export default function Dashboard({ dosareState, rnpmHistory, history, onHistory
                 <span className="text-xs text-muted-foreground">AI Enabled</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude Opus
-                4.8 & Sonnet 5 / Gemini 3.x / GPT-5.6), administrare utilizatori cu cote si granturi pe pool AI unic,
-                audit exportabil —{" "}
+                Modul RNPM complet (avize, creditori, debitori, bunuri, istoric), analiza AI multi-agent (Claude Opus 5
+                & Sonnet 5 / Gemini 3.x / GPT-5.6), administrare utilizatori cu cote si granturi pe pool AI unic, audit
+                exportabil —{" "}
                 {authMode === "web"
                   ? "cheile API sunt stocate criptat pe server, per utilizator"
                   : "cheile API pastrate in OS keystore, backend legat pe loopback"}{" "}

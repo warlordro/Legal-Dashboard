@@ -20,7 +20,7 @@ import { patUsageAudit } from "./middleware/patUsageAudit.ts";
 import { apiTokensRouter } from "./routes/apiTokens.ts";
 import { openapiRouter } from "./routes/openapi.ts";
 import { getAuthMode, validateAuthConfig } from "./auth/config.ts";
-import { getUserById, updateUserRole } from "./db/userRepository.ts";
+import { getUserById, listAllUserIdentities, updateUserRole } from "./db/userRepository.ts";
 import { requestIdContext } from "./middleware/requestId.ts";
 import { monitoringRouter, setMonitoringScheduler, getMonitoringSchedulerStatus } from "./routes/monitoring.ts";
 import { nameListsRouter } from "./routes/nameLists.ts";
@@ -49,7 +49,7 @@ import { RETENTION_DAYS, runRetentionPurge } from "./services/retentionPurge.ts"
 import { cautareDosare } from "./soap.ts";
 import { mountStaticFrontend } from "./middleware/static-frontend.ts";
 import { getDb, getDbPath, markShuttingDown, preMigrationBackup } from "./db/schema.ts";
-import { markRnpmShuttingDown } from "./db/rnpmDb.ts";
+import { markRnpmShuttingDown, prewarmRnpmMigrations } from "./db/rnpmDb.ts";
 import { isRnpmSplitDone, rnpmSplitCompletedAt, runRnpmSplitIfNeeded } from "./db/rnpmSplitter.ts";
 import { getAuditEvents, recordAudit } from "./db/auditRepository.ts";
 import { acquireInstanceLock, flushPendingReclaimAudit, releaseInstanceLock } from "./db/instanceLock.ts";
@@ -617,6 +617,12 @@ try {
   if (getAuthMode() === "desktop") {
     getAvize({ ownerId: "local", pageSize: 1 });
     getAvizStats("local");
+  } else {
+    // CodeRabbit 1.3: in web mode nu putem prewarm-ui prin "local" (ar provisiona un
+    // fisier orfan), dar avem useri reali. Rulam AICI pre-migrarea bazelor lor RNPM —
+    // sincrona si blocanta — ca sa nu o plateasca prima cerere a fiecarui user, cand
+    // ar ingheta tot serverul. Atinge doar fisierele existente.
+    prewarmRnpmMigrations(listAllUserIdentities().map((u) => u.id));
   }
   flushPendingReclaimAudit();
   // B1 (corectie Codex): auditul splitului trebuie sa fie DURABIL. Markerul

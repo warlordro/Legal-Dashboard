@@ -504,7 +504,7 @@ export function ManualChapters() {
               items={[
                 "Claude Haiku 4.5 — Rapid (cea mai rapida analiza)",
                 "Claude Sonnet 5 — Echilibrat (balans viteza/calitate)",
-                "Claude Opus 4.8 — Premium (cel mai detaliat)",
+                "Claude Opus 5 — Premium (cel mai detaliat)",
               ]}
             />
             <p>
@@ -563,7 +563,7 @@ export function ManualChapters() {
               'Selecteaza 2 modele "Analist" — acestea analizeaza dosarul independent si in paralel',
               'Selecteaza 1 model "Judecator" — acesta primeste ambele analize si le reconciliaza',
               "Nu se poate selecta acelasi model de doua ori",
-              "Modelele judecator sunt restrictionate la modele premium: Claude Opus 4.8, GPT-5.6 Sol sau Gemini 3.1 Pro",
+              "Modelele judecator sunt restrictionate la modele premium: Claude Opus 5, GPT-5.6 Sol sau Gemini 3.1 Pro",
             ]}
           />
         </SubSection>

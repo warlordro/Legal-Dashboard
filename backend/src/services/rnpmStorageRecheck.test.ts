@@ -93,10 +93,10 @@ describe("recheck limita RNPM in servicii", () => {
     expect(storageLimitCheck).toHaveBeenCalledOnce();
   });
 
-  it("continuarea cu existingGcode termina paginile fara recheck", async () => {
+  it("continuarea cu existingGcode e supusa aceluiasi recheck de limita (F12-F3)", async () => {
     const client = new PagingClient(2);
     const storageLimitCheck = vi.fn(async () => {
-      throw new Error("nu trebuie apelat");
+      throw new Error("storage full");
     });
 
     await expect(
@@ -113,9 +113,11 @@ describe("recheck limita RNPM in servicii", () => {
         },
         client
       )
-    ).resolves.toMatchObject({ documents: expect.any(Array) });
-    expect(client.calls).toBe(2);
-    expect(storageLimitCheck).not.toHaveBeenCalled();
+    ).rejects.toThrow("storage full");
+    // Prima pagina se descarca (gcode-ul existent o autorizeaza), a doua e blocata
+    // de recheck — inainte de fix continuarea trecea cu recheck-ul complet sarit.
+    expect(client.calls).toBe(1);
+    expect(storageLimitCheck).toHaveBeenCalledOnce();
   });
 
   it("bulk recheck-uieste intre iteme si emite eroare coerenta pe itemul blocat", async () => {

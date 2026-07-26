@@ -33,6 +33,13 @@ export const ErrorCodes = {
   MISSING_API_KEY: "MISSING_API_KEY",
   UNKNOWN_MODEL: "UNKNOWN_MODEL",
   AI_ANALYSIS_FAILED: "AI_ANALYSIS_FAILED",
+  // v2.43.3: model care intoarce continut gol. Pe Claude 5 thinking-ul consuma din
+  // acelasi buget ca textul, deci un raspuns gol e semnal de trunchiere sau refuz,
+  // nu un rezultat valid de returnat ca 200.
+  AI_EMPTY_RESPONSE: "AI_EMPTY_RESPONSE",
+  // v2.43.3: analiza s-a oprit inainte de final (buget de tokeni epuizat). Textul
+  // partial NU se livreaza: pentru un cititor non-specialist arata complet.
+  AI_TRUNCATED: "AI_TRUNCATED",
   WEB_MODE_NOT_IMPLEMENTED: "WEB_MODE_NOT_IMPLEMENTED",
   QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
   CAPTCHA_NOT_CONFIGURED: "CAPTCHA_NOT_CONFIGURED",

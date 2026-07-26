@@ -553,6 +553,42 @@ describe("deleteRnpmBackups", () => {
     expect(fs.existsSync(path.join(getRnpmBackupDir("u1"), `${n1}-wal`))).toBe(false);
     expect((await listRnpmBackups("u2")).length).toBe(1);
   });
+
+  it("goleste si directorul jail, nu doar fisierele (finding review)", async () => {
+    // Fara asta, fiecare user sters lasa in urma un director gol, pentru totdeauna.
+    seedSearch("u1", "a");
+    await createRnpmManualBackup("u1");
+    const jail = getRnpmBackupDir("u1");
+    expect(fs.existsSync(jail)).toBe(true);
+
+    await deleteRnpmBackups("u1");
+
+    expect(fs.existsSync(jail)).toBe(false);
+  });
+
+  it("sterge si jail-urile ramase goale de dinaintea fixului", async () => {
+    // Gardul pe `deleted > 0` ar fi lasat pe disc, permanent, exact directoarele golite
+    // inainte de acest fix: ele nu mai primesc niciodata o stergere cu deleted > 0.
+    seedSearch("u1", "a");
+    const jail = getRnpmBackupDir("u1");
+    fs.mkdirSync(jail, { recursive: true });
+
+    expect(await deleteRnpmBackups("u1")).toBe(0);
+
+    expect(fs.existsSync(jail)).toBe(false);
+  });
+
+  it("pastreaza jail-ul cand mai contine fisiere nelistate", async () => {
+    seedSearch("u1", "a");
+    await createRnpmManualBackup("u1");
+    const jail = getRnpmBackupDir("u1");
+    const strain = path.join(jail, "altceva.txt");
+    fs.writeFileSync(strain, "x");
+
+    await deleteRnpmBackups("u1");
+
+    expect(fs.existsSync(strain)).toBe(true);
+  });
 });
 
 describe("runDailyBackup — multi-target", () => {

@@ -17,6 +17,11 @@ import { cn, formatBytes } from "@/lib/utils";
 export default function AdminRnpmStorage({ embedded = false }: { embedded?: boolean } = {}) {
   const confirm = useConfirm();
   const [rows, setRows] = useState<AdminRnpmUsageRow[] | null>(null);
+  // CodeRabbit 1.6: ruta e paginata. Fara controale aici, pagina ar afisa tacut doar
+  // primii `pageSize` useri — o regresie mai grava decat problema de scalare.
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const PAGE_SIZE = 20;
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMsg, setSuccessMsg] = useState<string | null>(null);
@@ -48,16 +53,25 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
     setLoading(true);
     setError(null);
     try {
-      const result = await adminListRnpmUsage(ac.signal);
+      const result = await adminListRnpmUsage({ page, pageSize: PAGE_SIZE, includeInactive: showInactive }, ac.signal);
       if (ac.signal.aborted) return;
-      setRows(result);
+      // Clamp: daca totalul a scazut (stergeri, schimbare de filtru) pagina curenta
+      // poate fi in afara intervalului si ar afisa o lista goala fara cale de intoarcere
+      // — blocul de paginare nu se randeaza cand total <= PAGE_SIZE.
+      const lastPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+      if (page > lastPage) {
+        setPage(lastPage);
+        return;
+      }
+      setRows(result.rows);
+      setTotal(result.total);
     } catch (e) {
       if (ac.signal.aborted) return;
       setError(e instanceof Error ? e.message : "Eroare la incarcarea utilizarii RNPM.");
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-  }, []);
+  }, [page, showInactive]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -137,9 +151,9 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
     }
   };
 
-  const hasFootprint = (row: AdminRnpmUsageRow) => row.dbSizeBytes !== null || row.backupCount > 0;
-  const visibleRows = rows?.filter((row) => showInactive || row.status === "active" || hasFootprint(row)) ?? null;
-  const hiddenCount = rows && visibleRows ? rows.length - visibleRows.length : 0;
+  // Filtrul a trecut pe server (vezi adminRnpmApi): randurile primite sunt deja cele
+  // care trebuie afisate, iar `total` corespunde exact setului filtrat.
+  const visibleRows = rows;
 
   const body = (
     <Card>
@@ -174,23 +188,27 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
         )}
         {loading && !rows && <div className="text-sm text-muted-foreground">Se incarca lista...</div>}
         {rows && rows.length === 0 && (
-          <div className="text-sm text-muted-foreground">Niciun utilizator inregistrat.</div>
+          // Filtrul de inactivi ruleaza pe server, deci lista goala nu inseamna "nimeni
+          // inregistrat" cand el e activ — inseamna doar ca nimeni nu are date RNPM.
+          <div className="text-sm text-muted-foreground">
+            {showInactive
+              ? "Niciun utilizator inregistrat."
+              : "Niciun utilizator cu date RNPM. Bifeaza mai jos ca sa vezi si conturile fara baza."}
+          </div>
         )}
-        {(hiddenCount > 0 || showInactive) && (
+        {(rows !== null || showInactive) && (
           <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
               checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
+              onChange={(e) => {
+                setPage(1);
+                setShowInactive(e.target.checked);
+              }}
               className="h-3.5 w-3.5 accent-primary"
             />
-            Arata si userii stersi sau suspendati fara date ({hiddenCount})
+            Arata si userii stersi sau suspendati fara date
           </label>
-        )}
-        {visibleRows && visibleRows.length === 0 && rows && rows.length > 0 && (
-          <div className="text-sm text-muted-foreground">
-            Toti userii ramasi sunt stersi sau suspendati, fara date RNPM.
-          </div>
         )}
         {visibleRows && visibleRows.length > 0 && (
           <div className="overflow-x-auto">
@@ -275,6 +293,35 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
                 ))}
               </tbody>
             </table>
+          </div>
+        )}
+        {total > PAGE_SIZE && (
+          <div className="flex items-center justify-between border-t border-border pt-3 text-xs text-muted-foreground">
+            <span>
+              {(page - 1) * PAGE_SIZE + 1}-{Math.min(page * PAGE_SIZE, total)} din {total} utilizatori
+            </span>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={page <= 1 || loading}
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+              >
+                Inapoi
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-7"
+                disabled={page * PAGE_SIZE >= total || loading}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Inainte
+              </Button>
+            </div>
           </div>
         )}
       </CardContent>

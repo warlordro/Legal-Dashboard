@@ -9,7 +9,13 @@ import { createRoot, type Root } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ConfirmProvider } from "@/components/ui/confirm-dialog";
-import { adminCreateBackup, adminDeleteBackups, adminListBackups, adminRestoreBackup } from "@/lib/adminBackupsApi";
+import {
+  adminCreateBackup,
+  adminDeleteBackup,
+  adminDeleteBackups,
+  adminListBackups,
+  adminRestoreBackup,
+} from "@/lib/adminBackupsApi";
 import AdminBackups from "./Backups";
 
 vi.mock("@/lib/adminBackupsApi", () => ({
@@ -17,12 +23,14 @@ vi.mock("@/lib/adminBackupsApi", () => ({
   adminCreateBackup: vi.fn(),
   adminRestoreBackup: vi.fn(),
   adminDeleteBackups: vi.fn(),
+  adminDeleteBackup: vi.fn(),
 }));
 
 const listMock = vi.mocked(adminListBackups);
 const createMock = vi.mocked(adminCreateBackup);
 const restoreMock = vi.mocked(adminRestoreBackup);
 const deleteMock = vi.mocked(adminDeleteBackups);
+const deleteOneMock = vi.mocked(adminDeleteBackup);
 
 let host: HTMLDivElement;
 let root: Root;
@@ -50,6 +58,7 @@ beforeEach(() => {
   createMock.mockReset();
   restoreMock.mockReset();
   deleteMock.mockReset();
+  deleteOneMock.mockReset();
   listMock.mockResolvedValue([
     { name: "legal-dashboard.2026-07-10.db", sizeBytes: 1024 * 1024, mtime: Date.now() },
     { name: "legal-dashboard.manual-2026-07-09T10-00-00.db", sizeBytes: 2048, mtime: Date.now() - 1000 },
@@ -243,5 +252,106 @@ describe("AdminBackups (embedded)", () => {
     });
     expect(deleteMock).toHaveBeenCalledTimes(1);
     expect(host.textContent).toContain("2 backup-uri sterse");
+  });
+
+  it("stergerea unui singur backup cere confirmare destructiva si apeleaza API-ul cu numele randului", async () => {
+    deleteOneMock.mockResolvedValue(undefined);
+    await render(<AdminBackups embedded />);
+    await act(async () => {
+      clickButton(/^Sterge$/);
+      await Promise.resolve();
+    });
+    const dialog = confirmDialog();
+    expect(dialog.textContent).toContain("Sterge backup");
+    expect(dialog.textContent).toContain("legal-dashboard.2026-07-10.db");
+    const confirmBtn = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      /^Sterge$/.test(b.textContent ?? "")
+    );
+    if (!confirmBtn) throw new Error("Butonul de confirmare lipsa");
+    await act(async () => {
+      confirmBtn.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(deleteOneMock).toHaveBeenCalledWith("legal-dashboard.2026-07-10.db");
+    expect(deleteOneMock).toHaveBeenCalledTimes(1);
+    expect(host.textContent).toContain("Backup sters: legal-dashboard.2026-07-10.db");
+  });
+
+  it("anularea dialogului de stergere nu apeleaza API-ul si lasa garda libera", async () => {
+    await render(<AdminBackups embedded />);
+    await act(async () => {
+      clickButton(/^Sterge$/);
+      await Promise.resolve();
+    });
+    const cancel = Array.from(confirmDialog().querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      /anuleaza/i.test(b.textContent ?? "")
+    );
+    if (!cancel) throw new Error("Butonul de anulare lipsa");
+    await act(async () => {
+      cancel.click();
+      await Promise.resolve();
+    });
+    expect(deleteOneMock).not.toHaveBeenCalled();
+    await act(async () => {
+      clickButton(/^Sterge$/);
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  });
+
+  it("CodeRabbit 1.5: doua click-uri in acelasi tick creeaza UN singur backup", async () => {
+    // Garda pe state React (`if (busy) return`) nu prindea al doilea click din acelasi
+    // tick: setState e asincron, deci ambele apeluri vedeau busy === null. Ref-ul
+    // sincron se inchide imediat.
+    let resolveCreate: (v: { name: string }) => void = () => undefined;
+    createMock.mockReturnValue(
+      new Promise<{ name: string }>((r) => {
+        resolveCreate = r;
+      })
+    );
+
+    await render(<AdminBackups embedded />);
+
+    await act(async () => {
+      clickButton(/Creeaza backup acum/);
+      clickButton(/Creeaza backup acum/);
+      await Promise.resolve();
+    });
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveCreate({ name: "legal-dashboard.manual-nou.db" });
+      await Promise.resolve();
+    });
+  });
+
+  it("CodeRabbit 1.5: garda se elibereaza dupa ce refuzi dialogul de confirmare", async () => {
+    // Reset-ul sta in finally-ul EXTERIOR tocmai pentru asta: iesirea pe respingerea
+    // dialogului trebuie sa lase butonul functional, nu sa il blocheze definitiv.
+    await render(<AdminBackups embedded />);
+
+    await act(async () => {
+      clickButton(/Sterge toate/);
+      await Promise.resolve();
+    });
+    const dialog = confirmDialog();
+    const cancel = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      /anuleaza/i.test(b.textContent ?? "")
+    );
+    await act(async () => {
+      cancel?.click();
+      await Promise.resolve();
+    });
+    expect(deleteMock).not.toHaveBeenCalled();
+
+    // A doua incercare trebuie sa redeschida dialogul — daca ref-ul ar fi ramas true,
+    // handler-ul ar iesi imediat si nu s-ar intampla nimic.
+    await act(async () => {
+      clickButton(/Sterge toate/);
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
   });
 });

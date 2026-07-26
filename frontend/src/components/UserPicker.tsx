@@ -96,8 +96,9 @@ export function UserPicker({ value, onSelect, disabled, ariaLabel }: UserPickerP
         {error && <p className="text-xs text-red-600">{error}</p>}
         {!loading && total > users.length && (
           <p className="text-xs text-muted-foreground">
-            Se afiseaza {users.length} din {total} utilizatori activi — lista e trunchiata la {MAX_USERS}, unii
-            utilizatori pot lipsi din dropdown.
+            Se afiseaza {users.length} din {total} utilizatori activi
+            {users.length >= MAX_USERS ? ` — lista e trunchiata la ${MAX_USERS}` : ""}; unii utilizatori pot lipsi din
+            dropdown.
           </p>
         )}
       </CardContent>

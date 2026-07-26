@@ -1176,7 +1176,26 @@ function autoCompactFailureReason(error: unknown): string {
       return "maintenance_shutdown";
     case "ENOSPC":
       return "enospc";
+    // CodeRabbit 1.8: masuratoarea a intrat in `try`, deci ajung aici si erorile de
+    // I/O care inainte ieseau din functie. Clasa proprie — un disc cu permisiuni
+    // gresite sau o baza corupta nu trebuie sa arate identic cu un refuz legitim de
+    // concurenta (restore in curs), altfel triajul operational devine imposibil.
+    case "EACCES":
+    case "EPERM":
+    case "EIO":
+    case "EBUSY":
+    case "SQLITE_NOTADB":
+      return "io_error";
     default:
+      // better-sqlite3 activeaza extended result codes, deci arunca SQLITE_IOERR_WRITE,
+      // SQLITE_CANTOPEN_ISDIR, SQLITE_BUSY_SNAPSHOT etc. — variantele neextinse practic
+      // nu apar, deci un match exact pe ele nu prinde nimic (finding review adversarial).
+      // LIMITARE cunoscuta: pe calea de compactare prin worker, snapshotRunner
+      // re-creeaza eroarea ca `new Error(msg.error)`, deci `.code` nu traverseaza
+      // granita workerului si acele esecuri raman clasificate "error".
+      if (typeof code === "string" && /^SQLITE_(IOERR|CANTOPEN|READONLY|FULL|BUSY|CORRUPT|NOTADB)/.test(code)) {
+        return "io_error";
+      }
       return "error";
   }
 }
@@ -1189,15 +1208,23 @@ export async function maybeAutoCompactRnpm(
     return { attempted: false, compacted: false, freedBytes: 0 };
   }
 
-  const minFreeBytes = readAutoCompactMinFreeBytes();
-  const measurement = await measureRnpmFreelistIfPresent(ownerId);
-  if (measurement === null || !shouldAutoCompactRnpm(measurement.freelistBytes, measurement.totalBytes, minFreeBytes)) {
-    return { attempted: false, compacted: false, freedBytes: 0 };
-  }
-
-  const compact = deps.compact ?? compactRnpmIfStillNeeded;
+  // CodeRabbit 1.8: masuratoarea sta ACUM in `try`. Inainte era deasupra lui, deci un
+  // throw din ea (measureRnpmFreelistIfPresent rethrow-uieste erorile de stat non-ENOENT
+  // si apeleaza getRnpmDb, care arunca RnpmRestoreInProgressError) iesea din functie
+  // fara sa scrie evenimentul structurat de skip — exact cazul pentru care a fost scris
+  // clasificatorul autoCompactFailureReason.
   const startedAt = Date.now();
   try {
+    const minFreeBytes = readAutoCompactMinFreeBytes();
+    const measurement = await measureRnpmFreelistIfPresent(ownerId);
+    if (
+      measurement === null ||
+      !shouldAutoCompactRnpm(measurement.freelistBytes, measurement.totalBytes, minFreeBytes)
+    ) {
+      return { attempted: false, compacted: false, freedBytes: 0 };
+    }
+
+    const compact = deps.compact ?? compactRnpmIfStillNeeded;
     return await compact(ownerId, minFreeBytes);
   } catch (error) {
     const reason = autoCompactFailureReason(error);
@@ -1273,7 +1300,12 @@ export async function deleteAllRnpmAndCompact(ownerId: string): Promise<{ delete
   });
 }
 
-async function deleteAllBackupsInDir(dir: string, prefix: string, logAction: string): Promise<number> {
+async function deleteAllBackupsInDir(
+  dir: string,
+  prefix: string,
+  logAction: string,
+  removeDirIfEmpty = false
+): Promise<number> {
   const backups = await listBackups(dir, prefix);
   let deleted = 0;
   for (const f of backups) {
@@ -1289,6 +1321,16 @@ async function deleteAllBackupsInDir(dir: string, prefix: string, logAction: str
     } catch {
       /* best-effort */
     }
+  }
+  // Jail-ul per user e dedicat unui singur owner: dupa stergerea tuturor backup-urilor
+  // ramanea un director gol per user sters, pentru totdeauna. rmdir esueaza (ENOTEMPTY)
+  // daca a mai ramas ceva inauntru, deci nu poate distruge fisiere nelistate.
+  // Neconditionat de `deleted`: jail-urile golite inainte de acest fix nu vor mai primi
+  // niciodata o stergere cu deleted > 0, deci ar fi ramas pe disc pentru totdeauna.
+  if (removeDirIfEmpty) {
+    await fsPromises.rmdir(dir).catch(() => {
+      /* best-effort: directorul nu e gol sau nu exista */
+    });
   }
   logBackupEvent({
     action: logAction,
@@ -1308,8 +1350,42 @@ export async function deleteAllBackups(): Promise<number> {
 
 export async function deleteRnpmBackups(ownerId: string): Promise<number> {
   return withMaintenanceWrite(() =>
-    deleteAllBackupsInDir(getRnpmBackupDir(ownerId), RNPM_PREFIX, "delete_rnpm_backups")
+    deleteAllBackupsInDir(getRnpmBackupDir(ownerId), RNPM_PREFIX, "delete_rnpm_backups", true)
   );
+}
+
+// Stergere individuala (Setari > Backup, per rand). Acelasi jail ca restore-ul
+// si acelasi write lock ca delete-all: un delete lansat in timpul unui restore
+// in zbor ar putea sterge sursa restore-ului sau snapshotul pre-restore.
+// Lock-ul e in-process (RWLock) — suficient: aplicatia ruleaza un singur proces
+// (single-instance lock pe desktop, un singur node in web mode), premisa intregii
+// mentenante din acest fisier. Validarea sta INAINTE de lock: e pura, iar un
+// nume-gunoi nu are de ce sa puna un writer in coada (writer-preference ar
+// intarzia reader-i noi degeaba).
+export async function deleteBackupByName(name: string): Promise<void> {
+  const dir = getBackupDir();
+  assertNameInJail(dir, name, RESTORE_NAME_RE);
+  return withMaintenanceWrite(async () => {
+    const target = path.join(dir, name);
+    try {
+      await fsPromises.unlink(target);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+        throw new BackupValidationError("Backup inexistent");
+      }
+      throw e;
+    }
+    // Bundle-aware: sidecar-urile legacy pleaca odata cu backup-ul, BEST-EFFORT
+    // (exact semantica din deleteAllBackupsInDir). Un sidecar orfan nu se poate
+    // atasa altui backup: numele contin timestamp + uniquifier, deci nu se
+    // refolosesc.
+    for (const suffix of ["-wal", "-shm"] as const) {
+      await fsPromises.unlink(target + suffix).catch(() => {
+        /* best-effort */
+      });
+    }
+    logBackupEvent({ action: "delete_backup", file: name });
+  });
 }
 
 // Prune SINCRON pe pool-ul preSplit al monolitului — apelat de splitter la

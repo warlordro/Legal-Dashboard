@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { api, apiFetch, extractErrorMessage } from "./api";
+import { AiMultiPartialError, api, apiFetch, extractErrorMessage } from "./api";
 
 describe("extractErrorMessage", () => {
   it("citeste string error legacy", () => {
@@ -244,5 +244,52 @@ describe("loadMoreSSE (via api.dosare.loadMore)", () => {
     expect(onBatch).toHaveBeenCalledTimes(2);
     expect(onBatch).toHaveBeenNthCalledWith(1, [{ numar: "1" }]);
     expect(onBatch).toHaveBeenNthCalledWith(2, [{ numar: "2" }, { numar: "3" }]);
+  });
+});
+
+// v2.43.3 (finding review): cand judecatorul cade dupa ce analistii au livrat, backendul
+// trimite analizele pe evenimentul `error`. Clientul le arunca (throw new Error), deci
+// userul platea doi analisti si nu vedea nimic.
+describe("api.ai.analyzeMulti — degradare cu analize partiale", () => {
+  let fetchSpy: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    fetchSpy = vi.fn();
+    globalThis.fetch = fetchSpy as unknown as typeof fetch;
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  const analyses = {
+    analyst1: { model: "claude-sonnet", text: "A1" },
+    analyst2: { model: "gpt-5.6-terra", text: "A2" },
+  };
+
+  it("propaga analizele pe AiMultiPartialError cand error-ul aduce result", async () => {
+    fetchSpy.mockResolvedValue(
+      makeSseResponse([
+        `event: error\ndata: ${JSON.stringify({ error: "Buget epuizat", code: "AI_TRUNCATED", result: { analyses } })}\n\n`,
+      ])
+    );
+
+    const err = await api.ai.analyzeMulti({} as any, ["claude-sonnet", "gpt-5.6-terra"], "claude-opus").catch((e) => e);
+
+    expect(err).toBeInstanceOf(AiMultiPartialError);
+    expect(err.message).toBe("Buget epuizat");
+    expect((err as AiMultiPartialError).analyses).toEqual(analyses);
+  });
+
+  it("ramane Error simplu cand error-ul nu aduce analize", async () => {
+    fetchSpy.mockResolvedValue(
+      makeSseResponse([`event: error\ndata: ${JSON.stringify({ error: "Lipseste cheia API" })}\n\n`])
+    );
+
+    const err = await api.ai.analyzeMulti({} as any, ["claude-sonnet", "gpt-5.6-terra"], "claude-opus").catch((e) => e);
+
+    expect(err).toBeInstanceOf(Error);
+    expect(err).not.toBeInstanceOf(AiMultiPartialError);
+    expect(err.message).toBe("Lipseste cheia API");
   });
 });

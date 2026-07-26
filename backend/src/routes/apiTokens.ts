@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { z } from "zod";
 import { getOwnerId } from "../middleware/owner.ts";
+import { requireRole } from "../middleware/requireRole.ts";
 import { ErrorCodes, fail, ok } from "../util/envelope.ts";
 import {
   createApiToken,
@@ -25,6 +26,14 @@ apiTokensRouter.use("*", async (c, next) => {
   }
   await next();
 });
+
+// F12-F8 (2026-07-26): pana acum "doar adminii emit PAT-uri" traia EXCLUSIV in UI
+// (ApiKeyDialog.tsx, Settings.tsx). Un apel direct cu cookie de sesiune de user
+// normal crea un token valid. Un gard doar in frontend nu e gard. Routerul e montat
+// numai in web mode (index.ts), deci zero suprafata desktop. Ordinea conteaza:
+// gardul de rol sta DUPA gate-ul de PAT, ca un PAT sa primeasca in continuare
+// PAT_CANNOT_MANAGE_TOKENS (anti-escaladare), nu 401/403 de rol.
+apiTokensRouter.use("*", requireRole("admin"));
 
 const SCOPES = ["dosare", "iccj", "rnpm"] as const;
 // .strict() respinge campuri necunoscute; name trim + charset afisabil (fara control chars).

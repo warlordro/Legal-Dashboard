@@ -22,9 +22,11 @@ interface ApiKeys {
 }
 
 interface MultiResult {
-  analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
-  judge: { model: string; text: string };
-  final: string;
+  analyses: { analyst1?: { model: string; text: string }; analyst2?: { model: string; text: string } };
+  // Optionale: pe degradare (judge gol sau trunchiat) exista doar analizele individuale.
+  judge?: { model: string; text: string };
+  final?: string;
+  degradedMessage?: string;
 }
 
 export interface DosareAiAnalysisPanelProps {
@@ -251,7 +253,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
             <span className="text-[10px] font-normal text-muted-foreground">(multi-agent)</span>
           </h4>
           <div className="flex items-center gap-1.5">
-            {multi.result[dosar.numar] && (
+            {multi.result[dosar.numar]?.final && (
               <button
                 type="button"
                 className="p-1 rounded hover:bg-blue-100 dark:hover:bg-blue-900/30 text-blue-500 hover:text-blue-700 dark:hover:text-blue-300 transition-colors disabled:opacity-50"
@@ -262,15 +264,17 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
                   setExportingPdf("advanced");
                   try {
                     const r = multi.result[dosar.numar];
+                    if (!r?.final) return;
+                    const judgeModel = r.judge?.model ?? multi.judge;
                     await exportAnalysisPDF(
                       dosar.numar,
                       dosar.institutie,
                       dosar.obiect,
                       r.final,
                       "advanced",
-                      ai.availableJudgeModels.find((j) => j.key === r.judge.model)?.label ||
-                        JUDGE_MODELS_LIST.find((j) => j.key === r.judge.model)?.label ||
-                        r.judge.model
+                      ai.availableJudgeModels.find((j) => j.key === judgeModel)?.label ||
+                        JUDGE_MODELS_LIST.find((j) => j.key === judgeModel)?.label ||
+                        judgeModel
                     );
                   } catch (err) {
                     console.error("[ai] export advanced pdf failed:", err);
@@ -445,67 +449,83 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
             {multi.error && multi.loading === null && <p className="text-sm text-destructive">{multi.error}</p>}
             {multi.result[dosar.numar] && (
               <div className="space-y-3">
-                {/* Final judge analysis */}
-                <div className={`rounded-lg border ${mc.border} ${mc.bg}`}>
-                  <div className="p-4 pb-2">
-                    <h4 className={`flex items-center gap-1.5 text-sm font-semibold ${mc.text}`}>
-                      <Bot className="h-3.5 w-3.5" /> Analiză AI Avansată (Judecător:{" "}
-                      {ai.availableJudgeModels.find((j) => j.key === multi.result[dosar.numar].judge.model)?.label ||
-                        JUDGE_MODELS_LIST.find((j) => j.key === multi.result[dosar.numar].judge.model)?.label ||
-                        multi.result[dosar.numar].judge.model}
-                      )
-                    </h4>
+                {/* Explicatia degradarii sta langa rezultatul ei, nu in banner-ul global. */}
+                {multi.result[dosar.numar].degradedMessage && (
+                  <p className="text-sm text-amber-700 dark:text-amber-400">
+                    {multi.result[dosar.numar].degradedMessage}
+                  </p>
+                )}
+                {/* Final judge analysis — lipseste pe degradare (AiMultiPartialError) */}
+                {multi.result[dosar.numar].final && (
+                  <div className={`rounded-lg border ${mc.border} ${mc.bg}`}>
+                    <div className="p-4 pb-2">
+                      <h4 className={`flex items-center gap-1.5 text-sm font-semibold ${mc.text}`}>
+                        <Bot className="h-3.5 w-3.5" /> Analiză AI Avansată (Judecător:{" "}
+                        {ai.availableJudgeModels.find((j) => j.key === multi.result[dosar.numar].judge?.model)?.label ||
+                          JUDGE_MODELS_LIST.find((j) => j.key === multi.result[dosar.numar].judge?.model)?.label ||
+                          multi.result[dosar.numar].judge?.model}
+                        )
+                      </h4>
+                    </div>
+                    <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground dark:prose-invert px-4 pb-4 [&_strong]:font-semibold [&_strong]:text-foreground [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-1.5 [&_ul]:my-1 [&_li]:my-0.5">
+                      {(multi.result[dosar.numar].final ?? "").split("\n").map((line, li) => {
+                        if (line.startsWith("## ")) return <h2 key={li}>{line.slice(3)}</h2>;
+                        if (line.startsWith("### ")) return <h3 key={li}>{line.slice(4)}</h3>;
+                        if (line.startsWith("**") && line.endsWith("**")) return <h3 key={li}>{line.slice(2, -2)}</h3>;
+                        if (line.startsWith("- ") || line.startsWith("* ")) {
+                          const content = line.slice(2);
+                          return (
+                            <div key={li} className="flex gap-2 ml-2">
+                              <span className={mc.bullet}>•</span>
+                              <SanitizedHtml html={formatAiMarkdownLine(content)} />
+                            </div>
+                          );
+                        }
+                        if (line.match(/^\d+\.\s/)) {
+                          const content = line.replace(/^\d+\.\s/, "");
+                          const num = line.match(/^(\d+)\./)?.[1];
+                          return (
+                            <div key={li} className="flex gap-2 ml-2">
+                              <span className={`font-semibold ${mc.num} min-w-[1.2em]`}>{num}.</span>
+                              <SanitizedHtml html={formatAiMarkdownLine(content)} />
+                            </div>
+                          );
+                        }
+                        if (line.trim() === "") return <div key={li} className="h-2" />;
+                        return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
+                      })}
+                    </div>
+                    <p className="mt-2 px-4 pb-2 text-sm italic text-muted-foreground">{AI_DISCLAIMER}</p>
                   </div>
-                  <div className="prose prose-sm max-w-none text-sm leading-relaxed text-foreground dark:prose-invert px-4 pb-4 [&_strong]:font-semibold [&_strong]:text-foreground [&_h2]:text-sm [&_h2]:font-bold [&_h2]:mt-3 [&_h2]:mb-1 [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:mt-2 [&_h3]:mb-1 [&_p]:my-1.5 [&_ul]:my-1 [&_li]:my-0.5">
-                    {multi.result[dosar.numar].final.split("\n").map((line, li) => {
-                      if (line.startsWith("## ")) return <h2 key={li}>{line.slice(3)}</h2>;
-                      if (line.startsWith("### ")) return <h3 key={li}>{line.slice(4)}</h3>;
-                      if (line.startsWith("**") && line.endsWith("**")) return <h3 key={li}>{line.slice(2, -2)}</h3>;
-                      if (line.startsWith("- ") || line.startsWith("* ")) {
-                        const content = line.slice(2);
-                        return (
-                          <div key={li} className="flex gap-2 ml-2">
-                            <span className={mc.bullet}>•</span>
-                            <SanitizedHtml html={formatAiMarkdownLine(content)} />
-                          </div>
-                        );
-                      }
-                      if (line.match(/^\d+\.\s/)) {
-                        const content = line.replace(/^\d+\.\s/, "");
-                        const num = line.match(/^(\d+)\./)?.[1];
-                        return (
-                          <div key={li} className="flex gap-2 ml-2">
-                            <span className={`font-semibold ${mc.num} min-w-[1.2em]`}>{num}.</span>
-                            <SanitizedHtml html={formatAiMarkdownLine(content)} />
-                          </div>
-                        );
-                      }
-                      if (line.trim() === "") return <div key={li} className="h-2" />;
-                      return <SanitizedHtml key={li} as="p" html={formatAiMarkdownLine(line)} />;
-                    })}
-                  </div>
-                  <p className="mt-2 px-4 pb-2 text-sm italic text-muted-foreground">{AI_DISCLAIMER}</p>
-                </div>
-                {/* Toggle individual analyses */}
-                <button
-                  type="button"
-                  className={`text-xs ${mc.link} ${mc.linkHover} underline`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    multi.toggleIndividual(dosar.numar);
-                  }}
-                >
-                  {multi.showIndividual.has(dosar.numar)
-                    ? "Ascunde analizele individuale"
-                    : "Vezi analizele individuale"}
-                </button>
-                {multi.showIndividual.has(dosar.numar) && (
+                )}
+                {/* Toggle individual analyses — inutil pe degradare: ele sunt deja vizibile */}
+                {multi.result[dosar.numar].final && (
+                  <button
+                    type="button"
+                    className={`text-xs ${mc.link} ${mc.linkHover} underline`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      multi.toggleIndividual(dosar.numar);
+                    }}
+                  >
+                    {multi.showIndividual.has(dosar.numar)
+                      ? "Ascunde analizele individuale"
+                      : "Vezi analizele individuale"}
+                  </button>
+                )}
+                {(multi.showIndividual.has(dosar.numar) || !multi.result[dosar.numar].final) && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {[multi.result[dosar.numar].analyses.analyst1, multi.result[dosar.numar].analyses.analyst2].map(
-                      (a, idx) => (
-                        <div key={idx} className="rounded-lg border border-muted bg-muted/30 p-3">
+                    {/* Numarul analistului vine din pozitia lui, nu din index-ul de dupa
+                        filtrare: cand analistul 1 lipseste, cel ramas e tot "Analist 2". */}
+                    {[
+                      { nr: 1, a: multi.result[dosar.numar].analyses.analyst1 },
+                      { nr: 2, a: multi.result[dosar.numar].analyses.analyst2 },
+                    ]
+                      .filter((e): e is { nr: number; a: { model: string; text: string } } => e.a !== undefined)
+                      .map(({ nr, a }) => (
+                        <div key={nr} className="rounded-lg border border-muted bg-muted/30 p-3">
                           <h5 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                            Analist {idx + 1}: {AI_MODELS.find((m) => m.key === a.model)?.label || a.model}
+                            Analist {nr}: {AI_MODELS.find((m) => m.key === a.model)?.label || a.model}
                           </h5>
                           <div className="prose prose-sm max-w-none text-xs leading-relaxed text-muted-foreground [&_strong]:font-semibold [&_strong]:text-foreground [&_p]:my-1 max-h-[400px] overflow-y-auto">
                             {a.text.split("\n").map((line, li) => {
@@ -531,8 +551,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
                             })}
                           </div>
                         </div>
-                      )
-                    )}
+                      ))}
                   </div>
                 )}
               </div>

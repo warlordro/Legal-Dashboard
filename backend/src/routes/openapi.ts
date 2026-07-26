@@ -55,6 +55,9 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
       "200": { description: "OK" },
       "401": { description: "invalid_token (lowercase, via AuthenticationError)" },
       "403": { description: "PAT_ROUTE_FORBIDDEN / INSUFFICIENT_SCOPE" },
+      // CodeRabbit 21: rutele chiar raspund 413 la depasirea limitei de body
+      // (bodyLimit global + limitele per-ruta), dar specul nu il documenta.
+      "413": { description: "PAYLOAD_TOO_LARGE (body peste limita rutei)" },
       "429": { description: "rate_limited / QUOTA_EXCEEDED (Retry-After)" },
       "503": { description: "ICCJ_UNAVAILABLE (breaker) / captcha reservation retry" },
     },
@@ -65,7 +68,7 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
   }
   if (prefix === "/api/dosare") {
     op.description =
-      "Raspuns imbogatit: `exactMatch` (boolean, DOAR pe numar dosar) + `parti[].calitateParte`. Forma legacy `{ data, total, exactMatch }`. Optional `failedInstitutii: string[]` = raspuns 200 cu rezultate PARTIALE (instantele listate nu au raspuns, dosarele lor lipsesc; inainte de v2.44 acest caz era eroare 500).";
+      "Raspuns imbogatit: `exactMatch` (boolean, DOAR pe numar dosar) + `parti[].calitateParte`. Forma legacy `{ data, total, exactMatch }`. Optional `failedInstitutii: string[]` = raspuns 200 cu rezultate PARTIALE (instantele listate nu au raspuns, dosarele lor lipsesc; inainte de v2.43.1 acest caz era eroare 500).";
   }
   if (prefix === "/api/rnpm/search") {
     op.description = "Cautare RNPM dupa rol debitor/creditor; paginare prin `startRnpmPage` (body) -> `nextRnpmPage`.";
@@ -74,7 +77,10 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
 }
 
 function tokenManagementPaths(): Record<string, Record<string, unknown>> {
-  const sessionNote = "Session-only (cookie/JWT). Un PAT primeste 403 PAT_CANNOT_MANAGE_TOKENS.";
+  // F12-F8 (2026-07-26): rutele cer si rol admin (requireRole in apiTokens.ts). Fara
+  // mentiunea asta specul ar sugera ca orice sesiune poate emite tokenuri.
+  const sessionNote =
+    "Session-only (cookie/JWT) SI doar rol admin (403 forbidden altfel). Un PAT primeste 403 PAT_CANNOT_MANAGE_TOKENS.";
   // Override-uieste security-ul global bearerAuth (CodeRabbit): rutele de management NU accepta
   // un PAT (Bearer) — se autentifica DOAR prin sesiune (cookie). Altfel specul ar sugera gresit
   // ca un PAT poate crea/revoca tokenuri.

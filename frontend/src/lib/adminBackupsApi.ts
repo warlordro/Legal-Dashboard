@@ -32,3 +32,7 @@ export async function adminDeleteBackups(): Promise<number> {
   const data = await unwrapMonitoring<{ deleted: number }>(await apiFetch(BASE, { method: "DELETE" }));
   return data.deleted;
 }
+
+export async function adminDeleteBackup(name: string): Promise<void> {
+  await unwrapMonitoring<{ name: string }>(await apiFetch(`${BASE}/${encodeURIComponent(name)}`, { method: "DELETE" }));
+}

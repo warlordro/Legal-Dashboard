@@ -368,7 +368,9 @@ async function executeSearchInner(
 
   while (allDocs.length < batchSize && rnpmPage <= pagesTotalClamped) {
     throwIfAborted(signal);
-    if (!existingGcode) await input.storageLimitCheck?.(ownerId);
+    // F12-F3: recheck-ul ruleaza si pe continuari (existingGcode). Vezi rnpm.ts —
+    // scutirea nu verifica daca exista cu adevarat o cautare in curs.
+    await input.storageLimitCheck?.(ownerId);
     let r: RnpmSearchResult;
     try {
       const tMore = Date.now();

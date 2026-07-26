@@ -21,6 +21,17 @@ export interface AiUsageCallMeta {
   routingTag?: AiUsageRoutingTag;
   latencyMs?: number;
   errorType?: string;
+  // v2.43.3: DOAR pentru linia de log `ai_call` — semnalul de trunchiere pe Claude 5
+  // (`stop_reason: "max_tokens"` nativ, `finish_reason: "length"` pe OpenRouter).
+  // NU se persista in `ai_usage`: recordAiUsageSafely destructureaza doar campurile
+  // cunoscute, iar o coloana noua ar cere migration pentru un semnal de diagnostic,
+  // nu o metrica de facturat. Ajunge in log doar pe calea de SUCCES (spread pe meta);
+  // pe calea de eroare nu exista producator, deci nu se adauga acolo.
+  stopReason?: string;
+  // v2.43.3: ce effort a plecat efectiv ("low"/"medium"/"high") sau "none". Tot doar
+  // pentru linia de log: fara el nu poti verifica dupa deploy ca reducerea de cost e
+  // chiar in vigoare, iar o scapare din allowlist ar rula tacut pe default-ul "high".
+  effortSent?: string;
 }
 
 interface ModelPrice {
@@ -43,7 +54,11 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     // stocat la insert.
     "claude-sonnet-5": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
     "claude-sonnet-4-6": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
+    // v2.43.2: Opus 5 la acelasi tarif ca 4.8 (verificat 2026-07-25). Intrarea
+    // 4-8 ramane pentru retry-uri/cozi in zbor si pentru un eventual rollback
+    // prin OPENROUTER_MODEL_OVERRIDES.
     "claude-opus-4-8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
+    "claude-opus-5": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
   },
   openai: {
     // Intrarile 5.4 raman pentru retry-uri/cozi in zbor din jurul migrarii
@@ -76,6 +91,9 @@ const MODEL_PRICES_USD_PER_MILLION: Record<AiUsageProvider, Record<string, Model
     "anthropic/claude-sonnet-5": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
     "anthropic/claude-sonnet-4.6": { inputUsdPerMillion: 3, outputUsdPerMillion: 15 },
     "anthropic/claude-opus-4.8": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
+    // v2.43.2: pe OpenRouter pricing-ul Opus 5 e identic cu cel nativ
+    // (verificat in catalogul live 2026-07-25).
+    "anthropic/claude-opus-5": { inputUsdPerMillion: 5, outputUsdPerMillion: 25 },
     "openai/gpt-5.4-nano": { inputUsdPerMillion: 0.05, outputUsdPerMillion: 0.4 },
     "openai/gpt-5.4-mini": { inputUsdPerMillion: 0.25, outputUsdPerMillion: 2 },
     "openai/gpt-5.4": { inputUsdPerMillion: 2.5, outputUsdPerMillion: 15 },

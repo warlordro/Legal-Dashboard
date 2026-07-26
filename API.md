@@ -60,7 +60,7 @@ ca `string | { code, message }`:
   (match pe nume normalizat e deferat); `parti[].calitateParte` da rolul (reclamant/parat/...).
   Optional apare si `failedInstitutii: string[]` (token-uri de instanta): raspuns 200 cu rezultate
   PARTIALE — instantele listate nu au raspuns si dosarele lor lipsesc din `data`. Cand campul e
-  prezent, `total` NU mai garanteaza completitudine (inainte de v2.44 acest caz era eroare 500).
+  prezent, `total` NU mai garanteaza completitudine (inainte de v2.43.1 acest caz era eroare 500).
   La **doua sau mai multe institutii** selectate, rezultatele sunt deduplicate pe cheia
   `institutie|numar` (schimbare minora fata de concatenarea istorica a raspunsurilor per instanta).
   `exactMatch` e garantat DOAR cand `failedInstitutii` lipseste: un dosar cu numar exact poate
