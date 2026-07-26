@@ -220,7 +220,11 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
       AI_TIMEOUT,
       tracking,
       c.req.raw.signal,
-      routing
+      routing,
+      // v2.43.3: `low` — analiza single extrage si explica din datele dosarului, fara
+      // reconciliere. Default-ul serverului ar fi `high`; asta e o reducere deliberata
+      // de cost fata de ce rula pana acum implicit.
+      "low"
     );
 
     // Succes: callModel a apelat deja confirmAiUsageReservation in interior.
@@ -351,7 +355,10 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
             feature: "dosar_multi_analyst",
           },
           analystsAbort.signal,
-          routing
+          routing,
+          // v2.43.3: analistii pe `low` — sunt doua apeluri din trei, deci acolo e masa
+          // de cost. Judge-ul ramane mai sus, vezi comentariul de la faza 3.
+          "low"
         ).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 1 }) });
           return text;
@@ -366,7 +373,9 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
             feature: "dosar_multi_analyst",
           },
           analystsAbort.signal,
-          routing
+          routing,
+          // v2.43.3: vezi analistul 1 — acelasi rol, acelasi effort.
+          "low"
         ).then(async (text) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
@@ -393,7 +402,12 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
             feature: "dosar_multi_judge",
           },
           judgeAbort.signal,
-          routing
+          routing,
+          // v2.43.3: judge-ul ramane PESTE analisti. El reconciliaza doua analize care
+          // pot sa se contrazica — detecteaza contradictii si le cantareste, pasul unde
+          // thinking-ul chiar isi merita costul. Semnal de regresie de urmarit: sectiunea
+          // "Revizuire si reconciliere" devine formala pe dosare unde analizele difera.
+          "medium"
         );
 
         await stream.writeSSE({
