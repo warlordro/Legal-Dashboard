@@ -1325,7 +1325,9 @@ async function deleteAllBackupsInDir(
   // Jail-ul per user e dedicat unui singur owner: dupa stergerea tuturor backup-urilor
   // ramanea un director gol per user sters, pentru totdeauna. rmdir esueaza (ENOTEMPTY)
   // daca a mai ramas ceva inauntru, deci nu poate distruge fisiere nelistate.
-  if (removeDirIfEmpty && deleted > 0) {
+  // Neconditionat de `deleted`: jail-urile golite inainte de acest fix nu vor mai primi
+  // niciodata o stergere cu deleted > 0, deci ar fi ramas pe disc pentru totdeauna.
+  if (removeDirIfEmpty) {
     await fsPromises.rmdir(dir).catch(() => {
       /* best-effort: directorul nu e gol sau nu exista */
     });

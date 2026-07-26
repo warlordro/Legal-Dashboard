@@ -102,6 +102,55 @@ describe("paritate de trunchiere pe caile native", () => {
     ).rejects.toMatchObject({ code: "AI_TRUNCATED", stopReason: "MAX_TOKENS" });
   });
 
+  it("OpenAI: content_filter e tot o taiere, nu un rezultat complet", async () => {
+    // Al doilea review: `reason` e optional in tipurile SDK si poate fi si "content_filter".
+    // Un gate doar pe "max_output_tokens" lasa exact acelasi mod de esec pe alt trigger.
+    responsesCreateMock.mockResolvedValue({
+      output_text: "Analiza taiata de filtru",
+      status: "incomplete",
+      incomplete_details: { reason: "content_filter" },
+      usage: { input_tokens: 10, output_tokens: 500 },
+    });
+
+    await expect(callModel("gpt-5.6-terra", "prompt", KEYS, 5000, undefined, undefined, NATIVE)).rejects.toMatchObject({
+      code: "AI_TRUNCATED",
+      stopReason: "content_filter",
+      // Mesajul nu are voie sa afirme bugetul de tokeni cand cauza e alta.
+      tokenBudget: false,
+    });
+  });
+
+  it("OpenAI: status incomplete fara reason e tot taiere", async () => {
+    responsesCreateMock.mockResolvedValue({
+      output_text: "x",
+      status: "incomplete",
+      usage: { input_tokens: 10, output_tokens: 500 },
+    });
+
+    await expect(callModel("gpt-5.6-terra", "prompt", KEYS, 5000, undefined, undefined, NATIVE)).rejects.toMatchObject({
+      code: "AI_TRUNCATED",
+      stopReason: "incomplete",
+    });
+  });
+
+  it("Gemini: SPII opreste generarea fara ca SDK-ul sa arunce — trebuie prins de noi", async () => {
+    // badFinishReasons din @google/generative-ai contine doar SAFETY/RECITATION/LANGUAGE.
+    // SPII (date personale) e cel mai plauzibil pe dosare si intoarce text partial in tacere.
+    generateContentMock.mockResolvedValue(geminiResponse("Analiza taiata", "SPII"));
+
+    await expect(
+      callModel("gemini-flash-3.6", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
+    ).rejects.toMatchObject({ code: "AI_TRUNCATED", stopReason: "SPII", tokenBudget: false });
+  });
+
+  it("MAX_TOKENS ramane marcat ca buget de tokeni", async () => {
+    generateContentMock.mockResolvedValue(geminiResponse("x", "MAX_TOKENS"));
+
+    await expect(
+      callModel("gemini-flash-3.6", "prompt", KEYS, 5000, undefined, undefined, NATIVE)
+    ).rejects.toMatchObject({ tokenBudget: true });
+  });
+
   it("Gemini: STOP normal trece nemodificat", async () => {
     generateContentMock.mockResolvedValue(geminiResponse("Analiza completa", "STOP"));
 

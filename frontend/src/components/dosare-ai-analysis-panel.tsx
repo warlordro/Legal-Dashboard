@@ -22,10 +22,11 @@ interface ApiKeys {
 }
 
 interface MultiResult {
-  analyses: { analyst1: { model: string; text: string }; analyst2: { model: string; text: string } };
+  analyses: { analyst1?: { model: string; text: string }; analyst2?: { model: string; text: string } };
   // Optionale: pe degradare (judge gol sau trunchiat) exista doar analizele individuale.
   judge?: { model: string; text: string };
   final?: string;
+  degradedMessage?: string;
 }
 
 export interface DosareAiAnalysisPanelProps {
@@ -448,6 +449,12 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
             {multi.error && multi.loading === null && <p className="text-sm text-destructive">{multi.error}</p>}
             {multi.result[dosar.numar] && (
               <div className="space-y-3">
+                {/* Explicatia degradarii sta langa rezultatul ei, nu in banner-ul global. */}
+                {multi.result[dosar.numar].degradedMessage && (
+                  <p className="text-sm text-amber-700 dark:text-amber-400">
+                    {multi.result[dosar.numar].degradedMessage}
+                  </p>
+                )}
                 {/* Final judge analysis — lipseste pe degradare (AiMultiPartialError) */}
                 {multi.result[dosar.numar].final && (
                   <div className={`rounded-lg border ${mc.border} ${mc.bg}`}>
@@ -508,11 +515,17 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
                 )}
                 {(multi.showIndividual.has(dosar.numar) || !multi.result[dosar.numar].final) && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {[multi.result[dosar.numar].analyses.analyst1, multi.result[dosar.numar].analyses.analyst2].map(
-                      (a, idx) => (
-                        <div key={idx} className="rounded-lg border border-muted bg-muted/30 p-3">
+                    {/* Numarul analistului vine din pozitia lui, nu din index-ul de dupa
+                        filtrare: cand analistul 1 lipseste, cel ramas e tot "Analist 2". */}
+                    {[
+                      { nr: 1, a: multi.result[dosar.numar].analyses.analyst1 },
+                      { nr: 2, a: multi.result[dosar.numar].analyses.analyst2 },
+                    ]
+                      .filter((e): e is { nr: number; a: { model: string; text: string } } => e.a !== undefined)
+                      .map(({ nr, a }) => (
+                        <div key={nr} className="rounded-lg border border-muted bg-muted/30 p-3">
                           <h5 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-2">
-                            Analist {idx + 1}: {AI_MODELS.find((m) => m.key === a.model)?.label || a.model}
+                            Analist {nr}: {AI_MODELS.find((m) => m.key === a.model)?.label || a.model}
                           </h5>
                           <div className="prose prose-sm max-w-none text-xs leading-relaxed text-muted-foreground [&_strong]:font-semibold [&_strong]:text-foreground [&_p]:my-1 max-h-[400px] overflow-y-auto">
                             {a.text.split("\n").map((line, li) => {
@@ -538,8 +551,7 @@ export function DosareAiAnalysisPanel({ dosar, ai, multi }: DosareAiAnalysisPane
                             })}
                           </div>
                         </div>
-                      )
-                    )}
+                      ))}
                   </div>
                 )}
               </div>

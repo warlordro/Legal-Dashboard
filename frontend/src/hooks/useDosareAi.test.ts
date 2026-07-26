@@ -10,20 +10,28 @@ import { act, createElement } from "react";
 import type { Dosar } from "@/types";
 
 const mockAnalyze = vi.fn();
-vi.mock("@/lib/api", () => ({
-  api: {
-    ai: {
-      analyze: (...args: unknown[]) => mockAnalyze(...args),
-      analyzeMulti: vi.fn(),
+const mockAnalyzeMulti = vi.fn();
+// importOriginal, nu obiect gol: `AiMultiPartialError` trebuie sa fie ACEEASI clasa pe
+// care o importa hook-ul, altfel `instanceof` din catch nu se potriveste niciodata.
+vi.mock("@/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api")>();
+  return {
+    ...actual,
+    api: {
+      ai: {
+        analyze: (...args: unknown[]) => mockAnalyze(...args),
+        analyzeMulti: (...args: unknown[]) => mockAnalyzeMulti(...args),
+      },
     },
-  },
-}));
+  };
+});
 
 const mockTenant = vi.fn();
 vi.mock("@/hooks/useTenantKeyStatus", () => ({
   useTenantKeyStatus: () => mockTenant(),
 }));
 
+import { AiMultiPartialError } from "@/lib/api";
 import { useDosareAi, type UseDosareAiResult } from "./useDosareAi";
 
 const CONFIGURED_ALL = { anthropic: true, openai: true, google: true, openrouter: true, captcha: true };
@@ -84,6 +92,7 @@ function mount() {
 beforeEach(() => {
   mockAnalyze.mockReset();
   mockAnalyze.mockResolvedValue({ analysis: "ok" });
+  mockAnalyzeMulti.mockReset();
   mockTenant.mockReset();
 });
 
@@ -123,6 +132,47 @@ describe("useDosareAi — chei per runtime", () => {
     });
     expect(mockAnalyze).not.toHaveBeenCalled();
     expect(h.api.ai.showKeyPrompt).toBe(true);
+    h.unmount();
+  });
+});
+
+// v2.43.3 (al doilea review): cand judecatorul cade dupa ce analistii au livrat, analizele
+// lor sunt platite. Hook-ul trebuie sa le pastreze, cu explicatia degradarii LANGA ele —
+// `multiError` e un singur string pentru toate randurile, deci nu poate juca rolul asta.
+describe("useDosareAi — analiza multi degradata", () => {
+  const ANALYSES = {
+    analyst1: { model: "claude-sonnet", text: "A1" },
+    analyst2: { model: "gpt-5.6-terra", text: "A2" },
+  };
+
+  it("pastreaza analizele partiale si eticheta degradarea in rezultat", async () => {
+    mockTenant.mockReturnValue(tenantDesktop());
+    mockAnalyzeMulti.mockRejectedValue(new AiMultiPartialError("Reconcilierea s-a oprit.", ANALYSES));
+    const h = mount();
+
+    await act(async () => {
+      await h.api.multiForRow(DOSAR.numar).onAnalyze(DOSAR);
+    });
+
+    const bundle = h.api.multiForRow(DOSAR.numar);
+    expect(bundle.result[DOSAR.numar]?.analyses).toEqual(ANALYSES);
+    expect(bundle.result[DOSAR.numar]?.degradedMessage).toBe("Reconcilierea s-a oprit.");
+    expect(bundle.result[DOSAR.numar]?.final).toBeUndefined();
+    expect(bundle.error).toBe("Reconcilierea s-a oprit.");
+    h.unmount();
+  });
+
+  it("o eroare obisnuita nu lasa rezultat partial", async () => {
+    mockTenant.mockReturnValue(tenantDesktop());
+    mockAnalyzeMulti.mockRejectedValue(new Error("Lipseste cheia API"));
+    const h = mount();
+
+    await act(async () => {
+      await h.api.multiForRow(DOSAR.numar).onAnalyze(DOSAR);
+    });
+
+    expect(h.api.multiForRow(DOSAR.numar).result[DOSAR.numar]).toBeUndefined();
+    expect(h.api.multiForRow(DOSAR.numar).error).toBe("Lipseste cheia API");
     h.unmount();
   });
 });

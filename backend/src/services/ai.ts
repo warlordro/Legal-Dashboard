@@ -129,11 +129,21 @@ function maxTokensFor(effortCapable: boolean): number {
 // dar inainte ca textul incomplet sa ajunga la user. Motivul: o analiza trunchiata
 // arata completa pentru un cititor non-specialist, care e exact publicul tinta;
 // e un mod de esec mai periculos decat raspunsul gol, fiindca nu se vede.
+// v2.43.3 (al doilea review): acopera si taierile care NU vin din bugetul de tokeni —
+// content filter pe OpenAI, BLOCKLIST / PROHIBITED_CONTENT / SPII pe Gemini (ultimul e
+// plauzibil pe dosare, care sunt pline de date personale). SDK-ul Gemini arunca singur
+// doar pentru SAFETY / RECITATION / LANGUAGE; restul intorc text partial in tacere.
+// Consecinta pentru user e aceeasi — o analiza incompleta care arata completa — deci
+// acelasi tip de eroare, cu mesaj care nu mai afirma un motiv pe care nu-l stie.
+const TOKEN_BUDGET_STOP_REASONS = new Set(["max_tokens", "max_output_tokens", "length", "MAX_TOKENS"]);
+
 export class AiTruncatedError extends Error {
   readonly code = "AI_TRUNCATED";
+  readonly tokenBudget: boolean;
   constructor(readonly stopReason: string) {
-    super("Analiza a fost taiata inainte de final (buget de tokeni epuizat).");
+    super("Analiza s-a oprit inainte de final si a fost respinsa ca incompleta.");
     this.name = "AiTruncatedError";
+    this.tokenBudget = TOKEN_BUDGET_STOP_REASONS.has(stopReason);
   }
 }
 
@@ -578,7 +588,11 @@ async function callAnthropic(
         throw e;
       }
       const value = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
-      if (message.stop_reason === "max_tokens") truncatedBy = "max_tokens";
+      // Idem callOpenAI/callGoogle: orice oprire care nu e finalizare normala.
+      // "refusal" intra si el aici — textul e partial sau absent.
+      if (message.stop_reason && message.stop_reason !== "end_turn" && message.stop_reason !== "stop_sequence") {
+        truncatedBy = message.stop_reason;
+      }
       return {
         value,
         meta: {
@@ -633,8 +647,13 @@ async function callOpenAI(
         );
         const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
         // Responses API: status "incomplete" + incomplete_details.reason.
-        const incompleteReason = (response as { incomplete_details?: { reason?: string } }).incomplete_details?.reason;
-        if (incompleteReason === "max_output_tokens") truncatedBy = "max_output_tokens";
+        // `status: "incomplete"` e semnalul primar; `reason` e optional in tipurile SDK
+        // (openai 6.36.0) si poate fi si "content_filter", nu doar plafonul de tokeni.
+        const incomplete = response as { status?: string; incomplete_details?: { reason?: string } };
+        const incompleteReason = incomplete.incomplete_details?.reason;
+        if (incomplete.status === "incomplete" || incompleteReason) {
+          truncatedBy = incompleteReason ?? "incomplete";
+        }
         return {
           value: response.output_text || "",
           meta: {
@@ -678,8 +697,10 @@ async function callOpenAI(
           { signal: fallbackSignal }
         );
         const usage = completion.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+        // Orice motiv de oprire in afara de "stop" inseamna raspuns incomplet
+        // ("length", "content_filter"; tool_calls nu apar — nu trimitem tool-uri).
         const finishReason = completion.choices?.[0]?.finish_reason;
-        if (finishReason === "length") truncatedBy = "length";
+        if (finishReason && finishReason !== "stop") truncatedBy = finishReason;
         return {
           value: completion.choices?.[0]?.message?.content ?? "",
           meta: {
@@ -727,8 +748,10 @@ async function callGoogle(
       const usage = (
         result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
       ).usageMetadata;
+      // Idem: orice finishReason diferit de STOP. SAFETY / RECITATION / LANGUAGE arunca
+      // deja din text(), dar BLOCKLIST / PROHIBITED_CONTENT / SPII / OTHER nu.
       const finishReason = result.response.candidates?.[0]?.finishReason as string | undefined;
-      if (finishReason === "MAX_TOKENS") truncatedBy = "MAX_TOKENS";
+      if (finishReason && finishReason !== "STOP") truncatedBy = finishReason;
       return {
         value: result.response.text(),
         meta: {

@@ -372,9 +372,11 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
       });
       // Declarat IN AFARA try-ului ca sa fie vizibil in catch: cand judge-ul pica dupa ce
       // analistii au livrat, analizele lor sunt deja platite si trebuie sa ajunga la user.
+      // Membrii sunt OPTIONALI: daca un analist cade dupa ce celalalt a livrat, analiza
+      // livrata e deja platita si trebuie sa ajunga la user, singura.
       let partialAnalyses: {
-        analyst1: { model: string; text: string };
-        analyst2: { model: string; text: string };
+        analyst1?: { model: string; text: string };
+        analyst2?: { model: string; text: string };
       } | null = null;
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
@@ -413,19 +415,18 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
         });
-        let analysisA: string;
-        let analysisB: string;
-        try {
-          [analysisA, analysisB] = await Promise.all([p1, p2]);
-        } catch (err) {
+        // allSettled, nu all: cu `all`, o respingere arunca imediat si analiza care
+        // rezolvase deja (facturata, logata in ai_usage) se pierde fara sa fie vazuta.
+        const [r1, r2] = await Promise.allSettled([p1, p2]);
+        const done1 = r1.status === "fulfilled" ? { model: analysts[0], text: r1.value } : undefined;
+        const done2 = r2.status === "fulfilled" ? { model: analysts[1], text: r2.value } : undefined;
+        if (done1 || done2) partialAnalyses = { ...(done1 && { analyst1: done1 }), ...(done2 && { analyst2: done2 }) };
+        if (!done1 || !done2) {
           analystsAbort.abort();
-          throw err;
+          throw r1.status === "rejected" ? r1.reason : (r2 as PromiseRejectedResult).reason;
         }
-
-        partialAnalyses = {
-          analyst1: { model: analysts[0], text: analysisA },
-          analyst2: { model: analysts[1], text: analysisB },
-        };
+        const analysisA = done1.text;
+        const analysisB = done2.text;
 
         // Phase 3: judge reconciliation.
         await stream.writeSSE({ event: "judge_started", data: "{}" });
@@ -493,9 +494,12 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
           // buget de tokeni. Judge-ul e cel mai expus, si e si apelul dupa care
           // analizele individuale sunt deja platite.
           errorCode = ErrorCodes.AI_TRUNCATED;
+          // Motivul se afirma DOAR cand e cunoscut: taierea poate veni si din filtrul de
+          // continut al providerului, nu doar din plafonul de tokeni.
+          const cauza = err.tokenBudget ? " (buget de tokeni epuizat)" : "";
           errorText = partialAnalyses
-            ? "Reconcilierea s-a oprit inainte de final (buget de tokeni epuizat). Analizele individuale sunt mai jos."
-            : "Analiza s-a oprit inainte de final (buget de tokeni epuizat). Reincearca; daca se repeta, alege un model diferit.";
+            ? `Reconcilierea s-a oprit inainte de final${cauza}. Analizele individuale sunt mai jos.`
+            : `Analiza s-a oprit inainte de final${cauza}. Reincearca; daca se repeta, alege un model diferit.`;
         }
         await stream.writeSSE({
           event: "error",

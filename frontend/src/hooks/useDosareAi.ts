@@ -13,12 +13,16 @@ interface ApiKeys {
 
 interface MultiResultPayload {
   analyses: {
-    analyst1: { model: string; text: string };
-    analyst2: { model: string; text: string };
+    analyst1?: { model: string; text: string };
+    analyst2?: { model: string; text: string };
   };
   // Optionale: pe degradare (judge gol sau trunchiat) analizele exista, reconcilierea nu.
   judge?: { model: string; text: string };
   final?: string;
+  // Explicatia degradarii traieste IN rezultat, nu in `error`-ul global al hook-ului:
+  // acela e un singur string pentru toate randurile, deci ar aparea si sub dosarele cu
+  // rezultat complet, si ar disparea la urmatoarea rulare lasand partialul fara context.
+  degradedMessage?: string;
 }
 
 type MultiPhase = "analyst1_done" | "analyst2_done" | "judge_started";
@@ -275,7 +279,10 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         // Degradare, nu esec total: analistii au livrat, doar judecatorul a cazut.
         // Analizele lor sunt platite si se afiseaza, alaturi de mesajul de eroare.
         if (err instanceof AiMultiPartialError) {
-          setMultiResult((prev) => ({ ...prev, [dosar.numar]: { analyses: err.analyses } }));
+          setMultiResult((prev) => ({
+            ...prev,
+            [dosar.numar]: { analyses: err.analyses, degradedMessage: err.message },
+          }));
         }
         setMultiError(err instanceof Error ? err.message : "Eroare la analiza avansata");
       } finally {

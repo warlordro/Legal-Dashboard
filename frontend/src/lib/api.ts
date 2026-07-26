@@ -16,9 +16,11 @@ export function extractErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
+// Membrii sunt optionali: degradarea poate lasa doar una din cele doua analize
+// (un analist a livrat, celalalt a cazut).
 export interface MultiAnalyses {
-  analyst1: { model: string; text: string };
-  analyst2: { model: string; text: string };
+  analyst1?: { model: string; text: string };
+  analyst2?: { model: string; text: string };
 }
 
 // Analiza multi a esuat DUPA ce analistii au livrat (judge gol sau trunchiat). Analizele

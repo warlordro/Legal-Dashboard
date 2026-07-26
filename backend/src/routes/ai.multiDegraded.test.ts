@@ -133,4 +133,33 @@ describe("POST /api/ai/analyze-multi — degradare cand judecatorul cade", () =>
     expect(err?.data.code).toBe("AI_TRUNCATED");
     expect(err?.data.result).toBeUndefined();
   });
+
+  it("un analist cade, celalalt livreaza: analiza platita nu se arunca", async () => {
+    // Al doilea review: cu Promise.all, respingerea unuia arunca imediat si analiza
+    // celuilalt — deja facturata — se pierdea fara sa fie vazuta.
+    let call = 0;
+    callModelMock.mockImplementation(async () => {
+      call += 1;
+      if (call === 1) return "Analiza analistului 1.";
+      throw new AiTruncatedError("max_tokens");
+    });
+
+    const { events } = await runMulti();
+    const err = events.find((e) => e.event === "error");
+
+    expect(err?.data.code).toBe("AI_TRUNCATED");
+    const analyses = (err?.data.result as { analyses?: Record<string, { text: string }> } | undefined)?.analyses;
+    expect(analyses?.analyst1?.text).toBe("Analiza analistului 1.");
+    expect(analyses?.analyst2).toBeUndefined();
+  });
+
+  it("mesajul nu afirma bugetul de tokeni cand taierea vine din filtrul de continut", async () => {
+    analystsOkJudge(() => Promise.reject(new AiTruncatedError("content_filter")));
+
+    const { events } = await runMulti();
+    const err = events.find((e) => e.event === "error");
+
+    expect(err?.data.code).toBe("AI_TRUNCATED");
+    expect(String(err?.data.error)).not.toMatch(/tokeni/i);
+  });
 });
