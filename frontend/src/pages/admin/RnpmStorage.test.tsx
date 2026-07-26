@@ -534,23 +534,28 @@ describe("AdminRnpmStorage (embedded)", () => {
       </ConfirmProvider>
     );
 
-    // Implicit: sters fara date = ascuns; sters cu date (ocupa spatiu) = vizibil.
-    expect(host.textContent).toContain("activ@x.ro");
-    expect(host.textContent).not.toContain("sters-gol@x.ro");
-    expect(host.textContent).toContain("sters-cu-date@x.ro");
+    // Filtrul ruleaza acum pe SERVER (inaintea paginarii), deci pagina afiseaza exact
+    // ce a primit. Ce se verifica aici e CONTRACTUL: implicit se cere fara inactivi,
+    // iar bifa retrimite cererea cu includeInactive si reseteaza pagina la 1.
+    expect(usageMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, includeInactive: false }),
+      expect.anything()
+    );
 
     const checkbox = host.querySelector<HTMLInputElement>('input[type="checkbox"]');
     expect(checkbox).not.toBeNull();
-    expect(host.textContent).toContain("(1)");
 
     await act(async () => {
       checkbox?.click();
       await Promise.resolve();
     });
-    expect(host.textContent).toContain("sters-gol@x.ro");
+    expect(usageMock).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, includeInactive: true }),
+      expect.anything()
+    );
   });
 
-  it("fara useri stersi/suspendati fara date, checkbox-ul nu apare", async () => {
+  it("bifa de inactivi e disponibila si cand pagina curenta nu contine niciunul", async () => {
     usageMock.mockResolvedValue(
       page([
         {
@@ -571,7 +576,9 @@ describe("AdminRnpmStorage (embedded)", () => {
       </ConfirmProvider>
     );
 
-    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
+    // Inainte, bifa aparea doar daca pagina CURENTA continea randuri ascunse — ceea ce
+    // dupa mutarea filtrului pe server ar fi facut-o invizibila exact cand e utila.
+    expect(host.querySelector('input[type="checkbox"]')).not.toBeNull();
   });
 
   it("409 la stergerea backup-urilor se afiseaza ca mesaj prietenos", async () => {

@@ -244,4 +244,59 @@ describe("AdminBackups (embedded)", () => {
     expect(deleteMock).toHaveBeenCalledTimes(1);
     expect(host.textContent).toContain("2 backup-uri sterse");
   });
+
+  it("CodeRabbit 1.5: doua click-uri in acelasi tick creeaza UN singur backup", async () => {
+    // Garda pe state React (`if (busy) return`) nu prindea al doilea click din acelasi
+    // tick: setState e asincron, deci ambele apeluri vedeau busy === null. Ref-ul
+    // sincron se inchide imediat.
+    let resolveCreate: (v: { name: string }) => void = () => undefined;
+    createMock.mockReturnValue(
+      new Promise<{ name: string }>((r) => {
+        resolveCreate = r;
+      })
+    );
+
+    await render(<AdminBackups embedded />);
+
+    await act(async () => {
+      clickButton(/Creeaza backup acum/);
+      clickButton(/Creeaza backup acum/);
+      await Promise.resolve();
+    });
+
+    expect(createMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      resolveCreate({ name: "legal-dashboard.manual-nou.db" });
+      await Promise.resolve();
+    });
+  });
+
+  it("CodeRabbit 1.5: garda se elibereaza dupa ce refuzi dialogul de confirmare", async () => {
+    // Reset-ul sta in finally-ul EXTERIOR tocmai pentru asta: iesirea pe respingerea
+    // dialogului trebuie sa lase butonul functional, nu sa il blocheze definitiv.
+    await render(<AdminBackups embedded />);
+
+    await act(async () => {
+      clickButton(/Sterge toate/);
+      await Promise.resolve();
+    });
+    const dialog = confirmDialog();
+    const cancel = Array.from(dialog.querySelectorAll<HTMLButtonElement>("button")).find((b) =>
+      /anuleaza/i.test(b.textContent ?? "")
+    );
+    await act(async () => {
+      cancel?.click();
+      await Promise.resolve();
+    });
+    expect(deleteMock).not.toHaveBeenCalled();
+
+    // A doua incercare trebuie sa redeschida dialogul — daca ref-ul ar fi ramas true,
+    // handler-ul ar iesi imediat si nu s-ar intampla nimic.
+    await act(async () => {
+      clickButton(/Sterge toate/);
+      await Promise.resolve();
+    });
+    expect(document.querySelector('[role="alertdialog"]')).not.toBeNull();
+  });
 });

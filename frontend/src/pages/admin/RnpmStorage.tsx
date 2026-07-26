@@ -53,8 +53,16 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
     setLoading(true);
     setError(null);
     try {
-      const result = await adminListRnpmUsage({ page, pageSize: PAGE_SIZE }, ac.signal);
+      const result = await adminListRnpmUsage({ page, pageSize: PAGE_SIZE, includeInactive: showInactive }, ac.signal);
       if (ac.signal.aborted) return;
+      // Clamp: daca totalul a scazut (stergeri, schimbare de filtru) pagina curenta
+      // poate fi in afara intervalului si ar afisa o lista goala fara cale de intoarcere
+      // — blocul de paginare nu se randeaza cand total <= PAGE_SIZE.
+      const lastPage = Math.max(1, Math.ceil(result.total / PAGE_SIZE));
+      if (page > lastPage) {
+        setPage(lastPage);
+        return;
+      }
       setRows(result.rows);
       setTotal(result.total);
     } catch (e) {
@@ -63,7 +71,7 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
     } finally {
       if (!ac.signal.aborted) setLoading(false);
     }
-  }, [page]);
+  }, [page, showInactive]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -143,9 +151,9 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
     }
   };
 
-  const hasFootprint = (row: AdminRnpmUsageRow) => row.dbSizeBytes !== null || row.backupCount > 0;
-  const visibleRows = rows?.filter((row) => showInactive || row.status === "active" || hasFootprint(row)) ?? null;
-  const hiddenCount = rows && visibleRows ? rows.length - visibleRows.length : 0;
+  // Filtrul a trecut pe server (vezi adminRnpmApi): randurile primite sunt deja cele
+  // care trebuie afisate, iar `total` corespunde exact setului filtrat.
+  const visibleRows = rows;
 
   const body = (
     <Card>
@@ -182,15 +190,18 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
         {rows && rows.length === 0 && (
           <div className="text-sm text-muted-foreground">Niciun utilizator inregistrat.</div>
         )}
-        {(hiddenCount > 0 || showInactive) && (
+        {(rows !== null || showInactive) && (
           <label className="flex w-fit cursor-pointer items-center gap-2 text-xs text-muted-foreground">
             <input
               type="checkbox"
               checked={showInactive}
-              onChange={(e) => setShowInactive(e.target.checked)}
+              onChange={(e) => {
+                setPage(1);
+                setShowInactive(e.target.checked);
+              }}
               className="h-3.5 w-3.5 accent-primary"
             />
-            Arata si userii stersi sau suspendati fara date ({hiddenCount})
+            Arata si userii stersi sau suspendati fara date
           </label>
         )}
         {visibleRows && visibleRows.length === 0 && rows && rows.length > 0 && (

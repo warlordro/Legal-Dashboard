@@ -23,12 +23,15 @@ export interface AdminRnpmUsagePage {
 // CodeRabbit 1.6: ruta e paginata — per rand se fac masuratori de fisier si listari de
 // director, deci la cateva sute de useri o cerere nelimitata devine lenta.
 export async function adminListRnpmUsage(
-  params: { page?: number; pageSize?: number } = {},
+  params: { page?: number; pageSize?: number; includeInactive?: boolean } = {},
   signal?: AbortSignal
 ): Promise<AdminRnpmUsagePage> {
   const qs = new URLSearchParams();
   if (params.page) qs.set("page", String(params.page));
   if (params.pageSize) qs.set("pageSize", String(params.pageSize));
+  // Filtrul ruleaza pe SERVER, inaintea paginarii — altfel o pagina putea aparea goala
+  // desi urmatoarele aveau date, iar totalul afisat nu corespundea tabelului.
+  if (params.includeInactive) qs.set("includeInactive", "1");
   const suffix = qs.toString() ? `?${qs}` : "";
   return unwrapMonitoring<AdminRnpmUsagePage>(await apiFetch(`/api/v1/admin/rnpm/usage${suffix}`, { signal }));
 }

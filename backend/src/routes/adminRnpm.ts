@@ -2,9 +2,11 @@
 // per user — fisierul viu (db+wal+shm) si jail-ul de backup-uri. Read-only,
 // envelope standard, fara audit (paritate cu GET /api/v1/admin/backups).
 // Erorile FS non-ENOENT se propaga -> appErrorHandler -> 500 pe envelope.
+import fs from "node:fs";
 import { Hono } from "hono";
 import { z } from "zod";
-import { listRnpmBackups, withMaintenanceRead } from "../db/backup.ts";
+import { getRnpmBackupDir, listRnpmBackups, withMaintenanceRead } from "../db/backup.ts";
+import { getRnpmDbPath } from "../db/rnpmDb.ts";
 import { getRnpmStorageLimitBytes, measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
 import { listAllUserIdentities } from "../db/userRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
@@ -35,19 +37,41 @@ export interface AdminRnpmUsageRow {
 const UsageQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(100).default(20),
+  // Filtrul de useri inactivi era client-side, DUPA paginare (finding review): o pagina
+  // intreaga putea aparea goala desi paginile urmatoare aveau date, iar "X-Y din N"
+  // numara alt set decat afisa tabelul. Mutat pe server, inaintea felierii.
+  includeInactive: z
+    .enum(["0", "1", "true", "false"])
+    .optional()
+    .transform((v) => v === "1" || v === "true"),
 });
+
+// Predicat IEFTIN, fara stat/readdir: doar existenta cailor. Se aplica exclusiv userilor
+// non-activi, deci costul e proportional cu ei, nu cu totalul. Erorile de acces intorc
+// `false` la existsSync, dar directia de eroare e spre AFISARE (un user cu backup-uri nu
+// dispare din lista adminului doar pentru ca fisierul viu lipseste).
+function hasRnpmFootprint(ownerId: string): boolean {
+  try {
+    return fs.existsSync(getRnpmDbPath(ownerId)) || fs.existsSync(getRnpmBackupDir(ownerId));
+  } catch {
+    return true;
+  }
+}
 
 adminRnpmRouter.get("/usage", async (c) => {
   const parsed = UsageQuerySchema.safeParse(c.req.query());
   if (!parsed.success) {
     return c.json(fail(ErrorCodes.INVALID_PARAMS, "Parametri de paginare invalizi.", c, parsed.error.issues), 400);
   }
-  const { page, pageSize } = parsed.data;
+  const { page, pageSize, includeInactive } = parsed.data;
   const allUsers = listAllUserIdentities(); // ordinea (email ASC) e contractul repository-ului
-  const total = allUsers.length;
+  const candidates = includeInactive
+    ? allUsers
+    : allUsers.filter((u) => u.status === "active" || hasRnpmFootprint(u.id));
+  const total = candidates.length;
   // Feliem INAINTE de bucla: costul per rand e I/O pe disc, deci paginarea trebuie sa
   // reduca munca efectiva, nu doar raspunsul.
-  const users = allUsers.slice((page - 1) * pageSize, page * pageSize);
+  const users = candidates.slice((page - 1) * pageSize, page * pageSize);
   // Fix review Codex: citirile (stat main/wal/shm + listarea backup-urilor)
   // ruleaza sub maintenance READ lock — un compact/restore concurent (writer)
   // nu mai poate face swap intre stat-uri, deci randul nu insumeaza generatii
