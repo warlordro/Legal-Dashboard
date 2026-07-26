@@ -150,6 +150,7 @@ adminBackupsRouter.delete("/", requireDesktopHeader, async (c) => {
 
 adminBackupsRouter.delete("/:name", requireDesktopHeader, async (c) => {
   const name = c.req.param("name");
+  if (!name) return c.json(fail(ErrorCodes.INVALID_PARAMS, "Nume backup lipsa", c), 400);
   try {
     await deleteBackupByName(name);
     recordAuditSafe(c, "backup.delete", {
