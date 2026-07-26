@@ -244,3 +244,50 @@ export function compactRnpmDb(ownerId: string): { beforeBytes: number; afterByte
   const after = sizeOf(dbPath) + sizeOf(`${dbPath}-wal`) + sizeOf(`${dbPath}-shm`);
   return { beforeBytes: before, afterBytes: after, durationMs };
 }
+
+// CodeRabbit 1.3 (v2.43.3): pre-migrarea bazei RNPM a unui user e integral SINCRONA
+// (mkdirSync + VACUUM INTO + prune), iar `getRnpmDb` are semnatura sincrona, deci nu
+// poate astepta workerul din snapshotRunner. Pe desktop e invizibil — un singur user.
+// Pe web, prima cerere a fiecarui user dupa un upgrade cu migrari noi ingheata TOT
+// serverul cat dureaza (masurat: ~120 ms la 103 MB, creste cu marimea bazei).
+//
+// Solutia respecta constrangerea de semnatura: nu facem `getRnpmDb` asincron, ci mutam
+// munca inaintea serverului. Se apeleaza din blocul de prewarm din index.ts, care ruleaza
+// deja INAINTE de `serve()` tocmai ca sa nu se raspunda "ok" la /health cat timp migrarile
+// blocheaza event loop-ul.
+//
+// Atinge DOAR fisierele care exista deja: `getRnpmDb` ar provisiona lazy un fisier nou,
+// iar un user care n-a folosit niciodata RNPM nu trebuie sa capete unul la boot.
+// Un esec pe un user NU opreste restul si NU trebuie sa cada boot-ul — pre-migrarea are
+// deja try/catch propriu care doar avertizeaza.
+export function prewarmRnpmMigrations(ownerIds: readonly string[]): {
+  warmed: number;
+  skipped: number;
+  failed: number;
+  durationMs: number;
+} {
+  const t0 = Date.now();
+  let warmed = 0;
+  let skipped = 0;
+  let failed = 0;
+  for (const ownerId of ownerIds) {
+    try {
+      if (!fs.existsSync(getRnpmDbPath(ownerId))) {
+        skipped++;
+        continue;
+      }
+      getRnpmDb(ownerId);
+      warmed++;
+    } catch (e) {
+      failed++;
+      console.warn(`[rnpmDb] prewarm esuat pentru ${ownerId} (continuam):`, e instanceof Error ? e.message : e);
+    }
+  }
+  const durationMs = Date.now() - t0;
+  // Progresul se logheaza: pe multi useri cu baze mari boot-ul se lungeste proportional,
+  // si operatorul trebuie sa vada de ce sta, nu sa para blocat.
+  console.log(
+    JSON.stringify({ action: "rnpm_prewarm", warmed, skipped, failed, durationMs, ts: new Date().toISOString() })
+  );
+  return { warmed, skipped, failed, durationMs };
+}
