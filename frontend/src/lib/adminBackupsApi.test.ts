@@ -79,12 +79,14 @@ describe("adminBackupsApi", () => {
   });
 
   it("adminDeleteBackup apeleaza DELETE pe numele encodat si rezolva la succes", async () => {
+    // Nume cu spatiu (nu apare in practica, dar discrimineaza encodarea):
+    // daca encodeURIComponent dispare dintr-un refactor, asertiunea pe %20 pica.
     mockApiFetch.mockResolvedValue(
-      jsonResponse(200, { data: { name: "legal-dashboard.manual-x.db" }, requestId: "rid-5" })
+      jsonResponse(200, { data: { name: "legal-dashboard.manual x.db" }, requestId: "rid-5" })
     );
 
-    await expect(adminDeleteBackup("legal-dashboard.manual-x.db")).resolves.toBeUndefined();
-    expect(mockApiFetch).toHaveBeenCalledWith("/api/v1/admin/backups/legal-dashboard.manual-x.db", {
+    await expect(adminDeleteBackup("legal-dashboard.manual x.db")).resolves.toBeUndefined();
+    expect(mockApiFetch).toHaveBeenCalledWith("/api/v1/admin/backups/legal-dashboard.manual%20x.db", {
       method: "DELETE",
     });
   });
