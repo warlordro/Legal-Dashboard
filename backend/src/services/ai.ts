@@ -864,7 +864,8 @@ export async function callModel(
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
   signal?: AbortSignal,
-  routing?: AiRouting
+  routing?: AiRouting,
+  effort?: AiEffort
 ): Promise<string> {
   const model = AI_MODELS[modelKey];
   if (!model) throw new Error("Model necunoscut");
@@ -876,12 +877,16 @@ export async function callModel(
     if (!apiKey) throw new Error("NO_API_KEY:openrouter");
     const slug = resolveOpenRouterSlug(modelKey);
     if (!slug) throw new Error(`MODEL_NOT_IN_STACK:${modelKey}`);
-    return callOpenRouter(apiKey, slug, prompt, timeout, tracking, signal, "openrouter:western");
+    return callOpenRouter(apiKey, slug, prompt, timeout, tracking, signal, "openrouter:western", effort);
   }
 
   const apiKey = getApiKey(model.provider, apiKeys);
   if (!apiKey) throw new Error(`NO_API_KEY:${model.provider}`);
-  if (model.provider === "anthropic") return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking, signal);
+  if (model.provider === "anthropic")
+    return callAnthropic(apiKey, model.modelId, prompt, timeout, tracking, signal, effort);
+  // GPT-5.6 (Responses API `reasoning`) si Gemini (`thinkingConfig`) NU primesc effort:
+  // calibrarea lor e follow-up separat, cu alte nume de campuri si alte valori permise.
+  // Nu presupune paritate cu ruta Anthropic.
   if (model.provider === "openai") return callOpenAI(apiKey, model.modelId, prompt, timeout, tracking, signal);
   if (model.provider === "google") return callGoogle(apiKey, model.modelId, prompt, timeout, tracking, signal);
   throw new Error("Provider necunoscut");

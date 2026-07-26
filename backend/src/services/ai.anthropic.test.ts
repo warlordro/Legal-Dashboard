@@ -15,7 +15,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-import { AI_MAX_TOKENS, callAnthropic } from "./ai.ts";
+import { AI_MAX_TOKENS, callAnthropic, callModel } from "./ai.ts";
 
 function mockFinalMessage(options?: { text?: string; stopReason?: string }) {
   return {
@@ -84,6 +84,24 @@ describe("callAnthropic — forma requestului (v2.43.3)", () => {
 
     const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
     expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("callModel propaga effort spre ruta nativa Anthropic", async () => {
+    // routing native EXPLICIT: shouldRouteViaOpenRouter scurt-circuiteaza pe prima
+    // linie, deci nu mai atinge DB-ul (getDecryptedKey) — fisierul asta nu are DB.
+    await callModel(
+      "claude-opus",
+      "prompt",
+      { anthropic: "k".repeat(20) },
+      5000,
+      undefined,
+      undefined,
+      { mode: "native" },
+      "medium"
+    );
+
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.output_config).toEqual({ effort: "medium" });
   });
 
   it("stop_reason ajunge in linia de log ai_call (semnal de trunchiere)", async () => {
