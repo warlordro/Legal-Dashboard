@@ -74,7 +74,10 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
 }
 
 function tokenManagementPaths(): Record<string, Record<string, unknown>> {
-  const sessionNote = "Session-only (cookie/JWT). Un PAT primeste 403 PAT_CANNOT_MANAGE_TOKENS.";
+  // F12-F8 (2026-07-26): rutele cer si rol admin (requireRole in apiTokens.ts). Fara
+  // mentiunea asta specul ar sugera ca orice sesiune poate emite tokenuri.
+  const sessionNote =
+    "Session-only (cookie/JWT) SI doar rol admin (403 forbidden altfel). Un PAT primeste 403 PAT_CANNOT_MANAGE_TOKENS.";
   // Override-uieste security-ul global bearerAuth (CodeRabbit): rutele de management NU accepta
   // un PAT (Bearer) — se autentifica DOAR prin sesiune (cookie). Altfel specul ar sugera gresit
   // ca un PAT poate crea/revoca tokenuri.
