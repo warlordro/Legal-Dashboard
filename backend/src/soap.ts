@@ -133,6 +133,9 @@ async function callSoap(action: string, body: string, signal?: AbortSignal): Pro
   });
 
   if (response.status >= 300 && response.status < 400) {
+    // Corpul se dreneaza explicit inainte de throw: fara asta conexiunea ramane
+    // ocupata in pool pana la GC.
+    await response.body?.cancel();
     console.error(`[soap] redirect neasteptat (status ${response.status}) — refuzat`);
     throw new Error("Raspuns neasteptat de la PortalJust (redirect).");
   }

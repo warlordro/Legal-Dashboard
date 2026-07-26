@@ -19,6 +19,8 @@ export async function validateKey(field: TenantKeyField, value: string): Promise
     const res = await fetchValidation(field, value);
     if (res.status >= 300 && res.status < 400) {
       // redirect:"manual" — nu urmarim redirect-ul cu cheia atasata; validare omisa.
+      // Corpul se dreneaza explicit: fara asta conexiunea ramane ocupata in pool.
+      await res.body?.cancel();
       return { valid: true, validationSkipped: true, reason: "Provider a raspuns cu redirect; validare online omisa." };
     }
     if (res.status === 401 || res.status === 403 || res.status === 422) {
@@ -59,6 +61,8 @@ async function validateTwoCaptcha(value: string): Promise<KeyValidationResult> {
   });
   if (res.status >= 300 && res.status < 400) {
     // redirect:"manual" — nu urmarim redirect-ul cu cheia atasata; validare omisa.
+    // Corpul se dreneaza explicit: fara asta conexiunea ramane ocupata in pool.
+    await res.body?.cancel();
     return { valid: true, validationSkipped: true, reason: "Provider a raspuns cu redirect; validare online omisa." };
   }
   if (res.status === 408 || res.status === 429 || res.status >= 500) {

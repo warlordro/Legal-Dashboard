@@ -55,6 +55,9 @@ function operationFor(method: string, prefix: string, scope: string): Record<str
       "200": { description: "OK" },
       "401": { description: "invalid_token (lowercase, via AuthenticationError)" },
       "403": { description: "PAT_ROUTE_FORBIDDEN / INSUFFICIENT_SCOPE" },
+      // CodeRabbit 21: rutele chiar raspund 413 la depasirea limitei de body
+      // (bodyLimit global + limitele per-ruta), dar specul nu il documenta.
+      "413": { description: "PAYLOAD_TOO_LARGE (body peste limita rutei)" },
       "429": { description: "rate_limited / QUOTA_EXCEEDED (Retry-After)" },
       "503": { description: "ICCJ_UNAVAILABLE (breaker) / captcha reservation retry" },
     },

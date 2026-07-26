@@ -129,7 +129,7 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
       setSuccessMsg(null);
       try {
         const deleted = await adminDeleteBackups();
-        setSuccessMsg(`${deleted} backup-uri sterse.`);
+        setSuccessMsg(`${deleted} ${deleted === 1 ? "backup sters" : "backup-uri sterse"}.`);
         await load();
       } catch (e) {
         setError(e instanceof Error ? e.message : "Eroare la stergere backups");

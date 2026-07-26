@@ -89,7 +89,8 @@ function filterByInstitutii(dosare: Dosar[], institutii: string[]): Dosar[] {
 function formatFailedInstitutii(tokens: string[]): string {
   const labels = tokens.map((t) => getInstitutieLabel(t));
   if (labels.length <= 3) return labels.join(", ");
-  return `${labels.slice(0, 3).join(", ")} si alte ${labels.length - 3} instante`;
+  const rest = labels.length - 3;
+  return `${labels.slice(0, 3).join(", ")} si inca ${rest} ${rest === 1 ? "instanta" : "instante"}`;
 }
 
 interface DosareState {
