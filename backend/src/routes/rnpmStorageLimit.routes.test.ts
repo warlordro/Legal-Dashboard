@@ -163,7 +163,7 @@ describe("limita RNPM ruleaza inainte de captcha", () => {
     });
   });
 
-  it("paginarea cu gcode existent este exceptata", async () => {
+  it("paginarea cu gcode existent trece prin aceeasi verificare de limita (F12-F3)", async () => {
     captchaGuard.mockResolvedValueOnce({
       ok: true,
       source: "body",
@@ -178,8 +178,33 @@ describe("limita RNPM ruleaza inainte de captcha", () => {
     });
 
     expect(res.status).toBe(200);
-    expect(storageGuard).not.toHaveBeenCalled();
+    // Inainte de fix: not.toHaveBeenCalled() — continuarea era scutita de limita
+    // pe baza unui `gcode` nevid din body, fara nicio validare a lui.
+    expect(storageGuard).toHaveBeenCalledWith("u1");
     expect(captchaGuard).toHaveBeenCalledOnce();
+  });
+
+  it("F12-F3: un gcode arbitrar din body NU scuteste de limita (429, nu 200)", async () => {
+    storageGuard.mockRejectedValueOnce(new RnpmStorageLimitError(600 * 1024 * 1024, 500 * 1024 * 1024));
+
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        type: "ipoteci",
+        params: {},
+        captchaKey: "x".repeat(32),
+        gcode: "orice-string-nevid",
+      }),
+    });
+
+    expect(res.status).toBe(429);
+    await expect(res.json()).resolves.toMatchObject({
+      data: null,
+      error: { code: "QUOTA_EXCEEDED", message: expect.stringContaining("Sterge avize") },
+    });
+    expect(storageGuard).toHaveBeenCalledWith("u1");
+    expect(captchaGuard).not.toHaveBeenCalled();
   });
 });
 

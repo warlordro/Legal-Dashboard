@@ -240,10 +240,11 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     return captchaResolution.response;
   }
   const ownerId = getOwnerId(c);
-  const previewGcode = (parsedBody as { gcode?: unknown }).gcode;
-  if (!(typeof previewGcode === "string" && previewGcode.length > 0)) {
-    await assertRnpmStorageWithinLimit(ownerId);
-  }
+  // F12-F3 (2026-07-26): pana acum un `gcode` nevid din body sarea peste limita de
+  // stocare. Conditia era pur sintactica (string nevid), deci orice cerere putea
+  // scuti orice cautare — nu doar o continuare reala. Limita se verifica acum
+  // intotdeauna; un user peste plafon elibereaza spatiu inainte sa continue.
+  await assertRnpmStorageWithinLimit(ownerId);
   const guard = await withRnpmCaptchaGuards(c, parsedBody);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
