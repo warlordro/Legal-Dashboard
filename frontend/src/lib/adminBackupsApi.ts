@@ -34,7 +34,5 @@ export async function adminDeleteBackups(): Promise<number> {
 }
 
 export async function adminDeleteBackup(name: string): Promise<void> {
-  await unwrapMonitoring<{ name: string }>(
-    await apiFetch(`${BASE}/${encodeURIComponent(name)}`, { method: "DELETE" })
-  );
+  await unwrapMonitoring<{ name: string }>(await apiFetch(`${BASE}/${encodeURIComponent(name)}`, { method: "DELETE" }));
 }
