@@ -526,20 +526,33 @@ async function callAnthropic(
       // varianta non-streaming; NU se face SSE spre client.
       const effortCapable = EFFORT_CAPABLE_MODEL_IDS.has(modelId);
       const sendEffort = effort !== undefined && !effortDisabled() && effortCapable;
-      const message = await client.messages
-        .stream(
-          {
-            model: modelId,
-            max_tokens: maxTokensFor(effortCapable),
-            // v2.42.0 (5.6): system prompt nativ Anthropic.
-            ...(system !== null ? { system } : {}),
-            messages: [{ role: "user", content: user }],
-            // Doar modelele din allowlist — Haiku 4.5 respinge campul cu 400.
-            ...(sendEffort ? { output_config: { effort } } : {}),
-          },
-          { signal: composeSignal(timeout, signal) }
-        )
-        .finalMessage();
+      const stream = client.messages.stream(
+        {
+          model: modelId,
+          max_tokens: maxTokensFor(effortCapable),
+          // v2.42.0 (5.6): system prompt nativ Anthropic.
+          ...(system !== null ? { system } : {}),
+          messages: [{ role: "user", content: user }],
+          // Doar modelele din allowlist — Haiku 4.5 respinge campul cu 400.
+          ...(sendEffort ? { output_config: { effort } } : {}),
+        },
+        { signal: composeSignal(timeout, signal) }
+      );
+      let message: Anthropic.Message;
+      try {
+        message = await stream.finalMessage();
+      } catch (e) {
+        // v2.43.3: pastram referinta la stream tocmai ca sa putem recupera tokenii deja
+        // generati cand apelul pica la mijloc (timeout, abort, eroare de retea).
+        // withAiLogging citeste `e.usage` pe calea de eroare; fara asta un apel taiat
+        // dupa 14k tokeni s-ar inregistra cu 0/0 si cost 0, desi providerul l-a facturat
+        // — exact cifra pe care ne bazam ca sa spunem daca a crescut costul.
+        const partial = stream.currentMessage?.usage;
+        if (partial && e !== null && typeof e === "object" && !("usage" in e)) {
+          (e as { usage?: unknown }).usage = partial;
+        }
+        throw e;
+      }
       const value = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
       return {
         value,
@@ -547,6 +560,7 @@ async function callAnthropic(
           usageInput: message.usage?.input_tokens,
           usageOutput: message.usage?.output_tokens,
           stopReason: message.stop_reason ?? undefined,
+          effortSent: sendEffort ? effort : "none",
         },
       };
     },
@@ -777,6 +791,7 @@ export async function callOpenRouter(
           // v2.43.3: omologul lui stop_reason de pe ruta nativa. "length" = raspuns
           // taiat de plafonul de tokeni — semnalul pe care il masuram dupa deploy.
           stopReason: choice?.finish_reason ?? undefined,
+          effortSent: sendEffort ? effort : "none",
         },
       };
     },

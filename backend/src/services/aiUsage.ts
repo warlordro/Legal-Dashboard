@@ -28,6 +28,10 @@ export interface AiUsageCallMeta {
   // nu o metrica de facturat. Ajunge in log doar pe calea de SUCCES (spread pe meta);
   // pe calea de eroare nu exista producator, deci nu se adauga acolo.
   stopReason?: string;
+  // v2.43.3: ce effort a plecat efectiv ("low"/"medium"/"high") sau "none". Tot doar
+  // pentru linia de log: fara el nu poti verifica dupa deploy ca reducerea de cost e
+  // chiar in vigoare, iar o scapare din allowlist ar rula tacut pe default-ul "high".
+  effortSent?: string;
 }
 
 interface ModelPrice {

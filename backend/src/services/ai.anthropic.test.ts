@@ -65,11 +65,43 @@ describe("callAnthropic — forma requestului (v2.43.3)", () => {
     expect(AI_MAX_TOKENS_EFFORT).toBe(16000);
   });
 
-  it("paseaza signal-ul compus in RequestOptions, ca la messages.create", async () => {
-    await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000);
+  it("abortul clientului mid-call se propaga si opreste apelul", async () => {
+    // Inainte testul verifica doar `instanceof AbortSignal`, ceea ce era mereu
+    // adevarat din composeSignal (timeout intern) — trecea si daca signal-ul
+    // parinte nu era compus deloc.
+    streamMock.mockReset().mockImplementation((_body: unknown, opts?: { signal?: AbortSignal }) => ({
+      finalMessage: () =>
+        new Promise((_resolve, reject) => {
+          opts?.signal?.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), {
+            once: true,
+          });
+        }),
+    }));
 
-    const options = streamMock.mock.calls[0][1] as { signal?: AbortSignal };
-    expect(options.signal).toBeInstanceOf(AbortSignal);
+    const controller = new AbortController();
+    const pending = callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 60_000, undefined, controller.signal);
+    const assertion = expect(pending).rejects.toSatisfy(
+      (e: unknown) => e instanceof DOMException && e.name === "AbortError",
+      "asteptat AbortError propagat din signal-ul parinte"
+    );
+    setTimeout(() => controller.abort(), 20);
+    await assertion;
+  });
+
+  it("usage-ul acumulat se recupereaza cand apelul pica la mijloc", async () => {
+    // Fara asta, un apel taiat dupa ce providerul a generat tokeni s-ar inregistra
+    // cu 0/0 si cost 0 — exact cifra pe care ne bazam ca sa spunem daca a crescut costul.
+    streamMock.mockReset().mockReturnValue({
+      currentMessage: { usage: { input_tokens: 120, output_tokens: 14000 } },
+      finalMessage: async () => {
+        throw new Error("connection reset");
+      },
+    });
+
+    await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).rejects.toSatisfy((e: unknown) => {
+      const usage = (e as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+      return usage?.input_tokens === 120 && usage?.output_tokens === 14000;
+    }, "asteptat usage partial atasat pe eroare");
   });
 
   it("output_config.effort DOAR pentru claude-sonnet-5 si claude-opus-5", async () => {
