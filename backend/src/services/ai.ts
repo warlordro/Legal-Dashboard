@@ -124,6 +124,19 @@ function maxTokensFor(effortCapable: boolean): number {
   return effortCapable ? AI_MAX_TOKENS_EFFORT : AI_MAX_TOKENS;
 }
 
+// v2.43.3: analiza taiata inainte de final. Se arunca DUPA ce apelul a fost
+// inregistrat ca succes in `ai_usage` — pentru ca a fost real si a fost facturat —
+// dar inainte ca textul incomplet sa ajunga la user. Motivul: o analiza trunchiata
+// arata completa pentru un cititor non-specialist, care e exact publicul tinta;
+// e un mod de esec mai periculos decat raspunsul gol, fiindca nu se vede.
+export class AiTruncatedError extends Error {
+  readonly code = "AI_TRUNCATED";
+  constructor(readonly stopReason: string) {
+    super("Analiza a fost taiata inainte de final (buget de tokeni epuizat).");
+    this.name = "AiTruncatedError";
+  }
+}
+
 // v2.43.3 (Claude 5): effort controleaza adancimea de thinking. Default-ul serverului
 // e "high" (a omite campul == high), deci "medium"/"low" sunt REDUCERI fata de
 // cheltuiala implicita de acum, nu functii noi.
@@ -137,11 +150,20 @@ export type AiEffort = "low" | "medium" | "high";
 const EFFORT_CAPABLE_MODEL_IDS = new Set(["claude-sonnet-5", "claude-opus-5"]);
 const EFFORT_CAPABLE_OPENROUTER_SLUGS = new Set(["anthropic/claude-sonnet-5", "anthropic/claude-opus-5"]);
 
-// Kill switch operational: omite campurile de effort pe AMBELE rute, fara rebuild.
-// NU e levier de cost — default-ul serverului e "high", deci activarea lui CRESTE
-// cheltuiala de thinking. E rollback de comportament.
-function effortDisabled(): boolean {
-  return process.env.AI_EFFORT_DISABLED === "1";
+// Parghie operationala pe effort, in AMBELE directii, fara rebuild.
+// `AI_EFFORT_OVERRIDE=low|medium|high` forteaza nivelul pe toate apelurile, ignorand
+// ce cere codul; `off` omite complet campul, deci modelele revin la default-ul
+// serverului (`high`) — adica varianta cea mai scumpa.
+// Varianta veche `AI_EFFORT_DISABLED=1` ramane recunoscuta, echivalenta cu `off`.
+// Motivul schimbarii (finding review adversarial): un simplu pornit/oprit oferea DOAR
+// directia scumpa. Daca dupa deploy costul creste, trebuie sa poti cobori nivelul din
+// configurare, nu prin redeploy.
+function resolveEffort(requested?: AiEffort): AiEffort | undefined {
+  const raw = process.env.AI_EFFORT_OVERRIDE?.trim().toLowerCase();
+  if (raw === "off") return undefined;
+  if (raw === "low" || raw === "medium" || raw === "high") return raw;
+  if (process.env.AI_EFFORT_DISABLED === "1") return undefined;
+  return requested;
 }
 
 // SECURITY: Body size limit for AI endpoint (100KB max)
@@ -513,7 +535,8 @@ async function callAnthropic(
   effort?: AiEffort
 ): Promise<string> {
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "anthropic",
     modelId,
     async () => {
@@ -525,7 +548,8 @@ async function callAnthropic(
       // indiferent daca stream-ul primeste evenimente. Valoarea de retur e identica cu
       // varianta non-streaming; NU se face SSE spre client.
       const effortCapable = EFFORT_CAPABLE_MODEL_IDS.has(modelId);
-      const sendEffort = effort !== undefined && !effortDisabled() && effortCapable;
+      const effectiveEffort = resolveEffort(effort);
+      const sendEffort = effectiveEffort !== undefined && effortCapable;
       const stream = client.messages.stream(
         {
           model: modelId,
@@ -534,7 +558,7 @@ async function callAnthropic(
           ...(system !== null ? { system } : {}),
           messages: [{ role: "user", content: user }],
           // Doar modelele din allowlist — Haiku 4.5 respinge campul cu 400.
-          ...(sendEffort ? { output_config: { effort } } : {}),
+          ...(sendEffort ? { output_config: { effort: effectiveEffort } } : {}),
         },
         { signal: composeSignal(timeout, signal) }
       );
@@ -554,18 +578,21 @@ async function callAnthropic(
         throw e;
       }
       const value = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
+      if (message.stop_reason === "max_tokens") truncatedBy = "max_tokens";
       return {
         value,
         meta: {
           usageInput: message.usage?.input_tokens,
           usageOutput: message.usage?.output_tokens,
           stopReason: message.stop_reason ?? undefined,
-          effortSent: sendEffort ? effort : "none",
+          effortSent: sendEffort ? effectiveEffort : "none",
         },
       };
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 async function callOpenAI(
@@ -710,7 +737,8 @@ export async function callOpenRouter(
   }
 
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "openrouter",
     slug,
     async () => {
@@ -733,14 +761,15 @@ export async function callOpenRouter(
       // O SINGURA variabila de body cu cast: un `@ts-expect-error` pe spread
       // conditionat ar pica build-ul strict ca "unused" cand conditia e falsa.
       const effortCapable = EFFORT_CAPABLE_OPENROUTER_SLUGS.has(slug);
-      const sendEffort = effort !== undefined && !effortDisabled() && effortCapable;
+      const effectiveEffort = resolveEffort(effort);
+      const sendEffort = effectiveEffort !== undefined && effortCapable;
       const body = {
         model: slug,
         // v2.42.0 (5.6): mesaj system separat (toChatMessages).
         messages: toChatMessages(system, user),
         max_tokens: maxTokensFor(effortCapable),
         usage: { include: true },
-        ...(sendEffort ? { reasoning: { effort } } : {}),
+        ...(sendEffort ? { reasoning: { effort: effectiveEffort } } : {}),
         // Cast pe varianta NON-streaming: `create` are overload-uri discriminate pe
         // `stream`, iar un cast pe uniunea de parametri ar face TS sa infereze
         // ChatCompletion | Stream si sa piarda `.choices` / `.usage`.
@@ -757,6 +786,7 @@ export async function callOpenRouter(
         | undefined;
       const choice = completion.choices?.[0];
       const content = choice?.message?.content ?? "";
+      if (choice?.finish_reason === "length") truncatedBy = "length";
       if (!content.trim()) {
         // F10: diagnosticul OpenRouter pentru raspunsuri goale logheaza doar
         // shape-ul (finish_reason, presence flags, lungimi) si NU continutul
@@ -778,7 +808,7 @@ export async function callOpenRouter(
           // v2.43.3: fara asta, la un raspuns gol nu stii daca effort-ul a plecat sau nu,
           // deci debugging-ul ar fi ghicit.
           "effort_sent:",
-          sendEffort ? effort : "none"
+          sendEffort ? effectiveEffort : "none"
         );
       }
       return {
@@ -791,12 +821,14 @@ export async function callOpenRouter(
           // v2.43.3: omologul lui stop_reason de pe ruta nativa. "length" = raspuns
           // taiat de plafonul de tokeni — semnalul pe care il masuram dupa deploy.
           stopReason: choice?.finish_reason ?? undefined,
-          effortSent: sendEffort ? effort : "none",
+          effortSent: sendEffort ? effectiveEffort : "none",
         },
       };
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 export { callAnthropic, callOpenAI, callGoogle };

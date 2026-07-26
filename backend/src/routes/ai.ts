@@ -14,6 +14,7 @@ import {
   shouldRouteViaOpenRouter,
   type AiRouting,
   validateAiBody,
+  AiTruncatedError,
 } from "../services/ai.ts";
 import { getSettings, upsertSettings, type AiProviderMode } from "../db/ownerAiSettingsRepository.ts";
 import { getDecryptedKey } from "../db/tenantKeysRepository.ts";
@@ -242,6 +243,21 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
     reservationToRelease = null;
     return c.json({ analysis: text });
   } catch (err: unknown) {
+    // v2.43.3: analiza taiata de plafonul de tokeni. Apelul a fost real si a fost
+    // facturat (deja inregistrat in ai_usage), dar textul partial nu se livreaza —
+    // arata complet pentru cine nu e jurist. Rezervarea NU se elibereaza, din acelasi
+    // motiv ca la raspunsul gol: consumul a avut loc.
+    if (err instanceof AiTruncatedError) {
+      reservationToRelease = null;
+      return c.json(
+        fail(
+          ErrorCodes.AI_TRUNCATED,
+          "Analiza s-a oprit inainte de final si a fost respinsa ca incompleta. Reincearca; daca se repeta, alege un model diferit.",
+          c
+        ),
+        502
+      );
+    }
     // SECURITY: Log error server-side but never expose internal details to client
     console.error("Eroare AI:", err instanceof Error ? err.message : err);
     return aiFailure(c, "Eroare la analiza AI. Verificati cheia API si incercati din nou.");

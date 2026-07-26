@@ -35,6 +35,8 @@ afterEach(() => {
   vi.clearAllMocks();
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu undefined.
   delete process.env.AI_EFFORT_DISABLED;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu undefined.
+  delete process.env.AI_EFFORT_OVERRIDE;
 });
 
 describe("callAnthropic — forma requestului (v2.43.3)", () => {
@@ -127,12 +129,31 @@ describe("callAnthropic — forma requestului (v2.43.3)", () => {
     expect(body).not.toHaveProperty("output_config");
   });
 
-  it("AI_EFFORT_DISABLED=1 omite output_config chiar si pe un model capabil", async () => {
+  it("AI_EFFORT_OVERRIDE=off omite output_config chiar si pe un model capabil", async () => {
+    process.env.AI_EFFORT_OVERRIDE = "off";
+    await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000, undefined, undefined, "medium");
+
+    const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("AI_EFFORT_DISABLED=1 ramane recunoscut (compat cu varianta veche)", async () => {
     process.env.AI_EFFORT_DISABLED = "1";
     await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000, undefined, undefined, "medium");
 
     const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
     expect(body).not.toHaveProperty("output_config");
+  });
+
+  it("AI_EFFORT_OVERRIDE forteaza nivelul cerut de operator, in ambele directii", async () => {
+    // Asta e ce lipsea din varianta pornit/oprit: parghia mergea doar spre scump.
+    for (const level of ["low", "high"]) {
+      process.env.AI_EFFORT_OVERRIDE = level;
+      streamMock.mockClear().mockReturnValue(mockFinalMessage());
+      await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000, undefined, undefined, "medium");
+      const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(body.output_config).toEqual({ effort: level });
+    }
   });
 
   it("callModel propaga effort spre ruta nativa Anthropic", async () => {
@@ -160,10 +181,16 @@ describe("callAnthropic — forma requestului (v2.43.3)", () => {
       logs.push(a.map(String).join(" "));
     });
     try {
-      await callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000);
+      // v2.43.3: trunchierea se INREGISTREAZA ca succes (apelul a avut loc si a fost
+      // facturat), apoi se arunca — textul partial nu ajunge la user.
+      await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).rejects.toMatchObject({
+        code: "AI_TRUNCATED",
+        stopReason: "max_tokens",
+      });
       const line = logs.find((l) => l.includes('"action":"ai_call"'));
       expect(line).toBeDefined();
       expect(line).toContain('"stopReason":"max_tokens"');
+      expect(line).toContain('"status":"ok"');
     } finally {
       spy.mockRestore();
     }

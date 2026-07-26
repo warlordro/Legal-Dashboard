@@ -134,8 +134,8 @@ describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
     expect(body.reasoning).toEqual({ effort: "medium" });
   });
 
-  it("AI_EFFORT_DISABLED=1 omite reasoning, dar pastreaza usage", async () => {
-    process.env.AI_EFFORT_DISABLED = "1";
+  it("AI_EFFORT_OVERRIDE=off omite reasoning, dar pastreaza usage", async () => {
+    process.env.AI_EFFORT_OVERRIDE = "off";
     try {
       mockOpenRouterResponse({ text: "ok" });
       await callOpenRouter(
@@ -154,7 +154,7 @@ describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
       expect(body.usage).toEqual({ include: true });
     } finally {
       // biome-ignore lint/performance/noDelete: env trebuie unset real
-      delete process.env.AI_EFFORT_DISABLED;
+      delete process.env.AI_EFFORT_OVERRIDE;
     }
   });
 
@@ -168,10 +168,15 @@ describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
       logs.push(a.map(String).join(" "));
     });
     try {
-      await callOpenRouter("k".repeat(20), "anthropic/claude-opus-5", "prompt", 5000);
+      // v2.43.3: la fel ca pe ruta nativa — succes inregistrat, apoi throw.
+      await expect(callOpenRouter("k".repeat(20), "anthropic/claude-opus-5", "prompt", 5000)).rejects.toMatchObject({
+        code: "AI_TRUNCATED",
+        stopReason: "length",
+      });
       const line = logs.find((l) => l.includes('"action":"ai_call"'));
       expect(line).toBeDefined();
       expect(line).toContain('"stopReason":"length"');
+      expect(line).toContain('"status":"ok"');
     } finally {
       spy.mockRestore();
     }
