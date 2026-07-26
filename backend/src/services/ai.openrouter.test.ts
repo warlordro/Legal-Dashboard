@@ -97,6 +97,71 @@ function mockOpenRouterResponse(options?: { text?: string; input?: number; outpu
   });
 }
 
+describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
+  it("are usage.include TOP-LEVEL si NU extra_body", async () => {
+    mockOpenRouterResponse({ text: "ok" });
+    await callOpenRouter("k".repeat(20), "anthropic/claude-opus-5", "prompt", 5000);
+
+    const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+    // `extra_body` e idiom din SDK-ul Python; openai@6 il trimite ca pe o cheie
+    // literala, pe care OpenRouter nu o interpreteaza -> costul nu venea niciodata.
+    expect(body).not.toHaveProperty("extra_body");
+    expect(body.usage).toEqual({ include: true });
+    expect(body.max_tokens).toBe(AI_MAX_TOKENS);
+  });
+
+  it("effort ajunge in reasoning.effort pentru un slug din allowlist", async () => {
+    mockOpenRouterResponse({ text: "ok" });
+    await callOpenRouter(
+      "k".repeat(20),
+      "anthropic/claude-opus-5",
+      "prompt",
+      5000,
+      undefined,
+      undefined,
+      undefined,
+      "medium"
+    );
+
+    const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+    expect(body.reasoning).toEqual({ effort: "medium" });
+  });
+
+  it("AI_EFFORT_DISABLED=1 omite reasoning, dar pastreaza usage", async () => {
+    process.env.AI_EFFORT_DISABLED = "1";
+    try {
+      mockOpenRouterResponse({ text: "ok" });
+      await callOpenRouter(
+        "k".repeat(20),
+        "anthropic/claude-opus-5",
+        "prompt",
+        5000,
+        undefined,
+        undefined,
+        undefined,
+        "medium"
+      );
+      const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(body).not.toHaveProperty("reasoning");
+      // Kill switch-ul e doar pentru effort, nu pentru raportarea de cost.
+      expect(body.usage).toEqual({ include: true });
+    } finally {
+      // biome-ignore lint/performance/noDelete: env trebuie unset real
+      delete process.env.AI_EFFORT_DISABLED;
+    }
+  });
+
+  it("modelele din afara allowlist-ului NU primesc reasoning", async () => {
+    for (const slug of ["anthropic/claude-haiku-4.5", "openai/gpt-5.6-sol", "google/gemini-3.1-pro-preview"]) {
+      openRouterCreateMock.mockClear();
+      mockOpenRouterResponse({ text: "ok" });
+      await callOpenRouter("k".repeat(20), slug, "prompt", 5000, undefined, undefined, undefined, "medium");
+      const body = openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>;
+      expect(body).not.toHaveProperty("reasoning");
+    }
+  });
+});
+
 describe("resolveOpenRouterSlug", () => {
   it("resolves model slugs", () => {
     expect(resolveOpenRouterSlug("claude-sonnet")).toBe(OPENROUTER_MODEL_MAP["claude-sonnet"]);

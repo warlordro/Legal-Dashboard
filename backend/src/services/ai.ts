@@ -111,6 +111,25 @@ export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analys
 // (stop_reason: "max_tokens") dupa o faza lunga de gandire.
 export const AI_MAX_TOKENS = 16000; // max output tokens (thinking + text pe Claude 5)
 
+// v2.43.3 (Claude 5): effort controleaza adancimea de thinking. Default-ul serverului
+// e "high" (a omite campul == high), deci "medium"/"low" sunt REDUCERI fata de
+// cheltuiala implicita de acum, nu functii noi.
+export type AiEffort = "low" | "medium" | "high";
+
+// Allowlist pe valori EXACTE, nu pe prefix. `anthropic/claude-haiku-4.5` exista in
+// OPENROUTER_MODEL_MAP si NU suporta effort (400) — un gate pe prefixul "anthropic/"
+// sau pe substringul "claude-" l-ar include. Gate-ul OpenRouter se aplica pe slug-ul
+// REZOLVAT (dupa resolveOpenRouterSlug), pentru ca OPENROUTER_MODEL_OVERRIDES poate
+// remapa orice cheie pe orice slug valid.
+const EFFORT_CAPABLE_OPENROUTER_SLUGS = new Set(["anthropic/claude-sonnet-5", "anthropic/claude-opus-5"]);
+
+// Kill switch operational: omite campurile de effort pe AMBELE rute, fara rebuild.
+// NU e levier de cost — default-ul serverului e "high", deci activarea lui CRESTE
+// cheltuiala de thinking. E rollback de comportament.
+function effortDisabled(): boolean {
+  return process.env.AI_EFFORT_DISABLED === "1";
+}
+
 // SECURITY: Body size limit for AI endpoint (100KB max)
 export const MAX_AI_BODY_SIZE = 100 * 1024;
 
@@ -641,7 +660,8 @@ export async function callOpenRouter(
   timeout: number,
   tracking?: AiUsageTrackingContext,
   signal?: AbortSignal,
-  routingTag?: AiUsageRoutingTag
+  routingTag?: AiUsageRoutingTag,
+  effort?: AiEffort
 ): Promise<string> {
   if (process.env.OPENROUTER_DISABLED === "1") {
     throw new Error("OPENROUTER_DISABLED");
@@ -661,17 +681,30 @@ export async function callOpenRouter(
         },
         timeout,
       });
-      const completion = await client.chat.completions.create(
-        {
-          model: slug,
-          // v2.42.0 (5.6): mesaj system separat (toChatMessages).
-          messages: toChatMessages(system, user),
-          max_tokens: AI_MAX_TOKENS,
-          // @ts-expect-error OpenRouter extension for returning real per-call cost.
-          extra_body: { usage: { include: true } },
-        },
-        { signal: composeSignal(timeout, signal) }
-      );
+      // v2.43.3: `usage` si `reasoning` sunt proprietati TOP-LEVEL in corpul cererii
+      // OpenRouter. Inainte se trimitea `extra_body: { usage: { include: true } }` —
+      // idiom din SDK-ul Python, inexistent in openai@6 (zero aparitii in pachet).
+      // SDK-ul nu l-a aruncat: `FallbackEncoder` face JSON.stringify pe obiectul
+      // intreg, deci pleca pe wire ca o cheie literala `extra_body`, pe care
+      // OpenRouter nu o interpreteaza. Rezultat: `usage.cost` nu venea niciodata si
+      // costul cadea mereu pe tabelul static din aiUsage.ts.
+      // O SINGURA variabila de body cu cast: un `@ts-expect-error` pe spread
+      // conditionat ar pica build-ul strict ca "unused" cand conditia e falsa.
+      const sendEffort = effort !== undefined && !effortDisabled() && EFFORT_CAPABLE_OPENROUTER_SLUGS.has(slug);
+      const body = {
+        model: slug,
+        // v2.42.0 (5.6): mesaj system separat (toChatMessages).
+        messages: toChatMessages(system, user),
+        max_tokens: AI_MAX_TOKENS,
+        usage: { include: true },
+        ...(sendEffort ? { reasoning: { effort } } : {}),
+        // Cast pe varianta NON-streaming: `create` are overload-uri discriminate pe
+        // `stream`, iar un cast pe uniunea de parametri ar face TS sa infereze
+        // ChatCompletion | Stream si sa piarda `.choices` / `.usage`.
+      } as unknown as OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming;
+      const completion = await client.chat.completions.create(body, {
+        signal: composeSignal(timeout, signal),
+      });
       const usage = completion.usage as
         | {
             prompt_tokens?: number;
