@@ -366,8 +366,11 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     // ar fi mascat ca 500 generic.
     if ((e as { code?: unknown })?.code === "RNPM_STORAGE_LIMIT") throw e;
     const msg = e instanceof Error ? e.message : "Eroare necunoscuta";
+    // F12-F5: detaliul ramane doar in log. Mesajul brut ajungea in corpul 500 catre
+    // client — iar pe calea captcha continea cheia tenantului. Textul generic e cel
+    // folosit de celelalte noua apeluri internalError din acest fisier.
     console.error("[rnpm/search]", msg);
-    return internalError(c, msg);
+    return internalError(c, "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.");
   } finally {
     if (dedupKey) clearInflight(dedupKey);
   }

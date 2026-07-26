@@ -44,3 +44,59 @@ describe("solveRnpmCaptcha — race mode si abort", () => {
     await assertion;
   });
 });
+
+// F12-F5 (2026-07-26): SDK-ul 2Captcha pune cheia in query string-ul requestului,
+// iar node-fetch include URL-ul intreg in mesajul FetchError. Mesajul ajungea
+// verbatim la client (corp 500, evenimente SSE bulk/split, corp 400 pe balance).
+// In web mode cheia e a TENANTULUI. Testele de mai jos re-mock-uiesc SDK-ul cu un
+// Solver care rejecteaza exact ca node-fetch si verifica pe modulul reimportat.
+describe("F12-F5 — cheia captcha nu ajunge in mesajele de eroare", () => {
+  const KEY = "abcdef0123456789abcdef0123456789";
+
+  afterEach(() => {
+    vi.doUnmock("@2captcha/captcha-solver");
+    vi.resetModules();
+  });
+
+  it("solveRnpmCaptcha redacteaza cheia dintr-o eroare de transport a SDK-ului 2Captcha", async () => {
+    vi.doMock("@2captcha/captcha-solver", () => ({
+      Solver: class {
+        constructor(private readonly apikey: string) {}
+        recaptcha(): Promise<never> {
+          return Promise.reject(
+            new Error(`request to https://2captcha.com/in.php?key=${this.apikey}&json=1 failed, reason: ECONNREFUSED`)
+          );
+        }
+      },
+    }));
+    vi.resetModules();
+    const { solveRnpmCaptcha: solve } = await import("./captchaSolver.ts");
+
+    await expect(solve(KEY, "2captcha")).rejects.toSatisfy((e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      return !msg.includes(KEY) && msg.includes("***");
+    }, "asteptat mesaj fara cheie, cu ***");
+  });
+
+  it("getCaptchaBalance redacteaza cheia dintr-o eroare de transport", async () => {
+    vi.doMock("@2captcha/captcha-solver", () => ({
+      Solver: class {
+        constructor(private readonly apikey: string) {}
+        balance(): Promise<never> {
+          return Promise.reject(
+            new Error(
+              `request to https://2captcha.com/res.php?key=${this.apikey}&action=getbalance failed, reason: ENOTFOUND`
+            )
+          );
+        }
+      },
+    }));
+    vi.resetModules();
+    const { getCaptchaBalance: balance } = await import("./captchaSolver.ts");
+
+    await expect(balance(KEY, "2captcha")).rejects.toSatisfy((e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      return !msg.includes(KEY) && msg.includes("***");
+    }, "asteptat mesaj fara cheie, cu ***");
+  });
+});

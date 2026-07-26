@@ -182,3 +182,36 @@ describe("limita RNPM ruleaza inainte de captcha", () => {
     expect(captchaGuard).toHaveBeenCalledOnce();
   });
 });
+
+// F12-F5 (2026-07-26): mesajul erorii interne nu mai pleaca verbatim spre client.
+// Pe calea captcha continea cheia tenantului (vezi captchaSolver.redactCaptchaSecrets);
+// redactarea la sursa e primul strat, textul generic de aici e al doilea.
+describe("F12-F5 — raspunsul 500 nu expune textul erorii interne", () => {
+  it("o eroare din executeSearch intoarce mesaj generic cu trimitere la requestId", async () => {
+    // Guard-ul mock-uit implicit intoarce body gol -> ruta ar da 400 la validarea
+    // de tip inainte sa ajunga la serviciu. Aici ne trebuie calea completa.
+    captchaGuard.mockResolvedValueOnce({
+      ok: true,
+      source: "body",
+      body: { type: "ipoteci", params: {}, captchaKey: "x".repeat(32) },
+      captchaKey: "x".repeat(32),
+    });
+    searchService.mockRejectedValueOnce(
+      new Error("Eroare 2Captcha: request to https://2captcha.com/in.php?key=SECRET failed")
+    );
+
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "ipoteci", params: {}, captchaKey: "x".repeat(32) }),
+    });
+
+    expect(res.status).toBe(500);
+    const body = (await res.json()) as { error: { code: string; message: string }; requestId: string };
+    expect(body.error.code).toBe("INTERNAL_ERROR");
+    expect(body.error.message).not.toContain("SECRET");
+    expect(body.error.message).not.toContain("2captcha.com");
+    expect(body.error.message).toContain("requestId");
+    expect(body.requestId).toEqual(expect.any(String));
+  });
+});

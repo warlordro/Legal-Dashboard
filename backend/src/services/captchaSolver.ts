@@ -40,6 +40,28 @@ export class CaptchaInsufficientFundsError extends Error {
   }
 }
 
+// F12-F5 (2026-07-26): SDK-ul 2Captcha pune cheia in query string-ul requestului
+// (`in.php?key=...`, `res.php?key=...`), iar node-fetch include URL-ul intreg in
+// mesajul FetchError pe orice esec de transport (DNS, ECONNREFUSED, TLS). Mesajul
+// ajungea verbatim in corpul 500 al rutei de cautare, in evenimentele SSE de
+// bulk/split, in corpul 400 de la /captcha/balance si in stdout. In web mode cheia
+// e a TENANTULUI, deci orice user autentificat o putea extrage provocand o eroare
+// de retea. Redactam la CONSTRUCTIA erorii, nu la sink: exista sase sinkuri care
+// stringifica acelasi Error.message.
+// Redactare pe VALOARE (cheile sunt in scope aici), nu pe numele parametrului —
+// acela ar fi o presupunere despre API-ul provider-ului.
+export function redactCaptchaSecrets(message: string, ...secrets: Array<string | undefined>): string {
+  let out = message;
+  for (const secret of secrets) {
+    const trimmed = secret?.trim();
+    // Sub 8 caractere nu e o cheie reala (validateKey cere >= 10) si o inlocuire
+    // pe un fragment scurt ar muti mesajul degeaba.
+    if (!trimmed || trimmed.length < 8) continue;
+    out = out.split(trimmed).join("***");
+  }
+  return out;
+}
+
 function providerLabel(provider: CaptchaProvider): string {
   return provider === "capsolver" ? "CapSolver" : "2Captcha";
 }
@@ -80,7 +102,7 @@ async function solveWith2Captcha(apiKey: string, signal?: AbortSignal): Promise<
     if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", e);
     if (/ERROR_WRONG_USER_KEY|ERROR_KEY_DOES_NOT_EXIST/i.test(msg))
       throw new CaptchaError("Cheia 2Captcha este invalida.", e);
-    throw new CaptchaError(`Eroare 2Captcha: ${msg}`, e);
+    throw new CaptchaError(`Eroare 2Captcha: ${redactCaptchaSecrets(msg, apiKey)}`, e);
   } finally {
     if (signal && onAbort) signal.removeEventListener("abort", onAbort);
   }
@@ -317,7 +339,9 @@ async function balance2Captcha(apiKey: string, signal: AbortSignal): Promise<num
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     const msg = e instanceof Error ? e.message : String(e);
     if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", e);
-    throw e;
+    // F12-F5: rethrow-ul brut de aici scurgea cheia in corpul 400 al rutei
+    // /captcha/balance (rnpm.ts pune e.message verbatim in envelope).
+    throw new CaptchaError(`Eroare 2Captcha: ${redactCaptchaSecrets(msg, apiKey)}`, e);
   } finally {
     if (onAbort) signal.removeEventListener("abort", onAbort);
   }
