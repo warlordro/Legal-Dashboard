@@ -1184,17 +1184,18 @@ function autoCompactFailureReason(error: unknown): string {
     case "EPERM":
     case "EIO":
     case "EBUSY":
-    // better-sqlite3 arunca coduri SQLITE_*, nu errno — fara ele, clasa de I/O ar fi
-    // cazut in "error" exact pe erorile pentru care a fost adaugata (finding review).
-    case "SQLITE_IOERR":
-    case "SQLITE_CANTOPEN":
-    case "SQLITE_READONLY":
-    case "SQLITE_FULL":
-    case "SQLITE_BUSY":
-    case "SQLITE_CORRUPT":
     case "SQLITE_NOTADB":
       return "io_error";
     default:
+      // better-sqlite3 activeaza extended result codes, deci arunca SQLITE_IOERR_WRITE,
+      // SQLITE_CANTOPEN_ISDIR, SQLITE_BUSY_SNAPSHOT etc. — variantele neextinse practic
+      // nu apar, deci un match exact pe ele nu prinde nimic (finding review adversarial).
+      // LIMITARE cunoscuta: pe calea de compactare prin worker, snapshotRunner
+      // re-creeaza eroarea ca `new Error(msg.error)`, deci `.code` nu traverseaza
+      // granita workerului si acele esecuri raman clasificate "error".
+      if (typeof code === "string" && /^SQLITE_(IOERR|CANTOPEN|READONLY|FULL|BUSY|CORRUPT|NOTADB)/.test(code)) {
+        return "io_error";
+      }
       return "error";
   }
 }

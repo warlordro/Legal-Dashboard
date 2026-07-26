@@ -187,6 +187,13 @@ export function openRnpmDbRaw(ownerId: string): Database.Database | null {
   return new Database(dbPath, { readonly: true, fileMustExist: true });
 }
 
+// Test-only: dimensiunea registry-ului de handle-uri. Fara el, un leak in prewarm nu
+// poate fi pinat de niciun test — `hasPendingRnpmMigrations` deschide o conexiune
+// proprie, deci contoarele lui nu spun nimic despre registry.
+export function __rnpmHandleCountForTests(): number {
+  return handles.size;
+}
+
 export function closeRnpmDb(ownerId: string): void {
   const db = handles.get(ownerId);
   if (db) {

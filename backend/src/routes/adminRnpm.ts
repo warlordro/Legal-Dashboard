@@ -7,7 +7,7 @@ import { Hono } from "hono";
 import { z } from "zod";
 import { getRnpmBackupDir, listRnpmBackups, withMaintenanceRead } from "../db/backup.ts";
 import { getRnpmDbPath } from "../db/rnpmDb.ts";
-import { getRnpmStorageLimitBytes, measureRnpmStorage } from "../db/rnpmStorageLimit.ts";
+import { getRnpmStorageLimitBytes, measureRnpmStorageUnlocked } from "../db/rnpmStorageLimit.ts";
 import { listAllUserIdentities } from "../db/userRepository.ts";
 import { requireRole } from "../middleware/requireRole.ts";
 import { ErrorCodes, fail, ok } from "../util/envelope.ts";
@@ -84,7 +84,11 @@ adminRnpmRouter.get("/usage", async (c) => {
   const rows: AdminRnpmUsageRow[] = await withMaintenanceRead(async () => {
     const acc: AdminRnpmUsageRow[] = [];
     for (const u of users) {
-      const storage = await measureRnpmStorage(u.id);
+      // Varianta UNLOCKED: read-ul de mentenanta e deja luat de blocul exterior, iar
+      // RWLock-ul e nereentrant si writer-preference — un al doilea read cerut aici s-ar
+      // aseza dupa orice writer intrat la coada intre timp, blocand permanent si
+      // writer-ul (care asteapta read-ul exterior). Vezi rnpmStorageLimit.ts.
+      const storage = await measureRnpmStorageUnlocked(u.id);
       const backups = await listRnpmBackups(u.id);
       acc.push({
         userId: u.id,

@@ -58,8 +58,21 @@ export interface RnpmStorageMeasurement {
   exists: boolean;
 }
 
+// Varianta FARA lock, pentru apelanti care tin deja maintenance read-ul.
+// RWLock-ul e writer-preference si NEREENTRANT (util/rwlock.ts): un al doilea read
+// cerut din interiorul primului se aseaza dupa orice writer intrat la coada intre
+// timp, iar writer-ul asteapta read-ul exterior — deadlock permanent, fara timeout si
+// fara log. Nu apela asta fara sa detii deja lock-ul.
+export function measureRnpmStorageUnlocked(ownerId: string): Promise<RnpmStorageMeasurement> {
+  return measureRnpmStorageInner(ownerId);
+}
+
 export function measureRnpmStorage(ownerId: string): Promise<RnpmStorageMeasurement> {
-  return withMaintenanceRead(async () => {
+  return withMaintenanceRead(() => measureRnpmStorageInner(ownerId));
+}
+
+function measureRnpmStorageInner(ownerId: string): Promise<RnpmStorageMeasurement> {
+  return (async () => {
     const dbPath = getRnpmDbPath(ownerId);
     let mainBytes: number;
     try {
@@ -85,7 +98,7 @@ export function measureRnpmStorage(ownerId: string): Promise<RnpmStorageMeasurem
       return { usedBytes: await measureFiles(dbPath), exists: true };
     }
     return { usedBytes: rawUsedBytes, exists: true };
-  });
+  })();
 }
 
 export class RnpmStorageLimitError extends Error {

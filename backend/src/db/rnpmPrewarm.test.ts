@@ -12,7 +12,13 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath, prewarmRnpmMigrations } from "./rnpmDb.ts";
+import {
+  __resetRnpmDbForTests,
+  __rnpmHandleCountForTests,
+  getRnpmDb,
+  getRnpmDbPath,
+  prewarmRnpmMigrations,
+} from "./rnpmDb.ts";
 import { closeDb, getDb } from "./schema.ts";
 
 let tmpRoot: string;
@@ -80,8 +86,11 @@ describe("prewarmRnpmMigrations (CodeRabbit 1.3)", () => {
 
     expect(prewarmRnpmMigrations(["u1"])).toMatchObject({ warmed: 1, skipped: 0, failed: 0 });
 
-    // Proprietatea care conteaza pentru finding: prima cerere reala nu mai plateste
-    // migrarea, iar boot-ul nu a lasat handle-uri deschise.
+    // Proprietatea centrala a findingului: boot-ul NU lasa handle-uri in registry.
+    // Contorul `skipped` de mai jos nu o poate dovedi — hasPendingRnpmMigrations
+    // deschide o conexiune proprie, independenta de registry.
+    expect(__rnpmHandleCountForTests()).toBe(0);
+    // Si migrarea chiar s-a aplicat: a doua trecere nu mai are ce face.
     expect(prewarmRnpmMigrations(["u1"])).toMatchObject({ warmed: 0, skipped: 1 });
   });
 

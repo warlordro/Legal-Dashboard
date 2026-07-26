@@ -204,11 +204,6 @@ export default function AdminRnpmStorage({ embedded = false }: { embedded?: bool
             Arata si userii stersi sau suspendati fara date
           </label>
         )}
-        {visibleRows && visibleRows.length === 0 && rows && rows.length > 0 && (
-          <div className="text-sm text-muted-foreground">
-            Toti userii ramasi sunt stersi sau suspendati, fara date RNPM.
-          </div>
-        )}
         {visibleRows && visibleRows.length > 0 && (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
