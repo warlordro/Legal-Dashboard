@@ -102,14 +102,27 @@ const TRUNCATE_FIELD = 200;
 export const AI_TIMEOUT = 120000; // 120s per call — single analysis (native: Claude/GPT/Gemini)
 export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analysts + judge)
 // v2.43.3: exportat pentru ca testele asertau literalul 8000, care a driftat la primul
-// bump. Constanta e PARTAJATA de toate cele patru rute (anthropic max_tokens, openai
-// max_output_tokens / max_completion_tokens, gemini maxOutputTokens, openrouter
-// max_tokens), deci ridicarea e tavan pentru toate — nu cost garantat: se factureaza
-// tokenii generati efectiv, nu plafonul.
-// 16000: pe Claude 5 thinking-ul e pornit implicit si consuma din ACELASI buget ca
-// textul de raspuns, deci un plafon calibrat pentru modele fara thinking taie analiza
-// (stop_reason: "max_tokens") dupa o faza lunga de gandire.
-export const AI_MAX_TOKENS = 16000; // max output tokens (thinking + text pe Claude 5)
+// bump.
+//
+// Plafon IMPLICIT, neschimbat fata de v2.43.2. Se aplica la GPT, Gemini si Haiku 4.5 —
+// modele care NU primesc `effort` in acest release, deci nu au nicio compensare de cost.
+// Un plafon ridicat pentru ele ar fi fost o cale directa de crestere a cheltuielii
+// (finding review adversarial, HIGH: obiectivul declarat e ca costul sa NU creasca).
+export const AI_MAX_TOKENS = 8000;
+
+// Plafon ridicat, DOAR pentru modelele Claude 5 care primesc si `effort`. Pe generatia
+// asta thinking-ul e pornit implicit si consuma din ACELASI buget ca textul de raspuns,
+// deci un plafon calibrat pentru modele fara thinking taie analiza
+// (stop_reason: "max_tokens") dupa o faza lunga de gandire. Perechea plafon-ridicat +
+// effort-redus e ce tine costul in frau; una fara alta nu.
+export const AI_MAX_TOKENS_EFFORT = 16000;
+
+// Plafonul urmeaza CAPABILITATEA modelului, nu faptul ca effort-ul a fost trimis
+// efectiv: cu AI_EFFORT_DISABLED=1 un model Claude 5 tot gandeste implicit, deci tot
+// are nevoie de spatiu ca sa nu iasa trunchiat.
+function maxTokensFor(effortCapable: boolean): number {
+  return effortCapable ? AI_MAX_TOKENS_EFFORT : AI_MAX_TOKENS;
+}
 
 // v2.43.3 (Claude 5): effort controleaza adancimea de thinking. Default-ul serverului
 // e "high" (a omite campul == high), deci "medium"/"low" sunt REDUCERI fata de
@@ -511,12 +524,13 @@ async function callAnthropic(
       // composeSignal produce un AbortSignal.timeout ABSOLUT, care taie la `timeout`
       // indiferent daca stream-ul primeste evenimente. Valoarea de retur e identica cu
       // varianta non-streaming; NU se face SSE spre client.
-      const sendEffort = effort !== undefined && !effortDisabled() && EFFORT_CAPABLE_MODEL_IDS.has(modelId);
+      const effortCapable = EFFORT_CAPABLE_MODEL_IDS.has(modelId);
+      const sendEffort = effort !== undefined && !effortDisabled() && effortCapable;
       const message = await client.messages
         .stream(
           {
             model: modelId,
-            max_tokens: AI_MAX_TOKENS,
+            max_tokens: maxTokensFor(effortCapable),
             // v2.42.0 (5.6): system prompt nativ Anthropic.
             ...(system !== null ? { system } : {}),
             messages: [{ role: "user", content: user }],
@@ -704,12 +718,13 @@ export async function callOpenRouter(
       // costul cadea mereu pe tabelul static din aiUsage.ts.
       // O SINGURA variabila de body cu cast: un `@ts-expect-error` pe spread
       // conditionat ar pica build-ul strict ca "unused" cand conditia e falsa.
-      const sendEffort = effort !== undefined && !effortDisabled() && EFFORT_CAPABLE_OPENROUTER_SLUGS.has(slug);
+      const effortCapable = EFFORT_CAPABLE_OPENROUTER_SLUGS.has(slug);
+      const sendEffort = effort !== undefined && !effortDisabled() && effortCapable;
       const body = {
         model: slug,
         // v2.42.0 (5.6): mesaj system separat (toChatMessages).
         messages: toChatMessages(system, user),
-        max_tokens: AI_MAX_TOKENS,
+        max_tokens: maxTokensFor(effortCapable),
         usage: { include: true },
         ...(sendEffort ? { reasoning: { effort } } : {}),
         // Cast pe varianta NON-streaming: `create` are overload-uri discriminate pe

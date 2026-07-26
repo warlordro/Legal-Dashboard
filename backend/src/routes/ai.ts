@@ -421,6 +421,29 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
           "medium"
         );
 
+        // v2.43.3: judge gol nu mai iese ca `done` cu `final: ""`. Promptul judge are
+        // regula pentru ANALIZA de analist goala, dar nimic nu acoperea cazul in care
+        // JUDGE-ul insusi nu produce text — iar el are promptul cel mai lung si outputul
+        // cel mai mare, deci e apelul cel mai expus la epuizarea bugetului de thinking.
+        // Analizele analistilor se trimit oricum: sunt platite si utile, chiar daca
+        // reconcilierea lipseste. Degradare explicita, nu succes fals.
+        if (!finalAnalysis.trim()) {
+          await stream.writeSSE({
+            event: "error",
+            data: JSON.stringify({
+              code: ErrorCodes.AI_EMPTY_RESPONSE,
+              error: "Judecatorul AI a returnat un raspuns gol. Analizele individuale sunt mai jos.",
+              result: {
+                analyses: {
+                  analyst1: { model: analysts[0], text: analysisA },
+                  analyst2: { model: analysts[1], text: analysisB },
+                },
+              },
+            }),
+          });
+          return;
+        }
+
         await stream.writeSSE({
           event: "done",
           data: JSON.stringify({

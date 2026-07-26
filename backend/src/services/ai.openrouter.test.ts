@@ -32,6 +32,7 @@ import { invalidateCache, setTenantKey } from "../db/tenantKeysRepository.ts";
 import { resetMasterKeyCacheForTests } from "../util/tenantKeyCrypto.ts";
 import {
   AI_MAX_TOKENS,
+  AI_MAX_TOKENS_EFFORT,
   callModel,
   callOpenAI,
   callOpenRouter,
@@ -107,7 +108,13 @@ describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
     // literala, pe care OpenRouter nu o interpreteaza -> costul nu venea niciodata.
     expect(body).not.toHaveProperty("extra_body");
     expect(body.usage).toEqual({ include: true });
-    expect(body.max_tokens).toBe(AI_MAX_TOKENS);
+    expect(body.max_tokens).toBe(AI_MAX_TOKENS_EFFORT);
+  });
+
+  it("plafonul ridicat merge doar la slugurile Claude 5 din allowlist", async () => {
+    mockOpenRouterResponse({ text: "ok" });
+    await callOpenRouter("k".repeat(20), "openai/gpt-5.6-sol", "prompt", 5000);
+    expect((openRouterCreateMock.mock.calls[0][0] as Record<string, unknown>).max_tokens).toBe(AI_MAX_TOKENS);
   });
 
   it("effort ajunge in reasoning.effort pentru un slug din allowlist", async () => {

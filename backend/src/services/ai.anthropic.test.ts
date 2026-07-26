@@ -15,7 +15,7 @@ vi.mock("@anthropic-ai/sdk", () => ({
   },
 }));
 
-import { AI_MAX_TOKENS, callAnthropic, callModel } from "./ai.ts";
+import { AI_MAX_TOKENS, AI_MAX_TOKENS_EFFORT, callAnthropic, callModel } from "./ai.ts";
 
 function mockFinalMessage(options?: { text?: string; stopReason?: string }) {
   return {
@@ -44,8 +44,25 @@ describe("callAnthropic — forma requestului (v2.43.3)", () => {
     expect(out).toBe("ok");
     expect(streamMock).toHaveBeenCalledTimes(1);
     const body = streamMock.mock.calls[0][0] as Record<string, unknown>;
-    expect(body.max_tokens).toBe(AI_MAX_TOKENS);
+    expect(body.max_tokens).toBe(AI_MAX_TOKENS_EFFORT);
     expect(body.model).toBe("claude-opus-5");
+  });
+
+  it("plafonul RIDICAT merge doar la modelele Claude 5; haiku ramane pe cel implicit", async () => {
+    // Perechea plafon-ridicat + effort-redus e ce tine costul in frau. Haiku nu
+    // primeste effort, deci nici plafonul ridicat — altfel ar fi crestere de cost
+    // fara compensare.
+    await callAnthropic("k".repeat(20), "claude-haiku-4-5-20251001", "prompt", 5000);
+    expect((streamMock.mock.calls[0][0] as Record<string, unknown>).max_tokens).toBe(AI_MAX_TOKENS);
+
+    streamMock.mockClear().mockReturnValue(mockFinalMessage());
+    await callAnthropic("k".repeat(20), "claude-sonnet-5", "prompt", 5000);
+    expect((streamMock.mock.calls[0][0] as Record<string, unknown>).max_tokens).toBe(AI_MAX_TOKENS_EFFORT);
+  });
+
+  it("plafoanele au valorile asteptate (buget, nu doar cablare)", () => {
+    expect(AI_MAX_TOKENS).toBe(8000);
+    expect(AI_MAX_TOKENS_EFFORT).toBe(16000);
   });
 
   it("paseaza signal-ul compus in RequestOptions, ca la messages.create", async () => {
