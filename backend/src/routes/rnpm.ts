@@ -240,6 +240,21 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
     return captchaResolution.response;
   }
   const ownerId = getOwnerId(c);
+  // CodeRabbit 1.2 (2026-07-26): gardul de restore sta INAINTE de verificarea de
+  // stocare SI de withRnpmCaptchaGuards. Doua motive:
+  //   (a) guard-ul de captcha inregistreaza consumul (recordCaptchaUsage /
+  //       reserveTokenCaptcha), deci o cerere respinsa pe 409 taxa cota degeaba;
+  //   (b) assertRnpmStorageWithinLimit intra in withMaintenanceRead, iar restore-ul
+  //       tine writer lock-ul si sterge latch-ul inainte sa-l elibereze — pus dupa
+  //       stocare, gardul ar vedea mereu `false` (writer-preference RWLock).
+  // Rezolutia de configuratie CAPTCHA ramane inaintea tuturor, ca web mode sa-si
+  // pastreze raspunsul canonic 501. Gardul ramane inainte de streamSSE pe bulk/split.
+  if (isRnpmRestoreInProgress(ownerId)) {
+    return c.json(
+      fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
+      409
+    );
+  }
   // F12-F3 (2026-07-26): pana acum un `gcode` nevid din body sarea peste limita de
   // stocare. Conditia era pur sintactica (string nevid), deci orice cerere putea
   // scuti orice cautare — nu doar o continuare reala. Limita se verifica acum
@@ -248,18 +263,6 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const guard = await withRnpmCaptchaGuards(c, parsedBody);
   if (!guard.ok) return guard.response;
   const { body, captchaKey } = guard;
-  // v2.43.0 (rnpm-split): gardul de restore loveste imediat dupa parsarea
-  // body-ului si INAINTE de streamSSE — un throw dupa ce stream-ul a pornit
-  // inseamna 200 deja trimis si eroare in mijlocul stream-ului. Rezolutia
-  // configuratiei CAPTCHA a rulat inainte de owner/storage ca web-mode sa-si
-  // pastreze raspunsul canonic 501; consumul CAPTCHA ramane dupa limita de
-  // stocare. Restore-ul sta inainte de auditul de consum.
-  if (isRnpmRestoreInProgress(getOwnerId(c))) {
-    return c.json(
-      fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
-      409
-    );
-  }
   if (guard.source === "tenant") {
     recordAudit(c, "rnpm.captcha.consume", {
       targetKind: "rnpm_search",
@@ -497,17 +500,18 @@ rnpmRouter.post("/bulk", limitBulk, async (c) => {
     return captchaResolution.response;
   }
   const ownerId = getOwnerId(c);
-  await assertRnpmStorageWithinLimit(ownerId);
-  const guard = await withRnpmCaptchaGuards(c, parsedBody);
-  if (!guard.ok) return guard.response;
-  const { body, captchaKey } = guard;
-  // v2.43.0 (rnpm-split): gard pre-SSE, vezi nota de la POST /search.
-  if (isRnpmRestoreInProgress(getOwnerId(c))) {
+  // CodeRabbit 1.2: vezi nota de la POST /search — gardul de restore inaintea
+  // verificarii de stocare si a consumului de captcha, dar tot inainte de streamSSE.
+  if (isRnpmRestoreInProgress(ownerId)) {
     return c.json(
       fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
       409
     );
   }
+  await assertRnpmStorageWithinLimit(ownerId);
+  const guard = await withRnpmCaptchaGuards(c, parsedBody);
+  if (!guard.ok) return guard.response;
+  const { body, captchaKey } = guard;
   if (guard.source === "tenant") {
     recordAudit(c, "rnpm.captcha.consume", {
       targetKind: "rnpm_search",
@@ -639,17 +643,18 @@ rnpmRouter.post("/search-split", limitSearch, async (c) => {
     return captchaResolution.response;
   }
   const ownerId = getOwnerId(c);
-  await assertRnpmStorageWithinLimit(ownerId);
-  const guard = await withRnpmCaptchaGuards(c, parsedBody);
-  if (!guard.ok) return guard.response;
-  const { body, captchaKey } = guard;
-  // v2.43.0 (rnpm-split): gard pre-SSE, vezi nota de la POST /search.
-  if (isRnpmRestoreInProgress(getOwnerId(c))) {
+  // CodeRabbit 1.2: vezi nota de la POST /search — gardul de restore inaintea
+  // verificarii de stocare si a consumului de captcha, dar tot inainte de streamSSE.
+  if (isRnpmRestoreInProgress(ownerId)) {
     return c.json(
       fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),
       409
     );
   }
+  await assertRnpmStorageWithinLimit(ownerId);
+  const guard = await withRnpmCaptchaGuards(c, parsedBody);
+  if (!guard.ok) return guard.response;
+  const { body, captchaKey } = guard;
   if (guard.source === "tenant") {
     recordAudit(c, "rnpm.captcha.consume", {
       targetKind: "rnpm_search",
