@@ -272,11 +272,22 @@ export function prewarmRnpmMigrations(ownerIds: readonly string[]): {
   let failed = 0;
   for (const ownerId of ownerIds) {
     try {
-      if (!fs.existsSync(getRnpmDbPath(ownerId))) {
+      const dbPath = getRnpmDbPath(ownerId);
+      // Gate pe migrari PENDING, nu doar pe existenta fisierului (finding review
+      // adversarial, convergent pe toate trei reviewurile). Fara el, prewarm-ul ar fi
+      // rulat la FIECARE boot, nu doar dupa un upgrade cu migrari noi — cazul majoritar
+      // fiind boot fara migrari, unde nu are nimic de facut.
+      if (!fs.existsSync(dbPath) || !hasPendingRnpmMigrations(dbPath)) {
         skipped++;
         continue;
       }
       getRnpmDb(ownerId);
+      // Handle-ul se INCHIDE imediat: migrarile sunt durabile, iar prima cerere reala
+      // il redeschide ieftin. Fara close, boot-ul ar fi tinut deschis permanent cate un
+      // handle (fd + wal + shm) pentru fiecare user cu baza RNPM, indiferent daca se mai
+      // logheaza vreodata — registry-ul nu are evictie, deci la cateva sute de useri
+      // inseamna drum direct spre EMFILE.
+      closeRnpmDb(ownerId);
       warmed++;
     } catch (e) {
       failed++;

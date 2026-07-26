@@ -1184,6 +1184,13 @@ function autoCompactFailureReason(error: unknown): string {
     case "EPERM":
     case "EIO":
     case "EBUSY":
+    // better-sqlite3 arunca coduri SQLITE_*, nu errno — fara ele, clasa de I/O ar fi
+    // cazut in "error" exact pe erorile pentru care a fost adaugata (finding review).
+    case "SQLITE_IOERR":
+    case "SQLITE_CANTOPEN":
+    case "SQLITE_READONLY":
+    case "SQLITE_FULL":
+    case "SQLITE_BUSY":
     case "SQLITE_CORRUPT":
     case "SQLITE_NOTADB":
       return "io_error";

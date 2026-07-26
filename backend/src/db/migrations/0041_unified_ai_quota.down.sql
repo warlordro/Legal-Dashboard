@@ -1,7 +1,18 @@
--- Down pragmatic (ghid 10.2): recreeaza ai.single + ai.multi cu ACEEASI limita
--- din 'ai'; granturile se DUPLICA pe ambele feature-uri legacy (pre-0041
--- pool-urile erau separate — maparea doar pe ai.single ar pierde extra-ul de
--- pe multi); sterge notificarile 'ai' si versiunea 41.
+-- Down pragmatic (ghid 10.2): sterge notificarile 'ai' si versiunea 41.
+--
+-- OVERRIDE-URI: se recreeaza ai.single + ai.multi cu ACEEASI limita din 'ai'.
+-- Duplicarea e SIGURA aici: cheia primara e (user_id, feature), iar up.sql alege UN
+-- singur rand (cel mai restrictiv, prin NOT EXISTS + subselect pe rowid), nu aduna.
+--
+-- GRANTURI: se muta DOAR pe ai.single. Duplicarea lor pe ambele feature-uri, cum se
+-- facea inainte, dubla bugetul la fiecare ciclu down->up (x2^N): up.sql colapseaza
+-- ambele inapoi in 'ai', extra-ul se aduna per grant, iar copia era identica pe toate
+-- coloanele in afara de id, deci indistinctibila. Vezi migration0041Rollback.test.ts.
+--
+-- NU "repara" asta inapoi spre duplicare: pierderea de functionalitate la rollback
+-- (analiza multi ramane fara extra) e compromisul ales DELIBERAT, fiindca alternativa
+-- e o dublare tacuta si necorectabila — up.sql e imuabil dupa aplicare (hash in
+-- _schema_versions), deci nu poate curata copiile.
 INSERT INTO user_quota_overrides (user_id, feature, period, limit_usd_milli, updated_at, updated_by)
 SELECT user_id, 'ai.single', period, limit_usd_milli, updated_at, updated_by
 FROM user_quota_overrides WHERE feature = 'ai';

@@ -52,20 +52,28 @@ adminRnpmRouter.get("/usage", async (c) => {
   // ruleaza sub maintenance READ lock — un compact/restore concurent (writer)
   // nu mai poate face swap intre stat-uri, deci randul nu insumeaza generatii
   // diferite ale aceluiasi fisier si nu raporteaza tranzitoriu "fara baza".
-  const rows: AdminRnpmUsageRow[] = [];
-  for (const u of users) {
-    const storage = await measureRnpmStorage(u.id);
-    const backups = await withMaintenanceRead(() => listRnpmBackups(u.id));
-    rows.push({
-      userId: u.id,
-      email: u.email,
-      displayName: u.display_name,
-      status: u.status,
-      dbSizeBytes: storage.exists ? storage.usedBytes : null,
-      storageLimitBytes: getRnpmStorageLimitBytes(u.id),
-      backupCount: backups.length,
-      backupsBytes: backups.reduce((sum, b) => sum + b.sizeBytes, 0),
-    });
-  }
+  //
+  // Corectie (review adversarial, convergent pe 5 revieweri): pana acum DOAR
+  // listRnpmBackups era sub lock, iar measureRnpmStorage rula in afara lui — exact
+  // race-ul pe care comentariul il declara inchis. Un singur `withMaintenanceRead` in
+  // jurul intregii bucle il inchide efectiv si evita si N asteptari pe lock per cerere.
+  const rows: AdminRnpmUsageRow[] = await withMaintenanceRead(async () => {
+    const acc: AdminRnpmUsageRow[] = [];
+    for (const u of users) {
+      const storage = await measureRnpmStorage(u.id);
+      const backups = await listRnpmBackups(u.id);
+      acc.push({
+        userId: u.id,
+        email: u.email,
+        displayName: u.display_name,
+        status: u.status,
+        dbSizeBytes: storage.exists ? storage.usedBytes : null,
+        storageLimitBytes: getRnpmStorageLimitBytes(u.id),
+        backupCount: backups.length,
+        backupsBytes: backups.reduce((sum, b) => sum + b.sizeBytes, 0),
+      });
+    }
+    return acc;
+  });
   return c.json(ok({ rows, page, pageSize, total }, c));
 });

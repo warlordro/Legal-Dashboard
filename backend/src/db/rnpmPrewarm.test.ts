@@ -33,7 +33,7 @@ afterEach(async () => {
 });
 
 describe("prewarmRnpmMigrations (CodeRabbit 1.3)", () => {
-  it("incalzeste bazele existente si NU provisioneaza fisiere pentru userii fara baza", () => {
+  it("NU provisioneaza fisiere pentru userii fara baza RNPM", () => {
     // u1 are baza (o cream prin getRnpmDb), u2 nu a folosit niciodata RNPM.
     getRnpmDb("u1");
     __resetRnpmDbForTests();
@@ -42,8 +42,9 @@ describe("prewarmRnpmMigrations (CodeRabbit 1.3)", () => {
 
     const result = prewarmRnpmMigrations(["u1", "u2"]);
 
-    expect(result.warmed).toBe(1);
-    expect(result.skipped).toBe(1);
+    // u1 e la zi (nimic de migrat), u2 nu are fisier — ambii `skipped`, zero munca.
+    expect(result.warmed).toBe(0);
+    expect(result.skipped).toBe(2);
     expect(result.failed).toBe(0);
     // Garantia care conteaza: u2 tot nu are fisier.
     expect(fs.existsSync(getRnpmDbPath("u2"))).toBe(false);
@@ -57,7 +58,31 @@ describe("prewarmRnpmMigrations (CodeRabbit 1.3)", () => {
     const result = prewarmRnpmMigrations(["..", "u1"]);
 
     expect(result.failed).toBe(1);
-    expect(result.warmed).toBe(1);
+    expect(result.skipped).toBe(1);
+  });
+
+  it("sare peste bazele FARA migrari pending (boot obisnuit nu face nimic)", () => {
+    getRnpmDb("u1");
+    __resetRnpmDbForTests();
+
+    // Baza e la zi -> nimic de migrat -> skipped, nu warmed.
+    expect(prewarmRnpmMigrations(["u1"])).toMatchObject({ warmed: 0, skipped: 1, failed: 0 });
+  });
+
+  it("incalzeste o baza cu migrari pending si NU lasa handle-ul deschis", () => {
+    getRnpmDb("u1");
+    __resetRnpmDbForTests();
+    // Simulam un upgrade: stergem ultima versiune din ledger, deci migrarea redevine pending.
+    const raw = new Database(getRnpmDbPath("u1"));
+    const max = (raw.prepare("SELECT MAX(version) AS v FROM _schema_versions").get() as { v: number }).v;
+    raw.prepare("DELETE FROM _schema_versions WHERE version = ?").run(max);
+    raw.close();
+
+    expect(prewarmRnpmMigrations(["u1"])).toMatchObject({ warmed: 1, skipped: 0, failed: 0 });
+
+    // Proprietatea care conteaza pentru finding: prima cerere reala nu mai plateste
+    // migrarea, iar boot-ul nu a lasat handle-uri deschise.
+    expect(prewarmRnpmMigrations(["u1"])).toMatchObject({ warmed: 0, skipped: 1 });
   });
 
   it("lista goala e no-op", () => {
