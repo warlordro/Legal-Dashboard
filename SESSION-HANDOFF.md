@@ -6,6 +6,15 @@ Document de context transfer intre sesiuni Claude. Pentru istoric versiuni detal
 vezi [CHANGELOG.md](CHANGELOG.md). Aici tin doar reguli active de lucru,
 operational kill switches, riscuri ramase si directii deschise pentru urmatorul agent.
 
+**Urmatoarea bucata de lucru:** [HANDOFF-SESIUNE-2026-07-26.md](HANDOFF-SESIUNE-2026-07-26.md)
+— punctul de intrare pentru sesiunea urmatoare, cu ordinea celor doua fluxuri deschise:
+(A) cele 3 findings F12 care blocheaza web deploy, detaliate in
+[HANDOFF-SEC-WEB-BLOCKERS-F12-2026-07-26.md](HANDOFF-SEC-WEB-BLOCKERS-F12-2026-07-26.md)
+(F12-F3 bypass cota RNPM prin `gcode`, F12-F5 cheie captcha in raspunsul 500, F12-F8
+`/api/v1/tokens*` fara gard de rol), verificate la sursa si neremediate; (B) triajul review-ului
+CodeRabbit din 2026-07-26, in [audit/CODERABBIT-TRIAJ-2026-07-26.md](audit/CODERABBIT-TRIAJ-2026-07-26.md)
+(9 findings de reparat din 54 comentarii). Restul de 9 findings F12 sunt in [HARDENING.md](HARDENING.md).
+
 ## Ultimul sprint mare livrat (2026-07-20): remediere sec + rezultate partiale PortalJust pe branch
 
 Dupa push-ul initial v2.43.0 (13 iulie), pe acelasi branch s-au livrat si pushuit DOUA directii mari (reincadrate ca release patch v2.43.1), ambele dublu-review-uite adversarial (Codex GPT-5.6 Sol + panel multi-model):
