@@ -54,8 +54,9 @@ export class CaptchaInsufficientFundsError extends Error {
 // encoding-ul nu o schimba, dar `validateKey` accepta orice string >= 10 caractere
 // (BYOK desktop, chei CapSolver), iar unul cu `+` sau `/` ar aparea in URL codificat
 // si ar scapa de o inlocuire pe forma bruta. Set() evita dubla trecere cand cele
-// doua forme coincid. Redactam DOAR `message`; `cause` pastreaza eroarea originala
-// si nu e stringificat pe nicio cale spre client (verificat in routes/services/util).
+// doua forme coincid. `cause` NU pastreaza eroarea originala: se reconstruieste
+// prin redactCaptchaCause (name + message/stack redactate), pentru ca un
+// `console.error(e)` pe obiectul intreg ar printa si cause-ul brut cu cheia.
 export function redactCaptchaSecrets(message: string, ...secrets: Array<string | undefined>): string {
   let out = message;
   for (const secret of secrets) {
@@ -68,6 +69,20 @@ export function redactCaptchaSecrets(message: string, ...secrets: Array<string |
     }
   }
   return out;
+}
+
+// Copie sigura pentru `cause`: doar name + message/stack (redactate). Proprietatile
+// enumerabile extra (ex. `url` pe FetchError) si cause-ul imbricat al erorii SDK se
+// arunca DELIBERAT — orice camp pastrat brut ar reintroduce scurgerea prin
+// logging object-aware (util.inspect printeaza proprietatile enumerabile si [cause]).
+function redactCaptchaCause(error: unknown, ...secrets: Array<string | undefined>): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  const safe = new Error(redactCaptchaSecrets(message, ...secrets));
+  if (error instanceof Error) {
+    safe.name = error.name;
+    if (error.stack) safe.stack = redactCaptchaSecrets(error.stack, ...secrets);
+  }
+  return safe;
 }
 
 function providerLabel(provider: CaptchaProvider): string {
@@ -107,10 +122,12 @@ async function solveWith2Captcha(apiKey: string, signal?: AbortSignal): Promise<
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     if (e instanceof CaptchaError) throw e;
     const msg = e instanceof Error ? e.message : String(e);
-    if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", e);
+    const safeCause = redactCaptchaCause(e, apiKey);
+    if (/ERROR_ZERO_BALANCE/i.test(msg))
+      throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", safeCause);
     if (/ERROR_WRONG_USER_KEY|ERROR_KEY_DOES_NOT_EXIST/i.test(msg))
-      throw new CaptchaError("Cheia 2Captcha este invalida.", e);
-    throw new CaptchaError(`Eroare 2Captcha: ${redactCaptchaSecrets(msg, apiKey)}`, e);
+      throw new CaptchaError("Cheia 2Captcha este invalida.", safeCause);
+    throw new CaptchaError(`Eroare 2Captcha: ${redactCaptchaSecrets(msg, apiKey)}`, safeCause);
   } finally {
     if (signal && onAbort) signal.removeEventListener("abort", onAbort);
   }
@@ -346,10 +363,12 @@ async function balance2Captcha(apiKey: string, signal: AbortSignal): Promise<num
   } catch (e) {
     if (e instanceof DOMException && e.name === "AbortError") throw e;
     const msg = e instanceof Error ? e.message : String(e);
-    if (/ERROR_ZERO_BALANCE/i.test(msg)) throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", e);
+    const safeCause = redactCaptchaCause(e, apiKey);
+    if (/ERROR_ZERO_BALANCE/i.test(msg))
+      throw new CaptchaInsufficientFundsError("Balanta 2Captcha insuficienta.", safeCause);
     // F12-F5: rethrow-ul brut de aici scurgea cheia in corpul 400 al rutei
     // /captcha/balance (rnpm.ts pune e.message verbatim in envelope).
-    throw new CaptchaError(`Eroare 2Captcha: ${redactCaptchaSecrets(msg, apiKey)}`, e);
+    throw new CaptchaError(`Eroare 2Captcha: ${redactCaptchaSecrets(msg, apiKey)}`, safeCause);
   } finally {
     if (onAbort) signal.removeEventListener("abort", onAbort);
   }
@@ -382,9 +401,15 @@ export async function getCaptchaBalance(apiKey: string, provider: CaptchaProvide
     if (e instanceof CaptchaError) throw e;
     // AbortSignal.timeout rejecteaza cu DOMException name=TimeoutError.
     if (e instanceof DOMException && (e.name === "TimeoutError" || e.name === "AbortError")) {
-      throw new CaptchaError(`Timeout ${providerLabel(provider)} (>${Math.round(BALANCE_TIMEOUT_MS / 1000)}s).`, e);
+      throw new CaptchaError(
+        `Timeout ${providerLabel(provider)} (>${Math.round(BALANCE_TIMEOUT_MS / 1000)}s).`,
+        redactCaptchaCause(e, key)
+      );
     }
     const msg = e instanceof Error ? e.message : String(e);
-    throw new CaptchaError(`Eroare ${providerLabel(provider)}: ${msg}`, e);
+    throw new CaptchaError(
+      `Eroare ${providerLabel(provider)}: ${redactCaptchaSecrets(msg, key)}`,
+      redactCaptchaCause(e, key)
+    );
   }
 }
