@@ -1176,6 +1176,17 @@ function autoCompactFailureReason(error: unknown): string {
       return "maintenance_shutdown";
     case "ENOSPC":
       return "enospc";
+    // CodeRabbit 1.8: masuratoarea a intrat in `try`, deci ajung aici si erorile de
+    // I/O care inainte ieseau din functie. Clasa proprie — un disc cu permisiuni
+    // gresite sau o baza corupta nu trebuie sa arate identic cu un refuz legitim de
+    // concurenta (restore in curs), altfel triajul operational devine imposibil.
+    case "EACCES":
+    case "EPERM":
+    case "EIO":
+    case "EBUSY":
+    case "SQLITE_CORRUPT":
+    case "SQLITE_NOTADB":
+      return "io_error";
     default:
       return "error";
   }
@@ -1189,15 +1200,23 @@ export async function maybeAutoCompactRnpm(
     return { attempted: false, compacted: false, freedBytes: 0 };
   }
 
-  const minFreeBytes = readAutoCompactMinFreeBytes();
-  const measurement = await measureRnpmFreelistIfPresent(ownerId);
-  if (measurement === null || !shouldAutoCompactRnpm(measurement.freelistBytes, measurement.totalBytes, minFreeBytes)) {
-    return { attempted: false, compacted: false, freedBytes: 0 };
-  }
-
-  const compact = deps.compact ?? compactRnpmIfStillNeeded;
+  // CodeRabbit 1.8: masuratoarea sta ACUM in `try`. Inainte era deasupra lui, deci un
+  // throw din ea (measureRnpmFreelistIfPresent rethrow-uieste erorile de stat non-ENOENT
+  // si apeleaza getRnpmDb, care arunca RnpmRestoreInProgressError) iesea din functie
+  // fara sa scrie evenimentul structurat de skip — exact cazul pentru care a fost scris
+  // clasificatorul autoCompactFailureReason.
   const startedAt = Date.now();
   try {
+    const minFreeBytes = readAutoCompactMinFreeBytes();
+    const measurement = await measureRnpmFreelistIfPresent(ownerId);
+    if (
+      measurement === null ||
+      !shouldAutoCompactRnpm(measurement.freelistBytes, measurement.totalBytes, minFreeBytes)
+    ) {
+      return { attempted: false, compacted: false, freedBytes: 0 };
+    }
+
+    const compact = deps.compact ?? compactRnpmIfStillNeeded;
     return await compact(ownerId, minFreeBytes);
   } catch (error) {
     const reason = autoCompactFailureReason(error);

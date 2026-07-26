@@ -26,7 +26,13 @@ import {
   shouldAutoCompactRnpm,
 } from "./backup.ts";
 import { deleteAvizeByIds, saveAvizFull, type SaveAvizInput } from "./avizRepository.ts";
-import { __resetRnpmActivityForTests, beginRnpmSearch, endRnpmSearch } from "./rnpmActivity.ts";
+import {
+  __resetRnpmActivityForTests,
+  beginRnpmRestore,
+  beginRnpmSearch,
+  endRnpmRestore,
+  endRnpmSearch,
+} from "./rnpmActivity.ts";
 import { __resetRnpmDbForTests, getRnpmDb, getRnpmDbPath } from "./rnpmDb.ts";
 import { closeDb, getDb } from "./schema.ts";
 
@@ -167,6 +173,47 @@ describe("maybeAutoCompactRnpm", () => {
     expect(result).toMatchObject({ attempted: true, compacted: true });
     expect(result.freedBytes).toBeGreaterThan(0);
     expect(Number(getRnpmDb(OWNER).pragma("page_count", { simple: true }))).toBeLessThan(beforePages);
+  });
+
+  it("CodeRabbit 1.8: un refuz de concurenta din MASURATOARE se logheaza clasificat", async () => {
+    // Inainte, masuratoarea era in afara `try`-ului: un throw din ea iesea din functie
+    // fara evenimentul structurat de skip — exact cazul pentru care exista
+    // clasificatorul. beginRnpmRestore ridica latch-ul, iar getRnpmDb (apelat din
+    // measureRnpmFreelistIfPresent) arunca RESTORE_IN_PROGRESS.
+    process.env.LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_MIN_FREE_MB = "0.1";
+    createFreelist(); // fara baza, masuratoarea iese pe ENOENT -> attempted: false
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+      logs.push(a.map(String).join(" "));
+    });
+    beginRnpmRestore(OWNER);
+    try {
+      const result = await maybeAutoCompactRnpm(OWNER);
+      expect(result).toMatchObject({ attempted: true, compacted: false, reason: "restore_in_progress" });
+      const line = logs.find((l) => l.includes('"action":"rnpm_autocompact_skipped"'));
+      expect(line).toBeDefined();
+      expect(line).toContain('"reason":"restore_in_progress"');
+    } finally {
+      endRnpmRestore(OWNER);
+      spy.mockRestore();
+    }
+  });
+
+  it("CodeRabbit 1.8: o eroare de I/O primeste clasa PROPRIE, nu aceeasi cu refuzul de concurenta", async () => {
+    // Fara clasa separata, un disc cu permisiuni gresite ar arata in loguri identic cu
+    // un restore in curs — triaj operational imposibil.
+    const compact = vi.fn(async () => {
+      const err = new Error("permission denied") as Error & { code?: string };
+      err.code = "EACCES";
+      throw err;
+    }) as unknown as typeof compactRnpmIfStillNeeded;
+    process.env.LEGAL_DASHBOARD_RNPM_AUTOCOMPACT_MIN_FREE_MB = "0.1";
+    createFreelist();
+
+    const result = await maybeAutoCompactRnpm(OWNER, { compact });
+
+    expect(result).toMatchObject({ attempted: true, compacted: false, reason: "io_error" });
+    expect(result.reason).not.toBe("restore_in_progress");
   });
 
   it("kill switch-ul dezactiveaza semantic autocompact-ul", async () => {
