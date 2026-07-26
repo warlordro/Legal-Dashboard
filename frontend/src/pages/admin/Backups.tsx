@@ -2,7 +2,7 @@
 // utilizatori, monitorizari, audit, setari). Datele RNPM au backup separat per
 // utilizator, self-service din zona RNPM ("Baza mea RNPM").
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Archive, DatabaseBackup, History, RefreshCw, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -46,72 +46,98 @@ export default function AdminBackups({ embedded = false }: { embedded?: boolean 
     void load();
   }, [load]);
 
+  // CodeRabbit 1.5: garda pe REF, nu pe state. Doua click-uri in acelasi tick vad
+  // amandoua `busy === null` (setState e asincron), dar ref-ul se inchide imediat.
+  // La handleRestore/handleDeleteAll fereastra era si mai larga: `await confirm()`
+  // rula INAINTE de setBusy, deci tinea cat era deschis dialogul, nu un tick.
+  // Reset in finally-ul EXTERIOR, ca sa acopere si respingerea dialogului.
+  // Acelasi tipar ca in RnpmStorage.tsx.
+  const actionInFlightRef = useRef(false);
+
   const handleCreate = async () => {
-    if (busy) return;
-    setBusy("create");
-    setError(null);
-    setSuccessMsg(null);
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     try {
-      const { name } = await adminCreateBackup();
-      setSuccessMsg(`Backup creat: ${name}.`);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Eroare la crearea backup-ului");
+      if (busy) return;
+      setBusy("create");
+      setError(null);
+      setSuccessMsg(null);
+      try {
+        const { name } = await adminCreateBackup();
+        setSuccessMsg(`Backup creat: ${name}.`);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Eroare la crearea backup-ului");
+      } finally {
+        setBusy(null);
+      }
     } finally {
-      setBusy(null);
+      actionInFlightRef.current = false;
     }
   };
 
   const handleRestore = async (entry: BackupEntry) => {
-    if (busy) return;
-    if (
-      !(await confirm({
-        title: "Restaureaza backup",
-        message:
-          "Restaurezi backup-ul COMPLET al bazei — toate modulele, toti utilizatorii (datele RNPM au backup separat per utilizator)?\n\nBaza curenta va fi salvata automat inainte de suprascriere. Dupa restore este recomandata repornirea aplicatiei.",
-        confirmLabel: "Restaureaza",
-        destructive: true,
-      }))
-    )
-      return;
-    setBusy(entry.name);
-    setError(null);
-    setSuccessMsg(null);
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     try {
-      const { preRestoreName } = await adminRestoreBackup(entry.name);
-      setSuccessMsg(`Restaurare completa. Snapshot pre-restore: ${preRestoreName}. Aplicatia se reincarca...`);
-      // INT-M12: dupa restaurarea monolitului TOT state-ul clientului e stale
-      // (useri, alerte, setari). Reload complet dupa un beat vizibil.
-      setTimeout(() => window.location.reload(), 2000);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Eroare restore");
+      if (busy) return;
+      if (
+        !(await confirm({
+          title: "Restaureaza backup",
+          message:
+            "Restaurezi backup-ul COMPLET al bazei — toate modulele, toti utilizatorii (datele RNPM au backup separat per utilizator)?\n\nBaza curenta va fi salvata automat inainte de suprascriere. Dupa restore este recomandata repornirea aplicatiei.",
+          confirmLabel: "Restaureaza",
+          destructive: true,
+        }))
+      )
+        return;
+      setBusy(entry.name);
+      setError(null);
+      setSuccessMsg(null);
+      try {
+        const { preRestoreName } = await adminRestoreBackup(entry.name);
+        setSuccessMsg(`Restaurare completa. Snapshot pre-restore: ${preRestoreName}. Aplicatia se reincarca...`);
+        // INT-M12: dupa restaurarea monolitului TOT state-ul clientului e stale
+        // (useri, alerte, setari). Reload complet dupa un beat vizibil.
+        setTimeout(() => window.location.reload(), 2000);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Eroare restore");
+      } finally {
+        setBusy(null);
+      }
     } finally {
-      setBusy(null);
+      actionInFlightRef.current = false;
     }
   };
 
   const handleDeleteAll = async () => {
-    if (busy) return;
-    if (
-      !(await confirm({
-        message: "Stergi toate backup-urile bazei complete?\n\nBackup-urile RNPM per utilizator nu sunt afectate.",
-        confirmLabel: "Sterge toate",
-        destructive: true,
-      }))
-    )
-      return;
-    setBusy("delete");
-    setError(null);
-    setSuccessMsg(null);
+    if (actionInFlightRef.current) return;
+    actionInFlightRef.current = true;
     try {
-      const deleted = await adminDeleteBackups();
-      setSuccessMsg(`${deleted} backup-uri sterse.`);
-      await load();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Eroare la stergere backups");
+      if (busy) return;
+      if (
+        !(await confirm({
+          message: "Stergi toate backup-urile bazei complete?\n\nBackup-urile RNPM per utilizator nu sunt afectate.",
+          confirmLabel: "Sterge toate",
+          destructive: true,
+        }))
+      )
+        return;
+      setBusy("delete");
+      setError(null);
+      setSuccessMsg(null);
+      try {
+        const deleted = await adminDeleteBackups();
+        setSuccessMsg(`${deleted} backup-uri sterse.`);
+        await load();
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Eroare la stergere backups");
+      } finally {
+        setBusy(null);
+      }
     } finally {
-      setBusy(null);
+      actionInFlightRef.current = false;
     }
   };
 
