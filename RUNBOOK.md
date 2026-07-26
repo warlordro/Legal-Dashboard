@@ -740,8 +740,8 @@ backup de monolit facut INAINTE de split (care mai contine tabele rnpm
 populate), iar splitter-ul refuza sa suprascrie fisierele per-user mai noi.
 Doua cai de remediere — alege UNA:
 
-1. **Pastreaza fisierele per-user (recomandat — sunt mai noi):** goleste
-   randurile rnpm din monolitul restaurat si reporneste:
+1. **Pastreaza fisierele per-user (recomandat — sunt mai noi):** cu aplicatia
+   OPRITA, goleste randurile rnpm din monolitul restaurat, apoi reporneste:
 
    ```sql
    -- sqlite3 legal-dashboard.db
