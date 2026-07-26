@@ -801,7 +801,7 @@ describe("GET /api/v1/dashboard/report", () => {
   it("owner isolation: events from other owners are excluded from timeline + charts", async () => {
     const aliceJob = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "iso-alice" });
     const aliceRun = seedFinalizedRun({ ownerId: "alice", jobId: aliceJob, status: "ok" });
-    insertAlert({
+    const aliceAlert = insertAlert({
       ownerId: "alice",
       jobId: aliceJob,
       runId: aliceRun,
@@ -810,6 +810,13 @@ describe("GET /api/v1/dashboard/report", () => {
       detail: {},
       dedupKey: "k-iso-alice",
     });
+    // created_at vine implicit din ceasul SQLite, iar fereastra raportului
+    // (`until`) din ceasul JS. Pe Windows cele doua se pot defaza cu cativa ms,
+    // iar alerta cade in afara lui `created_at <= until`. Ancoram timestampul la
+    // acelasi ceas care produce `until`, deci ordinea e garantata in proces.
+    getDb()
+      .prepare("UPDATE monitoring_alerts SET created_at = ? WHERE id = ?")
+      .run(new Date().toISOString(), aliceAlert.row.id);
 
     const bobJob = seedJob({ ownerId: "bob", kind: "dosar_soap", hashSuffix: "iso-bob" });
     const bobRun = seedFinalizedRun({ ownerId: "bob", jobId: bobJob, status: "error" });
