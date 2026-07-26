@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api } from "@/lib/api";
+import { AiMultiPartialError, api } from "@/lib/api";
 import { AI_MODELS, type AiMode, JUDGE_MODELS_LIST } from "@/components/dosare-ai-config";
 import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
 import type { Dosar } from "@/types";
@@ -16,8 +16,9 @@ interface MultiResultPayload {
     analyst1: { model: string; text: string };
     analyst2: { model: string; text: string };
   };
-  judge: { model: string; text: string };
-  final: string;
+  // Optionale: pe degradare (judge gol sau trunchiat) analizele exista, reconcilierea nu.
+  judge?: { model: string; text: string };
+  final?: string;
 }
 
 type MultiPhase = "analyst1_done" | "analyst2_done" | "judge_started";
@@ -271,6 +272,11 @@ export function useDosareAi({ apiKeys, aiSettings }: UseDosareAiArgs): UseDosare
         });
         setMultiResult((prev) => ({ ...prev, [dosar.numar]: result }));
       } catch (err: unknown) {
+        // Degradare, nu esec total: analistii au livrat, doar judecatorul a cazut.
+        // Analizele lor sunt platite si se afiseaza, alaturi de mesajul de eroare.
+        if (err instanceof AiMultiPartialError) {
+          setMultiResult((prev) => ({ ...prev, [dosar.numar]: { analyses: err.analyses } }));
+        }
         setMultiError(err instanceof Error ? err.message : "Eroare la analiza avansata");
       } finally {
         setMultiLoading(null);

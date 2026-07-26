@@ -604,7 +604,13 @@ async function callOpenAI(
   signal?: AbortSignal
 ): Promise<string> {
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  // v2.43.3 (finding review): detectia de trunchiere exista pe Anthropic si pe
+  // OpenRouter, dar lipsea aici si pe Gemini — adica exact aceeasi analiza taiata
+  // ajungea la user ca rezultat "complet" sau nu, dupa cum era rutata. Acelasi
+  // pattern ca la Anthropic: se arunca DUPA logare, ca apelul facturat sa ramana
+  // inregistrat.
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "openai",
     modelId,
     async () => {
@@ -626,11 +632,15 @@ async function callOpenAI(
           { signal: composed }
         );
         const usage = (response as { usage?: { input_tokens?: number; output_tokens?: number } }).usage;
+        // Responses API: status "incomplete" + incomplete_details.reason.
+        const incompleteReason = (response as { incomplete_details?: { reason?: string } }).incomplete_details?.reason;
+        if (incompleteReason === "max_output_tokens") truncatedBy = "max_output_tokens";
         return {
           value: response.output_text || "",
           meta: {
             usageInput: usage?.input_tokens,
             usageOutput: usage?.output_tokens,
+            stopReason: incompleteReason,
           },
         };
       } catch (err) {
@@ -668,17 +678,22 @@ async function callOpenAI(
           { signal: fallbackSignal }
         );
         const usage = completion.usage as { prompt_tokens?: number; completion_tokens?: number } | undefined;
+        const finishReason = completion.choices?.[0]?.finish_reason;
+        if (finishReason === "length") truncatedBy = "length";
         return {
           value: completion.choices?.[0]?.message?.content ?? "",
           meta: {
             usageInput: usage?.prompt_tokens,
             usageOutput: usage?.completion_tokens,
+            stopReason: finishReason ?? undefined,
           },
         };
       }
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 async function callGoogle(
@@ -690,7 +705,9 @@ async function callGoogle(
   signal?: AbortSignal
 ): Promise<string> {
   const { system, user } = promptParts(prompt);
-  return withAiLogging(
+  // Vezi callOpenAI: aceeasi paritate de trunchiere.
+  let truncatedBy: string | null = null;
+  const value = await withAiLogging(
     "google",
     modelId,
     async () => {
@@ -710,16 +727,21 @@ async function callGoogle(
       const usage = (
         result.response as { usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number } }
       ).usageMetadata;
+      const finishReason = result.response.candidates?.[0]?.finishReason as string | undefined;
+      if (finishReason === "MAX_TOKENS") truncatedBy = "MAX_TOKENS";
       return {
         value: result.response.text(),
         meta: {
           usageInput: usage?.promptTokenCount,
           usageOutput: usage?.candidatesTokenCount,
+          stopReason: finishReason,
         },
       };
     },
     tracking
   );
+  if (truncatedBy) throw new AiTruncatedError(truncatedBy);
+  return value;
 }
 
 export async function callOpenRouter(

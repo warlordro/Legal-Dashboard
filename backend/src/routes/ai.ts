@@ -370,6 +370,12 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
       stream.onAbort(() => {
         cancelAll();
       });
+      // Declarat IN AFARA try-ului ca sa fie vizibil in catch: cand judge-ul pica dupa ce
+      // analistii au livrat, analizele lor sunt deja platite si trebuie sa ajunga la user.
+      let partialAnalyses: {
+        analyst1: { model: string; text: string };
+        analyst2: { model: string; text: string };
+      } | null = null;
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
         const p1 = callModel(
@@ -416,6 +422,11 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
           throw err;
         }
 
+        partialAnalyses = {
+          analyst1: { model: analysts[0], text: analysisA },
+          analyst2: { model: analysts[1], text: analysisB },
+        };
+
         // Phase 3: judge reconciliation.
         await stream.writeSSE({ event: "judge_started", data: "{}" });
         const judgePrompt = buildJudgePrompt(dosar, analysisA, analysts[0], analysisB, analysts[1]);
@@ -449,12 +460,7 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
             data: JSON.stringify({
               code: ErrorCodes.AI_EMPTY_RESPONSE,
               error: "Judecatorul AI a returnat un raspuns gol. Analizele individuale sunt mai jos.",
-              result: {
-                analyses: {
-                  analyst1: { model: analysts[0], text: analysisA },
-                  analyst2: { model: analysts[1], text: analysisB },
-                },
-              },
+              result: { analyses: partialAnalyses },
             }),
           });
           return;
@@ -477,11 +483,30 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
         console.error("Eroare AI Multi:", err instanceof Error ? err.message : err);
         const msg = err instanceof Error ? err.message : "";
         let errorText = "Eroare la analiza AI avansata. Verificati cheile API si incercati din nou.";
+        let errorCode: string | undefined;
         if (msg.startsWith("NO_API_KEY:")) {
           const provider = msg.split(":")[1];
           errorText = `Lipseste cheia API pentru ${provider}. Configureaza din Setari AI.`;
+        } else if (err instanceof AiTruncatedError) {
+          // v2.43.3 (finding review): trunchierea cadea in mesajul generic si trimitea
+          // userul sa-si verifice cheile API — diagnostic gresit pentru o problema de
+          // buget de tokeni. Judge-ul e cel mai expus, si e si apelul dupa care
+          // analizele individuale sunt deja platite.
+          errorCode = ErrorCodes.AI_TRUNCATED;
+          errorText = partialAnalyses
+            ? "Reconcilierea s-a oprit inainte de final (buget de tokeni epuizat). Analizele individuale sunt mai jos."
+            : "Analiza s-a oprit inainte de final (buget de tokeni epuizat). Reincearca; daca se repeta, alege un model diferit.";
         }
-        await stream.writeSSE({ event: "error", data: JSON.stringify({ error: errorText }) });
+        await stream.writeSSE({
+          event: "error",
+          data: JSON.stringify({
+            error: errorText,
+            ...(errorCode ? { code: errorCode } : {}),
+            // Analizele deja obtinute se trimit ORICUM: sunt platite si utile, chiar
+            // daca reconcilierea lipseste.
+            ...(partialAnalyses ? { result: { analyses: partialAnalyses } } : {}),
+          }),
+        });
       } finally {
         if (releaseReservationAfterStream != null) {
           const reservationId = releaseReservationAfterStream;

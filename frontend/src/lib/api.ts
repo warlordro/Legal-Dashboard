@@ -16,6 +16,22 @@ export function extractErrorMessage(data: unknown, fallback: string): string {
   return fallback;
 }
 
+export interface MultiAnalyses {
+  analyst1: { model: string; text: string };
+  analyst2: { model: string; text: string };
+}
+
+// Analiza multi a esuat DUPA ce analistii au livrat (judge gol sau trunchiat). Analizele
+// sunt deja platite, deci calea de eroare le duce mai departe in loc sa le arunce.
+export class AiMultiPartialError extends Error {
+  readonly analyses: MultiAnalyses;
+  constructor(message: string, analyses: MultiAnalyses) {
+    super(message);
+    this.name = "AiMultiPartialError";
+    this.analyses = analyses;
+  }
+}
+
 // Single audited fetch site for the renderer. Per-domain modules
 // (monitoringApi, adminApi, dashboardApi, aiUsageApi, alertsApi) import this
 // instead of calling fetch() directly — that keeps the renderer-fetch hook
@@ -452,8 +468,14 @@ export const api = {
           if (!eventName || !dataStr) continue;
           const data = JSON.parse(dataStr);
           if (eventName === "done") final = data.result;
-          else if (eventName === "error") throw new Error(extractErrorMessage(data, "Eroare AI Multi"));
-          else if (eventName === "analyst_done") onPhase?.(data.which === 1 ? "analyst1_done" : "analyst2_done");
+          else if (eventName === "error") {
+            // v2.43.3: backendul trimite pe `error` si analizele deja produse cand doar
+            // reconcilierea a esuat (judge gol / trunchiat). Erau aruncate aici, deci userul
+            // platea doi analisti si nu vedea nimic. Le propagam pe o eroare tipata.
+            const partial = (data as { result?: { analyses?: MultiAnalyses } }).result?.analyses;
+            const message = extractErrorMessage(data, "Eroare AI Multi");
+            throw partial ? new AiMultiPartialError(message, partial) : new Error(message);
+          } else if (eventName === "analyst_done") onPhase?.(data.which === 1 ? "analyst1_done" : "analyst2_done");
           else if (eventName === "judge_started") onPhase?.("judge_started");
         }
       }
