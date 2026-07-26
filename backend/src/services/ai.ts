@@ -121,6 +121,7 @@ export type AiEffort = "low" | "medium" | "high";
 // sau pe substringul "claude-" l-ar include. Gate-ul OpenRouter se aplica pe slug-ul
 // REZOLVAT (dupa resolveOpenRouterSlug), pentru ca OPENROUTER_MODEL_OVERRIDES poate
 // remapa orice cheie pe orice slug valid.
+const EFFORT_CAPABLE_MODEL_IDS = new Set(["claude-sonnet-5", "claude-opus-5"]);
 const EFFORT_CAPABLE_OPENROUTER_SLUGS = new Set(["anthropic/claude-sonnet-5", "anthropic/claude-opus-5"]);
 
 // Kill switch operational: omite campurile de effort pe AMBELE rute, fara rebuild.
@@ -495,7 +496,8 @@ async function callAnthropic(
   prompt: PromptInput,
   timeout = AI_TIMEOUT,
   tracking?: AiUsageTrackingContext,
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  effort?: AiEffort
 ): Promise<string> {
   const { system, user } = promptParts(prompt);
   return withAiLogging(
@@ -503,22 +505,34 @@ async function callAnthropic(
     modelId,
     async () => {
       const client = new Anthropic({ apiKey });
-      const message = await client.messages.create(
-        {
-          model: modelId,
-          max_tokens: AI_MAX_TOKENS,
-          // v2.42.0 (5.6): system prompt nativ Anthropic.
-          ...(system !== null ? { system } : {}),
-          messages: [{ role: "user", content: user }],
-        },
-        { signal: composeSignal(timeout, signal) }
-      );
+      // v2.43.3: streaming + finalMessage() in loc de messages.create. Motivul e
+      // guard-ul SDK-ului pe apeluri non-streaming cu max_tokens mare, plus mentinerea
+      // conexiunii vii fata de intermediari. NU ocoleste timeout-ul nostru:
+      // composeSignal produce un AbortSignal.timeout ABSOLUT, care taie la `timeout`
+      // indiferent daca stream-ul primeste evenimente. Valoarea de retur e identica cu
+      // varianta non-streaming; NU se face SSE spre client.
+      const sendEffort = effort !== undefined && !effortDisabled() && EFFORT_CAPABLE_MODEL_IDS.has(modelId);
+      const message = await client.messages
+        .stream(
+          {
+            model: modelId,
+            max_tokens: AI_MAX_TOKENS,
+            // v2.42.0 (5.6): system prompt nativ Anthropic.
+            ...(system !== null ? { system } : {}),
+            messages: [{ role: "user", content: user }],
+            // Doar modelele din allowlist — Haiku 4.5 respinge campul cu 400.
+            ...(sendEffort ? { output_config: { effort } } : {}),
+          },
+          { signal: composeSignal(timeout, signal) }
+        )
+        .finalMessage();
       const value = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
       return {
         value,
         meta: {
           usageInput: message.usage?.input_tokens,
           usageOutput: message.usage?.output_tokens,
+          stopReason: message.stop_reason ?? undefined,
         },
       };
     },

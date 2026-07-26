@@ -21,6 +21,13 @@ export interface AiUsageCallMeta {
   routingTag?: AiUsageRoutingTag;
   latencyMs?: number;
   errorType?: string;
+  // v2.43.3: DOAR pentru linia de log `ai_call` — semnalul de trunchiere pe Claude 5
+  // (`stop_reason: "max_tokens"` nativ, `finish_reason: "length"` pe OpenRouter).
+  // NU se persista in `ai_usage`: recordAiUsageSafely destructureaza doar campurile
+  // cunoscute, iar o coloana noua ar cere migration pentru un semnal de diagnostic,
+  // nu o metrica de facturat. Ajunge in log doar pe calea de SUCCES (spread pe meta);
+  // pe calea de eroare nu exista producator, deci nu se adauga acolo.
+  stopReason?: string;
 }
 
 interface ModelPrice {
