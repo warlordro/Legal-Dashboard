@@ -101,7 +101,15 @@ const TRUNCATE_FIELD = 200;
 // SECURITY: Timeout for AI API calls
 export const AI_TIMEOUT = 120000; // 120s per call — single analysis (native: Claude/GPT/Gemini)
 export const AI_MULTI_TIMEOUT = 180000; // 180s per call — multi-agent (analysts + judge)
-const AI_MAX_TOKENS = 8000; // max output tokens — increased from 3000 for complex dosare
+// v2.43.3: exportat pentru ca testele asertau literalul 8000, care a driftat la primul
+// bump. Constanta e PARTAJATA de toate cele patru rute (anthropic max_tokens, openai
+// max_output_tokens / max_completion_tokens, gemini maxOutputTokens, openrouter
+// max_tokens), deci ridicarea e tavan pentru toate — nu cost garantat: se factureaza
+// tokenii generati efectiv, nu plafonul.
+// 16000: pe Claude 5 thinking-ul e pornit implicit si consuma din ACELASI buget ca
+// textul de raspuns, deci un plafon calibrat pentru modele fara thinking taie analiza
+// (stop_reason: "max_tokens") dupa o faza lunga de gandire.
+export const AI_MAX_TOKENS = 16000; // max output tokens (thinking + text pe Claude 5)
 
 // SECURITY: Body size limit for AI endpoint (100KB max)
 export const MAX_AI_BODY_SIZE = 100 * 1024;

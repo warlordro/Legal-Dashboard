@@ -31,6 +31,7 @@ import { closeDb, getDb } from "../db/schema.ts";
 import { invalidateCache, setTenantKey } from "../db/tenantKeysRepository.ts";
 import { resetMasterKeyCacheForTests } from "../util/tenantKeyCrypto.ts";
 import {
+  AI_MAX_TOKENS,
   callModel,
   callOpenAI,
   callOpenRouter,
@@ -254,7 +255,7 @@ describe("callOpenAI — Responses API fallback (audit R3)", () => {
       expect.objectContaining({
         model: "gpt-5.4",
         messages: [{ role: "user", content: "prompt" }],
-        max_completion_tokens: 8000,
+        max_completion_tokens: AI_MAX_TOKENS,
       }),
       expect.objectContaining({ signal: expect.any(AbortSignal) })
     );
