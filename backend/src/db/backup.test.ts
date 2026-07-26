@@ -464,7 +464,10 @@ describe("restore monolit — validare ledger (Rev. 3)", () => {
 
     await expect(restoreFromBackup(backupName)).resolves.toBeDefined();
     expect(readMarker(dbPath)).toBe("LEGACY");
-  });
+    // Singurul test din grup care valideaza ledger-ul COMPLET: rehash-uieste
+    // fiecare fisier de migratie de pe disc. Pe runnerul Windows depaseste
+    // marginal timeout-ul default de 5s.
+  }, 20000);
 
   it("backup FARA _schema_versions ramane acceptat la monolit (regresie)", async () => {
     const backupName = "legal-dashboard.2026-06-03.db";
