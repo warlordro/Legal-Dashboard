@@ -249,6 +249,14 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   //       stocare, gardul ar vedea mereu `false` (writer-preference RWLock).
   // Rezolutia de configuratie CAPTCHA ramane inaintea tuturor, ca web mode sa-si
   // pastreze raspunsul canonic 501. Gardul ramane inainte de streamSSE pe bulk/split.
+  //
+  // REZIDUAL ASUMAT (review adversarial 2026-07-26, MEDIUM): e un check-then-act.
+  // Un restore care porneste intre linia asta si `beginRnpmSearch` (rnpmSearchService)
+  // gaseste captcha deja contorizata. Corectitudinea ramane acoperita — beginRnpmSearch
+  // arunca RESTORE_IN_PROGRESS — se pierde doar contorizarea, in fereastra de race.
+  // Inainte de fix captcha se consuma INTOTDEAUNA inaintea verificarii; fixul ingusteaza
+  // fereastra, nu o creeaza. Inchiderea ei ar cere mutarea contorizarii sub acelasi
+  // lock cu latch-ul — refactor separat, nu intr-un commit de securitate.
   if (isRnpmRestoreInProgress(ownerId)) {
     return c.json(
       fail("RESTORE_IN_PROGRESS", "Restaurare in curs pentru acest cont; reincearca dupa finalizare", c),

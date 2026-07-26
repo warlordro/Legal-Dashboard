@@ -45,8 +45,8 @@ beforeEach(async () => {
   new Database(process.env.LEGAL_DASHBOARD_DB_PATH).close();
   getDb();
   // F12-F8: testul 2 verifica faptul ca o cerere same-origin AJUNGE la router
-  // (404 pe token inexistent). Fara rand admin pentru "alice" ar primi 401 de la
-  // requireRole si testul ar trece din motivul gresit.
+  // (404 pe token inexistent). Fara rand admin pentru "alice", requireRole ar
+  // raspunde 401 si testul ar PICA — seed-ul e ce il tine valid dupa gard.
   insertUser({ id: "alice", email: "alice@x.ro", displayName: "Alice", role: "admin" });
   mockedConn.mockReturnValue({ remote: { address: "10.0.0.5" } } as ReturnType<typeof getConnInfo>);
 });

@@ -99,4 +99,30 @@ describe("F12-F5 — cheia captcha nu ajunge in mesajele de eroare", () => {
       return !msg.includes(KEY) && msg.includes("***");
     }, "asteptat mesaj fara cheie, cu ***");
   });
+
+  it("redacteaza si forma percent-encodata a cheii (BYOK cu caractere non-alfanumerice)", async () => {
+    // Cheile 2Captcha oficiale sunt alfanumerice, dar validateKey accepta orice
+    // string >= 10 caractere (BYOK desktop, CapSolver). Un `+` sau `/` apare in
+    // URL codificat, deci o inlocuire doar pe forma bruta ar rata secretul.
+    const RAW = "abc+def/ghi=jkl";
+    vi.doMock("@2captcha/captcha-solver", () => ({
+      Solver: class {
+        constructor(private readonly apikey: string) {}
+        recaptcha(): Promise<never> {
+          return Promise.reject(
+            new Error(
+              `request to https://2captcha.com/in.php?key=${encodeURIComponent(this.apikey)}&json=1 failed, reason: ECONNRESET`
+            )
+          );
+        }
+      },
+    }));
+    vi.resetModules();
+    const { solveRnpmCaptcha: solve } = await import("./captchaSolver.ts");
+
+    await expect(solve(RAW, "2captcha")).rejects.toSatisfy((e: unknown) => {
+      const msg = e instanceof Error ? e.message : String(e);
+      return !msg.includes(RAW) && !msg.includes(encodeURIComponent(RAW)) && msg.includes("***");
+    }, "asteptat mesaj fara cheie in nicio forma, cu ***");
+  });
 });

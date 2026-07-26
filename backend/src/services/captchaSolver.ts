@@ -50,6 +50,12 @@ export class CaptchaInsufficientFundsError extends Error {
 // stringifica acelasi Error.message.
 // Redactare pe VALOARE (cheile sunt in scope aici), nu pe numele parametrului —
 // acela ar fi o presupunere despre API-ul provider-ului.
+// Acopera si forma percent-encodata: o cheie 2Captcha valida e alfanumerica, deci
+// encoding-ul nu o schimba, dar `validateKey` accepta orice string >= 10 caractere
+// (BYOK desktop, chei CapSolver), iar unul cu `+` sau `/` ar aparea in URL codificat
+// si ar scapa de o inlocuire pe forma bruta. Set() evita dubla trecere cand cele
+// doua forme coincid. Redactam DOAR `message`; `cause` pastreaza eroarea originala
+// si nu e stringificat pe nicio cale spre client (verificat in routes/services/util).
 export function redactCaptchaSecrets(message: string, ...secrets: Array<string | undefined>): string {
   let out = message;
   for (const secret of secrets) {
@@ -57,7 +63,9 @@ export function redactCaptchaSecrets(message: string, ...secrets: Array<string |
     // Sub 8 caractere nu e o cheie reala (validateKey cere >= 10) si o inlocuire
     // pe un fragment scurt ar muti mesajul degeaba.
     if (!trimmed || trimmed.length < 8) continue;
-    out = out.split(trimmed).join("***");
+    for (const variant of new Set([trimmed, encodeURIComponent(trimmed)])) {
+      out = out.split(variant).join("***");
+    }
   }
   return out;
 }
