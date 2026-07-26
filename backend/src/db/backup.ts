@@ -1354,6 +1354,40 @@ export async function deleteRnpmBackups(ownerId: string): Promise<number> {
   );
 }
 
+// Stergere individuala (Setari > Backup, per rand). Acelasi jail ca restore-ul
+// si acelasi write lock ca delete-all: un delete lansat in timpul unui restore
+// in zbor ar putea sterge sursa restore-ului sau snapshotul pre-restore.
+// Lock-ul e in-process (RWLock) — suficient: aplicatia ruleaza un singur proces
+// (single-instance lock pe desktop, un singur node in web mode), premisa intregii
+// mentenante din acest fisier. Validarea sta INAINTE de lock: e pura, iar un
+// nume-gunoi nu are de ce sa puna un writer in coada (writer-preference ar
+// intarzia reader-i noi degeaba).
+export async function deleteBackupByName(name: string): Promise<void> {
+  const dir = getBackupDir();
+  assertNameInJail(dir, name, RESTORE_NAME_RE);
+  return withMaintenanceWrite(async () => {
+    const target = path.join(dir, name);
+    try {
+      await fsPromises.unlink(target);
+    } catch (e) {
+      if ((e as NodeJS.ErrnoException)?.code === "ENOENT") {
+        throw new BackupValidationError("Backup inexistent");
+      }
+      throw e;
+    }
+    // Bundle-aware: sidecar-urile legacy pleaca odata cu backup-ul, BEST-EFFORT
+    // (exact semantica din deleteAllBackupsInDir). Un sidecar orfan nu se poate
+    // atasa altui backup: numele contin timestamp + uniquifier, deci nu se
+    // refolosesc.
+    for (const suffix of ["-wal", "-shm"] as const) {
+      await fsPromises.unlink(target + suffix).catch(() => {
+        /* best-effort */
+      });
+    }
+    logBackupEvent({ action: "delete_backup", file: name });
+  });
+}
+
 // Prune SINCRON pe pool-ul preSplit al monolitului — apelat de splitter la
 // boot, dupa verificarea backup-ului proaspat (context sincron, inainte de
 // serve; maintenance lock-ul nu are inca clienti). Fara el, un crash-loop la

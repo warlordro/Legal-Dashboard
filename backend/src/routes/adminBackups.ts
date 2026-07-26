@@ -11,6 +11,7 @@ import {
   BackupValidationError,
   createManualBackup,
   deleteAllBackups,
+  deleteBackupByName,
   listBackupsWithMeta,
   restoreFromBackup,
 } from "../db/backup.ts";
@@ -136,6 +137,39 @@ adminBackupsRouter.delete("/", requireDesktopHeader, async (c) => {
     });
     rethrowTypedMaintenanceError(e);
     console.error("[adminBackups] delete-all failed:", e);
+    return c.json(
+      fail(
+        ErrorCodes.INTERNAL_ERROR,
+        "Eroare interna. Reincearca sau contacteaza administratorul cu requestId-ul din raspuns.",
+        c
+      ),
+      500
+    );
+  }
+});
+
+adminBackupsRouter.delete("/:name", requireDesktopHeader, async (c) => {
+  const name = c.req.param("name");
+  try {
+    await deleteBackupByName(name);
+    recordAuditSafe(c, "backup.delete", {
+      targetKind: "backup",
+      targetId: name,
+    });
+    return c.json(ok({ name }, c));
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "Eroare stergere backup";
+    recordAuditSafe(c, "backup.delete", {
+      targetKind: "backup",
+      targetId: name,
+      outcome: isTypedMaintenanceError(e) ? "denied" : "error",
+      detail: { error: msg },
+    });
+    if (e instanceof BackupValidationError) {
+      return c.json(fail(ErrorCodes.INVALID_PARAMS, msg, c), 400);
+    }
+    rethrowTypedMaintenanceError(e);
+    console.error("[adminBackups] delete failed:", e);
     return c.json(
       fail(
         ErrorCodes.INTERNAL_ERROR,

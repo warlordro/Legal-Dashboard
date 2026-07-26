@@ -67,6 +67,14 @@ describe("/api/v1/admin/backups — gate + contract", () => {
       ).status
     ).toBe(403);
     expect((await app.request("/api/v1/admin/backups", { method: "DELETE", headers: DESKTOP })).status).toBe(403);
+    expect(
+      (
+        await app.request("/api/v1/admin/backups/legal-dashboard.x.db", {
+          method: "DELETE",
+          headers: DESKTOP,
+        })
+      ).status
+    ).toBe(403);
   });
 
   it("admin: create + list + restore + delete pe backup-urile monolitului", async () => {
@@ -128,5 +136,61 @@ describe("/api/v1/admin/backups — gate + contract", () => {
     });
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error?: { code: string } }).error?.code).toBe("INVALID_PARAMS");
+  });
+});
+
+describe("DELETE /api/v1/admin/backups/:name — stergere individuala", () => {
+  it("sterge DOAR backup-ul cerut, cu sidecar-uri, si scrie audit backup.delete", async () => {
+    const app = buildApp("admin1");
+    const r1 = await app.request("/api/v1/admin/backups/create", { method: "POST", headers: DESKTOP });
+    const name1 = ((await r1.json()) as { data: { name: string } }).data.name;
+    const r2 = await app.request("/api/v1/admin/backups/create", { method: "POST", headers: DESKTOP });
+    const name2 = ((await r2.json()) as { data: { name: string } }).data.name;
+    expect(name1).not.toBe(name2);
+    // Sidecar-uri legacy simulate — trebuie sa plece odata cu backup-ul.
+    fs.writeFileSync(path.join(getBackupDir(), `${name1}-wal`), "x");
+    fs.writeFileSync(path.join(getBackupDir(), `${name1}-shm`), "x");
+
+    const res = await app.request(`/api/v1/admin/backups/${encodeURIComponent(name1)}`, {
+      method: "DELETE",
+      headers: DESKTOP,
+    });
+    expect(res.status).toBe(200);
+    expect(((await res.json()) as { data: { name: string } }).data.name).toBe(name1);
+    expect(fs.existsSync(path.join(getBackupDir(), name1))).toBe(false);
+    expect(fs.existsSync(path.join(getBackupDir(), `${name1}-wal`))).toBe(false);
+    expect(fs.existsSync(path.join(getBackupDir(), `${name1}-shm`))).toBe(false);
+    expect(fs.existsSync(path.join(getBackupDir(), name2))).toBe(true);
+    const audit = getAuditEvents({ action: "backup.delete" });
+    expect(audit.length).toBe(1);
+    expect(audit[0]?.target_id).toBe(name1);
+  });
+
+  it("refuza traversal si nume care nu respecta pattern-ul de backup (400)", async () => {
+    const app = buildApp("admin1");
+    for (const raw of ["%2e%2e%2fetc", "..%5Cx.db", "legal-dashboard.db", "altfisier.db"]) {
+      const res = await app.request(`/api/v1/admin/backups/${raw}`, { method: "DELETE", headers: DESKTOP });
+      expect(res.status, raw).toBe(400);
+    }
+  });
+
+  it("backup inexistent → 400, cu audit outcome error", async () => {
+    const app = buildApp("admin1");
+    const res = await app.request("/api/v1/admin/backups/legal-dashboard.nu-exista.db", {
+      method: "DELETE",
+      headers: DESKTOP,
+    });
+    expect(res.status).toBe(400);
+    const body = (await res.json()) as { error: { message: string } };
+    expect(body.error.message).toBe("Backup inexistent");
+    const audit = getAuditEvents({ action: "backup.delete" });
+    expect(audit.length).toBe(1);
+    expect(audit[0]?.outcome).toBe("error");
+  });
+
+  it("cere header-ul desktop in mod desktop", async () => {
+    const app = buildApp("admin1");
+    const res = await app.request("/api/v1/admin/backups/legal-dashboard.x.db", { method: "DELETE" });
+    expect(res.status).toBe(403);
   });
 });
