@@ -588,8 +588,12 @@ async function callAnthropic(
         throw e;
       }
       const value = message.content.flatMap((block) => (block.type === "text" ? [block.text] : [])).join("");
-      // Idem callOpenAI/callGoogle: orice oprire care nu e finalizare normala.
-      // "refusal" intra si el aici — textul e partial sau absent.
+      // Idem callOpenAI/callGoogle: orice oprire care nu e finalizare normala. Uniunea
+      // completa din SDK-ul instalat (@anthropic-ai/sdk, messages.d.ts:874) e
+      // end_turn | max_tokens | stop_sequence | tool_use | pause_turn | refusal — deci
+      // in afara celor doua acceptate raman doar rezultate incomplete. Gate-ul e
+      // fail-closed deliberat: la o valoare noua preferam eroarea vizibila in locul unei
+      // analize taiate care arata completa.
       if (message.stop_reason && message.stop_reason !== "end_turn" && message.stop_reason !== "stop_sequence") {
         truncatedBy = message.stop_reason;
       }

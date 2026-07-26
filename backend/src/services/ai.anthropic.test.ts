@@ -174,6 +174,26 @@ describe("callAnthropic — forma requestului (v2.43.3)", () => {
     expect(body.output_config).toEqual({ effort: "medium" });
   });
 
+  it("stop_reason-urile de finalizare normala NU sunt tratate ca trunchiere", async () => {
+    // Gate-ul e prin excludere, pe calea calda a tuturor analistilor Claude si a
+    // judecatorului implicit: o greseala aici ar face TOATE analizele sa iasa pe eroare.
+    for (const reason of ["end_turn", "stop_sequence"]) {
+      streamMock.mockReset().mockReturnValue(mockFinalMessage({ stopReason: reason }));
+      await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).resolves.toBe("ok");
+    }
+  });
+
+  it("refusal e tot raspuns incomplet, nu rezultat valid", async () => {
+    streamMock.mockReset().mockReturnValue(mockFinalMessage({ stopReason: "refusal" }));
+
+    await expect(callAnthropic("k".repeat(20), "claude-opus-5", "prompt", 5000)).rejects.toMatchObject({
+      code: "AI_TRUNCATED",
+      stopReason: "refusal",
+      // Nu e o problema de buget, deci mesajul catre user nu are voie sa o afirme.
+      tokenBudget: false,
+    });
+  });
+
   it("stop_reason ajunge in linia de log ai_call (semnal de trunchiere)", async () => {
     streamMock.mockReset().mockReturnValue(mockFinalMessage({ stopReason: "max_tokens" }));
     const logs: string[] = [];

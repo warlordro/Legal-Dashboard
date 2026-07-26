@@ -378,6 +378,8 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
         analyst1?: { model: string; text: string };
         analyst2?: { model: string; text: string };
       } | null = null;
+      let done1: { model: string; text: string } | undefined;
+      let done2: { model: string; text: string } | undefined;
       try {
         // Phase 1+2: analysts in parallel, emit per-analyst completion as soon as it lands.
         const p1 = callModel(
@@ -395,6 +397,9 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
           // de cost. Judge-ul ramane mai sus, vezi comentariul de la faza 3.
           "low"
         ).then(async (text) => {
+          // Marcat INAINTE de writeSSE: daca sibling-ul respinge intre timp, analiza asta
+          // e deja platita si trebuie sa fie recuperabila din catch.
+          done1 = { model: analysts[0], text };
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 1 }) });
           return text;
         });
@@ -412,21 +417,29 @@ aiRouter.post("/analyze-multi", quotaGuard("ai.multi"), async (c) => {
           // v2.43.3: vezi analistul 1 — acelasi rol, acelasi effort.
           "low"
         ).then(async (text) => {
+          done2 = { model: analysts[1], text };
           await stream.writeSSE({ event: "analyst_done", data: JSON.stringify({ which: 2 }) });
           return text;
         });
-        // allSettled, nu all: cu `all`, o respingere arunca imediat si analiza care
-        // rezolvase deja (facturata, logata in ai_usage) se pierde fara sa fie vazuta.
-        const [r1, r2] = await Promise.allSettled([p1, p2]);
-        const done1 = r1.status === "fulfilled" ? { model: analysts[0], text: r1.value } : undefined;
-        const done2 = r2.status === "fulfilled" ? { model: analysts[1], text: r2.value } : undefined;
-        if (done1 || done2) partialAnalyses = { ...(done1 && { analyst1: done1 }), ...(done2 && { analyst2: done2 }) };
-        if (!done1 || !done2) {
+        // Ramane `all`, NU allSettled: prima respingere trebuie sa taie imediat sibling-ul
+        // (un NO_API_KEY respinge instant, iar allSettled ar fi lasat celalalt analist sa
+        // genereze pana la 180s, facturat, pe o cerere care oricum iese pe eroare).
+        // Analiza deja livrata nu se pierde: `done1`/`done2` sunt setate in `.then`.
+        let analysisA: string;
+        let analysisB: string;
+        try {
+          [analysisA, analysisB] = await Promise.all([p1, p2]);
+        } catch (err) {
           analystsAbort.abort();
-          throw r1.status === "rejected" ? r1.reason : (r2 as PromiseRejectedResult).reason;
+          if (done1 || done2) {
+            partialAnalyses = { ...(done1 && { analyst1: done1 }), ...(done2 && { analyst2: done2 }) };
+          }
+          throw err;
         }
-        const analysisA = done1.text;
-        const analysisB = done2.text;
+        partialAnalyses = {
+          analyst1: { model: analysts[0], text: analysisA },
+          analyst2: { model: analysts[1], text: analysisB },
+        };
 
         // Phase 3: judge reconciliation.
         await stream.writeSSE({ event: "judge_started", data: "{}" });
