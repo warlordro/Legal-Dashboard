@@ -227,6 +227,17 @@ aiRouter.post("/analyze", quotaGuard("ai.single"), async (c) => {
       "low"
     );
 
+    // v2.43.3: un raspuns gol nu mai iese ca 200 {"analysis":""}. Pe Claude 5 thinking-ul
+    // consuma din acelasi buget ca textul, deci content gol e semnal de trunchiere sau de
+    // refuz al modelului, nu un rezultat valid. Pe MULTI nu se schimba nimic: promptul
+    // judge are deja regula pentru analiza goala, deci degradarea acolo e by design.
+    // Reservation-ul a fost deja confirmat de callModel — apelul a costat, deci NU se
+    // elibereaza; userul primeste eroare, dar consumul real ramane contabilizat.
+    if (!text.trim()) {
+      reservationToRelease = null;
+      return c.json(fail(ErrorCodes.AI_EMPTY_RESPONSE, "Modelul a returnat un raspuns gol. Reincearca.", c), 502);
+    }
+
     // Succes: callModel a apelat deja confirmAiUsageReservation in interior.
     reservationToRelease = null;
     return c.json({ analysis: text });

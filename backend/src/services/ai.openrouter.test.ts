@@ -151,6 +151,25 @@ describe("F-C: forma body-ului OpenRouter (v2.43.3)", () => {
     }
   });
 
+  it("finish_reason ajunge in linia de log ai_call (semnal de trunchiere)", async () => {
+    openRouterCreateMock.mockResolvedValue({
+      choices: [{ message: { content: "ok" }, finish_reason: "length" }],
+      usage: { prompt_tokens: 10, completion_tokens: 20 },
+    });
+    const logs: string[] = [];
+    const spy = vi.spyOn(console, "log").mockImplementation((...a: unknown[]) => {
+      logs.push(a.map(String).join(" "));
+    });
+    try {
+      await callOpenRouter("k".repeat(20), "anthropic/claude-opus-5", "prompt", 5000);
+      const line = logs.find((l) => l.includes('"action":"ai_call"'));
+      expect(line).toBeDefined();
+      expect(line).toContain('"stopReason":"length"');
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("modelele din afara allowlist-ului NU primesc reasoning", async () => {
     for (const slug of ["anthropic/claude-haiku-4.5", "openai/gpt-5.6-sol", "google/gemini-3.1-pro-preview"]) {
       openRouterCreateMock.mockClear();

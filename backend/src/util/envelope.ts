@@ -33,6 +33,10 @@ export const ErrorCodes = {
   MISSING_API_KEY: "MISSING_API_KEY",
   UNKNOWN_MODEL: "UNKNOWN_MODEL",
   AI_ANALYSIS_FAILED: "AI_ANALYSIS_FAILED",
+  // v2.43.3: model care intoarce continut gol. Pe Claude 5 thinking-ul consuma din
+  // acelasi buget ca textul, deci un raspuns gol e semnal de trunchiere sau refuz,
+  // nu un rezultat valid de returnat ca 200.
+  AI_EMPTY_RESPONSE: "AI_EMPTY_RESPONSE",
   WEB_MODE_NOT_IMPLEMENTED: "WEB_MODE_NOT_IMPLEMENTED",
   QUOTA_EXCEEDED: "QUOTA_EXCEEDED",
   CAPTCHA_NOT_CONFIGURED: "CAPTCHA_NOT_CONFIGURED",

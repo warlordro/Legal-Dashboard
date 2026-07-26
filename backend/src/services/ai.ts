@@ -745,7 +745,11 @@ export async function callOpenRouter(
           "reasoning_present:",
           Boolean(reasoningPresent),
           "role:",
-          msg?.role
+          msg?.role,
+          // v2.43.3: fara asta, la un raspuns gol nu stii daca effort-ul a plecat sau nu,
+          // deci debugging-ul ar fi ghicit.
+          "effort_sent:",
+          sendEffort ? effort : "none"
         );
       }
       return {
@@ -755,6 +759,9 @@ export async function callOpenRouter(
           usageOutput: usage?.completion_tokens,
           costUsdMilli: usage?.cost != null ? Math.round(usage.cost * 1000) : null,
           routingTag,
+          // v2.43.3: omologul lui stop_reason de pe ruta nativa. "length" = raspuns
+          // taiat de plafonul de tokeni — semnalul pe care il masuram dupa deploy.
+          stopReason: choice?.finish_reason ?? undefined,
         },
       };
     },
