@@ -49,6 +49,12 @@ COPY --chown=app:app --from=deps /app/node_modules ./node_modules
 COPY --chown=app:app --from=builder /app/dist-backend/ ./dist-backend/
 COPY --chown=app:app --from=builder /app/dist-frontend/ ./dist-frontend/
 
+# Provizionarea primului admin dupa deploy (`node scripts/seed-admin.mjs`, vezi
+# DEPLOY-SERVER.md). Scriptul e standalone: cere doar node + better-sqlite3 din
+# /app/node_modules. Fara el in imagine, comanda documentata esueaza cu
+# "Cannot find module".
+COPY --chown=app:app scripts/seed-admin.mjs ./scripts/seed-admin.mjs
+
 # SECURITY: nu bake-uim .env in imagine. Operatorul furnizeaza env la runtime
 # (Dokploy Environment / docker-compose env).
 

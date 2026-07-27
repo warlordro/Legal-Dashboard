@@ -7,7 +7,7 @@ Production compose pins public proxy images by immutable manifest digest:
 | Service | Image |
 |---|---|
 | caddy | `caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17` |
-| oauth2-proxy | `quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine@sha256:36b46309c74e368e4b894314f5c69723c73728d60f66b777c13a40686a1364f7` |
+| oauth2-proxy | `quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine@sha256:1a2009d3b05316a5f0a482d8951422cdf100c31fb661fd48f2b4687c87c4ffa1` |
 
 Refresh flow:
 

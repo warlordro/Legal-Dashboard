@@ -1,44 +1,30 @@
-# Legal Dashboard — server deployment stack (v2.31.0+)
+# Legal Dashboard — deploy pe NAS Synology, in spatele unui Cloudflare Tunnel.
 #
 # Layout:
-#   internet → caddy (80/443, TLS via Let's Encrypt) → oauth2-proxy (4180)
-#     → backend (3002, expose only — NEVER ports)
+#   internet → Cloudflare (TLS, WAF, DDoS) → cloudflared (container separat)
+#     → oauth2-proxy (4180, publicat pe host) → backend (3002, expose only)
 #
-# Backend is bind-loopback inside the container network: only oauth2-proxy can
-# reach it. oauth2-proxy verifies the Google OAuth session, then injects
-# `X-Proxy-Auth: <shared secret>` + `X-Auth-Request-Email` headers. Backend
-# accepts the headers EXCLUSIVELY on POST /api/v1/auth/oauth2/sync (the bridge
-# endpoint) which mints the native HS256 JWT and sets the session cookie.
+# Diferente fata de deploy/docker-compose.prod.yml:
+#   - fara Caddy: TLS-ul e terminat de Cloudflare, iar tunelul e outbound-only,
+#     deci nu se deschid porturile 80/443 in router si nu exista Let's Encrypt;
+#   - oauth2-proxy publica portul 4180 pe host, pentru ca tunelul ruleaza in alt
+#     proiect Container Manager (alta retea Docker) si il atinge prin IP-ul LAN;
+#   - baza SQLite sta pe bind mount ./data, ca sa intre in Hyper Backup.
 #
-# Start: docker compose -f deploy/docker-compose.prod.yml --env-file deploy/.env.prod up -d
-# Stop:  docker compose -f deploy/docker-compose.prod.yml down
-# Logs:  docker compose -f deploy/docker-compose.prod.yml logs -f caddy oauth2-proxy backend
-
+# ATENTIE: acest fisier se COPIAZA in radacina proiectului, redenumit
+# docker-compose.yml (`context: .` presupune ca sta langa Dockerfile). Rulat
+# din deploy/, contextul de build ar fi gresit.
+#
+# Start (Container Manager: Project → Create, path = radacina proiectului,
+# source = Use existing docker-compose.yml) sau din CLI:
+#   docker compose --env-file .env up -d
 services:
-  caddy:
-    image: caddy:2.8-alpine@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-      - "443:443/udp"
-    environment:
-      DOMAIN: ${DOMAIN}
-      ACME_EMAIL: ${ACME_EMAIL}
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
-    depends_on:
-      - oauth2-proxy
-    networks:
-      - ld_net
-
   oauth2-proxy:
     image: quay.io/oauth2-proxy/oauth2-proxy:v7.7.1-alpine@sha256:1a2009d3b05316a5f0a482d8951422cdf100c31fb661fd48f2b4687c87c4ffa1
     restart: unless-stopped
-    expose:
-      - "4180"
+    ports:
+      # Poarta de autentificare - singurul port atins de tunel.
+      - "0.0.0.0:4180:4180"
     environment:
       OAUTH2_PROXY_PROVIDER: google
       OAUTH2_PROXY_CLIENT_ID: ${GOOGLE_CLIENT_ID}
@@ -49,6 +35,9 @@ services:
       OAUTH2_PROXY_COOKIE_HTTPONLY: "true"
       OAUTH2_PROXY_COOKIE_SAMESITE: lax
       OAUTH2_PROXY_COOKIE_EXPIRE: 168h
+      # OBLIGATORIU in spatele Cloudflare: fara el, oauth2-proxy ignora
+      # X-Forwarded-Proto, construieste callback-ul pe http:// si login-ul
+      # intra in bucla de redirect.
       OAUTH2_PROXY_REVERSE_PROXY: "true"
       OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
       OAUTH2_PROXY_UPSTREAMS: http://backend:3002/
@@ -62,12 +51,6 @@ services:
       OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
       OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
-      # Fix 2026-07-02: OAUTH2_PROXY_INJECT_REQUEST_HEADERS nu exista ca flag in
-      # oauth2-proxy v7.7.1 (confirmat din --help: absent). Nu a functionat
-      # niciodata. Mecanismul real, standard, e pass-basic-auth (default true) +
-      # basic-auth-password -> Authorization: Basic base64(user:secret). Backend-ul
-      # (auth.ts) accepta secretul din Authorization:Basic ca alternativa la
-      # X-Proxy-Auth (vezi extractBasicAuthPassword).
       OAUTH2_PROXY_PASS_BASIC_AUTH: "true"
       OAUTH2_PROXY_BASIC_AUTH_PASSWORD: ${PROXY_BRIDGE_SECRET}
     depends_on:
@@ -76,17 +59,15 @@ services:
       - ld_net
 
   backend:
-    # Build the image from the repository root: docker compose -f deploy/docker-compose.prod.yml build
-    # (in CI/CD register the digest of legal-dashboard:VERSION instead of building inline.)
     build:
-      context: ..
+      context: .
       dockerfile: Dockerfile
-    image: legal-dashboard:${APP_VERSION:-2.43.0}
+    image: legal-dashboard:${APP_VERSION:-2.43.3}
     restart: unless-stopped
     expose:
-      # IMPORTANT: NEVER replace with `ports:` — backend must remain reachable
-      # only from the oauth2-proxy via the internal docker network. Direct
-      # exposure bypasses the OAuth gate entirely.
+      # IMPORTANT: NU inlocui cu `ports:` — backend-ul trebuie sa ramana
+      # accesibil doar din reteaua interna, prin oauth2-proxy. Publicat direct,
+      # ar fi accesibil din LAN fara autentificare Google.
       - "3002"
     environment:
       HOST: 0.0.0.0
@@ -95,8 +76,8 @@ services:
       LEGAL_DASHBOARD_AUTH_MODE: web
       LEGAL_DASHBOARD_ALLOW_REMOTE: "1"
       LEGAL_DASHBOARD_JWT_SECRET: ${JWT_SECRET}
-      LEGAL_DASHBOARD_JWT_ISSUER: ${JWT_ISSUER:-legal-dashboard-prod}
-      LEGAL_DASHBOARD_JWT_AUDIENCE: ${JWT_AUDIENCE:-legal-dashboard-prod}
+      LEGAL_DASHBOARD_JWT_ISSUER: ${JWT_ISSUER:-legal-dashboard-nas}
+      LEGAL_DASHBOARD_JWT_AUDIENCE: ${JWT_AUDIENCE:-legal-dashboard-nas}
       LEGAL_DASHBOARD_JWT_TTL_SECONDS: ${JWT_TTL_SECONDS:-3600}
       LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET: ${PROXY_BRIDGE_SECRET}
       LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR: ${LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR:-172.16.0.0/12}
@@ -104,8 +85,6 @@ services:
       LEGAL_DASHBOARD_DB_PATH: /data/legal-dashboard.db
       MONITORING_DISABLED_KINDS: ${MONITORING_DISABLED_KINDS:-}
       RNPM_RUNTIME_VALIDATION_DISABLED: ${RNPM_RUNTIME_VALIDATION_DISABLED:-}
-      FX_PLAUSIBLE_EUR_USD_MIN: ${FX_PLAUSIBLE_EUR_USD_MIN:-}
-      FX_PLAUSIBLE_EUR_USD_MAX: ${FX_PLAUSIBLE_EUR_USD_MAX:-}
       SMTP_HOST: ${SMTP_HOST:-}
       SMTP_PORT: ${SMTP_PORT:-}
       SMTP_USER: ${SMTP_USER:-}
@@ -113,7 +92,9 @@ services:
       SMTP_FROM: ${SMTP_FROM:-}
       SMTP_SECURE: ${SMTP_SECURE:-}
     volumes:
-      - ld_data:/data
+      # bind mount, nu volum numit: fisierul e vizibil in File Station si intra
+      # in Hyper Backup impreuna cu restul folderului
+      - ./data:/data
     networks:
       - ld_net
     healthcheck:
@@ -122,11 +103,6 @@ services:
       timeout: 10s
       start_period: 120s
       retries: 3
-
-volumes:
-  caddy_data:
-  caddy_config:
-  ld_data:
 
 networks:
   ld_net:
