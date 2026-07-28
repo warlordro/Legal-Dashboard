@@ -1,12 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
-import { clearList, readList, writeList } from "./_localStorageList";
+import { useCurrentUser } from "./useCurrentUser";
+import { clearList, readList, scopedKey, writeList } from "./_localStorageList";
 
-const STORAGE_KEY = "portaljust-search-history";
+export const PORTALJUST_HISTORY_KEY = "portaljust-search-history";
 const MAX_ENTRIES = 15;
-
-const loadHistory = (): SearchHistoryEntry[] => readList<SearchHistoryEntry>(STORAGE_KEY);
-const saveHistory = (entries: SearchHistoryEntry[]) => writeList(STORAGE_KEY, entries);
 
 function buildLabel(params: SearchParams): string {
   const parts: string[] = [];
@@ -20,7 +18,31 @@ function buildLabel(params: SearchParams): string {
 }
 
 export function useSearchHistory() {
-  const [history, setHistory] = useState<SearchHistoryEntry[]>(loadHistory);
+  const { user } = useCurrentUser();
+  const ownerId = user?.id ?? null;
+  const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
+
+  // Istoricul se incarca abia dupa ce stim cine e utilizatorul. Pana atunci
+  // ramane in memorie si NU se scrie nimic: o scriere "orfana" ar ateriza in
+  // partitia gresita la urmatorul login.
+  useEffect(() => {
+    if (ownerId === null) {
+      setHistory([]);
+      return;
+    }
+    // Cheia veche, nescopata, e stearsa la prima incarcare: continutul ei apartine
+    // sesiunii dinaintea fixului si nu poate fi atribuit unui utilizator anume.
+    clearList(PORTALJUST_HISTORY_KEY);
+    setHistory(readList<SearchHistoryEntry>(scopedKey(PORTALJUST_HISTORY_KEY, ownerId)));
+  }, [ownerId]);
+
+  const saveHistory = useCallback(
+    (entries: SearchHistoryEntry[]) => {
+      if (ownerId === null) return;
+      writeList(scopedKey(PORTALJUST_HISTORY_KEY, ownerId), entries);
+    },
+    [ownerId]
+  );
 
   const addEntry = useCallback(
     (
@@ -52,21 +74,24 @@ export function useSearchHistory() {
         return next;
       });
     },
-    []
+    [saveHistory]
   );
 
-  const removeEntry = useCallback((id: string) => {
-    setHistory((prev) => {
-      const next = prev.filter((e) => e.id !== id);
-      saveHistory(next);
-      return next;
-    });
-  }, []);
+  const removeEntry = useCallback(
+    (id: string) => {
+      setHistory((prev) => {
+        const next = prev.filter((e) => e.id !== id);
+        saveHistory(next);
+        return next;
+      });
+    },
+    [saveHistory]
+  );
 
   const clearHistory = useCallback(() => {
     setHistory([]);
-    clearList(STORAGE_KEY);
-  }, []);
+    if (ownerId !== null) clearList(scopedKey(PORTALJUST_HISTORY_KEY, ownerId));
+  }, [ownerId]);
 
   return { history, addEntry, removeEntry, clearHistory };
 }

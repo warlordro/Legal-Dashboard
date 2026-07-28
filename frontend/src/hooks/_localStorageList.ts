@@ -2,6 +2,15 @@
 // (useSearchHistory, useRnpmHistory). Singurul scop: try/catch consistent in jur
 // de read + write (mod privat Safari, quota exceeded) ca sa nu sparga UI-ul.
 
+// Cheia efectiva sub care se persista lista: una per utilizator logat.
+// In web mode acelasi browser e folosit de conturi diferite (deploy NAS, Google
+// OAuth per persoana); cu o cheie fixa, istoricul unui user — CUI-uri, nume,
+// CNP-uri introduse ca criterii — era vizibil oricui se loga dupa el pe acelasi
+// browser. Pe desktop ownerId e "local", deci o singura partitie, ca inainte.
+export function scopedKey(baseKey: string, ownerId: string): string {
+  return `${baseKey}::${ownerId}`;
+}
+
 export function readList<T>(storageKey: string): T[] {
   try {
     const raw = localStorage.getItem(storageKey);
