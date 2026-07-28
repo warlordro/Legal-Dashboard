@@ -11,6 +11,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 import { __resetCurrentUserStoreForTests, useCurrentUser, type UseCurrentUserResult } from "./useCurrentUser";
+import { emitSessionReminted } from "@/lib/sessionEvents";
 
 const PROFILE = {
   id: "u-1",
@@ -108,6 +109,33 @@ describe("useCurrentUser — store partajat", () => {
     expect(b.api.user?.id).toBe("u-1");
     expect(mockGet).toHaveBeenCalledTimes(2);
     b.unmount();
+  });
+
+  it("re-mint de sesiune => re-fetch /me, chiar daca identitatea s-a schimbat", async () => {
+    mockGet.mockResolvedValueOnce(PROFILE);
+    const a = mount();
+    await flush();
+    expect(a.api.user?.id).toBe("u-1");
+
+    // Alt cont s-a logat in acelasi browser; tabul curent isi re-minteaza tacit
+    // sesiunea pe noua identitate. Store-ul trebuie sa o urmeze, altfel UI-ul si
+    // datele partitionate pe utilizator raman pe contul vechi.
+    mockGet.mockResolvedValueOnce({ ...PROFILE, id: "u-2", email: "alt@firma.ro" });
+    act(() => {
+      emitSessionReminted();
+    });
+    await flush();
+    expect(a.api.user?.id).toBe("u-2");
+    expect(mockGet).toHaveBeenCalledTimes(2);
+    a.unmount();
+  });
+
+  it("re-mint inainte de primul consumator NU declanseaza /me", async () => {
+    act(() => {
+      emitSessionReminted();
+    });
+    await flush();
+    expect(mockGet).not.toHaveBeenCalled();
   });
 
   it("mount-urile ulterioare cu stare buna NU re-fetch-uiesc", async () => {

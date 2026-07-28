@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { me, type MeProfile } from "@/lib/api";
+import { onSessionReminted } from "@/lib/sessionEvents";
 
 export interface UseCurrentUserResult {
   user: MeProfile | null;
@@ -81,6 +82,18 @@ async function refresh(): Promise<void> {
   emit({ loading: true, error: null });
   await fetchMe();
 }
+
+// Sesiunea re-mintata poate apartine ALTUI cont (cookie-ul oauth2-proxy e la
+// nivel de browser, nu de tab). Fara re-fetch, `fetchedOnce` ar tine store-ul
+// inghetat pe utilizatorul de la bootstrap, iar consumatorii care partitioneaza
+// date pe utilizator ar scrie in partitia gresita. Abonarea e la nivel de modul:
+// store-ul e oricum unul singur pe aplicatie.
+onSessionReminted(() => {
+  // Doar dupa ce store-ul a fost folosit macar o data — altfel am declansa un
+  // /me pentru o aplicatie care nu are inca nevoie de identitate.
+  if (!fetchedOnce) return;
+  void refresh();
+});
 
 // Reset pentru teste: stare initiala + listeners curatati (fara el, un test
 // anterior lasa abonati morti care primesc emit-uri din testul curent).
