@@ -58,6 +58,71 @@ In Cloudflare, pe tunelul existent, **Public Hostname → Add**:
 Portul 4180 e oauth2-proxy, nu backend-ul. Rutarea directa spre 3002 ar ocoli
 complet autentificarea Google.
 
+## 4b. Ruta pentru API-ul programatic (PAT)
+
+Clientii cu `Authorization: Bearer ld_pat_*` (scripturi, integrari, MCP) nu pot
+trece prin oauth2-proxy: orice cerere fara sesiune Google primeste 302 catre
+login, deci API-ul din [API.md](API.md) e inaccesibil din afara. Solutia e un
+hostname separat, servit de containerul `caddy-pat` (port 4181), care accepta
+DOAR cereri cu token opac pe `/api/*` si le trimite direct la backend.
+
+`OAUTH2_PROXY_SKIP_AUTH_ROUTES` nu e o alternativa: cu `PASS_BASIC_AUTH=true`
+headerul `Authorization` al clientului nu supravietuieste trecerii prin oauth2-proxy,
+iar ruta ar fi deschisa oricarui client, fara filtrul pe token.
+
+In Cloudflare, pe acelasi tunel, **Public Hostname → Add**:
+
+- Subdomain `api-dashboard` (sau alt nume), Domain = domeniul tau
+- Type `HTTP`, URL `<IP-LAN-NAS>:4181`
+
+Apoi **Build** in Container Manager, ca sa porneasca serviciul nou.
+
+Verificare (inlocuieste `<token>` cu un PAT real din **Setari → Acces API**):
+
+```bash
+# 1. tokenul functioneaza -> 200 cu specul OpenAPI
+curl -H "Authorization: Bearer <token>" https://api-dashboard.<domeniu>/api/v1/openapi.json
+
+# 2. token invalid -> 401 invalid_token DE LA BACKEND (nu 302 catre Google).
+#    Asta e proba ca ingressul e corect si ca backend-ul ramane poarta.
+curl -i -H "Authorization: Bearer ld_pat_invalid" https://api-dashboard.<domeniu>/api/dosare?numarDosar=1/1/2024
+
+# 3. fara header de autorizare -> 404 de la caddy-pat
+curl -i https://api-dashboard.<domeniu>/api/dosare
+
+# 4. hostname-ul de browser NU s-a largit -> tot 302 catre Google
+curl -i -H "Authorization: Bearer <token>" https://dashboard.<domeniu>/api/dosare?numarDosar=1/1/2024
+```
+
+Daca proba 1 da **426**, `X-Forwarded-Proto: https` nu ajunge la backend (verifica
+`deploy/Caddyfile.pat`). Daca da **403**, tokenul nu are scope-ul rutei. Ruta RNPM
+raspunde **501** pana cand un admin configureaza cheia de captcha la nivel de tenant.
+
+### Ce mai verifici o singura data, la prima instalare
+
+1. **Subnetul retelei Docker.** Backend-ul are incredere in headerele de proxy doar de la
+   peers din `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` (implicit `172.16.0.0/12`). Daca
+   Container Manager aloca `ld_net` din alt pool, IP-ul real al clientului se pierde si
+   rate-limitul plus alerta de IP nou colapseaza pe adresa containerului:
+   `docker network inspect <proiect>_ld_net` → daca subnetul e in afara CIDR-ului,
+   adauga-l in `.env` la `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR`.
+2. **Certificatul Cloudflare.** Certul Universal gratuit acopera un singur nivel sub zona.
+   Daca `api-dashboard.<domeniu>` iese pe al doilea nivel, handshake-ul TLS pica si ai
+   nevoie de un cert dedicat.
+3. **Sintaxa configului**, direct pe NAS, inainte de Build:
+   `docker run --rm -v "$PWD/deploy/Caddyfile.pat:/etc/caddy/Caddyfile:ro" caddy:2.10-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`
+
+### Risc acceptat: portul 4181 in LAN
+
+Portul 4181 e o intrare de API care nu trece prin poarta Google si nu beneficiaza de
+WAF-ul, rate-limitul si filtrul de tara din Cloudflare. Din internet nu se poate ajunge
+la el decat prin tunel, dar orice dispozitiv din LAN il atinge direct — si poate trimite
+un `CF-Connecting-IP` falsificat, pe care backend-ul il crede (peer-ul e in reteaua de
+incredere). Consecinte: ocolirea rate-limitului pre-autentificare (cel per token, 60/min,
+ramane) si, cu un token deja furat, suprimarea alertei de IP nou. Daca vrei sa inchizi
+si asta, pune o regula de firewall in DSM care lasa pe 4181 doar IP-ul masinii care
+ruleaza `cloudflared` (citeste peer-ul real din logurile containerului `caddy-pat`).
+
 ## 5. Pornire si primul admin
 
 **Container Manager → Project → Create**, path = folderul aplicatiei, source =
@@ -114,14 +179,8 @@ implementate in aplicatie.
 
 ## 7. Intretinere
 
-- **Update**: copiaza sursele noi peste folder, **incrementeaza `APP_VERSION`**
-  in `.env`, apoi **Build** in Container Manager. `data/` ramane neatins.
-
-  Bump-ul de versiune nu e cosmetic: `image:` din compose foloseste
-  `APP_VERSION` ca tag, iar Container Manager sare peste build daca imaginea cu
-  acel tag exista deja - reporneste containerul vechi si pare ca a reusit.
-  Verificare ca noul cod ruleaza, din terminalul containerului:
-  `grep -c <un-sir-nou-din-cod> /app/dist-backend/index.cjs`.
+- **Update**: copiaza sursele noi peste folder, apoi **Build** in Container
+  Manager. `data/` ramane neatins.
 - **Backup**: include `docker/legal-dashboard/data` in Hyper Backup — acolo e
   baza SQLite cu dosarele monitorizate.
 - **Rotire secrete**: schimbi valoarea in `.env` si dai Build. Rotirea

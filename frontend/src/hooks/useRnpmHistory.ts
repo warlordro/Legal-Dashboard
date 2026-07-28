@@ -1,12 +1,10 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
-import { clearList, readList, writeList } from "./_localStorageList";
+import { useCurrentUser } from "./useCurrentUser";
+import { clearList, migrateLegacyList, readList, scopedKey, writeList } from "./_localStorageList";
 
-const STORAGE_KEY = "legal-dashboard-rnpm-history";
+export const RNPM_HISTORY_KEY = "legal-dashboard-rnpm-history";
 const MAX_ENTRIES = 15;
-
-const loadHistory = (): RnpmSearchHistoryEntry[] => readList<RnpmSearchHistoryEntry>(STORAGE_KEY);
-const saveHistory = (entries: RnpmSearchHistoryEntry[]) => writeList(STORAGE_KEY, entries);
 
 function buildLabel(type: RnpmSearchType, params: RnpmSearchParams): string {
   const parts: string[] = [];
@@ -21,38 +19,65 @@ function buildLabel(type: RnpmSearchType, params: RnpmSearchParams): string {
 }
 
 export function useRnpmHistory() {
-  const [history, setHistory] = useState<RnpmSearchHistoryEntry[]>(loadHistory);
+  const { user } = useCurrentUser();
+  const ownerId = user?.id ?? null;
+  const [history, setHistory] = useState<RnpmSearchHistoryEntry[]>([]);
 
-  const addEntry = useCallback((type: RnpmSearchType, params: RnpmSearchParams, resultCount: number) => {
-    const entry: RnpmSearchHistoryEntry = {
-      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-      type,
-      params,
-      label: buildLabel(type, params),
-      resultCount,
-      timestamp: Date.now(),
-    };
+  // Vezi useSearchHistory: istoricul e partitionat pe utilizator, iar cheia veche
+  // (nescopata) se sterge la prima incarcare, ca sa nu ajunga la alt cont.
+  useEffect(() => {
+    if (ownerId === null) {
+      setHistory([]);
+      return;
+    }
+    migrateLegacyList(RNPM_HISTORY_KEY, ownerId);
+    setHistory(readList<RnpmSearchHistoryEntry>(scopedKey(RNPM_HISTORY_KEY, ownerId)));
+  }, [ownerId]);
 
-    setHistory((prev) => {
-      const filtered = prev.filter((e) => !(e.label === entry.label && e.type === entry.type));
-      const next = [entry, ...filtered].slice(0, MAX_ENTRIES);
-      saveHistory(next);
-      return next;
-    });
-  }, []);
+  const saveHistory = useCallback(
+    (entries: RnpmSearchHistoryEntry[]) => {
+      if (ownerId === null) return;
+      writeList(scopedKey(RNPM_HISTORY_KEY, ownerId), entries);
+    },
+    [ownerId]
+  );
 
-  const removeEntry = useCallback((id: string) => {
-    setHistory((prev) => {
-      const next = prev.filter((e) => e.id !== id);
-      saveHistory(next);
-      return next;
-    });
-  }, []);
+  const addEntry = useCallback(
+    (type: RnpmSearchType, params: RnpmSearchParams, resultCount: number) => {
+      const entry: RnpmSearchHistoryEntry = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+        type,
+        params,
+        label: buildLabel(type, params),
+        resultCount,
+        timestamp: Date.now(),
+      };
+
+      setHistory((prev) => {
+        const filtered = prev.filter((e) => !(e.label === entry.label && e.type === entry.type));
+        const next = [entry, ...filtered].slice(0, MAX_ENTRIES);
+        saveHistory(next);
+        return next;
+      });
+    },
+    [saveHistory]
+  );
+
+  const removeEntry = useCallback(
+    (id: string) => {
+      setHistory((prev) => {
+        const next = prev.filter((e) => e.id !== id);
+        saveHistory(next);
+        return next;
+      });
+    },
+    [saveHistory]
+  );
 
   const clearHistory = useCallback(() => {
     setHistory([]);
-    clearList(STORAGE_KEY);
-  }, []);
+    if (ownerId !== null) clearList(scopedKey(RNPM_HISTORY_KEY, ownerId));
+  }, [ownerId]);
 
   return { history, addEntry, removeEntry, clearHistory };
 }

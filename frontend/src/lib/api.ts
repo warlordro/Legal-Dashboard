@@ -1,4 +1,5 @@
 import type { Dosar, SearchParams, Termen } from "@/types";
+import { emitSessionReminted } from "./sessionEvents";
 
 const BASE = "/api";
 
@@ -158,9 +159,20 @@ export function ensureWebSession(): Promise<SyncSessionResult> {
   // apeleaza direct functia asta pe interval / visibilitychange / online, deci
   // o verificare pusa doar in apiFetch ar lasa acea cale deschisa.
   if (logoutInProgress) return Promise.resolve("error");
-  reSyncInFlight ??= syncWebSession().finally(() => {
-    reSyncInFlight = null;
-  });
+  reSyncInFlight ??= syncWebSession()
+    .then((result) => {
+      // Re-mint reusit: identitatea din cookie poate fi ALTA decat cea incarcata
+      // la bootstrap (alt cont logat intre timp in acelasi browser). Semnalam ca
+      // sesiunea s-a schimbat; store-ul /me se reinterogheaza si consumatorii
+      // legati de utilizator (istoricul partitionat, badge-urile de rol) se
+      // realiniaza. Bootstrap-ul cheama syncWebSession direct, deci nu trece pe
+      // aici si nu declanseaza un /me redundant.
+      if (result === "ok") emitSessionReminted();
+      return result;
+    })
+    .finally(() => {
+      reSyncInFlight = null;
+    });
   return reSyncInFlight;
 }
 
