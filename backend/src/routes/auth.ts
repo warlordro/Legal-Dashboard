@@ -1,5 +1,4 @@
 import { randomUUID, timingSafeEqual } from "node:crypto";
-import { getConnInfo } from "@hono/node-server/conninfo";
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { deleteCookie, setCookie } from "hono/cookie";
@@ -18,6 +17,7 @@ import { recordAudit } from "../db/auditRepository.ts";
 import { revokeJti } from "../db/jwtDenylistRepository.ts";
 import { canonicalizeEmail, getUserByEmail, getUserById } from "../db/userRepository.ts";
 import { getAuthUser } from "../middleware/owner.ts";
+import { readClientIp } from "../util/proxyIp.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import { hashEmail } from "../util/auditSanitize.ts";
 import { fail, ok } from "../util/envelope.ts";
@@ -100,7 +100,7 @@ authRouter.post("/logout", (c) => {
   // make getOwnerId(c) throw in web mode. Pull ip/userAgent/requestId by hand.
   let ip: string | null = null;
   try {
-    ip = getConnInfo(c).remote.address ?? null;
+    ip = readClientIp(c);
   } catch {
     ip = null;
   }
@@ -204,6 +204,7 @@ authRouter.post("/oauth2/sync", (c) => {
   const provided = c.req.header("x-proxy-auth") ?? extractBasicAuthPassword(c) ?? "";
   if (!constantTimeStringEquals(expected, provided)) {
     recordAudit(null, "auth.oauth2.sync", {
+      ip: readClientIp(c),
       outcome: "denied",
       targetKind: "http_request",
       targetId: c.req.path,
@@ -236,6 +237,7 @@ authRouter.post("/oauth2/sync", (c) => {
   const authRequestEmail = canonicalizeEmail(c.req.header("x-auth-request-email") ?? "");
   if (forwardedEmail !== "" && authRequestEmail !== "" && forwardedEmail !== authRequestEmail) {
     recordAudit(null, "auth.oauth2.sync", {
+      ip: readClientIp(c),
       outcome: "denied",
       targetKind: "http_request",
       targetId: c.req.path,
@@ -246,6 +248,7 @@ authRouter.post("/oauth2/sync", (c) => {
   const email = forwardedEmail !== "" ? forwardedEmail : authRequestEmail;
   if (!email || !email.includes("@") || email.length > 254) {
     recordAudit(null, "auth.oauth2.sync", {
+      ip: readClientIp(c),
       outcome: "denied",
       targetKind: "http_request",
       targetId: c.req.path,
@@ -257,6 +260,7 @@ authRouter.post("/oauth2/sync", (c) => {
   const user = getUserByEmail(email);
   if (user === null) {
     recordAudit(null, "auth.oauth2.sync", {
+      ip: readClientIp(c),
       outcome: "denied",
       targetKind: "http_request",
       targetId: c.req.path,
@@ -273,6 +277,7 @@ authRouter.post("/oauth2/sync", (c) => {
   }
   if (user.status !== "active") {
     recordAudit(null, "auth.oauth2.sync", {
+      ip: readClientIp(c),
       outcome: "denied",
       ownerId: user.id,
       targetKind: "user",
@@ -299,6 +304,7 @@ authRouter.post("/oauth2/sync", (c) => {
   const token = signAuthToken(payload, requireJwtSecret());
   writeSessionCookie(c, token, ttl);
   recordAudit(null, "auth.oauth2.sync", {
+    ip: readClientIp(c),
     outcome: "ok",
     ownerId: user.id,
     actorId: user.id,

@@ -14,14 +14,16 @@ vi.mock("@hono/node-server/conninfo", () => ({
 
 import { getConnInfo } from "@hono/node-server/conninfo";
 
-function fakeContext(peer: string | null, xff?: string): Context {
+function fakeContext(peer: string | null, xff?: string, cfIp?: string): Context {
   vi.mocked(getConnInfo).mockReturnValue({
     remote: { address: peer ?? undefined, port: 0, addressType: "IPv4" },
   } as unknown as ReturnType<typeof getConnInfo>);
+  const headers: Record<string, string | undefined> = {
+    "x-forwarded-for": xff,
+    "cf-connecting-ip": cfIp,
+  };
   return {
-    req: {
-      header: (name: string) => (name === "x-forwarded-for" ? xff : undefined),
-    },
+    req: { header: (name: string) => headers[name] },
   } as unknown as Context;
 }
 
@@ -45,6 +47,28 @@ describe("readClientIp", () => {
     // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
     delete process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR;
     expect(readClientIp(fakeContext("203.0.113.5", "1.1.1.1, 2.2.2.2"))).toBe("203.0.113.5");
+  });
+
+  // Deployul pe NAS: Cloudflare -> cloudflared -> oauth2-proxy -> backend.
+  // XFF se pierde pe traseu, CF-Connecting-IP nu.
+  it("prefera CF-Connecting-IP cand peer-ul e de incredere si XFF lipseste", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "172.16.0.0/12";
+    expect(readClientIp(fakeContext("172.20.0.3", undefined, "203.0.113.9"))).toBe("203.0.113.9");
+  });
+
+  it("CF-Connecting-IP are prioritate fata de XFF", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "172.16.0.0/12";
+    expect(readClientIp(fakeContext("172.20.0.3", "8.8.8.8", "203.0.113.9"))).toBe("203.0.113.9");
+  });
+
+  it("ignora CF-Connecting-IP cand peer-ul NU e de incredere (client direct nu il poate falsifica)", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "172.16.0.0/12";
+    expect(readClientIp(fakeContext("203.0.113.5", undefined, "1.1.1.1"))).toBe("203.0.113.5");
+  });
+
+  it("ignora un CF-Connecting-IP invalid si cade pe XFF", () => {
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "172.16.0.0/12";
+    expect(readClientIp(fakeContext("172.20.0.3", "8.8.8.8", "nu-e-ip"))).toBe("8.8.8.8");
   });
 
   it("returns peer when peer is NOT in trusted CIDR (XFF ignored)", () => {

@@ -1,8 +1,8 @@
 import type { Context } from "hono";
-import { getConnInfo } from "@hono/node-server/conninfo";
 import { getDb } from "./schema.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
+import { readClientIp } from "../util/proxyIp.ts";
 import { escapeLikeMeta } from "../util/textNormalize.ts";
 
 // Audit outcomes per PLAN-monitoring-webmode.md §2.4. Stored as TEXT with a
@@ -75,9 +75,12 @@ function readContext(c: Context): {
 } {
   const ownerId = getOwnerId(c);
   const actorId = getActorId(c);
+  // readClientIp, nu adresa socketului: in spatele unui proxy de incredere
+  // peer-ul e containerul vecin, iar auditul ar inregistra 172.x pentru toata
+  // lumea - inutilizabil intr-o investigatie.
   let ip: string | null = null;
   try {
-    ip = getConnInfo(c).remote.address ?? null;
+    ip = readClientIp(c);
   } catch {
     ip = null;
   }

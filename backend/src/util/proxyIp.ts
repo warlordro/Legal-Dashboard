@@ -80,6 +80,16 @@ export function readClientIp(c: Context): string | null {
   if (cidrs.length === 0 || !cidrs.some((cidr) => cidrContains(cidr, peer))) {
     return peer;
   }
+  // CF-Connecting-IP wins over X-Forwarded-For when we are behind Cloudflare.
+  // Cloudflare sets it at the edge and no hop on the way (cloudflared,
+  // oauth2-proxy) rewrites it, whereas XFF is rewritten or dropped by proxies —
+  // observed in the NAS deployment, where every audit row recorded the
+  // oauth2-proxy container address instead of the visitor. Only read once the
+  // peer is already trusted, so a direct client cannot forge it.
+  const cfIp = c.req.header("cf-connecting-ip")?.trim();
+  if (cfIp && net.isIP(cfIp) !== 0 && !cidrs.some((cidr) => cidrContains(cidr, cfIp))) {
+    return cfIp;
+  }
   // Walk right-to-left, skipping trusted proxies. The right-most non-trusted
   // entry is the closest hop we still trust to identify the real client. Going
   // leftmost would let any client spoof X-Forwarded-For: "1.1.1.1, <proxy>" and

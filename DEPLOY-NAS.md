@@ -114,8 +114,14 @@ implementate in aplicatie.
 
 ## 7. Intretinere
 
-- **Update**: copiaza sursele noi peste folder, apoi **Build** in Container
-  Manager. `data/` ramane neatins.
+- **Update**: copiaza sursele noi peste folder, **incrementeaza `APP_VERSION`**
+  in `.env`, apoi **Build** in Container Manager. `data/` ramane neatins.
+
+  Bump-ul de versiune nu e cosmetic: `image:` din compose foloseste
+  `APP_VERSION` ca tag, iar Container Manager sare peste build daca imaginea cu
+  acel tag exista deja - reporneste containerul vechi si pare ca a reusit.
+  Verificare ca noul cod ruleaza, din terminalul containerului:
+  `grep -c <un-sir-nou-din-cod> /app/dist-backend/index.cjs`.
 - **Backup**: include `docker/legal-dashboard/data` in Hyper Backup — acolo e
   baza SQLite cu dosarele monitorizate.
 - **Rotire secrete**: schimbi valoarea in `.env` si dai Build. Rotirea
