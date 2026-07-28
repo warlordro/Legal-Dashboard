@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
 import { useCurrentUser } from "./useCurrentUser";
-import { clearList, readList, scopedKey, writeList } from "./_localStorageList";
+import { clearList, migrateLegacyList, readList, scopedKey, writeList } from "./_localStorageList";
 
 export const RNPM_HISTORY_KEY = "legal-dashboard-rnpm-history";
 const MAX_ENTRIES = 15;
@@ -30,7 +30,7 @@ export function useRnpmHistory() {
       setHistory([]);
       return;
     }
-    clearList(RNPM_HISTORY_KEY);
+    migrateLegacyList(RNPM_HISTORY_KEY, ownerId);
     setHistory(readList<RnpmSearchHistoryEntry>(scopedKey(RNPM_HISTORY_KEY, ownerId)));
   }, [ownerId]);
 

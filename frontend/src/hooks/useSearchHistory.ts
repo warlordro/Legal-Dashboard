@@ -1,7 +1,7 @@
 import { useState, useCallback, useEffect } from "react";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
 import { useCurrentUser } from "./useCurrentUser";
-import { clearList, readList, scopedKey, writeList } from "./_localStorageList";
+import { clearList, migrateLegacyList, readList, scopedKey, writeList } from "./_localStorageList";
 
 export const PORTALJUST_HISTORY_KEY = "portaljust-search-history";
 const MAX_ENTRIES = 15;
@@ -30,9 +30,7 @@ export function useSearchHistory() {
       setHistory([]);
       return;
     }
-    // Cheia veche, nescopata, e stearsa la prima incarcare: continutul ei apartine
-    // sesiunii dinaintea fixului si nu poate fi atribuit unui utilizator anume.
-    clearList(PORTALJUST_HISTORY_KEY);
+    migrateLegacyList(PORTALJUST_HISTORY_KEY, ownerId);
     setHistory(readList<SearchHistoryEntry>(scopedKey(PORTALJUST_HISTORY_KEY, ownerId)));
   }, [ownerId]);
 

@@ -11,6 +11,26 @@ export function scopedKey(baseKey: string, ownerId: string): string {
   return `${baseKey}::${ownerId}`;
 }
 
+// Tranzitia de la cheia veche, nescopata, la partitii per utilizator.
+//
+// Desktop: exista un singur owner (`local`), deci continutul vechi ii apartine
+// cu certitudine — se muta in partitia lui, altfel fiecare utilizator desktop
+// si-ar pierde istoricul la primul start dupa upgrade. Nu suprascriem o partitie
+// deja populata (a doua rulare nu mai are ce migra).
+//
+// Web: continutul vechi nu poate fi atribuit niciunui cont — pe un browser
+// partajat ar putea fi al altcuiva — deci se sterge, nu se migreaza.
+export function migrateLegacyList(baseKey: string, ownerId: string): void {
+  const isDesktop = typeof window !== "undefined" && window.desktopApi !== undefined;
+  if (isDesktop) {
+    const legacy = readList<unknown>(baseKey);
+    if (legacy.length > 0 && readList<unknown>(scopedKey(baseKey, ownerId)).length === 0) {
+      writeList(scopedKey(baseKey, ownerId), legacy);
+    }
+  }
+  clearList(baseKey);
+}
+
 export function readList<T>(storageKey: string): T[] {
   try {
     const raw = localStorage.getItem(storageKey);
