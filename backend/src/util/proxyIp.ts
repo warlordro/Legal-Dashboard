@@ -73,8 +73,25 @@ function isSupportedTrustedCidrEntry(entry: string): boolean {
   return prefix >= 0 && prefix <= 32;
 }
 
+// Peer-ul socketului, sau null cand nu exista.
+//
+// `getConnInfo` din @hono/node-server citeste `c.env.incoming.socket` si ARUNCA
+// daca nu exista un server Node dedesubt — cazul lui `app.request()` din teste
+// si al oricarui runtime non-node. Inainte, singurii apelanti erau middleware-uri
+// montate pe /api/*; de cand `recordAudit` citeste IP-ul (f42caf2), apelul apare
+// si pe rute testate direct, iar exceptia transforma un 403 asteptat intr-un 500.
+// Absenta peer-ului e o informatie lipsa, nu o eroare: degradam la null, exact ca
+// pentru o adresa nedeterminabila.
+function peerAddress(c: Context): string | null {
+  try {
+    return getConnInfo(c).remote.address ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export function readClientIp(c: Context): string | null {
-  const peer = getConnInfo(c).remote.address ?? null;
+  const peer = peerAddress(c);
   if (!peer) return null;
   const cidrs = trustedCidrs();
   if (cidrs.length === 0 || !cidrs.some((cidr) => cidrContains(cidr, peer))) {

@@ -30,6 +30,18 @@ function fakeContext(peer: string | null, xff?: string, cfIp?: string): Context 
 describe("readClientIp", () => {
   const ORIGINAL_ENV = process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR;
 
+  // Regresie: `getConnInfo` arunca fara server Node dedesubt (app.request() din
+  // teste, runtime non-node). De cand recordAudit citeste IP-ul, apelul apare pe
+  // rute testate direct — exceptia scoasa aici transforma orice raspuns asteptat
+  // intr-un 500.
+  it("intoarce null in loc sa arunce cand nu exista conexiune (app.request)", () => {
+    vi.mocked(getConnInfo).mockImplementation(() => {
+      throw new TypeError("Cannot read properties of undefined (reading 'server')");
+    });
+    const c = { req: { header: () => undefined } } as unknown as Context;
+    expect(readClientIp(c)).toBeNull();
+  });
+
   beforeEach(() => {
     vi.mocked(getConnInfo).mockReset();
   });
