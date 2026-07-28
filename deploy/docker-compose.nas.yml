@@ -61,6 +61,22 @@ services:
     networks:
       - ld_net
 
+  # Ingress dedicat pentru API-ul programatic (Personal Access Tokens). Ruleaza pe
+  # un hostname SEPARAT in tunel; hostname-ul de browser ramane integral in spatele
+  # oauth2-proxy. Vezi deploy/Caddyfile.pat pentru matcher + strip list.
+  caddy-pat:
+    image: caddy:2.10-alpine@sha256:4c6e91c6ed0e2fa03efd5b44747b625fec79bc9cd06ac5235a779726618e530d
+    restart: unless-stopped
+    ports:
+      # A doua poarta atinsa de tunel — accepta DOAR cereri cu Bearer ld_pat_*.
+      - "0.0.0.0:4181:4181"
+    volumes:
+      - ./deploy/Caddyfile.pat:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - backend
+    networks:
+      - ld_net
+
   backend:
     build:
       context: .
