@@ -20,6 +20,7 @@ import {
   Users as UsersIcon,
   Split,
   PauseCircle,
+  LogOut,
 } from "lucide-react";
 
 export interface ChangeSection {
@@ -39,6 +40,27 @@ export interface VersionEntry {
 }
 
 export const versions: VersionEntry[] = [
+  {
+    version: "v2.43.4",
+    date: "28 Iulie 2026",
+    subtitle:
+      "Primul release de dupa mutarea aplicatiei pe varianta web: exista acum un buton de delogare, iar jurnalul de audit inregistreaza adresa reala a vizitatorului, nu adresa serverului intermediar.",
+    icon: <LogOut className="h-5 w-5" />,
+    borderColor: "border-l-sky-500",
+    badgeClass: "bg-sky-100 text-sky-900 dark:bg-sky-900/30 dark:text-sky-300",
+    sections: [
+      {
+        title: "Buton de delogare",
+        content:
+          "In colțul din stanga-jos, sub setari, apare acum 'Delogare'. Inchide sesiunea pe server si te duce pe o pagina de confirmare. Atentie la un lucru pe care pagina il si spune explicit: contul tau Google ramane conectat in browser, deci pe un calculator strain trebuie sa te deloghezi si din Google, altfel o revenire pe aplicatie te autentifica automat.",
+      },
+      {
+        title: "Auditul arata cine a intrat, de unde",
+        content:
+          "In Setari > Audit, coloana IP arata acum adresa reala a vizitatorului. Inainte, pe varianta web, toate intrarile primeau adresa interna a serverului intermediar, iar intrarile de autentificare nu primeau nimic — jurnalul nu putea fi folosit ca sa verifici un acces suspect. Intrarile mai vechi de 28 iulie 2026 ramin fara adresa; nu pot fi completate retroactiv.",
+      },
+    ],
+  },
   {
     version: "v2.43.3",
     date: "26 Iulie 2026",

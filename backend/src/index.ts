@@ -5,6 +5,7 @@ import type { Context } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { cors } from "hono/cors";
 import { secureHeaders } from "hono/secure-headers";
+import { logoutPageRouter } from "./routes/logoutPage.ts";
 import { rnpmRouter } from "./routes/rnpm.ts";
 import { dosareExportRouter, dosareRouter } from "./routes/dosare.ts";
 import { dosareIccjRouter, termeneIccjRouter } from "./routes/dosareIccj.ts";
@@ -485,6 +486,11 @@ if (MONITORING_ENABLED) {
   console.log("[monitoring] name-lists routes mounted at /api/v1/name-lists");
   console.log("[monitoring] alerts routes mounted at /api/v1/alerts");
 }
+
+// Pagina publica de delogare. Montata inainte de mountStaticFrontend, altfel
+// fallback-ul SPA ar servi index.html si utilizatorul ar vedea aplicatia
+// logata in loc de confirmarea delogarii. Detalii in routes/logoutPage.ts.
+app.route("/", logoutPageRouter);
 
 // Serve frontend static files in production
 if (process.env.NODE_ENV === "production") {

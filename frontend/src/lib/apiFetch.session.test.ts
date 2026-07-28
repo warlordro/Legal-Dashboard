@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { apiFetch } from "./api";
+import { apiFetch, beginLogout, ensureWebSession, resetLogoutStateForTests } from "./api";
 
 const SYNC = "/api/v1/auth/oauth2/sync";
 
@@ -12,6 +12,7 @@ function setDesktop(on: boolean): void {
 afterEach(() => {
   vi.unstubAllGlobals();
   setDesktop(false);
+  resetLogoutStateForTests();
 });
 
 describe("apiFetch 401 session recovery", () => {
@@ -122,6 +123,57 @@ describe("apiFetch 401 session recovery", () => {
     expect(r1.status).toBe(200);
     expect(r2.status).toBe(200);
     expect(syncCalls).toBe(1); // one bridge POST shared by both retries
+  });
+
+  // Cursa de la delogare: revocarea jti-ului face ca cererile concurente sa
+  // primeasca 401. Fara acest guard, re-mint-ul ar emite un JWT proaspat pe care
+  // /oauth2/sign_out nu il sterge — utilizatorul ramane cu o sesiune valida.
+  it("web: dupa beginLogout(), un 401 NU mai declanseaza re-mint", async () => {
+    setDesktop(false);
+    const fetchMock = vi.fn((_input: RequestInfo | URL) => Promise.resolve({ ok: false, status: 401 } as Response));
+    vi.stubGlobal("fetch", fetchMock);
+
+    beginLogout();
+    const res = await apiFetch("/api/v1/me");
+
+    expect(res.status).toBe(401);
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toEqual(["/api/v1/me"]);
+  });
+
+  // Cursa semnalata la review: flagul opreste doar sync-urile NOI. Unul deja
+  // pornit isi scrie cookie-ul cand aterizeaza, posibil dupa stergerea din
+  // /delogat. beginLogout() trebuie sa il astepte, nu doar sa ridice flagul.
+  it("web: beginLogout() asteapta un sync deja pornit", async () => {
+    setDesktop(false);
+    let releaseSync: ((r: Response) => void) | undefined;
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      if (String(input) === SYNC) {
+        return new Promise<Response>((resolve) => {
+          releaseSync = resolve;
+        });
+      }
+      return Promise.resolve({ ok: false, status: 401 } as Response);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    // Porneste un sync si lasa-l in zbor.
+    const inFlight = ensureWebSession();
+    await Promise.resolve();
+    expect(fetchMock.mock.calls.map((c) => String(c[0]))).toContain(SYNC);
+
+    let settled = false;
+    const pending = beginLogout().then(() => {
+      settled = true;
+    });
+
+    // Cat timp sync-ul e in zbor, beginLogout NU are voie sa se rezolve.
+    for (let i = 0; i < 6; i += 1) await Promise.resolve();
+    expect(settled).toBe(false);
+
+    releaseSync?.({ ok: true, status: 200 } as Response);
+    await inFlight;
+    await pending;
+    expect(settled).toBe(true);
   });
 
   it("web: a non-auth URL with /api/v1/auth/ only in the query is still intercepted", async () => {

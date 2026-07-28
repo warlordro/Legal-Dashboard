@@ -50,7 +50,10 @@ services:
       OAUTH2_PROXY_SET_XAUTHREQUEST: "true"
       OAUTH2_PROXY_SET_AUTHORIZATION_HEADER: "false"
       OAUTH2_PROXY_SKIP_PROVIDER_BUTTON: "true"
-      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$"
+      # /delogat e pagina de aterizare dupa sign_out. Trebuie sa fie publica:
+      # gate-uita, ar re-declansa login-ul Google si utilizatorul s-ar intoarce
+      # logat, fara sa inteleaga de ce.
+      OAUTH2_PROXY_SKIP_AUTH_ROUTES: "GET=^/health$$,GET=^/api/v1/auth/oauth2/sync$$,GET=^/delogat$$"
       OAUTH2_PROXY_PASS_BASIC_AUTH: "true"
       OAUTH2_PROXY_BASIC_AUTH_PASSWORD: ${PROXY_BRIDGE_SECRET}
     depends_on:

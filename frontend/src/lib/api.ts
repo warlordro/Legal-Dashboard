@@ -68,6 +68,38 @@ function isAuthPath(input: RequestInfo | URL): boolean {
   }
 }
 
+// Logout deschide o cursa: revocarea jti-ului face ca orice cerere concurenta
+// aflata in zbor (SSE, un fetch de pagina) sa primeasca 401, iar interceptorul
+// de mai jos ar re-minti un JWT proaspat — valid inca o ora si nesters de
+// `/oauth2/sign_out`, care atinge doar cookie-ul proxy-ului. Din momentul in
+// care utilizatorul a cerut delogarea, re-mint-ul e suspendat definitiv:
+// pagina se schimba oricum imediat, deci nu exista cale de revenire.
+// Verificat in ensureWebSession (acopera si keep-alive-ul, care o apeleaza
+// direct) si in ramura de 401 din apiFetch.
+let logoutInProgress = false;
+
+/**
+ * Marcheaza inceputul delogarii si asteapta sync-ul deja pornit, daca exista.
+ *
+ * Flagul singur nu ajunge: opreste doar pornirea unui sync NOU. Un sync aflat
+ * deja in zbor isi va scrie cookie-ul cand aterizeaza, posibil DUPA raspunsul
+ * paginii /delogat care il sterge — utilizatorul ar ramane cu un JWT proaspat,
+ * cu jti nerevocat si TTL de o ora. Asteptandu-l, cookie-ul lui e in loc inainte
+ * ca POST-ul de logout sa ruleze, deci exact acel jti ajunge in denylist.
+ */
+export async function beginLogout(): Promise<void> {
+  logoutInProgress = true;
+  if (reSyncInFlight) {
+    // Esecul sync-ului e irelevant aici: conteaza doar sa nu mai fie in zbor.
+    await reSyncInFlight.catch(() => undefined);
+  }
+}
+
+// Doar pentru teste: starea e per-modul si altfel ar contamina cazurile urmatoare.
+export function resetLogoutStateForTests(): void {
+  logoutInProgress = false;
+}
+
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers);
   if (!headers.has(DESKTOP_HEADER_NAME)) {
@@ -80,7 +112,7 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   // or was never minted; re-mint once via the oauth2-proxy bridge and retry the
   // request a single time so the user is never blocked mid-session. Skip auth
   // endpoints (no recursion) and desktop (auth is local, never 401s).
-  if (res.status === 401 && isWebRuntime() && !isAuthPath(input)) {
+  if (res.status === 401 && isWebRuntime() && !isAuthPath(input) && !logoutInProgress) {
     const outcome = await ensureWebSession();
     if (outcome === "ok") {
       // Retry via raw fetch so it cannot re-enter this interceptor. finalInit
@@ -122,6 +154,10 @@ export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionR
 // and useSessionKeepAlive.
 let reSyncInFlight: Promise<SyncSessionResult> | null = null;
 export function ensureWebSession(): Promise<SyncSessionResult> {
+  // Guard-ul sta aici, nu doar in interceptorul de 401: useSessionKeepAlive
+  // apeleaza direct functia asta pe interval / visibilitychange / online, deci
+  // o verificare pusa doar in apiFetch ar lasa acea cale deschisa.
+  if (logoutInProgress) return Promise.resolve("error");
   reSyncInFlight ??= syncWebSession().finally(() => {
     reSyncInFlight = null;
   });

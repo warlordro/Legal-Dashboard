@@ -1,5 +1,6 @@
-import { Moon, Sun, PanelLeftClose, PanelLeftOpen, Type, AArrowUp, AArrowDown, Bot } from "lucide-react";
+import { Moon, Sun, PanelLeftClose, PanelLeftOpen, Type, AArrowUp, AArrowDown, Bot, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { logout } from "@/lib/authApi";
 import { useTheme } from "@/hooks/useTheme";
 import { useFontSize } from "@/hooks/useFontSize";
 import { useTenantKeyStatus } from "@/hooks/useTenantKeyStatus";
@@ -124,6 +125,23 @@ export function SidebarFooter({ collapsed, onToggleCollapsed, hasApiKey, onConfi
         )}
         {!collapsed && (theme === "dark" ? "Mod Luminos" : "Mod Inchis")}
       </Button>
+
+      {/* Doar in web: pe desktop sesiunea e locala si nu exista de unde te
+          deloga. Ultimul buton inainte de comutatorul de meniu. */}
+      {isWeb && (
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => {
+            void logout();
+          }}
+          title={collapsed ? "Delogare" : undefined}
+          className={cn("w-full text-muted-foreground", collapsed ? "justify-center p-2 h-10" : "justify-start gap-3")}
+        >
+          <LogOut className={cn("shrink-0", collapsed ? "h-[18px] w-[18px]" : "h-4 w-4")} />
+          {!collapsed && "Delogare"}
+        </Button>
+      )}
 
       <Button
         variant="outline"

@@ -405,7 +405,14 @@ export default function AdminAudit({ embedded = false }: { embedded?: boolean } 
                               <span className="text-muted-foreground">-</span>
                             )}
                           </td>
-                          <td className="px-3 py-2 align-top font-mono text-xs text-muted-foreground">
+                          {/* v2.43.4: IP-urile IPv6 au pana la 39 de caractere si
+                              impingeau tabelul in afara ecranului. Se rup pe mai
+                              multe linii, cu valoarea intreaga si in title pentru
+                              copiere/citire rapida. */}
+                          <td
+                            className="max-w-[13rem] break-all px-3 py-2 align-top font-mono text-xs text-muted-foreground"
+                            title={row.ip ?? undefined}
+                          >
                             {row.ip ?? "-"}
                           </td>
                         </tr>
