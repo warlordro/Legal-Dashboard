@@ -14,6 +14,7 @@ import { readClientIp } from "../util/proxyIp.ts";
 
 // Esantionare: o folosire ok auditata per (token, ip) per zi (nu 1 INSERT + 1 SELECT/request).
 const auditedToday = new Map<string, string>(); // `${tokenId}|${ip}` -> YYYY-MM-DD
+const DENIED_STATUSES = new Set([401, 403, 429]);
 let lastPrunedDay = ""; // prune cross-day o singura data / zi, nu O(N) per request (fix runda 4)
 
 export function _resetPatAuditForTest(): void {
@@ -34,7 +35,15 @@ export async function patUsageAudit(c: Context, next: Next): Promise<void> {
   // detectia de IP nou (token furat din alt IP real) ar fi oarba.
   const ip = readClientIp(c) || null;
   const ua = c.req.header("user-agent") ?? null;
-  const denied = c.res.status >= 400; // gate/rateLimit a respins (403/429) -> audit denied, fara email
+  // Doar refuzurile REALE conteaza ca `denied`: 401 (token invalid/revocat), 403
+  // (scope/capability gate) si 429 (rate limit). Un 400 (validare de body/query)
+  // sau un 5xx nu sunt refuzuri — inainte, orice `status >= 400` marca randul
+  // "Refuzat", iar un simplu request malformat aparea in audit langa replay-urile
+  // de token revocat. Ele cad pe ramura `ok`: tokenul S-A autentificat, deci
+  // touchLastUsed + detectia de IP nou (inclusiv emailul de alerta) ruleaza si
+  // pentru ele — intentionat, altfel un atacator cu token furat ar putea evita
+  // alerta de IP nou trimitand exclusiv request-uri malformate.
+  const denied = DENIED_STATUSES.has(c.res.status);
   const day = new Date().toISOString().slice(0, 10);
   // prune cross-day DOAR la rollover (nu scan O(N) pe fiecare request — fix runda 4).
   if (day !== lastPrunedDay) {

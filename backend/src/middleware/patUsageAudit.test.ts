@@ -71,6 +71,23 @@ describe("patUsageAudit", () => {
     expect(mockedNotify).not.toHaveBeenCalled();
   });
 
+  // Regresie 2026-07-29: `status >= 400` marca "Refuzat" si un simplu request
+  // malformat (400 pe /api/rnpm/search fara parametri valizi), care in audit
+  // aparea langa replay-urile de token revocat. Refuz = 401/403/429.
+  it("nu marcheaza un 400 (validare) ca refuz — tokenul s-a autentificat", async () => {
+    const res = await buildApp("tok1", 400).request("/api/rnpm/search");
+    expect(res.status).toBe(400);
+    expect(auditCount("denied", "tok1")).toBe(0);
+    expect(auditCount("ok", "tok1")).toBe(1);
+  });
+
+  it("audits a rate-limited (429) PAT request as denied", async () => {
+    const res = await buildApp("tok1", 429).request("/api/dosare");
+    expect(res.status).toBe(429);
+    expect(auditCount("denied", "tok1")).toBe(1);
+    expect(mockedNotify).not.toHaveBeenCalled();
+  });
+
   it("samples: a second same-day same-IP success does not re-audit or re-alert", async () => {
     const app = buildApp("tok1", 200);
     await app.request("/api/dosare");

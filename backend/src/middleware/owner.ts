@@ -1,10 +1,10 @@
 import type { Context, Next } from "hono";
-import { getConnInfo } from "@hono/node-server/conninfo";
 import { AuthenticationError, getAuthProvider, type AuthenticatedContext } from "../auth/authProvider.ts";
 import { recordAudit } from "../db/auditRepository.ts";
 import { getAuthMode } from "../auth/config.ts";
 import { fail } from "../util/envelope.ts";
 import { getRequestId } from "./requestId.ts";
+import { readClientIp } from "../util/proxyIp.ts";
 import { TOKEN_PREFIX } from "../db/apiTokenRepository.ts";
 
 // Bearer-ul e in forma de PAT (ld_pat_*)? Folosit doar pentru atribuire in auditul de
@@ -59,7 +59,15 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
       outcome: "denied",
       targetKind: "http_request",
       targetId: c.req.path,
-      ip: readRemoteIp(c),
+      // readClientIp, nu peer-ul socketului: in spatele reverse-proxy-ului
+      // (oauth2-proxy/Caddy in acelasi network Docker) peer-ul e containerul
+      // vecin, deci fiecare refuz se inregistra cu 172.x — inutilizabil intr-o
+      // investigatie si divergent de restul auditului, care trece prin
+      // recordAudit -> readContext -> readClientIp. Contextul ramane `null`:
+      // readContext apeleaza getOwnerId(), care arunca in web mode exact pe
+      // calea asta (ownerId neasignat), iar catch-ul de mai jos ar inghiti
+      // randul de securitate.
+      ip: readClientIp(c),
       userAgent: c.req.header("user-agent") ?? null,
       detail: {
         requestId,
@@ -75,14 +83,6 @@ function writeAuthError(c: Context, err: AuthenticationError): Response {
     console.error(`[auth.audit_failed] ${auditErr instanceof Error ? auditErr.message : "unknown"}`);
   }
   return c.json(fail(err.code, err.message, c), err.status);
-}
-
-function readRemoteIp(c: Context): string | null {
-  try {
-    return getConnInfo(c).remote.address ?? null;
-  } catch {
-    return null;
-  }
 }
 
 // PR-9 auth seam: desktop stays a noop `local` identity; web mode resolves the
