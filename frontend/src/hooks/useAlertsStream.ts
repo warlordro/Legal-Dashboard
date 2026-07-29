@@ -6,6 +6,7 @@
 // only consumer (the navigation chrome) without crowding the rendering code.
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ensureWebSession, isWebRuntime } from "@/lib/api";
 import { alertsApi, type MonitoringAlert } from "@/lib/alertsApi";
 import { getAlertsNotificationsEnabled } from "@/lib/alertsNotificationPref";
 import type { DesktopNotificationStatus } from "@/types/desktop-api";
@@ -124,7 +125,20 @@ export function useAlertsStream(): UseAlertsStreamResult {
       if (stopped || reconnectTimerRef.current !== null) return;
       reconnectTimerRef.current = window.setTimeout(() => {
         reconnectTimerRef.current = null;
-        connect();
+        if (stopped) return;
+        // EventSource nu trece prin apiFetch, deci nu are interceptorul de 401:
+        // dupa o trezire cu cookie expirat se reconecta cu el si backendul
+        // inregistra un `auth.denied` la fiecare incercare. ensureWebSession e
+        // ieftin cat timp cookie-ul e proaspat (fara request), deci il putem
+        // aseza pe fiecare reconectare. In desktop nu exista bridge -> conectam
+        // direct.
+        if (!isWebRuntime()) {
+          connect();
+          return;
+        }
+        void ensureWebSession().finally(() => {
+          if (!stopped) connect();
+        });
       }, retryMs);
       retryMs = Math.min(retryMs * 2, 30000);
     };
