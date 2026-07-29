@@ -1,291 +1,134 @@
-# Legal Dashboard — Security Model
-
-## Threat model
-
-Legal Dashboard is a **single-user desktop application**. The backend is a local
-Node.js HTTP server that binds to `127.0.0.1` by default and is consumed by the
-Electron renderer in the same process tree. The deployment assumption is:
-
-> The machine running Legal Dashboard is trusted. The user running the app is
-> trusted. Other users on the same LAN are **not** trusted.
-
-Everything below is framed against that assumption. If you intend to run the
-backend as a shared service (web-mode), read the "Out of scope" section first
-and treat the current defaults as insufficient.
-
-## In scope — what the app protects against
-
-### Desktop attack surface (Electron)
-
-- **Remote code execution via renderer** — `nodeIntegration: false`,
-  `contextIsolation: true`, `sandbox: true`, `webSecurity: true`, dedicated
-  `preload.js` exposing a minimal `window.desktopApi`. CSP is set in
-  `onHeadersReceived` and limits `script-src` to `'self'`.
-- **Navigation hijack** — `will-navigate` refuses anything that is not
-  `http://localhost:${BACKEND_PORT}` or the `127.0.0.1` equivalent.
-- **Popup phishing / OAuth-style open-in-browser tricks** —
-  `setWindowOpenHandler` denies all popups; only an explicit allowlist of
-  government hosts (`portal.just.ro`, `portalquery.just.ro`, `www.just.ro`,
-  `www.scj.ro`, `mj.rnpm.ro`, `www.rnpm.ro`) may be opened externally via
-  `shell.openExternal`, and only over `https:`.
-- **DB corruption from parallel writers** —
-  `app.requestSingleInstanceLock()` guarantees one Electron process per
-  `userData` directory; a second launch focuses the existing window instead of
-  spawning a second backend on the same SQLite file.
-- **DevTools exposure in production** — `devTools: IS_DEV` plus a dev-only
-  menu entry. Production builds have DevTools off.
-
-### API-key storage (desktop)
-
-- Keys are held in the renderer only transiently. At rest, the renderer calls
-  `window.desktopApi.encryptKeys(...)` which round-trips through `ipcMain` to
-  `safeStorage.encryptString` — DPAPI on Windows, Keychain on macOS, libsecret
-  on Linux. The ciphertext (base64) lands in `localStorage`; plaintext never
-  touches disk.
-- The IPC bridge caps input sizes (`MAX_PLAINTEXT = 8 KiB`,
-  `MAX_CIPHERTEXT_B64 = 16 KiB`) and exposes only three channels:
-  `safeStorage:available`, `safeStorage:encrypt`, `safeStorage:decrypt`. No
-  file system, shell, or arbitrary-IPC access from the renderer.
-- On first launch after upgrade, the legacy obfuscated blob
-  (`portaljust-api-keys`) is migrated to the encrypted blob
-  (`portaljust-api-keys-enc`) and the legacy entry is removed.
-- **Web fallback** (no `desktopApi`) uses reversible base64 + reverse
-  obfuscation — explicitly **not** a security control; it exists to keep
-  casual localStorage snapshots from leaking keys in cleartext.
-
-### Backend hardening
-
-- **Loopback-only bind by default**. `HOST` is validated against the set
-  `{127.0.0.1, localhost, ::1}`. Any other value is ignored unless the operator
-  sets `LEGAL_DASHBOARD_ALLOW_REMOTE=1` explicitly; a warning is logged.
-- **CSP** on every backend response via Hono `secureHeaders`:
-  `default-src 'self'`, `script-src 'self'`, `style-src 'self' 'unsafe-inline'`
-  (Tailwind runtime), `img-src 'self' data:`, `object-src 'none'`,
-  `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`.
-- **Rate limiting keyed on the real socket IP** via
-  `getConnInfo(c).remote.address` — header-spoofing (`X-Forwarded-For`) cannot
-  bypass the limiter. Loopback gets a higher ceiling than other addresses
-  because all traffic is the same user.
-- **Auth pluggable seam (PR-9 branch).** `LEGAL_DASHBOARD_AUTH_MODE=desktop`
-  remains the default and sets the seeded `local` identity. In
-  `LEGAL_DASHBOARD_AUTH_MODE=web`, API requests fail closed unless they carry a
-  valid HS256 session token/JWT via `Authorization: Bearer ...` or the
-  `legal_dashboard_session` HttpOnly cookie; the token subject must map to an
-  active row in `users`. Missing/invalid/expired tokens do not fall back to
-  `local`. This is the backend seam only; real Google Workspace SSO/deploy/TLS
-  cutover remains out of scope for this branch.
-- **Web mode este auth seam, nu produs web self-service.**
-  `LEGAL_DASHBOARD_AUTH_MODE=web` activeaza validarea JWT
-  (issuer/audience/secret) si forteaza cookies `Secure`. Nu este livrat un
-  endpoint `/login` first-party: tokenele trebuie emise de un IdP extern
-  (Google Workspace, Auth0, etc.) si injectate prin cookie
-  `legal_dashboard_session`. `/health` expune `authMode` si
-  `loginAvailable:false` pentru ca operatorii sa nu confunde modul web cu un
-  produs deploy-ready out-of-the-box.
-- **Boot guard remote+desktop refused (PR-9).** `LEGAL_DASHBOARD_ALLOW_REMOTE=1`
-  cere `LEGAL_DASHBOARD_AUTH_MODE=web` si JWT secret valid (gate-ul istoric
-  `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost retras in v2.38.0 — web auth obligatoriu
-  e gate suficient si mai riguros). Desktop/local pe LAN este refuzat la boot.
-- **Pre-auth rate limit (PR-9).** `/api/*` are un bucket IP-only inainte de
-  `ownerContext`, ca floods cu token missing/invalid sa nu epuizeze la infinit
-  HMAC/user lookup. Requesturile autentificate cu succes elibereaza bucket-ul
-  pre-auth si raman guvernate de limiter-ul per-owner.
-- **`/health` public si non-sensitive.** Ruta este mount-uita inainte de auth si
-  nu contine PII sau statistici DB; readiness probes functioneaza fara token.
-- **AI key precedence**: if `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or
-  `GOOGLE_AI_KEY` are set in the backend environment, they take precedence
-  over keys submitted in the request body. This lets an operator who runs the
-  backend as a service prevent the renderer from overriding the server's keys.
-- **Web tenant API keys (v2.30.0)**: in `LEGAL_DASHBOARD_AUTH_MODE=web`,
-  admin-configured AI and captcha keys are stored in `tenant_api_keys` as
-  AES-256-GCM ciphertext with separate iv/tag columns. The master key is
-  `TENANT_KEY_ENCRYPTION_SECRET`, required in web mode and not stored in the
-  database. API responses expose only configured/not-configured status and
-  `last4`; audit details never include plaintext or ciphertext. Non-admin
-  web requests still cannot supply BYOK `apiKeys`/`captchaKey` in the body.
-- **SOAP fan-out cap** (`MAX_SOAP_FANOUT = 500`) on `/api/dosare/load-more`
-  and `/api/termene/load-more` to prevent an attacker (or a buggy client) from
-  amplifying one request into thousands of upstream SOAP calls.
-- **Email notifier isolation (PR-11).** SMTP credentials are read only from
-  server-side `SMTP_*` environment variables. Per-owner email settings default
-  to disabled, HTML email bodies escape alert payloads, and SMTP failures are
-  logged without blocking alert insert, SSE, native notifications, or the
-  in-app alerts inbox.
-
-### Background monitoring activity
-
-The monitoring scheduler (live and hardened in v2.2.0, further hardened in v2.3.0 and extended with `name_soap` in v2.4.0, `backend/src/services/monitoring/scheduler.ts`) runs background jobs that periodically refresh dosar / termene state from PortalJust SOAP. It inherits the desktop trust model - same OS user, same SQLite, no extra network surface - and adds the following controls:
-
-- **Single-instance enforcement.** The scheduler runs only inside the Electron main process, which is itself gated by `app.requestSingleInstanceLock()`. There is no second writer racing the scheduler against the same SQLite file.
-- **Cooperative cancellation.** Every outbound SOAP request is wired through an `AbortSignal` chained to: (a) per-request timeout (`SOAP_REQUEST_TIMEOUT_MS`), and (b) the scheduler's shutdown signal. App-quit flushes in-flight runs instead of leaking sockets or holding SQLite WAL locks past process exit.
-- **Maintenance lock (RWLock).** Backup / restore acquire `withMaintenanceWrite` (writer-exclusive); scheduler ticks acquire `withMaintenanceRead`. Backups cannot observe a half-applied job outcome, and the scheduler cannot start a new tick while a backup is running. The lock is writer-preference, so a maintenance request cannot be starved by a busy tick loop.
-- **Outcome atomicity.** `finalizeRun` + `markJobOutcome` are wrapped in a single `db.transaction`, so a job's `runs` row, `next_run_at`, and `last_status` move together. A crash mid-tick cannot leave a "succeeded but never advanced" job. Orphaned `running` runs from a previous process are recovered on boot (`recoverOrphanRuns`).
-- **One-running-run-per-job DB enforcement (v2.3.0).** Migration `0005_one_running_run_per_job.up.sql` adds a UNIQUE partial index `idx_one_running_per_job` on `monitoring_runs(job_id) WHERE status='running'`. Even a buggy scheduler reset cannot insert a duplicate `running` row — the DB rejects it. Removes a class of finalize races that pre-v2.3.0 were guarded only at code level.
-- **Restore integrity check (v2.3.0).** `restoreFromBackup` runs `PRAGMA integrity_check` against the candidate file before promoting it; sidecar WAL/SHM unlinks are detected for non-ENOENT errors so a disk-full does not pass silently.
-- **Graceful shutdown drain (v2.3.0).** On `SIGTERM`/`SIGINT` the HTTP server drains in-flight requests with a 30-second timeout before the scheduler is stopped and the DB is closed. Eliminates a class of dropped-request races on Quit.
-- **Source-error suppression.** A job that fails 5 times consecutively against the upstream source is marked `source_error` and stops scheduling until manual intervention. This bounds noise (audit log, console, retries) when PortalJust is degraded — a single outage cannot generate unbounded retries or fill the audit log.
-- **Per-kind operational kill switch.** `MONITORING_DISABLED_KINDS` excludes listed kinds (`dosar_soap`, `name_soap`, `iccj`, `aviz_rnpm`) from scheduler claims without mutating job rows. This lets an operator pause one runner class while keeping the rest of the app live. Interactive ICCJ routes have their own switch (`ICCJ_ROUTES_DISABLED=1` returns 503 on `/api/dosare-iccj` + `/api/termene-iccj`).
-- **Body-size limits on monitoring mutations.** Monitoring POST/PATCH/manual-run routes use a dedicated request body cap before JSON parsing. Oversized payloads are rejected before they can allocate large request objects.
-- **Run retention purge.** `monitoring_runs` history is purged daily with a 90-day retention window. The purge timer is stopped with the scheduler, so shutdown does not leave background work behind.
-- **Owner scoping.** Every scheduler-driven mutation carries the owning `owner_id` into `recordAudit`. Cross-owner mutations from the API surface are rejected as `404` (not `403`) so status codes do not disclose the existence of other owners' jobs; the differentiation is preserved only in the audit log (`*_denied` actions).
-- **No external network beyond the existing allowlist.** The scheduler only calls the same PortalJust SOAP endpoints already used by foreground search. It does not introduce new outbound hosts and is bound by the same external-URL allowlist.
-
-The scheduler does **not** add authentication, encryption, or rate-limiting to its own outbound calls — those are inherited from the foreground SOAP path. It also does **not** run on the web (server-mode) deployment until per-owner rate-limiting and per-tenant isolation land; see "Out of scope".
-
-### Data-at-rest / data-exported
-
-- **XLSX formula-injection escape**. On export, any string cell whose value
-  begins with `=`, `+`, `-`, `@`, `\t`, or `\r` is prefixed with a single
-  quote so it is rendered as text by Excel / LibreOffice instead of evaluated
-  as a formula. Applied to every sheet produced by
-  `frontend/src/lib/export.ts` and `rnpmExport.ts`.
-- **Markdown / HTML sanitization** uses DOMPurify with an allowlist of
-  `[strong, em, b, i]` and `ALLOWED_ATTR: []` — no attributes, no URLs, no
-  script vectors.
-- **Solutie truncation** (`TRUNCATE_SOLUTIE = 5000`) limits the size of
-  court-decision text that round-trips through the AI prompt path, bounding
-  the token spend and prompt-injection surface.
-
-## Environment configuration
-
-| Variable | Default | Purpose |
-|---|---|---|
-| `HOST` | `127.0.0.1` | Bind address. Non-loopback values are ignored unless `LEGAL_DASHBOARD_ALLOW_REMOTE=1`. |
-| `LEGAL_DASHBOARD_ALLOW_REMOTE` | unset | Set to `1` to allow non-loopback `HOST` binds. Requires `LEGAL_DASHBOARD_AUTH_MODE=web`, which at boot forces JWT config (secret >=32 + issuer + audience via `validateAuthConfig`); otherwise boot fails. |
-| `LEGAL_DASHBOARD_PORT` | `3002` | Backend port. Electron sets this automatically. |
-| `LEGAL_DASHBOARD_DB_PATH` | `%APPDATA%/legal-dashboard/legal-dashboard.db` | SQLite path. Electron sets this. |
-| `LEGAL_DASHBOARD_AUTH_MODE` | `desktop` | Auth provider selector. `desktop` keeps `local`; `web` requires signed JWT/session auth. |
-| `APP_MODE` | unset | Backward-compatible alias for `LEGAL_DASHBOARD_AUTH_MODE` when the primary variable is unset. |
-| `LEGAL_DASHBOARD_JWT_SECRET` / `JWT_SECRET` | unset | Required in web auth mode; minimum 32 characters. |
-| `LEGAL_DASHBOARD_JWT_ISSUER` / `LEGAL_DASHBOARD_JWT_AUDIENCE` | unset | Required in web auth mode — `validateAuthConfig` throws a fatal boot error if either is missing when `LEGAL_DASHBOARD_AUTH_MODE=web`. |
-| `LEGAL_DASHBOARD_JWT_TTL_SECONDS` | `3600` | TTL for refreshed web auth session tokens; allowed range `60..86400`. |
-| `LEGAL_DASHBOARD_AUTH_TOKEN_TTL_SECONDS` | unset | Legacy alias for JWT TTL. |
-| `LEGAL_DASHBOARD_AUTH_COOKIE_SECURE` | secure in web mode | Set to `0` only for local HTTP testing. |
-| `TENANT_KEY_ENCRYPTION_SECRET` | unset | Required in web auth mode for centralized tenant API keys. Must decode from base64 to exactly 32 bytes. Store separately from DB backups; losing it requires re-entering all tenant keys from `/admin/keys`. |
-| `MONITORING_ENABLED` | `1` in Electron | Set to `0` to disable monitoring routes and scheduler. |
-| `MONITORING_DISABLED_KINDS` | unset | Comma-separated monitoring kinds to skip in scheduler claims, for example `dosar_soap,name_soap,iccj`. |
-| `ICCJ_ROUTES_DISABLED` | unset | Set to `1` to return 503 on the interactive ICCJ routes (`/api/dosare-iccj`, `/api/termene-iccj`) without redeploy. |
-| `ICCJ_TIMEOUT_MS` / `ICCJ_MAX_RESPONSE_BYTES` / `ICCJ_ENRICH_BUDGET_MS` | `30000` / `20971520` / `45000` | Tunables for the scj.ro scraping client (per-fetch timeout, response size cap, enrich wall-clock budget). |
-| `RNPM_TIMEOUT_MS` | `60000` | Per-fetch timeout backstop for the RNPM upstream (v2.37.1). |
-| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` / `SMTP_FROM` / `SMTP_SECURE` | unset | Optional SMTP channel for alert emails. Incomplete config disables email without blocking boot. |
-| `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` / `GOOGLE_AI_KEY` / `OPENROUTER_API_KEY` | unset | If set, override tenant DB keys in web mode and in-app keys on desktop. Normal web setup should prefer `/admin/keys`. |
-| `NODE_ENV` | `production` in Electron | `development` enables DevTools and the dev menu. |
-
-Desktop v2.4.0: the 2Captcha / CapSolver key is **not** read from env; it is
-entered in-app and persisted via `safeStorage` on desktop. Planned PR-9
-web/server mode: captcha provider keys move to server-side env/config and are
-not BYOK / not supplied by the browser client.
-
-## Out of scope — what the app does **not** protect against
-
-- **Malicious code running as the same OS user.** `safeStorage` decrypts
-  transparently for the logged-in user; any process running as that user can
-  call the same IPC (via a hijacked renderer) or read DPAPI-protected secrets.
-  Defense here is OS-level (antivirus, least-privilege user accounts).
-- **Operator-trusted shell eval via `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` (audit O3).**
-  The offsite-backup hook is passed verbatim to `sh -c` / `cmd /c`, so it is
-  equivalent to arbitrary code execution at the backend's OS-user privilege.
-  This is not a vulnerability — it is an operator-trusted-env item like
-  `SMTP_*` and the AI key env overrides — but it MUST be set only by the
-  trusted operator and never derived from request or other untrusted input.
-- **Compromised dependency (supply-chain attack).** npm packages are trusted
-  at install time. No hash pinning beyond `package-lock.json`; no runtime
-  allowlisting. If `xlsx-js-style`, `better-sqlite3`, or `@hono/node-server`
-  ships a malicious update, the app is compromised. Mitigation: review
-  lockfile diffs, use `npm ci` in CI, run `npm audit` regularly.
-- **`xlsx` parser CVEs — REZOLVAT in v2.6.4.** Backend-ul foloseste acum
-  `exceljs@^4.4.0` pentru `XLSX.read()`-ul reachable via
-  `/api/v1/name-lists/preview` si `/commit` (PR-5, bulk import Monitorizare).
-  `xlsx@0.18.5` ramane in `devDependencies` doar pentru fixture-urile de
-  test — nu mai ajunge in bundle-ul productie. Mitigari active in
-  `nameListParser.ts`: cap 10MB body, max 50K rows, max 20 cols, timeout 30s
-  pe parse (Promise.race). Frontend-ul foloseste `xlsx-js-style` nu doar pentru
-  EXPORT (`writeFile()`), ci si la PARSAREA de preview a fisierelor de import
-  bulk Monitorizare (`XLSX.read` in `monitoringBulkTemplate.ts:318`,
-  `parseBulkFile`), deci parserul ESTE reachable pe un path de input user — nu
-  este write-only. Riscul e mitigat inainte de parse printr-un cap pe
-  dimensiunea fisierului (`MAX_BULK_FILE_BYTES`) plus validare interna a matricei
-  (decode `!ref` cu cap pe randuri/coloane inainte de `sheet_to_json`);
-  parsarea autoritativa a importului ramane server-side pe `exceljs@^4.4.0`, iar
-  preview-ul din renderer nu comite nimic in DB.
-- **Unsigned Windows binaries.** We do not currently code-sign Windows
-  installers. SmartScreen will warn on first launch. Obtaining and wiring an
-  EV / OV certificate is tracked separately.
-- **LAN-mode hardening (v2.6.4 — fail-closed by default).** Setting
-  `LEGAL_DASHBOARD_ALLOW_REMOTE=1` (or HOST non-loopback) refuza acum pornirea
-  backend-ului pana cand `LEGAL_DASHBOARD_AUTH_MODE=web` cu un JWT valid e
-  configurat (din v2.38.0; gate-ul istoric `LEGAL_DASHBOARD_ACK_NO_AUTH` a fost
-  eliminat ca redundant). Pe interfata non-loopback, request-urile state-changing (POST/PUT/PATCH/DELETE)
-  de la peers non-loopback sunt validate prin `originGuard` middleware:
-  Origin/Referer trebuie sa match-uiasca Host-ul, altfel 403
-  `csrf_origin_mismatch`. Loopback (desktop la el insusi) trece liber pe
-  toate metodele. Remote bind in `desktop` mode este refuzat; TLS, SSO real si
-  token revocation raman pentru PR-10+.
-- **SOAP traffic to `portalquery.just.ro`.** Upstream is HTTP-by-default for a
-  legacy government service. The app uses HTTPS where the endpoint supports
-  it, but certain portals do not; this is intentional and documented here so
-  nobody tries to "fix" it without understanding the compatibility impact.
-- **Screenshot / clipboard exfiltration by other apps.** Standard desktop
-  threat model — not something the app can prevent.
-- **Portita de stocare RNPM prin replay gcode (BUG-02/NEW-01).** Risc acceptat pe
-  deploy intern cu utilizatori de incredere; redeschidere daca apar conturi
-  externe organizatiei.
-- **Absenta unui plafon de joburi de monitorizare per owner (SEC-09).** Risc
-  acceptat pe deploy intern; mitigari active (cadence 600s, claim 50/tick, rate
-  limit 120/min, dedup target_hash); redeschidere la conturi externe sau
-  infometare reala a scheduler-ului.
+# Security Policy
 
 ## Reporting a vulnerability
 
-File an issue with the `security` label, or email the maintainer directly if
-the report should be private. Please include:
+Please do not open a public issue for security problems.
 
-- Version (`package.json` version string or commit hash)
-- OS + Electron version (`Ajutor → Despre Legal Dashboard`)
-- Reproduction steps and observed vs. expected behaviour
-- Whether the issue requires local OS access, network access, or a specific
-  configuration (`LEGAL_DASHBOARD_ALLOW_REMOTE=1`, custom `HOST`, etc.)
+Report privately through **[GitHub Security Advisories](https://github.com/warlordro/Legal-Dashboard/security/advisories/new)**.
 
-## Change log
+Include what you can: affected version, deployment mode (desktop or web), reproduction steps, and impact. I maintain this project alone alongside a full-time job, so expect an acknowledgement within a few days rather than hours. I will tell you whether the report is in scope, what the fix looks like, and when it ships. If you'd like credit in the advisory and release notes, say so.
 
-| Date | Change |
+**Supported versions.** Only the latest release receives security fixes. There are no long-term support branches.
+
+---
+
+## Two deployment models
+
+The threat model differs substantially depending on how the application is run. Read the section that applies to you — the assumptions are not interchangeable.
+
+### Desktop mode (default)
+
+A single-user application. The backend is a local Node.js HTTP server bound to `127.0.0.1`, consumed by the Electron renderer in the same process tree.
+
+Trust assumptions:
+
+- The machine running the application is trusted.
+- The operating-system user running the application is trusted.
+- **Other users on the same LAN are not trusted.**
+
+There is no authentication in this mode, by design — the OS user *is* the identity. Exposing a desktop-mode backend beyond loopback is refused at boot rather than merely discouraged.
+
+### Web mode
+
+A multi-user service behind authentication, administered by an operator. Sessions are established through Google authentication with an email-domain allowlist; API requests fail closed without a valid session.
+
+Trust assumptions:
+
+- The operator controls the host, the TLS termination, and the reverse proxy in front of the application.
+- Authenticated users are trusted with their own data and **not** with each other's.
+- The operator is trusted with organisation-level configuration, including AI and captcha keys.
+- The network between the client and the reverse proxy is not trusted.
+
+Web mode requires `LEGAL_DASHBOARD_JWT_SECRET` (32+ bytes), an issuer, an audience, and `TENANT_KEY_ENCRYPTION_SECRET`. Boot fails fatally if any are missing — the application will not start in a half-configured state.
+
+---
+
+## In scope
+
+### Electron surface
+
+| Control | Implementation |
 |---|---|
-| 2026-07-28 | v2.43.4 — first release after the move to a self-hosted web deployment (Synology behind Cloudflare Tunnel + oauth2-proxy). Both changes were adversarially reviewed twice (fable-advisor before and after implementation, Codex after). **Session termination (new):** the UI had no logout control at all — `POST /api/v1/auth/logout` shipped in v2.31.0 but was never called, so a web user could not end a session from a shared machine without clearing cookies by hand. The button revokes the JWT server-side, then navigates to `/oauth2/sign_out?rd=%2Fdelogat`; the new public `GET /delogat` page (`routes/logoutPage.ts`, mounted before the SPA fallback, listed in `OAUTH2_PROXY_SKIP_AUTH_ROUTES`) confirms the logout, defensively clears `legal_dashboard_session`, and states visibly that the Google session survives in the browser. Two traps closed during review: an absolute `rd` is rejected by `OAUTH2_PROXY_WHITELIST_DOMAINS` and silently rewritten to `/`, where `SKIP_PROVIDER_BUTTON` re-authenticates instantly (verified live against the deployment); and `beginLogout()` now awaits an already-in-flight session re-mint — otherwise that request lands after the cookie deletion and installs a fresh JWT with an unrevoked `jti` and a full TTL. Non-2xx logout responses are surfaced explicitly (`fetch` does not throw on 403/429/500). **Accepted risk:** `/delogat` is a public GET that clears a cookie, so an external site can force a logout by navigating the user there — nuisance only, no data exposure and no escalation; a CSRF-token POST would require JavaScript on a page that must work precisely when the session is gone. **Audit attribution (fix):** behind the proxy chain every audit row recorded the neighbouring container address (`172.20.0.3`) and authentication rows recorded nothing, making the log useless for investigating an access. Three distinct causes: `readClientIp` now prefers `CF-Connecting-IP` (set by Cloudflare at the edge, not rewritten by any hop, unlike `X-Forwarded-For`) once the peer is already trusted; `readContext` in `auditRepository` was reading the raw socket address and bypassing the trusted-proxy logic entirely; and on `/oauth2/sync` + `/logout` the context cannot be handed to `recordAudit` (`getOwnerId` throws pre-authentication), so the IP is now passed explicitly. Rows written before this release cannot be backfilled. |
-| 2026-07-26 | v2.43.3 security release — closes the 3 web-deploy-blocking findings from the 2026-07-24 Claude Security scan (Faza 12 in HARDENING.md), each TDD'd and adversarially reviewed. **F12-F8 (PAT issuance):** `/api/v1/tokens*` management routes now require `requireRole("admin")` server-side — previously the admin gate existed only in the renderer, so any authenticated web user could mint PATs and reach the programmatic API surface. **F12-F5 (tenant captcha key leak):** the 2Captcha SDK embeds the key in request URLs and node-fetch echoes the full URL in transport-error messages, which previously reached the search 500 body, bulk/split SSE error events, the `/captcha/balance` 400 body and stdout; keys (raw + percent-encoded forms) are now redacted at error construction across all sinks and the client-facing 500 is generic. Post-release hardening (same version, prompted by a CodeRabbit follow-up review + fable-advisor verification): the raw SDK error is no longer retained as `cause` — it is rebuilt with redacted name/message/stack and extra enumerable properties plus nested causes deliberately dropped, so future object-aware logging (`console.error(e)` / `util.inspect`) cannot resurface the key; poisoned-mock regression test asserts over `util.inspect` of the whole error object. **F12-F3 (RNPM storage-limit bypass):** storage admission is measured before accepting work on ALL search routes, so a hand-crafted `gcode` body can no longer bypass the per-user storage cap. **CR-1.2 (captcha economics):** the restore-in-progress guard now runs BEFORE captcha consumption (but after captcha-config resolution, preserving the canonical web-mode 501) on `/search`, `/bulk` and `/search-split` — a 409'd request no longer burns a paid captcha solve. **New admin surface (small):** `DELETE /api/v1/admin/backups/:name` (single-backup delete) reuses the restore name-jail (`assertNameInJail` + `RESTORE_NAME_RE`, validated pre-lock, traversal variants covered by tests incl. double-encoding and backslash), runs under the maintenance write lock, is admin-only + desktop-header-gated, and audits `backup.delete` with targetId/outcome. AI-side observability hardening in the same release (trust boundary on model output): truncated/empty model responses are now detected on all four provider routes and surfaced as degradation instead of silently delivered as complete analyses. |
-| 2026-07-20 | v2.43.1 hardening batch (patch release over v2.43.0, same branch; dual adversarial review — Codex GPT-5.6 Sol + multi-model panel). **CSRF:** global desktop guard on ALL `/api/*` mutations (`X-Legal-Dashboard-Desktop` header; PAT + SSE exempt; kill switch with a structured boot warn when active) (SEC-01). **Trusted proxy:** fail-closed at boot in web + loopback binds when `LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR` is unset, with REAL CIDR validation (garbage / empty prefix rejected), a unified loopback classifier (127/8, canonical `::1`, `::ffff:127.x`) and `::1/128` support (NEW-02). **Outbound:** `redirect: "manual"` + 3xx guard on API-key validation and on the PortalJust SOAP fetch (SEC-04); RNPM response size cap (20MB, `response_too_large`) plus capped draining of the ICCJ `warmSession` and of abandoned bodies on RNPM early-returns (SEC-07). **Parsing:** `faultstring` sanitized + truncated before logging (control chars / line separators) (SEC-05); `decodeXmlEntities` maps XML-invalid / out-of-range code points to `U+FFFD` (SEC-06). **Boot/secrets:** template JWT-secret placeholders rejected (SEC-11). **Electron:** notification IPC handlers fail-closed on sender-check (SEC-08); navigation validation mirrored on `will-redirect` (SEC-10); shutdown-drain timer `unref`ed (BUG-08); Electron bumped to 41.10.2 (Chromium patch via lockfile) (SEC-02a). **Correctness:** daily email report retry is STRICT per-owner and survives midnight (resends the ORIGINAL day's report) (BUG-04); monitoring run race maps `SQLITE_CONSTRAINT_UNIQUE(monitoring_runs.job_id)` to `409 in_flight` (BUG-03); RNPM `pagesTotal` clamped to `ceil(total/pageSize)` (BUG-06); temp-PDF cleanup made robust via `finished()` (BUG-01); splitter closes its source handle via `try/finally` (BUG-05); backup fail-closed on an unreadable WAL sidecar and on an empty RNPM ledger at restore; AI budget warnings honor web-mode as the `quotaGuard`. **New feature (attack-surface note):** `GET /api/dosare` gains a tolerant per-institution fallback when the aggregate PortalJust call fails — hardcoded institution token catalog (~246), `URLSearchParams`-built queries (no new external host, no SSRF), concurrency 10, 120s total budget, max 2 concurrent fallbacks/process, fail-closed 413 cap; returns healthy results + `failedInstitutii` (200 may be partial; `exactMatch` guaranteed only when `failedInstitutii` is absent; dedup on `institutie\|numar`). **Docs:** in-app manual corrected on key storage (desktop = OS safeStorage; web = server-side AES-256-GCM); DEPLOY-SERVER RNPM backup corrected to app snapshots (not live-directory copy) + synced deploy versions; `GHSA-w5hq-g745-h8pq` (`uuid`/`exceljs`) tracked. Accepted risks documented above. |
-| 2026-07-19 | Tracking moderate advisory GHSA-w5hq-g745-h8pq on `uuid@8.3.2`, pulled in transitively via `exceljs@^4.4.0` (backend name-list parser). No upstream `exceljs` release bumps the `uuid` pin yet, so the transitive version cannot be updated without forking `exceljs`; `exceljs` uses `uuid` only for internal workbook part identifiers (never from attacker-controlled input, never in a security decision), so the advisory is not reachable on any exploitable path here. Accepted/tracked risk — revisited when `exceljs` ships a release with a fixed transitive `uuid` range. |
-| 2026-07-10 | v2.43.0 RNPM physical isolation per user. **Data layout:** RNPM data moves out of the monolith into per-user SQLite files `rnpm/<stem>.db` (stem = lowercase ownerId + short sha256 — collision-safe on case-insensitive filesystems, immune to Windows reserved names); search/aviz ids become a per-file namespace, so the cross-tenant `foreign`/403 state disappears — isolation is the file boundary itself, with the old `owner_id` filters kept as defense in depth against restore artifacts. **One-time splitter:** crash-safe two-phase protocol with durable marker `rnpm/.split-done.json`; fail-closed preflights (ownerId validation, FK integrity, parent-child owner consistency, 3x disk space), STRICT verified pre-split backup, per-owner copy+verify via a REAL read-only source connection, and a fail-closed boot ABORT if a pre-split monolith backup is restored after the split (documented remediation in RUNBOOK). **Self-service backup surface (new):** `/api/rnpm/backups*` operates strictly on the caller's jail `backups/rnpm/<stem>/` (name allow-list + `path.resolve` jail check; validation failures are 400, not 500); non-admin requests for another owner are silently coerced to the caller's own jail (no existence oracle); admin targeting is audited with `targetOwnerId`; manual create has a 60s per-owner cooldown (429 + Retry-After); `requireDesktopHeader` stays on ALL mutations (desktop CSRF, web pass-through); concurrency guards refuse restore during an active search (409 SEARCH_ACTIVE) and any RNPM operation during a restore (409 RESTORE_IN_PROGRESS, latched in the DB layer). **Monolith backups** move to `/api/v1/admin/backups` (admin-only). All new snapshots are self-contained `VACUUM INTO` (no WAL/SHM sidecar coherence risk); restores validate the backup's schema version and auto-revert through temp+rename on integrity failure. No new external host; no new network surface. |
-| 2026-07-07 | v2.42.0 user administration surface (web mode). **Identity:** migration `0040` adds a UNIQUE NOCASE index on `users.email` + `canonicalizeEmail` as the SINGLE normalizer shared by create, import, seed and the oauth2 bridge (divergence here = users who cannot log in). **Provisioning:** `POST /users` + bulk xlsx import (server-side parse, 500-row/512KB caps, all-or-nothing transaction); creatable roles restricted to user/admin (support/readonly remain historic-only). **Soft-delete semantics:** a deleted account no longer blocks its email forever — re-adding it REACTIVATES the existing row (same id, displayName/role from input, `password_hash` cleared so no stale credentials survive) with audit `reactivated: true`; active/suspended stay 409 duplicates. **Last-admin guard:** counts ACTIVE admins only (a suspended admin is not a fallback), self-demote/self-deactivate refused server-side. **Budget controls:** migrations `0041`/`0042` consolidate AI spend into a single per-user pool enforced by `quotaGuard` (single + multi summed); grants and unlimited budgets are mutually exclusive (422 `unlimited_budget`, base includes the env default invisible to clients). **Audit:** owner/actor enriched with email (raw id kept in tooltip/fallback), XLSX export with formula-injection escaping incl. the IP column, capped at 10000 rows (413 above). **Static serving:** explicit `Cache-Control` (no-cache on HTML, immutable on hashed /assets) — browsers no longer serve stale bundles after redeploys. No new external host; admin routes stay behind `requireRole("admin")`. |
-| 2026-07-02 | v2.40.0 programmatic read-only API via Personal Access Tokens (web mode ONLY; the PAT surface is never mounted on desktop). **New auth path:** opaque `ld_pat_...` tokens dispatched exclusively from `Authorization: Bearer` (never from cookie), stored as SHA-256 hashes (migration `0039`: `api_tokens`, `captcha_usage.token_id`, partial `audit_log` index); validation hits the DB per-request (no cache) so revocation is instant; kill switch `LEGAL_DASHBOARD_PAT_DISABLED=1`. **Default-deny capability gate:** a PAT reaches ONLY explicit `(method, path, scope)` tuples in `PAT_CAPABILITIES` (GET = segment-boundary prefix match, POST = exact match, encoded slashes rejected); everything else (AI, `/me`, admin, monitoring) → 403 `PAT_ROUTE_FORBIDDEN`; allowed route without the scope → 403 `INSUFFICIENT_SCOPE`. Scopes: `dosare`, `iccj`, `rnpm`. **Anti-escalation:** token management (`/api/v1/tokens*`) is session-only (PAT → 403 `PAT_CANNOT_MANAGE_TOKENS`) and mounted after `originGuard` (CSRF-protected); successful PAT auth bypasses `originGuard` (Bearer is CSRF-immune by construction). **Transport + abuse controls:** production PAT requests require HTTPS (426 without `x-forwarded-proto: https`; dev override `LEGAL_DASHBOARD_PAT_ALLOW_HTTP=1`); PAT responses carry `Cache-Control: no-store`; dedicated per-token rate limit applied before the gate; per-token daily captcha cap reserved atomically fail-closed (`BEGIN IMMEDIATE`; invalid cap = refuse; exceeded = 429 `QUOTA_EXCEEDED` + `Retry-After`). **Forensics:** every PAT use is audited (ok/denied, proxy-aware IP); first use from a new IP emails the owner (if an alert address is configured). **Upstream protection:** global ICCJ circuit breaker with per-caller-class weighting (PAT = 0.25, capped below threshold) so an aggressive token cannot trip the breaker and deny legitimate UI traffic; open breaker → 503 `ICCJ_UNAVAILABLE` + `Retry-After` (`ICCJ_BREAKER_THRESHOLD` / `ICCJ_BREAKER_COOLDOWN_MS`, positive-integer validated). **Self-description:** `GET /api/v1/openapi.json` (OpenAPI 3.1, generated from `PAT_CAPABILITIES`, separate bearer/sessionCookie security schemes) + consumer guide `API.md`. Verification: TDD per step, two review-panel wiring rounds (mount ordering; CSRF on token routes) fixed pre-merge, full 7-dimension adversarial audit (19 raw → 8 confirmed, 0 critical/high, all remediated), 4 CodeRabbit batches applied. No new external host; the PAT surface reuses existing upstreams. |
-| 2026-06-25 | v2.39.0 web session bootstrap + keep-alive. **Auth fix (web only):** the SPA never called the bridge `POST /api/v1/auth/oauth2/sync`, so in `auth_mode=web` the `legal_dashboard_session` cookie was never minted and every `/api` request returned 401 — the committed web stack was usable only by manually hitting the bridge. The SPA now mints the session on load (`syncWebSession` / `useSessionBootstrap`) and gates the authenticated shell behind it. **Session continuity:** `useSessionKeepAlive` re-mints every ~50min (< 1h JWT TTL) plus on `visibilitychange`/`online`, and a 401 interceptor in `apiFetch` re-mints once (deduped via `ensureWebSession`) and retries, so an expired/missing cookie self-heals instead of blocking the user. The bridge itself is unchanged (still shared-secret `X-Proxy-Auth` + proxy-injected identity, server-to-server); the new client calls inherit the same trust boundary. **Interceptor scope:** gated on web runtime (`window.desktopApi === undefined`); desktop never enters it. Auth endpoints are skipped via a normalized pathname check (`isAuthPath`, not a substring of `String(input)`) so a `Request`-typed or query-string URL cannot misroute. No new network surface, no new external host. Desktop: zero impact (local auth, no cookie). |
-| 2026-06-14 | v2.38.0 model refresh + security hardening. **Session cookie:** `SameSite` tightened from `Lax` to `Strict` on the minted auth cookie. **Boot gate retired:** `LEGAL_DASHBOARD_ACK_NO_AUTH` removed as redundant — a remote bind already requires `LEGAL_DASHBOARD_AUTH_MODE=web` + a valid JWT, and boot fails fatally otherwise, so the acknowledgement gate added no real guarantee. **JWT revocation:** minted tokens now carry a `jti` claim; a new `jwt_denylist` table (migration `0038`) records revoked token ids; verification rejects any token whose `jti` is on the denylist; logout revokes the presented token (cookie AND `Authorization: Bearer` paths); a denylist write failure on logout is logged rather than silently swallowed (best-effort — logout still succeeds, token expires at TTL); expired denylist entries are purged daily. **Root `.env.example`:** `JWT_ISSUER` / `JWT_AUDIENCE` relabeled REQUIRED-WEB (they are fatal at boot in web mode) and `JWT_TTL_SECONDS` documented. **Watchdog forensics:** the Electron event-loop watchdog diagnostic report now redacts `environmentVariables` + `commandLine` recursively (incl. nested `workers[]` sub-reports; could leak secrets passed via env or argv). **Audit log:** `audit_log` detail is now capped by UTF-8 byte length (was JS char count — multi-byte content was under-counted, so the on-disk cap could be exceeded). **Ops note:** `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` documented as an operator-trusted shell eval (the operator supplies and trusts the command; not user-influenced). No new network surface. |
-| 2026-06-11 | v2.37.1 post-full-review hardening (12-agent review @ 920ef31 + CodeRabbit pass). **Web auth fix:** `deploy/Caddyfile` no longer strips the `Cookie` header on the proxied path — with the strip active, oauth2-proxy could never read its own session/CSRF cookies and the backend never received `legal_dashboard_session` (committed web stack was fail-closed auth-dead); only spoofable identity headers (`X-Auth-Request-Email`, `X-Forwarded-Email`, `X-Forwarded-User`, `X-Proxy-Auth`, `Authorization`) remain stripped. **Upstream timeouts:** RNPM gets a per-fetch backstop (`RNPM_TIMEOUT_MS`, default 60s) — it was the only upstream without one; the `/search` idempotency TTL rises 120s→15min so a client retry can no longer run concurrently with the original (double captcha spend). **Alert integrity:** name_soap partial fan-out failures no longer fabricate `dosar_disappeared` (failed institutions carry forward in the baseline) and dedup keys are baseline-anchored so repeat real transitions alert again; PortalJust 200-but-drifted bodies throw instead of reading as empty. **Ops/docs:** `ICCJ_ROUTES_DISABLED`, `ICCJ_TIMEOUT_MS`, `ICCJ_MAX_RESPONSE_BYTES`, `ICCJ_ENRICH_BUDGET_MS`, `RNPM_TIMEOUT_MS` documented in `.env.example` + this file; `MONITORING_DISABLED_KINDS` value lists now include `iccj`; `docker-build.yml` gets a least-privilege `permissions: contents: read` block; down-migrations clean their `_schema_versions` row (rollback no longer desyncs the version journal) + 0034 rollback runbook. Untracked smoke-dump JSONs with real party names removed from the repo root (PII hygiene, same class as the gitignored RNPM dumps). No new network surface. |
-| 2026-06-07 | v2.37.0 ICCJ integration — adds outbound HTTP to a new external host `www.scj.ro` (search `/738`, detail `/1094`, sedinte `/737`); `www.scj.ro` added to the `shell.openExternal` allowlist (`electron/main.js`) and to the documented external-URL whitelist (this file + `CLAUDE.md`). Network-surface hardening verified in the dual review (10-agent `/full-review` + Codex adversarial): upstream URLs are hardcoded constants and user params go through `URLSearchParams` (no SSRF / no path injection); detail id is numeric-gated (`^\d{1,20}$` at the route, `^\d+$` in the service); responses are capped (`ICCJ_MAX_RESPONSE_BYTES`, default 20MB) and time-bounded (`ICCJ_TIMEOUT_MS`, default 30s); HTML regex parsers are anchored/single-quantifier (no catastrophic backtracking) and ICCJ strings render as React text (no `dangerouslySetInnerHTML`). New operational kill switch `ICCJ_ROUTES_DISABLED=1` returns 503 on the interactive ICCJ routes (separate from the scheduler's `MONITORING_DISABLED_KINDS`); per-item enrich timeouts are isolated and server-side enrich is time-budgeted (`ICCJ_ENRICH_BUDGET_MS`); detail-page markup drift fails loud (`IccjParseError`) so monitoring never records a false "dosar disappeared". The ICCJ routes inherit the global auth/owner-context + rate-limit + origin-guard middleware (web mode fail-closed). scj.ro is HTTP-scraped public court data (no API, no auth) — same accepted-risk class as the existing PortalJust SOAP upstream. |
-| 2026-05-20 | v2.34.0 web hardening (4 P0 + 8 P1 din auditul intern v2.33.0): **P0 — Auth surface:** Google OAuth2 device-code GET handler eliminat (POST-only); `device_codes` rate-limit per `(ip, ua)` pe 5s/min/30min cu fail-closed cand UA lipseste (P0-1). Admin guards intarite pe rutele `/admin/tenant-keys` (`POST/DELETE`) — operatorul admin trebuie sa fie owner-ul tenantului (`requireTenantOwner`), nu doar membru `requireRole("admin")` (P0-2). `/admin/users/:id/grants` modificarile non-revoke (`grant_create`, `extend`) blocate cu `cannot_modify_own_grants` cand admin-ul opereaza pe propriul user (P0-4). Bodu request RNPM `apiKey`/`captchaKey` warning hardening: log line schimbat sa includa stack trace + `X-Auth-Source` header pentru forensics (P1-5). **P1 — Reliability + rate-limit:** SOAP fan-out retry budget per request: max 3 retries pe failure tranzient (timeout, ECONNRESET, 502/503/504); peste, returneaza ultimul error (P1-1). `captcha/balance` per-tenant TTL cache 5min (la fiecare provider) — anti-spam pe upstream cand UI poll-uieste `/admin/keys` (P1-2). Per-tenant tenant-key owner guard pe `/admin/tenant-keys` (verificare suplimentara peste `requireRole("admin")`) — protejeaza fata de "admin la tenant X cere POST cu `tenantId=Y`" (P1-3). Captcha quota schimbata din **cost-based** in **count-based** per-user: `getCaptchaQuotaState` + `incrementCaptchaQuotaUsage` (atomic, in tranzactie); 3 ferestre rolling 24h/7d/30d cu intent-recording la guard accept (NU dupa upstream success — risk overcount-never-undercount). Override per-user via `user_quota_overrides` cu FK la `users(id)`. UI `/admin/quota` dual-unit (req / USD-milli) cu legenda explicita (P1-4). RNPM body-key warning structured logging (P1-5). Web mode owner-scoped tenant key guard suplimentar pe `/admin/tenant-keys` (P1-6). **P1 — Operational readiness:** CI smoke-test fixtures via `openssl rand` fallback in `.github/workflows/docker-build.yml` — `${{ secrets.CI_JWT_SECRET || steps.fixtures.outputs.jwt_secret }}` pattern, no inline literal secrets (P1-7). Offsite backup hook in `backup.ts`: env-configurable shell command `LEGAL_DASHBOARD_BACKUP_OFFSITE_CMD` invoked dupa `rename` atomic; fail-open (local backup ramane chiar daca hook failure); structured JSON `offsite_backup` / `offsite_backup_failed` log line. 4 teste POSIX-only `it.skipIf(isWindows)` in `backup.test.ts`. RUNBOOK.md (~400 linii, 12 sectiuni Ro fara diacritice) acopera incident playbooks (boot fail, DB corruption, restore local + offsite, tenant key loss, rollback, quota reset, JWT rotation, forensics) + Sentry SDK amanat la v2.35.0 cu workaround documentat (stdout structured JSON e grep-friendly cu Loki/Promtail/fluent-bit) (P1-8). **Test coverage:** 1334 pass / 5 skipped backend. **Verificare:** biome check pass, `tsc --noEmit` pass backend + frontend, `npm run build` pass. **Desktop:** ZERO impact — toate schimbarile gateuite pe `getAuthMode() === "web"` sau pe web-only routes. |
-| 2026-05-19 | v2.33.0 security hardening: closes CRITICAL-1 + 5 HIGH + 11 MEDIUM + 3 LOW across quota/budget, deployment topology, validation I/O and audit trail. Quota reservations are web-only, atomic and provider-specific; pending estimates count in rolling budget windows while desktop remains a no-op. Deployment adds SQLite instance locking before DB init, stale reclaim audit, explicit trusted proxy CIDR for `X-Forwarded-For`, Caddy header stripping and digest-pinned reverse-proxy images. External I/O now has streaming SOAP byte caps, RNPM runtime validation fail-closed by default (`RNPM_RUNTIME_VALIDATION_DISABLED=1` is the rollback switch), Google key validation via header and BCE FX plausibility fail-closed with no manual fallback. Audit log keeps secrets out: key/captcha events expose only metadata, SMTP errors are sanitized, logout attribution avoids plaintext/session resurrection, `audit.viewed` is emitted only for investigative filters, and `system.boot` / `system.shutdown` provide minimal operational traceability. |
-| 2026-05-19 | v2.32.0 quota policies extension (web mode only): `quotaGuard` middleware now enforces rolling-window budgets per feature (day=86400s, week=604800s, month=2592000s — locked seconds; no manual override) and treats `effective_limit_milli = base_limit + Σ active_grants` (NULL = unlimited, no enforcement). New tables: `user_quota_grants` (admin-issued extra credit with `expires_at` ISO; revocation idempotent via `revoked_at`/`revoke_reason`), `fx_rates` (BCE USD/EUR with `fetched_at`/`stale` derivation), `budget_notifications` (state machine: `above_threshold_since`/`fired_at`/`cleared_at`/`email_sent_at`). 80% soft warning fires email+banner once per episode, auto-clears when consumption drops below threshold (no manual close API — anti-spam by design). FX feed pulls `https://www.ecb.europa.eu/stats/eurofxref/eurofxref-daily.xml` daily at 16:30 CET via 10s `AbortController`; boot fail-safe single-shot fetch. **D14 fail-closed EUR display:** UI shows `"EUR indisponibil"` if `fx.rate IS NULL` or `fx.stale === true` (rate older than 48h) — no hardcoded fallback rate, no manual entry. Admin grant routes (`POST/DELETE /api/v1/admin/users/:id/grants`, `DELETE /api/v1/admin/grants/:id`) require `requireRole("admin")`; audit `admin.users.grant_create` / `admin.users.grant_revoke` records `feature`, `extraUsdMilli`, `expiresAt`, optional reason — never includes plaintext API keys or master secret. `quotaGuard` short-circuits when `getAuthMode() !== "web"` — desktop ZERO impact (no DB writes, no enforcement, no warnings). No change to rate-limits, body caps, CORS allow-list, AI HTML sanitization, or renderer URL whitelist (BCE fetch is server-side only and bypasses Electron CSP `connect-src 'self'`). |
-| 2026-05-19 | v2.31.0 server deployment stack (bridge `/auth/oauth2/sync` for oauth2-proxy): new POST endpoint accepts `X-Auth-Request-Email` / `X-Forwarded-Email` only when paired with a shared secret `X-Proxy-Auth` compared via `timingSafeEqual`; secret read from `LEGAL_DASHBOARD_OAUTH2_PROXY_SECRET` (fallback `OAUTH2_PROXY_SHARED_SECRET`) with minimum length 32 chars (fail-closed if missing/too-short — endpoint returns `bridge_disabled` 503). Endpoint is also gated by `LEGAL_DASHBOARD_AUTH_MODE=web` (returns 400 `desktop_only` otherwise). Endpoint never auto-provisions users: missing user returns 403 `not_provisioned`; suspended user returns 403 `account_inactive`. Audit log writes `auth.oauth2.sync` events with **only** `emailHash` (SHA-256 hex prefix, 16 chars) — never plaintext. Successful path mints an HS256 JWT identical to `/auth/login` (same `signAuthToken` / `writeSessionCookie` path → HttpOnly + Secure + SameSite=Lax + Path=/). Deploy stack (`deploy/docker-compose.prod.yml`): Caddy 2.8 auto-TLS + oauth2-proxy v7.7.1-alpine + backend in single network; backend uses `expose: 3002` (no `ports:` — unreachable from host network); oauth2-proxy `pass_authorization_header=false` + `pass_access_token=false` prevents Google tokens from leaking to backend or its logs; `OAUTH2_PROXY_INJECT_REQUEST_HEADERS="X-Proxy-Auth=${PROXY_BRIDGE_SECRET}"` ensures only the proxy can call the bridge. Caddyfile adds HSTS (max-age=63072000+preload), Referrer-Policy `no-referrer`, X-Content-Type-Options nosniff, X-Frame-Options DENY, -Server. `scripts/seed-admin.mjs` provisions the first admin idempotently (no plaintext password ever stored; web users never use password auth). New backend test file `auth.oauth2.test.ts` (12 tests) pins all failure modes: secret unset/short, bad/missing `X-Proxy-Auth`, missing/malformed email, user not provisioned, suspended user, audit log contains no plaintext email, desktop_only rejection. No change to existing rate-limits, body cap, CORS allow-list, AI HTML sanitization, or external URL whitelist. |
-| 2026-05-19 | v2.30.0 web admin centralized keys: `tenant_api_keys` stores Anthropic/OpenAI/Google/OpenRouter/2Captcha/CapSolver keys encrypted with AES-256-GCM under `TENANT_KEY_ENCRYPTION_SECRET`; `/admin/keys` is admin-only and returns only `set`/`last4`; audit rows never include plaintext/ciphertext. Web non-admin BYOK remains blocked, AI quota enforcement returns `QUOTA_EXCEEDED` with `Retry-After`, and RNPM captcha in web mode resolves provider/mode/key server-side from tenant DB. Desktop safeStorage/BYOK behavior remains unchanged. |
-| 2026-05-16 | v2.28.0 OpenRouter AI routing: admin settings are owner-scoped through `owner_ai_settings`, web mode keeps API keys server-side only (`OPENROUTER_API_KEY` env; body-supplied keys remain rejected), and `OPENROUTER_DISABLED=1` provides an immediate operational kill switch with no silent fallback to native providers. Multi-agent requests reject mixed OpenRouter stacks with `STACK_MIX_FORBIDDEN`, so routing/cost attribution cannot silently cross the selected stack boundary. `ai_usage` accepts provider `openrouter` and records `routing_tag`; no change to AI HTML sanitization, URL whitelist, or owner isolation rules. |
-| 2026-05-13 | v2.25.0 RNPM multi-token filter: tokenizer caps filter evaluation at `FILTER_TOKEN_MAX_COUNT = 8` tokens, deduplicates case-insensitive/diacritics-insensitive input, and keeps every token owner-scoped through the existing `owner_id + search_id` filter path. Query logging remains raw-query-free (`qLen` only), LIKE patterns continue through `buildRnpmLikePattern()`, and the existing kill switch `RNPM_RESULTS_FILTER_DISABLED=1` remains valid. |
-| 2026-05-13 | Previous RNPM results filter: new POST-only `POST /api/rnpm/search/:searchId/filter` keeps raw `q` out of URL logs, structured route logs record `qLen` instead of query text, and ownership precheck returns the same 404 for missing vs cross-owner `searchId` (anti-enumeration). Filter query stays owner-scoped through `owner_id + search_id`, caps response IDs at 1500, times out after 5s, exposes `missingDetails` without leaking detail content, and can be disabled through `RNPM_RESULTS_FILTER_DISABLED=1` if DB contention or a regression appears. |
-| 2026-04-17 | Initial security model: Electron hardening, safeStorage-backed keys, loopback bind, CSP, real-IP rate limit, SOAP fan-out cap, XLSX formula escape. |
-| 2026-04-18 | Documented accept of `xlsx` / `xlsx-js-style` parser CVEs (write-only usage, no reachable surface). Deferred items tracked in `AUDIT_DEFERRED_2026-04-18.md`. |
-| 2026-04-28 | Added "Background monitoring activity" section: scheduler trust model, AbortSignal cancellation, RWLock maintenance gate, outcome atomicity, source_error suppression, owner-scoped audit. |
-| 2026-04-29 | Synced monitoring security notes for v2.2.0: per-kind kill switch, mutation body caps, run retention purge, and environment variables. |
-| 2026-04-29 | v2.4.0 PR-5: bulk name lists / `name_soap`, mixed monitoring XLSX template, preview/commit with strict parser caps for `xlsx@0.18.5`, auto-create jobs cap 100, name SOAP runner alerts, and post-review transaction hardening for name list replay/archive races. |
-| 2026-04-29 | v2.3.0 audit remediation hardening: migration 0005 `idx_one_running_per_job` UNIQUE partial index, restore SQLite with `PRAGMA integrity_check`, recurring 24h backup timer, graceful shutdown HTTP drain 30s, RNPM `executeSearch` under `withMaintenanceRead`, audit on RNPM destructive routes (`POST /saved/delete-batch`, `DELETE /saved/:id`, `DELETE /searches/:id`), cross-tenant `existingSearchId` check via `belongsToOwner`, migration runner bidirectional CRLF self-heal + `MIGRATIONS_STRICT=1` CI gate, dependency bumps (dompurify, jspdf, jspdf-autotable). |
-| 2026-05-08 | v2.20.0 RNPM cap observability: audit event `rnpm.cap_hit` emitted by `POST /api/v1/rnpm/search-split` whenever `upstreamTotal != recovered` or sub-types end in `blocked` / `partial`. Detail captures `type`, `criteriu`, `upstreamTotal`, `recovered`, `gap`, `gapByReason` (terminal_cap / silent_refusal / residual_unclassified), and `blockedLabels`. Owner-scoped via `recordAudit(c, ...)`. No new attack surface — same `audit_log` table, same write path. |
-| 2026-05-08 | v2.20.2 RNPM cap_hit audit hardening: `criteriu` (CUI/CNP/nume) removed from audit detail (GDPR — was being persisted in plaintext alongside structured cap-hit shape); audit emit wrapped in local try/catch so `audit_log` write failure no longer flips the SSE stream into `error` event (caller-side isolation). |
-| 2026-05-08 | v2.20.3 RNPM hardening (post-/full-review): (1) audit `rnpm.cap_hit` now carries `requestId` (correlation between server log and client envelope); (2) migration 0017 adds `idx_audit_log_created_at` + `purgeOldAuditLog` (90-day retention, runs daily through `purgeWorker`) so audit table can no longer grow unbounded; (3) split SSE differentiates `aborted` (client signal abort) from `timeout` (server-side) from `error` (other failure) for forensics; (4) tier-1 / tier-2 loops fail-fast at K=3 consecutive upstream errors (`upstream_throttled` reason) instead of burning every captcha during throttling; (5) caller-side `captchasUsed` accumulates from `result.captchasUsed` (includes internal retries like `search_retry` on invalid gcode) instead of pre-incrementing; (6) `validateSubTypeLabels` (helper service `rnpmSubTypes.ts`, mirror of frontend canonical `TIP_AVIZ_BY_CATEGORY`) blocks arbitrary-label payloads in `subTypeLabels` (allow-list, prefix-exact); (7) operational kill switch `RNPM_AUDIT_CAP_HIT_DISABLED=1` skips the `audit_log` insert without restart. |
-| 2026-05-10 | v2.20.4 defense-in-depth tuning (UX): (1) rate-limit per `(ip, ownerId)` raised from 30 to 120 req/min — anti-runaway protection still active (an infinite useEffect loop is still capped at ~120 hits before 429), but normal Alerts page UX (Refresh + Inchide toate + paginate) no longer false-positives. Pre-auth rate-limit unchanged at 60 failed/min/IP. (2) `/api/rnpm/bulk` SSE timeout raised from 10 min to 60 min to support 200-CUI batches without orphaned hanging streams; not a security change but listed for traceability since it widens the resource-consumption window. No threat-model change — `bodyLimit`, fail-closed-on-missing-IP, web-mode 501 gate, and per-(ip, ownerId) bucket isolation all unchanged. *(NOTE v2.20.5: 60 min was undersized for the 200-CUI ipoteci worst case (~83 min) — re-bumped to 90 min in v2.20.5; resource-consumption-window note remains.)* |
-| 2026-05-10 | v2.20.5 hotfix: (security-relevant lines only) (1) `/api/rnpm/bulk` SSE timeout raised from 60 min to 90 min (`SSE_TIMEOUT_MS` 3600000 → 5400000) so a single stream of up to 200 CUI on the slowest category (ipoteci, ~25s/item worst case) cannot starve mid-flight and leave the upstream captcha-already-consumed but no-result-returned. Resource-consumption window widens from 60 min to 90 min per stream — still capped, still per-(ip, ownerId) rate-limited at 120 req/min. (2) Root `package.json` regression fix: scripts/build/devDependencies blocks were stripped accidentally in the v2.20.4 release commit, causing the v2.20.4 GitHub Actions build (Docker, macOS, Windows) to fail on `npm run build` ("Missing script"). Not a security regression by itself — but it meant v2.20.4 produced no signed artifacts; v2.20.5 restores the toolchain so signed installers ship again. No threat-model change. |
-| 2026-05-12 | v2.20.9 safety hardening: SOAP response cap 8MB before body read, RNPM `firstResult.total` type-guard before split cap decisions, and XLSX formula-escape sentinel for `=+-@\t\r`. |
-| 2026-05-12 | v2.21.0 RNPM trust + retention safety: runtime schema validation; v2.33.0 makes invalid payloads fail closed by default and keeps `RNPM_RUNTIME_VALIDATION_DISABLED=1` as rollback, `activ: null` for unknown RNPM status, migration 0019 `idx_monitoring_runs_started_at`, chunked purge capped at 1M rows per run, and explicit baseline rollback sentinel. |
-| 2026-05-12 | v2.22.0 supply chain hardening + polish: GitHub Actions pinned to full git SHAs (defeats tag-repointing attacks on `actions/checkout`, `actions/setup-node`, `actions/upload-artifact`, `softprops/action-gh-release`); `Dockerfile` base image pinned to multi-arch digest `sha256:8ea2348b...` on both build stages; migrated user-upload XLSX parsing path from `xlsx@0.18.5` to `xlsx-js-style` (closes active prototype-pollution + ReDoS CVEs with no upstream fix); hono `^4.12.17` → `^4.12.18` to close 3 moderate CVEs (CSS injection in JSX SSR, JWT NumericDate validation, Cache middleware Vary headers); `npm audit --omit=dev` remains clean. Polish: `PRAGMA synchronous = NORMAL` (paired with WAL, no corruption risk), `RNPM_SITEKEY` / `RNPM_PAGEURL` / `RNPM_USER_AGENT` externalized via lazy getters reading `process.env` for hot-swap without rebuild. |
-| 2026-05-13 | v2.23.0 master switch monitoring (auditability + owner isolation): new endpoints `GET/PUT /api/v1/monitoring/master-switch` with Zod `.strict()` validation (rejects unknown keys / non-boolean payload with `invalid_payload` 422), per-owner upsert via new table `owner_monitoring_settings (owner_id PK, monitoring_enabled, updated_at)` introduced by migration 0020 with partial index `WHERE monitoring_enabled = 0` for scheduler anti-join. Scheduler `claimDueJobs` filters via anti-join — disabled owners never get their jobs claimed even if `next_run_at` is past due. Audit entries `monitoring.master_switch.on` / `.off` carry `actor_id` (owner-id resolved through standard auth pipeline) + `request_id` (propagated from `x-request-id` header) and are written **only** on real state change (no-op call = no audit row, prevents log spam from idempotent UI retries). No new attack surface — same `recordAudit` write path, same envelope, same body cap; no auth-mode coupling (works identically in desktop owner='local' and web). |
-| 2026-05-14 | v2.27.2 Faza 11 / F11-F1 OriginGuard hardening (work-in-progress integration): backend `requireDesktopHeader` middleware now applied on POST/DELETE admin body-less routes (RNPM `DELETE /saved/all`, `POST /compact`, backup-management actions, monitoring master-switch toggle) — requests missing `X-Legal-Dashboard-Desktop: 1` are refused with envelope-shape `{ data: null, error: { code, message }, requestId }`. Frontend `apiClient` injects the header on every request to the backend in Electron mode so the gate is transparent for the desktop UI. `originGuard` itself now returns the same envelope shape on refusals (previously raw JSON body), keeping the contract uniform across HTTP error paths. **Note:** F11 is still work-in-progress for web mode (header gate not yet wired to per-user / SSO context); the desktop gate is shipped, the web cutover remains to be finalized in a follow-up release. Tests: backend `requireDesktopHeader` + `originGuard` envelope pinned with edge-case coverage before hardening began (commit `6a8b2b9`). No new attack surface — same body cap, same audit pipeline; the change tightens an existing trust boundary instead of opening a new one. |
-| 2026-05-15 | v2.27.3 attack surface reduction (export PDF revert): removed `POST /api/v1/dosare/export.pdf` + `POST /api/v1/termene/export.pdf` handlers and their backing services `dosareExportPdf.ts` + `termeneExportPdf.ts`. PDF generation for `/dosare` and `/termene` reverted to frontend jsPDF + jspdf-autotable running in a Web Worker (no network round-trip to backend, no server-side PDF stream attack surface for those flows). PDFKit streaming kept for RNPM (~50k pages possible) and alerts exports — both still gated behind existing rate-limits + body cap. Export XLSX path unchanged. No new attack surface; net reduction by removing two authenticated POST endpoints that previously accepted client-supplied JSON arrays. |
-| 2026-05-16 | v2.27.5 RNPM filter performance fix (not a security change per se, listed for completeness): materialized `*_norm` columns on `rnpm_avize`, `rnpm_creditori`, `rnpm_debitori`, `rnpm_bunuri`, `rnpm_bunuri_descrieri` via migration 0022. 10 `AFTER INSERT/UPDATE OF` triggers populate them automatically; idempotent post-migration backfill in `schema.ts`. Read-path `avizRepository.ts` reads `col_norm` directly instead of calling JS UDF `rnpm_norm()` per-row x 24 columns. Eliminates ~8s renderer freeze on filter input over 148-result page. No change to SQL surface (still raw SQL only in `backend/src/db/**`), no change to owner_id enforcement (same `WHERE owner_id = ?` pre-filter), no change to the AI HTML sanitization path, no change to the URL whitelist. UDF stays registered on the connection in `schema.ts`; migration `.up.sql` only contains `CREATE TRIGGER` (lazy UDF resolution at fire time). Regression coverage: 7 new tests pin trigger population + diacritic/JSON/4-char-prefix scenarios. Tests pass for `avizRepository.normColumns.test.ts` and the existing `filterRnpmSearchResults.explain.test.ts` (updated to reflect the new SQL shape). |
-| 2026-05-15 | v2.27.4 CI least-privilege + Faza 11 hardening close-out: `lint-test.yml` now declares `permissions: contents: read` explicitly (was inheriting the default repo-wide `GITHUB_TOKEN` scope) — read-only is sufficient because the job neither pushes nor creates releases. Added `concurrency` block (`cancel-in-progress: true`) so superseded runs on the same ref are cancelled, reducing the window where a stale job could still race against a freshly-pushed commit on the same branch. Faza 11 close-out: `scripts/rebuild-electron.cjs` removes `shell: true` from the `npm rebuild` spawn (replaced with explicit `where`/`which` resolver for `npm.cmd`) — closes the small command-injection seam introduced by passing the command line through a shell interpreter. Backend `auth.ts` / `health.ts` route handler split clarifies the trust seam between authenticated POST `/login` (form parse + bcrypt) and unauthenticated `/health` (boot probe). Biome cleanup PR-0..PR-8 closed without altering DOMPurify (kept active in all four AI sanitization call-sites — PR-4 centralized them into `frontend/src/lib/aiSanitize.ts` without disabling), without touching the external URL whitelist (`portal.just.ro`, `www.just.ro`, `portalquery.just.ro`, `mj.rnpm.ro`, `www.rnpm.ro`), and preserving `delete process.env.X` as a statement (NOT rewritten as a string assignment). Plus a documentation entry on PortalJust upstream data quality: legacy ANSI/cp1250 → UTF-8 transcoding occasionally substitutes `?` characters in `solutie`/`solutieSumar` — accepted upstream data loss, not a client-side bug, not exploitable. No new attack surface; net reduction from the CI scope tightening and the script-spawn change. |
-| 2026-05-18 | v2.28.4 audit pack remediation 2026-05-18 — 16 findings F1-F16 across 5 merged PRs. **PR1 — Security hotfix:** F1 explicit `bodyLimit` middleware applied per-route (search 64KB, bulk 512KB, small 4KB, AI 100KB, bulk dismiss 256KB) — closes implicit-cap inheritance gap where some route handlers relied on Hono default; F4 monitoring master-switch toggle now retries the audit-log INSERT on transient SQLite BUSY (single retry with 50ms backoff) so concurrent admin toggles cannot lose the audit row. **PR2 — Backend hygiene:** F6 AI request cancellation propagates `AbortSignal` from HTTP client → SDK call → provider stream (covers Anthropic/OpenAI/Gemini/OpenRouter stacks); F7 `/api/rnpm/load-more` now declares explicit 4KB `bodyLimit` (was relying on implicit small route cap); F10 structured logger redacts `Authorization`, `X-2Captcha-Api-Key`, `X-CapSolver-Api-Key`, `X-OpenRouter-Api-Key` headers in audit + access logs (zero-leak even on debug-level dumps). **PR3 — Frontend hardening:** F5 XLSX import path now caps row-count at 10k and column count at 64 before parse-time materialization (previously caps applied only at write-time); F11 `aiSanitize.ts` DOMPurify config now strict-mode (FORBID_TAGS `script|style|iframe|object|embed|form`, FORBID_ATTR `on*|formaction|srcdoc|xlink:href`); F12 null-safe selectors on `frontend/src/pages/Monitorizare.tsx` and `Alerte.tsx` (no more `data!.field` non-null assertions); F14 explicit `focus-trap` on modals (RNPM bulk export, AI multi-agent picker, alert dismiss confirm) so keyboard navigation cannot escape into the background page mid-flow. **PR4 — Web pre-cutover:** F2 `ownerId` is now a **required** parameter on the repository surface (`SaveSearchInput`, `GetSearchesOptions`, `UpsertAvizInput`, `GetAvizeOptions`, `ExecuteSearchInput`, `SplitSearchInput`) — desktop adapter resolves it to `"local"` via `getOwnerId(c)` middleware, web mode throws if missing instead of silently falling back to `"local"` (closes cross-tenant data spill window for the upcoming web cutover); F15 `/health` split into **public minimal** (`{ status, service }` only) + new `/health/detail` loopback-gated route via `getConnInfo` (allow-list `127.0.0.1`, `::1`, `::ffff:127.0.0.1`) that exposes `authMode`, `monitoring`, `emailConfigured`, `loginAvailable` — closes info-leak vector where an unauthenticated public probe disclosed operational telemetry useful for reconnaissance. **PR5 — Docs/ops:** F8 migration writer now requires a paired `down.sql` (CI gate fails the PR if missing); F9 Dockerfile multi-stage base images re-pinned to current digests `sha256:f44b8e8...` (rotated from v2.22.0 pins); F13 CORS policy explicit list (`Origin` echo only for `app.localhost`, `localhost:5173`, file://, `LEGAL_DASHBOARD_ALLOW_REMOTE=1` LAN bind subnet) — no wildcards; F16 `check-worktree.cjs` enforces clean tree before `npm run dist`/`dist:server`/`dist:mac` so accidental local debug code cannot ship in signed artifacts. **Test coverage:** +1 new test on `index.test.ts` (`/health` public response strips operational telemetry) + 4 modified tests on `index.test.ts` (3 `/health` → `/health/detail` migration + 1 unchanged); 18+ test callsites updated in `rnpmSearchService.split.test.ts` / `rnpm.contract.test.ts` / `rnpmSearchService.test.ts` to pass explicit `ownerId` (web pre-cutover compatibility). |
+| Renderer RCE | `nodeIntegration: false`, `contextIsolation: true`, `sandbox: true`, `webSecurity: true`, dedicated preload exposing a minimal API |
+| Script injection | CSP set in `onHeadersReceived`, `script-src` limited to `'self'` |
+| Navigation hijack | `will-navigate` refuses anything that is not the local backend origin |
+| Popup phishing | `setWindowOpenHandler` denies all popups; only an explicit allowlist of government hosts opens externally, HTTPS only |
+| Parallel-writer DB corruption | `app.requestSingleInstanceLock()` — one process per data directory; a second launch focuses the existing window |
+| DevTools exposure | Disabled in production builds |
+
+The external-host allowlist covers the official court, High Court and registry domains. Anything else is refused rather than opened.
+
+### Credential handling
+
+**Desktop.** Keys exist in the renderer only transiently. At rest they round-trip through IPC to `safeStorage` — DPAPI on Windows, Keychain on macOS, libsecret on Linux — and only base64 ciphertext reaches disk. Plaintext is never written. The IPC bridge exposes three channels (`available`, `encrypt`, `decrypt`) with input size caps, and grants no filesystem, shell, or arbitrary-IPC access. Legacy obfuscated key blobs are migrated to encrypted storage on first launch after upgrade and the legacy entry is removed.
+
+**Web.** Admin-configured AI and captcha keys are stored as AES-256-GCM ciphertext with separate IV and tag columns. The master key lives in the environment (`TENANT_KEY_ENCRYPTION_SECRET`) and is never stored in the database. API responses expose only configured/not-configured status and the last four characters. Audit entries never contain plaintext or ciphertext. Non-admin requests cannot supply their own keys in a request body.
+
+**Precedence.** If AI provider keys are present in the backend environment, they take precedence over anything submitted in a request. An operator running the backend as a service cannot have the server's keys overridden by a client.
+
+The browser-only fallback path (no Electron bridge available) uses reversible obfuscation. This is **explicitly not a security control** — it exists so that a casual `localStorage` snapshot does not expose keys in cleartext, and nothing more.
+
+### Backend hardening
+
+- **Bind address.** Loopback only by default; `HOST` is validated against `{127.0.0.1, localhost, ::1}`. Non-loopback binding requires `LEGAL_DASHBOARD_ALLOW_REMOTE=1`, which in turn requires web auth mode and a valid JWT secret. Desktop mode on a LAN is refused at boot.
+- **Rate limiting** is keyed on the real socket address, so `X-Forwarded-For` spoofing cannot bypass the limiter. Loopback receives a higher ceiling because all such traffic is the same user.
+- **Pre-auth bucket.** `/api/*` has an IP-only limiter ahead of owner resolution, so floods carrying missing or invalid tokens cannot exhaust HMAC verification and user lookups. A successful authentication releases the pre-auth bucket; the request is then governed by the per-owner limiter.
+- **CSP on every response** via Hono `secureHeaders`: `default-src 'self'`, `object-src 'none'`, `frame-ancestors 'none'`, `base-uri 'self'`, `form-action 'self'`.
+- **Session handling (web).** Logout revokes the session server-side rather than only clearing the client. The session cookie is `HttpOnly`, `Secure` in web mode, and hardened against cross-site use. The logout confirmation page states explicitly that the upstream Google session remains active in the browser — relevant on shared machines.
+- **Fan-out cap.** A hard limit of 500 upstream SOAP calls per request prevents one client call, buggy or malicious, from amplifying into thousands.
+- **Body-size limits** apply before JSON parsing on mutation routes, so oversized payloads are rejected before large objects are allocated.
+- **Email isolation.** SMTP credentials are read only from server-side environment variables. Per-owner email delivery defaults to off. HTML alert bodies escape their payloads. SMTP failures are logged without blocking alert insertion, in-app delivery, or the alerts inbox.
+- **`/health`** is mounted before authentication and stays public and non-sensitive: no personal data, no database statistics. Readiness probes work without a token.
+
+### Multi-tenant isolation (web mode)
+
+- **Physical data separation.** Each account gets its own registry SQLite file, with a per-account storage cap that cannot be circumvented. The migration from a shared store was a one-time, crash-safe split with a verified pre-split backup.
+- **Cross-owner access returns 404, not 403**, so status codes do not disclose that another owner's records exist. The distinction is preserved only in the audit log, as explicit `*_denied` actions.
+- **Backup and restore** are self-service but scoped strictly to the caller's own data, with cooldowns, concurrency guards against simultaneous search and restore, and a verified pre-restore snapshot. Full-database backup is admin-only, with automatic retention across disjoint pools.
+- **Programmatic access** is read-only. Personal access tokens are scoped per module, support optional expiry and a daily cap, and are shown once — only a fingerprint is stored. Requests outside the granted scope are refused. Token management is admin-only.
+- **Audit log** records the real visitor address rather than the reverse proxy's. Entries created before this change do not carry an address and are not backfilled retroactively.
+- **AI spend** is governed by a shared quota pool with per-user grants, with per-user consumption reporting. Truncated model responses are detected and flagged rather than served as complete.
+
+### Background monitoring
+
+The scheduler refreshes case state from the official SOAP interface on a timer. It inherits the deployment's trust model and adds:
+
+- **Single-instance enforcement.** The scheduler runs inside the backend process in both deployment modes. Startup acquires the database-directory instance lock before the scheduler starts, so a second process cannot race it against the same database.
+- **Cooperative cancellation.** Every outbound request is wired to an abort signal chained to a per-request timeout and to the scheduler's shutdown signal. Quitting flushes in-flight runs instead of leaking sockets or holding WAL locks past process exit.
+- **Outcome atomicity.** Run finalisation and job-outcome updates share a single transaction, so the run row, next scheduled time and last status move together. A crash mid-tick cannot leave a job "succeeded but never advanced". Orphaned running rows from a previous process are recovered at boot.
+- **Database-level uniqueness.** A unique partial index on `monitoring_runs(job_id) WHERE status='running'` enforces one running run per job. Even a buggy scheduler reset cannot insert a duplicate — the database rejects it. This removes a class of finalisation race that was previously guarded only in code.
+- **Maintenance lock.** Backup and restore take a writer-exclusive lock; scheduler ticks take a read lock. Backups cannot observe a half-applied outcome, and no tick starts while a backup runs. The lock is writer-preference, so maintenance cannot be starved by a busy tick loop.
+- **Restore integrity.** `PRAGMA integrity_check` runs against a candidate file before it is promoted. Sidecar WAL/SHM unlink failures are surfaced rather than silently ignored, so a full disk does not pass as success.
+- **Graceful shutdown.** On `SIGTERM`/`SIGINT` the HTTP server drains in-flight requests with a 30-second timeout before the scheduler stops and the database closes.
+- **Source-error suppression.** A job failing five consecutive times against a degraded upstream is parked as `source_error` and stops scheduling until manual intervention. One outage cannot generate unbounded retries or flood the audit log.
+- **Kill switches**, no redeploy required: `MONITORING_ENABLED=0` unmounts routes and scheduler; `MONITORING_DISABLED_KINDS` excludes job kinds from scheduler claims without mutating rows; `ICCJ_ROUTES_DISABLED=1` returns 503 on the interactive High Court routes.
+- **Retention.** Run history is purged daily on a 90-day window. The purge timer stops with the scheduler.
+- **No new network surface.** The scheduler calls only the endpoints already used by foreground search, bound by the same external-host allowlist.
+
+The scheduler does not add authentication or encryption to its own outbound calls; those are inherited from the foreground path.
+
+### Data at rest and data exported
+
+- **Spreadsheet formula injection.** Any exported string cell beginning with `=`, `+`, `-`, `@`, tab or carriage return is prefixed with a single quote, so Excel and LibreOffice render it as text instead of evaluating it. Applied to every generated sheet.
+- **Markup sanitisation.** Markdown and HTML pass through DOMPurify with a four-tag allowlist (`strong`, `em`, `b`, `i`) and no permitted attributes — no URLs, no script vectors.
+- **Prompt-path bounding.** Court-decision text is truncated before entering the AI prompt path, limiting both token spend and prompt-injection surface.
+- **Secret redaction.** Captcha keys are stripped from all error output, including messages surfaced to the UI.
+
+---
+
+## Out of scope
+
+Stated explicitly so operators can make their own risk decisions:
+
+- **Unsigned Windows binaries.** Releases are not code-signed. Verify checksums if provenance matters to you.
+- **Desktop mode exposed on a network.** Refused at boot, and unsupported if forced.
+- **Operator-side infrastructure.** TLS termination, reverse-proxy configuration, host hardening and OS patching are the operator's responsibility. The reference deployment terminates TLS at a CDN edge and opens no inbound router ports, but that topology is a recommendation, not an enforced control.
+- **Compromise of a trusted machine or OS account.** Malware with the user's privileges can read anything the user can read, including keychain-decrypted keys.
+- **Upstream sources.** Availability, accuracy and integrity of the official court and registry systems are outside this project's control. Displayed records link back to the official source so they can be verified independently.
+- **Third-party captcha and AI providers.** Requests routed to them are governed by their own terms and security posture.
+
+---
+
+## Data protection note
+
+Case records contain personal data. Operators deploying this application are controllers under the GDPR and are responsible for their own lawful basis, retention policy and access control. The application provides the tooling — per-user separation, audit logging, storage caps, scoped read-only tokens, and self-service backup, restore, export and deletion of the user's own RNPM records — but the compliance obligation belongs to whoever runs it.
