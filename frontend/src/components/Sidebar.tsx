@@ -158,7 +158,9 @@ export function Sidebar({
   return (
     <aside
       className={cn(
-        "flex h-full flex-col border-r border-border bg-card transition-all duration-300",
+        // shrink-0: fara el, un tabel lat din <main> comprima bara laterala sub
+        // w-60 (iconite si etichete inghesuite) inainte sa se vada overflow-ul.
+        "flex h-full shrink-0 flex-col border-r border-border bg-card transition-all duration-300",
         collapsed ? "w-16" : "w-60"
       )}
     >
