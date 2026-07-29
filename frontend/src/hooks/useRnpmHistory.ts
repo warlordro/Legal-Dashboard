@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useLayoutEffect, useRef } from "react";
 import type { RnpmSearchHistoryEntry, RnpmSearchParams, RnpmSearchType } from "@/types/rnpm";
 import { useCurrentUser } from "./useCurrentUser";
 import { clearList, migrateLegacyList, readList, scopedKey, writeList } from "./_localStorageList";
@@ -22,21 +22,27 @@ export function useRnpmHistory() {
   const { user } = useCurrentUser();
   const ownerId = user?.id ?? null;
   const [history, setHistory] = useState<RnpmSearchHistoryEntry[]>([]);
+  // Partitia din care s-a incarcat starea curenta; `null` = inca nimic incarcat.
+  const loadedOwnerRef = useRef<string | null>(null);
 
-  // Vezi useSearchHistory: istoricul e partitionat pe utilizator, iar cheia veche
-  // (nescopata) se sterge la prima incarcare, ca sa nu ajunga la alt cont.
-  useEffect(() => {
+  // Vezi useSearchHistory: istoricul e partitionat pe utilizator, cheia veche
+  // (nescopata) se sterge la prima incarcare, iar efectul e de layout ca la
+  // schimbarea de identitate sa nu existe niciun cadru cu datele contului vechi.
+  useLayoutEffect(() => {
     if (ownerId === null) {
+      loadedOwnerRef.current = null;
       setHistory([]);
       return;
     }
     migrateLegacyList(RNPM_HISTORY_KEY, ownerId);
+    loadedOwnerRef.current = ownerId;
     setHistory(readList<RnpmSearchHistoryEntry>(scopedKey(RNPM_HISTORY_KEY, ownerId)));
   }, [ownerId]);
 
   const saveHistory = useCallback(
     (entries: RnpmSearchHistoryEntry[]) => {
-      if (ownerId === null) return;
+      // Se scrie DOAR in partitia din care s-a si citit (vezi useSearchHistory).
+      if (ownerId === null || loadedOwnerRef.current !== ownerId) return;
       writeList(scopedKey(RNPM_HISTORY_KEY, ownerId), entries);
     },
     [ownerId]

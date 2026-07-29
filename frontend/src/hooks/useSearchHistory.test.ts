@@ -144,6 +144,31 @@ describe("useSearchHistory — partitionare pe utilizator", () => {
     expect(localStorage.getItem(`${PORTALJUST_HISTORY_KEY}::user-a`)).toContain("POPESCU ION");
   });
 
+  it("dupa schimbarea de identitate, prima scriere nu duce datele vechi in partitia noua", () => {
+    // Scenariul real: sesiunea se re-minteaza pe alt cont in acelasi tab, fara
+    // remontare. Intre randare si incarcarea partitiei noi nu are voie sa existe
+    // o fereastra in care intrarile lui A ajung scrise la B.
+    currentUser = { id: "user-a" };
+    const hook = renderHook();
+    act(() => {
+      hook.current?.addEntry("dosare", PARAMS, 3);
+    });
+    expect(hook.current?.history).toHaveLength(1);
+
+    currentUser = { id: "user-b" };
+    rerender(hook);
+    expect(hook.current?.history).toEqual([]);
+
+    act(() => {
+      hook.current?.addEntry("termene", { numarDosar: "1234/3/2026" }, 1);
+    });
+    const partitiaB = localStorage.getItem(`${PORTALJUST_HISTORY_KEY}::user-b`) ?? "";
+    expect(partitiaB).toContain("1234/3/2026");
+    expect(partitiaB).not.toContain("POPESCU ION");
+    // Partitia lui A ramane exact cum a lasat-o.
+    expect(localStorage.getItem(`${PORTALJUST_HISTORY_KEY}::user-a`)).toContain("POPESCU ION");
+  });
+
   it("clearHistory goleste doar partitia utilizatorului curent", () => {
     localStorage.setItem(`${PORTALJUST_HISTORY_KEY}::user-b`, JSON.stringify([{ id: "b" }]));
     currentUser = { id: "user-a" };
