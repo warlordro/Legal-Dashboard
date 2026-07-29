@@ -6,9 +6,21 @@
 // dar cu signatura diferita (combina date+time fragments) — nu-l atingem aici
 // ca sa nu introducem noise non-task in stage; cleanup-ul lui e separat.
 
+// Timestamp-urile scrise de SQLite (`datetime('now')` — audit_log.ts,
+// monitoring_*.created_at si celelalte ~19 coloane de timp) sunt UTC in formatul
+// "YYYY-MM-DD HH:MM:SS", FARA marcaj de zona. `new Date(...)` pe un astfel de
+// string il interpreteaza ca ora LOCALA, deci auditul afisa ora UTC ca si cum ar
+// fi fost locala: vara, cu 3 ore in urma pentru Romania. Marcam explicit zona ca
+// UTC inainte de parsare; sirurile care au deja Z sau offset trec neatinse.
+const NAIVE_SQLITE_TS = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
+
+export function parseBackendTimestamp(value: string): Date {
+  return new Date(NAIVE_SQLITE_TS.test(value) ? `${value.replace(" ", "T")}Z` : value);
+}
+
 export function formatIsoDateTime(iso: string | null | undefined, opts?: { seconds?: boolean }): string {
   if (!iso) return "-";
-  const d = new Date(iso);
+  const d = parseBackendTimestamp(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("ro-RO", {
     day: "2-digit",

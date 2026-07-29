@@ -251,6 +251,22 @@ function clampAuditOffset(offset: number | undefined): number {
   return n < 0 ? 0 : n;
 }
 
+// Coloana `ts` e scrisa de `datetime('now')`, deci "YYYY-MM-DD HH:MM:SS" in UTC.
+// UI-ul trimite insa instantul in ISO-8601 ("2026-07-29T21:00:00.000Z"), iar
+// SQLite compara TEXT lexicografic: 'T' (0x54) > ' ' (0x20), deci un filtru ISO
+// taia fereastra in alt loc decat cere adminul (toate randurile din ziua limita
+// se sorteaza inaintea sirului ISO). Normalizam la formatul coloanei. Valorile
+// deja in format de coloana trec neatinse — apelantii interni le folosesc si un
+// `new Date(...)` pe un sir naiv le-ar deplasa cu offsetul local al serverului.
+const COLUMN_TS = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
+
+function toColumnTimestamp(value: string): string {
+  if (COLUMN_TS.test(value)) return value;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return parsed.toISOString().slice(0, 19).replace("T", " ");
+}
+
 function buildAuditWhere(opts: ListAuditEventsOpts): {
   sql: string;
   params: (string | number | null)[];
@@ -297,12 +313,12 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
     // convention (PR-7 hardening) so admins comparing audit events to AI
     // usage windows see consistent intervals.
     where.push("ts >= ?");
-    params.push(opts.since);
+    params.push(toColumnTimestamp(opts.since));
   }
   if (opts.until) {
     // Open upper bound (ts < until) so successive windows tile without overlap.
     where.push("ts < ?");
-    params.push(opts.until);
+    params.push(toColumnTimestamp(opts.until));
   }
   if (opts.requestId) {
     where.push("request_id = ?");
