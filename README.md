@@ -1,158 +1,217 @@
-﻿# Legal Dashboard
+# Legal Dashboard
 
-**English version: [README.en.md](README.en.md)**
+**Search, monitoring and AI analysis for Romanian court records and movable-property security interests.**
 
-Desktop app (Electron) cu arhitectura web-ready pentru cautarea rapida a
-dosarelor in portalul instantelor, interogarea Registrului National de
-Publicitate Mobiliara (RNPM) si monitorizarea automata a dosarelor prin
-PortalJust SOAP. Include un modul de analiza AI multi-agent (Claude, OpenAI,
-Gemini) cu stocarea cheilor in keystore-ul sistemului de operare prin Electron
-`safeStorage` pe desktop si chei tenant criptate server-side in web mode.
+`v2.43.4` · MIT licensed · Node.js ≥ 22 · Windows, macOS, Docker, bare-metal
+56 releases · 2,602 tests (2,171 backend / 431 frontend, Vitest)
 
-Versiune curenta: **v2.43.4**. Vezi [CHANGELOG.md](CHANGELOG.md) pentru istoric,
-[SECURITY.md](SECURITY.md) pentru threat model si [RUNBOOK.md](RUNBOOK.md) pentru procedurile operationale (rollback, restore, forensics). Pentru deploy productie cu Google OAuth2, vezi [DEPLOY-SERVER.md](DEPLOY-SERVER.md).
+*Romanian documentation: [README.ro.md](README.ro.md) · [CHANGELOG.md](CHANGELOG.md) · [SECURITY.md](SECURITY.md) · [RUNBOOK.md](RUNBOOK.md)*
 
-Ultimul release **v2.43.4** - delogare in modul web (buton in sidebar, pagina de confirmare `/delogat`, cu avertisment ca sesiunea Google ramane activa) si auditul care inregistreaza adresa reala a vizitatorului in loc de adresa proxy-ului, plus deploy pe NAS documentat (`DEPLOY-NAS.md`) cu doua bug-uri de imagine reparate. Predecesor **v2.43.3** - securitate + calibrare AI: acces API (tokenuri) doar pentru admin, cheia captcha redactata din orice mesaj de eroare, limita de stocare RNPM neocolibila, effort si plafoane de tokeni calibrate pentru Claude 5 (cu raportarea costului real OpenRouter reparata si validata live), detectia analizelor trunchiate pe toate modelele, plus stergere individuala de backup in Setari > Backup. Predecesor **v2.43.2** - refresh de modele AI (nativ si OpenRouter): Gemini 3.5 Flash devine Gemini 3.6 Flash pe slotul "Echilibrat" (mai capabil si mai ieftin la iesire), Gemini 3.1 Flash Lite devine Gemini 3.5 Flash Lite pe slotul "Rapid" (generatie noua, ramane cel mai ieftin model din catalog), iar Claude Opus 4.8 devine Claude Opus 5 pe slotul "Premium" (aceeasi cheie interna si acelasi tarif per milion de tokeni, fara reconfigurare). Predecesor **v2.43.1** - rezultate partiale la cautarea de dosare (cand o instanta nu raspunde, aplicatia arata rezultatele de la instantele care au raspuns plus un banner cu cele lipsa) si un val de remedieri de securitate/corectitudine dublu-review-uite. Predecesor **v2.43.0** - Separare fizica a datelor RNPM per utilizator: fiecare cont primeste propriul fisier SQLite `rnpm/<stem>.db` (split one-time crash-safe la primul boot, cu backup pre-split verificat), backup si restaurare self-service strict pe datele proprii (cooldown, garduri de concurenta cautare/restore, snapshot pre-restore verificat), backup zilnic multi-target cu retentie pe pool-uri disjuncte si tab nou Setari > Backup (admin-only) pentru baza completa. Predecesor **v2.42.0** - administrare utilizatori completa in web mode: creare individuala si import xlsx, pagina Setari pe taburi, pool unic de cota AI cu granturi, tab Consum per utilizator, jurnal de audit cu export xlsx, Claude Sonnet 5.
+---
 
-Istoric complet al versiunilor anterioare in [CHANGELOG.md](CHANGELOG.md) si in-app changelog (pagina `/changelog`).
+## What this is
 
+Romania's judicial and collateral data is public by law and, in practice, close to unusable. It lives behind an undocumented SOAP interface and a captcha-gated registry. There is no API, no bulk access, no official client library, and — until this project — no maintained open-source client either.
 
-## Prerequisite
+Legal Dashboard is that client. It runs as a desktop application or as an authenticated multi-user web service **from the same codebase**, and it turns four separate manual lookups into queryable, exportable, monitorable data.
 
-- **Node.js >= 22** (backend foloseste `--experimental-strip-types`)
-- **Git**
-- Optional, doar pentru reCAPTCHA RNPM: cont 2Captcha sau CapSolver (cu credit)
-- Optional, doar pentru modulul AI: cheie API Anthropic / OpenAI / Google
+### The four data sources
 
-## Setup local (5 pasi)
+| Source | What it is | What the official interface gives you |
+|---|---|---|
+| **PortalJust** (`portal.just.ro`) | The Ministry of Justice case portal — every case before Romania's 246 courts | A SOAP endpoint with no published schema, one court per query form |
+| **ICCJ** (`scj.ro`) | The High Court of Cassation and Justice | A separate website; **not covered by PortalJust at all** |
+| **RNPM** | The National Registry of Movable Property Publicity — the register of security interests over movable assets | A captcha on every query, no history, no bulk lookup |
+| **AI providers** | Anthropic, OpenAI, Google | — |
+
+If you work in a common-law jurisdiction, RNPM is the rough equivalent of a UCC-1 filing registry: it tells you who has already taken security over a company's movable assets. It is the first thing a lender checks and the last thing anyone wants to check by hand, one captcha at a time, across a portfolio of two hundred companies.
+
+---
+
+## Deployment model
+
+This is software you run yourself, not a service you subscribe to. Each organisation deploys its own instance and keeps its own data — no third party sits between you and the source registries, and no case data leaves infrastructure you control.
+
+The reference deployment runs on a NAS behind a Cloudflare tunnel: traffic enters through Cloudflare (TLS, WAF, DDoS protection), passes the Google authentication layer, and only then reaches the application. No router ports are opened. A conventional server or Docker deployment works the same way — see `npm run dist:server` below.
+
+---
+
+## Features
+
+### Cases and hearings
+
+- Parallel search across **246 courts**, grouped by category (courts of appeal, tribunals, first-instance, military and specialised courts), by case number, subject matter, or party name
+- Sortable, paginated results with expandable rows: parties, procedural stage, subject matter, and the full hearing timeline with rulings and a direct link to the official record
+- Statistics panel where every card doubles as a filter; calendar view for hearing dates
+- **Partial results on failure** — when one court doesn't respond, you get the courts that did, plus a banner naming what's missing, instead of losing the whole query
+- Excel and PDF export, on selection or on the full result set
+
+### High Court (ICCJ)
+
+A dedicated module querying `scj.ro` directly, with the same search logic, tables and exports. The official portal does not cover the High Court, so without this the highest court in the country is a blind spot.
+
+### RNPM — movable-property security interests
+
+- All five statutory categories: movable mortgages, fiduciary transfers, specific notices, securitised receivables, mortgage bonds
+- Three working modes: single lookup, **bulk lookup of up to 200 identifiers** (company or personal registration numbers, or names) with item-by-item progress, and a **persistent local database** of everything you've ever queried
+- Local database is diacritics-insensitive, filterable by type, period and active status, with aggregate statistics (distribution by type, top creditors, top debtors, monthly trend)
+- Full detail per filing: creditors, debtors, assets, amendment history
+
+The practical difference from the official site: there, every query starts from zero and leaves no trace. Here, what you searched once stays yours — re-queryable, filterable and comparable over time.
+
+### Automated monitoring and alerts
+
+Track cases and party names and let the application check for you on a schedule. It detects new hearings, delivered rulings, new parties joining a case, and new cases filed against a monitored name. Alerts land in-app and optionally by email, either individually or as a daily digest at a fixed hour. Bulk-dismissable and exportable.
+
+This is the part that changes how the work is done: you stop checking, and start being told.
+
+### AI case analysis
+
+Structured analysis of any case — summary, parties, current posture, hearing history, likely next steps, legal basis, related matters. Nine models across three providers, grouped into fast / balanced / premium tiers.
+
+There is also a **multi-agent mode**: two models analyse the same case in parallel, and a third premium-tier model reviews both, reconciles contradictions, and corrects misreadings before anything reaches the user. Truncated analyses are detected and flagged rather than served as if complete. Output exports to PDF.
+
+---
+
+## Two run modes, one codebase
+
+| | Desktop | Web |
+|---|---|---|
+| Install | Installer per machine (Windows / macOS) | None — a link |
+| Access | Only the machine it's installed on | Any browser |
+| Users | Single, local | Team, with accounts and roles |
+| API keys | Each user supplies their own | Configured once by an admin, for everyone |
+| AI cost | Uncontrolled | Per-user budget and quota, with consumption reporting |
+| Updates | Reinstall | Automatic on next load |
+| Audit | Local | Centralised, exportable |
+
+**Web mode specifics:** Google OAuth with an email-domain allowlist; sessions established on load, refreshed in the background, self-recovering on expiry; explicit logout with a confirmation page that warns the Google session is still live in the browser. Each user sees only their own data — the RNPM store is **physically separated per account**, one SQLite file each, with its own storage cap. Admins get tabbed settings, per-user AI quotas and grants, per-user consumption, and an exportable audit log.
+
+**Programmatic access:** the application can issue read-only personal access tokens, scoped per module (cases, ICCJ, RNPM), with optional expiry and a daily cap. The token is shown once; only its fingerprint is stored. Any request outside the granted scope is refused. Token management is admin-only.
+
+---
+
+## Quick start
+
+**Prerequisites:** Node.js ≥ 22 (the backend uses `--experimental-strip-types`), Git. Optionally a 2Captcha or CapSolver account for RNPM, and an Anthropic / OpenAI / Google API key for the AI module.
 
 ```bash
-git clone <repo-url> legal-dashboard
+git clone https://github.com/warlordro/Legal-Dashboard.git legal-dashboard
 cd legal-dashboard
-npm install                  # instaleaza root + backend + frontend (workspaces)
-cp backend/.env.example backend/.env    # edit daca vrei API keys din .env
-npm run electron:dev         # porneste Electron (backend pe 3002, window)
+npm install                              # root + backend + frontend (workspaces)
+cp backend/.env.example backend/.env     # optional: API keys via env
+npm run electron:dev                     # backend on :3002, Electron window
 ```
 
-Primul boot creeaza DB-ul la `app.getPath("userData")/legal-dashboard.db`.
+First boot creates the database at `app.getPath("userData")/legal-dashboard.db`.
 
-## Comenzi utile
+> **Note on network environment:** the court portal is selective about which networks it answers. If case search times out on your host, try running from a different connection — the RNPM, ICCJ and AI modules are unaffected either way.
 
-| Comanda | Ce face |
+### Common commands
+
+| Command | What it does |
 |---|---|
-| `npm run electron:dev` | Porneste aplicatia desktop |
-| `npm run rebuild:electron` | Recompileaza `better-sqlite3` pentru ABI-ul Electron dupa teste Node / `npm rebuild` |
-| `npm run dev:backend` | Ruleaza backend-ul separat (Node + TS direct) pe 3002 |
-| `npm run dev:frontend` | Ruleaza Vite dev server pe 5173 (doar renderer) |
-| `npm run build` | Build productie (frontend + backend CJS bundle) |
-| `npm run dist` | Build + `electron-builder` pentru Windows NSIS |
-| `npm run dist:mac` | Build + `electron-builder` pentru macOS DMG (x64 + arm64; normal ruleaza pe runner macOS) |
-| `npm run dist:server` | Genereaza ZIP server deployabil pentru bare-metal / Docker context |
-| `npm test --workspace=backend` | Ruleaza vitest pe backend (900 teste in v2.22.0) |
-| `cd frontend && npm test -- --run` | Ruleaza vitest pe frontend (92 teste in v2.22.0) |
+| `npm run electron:dev` | Start the desktop app |
+| `npm run dev:backend` | Backend only (Node + TS direct) on :3002 |
+| `npm run dev:frontend` | Vite dev server on :5173 (renderer only) |
+| `npm run build` | Production build (frontend + backend CJS bundle) |
+| `npm run dist` | Windows NSIS installer |
+| `npm run dist:mac` | macOS DMG (x64 + arm64) |
+| `npm run dist:server` | Deployable server ZIP for bare-metal / Docker |
+| `npm test --workspace=backend` | Backend test suite (Vitest) |
+| `cd frontend && npm test -- --run` | Frontend test suite |
 | `npx tsc --noEmit -p backend/tsconfig.json` | Type-check backend |
-| `cd frontend && npx tsc --noEmit` | Type-check frontend |
-| `npx biome check` | Lint + format check (warnings non-bloquant) |
+| `npx biome check` | Lint + format check |
+| `npm run rebuild:electron` | Rebuild `better-sqlite3` for the Electron ABI after running Node tests |
 
-## Monitoring
+> **If a large number of backend tests fail at once**, it is almost certainly not your code: `better-sqlite3` is a native module and gets compiled against one Node ABI at a time. Run `npm rebuild better-sqlite3` before the test suite, and `npm run rebuild:electron` before launching the desktop app again.
 
-Feature-ul de monitorizare este pornit implicit pe desktop incepand din v2.2.0.
-Scheduler-ul ruleaza joburi `dosar_soap` si `name_soap`, salveaza snapshot-uri,
-detecteaza diferente intre sedinte/solutii/subiecti monitorizati si scrie audit
-log pentru mutatiile relevante. v2.4.0 adauga bulk import pentru nume si runner
-`name_soap`; v2.3.0 a adaugat finalize state-guarded + index unic
-`idx_one_running_per_job` la nivel de DB, deci un singur run `running` simultan
-per job - recovery-ul de crash nu mai poate produce duplicate.
+---
 
-Kill switch-uri operationale:
+## Architecture
 
-- `MONITORING_ENABLED=0` opreste mount-ul rutelor si scheduler-ul.
-- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap,iccj` exclude tipurile listate din
-  claim-ul scheduler-ului fara modificari in DB.
-- `ICCJ_ROUTES_DISABLED=1` opreste rutele interactive ICCJ (`/api/dosare-iccj`,
-  `/api/termene-iccj`) cu raspuns 503, fara redeploy.
+```
+electron/main.js              main process: single-instance lock, CSP, safeStorage IPC, backend bundle
+electron/preload.js           context bridge (safeStorage only)
+backend/src/index.ts          Hono server on :3002 — AI routes, PortalJust SOAP, RNPM
+backend/src/routes/           API v1: monitoring jobs, manual runs, RNPM search/bulk/export
+backend/src/services/         scheduler, diffing, SOAP runners, clock/test seams
+backend/src/db/               SQLite (better-sqlite3), versioned migrations, owner-scoped
+                              repositories, audit and monitoring tables
+frontend/src/                 React 18 SPA (Vite), REST + SSE to the backend
+```
 
-Tipul `aviz_rnpm` ramane rezervat pentru o etapa viitoare; `name_soap` este activ in v2.4.0+.
+**Monitoring internals.** The scheduler runs `dosar_soap` and `name_soap` jobs, stores snapshots, diffs hearings / rulings / parties, and writes an audit trail. A unique index (`idx_one_running_per_job`) plus state-guarded finalisation guarantees one running job at a time — crash recovery cannot produce duplicates.
 
-## Server / Docker deploy
+**Operational kill switches**, no redeploy required:
 
-`npm run dist:server` genereaza `server-release/legal-dashboard-server-<version>.zip`.
-ZIP-ul include `package-lock.json` + manifestele workspace si scripturile
-`start.sh` / `start.bat` instaleaza runtime deps cu `npm ci` la prima pornire
-daca lipseste `node_modules/better-sqlite3`. Motiv: `better-sqlite3` este modul
-nativ si trebuie compilat pe platforma tinta.
+- `MONITORING_ENABLED=0` — unmounts monitoring routes and the scheduler
+- `MONITORING_DISABLED_KINDS=dosar_soap,name_soap,iccj` — excludes job kinds from scheduler claims, no DB changes
+- `ICCJ_ROUTES_DISABLED=1` — interactive ICCJ routes return 503
 
-Docker foloseste acelasi lockfile prin `npm ci --workspace=backend --omit=dev`
-si are `start-period=120s` pe healthcheck pentru boot-uri lente cu prewarm /
-migrari DB.
+**Auth modes.** `desktop` (default) is a single local identity with no token validation, used when the backend runs in-process under Electron. `web` validates JWTs on `Authorization: Bearer` or the `legal_dashboard_session` cookie, and requires `LEGAL_DASHBOARD_JWT_SECRET` (32+ bytes), issuer and audience — boot fails fatally if they're missing. Non-loopback binding requires explicit opt-in via `LEGAL_DASHBOARD_ALLOW_REMOTE=1`, which in turn requires web mode and a valid JWT.
 
-## Configurare
+`/health` stays public and non-sensitive in all modes. Full environment reference in `backend/.env.example`.
 
-Toate variabilele de environment sunt in [backend/.env.example](backend/.env.example).
-Cheile API pentru AI pot fi setate fie in `.env` (precedence), fie din UI
-(salvate local prin safeStorage). Vezi `SECURITY.md` pentru detalii.
-Cheile 2Captcha / CapSolver raman in UI + safeStorage pe desktop; in planul
-web/server (PR-9) vor fi mutate server-side in `.env`/config si nu vor fi BYOK
-sau trimise din browser.
+---
 
-Notificarile email sunt optionale. Pentru a activa canalul SMTP, completeaza
-`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` si optional
-`SMTP_SECURE` in `backend/.env`, apoi activeaza destinatarul din dialogul de
-configurare al aplicatiei. Fara aceste variabile, aplicatia porneste normal si
-email-ul ramane dezactivat. In web mode, adresa de login este precompletata ca
-destinatar propus; pe desktop (`local@desktop`) campul ramane manual.
+## Security
 
-Port backend default: `3002`. Suprascrie cu `LEGAL_DASHBOARD_PORT`.
-LAN exposure blocat by default; opt-in explicit cu `LEGAL_DASHBOARD_ALLOW_REMOTE=1`.
+See **[SECURITY.md](SECURITY.md)** for the full threat model, and **[RUNBOOK.md](RUNBOOK.md)** for rollback, restore and forensics procedures.
 
-## Auth modes (PR-9)
+Summary of the posture:
 
-Aplicatia suporta doua moduri de autentificare:
+- API keys are stored in the OS keychain via Electron `safeStorage` on desktop, and as server-side encrypted per-tenant keys in web mode. In web mode users never see or supply keys.
+- Per-user physical data separation for RNPM (one SQLite file per account), with a one-time crash-safe split and a verified pre-split backup.
+- Self-service backup and restore scoped strictly to the user's own data, with concurrency guards and a verified pre-restore snapshot. Full-database backup is admin-only, with automatic retention across disjoint pools.
+- LAN exposure is blocked by default. Session revocation is enforced server-side on logout. The session cookie is hardened against cross-site use. Captcha keys are redacted from all error output. The audit log records the real visitor address, not the proxy's.
+- Every recent release goes through a written plan, adversarial review before and after implementation, and verification against a live instance. Automated checks (types, tests, build) block publication.
 
-- **desktop** (default): single-user `local` identity, no token validation.
-  Folosit cand backend-ul ruleaza in-process via Electron.
-- **web**: JWT validation pe `Authorization: Bearer <token>` sau cookie
-  `legal_dashboard_session`. Cere `LEGAL_DASHBOARD_JWT_SECRET` (32+ bytes).
+Out of scope, stated explicitly: unsigned Windows binaries, LAN mode without authentication. Details in SECURITY.md.
 
-### Env vars
+---
 
-- `LEGAL_DASHBOARD_AUTH_MODE` - `desktop` | `web` (default `desktop`)
-- `LEGAL_DASHBOARD_JWT_SECRET` - required pentru web mode
-- `LEGAL_DASHBOARD_JWT_ISSUER` - required in web mode (boot-ul esueaza fatal daca lipseste)
-- `LEGAL_DASHBOARD_JWT_AUDIENCE` - required in web mode (boot-ul esueaza fatal daca lipseste)
-- `LEGAL_DASHBOARD_JWT_TTL_SECONDS` - optional, default `3600`
-- `LEGAL_DASHBOARD_ALLOW_REMOTE=1` - opt-in pentru bind non-loopback; cere
-  `LEGAL_DASHBOARD_AUTH_MODE=web` + JWT valid, altfel boot-ul esueaza
+## Legal and ethical notes
 
-### Setup user pentru web mode
+Worth being explicit about, since this project automates access to state systems.
 
-JWT `sub` trebuie sa mapeze la o coloana activa `users.id`. Pre-seedati userii
-manual pana la PR-10/PR-11 (server-side sessions + Google SSO). `/api/v1/auth/login`
-returneaza 501 in acest sprint - login-ul real vine in PR-11.
+**All data reached by this application is public by law.** Court records are public under Romanian procedural law; RNPM is a public register whose entire purpose is to give notice to third parties. Nothing here circumvents an access-control decision about *who* may see the data — only the friction in *how* it is served.
 
-### `/health`
+**RNPM captcha.** The registry gates legally-public data behind a captcha, with no API and no bulk access. The application solves it so that portfolio-scale due diligence is possible at all. Requests are rate-limited and quota-capped per user, and the application queries only what that user would otherwise type in by hand. It does not crawl, enumerate, or mirror the registry.
 
-`/health` ramane public si non-sensitive in toate modurile.
+**No scraping of the court portal.** Case data comes from the Ministry of Justice's own SOAP interface, which is the intended machine-readable channel.
 
-## Arhitectura (scurt)
+**Personal data.** Case records contain personal data. Deployers are controllers under GDPR and are responsible for their own lawful basis, retention, and access control. The application provides the tooling — per-user separation, audit logging, storage caps, scoped tokens — but the compliance obligation sits with whoever runs it.
 
-- `electron/main.js` - main process: single-instance lock, CSP, safeStorage IPC,
-  backend bundle load
-- `electron/preload.js` - context bridge (doar safeStorage)
-- `backend/src/index.ts` - Hono server (port 3002), bootstrap scheduler, rute AI,
-  SOAP PortalJust, RNPM
-- `backend/src/routes/monitoring.ts` - API v1 pentru joburi de monitorizare,
-  manual run si body-size limits dedicate
-- `backend/src/services/monitoring/**` - scheduler, diff, runner `dosar_soap`,
-  clock/test seams
-- `backend/src/routes/rnpm.ts` - search + bulk + baza locala + export
-- `backend/src/db/**` - SQLite (better-sqlite3), migrari versionate,
-  repositories cu `owner_id`, audit si monitoring tables
-- `frontend/src/**` - React 18 SPA (Vite), comunica cu backend prin REST/SSE
-- `dist-backend/`, `dist-frontend/` - output de build
+---
 
-## Securitate
+## Project status
 
-Vezi [SECURITY.md](SECURITY.md) pentru threat model complet, protectii
-desktop/backend si scope out-of-scope (cod fara semnatura Windows, LAN mode
-fara auth, etc.).
+Functional: cases, hearings, ICCJ, RNPM, monitoring with email alerts, AI analysis, user administration, programmatic API. The web deployment is live and verified against a real instance with Google authentication.
+
+Remaining work is operational rather than product-level: exposing the programmatic API on the public deployment (it works locally, the route isn't live yet), packaging the application as an MCP server for AI assistants, and OAuth for external integrations.
+
+The desktop application remains fully supported, with Windows and macOS installers, for local-only workflows.
+
+---
+
+## Contributing
+
+This has been a single-maintainer project. I'd genuinely welcome that changing.
+
+Useful to know before you start: I'm a financial-risk and AML professional rather than a trained software engineer, and much of this codebase was written with AI assistance and then hardened by review and tests. If you find something that looks confidently wrong, it probably is — an issue explaining why is more valuable to me than a polite silence.
+
+Areas where help would matter most:
+
+- Extracting the PortalJust SOAP and RNPM integration layers into standalone, publishable libraries — they're the parts other people would actually want
+- Test coverage on the frontend, which trails the backend considerably (431 tests against 2,171)
+- Accessibility, which has had no serious attention
+- Anything in the Romanian-only documentation that should be in English
+
+Open an issue before a large PR so we don't duplicate work. `main` is protected; changes go through pull requests with CI (type-check, tests, build) passing.
+
+---
+
+## License
+
+MIT — see [LICENSE](LICENSE).
