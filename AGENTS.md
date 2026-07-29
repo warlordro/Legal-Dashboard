@@ -14,12 +14,20 @@ Keep it lightweight. Choose only the roles needed, explain the active roles
 briefly when useful, then execute normally. Do not add ceremony to simple
 one-step tasks.
 
-## Project State Source
+## Project Context
 
-Read `CLAUDE.md` before starting a new development PR. It carries the fuller
-current sprint context, accepted risks, web-readiness bridge, build notes, and
-runtime traps. Then read `SESSION-HANDOFF.md` for the immediate next-session
-handoff. Closed plans and handoffs live in `docs/archive/`.
+If `CLAUDE.md` exists locally, read it first. It is the central project-scoped
+working context for local Claude/Codex sessions, intentionally ignored by Git,
+and may be absent from public clones.
+
+Use the current source tree plus `README.md`, `CHANGELOG.md`, `SECURITY.md`,
+`DOCUMENTATIE.md`, and `RUNBOOK.md` as the public sources of truth.
+
+If `internal-history/INDEX.md` exists locally, read it when historical plans,
+handoffs, audits, or past implementation decisions are relevant. That folder
+is intentionally ignored by Git and may be absent from public clones. When
+historical notes conflict with current source or public documentation, the
+current source wins.
 
 ## Scope Discipline
 
@@ -35,6 +43,19 @@ approval before changing those files.
 
 Do not remove or replace existing working behavior unless the current agreed
 plan explicitly says to do so.
+
+## Validation Before Push
+
+Run Biome on changed supported files, backend and frontend type-checks, the
+production build, and tests proportionate to the changed logic.
+Documentation-only changes do not require application test suites, but the
+type-checks and build still run before push.
+
+## Local History Maintenance
+
+Keep new internal plans, handoffs, and review workpapers under
+`internal-history/` and update `internal-history/INDEX.md` when the historical
+reading order changes. Never add that local archive to a public commit.
 
 ## Electron Smoke
 

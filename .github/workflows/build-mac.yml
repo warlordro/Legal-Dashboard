@@ -31,7 +31,7 @@ jobs:
 
       - name: Biome lint + format check
         # Gate permanent: orice eroare biome pica CI.
-        # CLAUDE.md cere npx biome check --write local obligatoriu inainte de orice push.
+        # Contributor workflow: ruleaza Biome local pe fisierele modificate inainte de push.
         run: npx biome check
 
       # Type-check + test gate runs BEFORE electron-builder so better-sqlite3

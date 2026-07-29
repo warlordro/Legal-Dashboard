@@ -8,8 +8,8 @@
 //   - payload_hash and payload_json round-trip exactly (no normalization)
 //
 // The runner consumes this repo: load latest → diff → insert new. The diff
-// engine itself is pure (services/monitoring/diff.ts); the repo is the only
-// place raw SQL touches the snapshots table per CLAUDE.md raw-SQL rule.
+// engine itself is pure (services/monitoring/diff.ts); repository code is the
+// only place where raw SQL touches the snapshots table.
 
 import Database from "better-sqlite3";
 import path from "node:path";

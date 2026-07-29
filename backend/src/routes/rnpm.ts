@@ -1440,8 +1440,8 @@ rnpmRouter.post("/saved/export.pdf", limitExport, async (c) => {
   return c.body(Readable.toWeb(fileStream) as unknown as ReadableStream);
 });
 
-// Cursor pagination is intentional here — deliberate deviation from the
-// CLAUDE.md "offset-based on listari principale" guideline. RNPM searches is
+// Cursor pagination is intentional here — a deliberate deviation from the
+// offset-based pagination used by the principal listings. RNPM searches is
 // a personal history log (monotonically growing IDs, "load more" UX, no
 // "page 5 of 12" indicator), where cursor wins on two counts:
 //   1. Inserts at the head don't shift offsets of older rows mid-scroll.

@@ -3,9 +3,8 @@
 //
 // Why exhaustive tests live here: the scheduler in C2 just wires this into
 // SOAP + DB; correctness of WHICH alerts fire WHEN is owned entirely by this
-// file. Future regressions (PJI shipped a sister project that double-fired
-// termen_new on cosmetic drift — see HARDENING.md L298-339) are caught at
-// commit time only if the fixture coverage here is real.
+// file. Future regressions (including termen_new firing on cosmetic drift) are
+// caught at commit time only if the fixture coverage here is real.
 
 import { describe, expect, it } from "vitest";
 import type { AlertConfig } from "../../../schemas/monitoring.ts";

@@ -8,9 +8,8 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-// __dirname, nu import.meta.url — conventia repo-ului (CLAUDE.md "Nota
-// Importanta Build": backend-ul e CJS; toate testele-frate de migratii
-// folosesc acelasi pattern).
+// __dirname, nu import.meta.url — backend-ul este bundled CJS, iar toate
+// testele-frate de migratii folosesc acelasi pattern.
 const dir = __dirname;
 
 describe("down migrations clean up _schema_versions", () => {

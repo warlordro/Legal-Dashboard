@@ -9,9 +9,8 @@
 //
 // Stadiu prefix is critical: a single dosar can have parallel sedinte in fond
 // + apel. Without stadiu, a key built only from data+ora+complet would collide
-// across stadii and the diff would erase one with the other (HARDENING.md
-// L298-339 absorption documented this; PJI's sister project shipped without
-// stadiu and produced false positives).
+// across stadii and the diff would erase one with the other, producing false
+// positives.
 //
 // PR-3 ships the util + tests; PR-4 wires it into the actual diff loop.
 

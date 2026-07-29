@@ -30,7 +30,7 @@ export interface AdminRnpmUsageRow {
 // masuratori de fisier (stat db/wal/shm) plus listarea directorului de backup-uri.
 // La cativa useri e in regula; la cateva sute devine o cerere lenta si nelimitata.
 // Paginare dupa modelul ListUsersQuerySchema din admin.ts — forma { rows, page,
-// pageSize, total } e conventia web-readiness din CLAUDE.md.
+// pageSize, total } este contractul listelor administrative.
 // Nota: forma veche (lista simpla) era DELIBERATA, pentru paritate cu
 // GET /api/v1/admin/backups; schimbarea e o imbunatatire de scalare, nu repararea
 // unei incalcari de conventie.

@@ -528,7 +528,7 @@ export async function withAiLogging<T>(
 // (e.g. multi-agent flow's shared controller, so a failing analyst cancels its
 // sibling instead of letting it run for the full multi-timeout). Falls back to
 // the timeout-only signal when no parent is supplied. Requires Node 20+ for
-// AbortSignal.any — backend runtime is Node 22+ (see CLAUDE.md).
+// AbortSignal.any; the backend runtime requirement is Node 22+.
 function composeSignal(timeout: number, parent?: AbortSignal): AbortSignal {
   const timeoutSignal = AbortSignal.timeout(timeout);
   if (!parent) return timeoutSignal;

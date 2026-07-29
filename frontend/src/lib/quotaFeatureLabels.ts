@@ -1,6 +1,6 @@
 // v2.41.0: sursa unica de etichete umane pentru feature-urile de cota.
-// Conventia cross-stack din CLAUDE.md: enum-urile backend nu se afiseaza raw
-// in DOM — orice token trece printr-un helper de traducere cu fallback.
+// Conventie cross-stack: enum-urile backend nu se afiseaza raw in DOM — orice
+// token trece printr-un helper de traducere cu fallback.
 // Importat de Cote + Granturi (si, din v2.42, de Consum) — nu duplica map-uri.
 
 // v2.42.0 (5.2): pool AI unic — enum-ul de cota devine ["ai", "captcha.rnpm"].

@@ -91,8 +91,8 @@ const TargetAvizRnpm = z
   })
   .strict();
 
-// Alert configuration per job — borrowed semantics from HARDENING.md L296-309
-// (notify_days_before, notify_on_*). Defaults applied via .default() so the
+// Alert configuration per job (notify_days_before, notify_on_*). Defaults
+// applied via .default() so the
 // stored JSON always has explicit values; reader-side decode is robust.
 export const AlertConfigSchema = z
   .object({

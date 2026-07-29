@@ -174,8 +174,8 @@ Configurarea minima recomandata, in ordinea impactului:
 
 Ce ramane in sarcina ta, indiferent de Cloudflare: secretele din `.env`,
 provizionarea utilizatorilor, backup-ul bazei si actualizarea imaginilor. Vezi
-[SECURITY.md](SECURITY.md) si [HARDENING.md](HARDENING.md) pentru controalele
-implementate in aplicatie.
+[SECURITY.md](SECURITY.md) pentru controalele implementate in aplicatie si
+[RUNBOOK.md](RUNBOOK.md) pentru operare, incidente si recuperare.
 
 ## 7. Intretinere
 
