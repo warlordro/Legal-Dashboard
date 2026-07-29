@@ -1,5 +1,7 @@
 ﻿# Legal Dashboard
 
+**English version: [README.en.md](README.en.md)**
+
 Desktop app (Electron) cu arhitectura web-ready pentru cautarea rapida a
 dosarelor in portalul instantelor, interogarea Registrului National de
 Publicitate Mobiliara (RNPM) si monitorizarea automata a dosarelor prin
