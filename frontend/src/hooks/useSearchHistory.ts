@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useLayoutEffect, useRef } from "react";
 import type { SearchHistoryEntry, SearchParams } from "@/types";
 import { useCurrentUser } from "./useCurrentUser";
 import { clearList, migrateLegacyList, readList, scopedKey, writeList } from "./_localStorageList";
@@ -21,22 +21,36 @@ export function useSearchHistory() {
   const { user } = useCurrentUser();
   const ownerId = user?.id ?? null;
   const [history, setHistory] = useState<SearchHistoryEntry[]>([]);
+  // Partitia din care s-a incarcat starea curenta; `null` = inca nimic incarcat.
+  const loadedOwnerRef = useRef<string | null>(null);
 
   // Istoricul se incarca abia dupa ce stim cine e utilizatorul. Pana atunci
   // ramane in memorie si NU se scrie nimic: o scriere "orfana" ar ateriza in
   // partitia gresita la urmatorul login.
-  useEffect(() => {
+  //
+  // useLayoutEffect, nu useEffect: la schimbarea de identitate (sesiune
+  // re-mintata pe alt cont in acelasi tab) un efect pasiv ruleaza DUPA paint,
+  // deci ar exista un cadru in care UI-ul arata inca istoricul contului vechi si
+  // in care o scriere ar duce intrarile lui in partitia noua. Efectul de layout
+  // ruleaza in acelasi commit, inainte ca browserul sa picteze si inainte ca
+  // vreun callback sa poata rula.
+  useLayoutEffect(() => {
     if (ownerId === null) {
+      loadedOwnerRef.current = null;
       setHistory([]);
       return;
     }
     migrateLegacyList(PORTALJUST_HISTORY_KEY, ownerId);
+    loadedOwnerRef.current = ownerId;
     setHistory(readList<SearchHistoryEntry>(scopedKey(PORTALJUST_HISTORY_KEY, ownerId)));
   }, [ownerId]);
 
   const saveHistory = useCallback(
     (entries: SearchHistoryEntry[]) => {
-      if (ownerId === null) return;
+      // A doua incuietoare, explicita: se scrie DOAR in partitia din care s-a si
+      // citit. Fara ea, invariantul "nu amesteci conturi" ar depinde tacit de
+      // momentul in care ruleaza efectul.
+      if (ownerId === null || loadedOwnerRef.current !== ownerId) return;
       writeList(scopedKey(PORTALJUST_HISTORY_KEY, ownerId), entries);
     },
     [ownerId]
