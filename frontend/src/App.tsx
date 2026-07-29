@@ -173,7 +173,13 @@ function AppShell({
           unreadAlerts={unreadAlerts}
         />
       </PageBoundary>
-      <main ref={mainRef} className="flex-1 overflow-y-auto scrollbar-thin relative">
+      {/* min-w-0: un flex item are min-width:auto, deci se lateste pana la
+          min-content-ul continutului. Un tabel lat (audit, RNPM cu randul de
+          detalii expandat) impingea <main> peste viewport, iar `overflow-hidden`
+          de pe containerul de sus taia partea dreapta — scrollerele interne
+          `overflow-x-auto` nu se activau niciodata pentru ca nu aveau o latime
+          constransa. Cu min-w-0 tabelele scroleaza in interiorul cardului. */}
+      <main ref={mainRef} className="min-w-0 flex-1 overflow-y-auto scrollbar-thin relative">
         {/* Dashboard only renders on "/" — no long-running ops */}
         {pathname === "/" && (
           <PageBoundary label="Dashboard">

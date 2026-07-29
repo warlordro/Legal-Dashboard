@@ -90,6 +90,7 @@ let logoutInProgress = false;
  */
 export async function beginLogout(): Promise<void> {
   logoutInProgress = true;
+  sessionExpiresAtMs = null;
   if (reSyncInFlight) {
     // Esecul sync-ului e irelevant aici: conteaza doar sa nu mai fie in zbor.
     await reSyncInFlight.catch(() => undefined);
@@ -99,6 +100,7 @@ export async function beginLogout(): Promise<void> {
 // Doar pentru teste: starea e per-modul si altfel ar contamina cazurile urmatoare.
 export function resetLogoutStateForTests(): void {
   logoutInProgress = false;
+  sessionExpiresAtMs = null;
 }
 
 export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
@@ -107,6 +109,15 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
     headers.set(DESKTOP_HEADER_NAME, DESKTOP_HEADER_VALUE);
   }
   const finalInit: RequestInit = { ...init, headers };
+  // Poarta de re-mint: cand un sync e deja in zbor (trezirea tabului, revenirea
+  // retelei), cererea asteapta cookie-ul proaspat in loc sa curga in paralel si
+  // sa ia 401. Fara ea, fiecare trezire cu cookie expirat producea o rafala de
+  // `auth.denied` in audit, chiar daca interceptorul de mai jos le recupera.
+  // Conditia e aceeasi ca la interceptor: NU pe endpointurile de auth, altfel
+  // POST-ul de sync ar astepta promisiunea care il asteapta pe el (deadlock).
+  if (reSyncInFlight && isWebRuntime() && !isAuthPath(input)) {
+    await reSyncInFlight.catch(() => undefined);
+  }
   const res = await fetch(input, finalInit);
 
   // Web-mode session recovery. A 401 means the session cookie expired (TTL ~1h)
@@ -114,7 +125,11 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
   // request a single time so the user is never blocked mid-session. Skip auth
   // endpoints (no recursion) and desktop (auth is local, never 401s).
   if (res.status === 401 && isWebRuntime() && !isAuthPath(input) && !logoutInProgress) {
-    const outcome = await ensureWebSession();
+    // force: cookie-ul poate lipsi din motive pe care nu le urmarim (alt tab a
+    // delogat, jti revocat, cookie sters manual). Verificarea de prospetime din
+    // ensureWebSession ar sari re-mint-ul si ar transforma un 401 auto-reparabil
+    // intr-o sesiune moarta — pe calea de recuperare re-mintul e obligatoriu.
+    const outcome = await ensureWebSession({ force: true });
     if (outcome === "ok") {
       // Retry via raw fetch so it cannot re-enter this interceptor. finalInit
       // (incl. body) must be replayable — every caller uses string URLs + string
@@ -126,6 +141,35 @@ export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Pr
 }
 
 export type SyncSessionResult = "ok" | "not_provisioned" | "unavailable" | "error";
+
+// Expirarea cookie-ului de sesiune, asa cum a raportat-o bridge-ul la ultimul
+// sync reusit (`expiresAt`, secunde epoch). Serveste unui singur scop: sa nu mai
+// re-mintim un cookie care mai are ore de trait. Inainte, keep-alive-ul cerea un
+// JWT nou la FIECARE revenire in tab, deci o zi normala de lucru umplea auditul
+// cu sute de randuri `auth.oauth2.sync`. `null` = necunoscut (bootstrap, sau
+// bridge care nu a raspuns cu expiresAt) -> tratat ca "nu e proaspat".
+let sessionExpiresAtMs: number | null = null;
+// Marja > intervalul de keep-alive (50 min la TTL de 1h), altfel tick-ul de
+// interval ar considera cookie-ul "proaspat" cu 10 minute ramase si l-ar lasa sa
+// expire intre doua tick-uri.
+const SESSION_FRESH_MARGIN_MS = 15 * 60 * 1000;
+
+function sessionLooksFresh(): boolean {
+  return sessionExpiresAtMs !== null && sessionExpiresAtMs - Date.now() > SESSION_FRESH_MARGIN_MS;
+}
+
+// Best-effort: raspunsul poate fi un mock de test fara .json(), sau un envelope
+// fara expiresAt. Orice eroare lasa expirarea necunoscuta, deci re-mint normal.
+async function rememberSessionExpiry(res: Response): Promise<void> {
+  try {
+    if (typeof res.json !== "function") return;
+    const body = (await res.clone().json()) as { data?: { expiresAt?: unknown } };
+    const expiresAt = body?.data?.expiresAt;
+    sessionExpiresAtMs = typeof expiresAt === "number" && Number.isFinite(expiresAt) ? expiresAt * 1000 : null;
+  } catch {
+    sessionExpiresAtMs = null;
+  }
+}
 
 // Web-mode session bridge. In auth_mode=web the cookie legal_dashboard_session
 // is minted ONLY by POST /api/v1/auth/oauth2/sync: oauth2-proxy injects
@@ -143,7 +187,10 @@ export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionR
     console.warn("[syncWebSession] bridge sync failed:", err);
     return "error";
   }
-  if (res.ok) return "ok";
+  if (res.ok) {
+    await rememberSessionExpiry(res);
+    return "ok";
+  }
   if (res.status === 403) return "not_provisioned"; // not_provisioned / forbidden / account_inactive
   if (res.status === 400 || res.status === 503) return "unavailable"; // desktop_only / missing_identity / bridge_disabled
   return "error";
@@ -154,11 +201,17 @@ export async function syncWebSession(signal?: AbortSignal): Promise<SyncSessionR
 // flight; every caller awaits the same promise. Shared by the 401 interceptor
 // and useSessionKeepAlive.
 let reSyncInFlight: Promise<SyncSessionResult> | null = null;
-export function ensureWebSession(): Promise<SyncSessionResult> {
+export function ensureWebSession(options?: { force?: boolean }): Promise<SyncSessionResult> {
   // Guard-ul sta aici, nu doar in interceptorul de 401: useSessionKeepAlive
   // apeleaza direct functia asta pe interval / visibilitychange / online, deci
   // o verificare pusa doar in apiFetch ar lasa acea cale deschisa.
   if (logoutInProgress) return Promise.resolve("error");
+  // Fara `force`, un cookie cu marja confortabila de viata nu se re-minteste:
+  // apelantii preventivi (keep-alive, reconectarea SSE) pot chema functia des si
+  // ieftin. Calea de recuperare din 401 trece cu force=true.
+  if (options?.force !== true && reSyncInFlight === null && sessionLooksFresh()) {
+    return Promise.resolve("ok");
+  }
   reSyncInFlight ??= syncWebSession()
     .then((result) => {
       // Re-mint reusit: identitatea din cookie poate fi ALTA decat cea incarcata

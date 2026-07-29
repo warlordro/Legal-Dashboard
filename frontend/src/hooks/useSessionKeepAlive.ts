@@ -10,6 +10,10 @@ import { ensureWebSession } from "@/lib/api";
 //   - online: re-mint when the network comes back.
 // Re-minting before the next request also lets the alerts SSE stream reconnect
 // with a fresh cookie. Desktop: no-op (auth is local).
+//
+// ensureWebSession() sare peste POST-ul de bridge cat timp cookie-ul are marja de
+// viata, deci trezirile dese ale tabului nu mai emit cate un JWT nou (si cate un
+// rand de audit) fiecare — doar cele care chiar apropie expirarea.
 const REFRESH_INTERVAL_MS = 50 * 60 * 1000; // 50 min < 1h cookie TTL
 
 export function useSessionKeepAlive(): void {

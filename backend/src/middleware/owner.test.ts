@@ -3,7 +3,7 @@ import path from "node:path";
 import os from "node:os";
 import fsPromises from "node:fs/promises";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { signAuthToken } from "../auth/jwt.ts";
 import { getAuditEvents } from "../db/auditRepository.ts";
@@ -11,6 +11,16 @@ import { closeDb, getDb } from "../db/schema.ts";
 import { insertUser, updateUserStatus } from "../db/userRepository.ts";
 import { requestIdContext } from "./requestId.ts";
 import { getActorId, getOwnerId, ownerContext } from "./owner.ts";
+
+// Peer-ul socketului nu exista sub `app.request()`, exact ca in productie unde
+// getConnInfo arunca fara server Node dedesubt. Mock-ul lasa comportamentul
+// implicit (arunca -> IP null) si permite testului de proxy sa injecteze un peer.
+vi.mock("@hono/node-server/conninfo", () => ({
+  getConnInfo: vi.fn(() => {
+    throw new TypeError("no connection");
+  }),
+}));
+import { getConnInfo } from "@hono/node-server/conninfo";
 
 const SECRET = "0123456789abcdef0123456789abcdef";
 
@@ -29,6 +39,9 @@ beforeEach(async () => {
   const seed = new Database(dbPath);
   seed.close();
   getDb();
+  vi.mocked(getConnInfo).mockImplementation(() => {
+    throw new TypeError("no connection");
+  });
 });
 
 afterEach(async () => {
@@ -47,6 +60,8 @@ afterEach(async () => {
   delete process.env.LEGAL_DASHBOARD_JWT_ISSUER;
   // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
   delete process.env.LEGAL_DASHBOARD_JWT_AUDIENCE;
+  // biome-ignore lint/performance/noDelete: process.env trebuie unset real, nu valoare undefined.
+  delete process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR;
   await fsPromises.rm(tmpRoot, { recursive: true, force: true });
 });
 
@@ -134,6 +149,28 @@ describe("ownerContext auth seam", () => {
       status: 401,
       isPatShaped: false, // fara Authorization: Bearer ld_pat_* -> esec JWT/cookie, nu PAT
     });
+  });
+
+  // Regresie 2026-07-29: auditul de refuz scria peer-ul socketului, adica
+  // adresa containerului vecin (172.20.0.x) pentru fiecare vizitator din
+  // spatele oauth2-proxy. Restul auditului trece prin readClientIp; refuzurile
+  // trebuie sa raporteze acelasi IP real.
+  it("records the forwarded client IP, not the trusted proxy peer", async () => {
+    process.env.LEGAL_DASHBOARD_AUTH_MODE = "web";
+    process.env.LEGAL_DASHBOARD_JWT_SECRET = SECRET;
+    process.env.LEGAL_DASHBOARD_TRUSTED_PROXY_CIDR = "172.20.0.0/16";
+    vi.mocked(getConnInfo).mockReturnValue({
+      remote: { address: "172.20.0.4", port: 0, addressType: "IPv4" },
+    } as unknown as ReturnType<typeof getConnInfo>);
+    const app = buildApp();
+
+    const res = await app.request("/api/whoami", {
+      headers: { "x-forwarded-for": "203.0.113.9, 172.20.0.4" },
+    });
+
+    expect(res.status).toBe(401);
+    const events = getAuditEvents({ ownerId: null, action: "auth.denied" });
+    expect(events[0].ip).toBe("203.0.113.9");
   });
 
   it("flags isPatShaped=true in the auth.denied audit for a revoked/unknown ld_pat_ bearer", async () => {
