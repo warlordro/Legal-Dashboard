@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { formatIsoDateTime, formatCadence, parseBackendTimestamp } from "./datetime-formatters";
+import { formatIsoDateTime, formatCadence } from "./datetime-formatters";
 
 // Caracterizeaza comportamentul consolidat din Stage 5: 5 pagini (Alerts,
 // Audit, Quota, Users, Monitorizare) aveau definitii locale aproape identice
@@ -33,18 +33,14 @@ describe("formatIsoDateTime", () => {
   // Regresie 2026-07-30: `datetime('now')` din SQLite scrie UTC fara marcaj de
   // zona, iar `new Date("2026-07-29 22:38:31")` interpreteaza sirul ca ora
   // LOCALA. Auditul afisa deci ora UTC ca locala (vara, 3 ore in urma).
-  // Asertiunea e independenta de timezone-ul in care ruleaza testul: cele doua
-  // forme trebuie sa descrie acelasi instant.
+  //
+  // Asertiunea e pe ora ABSOLUTA, nu pe egalitatea celor doua forme: cu TZ=UTC
+  // (cazul runnerelor CI) formele coincid si pe codul nefixat, deci un test de
+  // egalitate ar trece degeaba. Suita ruleaza cu TZ=Europe/Bucharest fixat in
+  // vite.config.ts, unde 22:38:31Z = 01:38:31 in ziua urmatoare.
   it("trateaza timestamp-ul SQLite fara zona ca UTC", () => {
-    expect(formatIsoDateTime("2026-07-29 22:38:31", { seconds: true })).toBe(
-      formatIsoDateTime("2026-07-29T22:38:31Z", { seconds: true })
-    );
-  });
-
-  it("parseBackendTimestamp lasa neatinse sirurile cu zona explicita", () => {
-    expect(parseBackendTimestamp("2026-07-29T22:38:31Z").toISOString()).toBe("2026-07-29T22:38:31.000Z");
-    expect(parseBackendTimestamp("2026-07-29T22:38:31+03:00").toISOString()).toBe("2026-07-29T19:38:31.000Z");
-    expect(parseBackendTimestamp("2026-07-29 22:38:31").toISOString()).toBe("2026-07-29T22:38:31.000Z");
+    expect(formatIsoDateTime("2026-07-29 22:38:31", { seconds: true })).toBe("30.07.2026, 01:38:31");
+    expect(formatIsoDateTime("2026-07-29T22:38:31Z", { seconds: true })).toBe("30.07.2026, 01:38:31");
   });
 
   it("include secunde cand opts.seconds = true", () => {

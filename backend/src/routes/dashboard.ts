@@ -19,6 +19,7 @@ import {
   type TimelineRunRow,
 } from "../db/dashboardActivityRepository.ts";
 import { getOwnerId } from "../middleware/owner.ts";
+import { parseDbTimestamp } from "../util/dbTimestamp.ts";
 import { fail, ok } from "../util/envelope.ts";
 import { clampInt } from "../util/validation.ts";
 
@@ -298,7 +299,15 @@ function auditRowToEvent(row: TimelineAuditRow): TimelineEvent {
 // Composite key: (ts DESC, id DESC). The same comparator is used for
 // post-merge filtering against the parsed cursor, so ordering and cursor
 // boundary semantics never diverge.
+// Comparatia e pe INSTANT, nu pe string: sursele timeline-ului stocheaza timpul in
+// doua formate ("YYYY-MM-DD HH:MM:SS" pentru audit_log, ISO cu Z pentru alerte si
+// rulari), iar ' ' < 'T' lexicografic. Comparand textul, orice eveniment de audit
+// din aceeasi zi ateriza sub alertele si rularile din aceeasi zi, indiferent de ora
+// reala — vizibil ca "audit acum 2 minute" listat sub "alerta acum 3 ore".
 function compareDesc(a: { ts: string; id: string }, b: { ts: string; id: string }): number {
+  const at = parseDbTimestamp(a.ts).getTime();
+  const bt = parseDbTimestamp(b.ts).getTime();
+  if (at !== bt && !Number.isNaN(at) && !Number.isNaN(bt)) return at < bt ? 1 : -1;
   if (a.ts !== b.ts) return a.ts < b.ts ? 1 : -1;
   return a.id < b.id ? 1 : a.id > b.id ? -1 : 0;
 }

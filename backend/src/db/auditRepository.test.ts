@@ -353,11 +353,11 @@ describe("listAuditEvents() — admin filters + pagination", () => {
          (owner_id, actor_id, action, target_kind, target_id, outcome, ts)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
-    stmt.run("alice", "alice", "user.login", null, null, "ok", "2026-04-01T10:00:00Z");
-    stmt.run("alice", "alice", "monitoring.create", "monitoring_job", "1", "ok", "2026-04-15T10:00:00Z");
-    stmt.run("alice", "admin-bob", "admin.suspend_user", "user", "alice", "ok", "2026-04-20T10:00:00Z");
-    stmt.run("bob", "bob", "user.login", null, null, "denied", "2026-04-22T10:00:00Z");
-    stmt.run(null, null, "system.boot", null, null, "ok", "2026-04-25T10:00:00Z");
+    stmt.run("alice", "alice", "user.login", null, null, "ok", "2026-04-01 10:00:00");
+    stmt.run("alice", "alice", "monitoring.create", "monitoring_job", "1", "ok", "2026-04-15 10:00:00");
+    stmt.run("alice", "admin-bob", "admin.suspend_user", "user", "alice", "ok", "2026-04-20 10:00:00");
+    stmt.run("bob", "bob", "user.login", null, null, "denied", "2026-04-22 10:00:00");
+    stmt.run(null, null, "system.boot", null, null, "ok", "2026-04-25 10:00:00");
   });
 
   // Regresie 2026-07-30: fixture-urile de mai sus scriu `ts` in ISO cu T si Z,

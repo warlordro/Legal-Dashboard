@@ -14,13 +14,10 @@
 // Formatarea foloseste Intl cu `Europe/Bucharest` ca referinta legala (aplicatia
 // e ro-only), independent de TZ-ul masinii.
 
+import { parseDbTimestamp } from "./dbTimestamp.ts";
+
 const RO_TZ = "Europe/Bucharest";
 const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})/;
-const NAIVE_SQLITE_TS = /^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/;
-
-export function parseDbTimestamp(input: string): Date {
-  return new Date(NAIVE_SQLITE_TS.test(input) ? `${input.replace(" ", "T")}Z` : input);
-}
 
 export function formatRoDate(input: string | null | undefined): string {
   if (!input) return "-";
