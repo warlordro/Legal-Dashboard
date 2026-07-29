@@ -5680,7 +5680,7 @@ Fix de corectitudine pe parser-ul SOAP PortalJust + consolidarea auditului CodeR
 
 ### HARDENING — Faza 7: consolidare CodeRabbit findings 19.04.2026
 
-Auditul CodeRabbit a scos 4 Critical + 7 Important. Fiecare verificat manual vs codul sursa (fisier:linie concrete), apoi sintetizat in [HARDENING.md](HARDENING.md) Faza 7 ca punch-list actionabil. Fisierul intermediar `CODERABBIT-FINDINGS-2026-04-19.md` a fost eliminat — context-ul necesar e self-contained in fiecare bullet din Faza 7.
+Auditul CodeRabbit a scos 4 Critical + 7 Important. Fiecare verificat manual vs codul sursa (fisier:linie concrete), apoi sintetizat in `HARDENING.md` Faza 7 ca punch-list actionabil. Fisierul intermediar `CODERABBIT-FINDINGS-2026-04-19.md` a fost eliminat — context-ul necesar e self-contained in fiecare bullet din Faza 7.
 
 **Blockers pentru web deploy** (~3h total, fix inainte de orice `LEGAL_DASHBOARD_ALLOW_REMOTE=1` sau Docker push):
 

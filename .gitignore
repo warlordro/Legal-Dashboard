@@ -76,3 +76,19 @@ START.md
 audit/
 docs/archive/
 docs/superpowers/plans/
+
+# Prezentari, ghiduri si rapoarte generate — se produc local, nu se publica.
+# Fixturile HTML din backend/src/services/iccj/__fixtures__/ si frontend/index.html
+# NU sunt afectate: regulile de mai jos sunt ancorate la radacina sau la caile
+# concrete unde traiesc documentele.
+/*.html
+/*.pdf
+/PREZENTARE.md
+docs/prezentari/
+docs/superpowers/*.html
+
+# Configuratii MCP locale (per-masina, nu fac parte din proiect)
+mcps/
+
+# Lock-ul de single-instance scris de Electron la runtime
+.instance.lock
