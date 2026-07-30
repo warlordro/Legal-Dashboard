@@ -62,4 +62,30 @@ describe("formatRoDateTime", () => {
   it("returneaza input ca string daca Date e invalid", () => {
     expect(formatRoDateTime("not a date")).toBe("not a date");
   });
+
+  // Regresie 2026-07-30: `datetime('now')` scrie "YYYY-MM-DD HH:MM:SS" fara zona,
+  // iar `new Date(...)` pe un asemenea sir foloseste TZ-ul procesului. Pe
+  // containerul UTC ieseau corect din intamplare; cu `TZ=Europe/Bucharest`
+  // exporturile ar fi aratat cu 3 ore in plus.
+  it("trateaza timestamp-ul SQLite fara zona ca UTC, indiferent de TZ-ul procesului", () => {
+    const originalTZ = process.env.TZ;
+    try {
+      process.env.TZ = "Europe/Bucharest";
+      expect(formatRoDateTime("2026-05-13 10:00:00")).toBe(formatRoDateTime("2026-05-13T10:00:00Z"));
+      process.env.TZ = "Pacific/Honolulu";
+      expect(formatRoDateTime("2026-05-13 10:00:00")).toBe(formatRoDateTime("2026-05-13T10:00:00Z"));
+    } finally {
+      if (originalTZ === undefined) {
+        // biome-ignore lint/performance/noDelete: process.env coerce undefined la string "undefined", deci delete e singura optiune corecta
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = originalTZ;
+      }
+    }
+  });
+
+  it("include secunde cand opts.seconds = true (audit)", () => {
+    expect(formatRoDateTime("2026-05-13 10:00:07", { seconds: true })).toMatch(/^13\.05\.2026, 13:00:07$/);
+    expect(formatRoDateTime("2026-05-13 10:00:07")).toMatch(/^13\.05\.2026, 13:00$/);
+  });
 });

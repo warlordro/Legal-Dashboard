@@ -5,6 +5,7 @@
 import ExcelJS from "exceljs";
 import type { AuditRow } from "../db/auditRepository.ts";
 import { getUserById } from "../db/userRepository.ts";
+import { formatRoDateTime } from "../util/dateFormat.ts";
 
 const FORMULA_PREFIX = /^[=+\-@\t\r]/;
 export function safeCell(v: string): string {
@@ -41,6 +42,15 @@ function userLabel(id: string | null, labels: Map<string, string>): string {
   return labels.get(id) ?? id;
 }
 
+// Raportul se citeste in Romania, iar coloana `ts` e UTC fara marcaj de zona.
+// Pana acum exportul copia sirul brut, deci arata cu 3 ore in urma fata de ceasul
+// cititorului — si diferit de ce arata UI-ul. Refolosim formatterul comun din
+// util/dateFormat (acelasi pe care il folosesc exporturile de alerte), cu secunde:
+// intr-o rafala de evenimente, precizia la minut le-ar face indistinguibile.
+function auditTimestamp(value: string): string {
+  return formatRoDateTime(value, { seconds: true });
+}
+
 function capDetail(detailJson: string): string {
   if (detailJson.length <= DETAIL_MAX_CHARS) return detailJson;
   return `${detailJson.slice(0, DETAIL_MAX_CHARS)}…`;
@@ -53,7 +63,7 @@ export async function buildAuditXlsx(
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet("Audit");
   sheet.columns = [
-    { header: "Data", key: "ts", width: 24 },
+    { header: "Data (ora Romaniei)", key: "ts", width: 24 },
     { header: "Actiune", key: "action", width: 32 },
     { header: "Rezultat", key: "outcome", width: 12 },
     { header: "Owner", key: "owner", width: 36 },
@@ -70,7 +80,7 @@ export async function buildAuditXlsx(
     const target =
       row.target_kind !== null || row.target_id !== null ? `${row.target_kind ?? ""}:${row.target_id ?? ""}` : "";
     sheet.addRow({
-      ts: safeCell(row.ts),
+      ts: safeCell(auditTimestamp(row.ts)),
       action: safeCell(row.action),
       outcome: safeCell(OUTCOME_RO[row.outcome] ?? row.outcome),
       owner: safeCell(userLabel(row.owner_id, labels)),
@@ -85,10 +95,10 @@ export async function buildAuditXlsx(
   const meta = workbook.addWorksheet("Interval");
   meta.getColumn(1).width = 24;
   meta.getColumn(2).width = 36;
-  meta.getCell("A1").value = "De la";
-  meta.getCell("B1").value = safeCell(interval.since ?? "inceput");
-  meta.getCell("A2").value = "Pana la";
-  meta.getCell("B2").value = safeCell(interval.until ?? "acum");
+  meta.getCell("A1").value = "De la (ora Romaniei)";
+  meta.getCell("B1").value = safeCell(interval.since === null ? "inceput" : auditTimestamp(interval.since));
+  meta.getCell("A2").value = "Pana la (ora Romaniei)";
+  meta.getCell("B2").value = safeCell(interval.until === null ? "acum" : auditTimestamp(interval.until));
   meta.getCell("A3").value = "Randuri";
   meta.getCell("B3").value = rows.length;
 

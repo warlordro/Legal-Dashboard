@@ -364,8 +364,14 @@ function backdateRun(runId: number, endedAt: string): void {
   getDb().prepare("UPDATE monitoring_runs SET ended_at = ? WHERE id = ?").run(endedAt, runId);
 }
 
+// Fixture realista: `audit_log.ts` e scris de `datetime('now')`, deci "YYYY-MM-DD
+// HH:MM:SS" UTC — NU ISO cu Z, cum stocheaza alertele si rularile. Acceptam ISO la
+// apel pentru lizibilitate si convertim la formatul coloanei; altfel testele ar
+// valida un format care nu exista in productie (verificat pe DB-ul real: 352/352
+// randuri naive) si ar rata bugurile de comparatie lexicografica.
 function backdateAudit(auditId: number, ts: string): void {
-  getDb().prepare("UPDATE audit_log SET ts = ? WHERE id = ?").run(ts, auditId);
+  const columnTs = ts.includes("T") ? new Date(ts).toISOString().slice(0, 19).replace("T", " ") : ts;
+  getDb().prepare("UPDATE audit_log SET ts = ? WHERE id = ?").run(columnTs, auditId);
 }
 
 function lastAuditId(): number {
@@ -425,6 +431,65 @@ describe("GET /api/v1/dashboard/timeline", () => {
     // DESC by ts: alert b (13:00) > audit (12:00) > alert a (11:00) > run (10:00)
     expect(body.data.events.map((e) => e.kind)).toEqual(["alert", "audit", "alert", "run"]);
     expect(body.data.nextCursor).toBeNull();
+  });
+
+  // Regresie 2026-07-30 (review adversarial): `audit_log.ts` e scris de
+  // `datetime('now')` — naiv, fara Z — iar alertele/rularile de `strftime(...Z)`.
+  // Fixture-urile de mai sus backdateaza auditul in ISO, deci nu prindeau bugul:
+  // in productie, comparatia lexicografica (' ' < 'T') aseza orice audit sub
+  // evenimentele din aceeasi zi, iar un cursor care aterizeaza pe un rand de audit
+  // sarea definitiv alertele mai vechi din acea zi.
+  it("ordoneaza si pagineaza corect cand auditul are ts in formatul real (naiv)", async () => {
+    const jobId = seedJob({ ownerId: "alice", kind: "dosar_soap", hashSuffix: "naive" });
+    const runId = seedFinalizedRun({ ownerId: "alice", jobId, status: "ok" });
+    backdateRun(runId, "2026-04-19T00:00:00.000Z"); // mult mai vechi, iese ultimul
+    const newer = insertAlert({
+      ownerId: "alice",
+      jobId,
+      runId,
+      kind: "termen_new",
+      title: "Alert newer",
+      detail: {},
+      dedupKey: "tl-naive-newer",
+    });
+    backdateAlert(newer.row.id, "2026-04-30T13:00:00.000Z");
+    const older = insertAlert({
+      ownerId: "alice",
+      jobId,
+      runId,
+      kind: "termen_new",
+      title: "Alert older",
+      detail: {},
+      dedupKey: "tl-naive-older",
+    });
+    backdateAlert(older.row.id, "2026-04-30T11:00:00.000Z");
+    recordAudit(null, "monitoring.job.deleted", { ownerId: "alice", detail: {} });
+    backdateAudit(lastAuditId(), "2026-04-30 12:00:00"); // formatul real din productie
+
+    const app = buildTestApp();
+    const all = (await (
+      await app.request("/api/v1/dashboard/timeline?limit=10", { headers: { "x-test-owner": "alice" } })
+    ).json()) as TimelineResponse;
+    expect(all.data.events.map((e) => e.kind)).toEqual(["alert", "audit", "alert", "run"]);
+
+    // Paginare pas cu pas: cursorul de pe pagina 2 e ts-ul NAIV al auditului, si
+    // pagina 3 trebuie sa intoarca alerta de la 11:00, nu sa o sara.
+    const page1 = (await (
+      await app.request("/api/v1/dashboard/timeline?limit=1", { headers: { "x-test-owner": "alice" } })
+    ).json()) as TimelineResponse;
+    expect(page1.data.events[0].title).toBe("Alert newer");
+    const page2 = (await (
+      await app.request(`/api/v1/dashboard/timeline?limit=1&cursor=${encodeURIComponent(page1.data.nextCursor!)}`, {
+        headers: { "x-test-owner": "alice" },
+      })
+    ).json()) as TimelineResponse;
+    expect(page2.data.events[0].kind).toBe("audit");
+    const page3 = (await (
+      await app.request(`/api/v1/dashboard/timeline?limit=1&cursor=${encodeURIComponent(page2.data.nextCursor!)}`, {
+        headers: { "x-test-owner": "alice" },
+      })
+    ).json()) as TimelineResponse;
+    expect(page3.data.events[0].title).toBe("Alert older");
   });
 
   it("paginates via cursor (events strictly older than the cursor)", async () => {
@@ -779,7 +844,9 @@ describe("GET /api/v1/dashboard/report", () => {
       backdatedTs,
       backdatedTs
     );
-    db.prepare("UPDATE audit_log SET ts = ? WHERE owner_id = 'alice'").run(backdatedTs);
+    // Formatul REAL al coloanei (naiv, ca `datetime('now')`), nu ISO: vezi nota de
+    // la backdateAudit.
+    db.prepare("UPDATE audit_log SET ts = ? WHERE owner_id = 'alice'").run(backdatedTs.slice(0, 19).replace("T", " "));
 
     const app = buildTestApp();
     const res = await app.request("/api/v1/dashboard/report?range=7d", {

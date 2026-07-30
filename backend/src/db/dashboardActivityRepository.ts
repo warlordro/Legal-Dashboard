@@ -15,6 +15,7 @@
 // scan the entire table.
 
 import { getDb } from "./schema.ts";
+import { toIsoUtcTimestamp, toNaiveUtcTimestamp } from "../util/dbTimestamp.ts";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Curated audit actions surfaced in the dashboard timeline.
@@ -128,7 +129,7 @@ export function listAlertsBefore(opts: {
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT ?`
     )
-    .all(opts.ownerId, opts.before, opts.limit) as TimelineAlertRow[];
+    .all(opts.ownerId, toIsoUtcTimestamp(opts.before), opts.limit) as TimelineAlertRow[];
 }
 
 export function listFinalizedRunsBefore(opts: {
@@ -151,7 +152,7 @@ export function listFinalizedRunsBefore(opts: {
        ORDER BY r.ended_at DESC, r.id DESC
        LIMIT ?`
     )
-    .all(opts.ownerId, opts.before, opts.limit) as TimelineRunRow[];
+    .all(opts.ownerId, toIsoUtcTimestamp(opts.before), opts.limit) as TimelineRunRow[];
 }
 
 export function listCuratedAuditBefore(opts: {
@@ -175,7 +176,7 @@ export function listCuratedAuditBefore(opts: {
        ORDER BY ts DESC, id DESC
        LIMIT ?`
     )
-    .all(opts.ownerId, opts.before, ...CURATED_AUDIT_ACTIONS, opts.limit) as TimelineAuditRow[];
+    .all(opts.ownerId, toNaiveUtcTimestamp(opts.before), ...CURATED_AUDIT_ACTIONS, opts.limit) as TimelineAuditRow[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -209,7 +210,7 @@ export function listAlertsInRange(opts: {
        ORDER BY a.created_at DESC, a.id DESC
        LIMIT ?`
     )
-    .all(opts.ownerId, opts.since, opts.until, opts.limit) as TimelineAlertRow[];
+    .all(opts.ownerId, toIsoUtcTimestamp(opts.since), toIsoUtcTimestamp(opts.until), opts.limit) as TimelineAlertRow[];
 }
 
 export function listFinalizedRunsInRange(opts: {
@@ -232,7 +233,7 @@ export function listFinalizedRunsInRange(opts: {
        ORDER BY r.ended_at DESC, r.id DESC
        LIMIT ?`
     )
-    .all(opts.ownerId, opts.since, opts.until, opts.limit) as TimelineRunRow[];
+    .all(opts.ownerId, toIsoUtcTimestamp(opts.since), toIsoUtcTimestamp(opts.until), opts.limit) as TimelineRunRow[];
 }
 
 export function listCuratedAuditInRange(opts: {
@@ -253,7 +254,13 @@ export function listCuratedAuditInRange(opts: {
        ORDER BY ts DESC, id DESC
        LIMIT ?`
     )
-    .all(opts.ownerId, opts.since, opts.until, ...CURATED_AUDIT_ACTIONS, opts.limit) as TimelineAuditRow[];
+    .all(
+      opts.ownerId,
+      toNaiveUtcTimestamp(opts.since),
+      toNaiveUtcTimestamp(opts.until),
+      ...CURATED_AUDIT_ACTIONS,
+      opts.limit
+    ) as TimelineAuditRow[];
 }
 
 // ────────────────────────────────────────────────────────────────────────────

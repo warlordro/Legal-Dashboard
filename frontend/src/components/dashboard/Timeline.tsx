@@ -17,7 +17,7 @@ import { Link } from "react-router-dom";
 import { AlertTriangle, Bell, Loader2, PlayCircle, RefreshCw, Shield } from "lucide-react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, parseSqliteUtc } from "@/lib/utils";
 import {
   dashboardApi,
   MonitoringApiError,
@@ -48,13 +48,15 @@ const dateFmt = new Intl.DateTimeFormat("ro-RO", {
 });
 
 function formatTs(ts: string): string {
-  const d = new Date(ts);
+  const d = parseSqliteUtc(ts);
   if (Number.isNaN(d.getTime())) return ts;
   return dateFmt.format(d);
 }
 
 function relativeTime(ts: string, now: number): string {
-  const d = new Date(ts).getTime();
+  // parseSqliteUtc, nu `new Date` direct: ts-ul din audit_log e UTC fara marcaj,
+  // deci un eveniment de acum aparea "acum 3 ore" vara.
+  const d = parseSqliteUtc(ts).getTime();
   if (Number.isNaN(d)) return "";
   const diff = Math.max(0, now - d);
   const sec = Math.floor(diff / 1000);

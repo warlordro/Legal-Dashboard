@@ -353,11 +353,31 @@ describe("listAuditEvents() — admin filters + pagination", () => {
          (owner_id, actor_id, action, target_kind, target_id, outcome, ts)
        VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
-    stmt.run("alice", "alice", "user.login", null, null, "ok", "2026-04-01T10:00:00Z");
-    stmt.run("alice", "alice", "monitoring.create", "monitoring_job", "1", "ok", "2026-04-15T10:00:00Z");
-    stmt.run("alice", "admin-bob", "admin.suspend_user", "user", "alice", "ok", "2026-04-20T10:00:00Z");
-    stmt.run("bob", "bob", "user.login", null, null, "denied", "2026-04-22T10:00:00Z");
-    stmt.run(null, null, "system.boot", null, null, "ok", "2026-04-25T10:00:00Z");
+    stmt.run("alice", "alice", "user.login", null, null, "ok", "2026-04-01 10:00:00");
+    stmt.run("alice", "alice", "monitoring.create", "monitoring_job", "1", "ok", "2026-04-15 10:00:00");
+    stmt.run("alice", "admin-bob", "admin.suspend_user", "user", "alice", "ok", "2026-04-20 10:00:00");
+    stmt.run("bob", "bob", "user.login", null, null, "denied", "2026-04-22 10:00:00");
+    stmt.run(null, null, "system.boot", null, null, "ok", "2026-04-25 10:00:00");
+  });
+
+  // Regresie 2026-07-30: fixture-urile de mai sus scriu `ts` in ISO cu T si Z,
+  // dar productia il scrie prin `datetime('now')`, adica "YYYY-MM-DD HH:MM:SS".
+  // Filtrul primea ISO-ul din UI si il compara lexicografic cu formatul real:
+  // ' ' < 'T', deci orice rand real cadea sub limita si fereastra ieșea goala.
+  it("filtreaza corect randurile in formatul real al coloanei (fara T/Z)", () => {
+    const db = getDb();
+    db.exec("DELETE FROM audit_log");
+    const stmt = db.prepare(
+      `INSERT INTO audit_log (owner_id, actor_id, action, outcome, ts) VALUES (?, ?, ?, 'ok', ?)`
+    );
+    stmt.run("alice", "alice", "before.window", "2026-04-20 09:59:59");
+    stmt.run("alice", "alice", "on.boundary", "2026-04-20 10:00:00");
+    stmt.run("alice", "alice", "after.window", "2026-04-20 10:00:01");
+
+    const r = listAuditEvents({ since: "2026-04-20T10:00:00.000Z" });
+
+    expect(r.total).toBe(2);
+    expect(r.rows.map((e) => e.action).sort()).toEqual(["after.window", "on.boundary"]);
   });
 
   it("returns all owners + total when ownerId is undefined", () => {

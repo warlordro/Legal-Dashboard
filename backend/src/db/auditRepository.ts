@@ -3,6 +3,7 @@ import { getDb } from "./schema.ts";
 import { getActorId, getOwnerId } from "../middleware/owner.ts";
 import { getRequestId } from "../middleware/requestId.ts";
 import { readClientIp } from "../util/proxyIp.ts";
+import { toNaiveUtcTimestamp } from "../util/dbTimestamp.ts";
 import { escapeLikeMeta } from "../util/textNormalize.ts";
 
 // Audit outcomes per PLAN-monitoring-webmode.md §2.4. Stored as TEXT with a
@@ -297,12 +298,12 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
     // convention (PR-7 hardening) so admins comparing audit events to AI
     // usage windows see consistent intervals.
     where.push("ts >= ?");
-    params.push(opts.since);
+    params.push(toNaiveUtcTimestamp(opts.since));
   }
   if (opts.until) {
     // Open upper bound (ts < until) so successive windows tile without overlap.
     where.push("ts < ?");
-    params.push(opts.until);
+    params.push(toNaiveUtcTimestamp(opts.until));
   }
   if (opts.requestId) {
     where.push("request_id = ?");
@@ -321,7 +322,15 @@ function buildAuditWhere(opts: ListAuditEventsOpts): {
 // ramane vizibil); pentru deploy web cu cerinte legale mai stricte, tuneaza
 // constanta din `services/monitoring/scheduler.ts:AUDIT_LOG_RETENTION_DAYS`.
 export function purgeOldAuditLog(retentionDays = 90): number {
-  const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+  // Cutoff in formatul coloanei: `ts` e naiv ("YYYY-MM-DD HH:MM:SS"), iar un
+  // cutoff ISO comparat lexicografic ar include si randurile din ziua limitei
+  // (' ' < 'T'), deci retentia de 90 de zile ar tunde efectiv la ~89.
+  //
+  // Rotunjim in SUS la secunda: coloana are rezolutie de o secunda, deci un `ts <
+  // cutoff` cu cutoff truncat ar lasa pe loc randurile scrise in aceeasi secunda
+  // — cu `retentionDays = 0` (escape hatch "sterge tot") nu s-ar sterge nimic.
+  const cutoffMs = Math.ceil((Date.now() - retentionDays * 86_400_000) / 1000) * 1000;
+  const cutoff = toNaiveUtcTimestamp(new Date(cutoffMs).toISOString());
   // v2.37.1 (review cluster 5): chunked ca purgeOldRuns — DELETE-ul unbounded
   // tinea write lock-ul pe un scan complet la primul purge pe instalari vechi.
   // Cu idx_audit_log_ts (0035) + LIMIT, fiecare batch elibereaza lock-ul rapid.

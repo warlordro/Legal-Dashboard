@@ -6,9 +6,16 @@
 // dar cu signatura diferita (combina date+time fragments) — nu-l atingem aici
 // ca sa nu introducem noise non-task in stage; cleanup-ul lui e separat.
 
+import { parseSqliteUtc } from "./utils";
+
+// parseSqliteUtc, nu `new Date` direct: coloanele scrise cu `datetime('now')`
+// (audit_log.ts si celelalte ~19 coloane de timp din migrations vechi) sunt UTC in
+// formatul "YYYY-MM-DD HH:MM:SS", fara marcaj de zona, iar V8 le interpreteaza ca
+// ora LOCALA. Auditul afisa deci ora UTC ca si cum ar fi fost locala — vara, cu 3
+// ore in urma pentru Romania.
 export function formatIsoDateTime(iso: string | null | undefined, opts?: { seconds?: boolean }): string {
   if (!iso) return "-";
-  const d = new Date(iso);
+  const d = parseSqliteUtc(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("ro-RO", {
     day: "2-digit",

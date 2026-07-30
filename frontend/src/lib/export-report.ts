@@ -31,6 +31,7 @@ import {
 } from "./excel-helpers";
 import { runExportInWorker } from "./exportRunner";
 import { MIME_PDF, stripDiacritics, type ExportResult } from "./pdf-helpers";
+import { parseSqliteUtc } from "./utils";
 
 const MIME_XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
@@ -60,7 +61,10 @@ function formatTokens(n: number): string {
 }
 
 function formatTs(iso: string): string {
-  const d = new Date(iso);
+  // parseSqliteUtc: evenimentele de audit din timeline vin cu ts naiv (UTC fara
+  // marcaj), deci `new Date` direct le-ar afisa cu offsetul local scazut — acelasi
+  // eveniment ar aparea corect pe ecran si deplasat in xlsx/pdf.
+  const d = parseSqliteUtc(iso);
   if (Number.isNaN(d.getTime())) return iso;
   return d.toLocaleString("ro-RO", {
     day: "2-digit",

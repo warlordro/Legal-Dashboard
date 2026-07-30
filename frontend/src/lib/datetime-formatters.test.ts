@@ -30,6 +30,19 @@ describe("formatIsoDateTime", () => {
     expect(out).toMatch(/^\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}$/);
   });
 
+  // Regresie 2026-07-30: `datetime('now')` din SQLite scrie UTC fara marcaj de
+  // zona, iar `new Date("2026-07-29 22:38:31")` interpreteaza sirul ca ora
+  // LOCALA. Auditul afisa deci ora UTC ca locala (vara, 3 ore in urma).
+  //
+  // Asertiunea e pe ora ABSOLUTA, nu pe egalitatea celor doua forme: cu TZ=UTC
+  // (cazul runnerelor CI) formele coincid si pe codul nefixat, deci un test de
+  // egalitate ar trece degeaba. Suita ruleaza cu TZ=Europe/Bucharest fixat in
+  // vite.config.ts, unde 22:38:31Z = 01:38:31 in ziua urmatoare.
+  it("trateaza timestamp-ul SQLite fara zona ca UTC", () => {
+    expect(formatIsoDateTime("2026-07-29 22:38:31", { seconds: true })).toBe("30.07.2026, 01:38:31");
+    expect(formatIsoDateTime("2026-07-29T22:38:31Z", { seconds: true })).toBe("30.07.2026, 01:38:31");
+  });
+
   it("include secunde cand opts.seconds = true", () => {
     const out = formatIsoDateTime("2026-04-30T08:30:45.000Z", { seconds: true });
     expect(out).toMatch(/^\d{2}\.\d{2}\.\d{4}, \d{2}:\d{2}:\d{2}$/);

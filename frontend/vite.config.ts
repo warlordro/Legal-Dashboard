@@ -45,6 +45,11 @@ export default defineConfig({
     environment: "node",
     globals: true,
     include: ["src/**/*.test.{ts,tsx}"],
+    // TZ fixat: runnerele CI ruleaza in UTC, iar bugurile de zona (timestamp
+    // SQLite naiv interpretat ca ora locala) sunt INVIZIBILE cand offsetul e 0 —
+    // un test care compara forma naiva cu forma Z ar trece si pe codul nefixat.
+    // Europe/Bucharest e si fusul aplicatiei, deci testele reproduc ce vede userul.
+    env: { TZ: "Europe/Bucharest" },
   },
   server: {
     port: 5173,
