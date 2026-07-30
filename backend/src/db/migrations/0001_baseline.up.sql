@@ -57,7 +57,7 @@ CREATE INDEX idx_avize_search_type   ON rnpm_avize(owner_id, search_type);
 CREATE INDEX idx_avize_data          ON rnpm_avize(data);
 
 -- Content-addressable lookup for bun descriere texts (~99% dedup vs inline column).
--- Note: no owner_id by design — this is a content-addressable shared lookup.
+-- Note: no owner_id by design — content-addressable shared lookup (HARDENING.md CM5).
 CREATE TABLE rnpm_bunuri_descrieri (
   id    INTEGER PRIMARY KEY AUTOINCREMENT,
   text  TEXT NOT NULL UNIQUE
