@@ -145,9 +145,51 @@ describe("POST /rnpm/search — erori tardive pe flux", () => {
   });
 
   it("la abort de client NU se livreaza eveniment terminal", async () => {
-    const { text } = await streamEvents(new DOMException("Aborted", "AbortError"));
+    // Abortul REAL al clientului, nu doar un reject: distinctia conteaza, pentru
+    // ca la expirarea plafonului nostru clientul e inca acolo si ii datoram o
+    // eroare explicita.
+    const ac = new AbortController();
+    vi.mocked(executeSearch).mockImplementationOnce(async () => {
+      ac.abort();
+      throw new DOMException("Aborted", "AbortError");
+    });
+
+    const res = await buildApp().request("/api/v1/rnpm/search", {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "text/event-stream" },
+      body: searchBody(),
+      signal: ac.signal,
+    });
+    const text = await res.text();
 
     expect(text).not.toContain("event: result");
     expect(text).not.toContain("event: error");
+  });
+});
+
+describe("POST /rnpm/search — semnal deja abortat inainte de handler", () => {
+  it("propaga abortul catre serviciu chiar daca clientul a plecat devreme", async () => {
+    // `addEventListener("abort")` pe un semnal DEJA abortat nu se declanseaza
+    // niciodata (spec DOM). Fara verificare explicita, cautarea ar rula pana la
+    // capat pentru un client plecat: captcha platita, RNPM lovit, scrieri facute.
+    let seen: AbortSignal | undefined;
+    vi.mocked(executeSearch).mockImplementationOnce(async (input: { signal?: AbortSignal }) => {
+      seen = input.signal;
+      return OK_RESULT as unknown as Awaited<ReturnType<typeof executeSearch>>;
+    });
+
+    const ac = new AbortController();
+    ac.abort();
+
+    await Promise.resolve(
+      buildApp().request("/api/v1/rnpm/search", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: searchBody(),
+        signal: ac.signal,
+      })
+    ).catch(() => undefined);
+
+    expect(seen?.aborted).toBe(true);
   });
 });

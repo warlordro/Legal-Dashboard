@@ -110,3 +110,17 @@ describe("rnpmSearch pe transport in flux", () => {
     await expect(rnpmSearch("ipoteci", {}, "key")).resolves.toMatchObject({ searchId: 5 });
   });
 });
+
+describe("rnpmSearch pe flux — robustete parsare", () => {
+  it("nu trunchiaza payload-ul care contine separatori Unicode de linie", async () => {
+    // U+2028/U+2029 sunt valide in siruri JSON si NU sunt escapate de
+    // JSON.stringify. Un regex multiline le-ar trata ca sfarsit de linie si ar
+    // taia payload-ul; calea JSON veche nu avea problema asta.
+    const payload = { ...OK_PAYLOAD, criteriu: "linie noua paragraf" };
+    vi.stubGlobal("fetch", async () => sseResponse({ event: "result", data: payload }));
+
+    const out = await rnpmSearch("ipoteci", {}, "key");
+
+    expect(out.criteriu).toBe("linie noua paragraf");
+  });
+});

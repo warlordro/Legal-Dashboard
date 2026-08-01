@@ -211,12 +211,21 @@ async function consumeSearchStream(res: Response, type: RnpmSearchType): Promise
         if (idx < 0) break;
         const chunk = buf.slice(0, idx);
         buf = buf.slice(idx + 2);
-        const eventMatch = chunk.match(/^event: (\S+)/m);
-        const dataMatch = chunk.match(/^data: (.*)$/m);
-        if (!eventMatch || !dataMatch) continue;
-        const event = eventMatch[1];
+        // Parsare pe linii explicit, NU cu regex: in JavaScript `$` cu flag
+        // multiline trateaza U+2028/U+2029 drept sfarsit de linie, iar acele
+        // caractere sunt valide in siruri JSON si `JSON.stringify` nu le
+        // escapeaza. Un aviz care le contine ar fi trunchiat si ar produce
+        // eroare de parsare — pe calea JSON veche functiona.
+        let event = "";
+        let raw: string | null = null;
+        for (const line of chunk.split("\n")) {
+          const clean = line.endsWith("\r") ? line.slice(0, -1) : line;
+          if (clean.startsWith("event:")) event = clean.slice(6).trim();
+          else if (clean.startsWith("data:")) raw = clean.slice(5).replace(/^ /, "");
+        }
+        if (!event || raw === null) continue;
         if (event === "ping") continue;
-        const data = JSON.parse(dataMatch[1]);
+        const data = JSON.parse(raw);
         if (event === "result") {
           result = data as RnpmSearchResponse;
           break;

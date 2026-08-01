@@ -193,6 +193,10 @@ export const INFLIGHT_TTL_SEARCH_MS = 900_000;
 // intermediari si detecteaza clientul plecat — scrierea esueaza si abortam.
 const SEARCH_STREAM_PING_MS = 10_000;
 
+// Plafon dur pe fluxul de /search. Aliniat cu TTL-ul de dedup, ca o cerere
+// intepenita sa nu supravietuiasca cheii ei de idempotenta.
+const SEARCH_STREAM_TIMEOUT_MS = INFLIGHT_TTL_SEARCH_MS;
+
 // Corpul de succes se construieste camp cu camp, NU prin spread peste rezultatul
 // serviciului: `ExecuteSearchResult` are campuri interne care nu se expun (ex.
 // `captchasUsed`). Pinuit de rnpm.searchPayload.characterization.test.ts.
@@ -258,7 +262,12 @@ function searchErrorEvent(
 function streamSearchAsSSE(
   c: import("hono").Context,
   run: Promise<Awaited<ReturnType<typeof executeSearch>>>,
-  opts: { type: RnpmSearchType; dedupKey: string | null; controller: AbortController }
+  opts: {
+    type: RnpmSearchType;
+    dedupKey: string | null;
+    controller: AbortController;
+    onDone: () => void;
+  }
 ) {
   return streamSSE(c, async (stream) => {
     // Scrierile trebuie serializate: un ping care pleaca in mijlocul scrierii
@@ -267,16 +276,23 @@ function streamSearchAsSSE(
     const ping = setInterval(() => {
       pending = pending.then(() =>
         stream.writeSSE({ event: "ping", data: "{}" }).catch((err) => {
-          // F06 (audit 2026-07-09): un reject nemanipulat aici devine
-          // unhandledRejection => process.exit(1) in server mode si doboara TOT
-          // procesul web. In plus, esecul scrierii inseamna client plecat: nu
-          // doar logam, ci ABORTAM munca — altfel cererea continua sa consume
-          // captcha si sa loveasca RNPM pentru nimeni.
+          // Detectia clientului plecat se face prin bridge-ul de semnal
+          // (`onRequestAbort` din ruta), NU prin esecul scrierii: `writeSSE` din
+          // Hono inghite erorile de scriere, deci acest catch nu se declanseaza
+          // pe versiunea curenta. Il pastram ca protectie daca Hono schimba
+          // comportamentul — atunci esecul devine si el semnal de client plecat.
+          // Motivul original (F06, audit 2026-07-09): un reject nemanipulat aici
+          // ar deveni unhandledRejection => process.exit(1) in server mode.
           console.error("[rnpm/search] ping writeSSE failed (client disconnected?)", err);
           opts.controller.abort();
         })
       );
     }, SEARCH_STREAM_PING_MS);
+
+    // Plafon dur, ca la /bulk. Heartbeat-ul tine acum conexiunea vie la
+    // nesfarsit, deci o cautare intepenita (ex. coada pe un lock blocat) ar
+    // lasa utilizatorul cu rotita invartindu-se — inainte proxy-ul o taia.
+    const timeoutHandle = setTimeout(() => opts.controller.abort(), SEARCH_STREAM_TIMEOUT_MS);
 
     try {
       const result = await run;
@@ -287,9 +303,24 @@ function streamSearchAsSSE(
       clearInterval(ping);
       await pending;
       if (e instanceof DOMException && e.name === "AbortError") {
-        // Clientul a plecat: nu exista cui livra un eveniment terminal, iar
-        // corpul s-ar scrie pe un socket inchis. Doar oprim si logam.
-        console.log("[rnpm/search] aborted by client");
+        if (c.req.raw.signal?.aborted === true) {
+          // Clientul a plecat: nu exista cui livra un eveniment terminal, iar
+          // corpul s-ar scrie pe un socket inchis. Doar oprim si logam.
+          console.log("[rnpm/search] aborted by client");
+          return;
+        }
+        // Plafonul nostru a expirat, dar clientul e INCA acolo: ii datoram o
+        // eroare explicita, altfel ramane cu rotita invartindu-se.
+        console.error("[rnpm/search] stream timeout");
+        await stream
+          .writeSSE({
+            event: "error",
+            data: JSON.stringify({
+              status: 504,
+              body: fail(ErrorCodes.INTERNAL_ERROR, "Cautarea a depasit timpul maxim alocat. Reincearca.", c),
+            }),
+          })
+          .catch((err) => console.error("[rnpm/search] timeout writeSSE failed", err));
         return;
       }
       const { status, body } = searchErrorEvent(e, c, opts.type);
@@ -298,6 +329,8 @@ function streamSearchAsSSE(
         .catch((err) => console.error("[rnpm/search] error writeSSE failed", err));
     } finally {
       clearInterval(ping);
+      clearTimeout(timeoutHandle);
+      opts.onDone();
       if (opts.dedupKey) clearInflight(opts.dedupKey);
     }
   });
@@ -431,6 +464,14 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   const searchAbort = new AbortController();
   const onRequestAbort = () => searchAbort.abort();
   c.req.raw.signal?.addEventListener?.("abort", onRequestAbort);
+  // OBLIGATORIU dupa addEventListener: pe un semnal DEJA abortat listener-ul nu
+  // se declanseaza niciodata (spec DOM), iar `searchAbort` ar ramane pe veci
+  // ne-abortat. Fereastra e reala si larga — clientul poate pleca in timpul
+  // verificarii de stocare (asteptare pe lock de mentenanta, minute cand ruleaza
+  // backup-ul) sau al gardurilor de captcha, ambele inaintea acestei linii.
+  // Fara verificare, cautarea ruleaza pana la capat pentru nimeni: captcha
+  // platita, RNPM lovit, toate scrierile executate.
+  if (c.req.raw.signal?.aborted) searchAbort.abort();
 
   const run = executeSearch({
     type,
@@ -464,7 +505,12 @@ rnpmRouter.post("/search", limitSearch, async (c) => {
   // azi: taburi SPA deja deschise ruleaza JS vechi, iar consumatorii API/PAT nu
   // trebuie rupti.
   if (wantsEventStream(c)) {
-    return streamSearchAsSSE(c, run, { type, dedupKey, controller: searchAbort });
+    return streamSearchAsSSE(c, run, {
+      type,
+      dedupKey,
+      controller: searchAbort,
+      onDone: () => c.req.raw.signal?.removeEventListener?.("abort", onRequestAbort),
+    });
   }
 
   try {
