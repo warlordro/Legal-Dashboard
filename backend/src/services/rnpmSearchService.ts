@@ -104,6 +104,17 @@ async function searchWithFreshSession(
 // Optiunea B (auto-split pe tipInscriere) — nu inca implementat.
 const MAX_TOTAL_RESULTS = 1500;
 
+// Recuperarea detaliilor e best-effort. Cand RNPM ramane lent, a doua trecere nu
+// are voie sa dubleze la nesfarsit durata cautarii — bulk si split ruleaza pe
+// pana la MAX_TOTAL_RESULTS avize, iar transportul in flux are si el un plafon.
+// Bugetul se verifica INAINTE de fiecare transa, deci o transa pornita se
+// termina; 0 dezactiveaza complet recuperarea (kill switch operational).
+const DEFAULT_RECOVERY_BUDGET_MS = 120_000;
+function recoveryBudgetMs(): number {
+  const raw = Number.parseInt(process.env.RNPM_RECOVERY_BUDGET_MS ?? "", 10);
+  return Number.isFinite(raw) && raw >= 0 ? raw : DEFAULT_RECOVERY_BUDGET_MS;
+}
+
 // v2.20.3 Grupul I — fail-fast pe silent_refusal consecutiv. Daca primii K
 // sub-tipuri din tier-1 returneaza `total > 0 && documents: []` consecutiv,
 // upstream-ul e plauzibil throttling/captcha-invalidating wholesale: nu mai are
@@ -471,9 +482,15 @@ async function executeSearchInner(
   if (recoverable.length > 0 && !signal?.aborted) {
     const tRecovery = Date.now();
     const pending = recoverable.splice(0, recoverable.length);
+    const budgetMs = recoveryBudgetMs();
     let recovered = 0;
+    let skipped = 0;
     for (let i = 0; i < pending.length; i += concurrency) {
       throwIfAborted(signal);
+      if (Date.now() - tRecovery >= budgetMs) {
+        skipped = pending.length - i;
+        break;
+      }
       const slice = pending.slice(i, i + concurrency);
       const results = await Promise.all(slice.map((entry) => fetchAndPersist(entry.doc, entry.idx)));
       for (const r of results) {
@@ -496,7 +513,10 @@ async function executeSearchInner(
       searchType: input.type,
       size: pending.length,
       ok: recovered,
-      failed: pending.length - recovered,
+      failed: pending.length - recovered - skipped,
+      // Explicit, nu implicit: o taiere tacuta a bugetului ar arata in log
+      // identic cu "am incercat tot si a esuat".
+      skipped,
       latencyMs: Date.now() - tRecovery,
     });
   }

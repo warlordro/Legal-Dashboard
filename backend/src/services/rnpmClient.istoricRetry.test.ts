@@ -12,6 +12,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { RnpmClient } from "./rnpmClient.ts";
+import { drippingStream } from "./rnpmClient.testStreams.ts";
 
 const ISTORIC_OK = { inscriere: "x", istoric: [{ tip: "initial" }] };
 
@@ -65,6 +66,25 @@ describe("fetchIstoric — buget per incercare", () => {
 
     const client = new RnpmClient({ requestDelayMs: 0, fetchImpl });
     const out = await client.fetchIstoric("22222222-2222-2222-2222-222222222222");
+
+    expect(calls).toBe(2);
+    expect(out).toEqual(ISTORIC_OK.istoric);
+  });
+
+  it("o prima incercare care expira la CITIREA body-ului primeste a doua sansa", async () => {
+    // Bugetul acopera si citirea raspunsului. Daca reincercarea acopera doar faza
+    // de fetch, un body care picura arde bugetul si avizul se pierde la fel de
+    // complet ca in incident — headerele au sosit, dar datele nu.
+    process.env.RNPM_TIMEOUT_MS = "120";
+    let calls = 0;
+    const fetchImpl = (async () => {
+      calls++;
+      if (calls === 1) return new Response(drippingStream(), { status: 200 });
+      return jsonResponse(200, ISTORIC_OK);
+    }) as unknown as typeof fetch;
+
+    const client = new RnpmClient({ requestDelayMs: 0, fetchImpl });
+    const out = await client.fetchIstoric("44444444-4444-4444-4444-444444444444");
 
     expect(calls).toBe(2);
     expect(out).toEqual(ISTORIC_OK.istoric);

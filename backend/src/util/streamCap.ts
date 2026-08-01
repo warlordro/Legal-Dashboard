@@ -35,7 +35,11 @@ export async function readResponseTextWithCap(
     while (true) {
       if (signal?.aborted) {
         await abort();
-        throw new DOMException("Aborted", "AbortError");
+        // Motivul semnalului, nu un AbortError sintetic: pe un buget de timeout
+        // reason e `TimeoutError`, iar apelantii disting expirarea (se
+        // reincearca) de abortul clientului (nu se reincearca). Sintetizand
+        // AbortError, o expirare in faza de body se prezenta ca "clientul a plecat".
+        throw signal.reason ?? new DOMException("Aborted", "AbortError");
       }
       const { value, done } = await reader.read();
       if (done) break;
