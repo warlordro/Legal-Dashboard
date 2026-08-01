@@ -351,9 +351,16 @@ async function executeSearchInner(
             // sub-ms (saveAvizFull e sync better-sqlite3); fetch-ul HTTP de mai
             // sus ramane intentionat in afara, ca un user care opreste sa nu
             // ramana prins in lock-ul reader pe latenta upstream.
-            const avizId = await withMaintenanceRead(async () =>
-              persistAvizWithDetail(doc, detail, input.type, ownerId, searchId)
-            );
+            // Re-verificam abortul DUPA achizitia lock-ului, nu doar inainte de
+            // coada: cand un writer (backup/compact/restore) tine lock-ul,
+            // asteptarea aici poate dura minute, iar clientul poate pleca in
+            // acest timp. Politica: dupa ce abortul e observat nu se mai fac
+            // scrieri NOI; ce s-a persistat deja ramane, pentru recuperarea
+            // starii partiale via /saved.
+            const avizId = await withMaintenanceRead(async () => {
+              if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+              return persistAvizWithDetail(doc, detail, input.type, ownerId, searchId);
+            });
             return { localIdx, doc, ok: true as const, avizId };
           } catch (e) {
             if (e instanceof DOMException && e.name === "AbortError") throw e;
