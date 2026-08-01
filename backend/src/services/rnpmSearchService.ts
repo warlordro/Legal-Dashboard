@@ -76,6 +76,27 @@ export interface ExecuteSearchResult {
 // daca apare regres (429/503/silent_refusal), revine la 7.
 const DEFAULT_DETAIL_CONCURRENCY = 12;
 const DEFAULT_BATCH_SIZE = 25;
+
+// RNPM leaga setul de rezultate de gcode-ul cu care a fost deschis. Cand o
+// continuare (`startRnpmPage > 1`) primeste 410 pentru ca sesiunea a expirat,
+// rezolvam un captcha nou — dar gcode-ul proaspat deschide o sesiune GOALA, in
+// care pagina N inca nu exista, deci cererea directa raspunde tot 410. Observat
+// in productie 2026-08-01: doua continuari consecutive pe pagina 2 au platit
+// cate un captcha (16.8s si 15.7s) si au picat amandoua cu 410 dupa retry.
+// Reluam intai pagina 1, ca sesiunea sa se materializeze, apoi cerem pagina
+// ceruta. Raspunsul paginii 1 se arunca: documentele ei au fost deja procesate
+// in cererea initiala, iar corpul e citit integral de client, deci conexiunea
+// ramane reutilizabila.
+async function searchWithFreshSession(
+  client: RnpmClient,
+  type: RnpmSearchType,
+  params: RnpmSearchParams,
+  page: number,
+  signal?: AbortSignal
+): Promise<RnpmSearchResult> {
+  if (page > 1) await client.search(type, params, 1, signal);
+  return client.search(type, params, page, signal);
+}
 // Cap upstream RNPM, confirmat empiric 2026-05-06: la query cu total=1826,
 // API-ul intoarce 200 pe toate paginile DAR `documents: []` — refuz silentios.
 // Pastram 1500 ca early-exit guard (cu mesaj clar) ca sa nu mai pierdem timpul
@@ -211,7 +232,12 @@ async function executeSearchInner(
   });
   try {
     const tSearch = Date.now();
-    firstResult = await client.search(input.type, searchParams, rnpmPage, signal);
+    // Invariant: orice gcode PROASPAT cere intai pagina 1. Cu `existingGcode`
+    // sesiunea e (probabil) deja vie, deci mergem direct pe pagina ceruta si
+    // lasam catch-ul de mai jos sa trateze expirarea.
+    firstResult = existingGcode
+      ? await client.search(input.type, searchParams, rnpmPage, signal)
+      : await searchWithFreshSession(client, input.type, searchParams, rnpmPage, signal);
     const dt = Date.now() - tSearch;
     searchMs += dt;
     logRnpmEvent({
@@ -240,7 +266,7 @@ async function executeSearchInner(
       captchasUsed++;
       searchParams.gcode = gcode;
       const tSearch2 = Date.now();
-      firstResult = await client.search(input.type, searchParams, rnpmPage, signal);
+      firstResult = await searchWithFreshSession(client, input.type, searchParams, rnpmPage, signal);
       const dt = Date.now() - tSearch2;
       searchMs += dt;
       logRnpmEvent({
@@ -400,7 +426,7 @@ async function executeSearchInner(
         captchasUsed++;
         searchParams.gcode = gcode;
         const tMore2 = Date.now();
-        r = await client.search(input.type, searchParams, rnpmPage, signal);
+        r = await searchWithFreshSession(client, input.type, searchParams, rnpmPage, signal);
         const dt = Date.now() - tMore2;
         searchMs += dt;
         logRnpmEvent({
