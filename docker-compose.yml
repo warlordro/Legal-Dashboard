@@ -27,6 +27,9 @@ services:
       OAUTH2_PROXY_REVERSE_PROXY: "true"          # trust X-Forwarded-* from Traefik
       OAUTH2_PROXY_HTTP_ADDRESS: 0.0.0.0:4180
       OAUTH2_PROXY_UPSTREAMS: http://backend:3002/
+      # Vezi nota din deploy/docker-compose.nas.yml: default-ul de 30s taie
+      # POST /api/rnpm/search cand rezolvarea captcha depaseste pragul.
+      OAUTH2_PROXY_UPSTREAM_TIMEOUT: 90s
       OAUTH2_PROXY_REDIRECT_URL: https://${DOMAIN}/oauth2/callback
       OAUTH2_PROXY_WHITELIST_DOMAINS: .${DOMAIN}
       OAUTH2_PROXY_EMAIL_DOMAINS: ${OAUTH2_PROXY_EMAIL_DOMAINS}   # set to your allowed email domain (e.g. example.com)
