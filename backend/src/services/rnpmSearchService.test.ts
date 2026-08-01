@@ -292,5 +292,6 @@ describe("executeSearch — continuare cu sesiune RNPM expirata", () => {
       { page: 1, gcode: "stub-gcode" },
       { page: 3, gcode: "stub-gcode" },
     ]);
+    expect(vi.mocked(solveRnpmCaptcha)).toHaveBeenCalledTimes(1);
   });
 });
