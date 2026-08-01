@@ -225,7 +225,15 @@ async function consumeSearchStream(res: Response, type: RnpmSearchType): Promise
         }
         if (!event || raw === null) continue;
         if (event === "ping") continue;
-        const data = JSON.parse(raw);
+        let data: unknown;
+        try {
+          data = JSON.parse(raw);
+        } catch {
+          // Un cadru trunchiat sau injectat de un intermediar ar propaga un
+          // SyntaxError in engleza pana la utilizator. Mesajele din interfata
+          // sunt in romana — vezi si garda echivalenta din rnpmSplitSearch.
+          throw new Error("Raspuns invalid de la server (cadru corupt in flux)");
+        }
         if (event === "result") {
           result = data as RnpmSearchResponse;
           break;

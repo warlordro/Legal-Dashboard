@@ -116,11 +116,17 @@ describe("rnpmSearch pe flux — robustete parsare", () => {
     // U+2028/U+2029 sunt valide in siruri JSON si NU sunt escapate de
     // JSON.stringify. Un regex multiline le-ar trata ca sfarsit de linie si ar
     // taia payload-ul; calea JSON veche nu avea problema asta.
-    const payload = { ...OK_PAYLOAD, criteriu: "linie noua paragraf" };
+    // Escape-uri EXPLICITE, nu caractere brute: brute sunt invizibile in editor
+    // si un formatter le-ar putea normaliza fara sa observe nimeni, iar testul
+    // ar trece degeaba. Asertia de mai jos confirma ca ajung in payload.
+    const criteriu = "linie\u2028noua\u2029paragraf";
+    expect(JSON.stringify(criteriu)).toContain("\u2028");
+    expect(JSON.stringify(criteriu)).toContain("\u2029");
+    const payload = { ...OK_PAYLOAD, criteriu };
     vi.stubGlobal("fetch", async () => sseResponse({ event: "result", data: payload }));
 
     const out = await rnpmSearch("ipoteci", {}, "key");
 
-    expect(out.criteriu).toBe("linie noua paragraf");
+    expect(out.criteriu).toBe(criteriu);
   });
 });
