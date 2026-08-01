@@ -254,6 +254,23 @@ function rnpmTimeoutMs(): number {
   return Number.isFinite(raw) && raw > 0 ? raw : 60_000;
 }
 
+// `AbortSignal.timeout` respinge cu DOMException name="TimeoutError"; abortul de
+// client vine ca name="AbortError". Distinctia conteaza: pe timeout reincercam,
+// pe abort NU — clientul a plecat si orice cerere noua e munca irosita.
+function isTimeoutError(e: unknown): boolean {
+  return e instanceof DOMException && e.name === "TimeoutError";
+}
+
+// Toate expirarile produc acelasi text generic, deci logul nu spunea NICIODATA
+// care sub-cerere a cazut — investigatia incidentului din 2026-08-01 a durat o zi
+// din cauza asta. Impachetam DOAR `TimeoutError`; `AbortError` trebuie sa treaca
+// neatins, altfel abortul de client devine esec obisnuit si bucla de detalii
+// continua sa lucreze pentru cineva care a plecat.
+function labelTimeout(e: unknown, what: string): unknown {
+  if (!isTimeoutError(e)) return e;
+  return new RnpmError(`Expirare RNPM (${what}) dupa ${rnpmTimeoutMs()}ms`, 504, e, "upstream_timeout");
+}
+
 function withRnpmTimeout(signal?: AbortSignal): AbortSignal {
   const timeout = AbortSignal.timeout(rnpmTimeoutMs());
   return signal ? AbortSignal.any([signal, timeout]) : timeout;
@@ -324,7 +341,12 @@ export class RnpmClient {
   async fetchPart(uuid: string, part: 1 | 2 | 3 | 4, signal?: AbortSignal): Promise<unknown> {
     const url = `${RNPM_BASE_URL}/api/view/inscriere/${uuid}?part=${part}`;
     const composed = withRnpmTimeout(signal);
-    const res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
+    let res: Response;
+    try {
+      res = await this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
+    } catch (e) {
+      throw labelTimeout(e, `part=${part}`);
+    }
     if (res.status === 400 || res.status === 404 || res.status === 410) {
       await res.body?.cancel().catch(() => {});
       return null;
@@ -342,13 +364,37 @@ export class RnpmClient {
     // execution error" then 200 with data a few seconds later. Retry once with a
     // short backoff before giving up. Un singur buget de timeout acopera ambele
     // attempts (v2.37.1).
-    const composed = withRnpmTimeout(signal);
+    // Fiecare incercare primeste BUGET PROPRIU. Inainte, un singur `composed`
+    // acoperea ambele: daca prima consuma aproape tot, a doua pornea cu semnalul
+    // expirat si nu avea nicio sansa. Semnalul extern intra in ambele bugete prin
+    // `AbortSignal.any`, deci anularea clientului le intrerupe pe amandoua.
+    let composed = withRnpmTimeout(signal);
     const doFetch = () => this.fetchImpl(url, { headers: defaultHeaders(), signal: composed });
-    let res = await doFetch();
-    if (res.status === 400) {
+
+    // Reincercarea acoperea DOAR status 400. O prima incercare agatata pana la
+    // expirare arunca direct, fara a doua sansa — exact profilul incidentului
+    // din 2026-08-01, unde 12 avize s-au pierdut integral pentru ca istoricul,
+    // date optionale, a luat cu el si partile 1-4 prin `Promise.all`.
+    let res: Response;
+    let retried = false;
+    try {
+      res = await doFetch();
+    } catch (e) {
+      if (!isTimeoutError(e) || signal?.aborted) throw e;
+      retried = true;
+      composed = withRnpmTimeout(signal);
+      try {
+        res = await doFetch();
+      } catch (e2) {
+        throw labelTimeout(e2, "istoric");
+      }
+    }
+
+    if (!retried && res.status === 400) {
       await res.body?.cancel().catch(() => {});
       await new Promise((r) => setTimeout(r, 1500));
       if (signal?.aborted) throw new DOMException("Aborted", "AbortError");
+      composed = withRnpmTimeout(signal);
       res = await doFetch();
     }
     // 404/410 = aviz not found / gone; 400 after retry = treat as no history.
