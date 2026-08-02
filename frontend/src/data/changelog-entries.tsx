@@ -41,6 +41,32 @@ export interface VersionEntry {
 
 export const versions: VersionEntry[] = [
   {
+    version: "v2.44.0",
+    date: "2 August 2026",
+    subtitle:
+      "Cautarea RNPM nu mai pica cu 'Eroare server (502)' cand dureaza mai mult, iar avizele ale caror detalii nu au venit din prima sunt reincercate automat, fara sa fie nevoie sa reiei cautarea.",
+    icon: <Activity className="h-5 w-5" />,
+    borderColor: "border-l-emerald-500",
+    badgeClass: "bg-emerald-100 text-emerald-900 dark:bg-emerald-900/30 dark:text-emerald-300",
+    sections: [
+      {
+        title: "Fara 'Eroare server (502)' la cautarile lungi",
+        content:
+          "Pe varianta web, o cautare RNPM care trecea de 30 de secunde putea sa se termine cu 'Eroare server (502)', desi aplicatia lucra normal — serverul intermediar renunta sa mai astepte. Acum raspunsul incepe imediat si ramane deschis pana cand cautarea se termina, oricat ar dura. Nu se schimba nimic in felul in care vezi rezultatele: apar tot deodata, la final, nu unul cate unul.",
+      },
+      {
+        title: "Avizele fara detalii se reincearca singure",
+        content:
+          "Cand serverul RNPM raspunde greu, se intampla ca detaliile unui aviz sa nu ajunga la timp. Pana acum, avizul respectiv se pierdea complet si aparea in tabel cu statusul 'Necunoscut', imposibil de deosebit de un aviz al carui status chiar nu e cunoscut. Acum aplicatia le reincearca automat la finalul cautarii, fara sa apesi nimic si fara sa consume inca o rezolvare de captcha. In practica, o a doua incercare le aduce aproape intotdeauna.",
+      },
+      {
+        title: "Vezi clar daca a ramas ceva neadus",
+        content:
+          "Daca dupa reincercare tot raman avize fara detalii, scrie explicit langa numarul de rezultate, in rosu: 'N avize fara detalii'. Treci cu mouse-ul peste ca sa vezi exact care sunt. Inainte, aceasta informatie era calculata de aplicatie dar nu se afisa nicaieri, deci nu aveai cum sa stii ca lipseste ceva.",
+      },
+    ],
+  },
+  {
     version: "v2.43.4",
     date: "28 Iulie 2026",
     subtitle:
